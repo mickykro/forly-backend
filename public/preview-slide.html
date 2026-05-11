@@ -1,0 +1,157 @@
+<!doctype html>
+<html dir="rtl" lang="he">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1080, height=1350, initial-scale=1.0">
+  <title>slide-01</title>
+  <style>
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;700&display=swap');
+* { box-sizing: border-box; }
+html { margin: 0; padding: 0; width: 1080px; height: 1350px; direction: rtl; }
+body {
+  margin: 0;
+  width: 1080px;
+  height: 1350px;
+  overflow: hidden;
+  font-family: 'Heebo', Arial, sans-serif;
+  background: linear-gradient(145deg, #F5F1F8 0%, #FFFFFF 100%);
+  color: #2D1B3D;
+  position: relative;
+}
+.slide {
+  position: relative;
+  width: 1080px;
+  height: 1350px;
+  overflow: hidden;
+  isolation: isolate;
+}
+.accent {
+  position: absolute;
+  border-radius: 999px;
+  background: #E8B4D9;
+  filter: blur(52px);
+  opacity: .36;
+  z-index: 0;
+}
+.accent.one { width: 440px; height: 440px; left: -130px; top: 92px; }
+.accent.two { width: 530px; height: 530px; right: -205px; bottom: 235px; opacity: .28; }
+.accent.three { width: 285px; height: 285px; left: 270px; bottom: -75px; opacity: .25; }
+.visual-wrap {
+  position: absolute;
+  left: 86px;
+  top: 118px;
+  width: 908px;
+  height: 635px;
+  border-radius: 52px;
+  overflow: hidden;
+  box-shadow: 0 34px 92px rgba(45, 27, 61, .16);
+  background: rgba(255,255,255,.72);
+  z-index: 1;
+}
+.visual-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.panel {
+  position: absolute;
+  right: 86px;
+  top: 665px;
+  width: 835px;
+  min-height: 365px;
+  padding: 62px 64px 58px 64px;
+  border-radius: 48px;
+  background: rgba(255,255,255,.82);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 22px 70px rgba(45, 27, 61, .12);
+  z-index: 3;
+  text-align: right;
+}
+h1 {
+  margin: 0 0 26px 0;
+  font-family: 'Heebo', Arial, sans-serif;
+  font-weight: 700;
+  font-size: 76px;
+  line-height: 1.08;
+  letter-spacing: -1.7px;
+  color: #2D1B3D;
+}
+p {
+  margin: 0;
+  font-family: 'Heebo', Arial, sans-serif;
+  font-weight: 400;
+  font-size: 46px;
+  line-height: 1.32;
+  letter-spacing: -0.65px;
+  color: #2D1B3D;
+}
+.cta {
+  position: absolute;
+  right: 64px;
+  bottom: 54px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 76px;
+  padding: 14px 34px 15px 34px;
+  border-radius: 999px;
+  background: #2D1B3D;
+  color: #FFFFFF;
+  font-family: 'Heebo', Arial, sans-serif;
+  font-weight: 700;
+  font-size: 35px;
+  line-height: 1;
+  box-shadow: 0 15px 34px rgba(45,27,61,.24);
+}
+.logo {
+  position: absolute;
+  left: 86px;
+  bottom: 70px;
+  z-index: 5;
+  font-family: 'Heebo', Arial, sans-serif;
+  font-weight: 700;
+  font-size: 35px;
+  line-height: 1;
+  letter-spacing: -.4px;
+  color: #2D1B3D;
+  padding: 18px 26px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.72);
+  box-shadow: 0 12px 32px rgba(45,27,61,.10);
+}
+.info-line {
+  position: absolute;
+  right: 86px;
+  bottom: 82px;
+  z-index: 5;
+  font-family: 'Heebo', Arial, sans-serif;
+  font-weight: 400;
+  font-size: 31px;
+  line-height: 1.1;
+  color: #2D1B3D;
+  opacity: .82;
+}
+.slide.no-cta .panel { min-height: 330px; }
+.slide.no-cta .panel p { max-width: 690px; }
+.slide.no-cta .panel { padding-bottom: 66px; }
+</style>
+</head>
+<body>
+  <main class="slide " aria-label="Slide 1">
+    <div class="accent one"></div>
+    <div class="accent two"></div>
+    <div class="accent three"></div>
+    <section class="visual-wrap" aria-hidden="true">
+      <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI5MDgiIGhlaWdodD0iNjM1IiB2aWV3Qm94PSIwIDAgOTA4IDYzNSI+CjxkZWZzPjxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwIiB5MT0iMCIgeDI9IjEiIHkyPSIxIj48c3RvcCBzdG9wLWNvbG9yPSIjZmZmIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZjVmMWY4Ii8+PC9saW5lYXJHcmFkaWVudD48ZmlsdGVyIGlkPSJibHVyIj48ZmVHYXVzc2lhbkJsdXIgc3RkRGV2aWF0aW9uPSIxOCIvPjwvZmlsdGVyPjwvZGVmcz4KPHJlY3Qgd2lkdGg9IjkwOCIgaGVpZ2h0PSI2MzUiIGZpbGw9InVybCgjYmcpIi8+CjxjaXJjbGUgY3g9IjEzMCIgY3k9IjExMCIgcj0iMTI1IiBmaWxsPSIjRThCNEQ5IiBvcGFjaXR5PSIuNDUiIGZpbHRlcj0idXJsKCNibHVyKSIvPjxjaXJjbGUgY3g9Ijc4MCIgY3k9IjUxMCIgcj0iMTcwIiBmaWxsPSIjRThCNEQ5IiBvcGFjaXR5PSIuMjgiIGZpbHRlcj0idXJsKCNibHVyKSIvPgo8cmVjdCB4PSIxMjYiIHk9Ijk2IiB3aWR0aD0iMzU1IiBoZWlnaHQ9IjQ2NiIgcng9IjIyIiBmaWxsPSIjZmZmZmZmIiBzdHJva2U9IiNFOEI0RDkiIHN0cm9rZS13aWR0aD0iNSIvPgo8cmVjdCB4PSIxNjYiIHk9IjE1MyIgd2lkdGg9IjE4MiIgaGVpZ2h0PSIyMCIgcng9IjEwIiBmaWxsPSIjMkQxQjNEIiBvcGFjaXR5PSIuODIiLz48cmVjdCB4PSIxNjYiIHk9IjIxNCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSIxMiIgcng9IjYiIGZpbGw9IiMyRDFCM0QiIG9wYWNpdHk9Ii4zMyIvPjxyZWN0IHg9IjE2NiIgeT0iMjUxIiB3aWR0aD0iMjI1IiBoZWlnaHQ9IjEyIiByeD0iNiIgZmlsbD0iIzJEMUIzRCIgb3BhY2l0eT0iLjI1Ii8+PHJlY3QgeD0iMTY2IiB5PSIyODgiIHdpZHRoPSIyNTgiIGhlaWdodD0iMTIiIHJ4PSI2IiBmaWxsPSIjMkQxQjNEIiBvcGFjaXR5PSIuMjIiLz48cmVjdCB4PSIxNjYiIHk9IjM0OCIgd2lkdGg9IjIxMCIgaGVpZ2h0PSIxMiIgcng9IjYiIGZpbGw9IiNFOEI0RDkiIG9wYWNpdHk9Ii44NSIvPjxyZWN0IHg9IjE2NiIgeT0iMzg5IiB3aWR0aD0iMjUwIiBoZWlnaHQ9IjEyIiByeD0iNiIgZmlsbD0iIzJEMUIzRCIgb3BhY2l0eT0iLjE4Ii8+CjxyZWN0IHg9IjUyNiIgeT0iMTMwIiB3aWR0aD0iMjQ0IiBoZWlnaHQ9IjM2OCIgcng9IjM4IiBmaWxsPSIjMkQxQjNEIiBvcGFjaXR5PSIuOTAiLz48cmVjdCB4PSI1NDgiIHk9IjE1NiIgd2lkdGg9IjIwMCIgaGVpZ2h0PSIzMTYiIHJ4PSIyNCIgZmlsbD0iI0Y1RjFGOCIvPgo8cGF0aCBkPSJNNTY2IDQzMCBDNjEyIDM5OCwgNjgwIDQwMSwgNzIyIDQzMyBDNzM1IDQ0MywgNzMwIDQ2OCwgNzEwIDQ3MSBDNjUwIDQ4MSwgNjAwIDQ3NiwgNTU2IDQ2MSBDNTM3IDQ1NSwgNTQ3IDQ0MSwgNTY2IDQzMFoiIGZpbGw9IiNkM2EwYmQiLz4KPHBhdGggZD0iTTYwNiAzODUgQzYzMiAzNTAsIDY2NiAzNDksIDY5MSAzODQgQzcwNyA0MDcsIDY5MiA0NDEsIDY1MCA0NDYgQzYwOCA0NTEsIDU4NyA0MTIsIDYwNiAzODVaIiBmaWxsPSIjZjFjN2RjIi8+CjxlbGxpcHNlIGN4PSI2NDkiIGN5PSIzNzkiIHJ4PSI1NCIgcnk9IjI3IiBmaWxsPSIjRkZGRkZGIiBvcGFjaXR5PSIuNzYiLz48cGF0aCBkPSJNNTk2IDM5OCBDNjI1IDQxNSwgNjgxIDQxNSwgNzA3IDM5NyIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkZGRkZGIiBzdHJva2Utd2lkdGg9IjEyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIG9wYWNpdHk9Ii43NSIvPgo8Y2lyY2xlIGN4PSI2NTAiIGN5PSIyNDAiIHI9IjU1IiBmaWxsPSIjRThCNEQ5IiBvcGFjaXR5PSIuNTUiLz48cGF0aCBkPSJNNjIxIDI0MSBsMjIgMjQgbDQwIC01MSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkZGRkZGIiBzdHJva2Utd2lkdGg9IjE0IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+" alt="">
+    </section>
+    <section class="panel">
+      <h1>ראיון העבודה שלך קרוב?</h1>
+      <p>ידיים מטופלות הן הצהרת ביטחון. מניקור ג'ל הוא ההשקעה החכמה.</p>
+      <span class="cta">החליקו →</span>
+    </section>
+
+    <div class="logo">דנה - בוטיק יופי</div>
+  </main>
+</body>
+</html>

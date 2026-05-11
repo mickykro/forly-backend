@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(firebase --version)",
+      "Bash(firebase login:list)",
+      "Bash(firebase functions:secrets:set GREENAPI_INSTANCE --data-file=-)",
+      "Bash(firebase functions:secrets:set GREENAPI_TOKEN --data-file=-)",
+      "Bash(firebase deploy *)",
+      "Bash(gcloud --version)",
+      "Bash(gcloud auth *)",
+      "Bash(gcloud projects *)",
+      "Bash(gcloud config *)",
+      "Bash(gcloud builds *)",
+      "Bash(curl -sS -X POST https://createcarouseldraft-llt3ciapzq-ew.a.run.app -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS 'https://getcarouseldraft-llt3ciapzq-ew.a.run.app?id=test' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}  size=%{size_download}\\\\n\" https://call4li.web.app/c/test123)",
+      "Bash(firebase functions:secrets:access GREENAPI_INSTANCE --project call4li)",
+      "Bash(firebase functions:secrets:access GREENAPI_TOKEN --project call4li)",
+      "Bash(gcloud run *)",
+      "Bash(curl -sS -X POST https://call4li.web.app/api/create-draft -H 'Content-Type: application/json' -d '{}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS 'https://call4li.web.app/api/get-draft?id=test' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS -X POST https://call4li.web.app/api/save-draft -H 'Content-Type: application/json' -d '{}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://call4li.web.app/c/test123)",
+      "Bash(curl -sS -X POST https://createcarouseldraft-llt3ciapzq-ew.a.run.app -H 'Content-Type: application/json' -d '{}' -w \"  HTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS 'https://getcarouseldraft-llt3ciapzq-ew.a.run.app?id=test' -w \"  HTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS -X POST https://savecarouseldraft-llt3ciapzq-ew.a.run.app -H 'Content-Type: application/json' -d '{}' -w \"  HTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS -X POST https://call4li.web.app/api/create-draft -H 'Content-Type: application/json' -d '{}' -w \"  HTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS 'https://call4li.web.app/api/get-draft?id=test' -w \"  HTTP %{http_code}\\\\n\")",
+      "Bash(gcloud functions *)",
+      "Bash(curl -sS -X POST https://call4li.web.app/api/create-draft -H 'Content-Type: application/json' -d '{\"business_phone\":\"972500000000\",\"caption\":\"verify\",\"format\":\"1080x1350\",\"slides\":[ *)",
+      "Bash(curl -sS https://call4li.web.app/c/editor.js)",
+      "Bash(curl -sS 'https://call4li.web.app/api/get-draft?id=does-not-exist' -w \"  HTTP %{http_code}\\\\n\")",
+      "Bash(curl -sS -D - -o /dev/null -H \"Origin: https://call4li.web.app\" \"https://firebasestorage.googleapis.com/v0/b/call4li.firebasestorage.app/o/carousel_drafts%2Fdf290fbc-c021-453a-9108-dbd8e5a13b6f%2Fslide-01.png?alt=media&token=f225c37d-e7f4-495d-8ba7-da744c58696c\")",
+      "Bash(curl -sS \"https://firebasestorage.googleapis.com/v0/b/call4li.firebasestorage.app/o/carousel_drafts%2F8b1c3896-e7f6-457a-8c6a-695210cec9c7%2Fslide-01.html?alt=media&token=2ce52c99-1b76-413d-af43-ec1ca3a1f19f\" -o /tmp/slide-01.html -w \"HTTP %{http_code}  size=%{size_download}  type=%{content_type}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(cp /tmp/slide-01.html /Users/MichaelKrotorio/Desktop/Call4li/call4li_creator_website/forly-backend/public/preview-slide.html && ls -la /Users/MichaelKrotorio/Desktop/Call4li/call4li_creator_website/forly-backend/public/preview-slide.html)",
+      "Bash(gcloud storage *)",
+      "Bash(timeout 5 node -e ' *)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('/Users/MichaelKrotorio/Desktop/Call4li/call4li_creator_website/forly-backend/functions/node_modules/firebase-functions/package.json'\\).exports, null, 2\\)\\)\")"
+    ]
+  }
+}

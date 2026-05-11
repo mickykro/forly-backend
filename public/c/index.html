@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>עורך קרוסלה</title>
+  <link rel="stylesheet" href="/c/editor.css">
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header class="toolbar">
+    <span class="brand">Call4li</span>
+    <div class="actions">
+      <button id="undoBtn" disabled>↶ בטל</button>
+      <button id="saveBtn" class="primary">שמור ושלח</button>
+    </div>
+    <input type="file" id="bgFileInput" accept="image/*" hidden>
+    <div id="status"></div>
+  </header>
+
+  <main id="slideContainer">
+    <div id="loadingState">טוען קרוסלה...</div>
+  </main>
+
+  <aside id="contextPanel" data-mode="">
+    <div class="panel-section panel-text">
+      <label>גופן <select id="fontSelect">
+        <option value="Heebo">Heebo</option>
+        <option value="Rubik">Rubik</option>
+        <option value="Assistant">Assistant</option>
+        <option value="Frank Ruhl Libre">Frank Ruhl Libre</option>
+        <option value="Suez One">Suez One</option>
+        <option value="Secular One">Secular One</option>
+      </select></label>
+      <label>גודל <input type="number" id="fontSize" min="10" max="200" step="2"></label>
+      <label>צבע <input type="color" id="fontColor"></label>
+    </div>
+    <div class="panel-section panel-container">
+      <label>רקע <input type="color" id="bgColor"></label>
+      <label>שקיפות <input type="range" id="bgOpacity" min="0" max="100"></label>
+      <button id="deleteContainerBtn" class="danger">מחק מיכל</button>
+    </div>
+    <button id="closePanelBtn" class="dim">סגור</button>
+  </aside>
+
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="/c/editor.js"></script>
+</body>
+</html>

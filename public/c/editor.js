@@ -1,0 +1,717 @@
+// Same-origin Hosting rewrites → private Cloud Functions in europe-west1
+const GET_URL  = '/api/get-draft';
+const SAVE_URL = '/api/save-draft';
+
+const carouselId = window.location.pathname.split('/').filter(Boolean).pop();
+const statusEl = document.getElementById('status');
+const containerEl = document.getElementById('slideContainer');
+const panelEl = document.getElementById('contextPanel');
+
+let carouselData = null;
+let lastFocusedIframe = null;
+
+const DRAG_THRESHOLD = 15;
+const MAX_UNDO = 30;
+const undoStack = [];
+
+const FONT_FAMILIES = [
+  'Heebo', 'Rubik', 'Assistant', 'Frank Ruhl Libre', 'Suez One', 'Secular One',
+];
+const FONT_LINK_HREF = 'https://fonts.googleapis.com/css2?' +
+  'family=Heebo:wght@400;500;700;900&' +
+  'family=Rubik:wght@400;500;700&' +
+  'family=Assistant:wght@400;500;700&' +
+  'family=Frank+Ruhl+Libre:wght@400;500;700&' +
+  'family=Suez+One&' +
+  'family=Secular+One&display=swap';
+
+// Current selection — text or container or none
+const selection = { type: null, el: null, iframe: null };
+
+const EDITOR_STYLE = `
+  .__editor-draggable { cursor: move; touch-action: none; }
+  .__editor-draggable:hover {
+    outline: 2px dashed rgba(45, 156, 219, 0.7);
+    outline-offset: 2px;
+  }
+  .__editor-draggable.__editor-dragging {
+    outline: 2px solid #2D9CDB;
+  }
+  .__editor-selected {
+    outline: 3px solid #9D4EDD !important;
+    outline-offset: 2px;
+  }
+  [contenteditable="true"] { cursor: text; }
+  [contenteditable="true"]:hover {
+    outline: 2px dashed rgba(157, 78, 221, 0.7);
+    outline-offset: 2px;
+  }
+  [contenteditable="true"]:focus {
+    outline: 2px solid #9D4EDD;
+    outline-offset: 2px;
+  }
+  body.__bg-editing { cursor: move; }
+  body.__bg-editing [contenteditable="true"] { pointer-events: none; outline: none !important; }
+  body.__bg-editing .__editor-draggable { pointer-events: none; outline: none !important; }
+`;
+
+async function loadCarousel() {
+  try {
+    const res = await fetch(`${GET_URL}?id=${carouselId}`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'failed to load');
+    }
+    carouselData = await res.json();
+    await renderSlides();
+  } catch (err) {
+    containerEl.innerHTML = `<div style="padding:80px;text-align:center;color:#c33">
+      <h2>הקישור לא תקין או פג תוקף</h2>
+      <p>${err.message}</p>
+    </div>`;
+  }
+}
+
+async function renderSlides() {
+  containerEl.innerHTML = '';
+  for (const slide of carouselData.slides) {
+    const card = document.createElement('div');
+    card.className = 'slide-card';
+    card.dataset.slideIndex = slide.index;
+
+    const controls = document.createElement('div');
+    controls.className = 'slide-controls';
+
+    const label = document.createElement('span');
+    label.className = 'slide-label';
+    label.textContent = `שקף ${slide.index}`;
+
+    const actions = document.createElement('div');
+    actions.className = 'slide-actions';
+
+    const addTextBtn = makeBtn('+ טקסט');
+    const addContainerBtn = makeBtn('+ מיכל');
+    const changeBgBtn = makeBtn('שנה רקע');
+    const adjustBgBtn = makeBtn('התאם רקע');
+
+    actions.appendChild(addTextBtn);
+    actions.appendChild(addContainerBtn);
+    actions.appendChild(changeBgBtn);
+    actions.appendChild(adjustBgBtn);
+    controls.appendChild(label);
+    controls.appendChild(actions);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'slide-wrap';
+
+    const iframe = document.createElement('iframe');
+    iframe.className = 'slide-frame';
+    iframe.dataset.slideIndex = slide.index;
+    iframe.setAttribute('scrolling', 'no');
+
+    const htmlText = await fetch(slide.html_url).then(r => r.text());
+
+    wrap.appendChild(iframe);
+    card.appendChild(controls);
+    card.appendChild(wrap);
+    containerEl.appendChild(card);
+
+    addTextBtn.addEventListener('click', () => addTextTo(iframe));
+    addContainerBtn.addEventListener('click', () => addContainerTo(iframe));
+    changeBgBtn.addEventListener('click', () => triggerBgChange(iframe));
+    adjustBgBtn.addEventListener('click', () => toggleBgEdit(iframe, adjustBgBtn));
+
+    // Attach load listener BEFORE assigning srcdoc to avoid a race where the
+    // load event fires before we get a chance to listen — that race made the
+    // last slide silently un-editable because enableEditMode was never called.
+    const loaded = new Promise(resolve => {
+      iframe.addEventListener('load', resolve, { once: true });
+    });
+    iframe.srcdoc = htmlText;
+    await loaded;
+    enableEditMode(iframe);
+    fitIframe(iframe);
+  }
+
+  const refit = () => document.querySelectorAll('iframe.slide-frame').forEach(fitIframe);
+  window.addEventListener('resize', refit);
+  refit();
+}
+
+function makeBtn(text) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = text;
+  return b;
+}
+
+function fitIframe(iframe) {
+  const wrap = iframe.parentElement;
+  if (!wrap || !wrap.clientWidth) return;
+  iframe.style.transform = `scale(${wrap.clientWidth / 1080})`;
+}
+
+// ─────────────────────────── Undo stack ───────────────────────────
+
+function snapshotIframe(iframe) {
+  if (!iframe || !iframe.contentDocument) return null;
+  return iframe.contentDocument.documentElement.outerHTML;
+}
+
+function pushUndo(iframe, htmlBefore) {
+  if (!htmlBefore || !iframe) return;
+  undoStack.push({ iframe, html: htmlBefore });
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  updateUndoButton();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  const { iframe, html } = undoStack.pop();
+  if (iframe.dataset.bgEdit === '1') exitBgEditState(iframe);
+  clearSelection();
+  iframe.srcdoc = html;
+  iframe.addEventListener('load', () => {
+    enableEditMode(iframe);
+    fitIframe(iframe);
+  }, { once: true });
+  updateUndoButton();
+}
+
+function updateUndoButton() {
+  const btn = document.getElementById('undoBtn');
+  if (btn) btn.disabled = undoStack.length === 0;
+}
+
+// ─────────────────────────── Edit mode ───────────────────────────
+
+function enableEditMode(iframe) {
+  const doc = iframe.contentDocument;
+  if (!doc || !doc.body) return;
+
+  if (!doc.querySelector('style[data-editor-affordance]')) {
+    const style = doc.createElement('style');
+    style.setAttribute('data-editor-affordance', '');
+    style.textContent = EDITOR_STYLE;
+    doc.head.appendChild(style);
+  }
+
+  if (!doc.querySelector('link[data-editor-fonts]')) {
+    const link = doc.createElement('link');
+    link.setAttribute('data-editor-fonts', '');
+    link.setAttribute('rel', 'stylesheet');
+    link.setAttribute('href', FONT_LINK_HREF);
+    doc.head.appendChild(link);
+  }
+
+  ['h1', 'h2', 'h3', 'h4', 'p', 'span', 'div', 'a', 'li'].forEach(tag => {
+    doc.querySelectorAll(tag).forEach(el => {
+      if (el.children.length === 0 && el.textContent.trim().length > 0) {
+        el.setAttribute('contenteditable', 'true');
+        attachTextEditUndo(el, iframe);
+      }
+    });
+  });
+
+  doc.querySelectorAll('img').forEach(img => {
+    img.setAttribute('draggable', 'false');
+  });
+
+  const win = doc.defaultView;
+  doc.querySelectorAll('*').forEach(el => {
+    if (win.getComputedStyle(el).position === 'absolute') {
+      makeDraggable(el, doc, iframe);
+    }
+  });
+
+  const markFocused = () => { lastFocusedIframe = iframe; };
+  doc.addEventListener('pointerdown', markFocused, true);
+  doc.addEventListener('focusin', markFocused, true);
+}
+
+function attachTextEditUndo(el, iframe) {
+  if (el.dataset.__editTracked) return;
+  el.dataset.__editTracked = '1';
+  let preEdit = null;
+  let dirty = false;
+
+  el.addEventListener('focus', () => {
+    preEdit = snapshotIframe(iframe);
+    dirty = false;
+    selectText(el, iframe);
+  });
+  el.addEventListener('input', () => { dirty = true; });
+  el.addEventListener('blur', () => {
+    if (dirty && preEdit) pushUndo(iframe, preEdit);
+    preEdit = null;
+    dirty = false;
+  });
+}
+
+function makeDraggable(el, doc, iframe) {
+  if (el.classList.contains('__editor-draggable')) return;
+  el.classList.add('__editor-draggable');
+  const win = doc.defaultView;
+
+  el.addEventListener('pointerdown', (e) => {
+    if (iframe.dataset.bgEdit === '1') return;
+    if (e.target.closest && e.target.closest('.__editor-draggable') !== el) return;
+
+    const active = doc.activeElement;
+    const targetEditable = e.target.closest && e.target.closest('[contenteditable="true"]');
+    if (active && active === targetEditable && active.getAttribute('contenteditable') === 'true') {
+      return;
+    }
+
+    const downTarget = e.target;
+    const downWasOnEditable = !!(downTarget && downTarget.closest && downTarget.closest('[contenteditable="true"]'));
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragging = false;
+    let preDragSnapshot = null;
+    let origLeft = 0;
+    let origTop = 0;
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+
+      if (!dragging) {
+        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+        dragging = true;
+        preDragSnapshot = snapshotIframe(iframe);
+        if (doc.activeElement && doc.activeElement.blur) doc.activeElement.blur();
+        const sel = doc.defaultView.getSelection && doc.defaultView.getSelection();
+        if (sel && sel.removeAllRanges) sel.removeAllRanges();
+        const rect = el.getBoundingClientRect();
+        const parent = el.offsetParent || doc.body;
+        const parentRect = parent.getBoundingClientRect();
+        origLeft = rect.left - parentRect.left;
+        origTop = rect.top - parentRect.top;
+        el.classList.add('__editor-dragging');
+      }
+
+      ev.preventDefault();
+      el.style.left = `${origLeft + dx}px`;
+      el.style.top = `${origTop + dy}px`;
+      el.style.right = 'auto';
+      el.style.bottom = 'auto';
+    };
+
+    const onUp = () => {
+      if (dragging && preDragSnapshot) {
+        pushUndo(iframe, preDragSnapshot);
+        // Keep the container selected after a drag
+        selectContainer(el, iframe);
+      } else if (!downWasOnEditable) {
+        // Click without drag on the container background → select for styling
+        selectContainer(el, iframe);
+      }
+      el.classList.remove('__editor-dragging');
+      win.removeEventListener('pointermove', onMove);
+      win.removeEventListener('pointerup', onUp);
+      win.removeEventListener('pointercancel', onUp);
+    };
+
+    win.addEventListener('pointermove', onMove);
+    win.addEventListener('pointerup', onUp);
+    win.addEventListener('pointercancel', onUp);
+  });
+}
+
+// ─────────────────────────── Selection + context panel ───────────────────────────
+
+function selectText(el, iframe) {
+  clearContainerHighlights();
+  selection.type = 'text';
+  selection.el = el;
+  selection.iframe = iframe;
+  populateTextPanel(el);
+  showPanel('text');
+}
+
+function selectContainer(el, iframe) {
+  const doc = iframe.contentDocument;
+  if (doc && doc.activeElement && doc.activeElement.blur) doc.activeElement.blur();
+  clearContainerHighlights();
+  el.classList.add('__editor-selected');
+  selection.type = 'container';
+  selection.el = el;
+  selection.iframe = iframe;
+  populateContainerPanel(el);
+  showPanel('container');
+}
+
+function clearSelection() {
+  clearContainerHighlights();
+  selection.type = null;
+  selection.el = null;
+  selection.iframe = null;
+  hidePanel();
+}
+
+function clearContainerHighlights() {
+  document.querySelectorAll('iframe.slide-frame').forEach(iframe => {
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    doc.querySelectorAll('.__editor-selected').forEach(e => e.classList.remove('__editor-selected'));
+  });
+}
+
+function showPanel(mode) {
+  panelEl.dataset.mode = mode;
+  panelEl.classList.add('visible');
+}
+
+function hidePanel() {
+  panelEl.dataset.mode = '';
+  panelEl.classList.remove('visible');
+}
+
+function populateTextPanel(el) {
+  const cs = el.ownerDocument.defaultView.getComputedStyle(el);
+  // font-family may be a stack — strip quotes, pick first
+  const firstFont = (cs.fontFamily || '').split(',')[0].replace(/['"]/g, '').trim();
+  const fontSelect = document.getElementById('fontSelect');
+  fontSelect.value = FONT_FAMILIES.includes(firstFont) ? firstFont : 'Heebo';
+
+  const sizePx = parseFloat(cs.fontSize) || 40;
+  document.getElementById('fontSize').value = Math.round(sizePx);
+
+  document.getElementById('fontColor').value = rgbToHex(cs.color || 'rgb(0,0,0)');
+}
+
+function populateContainerPanel(el) {
+  const cs = el.ownerDocument.defaultView.getComputedStyle(el);
+  const bg = cs.backgroundColor || 'rgba(255,255,255,1)';
+  const parsed = parseColor(bg);
+  document.getElementById('bgColor').value = rgbToHex(`rgb(${parsed.r}, ${parsed.g}, ${parsed.b})`);
+  document.getElementById('bgOpacity').value = Math.round(parsed.a * 100);
+  // Store current state on the element so we can recompose rgba on either change
+  el.dataset.__bgColor = document.getElementById('bgColor').value;
+  el.dataset.__bgOpacity = document.getElementById('bgOpacity').value;
+}
+
+function parseColor(str) {
+  // Handles "rgb(r, g, b)", "rgba(r, g, b, a)", "#rrggbb"
+  const m = str.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\)/);
+  if (m) return { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] };
+  if (str.startsWith('#')) {
+    return { r: parseInt(str.slice(1, 3), 16), g: parseInt(str.slice(3, 5), 16), b: parseInt(str.slice(5, 7), 16), a: 1 };
+  }
+  return { r: 255, g: 255, b: 255, a: 1 };
+}
+
+function rgbToHex(rgb) {
+  const m = rgb.match(/(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (!m) return '#000000';
+  const toHex = n => Number(n).toString(16).padStart(2, '0');
+  return '#' + toHex(m[1]) + toHex(m[2]) + toHex(m[3]);
+}
+
+function hexToRgba(hex, alphaPct) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alphaPct / 100})`;
+}
+
+// Wire panel inputs
+document.getElementById('fontSelect').addEventListener('change', (e) => {
+  if (selection.type !== 'text' || !selection.el) return;
+  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
+  selection.el.style.fontFamily = `'${e.target.value}', sans-serif`;
+});
+document.getElementById('fontSize').addEventListener('change', (e) => {
+  if (selection.type !== 'text' || !selection.el) return;
+  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
+  selection.el.style.fontSize = `${e.target.value}px`;
+});
+document.getElementById('fontColor').addEventListener('change', (e) => {
+  if (selection.type !== 'text' || !selection.el) return;
+  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
+  selection.el.style.color = e.target.value;
+});
+document.getElementById('bgColor').addEventListener('change', (e) => {
+  if (selection.type !== 'container' || !selection.el) return;
+  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
+  selection.el.dataset.__bgColor = e.target.value;
+  const pct = parseFloat(selection.el.dataset.__bgOpacity || '100');
+  selection.el.style.backgroundColor = hexToRgba(e.target.value, pct);
+});
+document.getElementById('bgOpacity').addEventListener('input', (e) => {
+  if (selection.type !== 'container' || !selection.el) return;
+  selection.el.dataset.__bgOpacity = e.target.value;
+  const hex = selection.el.dataset.__bgColor || '#ffffff';
+  selection.el.style.backgroundColor = hexToRgba(hex, parseFloat(e.target.value));
+});
+document.getElementById('bgOpacity').addEventListener('change', () => {
+  // Single undo entry per slider release
+  if (selection.type !== 'container' || !selection.el) return;
+  // We pushed nothing during 'input'; push now for the committed value
+  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
+});
+document.getElementById('deleteContainerBtn').addEventListener('click', () => {
+  if (selection.type !== 'container' || !selection.el) return;
+  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
+  selection.el.remove();
+  clearSelection();
+});
+document.getElementById('closePanelBtn').addEventListener('click', () => clearSelection());
+
+// Click outside any slide → deselect
+document.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('#contextPanel')) return;
+  if (e.target.closest('.slide-card')) return;
+  clearSelection();
+}, true);
+
+// ─────────────────────────── BG edit (pan + zoom) ───────────────────────────
+
+function toggleBgEdit(iframe, button) {
+  if (iframe.dataset.bgEdit === '1') {
+    exitBgEditState(iframe);
+    button.textContent = 'התאם רקע';
+    button.classList.remove('active');
+  } else {
+    enterBgEditState(iframe);
+    button.textContent = 'סיום';
+    button.classList.add('active');
+  }
+}
+
+function enterBgEditState(iframe) {
+  const doc = iframe.contentDocument;
+  if (!doc || !doc.body) return;
+  clearSelection();
+  pushUndo(iframe, snapshotIframe(iframe));
+  iframe.dataset.bgEdit = '1';
+  iframe.parentElement.classList.add('bg-editing');
+  doc.body.classList.add('__bg-editing');
+  if (doc.activeElement && doc.activeElement.blur) doc.activeElement.blur();
+
+  iframe._bgState = { posX: 0, posY: 0, sizePct: 100 };
+  doc.body.style.backgroundRepeat = 'no-repeat';
+  doc.body.style.backgroundPosition = '0px 0px';
+  doc.body.style.backgroundSize = '100%';
+
+  attachBgPointerHandlers(iframe);
+}
+
+function exitBgEditState(iframe) {
+  const doc = iframe.contentDocument;
+  if (!doc || !doc.body) return;
+  doc.body.classList.remove('__bg-editing');
+  iframe.parentElement.classList.remove('bg-editing');
+  delete iframe.dataset.bgEdit;
+  if (iframe._bgCleanup) {
+    iframe._bgCleanup();
+    iframe._bgCleanup = null;
+  }
+}
+
+function attachBgPointerHandlers(iframe) {
+  const doc = iframe.contentDocument;
+  const body = doc.body;
+  const win = doc.defaultView;
+
+  function applyBg() {
+    const s = iframe._bgState;
+    body.style.backgroundPosition = `${s.posX}px ${s.posY}px`;
+    body.style.backgroundSize = `${s.sizePct}%`;
+  }
+
+  let startX = 0, startY = 0;
+  let basePosX = 0, basePosY = 0;
+  let pinchStartDist = 0, pinchStartSize = 0;
+
+  const touchDist = (touches) => {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const onPointerDown = (e) => {
+    if (e.pointerType === 'touch' && !e.isPrimary) return;
+    startX = e.clientX;
+    startY = e.clientY;
+    basePosX = iframe._bgState.posX;
+    basePosY = iframe._bgState.posY;
+
+    const onMove = (ev) => {
+      ev.preventDefault();
+      iframe._bgState.posX = basePosX + (ev.clientX - startX);
+      iframe._bgState.posY = basePosY + (ev.clientY - startY);
+      applyBg();
+    };
+    const onUp = () => {
+      win.removeEventListener('pointermove', onMove);
+      win.removeEventListener('pointerup', onUp);
+      win.removeEventListener('pointercancel', onUp);
+    };
+    win.addEventListener('pointermove', onMove);
+    win.addEventListener('pointerup', onUp);
+    win.addEventListener('pointercancel', onUp);
+  };
+
+  const onTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      pinchStartDist = touchDist(e.touches);
+      pinchStartSize = iframe._bgState.sizePct;
+    }
+  };
+  const onTouchMove = (e) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const d = touchDist(e.touches);
+      const next = pinchStartSize * (d / pinchStartDist);
+      iframe._bgState.sizePct = Math.max(10, Math.min(500, next));
+      applyBg();
+    }
+  };
+
+  const onWheel = (e) => {
+    e.preventDefault();
+    const next = iframe._bgState.sizePct - e.deltaY * 0.1;
+    iframe._bgState.sizePct = Math.max(10, Math.min(500, next));
+    applyBg();
+  };
+
+  doc.addEventListener('pointerdown', onPointerDown);
+  doc.addEventListener('touchstart', onTouchStart, { passive: false });
+  doc.addEventListener('touchmove', onTouchMove, { passive: false });
+  doc.addEventListener('wheel', onWheel, { passive: false });
+
+  iframe._bgCleanup = () => {
+    doc.removeEventListener('pointerdown', onPointerDown);
+    doc.removeEventListener('touchstart', onTouchStart);
+    doc.removeEventListener('touchmove', onTouchMove);
+    doc.removeEventListener('wheel', onWheel);
+  };
+}
+
+// ─────────────────────────── Toolbar / per-slide actions ───────────────────────────
+
+document.getElementById('undoBtn').addEventListener('click', undo);
+
+function addTextTo(iframe) {
+  if (!iframe || !iframe.contentDocument) return;
+  if (iframe.dataset.bgEdit === '1') return;
+  pushUndo(iframe, snapshotIframe(iframe));
+  const doc = iframe.contentDocument;
+  const newText = doc.createElement('div');
+  newText.style.cssText = 'position:absolute;top:50%;right:50%;transform:translate(50%,-50%);font-family:Heebo,sans-serif;font-size:48px;color:#ffffff;font-weight:700;text-shadow:0 2px 8px rgba(0,0,0,0.4);';
+  newText.setAttribute('contenteditable', 'true');
+  newText.textContent = 'טקסט חדש';
+  doc.body.appendChild(newText);
+  attachTextEditUndo(newText, iframe);
+  makeDraggable(newText, doc, iframe);
+  newText.focus();
+}
+
+function addContainerTo(iframe) {
+  if (!iframe || !iframe.contentDocument) return;
+  if (iframe.dataset.bgEdit === '1') return;
+  pushUndo(iframe, snapshotIframe(iframe));
+  const doc = iframe.contentDocument;
+  const container = doc.createElement('div');
+  container.style.cssText = 'position:absolute;left:140px;top:1000px;width:800px;min-height:200px;padding:42px 56px;border-radius:32px;background:rgba(255,255,255,0.9);box-shadow:0 14px 40px rgba(0,0,0,0.10);';
+  const text = doc.createElement('div');
+  text.style.cssText = 'font-family:Heebo,sans-serif;font-size:44px;font-weight:700;color:#2D1B3D;text-align:right;';
+  text.setAttribute('contenteditable', 'true');
+  text.textContent = 'טקסט חדש';
+  container.appendChild(text);
+  doc.body.appendChild(container);
+  makeDraggable(container, doc, iframe);
+  attachTextEditUndo(text, iframe);
+  selectContainer(container, iframe);
+}
+
+let bgTargetIframe = null;
+function triggerBgChange(iframe) {
+  if (iframe.dataset.bgEdit === '1') return;
+  bgTargetIframe = iframe;
+  const input = document.getElementById('bgFileInput');
+  input.value = '';
+  input.click();
+}
+document.getElementById('bgFileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file || !bgTargetIframe || !bgTargetIframe.contentDocument) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    pushUndo(bgTargetIframe, snapshotIframe(bgTargetIframe));
+    const body = bgTargetIframe.contentDocument.body;
+    body.style.backgroundImage = `url(${ev.target.result})`;
+    body.style.backgroundSize = 'cover';
+    body.style.backgroundPosition = 'center';
+    body.style.backgroundRepeat = 'no-repeat';
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  setStatus('מרנדר...');
+
+  try {
+    await document.fonts.ready;
+    const slides = [];
+    const iframes = document.querySelectorAll('iframe.slide-frame');
+
+    for (const iframe of iframes) {
+      const idx = parseInt(iframe.dataset.slideIndex, 10);
+      const doc = iframe.contentDocument;
+      if (!doc) continue;
+
+      if (iframe.dataset.bgEdit === '1') exitBgEditState(iframe);
+
+      doc.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+      doc.querySelectorAll('.__editor-draggable').forEach(el => el.classList.remove('__editor-draggable', '__editor-dragging'));
+      doc.querySelectorAll('.__editor-selected').forEach(el => el.classList.remove('__editor-selected'));
+      doc.querySelectorAll('style[data-editor-affordance]').forEach(el => el.remove());
+
+      setStatus(`שקף ${idx}/${iframes.length}...`);
+
+      const canvas = await html2canvas(doc.body, {
+        width: 1080, height: 1350, scale: 1,
+        useCORS: true, backgroundColor: null, logging: false,
+        windowWidth: 1080, windowHeight: 1350
+      });
+      const pngBase64 = canvas.toDataURL('image/png');
+
+      const cleanHtml = '<!doctype html>' + doc.documentElement.outerHTML;
+
+      enableEditMode(iframe);
+
+      slides.push({ index: idx, html: cleanHtml, png_base64: pngBase64 });
+    }
+
+    setStatus('שולח ל-WhatsApp...');
+    const res = await fetch(SAVE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ carousel_id: carouselId, slides })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'save failed');
+    }
+    setStatus('נשמר ✓');
+    undoStack.length = 0;
+    updateUndoButton();
+    clearSelection();
+  } catch (err) {
+    setStatus('שגיאה: ' + err.message);
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function setStatus(msg) { statusEl.textContent = msg; }
+
+loadCarousel();
