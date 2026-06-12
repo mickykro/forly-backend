@@ -4,6 +4,13 @@ const SAVE_URL = '/api/save-draft';
 
 const carouselId = window.location.pathname.split('/').filter(Boolean).pop();
 const statusEl = document.getElementById('status');
+const statusTextEl = document.getElementById('statusText');
+const headerSpinner = document.getElementById('headerSpinner');
+const saveModal = document.getElementById('saveModal');
+const saveModalTitle = document.getElementById('saveModalTitle');
+const saveModalMessage = document.getElementById('saveModalMessage');
+const saveModalDismissBtn = document.getElementById('saveModalDismissBtn');
+const successToast = document.getElementById('successToast');
 const containerEl = document.getElementById('slideContainer');
 const panelEl = document.getElementById('contextPanel');
 
@@ -170,11 +177,13 @@ function undo() {
   const { iframe, html } = undoStack.pop();
   if (iframe.dataset.bgEdit === '1') exitBgEditState(iframe);
   clearSelection();
-  iframe.srcdoc = html;
+  // Listener must register BEFORE srcdoc assignment to avoid a race where
+  // the load event fires synchronously and is missed.
   iframe.addEventListener('load', () => {
     enableEditMode(iframe);
     fitIframe(iframe);
   }, { once: true });
+  iframe.srcdoc = html;
   updateUndoButton();
 }
 
@@ -417,21 +426,134 @@ function hexToRgba(hex, alphaPct) {
   return `rgba(${r}, ${g}, ${b}, ${alphaPct / 100})`;
 }
 
-// Wire panel inputs
+// Wire panel inputs — selection-aware (selected text vs whole element) + live preview
+
+// Capture a styling "session": which element we're editing + any current text-selection
+// range inside it + a pre-change snapshot for undo. Reused across all input events in
+// one user gesture (e.g. dragging the color picker).
+function captureTextStyleSession() {
+  if (selection.type !== 'text' || !selection.el) return null;
+  const iframe = selection.iframe;
+  const doc = iframe.contentDocument;
+  let range = null;
+  let styledSpan = null;
+  const sel = doc.getSelection && doc.getSelection();
+  if (sel && sel.rangeCount && !sel.isCollapsed) {
+    const r = sel.getRangeAt(0);
+    const inside = selection.el === r.commonAncestorContainer
+      || (selection.el.contains && selection.el.contains(r.commonAncestorContainer));
+    if (inside) {
+      range = r.cloneRange();
+      // If the selection range matches an existing styled span's contents,
+      // remember it so we layer new styles onto the same span instead of
+      // wrapping it in yet another span.
+      const c = r.commonAncestorContainer;
+      const candidate = c.nodeType === 1 ? c : c.parentElement;
+      const wrapping = candidate && candidate.closest && candidate.closest('span[style]');
+      if (wrapping && selection.el.contains(wrapping) && wrapping.textContent === r.toString()) {
+        styledSpan = wrapping;
+      }
+    }
+  }
+  return { iframe, el: selection.el, range, styledSpan, snapshot: snapshotIframe(iframe) };
+}
+
+function applyTextStyle(session, prop, value) {
+  if (!session) return;
+  const { el, range } = session;
+  const doc = el.ownerDocument;
+  if (range && !range.collapsed) {
+    // Reuse an existing styled span if the selection already covers one
+    // (captureTextStyleSession detected this). Otherwise create a new wrapper.
+    let span = session.styledSpan;
+    if (!span) {
+      span = doc.createElement('span');
+      try {
+        range.surroundContents(span);
+      } catch {
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+      }
+      session.styledSpan = span;
+      const sel = doc.getSelection();
+      sel.removeAllRanges();
+      const newRange = doc.createRange();
+      newRange.selectNodeContents(span);
+      sel.addRange(newRange);
+      session.range = newRange.cloneRange();
+    }
+    span.style[prop] = value;
+  } else {
+    // No selection — pick the most relevant target so styles like border-radius
+    // land on the element that actually has a background.
+    let target = el;
+    // 1. If a descendant span carries inline styling, that's the active styled chunk
+    const styledDescendant = el.querySelector && el.querySelector('span[style]');
+    if (styledDescendant) target = styledDescendant;
+    // 2. Caret position trumps when it's inside a different styled span
+    const sel = doc.getSelection && doc.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const node = sel.anchorNode;
+      const candidate = node ? (node.nodeType === 1 ? node : node.parentElement) : null;
+      const cursorSpan = candidate && candidate.closest && candidate.closest('span[style]');
+      if (cursorSpan && el.contains(cursorSpan)) target = cursorSpan;
+    }
+    target.style[prop] = value;
+  }
+}
+
+function wireLiveTextControl(inputId, prop, transform) {
+  const input = document.getElementById(inputId);
+  let session = null;
+  const startSession = () => { session = captureTextStyleSession(); };
+  input.addEventListener('mousedown', startSession);
+  input.addEventListener('touchstart', startSession, { passive: true });
+  input.addEventListener('focus', startSession);
+  input.addEventListener('input', (e) => {
+    if (!session) session = captureTextStyleSession();
+    if (!session) return;
+    const value = transform ? transform(e.target.value) : e.target.value;
+    applyTextStyle(session, prop, value);
+  });
+  input.addEventListener('change', () => {
+    if (session && session.snapshot) pushUndo(session.iframe, session.snapshot);
+    // Collapse iframe selection so the NEXT picker drag starts cleanly —
+    // otherwise a stale range would cause us to wrap the just-wrapped span again.
+    if (session && session.iframe && session.iframe.contentDocument) {
+      const sel = session.iframe.contentDocument.getSelection();
+      if (sel && sel.removeAllRanges) sel.removeAllRanges();
+    }
+    session = null;
+  });
+}
+
+wireLiveTextControl('fontColor', 'color');
+wireLiveTextControl('fontSize', 'fontSize', v => `${v}px`);
+wireLiveTextControl('textBgColor', 'backgroundColor');
+wireLiveTextControl('textBgRadius', 'borderRadius', v => `${v}px`);
+
+document.getElementById('textBgClearBtn').addEventListener('click', () => {
+  if (selection.type !== 'text' || !selection.el) return;
+  const root = selection.el;
+  // Don't push undo if nothing would change
+  const hasBg = !!root.style.backgroundColor
+    || !!Array.from(root.querySelectorAll('*')).find(c => c.style && c.style.backgroundColor);
+  if (!hasBg) return;
+  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
+  // Unconditionally remove inline background-color on the root and every
+  // descendant — covers all the wrapper spans we (or earlier sessions) created.
+  if (root.style.backgroundColor) root.style.backgroundColor = '';
+  root.querySelectorAll('*').forEach(child => {
+    if (child.style && child.style.backgroundColor) child.style.backgroundColor = '';
+  });
+});
+
+// Font: select fires only 'change'; no continuous preview is meaningful
 document.getElementById('fontSelect').addEventListener('change', (e) => {
-  if (selection.type !== 'text' || !selection.el) return;
-  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
-  selection.el.style.fontFamily = `'${e.target.value}', sans-serif`;
-});
-document.getElementById('fontSize').addEventListener('change', (e) => {
-  if (selection.type !== 'text' || !selection.el) return;
-  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
-  selection.el.style.fontSize = `${e.target.value}px`;
-});
-document.getElementById('fontColor').addEventListener('change', (e) => {
-  if (selection.type !== 'text' || !selection.el) return;
-  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
-  selection.el.style.color = e.target.value;
+  const session = captureTextStyleSession();
+  if (!session) return;
+  applyTextStyle(session, 'fontFamily', `'${e.target.value}', sans-serif`);
+  if (session.snapshot) pushUndo(session.iframe, session.snapshot);
 });
 document.getElementById('bgColor').addEventListener('change', (e) => {
   if (selection.type !== 'container' || !selection.el) return;
@@ -459,6 +581,76 @@ document.getElementById('deleteContainerBtn').addEventListener('click', () => {
   clearSelection();
 });
 document.getElementById('closePanelBtn').addEventListener('click', () => clearSelection());
+
+// ─────────────────────────── Z-order (forward/back) ───────────────────────────
+
+function getZ(el) {
+  const v = el.ownerDocument.defaultView.getComputedStyle(el).zIndex;
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+function reorder(el, direction) {
+  if (!el || !el.parentElement) return false;
+  const parent = el.parentElement;
+  const siblings = Array.from(parent.children).filter(c => c !== el);
+  switch (direction) {
+    case 'front': {
+      const maxZ = siblings.reduce((m, c) => Math.max(m, getZ(c)), 0);
+      el.style.zIndex = String(maxZ + 1);
+      parent.appendChild(el);
+      return true;
+    }
+    case 'back': {
+      const minZ = siblings.reduce((m, c) => Math.min(m, getZ(c)), 0);
+      el.style.zIndex = String(minZ - 1);
+      if (parent.firstElementChild !== el) parent.insertBefore(el, parent.firstElementChild);
+      return true;
+    }
+    case 'forward':
+      el.style.zIndex = String(getZ(el) + 1);
+      return true;
+    case 'backward':
+      el.style.zIndex = String(getZ(el) - 1);
+      return true;
+  }
+  return false;
+}
+
+// Reorder target depends on what's selected:
+// - container selection: that container
+// - text selection: the nearest absolute-positioned ancestor
+function getReorderTarget() {
+  if (!selection.el) return null;
+  if (selection.type === 'container') return { el: selection.el, iframe: selection.iframe };
+  if (selection.type === 'text') {
+    const ancestor = selection.el.closest && selection.el.closest('.__editor-draggable');
+    if (ancestor) return { el: ancestor, iframe: selection.iframe };
+  }
+  return null;
+}
+
+function wireOrderBtn(id, direction) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const tgt = getReorderTarget();
+    if (!tgt) return;
+    const snap = snapshotIframe(tgt.iframe);
+    if (reorder(tgt.el, direction)) {
+      pushUndo(tgt.iframe, snap);
+    }
+  });
+}
+wireOrderBtn('orderFrontBtn', 'front');
+wireOrderBtn('orderForwardBtn', 'forward');
+wireOrderBtn('orderBackwardBtn', 'backward');
+wireOrderBtn('orderBackBtn', 'back');
+wireOrderBtn('orderFrontBtnText', 'front');
+wireOrderBtn('orderForwardBtnText', 'forward');
+wireOrderBtn('orderBackwardBtnText', 'backward');
+wireOrderBtn('orderBackBtnText', 'back');
+
 
 // Click outside any slide → deselect
 document.addEventListener('pointerdown', (e) => {
@@ -644,18 +836,96 @@ document.getElementById('bgFileInput').addEventListener('change', (e) => {
   reader.onload = (ev) => {
     pushUndo(bgTargetIframe, snapshotIframe(bgTargetIframe));
     const body = bgTargetIframe.contentDocument.body;
-    body.style.backgroundImage = `url(${ev.target.result})`;
-    body.style.backgroundSize = 'cover';
-    body.style.backgroundPosition = 'center';
-    body.style.backgroundRepeat = 'no-repeat';
+    const slide = body.querySelector('.slide');
+    const bgValue = `url(${ev.target.result}) center / cover no-repeat`;
+    // Apply on BOTH body and .slide so the image shows regardless of which
+    // element is acting as the slide's visual background.
+    body.style.background = bgValue;
+    if (slide) slide.style.background = bgValue;
   };
   reader.readAsDataURL(file);
 });
 
+// ─── Per-container BG image ───
+document.getElementById('containerBgImageBtn').addEventListener('click', () => {
+  if (selection.type !== 'container' || !selection.el) return;
+  document.getElementById('containerBgInput').value = '';
+  document.getElementById('containerBgInput').click();
+});
+document.getElementById('containerBgInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file || selection.type !== 'container' || !selection.el) return;
+  const reader = new FileReader();
+  const targetEl = selection.el;
+  const targetIframe = selection.iframe;
+  reader.onload = (ev) => {
+    pushUndo(targetIframe, snapshotIframe(targetIframe));
+    targetEl.style.backgroundImage = `url(${ev.target.result})`;
+    targetEl.style.backgroundSize = 'cover';
+    targetEl.style.backgroundPosition = 'center';
+    targetEl.style.backgroundRepeat = 'no-repeat';
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('containerBgClearBtn').addEventListener('click', () => {
+  if (selection.type !== 'container' || !selection.el) return;
+  pushUndo(selection.iframe, snapshotIframe(selection.iframe));
+  selection.el.style.backgroundImage = '';
+  selection.el.style.backgroundSize = '';
+  selection.el.style.backgroundPosition = '';
+  selection.el.style.backgroundRepeat = '';
+});
+
+// ─────────────────────────── Save flow + modal/toast/header UI ───────────────────────────
+
+function openSaveModal(title, message) {
+  saveModalTitle.textContent = title;
+  saveModalMessage.textContent = message;
+  saveModalDismissBtn.style.display = '';
+  saveModalDismissBtn.textContent = 'סגור והמשך ברקע';
+  bindModalDismiss();
+  saveModal.hidden = false;
+}
+function setSaveModalProgress(title, message) {
+  if (!saveModal.hidden) {
+    saveModalTitle.textContent = title;
+    saveModalMessage.textContent = message;
+  }
+}
+function closeSaveModalToHeader() {
+  saveModal.hidden = true;
+  headerSpinner.hidden = false;
+}
+function dismissAllSaveUi() {
+  saveModal.hidden = true;
+  headerSpinner.hidden = true;
+}
+function showSuccessToast(text) {
+  successToast.querySelector('span:last-child').textContent = text;
+  successToast.hidden = false;
+  clearTimeout(showSuccessToast._t);
+  showSuccessToast._t = setTimeout(() => { successToast.hidden = true; }, 4000);
+}
+function showErrorModal(message) {
+  saveModal.hidden = false;
+  saveModalTitle.textContent = 'שגיאה';
+  saveModalMessage.textContent = message;
+  saveModalDismissBtn.textContent = 'סגור';
+  saveModalDismissBtn.onclick = () => {
+    saveModal.hidden = true;
+    saveModalDismissBtn.onclick = null;
+  };
+  headerSpinner.hidden = true;
+}
+function bindModalDismiss() {
+  saveModalDismissBtn.onclick = closeSaveModalToHeader;
+}
+
 document.getElementById('saveBtn').addEventListener('click', async () => {
   const btn = document.getElementById('saveBtn');
   btn.disabled = true;
-  setStatus('מרנדר...');
+  openSaveModal('ממיר את העריכה לתמונות', 'מכין את 5 השקפים…');
+  setStatus('');
 
   try {
     await document.fonts.ready;
@@ -674,44 +944,57 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
       doc.querySelectorAll('.__editor-selected').forEach(el => el.classList.remove('__editor-selected'));
       doc.querySelectorAll('style[data-editor-affordance]').forEach(el => el.remove());
 
-      setStatus(`שקף ${idx}/${iframes.length}...`);
+      setSaveModalProgress('ממיר את העריכה לתמונות', `שקף ${idx} מתוך ${iframes.length}…`);
+      setStatus(`שקף ${idx}/${iframes.length}…`);
 
-      const canvas = await html2canvas(doc.body, {
-        width: 1080, height: 1350, scale: 1,
-        useCORS: true, backgroundColor: null, logging: false,
-        windowWidth: 1080, windowHeight: 1350
+      // html-to-image renders via <foreignObject>, so the browser engine itself
+      // paints the DOM — this honours backdrop-filter, modern CSS, web fonts,
+      // and SVG that html2canvas was dropping.
+      if (doc.fonts && doc.fonts.ready) await doc.fonts.ready;
+      const pngBase64 = await htmlToImage.toPng(doc.body, {
+        width: 1080,
+        height: 1350,
+        pixelRatio: 1,
+        cacheBust: true
       });
-      const pngBase64 = canvas.toDataURL('image/png');
 
       const cleanHtml = '<!doctype html>' + doc.documentElement.outerHTML;
-
       enableEditMode(iframe);
 
       slides.push({ index: idx, html: cleanHtml, png_base64: pngBase64 });
     }
 
-    setStatus('שולח ל-WhatsApp...');
+    setSaveModalProgress('שולח ל-WhatsApp', 'מעלה ושולח את השקפים…');
+    setStatus('שולח ל-WhatsApp…');
+
     const res = await fetch(SAVE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ carousel_id: carouselId, slides })
     });
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'save failed');
+      let msg = 'save failed';
+      try { msg = (await res.json()).error || msg; } catch {}
+      throw new Error(msg);
     }
+    dismissAllSaveUi();
     setStatus('נשמר ✓');
+    showSuccessToast('השקפים נשלחו ל-WhatsApp בהצלחה');
     undoStack.length = 0;
     updateUndoButton();
     clearSelection();
   } catch (err) {
-    setStatus('שגיאה: ' + err.message);
     console.error(err);
+    showErrorModal(err.message || 'משהו השתבש בשמירה');
+    setStatus('שגיאה');
   } finally {
     btn.disabled = false;
   }
 });
 
-function setStatus(msg) { statusEl.textContent = msg; }
+function setStatus(msg) {
+  if (statusTextEl) statusTextEl.textContent = msg;
+  else statusEl.textContent = msg;
+}
 
 loadCarousel();

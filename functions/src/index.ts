@@ -130,8 +130,8 @@ export const createCarouselDraft = onRequest(
 
       await db.collection("carousel_drafts").doc(carouselId).set({
         business_phone: body.business_phone,
-        created_at: admin.firestore.Timestamp.fromMillis(now),
-        expires_at: admin.firestore.Timestamp.fromMillis(now + TWENTY_FOUR_HOURS_MS),
+        created_at: new Date(now),
+        expires_at: new Date(now + TWENTY_FOUR_HOURS_MS),
         status: "active",
         slide_count: 5,
         format: body.format || "1080x1350",
@@ -195,8 +195,8 @@ export const getCarouselDraft = onRequest({cors: false}, async (req, res) => {
 // ────────────────────────────────────────────────────────────
 export const saveCarouselDraft = onRequest(
   {
-    timeoutSeconds: 120,
-    memory: "512MiB",
+    timeoutSeconds: 300,
+    memory: "1GiB",
     secrets: [greenApiInstance, greenApiToken],
     cors: false,
   },
@@ -260,17 +260,22 @@ export const saveCarouselDraft = onRequest(
       await docRef.update({
         slides: newSlides,
         edit_count: editVersion,
-        last_edited_at: admin.firestore.Timestamp.fromMillis(Date.now()),
+        last_edited_at: new Date(),
         status: "edited",
       });
 
+      // WhatsApp send is best-effort — never let it fail the whole save.
       if (data.business_phone) {
-        await sendUpdatedPngsToWhatsApp(
-          data.business_phone as string,
-          newSlides,
-          greenApiInstance.value(),
-          greenApiToken.value()
-        );
+        try {
+          await sendUpdatedPngsToWhatsApp(
+            data.business_phone as string,
+            newSlides,
+            greenApiInstance.value(),
+            greenApiToken.value()
+          );
+        } catch (err) {
+          logger.error("Green-API send failed (save still succeeded):", err);
+        }
       }
 
       res.json({
@@ -294,27 +299,29 @@ async function sendUpdatedPngsToWhatsApp(
 ): Promise<void> {
   const chatId = `${phone}@c.us`;
   const baseUrl = `https://api.green-api.com/waInstance${instance}`;
+  const REQ_TIMEOUT_MS = 20000;
 
   await axios.post(`${baseUrl}/sendMessage/${token}`, {
     chatId,
     message: "✏️ הקרוסלה המעודכנת שלך:",
-  });
+  }, {timeout: REQ_TIMEOUT_MS});
 
-  for (const s of slides) {
-    await axios.post(`${baseUrl}/sendFileByUrl/${token}`, {
+  // Send all 5 PNGs in parallel — Green-API handles concurrent calls fine.
+  await Promise.all(slides.map((s) =>
+    axios.post(`${baseUrl}/sendFileByUrl/${token}`, {
       chatId,
       urlFile: s.png_url,
       fileName: `slide-${pad(s.index)}.png`,
       caption: `${s.index}/${slides.length}`,
-    });
-  }
+    }, {timeout: REQ_TIMEOUT_MS})
+  ));
 }
 
 // ────────────────────────────────────────────────────────────
 // 4) cleanupExpiredDrafts — scheduled, every 6 hours
 // ────────────────────────────────────────────────────────────
 export const cleanupExpiredDrafts = onSchedule("every 6 hours", async () => {
-  const now = admin.firestore.Timestamp.fromMillis(Date.now());
+  const now = new Date();
   const expired = await db
     .collection("carousel_drafts")
     .where("expires_at", "<", now)

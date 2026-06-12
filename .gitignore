@@ -73,3 +73,7 @@ functions/.env.local
 functions/.env.*.local
 
 functions/.secret.local
+
+# Local service account key (do not commit)
+functions/sa-key*.json
+functions/sa-key*.local.json
