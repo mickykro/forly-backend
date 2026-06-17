@@ -8,7 +8,8 @@ over — every deploy needs its own confirmation.
 
 - `firebase deploy …` (any target: functions, hosting, storage, firestore)
 - `firebase hosting:channel:deploy …`
-- `git push …` (any remote, any branch, any flag)
+- `git push …` to `main` (any remote, any flag). Pushing to any other
+  branch is allowed without per-action approval.
 - `gcloud ... add-iam-policy-binding` or any IAM mutation
 - `gcloud functions deploy …`, `gcloud run deploy …`
 - `npm publish`, `npm version`
