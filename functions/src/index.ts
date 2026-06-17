@@ -16,7 +16,6 @@ const db = admin.firestore();
 const greenApiInstance = defineSecret("GREENAPI_INSTANCE");
 const greenApiToken = defineSecret("GREENAPI_TOKEN");
 
-const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const ALLOWED_ORIGIN = "https://editor.call4li.com";
 
 const pad = (n: number): string => String(n).padStart(2, "0");
@@ -131,7 +130,6 @@ export const createCarouselDraft = onRequest(
       await db.collection("carousel_drafts").doc(carouselId).set({
         business_phone: body.business_phone,
         created_at: new Date(now),
-        expires_at: new Date(now + TWENTY_FOUR_HOURS_MS),
         status: "active",
         slide_count: 5,
         format: body.format || "1080x1350",
@@ -176,10 +174,6 @@ export const getCarouselDraft = onRequest({cors: false}, async (req, res) => {
   }
 
   const data = doc.data() as admin.firestore.DocumentData;
-  if ((data.expires_at as admin.firestore.Timestamp).toMillis() < Date.now()) {
-    res.status(410).json({error: "expired"});
-    return;
-  }
 
   res.json({
     carousel_id: id,
@@ -227,10 +221,6 @@ export const saveCarouselDraft = onRequest(
       return;
     }
     const data = doc.data() as admin.firestore.DocumentData;
-    if ((data.expires_at as admin.firestore.Timestamp).toMillis() < Date.now()) {
-      res.status(410).json({error: "expired"});
-      return;
-    }
 
     const editVersion = ((data.edit_count as number) || 0) + 1;
 
