@@ -213,40 +213,46 @@ function enableEditMode(iframe) {
     doc.head.appendChild(link);
   }
 
-  ['h1', 'h2', 'h3', 'h4', 'p', 'span', 'div', 'a', 'li'].forEach(tag => {
-    doc.querySelectorAll(tag).forEach(el => {
-      if (el.children.length === 0 && el.textContent.trim().length > 0) {
-        el.setAttribute('contenteditable', 'true');
-        attachTextEditUndo(el, iframe);
-      }
-    });
-  });
+  // Make text editable. Walk the tree and mark each "text unit" — an element
+  // that has text and whose only element-children are inline formatting
+  // (span/b/i/a/br…). This makes whole headings/paragraphs editable even when
+  // they contain inline spans, which the old leaf-only rule left selectable but
+  // not editable.
+  const INLINE = new Set(['SPAN','B','I','EM','STRONG','A','BR','SMALL','MARK','U','S','SUB','SUP','FONT','WBR','CODE','LABEL']);
+  const TEXT_SKIP = new Set(['STYLE','SCRIPT','LINK','META','HEAD','TITLE','IMG','SVG','BR']);
+  const markEditable = (el) => {
+    if (!el || el.nodeType !== 1 || TEXT_SKIP.has(el.tagName)) return;
+    const kids = Array.from(el.children);
+    const hasText = el.textContent.trim().length > 0;
+    const allInline = kids.every(c => INLINE.has(c.tagName));
+    if (hasText && allInline) {
+      el.setAttribute('contenteditable', 'true');
+      attachTextEditUndo(el, iframe);
+      return;
+    }
+    kids.forEach(markEditable);
+  };
+  markEditable(doc.body);
 
   doc.querySelectorAll('img').forEach(img => {
     img.setAttribute('draggable', 'false');
   });
 
-  const win = doc.defaultView;
-  // Make every plausible "item" draggable — not only absolutely-positioned ones.
-  // In-flow blocks are promoted to absolute on first drag (see makeDraggable), so
-  // slides authored with normal/flex layouts are movable too.
-  const slideRoot = doc.querySelector('.slide, main');
+  // Make EVERY element movable — no exception — except the page itself, the
+  // full-bleed canvas/background (use "adjust background" for that), and inline
+  // fragments inside an editable text block (those move as one block). In-flow
+  // elements are promoted to absolute on first drag (see makeDraggable).
+  const DRAG_SKIP = new Set(['STYLE','SCRIPT','LINK','META','HEAD','TITLE']);
   const isFullBleed = (el) => {
     const r = el.getBoundingClientRect();
     return r.width >= 1060 && r.height >= 1330;
   };
-  const draggables = new Set();
   doc.querySelectorAll('*').forEach(el => {
-    if (win.getComputedStyle(el).position === 'absolute') draggables.add(el);
-  });
-  [doc.body, slideRoot].forEach(root => {
-    if (root) Array.from(root.children).forEach(el => draggables.add(el));
-  });
-  const SKIP_TAGS = new Set(['STYLE', 'SCRIPT', 'LINK', 'META']);
-  draggables.forEach(el => {
-    if (el === doc.body || el === slideRoot) return;
-    if (SKIP_TAGS.has(el.tagName)) return;
-    if (isFullBleed(el)) return;        // don't let the whole canvas be dragged
+    if (el === doc.body) return;
+    if (DRAG_SKIP.has(el.tagName)) return;
+    if (isFullBleed(el)) return;
+    const ce = el.closest('[contenteditable="true"]');
+    if (ce && ce !== el) return;   // a fragment inside an editable text block
     makeDraggable(el, doc, iframe);
   });
 
@@ -836,11 +842,13 @@ function addTextTo(iframe) {
   if (iframe.dataset.bgEdit === '1') return;
   pushUndo(iframe, snapshotIframe(iframe));
   const doc = iframe.contentDocument;
+  const root = doc.querySelector('.slide, main') || doc.body;
+  const topZ = Array.from(root.children).reduce((m, c) => Math.max(m, getZ(c)), 0) + 1;
   const newText = doc.createElement('div');
-  newText.style.cssText = 'position:absolute;top:50%;right:50%;transform:translate(50%,-50%);font-family:Heebo,sans-serif;font-size:48px;color:#ffffff;font-weight:700;text-shadow:0 2px 8px rgba(0,0,0,0.4);';
+  newText.style.cssText = `position:absolute;top:50%;right:50%;transform:translate(50%,-50%);z-index:${topZ};font-family:Heebo,sans-serif;font-size:48px;color:#ffffff;font-weight:700;text-shadow:0 2px 8px rgba(0,0,0,0.4);`;
   newText.setAttribute('contenteditable', 'true');
   newText.textContent = 'טקסט חדש';
-  doc.body.appendChild(newText);
+  root.appendChild(newText);
   attachTextEditUndo(newText, iframe);
   makeDraggable(newText, doc, iframe);
   newText.focus();
@@ -851,14 +859,16 @@ function addContainerTo(iframe) {
   if (iframe.dataset.bgEdit === '1') return;
   pushUndo(iframe, snapshotIframe(iframe));
   const doc = iframe.contentDocument;
+  const root = doc.querySelector('.slide, main') || doc.body;
+  const topZ = Array.from(root.children).reduce((m, c) => Math.max(m, getZ(c)), 0) + 1;
   const container = doc.createElement('div');
-  container.style.cssText = 'position:absolute;left:140px;top:1000px;width:800px;min-height:200px;padding:42px 56px;border-radius:32px;background:rgba(255,255,255,0.9);box-shadow:0 14px 40px rgba(0,0,0,0.10);';
+  container.style.cssText = `position:absolute;left:140px;top:1000px;z-index:${topZ};width:800px;min-height:200px;padding:42px 56px;border-radius:32px;background:rgba(255,255,255,0.9);box-shadow:0 14px 40px rgba(0,0,0,0.10);`;
   const text = doc.createElement('div');
   text.style.cssText = 'font-family:Heebo,sans-serif;font-size:44px;font-weight:700;color:#2D1B3D;text-align:right;';
   text.setAttribute('contenteditable', 'true');
   text.textContent = 'טקסט חדש';
   container.appendChild(text);
-  doc.body.appendChild(container);
+  root.appendChild(container);
   makeDraggable(container, doc, iframe);
   attachTextEditUndo(text, iframe);
   selectContainer(container, iframe);
