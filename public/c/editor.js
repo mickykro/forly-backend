@@ -306,9 +306,12 @@ function makeDraggable(el, doc, iframe) {
 
     const active = doc.activeElement;
     const targetEditable = e.target.closest && e.target.closest('[contenteditable="true"]');
-    if (active && active === targetEditable && active.getAttribute('contenteditable') === 'true') {
-      return;
-    }
+    // If you're currently editing this element, give small gestures room to
+    // place the caret / select text — but a larger, deliberate drag still moves
+    // it, so a focused element is never stuck in place.
+    const downOnFocusedEditable = !!(active && active === targetEditable
+      && active.getAttribute('contenteditable') === 'true');
+    const threshold = downOnFocusedEditable ? 30 : DRAG_THRESHOLD;
 
     const downTarget = e.target;
     const downWasOnEditable = !!(downTarget && downTarget.closest && downTarget.closest('[contenteditable="true"]'));
@@ -325,7 +328,7 @@ function makeDraggable(el, doc, iframe) {
       const dy = ev.clientY - startY;
 
       if (!dragging) {
-        if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+        if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
         dragging = true;
         preDragSnapshot = snapshotIframe(iframe);
         if (doc.activeElement && doc.activeElement.blur) doc.activeElement.blur();
