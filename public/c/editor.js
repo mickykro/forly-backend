@@ -1023,7 +1023,11 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
       // paints the DOM — this honours backdrop-filter, modern CSS, web fonts,
       // and SVG that html2canvas was dropping.
       if (doc.fonts && doc.fonts.ready) await doc.fonts.ready;
-      const pngBase64 = await htmlToImage.toPng(doc.body, {
+      // Capture the <html> root, not <body>. On RTL slides whose decorative
+      // layers overflow the right edge, capturing <body> makes html-to-image
+      // shift the content right and clip the start of each line. The root
+      // element gives a clean coordinate origin and renders the full 1080×1350.
+      const pngBase64 = await htmlToImage.toPng(doc.documentElement, {
         width: 1080,
         height: 1350,
         pixelRatio: 1,
