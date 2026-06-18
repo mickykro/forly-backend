@@ -243,14 +243,29 @@ function enableEditMode(iframe) {
   // fragments inside an editable text block (those move as one block). In-flow
   // elements are promoted to absolute on first drag (see makeDraggable).
   const DRAG_SKIP = new Set(['STYLE','SCRIPT','LINK','META','HEAD','TITLE']);
+  const slideRoot = doc.querySelector('.slide, main') || doc.body;
   const isFullBleed = (el) => {
     const r = el.getBoundingClientRect();
     return r.width >= 1060 && r.height >= 1330;
   };
+
+  // Decorative full-bleed layers (background images, dark overlays/tints) sit on
+  // top of the content and otherwise swallow every click — which made whole
+  // slides un-editable. Let pointer events pass through them to the content
+  // beneath; they're still re-styled via "change/adjust background".
+  doc.querySelectorAll('*').forEach(el => {
+    if (el === doc.body || el === slideRoot || el === doc.documentElement) return;
+    if (isFullBleed(el) && el.textContent.trim() === '') {
+      el.dataset.__passthrough = '1';
+      el.style.pointerEvents = 'none';
+    }
+  });
+
   doc.querySelectorAll('*').forEach(el => {
     if (el === doc.body) return;
     if (DRAG_SKIP.has(el.tagName)) return;
     if (isFullBleed(el)) return;
+    if (el.dataset.__passthrough === '1') return;
     const ce = el.closest('[contenteditable="true"]');
     if (ce && ce !== el) return;   // a fragment inside an editable text block
     makeDraggable(el, doc, iframe);
@@ -995,6 +1010,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
       doc.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
       doc.querySelectorAll('.__editor-draggable').forEach(el => el.classList.remove('__editor-draggable', '__editor-dragging'));
       doc.querySelectorAll('.__editor-selected').forEach(el => el.classList.remove('__editor-selected'));
+      doc.querySelectorAll('[data-__passthrough]').forEach(el => { el.style.pointerEvents = ''; el.removeAttribute('data-__passthrough'); });
       doc.querySelectorAll('style[data-editor-affordance]').forEach(el => el.remove());
 
       setSaveModalProgress('ממיר את העריכה לתמונות', `שקף ${idx} מתוך ${iframes.length}…`);
