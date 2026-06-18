@@ -295,14 +295,109 @@ function attachTextEditUndo(el, iframe) {
   });
 }
 
+// ─────────────────────────── Resize (drag a container's edges) ───────────────────────────
+
+const RESIZE_EDGE = 22; // grab band (iframe px) around a selected container's edge
+
+// Which edge/corner the pointer is over, or null. Returns 'n','s','e','w','ne','nw','se','sw'.
+function resizeEdgeAt(el, x, y) {
+  const r = el.getBoundingClientRect();
+  const T = RESIZE_EDGE;
+  if (x < r.left - T || x > r.right + T || y < r.top - T || y > r.bottom + T) return null;
+  let dir = '';
+  if (Math.abs(y - r.top) <= T) dir += 'n';
+  else if (Math.abs(y - r.bottom) <= T) dir += 's';
+  if (Math.abs(x - r.left) <= T) dir += 'w';
+  else if (Math.abs(x - r.right) <= T) dir += 'e';
+  return dir || null;
+}
+
+function resizeCursorFor(dir) {
+  if (dir === 'n' || dir === 's') return 'ns-resize';
+  if (dir === 'e' || dir === 'w') return 'ew-resize';
+  if (dir === 'nw' || dir === 'se') return 'nwse-resize';
+  if (dir === 'ne' || dir === 'sw') return 'nesw-resize';
+  return '';
+}
+
+function startResize(el, doc, iframe, e, dir) {
+  const win = doc.defaultView;
+  const snap = snapshotIframe(iframe);
+  const startX = e.clientX, startY = e.clientY;
+  const rect = el.getBoundingClientRect();
+  const parent = el.offsetParent || doc.body;
+  const prect = parent.getBoundingClientRect();
+  const origLeft = rect.left - prect.left;
+  const origTop = rect.top - prect.top;
+  const origW = rect.width, origH = rect.height;
+
+  // Pin the box explicitly so any edge can be resized.
+  const cs = win.getComputedStyle(el);
+  if (cs.position !== 'absolute' && cs.position !== 'fixed') el.style.position = 'absolute';
+  el.style.margin = '0';
+  el.style.left = `${origLeft}px`;
+  el.style.top = `${origTop}px`;
+  el.style.right = 'auto';
+  el.style.bottom = 'auto';
+  el.style.width = `${origW}px`;
+  el.style.height = `${origH}px`;
+  el.classList.add('__editor-dragging');
+
+  const MIN = 24;
+  let changed = false;
+  const onMove = (ev) => {
+    ev.preventDefault();
+    changed = true;
+    const dx = ev.clientX - startX, dy = ev.clientY - startY;
+    let L = origLeft, T = origTop, W = origW, H = origH;
+    if (dir.includes('e')) W = Math.max(MIN, origW + dx);
+    if (dir.includes('w')) { W = Math.max(MIN, origW - dx); L = origLeft + (origW - W); }
+    if (dir.includes('s')) H = Math.max(MIN, origH + dy);
+    if (dir.includes('n')) { H = Math.max(MIN, origH - dy); T = origTop + (origH - H); }
+    el.style.width = `${W}px`;
+    el.style.height = `${H}px`;
+    el.style.left = `${L}px`;
+    el.style.top = `${T}px`;
+  };
+  const onUp = () => {
+    el.classList.remove('__editor-dragging');
+    if (changed) pushUndo(iframe, snap);
+    win.removeEventListener('pointermove', onMove);
+    win.removeEventListener('pointerup', onUp);
+    win.removeEventListener('pointercancel', onUp);
+  };
+  win.addEventListener('pointermove', onMove);
+  win.addEventListener('pointerup', onUp);
+  win.addEventListener('pointercancel', onUp);
+}
+
 function makeDraggable(el, doc, iframe) {
   if (el.classList.contains('__editor-draggable')) return;
   el.classList.add('__editor-draggable');
   const win = doc.defaultView;
 
+  // Hover near the edges of the selected container → show a resize cursor.
+  el.addEventListener('pointermove', (e) => {
+    if (iframe.dataset.bgEdit === '1') return;
+    if (selection.type === 'container' && selection.el === el) {
+      const dir = resizeEdgeAt(el, e.clientX, e.clientY);
+      el.style.cursor = dir ? resizeCursorFor(dir) : '';
+    }
+  });
+
   el.addEventListener('pointerdown', (e) => {
     if (iframe.dataset.bgEdit === '1') return;
     if (e.target.closest && e.target.closest('.__editor-draggable') !== el) return;
+
+    // If this container is selected and you grab an edge, resize instead of move.
+    if (selection.type === 'container' && selection.el === el) {
+      const dir = resizeEdgeAt(el, e.clientX, e.clientY);
+      if (dir) {
+        e.preventDefault();
+        startResize(el, doc, iframe, e, dir);
+        return;
+      }
+    }
 
     const active = doc.activeElement;
     const targetEditable = e.target.closest && e.target.closest('[contenteditable="true"]');
