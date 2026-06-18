@@ -227,10 +227,27 @@ function enableEditMode(iframe) {
   });
 
   const win = doc.defaultView;
+  // Make every plausible "item" draggable — not only absolutely-positioned ones.
+  // In-flow blocks are promoted to absolute on first drag (see makeDraggable), so
+  // slides authored with normal/flex layouts are movable too.
+  const slideRoot = doc.querySelector('.slide, main');
+  const isFullBleed = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 1060 && r.height >= 1330;
+  };
+  const draggables = new Set();
   doc.querySelectorAll('*').forEach(el => {
-    if (win.getComputedStyle(el).position === 'absolute') {
-      makeDraggable(el, doc, iframe);
-    }
+    if (win.getComputedStyle(el).position === 'absolute') draggables.add(el);
+  });
+  [doc.body, slideRoot].forEach(root => {
+    if (root) Array.from(root.children).forEach(el => draggables.add(el));
+  });
+  const SKIP_TAGS = new Set(['STYLE', 'SCRIPT', 'LINK', 'META']);
+  draggables.forEach(el => {
+    if (el === doc.body || el === slideRoot) return;
+    if (SKIP_TAGS.has(el.tagName)) return;
+    if (isFullBleed(el)) return;        // don't let the whole canvas be dragged
+    makeDraggable(el, doc, iframe);
   });
 
   const markFocused = () => { lastFocusedIframe = iframe; };
@@ -298,6 +315,18 @@ function makeDraggable(el, doc, iframe) {
         const parentRect = parent.getBoundingClientRect();
         origLeft = rect.left - parentRect.left;
         origTop = rect.top - parentRect.top;
+        // Promote in-flow elements to absolute so they can be freely moved,
+        // pinning their current size/position so the slide doesn't reflow.
+        const pos = win.getComputedStyle(el).position;
+        if (pos !== 'absolute' && pos !== 'fixed') {
+          el.style.width = `${rect.width}px`;
+          el.style.position = 'absolute';
+          el.style.margin = '0';
+          el.style.left = `${origLeft}px`;
+          el.style.top = `${origTop}px`;
+          el.style.right = 'auto';
+          el.style.bottom = 'auto';
+        }
         el.classList.add('__editor-dragging');
       }
 
@@ -661,6 +690,16 @@ document.addEventListener('pointerdown', (e) => {
 
 // ─────────────────────────── BG edit (pan + zoom) ───────────────────────────
 
+// The slide's visible background can live on <body> and/or the full-bleed
+// .slide/main wrapper. Return every element that should receive bg changes so
+// "change background" and "adjust background" act on what the user actually sees.
+function bgHosts(doc) {
+  const hosts = [doc.body];
+  const root = doc.querySelector('.slide, main');
+  if (root && root !== doc.body) hosts.push(root);
+  return hosts;
+}
+
 function toggleBgEdit(iframe, button) {
   if (iframe.dataset.bgEdit === '1') {
     exitBgEditState(iframe);
@@ -684,9 +723,11 @@ function enterBgEditState(iframe) {
   if (doc.activeElement && doc.activeElement.blur) doc.activeElement.blur();
 
   iframe._bgState = { posX: 0, posY: 0, sizePct: 100 };
-  doc.body.style.backgroundRepeat = 'no-repeat';
-  doc.body.style.backgroundPosition = '0px 0px';
-  doc.body.style.backgroundSize = '100%';
+  bgHosts(doc).forEach(host => {
+    host.style.backgroundRepeat = 'no-repeat';
+    host.style.backgroundPosition = '0px 0px';
+    host.style.backgroundSize = '100%';
+  });
 
   attachBgPointerHandlers(iframe);
 }
@@ -710,8 +751,10 @@ function attachBgPointerHandlers(iframe) {
 
   function applyBg() {
     const s = iframe._bgState;
-    body.style.backgroundPosition = `${s.posX}px ${s.posY}px`;
-    body.style.backgroundSize = `${s.sizePct}%`;
+    bgHosts(doc).forEach(host => {
+      host.style.backgroundPosition = `${s.posX}px ${s.posY}px`;
+      host.style.backgroundSize = `${s.sizePct}%`;
+    });
   }
 
   let startX = 0, startY = 0;
