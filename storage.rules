@@ -1,9 +1,9 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /carousel_drafts/{carouselId}/{allPaths=**} {
-      allow read: if true;
-      allow write: if false;
+    // Admin-only. Public media via tokened URLs from downloadAndUpload (don't require client auth).
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

@@ -17,6 +17,7 @@ const greenApiInstance = defineSecret("GREENAPI_INSTANCE");
 const greenApiToken = defineSecret("GREENAPI_TOKEN");
 
 const ALLOWED_ORIGIN = "https://editor.call4li.com";
+const ALLOWED_ORIGINS = ["https://editor.call4li.com", "https://app.call4li.com", "https://call4li.com"];
 
 const pad = (n: number): string => String(n).padStart(2, "0");
 
@@ -328,3 +329,34 @@ export const cleanupExpiredDrafts = onSchedule("every 6 hours", async () => {
   }
   logger.log(`cleaned ${expired.size} expired drafts`);
 });
+
+// ────────────────────────────────────────────────────────────
+// persistMedia — n8n → Storage (replaces sidecar)
+// ────────────────────────────────────────────────────────────
+export const persistMedia = onRequest(
+  {timeoutSeconds: 120, memory: "1GiB", cors: false},
+  async (req, res) => {
+    // ponytail: no origin check - n8n calls directly, no CORS needed
+    if (req.method !== "POST") {
+      res.status(405).send("POST only");
+      return;
+    }
+    const {source_url, dest_path, content_type} = req.body as {
+      source_url?: string;
+      dest_path?: string;
+      content_type?: string;
+    };
+    if (!source_url || !dest_path || !content_type) {
+      res.status(400).json({error: "missing source_url, dest_path, or content_type"});
+      return;
+    }
+    try {
+      const {publicUrl} = await downloadAndUpload(source_url, dest_path, content_type);
+      res.json({url: publicUrl});
+    } catch (err) {
+      logger.error("persistMedia failed:", err);
+      const msg = err instanceof Error ? err.message : "internal error";
+      res.status(500).json({error: msg});
+    }
+  }
+);
