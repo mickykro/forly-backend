@@ -15,6 +15,7 @@ const db = admin.firestore();
 
 const greenApiInstance = defineSecret("GREENAPI_INSTANCE");
 const greenApiToken = defineSecret("GREENAPI_TOKEN");
+const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 
 const ALLOWED_ORIGIN = "https://editor.call4li.com";
 
@@ -275,6 +276,123 @@ export const saveCarouselDraft = onRequest(
       });
     } catch (err) {
       logger.error("saveCarouselDraft failed:", err);
+      const msg = err instanceof Error ? err.message : "internal error";
+      res.status(500).json({error: msg});
+    }
+  }
+);
+
+// ────────────────────────────────────────────────────────────
+// slideChat — the per-slide AI assistant. Takes the current slide HTML + a
+// natural-language instruction (+ short chat history) and returns a one-line
+// reply plus the full, modified slide HTML.
+// ────────────────────────────────────────────────────────────
+const SLIDE_CHAT_MODEL = "claude-sonnet-4-6";
+
+const SLIDE_CHAT_SYSTEM = `You are an expert front-end designer editing ONE \
+Instagram carousel slide. The slide is a self-contained HTML document that \
+renders at exactly 1080x1350 px, right-to-left (Hebrew).
+
+You receive the slide's full current HTML and an instruction. Apply ONLY the \
+requested change and return the COMPLETE updated HTML document.
+
+Hard rules:
+- Keep the canvas exactly 1080x1350; keep body { width:1080px; height:1350px; \
+overflow:hidden; direction:rtl }.
+- Preserve everything not mentioned in the instruction (structure, text, \
+colours, positions). Make the smallest change that satisfies the request.
+- Self-contained only: inline <style>, optional Google Fonts <link>. NEVER add \
+<script>, event handlers, or external JS.
+- Keep all content within ~60px safe margins; never let text overflow the right \
+edge (it gets clipped in export).
+- Do not add editor-only classes/attributes (e.g. __editor-*, contenteditable).
+
+Respond in this exact format:
+1) One short sentence (in the user's language) summarising what you changed.
+2) Then the full HTML inside a single \`\`\`html code fence.`;
+
+function extractReplyAndHtml(text: string): {reply: string; html: string} {
+  const fence = text.match(/```(?:html)?\s*([\s\S]*?)```/i);
+  const html = fence ? fence[1].trim() : "";
+  let reply = fence ? text.slice(0, fence.index).trim() : text.trim();
+  reply = reply.replace(/```/g, "").trim();
+  return {reply: reply || "עודכן.", html};
+}
+
+function sanitizeSlideHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<script[^>]*\/?>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
+    .replace(/javascript:/gi, "");
+}
+
+interface ChatTurn { role: "user" | "assistant"; content: string }
+
+export const slideChat = onRequest(
+  {timeoutSeconds: 120, memory: "512MiB", cors: false, secrets: [anthropicApiKey]},
+  async (req, res) => {
+    setCors(res);
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).send("POST only");
+      return;
+    }
+
+    const body = req.body as {
+      html?: string;
+      message?: string;
+      history?: ChatTurn[];
+    };
+    const html = (body.html || "").trim();
+    const message = (body.message || "").trim();
+    if (!html || !message) {
+      res.status(400).json({error: "html and message are required"});
+      return;
+    }
+
+    const history = (Array.isArray(body.history) ? body.history : [])
+      .filter((t) => t && (t.role === "user" || t.role === "assistant") && typeof t.content === "string")
+      .slice(-8)
+      .map((t) => ({role: t.role, content: t.content}));
+
+    const messages = [
+      ...history,
+      {role: "user" as const, content: `Current slide HTML:\n\n${html}\n\n---\nInstruction: ${message}`},
+    ];
+
+    try {
+      const resp = await axios.post(
+        "https://api.anthropic.com/v1/messages",
+        {model: SLIDE_CHAT_MODEL, max_tokens: 8000, system: SLIDE_CHAT_SYSTEM, messages},
+        {
+          headers: {
+            "x-api-key": anthropicApiKey.value(),
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          timeout: 110000,
+        }
+      );
+
+      const data = resp.data as {content?: Array<{type: string; text?: string}>};
+      const text = (data.content || [])
+        .filter((b) => b.type === "text" && b.text)
+        .map((b) => b.text as string)
+        .join("");
+      const {reply, html: newHtml} = extractReplyAndHtml(text);
+      if (!newHtml) {
+        res.status(502).json({error: "assistant did not return HTML", reply});
+        return;
+      }
+      res.json({reply, html: sanitizeSlideHtml(newHtml)});
+    } catch (err) {
+      logger.error("slideChat failed:", err);
       const msg = err instanceof Error ? err.message : "internal error";
       res.status(500).json({error: msg});
     }

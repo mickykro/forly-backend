@@ -1,6 +1,7 @@
 // Same-origin Hosting rewrites → private Cloud Functions in europe-west1
 const GET_URL  = '/api/get-draft';
 const SAVE_URL = '/api/save-draft';
+const CHAT_URL = '/api/slide-chat';
 
 const carouselId = window.location.pathname.split('/').filter(Boolean).pop();
 const statusEl = document.getElementById('status');
@@ -16,6 +17,7 @@ const panelEl = document.getElementById('contextPanel');
 
 let carouselData = null;
 let lastFocusedIframe = null;
+const chatHistory = {}; // slideIndex -> [{role, content}]
 
 const DRAG_THRESHOLD = 15;
 const MAX_UNDO = 30;
@@ -96,11 +98,13 @@ async function renderSlides() {
     const actions = document.createElement('div');
     actions.className = 'slide-actions';
 
+    const chatBtn = makeBtn('🪄 עוזר');
     const addTextBtn = makeBtn('+ טקסט');
     const addContainerBtn = makeBtn('+ מיכל');
     const changeBgBtn = makeBtn('שנה רקע');
     const adjustBgBtn = makeBtn('התאם רקע');
 
+    actions.appendChild(chatBtn);
     actions.appendChild(addTextBtn);
     actions.appendChild(addContainerBtn);
     actions.appendChild(changeBgBtn);
@@ -116,11 +120,26 @@ async function renderSlides() {
     iframe.dataset.slideIndex = slide.index;
     iframe.setAttribute('scrolling', 'no');
 
+    const loader = document.createElement('div');
+    loader.className = 'slide-loader';
+    loader.hidden = true;
+    loader.innerHTML = '<div class="slide-loader-spinner"></div><span>העוזר עובד…</span>';
+
     const htmlText = await fetch(slide.html_url).then(r => r.text());
 
     wrap.appendChild(iframe);
+    wrap.appendChild(loader);
     card.appendChild(controls);
     card.appendChild(wrap);
+
+    const chatPanel = buildChatPanel(slide.index, iframe, wrap);
+    card.appendChild(chatPanel);
+    chatBtn.addEventListener('click', () => {
+      chatPanel.hidden = !chatPanel.hidden;
+      chatBtn.classList.toggle('active', !chatPanel.hidden);
+      if (!chatPanel.hidden) chatPanel._input.focus();
+    });
+
     containerEl.appendChild(card);
 
     addTextBtn.addEventListener('click', () => addTextTo(iframe));
@@ -156,6 +175,139 @@ function fitIframe(iframe) {
   const wrap = iframe.parentElement;
   if (!wrap || !wrap.clientWidth) return;
   iframe.style.transform = `scale(${wrap.clientWidth / 1080})`;
+}
+
+// ─────────────────────────── Per-slide AI assistant ───────────────────────────
+
+const CHAT_PRESETS = [
+  ['תקן חיתוך', 'תקן טקסט או אלמנטים שנחתכים בקצוות; ודא שהכל נמצא בתוך השוליים הבטוחים ולא חורג מהמסגרת'],
+  ['קצר טקסט', 'קצר את הטקסטים בשקף כך שיהיו תמציתיים וברורים יותר'],
+  ['הגדל ניגודיות', 'הגדל את הניגודיות והקריאות של הטקסט מול הרקע'],
+  ['שפר עיצוב', 'שפר את העיצוב והאסתטיקה של השקף תוך שמירה על אותו תוכן'],
+];
+
+function buildChatPanel(slideIndex, iframe, wrap) {
+  const panel = document.createElement('div');
+  panel.className = 'chat-panel';
+  panel.hidden = true;
+
+  const msgs = document.createElement('div');
+  msgs.className = 'chat-messages';
+
+  const presets = document.createElement('div');
+  presets.className = 'chat-presets';
+  CHAT_PRESETS.forEach(([label, instruction]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chat-preset';
+    b.textContent = label;
+    b.addEventListener('click', () => sendChat(slideIndex, iframe, wrap, panel, instruction, label));
+    presets.appendChild(b);
+  });
+
+  const row = document.createElement('div');
+  row.className = 'chat-input-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chat-input';
+  input.placeholder = 'בקש מהעוזר לשנות את השקף…';
+  const send = document.createElement('button');
+  send.type = 'button';
+  send.className = 'chat-send';
+  send.textContent = 'שלח';
+  const submit = () => {
+    const t = input.value.trim();
+    if (t) { input.value = ''; sendChat(slideIndex, iframe, wrap, panel, t); }
+  };
+  send.addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  row.appendChild(input);
+  row.appendChild(send);
+
+  panel.appendChild(msgs);
+  panel.appendChild(presets);
+  panel.appendChild(row);
+  panel._msgs = msgs;
+  panel._input = input;
+  panel._send = send;
+  return panel;
+}
+
+function appendChatMessage(panel, role, text) {
+  const m = document.createElement('div');
+  m.className = 'chat-msg chat-' + role;
+  m.textContent = text;
+  panel._msgs.appendChild(m);
+  panel._msgs.scrollTop = panel._msgs.scrollHeight;
+  return m;
+}
+
+function setSlideLoading(wrap, on) {
+  const loader = wrap.querySelector('.slide-loader');
+  if (loader) loader.hidden = !on;
+}
+
+// Serialize the slide HTML without editor-only artifacts (and any browser-
+// extension junk), so the assistant sees clean markup.
+function cleanSlideHtml(doc) {
+  const clone = doc.documentElement.cloneNode(true);
+  clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+  clone.querySelectorAll('[data-__edit-tracked]').forEach(el => el.removeAttribute('data-__edit-tracked'));
+  clone.querySelectorAll('.__editor-draggable, .__editor-dragging, .__editor-selected')
+    .forEach(el => el.classList.remove('__editor-draggable', '__editor-dragging', '__editor-selected'));
+  clone.querySelectorAll('[data-__passthrough]').forEach(el => {
+    el.style.pointerEvents = '';
+    el.removeAttribute('data-__passthrough');
+  });
+  clone.querySelectorAll('style[data-editor-affordance], link[data-editor-fonts]').forEach(el => el.remove());
+  clone.querySelectorAll('script, qb-toolbar').forEach(el => el.remove());
+  clone.querySelectorAll('[data-qb-installed], [data-qb-tmp-id]').forEach(el => {
+    el.removeAttribute('data-qb-installed');
+    el.removeAttribute('data-qb-tmp-id');
+  });
+  return '<!doctype html>' + clone.outerHTML;
+}
+
+async function sendChat(slideIndex, iframe, wrap, panel, text, displayText) {
+  if (!iframe.contentDocument || panel.dataset.busy === '1') return;
+  panel.dataset.busy = '1';
+  panel._send.disabled = true;
+  appendChatMessage(panel, 'user', displayText || text);
+  const pending = appendChatMessage(panel, 'assistant', '…');
+  setSlideLoading(wrap, true);
+
+  const html = cleanSlideHtml(iframe.contentDocument);
+  const history = chatHistory[slideIndex] || [];
+  try {
+    const res = await fetch(CHAT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ carousel_id: carouselId, slide_index: slideIndex, html, message: text, history })
+    });
+    if (!res.ok) {
+      let msg = 'הבקשה נכשלה';
+      try { msg = (await res.json()).error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    if (!data.html) throw new Error('העוזר לא החזיר שקף');
+
+    // Re-render the slide with the assistant's changes (undoable).
+    pushUndo(iframe, snapshotIframe(iframe));
+    iframe.addEventListener('load', () => { enableEditMode(iframe); fitIframe(iframe); }, { once: true });
+    iframe.srcdoc = data.html;
+
+    history.push({ role: 'user', content: text }, { role: 'assistant', content: data.reply || '' });
+    chatHistory[slideIndex] = history.slice(-16);
+    pending.textContent = data.reply || 'עודכן.';
+  } catch (err) {
+    pending.textContent = '⚠️ ' + (err.message || 'שגיאה');
+    pending.classList.add('chat-error');
+  } finally {
+    setSlideLoading(wrap, false);
+    panel.dataset.busy = '';
+    panel._send.disabled = false;
+  }
 }
 
 // ─────────────────────────── Undo stack ───────────────────────────

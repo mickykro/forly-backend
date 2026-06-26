@@ -43,6 +43,10 @@
         "function": { "functionId": "saveCarouselDraft", "region": "europe-west1" }
       },
       {
+        "source": "/api/slide-chat",
+        "function": { "functionId": "slideChat", "region": "europe-west1" }
+      },
+      {
         "source": "/c/**",
         "destination": "/c/index.html"
       }
