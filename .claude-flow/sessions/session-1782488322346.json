@@ -1,0 +1,14 @@
+{
+  "id": "session-1782488322346",
+  "startedAt": "2026-06-26T15:38:42.346Z",
+  "cwd": "/Users/MichaelKrotorio/Desktop/Call4li/call4li_creator_website/forly-backend",
+  "context": {},
+  "metrics": {
+    "edits": 0,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "endedAt": "2026-06-26T15:39:11.288Z",
+  "duration": 28942
+}
