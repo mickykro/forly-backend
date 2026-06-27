@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>הצטרפות לפורלי | Forly Signup</title>
+  <meta name="description" content="תוכן שיווקי אוטומטי למתווכי נדל״ן">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      max-width: 480px;
+      width: 100%;
+      padding: 40px;
+    }
+    .logo { text-align: center; font-size: 48px; margin-bottom: 16px; }
+    h1 { text-align: center; color: #1f2937; margin-bottom: 8px; font-size: 28px; }
+    .subtitle { text-align: center; color: #6b7280; margin-bottom: 32px; font-size: 16px; }
+    .form-group { margin-bottom: 20px; }
+    label { display: block; color: #374151; font-weight: 500; margin-bottom: 8px; font-size: 14px; }
+    input, select {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.2s;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    .btn {
+      width: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      margin-top: 8px;
+    }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .success {
+      background: #10b981;
+      color: white;
+      padding: 16px;
+      border-radius: 8px;
+      text-align: center;
+      margin-top: 20px;
+      font-weight: 500;
+    }
+    .error {
+      background: #ef4444;
+      color: white;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+    .features {
+      background: #f9fafb;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 32px;
+      margin-bottom: 24px;
+    }
+    .feature {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      color: #374151;
+    }
+    .feature:last-child { margin-bottom: 0; }
+    .feature-icon { font-size: 24px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🦉</div>
+    <h1>הצטרף לפורלי</h1>
+    <p class="subtitle">תוכן שיווקי אוטומטי לנדל״ן</p>
+
+    <div class="features">
+      <div class="feature">
+        <span class="feature-icon">📅</span>
+        <span>תכנית שיווקית שבועית מותאמת אישית</span>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">🎨</span>
+        <span>קרוסלות וסרטונים מקצועיים</span>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">📊</span>
+        <span>דוחות ביצועים שבועיים</span>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">💬</span>
+        <span>הכל דרך וואטסאפ</span>
+      </div>
+    </div>
+
+    <form id="signup-form">
+      <div id="error-message" class="error" style="display: none;"></div>
+
+      <div class="form-group">
+        <label for="phone">מספר טלפון *</label>
+        <input type="tel" id="phone" name="phone" placeholder="050-1234567" required maxlength="10" pattern="[0-9]{10}">
+      </div>
+
+      <div class="form-group">
+        <label for="name">שם מלא</label>
+        <input type="text" id="name" name="name" placeholder="ישראל ישראלי">
+      </div>
+
+      <div class="form-group">
+        <label for="city">עיר</label>
+        <input type="text" id="city" name="city" placeholder="תל אביב">
+      </div>
+
+      <div class="form-group">
+        <label for="specialty">התמחות</label>
+        <select id="specialty" name="specialty">
+          <option value="">בחר התמחות</option>
+          <option value="apartments">דירות מגורים</option>
+          <option value="luxury">יוקרה</option>
+          <option value="commercial">מסחרי</option>
+          <option value="rental">השכרה</option>
+          <option value="investment">השקעות</option>
+          <option value="projects">פרויקטים</option>
+          <option value="general">כללי</option>
+        </select>
+      </div>
+
+      <button type="submit" class="btn" id="submit-btn">
+        קבל קרוסלה חינם 🎁
+      </button>
+    </form>
+
+    <div id="success-message" class="success" style="display: none;">
+      ✅ נרשמת בהצלחה!<br>
+      הקרוסלה תגיע בוואטסאפ תוך כמה דקות 🦉
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('signup-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const errorMsg = document.getElementById('error-message');
+    const successMsg = document.getElementById('success-message');
+
+    // Phone formatting
+    document.getElementById('phone').addEventListener('input', (e) => {
+      e.target.value = e.target.value.replace(/\D/g, '').slice(0, 10);
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorMsg.style.display = 'none';
+
+      const phone = document.getElementById('phone').value.replace(/\D/g, '');
+      if (!/^\d{10}$/.test(phone)) {
+        errorMsg.textContent = 'מספר טלפון לא תקין (צריך 10 ספרות)';
+        errorMsg.style.display = 'block';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'שולח...';
+
+      try {
+        const res = await fetch('https://n8n.srv1173890.hstgr.cloud/webhook/lead-trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            name: document.getElementById('name').value || null,
+            city: document.getElementById('city').value || null,
+            specialty: document.getElementById('specialty').value || null,
+            source: 'web_new_user'
+          })
+        });
+
+        if (!res.ok) throw new Error('Network error');
+
+        form.style.display = 'none';
+        successMsg.style.display = 'block';
+
+        // Track conversion
+        if (window.gtag) {
+          gtag('event', 'conversion', { send_to: 'AW-XXXXX/XXXXX' });
+        }
+      } catch (err) {
+        errorMsg.textContent = 'שגיאה בשליחה. נסה שוב.';
+        errorMsg.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'קבל קרוסלה חינם 🎁';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forly | פורלי</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .hidden { display: none !important; }
+    .btn { background: #6366f1; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; width: 100%; margin-top: 10px; }
+    .btn:hover { background: #4f46e5; }
+    .btn-secondary { background: #e5e7eb; color: #374151; }
+    .btn-secondary:hover { background: #d1d5db; }
+    input { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 16px; margin-top: 10px; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 16px; }
+    .header { background: white; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+    .nav { display: flex; gap: 16px; margin-top: 16px; }
+    .nav-btn { flex: 1; padding: 12px; background: #f3f4f6; border: none; border-radius: 8px; cursor: pointer; }
+    .nav-btn.active { background: #6366f1; color: white; }
+    .item { border-bottom: 1px solid #e5e7eb; padding: 16px 0; }
+    .item:last-child { border-bottom: none; }
+    .loading { text-align: center; padding: 40px; color: #9ca3af; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="module">
+    const API_BASE = 'https://europe-west1-call4li.cloudfunctions.net';
+
+    // Router
+    const routes = {
+      '/': 'home',
+      '/login': 'login',
+      '/library': 'library',
+      '/plan': 'plan',
+      '/upload': 'upload',
+      '/listing': 'listing',
+      '/profile': 'profile'
+    };
+
+    let currentUser = null;
+
+    function getRoute() {
+      const hash = window.location.hash.slice(1) || '/';
+      return routes[hash] || 'home';
+    }
+
+    function navigate(path) {
+      window.location.hash = path;
+    }
+
+    async function apiCall(endpoint, options = {}) {
+      const res = await fetch(`${API_BASE}/${endpoint}`, {
+        ...options,
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...options.headers }
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    // Auth check
+    async function checkAuth() {
+      const token = document.cookie.split('; ').find(r => r.startsWith('auth='));
+      if (!token && getRoute() !== 'login') {
+        navigate('/login');
+        return false;
+      }
+      return true;
+    }
+
+    // Views
+    const views = {
+      login: () => `
+        <div class="container">
+          <div class="card" style="margin-top: 100px;">
+            <h1 style="text-align: center; margin-bottom: 20px;">🦉 כניסה לפורלי</h1>
+            <div id="login-form">
+              <input type="tel" id="phone" placeholder="מספר טלפון (050...)" maxlength="10">
+              <button class="btn" onclick="window.requestOtp()">שלח קוד</button>
+            </div>
+            <div id="otp-form" class="hidden">
+              <input type="text" id="otp" placeholder="קוד 6 ספרות" maxlength="6">
+              <button class="btn" onclick="window.verifyOtp()">כניסה</button>
+              <button class="btn btn-secondary" onclick="window.backToPhone()">חזרה</button>
+            </div>
+          </div>
+        </div>
+      `,
+
+      home: () => `
+        <div class="header">
+          <h2>🦉 פורלי</h2>
+          <button class="btn btn-secondary" onclick="window.logout()" style="width: auto; padding: 8px 16px;">יציאה</button>
+        </div>
+        <div class="container">
+          <div class="nav">
+            <button class="nav-btn" onclick="navigate('/library')">📚 ספריה</button>
+            <button class="nav-btn" onclick="navigate('/plan')">📅 תכנית</button>
+            <button class="nav-btn" onclick="navigate('/upload')">📤 העלאה</button>
+          </div>
+          <div class="card" style="margin-top: 20px; text-align: center;">
+            <h3>ברוך הבא לפורלי!</h3>
+            <p style="margin-top: 10px; color: #6b7280;">התוכן השבועי שלך מוכן</p>
+          </div>
+        </div>
+      `,
+
+      library: () => `
+        <div class="header">
+          <h2>📚 הספריה שלי</h2>
+          <button onclick="navigate('/')" style="background: none; border: none; font-size: 24px; cursor: pointer;">←</button>
+        </div>
+        <div class="container">
+          <div id="library-content" class="loading">טוען...</div>
+        </div>
+      `,
+
+      plan: () => `
+        <div class="header">
+          <h2>📅 תכנית שבועית</h2>
+          <button onclick="navigate('/')" style="background: none; border: none; font-size: 24px; cursor: pointer;">←</button>
+        </div>
+        <div class="container">
+          <div id="plan-content" class="loading">טוען...</div>
+        </div>
+      `,
+
+      upload: () => `
+        <div class="header">
+          <h2>📤 העלאת תמונות</h2>
+          <button onclick="navigate('/')" style="background: none; border: none; font-size: 24px; cursor: pointer;">←</button>
+        </div>
+        <div class="container">
+          <div class="card">
+            <input type="file" id="file-input" accept="image/*" multiple style="margin-bottom: 16px;">
+            <button class="btn" onclick="window.uploadFiles()">העלה</button>
+          </div>
+          <div id="upload-status"></div>
+        </div>
+      `,
+
+      listing: () => `
+        <div class="header">
+          <h2>🏠 נכס חדש</h2>
+          <button onclick="navigate('/')" style="background: none; border: none; font-size: 24px; cursor: pointer;">←</button>
+        </div>
+        <div class="container">
+          <div class="card">
+            <input id="address" placeholder="כתובת">
+            <input id="rooms" type="number" placeholder="חדרים">
+            <input id="sqm" type="number" placeholder="מ״ר">
+            <input id="price" type="number" placeholder="מחיר">
+            <button class="btn" onclick="window.createListing()">צור נכס</button>
+          </div>
+        </div>
+      `,
+
+      profile: () => `
+        <div class="header">
+          <h2>⚙️ הגדרות</h2>
+          <button onclick="navigate('/')" style="background: none; border: none; font-size: 24px; cursor: pointer;">←</button>
+        </div>
+        <div class="container">
+          <div class="card">
+            <p>פרופיל</p>
+          </div>
+        </div>
+      `
+    };
+
+    // Actions
+    window.requestOtp = async () => {
+      const phone = document.getElementById('phone').value.replace(/\D/g, '');
+      if (!/^\d{10}$/.test(phone)) return alert('מספר טלפון לא תקין');
+      try {
+        await apiCall('requestOtp', { method: 'POST', body: JSON.stringify({ phone }) });
+        document.getElementById('login-form').classList.add('hidden');
+        document.getElementById('otp-form').classList.remove('hidden');
+      } catch (e) { alert('שגיאה: ' + e.message); }
+    };
+
+    window.verifyOtp = async () => {
+      const phone = document.getElementById('phone').value.replace(/\D/g, '');
+      const code = document.getElementById('otp').value;
+      try {
+        await apiCall('verifyOtp', { method: 'POST', body: JSON.stringify({ phone, code }) });
+        navigate('/');
+        render();
+      } catch (e) { alert('קוד שגוי'); }
+    };
+
+    window.backToPhone = () => {
+      document.getElementById('otp-form').classList.add('hidden');
+      document.getElementById('login-form').classList.remove('hidden');
+    };
+
+    window.logout = () => {
+      document.cookie = 'auth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+      navigate('/login');
+      render();
+    };
+
+    window.uploadFiles = async () => {
+      const files = document.getElementById('file-input').files;
+      const status = document.getElementById('upload-status');
+      status.innerHTML = '<div class="loading">מעלה...</div>';
+
+      for (const file of files) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+            const base64 = e.target.result.split(',')[1];
+            await apiCall('uploadMedia', {
+              method: 'POST',
+              body: JSON.stringify({ data: base64, content_type: file.type })
+            });
+          } catch (err) { console.error(err); }
+        };
+        reader.readAsDataURL(file);
+      }
+
+      setTimeout(() => {
+        status.innerHTML = '<div class="card">✅ הועלה בהצלחה</div>';
+      }, 2000);
+    };
+
+    window.createListing = async () => {
+      const data = {
+        address: document.getElementById('address').value,
+        rooms: parseInt(document.getElementById('rooms').value),
+        sqm: parseInt(document.getElementById('sqm').value),
+        price: parseInt(document.getElementById('price').value)
+      };
+      try {
+        await apiCall('createListing', { method: 'POST', body: JSON.stringify(data) });
+        alert('✅ נכס נוצר');
+        navigate('/');
+      } catch (e) { alert('שגיאה: ' + e.message); }
+    };
+
+    // Render
+    async function render() {
+      const route = getRoute();
+      if (route !== 'login' && !await checkAuth()) return;
+
+      const view = views[route] || views.home;
+      document.getElementById('app').innerHTML = view();
+
+      // Load data for specific routes
+      if (route === 'library') loadLibrary();
+      if (route === 'plan') loadPlan();
+    }
+
+    async function loadLibrary() {
+      try {
+        const data = await apiCall('getLibrary');
+        const html = data.items?.map(item => `
+          <div class="card">
+            <img src="${item.url}" style="width: 100%; border-radius: 8px;">
+            <p style="margin-top: 8px;">${item.caption || ''}</p>
+            <button class="btn btn-secondary" onclick="window.markPosted('${item.id}')">סמן כפורסם</button>
+          </div>
+        `).join('') || '<div class="card">אין פריטים</div>';
+        document.getElementById('library-content').innerHTML = html;
+      } catch (e) {
+        document.getElementById('library-content').innerHTML = '<div class="card">שגיאה בטעינה</div>';
+      }
+    }
+
+    async function loadPlan() {
+      try {
+        const data = await apiCall('getPlan');
+        const html = data.items?.map((item, i) => `
+          <div class="card">
+            <h3>${i+1}. ${item.topic}</h3>
+            <p style="color: #6b7280; margin-top: 8px;">${item.type} • ${item.day || ''}</p>
+          </div>
+        `).join('') || '<div class="card">אין תכנית זמינה</div>';
+
+        const approveBtn = data.status === 'sent' ? `
+          <button class="btn" onclick="window.approvePlan('${data.plan_id}')">✅ אשר תכנית</button>
+        ` : '';
+
+        document.getElementById('plan-content').innerHTML = html + approveBtn;
+      } catch (e) {
+        document.getElementById('plan-content').innerHTML = '<div class="card">שגיאה בטעינה</div>';
+      }
+    }
+
+    window.markPosted = async (id) => {
+      try {
+        await apiCall('markPosted', { method: 'POST', body: JSON.stringify({ item_id: id }) });
+        alert('✅ סומן כפורסם');
+        loadLibrary();
+      } catch (e) { alert('שגיאה'); }
+    };
+
+    window.approvePlan = async (planId) => {
+      try {
+        await apiCall('approvePlan', { method: 'POST', body: JSON.stringify({ plan_id: planId }) });
+        alert('✅ התכנית אושרה');
+        loadPlan();
+      } catch (e) { alert('שגיאה'); }
+    };
+
+    // Init
+    window.addEventListener('hashchange', render);
+    render();
+  </script>
+</body>
+</html>
