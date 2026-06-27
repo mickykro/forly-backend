@@ -882,7 +882,7 @@ export const startWalkthrough = onRequest(
 
     try {
       // Fire n8n webhook (WW1)
-      await axios.post("https://n8n.srv1173890.hstgr.cloud/webhook/walkthrough-trigger", {
+      await axios.post("https://n8n.srv1173890.hstgr.cloud/webhook/476ac786-d35f-434c-b7a6-2fe5ed9d7141", {
         phone: auth.phone,
         listing_id,
         trigger_source: "web",
