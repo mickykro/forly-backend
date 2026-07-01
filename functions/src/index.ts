@@ -1,30 +1,15 @@
-import {setGlobalOptions} from "firebase-functions";
 import {onRequest} from "firebase-functions/https";
 import {onSchedule} from "firebase-functions/scheduler";
-import {defineSecret} from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import axios from "axios";
 import {v4 as uuidv4} from "uuid";
-
-admin.initializeApp();
-setGlobalOptions({region: "europe-west1", maxInstances: 10});
-
-const bucket = admin.storage().bucket();
-const db = admin.firestore();
-
-const greenApiInstance = defineSecret("GREENAPI_INSTANCE");
-const greenApiToken = defineSecret("GREENAPI_TOKEN");
+import {
+  db, bucket, pad, setCors, uploadBuffer, downloadAndUpload,
+  greenApiInstance, greenApiToken,
+} from "./shared";
 
 const ALLOWED_ORIGIN = "https://editor.call4li.com";
-
-const pad = (n: number): string => String(n).padStart(2, "0");
-
-function setCors(res: {set: (k: string, v: string) => void}): void {
-  res.set("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
-  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type");
-}
 
 interface InboundSlide {
   index: number;
@@ -42,40 +27,6 @@ interface StoredSlide {
   index: number;
   png_url: string;
   html_url: string;
-}
-
-function tokenedUrl(destPath: string, token: string): string {
-  return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
-    `${encodeURIComponent(destPath)}?alt=media&token=${token}`;
-}
-
-async function uploadBuffer(
-  destPath: string,
-  data: Buffer,
-  contentType: string
-): Promise<{publicUrl: string}> {
-  const token = uuidv4();
-  const file = bucket.file(destPath);
-  await file.save(data, {
-    metadata: {
-      contentType,
-      cacheControl: "public, max-age=86400",
-      metadata: {firebaseStorageDownloadTokens: token},
-    },
-  });
-  return {publicUrl: tokenedUrl(destPath, token)};
-}
-
-async function downloadAndUpload(
-  sourceUrl: string,
-  destPath: string,
-  contentType: string
-): Promise<{publicUrl: string}> {
-  const response = await axios.get(sourceUrl, {
-    responseType: "arraybuffer",
-    timeout: 30000,
-  });
-  return uploadBuffer(destPath, Buffer.from(response.data as ArrayBuffer), contentType);
 }
 
 // ────────────────────────────────────────────────────────────
@@ -155,7 +106,7 @@ export const createCarouselDraft = onRequest(
 // 2) getCarouselDraft — called from the editor page on load
 // ────────────────────────────────────────────────────────────
 export const getCarouselDraft = onRequest({cors: false}, async (req, res) => {
-  setCors(res);
+  setCors(res, ALLOWED_ORIGIN);
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -195,7 +146,7 @@ export const saveCarouselDraft = onRequest(
     cors: false,
   },
   async (req, res) => {
-    setCors(res);
+    setCors(res, ALLOWED_ORIGIN);
     if (req.method === "OPTIONS") {
       res.status(204).send("");
       return;
@@ -328,3 +279,16 @@ export const cleanupExpiredDrafts = onSchedule("every 6 hours", async () => {
   }
   logger.log(`cleaned ${expired.size} expired drafts`);
 });
+
+// ────────────────────────────────────────────────────────────
+// Nadlan — property landing pages + agent platform
+// ────────────────────────────────────────────────────────────
+export {createPropertyPage, getPropertyPage, updatePropertyPage} from "./nadlan/pages";
+export {submitPropertyLead, trackPropertyEvent} from "./nadlan/leads";
+export {sendLoginOtp, verifyLoginOtp} from "./nadlan/auth";
+export {
+  getUploadUrls, createProperty, demoCreateProperty,
+  listMyProperties, deleteProperty, getListingStatus,
+} from "./nadlan/properties";
+export {extendPropertyPage, expirePagesDaily} from "./nadlan/lifecycle";
+export {submitWebSignup} from "./signup/web";
