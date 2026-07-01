@@ -51,7 +51,59 @@ branding and property info from the `property_pages/{id}` payload (see bind map 
 Storage: `property_pages/{id}/walkthrough.mp4` (**must keep audio track** — n8n/WW1 pipeline
 must not strip it; the chat-upload test clip arrived with no audio stream), `poster.jpg`.
 
-## Cloud Functions (mirror carousel-editor style in `functions/src/index.ts`)
+## Area Intelligence — automated neighborhood research
+
+The area section is **not** filled by the agent — Forly is the expert. A research
+step gathers real, sourced facts about the neighborhood from the open web.
+
+### Key insight: cache per neighborhood, not per property
+Many listings share a neighborhood. Research once, reuse for ~90 days.
+
+- Firestore `area_profiles/{city}__{neighborhood}` (slugified, e.g. `tel-aviv__bavli`)
+- Fields: `blurb`, `stats[{value,label,source_url}]`, `landmarks[]`, `sources[]`,
+  `researched_at`, `expires_at (+90d)`
+- Cost per profile: one Claude call with web search (~5-8 searches) — cents.
+  Amortized across every listing in that neighborhood.
+
+### Pipeline (inside n8n "Property Page Builder", or standalone "Area Intelligence" workflow)
+1. **Normalize location** — Google Geocoding API on the property address →
+   `{lat, lng, neighborhood, city}` (also powers the map image).
+2. **Cache check** — `GET area_profiles/{slug}`; fresh → skip to step 5.
+3. **Research call** — ONE Anthropic Messages API call, model `claude-opus-4-8`
+   (runs once per neighborhood, so use the strong model), with the server-side
+   web search tool — Claude does the searching itself, no scraping infra:
+   ```jsonc
+   {
+     "model": "claude-opus-4-8",
+     "tools": [{ "type": "web_search_20260209", "name": "web_search", "max_uses": 8 }],
+     // prompt: research {neighborhood}, {city} for a real-estate landing page:
+     //  - price/sqm + 5yr trend (prefer nadlan.gov.il / madlan / CBS)
+     //  - schools & their reputation, parks, beach/transit access
+     //  - development plans, "why people love it"
+     //  - Respond in Hebrew. EVERY numeric stat must include its source URL.
+   }
+   ```
+   Then one cheap follow-up call (or structured-output pass) to shape the answer
+   into the payload schema.
+4. **Source-or-drop rule (anti-hallucination)** — a stat without a `source_url`
+   from an actual search result is DROPPED. Fewer real stats > invented ones.
+   Store `sources[]` on the profile for auditability. Never show unsourced
+   numbers to prospects (school "ratings" etc. must trace to a source).
+5. **Per-property distances** — neighborhood profile is shared; distances are
+   per-address: Google Distance Matrix from the geocoded point to a fixed
+   landmark set (park, beach, Ayalon, nearest train/light-rail) → `area.stops[]`.
+6. **Compose** — profile blurb+stats + property stops → `area` object in
+   `property_pages/{id}`.
+
+### Refresh & ops
+- TTL 90d; scheduled n8n cron re-researches expired profiles (mirrors
+  `cleanupExpiredDrafts` pattern).
+- Manual override: `area_profiles/{slug}.locked=true` lets us hand-curate a
+  profile (top neighborhoods deserve human polish) without the bot overwriting.
+- Env: `ANTHROPIC_API_KEY` (existing), `GOOGLE_MAPS_KEY` (geocoding + distance
+  matrix + static map — one key).
+
+
 | Function | Trigger | Job |
 |---|---|---|
 | `createPropertyPage` | POST from n8n | persist assets → Storage, write `property_pages/{id}`, return `{page_id, page_url}` |
