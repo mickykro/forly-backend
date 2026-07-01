@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly · עריכת דף</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <a class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
+</header>
+
+<div class="container">
+  <div class="page-head">
+    <div>
+      <h1>עריכת דף הנכס</h1>
+      <p>כל שינוי עולה לאוויר מיד אחרי שמירה.</p>
+    </div>
+    <a class="btn btn-ghost" id="openPage" target="_blank" href="#">פתיחת הדף ↗</a>
+  </div>
+
+  <div class="edit-layout">
+    <div>
+      <div class="card">
+        <div class="sec-title">כותרת ופרטים</div>
+        <div class="field">
+          <label>משפט הפתיחה (Hero)</label>
+          <input id="fPhrase" maxlength="80">
+          <div class="hint"><span id="phraseCount">0</span>/80 · המשפט הגדול מעל הווידאו</div>
+        </div>
+        <div class="grid-2">
+          <div class="field"><label>כותרת הנכס</label><input id="fTitle" maxlength="80"></div>
+          <div class="field"><label>מחיר (₪)</label><input id="fPrice" type="number"></div>
+        </div>
+        <div class="grid-3">
+          <div class="field"><label>חדרים</label><input id="fRooms" type="number" step="0.5"></div>
+          <div class="field"><label>מ״ר</label><input id="fSqm" type="number"></div>
+          <div class="field"><label>קומה</label><input id="fFloor" type="number"></div>
+        </div>
+
+        <div class="sec-title">גלריה — גרירה לשינוי סדר</div>
+        <div class="thumbs" id="galEdit"></div>
+        <div class="hint">✕ מסיר תמונה מהדף (הקובץ לא נמחק). לחיצה על תמונה — עריכת כיתוב.</div>
+
+        <div class="sec-title">כרטיסי ״למה דווקא כאן״</div>
+        <div id="cardsEdit"></div>
+
+        <div class="sec-title">אזור יצירת קשר</div>
+        <div class="field"><label>כותרת</label><input id="fCtaHead" maxlength="80"></div>
+        <div class="field"><label>משפט משנה</label><input id="fCtaSub" maxlength="200"></div>
+        <div class="field"><label>טקסט כפתור</label><input id="fCtaBtn" maxlength="30"></div>
+
+        <div class="sec-title">הצגת אזורים בדף</div>
+        <div class="toggle-row"><label>גלריית תמונות</label><span class="switch"><input type="checkbox" id="tGallery"><i></i></span></div>
+        <div class="toggle-row"><label>כרטיסי ״למה דווקא כאן״</label><span class="switch"><input type="checkbox" id="tCarousel"><i></i></span></div>
+        <div class="toggle-row" style="border-bottom:none"><label>מידע על השכונה</label><span class="switch"><input type="checkbox" id="tArea"><i></i></span></div>
+      </div>
+
+      <div class="save-bar">
+        <span id="saveMsg" style="align-self:center;color:var(--ink-soft);font-size:.85rem"></span>
+        <button class="btn btn-gold" id="saveBtn">שמירה</button>
+      </div>
+    </div>
+
+    <div class="preview-frame">
+      <iframe id="preview" title="תצוגה מקדימה"></iframe>
+    </div>
+  </div>
+</div>
+
+<script src="/api.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (s) { return document.querySelector(s); };
+  var pageId = new URLSearchParams(location.search).get("id");
+  if (!pageId) { location.href = "/"; return; }
+
+  var payload = null;
+  var galleryState = []; // {url, caption}
+  var pageOrigin = ""; // nadlan origin for preview
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function load() {
+    FLY.req("/api/page?id=" + encodeURIComponent(pageId)).then(function (d) {
+      payload = d;
+      $("#fPhrase").value = d.hero.phrase || "";
+      $("#phraseCount").textContent = ($("#fPhrase").value || "").length;
+      $("#fTitle").value = d.property.title || "";
+      $("#fPrice").value = d.property.price || "";
+      $("#fRooms").value = d.property.rooms || "";
+      $("#fSqm").value = d.property.size_sqm || "";
+      $("#fFloor").value = d.property.floor || "";
+      $("#fCtaHead").value = d.cta.headline || "";
+      $("#fCtaSub").value = d.cta.sub || "";
+      $("#fCtaBtn").value = d.cta.button_label || "";
+      $("#tGallery").checked = !!d.sections.gallery;
+      $("#tCarousel").checked = !!d.sections.carousel;
+      $("#tArea").checked = !!d.sections.area;
+
+      galleryState = (d.gallery.images || []).slice();
+      renderGallery();
+      renderCards(d.carousel.slides || []);
+      refreshPreview();
+    }).catch(function () { FLY.toast("שגיאה בטעינת הדף"); });
+  }
+
+  // gallery: reorder via drag, remove, caption edit
+  function renderGallery() {
+    var box = $("#galEdit");
+    box.innerHTML = "";
+    galleryState.forEach(function (img, i) {
+      var t = FLY.el("div", "t",
+        '<img src="' + esc(img.url) + '" draggable="true"><button class="x" type="button">✕</button>');
+      t.dataset.i = i;
+      t.querySelector(".x").addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (galleryState.length <= 1) { FLY.toast("חייבת להישאר תמונה אחת לפחות"); return; }
+        galleryState.splice(i, 1);
+        renderGallery();
+      });
+      t.addEventListener("click", function () {
+        var cap = prompt("כיתוב לתמונה:", img.caption || "");
+        if (cap !== null) { img.caption = cap.slice(0, 60); FLY.toast("כיתוב עודכן"); }
+      });
+      var imgel = t.querySelector("img");
+      imgel.addEventListener("dragstart", function (e) { e.dataTransfer.setData("text/plain", String(i)); });
+      t.addEventListener("dragover", function (e) { e.preventDefault(); });
+      t.addEventListener("drop", function (e) {
+        e.preventDefault();
+        var from = Number(e.dataTransfer.getData("text/plain"));
+        var moved = galleryState.splice(from, 1)[0];
+        galleryState.splice(i, 0, moved);
+        renderGallery();
+      });
+      box.appendChild(t);
+    });
+  }
+
+  function renderCards(slides) {
+    var box = $("#cardsEdit");
+    box.innerHTML = "";
+    slides.forEach(function (s, i) {
+      var w = FLY.el("div", "field",
+        '<label>כרטיס ' + (i + 1) + "</label>" +
+        '<input data-ct="' + i + '" value="' + esc(s.title) + '" maxlength="60" placeholder="כותרת" style="margin-bottom:8px">' +
+        '<textarea data-cb="' + i + '" rows="2" maxlength="300" placeholder="טקסט">' + esc(s.body) + "</textarea>");
+      box.appendChild(w);
+    });
+  }
+
+  $("#fPhrase").addEventListener("input", function () {
+    $("#phraseCount").textContent = this.value.length;
+  });
+
+  function refreshPreview() {
+    // Preview through the page origin; on custom domains the nadlan page is a
+    // different origin — use the page_url origin when we have it.
+    $("#preview").src = pageOrigin + "/p/" + pageId + "?t=" + Date.now();
+    $("#openPage").href = pageOrigin + "/p/" + pageId;
+  }
+
+  // resolve nadlan origin from the properties list (page_url)
+  FLY.req("/api/properties").then(function (d) {
+    var mine = (d.properties || []).find(function (p) { return p.page_id === pageId; });
+    if (mine && mine.page_url) {
+      pageOrigin = new URL(mine.page_url).origin;
+    }
+    load();
+  }).catch(function () { load(); });
+
+  $("#saveBtn").addEventListener("click", function () {
+    var btn = this;
+    btn.disabled = true;
+    $("#saveMsg").textContent = "שומרים...";
+    var slides = (payload.carousel.slides || []).map(function (s, i) {
+      var t = document.querySelector('[data-ct="' + i + '"]');
+      var b = document.querySelector('[data-cb="' + i + '"]');
+      return { title: t ? t.value : s.title, body: b ? b.value : s.body, tag: s.tag };
+    });
+    FLY.req("/api/page/update", {
+      method: "POST",
+      body: {
+        page_id: pageId,
+        hero_phrase: $("#fPhrase").value,
+        property: {
+          title: $("#fTitle").value,
+          price: Number($("#fPrice").value) || 0,
+          rooms: Number($("#fRooms").value) || 0,
+          size_sqm: Number($("#fSqm").value) || 0,
+          floor: Number($("#fFloor").value) || 0,
+        },
+        gallery_images: galleryState,
+        carousel_slides: slides,
+        cta: {
+          headline: $("#fCtaHead").value,
+          sub: $("#fCtaSub").value,
+          button_label: $("#fCtaBtn").value,
+        },
+        sections: {
+          gallery: $("#tGallery").checked,
+          carousel: $("#tCarousel").checked,
+          area: $("#tArea").checked,
+        },
+      },
+    }).then(function () {
+      $("#saveMsg").textContent = "✓ נשמר · הדף עודכן";
+      FLY.toast("✓ הדף עודכן");
+      setTimeout(refreshPreview, 800);
+    }).catch(function (e) {
+      $("#saveMsg").textContent = "שגיאה בשמירה";
+      FLY.toast("שגיאה: " + e.message);
+    }).finally(function () { btn.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,14 @@
 {
   "projects": {
     "default": "call4li"
+  },
+  "targets": {
+    "call4li": {
+      "hosting": {
+        "app": ["call4li"],
+        "nadlan": ["call4li-nadlan"],
+        "agent": ["call4li-agent"]
+      }
+    }
   }
 }

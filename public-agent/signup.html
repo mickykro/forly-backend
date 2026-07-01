@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly · הרשמה</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+</header>
+
+<div class="auth-wrap">
+  <div class="card auth-card" style="width:min(460px,100%)">
+    <div class="logo">🦉</div>
+    <h1 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:2px">הרשמה לפורלי</h1>
+    <p class="sub">דקה אחת — ואפשר לפתוח נכס ראשון</p>
+
+    <!-- step 1: details -->
+    <div id="step1" style="text-align:right">
+      <div class="field"><label>שם מלא *</label><input id="sName" autocomplete="name"></div>
+      <div class="field"><label>שם המשרד / מותג *</label><input id="sBrand"></div>
+      <div class="grid-2">
+        <div class="field"><label>נייד (וואטסאפ) *</label><input id="sPhone" type="tel" inputmode="tel" placeholder="050-0000000"></div>
+        <div class="field"><label>עיר פעילות</label><input id="sCity"></div>
+      </div>
+      <div class="field">
+        <label>לוגו</label>
+        <input id="sLogo" type="file" accept="image/png,image/jpeg,image/webp">
+        <div class="hint">אין לוגו? לא נורא — <label style="display:inline"><input type="checkbox" id="sWantLogo" style="width:auto"> צרו לי אחד בחינם 🎨</label></div>
+      </div>
+      <button class="btn btn-gold" id="toOtp" style="width:100%">המשך — אימות בוואטסאפ</button>
+      <p class="form-err" id="err1"></p>
+      <p class="hint" style="margin-top:12px;text-align:center">כבר רשומים? <a href="/" style="color:var(--gold);font-weight:600">כניסה</a></p>
+    </div>
+
+    <!-- step 2: OTP -->
+    <div id="step2" class="hidden">
+      <p style="font-size:.9rem;color:var(--ink-soft)">שלחנו קוד בוואטסאפ למספר <b id="sSentTo"></b></p>
+      <div class="otp-row" id="otpRow">
+        <input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric">
+      </div>
+      <button class="btn btn-gold" id="finishBtn" style="width:100%">סיום הרשמה</button>
+      <p class="form-err" id="err2"></p>
+      <button class="btn btn-ghost btn-sm" id="back2" style="margin-top:12px">← חזרה</button>
+    </div>
+
+    <!-- step 3: done -->
+    <div id="step3" class="hidden">
+      <div style="font-size:2.6rem">🥂</div>
+      <h2 style="font-family:var(--serif);margin:10px 0 6px">ברוכים הבאים לפורלי!</h2>
+      <p style="color:var(--ink-soft);font-weight:300;margin-bottom:18px">החשבון מוכן. שלחנו גם הודעת פתיחה בוואטסאפ.</p>
+      <a class="btn btn-gold" href="/create.html" style="width:100%">+ פתיחת נכס ראשון</a>
+      <a class="btn btn-ghost" href="/" style="width:100%;margin-top:8px">לאזור האישי</a>
+    </div>
+  </div>
+</div>
+
+<script src="/api.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (s) { return document.querySelector(s); };
+  var phoneVal = "";
+
+  $("#toOtp").addEventListener("click", function () {
+    var err = $("#err1");
+    err.classList.remove("show");
+    if (!$("#sName").value.trim() || !$("#sBrand").value.trim() || !$("#sPhone").value.trim()) {
+      err.textContent = "נא למלא שם, משרד ונייד";
+      err.classList.add("show");
+      return;
+    }
+    var btn = this; btn.disabled = true;
+    FLY.req("/api/auth/otp", {
+      method: "POST", noRedirect: true,
+      body: { phone: $("#sPhone").value.trim(), mode: "signup" },
+    }).then(function () {
+      phoneVal = $("#sPhone").value.trim();
+      $("#sSentTo").textContent = phoneVal;
+      $("#step1").classList.add("hidden");
+      $("#step2").classList.remove("hidden");
+      $("#otpRow input").focus();
+    }).catch(function (e) {
+      err.textContent = e.code === "already_registered" ? "המספר כבר רשום — אפשר פשוט להיכנס" :
+        e.code === "invalid_phone" ? "מספר לא תקין" :
+        e.code === "too_soon" ? "רגע... נסו שוב בעוד דקה" : "שגיאה בשליחת הקוד";
+      err.classList.add("show");
+    }).finally(function () { btn.disabled = false; });
+  });
+
+  var cells = Array.prototype.slice.call(document.querySelectorAll("#otpRow input"));
+  cells.forEach(function (c, i) {
+    c.addEventListener("input", function () {
+      c.value = c.value.replace(/\D/g, "").slice(0, 1);
+      if (c.value && i < cells.length - 1) cells[i + 1].focus();
+    });
+    c.addEventListener("keydown", function (e) {
+      if (e.key === "Backspace" && !c.value && i > 0) cells[i - 1].focus();
+    });
+  });
+  $("#back2").addEventListener("click", function () {
+    $("#step2").classList.add("hidden");
+    $("#step1").classList.remove("hidden");
+  });
+
+  $("#finishBtn").addEventListener("click", function () {
+    var code = cells.map(function (c) { return c.value; }).join("");
+    var err = $("#err2");
+    err.classList.remove("show");
+    if (code.length !== 6) { err.textContent = "נא להזין 6 ספרות"; err.classList.add("show"); return; }
+    var btn = this; btn.disabled = true;
+
+    // 1) verify OTP → session cookie
+    FLY.req("/api/auth/verify", {
+      method: "POST", noRedirect: true,
+      body: { phone: phoneVal, code: code },
+    }).then(function () {
+      // 2) optional logo upload
+      var logoFile = $("#sLogo").files[0] || null;
+      if (!logoFile) return null;
+      return FLY.uploadFiles([logoFile], {}, null).then(function (urls) { return urls[0]; });
+    }).then(function (logoUrl) {
+      // 3) create the business
+      return FLY.req("/api/signup", {
+        method: "POST", noRedirect: true,
+        body: {
+          full_name: $("#sName").value.trim(),
+          business_name: $("#sBrand").value.trim(),
+          city: $("#sCity").value.trim(),
+          niche: "nadlan",
+          logo_url: logoUrl || null,
+          wants_generated_logo: $("#sWantLogo").checked,
+        },
+      });
+    }).then(function () {
+      $("#step2").classList.add("hidden");
+      $("#step3").classList.remove("hidden");
+    }).catch(function (e) {
+      err.textContent = e.code === "wrong_code" ? "קוד שגוי" :
+        e.code === "expired" ? "הקוד פג — חזרו אחורה ושלחו חדש" :
+        e.code === "already_registered" ? "המספר כבר רשום" : "שגיאה בהרשמה";
+      err.classList.add("show");
+    }).finally(function () { btn.disabled = false; });
+  });
+})();
+</script>
+</body>
+</html>
