@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  Forly — Property Landing Page TEMPLATE (approved structure, 2026-07-01)
+  Served at: nadlan.call4li.com/p/{page_id}
+
+  This is the canonical structure for auto-generated property pages.
+  Plain HTML/CSS/JS, no framework (carousel-editor style).
+
+  BUILD TOKENS (replaced by the generator):
+    VIDEO_TOKEN   — walkthrough video URL (WW1 output; MUST keep audio track)
+    POSTER_TOKEN  — poster frame jpg URL
+
+  DATA-DRIVEN CONTENT (from property_pages/{id} payload — videos may NOT
+  have logo/branding baked in; the page supplies all branding/info):
+    .brand b / .brand span      — agent brand name + tagline (agent.logo_url
+                                   replaces text logo when present; if agent
+                                   has no logo, signup offers free AI logo gen)
+    .hero-copy h1 / .sub        — hero.phrase (Claude-generated)
+    .eyebrow                    — property.neighborhood + city
+    .specs .spec                — property price/rooms/size/floor/parking
+    .card ×4                    — carousel slides (agent / area / why)
+    .agent-strip                — agent.name, license, tagline, avatar/logo
+    .area-copy / .map-line      — area.blurb + distance stops
+    .astat ×4                   — area.stats
+    .cta-* copy                 — cta headline/sub/bullets
+    wa.me links                 — agent.phone
+    form POST                   — /api/property-lead {page_id, name, phone}
+  ═══════════════════════════════════════════════════════════════════
+-->
+
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>פנטהאוז בבלי · קומה 32 | פאר נדל״ן יוקרה</title>
+<meta name="description" content="פנטהאוז 5 חדרים עם נוף פתוח לים ולפארק, מגדל בבלי תל אביב. סיור וידאו, מידע על השכונה ותיאום ביקור.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@300;400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F7F3EC;
+  --paper:#FFFDF9;
+  --ink:#17140F;
+  --ink-soft:#5A5348;
+  --gold:#B98A2F;
+  --gold-bright:#D9B15C;
+  --gold-faint:rgba(185,138,47,.16);
+  --dark:#14110C;
+  --dark-2:#1D1913;
+  --radius:22px;
+  --serif:'Frank Ruhl Libre', 'Times New Roman', serif;
+  --sans:'Heebo', -apple-system, 'Segoe UI', sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--sans);
+  background:var(--bg);
+  color:var(--ink);
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+::selection{background:var(--gold);color:#fff}
+
+/* ─── reveal animations ─── */
+.reveal{opacity:0;transform:translateY(28px);transition:opacity .9s cubic-bezier(.2,.65,.25,1),transform .9s cubic-bezier(.2,.65,.25,1)}
+.reveal.in{opacity:1;transform:none}
+.reveal[data-delay="1"]{transition-delay:.12s}
+.reveal[data-delay="2"]{transition-delay:.24s}
+.reveal[data-delay="3"]{transition-delay:.36s}
+
+/* ─── topbar ─── */
+.topbar{
+  position:fixed;top:0;right:0;left:0;z-index:50;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px clamp(18px,4vw,44px);
+  transition:background .4s,box-shadow .4s, padding .4s;
+}
+.topbar.scrolled{background:rgba(20,17,12,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 1px 0 rgba(217,177,92,.25);padding-top:10px;padding-bottom:10px}
+.brand{display:flex;flex-direction:column;line-height:1.1;text-decoration:none}
+.brand b{font-family:var(--serif);font-size:1.35rem;letter-spacing:.22em;color:#fff;font-weight:600}
+.brand span{font-size:.6rem;letter-spacing:.34em;color:var(--gold-bright);text-transform:uppercase}
+.top-cta{
+  font-family:var(--sans);font-size:.85rem;font-weight:600;color:var(--dark);
+  background:var(--gold-bright);border:none;border-radius:100px;
+  padding:9px 20px;cursor:pointer;text-decoration:none;
+  transition:transform .25s,box-shadow .25s;
+}
+.top-cta:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(217,177,92,.4)}
+
+/* ─── hero ─── */
+.hero{
+  position:relative;min-height:100svh;
+  background:var(--dark);color:#fff;
+  display:flex;align-items:stretch;overflow:hidden;
+}
+.hero-bg{
+  position:absolute;inset:-6%;
+  background-image:url("POSTER_TOKEN");
+  background-size:cover;background-position:center;
+  filter:blur(46px) brightness(.34) saturate(1.15);
+  transform:scale(1.12);
+}
+.hero-inner{
+  position:relative;z-index:2;width:min(1180px,100%);margin:0 auto;
+  display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(28px,5vw,72px);
+  align-items:center;padding:110px clamp(20px,4.5vw,48px) 70px;
+}
+.hero-copy .eyebrow{
+  display:inline-flex;align-items:center;gap:10px;
+  font-size:.78rem;font-weight:500;letter-spacing:.26em;color:var(--gold-bright);
+  margin-bottom:22px;text-transform:uppercase;
+}
+.hero-copy .eyebrow::before{content:"";width:34px;height:1px;background:var(--gold-bright)}
+.hero-copy h1{
+  font-family:var(--serif);font-weight:500;
+  font-size:clamp(2.5rem,6vw,4.4rem);
+  line-height:1.12;margin-bottom:20px;
+}
+.hero-copy h1 em{font-style:normal;color:var(--gold-bright)}
+.hero-copy p.sub{
+  font-weight:300;font-size:clamp(1rem,1.6vw,1.2rem);
+  color:rgba(255,255,255,.78);max-width:34ch;margin-bottom:34px;
+}
+.hero-actions{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.btn{
+  display:inline-flex;align-items:center;gap:9px;
+  font-family:var(--sans);font-weight:600;font-size:.98rem;
+  border-radius:100px;padding:15px 30px;cursor:pointer;text-decoration:none;
+  transition:transform .25s,box-shadow .25s,background .25s;border:none;
+}
+.btn-gold{background:linear-gradient(115deg,var(--gold-bright),var(--gold));color:var(--dark)}
+.btn-gold:hover{transform:translateY(-2px);box-shadow:0 14px 34px rgba(217,177,92,.35)}
+.btn-ghost{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.35)}
+.btn-ghost:hover{border-color:var(--gold-bright);color:var(--gold-bright)}
+.hero-video-wrap{
+  position:relative;justify-self:center;
+  width:min(370px,86vw);
+  aspect-ratio:3/4;
+  border-radius:26px;overflow:hidden;
+  box-shadow:0 40px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(217,177,92,.35);
+  transform:translateY(var(--parallax,0));
+}
+.hero-video-wrap video{width:100%;height:100%;object-fit:cover;display:block}
+.video-badge{
+  position:absolute;top:14px;right:14px;z-index:3;
+  display:flex;align-items:center;gap:7px;
+  background:rgba(20,17,12,.62);backdrop-filter:blur(8px);
+  color:#fff;font-size:.72rem;font-weight:500;letter-spacing:.06em;
+  padding:6px 13px;border-radius:100px;border:1px solid rgba(255,255,255,.16);
+}
+.video-badge .dot{width:7px;height:7px;border-radius:50%;background:#E5484D;animation:pulse 1.6s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.sound-toggle{
+  position:absolute;bottom:14px;left:14px;z-index:3;
+  width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.28);
+  background:rgba(20,17,12,.6);backdrop-filter:blur(8px);color:#fff;
+  font-size:1.05rem;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:background .25s;
+}
+.sound-toggle:hover{background:rgba(217,177,92,.75)}
+.scroll-hint{
+  position:absolute;bottom:22px;right:50%;transform:translateX(50%);z-index:3;
+  display:flex;flex-direction:column;align-items:center;gap:7px;
+  color:rgba(255,255,255,.55);font-size:.72rem;letter-spacing:.24em;
+}
+.scroll-hint .line{width:1px;height:38px;background:linear-gradient(rgba(217,177,92,0),var(--gold-bright));animation:drip 2.2s infinite}
+@keyframes drip{0%{transform:scaleY(0);transform-origin:top}55%{transform:scaleY(1);transform-origin:top}56%{transform-origin:bottom}100%{transform:scaleY(0);transform-origin:bottom}}
+
+/* ─── specs strip ─── */
+.specs{
+  background:var(--dark-2);color:#fff;
+  border-top:1px solid rgba(217,177,92,.25);
+  border-bottom:1px solid rgba(217,177,92,.25);
+}
+.specs-inner{
+  width:min(1180px,100%);margin:0 auto;
+  display:grid;grid-template-columns:repeat(4,1fr);
+  padding:0 clamp(20px,4.5vw,48px);
+}
+.spec{
+  text-align:center;padding:30px 8px;position:relative;
+}
+.spec:not(:last-child)::after{
+  content:"";position:absolute;left:0;top:26%;height:48%;width:1px;
+  background:rgba(217,177,92,.28);
+}
+.spec b{
+  display:block;font-family:var(--serif);font-weight:500;
+  font-size:clamp(1.5rem,3vw,2.1rem);color:var(--gold-bright);letter-spacing:.02em;
+}
+.spec span{font-size:.8rem;font-weight:300;color:rgba(255,255,255,.66);letter-spacing:.08em}
+
+/* ─── sections common ─── */
+section.block{padding:clamp(70px,10vw,120px) clamp(20px,4.5vw,48px)}
+.container{width:min(1180px,100%);margin:0 auto}
+.sec-head{max-width:640px;margin-bottom:clamp(36px,5vw,60px)}
+.sec-head .kicker{
+  display:inline-flex;align-items:center;gap:10px;
+  font-size:.75rem;font-weight:600;letter-spacing:.3em;color:var(--gold);
+  text-transform:uppercase;margin-bottom:14px;
+}
+.sec-head .kicker::before{content:"";width:30px;height:1px;background:var(--gold)}
+.sec-head h2{
+  font-family:var(--serif);font-weight:500;
+  font-size:clamp(1.9rem,4vw,3rem);line-height:1.18;margin-bottom:14px;
+}
+.sec-head p{color:var(--ink-soft);font-weight:300;font-size:1.05rem}
+
+/* ─── carousel ─── */
+.carousel-outer{position:relative}
+.carousel{
+  display:flex;gap:clamp(14px,2vw,24px);
+  overflow-x:auto;scroll-snap-type:x mandatory;
+  padding:6px 4px 26px;
+  scrollbar-width:none;
+}
+.carousel::-webkit-scrollbar{display:none}
+.card{
+  scroll-snap-align:start;flex:0 0 min(320px,80vw);
+  background:var(--paper);border-radius:var(--radius);
+  padding:34px 28px 30px;
+  border:1px solid rgba(23,20,15,.07);
+  box-shadow:0 10px 34px rgba(23,20,15,.06);
+  display:flex;flex-direction:column;gap:14px;
+  transition:transform .35s,box-shadow .35s;
+}
+.card:hover{transform:translateY(-6px);box-shadow:0 22px 50px rgba(23,20,15,.11)}
+.card .num{
+  font-family:var(--serif);font-size:.95rem;color:var(--gold);
+  display:flex;align-items:center;gap:12px;letter-spacing:.14em;
+}
+.card .num::after{content:"";flex:1;height:1px;background:var(--gold-faint)}
+.card h3{font-family:var(--serif);font-weight:600;font-size:1.35rem;line-height:1.3}
+.card p{font-size:.94rem;font-weight:300;color:var(--ink-soft)}
+.card .tag{
+  margin-top:auto;align-self:flex-start;
+  font-size:.75rem;font-weight:600;color:var(--gold);
+  background:var(--gold-faint);border-radius:100px;padding:5px 14px;
+}
+.car-nav{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
+.car-nav button{
+  width:44px;height:44px;border-radius:50%;
+  border:1px solid rgba(23,20,15,.18);background:var(--paper);
+  font-size:1rem;cursor:pointer;color:var(--ink);
+  transition:background .25s,color .25s,border-color .25s;
+}
+.car-nav button:hover{background:var(--gold);border-color:var(--gold);color:#fff}
+
+/* ─── agent inline card ─── */
+.agent-strip{
+  margin-top:clamp(40px,6vw,64px);
+  background:var(--paper);border:1px solid rgba(185,138,47,.25);
+  border-radius:var(--radius);
+  display:flex;align-items:center;gap:24px;flex-wrap:wrap;
+  padding:26px clamp(22px,3vw,36px);
+}
+.avatar{
+  width:74px;height:74px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,var(--dark),#3A3123);
+  color:var(--gold-bright);font-family:var(--serif);font-size:1.6rem;font-weight:600;
+  display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--gold-bright);
+}
+.agent-meta{flex:1;min-width:220px}
+.agent-meta b{font-family:var(--serif);font-size:1.25rem;font-weight:600;display:block}
+.agent-meta span{font-size:.88rem;color:var(--ink-soft);font-weight:300}
+.agent-strip .btn{padding:12px 24px;font-size:.9rem}
+
+/* ─── area section ─── */
+.area{background:var(--dark);color:#fff;position:relative;overflow:hidden}
+.area::before{
+  content:"";position:absolute;inset:0;
+  background:
+    radial-gradient(680px 340px at 12% -8%, rgba(217,177,92,.13), transparent 60%),
+    radial-gradient(560px 300px at 92% 108%, rgba(217,177,92,.09), transparent 60%);
+  pointer-events:none;
+}
+.area .sec-head h2,.area .sec-head p{color:#fff}
+.area .sec-head p{color:rgba(255,255,255,.7)}
+.area-grid{
+  display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(30px,5vw,64px);
+  align-items:center;position:relative;z-index:1;
+}
+.area-copy p{
+  font-weight:300;font-size:1.02rem;color:rgba(255,255,255,.82);
+  margin-bottom:18px;
+}
+.area-copy p b{color:var(--gold-bright);font-weight:600}
+.area-stats{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:14px;
+}
+.astat{
+  background:rgba(255,255,255,.045);
+  border:1px solid rgba(217,177,92,.22);
+  border-radius:18px;padding:24px 20px;
+  transition:border-color .3s,transform .3s;
+}
+.astat:hover{border-color:var(--gold-bright);transform:translateY(-3px)}
+.astat b{
+  display:block;font-family:var(--serif);font-weight:500;
+  font-size:clamp(1.5rem,2.6vw,2rem);color:var(--gold-bright);margin-bottom:2px;
+}
+.astat span{font-size:.82rem;font-weight:300;color:rgba(255,255,255,.68)}
+.map-line{
+  margin-top:26px;display:flex;flex-direction:column;gap:0;
+  border-right:1px solid rgba(217,177,92,.35);
+}
+.map-line .stop{
+  display:flex;align-items:center;gap:14px;padding:9px 18px 9px 0;
+  font-size:.92rem;font-weight:300;color:rgba(255,255,255,.8);position:relative;
+}
+.map-line .stop::before{
+  content:"";width:9px;height:9px;border-radius:50%;
+  background:var(--gold-bright);
+  position:absolute;right:-5px;
+}
+.map-line .stop b{font-weight:600;color:#fff}
+.map-line .stop .min{margin-inline-start:auto;font-family:var(--serif);color:var(--gold-bright);font-size:1.05rem;white-space:nowrap}
+
+/* ─── CTA ─── */
+.cta{background:var(--bg)}
+.cta-panel{
+  background:var(--paper);
+  border:1px solid rgba(185,138,47,.3);
+  border-radius:calc(var(--radius) + 8px);
+  box-shadow:0 30px 80px rgba(23,20,15,.10);
+  display:grid;grid-template-columns:1fr 1fr;overflow:hidden;
+}
+.cta-info{
+  background:linear-gradient(150deg,var(--dark) 0%,#2A2318 100%);
+  color:#fff;padding:clamp(34px,4.5vw,56px);
+  display:flex;flex-direction:column;gap:16px;
+}
+.cta-info h2{font-family:var(--serif);font-weight:500;font-size:clamp(1.7rem,3vw,2.4rem);line-height:1.2}
+.cta-info h2 em{font-style:normal;color:var(--gold-bright)}
+.cta-info p{font-weight:300;color:rgba(255,255,255,.75);font-size:.98rem}
+.trust{margin-top:auto;display:flex;flex-direction:column;gap:8px;font-size:.85rem;color:rgba(255,255,255,.65)}
+.trust div{display:flex;gap:9px;align-items:center}
+.trust .tick{color:var(--gold-bright)}
+.cta-form{padding:clamp(34px,4.5vw,56px);display:flex;flex-direction:column;gap:16px}
+.cta-form label{font-size:.82rem;font-weight:600;letter-spacing:.04em;color:var(--ink-soft)}
+.cta-form input{
+  width:100%;font-family:var(--sans);font-size:1rem;color:var(--ink);
+  background:var(--bg);border:1px solid rgba(23,20,15,.14);border-radius:14px;
+  padding:15px 18px;outline:none;transition:border-color .25s,box-shadow .25s;
+}
+.cta-form input:focus{border-color:var(--gold);box-shadow:0 0 0 4px var(--gold-faint)}
+.cta-form .btn-gold{justify-content:center;margin-top:6px}
+.or{display:flex;align-items:center;gap:14px;color:var(--ink-soft);font-size:.8rem}
+.or::before,.or::after{content:"";flex:1;height:1px;background:rgba(23,20,15,.12)}
+.btn-wa{
+  background:#1FAF5A;color:#fff;justify-content:center;
+}
+.btn-wa:hover{transform:translateY(-2px);box-shadow:0 14px 30px rgba(31,175,90,.35)}
+.form-done{
+  display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px;
+  padding:clamp(34px,4.5vw,56px);
+}
+.form-done .big{font-size:3rem}
+.form-done h3{font-family:var(--serif);font-size:1.6rem;font-weight:600}
+.form-done p{color:var(--ink-soft);font-weight:300}
+
+/* ─── footer ─── */
+footer{
+  background:var(--dark);color:rgba(255,255,255,.55);
+  padding:34px clamp(20px,4.5vw,48px) 110px;
+  font-size:.8rem;font-weight:300;
+}
+footer .container{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center}
+footer .fbrand{font-family:var(--serif);letter-spacing:.2em;color:var(--gold-bright)}
+footer a{color:rgba(255,255,255,.7);text-decoration:none}
+
+/* ─── sticky mobile bar ─── */
+.sticky-bar{
+  position:fixed;bottom:0;right:0;left:0;z-index:60;
+  display:none;gap:10px;padding:12px 14px calc(12px + env(safe-area-inset-bottom));
+  background:rgba(20,17,12,.9);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-top:1px solid rgba(217,177,92,.3);
+  transform:translateY(110%);transition:transform .45s cubic-bezier(.2,.65,.25,1);
+}
+.sticky-bar.show{transform:none}
+.sticky-bar .btn{flex:1;justify-content:center;padding:13px 10px;font-size:.92rem}
+
+/* ─── responsive ─── */
+@media (max-width:880px){
+  .hero-inner{grid-template-columns:1fr;padding-top:96px;gap:34px;text-align:center}
+  .hero-copy .eyebrow{justify-content:center}
+  .hero-copy .eyebrow::before{display:none}
+  .hero-copy p.sub{margin-inline:auto}
+  .hero-actions{justify-content:center}
+  .hero-video-wrap{width:min(320px,78vw)}
+  .specs-inner{grid-template-columns:repeat(2,1fr)}
+  .spec:nth-child(2)::after{display:none}
+  .spec{padding:22px 8px}
+  .area-grid{grid-template-columns:1fr}
+  .cta-panel{grid-template-columns:1fr}
+  .sticky-bar{display:flex}
+  .scroll-hint{display:none}
+  footer{padding-bottom:130px}
+}
+@media (prefers-reduced-motion:reduce){
+  .reveal{transition:none;opacity:1;transform:none}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════ TOPBAR ══════════ -->
+<header class="topbar" id="topbar">
+  <a class="brand" href="#">
+    <b>PEER</b>
+    <span>Luxury Real Estate</span>
+  </a>
+  <a class="top-cta" href="#contact">לתיאום ביקור</a>
+</header>
+
+<!-- ══════════ HERO ══════════ -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <span class="eyebrow reveal in">בלעדי · מגדל בבלי, תל אביב</span>
+      <h1 class="reveal in" data-delay="1">החיים,<br><em>מקומה 32.</em></h1>
+      <p class="sub reveal in" data-delay="2">פנטהאוז 5 חדרים עם קו ראשון לפארק ונוף פתוח לים — נכס שמגיעים אליו פעם בעשור.</p>
+      <div class="hero-actions reveal in" data-delay="3">
+        <a class="btn btn-gold" href="#contact">אני רוצה לראות אותו</a>
+        <a class="btn btn-ghost" href="#area">על השכונה ↓</a>
+      </div>
+    </div>
+    <div class="hero-video-wrap reveal in" data-delay="2" id="videoWrap">
+      <div class="video-badge"><span class="dot"></span> סיור וידאו</div>
+      <video id="walkthrough" autoplay muted loop playsinline poster="POSTER_TOKEN">
+        <source src="VIDEO_TOKEN" type="video/mp4">
+      </video>
+      <button class="sound-toggle" id="soundBtn" aria-label="הפעלת קול">🔇</button>
+    </div>
+  </div>
+  <div class="scroll-hint"><span>גללו</span><span class="line"></span></div>
+</section>
+
+<!-- ══════════ SPECS ══════════ -->
+<div class="specs">
+  <div class="specs-inner">
+    <div class="spec reveal"><b>₪14.9M</b><span>מחיר מבוקש</span></div>
+    <div class="spec reveal" data-delay="1"><b>5 חד׳</b><span>210 מ״ר + מרפסת 60 מ״ר</span></div>
+    <div class="spec reveal" data-delay="2"><b>קומה 32</b><span>נוף פתוח לים ולפארק</span></div>
+    <div class="spec reveal" data-delay="3"><b>2 חניות</b><span>+ מחסן וכניסה פרטית</span></div>
+  </div>
+</div>
+
+<!-- ══════════ CAROUSEL: WHY / AGENT ══════════ -->
+<section class="block">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker">למה דווקא כאן</span>
+      <h2>נכס כזה לא מגיע ללוחות.<br>הוא מגיע לאנשים הנכונים.</h2>
+      <p>ארבע סיבות שבגללן הפנטהאוז הזה שווה את הביקור — ולמה כדאי שתגיעו לפני כולם.</p>
+    </div>
+    <div class="carousel-outer">
+      <div class="carousel" id="carousel">
+        <article class="card reveal">
+          <span class="num">01</span>
+          <h3>נוף שאי אפשר לשכפל</h3>
+          <p>קו ראשון לפארק בבלי ונוף פתוח לים — ללא בנייה עתידית חוסמת. בקומה 32, השקיעה היא חלק מהסלון.</p>
+          <span class="tag">חזית מערבית</span>
+        </article>
+        <article class="card reveal" data-delay="1">
+          <span class="num">02</span>
+          <h3>סטנדרט של מגדל יוקרה</h3>
+          <p>לובי מלון, קונסיירז׳ 24/7, בריכה, חדר כושר וספא לדיירים בלבד. הבית מתחיל כבר בכניסה למגדל.</p>
+          <span class="tag">שירותי דיירים</span>
+        </article>
+        <article class="card reveal" data-delay="2">
+          <span class="num">03</span>
+          <h3>מומחה של השכונה הזאת</h3>
+          <p>אלון פאר ליווה 47 עסקאות במגדלי בבלי בעשור האחרון — יותר מכל מתווך אחר באזור. הוא יודע בדיוק מה הנכס הזה שווה, ולמי.</p>
+          <span class="tag">47 עסקאות בבבלי</span>
+        </article>
+        <article class="card reveal" data-delay="3">
+          <span class="num">04</span>
+          <h3>תהליך דיסקרטי ומהיר</h3>
+          <p>ביקורים מתואמים אישית, חדר נתונים מסודר לרוכש הרציני, וליווי משפטי־פיננסי עד למסירת מפתח.</p>
+          <span class="tag">ליווי מלא</span>
+        </article>
+      </div>
+      <div class="car-nav">
+        <button id="prevBtn" aria-label="הקודם">→</button>
+        <button id="nextBtn" aria-label="הבא">←</button>
+      </div>
+    </div>
+
+    <div class="agent-strip reveal">
+      <div class="avatar">א״פ</div>
+      <div class="agent-meta">
+        <b>אלון פאר</b>
+        <span>מייסד PEER · מומחה נדל״ן יוקרה בצפון ת״א · רישיון תיווך 3142871</span>
+      </div>
+      <a class="btn btn-gold" href="#contact">דברו איתי על הנכס</a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ AREA ══════════ -->
+<section class="block area" id="area">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker">השכונה</span>
+      <h2>בבלי. השקט של פארק,<br>במרחק נגיעה מהעיר.</h2>
+      <p>אחת השכונות המבוקשות בתל אביב — וזה לא במקרה.</p>
+    </div>
+    <div class="area-grid">
+      <div class="area-copy reveal">
+        <p>בבלי היא הסוד הכי גלוי של תל אביב: שכונה ירוקה ושקטה שיושבת <b>צמוד לפארק הירקון</b>, ועדיין במרחק דקות מהשדרות, מהים ומכל מה שהעיר יודעת להציע.</p>
+        <p>בעשור האחרון הפכה בבלי למוקד מגדלי היוקרה של העיר, עם ביקוש עקבי ו<b>עליית ערך של כ־42% בחמש שנים</b> — אחת הגבוהות בתל אביב.</p>
+        <div class="map-line">
+          <div class="stop"><b>פארק הירקון</b><span class="min">2 דק׳ הליכה</span></div>
+          <div class="stop"><b>נמל תל אביב והים</b><span class="min">6 דק׳ נסיעה</span></div>
+          <div class="stop"><b>מתחם הבימה והשדרות</b><span class="min">8 דק׳ נסיעה</span></div>
+          <div class="stop"><b>הרכבת הקלה — תחנת ארלוזורוב</b><span class="min">7 דק׳ נסיעה</span></div>
+        </div>
+      </div>
+      <div class="area-stats">
+        <div class="astat reveal"><b>+42%</b><span>עליית ערך בחמש השנים האחרונות</span></div>
+        <div class="astat reveal" data-delay="1"><b>350 דונם</b><span>של פארק הירקון — הריאה הירוקה בפתח הבית</span></div>
+        <div class="astat reveal" data-delay="2"><b>9.2 / 10</b><span>דירוג בתי הספר היסודיים בסביבה</span></div>
+        <div class="astat reveal" data-delay="3"><b>4 דק׳</b><span>לנתיבי איילון — יציאה מהירה לכל הארץ</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ CTA ══════════ -->
+<section class="block cta" id="contact">
+  <div class="container">
+    <div class="cta-panel reveal">
+      <div class="cta-info">
+        <h2>הצעד הבא?<br><em>לראות אותו במו עיניכם.</em></h2>
+        <p>השאירו פרטים ואלון יחזור אליכם באופן אישי לתיאום ביקור — בדיסקרטיות מלאה וללא התחייבות.</p>
+        <div class="trust">
+          <div><span class="tick">✦</span> מענה אישי בתוך שעתיים בשעות הפעילות</div>
+          <div><span class="tick">✦</span> ביקור מתואם אישית, בזמן שנוח לכם</div>
+          <div><span class="tick">✦</span> הפרטים שלכם נשארים אצלנו בלבד</div>
+        </div>
+      </div>
+      <form class="cta-form" id="leadForm">
+        <div>
+          <label for="name">שם מלא</label>
+          <input id="name" name="name" type="text" placeholder="ישראל ישראלי" required autocomplete="name">
+        </div>
+        <div>
+          <label for="phone">טלפון נייד</label>
+          <input id="phone" name="phone" type="tel" placeholder="050-0000000" required autocomplete="tel" inputmode="tel">
+        </div>
+        <button class="btn btn-gold" type="submit">תיאום ביקור בנכס</button>
+        <div class="or">או</div>
+        <a class="btn btn-wa" href="https://wa.me/972500000000?text=%D7%94%D7%99%D7%99%20%D7%90%D7%9C%D7%95%D7%9F%2C%20%D7%A8%D7%90%D7%99%D7%AA%D7%99%20%D7%90%D7%AA%20%D7%94%D7%A4%D7%A0%D7%98%D7%94%D7%90%D7%95%D7%96%20%D7%91%D7%91%D7%91%D7%9C%D7%99%20%D7%95%D7%90%D7%A9%D7%9E%D7%97%20%D7%9C%D7%A4%D7%A8%D7%98%D7%99%D7%9D" target="_blank" rel="noopener">💬 דברו איתי בוואטסאפ</a>
+      </form>
+      <div class="form-done" id="formDone">
+        <span class="big">🥂</span>
+        <h3>הפרטים אצלנו.</h3>
+        <p>אלון יחזור אליכם באופן אישי בהקדם.<br>בינתיים — שווה לצפות בסיור עוד פעם 😉</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ FOOTER ══════════ -->
+<footer>
+  <div class="container">
+    <span class="fbrand">PEER · LUXURY REAL ESTATE</span>
+    <span>הדף נוצר אוטומטית ע״י <a href="https://call4li.com">Forly 🦉</a> · כל הפרטים כפופים לאימות</span>
+  </div>
+</footer>
+
+<!-- ══════════ STICKY MOBILE BAR ══════════ -->
+<div class="sticky-bar" id="stickyBar">
+  <a class="btn btn-wa" href="https://wa.me/972500000000" target="_blank" rel="noopener">💬 וואטסאפ</a>
+  <a class="btn btn-gold" href="#contact">תיאום ביקור</a>
+</div>
+
+<script>
+// reveal on scroll
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
+},{threshold:.16, rootMargin:'0px 0px -6% 0px'});
+document.querySelectorAll('.reveal:not(.in)').forEach(el=>io.observe(el));
+
+// topbar + sticky bar on scroll
+const topbar = document.getElementById('topbar');
+const sticky = document.getElementById('stickyBar');
+const hero = document.querySelector('.hero');
+addEventListener('scroll',()=>{
+  const y = scrollY;
+  topbar.classList.toggle('scrolled', y > 40);
+  sticky.classList.toggle('show', y > hero.offsetHeight * .7);
+  // gentle hero parallax
+  document.getElementById('videoWrap').style.setProperty('--parallax', (y * -0.06) + 'px');
+},{passive:true});
+
+// sound toggle
+const vid = document.getElementById('walkthrough');
+const soundBtn = document.getElementById('soundBtn');
+soundBtn.addEventListener('click',()=>{
+  vid.muted = !vid.muted;
+  soundBtn.textContent = vid.muted ? '🔇' : '🔊';
+});
+
+// carousel arrows (RTL: next = scroll negative)
+const car = document.getElementById('carousel');
+const step = ()=> Math.min(344, car.clientWidth * .85);
+document.getElementById('nextBtn').addEventListener('click',()=>car.scrollBy({left:-step(),behavior:'smooth'}));
+document.getElementById('prevBtn').addEventListener('click',()=>car.scrollBy({left: step(),behavior:'smooth'}));
+
+// mock form submit
+document.getElementById('leadForm').addEventListener('submit',(e)=>{
+  e.preventDefault();
+  document.getElementById('leadForm').style.display='none';
+  document.getElementById('formDone').style.display='flex';
+});
+</script>
+</body>
+</html>
