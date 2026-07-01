@@ -103,6 +103,59 @@ Many listings share a neighborhood. Research once, reuse for ~90 days.
 - Env: `ANTHROPIC_API_KEY` (existing), `GOOGLE_MAPS_KEY` (geocoding + distance
   matrix + static map — one key).
 
+## Agent Platform — agent.call4li.com (primary creation path)
+
+WhatsApp creation is **nice-to-have**; the primary surface is a web dashboard.
+Same tech philosophy as the property pages: plain static HTML/CSS/JS on Firebase
+Hosting (multi-site: `agent` target alongside `nadlan`), talking to Cloud
+Functions. No framework, no separate auth stack.
+
+### Auth: phone + WhatsApp OTP
+The agent's phone IS their identity (`businesses/{phone}`). Login: enter phone →
+Function sends a 6-digit code via Green-API WhatsApp → verify → signed JWT in an
+httpOnly cookie. Verifies the phone and confirms WhatsApp reachability in one
+step. No passwords.
+
+### Dashboard capabilities (MVP)
+- **Property list** — per listing: status (building | active | expiring | expired
+  | archived), days left, view_count, lead_count, page link.
+- **Create property** — form (address, rooms, sqm, floor, price, description) +
+  photo upload (→ Storage). Kicks the SAME pipeline as WhatsApp: Vision Tagger →
+  WW1 video → Property Page Builder → live page. Optional: upload own video
+  (skips WW1).
+- **Edit page** — structured form (below).
+- **Extend / archive / delete** — extend +30d (free at launch), archive hides
+  the page, delete removes listing + page + assets.
+- **Leads inbox (v2)** — leads per property, click-to-WhatsApp.
+
+### Page editing: structured form (MVP decision)
+Pages render from a payload doc → editing = PATCH fields, live instantly, no
+deploy. Form edits: hero phrase, price/details, photo order & swap, carousel
+card texts, CTA text, section show/hide. Never raw HTML — agents can't break
+the design. `updatePropertyPage` Function (owner-only), bumps `edit_count` —
+mirrors `saveCarouselDraft`. Inline visual editing = v2.
+
+### Web signup — agent.call4li.com/signup
+Full web-form alternative to Signup Bot2 (beyond the planned impatience
+deep-link resume): business details form → WhatsApp OTP verify → write
+`businesses/{phone}` (+ quota subcol) → WhatsApp welcome → into the dashboard.
+Both channels converge on the same Firestore doc. Logo upload + free AI logo
+generation offer lives here.
+
+## Page lifespan — 30 days, extendable
+
+- `property_pages/{id}.expires_at = created_at + 30d`; `status` gains
+  `expiring` / `expired`.
+- **Daily scheduled Function** (mirrors `cleanupExpiredDrafts`):
+  - `expires_at - now ≤ 5d`, not yet reminded → WhatsApp to agent:
+    "⏳ הדף של {property} יפוג בעוד 5 ימים" + one-tap signed extend link (+30d)
+    + dashboard link; set `reminder_sent_at`.
+  - `expires_at < now` → `status = expired`; page renders a graceful
+    "הדף אינו פעיל" state (doc + assets kept — renewal instant).
+- Extensions **free at launch**, unlimited; `extension_count` in schema so a
+  credits model can switch on later without migration.
+
+## Cloud Functions (mirror carousel-editor style in `functions/src/index.ts`)
 
 | Function | Trigger | Job |
 |---|---|---|
@@ -110,14 +163,24 @@ Many listings share a neighborhood. Research once, reuse for ~90 days.
 | `getPropertyPage` | GET `?id=` from page | return compiled payload (admin SDK) |
 | `submitPropertyLead` | POST from form | create lead (`source: landing_page`, `listing_id`, `page_id`), `lead_count++`, WhatsApp agent via Green-API, hand into Forly Leads Handler (`vkfYpJL5KONzlbJN`) |
 | `trackPropertyEvent` (opt.) | POST beacon | `view_count++`, scroll-depth |
+| `sendLoginOtp` / `verifyLoginOtp` | POST from agent dashboard | WhatsApp OTP via Green-API → signed JWT cookie |
+| `listMyProperties` / `createProperty` / `deleteProperty` | POST from dashboard (JWT) | listing CRUD; create kicks Vision Tagger → WW1 pipeline |
+| `updatePropertyPage` | POST from dashboard (JWT, owner-only) | structured-form edits → PATCH payload, `edit_count++` |
+| `extendPropertyPage` | POST from dashboard or signed WhatsApp link | `expires_at += 30d`, `extension_count++` |
+| `expirePagesDaily` | scheduled (daily) | T-5d reminders via WhatsApp; flip overdue pages to `expired` |
 
 Reuse: `setCors`, `uploadBuffer`, `downloadAndUpload`, `tokenedUrl`, Green-API axios pattern.
 
 ## n8n "Property Page Builder" workflow
-- Trigger: ExecuteWorkflow from Business Handler Agents feature 3, right after `executeWW1Workflow`.
-- Steps: Claude Sonnet structured call (hero_phrase, carousel slides, area blurb+stops+stats, cta copy)
+- Trigger: ExecuteWorkflow appended at the **end of WW1** (`vHUj7CfmGQszcRV7`) —
+  one hook covers BOTH creation channels, since dashboard `createProperty` and
+  WhatsApp burst (BHA feature 3) both funnel into WW1. Own-video uploads (no WW1)
+  call the builder directly from `createProperty`.
+- Steps: fetch listing + business (agent/logo) → Area Intelligence (cache or
+  research) → Claude structured call (hero_phrase, carousel slides, cta copy)
   → `POST createPropertyPage` → WhatsApp `page_url` to agent ("🎉 דף הנכס שלך מוכן").
-- Built **INACTIVE** until approved.
+- Built **INACTIVE** until approved; the one-node WW1 edit shown as a diff for
+  explicit approval before publish.
 
 ## firebase.json rewrites to add
 ```jsonc
@@ -132,7 +195,18 @@ Firestore directly — all reads via `getPropertyPage` (admin SDK). Lock `proper
 to server-only before launch.
 
 ## Build order
-1. Functions (`createPropertyPage`/`getPropertyPage`) + `public/p/` page bound to payload.
-2. n8n Property Page Builder + auto-trigger off WW1.
-3. `submitPropertyLead` + Green-API to agent + Leads Handler handoff.
-4. v2: Suno song (muxed into video as soundtrack), analytics dashboard, real area data, logo generation flow.
+1. **Page core** — Functions (`createPropertyPage`/`getPropertyPage`) + `/p/` page
+   bound to payload (nadlan hosting target).
+2. **Lead loop** — `submitPropertyLead` + Green-API to agent + Leads Handler handoff.
+3. **Pipeline** — n8n Property Page Builder + Area Intelligence + WW1 end-hook.
+4. **Agent platform** — agent.call4li.com: OTP auth, property list, create form
+   (photo upload → pipeline), structured page editor, extend/archive/delete.
+5. **Lifecycle** — `expirePagesDaily` + reminders + extend links; web signup form.
+6. **v2** — Suno song (muxed as video soundtrack), leads inbox, analytics
+   dashboard, inline visual editing, credits-based extensions.
+
+## One-time infra (needs owner action/approval)
+- Firebase Hosting multi-site: `nadlan` + `agent` targets in call4li project.
+- DNS: CNAME `nadlan.call4li.com` + `agent.call4li.com` → Firebase Hosting
+  (exact records provided at setup time).
+- Functions/Hosting deploys per forly-backend CLAUDE.md approval protocol.
