@@ -8,8 +8,11 @@
   Plain HTML/CSS/JS, no framework (carousel-editor style).
 
   BUILD TOKENS (replaced by the generator):
-    VIDEO_TOKEN   — walkthrough video URL (WW1 output; MUST keep audio track)
-    POSTER_TOKEN  — poster frame jpg URL
+    VIDEO_TOKEN      — walkthrough video URL (WW1 output; MUST keep audio track)
+    POSTER_TOKEN     — poster frame jpg URL
+    GALLERY_TOKEN_0..5 — gallery photo URLs (production: listing photo burst
+                          from WhatsApp, NOT video frames; captions data-driven,
+                          grid grows/shrinks with photo count, first = feature)
 
   DATA-DRIVEN CONTENT (from property_pages/{id} payload — videos may NOT
   have logo/branding baked in; the page supplies all branding/info):
@@ -210,6 +213,68 @@ section.block{padding:clamp(70px,10vw,120px) clamp(20px,4.5vw,48px)}
 }
 .sec-head p{color:var(--ink-soft);font-weight:300;font-size:1.05rem}
 
+/* ─── gallery ─── */
+.gal{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.gal-item{
+  position:relative;display:block;border-radius:18px;overflow:hidden;
+  aspect-ratio:3/4;cursor:zoom-in;border:1px solid rgba(23,20,15,.08);
+  background:var(--dark);padding:0;
+}
+.gal-item:first-child{grid-column:span 2;grid-row:span 2;aspect-ratio:auto}
+.gal-item img{
+  width:100%;height:100%;object-fit:cover;display:block;
+  transition:transform .7s cubic-bezier(.2,.65,.25,1);
+}
+.gal-item:hover img{transform:scale(1.055)}
+.gal-item .cap{
+  position:absolute;right:0;left:0;bottom:0;
+  padding:34px 16px 12px;
+  background:linear-gradient(transparent,rgba(20,17,12,.75));
+  color:#fff;font-size:.85rem;font-weight:500;letter-spacing:.04em;
+  display:flex;align-items:center;gap:8px;
+  opacity:0;transform:translateY(8px);transition:opacity .4s,transform .4s;
+}
+.gal-item .cap::before{content:"";width:16px;height:1px;background:var(--gold-bright)}
+.gal-item:hover .cap,.gal-item:focus-visible .cap{opacity:1;transform:none}
+
+/* lightbox */
+.lightbox{
+  position:fixed;inset:0;z-index:100;display:none;
+  background:rgba(15,12,8,.96);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  align-items:center;justify-content:center;touch-action:pan-y;
+}
+.lightbox.open{display:flex}
+.lightbox img{
+  max-width:min(92vw,560px);max-height:80svh;object-fit:contain;
+  border-radius:16px;box-shadow:0 30px 90px rgba(0,0,0,.6),0 0 0 1px rgba(217,177,92,.3);
+  user-select:none;-webkit-user-drag:none;
+  animation:lbIn .35s cubic-bezier(.2,.65,.25,1);
+}
+@keyframes lbIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+.lb-close{
+  position:absolute;top:max(16px,env(safe-area-inset-top));left:16px;
+  width:46px;height:46px;border-radius:50%;border:1px solid rgba(255,255,255,.25);
+  background:rgba(255,255,255,.06);color:#fff;font-size:1.15rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:background .25s;z-index:2;
+}
+.lb-close:hover{background:rgba(217,177,92,.6)}
+.lb-arrow{
+  position:absolute;top:50%;transform:translateY(-50%);
+  width:52px;height:52px;border-radius:50%;border:1px solid rgba(255,255,255,.25);
+  background:rgba(255,255,255,.06);color:#fff;font-size:1.25rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:background .25s;z-index:2;
+}
+.lb-arrow:hover{background:rgba(217,177,92,.6)}
+.lb-prev{right:14px}
+.lb-next{left:14px}
+.lb-meta{
+  position:absolute;bottom:max(18px,env(safe-area-inset-bottom));right:0;left:0;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  color:#fff;pointer-events:none;
+}
+.lb-meta .lb-cap{font-family:var(--serif);font-size:1.05rem;letter-spacing:.04em}
+.lb-meta .lb-count{font-size:.78rem;color:var(--gold-bright);letter-spacing:.3em;direction:ltr}
+
 /* ─── carousel ─── */
 .carousel-outer{position:relative}
 .carousel{
@@ -400,6 +465,10 @@ footer a{color:rgba(255,255,255,.7);text-decoration:none}
   .cta-panel{grid-template-columns:1fr}
   .sticky-bar{display:flex}
   .scroll-hint{display:none}
+  .gal{grid-template-columns:repeat(2,1fr);gap:10px}
+  .gal-item:first-child{grid-column:span 2;grid-row:auto;aspect-ratio:4/3}
+  .lb-arrow{width:44px;height:44px}
+  .lb-prev{right:8px}.lb-next{left:8px}
   footer{padding-bottom:130px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -450,6 +519,37 @@ footer a{color:rgba(255,255,255,.7);text-decoration:none}
     <div class="spec reveal" data-delay="1"><b>5 חד׳</b><span>210 מ״ר + מרפסת 60 מ״ר</span></div>
     <div class="spec reveal" data-delay="2"><b>קומה 32</b><span>נוף פתוח לים ולפארק</span></div>
     <div class="spec reveal" data-delay="3"><b>2 חניות</b><span>+ מחסן וכניסה פרטית</span></div>
+  </div>
+</div>
+
+<!-- ══════════ GALLERY ══════════ -->
+<section class="block" id="gallery">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker">הצצה פנימה</span>
+      <h2>כל חדר, מכל זווית.</h2>
+      <p>מה שהסיור לא הספיק להראות — לחצו על תמונה לצפייה במסך מלא.</p>
+    </div>
+    <div class="gal reveal" id="gal">
+      <button class="gal-item" data-cap="הסלון — נוף פתוח למערב"><img src="GALLERY_TOKEN_0" alt="הסלון" loading="lazy"><span class="cap">הסלון — נוף פתוח למערב</span></button>
+      <button class="gal-item" data-cap="הבריכה במתחם המגדל"><img src="GALLERY_TOKEN_1" alt="הבריכה" loading="lazy"><span class="cap">הבריכה במתחם המגדל</span></button>
+      <button class="gal-item" data-cap="המטבח — נגיעות שחור מט"><img src="GALLERY_TOKEN_2" alt="המטבח" loading="lazy"><span class="cap">המטבח — נגיעות שחור מט</span></button>
+      <button class="gal-item" data-cap="חדר השינה הראשי"><img src="GALLERY_TOKEN_3" alt="חדר השינה" loading="lazy"><span class="cap">חדר השינה הראשי</span></button>
+      <button class="gal-item" data-cap="פינת האוכל והאי"><img src="GALLERY_TOKEN_4" alt="פינת האוכל" loading="lazy"><span class="cap">פינת האוכל והאי</span></button>
+      <button class="gal-item" data-cap="חדר הילדים"><img src="GALLERY_TOKEN_5" alt="חדר הילדים" loading="lazy"><span class="cap">חדר הילדים</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- lightbox -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="גלריית תמונות">
+  <button class="lb-close" id="lbClose" aria-label="סגירה">✕</button>
+  <button class="lb-arrow lb-prev" id="lbPrev" aria-label="הקודם">→</button>
+  <img id="lbImg" src="" alt="">
+  <button class="lb-arrow lb-next" id="lbNext" aria-label="הבא">←</button>
+  <div class="lb-meta">
+    <span class="lb-cap" id="lbCap"></span>
+    <span class="lb-count" id="lbCount"></span>
   </div>
 </div>
 
@@ -615,6 +715,44 @@ const car = document.getElementById('carousel');
 const step = ()=> Math.min(344, car.clientWidth * .85);
 document.getElementById('nextBtn').addEventListener('click',()=>car.scrollBy({left:-step(),behavior:'smooth'}));
 document.getElementById('prevBtn').addEventListener('click',()=>car.scrollBy({left: step(),behavior:'smooth'}));
+
+// gallery lightbox
+const galItems = [...document.querySelectorAll('.gal-item')];
+const lb = document.getElementById('lightbox');
+const lbImg = document.getElementById('lbImg');
+const lbCap = document.getElementById('lbCap');
+const lbCount = document.getElementById('lbCount');
+let lbIdx = 0;
+function lbShow(i){
+  lbIdx = (i + galItems.length) % galItems.length;
+  const item = galItems[lbIdx];
+  lbImg.src = item.querySelector('img').src;
+  lbImg.alt = item.dataset.cap;
+  lbCap.textContent = item.dataset.cap;
+  lbCount.textContent = (lbIdx + 1) + ' / ' + galItems.length;
+}
+function lbOpen(i){ lbShow(i); lb.classList.add('open'); document.body.style.overflow='hidden'; }
+function lbClose(){ lb.classList.remove('open'); document.body.style.overflow=''; }
+galItems.forEach((el,i)=>el.addEventListener('click',()=>lbOpen(i)));
+document.getElementById('lbClose').addEventListener('click',lbClose);
+document.getElementById('lbNext').addEventListener('click',()=>lbShow(lbIdx+1));
+document.getElementById('lbPrev').addEventListener('click',()=>lbShow(lbIdx-1));
+lb.addEventListener('click',(e)=>{ if(e.target===lb) lbClose(); });
+addEventListener('keydown',(e)=>{
+  if(!lb.classList.contains('open')) return;
+  if(e.key==='Escape') lbClose();
+  if(e.key==='ArrowLeft') lbShow(lbIdx+1);   // RTL: left = forward
+  if(e.key==='ArrowRight') lbShow(lbIdx-1);
+});
+// touch swipe
+let touchX = null;
+lb.addEventListener('touchstart',(e)=>{ touchX = e.touches[0].clientX; },{passive:true});
+lb.addEventListener('touchend',(e)=>{
+  if(touchX===null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  if(Math.abs(dx) > 48) lbShow(lbIdx + (dx < 0 ? 1 : -1));
+  touchX = null;
+},{passive:true});
 
 // mock form submit
 document.getElementById('leadForm').addEventListener('submit',(e)=>{
