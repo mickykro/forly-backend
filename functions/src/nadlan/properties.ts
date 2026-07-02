@@ -135,17 +135,34 @@ async function createListingAndKickPipeline(
   };
   await db.collection("listings").doc(listingId).set(listing);
 
-  // Own video → straight to Page Builder; otherwise WW1 generates the video
-  // and its end-hook calls the builder.
+  // Own video → straight to Page Builder; otherwise the WW1 gateway generates
+  // the video and WW1's end-hook calls the builder. Bodies match each
+  // workflow's input contract exactly.
   const webhook = listing.own_video_url ?
     n8nPipelineWebhookUrl.value() : n8nWw1WebhookUrl.value();
+  const hookPayload = listing.own_video_url ? {
+    listing_id: listingId,
+    business_phone: phone,
+    video_url: listing.own_video_url,
+  } : {
+    phone,
+    image_urls: listing.photos_urls,
+    listing_id: listingId,
+    trigger_source: "dashboard",
+    property_details: {
+      address: listing.address,
+      neighborhood: listing.neighborhood,
+      city: listing.city,
+      price: listing.price,
+      rooms: listing.rooms,
+      size_sqm: listing.size_sqm,
+      floor: listing.floor,
+      parking: listing.parking,
+      description: listing.description,
+    },
+  };
   if (webhook) {
-    axios.post(webhook, {
-      listing_id: listingId,
-      business_phone: phone,
-      photos_urls: listing.photos_urls,
-      video_url: listing.own_video_url,
-    }, {timeout: 15000}).catch((err) => {
+    axios.post(webhook, hookPayload, {timeout: 15000}).catch((err) => {
       logger.error("pipeline webhook failed:", err?.message || err);
     });
   } else {
