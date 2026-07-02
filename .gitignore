@@ -77,3 +77,7 @@ functions/.secret.local
 # Local service account key (do not commit)
 functions/sa-key*.json
 functions/sa-key*.local.json
+
+# Firebase per-project env files (params live in deploy prompts / local files only)
+functions/.env.*
+!functions/.env.example
