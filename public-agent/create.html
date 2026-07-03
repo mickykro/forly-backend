@@ -108,7 +108,11 @@
 (function () {
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
-  var demoKey = new URLSearchParams(location.search).get("key");
+  // Read ?key= without URLSearchParams: it decodes "+" (valid in base64) to a
+  // space, corrupting base64 demo keys. Manual match + decodeURIComponent keeps
+  // a literal "+" intact and still handles %2B-encoded links.
+  var keyMatch = location.search.match(/[?&]key=([^&]*)/);
+  var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
   var isDemo = !!demoKey;
   if (isDemo) $("#agentBlock").classList.remove("hidden");
 
