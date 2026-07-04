@@ -14,6 +14,14 @@ const MAX_UPLOAD_MB = 10;
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const VIDEO_TYPES = new Set(["video/mp4", "video/quicktime"]);
 
+// The Storage emulator answers V4 signed-URL PUTs with 501 Not Implemented,
+// so local dev uploads go through the emulator's GCS JSON API instead.
+function storageEmulatorHost(): string {
+  const raw = process.env.FIREBASE_STORAGE_EMULATOR_HOST ||
+    process.env.STORAGE_EMULATOR_HOST || "";
+  return raw.replace(/^https?:\/\//, "");
+}
+
 // ────────────────────────────────────────────────────────────
 // getUploadUrls — POST { files: [{name, contentType}] }
 // V4 signed PUT URLs; browser uploads straight to Storage.
@@ -52,6 +60,20 @@ export const getUploadUrls = onRequest(
           isVideo ? "mp4" : "jpg";
         const token = uuidv4();
         const path = `agent_uploads/${owner}/${uuidv4()}.${ext}`;
+        const emuHost = storageEmulatorHost();
+        if (emuHost) {
+          const encPath = encodeURIComponent(path);
+          return {
+            name: f.name || path,
+            upload_url: `http://${emuHost}/upload/storage/v1/b/${bucket.name}` +
+              `/o?uploadType=media&name=${encPath}`,
+            method: "POST",
+            content_type: ct,
+            public_url: `http://${emuHost}/storage/v1/b/${bucket.name}` +
+              `/o/${encPath}?alt=media`,
+            max_mb: isVideo ? 120 : MAX_UPLOAD_MB,
+          };
+        }
         const file = bucket.file(path);
         const [uploadUrl] = await file.getSignedUrl({
           version: "v4",

@@ -54,7 +54,7 @@ window.FLY = (function () {
       return Promise.all(d.files.map(function (slot, i) {
         return new Promise(function (resolve, reject) {
           var xhr = new XMLHttpRequest();
-          xhr.open("PUT", slot.upload_url);
+          xhr.open(slot.method || "PUT", slot.upload_url);
           xhr.setRequestHeader("Content-Type", slot.content_type);
           xhr.upload.onprogress = function (e) {
             if (e.lengthComputable && onProgress) onProgress(i, Math.round(e.loaded / e.total * 100));
