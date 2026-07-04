@@ -23,18 +23,6 @@ const VIDEO_TYPES = new Set(["video/mp4", "video/quicktime"]);
 export const getUploadUrls = onRequest(
   {secrets: [nadlanJwtSecret, demoSecret], cors: false},
   async (req, res) => {
-    // DEBUG: dump the whole request to diagnose auth. Remove before launch.
-    const gotKey = String(req.headers["x-demo-key"] || "");
-    logger.info("getUploadUrls DEBUG", {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      cookie: req.headers.cookie || null,
-      demo_key_received: gotKey,
-      demo_key_received_len: gotKey.length,
-      demo_secret_len: demoSecret.value().length,
-      demo_key_matches: gotKey === demoSecret.value() && demoSecret.value().length > 0,
-    });
     if (req.method !== "POST") {
       res.status(405).send("POST only");
       return;
