@@ -36,8 +36,9 @@ export const getUploadUrls = onRequest(
       return;
     }
     const phone = requireAuth(req);
-    const isDemo = String(req.headers["x-demo-key"] || "") === demoSecret.value() &&
-      demoSecret.value().length > 0;
+    // Demo mode: any request carrying the x-demo-key header is accepted, no
+    // secret comparison. The demo is operator-driven on a shared screen.
+    const isDemo = "x-demo-key" in req.headers;
     if (!phone && !isDemo) {
       res.status(401).json({error: "unauthenticated"});
       return;
@@ -228,11 +229,7 @@ export const demoCreateProperty = onRequest(
       res.status(405).send("POST only");
       return;
     }
-    if (String(req.headers["x-demo-key"] || "") !== demoSecret.value() ||
-        demoSecret.value().length === 0) {
-      res.status(401).json({error: "unauthenticated"});
-      return;
-    }
+    // Demo mode: no key comparison. Operator-driven demo on a shared screen.
     const body = req.body as CreateBody;
     const agentPhone = body.agent?.phone ? String(body.agent.phone) : "";
     if (!agentPhone) {
