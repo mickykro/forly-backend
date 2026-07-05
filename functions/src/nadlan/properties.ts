@@ -22,6 +22,15 @@ function storageEmulatorHost(): string {
   return raw.replace(/^https?:\/\//, "");
 }
 
+// Public base for the DOWNLOAD url handed to n8n/Seedance/Vision Tagger.
+// Set STORAGE_PUBLIC_URL to a tunnel that fronts the storage emulator's :9199
+// (e.g. `cloudflared tunnel --url http://localhost:9199`) so those external
+// services can fetch locally-uploaded photos. Falls back to the local host.
+function publicStorageBase(emuHost: string): string {
+  const raw = (process.env.STORAGE_PUBLIC_URL || "").trim().replace(/\/+$/, "");
+  return raw || `http://${emuHost}`;
+}
+
 // ────────────────────────────────────────────────────────────
 // getUploadUrls — POST { files: [{name, contentType}] }
 // V4 signed PUT URLs; browser uploads straight to Storage.
@@ -64,13 +73,14 @@ export const getUploadUrls = onRequest(
         const emuHost = storageEmulatorHost();
         if (emuHost) {
           const encPath = encodeURIComponent(path);
+          const publicBase = publicStorageBase(emuHost);
           return {
             name: f.name || path,
             upload_url: `http://${emuHost}/upload/storage/v1/b/${bucket.name}` +
               `/o?uploadType=media&name=${encPath}`,
             method: "POST",
             content_type: ct,
-            public_url: `http://${emuHost}/storage/v1/b/${bucket.name}` +
+            public_url: `${publicBase}/storage/v1/b/${bucket.name}` +
               `/o/${encPath}?alt=media`,
             max_mb: isVideo ? 120 : MAX_UPLOAD_MB,
           };
