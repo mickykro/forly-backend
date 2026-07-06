@@ -28,6 +28,21 @@ const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
 
+// Load server/.env if present so config lives in a file, not fragile inline
+// env vars. Inline `KEY=val node index.js` still works and overrides the file.
+(function loadDotEnv() {
+  const envPath = path.join(__dirname, ".env");
+  if (!fs.existsSync(envPath)) return;
+  for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
+    if (!m || line.trim().startsWith("#")) continue;
+    const key = m[1];
+    let val = m[2].trim().replace(/^["']|["']$/g, "");
+    if (process.env[key] === undefined) process.env[key] = val;
+  }
+  console.log(`Loaded config from ${envPath}`);
+})();
+
 const PORT = Number(process.env.PORT || 8787);
 const BASE_URL = (process.env.BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads");
