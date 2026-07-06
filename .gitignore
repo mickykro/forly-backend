@@ -81,3 +81,5 @@ functions/sa-key*.local.json
 # Firebase per-project env files (params live in deploy prompts / local files only)
 functions/.env.*
 !functions/.env.example
+server/node_modules
+server/data
