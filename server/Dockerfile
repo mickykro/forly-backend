@@ -15,5 +15,6 @@ COPY server/package.json server/
 RUN cd server && npm install --omit=dev
 COPY server/ server/
 COPY public-agent/ public-agent/
+COPY public-nadlan/ public-nadlan/
 EXPOSE 8787
 CMD ["node", "server/index.js"]
