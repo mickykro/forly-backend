@@ -83,3 +83,7 @@ functions/.env.*
 !functions/.env.example
 server/node_modules
 server/data
+
+# VPS deploy secrets (live on the server, never committed)
+/deploy.env
+/sa-key.json
