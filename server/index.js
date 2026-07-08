@@ -25,6 +25,9 @@
 
 const path = require("path");
 const fs = require("fs");
+
+// ponytail: built-in .env loader (Node 20.12+), no dotenv dep. Shell env still wins.
+try { process.loadEnvFile(path.join(__dirname, "..", ".env")); } catch { /* no .env — fine */ }
 const crypto = require("crypto");
 const express = require("express");
 
@@ -49,7 +52,9 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploa
 const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || "https://call4li-nadlan.web.app").replace(/\/+$/, "");
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
 const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
-
+console.log(`WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
+console.log(`Pipeline webhook: ${N8N_PIPELINE_WEBHOOK_URL || "(not set)"}`);
+console.log(`Page base URL: ${PAGE_BASE_URL}`); 
 const MAX_UPLOAD_FILES = 12;
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mp4" };
@@ -58,16 +63,24 @@ const MAX_VIDEO_MB = 120;
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-// ── Firestore (optional) ──
+// ── Firestore + Storage (optional) ──
+// Initialised AFTER app.listen (see bottom) so a slow/misconfigured firebase-admin
+// can never block the HTTP server from binding its port.
 let db = null;
-if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-  const admin = require("firebase-admin");
-  admin.initializeApp();
-  db = admin.firestore();
-  console.log("Firestore enabled (service account credentials found)");
-} else {
-  console.warn("No GOOGLE_APPLICATION_CREDENTIALS — using in-memory listings. " +
-    "Status polling will only resolve if the Page Builder writes back here.");
+let bucket = null; // when set, uploads go to Firebase Storage → global URLs
+function initFirebase() {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    const admin = require("firebase-admin");
+    admin.initializeApp({
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "call4li.firebasestorage.app",
+    });
+    db = admin.firestore();
+    bucket = admin.storage().bucket();
+    console.log(`Firestore enabled; uploads → gs://${bucket.name}`);
+  } else {
+    console.warn("No GOOGLE_APPLICATION_CREDENTIALS — using in-memory listings. " +
+      "Status polling will only resolve if the Page Builder writes back here.");
+  }
 }
 const memListings = new Map(); // fallback store: listing_id → listing
 
@@ -110,21 +123,27 @@ app.post("/api/upload-urls", (req, res) => {
     const isVideo = ct in VIDEO_TYPES;
     const id = crypto.randomUUID();
     const fname = `${id}.${ext}`;
+    // With Storage: tokened URL (same scheme as functions' uploadBuffer); the
+    // file id doubles as the download token, so the URL is known before upload.
+    const publicUrl = bucket
+      ? `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/` +
+        `${encodeURIComponent(`intake/${fname}`)}?alt=media&token=${id}`
+      : `${BASE_URL}/files/${fname}`;
     slots.push({
       name: (f && f.name) || fname,
       upload_url: `/api/upload/${fname}`,
       method: "PUT",
       content_type: ct,
-      public_url: `${BASE_URL}/files/${fname}`,
+      public_url: publicUrl,
       max_mb: isVideo ? MAX_VIDEO_MB : MAX_IMAGE_MB,
     });
   }
   res.json({ files: slots });
 });
 
-// ── PUT /api/upload/:fname — raw body upload to local disk ──
+// ── PUT /api/upload/:fname — raw body upload (Storage if available, else disk) ──
 const rawBody = express.raw({ type: () => true, limit: `${MAX_VIDEO_MB}mb` });
-app.put("/api/upload/:fname", rawBody, (req, res) => {
+app.put("/api/upload/:fname", rawBody, async (req, res) => {
   const fname = req.params.fname;
   if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4)$/.test(fname)) {
     return res.status(400).json({ error: "bad filename" });
@@ -135,6 +154,23 @@ app.put("/api/upload/:fname", rawBody, (req, res) => {
   const isVideo = fname.endsWith(".mp4");
   if (req.body.length > (isVideo ? MAX_VIDEO_MB : MAX_IMAGE_MB) * 1024 * 1024) {
     return res.status(413).json({ error: "too large" });
+  }
+  if (bucket) {
+    const contentType = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", mp4: "video/mp4" }[fname.split(".").pop()];
+    try {
+      await bucket.file(`intake/${fname}`).save(req.body, {
+        resumable: false,
+        metadata: {
+          contentType,
+          cacheControl: "public, max-age=86400",
+          metadata: { firebaseStorageDownloadTokens: fname.slice(0, 36) },
+        },
+      });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.error("storage upload failed:", e.message);
+      return res.status(502).json({ error: "storage upload failed" });
+    }
   }
   fs.writeFileSync(path.join(UPLOAD_DIR, fname), req.body);
   res.json({ ok: true });
@@ -242,4 +278,7 @@ app.listen(PORT, () => {
   console.log(`  demo form:   ${BASE_URL}/create.html?key=demo`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
+  // After the port is open: a slow/failed Firebase init degrades to disk/in-memory
+  // instead of preventing the server from ever listening.
+  try { initFirebase(); } catch (e) { console.error("Firebase init failed, using local fallback:", e.message); }
 });
