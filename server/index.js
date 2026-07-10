@@ -445,6 +445,27 @@ app.post("/api/property-lead", async (req, res) => {
   }
 });
 
+// ── POST /api/video-overlay — burn titles onto the last 3s of a video ──
+// Body: { video_url, lines: ["4 חד׳ בבבלי | תל אביב", "₪4,900,000"] }
+// Returns: { video_url } of the re-hosted, overlaid mp4.
+const { overlayVideo, MAX_LINES } = require("./overlay");
+app.post("/api/video-overlay", async (req, res) => {
+  const body = req.body || {};
+  const videoUrl = String(body.video_url || "");
+  const lines = Array.isArray(body.lines) ?
+    body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
+  if (!/^https?:\/\//.test(videoUrl) || lines.length < 1 || lines.length > MAX_LINES) {
+    return res.status(400).json({ error: `video_url and 1-${MAX_LINES} lines required` });
+  }
+  try {
+    const result = await overlayVideo({ videoUrl, lines, uploadDir: UPLOAD_DIR, baseUrl: BASE_URL });
+    res.json(result);
+  } catch (err) {
+    console.error("video-overlay failed:", err.message);
+    res.status(500).json({ error: "overlay_failed", detail: err.message.slice(0, 300) });
+  }
+});
+
 const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click"]);
 app.post("/api/property-event", express.text({ type: () => true }), async (req, res) => {
   let body = {};

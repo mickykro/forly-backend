@@ -10,6 +10,8 @@
 #     -v forly-uploads:/app/server/data/uploads \
 #     forly-intake
 FROM node:22-alpine
+# ffmpeg (with libass) + Hebrew font for the /api/video-overlay endpoint
+RUN apk add --no-cache ffmpeg font-noto-hebrew
 WORKDIR /app
 COPY server/package.json server/
 RUN cd server && npm install --omit=dev
