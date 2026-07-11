@@ -115,6 +115,17 @@
         <a class="btn btn-gold" id="pageLink" target="_blank" href="#">צפייה בדף</a>
         <a class="btn btn-ghost" href="/" style="margin-top:8px">לרשימת הנכסים</a>
       </div>
+      <div id="waitBox" class="hidden">
+        <h3 style="font-family:var(--serif);margin-bottom:8px">⏳ עדיין עובדים על זה</h3>
+        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem">הבנייה לוקחת יותר מהרגיל — נשלח לך את הקישור לדף בוואטסאפ ברגע שהוא מוכן. אפשר לסגור את החלון.</p>
+        <a class="btn btn-ghost" href="/" style="margin-top:12px">לרשימת הנכסים</a>
+      </div>
+      <div id="failBox" class="hidden">
+        <h3 style="font-family:var(--serif);margin-bottom:8px">😕 משהו השתבש</h3>
+        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem">לא הצלחנו לסיים את בניית הדף. נסו שוב, ואם זה חוזר — כתבו לנו בוואטסאפ ונטפל בזה.</p>
+        <a class="btn btn-gold" href="" id="retryLink" style="margin-top:12px">נסו שוב</a>
+        <a class="btn btn-ghost" href="/" style="margin-top:8px">לרשימת הנכסים</a>
+      </div>
     </div>
   </div>
 </div>
@@ -277,26 +288,45 @@
     var stage = 2;
     var startedAt = Date.now();
 
+    // Stop polling after ~7 min so the screen can never spin forever; WhatsApp
+    // delivery is the backstop, so on timeout we tell the user we'll message them.
+    var MAX_WAIT_MS = 7 * 60 * 1000;
+
+    // End the build screen in a terminal state: "done" (page ready), "wait"
+    // (timed out — WhatsApp fallback) or "fail" (pipeline reported failure).
+    function endBuilding(state, pageUrl) {
+      clearInterval(iv);
+      $("#buildSpin").classList.add("hidden");
+      if (state === "done") {
+        ["st1", "st2", "st3", "st4"].forEach(function (id) {
+          var el = $("#" + id); el.classList.remove("now"); el.classList.add("done");
+        });
+        $("#pageLink").href = pageUrl;
+        $("#doneBox").classList.remove("hidden");
+      } else if (state === "fail") {
+        $("#retryLink").href = location.pathname + location.search;
+        $("#failBox").classList.remove("hidden");
+      } else {
+        $("#waitBox").classList.remove("hidden");
+      }
+    }
+
     var iv = setInterval(function () {
       // advance the cosmetic steps over time
       var elapsed = (Date.now() - startedAt) / 1000;
       if (stage === 2 && elapsed > 90) { $("#st2").classList.remove("now"); $("#st2").classList.add("done"); $("#st3").classList.add("now"); stage = 3; }
+      if (Date.now() - startedAt > MAX_WAIT_MS) { endBuilding("wait"); return; }
 
       fetch("/api/listing-status?id=" + encodeURIComponent(listingId))
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.page_id && d.page_url) {
-            clearInterval(iv);
-            ["st1", "st2", "st3", "st4"].forEach(function (id) {
-              var el = $("#" + id);
-              el.classList.remove("now"); el.classList.add("done");
-            });
-            $("#buildSpin").classList.add("hidden");
-            $("#pageLink").href = d.page_url;
-            $("#doneBox").classList.remove("hidden");
+            endBuilding("done", d.page_url);
+          } else if (d.status === "failed") {
+            endBuilding("fail");
           }
         })
-        .catch(function () { /* keep polling */ });
+        .catch(function () { /* transient — keep polling until MAX_WAIT_MS */ });
     }, 6000);
   }
 })();

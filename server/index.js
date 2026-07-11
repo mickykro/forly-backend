@@ -283,6 +283,9 @@ app.get("/api/listing-status", async (req, res) => {
     listing_id: id,
     page_id: listing.page_id || null,
     page_url: listing.page_id ? `${PAGE_BASE_URL}/p/${listing.page_id}` : null,
+    // "building" until a page exists; the pipeline may set "failed" so the
+    // building screen can surface an error instead of polling indefinitely.
+    status: listing.page_id ? "ready" : (listing.status === "failed" ? "failed" : "building"),
   });
 });
 
