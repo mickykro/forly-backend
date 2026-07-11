@@ -1,9 +1,21 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Carousel assets: public read via tokened URLs; writes only via Admin SDK.
     match /carousel_drafts/{carouselId}/{allPaths=**} {
       allow read: if true;
       allow write: if false;
+    }
+    // Property page assets: served via tokened URLs (bypass rules), but keep
+    // read open for robustness. Writes only via Admin SDK / signed URLs.
+    match /property_pages/{pageId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+    // Agent uploads & logos: written via V4 signed URLs (bypass rules),
+    // read via tokened URLs (bypass rules). No client SDK access.
+    match /{path=**} {
+      allow read, write: if false;
     }
   }
 }

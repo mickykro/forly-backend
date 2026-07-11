@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly · ניהול נכסים</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <span class="who" id="who"></span>
+</header>
+
+<!-- ── LOGIN ── -->
+<div class="auth-wrap" id="viewLogin">
+  <div class="card auth-card">
+    <div class="logo">🦉</div>
+    <h1 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:2px">כניסה לפורלי</h1>
+    <p class="sub">נשלח לך קוד אימות בוואטסאפ</p>
+
+    <div id="stepPhone">
+      <div class="field" style="text-align:right">
+        <label for="phone">מספר נייד</label>
+        <input id="phone" type="tel" inputmode="tel" placeholder="050-0000000" autocomplete="tel">
+      </div>
+      <button class="btn btn-gold" id="sendOtp" style="width:100%">שלחו לי קוד</button>
+      <p class="form-err" id="phoneErr"></p>
+      <p class="hint" style="margin-top:14px;font-size:.8rem;color:var(--ink-soft)">
+        עדיין לא רשומים? <a href="/signup.html" style="color:var(--gold);font-weight:600">הרשמה</a>
+      </p>
+    </div>
+
+    <div id="stepCode" class="hidden">
+      <p style="font-size:.9rem;color:var(--ink-soft)">הקוד נשלח בוואטסאפ למספר <b id="sentTo"></b></p>
+      <div class="otp-row" id="otpRow">
+        <input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric">
+      </div>
+      <button class="btn btn-gold" id="verifyOtp" style="width:100%">כניסה</button>
+      <p class="form-err" id="codeErr"></p>
+      <button class="btn btn-ghost btn-sm" id="backBtn" style="margin-top:12px">← מספר אחר</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PROPERTY LIST ── -->
+<div class="container hidden" id="viewList">
+  <div class="page-head">
+    <div>
+      <h1>הנכסים שלי</h1>
+      <p id="countLine"></p>
+    </div>
+    <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
+  </div>
+  <div class="prop-grid" id="propGrid"></div>
+  <div class="card center hidden" id="emptyState" style="padding:56px 24px">
+    <div style="font-size:2.4rem;margin-bottom:8px">🏠</div>
+    <h3 style="font-family:var(--serif);margin-bottom:6px">עוד אין נכסים</h3>
+    <p style="color:var(--ink-soft);font-weight:300;margin-bottom:18px">פתחו נכס ראשון — תוך דקות יהיה לו דף נחיתה עם וידאו וגלריה.</p>
+    <a class="btn btn-gold" href="/create.html">+ פתיחת נכס ראשון</a>
+  </div>
+</div>
+
+<script src="/api.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (s) { return document.querySelector(s); };
+  var phoneVal = "";
+
+  // ── OTP login flow ──
+  $("#sendOtp").addEventListener("click", function () {
+    var phone = $("#phone").value.trim();
+    var err = $("#phoneErr");
+    err.classList.remove("show");
+    this.disabled = true;
+    var btn = this;
+    FLY.req("/api/auth/otp", { method: "POST", body: { phone: phone }, noRedirect: true })
+      .then(function () {
+        phoneVal = phone;
+        $("#sentTo").textContent = phone;
+        $("#stepPhone").classList.add("hidden");
+        $("#stepCode").classList.remove("hidden");
+        $("#otpRow input").focus();
+      })
+      .catch(function (e) {
+        err.textContent = e.code === "unknown_agent" ? "המספר לא רשום — אפשר להירשם למטה" :
+          e.code === "too_soon" ? "רגע... נסו שוב בעוד דקה" :
+          e.code === "daily_limit" ? "יותר מדי נסיונות היום" :
+          e.code === "invalid_phone" ? "מספר לא תקין" : "שגיאה בשליחת הקוד";
+        err.classList.add("show");
+      })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  // otp cells: auto-advance + paste
+  var cells = Array.prototype.slice.call(document.querySelectorAll("#otpRow input"));
+  cells.forEach(function (c, i) {
+    c.addEventListener("input", function () {
+      c.value = c.value.replace(/\D/g, "").slice(0, 1);
+      if (c.value && i < cells.length - 1) cells[i + 1].focus();
+    });
+    c.addEventListener("keydown", function (e) {
+      if (e.key === "Backspace" && !c.value && i > 0) cells[i - 1].focus();
+      if (e.key === "Enter") $("#verifyOtp").click();
+    });
+    c.addEventListener("paste", function (e) {
+      var digits = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+      if (digits.length === 6) {
+        e.preventDefault();
+        cells.forEach(function (cc, j) { cc.value = digits[j]; });
+        cells[5].focus();
+      }
+    });
+  });
+
+  $("#backBtn").addEventListener("click", function () {
+    $("#stepCode").classList.add("hidden");
+    $("#stepPhone").classList.remove("hidden");
+  });
+
+  $("#verifyOtp").addEventListener("click", function () {
+    var code = cells.map(function (c) { return c.value; }).join("");
+    var err = $("#codeErr");
+    err.classList.remove("show");
+    if (code.length !== 6) { err.textContent = "נא להזין 6 ספרות"; err.classList.add("show"); return; }
+    var btn = this; btn.disabled = true;
+    FLY.req("/api/auth/verify", { method: "POST", body: { phone: phoneVal, code: code }, noRedirect: true })
+      .then(function (d) {
+        var next = new URLSearchParams(location.search).get("next");
+        if (next && next.indexOf("/") === 0) { location.href = next; return; }
+        showList(d.agent);
+      })
+      .catch(function (e) {
+        err.textContent = e.code === "wrong_code" ? "קוד שגוי (" + (e.data.attempts_left || 0) + " נסיונות נותרו)" :
+          e.code === "expired" ? "הקוד פג — שלחו קוד חדש" : "שגיאה באימות";
+        err.classList.add("show");
+      })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  // ── property list ──
+  function chipFor(status) {
+    var labels = { active: "פעיל", expiring: "עומד לפוג", expired: "פג תוקף", archived: "בארכיון", building: "בבנייה" };
+    return '<span class="chip ' + status + '">' + (labels[status] || status) + "</span>";
+  }
+
+  function cardHtml(p) {
+    var days = p.days_left != null ?
+      '<div class="days-bar"><i style="width:' + Math.min(100, p.days_left / 30 * 100) + '%"></i></div>' +
+      '<div style="font-size:.72rem;color:var(--ink-soft)">' + p.days_left + " ימים נותרו</div>" : "";
+    var actions = [];
+    if (p.page_url && (p.page_status === "active" || p.page_status === "expiring")) {
+      actions.push('<a class="btn btn-ghost btn-sm" target="_blank" href="' + p.page_url + '">צפייה</a>');
+      actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + p.page_id + '">עריכה</a>');
+    }
+    if (p.page_id && p.page_status !== "building") {
+      actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + p.page_id + '">הארכה +30</button>');
+    }
+    actions.push('<button class="btn btn-danger btn-sm" data-archive="' + p.listing_id + '">ארכיון</button>');
+    return '<div class="prop-card">' +
+      (p.thumb_url ? '<img class="thumb" src="' + p.thumb_url + '" alt="" loading="lazy">' :
+        '<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.4)">🏗️</div>') +
+      '<div class="body">' +
+      '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px"><h3>' + esc(p.title) + "</h3>" + chipFor(p.page_status) + "</div>" +
+      '<div class="addr">' + esc(p.address) + "</div>" + days +
+      '<div class="meta-row"><span>👁 <b>' + p.view_count + "</b> צפיות</span><span>🔔 <b>" + p.lead_count + "</b> לידים</span></div>" +
+      '<div class="actions">' + actions.join("") + "</div>" +
+      "</div></div>";
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function loadList() {
+    FLY.req("/api/properties", { noRedirect: true }).then(function (d) {
+      var items = d.properties || [];
+      $("#countLine").textContent = items.length ? items.length + " נכסים" : "";
+      $("#propGrid").innerHTML = items.map(cardHtml).join("");
+      $("#emptyState").classList.toggle("hidden", items.length > 0);
+      bindActions();
+    });
+  }
+
+  function bindActions() {
+    document.querySelectorAll("[data-extend]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.disabled = true;
+        FLY.req("/api/page/extend", { method: "POST", body: { page_id: b.dataset.extend } })
+          .then(function () { FLY.toast("✅ הדף הוארך ב-30 יום"); loadList(); })
+          .catch(function () { FLY.toast("שגיאה בהארכה"); b.disabled = false; });
+      });
+    });
+    document.querySelectorAll("[data-archive]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (!confirm("להעביר את הנכס לארכיון? הדף יוסתר מהציבור.")) return;
+        FLY.req("/api/properties/delete", { method: "POST", body: { listing_id: b.dataset.archive, mode: "archive" } })
+          .then(function () { FLY.toast("הנכס הועבר לארכיון"); loadList(); })
+          .catch(function () { FLY.toast("שגיאה"); });
+      });
+    });
+  }
+
+  function showList(agent) {
+    $("#viewLogin").classList.add("hidden");
+    $("#viewList").classList.remove("hidden");
+    if (agent && (agent.brand_name || agent.name)) {
+      $("#who").textContent = agent.brand_name || agent.name;
+    }
+    loadList();
+  }
+
+  // boot: session check
+  FLY.req("/api/properties", { noRedirect: true })
+    .then(function (d) {
+      $("#viewLogin").classList.add("hidden");
+      $("#viewList").classList.remove("hidden");
+      var items = d.properties || [];
+      $("#countLine").textContent = items.length ? items.length + " נכסים" : "";
+      $("#propGrid").innerHTML = items.map(cardHtml).join("");
+      $("#emptyState").classList.toggle("hidden", items.length > 0);
+      bindActions();
+    })
+    .catch(function () { /* stay on login */ });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+# Auto-deploy the standalone intake/pages server to the Hostinger VPS on merge
+# to main. The VPS holds a git checkout; this workflow SSHes in, pulls the
+# latest main, rebuilds the Docker image, and restarts the container.
+#
+# ── One-time setup ────────────────────────────────────────────────────────
+# 1. GitHub → repo Settings → Secrets and variables → Actions, add:
+#      VPS_HOST      31.97.216.242
+#      VPS_USER      root
+#      VPS_SSH_KEY   private key whose public key is in the VPS's
+#                    ~/.ssh/authorized_keys (used by this runner to log in)
+#
+# 2. Give the VPS read access to this private repo via a GitHub Deploy Key:
+#      # on the VPS:
+#      ssh-keygen -t ed25519 -f ~/.ssh/forly_deploy -N ""
+#      cat ~/.ssh/forly_deploy.pub   # → add under repo Settings → Deploy keys (read-only)
+#      printf 'Host github.com\n  IdentityFile ~/.ssh/forly_deploy\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+#
+# 3. Replace the rsync'd dir with a real clone (back it up first):
+#      mv /root/forly-backend /root/forly-backend.bak
+#      git clone git@github.com:mickykro/forly-backend.git /root/forly-backend
+#      cp /root/forly-backend.bak/deploy.env /root/forly-backend/ 2>/dev/null || true
+#      cp /root/forly-backend.bak/sa-key.json /root/forly-backend/ 2>/dev/null || true
+#
+# 4. Create /root/forly-backend/deploy.env (NOT committed) with runtime config:
+#      BASE_URL=http://31.97.216.242:8787
+#      PAGE_BASE_URL=http://31.97.216.242:8787
+#      N8N_WW1_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/dashboard-create
+#      N8N_PIPELINE_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/property-page-builder
+#      GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa-key.json
+#    and place the Firebase service-account key at /root/forly-backend/sa-key.json
+# ──────────────────────────────────────────────────────────────────────────
+
+name: Deploy server to VPS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - 'public-agent/**'
+      - 'public-nadlan/**'
+      - '.github/workflows/deploy-server.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Pull latest main on VPS, rebuild, restart
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" 'bash -seuo pipefail' <<'REMOTE'
+          cd /root/forly-backend
+          git fetch origin main
+          git reset --hard origin/main
+          docker build -f server/Dockerfile -t forly-intake .
+          docker rm -f forly-intake 2>/dev/null || true
+          docker run -d --name forly-intake --restart unless-stopped -p 8787:8787 \
+            --env-file /root/forly-backend/deploy.env \
+            -v /root/forly-backend/sa-key.json:/secrets/sa-key.json:ro \
+            -v forly-uploads:/app/server/data/uploads \
+            forly-intake
+          sleep 3
+          docker ps --filter name=forly-intake --format 'STATUS: {{.Status}}'
+          REMOTE
+
+      - name: Smoke test
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            "http://${{ secrets.VPS_HOST }}:8787/createPropertyPage" \
+            -H 'Content-Type: application/json' -d '{}' || true)
+          echo "createPropertyPage returned $code (expect 400 = new build live)"
+          test "$code" = "400"

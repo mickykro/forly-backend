@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly Nadlan</title>
+<meta name="description" content="">
+<meta property="og:type" content="website">
+<meta property="og:title" content="">
+<meta property="og:description" content="">
+<meta property="og:image" content="">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@300;400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/p/page.css">
+</head>
+<body class="is-loading">
+
+<!-- app states -->
+<div class="app-state" id="stateLoading"><div class="loader" aria-label="טוען"></div></div>
+<div class="app-state" id="stateExpired">
+  <div class="state-card">
+    <span class="big">🌙</span>
+    <h2>הדף אינו פעיל</h2>
+    <p id="expiredSub">תוקף הדף הסתיים. לפרטים על הנכס אפשר לפנות ישירות למתווך.</p>
+    <a class="btn btn-gold" id="expiredWa" href="#" style="display:none">💬 דברו עם המתווך</a>
+  </div>
+</div>
+<div class="app-state" id="stateNotfound">
+  <div class="state-card">
+    <span class="big">🔍</span>
+    <h2>הדף לא נמצא</h2>
+    <p>ייתכן שהקישור שגוי או שהדף הוסר.</p>
+  </div>
+</div>
+
+
+<!-- ══════════ TOPBAR ══════════ -->
+<header class="topbar" id="topbar">
+  <a class="brand" href="#">
+    <b>PEER</b>
+    <span>Luxury Real Estate</span>
+  </a>
+  <a class="top-cta" href="#contact">לתיאום ביקור</a>
+</header>
+
+<!-- ══════════ HERO ══════════ -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <span class="eyebrow reveal in">בלעדי · מגדל בבלי, תל אביב</span>
+      <h1 class="reveal in" data-delay="1">החיים,<br><em>מקומה 32.</em></h1>
+      <p class="sub reveal in" data-delay="2">פנטהאוז 5 חדרים עם קו ראשון לפארק ונוף פתוח לים — נכס שמגיעים אליו פעם בעשור.</p>
+      <div class="hero-actions reveal in" data-delay="3">
+        <a class="btn btn-gold" href="#contact">אני רוצה לראות אותו</a>
+        <a class="btn btn-ghost" href="#area">על השכונה ↓</a>
+      </div>
+    </div>
+    <div class="hero-video-wrap reveal in" data-delay="2" id="videoWrap">
+      <div class="video-badge"><span class="dot"></span> סיור וידאו</div>
+      <video id="walkthrough" autoplay muted loop playsinline poster="">
+        
+      </video>
+      <button class="sound-toggle" id="soundBtn" aria-label="הפעלת קול">🔇</button>
+    </div>
+  </div>
+  <div class="scroll-hint"><span>גללו</span><span class="line"></span></div>
+</section>
+
+<!-- ══════════ SPECS ══════════ -->
+<div class="specs">
+  <div class="specs-inner">
+    <div class="spec reveal"><b>₪14.9M</b><span>מחיר מבוקש</span></div>
+    <div class="spec reveal" data-delay="1"><b>5 חד׳</b><span>210 מ״ר + מרפסת 60 מ״ר</span></div>
+    <div class="spec reveal" data-delay="2"><b>קומה 32</b><span>נוף פתוח לים ולפארק</span></div>
+    <div class="spec reveal" data-delay="3"><b>2 חניות</b><span>+ מחסן וכניסה פרטית</span></div>
+  </div>
+</div>
+
+<!-- ══════════ GALLERY ══════════ -->
+<section class="block" id="gallery">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker">הצצה פנימה</span>
+      <h2>כל חדר, מכל זווית.</h2>
+      <p>מה שהסיור לא הספיק להראות — לחצו על תמונה לצפייה במסך מלא.</p>
+    </div>
+    <div class="gal reveal" id="gal">
+      <button class="gal-item" data-cap="הסלון — נוף פתוח למערב"><img src="" alt="הסלון" loading="lazy"><span class="cap">הסלון — נוף פתוח למערב</span></button>
+      <button class="gal-item" data-cap="הבריכה במתחם המגדל"><img src="" alt="הבריכה" loading="lazy"><span class="cap">הבריכה במתחם המגדל</span></button>
+      <button class="gal-item" data-cap="המטבח — נגיעות שחור מט"><img src="" alt="המטבח" loading="lazy"><span class="cap">המטבח — נגיעות שחור מט</span></button>
+      <button class="gal-item" data-cap="חדר השינה הראשי"><img src="" alt="חדר השינה" loading="lazy"><span class="cap">חדר השינה הראשי</span></button>
+      <button class="gal-item" data-cap="פינת האוכל והאי"><img src="" alt="פינת האוכל" loading="lazy"><span class="cap">פינת האוכל והאי</span></button>
+      <button class="gal-item" data-cap="חדר הילדים"><img src="" alt="חדר הילדים" loading="lazy"><span class="cap">חדר הילדים</span></button>
+    </div>
+  </div>
+</section>
+
+<!-- lightbox -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="גלריית תמונות">
+  <button class="lb-close" id="lbClose" aria-label="סגירה">✕</button>
+  <button class="lb-arrow lb-prev" id="lbPrev" aria-label="הקודם">→</button>
+  <img id="lbImg" src="" alt="">
+  <button class="lb-arrow lb-next" id="lbNext" aria-label="הבא">←</button>
+  <div class="lb-meta">
+    <span class="lb-cap" id="lbCap"></span>
+    <span class="lb-count" id="lbCount"></span>
+  </div>
+</div>
+
+<!-- ══════════ CAROUSEL: WHY / AGENT ══════════ -->
+<section class="block" id="why">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker">למה דווקא כאן</span>
+      <h2>נכס כזה לא מגיע ללוחות.<br>הוא מגיע לאנשים הנכונים.</h2>
+      <p>ארבע סיבות שבגללן הפנטהאוז הזה שווה את הביקור — ולמה כדאי שתגיעו לפני כולם.</p>
+    </div>
+    <div class="carousel-outer">
+      <div class="carousel" id="carousel">
+        <article class="card reveal">
+          <span class="num">01</span>
+          <h3>נוף שאי אפשר לשכפל</h3>
+          <p>קו ראשון לפארק בבלי ונוף פתוח לים — ללא בנייה עתידית חוסמת. בקומה 32, השקיעה היא חלק מהסלון.</p>
+          <span class="tag">חזית מערבית</span>
+        </article>
+        <article class="card reveal" data-delay="1">
+          <span class="num">02</span>
+          <h3>סטנדרט של מגדל יוקרה</h3>
+          <p>לובי מלון, קונסיירז׳ 24/7, בריכה, חדר כושר וספא לדיירים בלבד. הבית מתחיל כבר בכניסה למגדל.</p>
+          <span class="tag">שירותי דיירים</span>
+        </article>
+        <article class="card reveal" data-delay="2">
+          <span class="num">03</span>
+          <h3>מומחה של השכונה הזאת</h3>
+          <p>אלון פאר ליווה 47 עסקאות במגדלי בבלי בעשור האחרון — יותר מכל מתווך אחר באזור. הוא יודע בדיוק מה הנכס הזה שווה, ולמי.</p>
+          <span class="tag">47 עסקאות בבבלי</span>
+        </article>
+        <article class="card reveal" data-delay="3">
+          <span class="num">04</span>
+          <h3>תהליך דיסקרטי ומהיר</h3>
+          <p>ביקורים מתואמים אישית, חדר נתונים מסודר לרוכש הרציני, וליווי משפטי־פיננסי עד למסירת מפתח.</p>
+          <span class="tag">ליווי מלא</span>
+        </article>
+      </div>
+      <div class="car-nav">
+        <button id="prevBtn" aria-label="הקודם">→</button>
+        <button id="nextBtn" aria-label="הבא">←</button>
+      </div>
+    </div>
+
+    <div class="agent-strip reveal">
+      <div class="avatar">א״פ</div>
+      <div class="agent-meta">
+        <b>אלון פאר</b>
+        <span>מייסד PEER · מומחה נדל״ן יוקרה בצפון ת״א · רישיון תיווך 3142871</span>
+      </div>
+      <a class="btn btn-gold" href="#contact">דברו איתי על הנכס</a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ AREA ══════════ -->
+<section class="block area" id="area">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker">השכונה</span>
+      <h2>בבלי. השקט של פארק,<br>במרחק נגיעה מהעיר.</h2>
+      <p>אחת השכונות המבוקשות בתל אביב — וזה לא במקרה.</p>
+    </div>
+    <div class="area-grid">
+      <div class="area-copy reveal">
+        <p>בבלי היא הסוד הכי גלוי של תל אביב: שכונה ירוקה ושקטה שיושבת <b>צמוד לפארק הירקון</b>, ועדיין במרחק דקות מהשדרות, מהים ומכל מה שהעיר יודעת להציע.</p>
+        <p>בעשור האחרון הפכה בבלי למוקד מגדלי היוקרה של העיר, עם ביקוש עקבי ו<b>עליית ערך של כ־42% בחמש שנים</b> — אחת הגבוהות בתל אביב.</p>
+        <div class="map-line">
+          <div class="stop"><b>פארק הירקון</b><span class="min">2 דק׳ הליכה</span></div>
+          <div class="stop"><b>נמל תל אביב והים</b><span class="min">6 דק׳ נסיעה</span></div>
+          <div class="stop"><b>מתחם הבימה והשדרות</b><span class="min">8 דק׳ נסיעה</span></div>
+          <div class="stop"><b>הרכבת הקלה — תחנת ארלוזורוב</b><span class="min">7 דק׳ נסיעה</span></div>
+        </div>
+      </div>
+      <div class="area-stats">
+        <div class="astat reveal"><b>+42%</b><span>עליית ערך בחמש השנים האחרונות</span></div>
+        <div class="astat reveal" data-delay="1"><b>350 דונם</b><span>של פארק הירקון — הריאה הירוקה בפתח הבית</span></div>
+        <div class="astat reveal" data-delay="2"><b>9.2 / 10</b><span>דירוג בתי הספר היסודיים בסביבה</span></div>
+        <div class="astat reveal" data-delay="3"><b>4 דק׳</b><span>לנתיבי איילון — יציאה מהירה לכל הארץ</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ CTA ══════════ -->
+<section class="block cta" id="contact">
+  <div class="container">
+    <div class="cta-panel reveal">
+      <div class="cta-info">
+        <h2>הצעד הבא?<br><em>לראות אותו במו עיניכם.</em></h2>
+        <p>השאירו פרטים ואלון יחזור אליכם באופן אישי לתיאום ביקור — בדיסקרטיות מלאה וללא התחייבות.</p>
+        <div class="trust">
+          <div><span class="tick">✦</span> מענה אישי בתוך שעתיים בשעות הפעילות</div>
+          <div><span class="tick">✦</span> ביקור מתואם אישית, בזמן שנוח לכם</div>
+          <div><span class="tick">✦</span> הפרטים שלכם נשארים אצלנו בלבד</div>
+        </div>
+      </div>
+      <form class="cta-form" id="leadForm">
+        <div>
+          <label for="name">שם מלא</label>
+          <input id="name" name="name" type="text" placeholder="ישראל ישראלי" required autocomplete="name">
+        </div>
+        <div>
+          <label for="phone">טלפון נייד</label>
+          <input id="phone" name="phone" type="tel" placeholder="050-0000000" required autocomplete="tel" inputmode="tel">
+        </div>
+        <button class="btn btn-gold" type="submit">תיאום ביקור בנכס</button>
+        <div class="or">או</div>
+        <a class="btn btn-wa" href="https://wa.me/972500000000?text=%D7%94%D7%99%D7%99%20%D7%90%D7%9C%D7%95%D7%9F%2C%20%D7%A8%D7%90%D7%99%D7%AA%D7%99%20%D7%90%D7%AA%20%D7%94%D7%A4%D7%A0%D7%98%D7%94%D7%90%D7%95%D7%96%20%D7%91%D7%91%D7%91%D7%9C%D7%99%20%D7%95%D7%90%D7%A9%D7%9E%D7%97%20%D7%9C%D7%A4%D7%A8%D7%98%D7%99%D7%9D" target="_blank" rel="noopener">💬 דברו איתי בוואטסאפ</a>
+      </form>
+      <div class="form-done" id="formDone">
+        <span class="big">🥂</span>
+        <h3>הפרטים אצלנו.</h3>
+        <p>אלון יחזור אליכם באופן אישי בהקדם.<br>בינתיים — שווה לצפות בסיור עוד פעם 😉</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ FOOTER ══════════ -->
+<footer>
+  <div class="container">
+    <span class="fbrand">PEER · LUXURY REAL ESTATE</span>
+    <span>הדף נוצר אוטומטית ע״י <a href="https://call4li.com">Forly 🦉</a> · כל הפרטים כפופים לאימות</span>
+  </div>
+</footer>
+
+<!-- ══════════ STICKY MOBILE BAR ══════════ -->
+<div class="sticky-bar" id="stickyBar">
+  <a class="btn btn-wa" href="https://wa.me/972500000000" target="_blank" rel="noopener">💬 וואטסאפ</a>
+  <a class="btn btn-gold" href="#contact">תיאום ביקור</a>
+</div>
+
+<script src="/p/page.js"></script>
+</body>
+</html>

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly · נכס חדש</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <a class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
+</header>
+
+<div class="container" style="max-width:760px">
+
+  <!-- ── FORM ── -->
+  <div id="viewForm">
+    <div class="page-head">
+      <div>
+        <h1>נכס חדש</h1>
+        <p>ממלאים פרטים, מעלים תמונות — ותוך דקות יש דף נחיתה עם וידאו.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <!-- demo-only agent block: shown when ?key= is present (no login) -->
+      <div id="agentBlock" class="hidden">
+        <div class="sec-title">פרטי המתווך</div>
+        <div class="grid-2">
+          <div class="field"><label>שם מלא *</label><input id="agName" placeholder="אלון פאר"></div>
+          <div class="field"><label>שם המשרד</label><input id="agBrand" placeholder="פאר נדל״ן"></div>
+          <div class="field">
+            <label>נייד (וואטסאפ) *</label>
+            <div style="display:flex;gap:8px">
+              <select id="agCC" style="width:auto;flex:0 0 auto">
+                <option value="+972" selected>🇮🇱 +972</option>
+                <option value="+1">🇺🇸 +1</option>
+                <option value="+44">🇬🇧 +44</option>
+                <option value="+33">🇫🇷 +33</option>
+                <option value="+49">🇩🇪 +49</option>
+                <option value="+39">🇮🇹 +39</option>
+                <option value="+34">🇪🇸 +34</option>
+                <option value="+7">🇷🇺 +7</option>
+                <option value="+92">🇵🇰 +92</option>
+              </select>
+              <input id="agPhone" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
+            </div>
+          </div>
+          <div class="field"><label>מס׳ רישיון תיווך</label><input id="agLicense" placeholder="3142871"></div>
+        </div>
+        <div class="field"><label>לוגו (אופציונלי)</label><input id="agLogo" type="file" accept="image/png,image/jpeg,image/webp"></div>
+      </div>
+
+      <div class="sec-title">פרטי הנכס</div>
+      <div class="field"><label>כתובת *</label><input id="pAddress" placeholder="ברודצקי 12, דירה 34"></div>
+      <div class="grid-2">
+        <div class="field"><label>עיר *</label><input id="pCity" placeholder="תל אביב"></div>
+        <div class="field"><label>שכונה</label><input id="pHood" placeholder="בבלי"></div>
+      </div>
+      <div class="grid-3">
+        <div class="field"><label>מחיר (₪) *</label><input id="pPrice" type="number" inputmode="numeric" placeholder="4900000"></div>
+        <div class="field"><label>חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
+        <div class="field"><label>מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
+      </div>
+      <div class="grid-3">
+        <div class="field"><label>קומה</label><input id="pFloor" type="number" inputmode="numeric" placeholder="5"></div>
+        <div class="field"><label>חניות</label><input id="pParking" type="number" inputmode="numeric" placeholder="1"></div>
+        <div class="field"></div>
+      </div>
+      <div class="field">
+        <label>תיאור חופשי</label>
+        <textarea id="pDesc" rows="3" placeholder="משופצת אדריכלית, מרפסת שמש לים, ממ״ד..."></textarea>
+        <div class="hint">התיאור עוזר ל-AI לכתוב את הדף — ככל שתפרטו, הדף יהיה טוב יותר.</div>
+      </div>
+
+      <div class="sec-title">תמונות הנכס (3–12)</div>
+      <div class="drop" id="drop">
+        <div style="font-size:1.6rem">📸</div>
+        גררו תמונות לכאן או <b style="color:var(--gold)">לחצו לבחירה</b>
+        <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden">
+      </div>
+      <div class="thumbs" id="thumbs"></div>
+
+      <div class="sec-title">וידאו (אופציונלי)</div>
+      <div class="field">
+        <input id="videoInput" type="file" accept="video/mp4,video/quicktime">
+        <div class="hint">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</div>
+      </div>
+
+      <p class="form-err" id="formErr"></p>
+      <button class="btn btn-gold" id="submitBtn" style="width:100%;margin-top:14px">🚀 צרו לי דף נכס</button>
+    </div>
+  </div>
+
+  <!-- ── BUILDING ── -->
+  <div id="viewBuilding" class="hidden">
+    <div class="card center" style="max-width:460px;margin:8vh auto">
+      <div class="spinner" id="buildSpin"></div>
+      <h2 style="font-family:var(--serif);margin:18px 0 4px">הדף בבנייה 🏗️</h2>
+      <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem">זה לוקח בדרך כלל 2–4 דקות. אפשר לחכות כאן — או שנעדכן בוואטסאפ כשהדף מוכן.</p>
+      <ul class="build-steps" style="text-align:right">
+        <li id="st1"><span class="dot">📸</span> התמונות הועלו</li>
+        <li id="st2"><span class="dot">🎬</span> יוצרים סרטון סיור</li>
+        <li id="st3"><span class="dot">✍️</span> כותבים את הדף וחוקרים את השכונה</li>
+        <li id="st4"><span class="dot">🚀</span> הדף עולה לאוויר</li>
+      </ul>
+      <div id="doneBox" class="hidden">
+        <h3 style="font-family:var(--serif);margin-bottom:12px">✅ הדף באוויר!</h3>
+        <a class="btn btn-gold" id="pageLink" target="_blank" href="#">צפייה בדף</a>
+        <a class="btn btn-ghost" href="/" style="margin-top:8px">לרשימת הנכסים</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/api.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (s) { return document.querySelector(s); };
+
+  // Turn a country code + locally-typed number into a webhook-ready E.164-style
+  // digit string, e.g. ("+972","0542045280") -> "972542045280". Tolerates
+  // spaces/dashes, drops the leading national "0", and won't double-prefix a
+  // number that already starts with the country code.
+  function normalizeAgentPhone(cc, raw) {
+    var country = String(cc || "").replace(/\D/g, "");
+    var digits = String(raw || "").replace(/\D/g, "");
+    if (!digits) return "";
+    if (country && digits.indexOf(country) === 0) return digits;
+    digits = digits.replace(/^0+/, "");
+    return country + digits;
+  }
+
+  // Read ?key= without URLSearchParams: it decodes "+" (valid in base64) to a
+  // space, corrupting base64 demo keys. Manual match + decodeURIComponent keeps
+  // a literal "+" intact and still handles %2B-encoded links.
+  var keyMatch = location.search.match(/[?&]key=([^&]*)/);
+  var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
+  var isDemo = !!demoKey;
+  if (isDemo) $("#agentBlock").classList.remove("hidden");
+
+  var photos = []; // {file, url(local), publicUrl?, el}
+
+  // ── uploader UI ──
+  var drop = $("#drop"), input = $("#fileInput");
+  drop.addEventListener("click", function () { input.click(); });
+  drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+  drop.addEventListener("drop", function (e) {
+    e.preventDefault(); drop.classList.remove("over");
+    addFiles(e.dataTransfer.files);
+  });
+  input.addEventListener("change", function () { addFiles(input.files); input.value = ""; });
+
+  function addFiles(list) {
+    Array.prototype.slice.call(list).forEach(function (f) {
+      if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return;
+      if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + " גדול מ-10MB"); return; }
+      if (photos.length >= 12) { FLY.toast("עד 12 תמונות"); return; }
+      var url = URL.createObjectURL(f);
+      var t = FLY.el("div", "t",
+        '<img src="' + url + '"><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
+      t.querySelector(".x").addEventListener("click", function () {
+        photos = photos.filter(function (p) { return p.el !== t; });
+        t.remove();
+      });
+      $("#thumbs").appendChild(t);
+      photos.push({ file: f, el: t });
+    });
+  }
+
+  // ── submit ──
+  $("#submitBtn").addEventListener("click", function () {
+    var err = $("#formErr");
+    err.classList.remove("show");
+    var required = [["#pAddress", "כתובת"], ["#pCity", "עיר"], ["#pPrice", "מחיר"], ["#pRooms", "חדרים"]];
+    if (isDemo) required.push(["#agName", "שם מתווך"], ["#agPhone", "נייד מתווך"]);
+    for (var i = 0; i < required.length; i++) {
+      if (!$(required[i][0]).value.trim()) {
+        err.textContent = "חסר: " + required[i][1];
+        err.classList.add("show");
+        return;
+      }
+    }
+    if (photos.length < 3) {
+      err.textContent = "צריך לפחות 3 תמונות";
+      err.classList.add("show");
+      return;
+    }
+    var agPhone = "";
+    if (isDemo) {
+      agPhone = normalizeAgentPhone($("#agCC").value, $("#agPhone").value);
+      if (agPhone.length < 10 || agPhone.length > 15) {
+        err.textContent = "מספר טלפון לא תקין";
+        err.classList.add("show");
+        return;
+      }
+    }
+
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = "מעלים תמונות...";
+    var headers = isDemo ? { "x-demo-key": demoKey } : {};
+
+    var uploads = photos.map(function (p) { return p.file; });
+    var videoFile = $("#videoInput").files[0] || null;
+    if (videoFile) uploads.push(videoFile);
+    var logoFile = isDemo && $("#agLogo").files[0] ? $("#agLogo").files[0] : null;
+    if (logoFile) uploads.push(logoFile);
+
+    FLY.uploadFiles(uploads, headers, function (i, pct) {
+      if (i < photos.length) photos[i].el.querySelector(".bar i").style.width = pct + "%";
+    }).then(function (urls) {
+      var photoUrls = urls.slice(0, photos.length);
+      var cursor = photos.length;
+      var videoUrl = videoFile ? urls[cursor++] : null;
+      var logoUrl = logoFile ? urls[cursor++] : null;
+
+      var body = {
+        address: $("#pAddress").value.trim(),
+        city: $("#pCity").value.trim(),
+        neighborhood: $("#pHood").value.trim(),
+        price: Number($("#pPrice").value),
+        rooms: Number($("#pRooms").value),
+        size_sqm: Number($("#pSqm").value) || 0,
+        floor: Number($("#pFloor").value) || 0,
+        parking: Number($("#pParking").value) || 0,
+        description: $("#pDesc").value.trim(),
+        photos_urls: photoUrls,
+        own_video_url: videoUrl,
+      };
+      if (isDemo) {
+        body.agent = {
+          name: $("#agName").value.trim(),
+          brand_name: $("#agBrand").value.trim(),
+          phone: agPhone,
+          license: $("#agLicense").value.trim(),
+          logo_url: logoUrl,
+        };
+      }
+      btn.textContent = "יוצרים את הדף...";
+      var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
+      return fetch(path, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: Object.assign({ "Content-Type": "application/json" }, headers),
+        body: JSON.stringify(body),
+      }).then(function (r) {
+        return r.json().then(function (d) {
+          if (!r.ok) throw new Error(d.error || "create failed");
+          return d;
+        });
+      });
+    }).then(function (d) {
+      startBuildingScreen(d.listing_id);
+    }).catch(function (e) {
+      err.textContent = "שגיאה: " + e.message;
+      err.classList.add("show");
+      btn.disabled = false;
+      btn.textContent = "🚀 צרו לי דף נכס";
+    });
+  });
+
+  // ── building screen: poll listing status ──
+  function startBuildingScreen(listingId) {
+    $("#viewForm").classList.add("hidden");
+    $("#viewBuilding").classList.remove("hidden");
+    $("#st1").classList.add("done");
+    $("#st2").classList.add("now");
+    var stage = 2;
+    var startedAt = Date.now();
+
+    var iv = setInterval(function () {
+      // advance the cosmetic steps over time
+      var elapsed = (Date.now() - startedAt) / 1000;
+      if (stage === 2 && elapsed > 90) { $("#st2").classList.remove("now"); $("#st2").classList.add("done"); $("#st3").classList.add("now"); stage = 3; }
+
+      fetch("/api/listing-status?id=" + encodeURIComponent(listingId))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.page_id && d.page_url) {
+            clearInterval(iv);
+            ["st1", "st2", "st3", "st4"].forEach(function (id) {
+              var el = $("#" + id);
+              el.classList.remove("now"); el.classList.add("done");
+            });
+            $("#buildSpin").classList.add("hidden");
+            $("#pageLink").href = d.page_url;
+            $("#doneBox").classList.remove("hidden");
+          }
+        })
+        .catch(function () { /* keep polling */ });
+    }, 6000);
+  }
+})();
+</script>
+</body>
+</html>
