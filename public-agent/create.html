@@ -119,6 +119,21 @@
 
       <div class="grid-2">
         <div class="field">
+          <label>תבנית עיצוב</label>
+          <select id="thTemplate">
+            <option value="classic" selected>קלאסי · יוקרתי</option>
+            <option value="minimal">מינימלי · נקי</option>
+            <option value="bold">נועז · מודרני</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button type="button" id="thSurprise" class="btn btn-ghost" style="width:100%">🎲 עיצוב אקראי</button>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
           <label>גופן כותרות</label>
           <select id="thFontTitle">
             <option value="">ברירת מחדל (Frank Ruhl Libre)</option>
@@ -292,6 +307,14 @@
     $("#pvTitle").style.color = primary || "var(--gold)";
     $("#pvBtn").style.background = primary || "var(--gold)";
     $("#thPreview").style.borderColor = accent || "rgba(23,20,15,.14)";
+    // reflect the chosen template's key traits in the preview
+    var tpl = $("#thTemplate").value;
+    var pvBtn = $("#pvBtn");
+    pvBtn.style.textTransform = tpl === "bold" ? "uppercase" : "none";
+    pvBtn.style.borderRadius = tpl === "bold" ? "3px" : "10px";
+    pvBtn.style.letterSpacing = tpl === "bold" ? ".04em" : "normal";
+    $("#pvTitle").style.fontWeight = tpl === "minimal" ? "600" : "700";
+    $("#thPreview").style.borderRadius = tpl === "bold" ? "4px" : "14px";
   }
 
   function onFontChange() {
@@ -300,9 +323,31 @@
   }
   $("#thFontTitle").addEventListener("change", onFontChange);
   $("#thFontBody").addEventListener("change", onFontChange);
+  $("#thTemplate").addEventListener("change", updatePreview);
   $("#thAuto").addEventListener("change", function () {
     $("#thColors").style.display = this.checked ? "none" : "";
     updatePreview();
+  });
+
+  // "Surprise me" — compose a fresh design: random template + font pairing +
+  // a tasteful palette (switches to manual colors so the palette is visible).
+  var TH_FONTS = ["", "Heebo", "Assistant", "Rubik", "Frank Ruhl Libre", "Secular One"];
+  var TH_TEMPLATES = ["classic", "minimal", "bold"];
+  var TH_PALETTES = [
+    ["#b98a2f", "#14110c"], ["#2e86de", "#17436f"], ["#8e44ad", "#3d1f4d"],
+    ["#127a5b", "#0b3b2c"], ["#c0392b", "#4d1410"], ["#0f766e", "#134e4a"], ["#1f2937", "#111827"],
+  ];
+  function thPick(a) { return a[Math.floor(Math.random() * a.length)]; }
+  $("#thSurprise").addEventListener("click", function () {
+    $("#thTemplate").value = thPick(TH_TEMPLATES);
+    $("#thFontTitle").value = thPick(TH_FONTS);
+    $("#thFontBody").value = thPick(TH_FONTS);
+    var pal = thPick(TH_PALETTES);
+    $("#thAuto").checked = false;
+    $("#thColors").style.display = "";
+    $("#thPrimary").value = pal[0]; $("#thPrimaryBtn").style.background = pal[0];
+    $("#thAccent").value = pal[1]; $("#thAccentBtn").style.background = pal[1];
+    onFontChange();
   });
 
   // Color pickers: the swatch button mirrors the picked color and, on click,
@@ -373,6 +418,7 @@
   function buildTheme(logoFile) {
     var t = $("#thFontTitle").value, b = $("#thFontBody").value;
     var theme = {
+      template: $("#thTemplate").value || "classic",
       font_title: t === "custom" ? "custom" : (t || null),
       font_body: b === "custom" ? "custom" : (b || null),
       font_url: null, primary: null, accent: null,
