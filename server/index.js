@@ -139,14 +139,16 @@ function sanitizeTheme(t) {
   if (!t || typeof t !== "object") return null;
   const hex = (v) => (typeof v === "string" && HEX.test(v.trim()) ? v.trim() : null);
   const str = (v) => (typeof v === "string" ? v.slice(0, 60) : null);
+  const TEMPLATES = { classic: 1, minimal: 1, bold: 1 };
   const clean = {
+    template: TEMPLATES[t.template] ? t.template : null,
     font_title: str(t.font_title),
     font_body: str(t.font_body),
     font_url: typeof t.font_url === "string" && /^https?:\/\//.test(t.font_url) ? t.font_url : null,
     primary: hex(t.primary),
     accent: hex(t.accent),
   };
-  return (clean.font_title || clean.font_body || clean.font_url || clean.primary || clean.accent) ? clean : null;
+  return (clean.template || clean.font_title || clean.font_body || clean.font_url || clean.primary || clean.accent) ? clean : null;
 }
 
 function normalizePhone(raw) {

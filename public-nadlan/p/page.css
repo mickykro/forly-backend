@@ -460,3 +460,27 @@ body.has-state.state-notfound #stateNotfound{display:flex}
 .stat-src a{color:rgba(255,255,255,.45);text-decoration:none;border-bottom:1px dotted rgba(217,177,92,.4)}
 .form-err{display:none;color:#C0392B;font-size:.85rem}
 .form-err.show{display:block}
+
+/* ─── design templates (data-template on <html>) ─── */
+/* "classic" is the base look above — no overrides needed. */
+
+/* minimal — flat, editorial, more whitespace, no decorative gold rules */
+html[data-template="minimal"]{ --radius:10px; }
+html[data-template="minimal"] .btn{ border-radius:10px; }
+html[data-template="minimal"] .btn-gold{ background:var(--gold); color:#fff; }
+html[data-template="minimal"] .hero-copy .eyebrow::before,
+html[data-template="minimal"] .sec-head .kicker::before{ display:none; }
+html[data-template="minimal"] .hero-copy .eyebrow,
+html[data-template="minimal"] .sec-head .kicker{ letter-spacing:.14em; font-weight:600; }
+html[data-template="minimal"] .hero-copy h1{ font-weight:600; font-size:clamp(2.2rem,5vw,3.6rem); }
+html[data-template="minimal"] .sec-head h2{ font-weight:600; }
+html[data-template="minimal"] section.block{ padding:clamp(84px,12vw,150px) clamp(20px,4.5vw,48px); }
+
+/* bold — dramatic, sharp corners, oversized uppercase type */
+html[data-template="bold"]{ --radius:4px; }
+html[data-template="bold"] .btn{ border-radius:4px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+html[data-template="bold"] .hero-copy h1{ font-weight:700; font-size:clamp(2.9rem,7.5vw,5.4rem); line-height:1.05; }
+html[data-template="bold"] .sec-head h2{ font-weight:700; font-size:clamp(2.1rem,4.6vw,3.6rem); }
+html[data-template="bold"] .hero-copy .eyebrow,
+html[data-template="bold"] .sec-head .kicker{ font-weight:700; letter-spacing:.32em; }
+html[data-template="bold"] .spec b{ font-weight:700; }
