@@ -55,9 +55,15 @@
   }
   var rgbStr = function (c) { return "rgb(" + c.r + "," + c.g + "," + c.b + ")"; };
 
+  var TEMPLATES = { classic: 1, minimal: 1, bold: 1 };
+
   function applyTheme(theme) {
     if (!theme) return;
     var root = document.documentElement.style;
+
+    // Layout template (classic | minimal | bold) — swaps look via CSS variants.
+    document.documentElement.setAttribute("data-template",
+      TEMPLATES[theme.template] ? theme.template : "classic");
 
     // Colors: primary drives the gold accent tokens; derive bright/faint from it.
     var primary = hexToRgb(theme.primary);
