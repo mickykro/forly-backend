@@ -22,8 +22,8 @@
 #      cp /root/forly-backend.bak/sa-key.json /root/forly-backend/ 2>/dev/null || true
 #
 # 4. Create /root/forly-backend/deploy.env (NOT committed) with runtime config:
-#      BASE_URL=http://31.97.216.242:8787
-#      PAGE_BASE_URL=http://31.97.216.242:8787
+#      BASE_URL=https://forly.srv1173890.hstgr.cloud
+#      PAGE_BASE_URL=https://forly.srv1173890.hstgr.cloud
 #      N8N_WW1_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/dashboard-create
 #      N8N_PIPELINE_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/property-page-builder
 #      GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa-key.json
@@ -62,13 +62,24 @@ jobs:
           ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" 'bash -seuo pipefail' <<'REMOTE'
           cd /root/forly-backend
           git fetch origin main
-          git reset --hard origin/main
+          git checkout -B main origin/main
           docker build -f server/Dockerfile -t forly-intake .
           docker rm -f forly-intake 2>/dev/null || true
-          docker run -d --name forly-intake --restart unless-stopped -p 8787:8787 \
+          # Container is fronted by the existing Traefik proxy (TLS on
+          # forly.srv1173890.hstgr.cloud). It must join Traefik's network and
+          # carry the router labels — NOT be published on a raw port, or Traefik
+          # loses its route and the host 404s.
+          docker run -d --name forly-intake --restart unless-stopped \
+            --network root_default \
             --env-file /root/forly-backend/deploy.env \
             -v /root/forly-backend/sa-key.json:/secrets/sa-key.json:ro \
             -v forly-uploads:/app/server/data/uploads \
+            -l traefik.enable=true \
+            -l 'traefik.http.routers.forly.rule=Host(`forly.srv1173890.hstgr.cloud`)' \
+            -l traefik.http.routers.forly.entrypoints=web,websecure \
+            -l traefik.http.routers.forly.tls=true \
+            -l traefik.http.routers.forly.tls.certresolver=mytlschallenge \
+            -l traefik.http.services.forly.loadbalancer.server.port=8787 \
             forly-intake
           sleep 3
           docker ps --filter name=forly-intake --format 'STATUS: {{.Status}}'
@@ -76,8 +87,10 @@ jobs:
 
       - name: Smoke test
         run: |
+          # Hit the public HTTPS host (via Traefik) — confirms both the new
+          # build AND that Traefik routing/TLS survived the redeploy.
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
-            "http://${{ secrets.VPS_HOST }}:8787/createPropertyPage" \
+            "https://forly.srv1173890.hstgr.cloud/createPropertyPage" \
             -H 'Content-Type: application/json' -d '{}' || true)
-          echo "createPropertyPage returned $code (expect 400 = new build live)"
+          echo "createPropertyPage returned $code (expect 400 = new build live behind Traefik)"
           test "$code" = "400"
