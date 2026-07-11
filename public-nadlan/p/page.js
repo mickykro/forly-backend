@@ -32,9 +32,63 @@
     } catch (e) { /* no-op */ }
   }
 
+  // ── theme ───────────────────────────────────────────────
+  // Curated Hebrew fonts we can load from Google Fonts on demand.
+  var FONT_FAMILIES = {
+    "Heebo": "Heebo:wght@300;400;500;600;700",
+    "Assistant": "Assistant:wght@300;400;500;600;700",
+    "Rubik": "Rubik:wght@300;400;500;600;700",
+    "Frank Ruhl Libre": "Frank+Ruhl+Libre:wght@300;400;500;600;700",
+    "Secular One": "Secular+One",
+  };
+
+  function hexToRgb(h) {
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(h || "").trim());
+    return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
+  }
+  function mix(rgb, target, amt) { // amt 0..1 toward target (255=lighten, 0=darken)
+    return {
+      r: Math.round(rgb.r + (target - rgb.r) * amt),
+      g: Math.round(rgb.g + (target - rgb.g) * amt),
+      b: Math.round(rgb.b + (target - rgb.b) * amt),
+    };
+  }
+  var rgbStr = function (c) { return "rgb(" + c.r + "," + c.g + "," + c.b + ")"; };
+
+  function applyTheme(theme) {
+    if (!theme) return;
+    var root = document.documentElement.style;
+
+    // Colors: primary drives the gold accent tokens; derive bright/faint from it.
+    var primary = hexToRgb(theme.primary);
+    if (primary) {
+      root.setProperty("--gold", rgbStr(primary));
+      root.setProperty("--gold-bright", rgbStr(mix(primary, 255, 0.28)));
+      root.setProperty("--gold-faint", "rgba(" + primary.r + "," + primary.g + "," + primary.b + ",.16)");
+    }
+    var accent = hexToRgb(theme.accent);
+    if (accent) root.setProperty("--dark", rgbStr(mix(accent, 0, 0.45)));
+
+    // Font: custom upload takes priority, else a curated Google family.
+    if (theme.font_url) {
+      var style = document.createElement("style");
+      style.textContent = '@font-face{font-family:"CustomFont";src:url("' +
+        theme.font_url.replace(/"/g, "") + '");font-display:swap}';
+      document.head.appendChild(style);
+      root.setProperty("--sans", '"CustomFont", "Heebo", sans-serif');
+    } else if (theme.font && FONT_FAMILIES[theme.font]) {
+      var link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://fonts.googleapis.com/css2?family=" + FONT_FAMILIES[theme.font] + "&display=swap";
+      document.head.appendChild(link);
+      root.setProperty("--sans", '"' + theme.font + '", "Heebo", sans-serif');
+    }
+  }
+
   // ── render ──────────────────────────────────────────────
 
   function render(d) {
+    applyTheme(d.theme);
     var p = d.property, a = d.agent;
     var text = function (sel, val) { var el = $(sel); if (el && val != null) el.textContent = val; };
 

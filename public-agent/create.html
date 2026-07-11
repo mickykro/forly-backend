@@ -93,6 +93,33 @@
         <div class="hint">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</div>
       </div>
 
+      <div class="sec-title">עיצוב הדף</div>
+      <div class="grid-2">
+        <div class="field">
+          <label>גופן</label>
+          <select id="thFont">
+            <option value="">ברירת מחדל (Heebo)</option>
+            <option value="Assistant">Assistant · אסיסטנט</option>
+            <option value="Rubik">Rubik · רוביק</option>
+            <option value="Heebo">Heebo · חיבו</option>
+            <option value="Frank Ruhl Libre">Frank Ruhl Libre · פרנק רול</option>
+            <option value="Secular One">Secular One · סקולר וואן</option>
+            <option value="custom">גופן משלי (העלאה)…</option>
+          </select>
+        </div>
+        <div class="field" id="thFontFileWrap" style="display:none">
+          <label>קובץ גופן (woff2/ttf/otf)</label>
+          <input id="thFontFile" type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf">
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--ink-soft);margin:4px 0 12px;cursor:pointer">
+        <input id="thAuto" type="checkbox" checked style="width:auto"> צבעים אוטומטיים מהלוגו
+      </label>
+      <div class="grid-2" id="thColors" style="display:none">
+        <div class="field"><label>צבע ראשי</label><input id="thPrimary" type="color" value="#b98a2f"></div>
+        <div class="field"><label>צבע משני</label><input id="thAccent" type="color" value="#14110c"></div>
+      </div>
+
       <p class="form-err" id="formErr"></p>
       <button class="btn btn-gold" id="submitBtn" style="width:100%;margin-top:14px">🚀 צרו לי דף נכס</button>
     </div>
@@ -187,6 +214,75 @@
     });
   }
 
+  // ── theme (fonts + colors) ──
+  $("#thFont").addEventListener("change", function () {
+    $("#thFontFileWrap").style.display = this.value === "custom" ? "" : "none";
+  });
+  $("#thAuto").addEventListener("change", function () {
+    $("#thColors").style.display = this.checked ? "none" : "";
+  });
+
+  function rgbToHex(r, g, b) {
+    return "#" + [r, g, b].map(function (v) {
+      return ("0" + Math.max(0, Math.min(255, v)).toString(16)).slice(-2);
+    }).join("");
+  }
+  function hexToRgbL(h) {
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(h || ""));
+    return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
+  }
+  // A darker shade of the base color, for the secondary/accent token.
+  function deriveAccent(hex) {
+    var c = hexToRgbL(hex); if (!c) return null;
+    return rgbToHex(Math.round(c.r * 0.5), Math.round(c.g * 0.5), Math.round(c.b * 0.5));
+  }
+  // Pull a representative brand color out of the logo: average the saturated,
+  // non-background pixels on a downscaled canvas. Returns a hex or null.
+  function extractLogoColor(file) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var c = document.createElement("canvas"), w = c.width = 40, h = c.height = 40;
+          var ctx = c.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          var d = ctx.getImageData(0, 0, w, h).data;
+          var r = 0, g = 0, b = 0, n = 0;
+          for (var i = 0; i < d.length; i += 4) {
+            var R = d[i], G = d[i + 1], B = d[i + 2], A = d[i + 3];
+            if (A < 128) continue;
+            var mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+            if (mx > 245 && mn > 245) continue;   // near-white
+            if (mx < 22) continue;                 // near-black
+            if ((mx === 0 ? 0 : (mx - mn) / mx) < 0.18) continue; // low-sat background
+            r += R; g += G; b += B; n++;
+          }
+          URL.revokeObjectURL(url);
+          resolve(n < 5 ? null : rgbToHex(Math.round(r / n), Math.round(g / n), Math.round(b / n)));
+        } catch (e) { URL.revokeObjectURL(url); resolve(null); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }
+  // Resolve the theme the user picked. Colors come from explicit pickers, or —
+  // when "auto" is on — are derived from the logo (falling back to page defaults).
+  function buildTheme(logoFile) {
+    var sel = $("#thFont").value;
+    var theme = { font: sel === "custom" ? "custom" : (sel || null), font_url: null, primary: null, accent: null };
+    if (!$("#thAuto").checked) {
+      theme.primary = $("#thPrimary").value || null;
+      theme.accent = $("#thAccent").value || null;
+      return Promise.resolve(theme);
+    }
+    if (!logoFile) return Promise.resolve(theme);
+    return extractLogoColor(logoFile).then(function (base) {
+      if (base) { theme.primary = base; theme.accent = deriveAccent(base); }
+      return theme;
+    });
+  }
+
   // ── submit ──
   $("#submitBtn").addEventListener("click", function () {
     var err = $("#formErr");
@@ -220,53 +316,62 @@
     btn.textContent = "מעלים תמונות...";
     var headers = isDemo ? { "x-demo-key": demoKey } : {};
 
-    var uploads = photos.map(function (p) { return p.file; });
     var videoFile = $("#videoInput").files[0] || null;
-    if (videoFile) uploads.push(videoFile);
     var logoFile = isDemo && $("#agLogo").files[0] ? $("#agLogo").files[0] : null;
-    if (logoFile) uploads.push(logoFile);
+    var fontFile = ($("#thFont").value === "custom" && $("#thFontFile").files[0]) ? $("#thFontFile").files[0] : null;
 
-    FLY.uploadFiles(uploads, headers, function (i, pct) {
-      if (i < photos.length) photos[i].el.querySelector(".bar i").style.width = pct + "%";
-    }).then(function (urls) {
-      var photoUrls = urls.slice(0, photos.length);
-      var cursor = photos.length;
-      var videoUrl = videoFile ? urls[cursor++] : null;
-      var logoUrl = logoFile ? urls[cursor++] : null;
+    // Resolve the theme first (logo color extraction is async), then upload.
+    buildTheme(logoFile).then(function (theme) {
+      var uploads = photos.map(function (p) { return p.file; });
+      if (videoFile) uploads.push(videoFile);
+      if (logoFile) uploads.push(logoFile);
+      if (fontFile) uploads.push(fontFile);
 
-      var body = {
-        address: $("#pAddress").value.trim(),
-        city: $("#pCity").value.trim(),
-        neighborhood: $("#pHood").value.trim(),
-        price: Number($("#pPrice").value),
-        rooms: Number($("#pRooms").value),
-        size_sqm: Number($("#pSqm").value) || 0,
-        floor: Number($("#pFloor").value) || 0,
-        parking: Number($("#pParking").value) || 0,
-        description: $("#pDesc").value.trim(),
-        photos_urls: photoUrls,
-        own_video_url: videoUrl,
-      };
-      if (isDemo) {
-        body.agent = {
-          name: $("#agName").value.trim(),
-          brand_name: $("#agBrand").value.trim(),
-          phone: agPhone,
-          license: $("#agLicense").value.trim(),
-          logo_url: logoUrl,
+      return FLY.uploadFiles(uploads, headers, function (i, pct) {
+        if (i < photos.length) photos[i].el.querySelector(".bar i").style.width = pct + "%";
+      }).then(function (urls) {
+        var photoUrls = urls.slice(0, photos.length);
+        var cursor = photos.length;
+        var videoUrl = videoFile ? urls[cursor++] : null;
+        var logoUrl = logoFile ? urls[cursor++] : null;
+        var fontUrl = fontFile ? urls[cursor++] : null;
+        if (fontUrl) theme.font_url = fontUrl;
+
+        var body = {
+          address: $("#pAddress").value.trim(),
+          city: $("#pCity").value.trim(),
+          neighborhood: $("#pHood").value.trim(),
+          price: Number($("#pPrice").value),
+          rooms: Number($("#pRooms").value),
+          size_sqm: Number($("#pSqm").value) || 0,
+          floor: Number($("#pFloor").value) || 0,
+          parking: Number($("#pParking").value) || 0,
+          description: $("#pDesc").value.trim(),
+          photos_urls: photoUrls,
+          own_video_url: videoUrl,
+          theme: theme,
         };
-      }
-      btn.textContent = "יוצרים את הדף...";
-      var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
-      return fetch(path, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: Object.assign({ "Content-Type": "application/json" }, headers),
-        body: JSON.stringify(body),
-      }).then(function (r) {
-        return r.json().then(function (d) {
-          if (!r.ok) throw new Error(d.error || "create failed");
-          return d;
+        if (isDemo) {
+          body.agent = {
+            name: $("#agName").value.trim(),
+            brand_name: $("#agBrand").value.trim(),
+            phone: agPhone,
+            license: $("#agLicense").value.trim(),
+            logo_url: logoUrl,
+          };
+        }
+        btn.textContent = "יוצרים את הדף...";
+        var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
+        return fetch(path, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: Object.assign({ "Content-Type": "application/json" }, headers),
+          body: JSON.stringify(body),
+        }).then(function (r) {
+          return r.json().then(function (d) {
+            if (!r.ok) throw new Error(d.error || "create failed");
+            return d;
+          });
         });
       });
     }).then(function (d) {
