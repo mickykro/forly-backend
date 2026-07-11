@@ -7,8 +7,14 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700&family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&family=Secular+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<style>
+  .th-pick{border:none;border-radius:10px;color:#fff;font-weight:600;font-size:.85rem;cursor:pointer;min-height:40px;text-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .1s}
+  .th-pick:active{transform:scale(.98)}
+  .th-pick.chosen{box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.3))}
+  #thFontTitle option,#thFontBody option{font-size:1rem}
+</style>
 </head>
 <body>
 
@@ -94,30 +100,66 @@
       </div>
 
       <div class="sec-title">עיצוב הדף</div>
+
+      <!-- live preview of the chosen fonts + colors -->
+      <div id="thPreview" style="border:1px solid rgba(23,20,15,.14);border-radius:14px;padding:18px 20px;margin-bottom:14px;background:var(--bg)">
+        <div id="pvTitle" style="font-size:1.5rem;font-weight:700;margin-bottom:6px;color:var(--gold)">דירת יוקרה בלב תל אביב</div>
+        <div id="pvBody" style="font-size:.95rem;color:var(--ink-soft);line-height:1.7">4 חדרים · מרפסת שמש · נוף פתוח. כך ייראו הגופנים והצבעים בדף הנחיתה שלכם.</div>
+        <span id="pvBtn" style="display:inline-block;margin-top:12px;padding:9px 18px;border-radius:10px;background:var(--gold);color:#fff;font-weight:600;font-size:.9rem">תיאום ביקור</span>
+      </div>
+
       <div class="grid-2">
         <div class="field">
-          <label>גופן</label>
-          <select id="thFont">
-            <option value="">ברירת מחדל (Heebo)</option>
-            <option value="Assistant">Assistant · אסיסטנט</option>
-            <option value="Rubik">Rubik · רוביק</option>
-            <option value="Heebo">Heebo · חיבו</option>
-            <option value="Frank Ruhl Libre">Frank Ruhl Libre · פרנק רול</option>
-            <option value="Secular One">Secular One · סקולר וואן</option>
+          <label>גופן כותרות</label>
+          <select id="thFontTitle">
+            <option value="">ברירת מחדל (Frank Ruhl Libre)</option>
+            <option value="Heebo" style="font-family:'Heebo'">Heebo · חיבו</option>
+            <option value="Assistant" style="font-family:'Assistant'">Assistant · אסיסטנט</option>
+            <option value="Rubik" style="font-family:'Rubik'">Rubik · רוביק</option>
+            <option value="Frank Ruhl Libre" style="font-family:'Frank Ruhl Libre'">Frank Ruhl Libre · פרנק רול</option>
+            <option value="Secular One" style="font-family:'Secular One'">Secular One · סקולר וואן</option>
             <option value="custom">גופן משלי (העלאה)…</option>
           </select>
         </div>
-        <div class="field" id="thFontFileWrap" style="display:none">
-          <label>קובץ גופן (woff2/ttf/otf)</label>
-          <input id="thFontFile" type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf">
+        <div class="field">
+          <label>גופן תוכן</label>
+          <select id="thFontBody">
+            <option value="">ברירת מחדל (Heebo)</option>
+            <option value="Heebo" style="font-family:'Heebo'">Heebo · חיבו</option>
+            <option value="Assistant" style="font-family:'Assistant'">Assistant · אסיסטנט</option>
+            <option value="Rubik" style="font-family:'Rubik'">Rubik · רוביק</option>
+            <option value="Frank Ruhl Libre" style="font-family:'Frank Ruhl Libre'">Frank Ruhl Libre · פרנק רול</option>
+            <option value="Secular One" style="font-family:'Secular One'">Secular One · סקולר וואן</option>
+            <option value="custom">גופן משלי (העלאה)…</option>
+          </select>
         </div>
       </div>
+      <div class="field" id="thFontFileWrap" style="display:none">
+        <label>קובץ גופן מותאם (woff2/ttf/otf)</label>
+        <input id="thFontFile" type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf">
+        <div class="hint">הגופן המותאם יחול על מה שסימנתם כ"גופן משלי".</div>
+      </div>
+
       <label style="display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--ink-soft);margin:4px 0 12px;cursor:pointer">
         <input id="thAuto" type="checkbox" checked style="width:auto"> צבעים אוטומטיים מהלוגו
       </label>
-      <div class="grid-2" id="thColors" style="display:none">
-        <div class="field"><label>צבע ראשי</label><input id="thPrimary" type="color" value="#b98a2f"></div>
-        <div class="field"><label>צבע משני</label><input id="thAccent" type="color" value="#14110c"></div>
+      <div id="thColors" style="display:none">
+        <div class="grid-2">
+          <div class="field">
+            <label>צבע ראשי</label>
+            <div style="display:flex;gap:8px;align-items:stretch">
+              <input id="thPrimary" type="color" value="#b98a2f" style="width:52px;flex:0 0 auto;padding:4px;cursor:pointer">
+              <button type="button" id="thPrimaryBtn" class="th-pick" style="flex:1 1 auto;background:#b98a2f">בחרו צבע זה</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>צבע משני</label>
+            <div style="display:flex;gap:8px;align-items:stretch">
+              <input id="thAccent" type="color" value="#14110c" style="width:52px;flex:0 0 auto;padding:4px;cursor:pointer">
+              <button type="button" id="thAccentBtn" class="th-pick" style="flex:1 1 auto;background:#14110c">בחרו צבע זה</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <p class="form-err" id="formErr"></p>
@@ -215,11 +257,55 @@
   }
 
   // ── theme (fonts + colors) ──
-  $("#thFont").addEventListener("change", function () {
-    $("#thFontFileWrap").style.display = this.value === "custom" ? "" : "none";
-  });
+  // CSS font-family stack for a role; "custom" uses the uploaded font.
+  function roleFamily(role, sel) {
+    var base = role === "title" ? "'Frank Ruhl Libre', serif" : "'Heebo', sans-serif";
+    if (sel === "custom") return '"ThemeCustomFont", ' + base;
+    return sel ? ("'" + sel + "', " + base) : base;
+  }
+  function fontFilesNeeded() {
+    return $("#thFontTitle").value === "custom" || $("#thFontBody").value === "custom";
+  }
+  // Live preview reflecting the current font + color choices.
+  function updatePreview() {
+    $("#pvTitle").style.fontFamily = roleFamily("title", $("#thFontTitle").value);
+    $("#pvBody").style.fontFamily = roleFamily("body", $("#thFontBody").value);
+    var manual = !$("#thAuto").checked;
+    var primary = manual ? $("#thPrimary").value : "";
+    var accent = manual ? $("#thAccent").value : "";
+    $("#pvTitle").style.color = primary || "var(--gold)";
+    $("#pvBtn").style.background = primary || "var(--gold)";
+    $("#thPreview").style.borderColor = accent || "rgba(23,20,15,.14)";
+  }
+
+  function onFontChange() {
+    $("#thFontFileWrap").style.display = fontFilesNeeded() ? "" : "none";
+    updatePreview();
+  }
+  $("#thFontTitle").addEventListener("change", onFontChange);
+  $("#thFontBody").addEventListener("change", onFontChange);
   $("#thAuto").addEventListener("change", function () {
     $("#thColors").style.display = this.checked ? "none" : "";
+    updatePreview();
+  });
+
+  // Color pickers: the swatch button mirrors the picked color and, on click,
+  // marks it as chosen and applies it to the preview.
+  function wireColor(inputSel, btnSel) {
+    var input = $(inputSel), btn = $(btnSel);
+    function sync() { btn.style.background = input.value; }
+    input.addEventListener("input", function () { sync(); btn.classList.remove("chosen"); updatePreview(); });
+    btn.addEventListener("click", function () { btn.classList.add("chosen"); updatePreview(); });
+    sync();
+  }
+  wireColor("#thPrimary", "#thPrimaryBtn");
+  wireColor("#thAccent", "#thAccentBtn");
+
+  // Custom font: register it for the live preview the moment it's selected.
+  $("#thFontFile").addEventListener("change", function () {
+    var f = this.files[0]; if (!f || !window.FontFace) return;
+    var ff = new FontFace("ThemeCustomFont", "url('" + URL.createObjectURL(f) + "')");
+    ff.load().then(function (loaded) { document.fonts.add(loaded); updatePreview(); }).catch(function () {});
   });
 
   function rgbToHex(r, g, b) {
@@ -269,8 +355,12 @@
   // Resolve the theme the user picked. Colors come from explicit pickers, or —
   // when "auto" is on — are derived from the logo (falling back to page defaults).
   function buildTheme(logoFile) {
-    var sel = $("#thFont").value;
-    var theme = { font: sel === "custom" ? "custom" : (sel || null), font_url: null, primary: null, accent: null };
+    var t = $("#thFontTitle").value, b = $("#thFontBody").value;
+    var theme = {
+      font_title: t === "custom" ? "custom" : (t || null),
+      font_body: b === "custom" ? "custom" : (b || null),
+      font_url: null, primary: null, accent: null,
+    };
     if (!$("#thAuto").checked) {
       theme.primary = $("#thPrimary").value || null;
       theme.accent = $("#thAccent").value || null;
@@ -282,6 +372,7 @@
       return theme;
     });
   }
+  updatePreview();
 
   // ── submit ──
   $("#submitBtn").addEventListener("click", function () {
@@ -318,7 +409,7 @@
 
     var videoFile = $("#videoInput").files[0] || null;
     var logoFile = isDemo && $("#agLogo").files[0] ? $("#agLogo").files[0] : null;
-    var fontFile = ($("#thFont").value === "custom" && $("#thFontFile").files[0]) ? $("#thFontFile").files[0] : null;
+    var fontFile = (fontFilesNeeded() && $("#thFontFile").files[0]) ? $("#thFontFile").files[0] : null;
 
     // Resolve the theme first (logo color extraction is async), then upload.
     buildTheme(logoFile).then(function (theme) {

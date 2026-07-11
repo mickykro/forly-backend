@@ -133,13 +133,15 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 function sanitizeTheme(t) {
   if (!t || typeof t !== "object") return null;
   const hex = (v) => (typeof v === "string" && HEX.test(v.trim()) ? v.trim() : null);
+  const str = (v) => (typeof v === "string" ? v.slice(0, 60) : null);
   const clean = {
-    font: typeof t.font === "string" ? t.font.slice(0, 60) : null,
+    font_title: str(t.font_title),
+    font_body: str(t.font_body),
     font_url: typeof t.font_url === "string" && /^https?:\/\//.test(t.font_url) ? t.font_url : null,
     primary: hex(t.primary),
     accent: hex(t.accent),
   };
-  return (clean.font || clean.font_url || clean.primary || clean.accent) ? clean : null;
+  return (clean.font_title || clean.font_body || clean.font_url || clean.primary || clean.accent) ? clean : null;
 }
 
 function normalizePhone(raw) {

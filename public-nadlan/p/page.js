@@ -69,19 +69,35 @@
     var accent = hexToRgb(theme.accent);
     if (accent) root.setProperty("--dark", rgbStr(mix(accent, 0, 0.45)));
 
-    // Font: custom upload takes priority, else a curated Google family.
+    // Fonts: a custom uploaded font is registered once; each role (title →
+    // --serif, body → --sans) is set to its chosen family, loading the Google
+    // family on demand. "custom" points a role at the uploaded font.
     if (theme.font_url) {
       var style = document.createElement("style");
       style.textContent = '@font-face{font-family:"CustomFont";src:url("' +
         theme.font_url.replace(/"/g, "") + '");font-display:swap}';
       document.head.appendChild(style);
-      root.setProperty("--sans", '"CustomFont", "Heebo", sans-serif');
-    } else if (theme.font && FONT_FAMILIES[theme.font]) {
-      var link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "https://fonts.googleapis.com/css2?family=" + FONT_FAMILIES[theme.font] + "&display=swap";
-      document.head.appendChild(link);
-      root.setProperty("--sans", '"' + theme.font + '", "Heebo", sans-serif');
+    }
+    applyRoleFont("--serif", theme.font_title, "'Frank Ruhl Libre', serif");
+    applyRoleFont("--sans", theme.font_body, "'Heebo', sans-serif");
+  }
+
+  function loadGoogleFont(family) {
+    if (!FONT_FAMILIES[family]) return;
+    if (document.querySelector('link[data-font="' + family + '"]')) return;
+    var link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.setAttribute("data-font", family);
+    link.href = "https://fonts.googleapis.com/css2?family=" + FONT_FAMILIES[family] + "&display=swap";
+    document.head.appendChild(link);
+  }
+  function applyRoleFont(cssVar, choice, fallback) {
+    if (!choice) return;
+    if (choice === "custom") {
+      document.documentElement.style.setProperty(cssVar, '"CustomFont", ' + fallback);
+    } else if (FONT_FAMILIES[choice]) {
+      loadGoogleFont(choice);
+      document.documentElement.style.setProperty(cssVar, "'" + choice + "', " + fallback);
     }
   }
 
