@@ -7,8 +7,14 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700&family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&family=Secular+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<style>
+  .th-pick{border:none;border-radius:10px;color:#fff;font-weight:600;font-size:.85rem;cursor:pointer;min-height:40px;text-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .1s}
+  .th-pick:active{transform:scale(.98)}
+  .th-pick.chosen{box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.3))}
+  #thFontTitle option,#thFontBody option{font-size:1rem}
+</style>
 </head>
 <body>
 
@@ -93,6 +99,69 @@
         <div class="hint">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</div>
       </div>
 
+      <div class="sec-title">עיצוב הדף</div>
+
+      <!-- live preview of the chosen fonts + colors -->
+      <div id="thPreview" style="border:1px solid rgba(23,20,15,.14);border-radius:14px;padding:18px 20px;margin-bottom:14px;background:var(--bg)">
+        <div id="pvTitle" style="font-size:1.5rem;font-weight:700;margin-bottom:6px;color:var(--gold)">דירת יוקרה בלב תל אביב</div>
+        <div id="pvBody" style="font-size:.95rem;color:var(--ink-soft);line-height:1.7">4 חדרים · מרפסת שמש · נוף פתוח. כך ייראו הגופנים והצבעים בדף הנחיתה שלכם.</div>
+        <span id="pvBtn" style="display:inline-block;margin-top:12px;padding:9px 18px;border-radius:10px;background:var(--gold);color:#fff;font-weight:600;font-size:.9rem">תיאום ביקור</span>
+      </div>
+
+      <div class="grid-2">
+        <div class="field">
+          <label>גופן כותרות</label>
+          <select id="thFontTitle">
+            <option value="">ברירת מחדל (Frank Ruhl Libre)</option>
+            <option value="Heebo" style="font-family:'Heebo'">Heebo · חיבו</option>
+            <option value="Assistant" style="font-family:'Assistant'">Assistant · אסיסטנט</option>
+            <option value="Rubik" style="font-family:'Rubik'">Rubik · רוביק</option>
+            <option value="Frank Ruhl Libre" style="font-family:'Frank Ruhl Libre'">Frank Ruhl Libre · פרנק רול</option>
+            <option value="Secular One" style="font-family:'Secular One'">Secular One · סקולר וואן</option>
+            <option value="custom">גופן משלי (העלאה)…</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>גופן תוכן</label>
+          <select id="thFontBody">
+            <option value="">ברירת מחדל (Heebo)</option>
+            <option value="Heebo" style="font-family:'Heebo'">Heebo · חיבו</option>
+            <option value="Assistant" style="font-family:'Assistant'">Assistant · אסיסטנט</option>
+            <option value="Rubik" style="font-family:'Rubik'">Rubik · רוביק</option>
+            <option value="Frank Ruhl Libre" style="font-family:'Frank Ruhl Libre'">Frank Ruhl Libre · פרנק רול</option>
+            <option value="Secular One" style="font-family:'Secular One'">Secular One · סקולר וואן</option>
+            <option value="custom">גופן משלי (העלאה)…</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" id="thFontFileWrap" style="display:none">
+        <label>קובץ גופן מותאם (woff2/ttf/otf)</label>
+        <input id="thFontFile" type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf">
+        <div class="hint">הגופן המותאם יחול על מה שסימנתם כ"גופן משלי".</div>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--ink-soft);margin:4px 0 12px;cursor:pointer">
+        <input id="thAuto" type="checkbox" checked style="width:auto"> צבעים אוטומטיים מהלוגו
+      </label>
+      <div id="thColors" style="display:none">
+        <div class="grid-2">
+          <div class="field">
+            <label>צבע ראשי</label>
+            <div style="display:flex;gap:8px;align-items:stretch">
+              <input id="thPrimary" type="color" value="#b98a2f" style="width:52px;flex:0 0 auto;padding:4px;cursor:pointer">
+              <button type="button" id="thPrimaryBtn" class="th-pick" style="flex:1 1 auto;background:#b98a2f">בחרו צבע זה</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>צבע משני</label>
+            <div style="display:flex;gap:8px;align-items:stretch">
+              <input id="thAccent" type="color" value="#14110c" style="width:52px;flex:0 0 auto;padding:4px;cursor:pointer">
+              <button type="button" id="thAccentBtn" class="th-pick" style="flex:1 1 auto;background:#14110c">בחרו צבע זה</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <p class="form-err" id="formErr"></p>
       <button class="btn btn-gold" id="submitBtn" style="width:100%;margin-top:14px">🚀 צרו לי דף נכס</button>
     </div>
@@ -113,6 +182,17 @@
       <div id="doneBox" class="hidden">
         <h3 style="font-family:var(--serif);margin-bottom:12px">✅ הדף באוויר!</h3>
         <a class="btn btn-gold" id="pageLink" target="_blank" href="#">צפייה בדף</a>
+        <a class="btn btn-ghost" href="/" style="margin-top:8px">לרשימת הנכסים</a>
+      </div>
+      <div id="waitBox" class="hidden">
+        <h3 style="font-family:var(--serif);margin-bottom:8px">⏳ עדיין עובדים על זה</h3>
+        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem">הבנייה לוקחת יותר מהרגיל — נשלח לך את הקישור לדף בוואטסאפ ברגע שהוא מוכן. אפשר לסגור את החלון.</p>
+        <a class="btn btn-ghost" href="/" style="margin-top:12px">לרשימת הנכסים</a>
+      </div>
+      <div id="failBox" class="hidden">
+        <h3 style="font-family:var(--serif);margin-bottom:8px">😕 משהו השתבש</h3>
+        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem">לא הצלחנו לסיים את בניית הדף. נסו שוב, ואם זה חוזר — כתבו לנו בוואטסאפ ונטפל בזה.</p>
+        <a class="btn btn-gold" href="" id="retryLink" style="margin-top:12px">נסו שוב</a>
         <a class="btn btn-ghost" href="/" style="margin-top:8px">לרשימת הנכסים</a>
       </div>
     </div>
@@ -176,6 +256,124 @@
     });
   }
 
+  // ── theme (fonts + colors) ──
+  // CSS font-family stack for a role; "custom" uses the uploaded font.
+  function roleFamily(role, sel) {
+    var base = role === "title" ? "'Frank Ruhl Libre', serif" : "'Heebo', sans-serif";
+    if (sel === "custom") return '"ThemeCustomFont", ' + base;
+    return sel ? ("'" + sel + "', " + base) : base;
+  }
+  function fontFilesNeeded() {
+    return $("#thFontTitle").value === "custom" || $("#thFontBody").value === "custom";
+  }
+  // Live preview reflecting the current font + color choices.
+  function updatePreview() {
+    $("#pvTitle").style.fontFamily = roleFamily("title", $("#thFontTitle").value);
+    $("#pvBody").style.fontFamily = roleFamily("body", $("#thFontBody").value);
+    var manual = !$("#thAuto").checked;
+    var primary = manual ? $("#thPrimary").value : "";
+    var accent = manual ? $("#thAccent").value : "";
+    $("#pvTitle").style.color = primary || "var(--gold)";
+    $("#pvBtn").style.background = primary || "var(--gold)";
+    $("#thPreview").style.borderColor = accent || "rgba(23,20,15,.14)";
+  }
+
+  function onFontChange() {
+    $("#thFontFileWrap").style.display = fontFilesNeeded() ? "" : "none";
+    updatePreview();
+  }
+  $("#thFontTitle").addEventListener("change", onFontChange);
+  $("#thFontBody").addEventListener("change", onFontChange);
+  $("#thAuto").addEventListener("change", function () {
+    $("#thColors").style.display = this.checked ? "none" : "";
+    updatePreview();
+  });
+
+  // Color pickers: the swatch button mirrors the picked color and, on click,
+  // marks it as chosen and applies it to the preview.
+  function wireColor(inputSel, btnSel) {
+    var input = $(inputSel), btn = $(btnSel);
+    function sync() { btn.style.background = input.value; }
+    input.addEventListener("input", function () { sync(); btn.classList.remove("chosen"); updatePreview(); });
+    btn.addEventListener("click", function () { btn.classList.add("chosen"); updatePreview(); });
+    sync();
+  }
+  wireColor("#thPrimary", "#thPrimaryBtn");
+  wireColor("#thAccent", "#thAccentBtn");
+
+  // Custom font: register it for the live preview the moment it's selected.
+  $("#thFontFile").addEventListener("change", function () {
+    var f = this.files[0]; if (!f || !window.FontFace) return;
+    var ff = new FontFace("ThemeCustomFont", "url('" + URL.createObjectURL(f) + "')");
+    ff.load().then(function (loaded) { document.fonts.add(loaded); updatePreview(); }).catch(function () {});
+  });
+
+  function rgbToHex(r, g, b) {
+    return "#" + [r, g, b].map(function (v) {
+      return ("0" + Math.max(0, Math.min(255, v)).toString(16)).slice(-2);
+    }).join("");
+  }
+  function hexToRgbL(h) {
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(h || ""));
+    return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
+  }
+  // A darker shade of the base color, for the secondary/accent token.
+  function deriveAccent(hex) {
+    var c = hexToRgbL(hex); if (!c) return null;
+    return rgbToHex(Math.round(c.r * 0.5), Math.round(c.g * 0.5), Math.round(c.b * 0.5));
+  }
+  // Pull a representative brand color out of the logo: average the saturated,
+  // non-background pixels on a downscaled canvas. Returns a hex or null.
+  function extractLogoColor(file) {
+    return new Promise(function (resolve) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var c = document.createElement("canvas"), w = c.width = 40, h = c.height = 40;
+          var ctx = c.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          var d = ctx.getImageData(0, 0, w, h).data;
+          var r = 0, g = 0, b = 0, n = 0;
+          for (var i = 0; i < d.length; i += 4) {
+            var R = d[i], G = d[i + 1], B = d[i + 2], A = d[i + 3];
+            if (A < 128) continue;
+            var mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+            if (mx > 245 && mn > 245) continue;   // near-white
+            if (mx < 22) continue;                 // near-black
+            if ((mx === 0 ? 0 : (mx - mn) / mx) < 0.18) continue; // low-sat background
+            r += R; g += G; b += B; n++;
+          }
+          URL.revokeObjectURL(url);
+          resolve(n < 5 ? null : rgbToHex(Math.round(r / n), Math.round(g / n), Math.round(b / n)));
+        } catch (e) { URL.revokeObjectURL(url); resolve(null); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }
+  // Resolve the theme the user picked. Colors come from explicit pickers, or —
+  // when "auto" is on — are derived from the logo (falling back to page defaults).
+  function buildTheme(logoFile) {
+    var t = $("#thFontTitle").value, b = $("#thFontBody").value;
+    var theme = {
+      font_title: t === "custom" ? "custom" : (t || null),
+      font_body: b === "custom" ? "custom" : (b || null),
+      font_url: null, primary: null, accent: null,
+    };
+    if (!$("#thAuto").checked) {
+      theme.primary = $("#thPrimary").value || null;
+      theme.accent = $("#thAccent").value || null;
+      return Promise.resolve(theme);
+    }
+    if (!logoFile) return Promise.resolve(theme);
+    return extractLogoColor(logoFile).then(function (base) {
+      if (base) { theme.primary = base; theme.accent = deriveAccent(base); }
+      return theme;
+    });
+  }
+  updatePreview();
+
   // ── submit ──
   $("#submitBtn").addEventListener("click", function () {
     var err = $("#formErr");
@@ -209,53 +407,62 @@
     btn.textContent = "מעלים תמונות...";
     var headers = isDemo ? { "x-demo-key": demoKey } : {};
 
-    var uploads = photos.map(function (p) { return p.file; });
     var videoFile = $("#videoInput").files[0] || null;
-    if (videoFile) uploads.push(videoFile);
     var logoFile = isDemo && $("#agLogo").files[0] ? $("#agLogo").files[0] : null;
-    if (logoFile) uploads.push(logoFile);
+    var fontFile = (fontFilesNeeded() && $("#thFontFile").files[0]) ? $("#thFontFile").files[0] : null;
 
-    FLY.uploadFiles(uploads, headers, function (i, pct) {
-      if (i < photos.length) photos[i].el.querySelector(".bar i").style.width = pct + "%";
-    }).then(function (urls) {
-      var photoUrls = urls.slice(0, photos.length);
-      var cursor = photos.length;
-      var videoUrl = videoFile ? urls[cursor++] : null;
-      var logoUrl = logoFile ? urls[cursor++] : null;
+    // Resolve the theme first (logo color extraction is async), then upload.
+    buildTheme(logoFile).then(function (theme) {
+      var uploads = photos.map(function (p) { return p.file; });
+      if (videoFile) uploads.push(videoFile);
+      if (logoFile) uploads.push(logoFile);
+      if (fontFile) uploads.push(fontFile);
 
-      var body = {
-        address: $("#pAddress").value.trim(),
-        city: $("#pCity").value.trim(),
-        neighborhood: $("#pHood").value.trim(),
-        price: Number($("#pPrice").value),
-        rooms: Number($("#pRooms").value),
-        size_sqm: Number($("#pSqm").value) || 0,
-        floor: Number($("#pFloor").value) || 0,
-        parking: Number($("#pParking").value) || 0,
-        description: $("#pDesc").value.trim(),
-        photos_urls: photoUrls,
-        own_video_url: videoUrl,
-      };
-      if (isDemo) {
-        body.agent = {
-          name: $("#agName").value.trim(),
-          brand_name: $("#agBrand").value.trim(),
-          phone: agPhone,
-          license: $("#agLicense").value.trim(),
-          logo_url: logoUrl,
+      return FLY.uploadFiles(uploads, headers, function (i, pct) {
+        if (i < photos.length) photos[i].el.querySelector(".bar i").style.width = pct + "%";
+      }).then(function (urls) {
+        var photoUrls = urls.slice(0, photos.length);
+        var cursor = photos.length;
+        var videoUrl = videoFile ? urls[cursor++] : null;
+        var logoUrl = logoFile ? urls[cursor++] : null;
+        var fontUrl = fontFile ? urls[cursor++] : null;
+        if (fontUrl) theme.font_url = fontUrl;
+
+        var body = {
+          address: $("#pAddress").value.trim(),
+          city: $("#pCity").value.trim(),
+          neighborhood: $("#pHood").value.trim(),
+          price: Number($("#pPrice").value),
+          rooms: Number($("#pRooms").value),
+          size_sqm: Number($("#pSqm").value) || 0,
+          floor: Number($("#pFloor").value) || 0,
+          parking: Number($("#pParking").value) || 0,
+          description: $("#pDesc").value.trim(),
+          photos_urls: photoUrls,
+          own_video_url: videoUrl,
+          theme: theme,
         };
-      }
-      btn.textContent = "יוצרים את הדף...";
-      var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
-      return fetch(path, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: Object.assign({ "Content-Type": "application/json" }, headers),
-        body: JSON.stringify(body),
-      }).then(function (r) {
-        return r.json().then(function (d) {
-          if (!r.ok) throw new Error(d.error || "create failed");
-          return d;
+        if (isDemo) {
+          body.agent = {
+            name: $("#agName").value.trim(),
+            brand_name: $("#agBrand").value.trim(),
+            phone: agPhone,
+            license: $("#agLicense").value.trim(),
+            logo_url: logoUrl,
+          };
+        }
+        btn.textContent = "יוצרים את הדף...";
+        var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
+        return fetch(path, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: Object.assign({ "Content-Type": "application/json" }, headers),
+          body: JSON.stringify(body),
+        }).then(function (r) {
+          return r.json().then(function (d) {
+            if (!r.ok) throw new Error(d.error || "create failed");
+            return d;
+          });
         });
       });
     }).then(function (d) {
@@ -277,26 +484,45 @@
     var stage = 2;
     var startedAt = Date.now();
 
+    // Stop polling after ~7 min so the screen can never spin forever; WhatsApp
+    // delivery is the backstop, so on timeout we tell the user we'll message them.
+    var MAX_WAIT_MS = 7 * 60 * 1000;
+
+    // End the build screen in a terminal state: "done" (page ready), "wait"
+    // (timed out — WhatsApp fallback) or "fail" (pipeline reported failure).
+    function endBuilding(state, pageUrl) {
+      clearInterval(iv);
+      $("#buildSpin").classList.add("hidden");
+      if (state === "done") {
+        ["st1", "st2", "st3", "st4"].forEach(function (id) {
+          var el = $("#" + id); el.classList.remove("now"); el.classList.add("done");
+        });
+        $("#pageLink").href = pageUrl;
+        $("#doneBox").classList.remove("hidden");
+      } else if (state === "fail") {
+        $("#retryLink").href = location.pathname + location.search;
+        $("#failBox").classList.remove("hidden");
+      } else {
+        $("#waitBox").classList.remove("hidden");
+      }
+    }
+
     var iv = setInterval(function () {
       // advance the cosmetic steps over time
       var elapsed = (Date.now() - startedAt) / 1000;
       if (stage === 2 && elapsed > 90) { $("#st2").classList.remove("now"); $("#st2").classList.add("done"); $("#st3").classList.add("now"); stage = 3; }
+      if (Date.now() - startedAt > MAX_WAIT_MS) { endBuilding("wait"); return; }
 
       fetch("/api/listing-status?id=" + encodeURIComponent(listingId))
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.page_id && d.page_url) {
-            clearInterval(iv);
-            ["st1", "st2", "st3", "st4"].forEach(function (id) {
-              var el = $("#" + id);
-              el.classList.remove("now"); el.classList.add("done");
-            });
-            $("#buildSpin").classList.add("hidden");
-            $("#pageLink").href = d.page_url;
-            $("#doneBox").classList.remove("hidden");
+            endBuilding("done", d.page_url);
+          } else if (d.status === "failed") {
+            endBuilding("fail");
           }
         })
-        .catch(function () { /* keep polling */ });
+        .catch(function () { /* transient — keep polling until MAX_WAIT_MS */ });
     }, 6000);
   }
 })();

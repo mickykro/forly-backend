@@ -58,8 +58,14 @@ const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
 const MAX_UPLOAD_FILES = 12;
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mp4" };
+// Custom landing-page fonts. Browsers send inconsistent MIME for fonts (often
+// empty or application/octet-stream), so upload-urls also falls back to the
+// file extension — see FONT_EXTS.
+const FONT_TYPES = { "font/woff2": "woff2", "font/woff": "woff", "font/ttf": "ttf", "font/otf": "otf" };
+const FONT_EXTS = { woff2: "woff2", woff: "woff", ttf: "ttf", otf: "otf" };
 const MAX_IMAGE_MB = 10;
 const MAX_VIDEO_MB = 120;
+const MAX_FONT_MB = 5;
 const PAGE_LIFESPAN_DAYS = 30;
 const LEAD_MAX_PER_HOUR = 3;
 
@@ -121,6 +127,23 @@ async function incrPageCounter(pageId, field, by) {
 const pad = (n) => String(n).padStart(2, "0");
 const daysFromNow = (d) => new Date(Date.now() + d * 86400000);
 
+// Landing-page theme: only whitelist a hex color, a short font family/token, and
+// an optional custom-font URL. Returns null when nothing usable was provided.
+const HEX = /^#[0-9a-fA-F]{6}$/;
+function sanitizeTheme(t) {
+  if (!t || typeof t !== "object") return null;
+  const hex = (v) => (typeof v === "string" && HEX.test(v.trim()) ? v.trim() : null);
+  const str = (v) => (typeof v === "string" ? v.slice(0, 60) : null);
+  const clean = {
+    font_title: str(t.font_title),
+    font_body: str(t.font_body),
+    font_url: typeof t.font_url === "string" && /^https?:\/\//.test(t.font_url) ? t.font_url : null,
+    primary: hex(t.primary),
+    accent: hex(t.accent),
+  };
+  return (clean.font_title || clean.font_body || clean.font_url || clean.primary || clean.accent) ? clean : null;
+}
+
 function normalizePhone(raw) {
   const digits = String(raw).replace(/\D/g, "");
   if (/^05\d{8}$/.test(digits)) return "972" + digits.slice(1);
@@ -177,9 +200,12 @@ app.post("/api/upload-urls", (req, res) => {
   const slots = [];
   for (const f of files) {
     const ct = String((f && f.contentType) || "");
-    const ext = IMAGE_TYPES[ct] || VIDEO_TYPES[ct];
+    const nameExt = String((f && f.name) || "").split(".").pop().toLowerCase();
+    // Fonts often arrive with empty/octet-stream MIME → fall back to extension.
+    const ext = IMAGE_TYPES[ct] || VIDEO_TYPES[ct] || FONT_TYPES[ct] || FONT_EXTS[nameExt];
     if (!ext) return res.status(400).json({ error: `unsupported type: ${ct}` });
-    const isVideo = ct in VIDEO_TYPES;
+    const isVideo = ext === "mp4";
+    const isFont = ext in FONT_EXTS;
     const fname = `${crypto.randomUUID()}.${ext}`;
     slots.push({
       name: (f && f.name) || fname,
@@ -187,7 +213,7 @@ app.post("/api/upload-urls", (req, res) => {
       method: "PUT",
       content_type: ct,
       public_url: `${BASE_URL}/files/${fname}`,
-      max_mb: isVideo ? MAX_VIDEO_MB : MAX_IMAGE_MB,
+      max_mb: isVideo ? MAX_VIDEO_MB : isFont ? MAX_FONT_MB : MAX_IMAGE_MB,
     });
   }
   res.json({ files: slots });
@@ -196,14 +222,16 @@ app.post("/api/upload-urls", (req, res) => {
 const rawBody = express.raw({ type: () => true, limit: `${MAX_VIDEO_MB}mb` });
 app.put("/api/upload/:fname", rawBody, (req, res) => {
   const fname = req.params.fname;
-  if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4)$/.test(fname)) {
+  if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.test(fname)) {
     return res.status(400).json({ error: "bad filename" });
   }
   if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
     return res.status(400).json({ error: "empty body" });
   }
   const isVideo = fname.endsWith(".mp4");
-  if (req.body.length > (isVideo ? MAX_VIDEO_MB : MAX_IMAGE_MB) * 1024 * 1024) {
+  const isFont = /\.(woff2|woff|ttf|otf)$/.test(fname);
+  const maxMb = isVideo ? MAX_VIDEO_MB : isFont ? MAX_FONT_MB : MAX_IMAGE_MB;
+  if (req.body.length > maxMb * 1024 * 1024) {
     return res.status(413).json({ error: "too large" });
   }
   fs.writeFileSync(path.join(UPLOAD_DIR, fname), req.body);
@@ -238,6 +266,7 @@ async function createListing(phone, body, agentOverride) {
       phone: String(agentOverride.phone || phone),
       license: String(agentOverride.license || ""),
     } : null,
+    theme: sanitizeTheme(body.theme),
     created_at: new Date(),
   };
   await saveListing(listing);
@@ -283,6 +312,9 @@ app.get("/api/listing-status", async (req, res) => {
     listing_id: id,
     page_id: listing.page_id || null,
     page_url: listing.page_id ? `${PAGE_BASE_URL}/p/${listing.page_id}` : null,
+    // "building" until a page exists; the pipeline may set "failed" so the
+    // building screen can surface an error instead of polling indefinitely.
+    status: listing.page_id ? "ready" : (listing.status === "failed" ? "failed" : "building"),
   });
 });
 
@@ -300,6 +332,16 @@ app.post("/createPropertyPage", async (req, res) => {
     const reusable = await findActivePageByListing(body.listing_id);
     const pageId = reusable ? reusable.page_id : crypto.randomUUID();
     const base = `pages/${pageId}`;
+
+    // Theme is chosen on the intake form and stored on the listing; the n8n page
+    // builder doesn't forward it, so read it here. A custom font is re-hosted
+    // under the page assets so it never expires.
+    const listing = await getListing(body.listing_id).catch(() => null);
+    const theme = sanitizeTheme(body.theme || (listing && listing.theme));
+    if (theme && theme.font_url) {
+      const fext = (theme.font_url.split("?")[0].match(/\.(woff2|woff|ttf|otf)$/i) || [, "woff2"])[1].toLowerCase();
+      theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`).catch(() => theme.font_url);
+    }
 
     const videoP = rehost(body.video_url, `${base}/walkthrough.mp4`);
     const posterP = rehost(body.poster_url || body.photos[0].url, `${base}/poster.jpg`);
@@ -346,6 +388,7 @@ app.post("/createPropertyPage", async (req, res) => {
         floor: Number(body.property && body.property.floor) || 0,
         parking: Number(body.property && body.property.parking) || 0,
       },
+      theme: theme || null,
       hero: { phrase: body.hero_phrase || "", video_url: videoUrl, poster_url: posterUrl },
       gallery: { images: galleryImages },
       carousel: { slides: (body.carousel_slides || []).slice(0, 6) },
@@ -396,7 +439,7 @@ app.get("/api/property-page", async (req, res) => {
   res.json({
     page_id: id, status: d.status, agent: d.agent, property: d.property,
     hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
-    cta: d.cta, sections: d.sections,
+    cta: d.cta, sections: d.sections, theme: d.theme || null,
   });
 });
 
