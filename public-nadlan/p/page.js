@@ -131,7 +131,9 @@
     }
 
     // hero
-    text(".hero-copy .eyebrow", (p.neighborhood ? p.neighborhood + ", " : "") + p.city);
+    text(".hero-copy .eyebrow",
+      (p.listing_type === "rent" ? "להשכרה" : "למכירה") + " · " +
+      (p.neighborhood ? p.neighborhood + ", " : "") + p.city);
     var h1 = $(".hero-copy h1");
     var phrase = d.hero.phrase || p.title;
     var parts = phrase.split("\n");
@@ -147,9 +149,10 @@
     var heroBg = $(".hero-bg");
     if (heroBg && d.hero.poster_url) heroBg.style.backgroundImage = "url('" + d.hero.poster_url + "')";
 
-    // specs strip
+    // specs strip — price label + suffix depend on sale vs. rent
     var specs = $$(".spec");
-    fillSpec(specs[0], fmtPrice(p.price), "מחיר מבוקש");
+    var isRent = p.listing_type === "rent";
+    fillSpec(specs[0], fmtPrice(p.price) + (isRent && p.price ? " / חודש" : ""), isRent ? "שכר דירה חודשי" : "מחיר מבוקש");
     fillSpec(specs[1], p.rooms ? p.rooms + " חד׳" : "", p.size_sqm ? p.size_sqm + " מ״ר" : "");
     fillSpec(specs[2], p.floor ? "קומה " + p.floor : (p.neighborhood || p.city), p.address || "");
     fillSpec(specs[3], p.parking ? p.parking + " חניות" : "", p.parking ? "בטאבו" : "");

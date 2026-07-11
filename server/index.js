@@ -251,6 +251,7 @@ async function createListing(phone, body, agentOverride) {
     address: String(body.address).slice(0, 120),
     neighborhood: String(body.neighborhood || "").slice(0, 60),
     city: String(body.city).slice(0, 60),
+    listing_type: body.listing_type === "rent" ? "rent" : "sale",
     price: Number(body.price) || 0, rooms: Number(body.rooms) || 0,
     size_sqm: Number(body.size_sqm) || 0, floor: Number(body.floor) || 0,
     parking: Number(body.parking) || 0,
@@ -277,6 +278,7 @@ async function createListing(phone, body, agentOverride) {
   } : {
     phone, image_urls: listing.photos_urls, listing_id: listingId, trigger_source: "dashboard",
     property_details: {
+      listing_type: listing.listing_type,
       address: listing.address, neighborhood: listing.neighborhood, city: listing.city,
       price: listing.price, rooms: listing.rooms, size_sqm: listing.size_sqm,
       floor: listing.floor, parking: listing.parking, description: listing.description,
@@ -379,6 +381,7 @@ app.post("/createPropertyPage", async (req, res) => {
       property: {
         title: (body.property && body.property.title) ||
           `${(body.property && body.property.rooms) || ""} חד׳ ב${(body.property && (body.property.neighborhood || body.property.city)) || ""}`.trim(),
+        listing_type: (body.property && body.property.listing_type) || (listing && listing.listing_type) || "sale",
         address: (body.property && body.property.address) || "",
         neighborhood: (body.property && body.property.neighborhood) || "",
         city: (body.property && body.property.city) || "",

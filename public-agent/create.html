@@ -64,13 +64,22 @@
       </div>
 
       <div class="sec-title">פרטי הנכס</div>
-      <div class="field"><label>כתובת *</label><input id="pAddress" placeholder="ברודצקי 12, דירה 34"></div>
+      <div class="grid-2">
+        <div class="field">
+          <label>סוג העסקה *</label>
+          <select id="pType">
+            <option value="sale" selected>למכירה</option>
+            <option value="rent">להשכרה</option>
+          </select>
+        </div>
+        <div class="field"><label>כתובת *</label><input id="pAddress" placeholder="ברודצקי 12, דירה 34"></div>
+      </div>
       <div class="grid-2">
         <div class="field"><label>עיר *</label><input id="pCity" placeholder="תל אביב"></div>
         <div class="field"><label>שכונה</label><input id="pHood" placeholder="בבלי"></div>
       </div>
       <div class="grid-3">
-        <div class="field"><label>מחיר (₪) *</label><input id="pPrice" type="number" inputmode="numeric" placeholder="4900000"></div>
+        <div class="field"><label id="pPriceLabel">מחיר (₪) *</label><input id="pPrice" type="number" inputmode="numeric" placeholder="4900000"></div>
         <div class="field"><label>חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
         <div class="field"><label>מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
       </div>
@@ -256,6 +265,13 @@
     });
   }
 
+  // ── listing type (sale / rent): adapt the price label ──
+  $("#pType").addEventListener("change", function () {
+    var rent = this.value === "rent";
+    $("#pPriceLabel").textContent = rent ? "שכר דירה חודשי (₪) *" : "מחיר (₪) *";
+    $("#pPrice").placeholder = rent ? "12000" : "4900000";
+  });
+
   // ── theme (fonts + colors) ──
   // CSS font-family stack for a role; "custom" uses the uploaded font.
   function roleFamily(role, sel) {
@@ -429,6 +445,7 @@
         if (fontUrl) theme.font_url = fontUrl;
 
         var body = {
+          listing_type: $("#pType").value === "rent" ? "rent" : "sale",
           address: $("#pAddress").value.trim(),
           city: $("#pCity").value.trim(),
           neighborhood: $("#pHood").value.trim(),
