@@ -139,7 +139,7 @@ function sanitizeTheme(t) {
   if (!t || typeof t !== "object") return null;
   const hex = (v) => (typeof v === "string" && HEX.test(v.trim()) ? v.trim() : null);
   const str = (v) => (typeof v === "string" ? v.slice(0, 60) : null);
-  const TEMPLATES = { classic: 1, minimal: 1, bold: 1 };
+  const TEMPLATES = { original: 1, nocturne: 1, galerie: 1, reel: 1 };
   const clean = {
     template: TEMPLATES[t.template] ? t.template : null,
     font_title: str(t.font_title),

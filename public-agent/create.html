@@ -15,32 +15,24 @@
   .th-pick.chosen{box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.3))}
   #thFontTitle option,#thFontBody option{font-size:1rem}
 
-  /* template picker grid — each card is a mini mock of the design */
-  .tpl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-  .tpl-card{border:2px solid rgba(23,20,15,.14);border-radius:12px;background:#fff;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:border-color .15s,box-shadow .15s}
+  /* template picker — live iframe previews of each design */
+  .tpl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  @media(max-width:540px){.tpl-grid{grid-template-columns:1fr}}
+  .tpl-card{position:relative;border:2px solid rgba(23,20,15,.14);border-radius:14px;overflow:hidden;background:#0c0a09;cursor:pointer;transition:border-color .15s,box-shadow .15s}
   .tpl-card:hover{border-color:var(--gold-bright,#d9b15c)}
-  .tpl-card.selected{border-color:var(--gold,#b98a2f);box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.22))}
-  .tpl-card .tpl-name{font-size:.76rem;font-weight:600;color:var(--ink,#17140f);text-align:center}
-  .tpl-mock{border-radius:8px;overflow:hidden;background:#f4efe6;aspect-ratio:4/3;display:flex;flex-direction:column;padding:7px;gap:5px}
-  .tpl-mock .m-bar{height:6px;width:42%;border-radius:4px;background:#c9a24a}
-  .tpl-mock .m-img{flex:1;border-radius:6px;background:linear-gradient(120deg,#d8cbb0,#efe7d6)}
-  .tpl-mock .m-h{height:9px;width:72%;border-radius:4px;background:#2b2620}
-  .tpl-mock .m-sub{height:5px;width:55%;border-radius:4px;background:#b3a89a}
-  .tpl-mock .m-btn{height:11px;width:38%;border-radius:20px;background:#c9a24a}
-  /* minimal */
-  .tpl-card[data-tpl="minimal"] .tpl-mock{background:#fff;gap:6px}
-  .tpl-card[data-tpl="minimal"] .m-bar{background:#111;width:28%}
-  .tpl-card[data-tpl="minimal"] .m-img{background:#ececec}
-  .tpl-card[data-tpl="minimal"] .m-h{background:#111;height:8px}
-  .tpl-card[data-tpl="minimal"] .m-sub{background:#c9c9c9}
-  .tpl-card[data-tpl="minimal"] .m-btn{background:#111;border-radius:4px}
-  /* bold */
-  .tpl-card[data-tpl="bold"] .tpl-mock{background:#14110c}
-  .tpl-card[data-tpl="bold"] .m-bar{background:#d9b15c;width:34%}
-  .tpl-card[data-tpl="bold"] .m-img{background:linear-gradient(120deg,#2b2620,#3a332a)}
-  .tpl-card[data-tpl="bold"] .m-h{background:#fff;height:13px;width:82%}
-  .tpl-card[data-tpl="bold"] .m-sub{background:#7a7264}
-  .tpl-card[data-tpl="bold"] .m-btn{background:#d9b15c;border-radius:2px;width:44%}
+  .tpl-card.selected{border-color:var(--gold,#b98a2f);box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.28))}
+  .tpl-frame{position:relative;aspect-ratio:16/11;overflow:hidden;background:#0c0a09}
+  .tpl-frame iframe{position:absolute;top:0;right:0;width:1280px;height:880px;border:0;transform-origin:top right;pointer-events:none}
+  .tpl-check{position:absolute;top:10px;inset-inline-start:10px;z-index:4;width:26px;height:26px;border-radius:50%;background:var(--gold,#b98a2f);color:#fff;display:none;place-items:center;font-size:.85rem;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+  .tpl-card.selected .tpl-check{display:grid}
+  .tpl-bar{position:relative;z-index:3;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;background:#fff}
+  .tpl-name{font-size:.82rem;font-weight:600;color:var(--ink,#17140f)}
+  .tpl-full{border:1px solid rgba(23,20,15,.18);background:transparent;border-radius:8px;padding:5px 11px;font-size:.9rem;line-height:1;cursor:pointer;color:var(--ink-soft,#5c554c)}
+  .tpl-full:hover{border-color:var(--gold,#b98a2f);color:var(--gold,#b98a2f)}
+  /* fullscreen overlay */
+  #tplFull{display:none;position:fixed;inset:0;z-index:9999;background:#000}
+  #tplFull iframe{width:100%;height:100%;border:0}
+  #tplFullClose{position:fixed;top:14px;inset-inline-end:14px;z-index:10000;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.55);color:#fff;border-radius:100px;padding:9px 18px;font-size:.9rem;font-weight:600;cursor:pointer;backdrop-filter:blur(6px)}
 </style>
 </head>
 <body>
@@ -145,22 +137,30 @@
       </div>
 
       <div class="field">
-        <label>תבנית עיצוב</label>
-        <div class="tpl-grid">
-          <button type="button" class="tpl-card selected" data-tpl="classic">
-            <div class="tpl-mock"><span class="m-bar"></span><span class="m-img"></span><span class="m-h"></span><span class="m-sub"></span><span class="m-btn"></span></div>
-            <span class="tpl-name">קלאסי · יוקרתי</span>
-          </button>
-          <button type="button" class="tpl-card" data-tpl="minimal">
-            <div class="tpl-mock"><span class="m-bar"></span><span class="m-img"></span><span class="m-h"></span><span class="m-sub"></span><span class="m-btn"></span></div>
-            <span class="tpl-name">מינימלי · נקי</span>
-          </button>
-          <button type="button" class="tpl-card" data-tpl="bold">
-            <div class="tpl-mock"><span class="m-bar"></span><span class="m-img"></span><span class="m-h"></span><span class="m-sub"></span><span class="m-btn"></span></div>
-            <span class="tpl-name">נועז · מודרני</span>
-          </button>
+        <label>תבנית עיצוב · לחצו לבחירה, ⛶ למסך מלא</label>
+        <div class="tpl-grid" id="tplGrid">
+          <div class="tpl-card selected" data-tpl="original">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><iframe src="/previews/original.html" title="Original" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name">קלאסי</span><button type="button" class="tpl-full" data-src="/previews/original.html">⛶</button></div>
+          </div>
+          <div class="tpl-card" data-tpl="nocturne">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><iframe src="/previews/nocturne.html" title="Nocturne" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name">נוקטורן · דרמטי</span><button type="button" class="tpl-full" data-src="/previews/nocturne.html">⛶</button></div>
+          </div>
+          <div class="tpl-card" data-tpl="galerie">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><iframe src="/previews/galerie.html" title="Galerie" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name">גלריה · בהיר</span><button type="button" class="tpl-full" data-src="/previews/galerie.html">⛶</button></div>
+          </div>
+          <div class="tpl-card" data-tpl="reel">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><iframe src="/previews/reel.html" title="Reel" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name">ריל · תנועה</span><button type="button" class="tpl-full" data-src="/previews/reel.html">⛶</button></div>
+          </div>
         </div>
-        <input type="hidden" id="thTemplate" value="classic">
+        <input type="hidden" id="thTemplate" value="original">
       </div>
       <button type="button" id="thSurprise" class="btn btn-ghost" style="width:100%;margin-bottom:12px">🎲 עיצוב אקראי</button>
 
@@ -255,6 +255,9 @@
   </div>
 </div>
 
+<!-- fullscreen template preview overlay -->
+<div id="tplFull"><button type="button" id="tplFullClose">✕ סגירה</button><iframe id="tplFullFrame" title="תצוגה מקדימה"></iframe></div>
+
 <script src="/api.js"></script>
 <script>
 (function () {
@@ -339,14 +342,6 @@
     $("#pvTitle").style.color = primary || "var(--gold)";
     $("#pvBtn").style.background = primary || "var(--gold)";
     $("#thPreview").style.borderColor = accent || "rgba(23,20,15,.14)";
-    // reflect the chosen template's key traits in the preview
-    var tpl = $("#thTemplate").value;
-    var pvBtn = $("#pvBtn");
-    pvBtn.style.textTransform = tpl === "bold" ? "uppercase" : "none";
-    pvBtn.style.borderRadius = tpl === "bold" ? "3px" : "10px";
-    pvBtn.style.letterSpacing = tpl === "bold" ? ".04em" : "normal";
-    $("#pvTitle").style.fontWeight = tpl === "minimal" ? "600" : "700";
-    $("#thPreview").style.borderRadius = tpl === "bold" ? "4px" : "14px";
   }
 
   function onFontChange() {
@@ -365,8 +360,43 @@
     updatePreview();
   }
   Array.prototype.forEach.call(document.querySelectorAll(".tpl-card"), function (c) {
-    c.addEventListener("click", function () { selectTemplate(c.getAttribute("data-tpl")); });
+    c.addEventListener("click", function (e) {
+      if (e.target.closest(".tpl-full")) return; // fullscreen button handled below
+      selectTemplate(c.getAttribute("data-tpl"));
+    });
   });
+
+  // scale each preview iframe (rendered at 1280×880) to fit its card
+  function scaleFrames() {
+    Array.prototype.forEach.call(document.querySelectorAll(".tpl-frame"), function (f) {
+      var ifr = f.querySelector("iframe");
+      if (ifr) ifr.style.transform = "scale(" + (f.clientWidth / 1280) + ")";
+    });
+  }
+  addEventListener("resize", scaleFrames);
+  scaleFrames();
+  setTimeout(scaleFrames, 300); // after fonts/layout settle
+
+  // fullscreen preview overlay
+  var tplFull = $("#tplFull"), tplFullFrame = $("#tplFullFrame");
+  function openFull(src) {
+    tplFullFrame.src = src;
+    tplFull.style.display = "block";
+    document.body.style.overflow = "hidden";
+    if (tplFull.requestFullscreen) tplFull.requestFullscreen().catch(function () {});
+  }
+  function closeFull() {
+    if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
+    tplFull.style.display = "none";
+    tplFullFrame.src = "about:blank";
+    document.body.style.overflow = "";
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".tpl-full"), function (b) {
+    b.addEventListener("click", function (e) { e.stopPropagation(); openFull(b.getAttribute("data-src")); });
+  });
+  $("#tplFullClose").addEventListener("click", closeFull);
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && tplFull.style.display === "block") closeFull(); });
+  document.addEventListener("fullscreenchange", function () { if (!document.fullscreenElement && tplFull.style.display === "block") closeFull(); });
 
   $("#thAuto").addEventListener("change", function () {
     $("#thColors").style.display = this.checked ? "none" : "";
@@ -376,7 +406,7 @@
   // "Surprise me" — compose a fresh design: random template + font pairing +
   // a tasteful palette (switches to manual colors so the palette is visible).
   var TH_FONTS = ["", "Heebo", "Assistant", "Rubik", "Frank Ruhl Libre", "Secular One"];
-  var TH_TEMPLATES = ["classic", "minimal", "bold"];
+  var TH_TEMPLATES = ["original", "nocturne", "galerie", "reel"];
   var TH_PALETTES = [
     ["#b98a2f", "#14110c"], ["#2e86de", "#17436f"], ["#8e44ad", "#3d1f4d"],
     ["#127a5b", "#0b3b2c"], ["#c0392b", "#4d1410"], ["#0f766e", "#134e4a"], ["#1f2937", "#111827"],
