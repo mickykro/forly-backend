@@ -49,6 +49,11 @@ const BASE_URL = (process.env.BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads");
 // Where landing pages are served — defaults to this server (pages live at /p/).
 const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, "");
+// Local-dev convenience: when set, uploads are proxied to this host and the
+// returned public_url points there, so images from local testing carry the same
+// (production) URL and are fetchable by the real pipeline. Unset = local disk.
+const REMOTE_UPLOAD_BASE = (process.env.REMOTE_UPLOAD_BASE || "").replace(/\/+$/, "");
+const UPLOAD_PUBLIC_BASE = REMOTE_UPLOAD_BASE || BASE_URL;
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
 const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
@@ -212,7 +217,7 @@ app.post("/api/upload-urls", (req, res) => {
       upload_url: `/api/upload/${fname}`,
       method: "PUT",
       content_type: ct,
-      public_url: `${BASE_URL}/files/${fname}`,
+      public_url: `${UPLOAD_PUBLIC_BASE}/files/${fname}`,
       max_mb: isVideo ? MAX_VIDEO_MB : isFont ? MAX_FONT_MB : MAX_IMAGE_MB,
     });
   }
@@ -220,7 +225,7 @@ app.post("/api/upload-urls", (req, res) => {
 });
 
 const rawBody = express.raw({ type: () => true, limit: `${MAX_VIDEO_MB}mb` });
-app.put("/api/upload/:fname", rawBody, (req, res) => {
+app.put("/api/upload/:fname", rawBody, async (req, res) => {
   const fname = req.params.fname;
   if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.test(fname)) {
     return res.status(400).json({ error: "bad filename" });
@@ -233,6 +238,23 @@ app.put("/api/upload/:fname", rawBody, (req, res) => {
   const maxMb = isVideo ? MAX_VIDEO_MB : isFont ? MAX_FONT_MB : MAX_IMAGE_MB;
   if (req.body.length > maxMb * 1024 * 1024) {
     return res.status(413).json({ error: "too large" });
+  }
+  // Local-dev remote mode: proxy the bytes to the production host so the file is
+  // reachable at the same URL we returned in public_url. (Production never sets
+  // REMOTE_UPLOAD_BASE, so the forwarded request just writes to disk there — no loop.)
+  if (REMOTE_UPLOAD_BASE) {
+    try {
+      const r = await fetch(`${REMOTE_UPLOAD_BASE}/api/upload/${fname}`, {
+        method: "PUT",
+        headers: { "Content-Type": req.headers["content-type"] || "application/octet-stream" },
+        body: req.body,
+        signal: AbortSignal.timeout(120000),
+      });
+      if (!r.ok) return res.status(502).json({ error: `remote upload failed: ${r.status}` });
+      return res.json({ ok: true, remote: true });
+    } catch (err) {
+      return res.status(502).json({ error: `remote upload failed: ${err.message}` });
+    }
   }
   fs.writeFileSync(path.join(UPLOAD_DIR, fname), req.body);
   res.json({ ok: true });
