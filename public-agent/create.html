@@ -14,6 +14,33 @@
   .th-pick:active{transform:scale(.98)}
   .th-pick.chosen{box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.3))}
   #thFontTitle option,#thFontBody option{font-size:1rem}
+
+  /* template picker grid — each card is a mini mock of the design */
+  .tpl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .tpl-card{border:2px solid rgba(23,20,15,.14);border-radius:12px;background:#fff;padding:8px;cursor:pointer;display:flex;flex-direction:column;gap:6px;transition:border-color .15s,box-shadow .15s}
+  .tpl-card:hover{border-color:var(--gold-bright,#d9b15c)}
+  .tpl-card.selected{border-color:var(--gold,#b98a2f);box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.22))}
+  .tpl-card .tpl-name{font-size:.76rem;font-weight:600;color:var(--ink,#17140f);text-align:center}
+  .tpl-mock{border-radius:8px;overflow:hidden;background:#f4efe6;aspect-ratio:4/3;display:flex;flex-direction:column;padding:7px;gap:5px}
+  .tpl-mock .m-bar{height:6px;width:42%;border-radius:4px;background:#c9a24a}
+  .tpl-mock .m-img{flex:1;border-radius:6px;background:linear-gradient(120deg,#d8cbb0,#efe7d6)}
+  .tpl-mock .m-h{height:9px;width:72%;border-radius:4px;background:#2b2620}
+  .tpl-mock .m-sub{height:5px;width:55%;border-radius:4px;background:#b3a89a}
+  .tpl-mock .m-btn{height:11px;width:38%;border-radius:20px;background:#c9a24a}
+  /* minimal */
+  .tpl-card[data-tpl="minimal"] .tpl-mock{background:#fff;gap:6px}
+  .tpl-card[data-tpl="minimal"] .m-bar{background:#111;width:28%}
+  .tpl-card[data-tpl="minimal"] .m-img{background:#ececec}
+  .tpl-card[data-tpl="minimal"] .m-h{background:#111;height:8px}
+  .tpl-card[data-tpl="minimal"] .m-sub{background:#c9c9c9}
+  .tpl-card[data-tpl="minimal"] .m-btn{background:#111;border-radius:4px}
+  /* bold */
+  .tpl-card[data-tpl="bold"] .tpl-mock{background:#14110c}
+  .tpl-card[data-tpl="bold"] .m-bar{background:#d9b15c;width:34%}
+  .tpl-card[data-tpl="bold"] .m-img{background:linear-gradient(120deg,#2b2620,#3a332a)}
+  .tpl-card[data-tpl="bold"] .m-h{background:#fff;height:13px;width:82%}
+  .tpl-card[data-tpl="bold"] .m-sub{background:#7a7264}
+  .tpl-card[data-tpl="bold"] .m-btn{background:#d9b15c;border-radius:2px;width:44%}
 </style>
 </head>
 <body>
@@ -117,20 +144,25 @@
         <span id="pvBtn" style="display:inline-block;margin-top:12px;padding:9px 18px;border-radius:10px;background:var(--gold);color:#fff;font-weight:600;font-size:.9rem">תיאום ביקור</span>
       </div>
 
-      <div class="grid-2">
-        <div class="field">
-          <label>תבנית עיצוב</label>
-          <select id="thTemplate">
-            <option value="classic" selected>קלאסי · יוקרתי</option>
-            <option value="minimal">מינימלי · נקי</option>
-            <option value="bold">נועז · מודרני</option>
-          </select>
+      <div class="field">
+        <label>תבנית עיצוב</label>
+        <div class="tpl-grid">
+          <button type="button" class="tpl-card selected" data-tpl="classic">
+            <div class="tpl-mock"><span class="m-bar"></span><span class="m-img"></span><span class="m-h"></span><span class="m-sub"></span><span class="m-btn"></span></div>
+            <span class="tpl-name">קלאסי · יוקרתי</span>
+          </button>
+          <button type="button" class="tpl-card" data-tpl="minimal">
+            <div class="tpl-mock"><span class="m-bar"></span><span class="m-img"></span><span class="m-h"></span><span class="m-sub"></span><span class="m-btn"></span></div>
+            <span class="tpl-name">מינימלי · נקי</span>
+          </button>
+          <button type="button" class="tpl-card" data-tpl="bold">
+            <div class="tpl-mock"><span class="m-bar"></span><span class="m-img"></span><span class="m-h"></span><span class="m-sub"></span><span class="m-btn"></span></div>
+            <span class="tpl-name">נועז · מודרני</span>
+          </button>
         </div>
-        <div class="field">
-          <label>&nbsp;</label>
-          <button type="button" id="thSurprise" class="btn btn-ghost" style="width:100%">🎲 עיצוב אקראי</button>
-        </div>
+        <input type="hidden" id="thTemplate" value="classic">
       </div>
+      <button type="button" id="thSurprise" class="btn btn-ghost" style="width:100%;margin-bottom:12px">🎲 עיצוב אקראי</button>
 
       <div class="grid-2">
         <div class="field">
@@ -323,7 +355,19 @@
   }
   $("#thFontTitle").addEventListener("change", onFontChange);
   $("#thFontBody").addEventListener("change", onFontChange);
-  $("#thTemplate").addEventListener("change", updatePreview);
+
+  // template picker: clickable mini-preview cards backed by a hidden input.
+  function selectTemplate(tpl) {
+    $("#thTemplate").value = tpl;
+    Array.prototype.forEach.call(document.querySelectorAll(".tpl-card"), function (c) {
+      c.classList.toggle("selected", c.getAttribute("data-tpl") === tpl);
+    });
+    updatePreview();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".tpl-card"), function (c) {
+    c.addEventListener("click", function () { selectTemplate(c.getAttribute("data-tpl")); });
+  });
+
   $("#thAuto").addEventListener("change", function () {
     $("#thColors").style.display = this.checked ? "none" : "";
     updatePreview();
@@ -339,7 +383,7 @@
   ];
   function thPick(a) { return a[Math.floor(Math.random() * a.length)]; }
   $("#thSurprise").addEventListener("click", function () {
-    $("#thTemplate").value = thPick(TH_TEMPLATES);
+    selectTemplate(thPick(TH_TEMPLATES));
     $("#thFontTitle").value = thPick(TH_FONTS);
     $("#thFontBody").value = thPick(TH_FONTS);
     var pal = thPick(TH_PALETTES);
