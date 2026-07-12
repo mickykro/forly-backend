@@ -38,6 +38,25 @@
 
   var isRent = get("property.listing_type") === "rent";
 
+  // ── theme: custom colors + fonts override the template's accent tokens ──
+  (function applyTheme() {
+    var theme = DATA.theme || {};
+    var rs = document.documentElement.style;
+    function hx(h) { var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(h || "").trim()); return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null; }
+    function mix(c, t, a) { return { r: Math.round(c.r + (t - c.r) * a), g: Math.round(c.g + (t - c.g) * a), b: Math.round(c.b + (t - c.b) * a) }; }
+    function rgb(c) { return "rgb(" + c.r + "," + c.g + "," + c.b + ")"; }
+    var pr = hx(theme.primary);
+    if (pr) { rs.setProperty("--accent", rgb(pr)); rs.setProperty("--accent-lite", rgb(mix(pr, 255, 0.3))); rs.setProperty("--accent-deep", rgb(mix(pr, 0, 0.35))); }
+    var ac = hx(theme.accent);
+    if (ac) rs.setProperty("--accent2", rgb(ac));
+    var FF = { "Heebo": "Heebo:wght@300;400;500;600;700", "Assistant": "Assistant:wght@300;400;500;600;700", "Rubik": "Rubik:wght@300;400;500;600;700", "Frank Ruhl Libre": "Frank+Ruhl+Libre:wght@300;400;500;600;700", "Secular One": "Secular+One" };
+    function loadFont(f) { if (!FF[f] || document.querySelector('link[data-f="' + f + '"]')) return; var l = document.createElement("link"); l.rel = "stylesheet"; l.setAttribute("data-f", f); l.href = "https://fonts.googleapis.com/css2?family=" + FF[f] + "&display=swap"; document.head.appendChild(l); }
+    if (theme.font_url) { var st = document.createElement("style"); st.textContent = '@font-face{font-family:"CF";src:url("' + String(theme.font_url).replace(/"/g, "") + '");font-display:swap}'; document.head.appendChild(st); }
+    function role(vars, choice, fb) { if (!choice) return; var fam = (choice === "custom" && theme.font_url) ? '"CF", ' + fb : (FF[choice] ? (loadFont(choice), "'" + choice + "', " + fb) : null); if (fam) vars.forEach(function (v) { rs.setProperty(v, fam); }); }
+    role(["--serif", "--disp"], theme.font_title, "'Frank Ruhl Libre', serif"); // title → headings (--disp for reel)
+    role(["--sans"], theme.font_body, "'Heebo', sans-serif");
+  })();
+
   // ── scalar text bindings ──
   each("[data-bind]", document, function (el) {
     var v = get(el.getAttribute("data-bind"));
