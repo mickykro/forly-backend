@@ -9,6 +9,10 @@
   var $ = function (sel) { return document.querySelector(sel); };
   var $$ = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
 
+  // i18n — chosen page language; T() translates a chrome key (falls back to key).
+  var CURLANG = "he";
+  function TR(key, vars) { return window.I18N ? window.I18N.t(CURLANG, key, vars) : key; }
+
   function setState(state) {
     document.body.classList.remove("is-loading", "has-state", "state-expired", "state-notfound");
     if (state === "active") return;
@@ -112,6 +116,8 @@
 
   function render(d) {
     applyTheme(d.theme);
+    CURLANG = d.language || "he";
+    if (window.I18N) window.I18N.apply(document, CURLANG); // translate chrome + set <html lang/dir>
     var p = d.property, a = d.agent;
     var text = function (sel, val) { var el = $(sel); if (el && val != null) el.textContent = val; };
 
@@ -139,7 +145,7 @@
 
     // hero
     text(".hero-copy .eyebrow",
-      (p.listing_type === "rent" ? "להשכרה" : "למכירה") + " · " +
+      (p.listing_type === "rent" ? TR("for_rent") : TR("for_sale")) + " · " +
       (p.neighborhood ? p.neighborhood + ", " : "") + p.city);
     var h1 = $(".hero-copy h1");
     var phrase = d.hero.phrase || p.title;
@@ -159,10 +165,10 @@
     // specs strip — price label + suffix depend on sale vs. rent
     var specs = $$(".spec");
     var isRent = p.listing_type === "rent";
-    fillSpec(specs[0], fmtPrice(p.price) + (isRent && p.price ? " / חודש" : ""), isRent ? "שכר דירה חודשי" : "מחיר מבוקש");
-    fillSpec(specs[1], p.rooms ? p.rooms + " חד׳" : "", p.size_sqm ? p.size_sqm + " מ״ר" : "");
-    fillSpec(specs[2], p.floor ? "קומה " + p.floor : (p.neighborhood || p.city), p.address || "");
-    fillSpec(specs[3], p.parking ? p.parking + " חניות" : "", p.parking ? "בטאבו" : "");
+    fillSpec(specs[0], fmtPrice(p.price) + (isRent && p.price ? " " + TR("per_month") : ""), isRent ? TR("monthly_rent") : TR("asking_price"));
+    fillSpec(specs[1], p.rooms ? p.rooms + " " + TR("rooms_short") : "", p.size_sqm ? p.size_sqm + " " + TR("sqm") : "");
+    fillSpec(specs[2], p.floor ? TR("floor") + " " + p.floor : (p.neighborhood || p.city), p.address || "");
+    fillSpec(specs[3], p.parking ? p.parking + " " + TR("parking") : "", p.parking ? TR("registered") : "");
 
     // gallery
     if (d.sections.gallery && d.gallery.images.length) {
@@ -202,14 +208,14 @@
     }
     text(".agent-meta b", a.name);
     text(".agent-meta span",
-      [a.brand_name, a.tagline, a.license ? "רישיון תיווך " + a.license : ""]
+      [a.brand_name, a.tagline, a.license ? TR("license_label") + " " + a.license : ""]
         .filter(Boolean).join(" · "));
 
     // area
     if (d.sections.area && d.area && (d.area.blurb || d.area.stats.length)) {
       var areaHead = $("#area .sec-head h2");
       if (areaHead && p.neighborhood) {
-        areaHead.innerHTML = escapeHtml("השכונה: " + p.neighborhood);
+        areaHead.innerHTML = escapeHtml(TR("the_area") + ": " + p.neighborhood);
       }
       var copy = $(".area-copy");
       var blurbHtml = (d.area.blurb || "").split("\n").filter(Boolean)
@@ -247,7 +253,7 @@
     if (submitBtn) submitBtn.textContent = d.cta.button_label;
 
     // WhatsApp links
-    var waText = encodeURIComponent("היי " + (a.name || "") + ", ראיתי את הדף של " + p.title + " ואשמח לפרטים");
+    var waText = encodeURIComponent(TR("wa_prefill", { title: p.title }));
     $$("a.btn-wa").forEach(function (el) {
       el.href = "https://wa.me/" + a.phone + "?text=" + waText;
     });
@@ -259,9 +265,9 @@
 
   function buildSubline(p) {
     var bits = [];
-    if (p.rooms) bits.push(p.rooms + " חדרים");
-    if (p.size_sqm) bits.push(p.size_sqm + " מ״ר");
-    if (p.floor) bits.push("קומה " + p.floor);
+    if (p.rooms) bits.push(p.rooms + " " + TR("rooms"));
+    if (p.size_sqm) bits.push(p.size_sqm + " " + TR("sqm"));
+    if (p.floor) bits.push(TR("floor") + " " + p.floor);
     var loc = p.neighborhood ? p.neighborhood + ", " + p.city : p.city;
     return bits.join(" · ") + (loc ? " — " + loc : "");
   }
@@ -385,7 +391,7 @@
         $("#formDone").style.display = "flex";
       }).catch(function () {
         btn.disabled = false;
-        err.textContent = "משהו השתבש — נסו שוב או פנו בוואטסאפ";
+        err.textContent = TR("form_error");
         err.classList.add("show");
       });
     });
@@ -403,14 +409,15 @@
     .then(function (d) {
       if (!d) return;
       if (d.status === "expired" || d.status === "archived") {
+        CURLANG = d.language || "he";
+        if (window.I18N) window.I18N.apply(document, CURLANG);
         if (d.agent && d.agent.phone) {
           var wa = $("#expiredWa");
           wa.style.display = "inline-flex";
           wa.href = "https://wa.me/" + d.agent.phone;
         }
         if (d.agent && d.agent.name) {
-          $("#expiredSub").textContent =
-            "תוקף הדף הסתיים. לפרטים על הנכס אפשר לפנות ל" + d.agent.name + ".";
+          $("#expiredSub").textContent = TR("expired_contact", { name: d.agent.name });
         }
         setState("expired");
         return;

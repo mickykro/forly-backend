@@ -151,6 +151,12 @@ function sanitizeTheme(t) {
   return (clean.template || clean.font_title || clean.font_body || clean.font_url || clean.primary || clean.accent) ? clean : null;
 }
 
+// Landing-page language. Whitelist the supported codes; default to Hebrew.
+const LANGUAGES = { he: 1, en: 1, ar: 1, ru: 1, es: 1, fr: 1 };
+function sanitizeLang(v) {
+  return (typeof v === "string" && LANGUAGES[v]) ? v : "he";
+}
+
 function normalizePhone(raw) {
   const digits = String(raw).replace(/\D/g, "");
   if (/^05\d{8}$/.test(digits)) return "972" + digits.slice(1);
@@ -296,6 +302,7 @@ async function createListing(phone, body, agentOverride) {
       license: String(agentOverride.license || ""),
     } : null,
     theme: sanitizeTheme(body.theme),
+    language: sanitizeLang(body.language),
     created_at: new Date(),
   };
   await saveListing(listing);
@@ -303,8 +310,10 @@ async function createListing(phone, body, agentOverride) {
   const webhook = listing.own_video_url ? N8N_PIPELINE_WEBHOOK_URL : N8N_WW1_WEBHOOK_URL;
   const payload = listing.own_video_url ? {
     listing_id: listingId, business_phone: phone, video_url: listing.own_video_url,
+    language: listing.language,
   } : {
     phone, image_urls: listing.photos_urls, listing_id: listingId, trigger_source: "dashboard",
+    language: listing.language,
     property_details: {
       listing_type: listing.listing_type,
       address: listing.address, neighborhood: listing.neighborhood, city: listing.city,
@@ -420,6 +429,7 @@ app.post("/createPropertyPage", async (req, res) => {
         parking: Number(body.property && body.property.parking) || 0,
       },
       theme: theme || null,
+      language: sanitizeLang(body.language || (listing && listing.language)),
       hero: { phrase: body.hero_phrase || "", video_url: videoUrl, poster_url: posterUrl },
       gallery: { images: galleryImages },
       carousel: { slides: (body.carousel_slides || []).slice(0, 6) },
@@ -459,6 +469,7 @@ function pagePayload(id, d) {
     page_id: id, status: d.status, agent: d.agent, property: d.property,
     hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
     cta: d.cta, sections: d.sections, theme: d.theme || null,
+    language: d.language || "he",
   };
 }
 
@@ -473,6 +484,7 @@ app.get("/api/property-page", async (req, res) => {
       page_id: id, status: d.status,
       property: { title: d.property.title },
       agent: { name: d.agent.name, brand_name: d.agent.brand_name, phone: d.agent.phone },
+      language: d.language || "he",
     });
   }
   if (d.status === "building") return res.status(404).json({ error: "not ready" });

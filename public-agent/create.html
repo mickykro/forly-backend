@@ -83,6 +83,18 @@
       </div>
 
       <div class="sec-title">פרטי הנכס</div>
+      <div class="field">
+        <label>שפת דף הנחיתה</label>
+        <select id="pLang">
+          <option value="he" selected>עברית</option>
+          <option value="en">English</option>
+          <option value="ar">العربية</option>
+          <option value="ru">Русский</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+        </select>
+        <div class="hint">הדף שייווצר — הכותרות, הכפתורים והתוכן — יופיעו בשפה שתבחרו.</div>
+      </div>
       <div class="grid-2">
         <div class="field">
           <label>סוג העסקה *</label>
@@ -583,6 +595,7 @@
           photos_urls: photoUrls,
           own_video_url: videoUrl,
           theme: theme,
+          language: $("#pLang").value,
         };
         if (isDemo) {
           body.agent = {
