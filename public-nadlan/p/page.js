@@ -55,15 +55,16 @@
   }
   var rgbStr = function (c) { return "rgb(" + c.r + "," + c.g + "," + c.b + ")"; };
 
-  var TEMPLATES = { classic: 1, minimal: 1, bold: 1 };
+  var TEMPLATES = { original: 1, nocturne: 1, galerie: 1, reel: 1 };
 
   function applyTheme(theme) {
     if (!theme) return;
     var root = document.documentElement.style;
 
-    // Layout template (classic | minimal | bold) — swaps look via CSS variants.
+    // Layout template — original renders here; nocturne/galerie/reel are served
+    // as their own pages by the server (see /previews and template rendering).
     document.documentElement.setAttribute("data-template",
-      TEMPLATES[theme.template] ? theme.template : "classic");
+      TEMPLATES[theme.template] ? theme.template : "original");
 
     // Colors: primary drives the gold accent tokens; derive bright/faint from it.
     var primary = hexToRgb(theme.primary);

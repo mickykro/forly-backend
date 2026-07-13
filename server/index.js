@@ -139,7 +139,7 @@ function sanitizeTheme(t) {
   if (!t || typeof t !== "object") return null;
   const hex = (v) => (typeof v === "string" && HEX.test(v.trim()) ? v.trim() : null);
   const str = (v) => (typeof v === "string" ? v.slice(0, 60) : null);
-  const TEMPLATES = { classic: 1, minimal: 1, bold: 1 };
+  const TEMPLATES = { original: 1, nocturne: 1, galerie: 1, reel: 1 };
   const clean = {
     template: TEMPLATES[t.template] ? t.template : null,
     font_title: str(t.font_title),
@@ -195,6 +195,10 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static(path.join(__dirname, "..", "public-agent"), { index: "index.html" }));
 app.use(express.static(path.join(__dirname, "..", "public-nadlan")));
 app.use("/files", express.static(UPLOAD_DIR, { maxAge: "1d", immutable: true }));
+// Template assets + previews: serving a template HTML here (no __PAGE__ injected)
+// renders it with its demo data — exactly what the intake form's iframes show.
+const TEMPLATES_DIR = path.join(__dirname, "..", "public-nadlan", "templates");
+app.use("/tpl", express.static(TEMPLATES_DIR));
 
 // ════════════════════════════ INTAKE ════════════════════════════
 
@@ -448,6 +452,16 @@ app.post("/createPropertyPage", async (req, res) => {
 
 // ════════════════════════ LANDING PAGE ════════════════════════
 
+// Shared page payload — used by /api/property-page (client) and the
+// server-rendered templates (nocturne/galerie/reel) via /p/:id.
+function pagePayload(id, d) {
+  return {
+    page_id: id, status: d.status, agent: d.agent, property: d.property,
+    hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
+    cta: d.cta, sections: d.sections, theme: d.theme || null,
+  };
+}
+
 app.get("/api/property-page", async (req, res) => {
   const id = typeof req.query.id === "string" ? req.query.id : "";
   if (!id) return res.status(400).json({ error: "missing id" });
@@ -463,11 +477,7 @@ app.get("/api/property-page", async (req, res) => {
   }
   if (d.status === "building") return res.status(404).json({ error: "not ready" });
   res.set("Cache-Control", "public, max-age=60");
-  res.json({
-    page_id: id, status: d.status, agent: d.agent, property: d.property,
-    hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
-    cta: d.cta, sections: d.sections, theme: d.theme || null,
-  });
+  res.json(pagePayload(id, d));
 });
 
 app.post("/api/property-lead", async (req, res) => {
@@ -548,8 +558,27 @@ app.post("/api/property-event", express.text({ type: () => true }), async (req, 
 });
 
 // /p/{id} → serve the landing-page shell (frontend reads id from the path)
-app.get("/p/:id", (req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public-nadlan", "p", "index.html"));
+// Server-rendered templates: nocturne/galerie/reel are their own pages, filled
+// by injecting window.__PAGE__. "original" (and anything else) keeps the proven
+// client-fetch shell in public-nadlan/p/index.html.
+const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel"]);
+app.get("/p/:id", async (req, res) => {
+  const id = req.params.id;
+  const origShell = path.join(__dirname, "..", "public-nadlan", "p", "index.html");
+  let d = null;
+  try { d = await getPage(id); } catch (e) { /* fall back to original shell below */ }
+  const tpl = d && d.theme && d.theme.template;
+  // Only the new designs render server-side, and only when the page is live.
+  if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
+    return res.sendFile(origShell);
+  }
+  const file = path.join(TEMPLATES_DIR, tpl + ".html");
+  if (!fs.existsSync(file)) return res.sendFile(origShell);
+  let html = fs.readFileSync(file, "utf8");
+  const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d)).replace(/</g, "\\u003c")};</script>`;
+  html = html.replace("</head>", inject + "</head>");
+  res.set("Cache-Control", "public, max-age=60");
+  res.type("html").send(html);
 });
 
 app.listen(PORT, () => {
