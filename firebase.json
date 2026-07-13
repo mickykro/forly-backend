@@ -31,20 +31,61 @@
     ],
     "rewrites": [
       {
+        "source": "/api/signup-complete",
+        "function": {
+          "functionId": "signupComplete",
+          "region": "europe-west1"
+        }
+      },
+      {
+        "source": "/api/signup-upload",
+        "function": {
+          "functionId": "signupUpload",
+          "region": "europe-west1"
+        }
+      },
+      {
+        "source": "/api/signup-save",
+        "function": {
+          "functionId": "signupSave",
+          "region": "europe-west1"
+        }
+      },
+      {
+        "source": "/api/signup-get",
+        "function": {
+          "functionId": "signupGet",
+          "region": "europe-west1"
+        }
+      },
+      {
         "source": "/api/create-draft",
-        "function": { "functionId": "createCarouselDraft", "region": "europe-west1" }
+        "function": {
+          "functionId": "createCarouselDraft",
+          "region": "europe-west1"
+        }
       },
       {
         "source": "/api/get-draft",
-        "function": { "functionId": "getCarouselDraft", "region": "europe-west1" }
+        "function": {
+          "functionId": "getCarouselDraft",
+          "region": "europe-west1"
+        }
       },
       {
         "source": "/api/save-draft",
-        "function": { "functionId": "saveCarouselDraft", "region": "europe-west1" }
+        "function": {
+          "functionId": "saveCarouselDraft",
+          "region": "europe-west1"
+        }
       },
       {
         "source": "/c/**",
         "destination": "/c/index.html"
+      },
+      {
+        "source": "/signup",
+        "destination": "/signup/index.html"
       }
     ],
     "headers": [
