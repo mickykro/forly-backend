@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="theme-color" content="#FBF5F8">
+  <title>הרשמה — Forly</title>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --pink:#DB6B97; --pink-soft:#F4A3BF; --pink-deep:#B94C79;
+      --aubergine:#2A1F33; --ink:#1A1220; --rose-bg:#FBF5F8; --cream:#F8E9DC; --sage:#7FA89B;
+      --muted:#5A4F65; --line:rgba(26,18,32,.1); --bg:var(--rose-bg); --card:#fff;
+      --ok:#3F7A68; --err:#dc2626;
+      --radius:22px;
+      --shadow:0 3px 16px rgba(185,76,121,.09), 0 1px 3px rgba(26,18,32,.05);
+      --shadow-lg:0 16px 44px rgba(185,76,121,.2);
+      --glow-pink:0 8px 24px rgba(219,107,151,.4);
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{
+      font-family:'Inter','Heebo',-apple-system,sans-serif;background:var(--bg);color:var(--ink);
+      min-height:100vh;position:relative;overflow-x:hidden;
+    }
+    body::before,body::after{
+      content:"";position:fixed;border-radius:50%;filter:blur(60px);pointer-events:none;z-index:0;
+    }
+    body::before{width:380px;height:380px;background:radial-gradient(circle,rgba(219,107,151,.18),transparent 70%);top:-120px;left:-100px}
+    body::after{width:380px;height:380px;background:radial-gradient(circle,rgba(127,168,155,.14),transparent 70%);bottom:-140px;right:-120px}
+
+    .top{
+      background:radial-gradient(500px 200px at 18% 50%,rgba(219,107,151,.22),transparent 65%),
+        radial-gradient(400px 180px at 82% 50%,rgba(127,168,155,.14),transparent 65%),var(--ink);
+      color:#fff;position:sticky;top:0;z-index:20;box-shadow:0 2px 14px rgba(26,18,32,.3);
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .top-inner{max-width:600px;margin:0 auto;padding:12px 18px;display:flex;align-items:center;gap:10px}
+    .top .mark{width:28px;height:28px;border-radius:9px;object-fit:cover;box-shadow:var(--glow-pink)}
+    .top .brand{font-family:'Heebo',sans-serif;font-weight:900;font-size:16px;letter-spacing:.16em;text-transform:uppercase}
+    .pct-badge{
+      margin-inline-start:auto;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);
+      color:#fff;font-size:12px;font-weight:700;padding:4px 11px;border-radius:999px;
+      backdrop-filter:blur(4px);transition:background .3s ease;
+    }
+    .progress-wrap{background:rgba(255,255,255,.14);height:5px;width:100%;position:relative;z-index:20}
+    .progress{
+      background:linear-gradient(90deg,var(--pink-soft),var(--pink),var(--pink-deep));height:100%;width:0;
+      transition:width .45s cubic-bezier(.4,0,.2,1);border-radius:0 0 4px 4px;
+    }
+
+    .wrap{max-width:600px;margin:0 auto;padding:22px 16px 110px;position:relative;z-index:1}
+
+    .hero{text-align:center;padding:6px 8px 22px}
+    .hero-emoji{width:56px;height:56px;margin:0 auto 8px;animation:floaty 3.2s ease-in-out infinite}
+    .hero-emoji img{width:100%;height:100%;object-fit:cover;border-radius:16px;box-shadow:var(--glow-pink)}
+    .hero h1{font-family:'Heebo',sans-serif;font-size:21px;font-weight:800;color:var(--ink);margin-bottom:8px}
+    .hero .lead{color:var(--muted);font-size:14.5px;line-height:1.6;max-width:440px;margin:0 auto}
+    .hero .lead b{color:var(--pink-deep)}
+    .req-mark{color:var(--pink-deep);font-weight:800}
+
+    .consent-card{padding:16px 18px}
+    .consent-row{display:flex;align-items:flex-start;gap:10px;margin:0;font-weight:500;cursor:pointer;color:var(--aubergine);line-height:1.6}
+    .consent-row input[type=checkbox]{width:19px;height:19px;flex-shrink:0;margin-top:1px;accent-color:var(--pink);cursor:pointer}
+    .consent-row a{color:var(--pink-deep);font-weight:700;text-decoration:underline}
+
+    @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+
+    .card{
+      background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+      padding:18px 18px 20px;margin-bottom:16px;box-shadow:var(--shadow);
+      animation:fadeUp .55s cubic-bezier(.2,.7,.3,1) both;position:relative;overflow:hidden;
+    }
+    .card::before{
+      content:"";position:absolute;top:0;inset-inline-start:0;height:3px;width:100%;
+      background:linear-gradient(90deg,transparent,var(--pink),transparent);
+    }
+    .card-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px}
+    .card-icon{
+      width:38px;height:38px;flex-shrink:0;border-radius:12px;background:rgba(219,107,151,.14);
+      display:flex;align-items:center;justify-content:center;color:var(--pink-deep);
+    }
+    .card-icon svg{width:19px;height:19px}
+    .card-head h2{font-family:'Heebo',sans-serif;font-size:15.5px;font-weight:800;color:var(--ink);display:flex;align-items:center;gap:8px}
+    .card-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+    .badge-req{
+      background:linear-gradient(135deg,var(--pink),var(--pink-deep));color:#fff;font-size:10.5px;
+      font-weight:700;padding:3px 10px;border-radius:999px;margin-inline-start:6px;white-space:nowrap;
+    }
+
+    label{display:block;font-size:13px;font-weight:600;margin:12px 0 6px;color:var(--aubergine)}
+    input[type=text],input[type=url],input[type=number],textarea,select{
+      width:100%;padding:12px 13px;border:1.5px solid var(--line);border-radius:12px;
+      font-family:inherit;font-size:15px;background:var(--rose-bg);color:var(--ink);outline:none;
+      transition:border-color .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+    input::placeholder,textarea::placeholder{color:#a89bab}
+    input:focus,textarea:focus,select:focus{
+      border-color:var(--pink);box-shadow:0 0 0 4px rgba(219,107,151,.16);background:#fff;
+    }
+    textarea{resize:vertical;min-height:56px}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+
+    .grid-2{display:grid;grid-template-columns:1fr;gap:0}
+    @media (min-width:640px){ .grid-2{grid-template-columns:1fr 1fr;gap:16px} }
+
+    .chips{display:flex;flex-wrap:wrap;gap:9px;margin-top:6px}
+    .chip{
+      padding:9px 16px;border:1.5px solid var(--line);border-radius:999px;background:var(--rose-bg);
+      cursor:pointer;font-size:13.5px;font-weight:600;color:var(--muted);user-select:none;
+      transition:all .18s ease;
+    }
+    .chip:hover{border-color:var(--pink-soft);transform:translateY(-1px)}
+    .chip.on{
+      background:linear-gradient(135deg,var(--pink),var(--pink-deep));border-color:transparent;
+      color:#fff;box-shadow:0 6px 16px rgba(219,107,151,.4);
+    }
+
+    .areas-input{display:flex;gap:8px}
+    .areas-input input{flex:1}
+    .areas-input button{
+      padding:0 18px;border:0;border-radius:999px;background:var(--ink);color:#fff;cursor:pointer;
+      font-family:inherit;font-weight:700;font-size:14px;transition:background .18s ease;
+    }
+    .areas-input button:hover{background:var(--pink-deep)}
+    .area-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .area-tag{
+      background:rgba(219,107,151,.14);color:var(--pink-deep);border-radius:999px;padding:7px 8px 7px 14px;
+      font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;animation:fadeUp .3s ease both;
+    }
+    .area-tag span{
+      cursor:pointer;font-weight:800;background:rgba(255,255,255,.7);width:18px;height:18px;
+      border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;
+    }
+
+    .avatar-row,.logo-row{display:flex;align-items:center;gap:14px;margin-top:6px}
+    .avatar{
+      width:84px;height:84px;border-radius:50%;background:rgba(219,107,151,.12);
+      border:2px dashed var(--pink-soft);display:flex;align-items:center;justify-content:center;
+      font-size:26px;color:var(--pink-deep);flex-shrink:0;background-size:cover;background-position:center;
+    }
+    .logo-box{
+      width:84px;height:84px;border-radius:16px;background:var(--rose-bg);
+      border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;
+      font-size:24px;color:var(--muted);flex-shrink:0;background-size:cover;background-position:center;
+    }
+    .avatar-info{flex:1;min-width:0}
+    .avatar-hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5}
+    .btn-upload{
+      display:inline-flex;align-items:center;gap:7px;padding:10px 16px;background:rgba(219,107,151,.14);
+      color:var(--pink-deep);border-radius:999px;cursor:pointer;font-size:13.5px;font-weight:700;
+      transition:background .18s ease;
+    }
+    .btn-upload:hover{background:rgba(219,107,151,.24)}
+    .btn-upload svg{width:15px;height:15px;flex-shrink:0}
+
+    .color-row{display:flex;gap:18px;flex-wrap:wrap;margin-top:8px}
+    .color-item{display:flex;flex-direction:column;align-items:center;gap:7px}
+    .color-item span{font-size:11.5px;color:var(--muted);font-weight:600}
+    input.swatch{
+      -webkit-appearance:none;appearance:none;width:46px;height:46px;border:3px solid #fff;
+      border-radius:50%;padding:0;cursor:pointer;box-shadow:0 3px 10px rgba(26,18,32,.2);background:none;
+    }
+    input.swatch::-webkit-color-swatch-wrapper{padding:0;border-radius:50%}
+    input.swatch::-webkit-color-swatch{border:none;border-radius:50%}
+    input.swatch::-moz-color-swatch{border:none;border-radius:50%}
+
+    .submit-bar{
+      position:fixed;bottom:0;left:0;right:0;background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+      border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+      display:flex;justify-content:center;z-index:15;
+    }
+    .submit-bar .inner{max-width:600px;width:100%;display:flex;gap:12px;align-items:center}
+    .submit-bar button{
+      flex:1;padding:15px;border:0;border-radius:999px;color:#fff;font-size:16px;font-weight:800;
+      font-family:inherit;cursor:pointer;background:var(--pink);
+      box-shadow:var(--glow-pink);transition:transform .15s ease, box-shadow .15s ease;
+    }
+    .submit-bar button:active{transform:translateY(1px)}
+    .submit-bar button:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+    .save-note{font-size:12px;color:var(--muted);min-width:56px;text-align:center;white-space:nowrap}
+
+    .toast{
+      position:fixed;top:16px;left:50%;transform:translateX(-50%);
+      background:linear-gradient(135deg,var(--sage),#5f8a7c);color:#fff;padding:11px 20px;border-radius:12px;
+      font-size:14px;font-weight:600;z-index:50;display:none;box-shadow:0 10px 26px rgba(127,168,155,.4);
+    }
+
+    .done-screen{text-align:center;padding:80px 20px 40px;position:relative;z-index:1}
+    .done-card{
+      background:var(--card);border:1px solid var(--line);border-radius:24px;padding:40px 26px;
+      box-shadow:var(--shadow-lg);animation:fadeUp .5s ease both;
+    }
+    .done-screen .success-badge{
+      width:48px;height:48px;margin:0 auto 14px;border-radius:50%;background:rgba(219,107,151,.14);
+      color:var(--pink-deep);display:flex;align-items:center;justify-content:center;
+    }
+    .done-screen .success-badge svg{width:26px;height:26px}
+    .done-screen .owl-bounce{width:76px;height:76px;margin:0 auto;animation:bounce 1.1s ease infinite}
+    .done-screen .owl-bounce img{width:100%;height:100%;object-fit:cover;border-radius:20px;box-shadow:var(--glow-pink)}
+    @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+    .done-screen h1{
+      font-family:'Heebo',sans-serif;font-size:23px;margin:16px 0 10px;font-weight:900;
+      background:linear-gradient(160deg,var(--pink) 0%,var(--pink-deep) 100%);-webkit-background-clip:text;
+      background-clip:text;color:transparent;
+    }
+    .done-screen p{color:var(--muted);line-height:1.7;font-size:14.5px}
+
+    .err{
+      color:var(--err);font-size:13px;margin-top:10px;display:none;background:#fef2f2;
+      border:1px solid #fecaca;border-radius:10px;padding:9px 12px;font-weight:600;
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <img class="mark" src="forly-mark.png" width="28" height="28" alt="Forly">
+      <span class="brand">Forly</span>
+      <span class="pct-badge" id="pct_badge">0%</span>
+    </div>
+  </header>
+  <div class="progress-wrap"><div class="progress" id="bar"></div></div>
+  <div class="toast" id="toast">נשמר ✓</div>
+
+  <div class="wrap" id="form">
+    <div class="hero">
+      <div class="hero-emoji"><img src="forly-mark.png" alt="Forly"></div>
+      <h1>בואו נשלים את הפרופיל שלך</h1>
+      <p class="lead">היי! כאן אפשר להשלים את הפרופיל שלך במהירות. שדות עם <span class="req-mark">*</span> הם <b>חובה</b>, השאר לא. הכל נשמר אוטומטית.</p>
+    </div>
+
+    <div class="card" style="animation-delay:.08s">
+      <div class="card-head">
+        <span class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+        <div>
+          <h2>הפרטים החשובים <span class="badge-req">חובה</span></h2>
+          <p class="card-sub">כדי שפורלי תוכל להתחיל להכין לך תוכן</p>
+        </div>
+      </div>
+
+      <label>שם מלא <span class="req-mark">*</span></label>
+      <input type="text" id="full_name" maxlength="60" placeholder="למשל: חמזה חאן">
+
+      <label>אזורי פעילות <span class="req-mark">*</span></label>
+      <div class="areas-input">
+        <input type="text" id="area_input" placeholder="תל אביב, רמת גן…">
+        <button type="button" id="area_add">הוסף</button>
+      </div>
+      <div class="area-tags" id="area_tags"></div>
+
+      <label>תמונת פרופיל <span class="req-mark">*</span></label>
+      <div class="avatar-row">
+        <div class="avatar" id="portrait_prev"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h1.5l1-1.5h7l1 1.5H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><circle cx="12" cy="13" r="3.2"/></svg></div>
+        <div class="avatar-info">
+          <label class="btn-upload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M8 8l4-4 4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>בחירת תמונה<input type="file" id="portrait_file" accept="image/*" hidden></label>
+          <p class="avatar-hint">תמונת פנים ברורה מגדילה אמון בלקוחות</p>
+        </div>
+      </div>
+      <div class="err" id="ess_err">נא למלא שם, אזור אחד לפחות ותמונת פרופיל.</div>
+    </div>
+
+    <div class="card" style="animation-delay:.15s">
+      <div class="card-head">
+        <span class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3h6a2 2 0 0 1 2 2v6l-9 9-8-8 9-9Z"/><circle cx="15.5" cy="8.5" r="1.1" fill="currentColor" stroke="none"/></svg></span>
+        <div>
+          <h2>מיתוג אישי</h2>
+          <p class="card-sub">רשות — עוזר לתוכן להישמע ולהיראות כמוך</p>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <label>התמחות</label>
+          <input type="text" id="specialty" placeholder="דירות יוקרה, נכסים מסחריים…">
+        </div>
+        <div>
+          <label>מספר רישיון</label>
+          <input type="text" id="license_number" placeholder="מספר רישיון תיווך">
+        </div>
+      </div>
+
+      <label>סלוגן (עד 80 תווים)</label>
+      <input type="text" id="slogan" maxlength="80" placeholder="המשפט שמייצג אותך">
+
+      <label>טון</label>
+      <div class="chips" id="tone">
+        <div class="chip" data-v="professional">מקצועי</div>
+        <div class="chip" data-v="friendly">ידידותי</div>
+        <div class="chip" data-v="energetic">אנרגטי</div>
+        <div class="chip" data-v="luxury">יוקרתי</div>
+      </div>
+
+      <label>קול מועדף</label>
+      <div class="chips" id="gender_pref">
+        <div class="chip" data-v="male">זכר</div>
+        <div class="chip" data-v="female">נקבה</div>
+        <div class="chip" data-v="neutral">ניטרלי</div>
+      </div>
+
+      <label>שנות ניסיון</label>
+      <input type="number" id="years_experience" min="0" max="60" placeholder="0–60" style="max-width:160px">
+    </div>
+
+    <div class="card" style="animation-delay:.22s">
+      <div class="card-head">
+        <span class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 .5 18c1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.6 1.7-1.6H16.5a3.5 3.5 0 0 0 3.5-3.5C20 6.7 16.6 3 12 3Z"/><circle cx="7.5" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7.2" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="7.7" r="1" fill="currentColor" stroke="none"/></svg></span>
+        <div>
+          <h2>צבעים ולוגו</h2>
+          <p class="card-sub">רשות — כדי שהעיצוב יתאים למותג שלך</p>
+        </div>
+      </div>
+
+      <label>צבעי מותג</label>
+      <div class="color-row" id="colors">
+        <div class="color-item"><input type="color" class="swatch" value="#0B1B3D"><span>ראשי</span></div>
+        <div class="color-item"><input type="color" class="swatch" value="#D4AF37"><span>משני</span></div>
+        <div class="color-item"><input type="color" class="swatch" value="#F9F9F9"><span>רקע</span></div>
+      </div>
+      <div class="hint">שלושה צבעים שמייצגים את המותג שלך.</div>
+
+      <label>לוגו</label>
+      <div class="logo-row">
+        <div class="logo-box" id="logo_prev"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5" fill="currentColor" stroke="none"/><path d="M20 15l-5-5-4 4-2-2-5 5"/></svg></div>
+        <div class="avatar-info">
+          <label class="btn-upload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M8 8l4-4 4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>העלאת לוגו<input type="file" id="logo_file" accept="image/*" hidden></label>
+          <p class="avatar-hint">יופיע על גבי הקרוסלות והתמונות שלך</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="animation-delay:.29s">
+      <div class="card-head">
+        <span class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.6 3.8 6 3.8 9s-1.4 6.4-3.8 9c-2.4-2.6-3.8-6-3.8-9s1.4-6.4 3.8-9Z"/></svg></span>
+        <div>
+          <h2>נוכחות דיגיטלית</h2>
+          <p class="card-sub">רשות — יופיע בתוכן שפורלי מכינה עבורך</p>
+        </div>
+      </div>
+
+      <label>אתר</label>
+      <input type="url" id="site" placeholder="https://…">
+
+      <div class="grid-2">
+        <div>
+          <label>אינסטגרם</label>
+          <input type="text" id="instagram" placeholder="@username">
+        </div>
+        <div>
+          <label>פייסבוק</label>
+          <input type="text" id="facebook" placeholder="fb.com/…">
+        </div>
+      </div>
+    </div>
+
+    <div class="card consent-card" style="animation-delay:.36s">
+      <label class="consent-row">
+        <input type="checkbox" id="privacy_ok">
+        <span>קראתי ואני מסכים/ה ל<a href="https://www.call4li.com/privacy" target="_blank" rel="noopener noreferrer">מדיניות הפרטיות</a> של Forly <span class="req-mark">*</span></span>
+      </label>
+      <div class="err" id="privacy_err">יש לאשר את מדיניות הפרטיות כדי שנוכל לשמור את הפרטים שלך.</div>
+    </div>
+  </div>
+
+  <div class="submit-bar" id="bar_wrap">
+    <div class="inner">
+      <span class="save-note" id="save_note"></span>
+      <button id="submit">סיום והפעלה</button>
+    </div>
+  </div>
+
+  <div class="wrap done-screen" id="done" style="display:none">
+    <div class="done-card">
+      <div class="success-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg></div>
+      <div class="owl-bounce"><img src="forly-mark.png" alt="Forly"></div>
+      <h1>הפרופיל הושלם!</h1>
+      <p>פורלי כבר מכינה עבורך את התוכן והתוכנית השבועית.<br>אפשר לחזור ל-WhatsApp ולהמשיך משם.</p>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const qs = new URLSearchParams(location.search);
+  const PHONE = (qs.get('phone')||'').replace(/[^\d]/g,'');
+  const $ = id => document.getElementById(id);
+  const state = { areas: [], tone:'', gender_pref:'', portrait_url:'', logo_url:'', brand_colors:[] };
+
+  const OPTIONAL_COUNT = 11;
+  function recomputeBar(){
+    let req = 0;
+    if($('full_name').value.trim()) req += 20;
+    if(state.areas.length) req += 20;
+    if(state.portrait_url) req += 20;
+    const opt = [
+      $('specialty').value, $('license_number').value, $('slogan').value,
+      state.tone, state.gender_pref, $('site').value, $('instagram').value,
+      $('facebook').value, state.brand_colors.length?'x':'', state.logo_url,
+      ($('years_experience').value>0?'x':'')
+    ].filter(v=>v).length;
+    const pct = Math.min(100, Math.round(req*0.6) + Math.round((opt/OPTIONAL_COUNT)*40));
+    $('bar').style.width = pct + '%';
+    $('pct_badge').textContent = pct + '%';
+  }
+
+  function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block'; setTimeout(()=>t.style.display='none',1400); }
+
+  // ---- autosave a single field ----
+  let saveTimer=null;
+  function autosave(){
+    if(!$('privacy_ok').checked){ $('save_note').textContent=''; return; }
+    $('save_note').textContent='שומר…';
+    clearTimeout(saveTimer);
+    saveTimer=setTimeout(async ()=>{
+      try{
+        await fetch('/api/signup-save',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({phone:PHONE, profile: collect()})});
+        $('save_note').textContent='נשמר ✓';
+      }catch(e){ $('save_note').textContent=''; }
+    }, 700);
+  }
+
+  function collect(){
+    return {
+      full_name: $('full_name').value.trim(),
+      activity_areas: state.areas,
+      specialty: $('specialty').value.trim(),
+      license_number: $('license_number').value.trim(),
+      portrait_url: state.portrait_url,
+      slogan: $('slogan').value.trim(),
+      tone: state.tone,
+      gender_pref: state.gender_pref,
+      brand_colors: state.brand_colors,
+      logo_url: state.logo_url,
+      site: $('site').value.trim(),
+      instagram: $('instagram').value.trim(),
+      facebook: $('facebook').value.trim(),
+      years_experience: Number($('years_experience').value)||0,
+      privacy_consent: $('privacy_ok').checked
+    };
+  }
+
+  // ---- privacy consent gate ----
+  $('privacy_ok').addEventListener('change', ()=>{
+    $('privacy_err').style.display='none';
+    if($('privacy_ok').checked){ autosave(); }
+  });
+
+  // ---- areas as tags ----
+  function renderAreas(){
+    $('area_tags').innerHTML='';
+    state.areas.forEach((a,i)=>{
+      const el=document.createElement('div'); el.className='area-tag';
+      el.innerHTML = a+' <span>✕</span>';
+      el.querySelector('span').onclick=()=>{ state.areas.splice(i,1); renderAreas(); recomputeBar(); autosave(); };
+      $('area_tags').appendChild(el);
+    });
+  }
+  function addArea(){
+    const raw=$('area_input').value.trim();
+    if(!raw) return;
+    raw.split(',').map(s=>s.trim()).filter(Boolean).forEach(a=>{ if(!state.areas.includes(a)) state.areas.push(a); });
+    $('area_input').value=''; renderAreas(); recomputeBar(); autosave();
+  }
+  $('area_add').onclick=addArea;
+  $('area_input').addEventListener('keydown',e=>{ if(e.key==='Enter'){e.preventDefault();addArea();} });
+
+  // ---- chip groups ----
+  function wireChips(groupId, key){
+    document.querySelectorAll('#'+groupId+' .chip').forEach(c=>{
+      c.onclick=()=>{
+        document.querySelectorAll('#'+groupId+' .chip').forEach(x=>x.classList.remove('on'));
+        c.classList.add('on'); state[key]=c.dataset.v; recomputeBar(); autosave();
+      };
+    });
+  }
+  wireChips('tone','tone'); wireChips('gender_pref','gender_pref');
+
+  // ---- colors ----
+  function readColors(){ state.brand_colors=[...document.querySelectorAll('#colors .swatch')].map(s=>s.value.toUpperCase()); }
+  document.querySelectorAll('#colors .swatch').forEach(s=>s.addEventListener('change',()=>{ readColors(); recomputeBar(); autosave(); }));
+  readColors();
+
+  // ---- image upload (base64 -> function) ----
+  function wireUpload(fileId, kind, prevId){
+    $(fileId).addEventListener('change', async e=>{
+      const file=e.target.files[0]; if(!file) return;
+      const prev=$(prevId);
+      const reader=new FileReader();
+      reader.onload=async ()=>{
+        prev.innerHTML=''; prev.style.backgroundImage='url('+reader.result+')';
+        prev.style.backgroundSize='cover'; prev.style.backgroundPosition='center';
+        try{
+          const r=await fetch('/api/signup-upload',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({phone:PHONE, kind, base64:reader.result, content_type:file.type})});
+          const j=await r.json();
+          if(j.url){ if(kind==='portrait') state.portrait_url=j.url; else state.logo_url=j.url; toast('הועלה ✓'); recomputeBar(); autosave(); }
+        }catch(err){ toast('העלאה נכשלה'); }
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  wireUpload('portrait_file','portrait','portrait_prev');
+  wireUpload('logo_file','logo','logo_prev');
+
+  // ---- autosave on blur for text fields ----
+  ['full_name','specialty','license_number','slogan','years_experience','site','instagram','facebook']
+    .forEach(id=>{ $(id).addEventListener('blur',()=>{recomputeBar();autosave();}); $(id).addEventListener('input',recomputeBar); });
+
+  // ---- prefill from server ----
+  async function prefill(){
+    if(!PHONE) return;
+    try{
+      const r=await fetch('/api/signup-get?phone='+encodeURIComponent(PHONE));
+      const j=await r.json();
+      if(j.already_complete){ showDone(); return; }
+      const p=j.profile||{};
+      $('full_name').value=p.full_name||'';
+      state.areas=Array.isArray(p.activity_areas)?p.activity_areas:[]; renderAreas();
+      $('specialty').value=p.specialty||''; $('license_number').value=p.license_number||'';
+      $('slogan').value=p.slogan||''; $('site').value=p.site||'';
+      $('instagram').value=p.instagram||''; $('facebook').value=p.facebook||'';
+      if(p.years_experience) $('years_experience').value=p.years_experience;
+      if(p.portrait_url){ state.portrait_url=p.portrait_url; const pv=$('portrait_prev'); pv.innerHTML=''; pv.style.backgroundImage='url('+p.portrait_url+')'; pv.style.backgroundSize='cover'; pv.style.backgroundPosition='center'; }
+      if(p.logo_url){ state.logo_url=p.logo_url; const lv=$('logo_prev'); lv.innerHTML=''; lv.style.backgroundImage='url('+p.logo_url+')'; lv.style.backgroundSize='cover'; lv.style.backgroundPosition='center'; }
+      if(p.tone){ state.tone=p.tone; const c=document.querySelector('#tone .chip[data-v="'+p.tone+'"]'); if(c)c.classList.add('on'); }
+      if(p.gender_pref){ state.gender_pref=p.gender_pref; const c=document.querySelector('#gender_pref .chip[data-v="'+p.gender_pref+'"]'); if(c)c.classList.add('on'); }
+      if(Array.isArray(p.brand_colors)&&p.brand_colors.length){ const sw=document.querySelectorAll('#colors .swatch'); p.brand_colors.forEach((c,i)=>{if(sw[i])sw[i].value=c;}); readColors(); }
+      $('privacy_ok').checked = !!p.privacy_consent;
+      const hasPriorData = p.full_name || (Array.isArray(p.activity_areas)&&p.activity_areas.length) || p.portrait_url || p.specialty || p.slogan;
+      if(hasPriorData){ toast('מילאנו עבורך את מה שכבר ענית ב-WhatsApp'); }
+      recomputeBar();
+    }catch(e){}
+  }
+
+  function showDone(){ $('form').style.display='none'; $('bar_wrap').style.display='none'; $('done').style.display='block'; $('bar').style.width='100%'; $('pct_badge').textContent='100%'; }
+
+  // ---- submit ----
+  $('submit').onclick=async ()=>{
+    $('ess_err').style.display='none';
+    $('privacy_err').style.display='none';
+    if(!$('privacy_ok').checked){
+      $('privacy_err').style.display='block'; window.scrollTo({top:0,behavior:'smooth'}); return;
+    }
+    if(!$('full_name').value.trim() || !state.areas.length || !state.portrait_url){
+      $('ess_err').style.display='block'; window.scrollTo({top:0,behavior:'smooth'}); return;
+    }
+    $('submit').disabled=true; $('submit').textContent='שומר…';
+    try{
+      const r=await fetch('/api/signup-complete',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({phone:PHONE, profile:collect()})});
+      const j=await r.json();
+      if(j.ok){ showDone(); } else { $('submit').disabled=false; $('submit').textContent='סיום והפעלה'; $('ess_err').textContent=j.error||'שגיאה, נסו שוב'; $('ess_err').style.display='block'; }
+    }catch(e){ $('submit').disabled=false; $('submit').textContent='סיום והפעלה'; }
+  };
+
+  if(!PHONE){ $('save_note').textContent=''; }
+  recomputeBar(); prefill();
+})();
+</script>
+</body>
+</html>
