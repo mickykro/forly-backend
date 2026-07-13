@@ -39,7 +39,7 @@
 
 <header class="topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
-  <a class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
+  <a id="navMyProps" class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
 </header>
 
 <div class="container" style="max-width:760px">
@@ -58,8 +58,8 @@
       <div id="agentBlock" class="hidden">
         <div class="sec-title">פרטי המתווך</div>
         <div class="grid-2">
-          <div class="field"><label>שם מלא *</label><input id="agName" placeholder="אלון פאר"></div>
-          <div class="field"><label>שם המשרד</label><input id="agBrand" placeholder="פאר נדל״ן"></div>
+          <div class="field"><label>שם מלא *</label><input id="agName" placeholder="רון גולן"></div>
+          <div class="field"><label>שם המשרד</label><input id="agBrand" placeholder="גולן נכסים"></div>
           <div class="field">
             <label>נייד (וואטסאפ) *</label>
             <div style="display:flex;gap:8px">
@@ -77,7 +77,7 @@
               <input id="agPhone" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
             </div>
           </div>
-          <div class="field"><label>מס׳ רישיון תיווך</label><input id="agLicense" placeholder="3142871"></div>
+          <div class="field"><label>מס׳ רישיון תיווך</label><input id="agLicense" placeholder="3205419"></div>
         </div>
         <div class="field"><label>לוגו (אופציונלי)</label><input id="agLogo" type="file" accept="image/png,image/jpeg,image/webp"></div>
       </div>
@@ -283,7 +283,12 @@
   var keyMatch = location.search.match(/[?&]key=([^&]*)/);
   var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
   var isDemo = !!demoKey;
-  if (isDemo) $("#agentBlock").classList.remove("hidden");
+  if (isDemo) {
+    $("#agentBlock").classList.remove("hidden");
+    // standalone demo — not for signed-in users: hide the "my properties" nav
+    var myProps = $("#navMyProps");
+    if (myProps) myProps.style.display = "none";
+  }
 
   var photos = []; // {file, url(local), publicUrl?, el}
 
