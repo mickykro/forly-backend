@@ -239,6 +239,15 @@
         <h3 style="font-family:var(--serif);margin-bottom:12px">✅ הדף באוויר!</h3>
         <a class="btn btn-gold" id="pageLink" target="_blank" href="#">צפייה בדף</a>
         <a class="btn btn-ghost" href="/" style="margin-top:8px">לרשימת הנכסים</a>
+        <div id="editLinkRow" class="hidden" style="margin-top:18px;text-align:right">
+          <p style="font-size:.85rem;color:var(--ink-soft,#5A5348);margin-bottom:6px">
+            🔑 קישור לעריכת הטקסטים בדף — אישי, לא להעביר הלאה:</p>
+          <div style="display:flex;gap:8px">
+            <input id="editLinkInput" readonly
+              style="flex:1;min-width:0;direction:ltr;font-size:.76rem;padding:9px 10px;border:1px solid rgba(185,138,47,.35);border-radius:9px;background:#FBF8F2;color:#5A5348">
+            <button type="button" class="btn btn-ghost" id="copyEditLink" style="white-space:nowrap">העתקה</button>
+          </div>
+        </div>
       </div>
       <div id="waitBox" class="hidden">
         <h3 style="font-family:var(--serif);margin-bottom:8px">⏳ עדיין עובדים על זה</h3>
@@ -597,7 +606,7 @@
 
     // End the build screen in a terminal state: "done" (page ready), "wait"
     // (timed out — WhatsApp fallback) or "fail" (pipeline reported failure).
-    function endBuilding(state, pageUrl) {
+    function endBuilding(state, pageUrl, editUrl) {
       clearInterval(iv);
       $("#buildSpin").classList.add("hidden");
       if (state === "done") {
@@ -605,6 +614,17 @@
           var el = $("#" + id); el.classList.remove("now"); el.classList.add("done");
         });
         $("#pageLink").href = pageUrl;
+        if (editUrl) {
+          $("#editLinkInput").value = editUrl;
+          $("#editLinkRow").classList.remove("hidden");
+          $("#copyEditLink").addEventListener("click", function () {
+            var btn = this, input = $("#editLinkInput");
+            var done = function () { btn.textContent = "הועתק ✓"; setTimeout(function () { btn.textContent = "העתקה"; }, 2500); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(editUrl).then(done, function () { input.select(); document.execCommand("copy"); done(); });
+            } else { input.select(); document.execCommand("copy"); done(); }
+          });
+        }
         $("#doneBox").classList.remove("hidden");
       } else if (state === "fail") {
         $("#retryLink").href = location.pathname + location.search;
@@ -624,7 +644,7 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.page_id && d.page_url) {
-            endBuilding("done", d.page_url);
+            endBuilding("done", d.page_url, d.edit_url);
           } else if (d.status === "failed") {
             endBuilding("fail");
           }

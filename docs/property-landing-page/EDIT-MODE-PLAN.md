@@ -158,13 +158,25 @@ these already have a home in the dashboard structured editor.
 **Effort:** ~1 session (S–M). No new dependencies, no schema migration
 (lazy token backfill), no n8n changes.
 
-## 7. Open questions
+## 7. Decisions (owner, 2026-07-13) & implementation notes
 
-1. **Serving path:** implement on the standalone server only, or mirror into
-   the Firebase Functions path in the same release? (Plan assumes both,
-   server first.)
-2. **Field scope:** are gallery captions + area blurb in for v1, or keep v1
-   to hero / cards / CTA only?
-3. **WhatsApp:** confirmed the edit link is *only* on the dashboard — the
-   n8n "page is live" WhatsApp message keeps pointing to agent.call4li.com,
-   correct?
+1. **Serving path:** standalone server only (`server/index.js` + `server/edit.js`).
+   The Firebase Functions path was NOT touched.
+2. **Field scope:** *every* text on the page. Beyond the payload fields, the
+   template's static strings (section headings, buttons, form labels, footer,
+   sticky bar…) are editable through a whitelisted `texts` override map stored
+   on the page doc and applied after render. Derived strings (eyebrow, hero
+   subline, spec values) are editable as overrides via the same map.
+3. **Edit link surface:** agent-facing only — currently the create-flow
+   "page ready" screen (`create.html` doneBox, fed by `edit_url` from
+   `/api/listing-status`, which also lazily backfills tokens for old pages).
+   When a dashboard lands in the server path, surface it there too. The n8n
+   WhatsApp message is unchanged.
+
+**Shipped files:** `server/edit.js` (token + whitelist merge),
+`server/index.js` (routes), `public-nadlan/p/edit.js` + `edit.css`
+(lazy-loaded editor), `public-nadlan/p/page.js` + `index.html` (hooks),
+`public-agent/create.html` (link surfacing),
+`scripts/edit-mode-e2e.local.js` (Playwright suite — 23 checks).
+Bonus fixes: mock leftovers ("אלון", "PEER", "בתל אביב") in the footer,
+thank-you card and area subtitle are now derived from the payload.

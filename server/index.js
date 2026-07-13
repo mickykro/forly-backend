@@ -127,6 +127,19 @@ async function incrPageCounter(pageId, field, by) {
   if (db) await db.collection("property_pages").doc(pageId).update({ [field]: FieldValue.increment(by) });
   else { const p = mem.pages.get(pageId); if (p) p[field] = (p[field] || 0) + by; }
 }
+// Partial page update from a { "dot.path": value } patch — avoids clobbering
+// concurrently-incremented counters the way a full set() would.
+async function updatePage(pageId, patch) {
+  if (db) { await db.collection("property_pages").doc(pageId).update(patch); return; }
+  const p = mem.pages.get(pageId);
+  if (!p) return;
+  for (const [key, val] of Object.entries(patch)) {
+    const parts = key.split(".");
+    let o = p;
+    while (parts.length > 1) { const k = parts.shift(); o[k] = o[k] || {}; o = o[k]; }
+    o[parts[0]] = val;
+  }
+}
 
 // ── helpers ──
 const pad = (n) => String(n).padStart(2, "0");
@@ -334,10 +347,24 @@ app.get("/api/listing-status", async (req, res) => {
   if (!id) return res.status(400).json({ error: "missing id" });
   const listing = await getListing(id);
   if (!listing) return res.status(404).json({ error: "not found" });
+  // Agent-only edit link (this endpoint backs the agent-facing create flow).
+  // Pages created before edit tokens existed get one lazily here.
+  let editUrl = null;
+  if (listing.page_id) {
+    const page = await getPage(listing.page_id);
+    if (page) {
+      if (!page.edit_token) {
+        page.edit_token = pageEdit.newEditToken();
+        await updatePage(listing.page_id, { edit_token: page.edit_token });
+      }
+      editUrl = `${PAGE_BASE_URL}/p/${listing.page_id}#edit=${page.edit_token}`;
+    }
+  }
   res.json({
     listing_id: id,
     page_id: listing.page_id || null,
     page_url: listing.page_id ? `${PAGE_BASE_URL}/p/${listing.page_id}` : null,
+    edit_url: editUrl,
     // "building" until a page exists; the pipeline may set "failed" so the
     // building screen can surface an error instead of polling indefinitely.
     status: listing.page_id ? "ready" : (listing.status === "failed" ? "failed" : "building"),
@@ -394,6 +421,8 @@ app.post("/createPropertyPage", async (req, res) => {
       expires_at: reusable ? reusable.expires_at : daysFromNow(PAGE_LIFESPAN_DAYS),
       extension_count: reusable ? (reusable.extension_count || 0) : 0,
       edit_count: reusable ? (reusable.edit_count || 0) : 0,
+      edit_token: (reusable && reusable.edit_token) || pageEdit.newEditToken(),
+      texts: (reusable && reusable.texts) || null,
       agent: {
         name: (body.agent && body.agent.name) || "",
         brand_name: (body.agent && (body.agent.brand_name || body.agent.name)) || "",
@@ -462,12 +491,50 @@ app.get("/api/property-page", async (req, res) => {
     });
   }
   if (d.status === "building") return res.status(404).json({ error: "not ready" });
-  res.set("Cache-Control", "public, max-age=60");
+  // Magic edit link: a valid edit_token flips the payload to editable.
+  // Invalid/missing tokens get the plain public payload — no hint given.
+  const token = typeof req.query.edit_token === "string" ? req.query.edit_token : "";
+  let editable = false;
+  if (token && !pageEdit.editThrottled(id)) {
+    if (pageEdit.editTokenOk(d, token)) editable = true;
+    else pageEdit.noteEditFail(id);
+  }
+  res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
   res.json({
     page_id: id, status: d.status, agent: d.agent, property: d.property,
     hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
     cta: d.cta, sections: d.sections, theme: d.theme || null,
+    texts: d.texts || null, ...(editable ? { editable: true } : {}),
   });
+});
+
+// ── POST /api/page/edit-text — save from the in-page edit mode ──
+// Token-authed, text-only, whitelist-merged (see server/edit.js).
+app.post("/api/page/edit-text", async (req, res) => {
+  const body = req.body || {};
+  const pageId = String(body.page_id || "");
+  if (!pageId || !body.fields || typeof body.fields !== "object") {
+    return res.status(400).json({ error: "page_id and fields required" });
+  }
+  const d = await getPage(pageId);
+  if (!d) return res.status(404).json({ error: "not found" });
+  if (pageEdit.editThrottled(pageId) || !pageEdit.editTokenOk(d, body.edit_token)) {
+    pageEdit.noteEditFail(pageId);
+    return res.status(401).json({ error: "bad_token" });
+  }
+  if (d.status !== "active" && d.status !== "expiring") {
+    return res.status(410).json({ error: "page_inactive" });
+  }
+  try {
+    const patch = pageEdit.buildEditPatch(d, body.fields);
+    patch["edit_count"] = (d.edit_count || 0) + 1;
+    patch["updated_at"] = new Date();
+    await updatePage(pageId, patch);
+    res.json({ ok: true, edit_count: patch["edit_count"] });
+  } catch (err) {
+    console.error("edit-text failed:", err);
+    res.status(500).json({ error: "internal" });
+  }
 });
 
 app.post("/api/property-lead", async (req, res) => {
@@ -519,6 +586,7 @@ app.post("/api/property-lead", async (req, res) => {
 // Body: { video_url, lines: ["4 חד׳ בבבלי | תל אביב", "₪4,900,000"] }
 // Returns: { video_url } of the re-hosted, overlaid mp4.
 const { overlayVideo, MAX_LINES } = require("./overlay");
+const pageEdit = require("./edit");
 app.post("/api/video-overlay", async (req, res) => {
   const body = req.body || {};
   const videoUrl = String(body.video_url || "");
