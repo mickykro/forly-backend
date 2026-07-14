@@ -15,6 +15,11 @@
  *     POST /api/property-lead          → capture a lead, notify agent
  *     POST /api/property-event         → beacon metrics
  *     GET  /p/:id                      → serve the landing page shell
+ *   AGENT PORTAL (login/dashboard/signup)
+ *     any other /api/*                 → proxied to the Firebase-hosted
+ *       functions (FIREBASE_API_BASE) with cookie relay, so /api/auth/otp,
+ *       /api/auth/verify, /api/properties, /api/page/*, /api/signup work
+ *       same-origin on this host too
  *
  * Storage: uploads + re-hosted page assets live under UPLOAD_DIR and are
  * served at BASE_URL/files/… . Listings/pages go to Firestore when a service
@@ -555,6 +560,40 @@ app.post("/api/property-event", express.text({ type: () => true }), async (req, 
   try { if (event === "view") await incrPageCounter(pageId, "view_count", 1); }
   catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
   res.status(204).send("");
+});
+
+// ── Firebase fallback proxy ──
+// The agent portal pages (index/signup/edit) call same-origin /api/* routes
+// that exist only as Cloud Functions behind the call4li-agent Firebase
+// Hosting rewrites (/api/auth/otp, /api/auth/verify, /api/properties,
+// /api/page/*, /api/signup, …). Only the intake/demo subset is implemented
+// natively above, so on this host those calls used to 404. Forward anything
+// unmatched to Firebase, relaying Cookie/Set-Cookie so the httpOnly
+// fly_session cookie gets scoped to this host and auth stays same-origin.
+const FIREBASE_API_BASE = (process.env.FIREBASE_API_BASE || "https://call4li-agent.web.app").replace(/\/+$/, "");
+app.all("/api/*", async (req, res) => {
+  const headers = {};
+  if (req.headers.cookie) headers.cookie = req.headers.cookie;
+  let body;
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    headers["content-type"] = req.headers["content-type"] || "application/json";
+    body = Buffer.isBuffer(req.body) ? req.body :
+      typeof req.body === "string" ? req.body : JSON.stringify(req.body || {});
+  }
+  try {
+    const r = await fetch(FIREBASE_API_BASE + req.originalUrl, {
+      method: req.method, headers, body,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30000),
+    });
+    for (const c of r.headers.getSetCookie()) res.append("Set-Cookie", c);
+    const ct = r.headers.get("content-type");
+    if (ct) res.set("Content-Type", ct);
+    res.status(r.status).send(Buffer.from(await r.arrayBuffer()));
+  } catch (err) {
+    console.error(`firebase proxy ${req.method} ${req.originalUrl} failed:`, err.message);
+    res.status(502).json({ error: "upstream_unreachable" });
+  }
 });
 
 // /p/{id} → serve the landing-page shell (frontend reads id from the path)
