@@ -208,6 +208,12 @@ app.use("/tpl", express.static(TEMPLATES_DIR));
 
 // ════════════════════════════ INTAKE ════════════════════════════
 
+const createAuthRouter = require("./auth");
+app.use("/api/auth", createAuthRouter({
+  db, mem, sendWhatsApp,
+  secret: process.env.FORLY_JWT_SECRET || "change-me-in-env",
+}));
+
 app.post("/api/upload-urls", (req, res) => {
   if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
   const files = req.body && req.body.files;
