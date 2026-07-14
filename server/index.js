@@ -15,11 +15,15 @@
  *     POST /api/property-lead          → capture a lead, notify agent
  *     POST /api/property-event         → beacon metrics
  *     GET  /p/:id                      → serve the landing page shell
- *   AGENT PORTAL (login/dashboard/signup)
- *     any other /api/*                 → proxied to the Firebase-hosted
- *       functions (FIREBASE_API_BASE) with cookie relay, so /api/auth/otp,
- *       /api/auth/verify, /api/properties, /api/page/*, /api/signup work
- *       same-origin on this host too
+ *   AGENT PORTAL (login/dashboard/signup) — see server/portal.js
+ *     POST /api/auth/otp, /api/auth/verify, /api/signup
+ *     GET  /api/properties ; POST /api/properties/create|delete
+ *     POST /api/page/update ; GET|POST /api/page/extend, /api/extend
+ *     daily page-lifecycle sweep (09:00 Asia/Jerusalem)
+ *     Requires NADLAN_JWT_SECRET + Firestore; without them these routes fall
+ *     through to the Firebase proxy below.
+ *   FALLBACK: any other /api/*         → proxied to the Firebase-hosted
+ *     functions (FIREBASE_API_BASE) with cookie relay
  *
  * Storage: uploads + re-hosted page assets live under UPLOAD_DIR and are
  * served at BASE_URL/files/… . Listings/pages go to Firestore when a service
@@ -33,6 +37,8 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
+const session = require("./session");
+const {registerPortal} = require("./portal");
 
 // Load server/.env if present so config lives in a file, not fragile inline
 // env vars. Inline `KEY=val node index.js` still works and overrides the file.
@@ -64,6 +70,9 @@ const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
 const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
+// Session/action-token secret shared with the Cloud Functions (Secret Manager
+// NADLAN_JWT_SECRET) so existing cookies and extend links survive the move.
+const NADLAN_JWT_SECRET = process.env.NADLAN_JWT_SECRET || "";
 
 const MAX_UPLOAD_FILES = 12;
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -184,7 +193,10 @@ async function rehost(url, destRel) {
 }
 
 async function sendWhatsApp(phone, message) {
-  if (!GREENAPI_INSTANCE || !GREENAPI_TOKEN) return;
+  // Throw (rather than silently skip) so flows that depend on delivery —
+  // like the OTP login — can surface a real error. Callers where WhatsApp
+  // is best-effort already .catch().
+  if (!GREENAPI_INSTANCE || !GREENAPI_TOKEN) throw new Error("whatsapp not configured");
   await fetch(`https://api.green-api.com/waInstance${GREENAPI_INSTANCE}/sendMessage/${GREENAPI_TOKEN}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -208,7 +220,10 @@ app.use("/tpl", express.static(TEMPLATES_DIR));
 // ════════════════════════════ INTAKE ════════════════════════════
 
 app.post("/api/upload-urls", (req, res) => {
-  if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
+  // Auth: session cookie (agent dashboard) OR demo-key header (intake demo) —
+  // same dual model as the getUploadUrls Cloud Function.
+  const authed = session.requireAuth(req, NADLAN_JWT_SECRET);
+  if (!authed && !("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
   const files = req.body && req.body.files;
   if (!Array.isArray(files) || files.length < 1 || files.length > MAX_UPLOAD_FILES) {
     return res.status(400).json({ error: `1-${MAX_UPLOAD_FILES} files` });
@@ -467,7 +482,9 @@ function pagePayload(id, d) {
   };
 }
 
-app.get("/api/property-page", async (req, res) => {
+// Registered at both paths: /api/property-page (nadlan /p/ frontend) and
+// /api/page (agent dashboard edit view) — same handler, as in firebase.json.
+async function servePropertyPage(req, res) {
   const id = typeof req.query.id === "string" ? req.query.id : "";
   if (!id) return res.status(400).json({ error: "missing id" });
   const d = await getPage(id);
@@ -483,7 +500,9 @@ app.get("/api/property-page", async (req, res) => {
   if (d.status === "building") return res.status(404).json({ error: "not ready" });
   res.set("Cache-Control", "public, max-age=60");
   res.json(pagePayload(id, d));
-});
+}
+app.get("/api/property-page", servePropertyPage);
+app.get("/api/page", servePropertyPage);
 
 app.post("/api/property-lead", async (req, res) => {
   const body = req.body || {};
@@ -562,14 +581,32 @@ app.post("/api/property-event", express.text({ type: () => true }), async (req, 
   res.status(204).send("");
 });
 
+// ════════════════════════ AGENT PORTAL ════════════════════════
+// The nadlan/signup Cloud Functions ported to this server (auth OTP,
+// properties, page edit/extend, signup, daily lifecycle sweep). Needs the
+// shared session secret and Firestore; when either is missing the routes are
+// not registered and the Firebase fallback proxy below serves them instead.
+if (db && NADLAN_JWT_SECRET) {
+  const portal = registerPortal(app, {
+    db,
+    secret: NADLAN_JWT_SECRET,
+    sendWhatsApp,
+    normalizePhone,
+    createListing,
+    pageBaseUrl: PAGE_BASE_URL,
+    uploadDir: UPLOAD_DIR,
+  });
+  portal.startLifecycleCron();
+} else {
+  console.warn("agent portal disabled (needs NADLAN_JWT_SECRET + Firestore) — " +
+    "portal /api/* routes fall through to the Firebase proxy");
+}
+
 // ── Firebase fallback proxy ──
-// The agent portal pages (index/signup/edit) call same-origin /api/* routes
-// that exist only as Cloud Functions behind the call4li-agent Firebase
-// Hosting rewrites (/api/auth/otp, /api/auth/verify, /api/properties,
-// /api/page/*, /api/signup, …). Only the intake/demo subset is implemented
-// natively above, so on this host those calls used to 404. Forward anything
-// unmatched to Firebase, relaying Cookie/Set-Cookie so the httpOnly
-// fly_session cookie gets scoped to this host and auth stays same-origin.
+// Any /api/* route not implemented above is forwarded to the Firebase-hosted
+// functions (today that should only happen when the portal is disabled, or
+// for routes that never moved). Cookie/Set-Cookie are relayed so the httpOnly
+// fly_session cookie stays scoped to this host and auth stays same-origin.
 const FIREBASE_API_BASE = (process.env.FIREBASE_API_BASE || "https://call4li-agent.web.app").replace(/\/+$/, "");
 app.all("/api/*", async (req, res) => {
   const headers = {};
