@@ -33,13 +33,30 @@
   #tplFull{display:none;position:fixed;inset:0;z-index:9999;background:#000}
   #tplFull iframe{width:100%;height:100%;border:0}
   #tplFullClose{position:fixed;top:14px;inset-inline-end:14px;z-index:10000;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.55);color:#fff;border-radius:100px;padding:9px 18px;font-size:.9rem;font-weight:600;cursor:pointer;backdrop-filter:blur(6px)}
+  /* language switcher (top corner) */
+  .topbar-actions{display:flex;align-items:center;gap:10px}
+  .lang-switch{position:relative}
+  .lang-btn{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.32);border-radius:100px;padding:6px 13px;font-size:.9rem;font-weight:600;cursor:pointer;line-height:1.2}
+  .lang-btn .fl{font-size:1.05rem}
+  .lang-menu{position:absolute;inset-inline-end:0;top:calc(100% + 6px);z-index:50;background:#fff;border:1px solid rgba(23,20,15,.14);border-radius:12px;box-shadow:0 16px 40px -18px rgba(0,0,0,.4);padding:6px;min-width:172px;display:none}
+  .lang-menu.open{display:block}
+  .lang-opt{display:flex;align-items:center;gap:10px;width:100%;background:transparent;border:0;border-radius:8px;padding:9px 12px;font-size:.95rem;color:var(--ink,#1a1712);cursor:pointer;text-align:start}
+  .lang-opt:hover{background:rgba(23,20,15,.06)}
+  .lang-opt .fl{font-size:1.15rem}
+  .lang-opt[aria-selected="true"]{background:rgba(185,138,47,.14);font-weight:600}
 </style>
 </head>
 <body>
 
 <header class="topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
-  <a class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
+  <div class="topbar-actions">
+    <div class="lang-switch" id="langSwitch">
+      <button type="button" class="lang-btn" id="langBtn" aria-haspopup="true" aria-expanded="false"><span class="fl" id="langFlag">🇮🇱</span><span id="langName">עברית</span><span aria-hidden="true">▾</span></button>
+      <div class="lang-menu" id="langMenu" role="menu"></div>
+    </div>
+    <a id="navMyProps" class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)" data-i18n="nav_my_properties">← הנכסים שלי</a>
+  </div>
 </header>
 
 <div class="container" style="max-width:760px">
@@ -48,20 +65,20 @@
   <div id="viewForm">
     <div class="page-head">
       <div>
-        <h1>נכס חדש</h1>
-        <p>ממלאים פרטים, מעלים תמונות — ותוך דקות יש דף נחיתה עם וידאו.</p>
+        <h1 data-i18n="h1_new_property">נכס חדש</h1>
+        <p data-i18n="subtitle">ממלאים פרטים, מעלים תמונות — ותוך דקות יש דף נחיתה עם וידאו.</p>
       </div>
     </div>
 
     <div class="card">
       <!-- demo-only agent block: shown when ?key= is present (no login) -->
       <div id="agentBlock" class="hidden">
-        <div class="sec-title">פרטי המתווך</div>
+        <div class="sec-title" data-i18n="sec_agent">פרטי המתווך</div>
         <div class="grid-2">
-          <div class="field"><label>שם מלא *</label><input id="agName" placeholder="אלון פאר"></div>
-          <div class="field"><label>שם המשרד</label><input id="agBrand" placeholder="פאר נדל״ן"></div>
+          <div class="field"><label data-i18n="lbl_fullname">שם מלא *</label><input id="agName" placeholder="רון גולן" data-i18n-ph="ph_agName"></div>
+          <div class="field"><label data-i18n="lbl_brand">שם המשרד</label><input id="agBrand" placeholder="גולן נכסים" data-i18n-ph="ph_agBrand"></div>
           <div class="field">
-            <label>נייד (וואטסאפ) *</label>
+            <label data-i18n="lbl_phone_wa">נייד (וואטסאפ) *</label>
             <div style="display:flex;gap:8px">
               <select id="agCC" style="width:auto;flex:0 0 auto">
                 <option value="+972" selected>🇮🇱 +972</option>
@@ -77,149 +94,150 @@
               <input id="agPhone" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
             </div>
           </div>
-          <div class="field"><label>מס׳ רישיון תיווך</label><input id="agLicense" placeholder="3142871"></div>
+          <div class="field"><label data-i18n="lbl_license">מס׳ רישיון תיווך</label><input id="agLicense" placeholder="3205419"></div>
         </div>
-        <div class="field"><label>לוגו (אופציונלי)</label><input id="agLogo" type="file" accept="image/png,image/jpeg,image/webp"></div>
+        <div class="field"><label data-i18n="lbl_logo">לוגו (אופציונלי)</label><input id="agLogo" type="file" accept="image/png,image/jpeg,image/webp"></div>
       </div>
 
-      <div class="sec-title">פרטי הנכס</div>
+      <input type="hidden" id="pLang" value="he">
+      <div class="sec-title" data-i18n="sec_property">פרטי הנכס</div>
       <div class="grid-2">
         <div class="field">
-          <label>סוג העסקה *</label>
+          <label data-i18n="lbl_deal_type">סוג העסקה *</label>
           <select id="pType">
-            <option value="sale" selected>למכירה</option>
-            <option value="rent">להשכרה</option>
+            <option value="sale" selected data-i18n="opt_sale">למכירה</option>
+            <option value="rent" data-i18n="opt_rent">להשכרה</option>
           </select>
         </div>
-        <div class="field"><label>כתובת *</label><input id="pAddress" placeholder="ברודצקי 12, דירה 34"></div>
+        <div class="field"><label data-i18n="lbl_address">כתובת *</label><input id="pAddress" placeholder="ברודצקי 12, דירה 34" data-i18n-ph="ph_address"></div>
       </div>
       <div class="grid-2">
-        <div class="field"><label>עיר *</label><input id="pCity" placeholder="תל אביב"></div>
-        <div class="field"><label>שכונה</label><input id="pHood" placeholder="בבלי"></div>
+        <div class="field"><label data-i18n="lbl_city">עיר *</label><input id="pCity" placeholder="תל אביב" data-i18n-ph="ph_city"></div>
+        <div class="field"><label data-i18n="lbl_neighborhood">שכונה</label><input id="pHood" placeholder="בבלי" data-i18n-ph="ph_hood"></div>
       </div>
       <div class="grid-3">
-        <div class="field"><label id="pPriceLabel">מחיר (₪) *</label><input id="pPrice" type="number" inputmode="numeric" placeholder="4900000"></div>
-        <div class="field"><label>חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
-        <div class="field"><label>מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
+        <div class="field"><label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label><input id="pPrice" type="number" inputmode="numeric" placeholder="4900000"></div>
+        <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
+        <div class="field"><label data-i18n="lbl_sqm">מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
       </div>
       <div class="grid-3">
-        <div class="field"><label>קומה</label><input id="pFloor" type="number" inputmode="numeric" placeholder="5"></div>
-        <div class="field"><label>חניות</label><input id="pParking" type="number" inputmode="numeric" placeholder="1"></div>
+        <div class="field"><label data-i18n="lbl_floor">קומה</label><input id="pFloor" type="number" inputmode="numeric" placeholder="5"></div>
+        <div class="field"><label data-i18n="lbl_parking">חניות</label><input id="pParking" type="number" inputmode="numeric" placeholder="1"></div>
         <div class="field"></div>
       </div>
       <div class="field">
-        <label>תיאור חופשי</label>
-        <textarea id="pDesc" rows="3" placeholder="משופצת אדריכלית, מרפסת שמש לים, ממ״ד..."></textarea>
-        <div class="hint">התיאור עוזר ל-AI לכתוב את הדף — ככל שתפרטו, הדף יהיה טוב יותר.</div>
+        <label data-i18n="lbl_description">תיאור חופשי</label>
+        <textarea id="pDesc" rows="3" placeholder="משופצת אדריכלית, מרפסת שמש לים, ממ״ד..." data-i18n-ph="ph_description"></textarea>
+        <div class="hint" data-i18n="hint_description">התיאור עוזר ל-AI לכתוב את הדף — ככל שתפרטו, הדף יהיה טוב יותר.</div>
       </div>
 
-      <div class="sec-title">תמונות הנכס (3–12)</div>
+      <div class="sec-title" data-i18n="sec_photos">תמונות הנכס (3–12)</div>
       <div class="drop" id="drop">
         <div style="font-size:1.6rem">📸</div>
-        גררו תמונות לכאן או <b style="color:var(--gold)">לחצו לבחירה</b>
+        <span data-i18n="drop_prompt">גררו תמונות לכאן או</span> <b style="color:var(--gold)" data-i18n="drop_click">לחצו לבחירה</b>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden">
       </div>
       <div class="thumbs" id="thumbs"></div>
 
-      <div class="sec-title">וידאו (אופציונלי)</div>
+      <div class="sec-title" data-i18n="sec_video">וידאו (אופציונלי)</div>
       <div class="field">
         <input id="videoInput" type="file" accept="video/mp4,video/quicktime">
-        <div class="hint">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</div>
+        <div class="hint" data-i18n="hint_video">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</div>
       </div>
 
-      <div class="sec-title">עיצוב הדף</div>
+      <div class="sec-title" data-i18n="sec_design">עיצוב הדף</div>
 
       <!-- live preview of the chosen fonts + colors -->
       <div id="thPreview" style="border:1px solid rgba(23,20,15,.14);border-radius:14px;padding:18px 20px;margin-bottom:14px;background:var(--bg)">
-        <div id="pvTitle" style="font-size:1.5rem;font-weight:700;margin-bottom:6px;color:var(--gold)">דירת יוקרה בלב תל אביב</div>
-        <div id="pvBody" style="font-size:.95rem;color:var(--ink-soft);line-height:1.7">4 חדרים · מרפסת שמש · נוף פתוח. כך ייראו הגופנים והצבעים בדף הנחיתה שלכם.</div>
-        <span id="pvBtn" style="display:inline-block;margin-top:12px;padding:9px 18px;border-radius:10px;background:var(--gold);color:#fff;font-weight:600;font-size:.9rem">תיאום ביקור</span>
+        <div id="pvTitle" style="font-size:1.5rem;font-weight:700;margin-bottom:6px;color:var(--gold)" data-i18n="pv_title">דירת יוקרה בלב תל אביב</div>
+        <div id="pvBody" style="font-size:.95rem;color:var(--ink-soft);line-height:1.7" data-i18n="pv_body">4 חדרים · מרפסת שמש · נוף פתוח. כך ייראו הגופנים והצבעים בדף הנחיתה שלכם.</div>
+        <span id="pvBtn" style="display:inline-block;margin-top:12px;padding:9px 18px;border-radius:10px;background:var(--gold);color:#fff;font-weight:600;font-size:.9rem" data-i18n="pv_btn">תיאום ביקור</span>
       </div>
 
       <div class="field">
-        <label>תבנית עיצוב · לחצו לבחירה, ⛶ למסך מלא</label>
+        <label data-i18n="lbl_template">תבנית עיצוב · לחצו לבחירה, ⛶ למסך מלא</label>
         <div class="tpl-grid" id="tplGrid">
           <div class="tpl-card selected" data-tpl="original">
             <div class="tpl-check">✓</div>
             <div class="tpl-frame"><iframe src="/previews/original.html" title="Original" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
-            <div class="tpl-bar"><span class="tpl-name">קלאסי</span><button type="button" class="tpl-full" data-src="/previews/original.html">⛶</button></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_classic">קלאסי</span><button type="button" class="tpl-full" data-src="/previews/original.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="nocturne">
             <div class="tpl-check">✓</div>
             <div class="tpl-frame"><iframe src="/tpl/nocturne.html" title="Nocturne" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
-            <div class="tpl-bar"><span class="tpl-name">נוקטורן · דרמטי</span><button type="button" class="tpl-full" data-src="/tpl/nocturne.html">⛶</button></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_nocturne">נוקטורן · דרמטי</span><button type="button" class="tpl-full" data-src="/tpl/nocturne.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="galerie">
             <div class="tpl-check">✓</div>
             <div class="tpl-frame"><iframe src="/tpl/galerie.html" title="Galerie" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
-            <div class="tpl-bar"><span class="tpl-name">גלריה · בהיר</span><button type="button" class="tpl-full" data-src="/tpl/galerie.html">⛶</button></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_galerie">גלריה · בהיר</span><button type="button" class="tpl-full" data-src="/tpl/galerie.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="reel">
             <div class="tpl-check">✓</div>
             <div class="tpl-frame"><iframe src="/tpl/reel.html" title="Reel" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
-            <div class="tpl-bar"><span class="tpl-name">ריל · תנועה</span><button type="button" class="tpl-full" data-src="/tpl/reel.html">⛶</button></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_reel">ריל · תנועה</span><button type="button" class="tpl-full" data-src="/tpl/reel.html">⛶</button></div>
           </div>
         </div>
         <input type="hidden" id="thTemplate" value="original">
       </div>
-      <button type="button" id="thSurprise" class="btn btn-ghost" style="width:100%;margin-bottom:12px">🎲 עיצוב אקראי</button>
+      <button type="button" id="thSurprise" class="btn btn-ghost" style="width:100%;margin-bottom:12px" data-i18n="btn_surprise">🎲 עיצוב אקראי</button>
 
       <div class="grid-2">
         <div class="field">
-          <label>גופן כותרות</label>
+          <label data-i18n="lbl_font_title">גופן כותרות</label>
           <select id="thFontTitle">
-            <option value="">ברירת מחדל (Frank Ruhl Libre)</option>
+            <option value="" data-i18n="opt_font_title_default">ברירת מחדל (Frank Ruhl Libre)</option>
             <option value="Heebo" style="font-family:'Heebo'">Heebo · חיבו</option>
             <option value="Assistant" style="font-family:'Assistant'">Assistant · אסיסטנט</option>
             <option value="Rubik" style="font-family:'Rubik'">Rubik · רוביק</option>
             <option value="Frank Ruhl Libre" style="font-family:'Frank Ruhl Libre'">Frank Ruhl Libre · פרנק רול</option>
             <option value="Secular One" style="font-family:'Secular One'">Secular One · סקולר וואן</option>
-            <option value="custom">גופן משלי (העלאה)…</option>
+            <option value="custom" data-i18n="opt_font_custom">גופן משלי (העלאה)…</option>
           </select>
         </div>
         <div class="field">
-          <label>גופן תוכן</label>
+          <label data-i18n="lbl_font_body">גופן תוכן</label>
           <select id="thFontBody">
-            <option value="">ברירת מחדל (Heebo)</option>
+            <option value="" data-i18n="opt_font_body_default">ברירת מחדל (Heebo)</option>
             <option value="Heebo" style="font-family:'Heebo'">Heebo · חיבו</option>
             <option value="Assistant" style="font-family:'Assistant'">Assistant · אסיסטנט</option>
             <option value="Rubik" style="font-family:'Rubik'">Rubik · רוביק</option>
             <option value="Frank Ruhl Libre" style="font-family:'Frank Ruhl Libre'">Frank Ruhl Libre · פרנק רול</option>
             <option value="Secular One" style="font-family:'Secular One'">Secular One · סקולר וואן</option>
-            <option value="custom">גופן משלי (העלאה)…</option>
+            <option value="custom" data-i18n="opt_font_custom">גופן משלי (העלאה)…</option>
           </select>
         </div>
       </div>
       <div class="field" id="thFontFileWrap" style="display:none">
-        <label>קובץ גופן מותאם (woff2/ttf/otf)</label>
+        <label data-i18n="lbl_custom_font_file">קובץ גופן מותאם (woff2/ttf/otf)</label>
         <input id="thFontFile" type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf">
-        <div class="hint">הגופן המותאם יחול על מה שסימנתם כ"גופן משלי".</div>
+        <div class="hint" data-i18n="hint_custom_font">הגופן המותאם יחול על מה שסימנתם כ"גופן משלי".</div>
       </div>
 
       <label style="display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--ink-soft);margin:4px 0 12px;cursor:pointer">
-        <input id="thAuto" type="checkbox" checked style="width:auto"> צבעים אוטומטיים מהלוגו
+        <input id="thAuto" type="checkbox" checked style="width:auto"> <span data-i18n="lbl_auto_colors">צבעים אוטומטיים מהלוגו</span>
       </label>
       <div id="thColors" style="display:none">
         <div class="grid-2">
           <div class="field">
-            <label>צבע ראשי</label>
+            <label data-i18n="lbl_primary_color">צבע ראשי</label>
             <div style="display:flex;gap:8px;align-items:stretch">
               <input id="thPrimary" type="color" value="#b98a2f" style="width:52px;flex:0 0 auto;padding:4px;cursor:pointer">
-              <button type="button" id="thPrimaryBtn" class="th-pick" style="flex:1 1 auto;background:#b98a2f">בחרו צבע זה</button>
+              <button type="button" id="thPrimaryBtn" class="th-pick" style="flex:1 1 auto;background:#b98a2f" data-i18n="btn_use_color">בחרו צבע זה</button>
             </div>
           </div>
           <div class="field">
-            <label>צבע משני</label>
+            <label data-i18n="lbl_secondary_color">צבע משני</label>
             <div style="display:flex;gap:8px;align-items:stretch">
               <input id="thAccent" type="color" value="#14110c" style="width:52px;flex:0 0 auto;padding:4px;cursor:pointer">
-              <button type="button" id="thAccentBtn" class="th-pick" style="flex:1 1 auto;background:#14110c">בחרו צבע זה</button>
+              <button type="button" id="thAccentBtn" class="th-pick" style="flex:1 1 auto;background:#14110c" data-i18n="btn_use_color">בחרו צבע זה</button>
             </div>
           </div>
         </div>
       </div>
 
       <p class="form-err" id="formErr"></p>
-      <button class="btn btn-gold" id="submitBtn" style="width:100%;margin-top:14px">🚀 צרו לי דף נכס</button>
+      <button class="btn btn-gold" id="submitBtn" style="width:100%;margin-top:14px" data-i18n="btn_submit">🚀 צרו לי דף נכס</button>
     </div>
   </div>
 
@@ -227,42 +245,44 @@
   <div id="viewBuilding" class="hidden">
     <div class="card center" style="max-width:460px;margin:8vh auto">
       <div class="spinner" id="buildSpin"></div>
-      <h2 style="font-family:var(--serif);margin:18px 0 4px">הדף בבנייה 🏗️</h2>
-      <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem">זה לוקח בדרך כלל 2–4 דקות. אפשר לחכות כאן — או שנעדכן בוואטסאפ כשהדף מוכן.</p>
-      <ul class="build-steps" style="text-align:right">
-        <li id="st1"><span class="dot">📸</span> התמונות הועלו</li>
-        <li id="st2"><span class="dot">🎬</span> יוצרים סרטון סיור</li>
-        <li id="st3"><span class="dot">✍️</span> כותבים את הדף וחוקרים את השכונה</li>
-        <li id="st4"><span class="dot">🚀</span> הדף עולה לאוויר</li>
+      <h2 style="font-family:var(--serif);margin:18px 0 4px" data-i18n="build_title">הדף בבנייה 🏗️</h2>
+      <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem" data-i18n="build_sub">זה לוקח בדרך כלל 2–4 דקות. אפשר לחכות כאן — או שנעדכן בוואטסאפ כשהדף מוכן.</p>
+      <ul class="build-steps" style="text-align:start">
+        <li id="st1"><span class="dot">📸</span> <span data-i18n="step_photos">התמונות הועלו</span></li>
+        <li id="st2"><span class="dot">🎬</span> <span data-i18n="step_video">יוצרים סרטון סיור</span></li>
+        <li id="st3"><span class="dot">✍️</span> <span data-i18n="step_writing">כותבים את הדף וחוקרים את השכונה</span></li>
+        <li id="st4"><span class="dot">🚀</span> <span data-i18n="step_live">הדף עולה לאוויר</span></li>
       </ul>
       <div id="doneBox" class="hidden">
-        <h3 style="font-family:var(--serif);margin-bottom:12px">✅ הדף באוויר!</h3>
-        <a class="btn btn-gold" id="pageLink" target="_blank" href="#">צפייה בדף</a>
-        <a class="btn btn-ghost" href="/" style="margin-top:8px">לרשימת הנכסים</a>
+        <h3 style="font-family:var(--serif);margin-bottom:12px" data-i18n="done_title">✅ הדף באוויר!</h3>
+        <a class="btn btn-gold" id="pageLink" target="_blank" href="#" data-i18n="done_view">צפייה בדף</a>
+        <a class="btn btn-ghost" href="/" style="margin-top:8px" data-i18n="link_my_list">לרשימת הנכסים</a>
       </div>
       <div id="waitBox" class="hidden">
-        <h3 style="font-family:var(--serif);margin-bottom:8px">⏳ עדיין עובדים על זה</h3>
-        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem">הבנייה לוקחת יותר מהרגיל — נשלח לך את הקישור לדף בוואטסאפ ברגע שהוא מוכן. אפשר לסגור את החלון.</p>
-        <a class="btn btn-ghost" href="/" style="margin-top:12px">לרשימת הנכסים</a>
+        <h3 style="font-family:var(--serif);margin-bottom:8px" data-i18n="wait_title">⏳ עדיין עובדים על זה</h3>
+        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem" data-i18n="wait_sub">הבנייה לוקחת יותר מהרגיל — נשלח לך את הקישור לדף בוואטסאפ ברגע שהוא מוכן. אפשר לסגור את החלון.</p>
+        <a class="btn btn-ghost" href="/" style="margin-top:12px" data-i18n="link_my_list">לרשימת הנכסים</a>
       </div>
       <div id="failBox" class="hidden">
-        <h3 style="font-family:var(--serif);margin-bottom:8px">😕 משהו השתבש</h3>
-        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem">לא הצלחנו לסיים את בניית הדף. נסו שוב, ואם זה חוזר — כתבו לנו בוואטסאפ ונטפל בזה.</p>
-        <a class="btn btn-gold" href="" id="retryLink" style="margin-top:12px">נסו שוב</a>
-        <a class="btn btn-ghost" href="/" style="margin-top:8px">לרשימת הנכסים</a>
+        <h3 style="font-family:var(--serif);margin-bottom:8px" data-i18n="fail_title">😕 משהו השתבש</h3>
+        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem" data-i18n="fail_sub">לא הצלחנו לסיים את בניית הדף. נסו שוב, ואם זה חוזר — כתבו לנו בוואטסאפ ונטפל בזה.</p>
+        <a class="btn btn-gold" href="" id="retryLink" style="margin-top:12px" data-i18n="fail_retry">נסו שוב</a>
+        <a class="btn btn-ghost" href="/" style="margin-top:8px" data-i18n="link_my_list">לרשימת הנכסים</a>
       </div>
     </div>
   </div>
 </div>
 
 <!-- fullscreen template preview overlay -->
-<div id="tplFull"><button type="button" id="tplFullClose">✕ סגירה</button><iframe id="tplFullFrame" title="תצוגה מקדימה"></iframe></div>
+<div id="tplFull"><button type="button" id="tplFullClose" data-i18n="fullscreen_close">✕ סגירה</button><iframe id="tplFullFrame" title="תצוגה מקדימה" data-i18n-aria="iframe_preview"></iframe></div>
 
 <script src="/api.js"></script>
+<script src="/form-i18n.js"></script>
 <script>
 (function () {
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
+  var FT = function (k) { return window.FORM_I18N ? window.FORM_I18N.t(k) : k; };
 
   // Turn a country code + locally-typed number into a webhook-ready E.164-style
   // digit string, e.g. ("+972","0542045280") -> "972542045280". Tolerates
@@ -283,7 +303,50 @@
   var keyMatch = location.search.match(/[?&]key=([^&]*)/);
   var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
   var isDemo = !!demoKey;
-  if (isDemo) $("#agentBlock").classList.remove("hidden");
+  if (isDemo) {
+    $("#agentBlock").classList.remove("hidden");
+    // standalone demo — not for signed-in users: hide the "my properties" nav
+    var myProps = $("#navMyProps");
+    if (myProps) myProps.style.display = "none";
+  }
+
+  // ── language switcher (top corner) — drives BOTH the form UI language and the
+  //    generated page's language (mirrored into hidden #pLang). Persisted locally.
+  function updatePriceLabel() {
+    $("#pPriceLabel").textContent = FT($("#pType").value === "rent" ? "lbl_price_rent" : "lbl_price");
+  }
+  (function initLang() {
+    if (!window.FORM_I18N) return;
+    var order = window.FORM_I18N.order, menu = $("#langMenu"), btn = $("#langBtn"), sw = $("#langSwitch");
+    var saved = null; try { saved = localStorage.getItem("forly_lang"); } catch (e) {}
+    var start = (saved && order.indexOf(saved) >= 0) ? saved : "he";
+    menu.innerHTML = order.map(function (l) {
+      return '<button type="button" class="lang-opt" role="menuitem" data-l="' + l + '">' +
+        '<span class="fl">' + window.FORM_I18N.flag(l) + '</span><span>' + window.FORM_I18N.name(l) + '</span></button>';
+    }).join("");
+    function setLang(l) {
+      window.FORM_I18N.apply(l);
+      $("#pLang").value = l;
+      $("#langFlag").textContent = window.FORM_I18N.flag(l);
+      $("#langName").textContent = window.FORM_I18N.name(l);
+      Array.prototype.forEach.call(menu.children, function (c) {
+        c.setAttribute("aria-selected", c.getAttribute("data-l") === l ? "true" : "false");
+      });
+      updatePriceLabel();
+      try { localStorage.setItem("forly_lang", l); } catch (e) {}
+    }
+    function closeMenu() { menu.classList.remove("open"); btn.setAttribute("aria-expanded", "false"); }
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var open = menu.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    Array.prototype.forEach.call(menu.children, function (c) {
+      c.addEventListener("click", function () { setLang(c.getAttribute("data-l")); closeMenu(); });
+    });
+    document.addEventListener("click", function (e) { if (!sw.contains(e.target)) closeMenu(); });
+    setLang(start);
+  })();
 
   var photos = []; // {file, url(local), publicUrl?, el}
 
@@ -301,8 +364,8 @@
   function addFiles(list) {
     Array.prototype.slice.call(list).forEach(function (f) {
       if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return;
-      if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + " גדול מ-10MB"); return; }
-      if (photos.length >= 12) { FLY.toast("עד 12 תמונות"); return; }
+      if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + FT("err_too_big")); return; }
+      if (photos.length >= 12) { FLY.toast(FT("err_max_photos")); return; }
       var url = URL.createObjectURL(f);
       var t = FLY.el("div", "t",
         '<img src="' + url + '"><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
@@ -317,9 +380,8 @@
 
   // ── listing type (sale / rent): adapt the price label ──
   $("#pType").addEventListener("change", function () {
-    var rent = this.value === "rent";
-    $("#pPriceLabel").textContent = rent ? "שכר דירה חודשי (₪) *" : "מחיר (₪) *";
-    $("#pPrice").placeholder = rent ? "12000" : "4900000";
+    updatePriceLabel();
+    $("#pPrice").placeholder = this.value === "rent" ? "12000" : "4900000";
   });
 
   // ── theme (fonts + colors) ──
@@ -514,17 +576,17 @@
   $("#submitBtn").addEventListener("click", function () {
     var err = $("#formErr");
     err.classList.remove("show");
-    var required = [["#pAddress", "כתובת"], ["#pCity", "עיר"], ["#pPrice", "מחיר"], ["#pRooms", "חדרים"]];
-    if (isDemo) required.push(["#agName", "שם מתווך"], ["#agPhone", "נייד מתווך"]);
+    var required = [["#pAddress", "fld_address"], ["#pCity", "fld_city"], ["#pPrice", "fld_price"], ["#pRooms", "fld_rooms"]];
+    if (isDemo) required.push(["#agName", "fld_agent_name"], ["#agPhone", "fld_agent_phone"]);
     for (var i = 0; i < required.length; i++) {
       if (!$(required[i][0]).value.trim()) {
-        err.textContent = "חסר: " + required[i][1];
+        err.textContent = FT("err_missing") + FT(required[i][1]);
         err.classList.add("show");
         return;
       }
     }
     if (photos.length < 3) {
-      err.textContent = "צריך לפחות 3 תמונות";
+      err.textContent = FT("err_min_photos");
       err.classList.add("show");
       return;
     }
@@ -532,7 +594,7 @@
     if (isDemo) {
       agPhone = normalizeAgentPhone($("#agCC").value, $("#agPhone").value);
       if (agPhone.length < 10 || agPhone.length > 15) {
-        err.textContent = "מספר טלפון לא תקין";
+        err.textContent = FT("err_bad_phone");
         err.classList.add("show");
         return;
       }
@@ -540,7 +602,7 @@
 
     var btn = this;
     btn.disabled = true;
-    btn.textContent = "מעלים תמונות...";
+    btn.textContent = FT("status_uploading");
     var headers = isDemo ? { "x-demo-key": demoKey } : {};
 
     var videoFile = $("#videoInput").files[0] || null;
@@ -578,6 +640,7 @@
           photos_urls: photoUrls,
           own_video_url: videoUrl,
           theme: theme,
+          language: $("#pLang").value,
         };
         if (isDemo) {
           body.agent = {
@@ -588,7 +651,7 @@
             logo_url: logoUrl,
           };
         }
-        btn.textContent = "יוצרים את הדף...";
+        btn.textContent = FT("status_creating");
         var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
         return fetch(path, {
           method: "POST",
@@ -605,10 +668,10 @@
     }).then(function (d) {
       startBuildingScreen(d.listing_id);
     }).catch(function (e) {
-      err.textContent = "שגיאה: " + e.message;
+      err.textContent = FT("err_prefix") + e.message;
       err.classList.add("show");
       btn.disabled = false;
-      btn.textContent = "🚀 צרו לי דף נכס";
+      btn.textContent = FT("btn_submit");
     });
   });
 

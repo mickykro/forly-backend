@@ -61,7 +61,7 @@
 
 <header class="topbar">
   <a class="brand" href="#"><span data-bind="agent.brand_name">רוזנברג</span><small data-bind="agent.tagline">GALERIE · TEL AVIV</small></a>
-  <a class="top-phone num" data-wa href="#">שיחה עם המתווך</a>
+  <a class="top-phone num" data-wa href="#" data-i18n="contact_agent">שיחה עם המתווך</a>
 </header>
 
 <div class="wrap hero">
@@ -74,20 +74,20 @@
   </div>
   <figure class="frame">
     <div class="frame-in"><video data-video autoplay muted loop playsinline></video></div>
-    <figcaption class="plate">סרטון סיור · 2026</figcaption>
+    <figcaption class="plate" data-i18n="tour_video">סרטון סיור · 2026</figcaption>
   </figure>
   <dl class="plabels">
     <div class="plabel price"><dt data-price-label>מחיר מבוקש</dt><dd class="num" data-bind="property.price" data-fmt="price">₪8,400,000</dd></div>
-    <div class="plabel"><dt>חדרים</dt><dd class="num" data-bind="property.rooms">4</dd></div>
-    <div class="plabel"><dt>שטח בנוי</dt><dd class="num"><span data-bind="property.size_sqm">140</span> <small>מ״ר</small></dd></div>
-    <div class="plabel"><dt>קומה</dt><dd class="num" data-bind="property.floor">7</dd></div>
+    <div class="plabel"><dt data-i18n="rooms">חדרים</dt><dd class="num" data-bind="property.rooms">4</dd></div>
+    <div class="plabel"><dt data-i18n="built_area">שטח בנוי</dt><dd class="num"><span data-bind="property.size_sqm">140</span> <small data-i18n="sqm">מ״ר</small></dd></div>
+    <div class="plabel"><dt data-i18n="floor">קומה</dt><dd class="num" data-bind="property.floor">7</dd></div>
   </dl>
 </div>
 
 <section class="blk">
   <div class="wrap res">
     <div class="reveal">
-      <span class="label">הנכס</span>
+      <span class="label" data-i18n="the_property">הנכס</span>
       <h2 style="margin-top:16px" data-bind="hero.phrase">נכס שמגיעים אליו פעם בעשור.</h2>
       <p class="lede" data-bind="cta.sub">דירה נדירה בלב הצפון הישן, במרחק נגיעה מהים.</p>
     </div>
@@ -100,8 +100,8 @@
 <section class="blk band" id="gallery">
   <div class="wrap">
     <div class="g-head reveal">
-      <div><span class="label">גלריה</span><h2 style="margin:14px 0 0">רגעים מתוך הסיור</h2></div>
-      <span class="cat">לחצו על תמונה להגדלה</span>
+      <div><span class="label" data-i18n="gallery">גלריה</span><h2 style="margin:14px 0 0" data-i18n="moments_from_tour">רגעים מתוך הסיור</h2></div>
+      <span class="cat" data-i18n="gallery_hint_click">לחצו על תמונה להגדלה</span>
     </div>
     <div class="g-grid reveal" data-gallery data-gallery-class="g" data-gallery-count="6"></div>
   </div>
@@ -110,7 +110,7 @@
 <section class="blk">
   <div class="wrap addr">
     <div class="reveal">
-      <span class="label">הכתובת</span>
+      <span class="label" data-i18n="the_address">הכתובת</span>
       <h2 style="margin-top:16px"><span data-bind="property.neighborhood">הצפון הישן</span>, <span data-bind="property.city">תל אביב</span></h2>
       <p class="lede" data-bind="area.blurb">שכונה מבוקשת במרחק הליכה מהים.</p>
       <ul class="stops" data-list="area.stops"><template><li><b data-field="label"></b><span data-field="minutes"></span></li></template></ul>
@@ -122,27 +122,28 @@
 <section class="blk band" id="contact">
   <div class="wrap contact">
     <div class="reveal">
-      <span class="label">תיאום ביקור</span>
+      <span class="label" data-i18n="book_visit">תיאום ביקור</span>
       <h2 style="margin-top:16px" data-bind="cta.headline">לראות את הנכס במו עיניכם</h2>
       <p class="lede" data-bind="cta.sub">השאירו פרטים ונחזור אליכם עוד היום לתיאום ביקור פרטי בנכס.</p>
-      <div class="agent"><div class="av">ש</div><div><b data-bind="agent.name">שלום רוזנברג</b><span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · רישיון תיווך <span data-bind="agent.license">3142871</span></span></div></div>
+      <div class="agent"><div class="av">ש</div><div><b data-bind="agent.name">שלום רוזנברג</b><span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · <span data-i18n="license_label">רישיון תיווך</span> <span data-bind="agent.license">3205419</span></span></div></div>
     </div>
     <form data-lead-form class="reveal">
-      <div class="field"><label>שם מלא</label><input data-lead="name" type="text" placeholder="ישראל ישראלי" required></div>
-      <div class="field"><label>טלפון נייד</label><input data-lead="phone" type="tel" class="num" placeholder="050-000-0000" required></div>
-      <div class="field"><label>הודעה (אופציונלי)</label><textarea data-lead="message" rows="2" placeholder="אשמח לתאם ביקור..."></textarea></div>
+      <div class="field"><label data-i18n="form_name">שם מלא</label><input data-lead="name" type="text" placeholder="ישראל ישראלי" data-i18n-ph="ph_name" required></div>
+      <div class="field"><label data-i18n="form_phone">טלפון נייד</label><input data-lead="phone" type="tel" class="num" placeholder="050-000-0000" required></div>
+      <div class="field"><label data-i18n="form_message">הודעה (אופציונלי)</label><textarea data-lead="message" rows="2" placeholder="אשמח לתאם ביקור..." data-i18n-ph="ph_message"></textarea></div>
       <div class="actions">
-        <button class="btn btn-teal" type="submit">שלחו לי פרטים</button>
-        <a class="btn btn-wa" data-wa target="_blank" rel="noopener" href="#">וואטסאפ ישיר</a>
+        <button class="btn btn-teal" type="submit" data-i18n="send_details">שלחו לי פרטים</button>
+        <a class="btn btn-wa" data-wa target="_blank" rel="noopener" href="#" data-i18n="direct_whatsapp">וואטסאפ ישיר</a>
       </div>
-      <p class="sent" data-lead-sent>✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
+      <p class="sent" data-lead-sent data-i18n="lead_sent">✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
     </form>
   </div>
 </section>
 
-<footer><div class="wrap"><span class="fbrand" data-bind="agent.brand_name">רוזנברג · GALERIE</span><span>הדף נוצר אוטומטית ע״י Forly 🦉 · כל הפרטים כפופים לאימות</span></div></footer>
+<footer><div class="wrap"><span class="fbrand" data-bind="agent.brand_name">רוזנברג · GALERIE</span><span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉 · כל הפרטים כפופים לאימות</span></div></footer>
 
 <script src="/tpl/demo.js"></script>
+<script src="/tpl/i18n.js"></script>
 <script src="/tpl/runtime.js"></script>
 </body>
 </html>

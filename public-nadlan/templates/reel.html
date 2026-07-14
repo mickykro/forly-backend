@@ -66,7 +66,7 @@
 <section class="hero">
   <header class="topbar">
     <a class="brand" href="#"><span data-bind="agent.brand_name">רוזנברג</span><small data-bind="agent.tagline">REEL · TEL AVIV</small></a>
-    <a class="top-phone num" data-wa href="#">שיחה עם המתווך</a>
+    <a class="top-phone num" data-wa href="#" data-i18n="contact_agent">שיחה עם המתווך</a>
   </header>
   <video data-video autoplay muted loop playsinline></video>
   <div class="hero-in">
@@ -74,11 +74,11 @@
     <h1 data-bind="property.title">דיזנגוף 156</h1>
     <p class="sub" data-bind="hero.phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד.</p>
     <div class="hero-cta">
-      <a class="btn btn-wine" href="#contact">תיאום ביקור פרטי</a>
-      <a class="btn btn-glass" href="#gallery">צפו בגלריה</a>
+      <a class="btn btn-wine" href="#contact" data-i18n="book_visit_private">תיאום ביקור פרטי</a>
+      <a class="btn btn-glass" href="#gallery" data-i18n="view_gallery">צפו בגלריה</a>
     </div>
   </div>
-  <button class="sound" id="soundBtn" aria-label="הפעלת קול">🔇</button>
+  <button class="sound" id="soundBtn" aria-label="הפעלת קול" data-i18n-aria="video_sound">🔇</button>
 </section>
 
 <div class="ticker" aria-hidden="true"><div class="track" id="track"></div></div>
@@ -87,9 +87,9 @@
   <div class="wrap">
     <dl class="figures reveal">
       <div class="fig price"><b class="num" data-bind="property.price" data-fmt="price">₪8.4M</b><span data-price-label>מחיר מבוקש</span></div>
-      <div class="fig"><b class="num" data-bind="property.rooms">4</b><span>חדרים</span></div>
-      <div class="fig"><b class="num"><span data-bind="property.size_sqm">140</span></b><span>מ״ר בנוי</span></div>
-      <div class="fig"><b class="num" data-bind="property.floor">7</b><span>קומה</span></div>
+      <div class="fig"><b class="num" data-bind="property.rooms">4</b><span data-i18n="rooms">חדרים</span></div>
+      <div class="fig"><b class="num"><span data-bind="property.size_sqm">140</span></b><span data-i18n="built_area">מ״ר בנוי</span></div>
+      <div class="fig"><b class="num" data-bind="property.floor">7</b><span data-i18n="floor">קומה</span></div>
     </dl>
   </div>
 </section>
@@ -97,12 +97,12 @@
 <section id="about" style="padding-top:0">
   <div class="wrap res">
     <div class="reveal">
-      <span class="kick">הנכס</span>
+      <span class="kick" data-i18n="the_property">הנכס</span>
       <h2 style="margin-top:18px" data-bind="hero.phrase">נכס שמגיעים אליו פעם בעשור.</h2>
       <p class="lede" data-bind="cta.sub">דירה נדירה בלב הצפון הישן, במרחק נגיעה מהים.</p>
     </div>
     <div class="reveal">
-      <span class="kick">מה יש בפנים</span>
+      <span class="kick" data-i18n="whats_inside">מה יש בפנים</span>
       <div class="chips" style="margin-top:18px" data-list="carousel.slides"><template><span class="chip" data-field="tag"></span></template></div>
     </div>
   </div>
@@ -111,8 +111,8 @@
 <section id="gallery" style="padding-top:0">
   <div class="wrap">
     <div class="strip-head reveal">
-      <div><span class="kick">גלריה</span><h2 style="margin:14px 0 0">רגעים מתוך הסיור</h2></div>
-      <span class="strip-hint">↔ גררו לצדדים · לחצו להגדלה</span>
+      <div><span class="kick" data-i18n="gallery">גלריה</span><h2 style="margin:14px 0 0" data-i18n="moments_from_tour">רגעים מתוך הסיור</h2></div>
+      <span class="strip-hint" data-i18n="gallery_hint_drag">↔ גררו לצדדים · לחצו להגדלה</span>
     </div>
   </div>
   <div class="wrap"><div class="strip reveal" id="strip" data-gallery data-gallery-class="shot" data-gallery-count="6"></div></div>
@@ -121,7 +121,7 @@
 <section class="band">
   <div class="wrap addr">
     <div class="reveal">
-      <span class="kick">הכתובת</span>
+      <span class="kick" data-i18n="the_address">הכתובת</span>
       <h2 style="margin-top:16px"><span data-bind="property.neighborhood">הצפון הישן</span> · <span data-bind="property.city">תל אביב</span></h2>
       <p class="lede" data-bind="area.blurb">שכונה מבוקשת במרחק הליכה מהים.</p>
     </div>
@@ -132,34 +132,37 @@
 <section id="contact">
   <div class="wrap contact">
     <div class="reveal">
-      <span class="kick">תיאום ביקור</span>
+      <span class="kick" data-i18n="book_visit">תיאום ביקור</span>
       <h2 style="margin-top:16px" data-bind="cta.headline">הנכסים הטובים באמת לא מחכים</h2>
       <p class="lede" data-bind="cta.sub">השאירו פרטים ונחזור אליכם עוד היום לתיאום ביקור פרטי בנכס.</p>
-      <div class="agent"><div class="av">ש</div><div><b data-bind="agent.name">שלום רוזנברג</b><span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · רישיון תיווך <span data-bind="agent.license">3142871</span></span></div></div>
+      <div class="agent"><div class="av">ש</div><div><b data-bind="agent.name">שלום רוזנברג</b><span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · <span data-i18n="license_label">רישיון תיווך</span> <span data-bind="agent.license">3205419</span></span></div></div>
     </div>
     <form data-lead-form class="reveal">
-      <div class="field"><label>שם מלא</label><input data-lead="name" type="text" placeholder="ישראל ישראלי" required></div>
-      <div class="field"><label>טלפון נייד</label><input data-lead="phone" type="tel" class="num" placeholder="050-000-0000" required></div>
-      <div class="field"><label>הודעה (אופציונלי)</label><textarea data-lead="message" rows="2" placeholder="אשמח לתאם ביקור..."></textarea></div>
+      <div class="field"><label data-i18n="form_name">שם מלא</label><input data-lead="name" type="text" placeholder="ישראל ישראלי" data-i18n-ph="ph_name" required></div>
+      <div class="field"><label data-i18n="form_phone">טלפון נייד</label><input data-lead="phone" type="tel" class="num" placeholder="050-000-0000" required></div>
+      <div class="field"><label data-i18n="form_message">הודעה (אופציונלי)</label><textarea data-lead="message" rows="2" placeholder="אשמח לתאם ביקור..." data-i18n-ph="ph_message"></textarea></div>
       <div class="actions">
-        <button class="btn btn-wine" type="submit">שלחו לי פרטים</button>
-        <a class="btn btn-wa" data-wa target="_blank" rel="noopener" href="#">וואטסאפ ישיר</a>
+        <button class="btn btn-wine" type="submit" data-i18n="send_details">שלחו לי פרטים</button>
+        <a class="btn btn-wa" data-wa target="_blank" rel="noopener" href="#" data-i18n="direct_whatsapp">וואטסאפ ישיר</a>
       </div>
-      <p class="sent" data-lead-sent>✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
+      <p class="sent" data-lead-sent data-i18n="lead_sent">✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
     </form>
   </div>
 </section>
 
-<footer><div class="wrap"><span class="fbrand" data-bind="agent.brand_name">רוזנברג · REEL</span><span>הדף נוצר אוטומטית ע״י Forly 🦉 · כל הפרטים כפופים לאימות</span></div></footer>
+<footer><div class="wrap"><span class="fbrand" data-bind="agent.brand_name">רוזנברג · REEL</span><span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉 · כל הפרטים כפופים לאימות</span></div></footer>
 
 <script src="/tpl/demo.js"></script>
+<script src="/tpl/i18n.js"></script>
 <script src="/tpl/runtime.js"></script>
 <script>
 (function(){
   var D = window.__PAGE__ || window.__DEMO__ || {}, p = D.property || {};
   function fp(n){ if(!n)return ""; n=+n; if(n>=1e6){var m=n/1e6;return "₪"+(m%1===0?m.toFixed(0):m.toFixed(1))+"M";} return "₪"+n.toLocaleString("he-IL"); }
   var rent = p.listing_type==="rent";
-  var facts=[fp(p.price)+(rent?" / חודש":""), (p.rooms||"")+" חדרים", (p.size_sqm||"")+" מ״ר", p.floor?("קומה "+p.floor):"", p.neighborhood, p.city].filter(Boolean);
+  var LANG = D.language || "he";
+  function T(k){ return window.I18N ? window.I18N.t(LANG, k) : k; }
+  var facts=[fp(p.price)+(rent?(" "+T("per_month")):""), (p.rooms||"")+" "+T("rooms"), (p.size_sqm||"")+" "+T("sqm"), p.floor?(T("floor")+" "+p.floor):"", p.neighborhood, p.city].filter(Boolean);
   var track=document.getElementById("track");
   if(track){ var html=facts.map(function(f){return "<span>"+f+"</span>";}).join(""); track.innerHTML=html+html; }
   // sound toggle

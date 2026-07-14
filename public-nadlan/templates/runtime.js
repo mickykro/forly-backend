@@ -37,6 +37,11 @@
   var each = function (sel, root, fn) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); };
 
   var isRent = get("property.listing_type") === "rent";
+  var LANG = DATA.language || "he";
+  function T(key, vars) { return window.I18N ? window.I18N.t(LANG, key, vars) : key; }
+
+  // ── i18n: translate static chrome ([data-i18n]) + set <html lang/dir> ──
+  if (window.I18N) window.I18N.apply(document, LANG);
 
   // ── theme: custom colors + fonts override the template's accent tokens ──
   (function applyTheme() {
@@ -60,11 +65,11 @@
   // ── scalar text bindings ──
   each("[data-bind]", document, function (el) {
     var v = get(el.getAttribute("data-bind"));
-    if (el.getAttribute("data-fmt") === "price") v = fmtPrice(v) + (isRent && v ? " / חודש" : "");
+    if (el.getAttribute("data-fmt") === "price") v = fmtPrice(v) + (isRent && v ? " " + T("per_month") : "");
     if (v != null && v !== "") el.textContent = v;
   });
-  each("[data-deal]", document, function (el) { el.textContent = isRent ? "להשכרה" : "למכירה"; });
-  each("[data-price-label]", document, function (el) { el.textContent = isRent ? "שכר דירה חודשי" : "מחיר מבוקש"; });
+  each("[data-deal]", document, function (el) { el.textContent = isRent ? T("for_rent") : T("for_sale"); });
+  each("[data-price-label]", document, function (el) { el.textContent = isRent ? T("monthly_rent") : T("asking_price"); });
   each("[data-show]", document, function (el) { if (!get(el.getAttribute("data-show"))) el.remove(); });
 
   // ── document title / meta ──
@@ -80,7 +85,7 @@
 
   // ── WhatsApp links ──
   var phone = String(get("agent.phone") || get("business_phone") || "").replace(/\D/g, "");
-  var waText = encodeURIComponent("שלום, ראיתי את " + (title || "הנכס") + " ואשמח לתאם ביקור.");
+  var waText = encodeURIComponent(T("wa_prefill", { title: title || T("the_property") }));
   each("[data-wa]", document, function (a) { if (phone) a.href = "https://wa.me/" + phone + "?text=" + waText; });
 
   // ── list loops (clone the inner <template> per item) ──
@@ -194,7 +199,7 @@
           body: JSON.stringify({ page_id: PAGE_ID, name: name, phone: ph }),
         }).catch(function () {});
       }
-      if (phone) window.open("https://wa.me/" + phone + "?text=" + encodeURIComponent("שלום, אני " + name + " (" + ph + ") ואשמח לתאם ביקור ב" + (title || "נכס") + "." + (msg ? "\n" + msg : "")), "_blank");
+      if (phone) window.open("https://wa.me/" + phone + "?text=" + encodeURIComponent(T("lead_wa_prefill", { name: name, phone: ph, title: title || T("the_property") }) + (msg ? "\n" + msg : "")), "_blank");
       var sent = form.querySelector("[data-lead-sent]"); if (sent) sent.style.display = "block";
       beacon("cta_click");
     });
