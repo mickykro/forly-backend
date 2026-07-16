@@ -77,3 +77,6 @@ functions/.secret.local
 # Local service account key (do not commit)
 functions/sa-key*.json
 functions/sa-key*.local.json
+
+# server/ runtime data (uploaded test photos, in-memory store dumps)
+server/data/
