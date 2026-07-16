@@ -209,13 +209,21 @@ app.use("/tpl", express.static(TEMPLATES_DIR));
 // ════════════════════════════ INTAKE ════════════════════════════
 
 const createAuthRouter = require("./auth");
+const { requireAuth } = createAuthRouter;
+const AUTH_SECRET = process.env.FORLY_JWT_SECRET || "change-me-in-env";
 app.use("/api/auth", createAuthRouter({
   db, mem, sendWhatsApp,
-  secret: process.env.FORLY_JWT_SECRET || "change-me-in-env",
+  secret: AUTH_SECRET,
 }));
 
-app.post("/api/upload-urls", (req, res) => {
-  if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
+// Demo flow (shared link + x-demo-key) skips straight through; the real
+// dashboard has no key, so it must present a valid session cookie instead.
+function uploadAuth(req, res, next) {
+  if ("x-demo-key" in req.headers) return next();
+  return requireAuth(AUTH_SECRET)(req, res, next);
+}
+
+app.post("/api/upload-urls", uploadAuth, (req, res) => {
   const files = req.body && req.body.files;
   if (!Array.isArray(files) || files.length < 1 || files.length > MAX_UPLOAD_FILES) {
     return res.status(400).json({ error: `1-${MAX_UPLOAD_FILES} files` });
@@ -344,6 +352,16 @@ app.post("/api/properties/demo-create", async (req, res) => {
   const agentPhone = body.agent && body.agent.phone ? String(body.agent.phone) : "";
   if (!agentPhone) return res.status(400).json({ error: "agent.phone required" });
   const result = await createListing(agentPhone, body, body.agent || {});
+  if (result.error) return res.status(result.code).json({ error: result.error });
+  res.json({ ...result, status: "building" });
+});
+
+// Real (non-demo) dashboard flow: phone comes from the verified session, not
+// the client body, and the agent's own businesses/{phone} profile is used
+// instead of a client-supplied agent override.
+app.post("/api/properties/create", requireAuth(AUTH_SECRET), async (req, res) => {
+  const body = req.body || {};
+  const result = await createListing(req.user.userId, body, null);
   if (result.error) return res.status(result.code).json({ error: result.error });
   res.json({ ...result, status: "building" });
 });
