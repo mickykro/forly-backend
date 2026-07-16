@@ -79,7 +79,7 @@
   form .field{margin-bottom:16px}form label{display:block;font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--mist);margin-bottom:8px}
   form input,form textarea{width:100%;background:rgba(5,7,11,.5);border:1px solid var(--line);border-radius:6px;color:var(--ivory);font-family:var(--sans);font-weight:300;font-size:.98rem;padding:14px 16px}
   form input:focus,form textarea:focus{outline:none;border-color:var(--champ)}form input::placeholder,form textarea::placeholder{color:var(--mist)}
-  .form-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}@media(max-width:480px){.form-actions{grid-template-columns:1fr}}
+  .form-actions{display:grid;grid-template-columns:1fr;gap:12px;margin-top:22px}
   .btn-sub{background:var(--champ);color:#1A140A;font-weight:500}.btn-sub:hover{background:var(--champ-lite);transform:translateY(-2px)}
   .sent{display:none;margin-top:14px;text-align:center;color:var(--champ-lite);font-size:.9rem}
   footer{border-top:1px solid var(--line);padding:26px 0;font-size:.78rem;color:var(--mist)}footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}.fbrand{font-family:var(--serif);letter-spacing:.14em;color:var(--ivory-2)}
@@ -165,7 +165,6 @@
         <div class="field"><label data-i18n="form_message">הודעה (אופציונלי)</label><textarea data-lead="message" rows="2" placeholder="אשמח לתאם ביקור..." data-i18n-ph="ph_message"></textarea></div>
         <div class="form-actions">
           <button class="btn btn-sub" type="submit" data-i18n="send_details">שלחו לי פרטים</button>
-          <a class="btn btn-wa" data-wa target="_blank" rel="noopener" href="#" data-i18n="direct_whatsapp">וואטסאפ ישיר</a>
         </div>
         <p class="sent" data-lead-sent data-i18n="lead_sent">✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
       </form>

@@ -20,9 +20,10 @@ export const submitPropertyLead = onRequest(
       res.status(405).send("POST only");
       return;
     }
-    const body = req.body as {page_id?: string; name?: string; phone?: string};
+    const body = req.body as {page_id?: string; name?: string; phone?: string; message?: string};
     const prospectPhone = normalizePhone(body.phone || "");
     const name = String(body.name || "").trim().slice(0, 60);
+    const message = String(body.message || "").trim().slice(0, 500);
     if (!body.page_id || !prospectPhone || name.length < 2) {
       res.status(400).json({error: "invalid_input"});
       return;
@@ -76,10 +77,30 @@ export const submitPropertyLead = onRequest(
         last_activity_at: new Date(),
       }, {merge: true});
 
-      // 2) Counter.
+      // 2) Immutable per-submission record — every CTA form submit is kept,
+      // stamped with the real-estate agent behind the page.
+      await db.collection("lead_submissions").add({
+        page_id: body.page_id,
+        listing_id: page.listing_id,
+        prospect_name: name,
+        prospect_phone: prospectPhone,
+        message: message || null,
+        source: "landing_page",
+        property_title: page.property?.title || "",
+        agent: {
+          name: page.agent?.name || "",
+          brand_name: page.agent?.brand_name || "",
+          phone: page.agent?.phone || page.business_phone,
+          license: page.agent?.license || "",
+        },
+        agent_phone: page.business_phone,
+        created_at: new Date(),
+      });
+
+      // 3) Counter.
       await pageDoc.ref.update({lead_count: FieldValue.increment(1)});
 
-      // 3) WhatsApp the agent — best-effort.
+      // 4) WhatsApp the agent — best-effort.
       try {
         await sendWhatsAppMessage(
           page.business_phone,
@@ -93,16 +114,23 @@ export const submitPropertyLead = onRequest(
         logger.error("lead notify failed (lead still saved):", err);
       }
 
-      // 4) Hand into Forly Leads Handler — fire and forget.
+      // 5) Hand into Forly Leads Handler — fire and forget.
       const webhook = n8nLeadWebhookUrl.value();
       if (webhook) {
         axios.post(webhook, {
           phone: prospectPhone,
           name,
+          message: message || null,
           source: "landing_page",
           page_id: body.page_id,
           listing_id: page.listing_id,
           agent_phone: page.business_phone,
+          agent: {
+            name: page.agent?.name || "",
+            brand_name: page.agent?.brand_name || "",
+            phone: page.agent?.phone || page.business_phone,
+            license: page.agent?.license || "",
+          },
         }, {timeout: 10000}).catch((err) => {
           logger.error("leads-handler webhook failed:", err?.message || err);
         });

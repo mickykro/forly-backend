@@ -14,7 +14,7 @@
      data-list="area.stops"   → clone the child <template> per array item,
                                 filling [data-field="k"] from item[k]
      data-gallery data-gallery-class="g"  → build N tiles from the video's frames
-     data-lead-form           → submit posts /api/property-lead, then WhatsApp
+     data-lead-form           → submit posts /api/property-lead
        [data-lead="name|phone|message"], [data-lead-sent]
      data-count               → animate the number up when scrolled into view
    Interactions: scroll-reveal (.reveal), lightbox, view/CTA beacons. */
@@ -196,10 +196,9 @@
       if (!IS_PREVIEW && PAGE_ID && name && ph) {
         fetch("/api/property-lead", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ page_id: PAGE_ID, name: name, phone: ph }),
+          body: JSON.stringify({ page_id: PAGE_ID, name: name, phone: ph, message: msg }),
         }).catch(function () {});
       }
-      if (phone) window.open("https://wa.me/" + phone + "?text=" + encodeURIComponent(T("lead_wa_prefill", { name: name, phone: ph, title: title || T("the_property") }) + (msg ? "\n" + msg : "")), "_blank");
       var sent = form.querySelector("[data-lead-sent]"); if (sent) sent.style.display = "block";
       beacon("cta_click");
     });

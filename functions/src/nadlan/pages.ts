@@ -50,6 +50,19 @@ export const createPropertyPage = onRequest(
       return;
     }
 
+    // The gallery must never show the same photo twice — drop duplicate
+    // source URLs before hosting anything.
+    const seenPhotoUrls = new Set<string>();
+    const uniquePhotos = body.photos.filter((p) => {
+      if (!p.url || seenPhotoUrls.has(p.url)) return false;
+      seenPhotoUrls.add(p.url);
+      return true;
+    });
+    if (uniquePhotos.length < 1) {
+      res.status(400).json({error: "photos must contain at least one valid url"});
+      return;
+    }
+
     try {
       // Idempotency: reuse an existing page for this listing.
       const existing = await db.collection(PAGES)
@@ -62,8 +75,8 @@ export const createPropertyPage = onRequest(
       const videoUp = downloadAndUpload(body.video_url, `${base}/walkthrough.mp4`, "video/mp4");
       const posterUp = body.poster_url ?
         downloadAndUpload(body.poster_url, `${base}/poster.jpg`, "image/jpeg") :
-        downloadAndUpload(body.photos[0].url, `${base}/poster.jpg`, "image/jpeg");
-      const photoUps = body.photos.slice(0, 12).map((p, i) => {
+        downloadAndUpload(uniquePhotos[0].url, `${base}/poster.jpg`, "image/jpeg");
+      const photoUps = uniquePhotos.slice(0, 12).map((p, i) => {
         const ext = guessImageExt(p.url);
         return downloadAndUpload(p.url, `${base}/photo-${pad(i + 1)}.${ext}`, `image/${ext === "jpg" ? "jpeg" : ext}`);
       });
@@ -83,7 +96,7 @@ export const createPropertyPage = onRequest(
 
       const galleryImages: GalleryImage[] = photos.map((p, i) => ({
         url: p.publicUrl,
-        caption: body.photos![i].caption || "",
+        caption: uniquePhotos[i].caption || "",
       }));
 
       const now = new Date();
@@ -263,9 +276,15 @@ export const updatePropertyPage = onRequest(
     }
     if (Array.isArray(body.gallery_images)) {
       // Only reorder/caption/remove of already-hosted images (same-bucket URLs).
+      // Dedupe by URL so the gallery never ends up with the same image twice.
       const current = new Set(d.gallery.images.map((i) => i.url));
+      const kept = new Set<string>();
       const next = body.gallery_images
-        .filter((i) => current.has(i.url))
+        .filter((i) => {
+          if (!current.has(i.url) || kept.has(i.url)) return false;
+          kept.add(i.url);
+          return true;
+        })
         .map((i) => ({url: i.url, caption: String(i.caption || "").slice(0, 60)}));
       if (next.length >= 1) update["gallery.images"] = next;
     }
