@@ -170,7 +170,15 @@
     fillSpec(specs[2], p.floor ? TR("floor") + " " + p.floor : (p.neighborhood || p.city), p.address || "");
     fillSpec(specs[3], p.parking ? p.parking + " " + TR("parking") : "", p.parking ? TR("registered") : "");
 
-    // gallery
+    // gallery — never render the same image twice, whatever the payload says
+    if (d.gallery && Array.isArray(d.gallery.images)) {
+      var seenUrls = {};
+      d.gallery.images = d.gallery.images.filter(function (img) {
+        if (!img || !img.url || seenUrls[img.url]) return false;
+        seenUrls[img.url] = 1;
+        return true;
+      });
+    }
     if (d.sections.gallery && d.gallery.images.length) {
       var gal = $("#gal");
       gal.innerHTML = d.gallery.images.map(function (img, i) {

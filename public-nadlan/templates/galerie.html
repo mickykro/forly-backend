@@ -51,7 +51,7 @@
   .btn-teal{background:var(--teal);color:var(--paper)}.btn-teal:hover{background:var(--teal-2);transform:translateY(-2px)}.btn-wa{background:#1FA855;color:#fff}.btn-wa:hover{background:#178A45;transform:translateY(-2px)}
   form .field{margin-bottom:16px}form label{display:block;font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--stone);margin-bottom:8px}
   form input,form textarea{width:100%;background:var(--paper);border:1px solid var(--line);border-radius:2px;color:var(--ink);font-family:var(--sans);font-size:.96rem;padding:13px 15px}form input:focus,form textarea:focus{outline:none;border-color:var(--teal)}form input::placeholder,form textarea::placeholder{color:var(--stone)}
-  .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:20px}@media(max-width:460px){.actions{grid-template-columns:1fr}}
+  .actions{display:grid;grid-template-columns:1fr;gap:10px;margin-top:20px}
   .sent{display:none;margin-top:12px;color:var(--teal);font-weight:500;font-size:.9rem;text-align:center}
   footer{border-top:1px solid var(--line);padding:26px 0;font-size:.78rem;color:var(--stone)}footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}.fbrand{font-family:var(--serif);letter-spacing:.08em;color:var(--ink-2)}
   .reveal{opacity:0;transform:translateY(24px);transition:opacity .8s ease,transform .8s ease}.reveal.in{opacity:1;transform:none}@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none}}
@@ -133,7 +133,6 @@
       <div class="field"><label data-i18n="form_message">הודעה (אופציונלי)</label><textarea data-lead="message" rows="2" placeholder="אשמח לתאם ביקור..." data-i18n-ph="ph_message"></textarea></div>
       <div class="actions">
         <button class="btn btn-teal" type="submit" data-i18n="send_details">שלחו לי פרטים</button>
-        <a class="btn btn-wa" data-wa target="_blank" rel="noopener" href="#" data-i18n="direct_whatsapp">וואטסאפ ישיר</a>
       </div>
       <p class="sent" data-lead-sent data-i18n="lead_sent">✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
     </form>
