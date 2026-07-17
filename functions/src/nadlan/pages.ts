@@ -202,6 +202,8 @@ export const getPropertyPage = onRequest({cors: false}, async (req, res) => {
     area: d.area,
     cta: d.cta,
     sections: d.sections,
+    theme: d.theme || null,
+    texts: d.texts || null,
   });
 });
 
