@@ -65,6 +65,13 @@
       "target": "nadlan",
       "public": "public-nadlan",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "redirects": [
+        {
+          "source": "/:path*",
+          "destination": "https://nadlan.call4li.com/:path*",
+          "type": 301
+        }
+      ],
       "rewrites": [
         {
           "source": "/api/property-page",
