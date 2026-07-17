@@ -272,6 +272,27 @@ app.put("/api/upload/:fname", rawBody, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Remove an uploaded file (the form deletes photos the user takes back out).
+app.delete("/api/upload/:fname", async (req, res) => {
+  if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
+  const fname = req.params.fname;
+  if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.test(fname)) {
+    return res.status(400).json({ error: "bad filename" });
+  }
+  if (REMOTE_UPLOAD_BASE) {
+    try {
+      await fetch(`${REMOTE_UPLOAD_BASE}/api/upload/${fname}`, {
+        method: "DELETE",
+        headers: { "x-demo-key": "relay" },
+        signal: AbortSignal.timeout(20000),
+      });
+    } catch { /* best-effort */ }
+    return res.json({ ok: true });
+  }
+  try { fs.unlinkSync(path.join(UPLOAD_DIR, fname)); } catch { /* already gone */ }
+  res.json({ ok: true });
+});
+
 async function createListing(phone, body, agentOverride) {
   if (!body.address || !body.city || !body.price || !body.rooms) {
     return { error: "address, city, price, rooms are required", code: 400 };
@@ -372,11 +393,16 @@ app.post("/createPropertyPage", async (req, res) => {
     const pageId = reusable ? reusable.page_id : crypto.randomUUID();
     const base = `pages/${pageId}`;
 
-    // Theme is chosen on the intake form and stored on the listing; the n8n page
-    // builder doesn't forward it, so read it here. A custom font is re-hosted
-    // under the page assets so it never expires.
+    // Theme and agent are chosen on the intake form and stored on the listing;
+    // the n8n page builder doesn't always forward them, so fall back to the
+    // listing here (this is what kept uploaded logos off the page). A custom
+    // font is re-hosted under the page assets so it never expires.
     const listing = await getListing(body.listing_id).catch(() => null);
     const theme = sanitizeTheme(body.theme || (listing && listing.theme));
+    const listingAgent = (listing && listing.agent) || {};
+    const agentIn = body.agent || {};
+    const agentField = (k) => String(agentIn[k] || listingAgent[k] || "");
+    const logoSrc = agentIn.logo_url || listingAgent.logo_url || null;
     if (theme && theme.font_url) {
       const fext = (theme.font_url.split("?")[0].match(/\.(woff2|woff|ttf|otf)$/i) || [, "woff2"])[1].toLowerCase();
       theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`).catch(() => theme.font_url);
@@ -387,7 +413,7 @@ app.post("/createPropertyPage", async (req, res) => {
     const photoPs = body.photos.slice(0, 12).map((p, i) =>
       rehost(p.url, `${base}/photo-${pad(i + 1)}.${guessImageExt(p.url)}`));
     const mapP = body.area && body.area.map_image_url ? rehost(body.area.map_image_url, `${base}/map.png`) : null;
-    const logoP = body.agent && body.agent.logo_url ? rehost(body.agent.logo_url, `${base}/logo.png`) : null;
+    const logoP = logoSrc ? rehost(logoSrc, `${base}/logo.png`) : null;
 
     const [videoUrl, posterUrl, ...rest] = await Promise.all([
       videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
@@ -408,12 +434,12 @@ app.post("/createPropertyPage", async (req, res) => {
       extension_count: reusable ? (reusable.extension_count || 0) : 0,
       edit_count: reusable ? (reusable.edit_count || 0) : 0,
       agent: {
-        name: (body.agent && body.agent.name) || "",
-        brand_name: (body.agent && (body.agent.brand_name || body.agent.name)) || "",
+        name: agentField("name"),
+        brand_name: agentField("brand_name") || agentField("name"),
         logo_url: logoUrl,
-        tagline: (body.agent && body.agent.tagline) || "",
-        phone: (body.agent && body.agent.phone) || body.business_phone,
-        license: (body.agent && body.agent.license) || "",
+        tagline: agentField("tagline"),
+        phone: agentField("phone") || body.business_phone,
+        license: agentField("license"),
       },
       property: {
         title: (body.property && body.property.title) ||

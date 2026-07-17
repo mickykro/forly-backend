@@ -72,6 +72,16 @@ export const createPropertyPage = onRequest(
       const pageId = reusable ? reusable.id : uuidv4();
       const base = `${PAGES}/${pageId}`;
 
+      // Agent details fall back to the listing — the n8n page builder doesn't
+      // always forward them (this is what kept uploaded logos off the pages).
+      const listingSnap = await db.collection("listings").doc(body.listing_id).get();
+      const listingAgent: Partial<AgentInfo> =
+        (listingSnap.exists ? (listingSnap.get("agent") as Partial<AgentInfo> | null) : null) || {};
+      const agentIn: Partial<AgentInfo> = body.agent || {};
+      const agentField = (k: "name" | "brand_name" | "tagline" | "phone" | "license"): string =>
+        String(agentIn[k] || listingAgent[k] || "");
+      const logoSrc = agentIn.logo_url || listingAgent.logo_url || null;
+
       const videoUp = downloadAndUpload(body.video_url, `${base}/walkthrough.mp4`, "video/mp4");
       const posterUp = body.poster_url ?
         downloadAndUpload(body.poster_url, `${base}/poster.jpg`, "image/jpeg") :
@@ -82,8 +92,8 @@ export const createPropertyPage = onRequest(
       });
       const mapUp = body.area?.map_image_url ?
         downloadAndUpload(body.area.map_image_url, `${base}/map.png`, "image/png") : null;
-      const logoUp = body.agent?.logo_url ?
-        downloadAndUpload(body.agent.logo_url, `${base}/logo.png`, "image/png") : null;
+      const logoUp = logoSrc ?
+        downloadAndUpload(logoSrc, `${base}/logo.png`, "image/png") : null;
 
       const [video, poster, ...rest] = await Promise.all([
         videoUp, posterUp, ...photoUps,
@@ -113,12 +123,12 @@ export const createPropertyPage = onRequest(
         extension_count: reusable ? ((reusable.get("extension_count") as number) || 0) : 0,
         edit_count: reusable ? ((reusable.get("edit_count") as number) || 0) : 0,
         agent: {
-          name: body.agent?.name || "",
-          brand_name: body.agent?.brand_name || body.agent?.name || "",
+          name: agentField("name"),
+          brand_name: agentField("brand_name") || agentField("name"),
           logo_url: logo ? logo.publicUrl : null,
-          tagline: body.agent?.tagline || "",
-          phone: body.agent?.phone || body.business_phone,
-          license: body.agent?.license || "",
+          tagline: agentField("tagline"),
+          phone: agentField("phone") || body.business_phone,
+          license: agentField("license"),
         },
         property: {
           title: body.property?.title ||

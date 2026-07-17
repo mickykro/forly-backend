@@ -10,7 +10,11 @@
      data-price-label         → "מחיר מבוקש" / "שכר דירה חודשי"
      data-show="a.b"          → element removed if the value is empty
      data-video               → <video>.src = hero.video_url (+ poster)
-     data-wa                  → <a>.href = wa.me link to the agent
+     data-wa                  → <a>.href = #contact (all contact goes through the
+                                lead form — Forly relays to the agent, no direct WhatsApp)
+     data-logo                → brand element: replaced with the agent's logo image
+     data-avatar              → agent avatar: logo image, or initials from agent.name
+     data-ppm                 → price-per-sqm line (sale listings with price+sqm)
      data-list="area.stops"   → clone the child <template> per array item,
                                 filling [data-field="k"] from item[k]
      data-gallery data-gallery-class="g"  → build N tiles from the video's frames
@@ -83,10 +87,38 @@
     if (vsrc) { v.src = vsrc; v.load(); var p = v.play && v.play(); if (p && p.catch) p.catch(function () {}); }
   });
 
-  // ── WhatsApp links ──
-  var phone = String(get("agent.phone") || get("business_phone") || "").replace(/\D/g, "");
-  var waText = encodeURIComponent(T("wa_prefill", { title: title || T("the_property") }));
-  each("[data-wa]", document, function (a) { if (phone) a.href = "https://wa.me/" + phone + "?text=" + waText; });
+  // ── contact links: everything funnels into the lead form (#contact). Forly
+  //    relays the lead to the agent from its own WhatsApp number — the page
+  //    never links prospects directly to the agent.
+  each("[data-wa]", document, function (a) {
+    a.href = "#contact";
+    a.removeAttribute("target");
+    a.setAttribute("data-i18n", "leave_details");
+    a.textContent = T("leave_details");
+  });
+
+  // ── agent logo: brand slot + avatar circle ──
+  var logoUrl = String(get("agent.logo_url") || "");
+  var escAttr = function (s) { return String(s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); };
+  if (/^https?:\/\//.test(logoUrl)) {
+    each("[data-logo]", document, function (el) {
+      el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="' + escAttr(get("agent.brand_name") || get("agent.name") || "") +
+        '" style="height:38px;max-width:150px;object-fit:contain;display:block">';
+    });
+    each("[data-avatar]", document, function (el) {
+      el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+    });
+  } else {
+    var initials = String(get("agent.name") || "").split(/\s+/).map(function (w) { return w.charAt(0); }).join("").slice(0, 2);
+    each("[data-avatar]", document, function (el) { if (initials) el.textContent = initials; });
+  }
+
+  // ── price per m² (sale listings with both price and size) ──
+  var ppmPrice = +get("property.price") || 0, ppmSqm = +get("property.size_sqm") || 0;
+  each("[data-ppm]", document, function (el) {
+    if (isRent || !ppmPrice || !ppmSqm) { el.remove(); return; }
+    el.textContent = "₪" + Math.round(ppmPrice / ppmSqm).toLocaleString("he-IL") + " " + T("per_sqm");
+  });
 
   // ── list loops (clone the inner <template> per item) ──
   each("[data-list]", document, function (host) {
