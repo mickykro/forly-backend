@@ -132,6 +132,48 @@ async function incrPageCounter(pageId, field, by) {
 const pad = (n) => String(n).padStart(2, "0");
 const daysFromNow = (d) => new Date(Date.now() + d * 86400000);
 
+// ── pretty page ids: {agent-slug}-{shortcode} instead of a raw UUID ──
+// Content is Hebrew, so the agent part is transliterated to Latin (Hebrew in a
+// URL percent-encodes into something uglier than a UUID); the random suffix
+// guarantees uniqueness and keeps pages from being trivially enumerable.
+const HE_LATIN = {
+  "א": "a", "ב": "b", "ג": "g", "ד": "d", "ה": "h", "ו": "v", "ז": "z",
+  "ח": "ch", "ט": "t", "י": "y", "כ": "k", "ך": "k", "ל": "l", "מ": "m",
+  "ם": "m", "נ": "n", "ן": "n", "ס": "s", "ע": "a", "פ": "p", "ף": "f",
+  "צ": "tz", "ץ": "tz", "ק": "k", "ר": "r", "ש": "sh", "ת": "t",
+};
+function translit(s) {
+  return String(s || "").split("").map((c) => (c in HE_LATIN ? HE_LATIN[c] : c)).join("");
+}
+function agentSlug(agent) {
+  const raw = (agent && (agent.brand_name || agent.name)) || "";
+  const s = translit(raw)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 20)
+    .replace(/-+$/g, "");
+  return s || "nadlan";
+}
+// Unambiguous base32 (no 0/1/o/i/l) so shared/typed links don't get mangled.
+const SHORT_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
+function shortCode(n) {
+  const bytes = crypto.randomBytes(n);
+  let out = "";
+  for (let i = 0; i < n; i++) out += SHORT_ALPHABET[bytes[i] % SHORT_ALPHABET.length];
+  return out;
+}
+// {agentSlug}-{shortCode}, collision-checked against existing pages. 30^5 ≈ 24M
+// suffixes per agent prefix, so the loop effectively never repeats.
+async function uniquePageId(agent) {
+  const base = agentSlug(agent);
+  for (let i = 0; i < 6; i++) {
+    const cand = `${base}-${shortCode(5)}`;
+    if (!(await getPage(cand))) return cand;
+  }
+  return `${base}-${shortCode(8)}`;
+}
+
 // Landing-page theme: only whitelist a hex color, a short font family/token, and
 // an optional custom-font URL. Returns null when nothing usable was provided.
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -369,7 +411,7 @@ app.post("/createPropertyPage", async (req, res) => {
   }
   try {
     const reusable = await findActivePageByListing(body.listing_id);
-    const pageId = reusable ? reusable.page_id : crypto.randomUUID();
+    const pageId = reusable ? reusable.page_id : await uniquePageId(body.agent);
     const base = `pages/${pageId}`;
 
     // Theme is chosen on the intake form and stored on the listing; the n8n page
