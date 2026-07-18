@@ -253,6 +253,9 @@ module.exports = function createPagesRouter(ctx) {
         }
         patch["texts"] = textsMap;
       }
+      if (body.theme && typeof body.theme === "object" && SERVER_TEMPLATES.has(body.theme.template)) {
+        patch["theme.template"] = body.theme.template;
+      }
       if (body.sections && typeof body.sections === "object") {
         patch["sections.gallery"] = !!body.sections.gallery;
         patch["sections.carousel"] = !!body.sections.carousel;

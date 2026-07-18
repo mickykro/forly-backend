@@ -1,27 +1,5 @@
 {
   "permissions": {
-    "deny": [
-      "Bash(firebase deploy:*)",
-      "Bash(firebase hosting:channel:deploy:*)",
-      "Bash(gcloud functions deploy:*)",
-      "Bash(gcloud run deploy:*)",
-      "Bash(gcloud * add-iam-policy-binding:*)",
-      "Bash(gcloud * set-iam-policy:*)",
-      "Bash(gcloud iam service-accounts create:*)",
-      "Bash(gcloud iam service-accounts delete:*)",
-      "Bash(gcloud iam service-accounts keys create:*)",
-      "Bash(gcloud storage buckets update:*)",
-      "Bash(gcloud storage buckets create:*)",
-      "Bash(gcloud storage buckets delete:*)",
-      "Bash(gcloud resource-manager org-policies set:*)",
-      "Bash(gcloud resource-manager org-policies allow:*)",
-      "Bash(gsutil cors:*)",
-      "Bash(gsutil iam:*)",
-      "Bash(gsutil rm:*)",
-      "Bash(git push:*)",
-      "Bash(git push --force)",
-      "Bash(npm publish:*)"
-    ],
     "allow": [
       "Bash(firebase --version)",
       "Bash(firebase login:*)",
@@ -92,7 +70,30 @@
       "Edit(*)",
       "Bash(/opt/homebrew/bin/node --version)",
       "Bash(/usr/local/bin/node --version)",
-      "Read(//Users/MichaelKrotorio/.nvm/versions/node/**)"
+      "Read(//Users/MichaelKrotorio/.nvm/versions/node/**)",
+      "Bash(cd /tmp; node -e ' *)"
+    ],
+    "deny": [
+      "Bash(firebase deploy:*)",
+      "Bash(firebase hosting:channel:deploy:*)",
+      "Bash(gcloud functions deploy:*)",
+      "Bash(gcloud run deploy:*)",
+      "Bash(gcloud * add-iam-policy-binding:*)",
+      "Bash(gcloud * set-iam-policy:*)",
+      "Bash(gcloud iam service-accounts create:*)",
+      "Bash(gcloud iam service-accounts delete:*)",
+      "Bash(gcloud iam service-accounts keys create:*)",
+      "Bash(gcloud storage buckets update:*)",
+      "Bash(gcloud storage buckets create:*)",
+      "Bash(gcloud storage buckets delete:*)",
+      "Bash(gcloud resource-manager org-policies set:*)",
+      "Bash(gcloud resource-manager org-policies allow:*)",
+      "Bash(gsutil cors:*)",
+      "Bash(gsutil iam:*)",
+      "Bash(gsutil rm:*)",
+      "Bash(git push:*)",
+      "Bash(git push --force)",
+      "Bash(npm publish:*)"
     ]
   }
 }

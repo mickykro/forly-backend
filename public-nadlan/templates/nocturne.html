@@ -119,8 +119,8 @@
 
 <section>
   <div class="wrap">
-    <span class="kick reveal" data-i18n="why_here">למה דווקא כאן</span>
-    <h2 class="reveal" data-bind="hero.phrase">נכס שמגיעים אליו פעם בעשור.</h2>
+    <span class="kick reveal" data-i18n="why_here" data-bind="texts.why_title">למה דווקא כאן</span>
+    <h2 class="reveal" data-bind="texts.why_sub||hero.phrase">נכס שמגיעים אליו פעם בעשור.</h2>
     <div class="hl-grid" data-list="carousel.slides">
       <template><article class="hl reveal"><span class="n" data-field="num"></span><h3 data-field="title"></h3><p data-field="body"></p><span class="tag" data-field="tag"></span></article></template>
     </div>
@@ -129,8 +129,8 @@
 
 <section id="gallery">
   <div class="wrap">
-    <span class="kick reveal" data-i18n="peek_inside">הצצה פנימה</span>
-    <h2 class="reveal" data-i18n="moments_from_tour">רגעים מתוך הסיור</h2>
+    <span class="kick reveal" data-i18n="peek_inside" data-bind="texts.gallery_title">הצצה פנימה</span>
+    <h2 class="reveal" data-i18n="moments_from_tour" data-bind="texts.gallery_sub">רגעים מתוך הסיור</h2>
     <div class="gal reveal" data-gallery data-gallery-class="g" data-gallery-count="7"></div>
   </div>
 </section>
@@ -138,9 +138,9 @@
 <section class="band">
   <div class="wrap addr-grid">
     <div class="reveal">
-      <span class="kick" data-i18n="the_address">הכתובת</span>
+      <span class="kick" data-i18n="the_address" data-bind="texts.area_title">הכתובת</span>
       <h2><span data-bind="property.neighborhood">הצפון הישן</span>, <span data-bind="property.city">תל אביב</span></h2>
-      <p class="lede" data-bind="area.blurb">שכונה מבוקשת במרחק הליכה מהים.</p>
+      <p class="lede" data-bind="texts.area_sub||area.blurb">שכונה מבוקשת במרחק הליכה מהים.</p>
       <ul class="stops" data-list="area.stops">
         <template><li><b data-field="label"></b><span data-field="minutes"></span></li></template>
       </ul>
@@ -167,13 +167,13 @@
         <div class="form-actions">
           <button class="btn btn-sub" type="submit" data-i18n="send_details">שלחו לי פרטים</button>
         </div>
-        <p class="sent" data-lead-sent data-i18n="lead_sent">✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
+        <p class="sent" data-lead-sent data-i18n="lead_sent" data-bind="texts.done_title">✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
       </form>
     </div>
   </div>
 </section>
 
-<footer><div class="wrap"><span class="fbrand" data-bind="agent.brand_name">רוזנברג</span><span><span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉</span> · <a href="/legal/privacy.html" data-i18n="privacy_policy" style="color:inherit;text-decoration:underline">מדיניות פרטיות</a> · <a href="/legal/accessibility.html" data-i18n="accessibility" style="color:inherit;text-decoration:underline">הצהרת נגישות</a></span></div></footer>
+<footer><div class="wrap"><span class="fbrand" data-bind="texts.footer_brand||agent.brand_name">רוזנברג</span><span><span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉</span> · <a href="/legal/privacy.html" data-i18n="privacy_policy" style="color:inherit;text-decoration:underline">מדיניות פרטיות</a> · <a href="/legal/accessibility.html" data-i18n="accessibility" style="color:inherit;text-decoration:underline">הצהרת נגישות</a></span></div></footer>
 
 <script>(function(){var tb=document.getElementById("topbar");addEventListener("scroll",function(){tb.classList.toggle("solid",(window.scrollY||0)>60);},{passive:true});})();</script>
 <script src="/tpl/demo.js"></script>

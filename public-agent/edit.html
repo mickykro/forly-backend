@@ -25,6 +25,10 @@
 .field .hint{font-size:.75rem;color:#888;margin-top:4px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.tpl-pick{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.tpl-pick button{padding:12px 8px;border:1.5px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;font:inherit;font-size:.9rem;font-weight:600;color:#333;transition:.15s}
+.tpl-pick button:hover{border-color:var(--gold)}
+.tpl-pick button.on{border-color:var(--gold);background:var(--gold,#c8a24a);color:#fff}
 .toggle-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eee}
 .switch{position:relative;width:44px;height:24px}
 .switch input{opacity:0;width:0;height:0}
@@ -61,6 +65,17 @@
 
   <div class="edit-layout">
     <div class="edit-panel">
+      <!-- Template -->
+      <div class="card">
+        <div class="sec-title">תבנית העיצוב</div>
+        <div class="tpl-pick" id="tplPick">
+          <button type="button" data-tpl="nocturne">נוקטרן</button>
+          <button type="button" data-tpl="galerie">גלריה</button>
+          <button type="button" data-tpl="reel">ריל</button>
+        </div>
+        <div class="hint">התוכן נשמר — רק המראה משתנה.</div>
+      </div>
+
       <!-- Agent -->
       <div class="card">
         <div class="sec-title">פרטי הסוכן</div>
@@ -323,6 +338,8 @@
       var sections = d.sections || {};
       var gallery = d.gallery || {};
       var carousel = d.carousel || {};
+      // Template
+      setActiveTpl((d.theme || {}).template || "nocturne");
       // Agent
       $("#fAgentName").value = agent.name || "";
       $("#fAgentBrand").value = agent.brand_name || "";
@@ -443,6 +460,26 @@
       box.appendChild(w);
     });
   }
+
+  // Template picker: switch presentation, keep all content
+  function setActiveTpl(name) {
+    Array.prototype.forEach.call(document.querySelectorAll("#tplPick button"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-tpl") === name);
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("#tplPick button"), function (btn) {
+    btn.addEventListener("click", function () {
+      var name = btn.getAttribute("data-tpl");
+      setActiveTpl(name);
+      fetch("/api/page/update", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page_id: pageId, theme: { template: name } }),
+      }).then(function () {
+        $("#preview").src = "/p/" + pageId + "?t=" + Date.now();
+        FLY.toast("✓ התבנית עודכנה");
+      }).catch(function () { FLY.toast("שגיאה"); });
+    });
+  });
 
   load();
 

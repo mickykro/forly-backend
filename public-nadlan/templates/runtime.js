@@ -66,9 +66,10 @@
     role(["--sans"], theme.font_body, "'Heebo', sans-serif");
   })();
 
-  // ── scalar text bindings ──
+  // ── scalar text bindings (data-bind="a.b||c.d" → first non-empty path wins) ──
   each("[data-bind]", document, function (el) {
-    var v = get(el.getAttribute("data-bind"));
+    var v = null, paths = el.getAttribute("data-bind").split("||");
+    for (var i = 0; i < paths.length; i++) { v = get(paths[i].trim()); if (v != null && v !== "") break; }
     if (el.getAttribute("data-fmt") === "price") v = fmtPrice(v) + (isRent && v ? " " + T("per_month") : "");
     if (v != null && v !== "") el.textContent = v;
   });
