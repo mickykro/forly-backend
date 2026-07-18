@@ -26,8 +26,14 @@
 #      PAGE_BASE_URL=https://forly.srv1173890.hstgr.cloud
 #      N8N_WW1_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/dashboard-create
 #      N8N_PIPELINE_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/property-page-builder
+#      N8N_LEAD_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/lead-trigger
 #      GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa-key.json
+#      GREENAPI_INSTANCE=...            # required for OTP + notifications
+#      GREENAPI_TOKEN=...
+#      NADLAN_JWT_SECRET=...            # required for agent login/dashboard (openssl rand -hex 32)
 #    and place the Firebase service-account key at /root/forly-backend/sa-key.json
+#    NOTE: use the SAME NADLAN_JWT_SECRET the Cloud Functions used, so existing
+#    agent session cookies keep working after the cutover to this server.
 # ──────────────────────────────────────────────────────────────────────────
 
 name: Deploy server to VPS

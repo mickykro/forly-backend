@@ -28,6 +28,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const express = require("express");
+const auth = require("./auth");
 
 // Load server/.env if present so config lives in a file, not fragile inline
 // env vars. Inline `KEY=val node index.js` still works and overrides the file.
@@ -59,6 +60,10 @@ const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
 const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
+// Secret for agent session cookies + one-tap action links (was NADLAN_JWT_SECRET
+// in the Cloud Functions path). Without it the auth/dashboard routes refuse to
+// run rather than issue forgeable sessions.
+const NADLAN_JWT_SECRET = process.env.NADLAN_JWT_SECRET || "";
 
 const MAX_UPLOAD_FILES = 12;
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -72,7 +77,13 @@ const MAX_IMAGE_MB = 10;
 const MAX_VIDEO_MB = 120;
 const MAX_FONT_MB = 5;
 const PAGE_LIFESPAN_DAYS = 30;
+const REMINDER_BEFORE_DAYS = 5;
 const LEAD_MAX_PER_HOUR = 3;
+// OTP policy (mirrors the Cloud Functions auth path).
+const OTP_TTL_MS = 5 * 60 * 1000;
+const OTP_RESEND_GAP_MS = 60 * 1000;
+const OTP_MAX_SENDS_PER_DAY = 5;
+const OTP_MAX_ATTEMPTS = 5;
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -90,7 +101,17 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     "The n8n Page Builder reads listings from real Firestore, so set the SA " +
     "key for the full pipeline; in-memory is single-process demo only.");
 }
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map() };
+const mem = {
+  listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(),
+  businesses: new Map(), otps: new Map(), lead_submissions: [],
+};
+
+// Millis from a Firestore Timestamp or a JS Date (in-memory mode stores Dates).
+function toMillis(v) {
+  if (!v) return 0;
+  if (typeof v.toMillis === "function") return v.toMillis();
+  return new Date(v).getTime();
+}
 
 async function saveListing(l) {
   if (db) await db.collection("listings").doc(l.listing_id).set(l);
@@ -126,6 +147,92 @@ async function findActivePageByListing(listingId) {
 async function incrPageCounter(pageId, field, by) {
   if (db) await db.collection("property_pages").doc(pageId).update({ [field]: FieldValue.increment(by) });
   else { const p = mem.pages.get(pageId); if (p) p[field] = (p[field] || 0) + by; }
+}
+
+// ── businesses (agent accounts) ──
+async function getBusiness(phone) {
+  if (db) { const d = await db.collection("businesses").doc(phone).get(); return d.exists ? d.data() : null; }
+  return mem.businesses.get(phone) || null;
+}
+async function setBusiness(phone, data, merge) {
+  if (db) { await db.collection("businesses").doc(phone).set(data, { merge: !!merge }); return; }
+  mem.businesses.set(phone, merge ? { ...(mem.businesses.get(phone) || {}), ...data } : data);
+}
+
+// ── otp_codes (login/signup codes) ──
+async function getOtp(phone) {
+  if (db) { const d = await db.collection("otp_codes").doc(phone).get(); return d.exists ? d.data() : null; }
+  return mem.otps.get(phone) || null;
+}
+async function setOtp(phone, data) {
+  if (db) { await db.collection("otp_codes").doc(phone).set(data); return; }
+  mem.otps.set(phone, data);
+}
+async function updateOtp(phone, patch) {
+  if (db) { await db.collection("otp_codes").doc(phone).update(patch); return; }
+  const o = mem.otps.get(phone); if (o) Object.assign(o, patch);
+}
+async function deleteOtp(phone) {
+  if (db) { await db.collection("otp_codes").doc(phone).delete(); return; }
+  mem.otps.delete(phone);
+}
+
+// ── dashboard queries (by owner phone) ──
+async function listListingsByPhone(phone, statuses) {
+  if (db) {
+    const snap = await db.collection("listings")
+      .where("business_phone", "==", phone)
+      .where("status", "in", statuses).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listings.values()].filter((l) => l.business_phone === phone && statuses.includes(l.status));
+}
+async function listPagesByPhone(phone) {
+  if (db) {
+    const snap = await db.collection("property_pages").where("business_phone", "==", phone).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.pages.values()].filter((p) => p.business_phone === phone);
+}
+async function updateListing(id, patch) {
+  if (db) { await db.collection("listings").doc(id).update(patch); return; }
+  const l = mem.listings.get(id); if (l) Object.assign(l, patch);
+}
+// Partial page update from a { "dot.path": value } patch (both storage modes).
+async function patchPage(pageId, patch) {
+  if (db) { await db.collection("property_pages").doc(pageId).update(patch); return; }
+  const p = mem.pages.get(pageId);
+  if (!p) return;
+  for (const [key, val] of Object.entries(patch)) {
+    const parts = key.split(".");
+    let o = p;
+    while (parts.length > 1) { const k = parts.shift(); o[k] = o[k] || {}; o = o[k]; }
+    o[parts[0]] = val;
+  }
+}
+async function addLeadSubmission(rec) {
+  if (db) { await db.collection("lead_submissions").add(rec); return; }
+  mem.lead_submissions.push(rec);
+}
+async function bumpPageMetric(pageId, event) {
+  const day = new Date().toISOString().slice(0, 10);
+  if (db) {
+    await db.collection("property_pages").doc(pageId).collection("metrics").doc(day)
+      .set({ [event]: FieldValue.increment(1) }, { merge: true });
+  }
+  // in-memory mode skips the metrics subcollection (demo only)
+}
+// Pages that may need a reminder or expiry sweep (active/expiring, expiring soon).
+async function listPagesForExpiry(soonMs) {
+  if (db) {
+    const snap = await db.collection("property_pages")
+      .where("status", "in", ["active", "expiring"])
+      .where("expires_at", "<=", new Date(soonMs))
+      .limit(100).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.pages.values()].filter((p) =>
+    (p.status === "active" || p.status === "expiring") && toMillis(p.expires_at) <= soonMs).slice(0, 100);
 }
 
 // ── helpers ──
@@ -251,7 +358,10 @@ app.use("/tpl", express.static(TEMPLATES_DIR));
 // ════════════════════════════ INTAKE ════════════════════════════
 
 app.post("/api/upload-urls", (req, res) => {
-  if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
+  // Accept an authenticated agent session OR the operator-driven demo header.
+  if (!sessionPhone(req) && !("x-demo-key" in req.headers)) {
+    return res.status(401).json({ error: "unauthenticated" });
+  }
   const files = req.body && req.body.files;
   if (!Array.isArray(files) || files.length < 1 || files.length > MAX_UPLOAD_FILES) {
     return res.status(400).json({ error: `1-${MAX_UPLOAD_FILES} files` });
@@ -397,6 +507,294 @@ app.get("/api/listing-status", async (req, res) => {
     // building screen can surface an error instead of polling indefinitely.
     status: listing.page_id ? "ready" : (listing.status === "failed" ? "failed" : "building"),
   });
+});
+
+// ════════════════════════ AGENT AUTH + DASHBOARD ════════════════════════
+// Ported from the Cloud Functions nadlan path so the whole agent app runs on
+// this server. Session = HMAC cookie (server/auth.js). All owner-scoped routes
+// check business_phone === session.sub.
+
+const todayKey = () => new Date().toISOString().slice(0, 10);
+const sessionPhone = (req) => auth.requireAuth(req, NADLAN_JWT_SECRET);
+// Guard: refuse auth routes if the signing secret isn't configured.
+function requireSecret(res) {
+  if (NADLAN_JWT_SECRET) return true;
+  res.status(503).json({ error: "auth_not_configured" });
+  return false;
+}
+
+// POST /api/auth/otp — { phone, mode?: "login" | "signup" }
+app.post("/api/auth/otp", async (req, res) => {
+  if (!requireSecret(res)) return;
+  const phone = normalizePhone((req.body && req.body.phone) || "");
+  if (!phone) return res.status(400).json({ error: "invalid_phone" });
+  const mode = (req.body && req.body.mode) === "signup" ? "signup" : "login";
+
+  const business = await getBusiness(phone);
+  if (mode === "login" && !business) return res.status(404).json({ error: "unknown_agent" });
+  if (mode === "signup" && business) return res.status(409).json({ error: "already_registered" });
+
+  const now = Date.now();
+  const prev = (await getOtp(phone)) || {};
+  const lastSent = prev.last_sent_at ? toMillis(prev.last_sent_at) : 0;
+  if (now - lastSent < OTP_RESEND_GAP_MS) {
+    return res.status(429).json({ error: "too_soon", retry_in_s: Math.ceil((OTP_RESEND_GAP_MS - (now - lastSent)) / 1000) });
+  }
+  const sendsToday = prev.sends_day === todayKey() ? (prev.sends_today || 0) : 0;
+  if (sendsToday >= OTP_MAX_SENDS_PER_DAY) return res.status(429).json({ error: "daily_limit" });
+
+  const code = String(crypto.randomInt(100000, 1000000));
+  await setOtp(phone, {
+    code_hash: auth.hashCode(code, NADLAN_JWT_SECRET),
+    expires_at: new Date(now + OTP_TTL_MS),
+    attempts: 0, mode,
+    last_sent_at: new Date(now),
+    sends_today: sendsToday + 1, sends_day: todayKey(),
+  });
+
+  try {
+    if (!GREENAPI_INSTANCE || !GREENAPI_TOKEN) throw new Error("greenapi_not_configured");
+    await sendWhatsApp(phone, `🔐 קוד הכניסה שלך לפורלי: ${code}\nהקוד תקף ל-5 דקות.`);
+  } catch (err) {
+    console.error("OTP WhatsApp send failed:", err.message);
+    return res.status(502).json({ error: "whatsapp_send_failed" });
+  }
+  res.json({ ok: true });
+});
+
+// POST /api/auth/verify — { phone, code } → session cookie
+app.post("/api/auth/verify", async (req, res) => {
+  if (!requireSecret(res)) return;
+  const phone = normalizePhone((req.body && req.body.phone) || "");
+  const code = String((req.body && req.body.code) || "").trim();
+  if (!phone || !/^\d{6}$/.test(code)) return res.status(400).json({ error: "invalid_input" });
+
+  const otp = await getOtp(phone);
+  if (!otp) return res.status(400).json({ error: "no_code" });
+  if (toMillis(otp.expires_at) < Date.now()) { await deleteOtp(phone); return res.status(400).json({ error: "expired" }); }
+  if ((otp.attempts || 0) >= OTP_MAX_ATTEMPTS) { await deleteOtp(phone); return res.status(429).json({ error: "too_many_attempts" }); }
+  if (otp.code_hash !== auth.hashCode(code, NADLAN_JWT_SECRET)) {
+    await updateOtp(phone, { attempts: (otp.attempts || 0) + 1 });
+    return res.status(401).json({ error: "wrong_code", attempts_left: OTP_MAX_ATTEMPTS - (otp.attempts || 0) - 1 });
+  }
+
+  await deleteOtp(phone);
+  res.set("Set-Cookie", auth.sessionCookie(auth.signSession(phone, NADLAN_JWT_SECRET)));
+  const b = (await getBusiness(phone)) || {};
+  res.json({
+    ok: true, is_new: !Object.keys(b).length, mode: otp.mode || "login",
+    agent: { name: b.full_name || "", brand_name: b.business_name || "", logo_url: b.logo_url || null },
+  });
+});
+
+// GET /api/properties — list mine (session)
+app.get("/api/properties", async (req, res) => {
+  const phone = sessionPhone(req);
+  if (!phone) return res.status(401).json({ error: "unauthenticated" });
+  const [listings, pages] = await Promise.all([
+    listListingsByPhone(phone, ["active", "archived"]),
+    listPagesByPhone(phone),
+  ]);
+  const pageById = new Map(pages.map((p) => [p.page_id, p]));
+  const items = listings.map((d) => {
+    const page = d.page_id ? pageById.get(d.page_id) : null;
+    const expiresAt = page && page.expires_at ? toMillis(page.expires_at) : null;
+    return {
+      listing_id: d.listing_id, page_id: d.page_id,
+      title: (page && page.property && page.property.title) || d.address,
+      address: d.address, listing_status: d.status,
+      page_status: (page && page.status) || "building",
+      days_left: expiresAt ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 86400000)) : null,
+      view_count: (page && page.view_count) || 0,
+      lead_count: (page && page.lead_count) || 0,
+      page_url: d.page_id ? `${PAGE_BASE_URL}/p/${d.page_id}` : null,
+      thumb_url: (page && page.gallery && page.gallery.images[0] && page.gallery.images[0].url) || d.photos_urls[0] || null,
+      created_at: d.created_at,
+    };
+  }).sort((a, b) => toMillis(b.created_at) - toMillis(a.created_at));
+  res.json({ properties: items });
+});
+
+// POST /api/properties/create — create a real listing (session)
+app.post("/api/properties/create", async (req, res) => {
+  const phone = sessionPhone(req);
+  if (!phone) return res.status(401).json({ error: "unauthenticated" });
+  const result = await createListing(phone, req.body || {}, null);
+  if (result.error) return res.status(result.code).json({ error: result.error });
+  res.json({ ...result, status: "building" });
+});
+
+// POST /api/properties/delete — { listing_id, mode: "archive" | "delete" } (session, owner)
+app.post("/api/properties/delete", async (req, res) => {
+  const phone = sessionPhone(req);
+  if (!phone) return res.status(401).json({ error: "unauthenticated" });
+  const { listing_id: listingId, mode } = req.body || {};
+  if (!listingId || (mode !== "archive" && mode !== "delete")) {
+    return res.status(400).json({ error: "listing_id and mode(archive|delete) required" });
+  }
+  const listing = await getListing(listingId);
+  if (!listing) return res.status(404).json({ error: "not found" });
+  if (listing.business_phone !== phone) return res.status(403).json({ error: "not_owner" });
+  const pageId = listing.page_id || null;
+  try {
+    if (mode === "archive") {
+      await updateListing(listingId, { status: "archived" });
+      if (pageId) await patchPage(pageId, { status: "archived" });
+    } else {
+      await updateListing(listingId, { status: "deleted" });
+      if (pageId) {
+        await patchPage(pageId, { status: "archived" });
+        fs.rm(path.join(UPLOAD_DIR, "pages", pageId), { recursive: true, force: true }, () => {});
+      }
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("deleteProperty failed:", err);
+    res.status(500).json({ error: "internal" });
+  }
+});
+
+// POST /api/page/update — structured editor save (session, owner). Whitelist merge.
+app.post("/api/page/update", async (req, res) => {
+  const phone = sessionPhone(req);
+  if (!phone) return res.status(401).json({ error: "unauthenticated" });
+  const body = req.body || {};
+  if (!body.page_id) return res.status(400).json({ error: "missing page_id" });
+  const d = await getPage(body.page_id);
+  if (!d) return res.status(404).json({ error: "not found" });
+  if (d.business_phone !== phone) return res.status(403).json({ error: "not_owner" });
+
+  const patch = { updated_at: new Date(), edit_count: (d.edit_count || 0) + 1 };
+  if (typeof body.hero_phrase === "string") patch["hero.phrase"] = body.hero_phrase.slice(0, 80);
+  if (body.property && typeof body.property === "object") {
+    for (const k of ["title", "address", "neighborhood", "city", "price", "rooms", "size_sqm", "floor", "parking"]) {
+      if (body.property[k] !== undefined) patch[`property.${k}`] = body.property[k];
+    }
+  }
+  if (Array.isArray(body.gallery_images)) {
+    const current = new Set((d.gallery.images || []).map((i) => i.url));
+    const next = body.gallery_images
+      .filter((i) => i && current.has(i.url))
+      .map((i) => ({ url: i.url, caption: String(i.caption || "").slice(0, 60) }));
+    if (next.length >= 1) patch["gallery.images"] = next;
+  }
+  if (Array.isArray(body.carousel_slides)) {
+    patch["carousel.slides"] = (d.carousel.slides || []).map((s, i) => {
+      const p = body.carousel_slides[i] || {};
+      return {
+        num: s.num,
+        title: String(p.title != null ? p.title : s.title).slice(0, 60),
+        body: String(p.body != null ? p.body : s.body).slice(0, 300),
+        tag: String(p.tag != null ? p.tag : s.tag).slice(0, 30),
+      };
+    });
+  }
+  if (body.cta && typeof body.cta === "object") {
+    if (typeof body.cta.headline === "string") patch["cta.headline"] = body.cta.headline.slice(0, 80);
+    if (typeof body.cta.sub === "string") patch["cta.sub"] = body.cta.sub.slice(0, 200);
+    if (typeof body.cta.button_label === "string") patch["cta.button_label"] = body.cta.button_label.slice(0, 30);
+  }
+  if (body.sections && typeof body.sections === "object") {
+    for (const k of ["gallery", "carousel", "area"]) {
+      if (typeof body.sections[k] === "boolean") patch[`sections.${k}`] = body.sections[k];
+    }
+  }
+  await patchPage(body.page_id, patch);
+  res.json({ ok: true, edit_count: patch.edit_count });
+});
+
+// Extend helpers + routes (dual auth: session POST, one-tap signed GET).
+async function applyExtension(pageId) {
+  const d = await getPage(pageId);
+  const base = Math.max(Date.now(), toMillis(d.expires_at));
+  const newExpiry = new Date(base + PAGE_LIFESPAN_DAYS * 86400000);
+  await patchPage(pageId, {
+    expires_at: newExpiry, status: "active",
+    extension_count: (d.extension_count || 0) + 1,
+    reminder_sent_at: null, updated_at: new Date(),
+  });
+  return newExpiry;
+}
+function buildExtendLink(pageId, expiresAtMs) {
+  const t = auth.signActionToken([pageId, String(expiresAtMs)], NADLAN_JWT_SECRET);
+  return `${PAGE_BASE_URL}/api/extend?id=${pageId}&e=${expiresAtMs}&t=${t}`;
+}
+function confirmHtml(title, sub) {
+  return `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>` +
+    `<style>body{font-family:-apple-system,'Segoe UI',sans-serif;background:#F7F3EC;color:#17140F;` +
+    `display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}` +
+    `.card{background:#FFFDF9;border:1px solid rgba(185,138,47,.3);border-radius:22px;padding:48px 36px;` +
+    `max-width:340px;box-shadow:0 20px 60px rgba(23,20,15,.08)}h1{font-size:1.5rem;margin:0 0 10px}` +
+    `p{color:#5A5348;margin:0}</style></head>` +
+    `<body><div class="card"><h1>${title}</h1><p>${sub}</p></div></body></html>`;
+}
+const expiredLinkHtml = () => confirmHtml("הקישור אינו תקף", "ייתכן שהדף כבר הוארך. ניתן להאריך גם דרך agent.call4li.com");
+
+// POST /api/page/extend — dashboard (session, owner)
+app.post("/api/page/extend", async (req, res) => {
+  const phone = sessionPhone(req);
+  if (!phone) return res.status(401).json({ error: "unauthenticated" });
+  const pageId = String((req.body && req.body.page_id) || "");
+  const d = await getPage(pageId);
+  if (!d) return res.status(404).json({ error: "not found" });
+  if (d.business_phone !== phone) return res.status(403).json({ error: "not_owner" });
+  const newExpiry = await applyExtension(pageId);
+  res.json({ ok: true, expires_at: newExpiry.toISOString() });
+});
+
+// GET /api/extend?id=&e=&t= — one-tap WhatsApp link (signed, single-use)
+app.get("/api/extend", async (req, res) => {
+  if (!requireSecret(res)) return;
+  const pageId = String(req.query.id || "");
+  const e = String(req.query.e || "");
+  const t = String(req.query.t || "");
+  if (!pageId || !e || !t || !auth.verifyActionToken([pageId, e], t, NADLAN_JWT_SECRET)) {
+    return res.status(401).type("html").send(expiredLinkHtml());
+  }
+  const d = await getPage(pageId);
+  if (!d || toMillis(d.expires_at) !== Number(e)) {
+    return res.status(401).type("html").send(expiredLinkHtml());
+  }
+  const newExpiry = await applyExtension(pageId);
+  const dateStr = newExpiry.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" });
+  res.type("html").send(confirmHtml("✅ הדף הוארך בהצלחה", `הדף פעיל עד ${dateStr}.`));
+});
+
+// POST /api/signup — complete web signup (session from signup-mode OTP)
+app.post("/api/signup", async (req, res) => {
+  const phone = sessionPhone(req);
+  if (!phone) return res.status(401).json({ error: "unauthenticated" });
+  const body = req.body || {};
+  const fullName = String(body.full_name || "").trim().slice(0, 60);
+  const businessName = String(body.business_name || "").trim().slice(0, 60);
+  if (fullName.length < 2 || businessName.length < 2) {
+    return res.status(400).json({ error: "full_name and business_name required" });
+  }
+  const existing = await getBusiness(phone);
+  if (existing && existing.signup_completed_at) return res.status(409).json({ error: "already_registered" });
+  try {
+    await setBusiness(phone, {
+      phone, full_name: fullName, business_name: businessName,
+      city: String(body.city || "").slice(0, 60),
+      niche: String(body.niche || "nadlan").slice(0, 40),
+      logo_url: body.logo_url || null,
+      logo_requested: body.wants_generated_logo === true && !body.logo_url,
+      source: "web_signup", signup_completed_at: new Date(),
+      total_inquiries_reported: 0, total_deals_closed: 0,
+      created_at: existing ? existing.created_at : new Date(),
+    }, true);
+    try {
+      await sendWhatsApp(phone,
+        `ברוכים הבאים לפורלי 🦉\n${fullName}, החשבון של ${businessName} מוכן!\n\n` +
+        `מה עכשיו? נכנסים ל-agent.call4li.com, פותחים נכס ראשון — ` +
+        `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`);
+    } catch (err) { console.error("welcome send failed (signup still ok):", err.message); }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("submitWebSignup failed:", err);
+    res.status(500).json({ error: "internal" });
+  }
 });
 
 // ════════════════════════ PAGE BUILDER ════════════════════════
@@ -550,14 +948,38 @@ app.post("/api/property-lead", async (req, res) => {
   if (count >= LEAD_MAX_PER_HOUR) return res.json({ ok: true });
   mem.throttle.set(prospectPhone, { windowStart: count === 0 ? now : t.windowStart, count: count + 1 });
 
+  const message = String(body.message || "").trim().slice(0, 500);
   try {
+    // 1) Lead doc — never downgrade a converted lead.
+    const prior = db ?
+      (await db.collection("leads").doc(prospectPhone).get()).data() :
+      mem.leads.get(prospectPhone);
+    const existingStatus = prior ? prior.status : null;
     const lead = {
       phone: prospectPhone, prospect_name: name, source: "landing_page",
       page_id: body.page_id, listing_id: page.listing_id,
-      agent_phone: page.business_phone, status: "new", last_activity_at: new Date(),
+      agent_phone: page.business_phone,
+      ...(existingStatus === "converted" ? {} : { status: existingStatus || "new" }),
+      last_activity_at: new Date(),
     };
     if (db) await db.collection("leads").doc(prospectPhone).set(lead, { merge: true });
-    else mem.leads.set(prospectPhone, lead);
+    else mem.leads.set(prospectPhone, { ...(prior || {}), ...lead });
+
+    // 2) Immutable per-submission record, stamped with the agent behind the page.
+    const agentInfo = {
+      name: (page.agent && page.agent.name) || "",
+      brand_name: (page.agent && page.agent.brand_name) || "",
+      phone: (page.agent && page.agent.phone) || page.business_phone,
+      license: (page.agent && page.agent.license) || "",
+    };
+    await addLeadSubmission({
+      page_id: body.page_id, listing_id: page.listing_id,
+      prospect_name: name, prospect_phone: prospectPhone, message: message || null,
+      source: "landing_page", property_title: (page.property && page.property.title) || "",
+      agent: agentInfo, agent_phone: page.business_phone, created_at: new Date(),
+    });
+
+    // 3) Counter.
     await incrPageCounter(body.page_id, "lead_count", 1);
 
     sendWhatsApp(page.business_phone,
@@ -567,8 +989,8 @@ app.post("/api/property-lead", async (req, res) => {
     if (N8N_LEAD_WEBHOOK_URL) {
       fetch(N8N_LEAD_WEBHOOK_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: prospectPhone, name, source: "landing_page",
-          page_id: body.page_id, listing_id: page.listing_id, agent_phone: page.business_phone }),
+        body: JSON.stringify({ phone: prospectPhone, name, message: message || null, source: "landing_page",
+          page_id: body.page_id, listing_id: page.listing_id, agent_phone: page.business_phone, agent: agentInfo }),
         signal: AbortSignal.timeout(10000),
       }).catch((e) => console.error("leads-handler webhook failed:", e.message));
     }
@@ -606,8 +1028,10 @@ app.post("/api/property-event", express.text({ type: () => true }), async (req, 
   try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
   const { page_id: pageId, event } = body;
   if (!pageId || !event || !EVENTS.has(event)) return res.status(204).send("");
-  try { if (event === "view") await incrPageCounter(pageId, "view_count", 1); }
-  catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
+  try {
+    await bumpPageMetric(pageId, event);
+    if (event === "view") await incrPageCounter(pageId, "view_count", 1);
+  } catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
   res.status(204).send("");
 });
 
@@ -635,10 +1059,67 @@ app.get("/p/:id", async (req, res) => {
   res.type("html").send(html);
 });
 
+// ════════════════════════ LIFECYCLE (expirePagesDaily) ════════════════════════
+// The Cloud Functions path ran this on a 09:00 Asia/Jerusalem schedule. Here the
+// server is long-running, so an hourly tick fires the sweep once per day when the
+// Jerusalem hour hits 9 (reminders are idempotent via reminder_sent_at).
+async function runExpirySweep() {
+  const now = Date.now();
+  const soon = now + REMINDER_BEFORE_DAYS * 86400000;
+  let reminded = 0; let expired = 0;
+  const docs = await listPagesForExpiry(soon);
+  for (const d of docs) {
+    const expMs = toMillis(d.expires_at);
+    try {
+      if (expMs < now) {
+        await patchPage(d.page_id, { status: "expired", updated_at: new Date() });
+        expired++;
+        continue;
+      }
+      if (!d.reminder_sent_at) {
+        const daysLeft = Math.max(1, Math.ceil((expMs - now) / 86400000));
+        const link = buildExtendLink(d.page_id, expMs);
+        await sendWhatsApp(d.business_phone,
+          `⏳ דף הנכס "${d.property.title}" יפוג בעוד ${daysLeft} ימים.\n` +
+          `להארכה בחינם (30 יום נוספים) בלחיצה אחת:\n${link}\n\n` +
+          `לניהול כל הנכסים: agent.call4li.com`).catch((e) => { throw e; });
+        await patchPage(d.page_id, { reminder_sent_at: new Date(), status: "expiring" });
+        reminded++;
+      }
+    } catch (err) {
+      console.error(`lifecycle failed for page ${d.page_id}:`, err.message);
+    }
+  }
+  console.log(`expirePagesDaily: reminded=${reminded} expired=${expired}`);
+}
+let lastSweepDay = "";
+function jerusalemParts() {
+  // Hour + Y-M-D in Asia/Jerusalem without pulling a tz library.
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jerusalem", hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit",
+  }).formatToParts(new Date());
+  const get = (t) => (fmt.find((p) => p.type === t) || {}).value;
+  return { day: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")) };
+}
+function startExpiryScheduler() {
+  const tick = () => {
+    const { day, hour } = jerusalemParts();
+    if (hour === 9 && day !== lastSweepDay) {
+      lastSweepDay = day;
+      runExpirySweep().catch((e) => console.error("expiry sweep error:", e.message));
+    }
+  };
+  setInterval(tick, 60 * 60 * 1000); // hourly
+  tick();
+}
+
 app.listen(PORT, () => {
   console.log(`Forly server on ${BASE_URL} (port ${PORT})`);
   console.log(`  demo form:   ${BASE_URL}/create.html?key=demo`);
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
+  console.log(`  agent auth:  ${NADLAN_JWT_SECRET ? "enabled" : "DISABLED (set NADLAN_JWT_SECRET)"}`);
+  startExpiryScheduler();
 });
