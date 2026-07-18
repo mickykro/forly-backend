@@ -66,6 +66,45 @@ async function findActivePageByListing(listingId) {
   return null;
 }
 
+// ── pretty page ids: {agent-slug}-{shortcode} instead of a raw UUID ──
+// Content is Hebrew, so the agent part is transliterated to Latin (Hebrew in a
+// URL percent-encodes into something uglier than a UUID); the random suffix
+// guarantees uniqueness and keeps pages from being trivially enumerable.
+const HE_LATIN = {
+  "א": "a", "ב": "b", "ג": "g", "ד": "d", "ה": "h", "ו": "v", "ז": "z",
+  "ח": "ch", "ט": "t", "י": "y", "כ": "k", "ך": "k", "ל": "l", "מ": "m",
+  "ם": "m", "נ": "n", "ן": "n", "ס": "s", "ע": "a", "פ": "p", "ף": "f",
+  "צ": "tz", "ץ": "tz", "ק": "k", "ר": "r", "ש": "sh", "ת": "t",
+};
+function agentSlug(agent) {
+  const raw = (agent && (agent.brand_name || agent.name)) || "";
+  const s = raw.split("").map((c) => (c in HE_LATIN ? HE_LATIN[c] : c)).join("")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 20)
+    .replace(/-+$/g, "");
+  return s || "nadlan";
+}
+// Unambiguous base32 (no 0/1/o/i/l) so shared/typed links don't get mangled.
+const SHORT_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
+function shortCode(n) {
+  const bytes = require("crypto").randomBytes(n);
+  let out = "";
+  for (let i = 0; i < n; i++) out += SHORT_ALPHABET[bytes[i] % SHORT_ALPHABET.length];
+  return out;
+}
+// {agentSlug}-{shortCode}, collision-checked against existing pages. 30^5 ≈ 24M
+// suffixes per agent prefix, so the loop effectively never repeats.
+async function uniquePageId(agent) {
+  const base = agentSlug(agent);
+  for (let i = 0; i < 6; i++) {
+    const cand = `${base}-${shortCode(5)}`;
+    if (!(await getPage(cand))) return cand;
+  }
+  return `${base}-${shortCode(8)}`;
+}
+
 async function incrPageCounter(pageId, field, by) {
   if (db) await db.collection("property_pages").doc(pageId).update({ [field]: FieldValue.increment(by) });
   else { const p = mem.pages.get(pageId); if (p) p[field] = (p[field] || 0) + by; }
@@ -108,7 +147,7 @@ module.exports = {
   get db() { return db; },
   get mem() { return mem; },
   saveListing, getListing, setListingPageId, listListingsByPhone,
-  savePage, getPage, findActivePageByListing, incrPageCounter, updatePage,
+  savePage, getPage, findActivePageByListing, incrPageCounter, updatePage, uniquePageId,
   getBusiness, setBusiness,
   saveLead,
 };

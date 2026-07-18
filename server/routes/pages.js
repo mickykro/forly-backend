@@ -42,7 +42,7 @@ module.exports = function createPagesRouter(ctx) {
     }
     try {
       const reusable = await db.findActivePageByListing(body.listing_id);
-      const pageId = reusable ? reusable.page_id : crypto.randomUUID();
+      const pageId = reusable ? reusable.page_id : await db.uniquePageId(body.agent);
       const base = `pages/${pageId}`;
 
       // Theme and agent are chosen on the intake form and stored on the listing;
