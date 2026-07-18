@@ -6,8 +6,10 @@ import {
   db, bucket, tokenedUrl, nadlanJwtSecret, demoSecret, pageBaseUrl,
   n8nWw1WebhookUrl, n8nPipelineWebhookUrl,
 } from "../shared";
-import {requireAuth} from "./auth";
+import {requireAuth, signSession, SESSION_COOKIE} from "./auth";
 import {AgentInfo, Listing, PropertyPage} from "./types";
+
+const SESSION_TTL_S = 30 * 24 * 60 * 60; // 30 days
 
 const MAX_UPLOAD_FILES = 12;
 const MAX_UPLOAD_MB = 10;
@@ -231,27 +233,52 @@ export const createProperty = onRequest(
 // ────────────────────────────────────────────────────────────
 // demoCreateProperty — POST (x-demo-key) with inline agent info.
 // Same body as createProperty + agent{}; used for prospect demos.
+// Creates/updates businesses/{phone} with partial flag + sets session.
 // ────────────────────────────────────────────────────────────
 export const demoCreateProperty = onRequest(
-  {secrets: [demoSecret], cors: false},
+  {secrets: [demoSecret, nadlanJwtSecret], cors: false},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("POST only");
       return;
     }
     // Demo mode: no key comparison. Operator-driven demo on a shared screen.
-    const body = req.body as CreateBody;
+    const body = req.body as CreateBody & {theme?: Record<string, unknown>; language?: string};
     const agentPhone = body.agent?.phone ? String(body.agent.phone) : "";
     if (!agentPhone) {
       res.status(400).json({error: "agent.phone required"});
       return;
     }
+
+    // ponytail: upsert businesses/{phone} with partial data so dashboard shows notification
+    const now = new Date();
+    const businessRef = db.collection("businesses").doc(agentPhone);
+    await businessRef.set({
+      phone: agentPhone,
+      full_name: String(body.agent?.name || ""),
+      business_name: String(body.agent?.brand_name || body.agent?.name || ""),
+      logo_url: body.agent?.logo_url || null,
+      license_number: String(body.agent?.license || ""),
+      onboarding_state: "demo_partial", // dashboard checks this for notification
+      onboarding_pct: 30, // minimal profile from demo
+      plan: "trial",
+      paid: false,
+      created_at: now,
+      updated_at: now,
+    }, {merge: true});
+
     const result = await createListingAndKickPipeline(agentPhone, body, body.agent || {});
     if ("error" in result) {
       res.status(result.code).json({error: result.error});
       return;
     }
-    res.json({...result, status: "building"});
+
+    // sign session so user is auto-logged in
+    const token = signSession(agentPhone, nadlanJwtSecret.value());
+    res.set("Set-Cookie",
+      `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_TTL_S}; Path=/`);
+
+    res.json({...result, status: "building", logged_in: true});
   }
 );
 
@@ -377,6 +404,79 @@ export const deleteProperty = onRequest(
     } catch (err) {
       logger.error("deleteProperty failed:", err);
       res.status(500).json({error: "internal"});
+    }
+  }
+);
+
+// ────────────────────────────────────────────────────────────
+// getMyProfile — GET (session cookie)
+// Returns business profile including onboarding_state for dashboard
+// ────────────────────────────────────────────────────────────
+export const getMyProfile = onRequest(
+  {secrets: [nadlanJwtSecret], cors: false},
+  async (req, res) => {
+    const phone = requireAuth(req);
+    if (!phone) {
+      res.status(401).json({error: "unauthenticated"});
+      return;
+    }
+    const doc = await db.collection("businesses").doc(phone).get();
+    if (!doc.exists) {
+      res.json({profile: null, needs_completion: true});
+      return;
+    }
+    const d = doc.data() as Record<string, unknown>;
+    const state = String(d.onboarding_state || "");
+    // ponytail: needs_completion if not 'complete'
+    const needsCompletion = state !== "complete";
+    res.json({
+      profile: {
+        phone,
+        full_name: d.full_name || "",
+        business_name: d.business_name || "",
+        logo_url: d.logo_url || null,
+        onboarding_state: state,
+        onboarding_pct: d.onboarding_pct || 0,
+      },
+      needs_completion: needsCompletion,
+    });
+  }
+);
+
+// ────────────────────────────────────────────────────────────
+// demoSaveAgent — POST { phone, field, value }
+// Autosave single agent field during demo (on blur).
+// No auth: demo is operator-driven on shared screen.
+// ────────────────────────────────────────────────────────────
+export const demoSaveAgent = onRequest(
+  {cors: false},
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).send("POST only");
+      return;
+    }
+    const {phone, field, value} = req.body as {phone?: string; field?: string; value?: unknown};
+    const p = String(phone || "").replace(/\D/g, "");
+    if (!p || !field) {
+      res.status(400).json({error: "phone and field required"});
+      return;
+    }
+    // ponytail: whitelist allowed fields
+    const allowed = ["full_name", "business_name", "license_number", "logo_url"];
+    if (!allowed.includes(field)) {
+      res.status(400).json({error: "invalid field"});
+      return;
+    }
+    try {
+      await db.collection("businesses").doc(p).set({
+        [field]: value ?? "",
+        onboarding_state: "demo_partial",
+        updated_at: new Date(),
+      }, {merge: true});
+      res.json({ok: true});
+    } catch (err) {
+      logger.error("demoSaveAgent failed:", err);
+      res.status(500).json({error: "save failed"});
     }
   }
 );

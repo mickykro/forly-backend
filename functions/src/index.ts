@@ -11,6 +11,9 @@ import {
 
 const ALLOWED_ORIGIN = "https://editor.call4li.com";
 
+// cleanupExpiredDrafts (below) relies on this being stamped at creation time.
+const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 interface InboundSlide {
   index: number;
   png_url: string;
@@ -81,6 +84,7 @@ export const createCarouselDraft = onRequest(
       await db.collection("carousel_drafts").doc(carouselId).set({
         business_phone: body.business_phone,
         created_at: new Date(now),
+        expires_at: new Date(now + DRAFT_TTL_MS),
         status: "active",
         slide_count: 5,
         format: body.format || "1080x1350",
@@ -280,15 +284,261 @@ export const cleanupExpiredDrafts = onSchedule("every 6 hours", async () => {
   logger.log(`cleaned ${expired.size} expired drafts`);
 });
 
-// ────────────────────────────────────────────────────────────
-// Nadlan — property landing pages + agent platform
-// ────────────────────────────────────────────────────────────
-export {createPropertyPage, getPropertyPage, updatePropertyPage} from "./nadlan/pages";
-export {submitPropertyLead, trackPropertyEvent} from "./nadlan/leads";
-export {sendLoginOtp, verifyLoginOtp} from "./nadlan/auth";
-export {
-  getUploadUrls, createProperty, demoCreateProperty,
-  listMyProperties, deleteProperty, getListingStatus,
-} from "./nadlan/properties";
-export {extendPropertyPage, expirePagesDaily} from "./nadlan/lifecycle";
-export {submitWebSignup} from "./signup/web";
+// ════════════════════════════════════════════════════════════
+// SIGNUP WEB FORM (Forly onboarding — phone-based, no JWT)
+// Companion to the WhatsApp signup bot. Lets an impatient agent
+// finish the 15-field profile on the web instead of in chat.
+// Data model per signup design doc §4/§9.
+// ════════════════════════════════════════════════════════════
+
+const TONE_VALUES = ["professional", "friendly", "energetic", "luxury"];
+const GENDER_VALUES = ["male", "female", "neutral"];
+
+function normalizePhone(raw: unknown): string {
+  return String(raw || "").replace(/[^\d]/g, "");
+}
+
+// GET /api/signup-get?phone=...  → returns saved partial so the form prefills
+export const signupGet = onRequest({cors: false}, async (req, res) => {
+  setCors(res, ALLOWED_ORIGIN);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  const phone = normalizePhone(req.query.phone);
+  if (!phone) {
+    res.status(400).json({error: "missing phone"});
+    return;
+  }
+
+  const doc = await db.collection("businesses").doc(phone).get();
+  const d = (doc.exists ? doc.data() : {}) as admin.firestore.DocumentData;
+  const partial = (d.onboarding_partial || {}) as admin.firestore.DocumentData;
+
+  // merge top-level + partial so the form shows whatever exists
+  res.json({
+    phone,
+    already_complete: d.onboarding_state === "complete",
+    profile: {
+      full_name: d.full_name ?? partial.full_name ?? "",
+      activity_areas: d.activity_areas ?? partial.activity_areas ?? [],
+      specialty: d.specialty ?? partial.specialty ?? "",
+      license_number: d.license_number ?? partial.license_number ?? "",
+      portrait_url: d.portrait_url ?? partial.portrait_url ?? "",
+      slogan: d.slogan ?? partial.slogan ?? "",
+      tone: d.tone ?? partial.tone ?? "",
+      gender_pref: d.gender_pref ?? partial.gender_pref ?? "",
+      brand_colors: d.brand_colors ?? partial.brand_colors ?? [],
+      logo_url: d.logo_url ?? partial.logo_url ?? "",
+      site: d.site ?? partial.site ?? "",
+      instagram: d.instagram ?? partial.instagram ?? "",
+      facebook: d.facebook ?? partial.facebook ?? "",
+      years_experience: d.years_experience ?? partial.years_experience ?? null,
+      privacy_consent: Boolean(d.privacy_consent ?? partial.privacy_consent ?? false),
+    },
+  });
+});
+
+// POST /api/signup-upload  {phone, kind:'portrait'|'logo', base64, content_type}
+// → uploads to Storage, returns a permanent tokened URL
+export const signupUpload = onRequest(
+  {timeoutSeconds: 60, memory: "512MiB", cors: false},
+  async (req, res) => {
+    setCors(res, ALLOWED_ORIGIN);
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).send("POST only");
+      return;
+    }
+    const {phone: rawPhone, kind, base64, content_type: contentType} = req.body as {
+      phone?: string; kind?: string; base64?: string; content_type?: string;
+    };
+    const phone = normalizePhone(rawPhone);
+    if (!phone || !base64 || (kind !== "portrait" && kind !== "logo")) {
+      res.status(400).json({error: "phone, kind (portrait|logo), base64 required"});
+      return;
+    }
+    try {
+      const ct = contentType || "image/jpeg";
+      const ext = ct.includes("png") ? "png" : "jpg";
+      const folder = kind === "portrait" ? "portraits" : "logos";
+      const destPath = `${folder}/${phone}.${ext}`;
+      const data = Buffer.from(base64.replace(/^data:[^;]+;base64,/, ""), "base64");
+      const {publicUrl} = await uploadBuffer(destPath, data, ct);
+      res.json({url: publicUrl});
+    } catch (err) {
+      logger.error("signupUpload failed:", err);
+      res.status(500).json({error: "upload failed"});
+    }
+  }
+);
+
+// POST /api/signup-complete  {phone, profile}
+// → writes businesses/{phone} (set-merge), inits quota, converts lead, marks complete
+export const signupComplete = onRequest(
+  {timeoutSeconds: 60, memory: "256MiB", cors: false},
+  async (req, res) => {
+    setCors(res, ALLOWED_ORIGIN);
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).send("POST only");
+      return;
+    }
+    const {phone: rawPhone, profile} = req.body as {
+      phone?: string; profile?: Record<string, unknown>;
+    };
+    const phone = normalizePhone(rawPhone);
+    const p = profile || {};
+    if (!phone) {
+      res.status(400).json({error: "missing phone"});
+      return;
+    }
+    if (p.privacy_consent !== true) {
+      res.status(400).json({error: "privacy_consent_required"});
+      return;
+    }
+
+    // doc §4 60% gate: require the three essentials
+    const fullName = String(p.full_name || "").trim();
+    const areas = Array.isArray(p.activity_areas) ? p.activity_areas : [];
+    const portrait = String(p.portrait_url || "").trim();
+    if (!fullName || areas.length === 0 || !portrait) {
+      res.status(400).json({
+        error: "missing required fields",
+        need: ["full_name", "activity_areas", "portrait_url"],
+      });
+      return;
+    }
+
+    const tone = TONE_VALUES.includes(String(p.tone)) ? String(p.tone) : "";
+    const gender = GENDER_VALUES.includes(String(p.gender_pref)) ? String(p.gender_pref) : "";
+    const years = Number(p.years_experience);
+
+    // completeness percentage (60 essentials + up to 40 optional)
+    const optional = [
+      p.specialty, p.license_number, p.slogan, tone, gender,
+      p.site, p.instagram, p.facebook,
+      (Array.isArray(p.brand_colors) && p.brand_colors.length) ? "x" : "",
+      p.logo_url, (years > 0 ? "x" : ""),
+    ];
+    const optN = optional.filter((v) => v !== "" && v != null).length;
+    const pct = 60 + Math.round((optN / 11) * 40);
+    const now = new Date();
+
+    try {
+      const businessRef = db.collection("businesses").doc(phone);
+      await businessRef.set({
+        full_name: fullName,
+        phone,
+        activity_areas: areas,
+        portrait_url: portrait,
+        specialty: String(p.specialty || ""),
+        license_number: String(p.license_number || ""),
+        slogan: String(p.slogan || ""),
+        tone,
+        gender_pref: gender,
+        brand_colors: Array.isArray(p.brand_colors) ? p.brand_colors : [],
+        logo_url: String(p.logo_url || ""),
+        site: String(p.site || ""),
+        instagram: String(p.instagram || ""),
+        facebook: String(p.facebook || ""),
+        years_experience: Number.isFinite(years) ? years : 0,
+        plan: "trial",
+        paid: false,
+        onboarding_state: "complete",
+        onboarding_pct: pct,
+        privacy_consent: true,
+        privacy_consent_at: now,
+        updated_at: now,
+        created_at: now,
+      }, {merge: true});
+
+      // init quota/current (subcollection doc) if absent
+      const quotaRef = businessRef.collection("quota").doc("current");
+      const quotaSnap = await quotaRef.get();
+      if (!quotaSnap.exists) {
+        await quotaRef.set({
+          walkthroughs_used: 0,
+          walkthroughs_cap: 4,
+          period_start: now,
+          reset_at: now,
+        });
+      }
+
+      // convert lead if one exists
+      const leadRef = db.collection("leads").doc(phone);
+      const leadSnap = await leadRef.get();
+      if (leadSnap.exists) {
+        await leadRef.set({status: "converted", converted_at: now}, {merge: true});
+      }
+
+      res.json({ok: true, phone, onboarding_pct: pct});
+    } catch (err) {
+      logger.error("signupComplete failed:", err);
+      res.status(500).json({error: "save failed"});
+    }
+  }
+);
+
+// POST /api/signup-save  {phone, profile}
+// → autosave: merges into onboarding_partial (shared with the WhatsApp bot), no completion
+export const signupSave = onRequest(
+  {timeoutSeconds: 30, memory: "256MiB", cors: false},
+  async (req, res) => {
+    setCors(res, ALLOWED_ORIGIN);
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).send("POST only");
+      return;
+    }
+    const {phone: rawPhone, profile} = req.body as {
+      phone?: string; profile?: Record<string, unknown>;
+    };
+    const phone = normalizePhone(rawPhone);
+    const p = profile || {};
+    if (!phone) {
+      res.status(400).json({error: "missing phone"});
+      return;
+    }
+    // No consent yet → nothing gets persisted, not even a partial save.
+    if (p.privacy_consent !== true) {
+      res.json({ok: false, error: "privacy_consent_required"});
+      return;
+    }
+    try {
+      await db.collection("businesses").doc(phone).set({
+        privacy_consent: true,
+        onboarding_partial: {
+          full_name: String(p.full_name || ""),
+          activity_areas: Array.isArray(p.activity_areas) ? p.activity_areas : [],
+          specialty: String(p.specialty || ""),
+          license_number: String(p.license_number || ""),
+          portrait_url: String(p.portrait_url || ""),
+          slogan: String(p.slogan || ""),
+          tone: String(p.tone || ""),
+          gender_pref: String(p.gender_pref || ""),
+          brand_colors: Array.isArray(p.brand_colors) ? p.brand_colors : [],
+          logo_url: String(p.logo_url || ""),
+          site: String(p.site || ""),
+          instagram: String(p.instagram || ""),
+          facebook: String(p.facebook || ""),
+          years_experience: Number(p.years_experience) || 0,
+        },
+        updated_at: new Date(),
+      }, {merge: true});
+      res.json({ok: true});
+    } catch (err) {
+      logger.error("signupSave failed:", err);
+      res.status(500).json({error: "save failed"});
+    }
+  }
+);

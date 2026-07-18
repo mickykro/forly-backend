@@ -23,15 +23,16 @@
       "the_address": "הכתובת", "the_area": "השכונה", "video_tour": "סיור וידאו", "tour_video": "סרטון סיור",
       "gallery_hint_click": "לחצו על תמונה להגדלה", "gallery_hint_drag": "↔ גררו לצדדים · לחצו להגדלה", "scroll": "גללו", "or": "או",
       "form_name": "שם מלא", "form_phone": "טלפון נייד", "form_message": "הודעה (אופציונלי)", "ph_name": "ישראל ישראלי", "ph_message": "אשמח לתאם ביקור...",
-      "lead_sent": "✓ הפרטים נשלחו — נחזור אליכם בהקדם", "footer_disclaimer": "הדף נוצר אוטומטית ע״י Forly 🦉 · כל הפרטים כפופים לאימות",
+      "lead_sent": "✓ הפרטים נשלחו — נחזור אליכם בהקדם", "footer_disclaimer": "הדף נוצר אוטומטית ע״י Forly 🦉 ",
       "gallery_head": "כל חדר, מכל זווית.", "gallery_sub": "מה שהסיור לא הספיק להראות — לחצו על תמונה לצפייה במסך מלא.",
       "why_head": "נכס כזה לא מגיע ללוחות. הוא מגיע לאנשים הנכונים.", "why_sub": "כמה סיבות שבגללן הנכס הזה שווה ביקור — ולמה כדאי להגיע לפני כולם.",
       "area_sub": "אחת השכונות המבוקשות באזור — וזה לא במקרה.", "video_sound": "הפעלת קול", "sent_title": "הפרטים אצלנו.",
-      "sent_body": "נחזור אליכם באופן אישי בהקדם. בינתיים — שווה לצפות בסיור עוד פעם 😉", "not_found": "הדף לא נמצא", "step_next": "הצעד הבא?",
+      "sent_body": "נחזור אליכם באופן אישי בהקדם. בינתיים — שווה לצפות בסיור עוד פעם 😉", "sent_body_named": "{name} יחזור אליכם באופן אישי בהקדם. בינתיים — שווה לצפות בסיור עוד פעם 😉", "not_found": "הדף לא נמצא", "step_next": "הצעד הבא?",
       "wa_prefill": "שלום, ראיתי את {title} ואשמח לתאם ביקור.", "lead_wa_prefill": "שלום, אני {name} ({phone}) ואשמח לתאם ביקור ב{title}.",
       "expired_contact": "תוקף הדף הסתיים. לפרטים על הנכס אפשר לפנות ל{name}.",
       "trust_personal": "מענה אישי בתוך שעתיים בשעות הפעילות", "trust_scheduled": "ביקור מתואם אישית, בזמן שנוח לכם", "trust_private": "הפרטים שלכם נשארים אצלנו בלבד",
-      "parking": "חניות", "registered": "בטאבו", "form_error": "משהו השתבש — נסו שוב או פנו בוואטסאפ", "here_area": "השכונה"
+      "parking": "חניות", "registered": "בטאבו", "form_error": "משהו השתבש — נסו שוב או פנו בוואטסאפ", "here_area": "השכונה",
+      "per_sqm": "למ״ר", "leave_details": "השאירו פרטים", "privacy_policy": "מדיניות פרטיות", "accessibility": "הצהרת נגישות"
     },
     "en": {
       "contact_agent": "Speak with the agent", "book_visit": "Book a visit", "book_visit_private": "Book a private visit", "book_visit_property": "Book a viewing",
@@ -43,15 +44,16 @@
       "the_address": "The address", "the_area": "The area", "video_tour": "Video tour", "tour_video": "Tour video",
       "gallery_hint_click": "Tap a photo to enlarge", "gallery_hint_drag": "↔ Drag sideways · tap to enlarge", "scroll": "Scroll", "or": "or",
       "form_name": "Full name", "form_phone": "Mobile phone", "form_message": "Message (optional)", "ph_name": "John Smith", "ph_message": "I'd love to book a visit...",
-      "lead_sent": "✓ Details sent — we'll get back to you shortly", "footer_disclaimer": "This page was generated automatically by Forly 🦉 · All details subject to verification",
+      "lead_sent": "✓ Details sent — we'll get back to you shortly", "footer_disclaimer": "This page was generated automatically by Forly 🦉",
       "gallery_head": "Every room, from every angle.", "gallery_sub": "What the tour didn't have time to show — tap a photo to view full screen.",
       "why_head": "A property like this never hits the listings. It reaches the right people.", "why_sub": "A few reasons this property is worth a visit — and why you'll want to get there before everyone else.",
       "area_sub": "One of the most sought-after neighborhoods in the area — and that's no accident.", "video_sound": "Turn on sound", "sent_title": "We've got your details.",
-      "sent_body": "We'll get back to you personally very soon. In the meantime — the tour is worth another look 😉", "not_found": "Page not found", "step_next": "The next step?",
+      "sent_body": "We'll get back to you personally very soon. In the meantime — the tour is worth another look 😉", "sent_body_named": "{name} will get back to you personally very soon. In the meantime — the tour is worth another look 😉", "not_found": "Page not found", "step_next": "The next step?",
       "wa_prefill": "Hi, I saw {title} and I'd love to book a visit.", "lead_wa_prefill": "Hi, I'm {name} ({phone}) and I'd love to book a visit to {title}.",
       "expired_contact": "This page has expired. For details about the property, please contact {name}.",
       "trust_personal": "Personal reply within two hours during business hours", "trust_scheduled": "A visit arranged personally, at a time that suits you", "trust_private": "Your details stay with us alone",
-      "parking": "parking", "registered": "registered", "form_error": "Something went wrong — try again or reach out on WhatsApp", "here_area": "The area"
+      "parking": "parking", "registered": "registered", "form_error": "Something went wrong — try again or reach out on WhatsApp", "here_area": "The area",
+      "per_sqm": "per m²", "leave_details": "Leave your details", "privacy_policy": "Privacy policy", "accessibility": "Accessibility statement"
     },
     "ar": {
       "contact_agent": "التحدث مع الوسيط", "book_visit": "تحديد موعد زيارة", "book_visit_private": "تحديد موعد زيارة خاصة", "book_visit_property": "تحديد موعد معاينة العقار",
@@ -63,15 +65,16 @@
       "the_address": "العنوان", "the_area": "الحي", "video_tour": "جولة بالفيديو", "tour_video": "فيديو الجولة",
       "gallery_hint_click": "اضغط على الصورة لتكبيرها", "gallery_hint_drag": "↔ اسحب إلى الجانبين · اضغط للتكبير", "scroll": "مرّر", "or": "أو",
       "form_name": "الاسم الكامل", "form_phone": "الهاتف المحمول", "form_message": "رسالة (اختياري)", "ph_name": "محمد أحمد", "ph_message": "يسعدني تحديد موعد زيارة...",
-      "lead_sent": "✓ تم إرسال التفاصيل — سنعاود التواصل معك قريبًا", "footer_disclaimer": "تم إنشاء هذه الصفحة تلقائيًا بواسطة Forly 🦉 · جميع التفاصيل خاضعة للتحقق",
+      "lead_sent": "✓ تم إرسال التفاصيل — سنعاود التواصل معك قريبًا", "footer_disclaimer": "تم إنشاء هذه الصفحة تلقائيًا بواسطة Forly 🦉 ",
       "gallery_head": "كل غرفة، من كل زاوية.", "gallery_sub": "ما لم تُتِح الجولة عرضه — اضغط على الصورة لمشاهدتها بملء الشاشة.",
       "why_head": "عقار كهذا لا يصل إلى الإعلانات. بل يصل إلى الأشخاص المناسبين.", "why_sub": "بعض الأسباب التي تجعل هذا العقار يستحق الزيارة — ولماذا يجدر بك الوصول قبل الجميع.",
       "area_sub": "أحد أكثر الأحياء طلبًا في المنطقة — وهذا ليس من قبيل الصدفة.", "video_sound": "تشغيل الصوت", "sent_title": "تفاصيلك وصلتنا.",
-      "sent_body": "سنعاود التواصل معك شخصيًا قريبًا جدًا. في هذه الأثناء — تستحق الجولة مشاهدة أخرى 😉", "not_found": "الصفحة غير موجودة", "step_next": "الخطوة التالية؟",
+      "sent_body": "سنعاود التواصل معك شخصيًا قريبًا جدًا. في هذه الأثناء — تستحق الجولة مشاهدة أخرى 😉", "sent_body_named": "{name} سيعاود التواصل معك شخصيًا قريبًا جدًا. في هذه الأثناء — تستحق الجولة مشاهدة أخرى 😉", "not_found": "الصفحة غير موجودة", "step_next": "الخطوة التالية؟",
       "wa_prefill": "مرحبًا، رأيت {title} ويسعدني تحديد موعد زيارة.", "lead_wa_prefill": "مرحبًا، أنا {name} ({phone}) ويسعدني تحديد موعد زيارة لـ{title}.",
       "expired_contact": "انتهت صلاحية هذه الصفحة. للحصول على تفاصيل العقار يمكنك التواصل مع {name}.",
       "trust_personal": "رد شخصي خلال ساعتين ضمن ساعات العمل", "trust_scheduled": "زيارة مرتّبة شخصيًا، في الوقت المناسب لك", "trust_private": "تبقى تفاصيلك لدينا وحدنا",
-      "parking": "مواقف", "registered": "مسجّلة", "form_error": "حدث خطأ ما — حاول مرة أخرى أو تواصل عبر واتساب", "here_area": "الحي"
+      "parking": "مواقف", "registered": "مسجّلة", "form_error": "حدث خطأ ما — حاول مرة أخرى أو تواصل عبر واتساب", "here_area": "الحي",
+      "per_sqm": "للم²", "leave_details": "اترك تفاصيلك", "privacy_policy": "سياسة الخصوصية", "accessibility": "بيان إمكانية الوصول"
     },
     "ru": {
       "contact_agent": "Связаться с агентом", "book_visit": "Записаться на просмотр", "book_visit_private": "Записаться на частный просмотр", "book_visit_property": "Записаться на осмотр объекта",
@@ -83,15 +86,16 @@
       "the_address": "Адрес", "the_area": "Район", "video_tour": "Видеотур", "tour_video": "Видео тура",
       "gallery_hint_click": "Нажмите на фото, чтобы увеличить", "gallery_hint_drag": "↔ Проведите в стороны · нажмите, чтобы увеличить", "scroll": "Листайте", "or": "или",
       "form_name": "Полное имя", "form_phone": "Мобильный телефон", "form_message": "Сообщение (необязательно)", "ph_name": "Иван Иванов", "ph_message": "С удовольствием запишусь на просмотр...",
-      "lead_sent": "✓ Детали отправлены — мы свяжемся с вами в ближайшее время", "footer_disclaimer": "Эта страница создана автоматически с помощью Forly 🦉 · Все данные подлежат проверке",
+      "lead_sent": "✓ Детали отправлены — мы свяжемся с вами в ближайшее время", "footer_disclaimer": "Эта страница создана автоматически с помощью Forly 🦉 ",
       "gallery_head": "Каждая комната, с каждого ракурса.", "gallery_sub": "То, что тур не успел показать — нажмите на фото, чтобы открыть на весь экран.",
       "why_head": "Такой объект не попадает на доски объявлений. Он попадает к нужным людям.", "why_sub": "Несколько причин, почему этот объект стоит посетить — и почему стоит успеть раньше всех.",
       "area_sub": "Один из самых востребованных районов в округе — и это неслучайно.", "video_sound": "Включить звук", "sent_title": "Ваши данные у нас.",
-      "sent_body": "Мы свяжемся с вами лично в самое ближайшее время. А пока — тур стоит пересмотреть ещё раз 😉", "not_found": "Страница не найдена", "step_next": "Следующий шаг?",
+      "sent_body": "Мы свяжемся с вами лично в самое ближайшее время. А пока — тур стоит пересмотреть ещё раз 😉", "sent_body_named": "{name} свяжется с вами лично в самое ближайшее время. А пока — тур стоит пересмотреть ещё раз 😉", "not_found": "Страница не найдена", "step_next": "Следующий шаг?",
       "wa_prefill": "Здравствуйте, я видел {title} и хотел бы записаться на просмотр.", "lead_wa_prefill": "Здравствуйте, меня зовут {name} ({phone}), хотел бы записаться на просмотр {title}.",
       "expired_contact": "Срок действия страницы истёк. За информацией об объекте обращайтесь к {name}.",
       "trust_personal": "Личный ответ в течение двух часов в рабочее время", "trust_scheduled": "Просмотр, организованный лично, в удобное для вас время", "trust_private": "Ваши данные остаются только у нас",
-      "parking": "парковка", "registered": "в реестре", "form_error": "Что-то пошло не так — попробуйте ещё раз или напишите в WhatsApp", "here_area": "Район"
+      "parking": "парковка", "registered": "в реестре", "form_error": "Что-то пошло не так — попробуйте ещё раз или напишите в WhatsApp", "here_area": "Район",
+      "per_sqm": "за м²", "leave_details": "Оставьте контакты", "privacy_policy": "Политика конфиденциальности", "accessibility": "Заявление о доступности"
     },
     "es": {
       "contact_agent": "Hablar con el agente", "book_visit": "Agendar una visita", "book_visit_private": "Agendar una visita privada", "book_visit_property": "Agendar una visita al inmueble",
@@ -103,15 +107,16 @@
       "the_address": "La dirección", "the_area": "La zona", "video_tour": "Recorrido en vídeo", "tour_video": "Vídeo del recorrido",
       "gallery_hint_click": "Toca una foto para ampliar", "gallery_hint_drag": "↔ Desliza a los lados · toca para ampliar", "scroll": "Desliza", "or": "o",
       "form_name": "Nombre completo", "form_phone": "Teléfono móvil", "form_message": "Mensaje (opcional)", "ph_name": "Juan Pérez", "ph_message": "Me encantaría agendar una visita...",
-      "lead_sent": "✓ Datos enviados — te responderemos en breve", "footer_disclaimer": "Esta página se generó automáticamente con Forly 🦉 · Todos los datos están sujetos a verificación",
+      "lead_sent": "✓ Datos enviados — te responderemos en breve", "footer_disclaimer": "Esta página se generó automáticamente con Forly 🦉 ",
       "gallery_head": "Cada habitación, desde cada ángulo.", "gallery_sub": "Lo que el recorrido no llegó a mostrar — toca una foto para verla a pantalla completa.",
       "why_head": "Un inmueble así no llega a los portales. Llega a las personas adecuadas.", "why_sub": "Algunas razones por las que este inmueble merece una visita — y por qué conviene llegar antes que nadie.",
       "area_sub": "Una de las zonas más solicitadas del área — y no es casualidad.", "video_sound": "Activar sonido", "sent_title": "Ya tenemos tus datos.",
-      "sent_body": "Te responderemos personalmente muy pronto. Mientras tanto — el recorrido merece otra mirada 😉", "not_found": "Página no encontrada", "step_next": "¿El siguiente paso?",
+      "sent_body": "Te responderemos personalmente muy pronto. Mientras tanto — el recorrido merece otra mirada 😉", "sent_body_named": "{name} te responderá personalmente muy pronto. Mientras tanto — el recorrido merece otra mirada 😉", "not_found": "Página no encontrada", "step_next": "¿El siguiente paso?",
       "wa_prefill": "Hola, vi {title} y me encantaría agendar una visita.", "lead_wa_prefill": "Hola, soy {name} ({phone}) y me encantaría agendar una visita a {title}.",
       "expired_contact": "Esta página ha caducado. Para más información sobre el inmueble, puedes contactar con {name}.",
       "trust_personal": "Respuesta personal en menos de dos horas en horario laboral", "trust_scheduled": "Una visita organizada personalmente, a la hora que te convenga", "trust_private": "Tus datos se quedan solo con nosotros",
-      "parking": "plazas de garaje", "registered": "registradas", "form_error": "Algo salió mal — inténtalo de nuevo o escríbenos por WhatsApp", "here_area": "La zona"
+      "parking": "plazas de garaje", "registered": "registradas", "form_error": "Algo salió mal — inténtalo de nuevo o escríbenos por WhatsApp", "here_area": "La zona",
+      "per_sqm": "por m²", "leave_details": "Deja tus datos", "privacy_policy": "Política de privacidad", "accessibility": "Declaración de accesibilidad"
     },
     "fr": {
       "contact_agent": "Parler à l'agent", "book_visit": "Planifier une visite", "book_visit_private": "Planifier une visite privée", "book_visit_property": "Planifier une visite du bien",
@@ -123,15 +128,16 @@
       "the_address": "L'adresse", "the_area": "Le quartier", "video_tour": "Visite en vidéo", "tour_video": "Vidéo de la visite",
       "gallery_hint_click": "Touchez une photo pour l'agrandir", "gallery_hint_drag": "↔ Glissez sur les côtés · touchez pour agrandir", "scroll": "Faites défiler", "or": "ou",
       "form_name": "Nom complet", "form_phone": "Téléphone portable", "form_message": "Message (facultatif)", "ph_name": "Jean Dupont", "ph_message": "Je serais ravi de planifier une visite...",
-      "lead_sent": "✓ Détails envoyés — nous vous recontactons très vite", "footer_disclaimer": "Cette page a été générée automatiquement par Forly 🦉 · Toutes les informations sont sujettes à vérification",
+      "lead_sent": "✓ Détails envoyés — nous vous recontactons très vite", "footer_disclaimer": "Cette page a été générée automatiquement par Forly 🦉 ",
       "gallery_head": "Chaque pièce, sous tous les angles.", "gallery_sub": "Ce que la visite n'a pas eu le temps de montrer — touchez une photo pour la voir en plein écran.",
       "why_head": "Un bien pareil n'arrive pas sur les annonces. Il arrive aux bonnes personnes.", "why_sub": "Quelques raisons pour lesquelles ce bien mérite une visite — et pourquoi mieux vaut arriver avant tout le monde.",
       "area_sub": "L'un des quartiers les plus prisés du secteur — et ce n'est pas un hasard.", "video_sound": "Activer le son", "sent_title": "Nous avons vos coordonnées.",
-      "sent_body": "Nous vous recontacterons personnellement très bientôt. En attendant — la visite mérite un second regard 😉", "not_found": "Page introuvable", "step_next": "La prochaine étape ?",
+      "sent_body": "Nous vous recontacterons personnellement très bientôt. En attendant — la visite mérite un second regard 😉", "sent_body_named": "{name} vous recontactera personnellement très bientôt. En attendant — la visite mérite un second regard 😉", "not_found": "Page introuvable", "step_next": "La prochaine étape ?",
       "wa_prefill": "Bonjour, j'ai vu {title} et je serais ravi de planifier une visite.", "lead_wa_prefill": "Bonjour, je suis {name} ({phone}) et je serais ravi de planifier une visite de {title}.",
       "expired_contact": "Cette page a expiré. Pour des informations sur le bien, vous pouvez contacter {name}.",
       "trust_personal": "Réponse personnelle sous deux heures pendant les heures d'ouverture", "trust_scheduled": "Une visite organisée personnellement, à l'heure qui vous convient", "trust_private": "Vos coordonnées restent chez nous uniquement",
-      "parking": "places de parking", "registered": "enregistrées", "form_error": "Une erreur s'est produite — réessayez ou contactez-nous sur WhatsApp", "here_area": "Le quartier"
+      "parking": "places de parking", "registered": "enregistrées", "form_error": "Une erreur s'est produite — réessayez ou contactez-nous sur WhatsApp", "here_area": "Le quartier",
+      "per_sqm": "par m²", "leave_details": "Laissez vos coordonnées", "privacy_policy": "Politique de confidentialité", "accessibility": "Déclaration d'accessibilité"
     }
   };
   var RTL = { he: 1, ar: 1 };

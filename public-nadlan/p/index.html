@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Forly Nadlan</title>
 <meta name="description" content="">
+<link rel="icon" type="image/png" href="/favicon.png">
 <meta property="og:type" content="website">
 <meta property="og:title" content="">
 <meta property="og:description" content="">
@@ -23,7 +24,6 @@
     <span class="big">🌙</span>
     <h2>הדף אינו פעיל</h2>
     <p id="expiredSub">תוקף הדף הסתיים. לפרטים על הנכס אפשר לפנות ישירות למתווך.</p>
-    <a class="btn btn-gold" id="expiredWa" href="#" style="display:none">💬 דברו עם המתווך</a>
   </div>
 </div>
 <div class="app-state" id="stateNotfound">
@@ -38,10 +38,10 @@
 <!-- ══════════ TOPBAR ══════════ -->
 <header class="topbar" id="topbar">
   <a class="brand" href="#">
-    <b>GOLAN</b>
-    <span>Luxury Real Estate</span>
+    <b data-edit="agent.brand_name">GOLAN</b>
+    <span data-edit="agent.tagline">Luxury Real Estate</span>
   </a>
-  <a class="top-cta" href="#contact" data-i18n="book_visit">לתיאום ביקור</a>
+  <a class="top-cta" href="#contact" data-i18n="book_visit" data-edit="texts.top_cta">לתיאום ביקור</a>
 </header>
 
 <!-- ══════════ HERO ══════════ -->
@@ -49,12 +49,12 @@
   <div class="hero-bg"></div>
   <div class="hero-inner">
     <div class="hero-copy">
-      <span class="eyebrow reveal in">בלעדי · מגדל בבלי, תל אביב</span>
-      <h1 class="reveal in" data-delay="1">החיים,<br><em>מקומה 32.</em></h1>
-      <p class="sub reveal in" data-delay="2">פנטהאוז 5 חדרים עם קו ראשון לפארק ונוף פתוח לים — נכס שמגיעים אליו פעם בעשור.</p>
+      <span class="eyebrow reveal in" data-edit="texts.eyebrow">בלעדי · מגדל בבלי, תל אביב</span>
+      <h1 class="reveal in" data-delay="1" data-edit="hero.phrase">החיים,<br><em>מקומה 32.</em></h1>
+      <p class="sub reveal in" data-delay="2" data-edit="texts.hero_sub">פנטהאוז 5 חדרים עם קו ראשון לפארק ונוף פתוח לים — נכס שמגיעים אליו פעם בעשור.</p>
       <div class="hero-actions reveal in" data-delay="3">
-        <a class="btn btn-gold" href="#contact" data-i18n="see_it_myself">אני רוצה לראות אותו</a>
-        <a class="btn btn-ghost" href="#area" data-i18n="about_area_arrow">על השכונה ↓</a>
+        <a class="btn btn-gold" href="#contact" data-i18n="see_it_myself" data-edit="texts.hero_btn1">אני רוצה לראות אותו</a>
+        <a class="btn btn-ghost" href="#area" data-i18n="about_area_arrow" data-edit="texts.hero_btn2">על השכונה ↓</a>
       </div>
     </div>
     <div class="hero-video-wrap reveal in" data-delay="2" id="videoWrap">
@@ -65,16 +65,16 @@
       <button class="sound-toggle" id="soundBtn" aria-label="הפעלת קול" data-i18n-aria="video_sound">🔇</button>
     </div>
   </div>
-  <div class="scroll-hint"><span data-i18n="scroll">גללו</span><span class="line"></span></div>
+  <div class="scroll-hint"><span data-i18n="scroll" data-edit="texts.scroll_hint">גללו</span><span class="line"></span></div>
 </section>
 
 <!-- ══════════ SPECS ══════════ -->
 <div class="specs">
   <div class="specs-inner">
-    <div class="spec reveal"><b>₪14.9M</b><span>מחיר מבוקש</span></div>
-    <div class="spec reveal" data-delay="1"><b>5 חד׳</b><span>210 מ״ר + מרפסת 60 מ״ר</span></div>
-    <div class="spec reveal" data-delay="2"><b>קומה 32</b><span>נוף פתוח לים ולפארק</span></div>
-    <div class="spec reveal" data-delay="3"><b>2 חניות</b><span>+ מחסן וכניסה פרטית</span></div>
+    <div class="spec reveal"><b data-edit="texts.spec1_v">₪14.9M</b><span data-edit="texts.spec1_l">מחיר מבוקש</span></div>
+    <div class="spec reveal" data-delay="1"><b data-edit="texts.spec2_v">5 חד׳</b><span data-edit="texts.spec2_l">210 מ״ר + מרפסת 60 מ״ר</span></div>
+    <div class="spec reveal" data-delay="2"><b data-edit="texts.spec3_v">קומה 32</b><span data-edit="texts.spec3_l">נוף פתוח לים ולפארק</span></div>
+    <div class="spec reveal" data-delay="3"><b data-edit="texts.spec4_v">2 חניות</b><span data-edit="texts.spec4_l">+ מחסן וכניסה פרטית</span></div>
   </div>
 </div>
 
@@ -82,9 +82,9 @@
 <section class="block" id="gallery">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="kicker" data-i18n="peek_inside">הצצה פנימה</span>
-      <h2 data-i18n="gallery_head">כל חדר, מכל זווית.</h2>
-      <p data-i18n="gallery_sub">מה שהסיור לא הספיק להראות — לחצו על תמונה לצפייה במסך מלא.</p>
+      <span class="kicker" data-i18n="peek_inside" data-edit="texts.gallery_kicker">הצצה פנימה</span>
+      <h2 data-i18n="gallery_head" data-edit="texts.gallery_title">כל חדר, מכל זווית.</h2>
+      <p data-i18n="gallery_sub" data-edit="texts.gallery_sub">מה שהסיור לא הספיק להראות — לחצו על תמונה לצפייה במסך מלא.</p>
     </div>
     <div class="gal reveal" id="gal">
       <button class="gal-item" data-cap="הסלון — נוף פתוח למערב"><img src="" alt="הסלון" loading="lazy"><span class="cap">הסלון — נוף פתוח למערב</span></button>
@@ -113,9 +113,9 @@
 <section class="block" id="why">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="kicker" data-i18n="why_here">למה דווקא כאן</span>
-      <h2 data-i18n="why_head">נכס כזה לא מגיע ללוחות.<br>הוא מגיע לאנשים הנכונים.</h2>
-      <p data-i18n="why_sub">ארבע סיבות שבגללן הפנטהאוז הזה שווה את הביקור — ולמה כדאי שתגיעו לפני כולם.</p>
+      <span class="kicker" data-i18n="why_here" data-edit="texts.why_kicker">למה דווקא כאן</span>
+      <h2 data-i18n="why_head" data-edit="texts.why_title">נכס כזה לא מגיע ללוחות.<br>הוא מגיע לאנשים הנכונים.</h2>
+      <p data-i18n="why_sub" data-edit="texts.why_sub">ארבע סיבות שבגללן הפנטהאוז הזה שווה את הביקור — ולמה כדאי שתגיעו לפני כולם.</p>
     </div>
     <div class="carousel-outer">
       <div class="carousel" id="carousel">
@@ -153,10 +153,10 @@
     <div class="agent-strip reveal">
       <div class="avatar">ר״ג</div>
       <div class="agent-meta">
-        <b>רון גולן</b>
-        <span>מייסד גולן נכסים · מומחה נדל״ן יוקרה בצפון ת״א · רישיון תיווך 3205419</span>
+        <b data-edit="agent.name">רון גולן</b>
+        <span data-edit="texts.agent_meta">מייסד גולן נכסים · מומחה נדל״ן יוקרה בצפון ת״א · רישיון תיווך 3205419</span>
       </div>
-      <a class="btn btn-gold" href="#contact" data-i18n="talk_about_property">דברו איתי על הנכס</a>
+      <a class="btn btn-gold" href="#contact" data-i18n="talk_about_property" data-edit="texts.agent_cta">דברו איתי על הנכס</a>
     </div>
   </div>
 </section>
@@ -165,9 +165,9 @@
 <section class="block area" id="area">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="kicker" data-i18n="the_area">השכונה</span>
-      <h2>בבלי. השקט של פארק,<br>במרחק נגיעה מהעיר.</h2>
-      <p data-i18n="area_sub">אחת השכונות המבוקשות בתל אביב — וזה לא במקרה.</p>
+      <span class="kicker" data-i18n="the_area" data-edit="texts.area_kicker">השכונה</span>
+      <h2 data-edit="texts.area_title">בבלי. השקט של פארק,<br>במרחק נגיעה מהעיר.</h2>
+      <p data-i18n="area_sub" data-edit="texts.area_sub">אחת השכונות המבוקשות בתל אביב — וזה לא במקרה.</p>
     </div>
     <div class="area-grid">
       <div class="area-copy reveal">
@@ -195,8 +195,8 @@
   <div class="container">
     <div class="cta-panel reveal">
       <div class="cta-info">
-        <h2>הצעד הבא?<br><em>לראות אותו במו עיניכם.</em></h2>
-        <p>השאירו פרטים ורון יחזור אליכם באופן אישי לתיאום ביקור — בדיסקרטיות מלאה וללא התחייבות.</p>
+        <h2 data-edit="cta.headline">הצעד הבא?<br><em>לראות אותו במו עיניכם.</em></h2>
+        <p data-edit="cta.sub">השאירו פרטים ונחזור אליכם באופן אישי לתיאום ביקור — בדיסקרטיות מלאה וללא התחייבות.</p>
         <div class="trust">
           <div><span class="tick">✦</span> <span data-i18n="trust_personal">מענה אישי בתוך שעתיים בשעות הפעילות</span></div>
           <div><span class="tick">✦</span> <span data-i18n="trust_scheduled">ביקור מתואם אישית, בזמן שנוח לכם</span></div>
@@ -205,19 +205,19 @@
       </div>
       <form class="cta-form" id="leadForm">
         <div>
-          <label for="name" data-i18n="form_name">שם מלא</label>
+          <label for="name" data-i18n="form_name" data-edit="texts.form_name_label">שם מלא</label>
           <input id="name" name="name" type="text" placeholder="ישראל ישראלי" data-i18n-ph="ph_name" required autocomplete="name">
         </div>
         <div>
-          <label for="phone" data-i18n="form_phone">טלפון נייד</label>
+          <label for="phone" data-i18n="form_phone" data-edit="texts.form_phone_label">טלפון נייד</label>
           <input id="phone" name="phone" type="tel" placeholder="050-0000000" required autocomplete="tel" inputmode="tel">
         </div>
-        <button class="btn btn-gold" type="submit">תיאום ביקור בנכס</button>
+        <button class="btn btn-gold" type="submit" data-edit="cta.button_label">תיאום ביקור בנכס</button>
       </form>
       <div class="form-done" id="formDone">
         <span class="big">🥂</span>
-        <h3 data-i18n="sent_title">הפרטים אצלנו.</h3>
-        <p data-i18n="sent_body">רון יחזור אליכם באופן אישי בהקדם.<br>בינתיים — שווה לצפות בסיור עוד פעם 😉</p>
+        <h3 data-i18n="sent_title" data-edit="texts.done_title">הפרטים אצלנו.</h3>
+        <p data-i18n="sent_body" data-edit="texts.done_sub">נחזור אליכם באופן אישי בהקדם.<br>בינתיים — שווה לצפות בסיור עוד פעם 😉</p>
       </div>
     </div>
   </div>
@@ -226,18 +226,18 @@
 <!-- ══════════ FOOTER ══════════ -->
 <footer>
   <div class="container">
-    <span class="fbrand">GOLAN · LUXURY REAL ESTATE</span>
-    <span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י <a href="https://call4li.com">Forly 🦉</a> · כל הפרטים כפופים לאימות</span>
+    <span class="fbrand" data-edit="texts.footer_brand">GOLAN · LUXURY REAL ESTATE</span>
+    <span><span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉</span> · <a href="/legal/privacy.html" data-i18n="privacy_policy" style="color:inherit;text-decoration:underline">מדיניות פרטיות</a> · <a href="/legal/accessibility.html" data-i18n="accessibility" style="color:inherit;text-decoration:underline">הצהרת נגישות</a></span>
   </div>
 </footer>
 
 <!-- ══════════ STICKY MOBILE BAR ══════════ -->
 <div class="sticky-bar" id="stickyBar">
-  <a class="btn btn-wa" href="https://wa.me/972500000000" target="_blank" rel="noopener" data-i18n="whatsapp">💬 וואטסאפ</a>
-  <a class="btn btn-gold" href="#contact" data-i18n="book_visit">תיאום ביקור</a>
+  <a class="btn btn-wa" href="#contact" data-i18n="leave_details" data-edit="texts.sticky_wa">💬 השאירו פרטים</a>
+  <a class="btn btn-gold" href="#contact" data-i18n="book_visit" data-edit="texts.sticky_cta">תיאום ביקור</a>
 </div>
 
-<script src="/tpl/i18n.js"></script>
+<script src="/templates/i18n.js"></script>
 <script src="/p/page.js"></script>
 </body>
 </html>

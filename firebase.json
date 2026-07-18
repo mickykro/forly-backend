@@ -33,20 +33,61 @@
       ],
       "rewrites": [
         {
+          "source": "/api/signup-complete",
+          "function": {
+            "functionId": "signupComplete",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/api/signup-upload",
+          "function": {
+            "functionId": "signupUpload",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/api/signup-save",
+          "function": {
+            "functionId": "signupSave",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/api/signup-get",
+          "function": {
+            "functionId": "signupGet",
+            "region": "europe-west1"
+          }
+        },
+        {
           "source": "/api/create-draft",
-          "function": { "functionId": "createCarouselDraft", "region": "europe-west1" }
+          "function": {
+            "functionId": "createCarouselDraft",
+            "region": "europe-west1"
+          }
         },
         {
           "source": "/api/get-draft",
-          "function": { "functionId": "getCarouselDraft", "region": "europe-west1" }
+          "function": {
+            "functionId": "getCarouselDraft",
+            "region": "europe-west1"
+          }
         },
         {
           "source": "/api/save-draft",
-          "function": { "functionId": "saveCarouselDraft", "region": "europe-west1" }
+          "function": {
+            "functionId": "saveCarouselDraft",
+            "region": "europe-west1"
+          }
         },
         {
           "source": "/c/**",
           "destination": "/c/index.html"
+        },
+        {
+          "source": "/signup",
+          "destination": "/signup/index.html"
         }
       ],
       "headers": [
@@ -65,6 +106,13 @@
       "target": "nadlan",
       "public": "public-nadlan",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "redirects": [
+        {
+          "source": "/:path*",
+          "destination": "https://nadlan.call4li.com/:path*",
+          "type": 301
+        }
+      ],
       "rewrites": [
         {
           "source": "/api/property-page",
@@ -95,67 +143,6 @@
         {
           "source": "**/*.@(js|css)",
           "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
-        }
-      ]
-    },
-    {
-      "target": "agent",
-      "public": "public-agent",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [
-        {
-          "source": "/api/auth/otp",
-          "function": { "functionId": "sendLoginOtp", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/auth/verify",
-          "function": { "functionId": "verifyLoginOtp", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/properties",
-          "function": { "functionId": "listMyProperties", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/properties/create",
-          "function": { "functionId": "createProperty", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/properties/demo-create",
-          "function": { "functionId": "demoCreateProperty", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/properties/delete",
-          "function": { "functionId": "deleteProperty", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/listing-status",
-          "function": { "functionId": "getListingStatus", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/upload-urls",
-          "function": { "functionId": "getUploadUrls", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/page/update",
-          "function": { "functionId": "updatePropertyPage", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/page/extend",
-          "function": { "functionId": "extendPropertyPage", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/page",
-          "function": { "functionId": "getPropertyPage", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/signup",
-          "function": { "functionId": "submitWebSignup", "region": "europe-west1" }
-        }
-      ],
-      "headers": [
-        {
-          "source": "**/*.html",
-          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
         }
       ]
     }
