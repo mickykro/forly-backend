@@ -1,0 +1,249 @@
+/*
+ * routes/pages.js — landing page builder + serving + leads
+ * Handles: /createPropertyPage, /api/property-page, /api/property-lead,
+ *          /api/property-event, /api/video-overlay, /p/:id
+ */
+
+const express = require("express");
+const crypto = require("crypto");
+const path = require("path");
+const fs = require("fs");
+
+const db = require("../db");
+const { pad, daysFromNow, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+
+const PAGE_LIFESPAN_DAYS = 30;
+const LEAD_MAX_PER_HOUR = 3;
+const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel"]);
+
+module.exports = function createPagesRouter(ctx) {
+  const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken } = ctx;
+
+  const router = express.Router();
+
+  // shared page payload builder
+  function pagePayload(id, d) {
+    return {
+      page_id: id, status: d.status, agent: d.agent, property: d.property,
+      hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
+      cta: d.cta, sections: d.sections, theme: d.theme || null,
+      language: d.language || "he",
+    };
+  }
+
+  // ── page builder (called by n8n) ──
+  router.post("/createPropertyPage", async (req, res) => {
+    const body = req.body || {};
+    if (!body.listing_id || !body.business_phone || !body.video_url ||
+        !Array.isArray(body.photos) || body.photos.length < 1) {
+      return res.status(400).json({ error: "listing_id, business_phone, video_url and photos are required" });
+    }
+    try {
+      const reusable = await db.findActivePageByListing(body.listing_id);
+      const pageId = reusable ? reusable.page_id : crypto.randomUUID();
+      const base = `pages/${pageId}`;
+
+      const listing = await db.getListing(body.listing_id).catch(() => null);
+      const theme = sanitizeTheme(body.theme || (listing && listing.theme));
+      if (theme && theme.font_url) {
+        const fext = (theme.font_url.split("?")[0].match(/\.(woff2|woff|ttf|otf)$/i) || [, "woff2"])[1].toLowerCase();
+        theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`, uploadDir, baseUrl).catch(() => theme.font_url);
+      }
+
+      const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl);
+      const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
+      const posterP = rehostFn(body.poster_url || body.photos[0].url, `${base}/poster.jpg`);
+      const photoPs = body.photos.slice(0, 12).map((p, i) =>
+        rehostFn(p.url, `${base}/photo-${pad(i + 1)}.${guessImageExt(p.url)}`));
+      const mapP = body.area && body.area.map_image_url ? rehostFn(body.area.map_image_url, `${base}/map.png`) : null;
+      const logoP = body.agent && body.agent.logo_url ? rehostFn(body.agent.logo_url, `${base}/logo.png`) : null;
+
+      const [videoUrl, posterUrl, ...rest] = await Promise.all([
+        videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
+      ]);
+      const photoUrls = rest.slice(0, photoPs.length);
+      let cursor = photoPs.length;
+      const mapUrl = mapP ? rest[cursor++] : null;
+      const logoUrl = logoP ? rest[cursor++] : null;
+
+      const galleryImages = photoUrls.map((u, i) => ({ url: u, caption: (body.photos[i] && body.photos[i].caption) || "" }));
+      const now = new Date();
+      const doc = {
+        page_id: pageId, listing_id: body.listing_id, business_phone: body.business_phone,
+        status: "active",
+        created_at: reusable ? reusable.created_at : now,
+        updated_at: now,
+        expires_at: reusable ? reusable.expires_at : daysFromNow(PAGE_LIFESPAN_DAYS),
+        extension_count: reusable ? (reusable.extension_count || 0) : 0,
+        edit_count: reusable ? (reusable.edit_count || 0) : 0,
+        agent: {
+          name: (body.agent && body.agent.name) || "",
+          brand_name: (body.agent && (body.agent.brand_name || body.agent.name)) || "",
+          logo_url: logoUrl,
+          tagline: (body.agent && body.agent.tagline) || "",
+          phone: (body.agent && body.agent.phone) || body.business_phone,
+          license: (body.agent && body.agent.license) || "",
+        },
+        property: {
+          title: (body.property && body.property.title) ||
+            `${(body.property && body.property.rooms) || ""} חד׳ ב${(body.property && (body.property.neighborhood || body.property.city)) || ""}`.trim(),
+          listing_type: (body.property && body.property.listing_type) || (listing && listing.listing_type) || "sale",
+          address: (body.property && body.property.address) || "",
+          neighborhood: (body.property && body.property.neighborhood) || "",
+          city: (body.property && body.property.city) || "",
+          price: Number(body.property && body.property.price) || 0,
+          rooms: Number(body.property && body.property.rooms) || 0,
+          size_sqm: Number(body.property && body.property.size_sqm) || 0,
+          floor: Number(body.property && body.property.floor) || 0,
+          parking: Number(body.property && body.property.parking) || 0,
+        },
+        theme: theme || null,
+        language: sanitizeLang(body.language || (listing && listing.language)),
+        hero: { phrase: body.hero_phrase || "", video_url: videoUrl, poster_url: posterUrl },
+        gallery: { images: galleryImages },
+        carousel: { slides: (body.carousel_slides || []).slice(0, 6) },
+        area: {
+          blurb: (body.area && body.area.blurb) || "",
+          stops: (body.area && body.area.stops) || [],
+          stats: ((body.area && body.area.stats) || []).filter((s) => s && s.source_url),
+          map_image_url: mapUrl,
+          profile_slug: (body.area && body.area.profile_slug) || null,
+        },
+        cta: {
+          headline: (body.cta && body.cta.headline) || "רוצים לראות את הנכס מקרוב?",
+          sub: (body.cta && body.cta.sub) || "השאירו פרטים ונחזור אליכם לתיאום ביקור.",
+          bullets: (body.cta && body.cta.bullets) || [],
+          button_label: (body.cta && body.cta.button_label) || "תיאום ביקור",
+        },
+        sections: { gallery: galleryImages.length >= 3, carousel: true, area: true },
+        view_count: reusable ? (reusable.view_count || 0) : 0,
+        lead_count: reusable ? (reusable.lead_count || 0) : 0,
+      };
+
+      await db.savePage(doc);
+      await db.setListingPageId(body.listing_id, pageId);
+      res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
+    } catch (err) {
+      console.error("createPropertyPage failed:", err);
+      res.status(500).json({ error: err instanceof Error ? err.message : "internal error" });
+    }
+  });
+
+  // ── property-page API ──
+  router.get("/api/property-page", async (req, res) => {
+    const id = typeof req.query.id === "string" ? req.query.id : "";
+    if (!id) return res.status(400).json({ error: "missing id" });
+    const d = await db.getPage(id);
+    if (!d) return res.status(404).json({ error: "not found" });
+    if (d.status === "expired" || d.status === "archived") {
+      res.set("Cache-Control", "public, max-age=60");
+      return res.json({
+        page_id: id, status: d.status,
+        property: { title: d.property.title },
+        agent: { name: d.agent.name, brand_name: d.agent.brand_name, phone: d.agent.phone },
+        language: d.language || "he",
+      });
+    }
+    if (d.status === "building") return res.status(404).json({ error: "not ready" });
+    res.set("Cache-Control", "public, max-age=60");
+    res.json(pagePayload(id, d));
+  });
+
+  // ── lead capture ──
+  router.post("/api/property-lead", async (req, res) => {
+    const body = req.body || {};
+    const prospectPhone = normalizePhone(body.phone || "");
+    const name = String(body.name || "").trim().slice(0, 60);
+    if (!body.page_id || !prospectPhone || name.length < 2) return res.status(400).json({ error: "invalid_input" });
+    const page = await db.getPage(body.page_id);
+    if (!page) return res.status(404).json({ error: "page_not_found" });
+    if (page.status !== "active" && page.status !== "expiring") return res.status(410).json({ error: "page_inactive" });
+
+    // throttle
+    const t = db.mem.throttle.get(prospectPhone);
+    const now = Date.now();
+    const count = t && now - t.windowStart < 3600000 ? t.count : 0;
+    if (count >= LEAD_MAX_PER_HOUR) return res.json({ ok: true });
+    db.mem.throttle.set(prospectPhone, { windowStart: count === 0 ? now : t.windowStart, count: count + 1 });
+
+    try {
+      const lead = {
+        phone: prospectPhone, prospect_name: name, source: "landing_page",
+        page_id: body.page_id, listing_id: page.listing_id,
+        agent_phone: page.business_phone, status: "new", last_activity_at: new Date(),
+      };
+      await db.saveLead(prospectPhone, lead);
+      await db.incrPageCounter(body.page_id, "lead_count", 1);
+
+      sendWhatsApp(page.business_phone,
+        `🔔 ליד חדש מדף הנכס "${page.property.title}"!\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
+        `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
+        greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
+
+      if (n8nLeadWebhook) {
+        fetch(n8nLeadWebhook, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: prospectPhone, name, source: "landing_page",
+            page_id: body.page_id, listing_id: page.listing_id, agent_phone: page.business_phone }),
+          signal: AbortSignal.timeout(10000),
+        }).catch((e) => console.error("leads-handler webhook failed:", e.message));
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("submitPropertyLead failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── video overlay ──
+  const { overlayVideo, MAX_LINES } = require("../overlay");
+  router.post("/api/video-overlay", async (req, res) => {
+    const body = req.body || {};
+    const videoUrl = String(body.video_url || "");
+    const lines = Array.isArray(body.lines) ?
+      body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
+    if (!/^https?:\/\//.test(videoUrl) || lines.length < 1 || lines.length > MAX_LINES) {
+      return res.status(400).json({ error: `video_url and 1-${MAX_LINES} lines required` });
+    }
+    try {
+      const result = await overlayVideo({ videoUrl, lines, uploadDir, baseUrl });
+      res.json(result);
+    } catch (err) {
+      console.error("video-overlay failed:", err.message);
+      res.status(500).json({ error: "overlay_failed", detail: err.message.slice(0, 300) });
+    }
+  });
+
+  // ── events beacon ──
+  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click"]);
+  router.post("/api/property-event", express.text({ type: () => true }), async (req, res) => {
+    let body = {};
+    try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
+    const { page_id: pageId, event } = body;
+    if (!pageId || !event || !EVENTS.has(event)) return res.status(204).send("");
+    try { if (event === "view") await db.incrPageCounter(pageId, "view_count", 1); }
+    catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
+    res.status(204).send("");
+  });
+
+  // ── page serving ──
+  router.get("/p/:id", async (req, res) => {
+    const id = req.params.id;
+    const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
+    let d = null;
+    try { d = await db.getPage(id); } catch (e) { /* fall back */ }
+    const tpl = d && d.theme && d.theme.template;
+    if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
+      return res.sendFile(origShell);
+    }
+    const file = path.join(templatesDir, tpl + ".html");
+    if (!fs.existsSync(file)) return res.sendFile(origShell);
+    let html = fs.readFileSync(file, "utf8");
+    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d)).replace(/</g, "\\u003c")};</script>`;
+    html = html.replace("</head>", inject + "</head>");
+    res.set("Cache-Control", "public, max-age=60");
+    res.type("html").send(html);
+  });
+
+  return router;
+};

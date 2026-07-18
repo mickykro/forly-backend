@@ -126,6 +126,9 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret }) {
         used: false,
       });
 
+      // ponytail: no GreenAPI creds = local dev, WhatsApp send is a no-op —
+      // print the code so login is testable. Never fires in prod (creds set).
+      if (!process.env.GREENAPI_TOKEN) console.log(`[dev] OTP for ${phone}: ${code}`);
       await sendWhatsApp(
         phone,
         `קוד הכניסה שלך ל-Forly: ${code}\nהקוד תקף ל-5 דקות.\n\nYour Forly login code: ${code}\nValid for 5 minutes.`
@@ -260,6 +263,13 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret }) {
 //   const { requireAuth } = require("./auth");
 //   app.get("/api/private", requireAuth(SECRET), (req, res) => { req.user.userId ... });
 module.exports.uidFor = uidFor;
+module.exports.signSession = signSession;
+module.exports.verifySession = verifySession;
+module.exports.readToken = readToken;
+
+// Canonical phone form used for businesses/{phone} doc ids and session userIds.
+// Exported so callers (demo signup, listing ownership) key on the same string.
+module.exports.normalizeAuthPhone = normalizeAny;
 
 module.exports.requireAuth = (secret) => (req, res, next) => {
   const session = verifySession(secret, readToken(req));
