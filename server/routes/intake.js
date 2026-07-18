@@ -93,6 +93,27 @@ module.exports = function createIntakeRouter(ctx) {
     res.json({ ok: true });
   });
 
+  // Remove an uploaded file (the form deletes photos the user takes back out).
+  router.delete("/upload/:fname", async (req, res) => {
+    if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
+    const fname = req.params.fname;
+    if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.test(fname)) {
+      return res.status(400).json({ error: "bad filename" });
+    }
+    if (remoteUploadBase) {
+      try {
+        await fetch(`${remoteUploadBase}/api/upload/${fname}`, {
+          method: "DELETE",
+          headers: { "x-demo-key": "relay" },
+          signal: AbortSignal.timeout(20000),
+        });
+      } catch { /* best-effort */ }
+      return res.json({ ok: true });
+    }
+    try { fs.unlinkSync(path.join(uploadDir, fname)); } catch { /* already gone */ }
+    res.json({ ok: true });
+  });
+
   // ── shared listing creation ──
   async function createListing(phone, body, agentOverride) {
     if (!body.address || !body.city || !body.price || !body.rooms) {

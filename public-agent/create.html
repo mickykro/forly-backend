@@ -5,11 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Forly · נכס חדש</title>
 <meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700&family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&family=Secular+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 <style>
+  .chip-btn{border:1px solid rgba(23,20,15,.18);background:#fff;border-radius:100px;padding:4px 12px;font-size:.85rem;cursor:pointer;color:var(--ink,#17140f);line-height:1.4}
+  .chip-btn:hover{border-color:var(--gold,#b98a2f);color:var(--gold,#b98a2f)}
   .th-pick{border:none;border-radius:10px;color:#fff;font-weight:600;font-size:.85rem;cursor:pointer;min-height:40px;text-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .1s}
   .th-pick:active{transform:scale(.98)}
   .th-pick.chosen{box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.3))}
@@ -116,14 +119,22 @@
         <div class="field"><label data-i18n="lbl_neighborhood">שכונה</label><input id="pHood" placeholder="בבלי" data-i18n-ph="ph_hood"></div>
       </div>
       <div class="grid-3">
-        <div class="field"><label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label><input id="pPrice" type="number" inputmode="numeric" placeholder="4900000"></div>
+        <div class="field"><label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label><input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="4,900,000"></div>
         <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
         <div class="field"><label data-i18n="lbl_sqm">מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
+      </div>
+      <div class="field" style="margin-top:-6px">
+        <div class="hint" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span data-i18n="quick_price">בחירה מהירה:</span><span id="priceChips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span></div>
+        <div class="hint" id="priceWords" style="color:var(--gold);font-weight:600;min-height:1.2em"></div>
       </div>
       <div class="grid-3">
         <div class="field"><label data-i18n="lbl_floor">קומה</label><input id="pFloor" type="number" inputmode="numeric" placeholder="5"></div>
         <div class="field"><label data-i18n="lbl_parking">חניות</label><input id="pParking" type="number" inputmode="numeric" placeholder="1"></div>
-        <div class="field"></div>
+        <div class="field" style="display:flex;align-items:end">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.85rem;color:var(--ink-soft);font-weight:400;padding-bottom:10px">
+            <input id="pNoBuilding" type="checkbox" style="width:auto"> <span data-i18n="lbl_no_building">הנכס אינו בבניין (בית פרטי / צמוד קרקע)</span>
+          </label>
+        </div>
       </div>
       <div class="field">
         <label data-i18n="lbl_description">תיאור חופשי</label>
@@ -377,7 +388,49 @@
     setLang(start);
   })();
 
-  var photos = []; // {file, url(local), publicUrl?, el}
+  var photos = []; // {file, el, publicUrl?, uploadPromise, removed?, failed?}
+  var uploadHeaders = isDemo ? { "x-demo-key": demoKey } : {};
+
+  // ── price entry: thousands separators, quick-pick chips, "in words" line ──
+  var SALE_PRESETS = [1000000, 1500000, 2000000, 2500000, 3000000, 4000000, 5000000];
+  var RENT_PRESETS = [3500, 4500, 5500, 6500, 8000, 10000, 15000];
+  function priceDigits() { return ($("#pPrice").value.match(/\d/g) || []).join(""); }
+  function priceValue() { return Number(priceDigits() || 0); }
+  function fmtThousands(n) { return Number(n).toLocaleString("en-US"); }
+  function priceWords(n) {
+    if (!n) return "";
+    if (n >= 1e6) { var m = n / 1e6; return "= " + (m % 1 ? m.toFixed(1) : String(m)) + " " + FT("price_millions"); }
+    if (n >= 1e3) { var k = n / 1e3; return "= " + (k % 1 ? k.toFixed(1) : String(k)) + " " + FT("price_thousands"); }
+    return "";
+  }
+  function refreshPrice() {
+    var d = priceDigits();
+    $("#pPrice").value = d ? fmtThousands(d) : "";
+    $("#priceWords").textContent = priceWords(Number(d || 0));
+  }
+  function renderPriceChips() {
+    var presets = $("#pType").value === "rent" ? RENT_PRESETS : SALE_PRESETS;
+    $("#priceChips").innerHTML = presets.map(function (v) {
+      return '<button type="button" class="chip-btn" data-v="' + v + '">₪' +
+        (v >= 1e6 ? (v / 1e6) + "M" : fmtThousands(v)) + "</button>";
+    }).join("");
+    Array.prototype.forEach.call($("#priceChips").children, function (b) {
+      b.addEventListener("click", function () {
+        $("#pPrice").value = b.getAttribute("data-v");
+        refreshPrice();
+      });
+    });
+  }
+  $("#pPrice").addEventListener("input", refreshPrice);
+  renderPriceChips();
+
+  // ── "not in a building" (private house): no floor field ──
+  $("#pNoBuilding").addEventListener("change", function () {
+    var floor = $("#pFloor");
+    floor.disabled = this.checked;
+    if (this.checked) { floor.value = ""; floor.placeholder = FT("lbl_floor_disabled"); }
+    else floor.placeholder = "5";
+  });
 
   // ── uploader UI ──
   var drop = $("#drop"), input = $("#fileInput");
@@ -390,6 +443,8 @@
   });
   input.addEventListener("change", function () { addFiles(input.files); input.value = ""; });
 
+  // Photos upload the moment they're picked (progress on the thumb); removing a
+  // photo also deletes the already-uploaded file from storage.
   function addFiles(list) {
     Array.prototype.slice.call(list).forEach(function (f) {
       if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return;
@@ -398,19 +453,37 @@
       var url = URL.createObjectURL(f);
       var t = FLY.el("div", "t",
         '<img src="' + url + '"><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
+      var entry = { file: f, el: t, publicUrl: null, removed: false, failed: false };
+      entry.uploadPromise = FLY.uploadFiles([f], uploadHeaders, function (_i, pct) {
+        var bar = t.querySelector(".bar i");
+        if (bar) bar.style.width = pct + "%";
+      }).then(function (urls) {
+        entry.publicUrl = urls[0];
+        // removed while the upload was in flight — clean up the orphan
+        if (entry.removed) { FLY.deleteUpload(urls[0], uploadHeaders); return null; }
+        return urls[0];
+      }).catch(function () {
+        entry.failed = true;
+        var bar = t.querySelector(".bar i");
+        if (bar) { bar.style.width = "100%"; bar.style.background = "#c0392b"; }
+        return null;
+      });
       t.querySelector(".x").addEventListener("click", function () {
+        entry.removed = true;
         photos = photos.filter(function (p) { return p.el !== t; });
         t.remove();
+        if (entry.publicUrl) FLY.deleteUpload(entry.publicUrl, uploadHeaders);
       });
       $("#thumbs").appendChild(t);
-      photos.push({ file: f, el: t });
+      photos.push(entry);
     });
   }
 
-  // ── listing type (sale / rent): adapt the price label ──
+  // ── listing type (sale / rent): adapt the price label + quick-pick options ──
   $("#pType").addEventListener("change", function () {
     updatePriceLabel();
-    $("#pPrice").placeholder = this.value === "rent" ? "12000" : "4900000";
+    $("#pPrice").placeholder = this.value === "rent" ? "12,000" : "4,900,000";
+    renderPriceChips();
   });
 
   // ── theme (fonts + colors) ──
@@ -632,27 +705,29 @@
     var btn = this;
     btn.disabled = true;
     btn.textContent = FT("status_uploading");
-    var headers = isDemo ? { "x-demo-key": demoKey } : {};
 
     var videoFile = $("#videoInput").files[0] || null;
     var logoFile = isDemo && $("#agLogo").files[0] ? $("#agLogo").files[0] : null;
     var fontFile = (fontFilesNeeded() && $("#thFontFile").files[0]) ? $("#thFontFile").files[0] : null;
 
-    // Resolve the theme first (logo color extraction is async), then upload.
+    // Photos are already uploading since selection — wait for them, and upload
+    // the video/logo/font alongside. Theme resolves first (logo color is async).
     buildTheme(logoFile).then(function (theme) {
-      var uploads = photos.map(function (p) { return p.file; });
-      if (videoFile) uploads.push(videoFile);
-      if (logoFile) uploads.push(logoFile);
-      if (fontFile) uploads.push(fontFile);
+      var extraFiles = [];
+      if (videoFile) extraFiles.push(videoFile);
+      if (logoFile) extraFiles.push(logoFile);
+      if (fontFile) extraFiles.push(fontFile);
 
-      return FLY.uploadFiles(uploads, headers, function (i, pct) {
-        if (i < photos.length) photos[i].el.querySelector(".bar i").style.width = pct + "%";
-      }).then(function (urls) {
-        var photoUrls = urls.slice(0, photos.length);
-        var cursor = photos.length;
-        var videoUrl = videoFile ? urls[cursor++] : null;
-        var logoUrl = logoFile ? urls[cursor++] : null;
-        var fontUrl = fontFile ? urls[cursor++] : null;
+      return Promise.all([
+        Promise.all(photos.map(function (p) { return p.uploadPromise; })),
+        extraFiles.length ? FLY.uploadFiles(extraFiles, uploadHeaders, null) : Promise.resolve([]),
+      ]).then(function (res) {
+        var photoUrls = res[0].filter(Boolean);
+        if (photoUrls.length < photos.length) throw new Error(FT("err_photo_upload"));
+        var extra = res[1], cursor = 0;
+        var videoUrl = videoFile ? extra[cursor++] : null;
+        var logoUrl = logoFile ? extra[cursor++] : null;
+        var fontUrl = fontFile ? extra[cursor++] : null;
         if (fontUrl) theme.font_url = fontUrl;
 
         var body = {
@@ -660,10 +735,10 @@
           address: $("#pAddress").value.trim(),
           city: $("#pCity").value.trim(),
           neighborhood: $("#pHood").value.trim(),
-          price: Number($("#pPrice").value),
+          price: priceValue(),
           rooms: Number($("#pRooms").value),
           size_sqm: Number($("#pSqm").value) || 0,
-          floor: Number($("#pFloor").value) || 0,
+          floor: $("#pNoBuilding").checked ? 0 : (Number($("#pFloor").value) || 0),
           parking: Number($("#pParking").value) || 0,
           description: $("#pDesc").value.trim(),
           photos_urls: photoUrls,
@@ -685,7 +760,7 @@
         return fetch(path, {
           method: "POST",
           credentials: "same-origin",
-          headers: Object.assign({ "Content-Type": "application/json" }, headers),
+          headers: Object.assign({ "Content-Type": "application/json" }, uploadHeaders),
           body: JSON.stringify(body),
         }).then(function (r) {
           return r.json().then(function (d) {
@@ -695,6 +770,23 @@
         });
       });
     }).then(function (d) {
+      // Remember demo listings locally so the dashboard can show a "logged in"
+      // view with just this property (used when there's no account yet).
+      if (isDemo) {
+        try {
+          var rec = {
+            listing_id: d.listing_id,
+            title: $("#pAddress").value.trim(),
+            city: $("#pCity").value.trim(),
+            thumb: (photos[0] && photos[0].publicUrl) || null,
+            created_at: Date.now(),
+          };
+          var arr = JSON.parse(localStorage.getItem("forly_demo_listings") || "[]")
+            .filter(function (r) { return r.listing_id !== rec.listing_id; });
+          arr.unshift(rec);
+          localStorage.setItem("forly_demo_listings", JSON.stringify(arr.slice(0, 10)));
+        } catch (e) { /* private mode — dashboard just won't show it */ }
+      }
       // ponytail: demo users are now logged in — redirect to dashboard
       if (isDemo && d.logged_in) {
         startBuildingScreen(d.listing_id, true);

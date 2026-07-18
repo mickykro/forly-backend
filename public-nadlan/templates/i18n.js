@@ -31,7 +31,8 @@
       "wa_prefill": "שלום, ראיתי את {title} ואשמח לתאם ביקור.", "lead_wa_prefill": "שלום, אני {name} ({phone}) ואשמח לתאם ביקור ב{title}.",
       "expired_contact": "תוקף הדף הסתיים. לפרטים על הנכס אפשר לפנות ל{name}.",
       "trust_personal": "מענה אישי בתוך שעתיים בשעות הפעילות", "trust_scheduled": "ביקור מתואם אישית, בזמן שנוח לכם", "trust_private": "הפרטים שלכם נשארים אצלנו בלבד",
-      "parking": "חניות", "registered": "בטאבו", "form_error": "משהו השתבש — נסו שוב או פנו בוואטסאפ", "here_area": "השכונה"
+      "parking": "חניות", "registered": "בטאבו", "form_error": "משהו השתבש — נסו שוב או פנו בוואטסאפ", "here_area": "השכונה",
+      "per_sqm": "למ״ר", "leave_details": "השאירו פרטים", "privacy_policy": "מדיניות פרטיות", "accessibility": "הצהרת נגישות"
     },
     "en": {
       "contact_agent": "Speak with the agent", "book_visit": "Book a visit", "book_visit_private": "Book a private visit", "book_visit_property": "Book a viewing",
@@ -51,7 +52,8 @@
       "wa_prefill": "Hi, I saw {title} and I'd love to book a visit.", "lead_wa_prefill": "Hi, I'm {name} ({phone}) and I'd love to book a visit to {title}.",
       "expired_contact": "This page has expired. For details about the property, please contact {name}.",
       "trust_personal": "Personal reply within two hours during business hours", "trust_scheduled": "A visit arranged personally, at a time that suits you", "trust_private": "Your details stay with us alone",
-      "parking": "parking", "registered": "registered", "form_error": "Something went wrong — try again or reach out on WhatsApp", "here_area": "The area"
+      "parking": "parking", "registered": "registered", "form_error": "Something went wrong — try again or reach out on WhatsApp", "here_area": "The area",
+      "per_sqm": "per m²", "leave_details": "Leave your details", "privacy_policy": "Privacy policy", "accessibility": "Accessibility statement"
     },
     "ar": {
       "contact_agent": "التحدث مع الوسيط", "book_visit": "تحديد موعد زيارة", "book_visit_private": "تحديد موعد زيارة خاصة", "book_visit_property": "تحديد موعد معاينة العقار",
@@ -71,7 +73,8 @@
       "wa_prefill": "مرحبًا، رأيت {title} ويسعدني تحديد موعد زيارة.", "lead_wa_prefill": "مرحبًا، أنا {name} ({phone}) ويسعدني تحديد موعد زيارة لـ{title}.",
       "expired_contact": "انتهت صلاحية هذه الصفحة. للحصول على تفاصيل العقار يمكنك التواصل مع {name}.",
       "trust_personal": "رد شخصي خلال ساعتين ضمن ساعات العمل", "trust_scheduled": "زيارة مرتّبة شخصيًا، في الوقت المناسب لك", "trust_private": "تبقى تفاصيلك لدينا وحدنا",
-      "parking": "مواقف", "registered": "مسجّلة", "form_error": "حدث خطأ ما — حاول مرة أخرى أو تواصل عبر واتساب", "here_area": "الحي"
+      "parking": "مواقف", "registered": "مسجّلة", "form_error": "حدث خطأ ما — حاول مرة أخرى أو تواصل عبر واتساب", "here_area": "الحي",
+      "per_sqm": "للم²", "leave_details": "اترك تفاصيلك", "privacy_policy": "سياسة الخصوصية", "accessibility": "بيان إمكانية الوصول"
     },
     "ru": {
       "contact_agent": "Связаться с агентом", "book_visit": "Записаться на просмотр", "book_visit_private": "Записаться на частный просмотр", "book_visit_property": "Записаться на осмотр объекта",
@@ -91,7 +94,8 @@
       "wa_prefill": "Здравствуйте, я видел {title} и хотел бы записаться на просмотр.", "lead_wa_prefill": "Здравствуйте, меня зовут {name} ({phone}), хотел бы записаться на просмотр {title}.",
       "expired_contact": "Срок действия страницы истёк. За информацией об объекте обращайтесь к {name}.",
       "trust_personal": "Личный ответ в течение двух часов в рабочее время", "trust_scheduled": "Просмотр, организованный лично, в удобное для вас время", "trust_private": "Ваши данные остаются только у нас",
-      "parking": "парковка", "registered": "в реестре", "form_error": "Что-то пошло не так — попробуйте ещё раз или напишите в WhatsApp", "here_area": "Район"
+      "parking": "парковка", "registered": "в реестре", "form_error": "Что-то пошло не так — попробуйте ещё раз или напишите в WhatsApp", "here_area": "Район",
+      "per_sqm": "за м²", "leave_details": "Оставьте контакты", "privacy_policy": "Политика конфиденциальности", "accessibility": "Заявление о доступности"
     },
     "es": {
       "contact_agent": "Hablar con el agente", "book_visit": "Agendar una visita", "book_visit_private": "Agendar una visita privada", "book_visit_property": "Agendar una visita al inmueble",
@@ -111,7 +115,8 @@
       "wa_prefill": "Hola, vi {title} y me encantaría agendar una visita.", "lead_wa_prefill": "Hola, soy {name} ({phone}) y me encantaría agendar una visita a {title}.",
       "expired_contact": "Esta página ha caducado. Para más información sobre el inmueble, puedes contactar con {name}.",
       "trust_personal": "Respuesta personal en menos de dos horas en horario laboral", "trust_scheduled": "Una visita organizada personalmente, a la hora que te convenga", "trust_private": "Tus datos se quedan solo con nosotros",
-      "parking": "plazas de garaje", "registered": "registradas", "form_error": "Algo salió mal — inténtalo de nuevo o escríbenos por WhatsApp", "here_area": "La zona"
+      "parking": "plazas de garaje", "registered": "registradas", "form_error": "Algo salió mal — inténtalo de nuevo o escríbenos por WhatsApp", "here_area": "La zona",
+      "per_sqm": "por m²", "leave_details": "Deja tus datos", "privacy_policy": "Política de privacidad", "accessibility": "Declaración de accesibilidad"
     },
     "fr": {
       "contact_agent": "Parler à l'agent", "book_visit": "Planifier une visite", "book_visit_private": "Planifier une visite privée", "book_visit_property": "Planifier une visite du bien",
@@ -131,7 +136,8 @@
       "wa_prefill": "Bonjour, j'ai vu {title} et je serais ravi de planifier une visite.", "lead_wa_prefill": "Bonjour, je suis {name} ({phone}) et je serais ravi de planifier une visite de {title}.",
       "expired_contact": "Cette page a expiré. Pour des informations sur le bien, vous pouvez contacter {name}.",
       "trust_personal": "Réponse personnelle sous deux heures pendant les heures d'ouverture", "trust_scheduled": "Une visite organisée personnellement, à l'heure qui vous convient", "trust_private": "Vos coordonnées restent chez nous uniquement",
-      "parking": "places de parking", "registered": "enregistrées", "form_error": "Une erreur s'est produite — réessayez ou contactez-nous sur WhatsApp", "here_area": "Le quartier"
+      "parking": "places de parking", "registered": "enregistrées", "form_error": "Une erreur s'est produite — réessayez ou contactez-nous sur WhatsApp", "here_area": "Le quartier",
+      "per_sqm": "par m²", "leave_details": "Laissez vos coordonnées", "privacy_policy": "Politique de confidentialité", "accessibility": "Déclaration d'accessibilité"
     }
   };
   var RTL = { he: 1, ar: 1 };

@@ -43,8 +43,15 @@ module.exports = function createPagesRouter(ctx) {
       const pageId = reusable ? reusable.page_id : crypto.randomUUID();
       const base = `pages/${pageId}`;
 
+      // Theme and agent are chosen on the intake form and stored on the listing;
+      // the n8n page builder doesn't always forward them, so fall back to the
+      // listing here (this is what kept uploaded logos off the page).
       const listing = await db.getListing(body.listing_id).catch(() => null);
       const theme = sanitizeTheme(body.theme || (listing && listing.theme));
+      const listingAgent = (listing && listing.agent) || {};
+      const agentIn = body.agent || {};
+      const agentField = (k) => String(agentIn[k] || listingAgent[k] || "");
+      const logoSrc = agentIn.logo_url || listingAgent.logo_url || null;
       if (theme && theme.font_url) {
         const fext = (theme.font_url.split("?")[0].match(/\.(woff2|woff|ttf|otf)$/i) || [, "woff2"])[1].toLowerCase();
         theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`, uploadDir, baseUrl).catch(() => theme.font_url);
@@ -56,7 +63,7 @@ module.exports = function createPagesRouter(ctx) {
       const photoPs = body.photos.slice(0, 12).map((p, i) =>
         rehostFn(p.url, `${base}/photo-${pad(i + 1)}.${guessImageExt(p.url)}`));
       const mapP = body.area && body.area.map_image_url ? rehostFn(body.area.map_image_url, `${base}/map.png`) : null;
-      const logoP = body.agent && body.agent.logo_url ? rehostFn(body.agent.logo_url, `${base}/logo.png`) : null;
+      const logoP = logoSrc ? rehostFn(logoSrc, `${base}/logo.png`) : null;
 
       const [videoUrl, posterUrl, ...rest] = await Promise.all([
         videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
@@ -77,12 +84,12 @@ module.exports = function createPagesRouter(ctx) {
         extension_count: reusable ? (reusable.extension_count || 0) : 0,
         edit_count: reusable ? (reusable.edit_count || 0) : 0,
         agent: {
-          name: (body.agent && body.agent.name) || "",
-          brand_name: (body.agent && (body.agent.brand_name || body.agent.name)) || "",
+          name: agentField("name"),
+          brand_name: agentField("brand_name") || agentField("name"),
           logo_url: logoUrl,
-          tagline: (body.agent && body.agent.tagline) || "",
-          phone: (body.agent && body.agent.phone) || body.business_phone,
-          license: (body.agent && body.agent.license) || "",
+          tagline: agentField("tagline"),
+          phone: agentField("phone") || body.business_phone,
+          license: agentField("license"),
         },
         property: {
           title: (body.property && body.property.title) ||

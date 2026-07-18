@@ -162,15 +162,28 @@
     var heroBg = $(".hero-bg");
     if (heroBg && d.hero.poster_url) heroBg.style.backgroundImage = "url('" + d.hero.poster_url + "')";
 
-    // specs strip — price label + suffix depend on sale vs. rent
+    // specs strip — price label + suffix depend on sale vs. rent; sale listings
+    // with a known size also show the price per m².
     var specs = $$(".spec");
     var isRent = p.listing_type === "rent";
-    fillSpec(specs[0], fmtPrice(p.price) + (isRent && p.price ? " " + TR("per_month") : ""), isRent ? TR("monthly_rent") : TR("asking_price"));
+    var priceLabel = isRent ? TR("monthly_rent") : TR("asking_price");
+    if (!isRent && p.price && p.size_sqm) {
+      priceLabel += " · ₪" + Math.round(p.price / p.size_sqm).toLocaleString("he-IL") + " " + TR("per_sqm");
+    }
+    fillSpec(specs[0], fmtPrice(p.price) + (isRent && p.price ? " " + TR("per_month") : ""), priceLabel);
     fillSpec(specs[1], p.rooms ? p.rooms + " " + TR("rooms_short") : "", p.size_sqm ? p.size_sqm + " " + TR("sqm") : "");
     fillSpec(specs[2], p.floor ? TR("floor") + " " + p.floor : (p.neighborhood || p.city), p.address || "");
     fillSpec(specs[3], p.parking ? p.parking + " " + TR("parking") : "", p.parking ? TR("registered") : "");
 
-    // gallery
+    // gallery — never render the same image twice, whatever the payload says
+    if (d.gallery && Array.isArray(d.gallery.images)) {
+      var seenUrls = {};
+      d.gallery.images = d.gallery.images.filter(function (img) {
+        if (!img || !img.url || seenUrls[img.url]) return false;
+        seenUrls[img.url] = 1;
+        return true;
+      });
+    }
     if (d.sections.gallery && d.gallery.images.length) {
       var gal = $("#gal");
       gal.innerHTML = d.gallery.images.map(function (img, i) {
@@ -252,11 +265,8 @@
     var submitBtn = $("#leadForm .btn-gold");
     if (submitBtn) submitBtn.textContent = d.cta.button_label;
 
-    // WhatsApp links
-    var waText = encodeURIComponent(TR("wa_prefill", { title: p.title }));
-    $$("a.btn-wa").forEach(function (el) {
-      el.href = "https://wa.me/" + a.phone + "?text=" + waText;
-    });
+    // All contact goes through the lead form — Forly relays to the agent from
+    // its own number, so the page never links prospects directly to WhatsApp.
 
     setState("active");
     initInteractions();
@@ -411,11 +421,6 @@
       if (d.status === "expired" || d.status === "archived") {
         CURLANG = d.language || "he";
         if (window.I18N) window.I18N.apply(document, CURLANG);
-        if (d.agent && d.agent.phone) {
-          var wa = $("#expiredWa");
-          wa.style.display = "inline-flex";
-          wa.href = "https://wa.me/" + d.agent.phone;
-        }
         if (d.agent && d.agent.name) {
           $("#expiredSub").textContent = TR("expired_contact", { name: d.agent.name });
         }
