@@ -13,6 +13,16 @@
   var CURLANG = "he";
   function TR(key, vars) { return window.I18N ? window.I18N.t(CURLANG, key, vars) : key; }
 
+  // Magic edit link: /p/{id}#edit={token}. The token stays in the fragment
+  // (never sent to the server in the URL) and is stripped from the address
+  // bar immediately; we hand it to the API explicitly.
+  var editToken = (function () {
+    var m = location.hash.match(/(?:^#|[#&])edit=([0-9a-f]{16,64})(?:&|$)/i);
+    if (!m) return null;
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* no-op */ }
+    return m[1];
+  })();
+
   function setState(state) {
     document.body.classList.remove("is-loading", "has-state", "state-expired", "state-notfound");
     if (state === "active") return;
@@ -30,6 +40,7 @@
   }
 
   function beacon(event) {
+    if (editToken) return; // the agent editing his page is not a visitor
     try {
       navigator.sendBeacon("/api/property-event",
         JSON.stringify({ page_id: pageId, event: event }));
@@ -162,15 +173,36 @@
     var heroBg = $(".hero-bg");
     if (heroBg && d.hero.poster_url) heroBg.style.backgroundImage = "url('" + d.hero.poster_url + "')";
 
-    // specs strip — price label + suffix depend on sale vs. rent
+    // specs strip — use custom texts if set, otherwise compute from property
     var specs = $$(".spec");
+    var texts = d.texts || {};
     var isRent = p.listing_type === "rent";
-    fillSpec(specs[0], fmtPrice(p.price) + (isRent && p.price ? " " + TR("per_month") : ""), isRent ? TR("monthly_rent") : TR("asking_price"));
-    fillSpec(specs[1], p.rooms ? p.rooms + " " + TR("rooms_short") : "", p.size_sqm ? p.size_sqm + " " + TR("sqm") : "");
-    fillSpec(specs[2], p.floor ? TR("floor") + " " + p.floor : (p.neighborhood || p.city), p.address || "");
-    fillSpec(specs[3], p.parking ? p.parking + " " + TR("parking") : "", p.parking ? TR("registered") : "");
+    var priceLabel = isRent ? TR("monthly_rent") : TR("asking_price");
+    if (!isRent && p.price && p.size_sqm) {
+      priceLabel += " · ₪" + Math.round(p.price / p.size_sqm).toLocaleString("he-IL") + " " + TR("per_sqm");
+    }
+    fillSpec(specs[0],
+      texts.spec1_v || fmtPrice(p.price) + (isRent && p.price ? " " + TR("per_month") : ""),
+      texts.spec1_l || priceLabel);
+    fillSpec(specs[1],
+      texts.spec2_v || (p.rooms ? p.rooms + " " + TR("rooms_short") : ""),
+      texts.spec2_l || (p.size_sqm ? p.size_sqm + " " + TR("sqm") : ""));
+    fillSpec(specs[2],
+      texts.spec3_v || (p.floor ? TR("floor") + " " + p.floor : (p.neighborhood || p.city)),
+      texts.spec3_l || p.address || "");
+    fillSpec(specs[3],
+      texts.spec4_v || (p.parking ? p.parking + " " + TR("parking") : ""),
+      texts.spec4_l || (p.parking ? TR("registered") : ""));
 
-    // gallery
+    // gallery — never render the same image twice, whatever the payload says
+    if (d.gallery && Array.isArray(d.gallery.images)) {
+      var seenUrls = {};
+      d.gallery.images = d.gallery.images.filter(function (img) {
+        if (!img || !img.url || seenUrls[img.url]) return false;
+        seenUrls[img.url] = 1;
+        return true;
+      });
+    }
     if (d.sections.gallery && d.gallery.images.length) {
       var gal = $("#gal");
       gal.innerHTML = d.gallery.images.map(function (img, i) {
@@ -197,6 +229,17 @@
     } else {
       hideSection("#why");
     }
+
+    // footer + form-done: genericize the template's mock brand/name
+    var fbrand = $(".fbrand");
+    if (fbrand && (a.brand_name || a.name)) fbrand.textContent = a.brand_name || a.name;
+    // Personalize the lead-form confirmation with the real agent's name, in the
+    // page language. Guarded on I18N so a missing dictionary leaves the clean,
+    // name-free static fallback rather than a raw key.
+    var doneSub = $("#formDone p");
+    if (doneSub && window.I18N && a.name) doneSub.textContent = TR("sent_body_named", { name: a.name });
+    var areaSub = $('[data-edit="texts.area_sub"]');
+    if (areaSub && p.city) areaSub.textContent = "אחת השכונות המבוקשות ב" + p.city + " — וזה לא במקרה.";
 
     // agent strip
     var initials = (a.name || "").split(" ").map(function (w) { return w[0] || ""; }).join("״").slice(0, 3);
@@ -239,11 +282,18 @@
       hideSection("#area");
     }
 
-    // CTA
+    // CTA — inject agent name into sub; fix legacy hardcoded names
     text(".cta-info h2", null); // keep template layout; set below
     var ctaH = $(".cta-info h2");
     ctaH.innerHTML = escapeHtml(d.cta.headline);
-    text(".cta-info p", d.cta.sub);
+    var ctaSub = d.cta.sub || "";
+    if (a.name) {
+      // Replace generic "נחזור אליכם" or legacy hardcoded "רון יחזור"
+      ctaSub = ctaSub.replace(/נחזור אליכם/g, a.name + " יחזור אליכם");
+      ctaSub = ctaSub.replace(/ורון יחזור/g, "ו" + a.name + " יחזור");
+      ctaSub = ctaSub.replace(/רון יחזור/g, a.name + " יחזור");
+    }
+    text(".cta-info p", ctaSub);
     if (d.cta.bullets && d.cta.bullets.length) {
       $(".trust").innerHTML = d.cta.bullets.map(function (b) {
         return '<div><span class="tick">✦</span> ' + escapeHtml(b) + "</div>";
@@ -252,11 +302,8 @@
     var submitBtn = $("#leadForm .btn-gold");
     if (submitBtn) submitBtn.textContent = d.cta.button_label;
 
-    // WhatsApp links
-    var waText = encodeURIComponent(TR("wa_prefill", { title: p.title }));
-    $$("a.btn-wa").forEach(function (el) {
-      el.href = "https://wa.me/" + a.phone + "?text=" + waText;
-    });
+    // All contact goes through the lead form — Forly relays to the agent from
+    // its own number, so the page never links prospects directly to WhatsApp.
 
     setState("active");
     initInteractions();
@@ -280,6 +327,38 @@
   }
 
   function hideSection(sel) { var el = $(sel); if (el) el.style.display = "none"; }
+
+  // Agent text overrides (saved from edit mode) — applied after render() so
+  // they win over both template statics and derived strings.
+  function applyTexts(texts) {
+    if (!texts) return;
+    Object.keys(texts).forEach(function (k) {
+      var el = $('[data-edit="texts.' + k + '"]');
+      if (el && texts[k]) el.textContent = texts[k];
+    });
+  }
+
+  // Edit mode assets load only for a valid edit link — visitors never pay for them.
+  function loadEditor(d) {
+    var css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/p/edit.css";
+    document.head.appendChild(css);
+    var s = document.createElement("script");
+    s.src = "/p/edit.js";
+    s.onload = function () { window.FlyEdit.init(d, editToken); };
+    document.body.appendChild(s);
+  }
+
+  function notice(msg) {
+    var n = document.createElement("div");
+    n.style.cssText = "position:fixed;bottom:18px;right:50%;transform:translateX(50%);" +
+      "background:rgba(23,20,15,.94);color:#fff;padding:12px 22px;border-radius:12px;" +
+      "font-size:.9rem;z-index:1200;box-shadow:0 10px 30px rgba(0,0,0,.25);text-align:center";
+    n.textContent = msg;
+    document.body.appendChild(n);
+    setTimeout(function () { n.remove(); }, 6000);
+  }
 
   function hostname(url) {
     try { return new URL(url).hostname.replace(/^www\./, ""); } catch (e) { return "מקור"; }
@@ -400,7 +479,8 @@
   // ── boot ────────────────────────────────────────────────
 
   if (!pageId) { setState("notfound"); return; }
-  fetch("/api/property-page?id=" + encodeURIComponent(pageId))
+  fetch("/api/property-page?id=" + encodeURIComponent(pageId) +
+      (editToken ? "&edit_token=" + encodeURIComponent(editToken) : ""))
     .then(function (r) {
       if (r.status === 404) { setState("notfound"); return null; }
       if (!r.ok) throw new Error("status " + r.status);
@@ -411,11 +491,6 @@
       if (d.status === "expired" || d.status === "archived") {
         CURLANG = d.language || "he";
         if (window.I18N) window.I18N.apply(document, CURLANG);
-        if (d.agent && d.agent.phone) {
-          var wa = $("#expiredWa");
-          wa.style.display = "inline-flex";
-          wa.href = "https://wa.me/" + d.agent.phone;
-        }
         if (d.agent && d.agent.name) {
           $("#expiredSub").textContent = TR("expired_contact", { name: d.agent.name });
         }
@@ -423,6 +498,79 @@
         return;
       }
       render(d);
+      applyTexts(d.texts);
+      if (editToken) {
+        if (d.editable) loadEditor(d);
+        else notice("קישור העריכה אינו תקף — מוצג מצב צפייה בלבד");
+      }
     })
     .catch(function () { setState("notfound"); });
+
+  // Live edit preview: parent edit.html sends postMessage to update content
+  window.addEventListener("message", function (e) {
+    if (!e.data || e.data.type !== "forly-edit") return;
+    var key = e.data.key, val = e.data.value || "";
+    var el, m;
+    // Direct element mapping for data-edit attributes
+    var dataEditMap = {
+      "agent.name": ".agent-meta b",
+      "agent.brand_name": ".brand b",
+      "agent.tagline": ".brand span",
+      "texts.agent_meta": ".agent-meta span",
+      "texts.hero_sub": ".hero-copy p.sub",
+      "texts.hero_btn1": ".hero-actions .btn-gold",
+      "texts.hero_btn2": ".hero-actions .btn-ghost",
+      "texts.scroll_hint": ".scroll-hint span:first-child",
+      "texts.gallery_title": "#gallery .sec-head h2",
+      "texts.gallery_sub": "#gallery .sec-head p",
+      "texts.why_title": "#why .sec-head h2",
+      "texts.why_sub": "#why .sec-head p",
+      "texts.area_title": "#area .sec-head h2",
+      "texts.area_sub": "#area .sec-head p",
+      "texts.done_title": "#formDone h3",
+      "texts.done_sub": "#formDone p",
+      "texts.footer_brand": ".fbrand",
+      "texts.sticky_wa": ".sticky-bar .btn-wa",
+      "texts.sticky_cta": ".sticky-bar .btn-gold",
+      "texts.top_cta": ".topbar .top-cta",
+      "texts.agent_cta": ".agent-strip .btn-gold",
+      "cta.sub": ".cta-info p",
+      "cta.button_label": "#leadForm .btn-gold",
+    };
+    // Spec fields
+    var specMap = {
+      "texts.spec1_v": ".spec:nth-child(1) b", "texts.spec1_l": ".spec:nth-child(1) span",
+      "texts.spec2_v": ".spec:nth-child(2) b", "texts.spec2_l": ".spec:nth-child(2) span",
+      "texts.spec3_v": ".spec:nth-child(3) b", "texts.spec3_l": ".spec:nth-child(3) span",
+      "texts.spec4_v": ".spec:nth-child(4) b", "texts.spec4_l": ".spec:nth-child(4) span",
+    };
+    Object.assign(dataEditMap, specMap);
+
+    if (key === "hero.phrase") {
+      el = $(".hero-copy h1");
+      if (el) {
+        var parts = val.split("\n");
+        el.innerHTML = parts.length > 1
+          ? escapeHtml(parts[0]) + "<br><em>" + escapeHtml(parts.slice(1).join(" ")) + "</em>"
+          : "<em>" + escapeHtml(val) + "</em>";
+      }
+    } else if (key === "property.title") {
+      document.title = val + " · " + ($(".brand b") ? $(".brand b").textContent : "");
+    } else if (key === "cta.headline") {
+      el = $(".cta-info h2");
+      if (el) el.innerHTML = escapeHtml(val);
+    } else if ((m = key.match(/^carousel\.slides\.(\d+)\.(\w+)$/))) {
+      var cards = $$("#carousel .card");
+      var card = cards[+m[1]];
+      if (card) {
+        if (m[2] === "title") { el = card.querySelector("h3"); if (el) el.textContent = val; }
+        if (m[2] === "body") { el = card.querySelector("p"); if (el) el.textContent = val; }
+        if (m[2] === "num") { el = card.querySelector(".num"); if (el) el.textContent = val; }
+        if (m[2] === "tag") { el = card.querySelector(".tag"); if (el) el.textContent = val; }
+      }
+    } else if (dataEditMap[key]) {
+      el = $(dataEditMap[key]);
+      if (el) el.textContent = val;
+    }
+  });
 })();

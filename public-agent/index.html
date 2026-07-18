@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Forly · ניהול נכסים</title>
 <meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -50,6 +51,15 @@
 
 <!-- ── PROPERTY LIST ── -->
 <div class="container hidden" id="viewList">
+  <!-- ponytail: notification banner for incomplete profiles -->
+  <div id="profileBanner" class="hidden" style="background:linear-gradient(90deg,#b98a2f 0%,#d4a84b 100%);color:#fff;padding:14px 20px;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <span style="font-size:1.5rem">👋</span>
+    <div style="flex:1 1 auto;min-width:200px">
+      <b style="display:block;margin-bottom:2px">השלימו את הפרופיל שלכם</b>
+      <span style="font-size:.9rem;opacity:.9">כדי שנוכל להתאים את הדפים ללוגו ולסגנון שלכם</span>
+    </div>
+    <a href="/signup" class="btn" style="background:#fff;color:#b98a2f;font-weight:600;border:none">השלמת פרופיל</a>
+  </div>
   <div class="page-head">
     <div>
       <h1>הנכסים שלי</h1>
@@ -216,9 +226,66 @@
       $("#who").textContent = agent.brand_name || agent.name;
     }
     loadList();
+    checkProfile(); // ponytail: check if profile needs completion
   }
 
-  // boot: session check
+  // ponytail: check profile completion and show banner if needed
+  function checkProfile() {
+    FLY.req("/api/profile", { noRedirect: true })
+      .then(function(d) {
+        if (d.needs_completion) {
+          // /signup route handles redirect with phone from session
+          $("#profileBanner").classList.remove("hidden");
+        }
+      })
+      .catch(function() { /* ignore errors */ });
+  }
+
+  // ── demo dashboard: after a demo page is created (no account yet), show a
+  //    "logged in" view with just that property instead of the login screen.
+  function demoCardHtml(r) {
+    return '<div class="prop-card" id="demo-' + esc(r.listing_id) + '">' +
+      (r.thumb ? '<img class="thumb" src="' + esc(r.thumb) + '" alt="" loading="lazy">' :
+        '<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.4)">🏗️</div>') +
+      '<div class="body">' +
+      '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px"><h3>' + esc(r.title) + '</h3><span class="demo-chip">' + chipFor("building") + "</span></div>" +
+      '<div class="addr">' + esc(r.city || "") + "</div>" +
+      '<div class="actions"></div>' +
+      "</div></div>";
+  }
+
+  function showDemoDashboard(records) {
+    $("#viewLogin").classList.add("hidden");
+    $("#viewList").classList.remove("hidden");
+    $("#who").textContent = "תצוגת הדגמה";
+    $("#countLine").textContent = records.length === 1 ? "נכס אחד" : records.length + " נכסים";
+    var banner = FLY.el("div", "card",
+      '🦉 <b>זה האזור האישי שלך.</b> הנכס שיצרת מופיע כאן — ' +
+      '<a href="/signup.html" style="color:var(--gold);font-weight:600">הרשמה מלאה</a> ' +
+      'תאפשר לערוך, להאריך ולנהל את כל הנכסים שלך.');
+    banner.style.cssText = "padding:14px 18px;margin-bottom:16px;font-size:.92rem";
+    var grid = $("#propGrid");
+    grid.parentNode.insertBefore(banner, grid);
+    grid.innerHTML = records.map(demoCardHtml).join("");
+    records.forEach(function (r) {
+      fetch("/api/listing-status?id=" + encodeURIComponent(r.listing_id))
+        .then(function (res) { return res.json(); })
+        .then(function (d) {
+          var card = document.getElementById("demo-" + r.listing_id);
+          if (!card) return;
+          card.querySelector(".demo-chip").innerHTML =
+            chipFor(d.page_id ? "active" : (d.status === "failed" ? "expired" : "building"));
+          if (d.page_url) {
+            card.querySelector(".actions").innerHTML =
+              '<a class="btn btn-ghost btn-sm" target="_blank" href="' + esc(d.page_url) + '">צפייה בדף</a>';
+          }
+        })
+        .catch(function () { /* leave the building chip */ });
+    });
+  }
+
+  // boot: session check → real list; otherwise fall back to the demo view when
+  // this browser created a demo page; otherwise stay on login.
   FLY.req("/api/properties", { noRedirect: true })
     .then(function (d) {
       $("#viewLogin").classList.add("hidden");
@@ -228,8 +295,14 @@
       $("#propGrid").innerHTML = items.map(cardHtml).join("");
       $("#emptyState").classList.toggle("hidden", items.length > 0);
       bindActions();
+      checkProfile(); // ponytail: check if profile needs completion
     })
-    .catch(function () { /* stay on login */ });
+    .catch(function () {
+      var records = [];
+      try { records = JSON.parse(localStorage.getItem("forly_demo_listings") || "[]"); } catch (e) { /* ignore */ }
+      if (records.length) showDemoDashboard(records);
+      /* else: stay on login */
+    });
 })();
 </script>
 </body>

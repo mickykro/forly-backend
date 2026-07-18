@@ -50,6 +50,19 @@ export const createPropertyPage = onRequest(
       return;
     }
 
+    // The gallery must never show the same photo twice — drop duplicate
+    // source URLs before hosting anything.
+    const seenPhotoUrls = new Set<string>();
+    const uniquePhotos = body.photos.filter((p) => {
+      if (!p.url || seenPhotoUrls.has(p.url)) return false;
+      seenPhotoUrls.add(p.url);
+      return true;
+    });
+    if (uniquePhotos.length < 1) {
+      res.status(400).json({error: "photos must contain at least one valid url"});
+      return;
+    }
+
     try {
       // Idempotency: reuse an existing page for this listing.
       const existing = await db.collection(PAGES)
@@ -59,18 +72,28 @@ export const createPropertyPage = onRequest(
       const pageId = reusable ? reusable.id : uuidv4();
       const base = `${PAGES}/${pageId}`;
 
+      // Agent details fall back to the listing — the n8n page builder doesn't
+      // always forward them (this is what kept uploaded logos off the pages).
+      const listingSnap = await db.collection("listings").doc(body.listing_id).get();
+      const listingAgent: Partial<AgentInfo> =
+        (listingSnap.exists ? (listingSnap.get("agent") as Partial<AgentInfo> | null) : null) || {};
+      const agentIn: Partial<AgentInfo> = body.agent || {};
+      const agentField = (k: "name" | "brand_name" | "tagline" | "phone" | "license"): string =>
+        String(agentIn[k] || listingAgent[k] || "");
+      const logoSrc = agentIn.logo_url || listingAgent.logo_url || null;
+
       const videoUp = downloadAndUpload(body.video_url, `${base}/walkthrough.mp4`, "video/mp4");
       const posterUp = body.poster_url ?
         downloadAndUpload(body.poster_url, `${base}/poster.jpg`, "image/jpeg") :
-        downloadAndUpload(body.photos[0].url, `${base}/poster.jpg`, "image/jpeg");
-      const photoUps = body.photos.slice(0, 12).map((p, i) => {
+        downloadAndUpload(uniquePhotos[0].url, `${base}/poster.jpg`, "image/jpeg");
+      const photoUps = uniquePhotos.slice(0, 12).map((p, i) => {
         const ext = guessImageExt(p.url);
         return downloadAndUpload(p.url, `${base}/photo-${pad(i + 1)}.${ext}`, `image/${ext === "jpg" ? "jpeg" : ext}`);
       });
       const mapUp = body.area?.map_image_url ?
         downloadAndUpload(body.area.map_image_url, `${base}/map.png`, "image/png") : null;
-      const logoUp = body.agent?.logo_url ?
-        downloadAndUpload(body.agent.logo_url, `${base}/logo.png`, "image/png") : null;
+      const logoUp = logoSrc ?
+        downloadAndUpload(logoSrc, `${base}/logo.png`, "image/png") : null;
 
       const [video, poster, ...rest] = await Promise.all([
         videoUp, posterUp, ...photoUps,
@@ -83,7 +106,7 @@ export const createPropertyPage = onRequest(
 
       const galleryImages: GalleryImage[] = photos.map((p, i) => ({
         url: p.publicUrl,
-        caption: body.photos![i].caption || "",
+        caption: uniquePhotos[i].caption || "",
       }));
 
       const now = new Date();
@@ -100,12 +123,12 @@ export const createPropertyPage = onRequest(
         extension_count: reusable ? ((reusable.get("extension_count") as number) || 0) : 0,
         edit_count: reusable ? ((reusable.get("edit_count") as number) || 0) : 0,
         agent: {
-          name: body.agent?.name || "",
-          brand_name: body.agent?.brand_name || body.agent?.name || "",
+          name: agentField("name"),
+          brand_name: agentField("brand_name") || agentField("name"),
           logo_url: logo ? logo.publicUrl : null,
-          tagline: body.agent?.tagline || "",
-          phone: body.agent?.phone || body.business_phone,
-          license: body.agent?.license || "",
+          tagline: agentField("tagline"),
+          phone: agentField("phone") || body.business_phone,
+          license: agentField("license"),
         },
         property: {
           title: body.property?.title ||
@@ -202,6 +225,8 @@ export const getPropertyPage = onRequest({cors: false}, async (req, res) => {
     area: d.area,
     cta: d.cta,
     sections: d.sections,
+    theme: d.theme || null,
+    texts: d.texts || null,
   });
 });
 
@@ -263,9 +288,15 @@ export const updatePropertyPage = onRequest(
     }
     if (Array.isArray(body.gallery_images)) {
       // Only reorder/caption/remove of already-hosted images (same-bucket URLs).
+      // Dedupe by URL so the gallery never ends up with the same image twice.
       const current = new Set(d.gallery.images.map((i) => i.url));
+      const kept = new Set<string>();
       const next = body.gallery_images
-        .filter((i) => current.has(i.url))
+        .filter((i) => {
+          if (!current.has(i.url) || kept.has(i.url)) return false;
+          kept.add(i.url);
+          return true;
+        })
         .map((i) => ({url: i.url, caption: String(i.caption || "").slice(0, 60)}));
       if (next.length >= 1) update["gallery.images"] = next;
     }

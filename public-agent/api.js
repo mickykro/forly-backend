@@ -70,6 +70,18 @@ window.FLY = (function () {
     });
   }
 
+  /* Delete a previously uploaded file by its public URL (best-effort — a
+     backend without a delete endpoint just leaves the orphan file). */
+  function deleteUpload(publicUrl, extraHeaders) {
+    var m = String(publicUrl || "").match(/\/files\/([0-9a-f-]{36}\.[a-z0-9]+)$/i);
+    if (!m) return Promise.resolve();
+    return fetch("/api/upload/" + m[1], {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: extraHeaders || {},
+    }).catch(function () { /* best-effort */ });
+  }
+
   function el(tag, cls, html) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -77,5 +89,5 @@ window.FLY = (function () {
     return e;
   }
 
-  return { req: req, toast: toast, uploadFiles: uploadFiles, el: el };
+  return { req: req, toast: toast, uploadFiles: uploadFiles, deleteUpload: deleteUpload, el: el };
 })();

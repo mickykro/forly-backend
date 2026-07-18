@@ -22,84 +22,131 @@
       ]
     }
   ],
-  "hosting": {
-    "public": "public",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "rewrites": [
-      {
-        "source": "/api/signup-complete",
-        "function": {
-          "functionId": "signupComplete",
-          "region": "europe-west1"
-        }
-      },
-      {
-        "source": "/api/signup-upload",
-        "function": {
-          "functionId": "signupUpload",
-          "region": "europe-west1"
-        }
-      },
-      {
-        "source": "/api/signup-save",
-        "function": {
-          "functionId": "signupSave",
-          "region": "europe-west1"
-        }
-      },
-      {
-        "source": "/api/signup-get",
-        "function": {
-          "functionId": "signupGet",
-          "region": "europe-west1"
-        }
-      },
-      {
-        "source": "/api/create-draft",
-        "function": {
-          "functionId": "createCarouselDraft",
-          "region": "europe-west1"
-        }
-      },
-      {
-        "source": "/api/get-draft",
-        "function": {
-          "functionId": "getCarouselDraft",
-          "region": "europe-west1"
-        }
-      },
-      {
-        "source": "/api/save-draft",
-        "function": {
-          "functionId": "saveCarouselDraft",
-          "region": "europe-west1"
-        }
-      },
-      {
-        "source": "/c/**",
-        "destination": "/c/index.html"
-      },
-      {
-        "source": "/signup",
-        "destination": "/signup/index.html"
-      }
-    ],
-    "headers": [
-      {
-        "source": "**/*.html",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "no-cache"
+  "hosting": [
+    {
+      "target": "app",
+      "public": "public",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        {
+          "source": "/api/signup-complete",
+          "function": {
+            "functionId": "signupComplete",
+            "region": "europe-west1"
           }
-        ]
-      }
-    ]
-  },
+        },
+        {
+          "source": "/api/signup-upload",
+          "function": {
+            "functionId": "signupUpload",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/api/signup-save",
+          "function": {
+            "functionId": "signupSave",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/api/signup-get",
+          "function": {
+            "functionId": "signupGet",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/api/create-draft",
+          "function": {
+            "functionId": "createCarouselDraft",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/api/get-draft",
+          "function": {
+            "functionId": "getCarouselDraft",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/api/save-draft",
+          "function": {
+            "functionId": "saveCarouselDraft",
+            "region": "europe-west1"
+          }
+        },
+        {
+          "source": "/c/**",
+          "destination": "/c/index.html"
+        },
+        {
+          "source": "/signup",
+          "destination": "/signup/index.html"
+        }
+      ],
+      "headers": [
+        {
+          "source": "**/*.html",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "target": "nadlan",
+      "public": "public-nadlan",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "redirects": [
+        {
+          "source": "/:path*",
+          "destination": "https://nadlan.call4li.com/:path*",
+          "type": 301
+        }
+      ],
+      "rewrites": [
+        {
+          "source": "/api/property-page",
+          "function": { "functionId": "getPropertyPage", "region": "europe-west1" }
+        },
+        {
+          "source": "/api/property-lead",
+          "function": { "functionId": "submitPropertyLead", "region": "europe-west1" }
+        },
+        {
+          "source": "/api/property-event",
+          "function": { "functionId": "trackPropertyEvent", "region": "europe-west1" }
+        },
+        {
+          "source": "/api/extend",
+          "function": { "functionId": "extendPropertyPage", "region": "europe-west1" }
+        },
+        {
+          "source": "/p/**",
+          "destination": "/p/index.html"
+        }
+      ],
+      "headers": [
+        {
+          "source": "**/*.html",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+        },
+        {
+          "source": "**/*.@(js|css)",
+          "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
+        }
+      ]
+    }
+  ],
   "storage": {
     "rules": "storage.rules"
   }

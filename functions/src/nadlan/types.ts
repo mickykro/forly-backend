@@ -59,6 +59,16 @@ export interface CtaInfo {
 
 export type PageStatus = "building" | "active" | "expiring" | "expired" | "archived";
 
+/** Landing-page look, chosen on the intake form (see server/index.js sanitizeTheme). */
+export interface PageTheme {
+  template: string | null;
+  font_title: string | null;
+  font_body: string | null;
+  font_url: string | null;
+  primary: string | null;
+  accent: string | null;
+}
+
 export interface PropertyPage {
   page_id: string;
   listing_id: string;
@@ -80,6 +90,12 @@ export interface PropertyPage {
   sections: {gallery: boolean; carousel: boolean; area: boolean};
   view_count: number;
   lead_count: number;
+  /** Pages built by the standalone server may carry these (see server/index.js). */
+  theme?: PageTheme | null;
+  /** Template-string overrides saved from the in-page edit mode. */
+  texts?: Record<string, string> | null;
+  /** Secret for the in-page edit link (never returned in any payload). */
+  edit_token?: string;
 }
 
 export type ListingStatus = "active" | "archived" | "deleted";
