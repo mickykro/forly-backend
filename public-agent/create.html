@@ -308,6 +308,35 @@
     // standalone demo — not for signed-in users: hide the "my properties" nav
     var myProps = $("#navMyProps");
     if (myProps) myProps.style.display = "none";
+    // ponytail: autosave agent fields on blur during demo
+    initDemoAutosave();
+  }
+
+  // ponytail: autosave agent fields during demo — writes to businesses/{phone}
+  function initDemoAutosave() {
+    var fieldMap = {
+      agName: "full_name",
+      agBrand: "business_name",
+      agLicense: "license_number",
+    };
+    var pending = {};
+    function saveField(inputId, field) {
+      var phone = normalizeAgentPhone($("#agCC").value, $("#agPhone").value);
+      if (!phone || phone.length < 10) return; // need valid phone first
+      var value = $("#" + inputId).value.trim();
+      if (pending[field] === value) return; // already saved this value
+      pending[field] = value;
+      fetch("/api/demo-save-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-demo-key": demoKey },
+        body: JSON.stringify({ phone: phone, field: field, value: value }),
+      }).catch(function() { delete pending[field]; }); // allow retry on fail
+    }
+    // attach blur handlers to agent fields
+    Object.keys(fieldMap).forEach(function(inputId) {
+      var el = $("#" + inputId);
+      if (el) el.addEventListener("blur", function() { saveField(inputId, fieldMap[inputId]); });
+    });
   }
 
   // ── language switcher (top corner) — drives BOTH the form UI language and the
@@ -666,7 +695,12 @@
         });
       });
     }).then(function (d) {
-      startBuildingScreen(d.listing_id);
+      // ponytail: demo users are now logged in — redirect to dashboard
+      if (isDemo && d.logged_in) {
+        startBuildingScreen(d.listing_id, true);
+      } else {
+        startBuildingScreen(d.listing_id, false);
+      }
     }).catch(function (e) {
       err.textContent = FT("err_prefix") + e.message;
       err.classList.add("show");
@@ -676,7 +710,8 @@
   });
 
   // ── building screen: poll listing status ──
-  function startBuildingScreen(listingId) {
+  // ponytail: demoLoggedIn param controls redirect behavior
+  function startBuildingScreen(listingId, demoLoggedIn) {
     $("#viewForm").classList.add("hidden");
     $("#viewBuilding").classList.remove("hidden");
     $("#st1").classList.add("done");
@@ -690,6 +725,7 @@
 
     // End the build screen in a terminal state: "done" (page ready), "wait"
     // (timed out — WhatsApp fallback) or "fail" (pipeline reported failure).
+    // ponytail: demo users redirect to dashboard after page is ready
     function endBuilding(state, pageUrl) {
       clearInterval(iv);
       $("#buildSpin").classList.add("hidden");
@@ -699,10 +735,18 @@
         });
         $("#pageLink").href = pageUrl;
         $("#doneBox").classList.remove("hidden");
+        // auto-redirect demo users to dashboard after 3s
+        if (demoLoggedIn) {
+          setTimeout(function() { location.href = "/"; }, 3000);
+        }
       } else if (state === "fail") {
         $("#retryLink").href = location.pathname + location.search;
         $("#failBox").classList.remove("hidden");
       } else {
+        // demo users should go to dashboard even on timeout
+        if (demoLoggedIn) {
+          setTimeout(function() { location.href = "/"; }, 2000);
+        }
         $("#waitBox").classList.remove("hidden");
       }
     }
