@@ -225,8 +225,11 @@
     // footer + form-done: genericize the template's mock brand/name
     var fbrand = $(".fbrand");
     if (fbrand && (a.brand_name || a.name)) fbrand.textContent = a.brand_name || a.name;
+    // Personalize the lead-form confirmation with the real agent's name, in the
+    // page language. Guarded on I18N so a missing dictionary leaves the clean,
+    // name-free static fallback rather than a raw key.
     var doneSub = $("#formDone p");
-    if (doneSub) doneSub.textContent = (a.name || "המתווך") + " יחזור אליכם באופן אישי בהקדם.";
+    if (doneSub && window.I18N && a.name) doneSub.textContent = TR("sent_body_named", { name: a.name });
     var areaSub = $('[data-edit="texts.area_sub"]');
     if (areaSub && p.city) areaSub.textContent = "אחת השכונות המבוקשות ב" + p.city + " — וזה לא במקרה.";
 
