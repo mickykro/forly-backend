@@ -8,6 +8,8 @@ const fs = require("fs");
 
 const pad = (n) => String(n).padStart(2, "0");
 const daysFromNow = (d) => new Date(Date.now() + d * 86400000);
+// Firestore hands back Timestamps, the in-memory store plain Dates.
+const asMillis = (v) => (v && v.toMillis ? v.toMillis() : v ? new Date(v).getTime() : 0);
 
 // ── theme sanitization ──
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -73,7 +75,7 @@ async function sendWhatsApp(phone, message, instance, token) {
 }
 
 module.exports = {
-  pad, daysFromNow,
+  pad, daysFromNow, asMillis,
   sanitizeTheme, sanitizeLang, normalizePhone,
   guessImageExt, rehost, sendWhatsApp,
 };

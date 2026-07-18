@@ -3,6 +3,8 @@
  * ponytail: single source for all collection access
  */
 
+const { asMillis } = require("./utils");
+
 let db = null;
 let FieldValue = null;
 const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(), otps: new Map() };
@@ -33,6 +35,11 @@ async function getListing(id) {
 async function setListingPageId(id, pageId) {
   if (db) await db.collection("listings").doc(id).set({ page_id: pageId }, { merge: true });
   else { const l = mem.listings.get(id); if (l) l.page_id = pageId; }
+}
+
+async function updateListing(id, patch) {
+  if (db) await db.collection("listings").doc(id).set(patch, { merge: true });
+  else Object.assign(mem.listings.get(id) || {}, patch);
 }
 
 async function listListingsByPhone(phone) {
@@ -105,6 +112,20 @@ async function uniquePageId(agent) {
   return `${base}-${shortCode(8)}`;
 }
 
+// Pages at or past `soonMs`, for the daily reminder/expire sweep.
+async function listPagesForExpiry(soonMs) {
+  if (db) {
+    const snap = await db.collection("property_pages")
+      .where("status", "in", ["active", "expiring"])
+      .where("expires_at", "<=", new Date(soonMs))
+      .limit(100).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.pages.values()]
+    .filter((p) => (p.status === "active" || p.status === "expiring") && asMillis(p.expires_at) <= soonMs)
+    .slice(0, 100);
+}
+
 async function incrPageCounter(pageId, field, by) {
   if (db) await db.collection("property_pages").doc(pageId).update({ [field]: FieldValue.increment(by) });
   else { const p = mem.pages.get(pageId); if (p) p[field] = (p[field] || 0) + by; }
@@ -146,8 +167,8 @@ module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
-  saveListing, getListing, setListingPageId, listListingsByPhone,
-  savePage, getPage, findActivePageByListing, incrPageCounter, updatePage, uniquePageId,
+  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone,
+  savePage, getPage, findActivePageByListing, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
   getBusiness, setBusiness,
   saveLead,
 };

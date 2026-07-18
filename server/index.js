@@ -6,6 +6,7 @@
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
+const auth = require("./auth");
 
 // ── .env loader ──
 (function loadDotEnv() {
@@ -46,8 +47,10 @@ db.init();
 
 // ── auth ──
 const createAuthRouter = require("./auth");
-const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken } = createAuthRouter;
+const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
+        signActionToken, verifyActionToken } = createAuthRouter;
 const { sendWhatsApp } = require("./utils");
+const { startExpiryScheduler } = require("./lifecycle");
 
 // ── app ──
 const app = express();
@@ -87,6 +90,9 @@ app.use("/api", createDashboardRouter({
   authSecret: AUTH_SECRET,
   pageBaseUrl: PAGE_BASE_URL,
   webSignupBase: WEB_SIGNUP_BASE,
+  uploadDir: UPLOAD_DIR,
+  greenInstance: GREENAPI_INSTANCE,
+  greenToken: GREENAPI_TOKEN,
 }));
 // signup redirect at root level
 app.get("/signup", (req, res) => {
@@ -107,6 +113,8 @@ app.use(createPagesRouter({
   n8nLeadWebhook: N8N_LEAD_WEBHOOK_URL,
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
+  requireAuth, verifyActionToken,
+  authSecret: AUTH_SECRET,
 }));
 
 // ── start ──
@@ -116,4 +124,11 @@ app.listen(PORT, () => {
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
+  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
+  startExpiryScheduler({
+    pageBaseUrl: PAGE_BASE_URL,
+    authSecret: AUTH_SECRET,
+    greenInstance: GREENAPI_INSTANCE,
+    greenToken: GREENAPI_TOKEN,
+  });
 });

@@ -1,7 +1,7 @@
 /*
  * routes/pages.js — landing page builder + serving + leads
  * Handles: /createPropertyPage, /api/property-page, /api/property-lead,
- *          /api/property-event, /api/video-overlay, /p/:id
+ *          /api/property-event, /api/video-overlay, /api/extend, /p/:id
  */
 
 const express = require("express");
@@ -11,14 +11,27 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
-const { pad, daysFromNow, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 
 const PAGE_LIFESPAN_DAYS = 30;
 const LEAD_MAX_PER_HOUR = 3;
 const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel"]);
 
+const confirmHtml = (title, sub) =>
+  `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
+  `<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>` +
+  `<style>body{font-family:-apple-system,'Segoe UI',sans-serif;background:#F7F3EC;color:#17140F;` +
+  `display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}` +
+  `.card{background:#FFFDF9;border:1px solid rgba(185,138,47,.3);border-radius:22px;padding:48px 36px;` +
+  `max-width:340px;box-shadow:0 20px 60px rgba(23,20,15,.08)}h1{font-size:1.5rem;margin:0 0 10px}` +
+  `p{color:#5A5348;margin:0}</style></head>` +
+  `<body><div class="card"><h1>${title}</h1><p>${sub}</p></div></body></html>`;
+const expiredLinkHtml = () =>
+  confirmHtml("הקישור אינו תקף", "ייתכן שהדף כבר הוארך. ניתן להאריך גם דרך agent.call4li.com");
+
 module.exports = function createPagesRouter(ctx) {
-  const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken } = ctx;
+  const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,
+          requireAuth, verifyActionToken, authSecret } = ctx;
 
   const router = express.Router();
 
@@ -267,6 +280,47 @@ module.exports = function createPagesRouter(ctx) {
       console.error("page/update failed:", err);
       res.status(500).json({ error: "internal" });
     }
+  });
+
+  // ── page expiry extension ──
+  // Two entry points, one effect: the dashboard button (session auth) and the
+  // one-tap link in the expiry-reminder WhatsApp (signed token, no session).
+  async function applyExtension(pageId, page) {
+    const from = Math.max(Date.now(), asMillis(page.expires_at));
+    const expiresAt = new Date(from + PAGE_LIFESPAN_DAYS * 86400000);
+    await db.updatePage(pageId, {
+      expires_at: expiresAt, status: "active",
+      extension_count: (page.extension_count || 0) + 1,
+      reminder_sent_at: null, updated_at: new Date(),
+    });
+    return expiresAt;
+  }
+
+  router.post("/api/page/extend", requireAuth(authSecret), async (req, res) => {
+    const pageId = String((req.body && req.body.page_id) || "");
+    const page = await db.getPage(pageId);
+    if (!page) return res.status(404).json({ error: "not found" });
+    if (page.business_phone !== req.user.userId) return res.status(403).json({ error: "not_owner" });
+    const expiresAt = await applyExtension(pageId, page);
+    res.json({ ok: true, expires_at: expiresAt.toISOString() });
+  });
+
+  // Token is bound to the current expires_at, so extending invalidates the link
+  // it came from — one tap per reminder, no replay.
+  router.get("/api/extend", async (req, res) => {
+    const pageId = String(req.query.id || "");
+    const e = String(req.query.e || "");
+    const t = String(req.query.t || "");
+    if (!pageId || !e || !t || !verifyActionToken([pageId, e], t, authSecret)) {
+      return res.status(401).type("html").send(expiredLinkHtml());
+    }
+    const page = await db.getPage(pageId);
+    if (!page || asMillis(page.expires_at) !== Number(e)) {
+      return res.status(401).type("html").send(expiredLinkHtml());
+    }
+    const expiresAt = await applyExtension(pageId, page);
+    const dateStr = expiresAt.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" });
+    res.type("html").send(confirmHtml("✅ הדף הוארך בהצלחה", `הדף פעיל עד ${dateStr}.`));
   });
 
   // ── lead capture ──

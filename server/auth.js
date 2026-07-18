@@ -271,6 +271,17 @@ module.exports.readToken = readToken;
 // Exported so callers (demo signup, listing ownership) key on the same string.
 module.exports.normalizeAuthPhone = normalizeAny;
 
+// One-tap action token (e.g. the WhatsApp "extend page" link). Bind it to a
+// value the action itself changes (expires_at) and it self-invalidates on use.
+const signActionToken = (parts, secret) =>
+  crypto.createHmac("sha256", secret).update(parts.join(":")).digest("base64url");
+module.exports.signActionToken = signActionToken;
+module.exports.verifyActionToken = (parts, token, secret) => {
+  const a = Buffer.from(String(token || ""));
+  const b = Buffer.from(signActionToken(parts, secret));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
 module.exports.requireAuth = (secret) => (req, res, next) => {
   const session = verifySession(secret, readToken(req));
   if (!session) return res.status(401).json({ error: "unauthenticated" });
