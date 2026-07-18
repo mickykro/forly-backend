@@ -71,6 +71,20 @@ async function incrPageCounter(pageId, field, by) {
   else { const p = mem.pages.get(pageId); if (p) p[field] = (p[field] || 0) + by; }
 }
 
+// Partial page update from a { "dot.path": value } patch — avoids clobbering
+// concurrently-incremented counters the way a full set() would.
+async function updatePage(pageId, patch) {
+  if (db) { await db.collection("property_pages").doc(pageId).update(patch); return; }
+  const p = mem.pages.get(pageId);
+  if (!p) return;
+  for (const [key, val] of Object.entries(patch)) {
+    const parts = key.split(".");
+    let o = p;
+    while (parts.length > 1) { const k = parts.shift(); o[k] = o[k] || {}; o = o[k]; }
+    o[parts[0]] = val;
+  }
+}
+
 // ── businesses ──
 async function getBusiness(phone) {
   if (!db) return null;
@@ -94,7 +108,7 @@ module.exports = {
   get db() { return db; },
   get mem() { return mem; },
   saveListing, getListing, setListingPageId, listListingsByPhone,
-  savePage, getPage, findActivePageByListing, incrPageCounter,
+  savePage, getPage, findActivePageByListing, incrPageCounter, updatePage,
   getBusiness, setBusiness,
   saveLead,
 };

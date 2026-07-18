@@ -10,6 +10,7 @@ const path = require("path");
 const fs = require("fs");
 
 const db = require("../db");
+const pageEdit = require("../edit");
 const { sanitizeTheme, sanitizeLang } = require("../utils");
 
 const MAX_UPLOAD_FILES = 12;
@@ -247,10 +248,24 @@ module.exports = function createIntakeRouter(ctx) {
     if (!id) return res.status(400).json({ error: "missing id" });
     const listing = await db.getListing(id);
     if (!listing) return res.status(404).json({ error: "not found" });
+    // Agent-only edit link (this endpoint backs the agent-facing create flow).
+    // Pages created before edit tokens existed get one lazily here.
+    let editUrl = null;
+    if (listing.page_id) {
+      const page = await db.getPage(listing.page_id);
+      if (page) {
+        if (!page.edit_token) {
+          page.edit_token = pageEdit.newEditToken();
+          await db.updatePage(listing.page_id, { edit_token: page.edit_token });
+        }
+        editUrl = `${pageBaseUrl}/p/${listing.page_id}#edit=${page.edit_token}`;
+      }
+    }
     res.json({
       listing_id: id,
       page_id: listing.page_id || null,
       page_url: listing.page_id ? `${pageBaseUrl}/p/${listing.page_id}` : null,
+      edit_url: editUrl,
       status: listing.page_id ? "ready" : (listing.status === "failed" ? "failed" : "building"),
     });
   });

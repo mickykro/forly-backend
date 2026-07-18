@@ -1,0 +1,50 @@
+/* Forly Nadlan — edit-mode styles. Loaded by page.js only when the page was
+   opened through a valid edit link; public visitors never fetch this file. */
+
+/* ── toolbar ── */
+.edit-toolbar{
+  position:fixed;bottom:0;right:0;left:0;z-index:1100;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 16px calc(10px + env(safe-area-inset-bottom));
+  background:rgba(23,20,15,.96);color:#fff;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-top:1px solid rgba(217,177,92,.4);
+  font-family:'Heebo',sans-serif;
+}
+.et-info{display:flex;align-items:baseline;gap:10px;min-width:0}
+.et-info b{color:var(--gold-bright,#D9B15C);font-size:.95rem;white-space:nowrap}
+.et-info span{font-size:.8rem;opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.et-actions{display:flex;gap:8px;flex-shrink:0}
+.et-btn{
+  border:none;border-radius:100px;padding:10px 22px;
+  font-family:inherit;font-size:.9rem;font-weight:600;cursor:pointer;
+  transition:opacity .2s,transform .2s;
+}
+.et-btn:active{transform:scale(.97)}
+.et-save{background:linear-gradient(115deg,var(--gold-bright,#D9B15C),var(--gold,#B98A2F));color:#17140F}
+.et-save:disabled{opacity:.4;cursor:default}
+.et-cancel{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.35)}
+
+/* room for the toolbar; the mobile sticky CTA bar sits above it */
+body.edit-mode{padding-bottom:76px}
+.edit-mode .sticky-bar{bottom:64px}
+
+/* ── editable affordances ── */
+.edit-mode [data-edit]{
+  outline:1.5px dashed rgba(185,138,47,.5);outline-offset:3px;border-radius:3px;
+  cursor:text;min-height:1em;
+  transition:outline-color .15s,background-color .15s;
+}
+.edit-mode [data-edit]:hover{outline-color:rgba(185,138,47,.95);background-color:rgba(185,138,47,.08)}
+.edit-mode [data-edit]:focus{outline:2px solid var(--gold,#B98A2F);background-color:rgba(185,138,47,.1)}
+.edit-mode [data-edit]:empty::before{content:"טקסט...";opacity:.45}
+.edit-mode [data-edit-wrap]{display:inline-block;min-width:16px}
+
+/* everything visible at once — no scroll-reveal hide while editing */
+.edit-mode .reveal{opacity:1;transform:none}
+
+/* gallery captions always shown (they're editable), incl. empty slots */
+.edit-mode .gal-item .cap{opacity:1;transform:none;min-height:20px}
+
+/* the post-submit thank-you card is text too — show it for editing */
+.edit-mode .form-done{display:flex;border-top:1px dashed rgba(185,138,47,.4);margin-top:10px}

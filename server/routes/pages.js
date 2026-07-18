@@ -10,6 +10,7 @@ const path = require("path");
 const fs = require("fs");
 
 const db = require("../db");
+const pageEdit = require("../edit");
 const { pad, daysFromNow, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 
 const PAGE_LIFESPAN_DAYS = 30;
@@ -28,6 +29,7 @@ module.exports = function createPagesRouter(ctx) {
       hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
       cta: d.cta, sections: d.sections, theme: d.theme || null,
       language: d.language || "he",
+      texts: d.texts || null,
     };
   }
 
@@ -83,6 +85,8 @@ module.exports = function createPagesRouter(ctx) {
         expires_at: reusable ? reusable.expires_at : daysFromNow(PAGE_LIFESPAN_DAYS),
         extension_count: reusable ? (reusable.extension_count || 0) : 0,
         edit_count: reusable ? (reusable.edit_count || 0) : 0,
+        edit_token: (reusable && reusable.edit_token) || pageEdit.newEditToken(),
+        texts: (reusable && reusable.texts) || null,
         agent: {
           name: agentField("name"),
           brand_name: agentField("brand_name") || agentField("name"),
@@ -152,8 +156,45 @@ module.exports = function createPagesRouter(ctx) {
       });
     }
     if (d.status === "building") return res.status(404).json({ error: "not ready" });
-    res.set("Cache-Control", "public, max-age=60");
-    res.json(pagePayload(id, d));
+    // Magic edit link: a valid edit_token flips the payload to editable.
+    // Invalid/missing tokens get the plain public payload — no hint given.
+    const token = typeof req.query.edit_token === "string" ? req.query.edit_token : "";
+    let editable = false;
+    if (token && !pageEdit.editThrottled(id)) {
+      if (pageEdit.editTokenOk(d, token)) editable = true;
+      else pageEdit.noteEditFail(id);
+    }
+    res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
+    res.json({ ...pagePayload(id, d), ...(editable ? { editable: true } : {}) });
+  });
+
+  // ── POST /api/page/edit-text — save from the in-page edit mode ──
+  // Token-authed, text-only, whitelist-merged (see server/edit.js).
+  router.post("/api/page/edit-text", async (req, res) => {
+    const body = req.body || {};
+    const pageId = String(body.page_id || "");
+    if (!pageId || !body.fields || typeof body.fields !== "object") {
+      return res.status(400).json({ error: "page_id and fields required" });
+    }
+    const d = await db.getPage(pageId);
+    if (!d) return res.status(404).json({ error: "not found" });
+    if (pageEdit.editThrottled(pageId) || !pageEdit.editTokenOk(d, body.edit_token)) {
+      pageEdit.noteEditFail(pageId);
+      return res.status(401).json({ error: "bad_token" });
+    }
+    if (d.status !== "active" && d.status !== "expiring") {
+      return res.status(410).json({ error: "page_inactive" });
+    }
+    try {
+      const patch = pageEdit.buildEditPatch(d, body.fields);
+      patch["edit_count"] = (d.edit_count || 0) + 1;
+      patch["updated_at"] = new Date();
+      await db.updatePage(pageId, patch);
+      res.json({ ok: true, edit_count: patch["edit_count"] });
+    } catch (err) {
+      console.error("edit-text failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
   });
 
   // ── lead capture ──

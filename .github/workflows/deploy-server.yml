@@ -23,11 +23,23 @@
 #
 # 4. Create /root/forly-backend/deploy.env (NOT committed) with runtime config:
 #      BASE_URL=https://forly.srv1173890.hstgr.cloud
-#      PAGE_BASE_URL=https://forly.srv1173890.hstgr.cloud
+#      PAGE_BASE_URL=https://nadlan.call4li.com   # branded page links (see step 5)
 #      N8N_WW1_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/dashboard-create
 #      N8N_PIPELINE_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/property-page-builder
 #      GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa-key.json
 #    and place the Firebase service-account key at /root/forly-backend/sa-key.json
+#
+# 5. Branded domain (nadlan.call4li.com), owner actions:
+#      - DNS: add an A record  nadlan.call4li.com → 31.97.216.242  (the VPS).
+#        A record, not CNAME, so IPv6 (which the VPS host also publishes) can't
+#        route visitors somewhere Traefik isn't listening.
+#      - The Traefik router below answers for both hostnames; Let's Encrypt
+#        issues the nadlan cert automatically on first HTTPS hit once DNS
+#        resolves (Traefik keeps retrying — deploy order doesn't matter).
+#      - Set PAGE_BASE_URL=https://nadlan.call4li.com in deploy.env so page
+#        links, edit links and WhatsApp messages use the branded domain.
+#        Old links on forly.srv1173890.hstgr.cloud keep working — same
+#        container serves both hosts.
 # ──────────────────────────────────────────────────────────────────────────
 
 name: Deploy server to VPS
@@ -75,7 +87,7 @@ jobs:
             -v /root/forly-backend/sa-key.json:/secrets/sa-key.json:ro \
             -v forly-uploads:/app/server/data/uploads \
             -l traefik.enable=true \
-            -l 'traefik.http.routers.forly.rule=Host(`forly.srv1173890.hstgr.cloud`)' \
+            -l 'traefik.http.routers.forly.rule=Host(`forly.srv1173890.hstgr.cloud`) || Host(`nadlan.call4li.com`)' \
             -l traefik.http.routers.forly.entrypoints=web,websecure \
             -l traefik.http.routers.forly.tls=true \
             -l traefik.http.routers.forly.tls.certresolver=mytlschallenge \
@@ -94,3 +106,8 @@ jobs:
             -H 'Content-Type: application/json' -d '{}' || true)
           echo "createPropertyPage returned $code (expect 400 = new build live behind Traefik)"
           test "$code" = "400"
+          # Branded domain — informational only until the owner's DNS record
+          # (nadlan.call4li.com → VPS) exists and the LE cert is issued.
+          ncode=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+            "https://nadlan.call4li.com/p/00000000-0000-0000-0000-000000000000" || true)
+          echo "nadlan.call4li.com returned $ncode (200 = branded domain live; anything else = DNS/cert not ready yet, not fatal)"

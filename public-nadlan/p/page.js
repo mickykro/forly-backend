@@ -13,6 +13,16 @@
   var CURLANG = "he";
   function TR(key, vars) { return window.I18N ? window.I18N.t(CURLANG, key, vars) : key; }
 
+  // Magic edit link: /p/{id}#edit={token}. The token stays in the fragment
+  // (never sent to the server in the URL) and is stripped from the address
+  // bar immediately; we hand it to the API explicitly.
+  var editToken = (function () {
+    var m = location.hash.match(/(?:^#|[#&])edit=([0-9a-f]{16,64})(?:&|$)/i);
+    if (!m) return null;
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* no-op */ }
+    return m[1];
+  })();
+
   function setState(state) {
     document.body.classList.remove("is-loading", "has-state", "state-expired", "state-notfound");
     if (state === "active") return;
@@ -30,6 +40,7 @@
   }
 
   function beacon(event) {
+    if (editToken) return; // the agent editing his page is not a visitor
     try {
       navigator.sendBeacon("/api/property-event",
         JSON.stringify({ page_id: pageId, event: event }));
@@ -211,6 +222,14 @@
       hideSection("#why");
     }
 
+    // footer + form-done: genericize the template's mock brand/name
+    var fbrand = $(".fbrand");
+    if (fbrand && (a.brand_name || a.name)) fbrand.textContent = a.brand_name || a.name;
+    var doneSub = $("#formDone p");
+    if (doneSub) doneSub.textContent = (a.name || "המתווך") + " יחזור אליכם באופן אישי בהקדם.";
+    var areaSub = $('[data-edit="texts.area_sub"]');
+    if (areaSub && p.city) areaSub.textContent = "אחת השכונות המבוקשות ב" + p.city + " — וזה לא במקרה.";
+
     // agent strip
     var initials = (a.name || "").split(" ").map(function (w) { return w[0] || ""; }).join("״").slice(0, 3);
     var avatar = $(".agent-strip .avatar");
@@ -290,6 +309,38 @@
   }
 
   function hideSection(sel) { var el = $(sel); if (el) el.style.display = "none"; }
+
+  // Agent text overrides (saved from edit mode) — applied after render() so
+  // they win over both template statics and derived strings.
+  function applyTexts(texts) {
+    if (!texts) return;
+    Object.keys(texts).forEach(function (k) {
+      var el = $('[data-edit="texts.' + k + '"]');
+      if (el && texts[k]) el.textContent = texts[k];
+    });
+  }
+
+  // Edit mode assets load only for a valid edit link — visitors never pay for them.
+  function loadEditor(d) {
+    var css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/p/edit.css";
+    document.head.appendChild(css);
+    var s = document.createElement("script");
+    s.src = "/p/edit.js";
+    s.onload = function () { window.FlyEdit.init(d, editToken); };
+    document.body.appendChild(s);
+  }
+
+  function notice(msg) {
+    var n = document.createElement("div");
+    n.style.cssText = "position:fixed;bottom:18px;right:50%;transform:translateX(50%);" +
+      "background:rgba(23,20,15,.94);color:#fff;padding:12px 22px;border-radius:12px;" +
+      "font-size:.9rem;z-index:1200;box-shadow:0 10px 30px rgba(0,0,0,.25);text-align:center";
+    n.textContent = msg;
+    document.body.appendChild(n);
+    setTimeout(function () { n.remove(); }, 6000);
+  }
 
   function hostname(url) {
     try { return new URL(url).hostname.replace(/^www\./, ""); } catch (e) { return "מקור"; }
@@ -410,7 +461,8 @@
   // ── boot ────────────────────────────────────────────────
 
   if (!pageId) { setState("notfound"); return; }
-  fetch("/api/property-page?id=" + encodeURIComponent(pageId))
+  fetch("/api/property-page?id=" + encodeURIComponent(pageId) +
+      (editToken ? "&edit_token=" + encodeURIComponent(editToken) : ""))
     .then(function (r) {
       if (r.status === 404) { setState("notfound"); return null; }
       if (!r.ok) throw new Error("status " + r.status);
@@ -428,6 +480,11 @@
         return;
       }
       render(d);
+      applyTexts(d.texts);
+      if (editToken) {
+        if (d.editable) loadEditor(d);
+        else notice("קישור העריכה אינו תקף — מוצג מצב צפייה בלבד");
+      }
     })
     .catch(function () { setState("notfound"); });
 })();
