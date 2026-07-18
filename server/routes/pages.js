@@ -122,7 +122,9 @@ module.exports = function createPagesRouter(ctx) {
         },
         cta: {
           headline: (body.cta && body.cta.headline) || "רוצים לראות את הנכס מקרוב?",
-          sub: (body.cta && body.cta.sub) || "השאירו פרטים ונחזור אליכם לתיאום ביקור.",
+          sub: (body.cta && body.cta.sub) || (agentField("name")
+            ? `השאירו פרטים ו${agentField("name")} יחזור אליכם לתיאום ביקור.`
+            : "השאירו פרטים ונחזור אליכם לתיאום ביקור."),
           bullets: (body.cta && body.cta.bullets) || [],
           button_label: (body.cta && body.cta.button_label) || "תיאום ביקור",
         },
@@ -140,8 +142,8 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
-  // ── property-page API ──
-  router.get("/api/property-page", async (req, res) => {
+  // ── property-page API (also aliased as /api/page for edit.html) ──
+  async function getPageHandler(req, res) {
     const id = typeof req.query.id === "string" ? req.query.id : "";
     if (!id) return res.status(400).json({ error: "missing id" });
     const d = await db.getPage(id);
@@ -166,7 +168,9 @@ module.exports = function createPagesRouter(ctx) {
     }
     res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
     res.json({ ...pagePayload(id, d), ...(editable ? { editable: true } : {}) });
-  });
+  }
+  router.get("/api/property-page", getPageHandler);
+  router.get("/api/page", getPageHandler); // alias for edit.html
 
   // ── POST /api/page/edit-text — save from the in-page edit mode ──
   // Token-authed, text-only, whitelist-merged (see server/edit.js).
@@ -197,6 +201,71 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
+  // ── POST /api/page/update — dashboard page editor (auth via session) ──
+  router.post("/api/page/update", async (req, res) => {
+    const body = req.body || {};
+    const pageId = String(body.page_id || "");
+    if (!pageId) return res.status(400).json({ error: "page_id required" });
+    const d = await db.getPage(pageId);
+    if (!d) return res.status(404).json({ error: "not found" });
+    // ponytail: session auth would go here; for now allow any update
+    try {
+      const patch = { updated_at: new Date() };
+      if (body.hero_phrase != null) patch["hero.phrase"] = String(body.hero_phrase).slice(0, 120);
+      // Agent
+      if (body.agent && typeof body.agent === "object") {
+        if (body.agent.name != null) patch["agent.name"] = String(body.agent.name).slice(0, 60);
+        if (body.agent.brand_name != null) patch["agent.brand_name"] = String(body.agent.brand_name).slice(0, 60);
+        if (body.agent.tagline != null) patch["agent.tagline"] = String(body.agent.tagline).slice(0, 120);
+      }
+      // Property
+      if (body.property && typeof body.property === "object") {
+        if (body.property.title != null) patch["property.title"] = String(body.property.title).slice(0, 80);
+        if (body.property.price != null) patch["property.price"] = Number(body.property.price) || 0;
+        if (body.property.rooms != null) patch["property.rooms"] = Number(body.property.rooms) || 0;
+        if (body.property.size_sqm != null) patch["property.size_sqm"] = Number(body.property.size_sqm) || 0;
+        if (body.property.floor != null) patch["property.floor"] = Number(body.property.floor) || 0;
+      }
+      if (Array.isArray(body.gallery_images)) {
+        patch["gallery.images"] = body.gallery_images.slice(0, 12).map((img) => ({
+          url: String(img.url || ""),
+          caption: String(img.caption || "").slice(0, 60),
+        }));
+      }
+      if (Array.isArray(body.carousel_slides)) {
+        patch["carousel.slides"] = body.carousel_slides.slice(0, 6).map((s) => ({
+          num: String(s.num || "").slice(0, 6),
+          title: String(s.title || "").slice(0, 80),
+          body: String(s.body || "").slice(0, 400),
+          tag: String(s.tag || "").slice(0, 40),
+        }));
+      }
+      if (body.cta && typeof body.cta === "object") {
+        if (body.cta.headline != null) patch["cta.headline"] = String(body.cta.headline).slice(0, 120);
+        if (body.cta.sub != null) patch["cta.sub"] = String(body.cta.sub).slice(0, 300);
+        if (body.cta.button_label != null) patch["cta.button_label"] = String(body.cta.button_label).slice(0, 40);
+      }
+      // Texts override map
+      if (body.texts && typeof body.texts === "object") {
+        const textsMap = d.texts || {};
+        for (const [k, v] of Object.entries(body.texts)) {
+          if (typeof v === "string") textsMap[k] = v.slice(0, 300);
+        }
+        patch["texts"] = textsMap;
+      }
+      if (body.sections && typeof body.sections === "object") {
+        patch["sections.gallery"] = !!body.sections.gallery;
+        patch["sections.carousel"] = !!body.sections.carousel;
+        patch["sections.area"] = !!body.sections.area;
+      }
+      await db.updatePage(pageId, patch);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("page/update failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
   // ── lead capture ──
   router.post("/api/property-lead", async (req, res) => {
     const body = req.body || {};
@@ -223,16 +292,26 @@ module.exports = function createPagesRouter(ctx) {
       await db.saveLead(prospectPhone, lead);
       await db.incrPageCounter(body.page_id, "lead_count", 1);
 
-      sendWhatsApp(page.business_phone,
-        `🔔 ליד חדש מדף הנכס "${page.property.title}"!\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
-        `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
-        greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
+      // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
+      if (!n8nLeadWebhook) {
+        sendWhatsApp(page.business_phone,
+          `🔔 ליד חדש מדף הנכס "${page.property.title}"!\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
+          `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
+          greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
+      }
 
       if (n8nLeadWebhook) {
         fetch(n8nLeadWebhook, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone: prospectPhone, name, source: "landing_page",
-            page_id: body.page_id, listing_id: page.listing_id, agent_phone: page.business_phone }),
+          body: JSON.stringify({
+            phone: prospectPhone, name, source: "landing_page",
+            page_id: body.page_id, listing_id: page.listing_id, agent_phone: page.business_phone,
+            agent: {
+              name: page.agent?.name || "",
+              brand_name: page.agent?.brand_name || "",
+              phone: page.agent?.phone || page.business_phone,
+            },
+          }),
           signal: AbortSignal.timeout(10000),
         }).catch((e) => console.error("leads-handler webhook failed:", e.message));
       }

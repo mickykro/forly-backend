@@ -16,7 +16,7 @@ All agent/prospect-facing strings. Review before deploy #2.
 - 404: `הדף לא נמצא` / `ייתכן שהקישור שגוי או שהדף הוסר.`
 - Form error: `משהו השתבש — נסו שוב או פנו בוואטסאפ`
 - WhatsApp prefill: `היי {agent}, ראיתי את הדף של {title} ואשמח לפרטים`
-- Footer: `הדף נוצר אוטומטית ע"י Forly 🦉 · כל הפרטים כפופים לאימות`
+- Footer: `הדף נוצר אוטומטית ע"י Forly 🦉`
 
 ## Extend confirmation page
 - `✅ הדף הוארך בהצלחה` / `הדף פעיל עד {date}.`
