@@ -141,8 +141,135 @@ search to **find** a sourced value (fetch, don't drop):
 Then the existing source-or-drop filter merges these in and remains the final
 safety net: **a number without a real source is still never shown to a buyer.**
 
-> Distances in `area.stops` already come from Google Maps Distance Matrix on the
-> geocoded address — those are real and need no change.
+---
+
+## C. Distances — measure a real walk, and only use the word the number allows
+
+**The bug (observed):** copy said a park was "מרחק הליכה" when it is ~3–4 km
+away. Root cause: the workflow only measured **driving** time to a **generic**
+`"פארק, {city}"` (Google can resolve that to any park in the city), and the
+copywriter was free to write "מרחק הליכה" with no distance to back it. Nothing
+ever measured a walk.
+
+Definition we enforce: **walkable = ≤ 1300 m (~15 min on foot).** Anything
+beyond that may never be called "הליכה / קרוב / צמוד".
+
+### C1. REPLACE `Prepare Distance Query` + `Distance Matrix` with one Code node `Nearby Amenities + Real Distances`
+Finds the **nearest actual** amenity of each type (`rankby=distance`), measures
+the **real walking** distance, and labels truthfully. (The `nearest()` call uses
+the Places API — enable "Places API" on the same Google key. If Places is off,
+delete `nearest()` and pass the amenity text query to Distance Matrix in
+`walking` mode instead — the wording gate below still fixes the false claims.)
+
+```js
+const base = $('Check Profile Freshness').first().json;
+const ctx  = base.profile_fresh ? base : $('Carry Fresh Profile').first().json;
+const geo  = $('Geocode Address').first().json;
+let lat = null, lng = null;
+if (geo && geo.status === 'OK' && geo.results && geo.results[0]) {
+  lat = geo.results[0].geometry.location.lat;
+  lng = geo.results[0].geometry.location.lng;
+}
+const helpers = this.helpers;
+const KEY = $env.GOOGLE_MAPS_KEY;
+const WALK_MAX_M = 1300;                 // ~15 min walk; above this: never "הליכה"
+
+const targets = [
+  { cat: 'פארק',           q: 'type=park' },
+  { cat: 'תחבורה ציבורית', q: 'type=transit_station' },
+  { cat: 'סופרמרקט',       q: 'type=supermarket' },
+  { cat: 'בית ספר',        q: 'type=school' },
+  { cat: 'חוף הים',        q: 'keyword=' + encodeURIComponent('חוף ים') },
+];
+
+async function nearest(q) {
+  const url = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=' +
+    lat + ',' + lng + '&rankby=distance&language=he&key=' + KEY + '&' + q;
+  const r = await helpers.httpRequest({ url, json: true });
+  const p = (r.results || [])[0];
+  return p ? { name: p.name, plat: p.geometry.location.lat, plng: p.geometry.location.lng } : null;
+}
+async function measure(plat, plng, mode) {
+  const url = 'https://maps.googleapis.com/maps/api/distancematrix/json?origins=' +
+    lat + ',' + lng + '&destinations=' + plat + ',' + plng +
+    '&mode=' + mode + '&language=he&key=' + KEY;
+  const r = await helpers.httpRequest({ url, json: true });
+  const el = r && r.rows && r.rows[0] && r.rows[0].elements && r.rows[0].elements[0];
+  if (!el || el.status !== 'OK') return null;
+  return { meters: el.distance.value, mins: Math.max(1, Math.round(el.duration.value / 60)) };
+}
+
+const stops = [], proximity = [];
+if (lat && lng && KEY) {
+  await Promise.all(targets.map(async (t) => {
+    let p; try { p = await nearest(t.q); } catch (e) { p = null; }
+    if (!p) return;
+    const w = await measure(p.plat, p.plng, 'walking');
+    let minutes, walkable = false, meters = w ? w.meters : null;
+    if (w && w.meters <= WALK_MAX_M) {
+      minutes = w.mins + ' דק׳ הליכה'; walkable = true;
+    } else {
+      const d = await measure(p.plat, p.plng, 'driving');
+      if (!d) return;
+      minutes = d.mins + ' דק׳ נסיעה';
+    }
+    stops.push({ label: p.name || t.cat, minutes, walkable });
+    proximity.push({ category: t.cat, name: p.name, walk_m: meters, walkable });
+  }));
+}
+stops.sort((a, b) => (b.walkable ? 1 : 0) - (a.walkable ? 1 : 0));   // walkable first
+
+const city = ctx.listing.city || '';
+return [{ json: Object.assign({}, ctx, {
+  lat, lng, stops, proximity,
+  // static map still needs a center point:
+  map_center: (lat && lng) ? (lat + ',' + lng) : null,
+}) }];
+```
+
+### C2. `Assemble Page Payload` — use the measured stops
+Replace the old Distance-Matrix parsing block with:
+```js
+const stops = $('Nearby Amenities + Real Distances').first().json.stops || [];
+```
+(and drop the `dm`/`ctx.landmarks` loop entirely.)
+
+### C3. Hard rule for the copywriter (add to `Build Copy Input`, §A1)
+Pass the proximity table in and forbid ungrounded proximity words:
+```js
+const prox = (ctx.proximity || []);
+// …append to the prompt string:
+'\n\nקרבה (מדודה בפועל):\n' + JSON.stringify(prox) +
+'\nכלל מרחקים: מותר לומר "מרחק הליכה"/"קרוב"/"צמוד" רק לפריט עם walkable=true. ' +
+'לכל השאר — לשון של נסיעה בלבד. אל תמציא מרחקים ואל תמציא מקומות שאינם ברשימה.'
+```
+
+---
+
+## D. Add the high-value facts: renovations & future plans (sourced-or-hidden)
+
+Buyers care most about **what's changing** — urban renewal and future transit —
+and these are the **highest hallucination risk** (claims about the future), so
+the rule is strict: **a future claim with no real source link is not shown.**
+
+### D1. Extend `Research Area (Claude)` to hunt these, with sources
+Add to the research prompt:
+```
+' חקור גם, עם מקור לכל טענה: (1) התחדשות עירונית ברחוב/בשכונה — תמ"א 38, ' +
+'פינוי-בינוי, תב"ע חדשה (מקור: mavat.iplan.gov.il או אתר העירייה); ' +
+'(2) תחבורה עתידית — מטרו / רכבת קלה / תחנות מתוכננות (מקור: nta.co.il, gov.il); ' +
+'(3) פרויקטים עירוניים מתוכננים — פארקים, מבני ציבור, מסחר (מקור: העירייה / מבא"ת). '
+```
+Return these as `stats` (each with `source_url`) and/or dated lines in `blurb`.
+The existing **source-or-drop** filter then guarantees only sourced future
+claims survive.
+
+### D2. (Optional, for prominence) a dedicated `area.plans[]` section
+If you want future plans shown as their own block rather than mixed into stats,
+add `area.plans[] = { title, detail, horizon, source_url }` — a small schema
+addition in `pages.ts` (`AreaInfo`), passed through `getPropertyPage`, and one
+new rendered section in the templates. Same source-or-drop rule applies. This is
+a repo change (deploy-gated), separate from the n8n edits above.
 
 ---
 
