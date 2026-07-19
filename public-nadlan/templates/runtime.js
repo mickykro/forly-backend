@@ -139,14 +139,19 @@
     });
   });
 
-  // ── gallery: extract frames from the tour video ──
+  // ── gallery: show the uploaded photos. Real pages carry gallery.images
+  //    (the actual listing photos); only the demo preview — which ships
+  //    captions but no image URLs — falls back to sampling the tour video's
+  //    frames so the template still has something to render.
   each("[data-gallery]", document, function (host) {
     var cls = host.getAttribute("data-gallery-class") || "g";
     var caps = (get("gallery.captions") || []);
-    var count = +(host.getAttribute("data-gallery-count") || 6);
-    var FR = [], i;
-    for (i = 0; i < count; i++) FR.push(0.06 + (0.86 * i) / Math.max(1, count - 1));
-    var frames = [], tiles = [];
+    var images = get("gallery.images");
+    var useImages = Array.isArray(images) && images.length > 0;
+    var count = useImages ?
+      Math.min(images.length, 12) :
+      +(host.getAttribute("data-gallery-count") || 6);
+    var frames = [], srcs = [], tiles = [], i;
     for (i = 0; i < count; i++) {
       var b = document.createElement("button");
       b.className = cls; b.type = "button";
@@ -154,34 +159,64 @@
       (function (idx) { b.addEventListener("click", function () { openLB(idx); }); })(i);
       host.appendChild(b); tiles.push(b);
     }
-    if (!vsrc) return;
-    var vv = document.createElement("video");
-    vv.src = vsrc; vv.muted = true; vv.playsInline = true; vv.preload = "auto"; vv.crossOrigin = "anonymous";
-    vv.addEventListener("loadedmetadata", function () {
-      var k = 0;
-      function seek() { if (k >= count) return; vv.currentTime = Math.max(0.1, FR[k] * vv.duration); }
-      vv.addEventListener("seeked", function () {
-        var c = document.createElement("canvas"); c.width = vv.videoWidth; c.height = vv.videoHeight;
-        try { c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height); frames[k] = c; tiles[k].insertBefore(c, tiles[k].firstChild); tiles[k].classList.add("loaded"); } catch (e) {}
-        k++; seek();
-      });
-      seek();
-    });
-    vv.load();
 
-    // lightbox (shared, created once)
+    if (useImages) {
+      images.slice(0, count).forEach(function (img, k) {
+        if (!img || !img.url) return;
+        srcs[k] = img.url;
+        var im = document.createElement("img");
+        im.src = img.url; im.loading = "lazy"; im.decoding = "async";
+        im.alt = img.caption || caps[k] || "";
+        im.style.cssText = "width:100%;height:100%;object-fit:cover;display:block";
+        tiles[k].insertBefore(im, tiles[k].firstChild);
+        tiles[k].classList.add("loaded");
+      });
+    } else if (vsrc) {
+      var FR = [];
+      for (i = 0; i < count; i++) FR.push(0.06 + (0.86 * i) / Math.max(1, count - 1));
+      var vv = document.createElement("video");
+      vv.src = vsrc; vv.muted = true; vv.playsInline = true; vv.preload = "auto"; vv.crossOrigin = "anonymous";
+      vv.addEventListener("loadedmetadata", function () {
+        var k = 0;
+        function seek() { if (k >= count) return; vv.currentTime = Math.max(0.1, FR[k] * vv.duration); }
+        vv.addEventListener("seeked", function () {
+          var c = document.createElement("canvas"); c.width = vv.videoWidth; c.height = vv.videoHeight;
+          try { c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height); frames[k] = c; tiles[k].insertBefore(c, tiles[k].firstChild); tiles[k].classList.add("loaded"); } catch (e) {}
+          k++; seek();
+        });
+        seek();
+      });
+      vv.load();
+    }
+
+    // lightbox (shared, created once) — holds both an <img> (photo mode) and a
+    // <canvas> (video-frame preview mode); openLB shows whichever applies.
     var lb = document.getElementById("__lb");
     if (!lb) {
       lb = document.createElement("div"); lb.id = "__lb";
       lb.style.cssText = "position:fixed;inset:0;z-index:100;background:rgba(8,8,10,.95);display:none;align-items:center;justify-content:center;padding:4vw";
-      lb.innerHTML = '<canvas id="__lbc" style="max-width:100%;max-height:88vh;border-radius:6px"></canvas>' +
+      lb.innerHTML = '<img id="__lbi" alt="" style="max-width:100%;max-height:88vh;border-radius:6px;display:none">' +
+        '<canvas id="__lbc" style="max-width:100%;max-height:88vh;border-radius:6px;display:none"></canvas>' +
         '<button id="__lbx" aria-label="סגירה" style="position:absolute;top:22px;inset-inline-end:22px;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:1.1rem;cursor:pointer">✕</button>';
       document.body.appendChild(lb);
       lb.addEventListener("click", function (e) { if (e.target === lb) closeLB(); });
       document.getElementById("__lbx").addEventListener("click", closeLB);
       document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeLB(); });
     }
-    function openLB(idx) { var f = frames[idx]; if (!f) return; var c = document.getElementById("__lbc"); c.width = f.width; c.height = f.height; c.getContext("2d").drawImage(f, 0, 0); lb.style.display = "flex"; document.body.style.overflow = "hidden"; }
+    function openLB(idx) {
+      var lbi = document.getElementById("__lbi"), lbc = document.getElementById("__lbc");
+      if (useImages) {
+        if (!srcs[idx]) return;
+        lbc.style.display = "none";
+        lbi.src = srcs[idx]; lbi.style.display = "block";
+      } else {
+        var f = frames[idx]; if (!f) return;
+        lbi.removeAttribute("src"); lbi.style.display = "none";
+        lbc.width = f.width; lbc.height = f.height; lbc.getContext("2d").drawImage(f, 0, 0);
+        lbc.style.display = "block";
+      }
+      lb.style.display = "flex"; document.body.style.overflow = "hidden";
+    }
     function closeLB() { lb.style.display = "none"; document.body.style.overflow = ""; }
   });
 

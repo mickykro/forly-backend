@@ -118,14 +118,15 @@
         <div class="field"><label data-i18n="lbl_city">עיר *</label><input id="pCity" placeholder="תל אביב" data-i18n-ph="ph_city"></div>
         <div class="field"><label data-i18n="lbl_neighborhood">שכונה</label><input id="pHood" placeholder="בבלי" data-i18n-ph="ph_hood"></div>
       </div>
-      <div class="grid-3">
-        <div class="field"><label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label><input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="4,900,000"></div>
-        <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
-        <div class="field"><label data-i18n="lbl_sqm">מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
-      </div>
-      <div class="field" style="margin-top:-6px">
+      <div class="field">
+        <label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label>
+        <input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="4,900,000">
         <div class="hint" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span data-i18n="quick_price">בחירה מהירה:</span><span id="priceChips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span></div>
         <div class="hint" id="priceWords" style="color:var(--gold);font-weight:600;min-height:1.2em"></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
+        <div class="field"><label data-i18n="lbl_sqm">מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
       </div>
       <div class="grid-3">
         <div class="field"><label data-i18n="lbl_floor">קומה</label><input id="pFloor" type="number" inputmode="numeric" placeholder="5"></div>
