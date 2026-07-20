@@ -48,6 +48,8 @@ const GRADIENT_PEAK_ALPHA = 242; // ~95% opaque at the very bottom
 // that are already Hebrew) pass through as-is.
 const ROOM_HE = {
   living_room: "סלון", livingroom: "סלון", salon: "סלון", lounge: "סלון",
+  open_plan_living_dining_kitchen: "חלל פתוח", open_plan: "חלל פתוח",
+  living_dining_kitchen: "חלל פתוח", living_dining: "סלון ופינת אוכל",
   kitchen: "מטבח", kitchenette: "מטבחון",
   bedroom: "חדר שינה", master_bedroom: "חדר שינה ראשי",
   kids_room: "חדר ילדים", children_room: "חדר ילדים", nursery: "חדר ילדים",
