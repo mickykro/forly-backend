@@ -27,6 +27,7 @@
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const zlib = require("zlib");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
 
@@ -40,9 +41,64 @@ const VISION_MODEL = process.env.OVERLAY_VISION_MODEL || "claude-haiku-4-5-20251
 
 // Cream (#F7F3EC) matches the landing-page theme; the room label sits on a
 // vertical gradient that fades from transparent (top) to this cream (bottom).
-const GRADIENT_COLOR = "0xF7F3EC";
+const CREAM_RGB = [0xF7, 0xF3, 0xEC];
 const GRADIENT_HEIGHT_FRAC = 0.22; // band height as a fraction of video height
 const GRADIENT_PEAK_ALPHA = 242; // ~95% opaque at the very bottom
+
+const bandHeight = (videoHeight) => Math.round(videoHeight * GRADIENT_HEIGHT_FRAC);
+
+// ── minimal RGBA PNG encoder (no deps) ──
+// A vertical cream gradient is built in-process and handed to ffmpeg as a
+// normal image input, so the filtergraph only needs `overlay` + `ass` — no
+// geq/lavfi tricks that vary across ffmpeg builds.
+const CRC_TABLE = (() => {
+  const t = new Int32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function pngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(body), 0);
+  return Buffer.concat([len, body, crc]);
+}
+// Solid `rgb` fading from alpha 0 at the top to `peakAlpha` at the bottom.
+function gradientPng(width, height, rgb, peakAlpha) {
+  const [r, g, b] = rgb;
+  const rowLen = 1 + width * 4; // 1 filter byte + RGBA per pixel
+  const raw = Buffer.alloc(rowLen * height);
+  for (let y = 0; y < height; y++) {
+    const a = Math.round(peakAlpha * Math.pow(height > 1 ? y / (height - 1) : 1, 1.2));
+    let off = y * rowLen;
+    raw[off++] = 0; // row filter: none
+    for (let x = 0; x < width; x++) {
+      raw[off++] = r; raw[off++] = g; raw[off++] = b; raw[off++] = a;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // colour type: RGBA
+  // bytes 10-12 (compression, filter, interlace) stay 0
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", zlib.deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
 
 // Vision-Tagger room types → Hebrew display labels. Unknown types (or values
 // that are already Hebrew) pass through as-is.
@@ -88,8 +144,14 @@ function modeOf(arr) {
 function run(cmd, args, timeoutMs) {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`${cmd} failed: ${err.message}\n${String(stderr).slice(-800)}`));
-      else resolve(String(stdout));
+      if (err) {
+        // Surface the tail of stderr (where ffmpeg/ffprobe print the real
+        // reason) rather than the giant command echo execFile prepends.
+        const tail = String(stderr).trim().split("\n").slice(-6).join(" | ").slice(-500);
+        reject(new Error(`${path.basename(cmd)} failed (code ${err.code ?? err.signal ?? "?"}): ${tail}`));
+      } else {
+        resolve(String(stdout));
+      }
     });
   });
 }
@@ -309,11 +371,12 @@ async function download(url, dest) {
   fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
 }
 
-// Build the ffmpeg args. With room segments we composite a cream gradient
-// strip (enabled only while a room label shows) and burn the ASS track over
-// it; without, a plain ASS pass. execFile passes args verbatim (no shell), so
-// commas inside filter expressions are escaped with \, for ffmpeg's parser.
-function buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments) {
+// Build the ffmpeg args. With room segments we overlay a pre-rendered cream
+// gradient PNG (enabled only while a room label shows) and burn the ASS track
+// over it; without, a plain ASS pass. execFile passes args verbatim (no
+// shell), so commas inside the enable expression are escaped with \, for
+// ffmpeg's filtergraph parser.
+function buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments, gradFile) {
   if (!roomSegments.length) {
     return [
       "-y", "-i", inFile,
@@ -324,18 +387,16 @@ function buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments) {
       outFile,
     ];
   }
-  const bandH = Math.round(info.height * GRADIENT_HEIGHT_FRAC);
+  const y = info.height - bandHeight(info.height);
   const enable = roomSegments
     .map((s) => `between(t\\,${s.start.toFixed(2)}\\,${s.end.toFixed(2)})`)
     .join("+");
   const filter =
-    `[1:v]format=rgba,geq=r=r(X\\,Y):g=g(X\\,Y):b=b(X\\,Y):` +
-    `a=${GRADIENT_PEAK_ALPHA}*pow(clip(Y/(H-1)\\,0\\,1)\\,1.2)[grad];` +
-    `[0:v][grad]overlay=x=0:y=${info.height - bandH}:enable=${enable}[bg];` +
+    `[0:v][1:v]overlay=x=0:y=${y}:enable=${enable}[bg];` +
     `[bg]format=yuv420p,ass=${assFile}[v]`;
   return [
     "-y", "-i", inFile,
-    "-f", "lavfi", "-i", `color=c=${GRADIENT_COLOR}:s=${info.width}x${bandH}`,
+    "-i", gradFile,
     "-filter_complex", filter,
     "-map", "[v]", "-map", "0:a?",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
@@ -380,7 +441,12 @@ async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
       }
     }
     fs.writeFileSync(assFile, buildAss(info, lines, roomSegments), "utf8");
-    await run(FFMPEG, buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments), 240000);
+    let gradFile = null;
+    if (roomSegments.length) {
+      gradFile = path.join(tmp, "grad.png");
+      fs.writeFileSync(gradFile, gradientPng(info.width, bandHeight(info.height), CREAM_RGB, GRADIENT_PEAK_ALPHA));
+    }
+    await run(FFMPEG, buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments, gradFile), 240000);
     const rel = `overlays/${crypto.randomUUID()}.mp4`;
     const finalPath = path.join(uploadDir, rel);
     fs.mkdirSync(path.dirname(finalPath), { recursive: true });
@@ -393,5 +459,5 @@ async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
 
 module.exports = {
   overlayVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS,
-  _test: { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime, modeOf },
+  _test: { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime, modeOf, gradientPng, bandHeight },
 };

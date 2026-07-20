@@ -3,8 +3,9 @@
  * Run: node server/overlay.test.js
  */
 const assert = require("assert");
+const zlib = require("zlib");
 const { _test, MAX_ROOMS } = require("./overlay");
-const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf } = _test;
+const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng, bandHeight } = _test;
 
 // ── roomLabel mapping ──
 assert.equal(roomLabel("living room"), "סלון");
@@ -68,21 +69,42 @@ assert.ok(!ass2.includes(",Room,,"), "no room events without segments");
 
 // ── buildFfmpegArgs ──
 const info = { width: 720, height: 1280, duration: 10 };
+assert.equal(bandHeight(1280), 282, "band height = round(1280*0.22)");
 // no rooms → simple -vf ass pass, audio copied
-const plain = buildFfmpegArgs("in.mp4", "t.ass", "out.mp4", info, []);
+const plain = buildFfmpegArgs("in.mp4", "t.ass", "out.mp4", info, [], null);
 assert.ok(plain.includes("-vf") && plain[plain.indexOf("-vf") + 1] === "ass=t.ass");
 assert.ok(!plain.includes("-filter_complex"), "no filter_complex without rooms");
 
-// rooms → gradient overlay + ass, cream lavfi input, enable windows, escaped commas
-const fc = buildFfmpegArgs("in.mp4", "t.ass", "out.mp4", info, rs);
+// rooms → gradient PNG overlay + ass, enable windows, escaped commas
+const fc = buildFfmpegArgs("in.mp4", "t.ass", "out.mp4", info, rs, "grad.png");
 const li = fc.indexOf("-filter_complex");
 assert.ok(li > 0, "filter_complex present with rooms");
 const filter = fc[li + 1];
-assert.ok(fc.join(" ").includes("color=c=0xF7F3EC:s=720x282"), "cream lavfi band = round(1280*0.22)=282");
-assert.ok(filter.includes("overlay=x=0:y=998"), "gradient overlaid at bottom (1280-282)");
+assert.ok(fc.includes("grad.png"), "gradient PNG is a second input");
+assert.ok(!fc.join(" ").includes("geq") && !fc.join(" ").includes("lavfi"), "no geq/lavfi gradient tricks");
+assert.ok(filter.startsWith("[0:v][1:v]overlay=x=0:y=998:"), "gradient overlaid at bottom (1280-282)");
 assert.ok(filter.includes("between(t\\,0.00\\,4.00)+between(t\\,4.00\\,7.25)"), "per-segment enable, escaped commas");
-assert.ok(filter.includes("pow(clip(Y/(H-1)\\,0\\,1)\\,1.2)"), "vertical alpha ramp");
+assert.ok(filter.includes("format=yuv420p,ass=t.ass"), "yuv420p then ass burn");
 assert.ok(fc.includes("0:a?"), "audio mapped optionally");
+
+// ── gradientPng: valid RGBA PNG with a vertical alpha ramp ──
+const png = gradientPng(4, 10, [0xF7, 0xF3, 0xEC], 242);
+assert.deepEqual([...png.slice(0, 8)], [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "PNG signature");
+// IHDR chunk starts at byte 8: [len(4)][type(4)][w(4)][h(4)][bitdepth][colortype]...
+assert.equal(png.readUInt32BE(16), 4, "IHDR width");
+assert.equal(png.readUInt32BE(20), 10, "IHDR height");
+assert.equal(png[24], 8, "bit depth 8");
+assert.equal(png[25], 6, "colour type RGBA");
+// Decode IDAT and check the alpha ramp: top row transparent, bottom row peak.
+const idatStart = png.indexOf(Buffer.from("IDAT", "ascii")) + 4;
+const idatLen = png.readUInt32BE(png.indexOf(Buffer.from("IDAT", "ascii")) - 4);
+const raw = zlib.inflateSync(png.slice(idatStart, idatStart + idatLen));
+const rowLen = 1 + 4 * 4;
+assert.equal(raw.length, rowLen * 10, "raw scanlines size");
+assert.equal(raw[0], 0, "row filter byte 0");
+assert.equal(raw[1 + 3], 0, "top row alpha = 0 (transparent)");
+assert.equal(raw[9 * rowLen + 1 + 3], 242, "bottom row alpha = peak");
+assert.equal(raw[1], 0xF7, "cream R"); assert.equal(raw[2], 0xF3, "cream G"); assert.equal(raw[3], 0xEC, "cream B");
 
 assert.equal(MAX_ROOMS, 12);
 console.log("all overlay tests passed");
