@@ -4,18 +4,21 @@
  *
  * Implementation: ffmpeg + a generated ASS subtitle track (libass), which
  * handles Hebrew RTL/BiDi shaping correctly — no generative model touches
- * the text, so it can never come out as gibberish. The overlay is a
- * semi-transparent band with a white title line and a gold sub-line,
- * fading in at (duration - 3s) and holding to the end.
+ * the text, so it can never come out as gibberish. The end titles are a
+ * semi-transparent band with a white title line and a gold sub-line, fading
+ * in at (duration - 3s) and holding to the end.
  *
  * Room labels (optional): when the caller passes `rooms` (the Vision-Tagger
  * room types of the photos the video was generated from) and
  * ANTHROPIC_API_KEY is set, frames are sampled from the FINISHED video and
  * classified in one Claude vision call against that closed label list —
  * Seedance doesn't guarantee shot order/timing, so we look at what actually
- * rendered. The per-frame labels are smoothed into segments and burned as a
- * top-center pill in the same ffmpeg pass as the titles. Vision failure is
- * non-fatal: the video still ships with titles only.
+ * rendered. The same call returns a short 1–2 word Hebrew descriptor per
+ * frame ("מרווח ומואר"). Per-frame labels are smoothed into segments and
+ * burned bottom-right (room name + descriptor beneath it, white text with a
+ * black outline) over a vertical cream→transparent gradient composited by
+ * ffmpeg. Room labels stop before the end-title window so the closing shot
+ * stays clean. Vision failure is non-fatal: the video ships with titles only.
  *
  * Requires ffmpeg + ffprobe with libass on PATH (see Dockerfile), and a
  * Hebrew-capable font (Noto Sans Hebrew / DejaVu Sans).
@@ -34,6 +37,12 @@ const MAX_LINES = 3;
 const MAX_LINE_CHARS = 60;
 const MAX_ROOMS = 12;
 const VISION_MODEL = process.env.OVERLAY_VISION_MODEL || "claude-haiku-4-5-20251001";
+
+// Cream (#F7F3EC) matches the landing-page theme; the room label sits on a
+// vertical gradient that fades from transparent (top) to this cream (bottom).
+const GRADIENT_COLOR = "0xF7F3EC";
+const GRADIENT_HEIGHT_FRAC = 0.22; // band height as a fraction of video height
+const GRADIENT_PEAK_ALPHA = 242; // ~95% opaque at the very bottom
 
 // Vision-Tagger room types → Hebrew display labels. Unknown types (or values
 // that are already Hebrew) pass through as-is.
@@ -60,6 +69,18 @@ function roomLabel(r) {
   const s = String(raw).trim();
   if (!s) return "";
   return ROOM_HE[s.toLowerCase().replace(/[\s-]+/g, "_")] || s.slice(0, 30);
+}
+
+// Most frequent value in an array (first-seen wins ties); null if empty.
+function modeOf(arr) {
+  const counts = new Map();
+  let best = null, bestN = 0;
+  for (const v of arr) {
+    const n = (counts.get(v) || 0) + 1;
+    counts.set(v, n);
+    if (n > bestN) { bestN = n; best = v; }
+  }
+  return best;
 }
 
 function run(cmd, args, timeoutMs) {
@@ -115,8 +136,11 @@ function buildAss({ width, height, duration }, lines, roomSegments = []) {
   const subSize = Math.round(height * 0.034);
   const titleMarginV = Math.round(height * 0.16);
   const subMarginV = Math.round(height * 0.105);
-  const roomSize = Math.round(height * 0.032);
-  const roomMarginV = Math.round(height * 0.05);
+  const roomNameSize = Math.round(height * 0.040);
+  const roomDescSize = Math.round(height * 0.028);
+  const roomOutline = Math.max(2, Math.round(height * 0.003));
+  const roomMarginR = Math.round(width * 0.045);
+  const roomMarginV = Math.round(height * 0.030);
   const fonts = "Noto Sans Hebrew";
   // Colors are &HAABBGGRR. BackColour 78000000 = ~47% black band (BorderStyle 3).
   // Gold #B98A2F -> BGR 2F8AB9.
@@ -132,8 +156,10 @@ function buildAss({ width, height, duration }, lines, roomSegments = []) {
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
     `Style: Title,${fonts},${titleSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,3,${Math.round(titleSize * 0.28)},0,2,40,40,${titleMarginV},1`,
     `Style: Sub,${fonts},${subSize},&H002F8AB9,&H00FFFFFF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,3,${Math.round(subSize * 0.28)},0,2,40,40,${subMarginV},1`,
-    // Room pill: top-center (Alignment 8), same translucent band treatment.
-    `Style: Room,${fonts},${roomSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,3,${Math.round(roomSize * 0.34)},0,8,40,40,${roomMarginV},1`,
+    // Room label: bottom-right (Alignment 3), outline style (BorderStyle 1) —
+    // white fill, black outline — because the cream band is drawn by ffmpeg,
+    // not by an ASS box. MarginR/V lift it off the corner.
+    `Style: Room,${fonts},${roomNameSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,${roomOutline},0,3,0,${roomMarginR},${roomMarginV},1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -144,8 +170,14 @@ function buildAss({ width, height, duration }, lines, roomSegments = []) {
     const marginOverride = i <= 1 ? 0 : Math.max(20, subMarginV - (i - 1) * Math.round(subSize * 1.5));
     return `Dialogue: 0,${start},${end},${style},,0,0,${marginOverride},,{\\fad(300,0)}${sanitizeAss(line)}`;
   });
-  const roomEvents = roomSegments.map((s) =>
-    `Dialogue: 0,${assTime(s.start)},${assTime(s.end)},Room,,0,0,0,,{\\fad(150,150)}${sanitizeAss(s.label)}`);
+  const roomEvents = roomSegments.map((s) => {
+    const name = sanitizeAss(s.label);
+    // Descriptor stacks under the name (smaller) via an inline \fs override.
+    const body = s.desc
+      ? `${name}\\N{\\fs${roomDescSize}}${sanitizeAss(s.desc)}`
+      : name;
+    return `Dialogue: 0,${assTime(s.start)},${assTime(s.end)},Room,,0,0,0,,{\\fad(150,150)}${body}`;
+  });
   return header.concat(events, roomEvents).join("\n") + "\n";
 }
 
@@ -180,7 +212,7 @@ function labelsToSegments(labels, times, duration) {
 }
 
 // One Claude vision call: all sampled frames in order, closed label list.
-// Returns one label (or null) per frame; anything outside the list → null.
+// Returns one {label, desc} per frame; label outside the list → null.
 async function classifyFrames(frames, allowed, apiKey) {
   const content = [];
   frames.forEach((f, i) => {
@@ -194,16 +226,21 @@ async function classifyFrames(frames, allowed, apiKey) {
     type: "text",
     text:
       `These ${frames.length} frames are sampled in order from one real-estate walkthrough video.\n` +
-      `Allowed labels:\n${allowed.map((l) => `- ${l}`).join("\n")}\n` +
-      `For each frame pick the allowed label that matches the room/space shown, ` +
-      `or null if the frame is a transition/blend between rooms or clearly matches no label. ` +
-      `Reply with ONLY a JSON array of exactly ${frames.length} entries (strings or null), ` +
-      `where entry i is the label for frame i.`,
+      `Allowed room labels:\n${allowed.map((l) => `- ${l}`).join("\n")}\n` +
+      `For each frame return an object {"label": ..., "desc": ...}:\n` +
+      `- label: the allowed label matching the room/space shown, or null for a ` +
+      `transition/blend between rooms or a frame matching no label.\n` +
+      `- desc: a SHORT 1-2 word Hebrew descriptor of a notable, clearly VISIBLE ` +
+      `quality of that space (e.g. "מרווח ומואר", "מטבח מודרני", "נוף פתוח"), or ` +
+      `null if nothing notable is visible. Keep it factual — describe only what ` +
+      `the frame shows.\n` +
+      `Reply with ONLY a JSON array of exactly ${frames.length} objects, where ` +
+      `entry i corresponds to frame i.`,
   });
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: VISION_MODEL, max_tokens: 1000, temperature: 0, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: VISION_MODEL, max_tokens: 1500, temperature: 0, messages: [{ role: "user", content }] }),
     signal: AbortSignal.timeout(90000),
   });
   if (!resp.ok) throw new Error(`vision api ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
@@ -213,11 +250,23 @@ async function classifyFrames(frames, allowed, apiKey) {
   if (!m) throw new Error("vision reply had no JSON array");
   const arr = JSON.parse(m[0]);
   const set = new Set(allowed);
-  return frames.map((_, i) => (set.has(arr[i]) ? arr[i] : null));
+  return frames.map((_, i) => {
+    const e = arr[i];
+    if (e && typeof e === "object") {
+      return {
+        label: set.has(e.label) ? e.label : null,
+        desc: typeof e.desc === "string" && e.desc.trim() ? e.desc.trim().slice(0, 40) : null,
+      };
+    }
+    // Tolerate a model that returned a bare label string instead of an object.
+    return { label: set.has(e) ? e : null, desc: null };
+  });
 }
 
 // Sample ~2 fps (8–24 frames), downscaled to 384px height to keep vision
-// tokens cheap, classify, and smooth into segments.
+// tokens cheap, classify, smooth into segments, and attach a descriptor.
+// Segments are clipped to end before the title window so the closing shot
+// stays clean.
 async function detectRoomSegments(inFile, tmp, info, rooms) {
   const allowed = [...new Set(rooms.map(roomLabel).filter(Boolean))];
   if (!allowed.length) return [];
@@ -236,8 +285,20 @@ async function detectRoomSegments(inFile, tmp, info, rooms) {
     t: ((i + 0.5) * info.duration) / files.length,
   }));
   if (!frames.length) return [];
-  const labels = await classifyFrames(frames, allowed, process.env.ANTHROPIC_API_KEY);
-  return labelsToSegments(labels, frames.map((f) => f.t), info.duration);
+  const items = await classifyFrames(frames, allowed, process.env.ANTHROPIC_API_KEY);
+  const times = frames.map((f) => f.t);
+  const segs = labelsToSegments(items.map((x) => x.label), times, info.duration);
+  const cutoff = Math.max(0, info.duration - OVERLAY_SECONDS);
+  return segs
+    .map((s) => ({ ...s, end: Math.min(s.end, cutoff) }))
+    .filter((s) => s.end - s.start >= 0.5) // too short after clipping → drop
+    .map((s) => {
+      const descs = frames
+        .map((f, i) => ({ t: f.t, desc: items[i].desc }))
+        .filter((x) => x.t >= s.start && x.t <= s.end && x.desc)
+        .map((x) => x.desc);
+      return { ...s, desc: modeOf(descs) };
+    });
 }
 
 async function download(url, dest) {
@@ -246,10 +307,47 @@ async function download(url, dest) {
   fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
 }
 
+// Build the ffmpeg args. With room segments we composite a cream gradient
+// strip (enabled only while a room label shows) and burn the ASS track over
+// it; without, a plain ASS pass. execFile passes args verbatim (no shell), so
+// commas inside filter expressions are escaped with \, for ffmpeg's parser.
+function buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments) {
+  if (!roomSegments.length) {
+    return [
+      "-y", "-i", inFile,
+      "-vf", `ass=${assFile}`,
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+      "-c:a", "copy",
+      "-movflags", "+faststart",
+      outFile,
+    ];
+  }
+  const bandH = Math.round(info.height * GRADIENT_HEIGHT_FRAC);
+  const enable = roomSegments
+    .map((s) => `between(t\\,${s.start.toFixed(2)}\\,${s.end.toFixed(2)})`)
+    .join("+");
+  const filter =
+    `[1:v]format=rgba,geq=r=r(X\\,Y):g=g(X\\,Y):b=b(X\\,Y):` +
+    `a=${GRADIENT_PEAK_ALPHA}*pow(clip(Y/(H-1)\\,0\\,1)\\,1.2)[grad];` +
+    `[0:v][grad]overlay=x=0:y=${info.height - bandH}:enable=${enable}[bg];` +
+    `[bg]format=yuv420p,ass=${assFile}[v]`;
+  return [
+    "-y", "-i", inFile,
+    "-f", "lavfi", "-i", `color=c=${GRADIENT_COLOR}:s=${info.width}x${bandH}`,
+    "-filter_complex", filter,
+    "-map", "[v]", "-map", "0:a?",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+    "-c:a", "copy",
+    "-movflags", "+faststart",
+    outFile,
+  ];
+}
+
 /**
  * Overlay `lines` on the last 3 seconds of the video at `videoUrl`, and —
  * when `rooms` is provided and ANTHROPIC_API_KEY is set — vision-detected
- * room-name pills on the segments where each room is on screen.
+ * room-name labels (with a short descriptor, over a cream gradient) on the
+ * segments where each room is on screen.
  * Writes the result under `uploadDir`/overlays and returns its public URL.
  */
 async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
@@ -274,14 +372,7 @@ async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
       }
     }
     fs.writeFileSync(assFile, buildAss(info, lines, roomSegments), "utf8");
-    await run(FFMPEG, [
-      "-y", "-i", inFile,
-      "-vf", `ass=${assFile}`,
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-      "-c:a", "copy",
-      "-movflags", "+faststart",
-      outFile,
-    ], 240000);
+    await run(FFMPEG, buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments), 240000);
     const rel = `overlays/${crypto.randomUUID()}.mp4`;
     const finalPath = path.join(uploadDir, rel);
     fs.mkdirSync(path.dirname(finalPath), { recursive: true });
@@ -294,5 +385,5 @@ async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
 
 module.exports = {
   overlayVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS,
-  _test: { buildAss, labelsToSegments, roomLabel, sanitizeAss, assTime },
+  _test: { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime, modeOf },
 };
