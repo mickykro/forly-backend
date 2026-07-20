@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly · לפני / אחרי</title>
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  /* topbar actions + language switcher (same as create.html) */
+  .topbar-actions{display:flex;align-items:center;gap:10px}
+  .lang-switch{position:relative}
+  .lang-btn{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.32);border-radius:100px;padding:6px 13px;font-size:.9rem;font-weight:600;cursor:pointer;line-height:1.2}
+  .lang-btn .fl{font-size:1.05rem}
+  .lang-menu{position:absolute;inset-inline-end:0;top:calc(100% + 6px);z-index:50;background:#fff;border:1px solid rgba(23,20,15,.14);border-radius:12px;box-shadow:0 16px 40px -18px rgba(0,0,0,.4);padding:6px;min-width:172px;display:none}
+  .lang-menu.open{display:block}
+  .lang-opt{display:flex;align-items:center;gap:10px;width:100%;background:transparent;border:0;border-radius:8px;padding:9px 12px;font-size:.95rem;color:var(--ink,#1a1712);cursor:pointer;text-align:start}
+  .lang-opt:hover{background:rgba(23,20,15,.06)}
+  .lang-opt .fl{font-size:1.15rem}
+  .lang-opt[aria-selected="true"]{background:rgba(185,138,47,.14);font-weight:600}
+  /* single-image slots side by side on wide screens */
+  .ba-slots{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:560px){.ba-slots{grid-template-columns:1fr}}
+  .ba-slot .thumbs{grid-template-columns:1fr}
+  .ba-slot .thumbs .t{aspect-ratio:4/3}
+  .drop.hidden{display:none}
+  /* start-frame radio cards */
+  .radio-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:560px){.radio-cards{grid-template-columns:1fr}}
+  .radio-card{border:1.5px solid rgba(23,20,15,.16);border-radius:12px;padding:12px 14px;cursor:pointer;font-size:.92rem;display:flex;align-items:center;gap:10px;transition:border-color .15s,background .15s}
+  .radio-card:hover{border-color:var(--gold)}
+  .radio-card.sel{border-color:var(--gold);background:var(--gold-faint)}
+  .radio-card input{accent-color:var(--gold);width:18px;height:18px}
+  /* previews */
+  .ba-preview{max-width:100%;border-radius:14px;display:block;margin:0 auto;box-shadow:0 8px 24px -12px rgba(0,0,0,.4)}
+  #baVideo{width:100%;border-radius:14px;background:#000;box-shadow:0 8px 24px -12px rgba(0,0,0,.4)}
+  .dl-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:16px}
+  .form-err{color:#c0392b;font-size:.9rem;margin-top:12px;display:none}
+  .form-err.show{display:block}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <div class="topbar-actions">
+    <div class="lang-switch" id="langSwitch">
+      <button type="button" class="lang-btn" id="langBtn" aria-haspopup="true" aria-expanded="false"><span class="fl" id="langFlag">🇮🇱</span><span id="langName">עברית</span><span aria-hidden="true">▾</span></button>
+      <div class="lang-menu" id="langMenu" role="menu"></div>
+    </div>
+    <a id="navBack" class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)" data-i18n="ba_back">← חזרה</a>
+  </div>
+</header>
+
+<div class="container" style="max-width:760px">
+
+  <!-- ── FORM ── -->
+  <div id="viewForm">
+    <div class="page-head">
+      <div>
+        <h1 data-i18n="ba_h1">סרטון לפני / אחרי</h1>
+        <p data-i18n="ba_subtitle">משתי תמונות מקבלים סרטון: מעלים "לפני", מוסיפים "אחרי" (או שה-AI ייצור אותו) — ואנחנו מנפישים את המעבר.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="field">
+        <label data-i18n="ba_desc_label">תיאור (אופציונלי)</label>
+        <textarea id="baDesc" rows="3" data-i18n-ph="ba_ph_desc" placeholder="למשל: סלון סקנדינבי חמים, פרקט אלון, ספה גדולה…"></textarea>
+        <div class="hint" data-i18n="ba_hint_desc">מנחה את תמונת ה"אחרי" של ה-AI ואת תנועת הסרטון. אפשר להשאיר ריק — ונרהט את החדר עבורכם.</div>
+      </div>
+
+      <div class="ba-slots">
+        <div class="ba-slot">
+          <div class="sec-title" data-i18n="ba_sec_before">📐 תמונת "לפני" *</div>
+          <div class="drop" id="dropBefore">
+            <span data-i18n="ba_pick_image">גררו תמונה לכאן או לחצו לבחירה</span>
+            <input id="fileBefore" type="file" accept="image/png,image/jpeg,image/webp" style="display:none">
+          </div>
+          <div class="thumbs" id="thumbBefore"></div>
+          <div class="hint" data-i18n="ba_hint_before">בדרך כלל תוכנית אדריכלית או חדר ריק/לא גמור. שדה חובה.</div>
+        </div>
+
+        <div class="ba-slot">
+          <div class="sec-title" data-i18n="ba_sec_after">🛋️ תמונת "אחרי" (אופציונלי)</div>
+          <div class="drop" id="dropAfter">
+            <span data-i18n="ba_pick_image">גררו תמונה לכאן או לחצו לבחירה</span>
+            <input id="fileAfter" type="file" accept="image/png,image/jpeg,image/webp" style="display:none">
+          </div>
+          <div class="thumbs" id="thumbAfter"></div>
+          <div class="hint" data-i18n="ba_hint_after">אין תמונת אחרי? ניצור אותה עם AI מתוך התיאור שלכם.</div>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:22px">
+        <label data-i18n="ba_lbl_start">באיזו תמונה מתחיל הסרטון?</label>
+        <div class="radio-cards">
+          <label class="radio-card sel" id="rcBefore"><input type="radio" name="startFrame" value="before" checked><span data-i18n="ba_start_before">לפני ← אחרי (מתחילים מה"לפני")</span></label>
+          <label class="radio-card" id="rcAfter"><input type="radio" name="startFrame" value="after"><span data-i18n="ba_start_after">אחרי ← לפני (מתחילים מה"אחרי")</span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label data-i18n="ba_lbl_duration">אורך הסרטון</label>
+        <select id="baDuration">
+          <option value="5" data-i18n="ba_dur_5">5 שניות</option>
+          <option value="10" data-i18n="ba_dur_10">10 שניות</option>
+        </select>
+      </div>
+
+      <p class="form-err" id="formErr"></p>
+      <button class="btn btn-gold" id="submitBtn" style="width:100%;margin-top:8px" data-i18n="ba_btn_submit">🎬 צרו סרטון</button>
+    </div>
+  </div>
+
+  <!-- ── APPROVE AI "AFTER" ── -->
+  <div id="viewApprove" class="hidden">
+    <div class="card" style="max-width:560px;margin:4vh auto">
+      <h2 class="center" style="font-family:var(--serif);margin-bottom:6px" data-i18n="ba_approve_title">הנה תמונת ה"אחרי" שנוצרה</h2>
+      <p class="center" style="color:var(--ink-soft);font-weight:300;font-size:.92rem;margin-bottom:16px" data-i18n="ba_approve_sub">מרוצים? אשרו כדי לבנות את הסרטון. רוצים שינוי? עדכנו את התיאור וצרו מחדש.</p>
+      <img id="approvePreview" class="ba-preview" alt="">
+      <div class="field" style="margin-top:16px">
+        <textarea id="regenDesc" rows="2" data-i18n-ph="ba_regen_ph" placeholder="עדכנו את התיאור לתוצאה אחרת…"></textarea>
+      </div>
+      <button class="btn btn-gold" id="approveBtn" style="width:100%" data-i18n="ba_btn_approve">✅ אישור — צרו את הסרטון</button>
+      <button class="btn btn-ghost" id="regenBtn" style="width:100%;margin-top:8px" data-i18n="ba_btn_regen">🔄 יצירה מחדש</button>
+    </div>
+  </div>
+
+  <!-- ── PROGRESS ── -->
+  <div id="viewProgress" class="hidden">
+    <div class="card center" style="max-width:480px;margin:6vh auto">
+      <div class="spinner" id="progSpin"></div>
+      <h2 style="font-family:var(--serif);margin:18px 0 4px" data-i18n="ba_prog_title">עובדים על זה… 🎬</h2>
+      <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem" data-i18n="ba_prog_sub">זה יכול לקחת כמה דקות. אפשר לחכות כאן — ונשלח לכם את הסרטון גם בוואטסאפ כשיהיה מוכן.</p>
+      <ul class="build-steps" style="text-align:start">
+        <li id="st1"><span class="dot">📤</span> <span data-i18n="ba_step_upload">התמונות הועלו</span></li>
+        <li id="st2"><span class="dot">🎨</span> <span data-i18n="ba_step_after">יוצרים את תמונת ה"אחרי" עם AI</span></li>
+        <li id="st3"><span class="dot">🎬</span> <span data-i18n="ba_step_video">מייצרים את סרטון הלפני/אחרי</span></li>
+        <li id="st4"><span class="dot">✅</span> <span data-i18n="ba_step_done">הסתיים</span></li>
+      </ul>
+
+      <div id="doneBox" class="hidden">
+        <h3 style="font-family:var(--serif);margin-bottom:12px" data-i18n="ba_done_title">✅ הסרטון מוכן!</h3>
+        <video id="baVideo" controls playsinline></video>
+        <p id="waNote" class="hidden" style="color:var(--ink-soft);font-weight:300;font-size:.86rem;margin-top:10px" data-i18n="ba_done_wa">שלחנו אותו גם לוואטסאפ שלכם.</p>
+        <div class="dl-row">
+          <a class="btn btn-gold btn-sm" id="dlVideo" download href="#" data-i18n="ba_dl_video">⬇️ הורדת הסרטון</a>
+          <a class="btn btn-ghost btn-sm" id="dlBefore" download href="#" data-i18n="ba_dl_before">⬇️ תמונת לפני</a>
+          <a class="btn btn-ghost btn-sm" id="dlAfter" download href="#" data-i18n="ba_dl_after">⬇️ תמונת אחרי</a>
+        </div>
+        <button class="btn btn-ghost" id="againBtn" style="margin-top:16px" data-i18n="ba_btn_again">יצירת סרטון נוסף</button>
+      </div>
+
+      <div id="waitBox" class="hidden">
+        <h3 style="font-family:var(--serif);margin-bottom:8px" data-i18n="ba_wait_title">⏳ עדיין עובדים</h3>
+        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem" data-i18n="ba_wait_sub">זה לוקח יותר מהרגיל — נשלח את הסרטון לוואטסאפ שלכם ברגע שיהיה מוכן. אפשר לסגור את החלון.</p>
+      </div>
+
+      <div id="failBox" class="hidden">
+        <h3 style="font-family:var(--serif);margin-bottom:8px" data-i18n="ba_fail_title">😕 משהו השתבש</h3>
+        <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem" data-i18n="ba_fail_sub">לא הצלחנו לסיים את הסרטון. נסו שוב.</p>
+        <button class="btn btn-gold" id="retryBtn" style="margin-top:12px" data-i18n="ba_btn_again">יצירת סרטון נוסף</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/api.js"></script>
+<script src="/form-i18n.js"></script>
+<script>
+(function () {
+  "use strict";
+  var $ = function (s) { return document.querySelector(s); };
+  var FT = function (k) { return window.FORM_I18N ? window.FORM_I18N.t(k) : k; };
+
+  // ?key= (demo) — parsed the same careful way as create.html so a literal "+"
+  // in a base64 key survives.
+  var keyMatch = location.search.match(/[?&]key=([^&]*)/);
+  var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
+  var isDemo = !!demoKey;
+  var uploadHeaders = isDemo ? { "x-demo-key": demoKey } : {};
+
+  // back link: demo returns to the demo create form (key preserved), else dashboard
+  $("#navBack").href = isDemo ? ("/create.html?key=" + encodeURIComponent(demoKey)) : "/";
+
+  // ── language switcher (same behaviour as create.html) ──
+  (function initLang() {
+    if (!window.FORM_I18N) return;
+    var order = window.FORM_I18N.order, menu = $("#langMenu"), btn = $("#langBtn"), sw = $("#langSwitch");
+    var saved = null; try { saved = localStorage.getItem("forly_lang"); } catch (e) {}
+    var start = (saved && order.indexOf(saved) >= 0) ? saved : "he";
+    menu.innerHTML = order.map(function (l) {
+      return '<button type="button" class="lang-opt" role="menuitem" data-l="' + l + '">' +
+        '<span class="fl">' + window.FORM_I18N.flag(l) + '</span><span>' + window.FORM_I18N.name(l) + '</span></button>';
+    }).join("");
+    function setLang(l) {
+      window.FORM_I18N.apply(l);
+      $("#langFlag").textContent = window.FORM_I18N.flag(l);
+      $("#langName").textContent = window.FORM_I18N.name(l);
+      Array.prototype.forEach.call(menu.children, function (c) {
+        c.setAttribute("aria-selected", c.getAttribute("data-l") === l ? "true" : "false");
+      });
+      try { localStorage.setItem("forly_lang", l); } catch (e) {}
+    }
+    btn.addEventListener("click", function () {
+      var open = menu.classList.toggle("open");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    menu.addEventListener("click", function (e) {
+      var opt = e.target.closest ? e.target.closest(".lang-opt") : null;
+      if (!opt) return;
+      setLang(opt.getAttribute("data-l"));
+      menu.classList.remove("open"); btn.setAttribute("aria-expanded", "false");
+    });
+    document.addEventListener("click", function (e) { if (!sw.contains(e.target)) menu.classList.remove("open"); });
+    setLang(start);
+  })();
+
+  // ── single-image upload slot (never multiple; a new pick replaces the old) ──
+  function makeSlot(dropSel, inputSel, thumbSel) {
+    var drop = $(dropSel), input = $(inputSel), thumb = $(thumbSel);
+    var entry = null;
+    function clear() {
+      if (entry) { entry.removed = true; if (entry.publicUrl) FLY.deleteUpload(entry.publicUrl, uploadHeaders); }
+      entry = null; thumb.innerHTML = ""; drop.classList.remove("hidden");
+    }
+    function setFile(f) {
+      if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { FLY.toast(FT("ba_err_upload")); return; }
+      if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + FT("err_too_big")); return; }
+      clear();
+      var objectUrl = URL.createObjectURL(f);
+      var t = FLY.el("div", "t",
+        '<img src="' + objectUrl + '"><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
+      entry = { file: f, objectUrl: objectUrl, publicUrl: null, removed: false, failed: false };
+      entry.uploadPromise = FLY.uploadFiles([f], uploadHeaders, function (_i, pct) {
+        var bar = t.querySelector(".bar i"); if (bar) bar.style.width = pct + "%";
+      }).then(function (urls) {
+        entry.publicUrl = urls[0];
+        if (entry.removed) { FLY.deleteUpload(urls[0], uploadHeaders); return null; }
+        return urls[0];
+      }).catch(function () {
+        entry.failed = true;
+        var bar = t.querySelector(".bar i"); if (bar) { bar.style.width = "100%"; bar.style.background = "#c0392b"; }
+        return null;
+      });
+      t.querySelector(".x").addEventListener("click", clear);
+      thumb.appendChild(t);
+      drop.classList.add("hidden");
+    }
+    drop.addEventListener("click", function () { input.click(); });
+    drop.addEventListener("dragover", function (e) { e.preventDefault(); drop.classList.add("over"); });
+    drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+    drop.addEventListener("drop", function (e) {
+      e.preventDefault(); drop.classList.remove("over");
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+    });
+    input.addEventListener("change", function () { if (input.files[0]) setFile(input.files[0]); input.value = ""; });
+    return {
+      has: function () { return !!entry; },
+      url: function () { return entry ? entry.uploadPromise : Promise.resolve(null); },
+      objectUrl: function () { return entry ? entry.objectUrl : null; },
+    };
+  }
+  var beforeSlot = makeSlot("#dropBefore", "#fileBefore", "#thumbBefore");
+  var afterSlot = makeSlot("#dropAfter", "#fileAfter", "#thumbAfter");
+
+  // ── start-frame radio cards ──
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="startFrame"]'), function (r) {
+    r.addEventListener("change", function () {
+      $("#rcBefore").classList.toggle("sel", $("#rcBefore").querySelector("input").checked);
+      $("#rcAfter").classList.toggle("sel", $("#rcAfter").querySelector("input").checked);
+    });
+  });
+  function startValue() {
+    var a = $("#rcAfter").querySelector("input");
+    return a && a.checked ? "after" : "before";
+  }
+
+  // ── view switching ──
+  function show(view) {
+    ["#viewForm", "#viewApprove", "#viewProgress"].forEach(function (v) {
+      $(v).classList.toggle("hidden", v !== view);
+    });
+  }
+
+  // ── submit ──
+  $("#submitBtn").addEventListener("click", function () {
+    var err = $("#formErr");
+    err.classList.remove("show");
+    if (!beforeSlot.has()) { err.textContent = FT("ba_err_need_before"); err.classList.add("show"); return; }
+
+    var btn = this;
+    btn.disabled = true;
+    btn.textContent = FT("ba_status_starting");
+
+    Promise.all([beforeSlot.url(), afterSlot.has() ? afterSlot.url() : Promise.resolve(null)])
+      .then(function (res) {
+        var beforeUrl = res[0], afterUrl = res[1];
+        if (!beforeUrl || (afterSlot.has() && !afterUrl)) throw new Error(FT("ba_err_upload"));
+        var body = {
+          before_url: beforeUrl,
+          description: $("#baDesc").value.trim(),
+          start: startValue(),
+          duration: $("#baDuration").value === "10" ? "10" : "5",
+        };
+        if (afterUrl) body.after_url = afterUrl;
+        return fetch("/api/before-after/create", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: Object.assign({ "Content-Type": "application/json" }, uploadHeaders),
+          body: JSON.stringify(body),
+        }).then(function (r) {
+          return r.json().then(function (d) {
+            if (!r.ok) throw new Error(d.error || "create failed");
+            return d;
+          });
+        });
+      })
+      .then(function (d) {
+        startProgress(d.job_id, afterSlot.has());
+      })
+      .catch(function (e) {
+        err.textContent = FT("err_prefix") + e.message;
+        err.classList.add("show");
+        btn.disabled = false;
+        btn.textContent = FT("ba_btn_submit");
+      });
+  });
+
+  // ── progress + polling ──
+  var pollIv = null;
+  var POLL_MS = 5000;
+  var MAX_WAIT_MS = 12 * 60 * 1000;
+
+  function setStep(id, cls) {
+    var el = $(id); if (!el) return;
+    el.classList.remove("now", "done");
+    if (cls) el.classList.add(cls);
+  }
+
+  function startProgress(jobId, hasProvidedAfter) {
+    show("#viewProgress");
+    $("#progSpin").classList.remove("hidden");
+    ["#doneBox", "#waitBox", "#failBox"].forEach(function (b) { $(b).classList.add("hidden"); });
+    setStep("#st1", "done");
+    // If the agent supplied their own after image, hide the AI after-image step.
+    $("#st2").style.display = hasProvidedAfter ? "none" : "";
+    setStep("#st2", hasProvidedAfter ? null : "now");
+    setStep("#st3", hasProvidedAfter ? "now" : null);
+    setStep("#st4", null);
+
+    var started = Date.now();
+    if (pollIv) clearInterval(pollIv);
+    pollIv = setInterval(function () { tick(jobId, started); }, POLL_MS);
+    tick(jobId, started);
+  }
+
+  function tick(jobId, started) {
+    if (Date.now() - started > MAX_WAIT_MS) { endProgress("wait"); return; }
+    fetch("/api/before-after/status?id=" + encodeURIComponent(jobId), { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.status === "after_ready" && d.after_generated) {
+          clearInterval(pollIv);
+          showApprove(jobId, d.after_image_url);
+        } else if (d.status === "generating_after") {
+          setStep("#st2", "now");
+        } else if (d.status === "generating_video" || d.status === "queued") {
+          if ($("#st2").style.display !== "none") setStep("#st2", "done");
+          setStep("#st3", "now");
+        } else if (d.status === "done") {
+          endProgress("done", d);
+        } else if (d.status === "failed") {
+          endProgress("fail");
+        }
+      })
+      .catch(function () { /* transient — keep polling */ });
+  }
+
+  function endProgress(state, d) {
+    clearInterval(pollIv);
+    $("#progSpin").classList.add("hidden");
+    if (state === "done") {
+      ["#st1", "#st2", "#st3", "#st4"].forEach(function (id) {
+        if ($(id).style.display !== "none") setStep(id, "done");
+      });
+      $("#baVideo").src = d.video_url;
+      $("#dlVideo").href = d.video_url;
+      $("#dlBefore").href = d.before_url || "#";
+      $("#dlAfter").href = d.after_image_url || "#";
+      if (!d.after_image_url) $("#dlAfter").style.display = "none";
+      if (isDemo) $("#waNote").classList.add("hidden"); else $("#waNote").classList.remove("hidden");
+      $("#doneBox").classList.remove("hidden");
+    } else if (state === "fail") {
+      $("#failBox").classList.remove("hidden");
+    } else {
+      $("#waitBox").classList.remove("hidden");
+    }
+  }
+
+  // ── approval of the AI "after" image ──
+  function showApprove(jobId, afterUrl) {
+    show("#viewApprove");
+    $("#approvePreview").src = afterUrl || "";
+    $("#regenDesc").value = $("#baDesc").value.trim();
+
+    var approve = $("#approveBtn"), regen = $("#regenBtn");
+    function post(action, description) {
+      approve.disabled = true; regen.disabled = true;
+      var body = { job_id: jobId, action: action };
+      if (typeof description === "string") body.description = description;
+      fetch("/api/before-after/approve", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: Object.assign({ "Content-Type": "application/json" }, uploadHeaders),
+        body: JSON.stringify(body),
+      }).then(function (r) {
+        return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || "failed"); return d; });
+      }).then(function () {
+        approve.disabled = false; regen.disabled = false;
+        // approve → straight to video; regenerate → back through the after step
+        startProgress(jobId, action === "approve");
+      }).catch(function (e) {
+        approve.disabled = false; regen.disabled = false;
+        FLY.toast(FT("err_prefix") + e.message);
+      });
+    }
+    approve.onclick = function () { post("approve"); };
+    regen.onclick = function () { post("regenerate", $("#regenDesc").value.trim()); };
+  }
+
+  // "create another" / retry — reload preserving ?key=
+  function reloadSame() { location.href = location.pathname + location.search; }
+  $("#againBtn").addEventListener("click", reloadSame);
+  $("#retryBtn").addEventListener("click", reloadSame);
+})();
+</script>
+</body>
+</html>

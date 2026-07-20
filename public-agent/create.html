@@ -58,6 +58,7 @@
       <button type="button" class="lang-btn" id="langBtn" aria-haspopup="true" aria-expanded="false"><span class="fl" id="langFlag">🇮🇱</span><span id="langName">עברית</span><span aria-hidden="true">▾</span></button>
       <div class="lang-menu" id="langMenu" role="menu"></div>
     </div>
+    <a id="navBeforeAfter" class="btn btn-ghost btn-sm" href="/before-after.html" style="color:#fff;border-color:rgba(255,255,255,.3)" data-i18n="nav_before_after">🎬 לפני / אחרי</a>
     <a id="navMyProps" class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)" data-i18n="nav_my_properties">← הנכסים שלי</a>
   </div>
 </header>
@@ -329,6 +330,9 @@
     // standalone demo — not for signed-in users: hide the "my properties" nav
     var myProps = $("#navMyProps");
     if (myProps) myProps.style.display = "none";
+    // keep the demo key when jumping to the before/after generator
+    var baNav = $("#navBeforeAfter");
+    if (baNav) baNav.href = "/before-after.html?key=" + encodeURIComponent(demoKey);
     // ponytail: autosave agent fields on blur during demo
     initDemoAutosave();
   }

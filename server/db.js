@@ -7,7 +7,7 @@ const { asMillis } = require("./utils");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(), otps: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(), otps: new Map(), baJobs: new Map() };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -163,6 +163,26 @@ async function saveLead(phone, lead) {
   else mem.leads.set(phone, lead);
 }
 
+// ── before/after video jobs ──
+async function saveBaJob(j) {
+  if (db) await db.collection("ba_jobs").doc(j.job_id).set(j);
+  else mem.baJobs.set(j.job_id, j);
+}
+
+async function getBaJob(id) {
+  if (db) { const d = await db.collection("ba_jobs").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.baJobs.get(id) || null;
+}
+
+// Partial update + refreshed updated_at. Returns the merged job so callers can
+// keep acting on it without a second read.
+async function updateBaJob(id, patch) {
+  const full = Object.assign({}, patch, { updated_at: new Date() });
+  if (db) await db.collection("ba_jobs").doc(id).set(full, { merge: true });
+  else Object.assign(mem.baJobs.get(id) || {}, full);
+  return getBaJob(id);
+}
+
 module.exports = {
   init,
   get db() { return db; },
@@ -171,4 +191,5 @@ module.exports = {
   savePage, getPage, findActivePageByListing, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
   getBusiness, setBusiness,
   saveLead,
+  saveBaJob, getBaJob, updateBaJob,
 };

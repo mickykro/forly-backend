@@ -74,8 +74,25 @@ async function sendWhatsApp(phone, message, instance, token) {
   });
 }
 
+// Send a file (image/video) by its public URL. Green-API fetches the URL itself,
+// so it must be publicly reachable. Mirrors the Functions-side sendWhatsAppFile.
+async function sendWhatsAppFile(phone, fileUrl, fileName, caption, instance, token) {
+  if (!instance || !token) return;
+  await fetch(`https://api.green-api.com/waInstance${instance}/sendFileByUrl/${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chatId: `${phone}@c.us`,
+      urlFile: fileUrl,
+      fileName: fileName || "file",
+      caption: caption || "",
+    }),
+    signal: AbortSignal.timeout(20000),
+  });
+}
+
 module.exports = {
   pad, daysFromNow, asMillis,
   sanitizeTheme, sanitizeLang, normalizePhone,
-  guessImageExt, rehost, sendWhatsApp,
+  guessImageExt, rehost, sendWhatsApp, sendWhatsAppFile,
 };
