@@ -48,6 +48,8 @@ const GRADIENT_PEAK_ALPHA = 242; // ~95% opaque at the very bottom
 // that are already Hebrew) pass through as-is.
 const ROOM_HE = {
   living_room: "סלון", livingroom: "סלון", salon: "סלון", lounge: "סלון",
+  open_plan_living_dining_kitchen: "חלל פתוח", open_plan: "חלל פתוח",
+  living_dining_kitchen: "חלל פתוח", living_dining: "סלון ופינת אוכל",
   kitchen: "מטבח", kitchenette: "מטבחון",
   bedroom: "חדר שינה", master_bedroom: "חדר שינה ראשי",
   kids_room: "חדר ילדים", children_room: "חדר ילדים", nursery: "חדר ילדים",
@@ -359,14 +361,20 @@ async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
     await download(videoUrl, inFile);
     const info = await probe(inFile);
     let roomSegments = [];
+    // room_debug surfaces WHY labels are/aren't present, right in the API
+    // response (visible in the n8n execution) instead of only in server logs.
+    let roomDebug = "no_rooms_requested";
     if (Array.isArray(rooms) && rooms.length) {
       if (!process.env.ANTHROPIC_API_KEY) {
+        roomDebug = "no_api_key";
         console.warn("video-overlay: rooms given but ANTHROPIC_API_KEY unset; skipping room labels");
       } else {
         // Room labels are best-effort — a vision failure must not sink the video.
         try {
           roomSegments = await detectRoomSegments(inFile, tmp, info, rooms.slice(0, MAX_ROOMS));
+          roomDebug = roomSegments.length ? "ok" : "no_segments_detected";
         } catch (err) {
+          roomDebug = "error: " + err.message.slice(0, 200);
           console.warn("video-overlay: room detection failed, continuing without:", err.message);
         }
       }
@@ -377,7 +385,7 @@ async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
     const finalPath = path.join(uploadDir, rel);
     fs.mkdirSync(path.dirname(finalPath), { recursive: true });
     fs.copyFileSync(outFile, finalPath);
-    return { video_url: `${baseUrl}/files/${rel}`, duration: info.duration, room_segments: roomSegments };
+    return { video_url: `${baseUrl}/files/${rel}`, duration: info.duration, room_segments: roomSegments, room_debug: roomDebug };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
