@@ -100,8 +100,7 @@ function gradientPng(width, height, rgb, peakAlpha) {
   ]);
 }
 
-// Vision-Tagger room types → Hebrew display labels. Unknown types (or values
-// that are already Hebrew) pass through as-is.
+// Vision-Tagger room types → Hebrew display labels (exact, normalized key).
 const ROOM_HE = {
   living_room: "סלון", livingroom: "סלון", salon: "סלון", lounge: "סלון",
   open_plan_living_dining_kitchen: "חלל פתוח", open_plan: "חלל פתוח",
@@ -122,11 +121,42 @@ const ROOM_HE = {
   view: "נוף", lobby: "לובי", pool: "בריכה", gym: "חדר כושר",
 };
 
+// Ordered substring → Hebrew fallbacks for compound/unseen types the Tagger
+// invents ("open_plan_apartment", "guest_bedroom", "second_balcony"). Most
+// specific first — the first substring found in the normalized key wins.
+const ROOM_KEYWORDS = [
+  ["open_plan", "חלל פתוח"], ["open_space", "חלל פתוח"],
+  ["master", "חדר שינה ראשי"],
+  ["kids", "חדר ילדים"], ["children", "חדר ילדים"], ["nursery", "חדר ילדים"],
+  ["bedroom", "חדר שינה"],
+  ["living", "סלון"], ["salon", "סלון"], ["lounge", "סלון"],
+  ["kitchen", "מטבח"],
+  ["dining", "פינת אוכל"],
+  ["bathroom", "חדר רחצה"], ["shower", "מקלחת"], ["toilet", "שירותים"],
+  ["mamad", "ממ״ד"], ["safe_room", "ממ״ד"],
+  ["balcony", "מרפסת"], ["terrace", "מרפסת"],
+  ["office", "חדר עבודה"], ["study", "חדר עבודה"],
+  ["hallway", "מסדרון"], ["corridor", "מסדרון"], ["entrance", "כניסה"],
+  ["garden", "גינה"], ["yard", "חצר"], ["roof", "גג"],
+  ["parking", "חניה"], ["storage", "מחסן"], ["laundry", "חדר כביסה"],
+  ["facade", "חזית הבניין"], ["exterior", "חזית הבניין"], ["building", "הבניין"],
+  ["lobby", "לובי"], ["pool", "בריכה"], ["gym", "חדר כושר"], ["view", "נוף"],
+];
+
+// Map a Tagger room type to a Hebrew label: exact match → keyword fallback →
+// drop. Values already in Hebrew pass through. Unknown English is DROPPED
+// (returns ""), never burned onto the video as a raw type string.
 function roomLabel(r) {
   const raw = typeof r === "string" ? r : (r && (r.room_type || r.label)) || "";
   const s = String(raw).trim();
   if (!s) return "";
-  return ROOM_HE[s.toLowerCase().replace(/[\s-]+/g, "_")] || s.slice(0, 30);
+  if (/[֐-׿]/.test(s)) return s.slice(0, 30); // already Hebrew
+  const key = s.toLowerCase().replace(/[\s-]+/g, "_");
+  if (ROOM_HE[key]) return ROOM_HE[key];
+  for (const [needle, he] of ROOM_KEYWORDS) {
+    if (key.includes(needle)) return he;
+  }
+  return "";
 }
 
 // Most frequent value in an array (first-seen wins ties); null if empty.
