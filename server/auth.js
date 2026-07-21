@@ -76,7 +76,7 @@ function readToken(req) {
 
 module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret }) {
   const router = express.Router();
-  if (!secret) throw new Error("auth: FORLY_JWT_SECRET is required");
+  if (!secret) throw new Error("auth: NADLAN_JWT_SECRET is required");
   if (mem && !mem.otps) mem.otps = new Map();
 
   // storage: Firestore when available, in-memory otherwise

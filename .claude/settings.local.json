@@ -71,7 +71,8 @@
       "Bash(/opt/homebrew/bin/node --version)",
       "Bash(/usr/local/bin/node --version)",
       "Read(//Users/MichaelKrotorio/.nvm/versions/node/**)",
-      "Bash(cd /tmp; node -e ' *)"
+      "Bash(cd /tmp; node -e ' *)",
+      "Bash(node -e ' *)"
     ],
     "deny": [
       "Bash(firebase deploy:*)",
