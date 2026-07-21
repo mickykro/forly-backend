@@ -5,6 +5,7 @@
 
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const pad = (n) => String(n).padStart(2, "0");
 const daysFromNow = (d) => new Date(Date.now() + d * 86400000);
@@ -63,6 +64,32 @@ async function rehost(url, destRel, uploadDir, baseUrl) {
   return `${baseUrl}/files/${destRel}`;
 }
 
+// Download a remote file and store it wherever the agent's uploads go: on the
+// production host when REMOTE_UPLOAD_BASE is set (so local dev's generated media
+// gets a production, fal-/WhatsApp-reachable URL), otherwise on local disk. Uses
+// a flat UUID filename so it goes through the same /api/upload/:fname endpoint as
+// browser uploads (which only accepts UUID names). Returns the public URL.
+const MEDIA_CT = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", mp4: "video/mp4" };
+async function storeMedia(url, ext, opts) {
+  const { uploadDir, uploadPublicBase, remoteUploadBase } = opts;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(120000) });
+  if (!resp.ok) throw new Error(`fetch ${url} → ${resp.status}`);
+  const buf = Buffer.from(await resp.arrayBuffer());
+  const fname = `${crypto.randomUUID()}.${ext}`;
+  if (remoteUploadBase) {
+    const r = await fetch(`${remoteUploadBase}/api/upload/${fname}`, {
+      method: "PUT",
+      headers: { "Content-Type": MEDIA_CT[ext] || "application/octet-stream" },
+      body: buf,
+      signal: AbortSignal.timeout(120000),
+    });
+    if (!r.ok) throw new Error(`remote store ${fname} → ${r.status}`);
+  } else {
+    fs.writeFileSync(path.join(uploadDir, fname), buf);
+  }
+  return `${uploadPublicBase}/files/${fname}`;
+}
+
 // ── whatsapp ──
 async function sendWhatsApp(phone, message, instance, token) {
   if (!instance || !token) return;
@@ -94,5 +121,5 @@ async function sendWhatsAppFile(phone, fileUrl, fileName, caption, instance, tok
 module.exports = {
   pad, daysFromNow, asMillis,
   sanitizeTheme, sanitizeLang, normalizePhone,
-  guessImageExt, rehost, sendWhatsApp, sendWhatsAppFile,
+  guessImageExt, rehost, storeMedia, sendWhatsApp, sendWhatsAppFile,
 };

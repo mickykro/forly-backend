@@ -5,6 +5,12 @@
  * This router owns the job doc + the agent-facing API; it fires the n8n webhook
  * to do the fal.ai work and exposes a callback n8n posts results to.
  *
+ * Media hosting: generated media is re-stored on the public upload host
+ * (production when REMOTE_UPLOAD_BASE is set) so fal can fetch the "after" image
+ * as the video stage's end frame and WhatsApp can fetch the video. The callback
+ * URL, by contrast, points at THIS server (callbackBase) — so in local dev only
+ * the callback needs to be reachable (a tunnel), while images stay on prod.
+ *
  * Flow: agent uploads a "before" image (e.g. a floor plan), one at a time, and
  * optionally an "after" image. No after image → n8n generates one with GPT-Image;
  * the agent approves/regenerates before we spend video credits; then n8n builds a
@@ -26,7 +32,7 @@ const express = require("express");
 const crypto = require("crypto");
 
 const db = require("../db");
-const { rehost, asMillis } = require("../utils");
+const { storeMedia, asMillis } = require("../utils");
 
 const MAX_REGEN = 5;
 // If n8n never calls back (workflow error, credential missing), a job stuck this
@@ -43,7 +49,12 @@ function isOwnUpload(u) {
 }
 
 module.exports = function createBeforeAfterRouter(ctx) {
-  const { requireAuth, authSecret, n8nWebhookUrl, callbackSecret, uploadDir, baseUrl, sendWhatsAppFile } = ctx;
+  const {
+    requireAuth, authSecret, n8nWebhookUrl, callbackSecret,
+    uploadDir, uploadPublicBase, remoteUploadBase, callbackBase,
+    sendWhatsAppFile,
+  } = ctx;
+  const storeOpts = { uploadDir, uploadPublicBase, remoteUploadBase };
 
   const router = express.Router();
 
@@ -78,7 +89,7 @@ module.exports = function createBeforeAfterRouter(ctx) {
       });
   }
 
-  const callbackUrl = () => `${baseUrl}/api/before-after/callback`;
+  const callbackUrl = () => `${callbackBase}/api/before-after/callback`;
 
   function fireAfterStage(job) {
     fireN8n(job.job_id, {
@@ -197,13 +208,15 @@ module.exports = function createBeforeAfterRouter(ctx) {
 
     try {
       if (body.stage === "after") {
-        const hosted = await rehost(mediaUrl, `ba/${jobId}/after.png`, uploadDir, baseUrl);
+        // Store on the public upload host (prod) so fal can fetch it as the video
+        // stage's end frame; a local-only URL would be unreachable to fal.
+        const hosted = await storeMedia(mediaUrl, "png", storeOpts);
         // Stop here — the agent approves (or regenerates) before we spend video credits.
         await db.updateBaJob(jobId, { status: "after_ready", after_image_url: hosted });
       } else if (body.stage === "video") {
         const prev = await db.getBaJob(jobId);
         if (prev && prev.status === "done") return res.json({ ok: true }); // idempotent
-        const hosted = await rehost(mediaUrl, `ba/${jobId}/video.mp4`, uploadDir, baseUrl);
+        const hosted = await storeMedia(mediaUrl, "mp4", storeOpts);
         await db.updateBaJob(jobId, { status: "done", video_url: hosted });
         if (job.business_phone && sendWhatsAppFile) {
           sendWhatsAppFile(job.business_phone, hosted, "before-after.mp4",

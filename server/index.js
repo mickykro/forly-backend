@@ -92,9 +92,12 @@ app.use("/api/before-after", createBeforeAfterRouter({
   n8nWebhookUrl: N8N_BEFORE_AFTER_WEBHOOK_URL,
   callbackSecret: BA_CALLBACK_SECRET,
   uploadDir: UPLOAD_DIR,
-  // Media is re-hosted to and served by THIS server (like pages.js rehosting),
-  // so use its own public address, not the (proxy-aware) upload base.
-  baseUrl: BASE_URL,
+  // Generated media follows the same host as agent uploads: production when
+  // REMOTE_UPLOAD_BASE is set (fal- and WhatsApp-reachable), else this server.
+  uploadPublicBase: UPLOAD_PUBLIC_BASE,
+  remoteUploadBase: REMOTE_UPLOAD_BASE,
+  // n8n posts results back to THIS server (only this needs to be reachable in dev).
+  callbackBase: BASE_URL,
   sendWhatsAppFile: (phone, url, name, caption) =>
     sendWhatsAppFile(phone, url, name, caption, GREENAPI_INSTANCE, GREENAPI_TOKEN),
 }));
