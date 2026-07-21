@@ -34,10 +34,8 @@ const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
 const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
-const FAL_KEY = process.env.FAL_KEY || "";
-const FAL_KLING_MODEL = process.env.FAL_KLING_MODEL || "fal-ai/kling-video/v1.6/pro/image-to-video";
-const FAL_KLING_TAIL_FIELD = process.env.FAL_KLING_TAIL_FIELD || "tail_image_url";
-const FAL_GPT_IMAGE_MODEL = process.env.FAL_GPT_IMAGE_MODEL || "fal-ai/gpt-image-1/edit-image";
+const N8N_BEFORE_AFTER_WEBHOOK_URL = process.env.N8N_BEFORE_AFTER_WEBHOOK_URL || "";
+const BA_CALLBACK_SECRET = process.env.BA_CALLBACK_SECRET || "";
 const AUTH_SECRET = process.env.FORLY_JWT_SECRET || "change-me-in-env";
 const WEB_SIGNUP_BASE = process.env.WEB_SIGNUP_URL || "https://call4li.web.app/signup";
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
@@ -87,18 +85,16 @@ app.use("/api", createIntakeRouter({
   pageBaseUrl: PAGE_BASE_URL,
 }));
 
-// ── before/after video generator (fal.ai: GPT-Image + Kling) ──
+// ── before/after video generator (generation runs in an n8n workflow) ──
 const createBeforeAfterRouter = require("./routes/beforeAfter");
 app.use("/api/before-after", createBeforeAfterRouter({
   requireAuth, authSecret: AUTH_SECRET,
-  falKey: FAL_KEY,
+  n8nWebhookUrl: N8N_BEFORE_AFTER_WEBHOOK_URL,
+  callbackSecret: BA_CALLBACK_SECRET,
   uploadDir: UPLOAD_DIR,
-  // Outputs are written to and served by THIS server (like pages.js rehosting),
+  // Media is re-hosted to and served by THIS server (like pages.js rehosting),
   // so use its own public address, not the (proxy-aware) upload base.
   baseUrl: BASE_URL,
-  klingModel: FAL_KLING_MODEL,
-  klingTailField: FAL_KLING_TAIL_FIELD,
-  gptImageModel: FAL_GPT_IMAGE_MODEL,
   sendWhatsAppFile: (phone, url, name, caption) =>
     sendWhatsAppFile(phone, url, name, caption, GREENAPI_INSTANCE, GREENAPI_TOKEN),
 }));
@@ -145,7 +141,7 @@ app.listen(PORT, () => {
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
   console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
-  console.log(`  fal (before/after): ${FAL_KEY ? "enabled" : "DISABLED (set FAL_KEY)"}`);
+  console.log(`  before/after: ${N8N_BEFORE_AFTER_WEBHOOK_URL ? "enabled" : "DISABLED (set N8N_BEFORE_AFTER_WEBHOOK_URL)"}`);
   startExpiryScheduler({
     pageBaseUrl: PAGE_BASE_URL,
     authSecret: AUTH_SECRET,
