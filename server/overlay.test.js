@@ -11,8 +11,13 @@ const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradient
 assert.equal(roomLabel("living room"), "סלון");
 assert.equal(roomLabel("Master-Bedroom"), "חדר שינה ראשי");
 assert.equal(roomLabel({ room_type: "kitchen" }), "מטבח");
-assert.equal(roomLabel("סלון"), "סלון");            // already Hebrew → pass-through
-assert.equal(roomLabel("weird_type"), "weird_type"); // unknown → as-is
+assert.equal(roomLabel("סלון"), "סלון");             // already Hebrew → pass-through
+// compound/unseen types → keyword fallback (never raw English)
+assert.equal(roomLabel("open_plan_apartment"), "חלל פתוח");
+assert.equal(roomLabel("guest_bedroom"), "חדר שינה");
+assert.equal(roomLabel("second_balcony"), "מרפסת");
+assert.equal(roomLabel("weird_type"), "");           // unknown → dropped, not shown
+assert.equal(roomLabel("utility_closet"), "");
 assert.equal(roomLabel(""), "");
 assert.equal(roomLabel(null), "");
 
