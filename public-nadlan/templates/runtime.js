@@ -121,6 +121,29 @@
     el.textContent = "₪" + Math.round(ppmPrice / ppmSqm).toLocaleString("he-IL") + " " + T("per_sqm");
   });
 
+  // ── amenities + area breakdown chips (parking, storage, elevator, sizes) ──
+  //    A Shabbat elevator implies a regular elevator, so only the stronger badge
+  //    shows. The host is removed entirely when the listing has none of these.
+  each("[data-amenities]", document, function (host) {
+    var p = get("property") || {};
+    var chips = [];
+    if (+p.size_built) chips.push(T("built_area") + " · " + p.size_built + " " + T("sqm"));
+    if (+p.size_balcony) chips.push(T("balconies") + " · " + p.size_balcony + " " + T("sqm"));
+    if (+p.size_garden) chips.push(T("garden") + " · " + p.size_garden + " " + T("sqm"));
+    if (+p.parking) chips.push(p.parking + " " + T("parking"));
+    if (p.storage) chips.push(T("storage"));
+    if (p.shabbat_elevator) chips.push(T("shabbat_elevator"));
+    else if (p.elevator) chips.push(T("elevator"));
+    if (!chips.length) { host.remove(); return; }
+    host.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;" + (host.style.cssText || "");
+    chips.forEach(function (c) {
+      var s = document.createElement("span");
+      s.textContent = c;
+      s.style.cssText = "display:inline-flex;align-items:center;padding:.42em .95em;border:1px solid rgba(128,128,128,.34);border-radius:100px;font-size:.82rem;line-height:1.3;white-space:nowrap";
+      host.appendChild(s);
+    });
+  });
+
   // ── list loops (clone the inner <template> per item) ──
   each("[data-list]", document, function (host) {
     var items = get(host.getAttribute("data-list"));

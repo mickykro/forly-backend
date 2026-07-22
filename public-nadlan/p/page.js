@@ -47,7 +47,7 @@
     } catch (e) { /* no-op */ }
   }
 
-  // ── theme ───────────────────────────────────────────────
+  // ── theme ──────────────────────────────────
   // Curated Hebrew fonts we can load from Google Fonts on demand.
   var FONT_FAMILIES = {
     "Heebo": "Heebo:wght@300;400;500;600;700",
@@ -123,7 +123,7 @@
     }
   }
 
-  // ── render ──────────────────────────────────────────────
+  // ── render ─────────────────────────────────
 
   function render(d) {
     applyTheme(d.theme);
@@ -194,6 +194,9 @@
       texts.spec4_v || (p.parking ? p.parking + " " + TR("parking") : ""),
       texts.spec4_l || (p.parking ? TR("registered") : ""));
 
+    // amenities + area breakdown chips under the spec strip
+    renderAmenities(p);
+
     // gallery — never render the same image twice, whatever the payload says
     if (d.gallery && Array.isArray(d.gallery.images)) {
       var seenUrls = {};
@@ -249,7 +252,8 @@
     } else {
       avatar.textContent = initials;
     }
-    text(".agent-meta b", a.name);
+    text(".agent-meta b",
+      d.agent2 && d.agent2.name ? a.name + " & " + d.agent2.name : a.name);
     text(".agent-meta span",
       [a.brand_name, a.tagline, a.license ? TR("license_label") + " " + a.license : ""]
         .filter(Boolean).join(" · "));
@@ -324,6 +328,24 @@
     if (!b) { el.style.display = "none"; return; }
     el.querySelector("b").textContent = b;
     el.querySelector("span").textContent = span || "";
+  }
+
+  // Amenity + area-breakdown chips (parking, storage, elevator, built/balcony/
+  // garden sqm). A Shabbat elevator implies a regular one, so only it shows.
+  function renderAmenities(p) {
+    var host = $("#amenities");
+    if (!host) return;
+    var chips = [];
+    if (+p.size_built) chips.push(TR("built_area") + " · " + p.size_built + " " + TR("sqm"));
+    if (+p.size_balcony) chips.push(TR("balconies") + " · " + p.size_balcony + " " + TR("sqm"));
+    if (+p.size_garden) chips.push(TR("garden") + " · " + p.size_garden + " " + TR("sqm"));
+    if (+p.parking) chips.push(p.parking + " " + TR("parking"));
+    if (p.storage) chips.push(TR("storage"));
+    if (p.shabbat_elevator) chips.push(TR("shabbat_elevator"));
+    else if (p.elevator) chips.push(TR("elevator"));
+    host.innerHTML = chips.map(function (c) {
+      return '<span class="amen">' + escapeHtml(c) + "</span>";
+    }).join("");
   }
 
   function hideSection(sel) { var el = $(sel); if (el) el.style.display = "none"; }
@@ -476,7 +498,7 @@
     });
   }
 
-  // ── boot ────────────────────────────────────────────────
+  // ── boot ─────────────────────────────────
 
   if (!pageId) { setState("notfound"); return; }
   fetch("/api/property-page?id=" + encodeURIComponent(pageId) +
