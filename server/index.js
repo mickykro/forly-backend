@@ -37,7 +37,7 @@ const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
 const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
-const AUTH_SECRET = process.env.FORLY_JWT_SECRET || "change-me-in-env";
+const AUTH_SECRET = process.env.NADLAN_JWT_SECRET || "change-me-in-env";
 // Operator admin panel: comma-separated allowlist of phone numbers permitted to
 // see/manage EVERY agent's properties. Empty ⇒ admin panel denies everyone.
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || "")
@@ -141,7 +141,7 @@ app.listen(PORT, () => {
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
-  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
+  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set NADLAN_JWT_SECRET)" : "enabled"}`);
   console.log(`  admin panel: ${ADMIN_PHONES.length ? `${BASE_URL}/admin.html (${ADMIN_PHONES.length} admin${ADMIN_PHONES.length > 1 ? "s" : ""})` : "LOCKED (set ADMIN_PHONES)"}`);
   startExpiryScheduler({
     pageBaseUrl: PAGE_BASE_URL,
