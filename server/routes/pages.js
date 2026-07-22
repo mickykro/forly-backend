@@ -38,7 +38,8 @@ module.exports = function createPagesRouter(ctx) {
   // shared page payload builder
   function pagePayload(id, d) {
     return {
-      page_id: id, status: d.status, agent: d.agent, property: d.property,
+      page_id: id, status: d.status, agent: d.agent, agent2: d.agent2 || null,
+      property: d.property,
       hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
       cta: d.cta, sections: d.sections, theme: d.theme || null,
       language: d.language || "he",
@@ -67,6 +68,17 @@ module.exports = function createPagesRouter(ctx) {
       const agentIn = body.agent || {};
       const agentField = (k) => String(agentIn[k] || listingAgent[k] || "");
       const logoSrc = agentIn.logo_url || listingAgent.logo_url || null;
+      // Co-listing agent (optional). n8n may not forward it, so fall back to the
+      // listing where the intake form stored it.
+      const agent2In = body.agent2 || (listing && listing.agent2) || null;
+      const agent2Doc = agent2In && agent2In.name ? {
+        name: String(agent2In.name).slice(0, 60),
+        phone: String(agent2In.phone || "").replace(/\D/g, "").slice(0, 15) || null,
+      } : null;
+      // Property amenities + area breakdown: prefer the builder payload, fall
+      // back to the listing (the intake form is the source of truth for these).
+      const propNum = (k) => Number((body.property && body.property[k]) || (listing && listing[k])) || 0;
+      const propBool = (k) => !!((body.property && body.property[k]) || (listing && listing[k]));
       if (theme && theme.font_url) {
         const fext = (theme.font_url.split("?")[0].match(/\.(woff2|woff|ttf|otf)$/i) || [, "woff2"])[1].toLowerCase();
         theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`, uploadDir, baseUrl).catch(() => theme.font_url);
@@ -106,8 +118,10 @@ module.exports = function createPagesRouter(ctx) {
           logo_url: logoUrl,
           tagline: agentField("tagline"),
           phone: agentField("phone") || body.business_phone,
+          phone2: agentField("phone2") || null,
           license: agentField("license"),
         },
+        agent2: agent2Doc,
         property: {
           title: (body.property && body.property.title) ||
             `${(body.property && body.property.rooms) || ""} חד׳ ב${(body.property && (body.property.neighborhood || body.property.city)) || ""}`.trim(),
@@ -118,8 +132,14 @@ module.exports = function createPagesRouter(ctx) {
           price: Number(body.property && body.property.price) || 0,
           rooms: Number(body.property && body.property.rooms) || 0,
           size_sqm: Number(body.property && body.property.size_sqm) || 0,
+          size_built: propNum("size_built"),
+          size_balcony: propNum("size_balcony"),
+          size_garden: propNum("size_garden"),
           floor: Number(body.property && body.property.floor) || 0,
-          parking: Number(body.property && body.property.parking) || 0,
+          parking: propNum("parking"),
+          storage: propBool("storage"),
+          elevator: propBool("elevator") || propBool("shabbat_elevator"),
+          shabbat_elevator: propBool("shabbat_elevator"),
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
@@ -367,7 +387,9 @@ module.exports = function createPagesRouter(ctx) {
               name: page.agent?.name || "",
               brand_name: page.agent?.brand_name || "",
               phone: page.agent?.phone || page.business_phone,
+              phone2: page.agent?.phone2 || null,
             },
+            agent2: page.agent2 || null,
           }),
           signal: AbortSignal.timeout(10000),
         }).catch((e) => console.error("leads-handler webhook failed:", e.message));
