@@ -50,6 +50,15 @@ async function listListingsByPhone(phone) {
   return [...mem.listings.values()].filter((l) => l.business_phone === phone);
 }
 
+// ── admin: full-collection reads (no phone filter) ──
+async function listAllListings(limit = 1000) {
+  if (db) {
+    const snap = await db.collection("listings").limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listings.values()];
+}
+
 // ── pages ──
 async function savePage(p) {
   if (db) await db.collection("property_pages").doc(p.page_id).set(p);
@@ -59,6 +68,15 @@ async function savePage(p) {
 async function getPage(id) {
   if (db) { const d = await db.collection("property_pages").doc(id).get(); return d.exists ? d.data() : null; }
   return mem.pages.get(id) || null;
+}
+
+// ── admin: full-collection page read (no phone filter) ──
+async function listAllPages(limit = 1000) {
+  if (db) {
+    const snap = await db.collection("property_pages").limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.pages.values()];
 }
 
 async function findActivePageByListing(listingId) {
@@ -157,6 +175,13 @@ async function setBusiness(phone, data, merge = true) {
   await db.collection("businesses").doc(phone).set(data, { merge });
 }
 
+// ── admin: all businesses (agent directory) ──
+async function listAllBusinesses(limit = 1000) {
+  if (!db) return [];
+  const snap = await db.collection("businesses").limit(limit).get();
+  return snap.docs.map((d) => d.data());
+}
+
 // ── leads ──
 async function saveLead(phone, lead) {
   if (db) await db.collection("leads").doc(phone).set(lead, { merge: true });
@@ -167,8 +192,8 @@ module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
-  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone,
-  savePage, getPage, findActivePageByListing, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
-  getBusiness, setBusiness,
+  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
+  savePage, getPage, findActivePageByListing, listAllPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
+  getBusiness, setBusiness, listAllBusinesses,
   saveLead,
 };

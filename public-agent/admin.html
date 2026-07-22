@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly · ניהול מערכת</title>
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  /* admin-only additions layered on top of the shared agent stylesheet */
+  .admin-badge{font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:var(--dark);background:linear-gradient(115deg,var(--gold-bright),var(--gold));padding:2px 9px;border-radius:100px;font-weight:700;margin-inline-start:8px;vertical-align:middle}
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:24px}
+  .stat{background:var(--paper);border:1px solid rgba(185,138,47,.22);border-radius:16px;padding:18px 20px}
+  .stat .n{font-family:var(--serif);font-weight:700;font-size:1.7rem;color:var(--ink)}
+  .stat .l{font-size:.78rem;color:var(--ink-soft);font-weight:400;margin-top:2px}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
+  .toolbar input,.toolbar select{font-family:var(--sans);font-size:.9rem;color:var(--ink);background:var(--paper);border:1px solid rgba(23,20,15,.14);border-radius:100px;padding:10px 16px;outline:none}
+  .toolbar input:focus,.toolbar select:focus{border-color:var(--gold);box-shadow:0 0 0 4px var(--gold-faint)}
+  .toolbar input[type=search]{flex:1 1 220px;min-width:180px}
+  .table-wrap{overflow-x:auto;background:var(--paper);border:1px solid rgba(185,138,47,.22);border-radius:var(--radius)}
+  table.admin{width:100%;border-collapse:collapse;font-size:.88rem;min-width:820px}
+  table.admin th,table.admin td{padding:12px 14px;text-align:right;border-bottom:1px solid rgba(23,20,15,.07);white-space:nowrap;vertical-align:middle}
+  table.admin th{font-size:.74rem;font-weight:600;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0;background:var(--paper)}
+  table.admin tbody tr:hover{background:var(--gold-faint)}
+  table.admin td.prop{white-space:normal;min-width:200px}
+  table.admin .p-title{font-family:var(--serif);font-weight:600}
+  table.admin .p-addr{font-size:.76rem;color:var(--ink-soft);font-weight:300}
+  table.admin .agent{white-space:normal;max-width:160px}
+  .row-actions{display:flex;gap:6px;flex-wrap:wrap}
+  .thumb-sm{width:46px;height:46px;border-radius:10px;object-fit:cover;background:var(--dark);display:block}
+  .num{font-variant-numeric:tabular-nums}
+  .empty{padding:48px 24px;text-align:center;color:var(--ink-soft)}
+  .denied{max-width:440px;margin:12vh auto;text-align:center}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Admin Console</span></a>
+  <span class="who" id="who"></span>
+</header>
+
+<!-- ── ACCESS DENIED ── -->
+<div class="container hidden" id="viewDenied">
+  <div class="card denied">
+    <div style="font-size:2.4rem;margin-bottom:8px">🔒</div>
+    <h1 style="font-family:var(--serif);font-size:1.3rem;margin-bottom:6px">אין הרשאת ניהול</h1>
+    <p style="color:var(--ink-soft);font-weight:300;margin-bottom:18px" id="deniedMsg">
+      החשבון שלך אינו מורשה לגשת למסך הניהול.
+    </p>
+    <a class="btn btn-ghost" href="/">חזרה לאזור האישי</a>
+  </div>
+</div>
+
+<!-- ── ADMIN DASHBOARD ── -->
+<div class="container hidden" id="viewAdmin">
+  <div class="page-head">
+    <div>
+      <h1>ניהול נכסים<span class="admin-badge">Admin</span></h1>
+      <p>כל הנכסים של כל הסוכנים במערכת</p>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ רענון</button>
+  </div>
+
+  <div class="stat-grid" id="statGrid"></div>
+
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="חיפוש לפי כתובת, עיר, סוכן…">
+    <select id="statusFilter">
+      <option value="">כל הסטטוסים</option>
+      <option value="active">פעיל</option>
+      <option value="expiring">עומד לפוג</option>
+      <option value="expired">פג תוקף</option>
+      <option value="building">בבנייה</option>
+      <option value="archived">בארכיון</option>
+    </select>
+    <span class="who num" id="shownCount"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="admin">
+      <thead>
+        <tr>
+          <th></th>
+          <th>נכס</th>
+          <th>סוכן</th>
+          <th>סטטוס</th>
+          <th class="num">צפיות</th>
+          <th class="num">לידים</th>
+          <th class="num">ימים</th>
+          <th>פעולות</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty hidden" id="emptyState">לא נמצאו נכסים תואמים.</div>
+  </div>
+</div>
+
+<script src="/api.js"></script>
+<script src="/admin.js"></script>
+</body>
+</html>
