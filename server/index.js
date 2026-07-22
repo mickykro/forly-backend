@@ -34,7 +34,7 @@ const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
 const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
-const AUTH_SECRET = process.env.FORLY_JWT_SECRET || "change-me-in-env";
+const AUTH_SECRET = process.env.NADLAN_JWT_SECRET || "change-me-in-env";
 const WEB_SIGNUP_BASE = process.env.WEB_SIGNUP_URL || "https://call4li.web.app/signup";
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
 const TEMPLATES_DIR = path.join(__dirname, "..", "public-nadlan", "templates");
@@ -124,7 +124,7 @@ app.listen(PORT, () => {
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
-  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
+  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set NADLAN_JWT_SECRET)" : "enabled"}`);
   startExpiryScheduler({
     pageBaseUrl: PAGE_BASE_URL,
     authSecret: AUTH_SECRET,
