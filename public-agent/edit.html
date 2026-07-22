@@ -41,6 +41,9 @@
 .thumbs .t{position:relative;width:64px;height:64px;border-radius:8px;overflow:hidden;cursor:pointer}
 .thumbs .t img{width:100%;height:100%;object-fit:cover}
 .thumbs .t .x{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:none;cursor:pointer;font-size:12px}
+.thumbs .t-add{width:64px;height:64px;border-radius:8px;border:1.5px dashed #ccc;background:#fafafa;color:#999;font-size:24px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+.thumbs .t-add:hover{border-color:var(--gold);color:var(--gold)}
+.thumbs .t-add:disabled{opacity:.5;cursor:default}
 .collapsible{border:1px solid #eee;border-radius:8px;margin-bottom:12px}
 .collapsible summary{padding:12px;cursor:pointer;font-weight:500;background:#fafafa;border-radius:8px}
 .collapsible[open] summary{border-radius:8px 8px 0 0;border-bottom:1px solid #eee}
@@ -145,7 +148,8 @@
         <div class="field"><label>כותרת</label><input id="fGalleryTitle" maxlength="90" data-live="texts.gallery_title"></div>
         <div class="field"><label>תיאור</label><input id="fGallerySub" maxlength="160" data-live="texts.gallery_sub"></div>
         <div class="thumbs" id="galEdit"></div>
-        <div class="hint">✕ מסיר תמונה. לחיצה — עריכת כיתוב. גרירה — שינוי סדר.</div>
+        <input type="file" id="galFile" accept="image/jpeg,image/png,image/webp" multiple hidden>
+        <div class="hint">＋ מוסיף תמונות. ✕ מסיר תמונה. לחיצה — עריכת כיתוב. גרירה — שינוי סדר.</div>
       </div>
 
       <!-- Carousel -->
@@ -443,7 +447,38 @@
       });
       box.appendChild(t);
     });
+    var add = FLY.el("button", "t-add", "＋");
+    add.type = "button";
+    add.title = "הוספת תמונות";
+    add.addEventListener("click", function () {
+      if (galleryState.length >= MAX_GALLERY) { FLY.toast("עד " + MAX_GALLERY + " תמונות בגלריה"); return; }
+      $("#galFile").click();
+    });
+    box.appendChild(add);
   }
+
+  var MAX_GALLERY = 12;
+  $("#galFile").addEventListener("change", function () {
+    var files = Array.prototype.slice.call(this.files || []).filter(function (f) {
+      return /^image\/(jpeg|png|webp)$/.test(f.type);
+    });
+    this.value = "";
+    if (!files.length) { FLY.toast("ניתן להעלות תמונות JPG / PNG / WebP בלבד"); return; }
+    var room = MAX_GALLERY - galleryState.length;
+    if (room <= 0) { FLY.toast("עד " + MAX_GALLERY + " תמונות בגלריה"); return; }
+    if (files.length > room) files = files.slice(0, room);
+    var addBtn = document.querySelector("#galEdit .t-add");
+    if (addBtn) { addBtn.disabled = true; addBtn.textContent = "⋯"; }
+    FLY.uploadFiles(files).then(function (urls) {
+      urls.forEach(function (u) { galleryState.push({ url: u, caption: "" }); });
+      renderGallery();
+      schedulePreviewRefresh();
+      FLY.toast(urls.length === 1 ? "✓ התמונה נוספה" : "✓ נוספו " + urls.length + " תמונות");
+    }).catch(function () {
+      renderGallery();
+      FLY.toast("שגיאה בהעלאת התמונות — נסו שוב");
+    });
+  });
 
   function renderCards(slides) {
     var box = $("#cardsEdit");
