@@ -57,6 +57,21 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Probe VPS reachability
+        run: |
+          # Diagnostic only (never fails the job). Tells us whether the runner
+          # can open a TCP connection to the SSH port — distinguishes a real
+          # firewall/DNS/wrong-host problem from an ssh-key/auth problem. The
+          # host value is masked by Actions, so nothing secret is printed.
+          host='${{ secrets.VPS_HOST }}'
+          port="${VPS_SSH_PORT:-22}"
+          echo "host set: $([ -n "$host" ] && echo yes || echo 'NO — VPS_HOST secret is empty')"
+          if timeout 15 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; then
+            echo "tcp $port: OPEN — runner can reach the VPS ssh port"
+          else
+            echo "tcp $port: UNREACHABLE — DNS failure, wrong host, wrong port, VPS down, or firewall blocking GitHub Actions IPs"
+          fi
+
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
