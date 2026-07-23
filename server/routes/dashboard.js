@@ -7,6 +7,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const db = require("../db");
+const portalStream = require("../portal-stream");
 const { sendWhatsApp } = require("../utils");
 
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
@@ -25,7 +26,6 @@ module.exports = function createDashboardRouter(ctx) {
     for (const l of listings) {
       if (l.status === "archived") continue;
       const page = l.page_id ? await db.getPage(l.page_id).catch(() => null) : null;
-      const expires = page ? asDate(page.expires_at) : null;
       properties.push({
         listing_id: l.listing_id,
         title: `${l.rooms || ""} חד׳ ב${l.neighborhood || l.city || ""}`.trim(),
@@ -34,7 +34,8 @@ module.exports = function createDashboardRouter(ctx) {
         page_id: l.page_id || null,
         page_url: l.page_id ? `${pageBaseUrl}/p/${l.page_id}` : null,
         page_status: page ? page.status : "building",
-        days_left: expires ? Math.max(0, Math.ceil((expires.getTime() - Date.now()) / 86400000)) : null,
+        // Pages no longer expire — null hides the countdown bar in the UI.
+        days_left: null,
         view_count: (page && page.view_count) || 0,
         lead_count: (page && page.lead_count) || 0,
       });
@@ -81,6 +82,8 @@ module.exports = function createDashboardRouter(ctx) {
       await db.updateListing(listingId, { status: mode === "archive" ? "archived" : "deleted" });
       if (listing.page_id) {
         await db.updatePage(listing.page_id, { status: "archived" });
+        // Realtime: pull the card off the public portal immediately.
+        portalStream.broadcast("listing_removed", { page_id: listing.page_id });
         if (mode === "delete") {
           fs.rm(path.join(uploadDir, "pages", listing.page_id), { recursive: true, force: true }, () => {});
         }

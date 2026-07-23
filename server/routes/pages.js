@@ -11,9 +11,13 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
+const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 
-const PAGE_LIFESPAN_DAYS = 30;
+// Portal era: pages no longer expire (the expiry scheduler is retired). New
+// pages get a far-future expires_at to keep the schema intact; /api/extend
+// stays functional for legacy reminder links already sent.
+const PAGE_LIFESPAN_DAYS = 36500;
 const LEAD_MAX_PER_HOUR = 3;
 const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel"]);
 
@@ -148,6 +152,9 @@ module.exports = function createPagesRouter(ctx) {
 
       await db.savePage(doc);
       await db.setListingPageId(body.listing_id, pageId);
+      // Realtime: the portal shows the listing the moment it exists.
+      portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
+        portalStream.toCard(doc, pageBaseUrl));
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
@@ -207,6 +214,8 @@ module.exports = function createPagesRouter(ctx) {
       patch["edit_count"] = (d.edit_count || 0) + 1;
       patch["updated_at"] = new Date();
       await db.updatePage(pageId, patch);
+      const fresh = await db.getPage(pageId).catch(() => null);
+      if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true, edit_count: patch["edit_count"] });
     } catch (err) {
       console.error("edit-text failed:", err);
@@ -275,6 +284,8 @@ module.exports = function createPagesRouter(ctx) {
         patch["sections.area"] = !!body.sections.area;
       }
       await db.updatePage(pageId, patch);
+      const fresh = await db.getPage(pageId).catch(() => null);
+      if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true });
     } catch (err) {
       console.error("page/update failed:", err);
@@ -401,14 +412,29 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── events beacon ──
-  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click"]);
+  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click", "phone_reveal"]);
   router.post("/api/property-event", express.text({ type: () => true }), async (req, res) => {
     let body = {};
     try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
     const { page_id: pageId, event } = body;
     if (!pageId || !event || !EVENTS.has(event)) return res.status(204).send("");
-    try { if (event === "view") await db.incrPageCounter(pageId, "view_count", 1); }
-    catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
+    try {
+      if (event === "view") await db.incrPageCounter(pageId, "view_count", 1);
+      else if (event === "phone_reveal") {
+        // Counter on the page + a queryable event record with the business id
+        // (derived server-side from the page — never trusted from the client).
+        await db.incrPageCounter(pageId, "phone_reveal_count", 1);
+        const page = await db.getPage(pageId).catch(() => null);
+        if (page) {
+          await db.logPortalEvent({
+            type: "phone_reveal",
+            page_id: pageId,
+            listing_id: page.listing_id || null,
+            business_phone: page.business_phone || null,
+          });
+        }
+      }
+    } catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
     res.status(204).send("");
   });
 

@@ -7,7 +7,7 @@ const { asMillis } = require("./utils");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(), otps: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(), otps: new Map(), portalEvents: [] };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -112,6 +112,32 @@ async function uniquePageId(agent) {
   return `${base}-${shortCode(8)}`;
 }
 
+// Live pages for the public buyer portal (call4li.com). "expiring" is kept for
+// pages flagged before the expiry system was retired. Sorted in memory to
+// avoid a Firestore composite index on status+created_at.
+async function listPublicPages(limit = 200) {
+  let pages;
+  if (db) {
+    const snap = await db.collection("property_pages")
+      .where("status", "in", ["active", "expiring"])
+      .limit(limit).get();
+    pages = snap.docs.map((d) => d.data());
+  } else {
+    pages = [...mem.pages.values()]
+      .filter((p) => p.status === "active" || p.status === "expiring")
+      .slice(0, limit);
+  }
+  return pages.sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at));
+}
+
+// Append-only analytics/trigger log for portal interactions (phone reveals
+// etc.). Queryable per business_phone; future automations can watch it.
+async function logPortalEvent(evt) {
+  const doc = { ...evt, at: new Date() };
+  if (db) await db.collection("portal_events").add(doc);
+  else mem.portalEvents.push(doc);
+}
+
 // Pages at or past `soonMs`, for the daily reminder/expire sweep.
 async function listPagesForExpiry(soonMs) {
   if (db) {
@@ -168,7 +194,7 @@ module.exports = {
   get db() { return db; },
   get mem() { return mem; },
   saveListing, getListing, setListingPageId, updateListing, listListingsByPhone,
-  savePage, getPage, findActivePageByListing, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
   getBusiness, setBusiness,
-  saveLead,
+  saveLead, logPortalEvent,
 };
