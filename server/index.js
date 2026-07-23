@@ -23,7 +23,10 @@ const auth = require("./auth");
 })();
 
 // ── config ──
-const PORT = Number(process.env.PORT || 8787);
+// Port precedence: CLI arg (e.g. `npm run local 3111`) → PORT env → default.
+const cliPort = Number(process.argv[2]);
+const PORT = Number.isInteger(cliPort) && cliPort > 0 && cliPort < 65536 ?
+  cliPort : Number(process.env.PORT || 8787);
 const BASE_URL = (process.env.BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads");
 const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, "");
@@ -34,7 +37,11 @@ const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
 const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
-const AUTH_SECRET = process.env.FORLY_JWT_SECRET || "change-me-in-env";
+const AUTH_SECRET = process.env.NADLAN_JWT_SECRET || "change-me-in-env";
+// Operator admin panel: comma-separated allowlist of phone numbers permitted to
+// see/manage EVERY agent's properties. Empty ⇒ admin panel denies everyone.
+const ADMIN_PHONES = (process.env.ADMIN_PHONES || "")
+  .split(",").map((s) => s.trim()).filter(Boolean);
 const WEB_SIGNUP_BASE = process.env.WEB_SIGNUP_URL || "https://call4li.web.app/signup";
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
 const TEMPLATES_DIR = path.join(__dirname, "..", "public-nadlan", "templates");
@@ -94,6 +101,16 @@ app.use("/api", createDashboardRouter({
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
 }));
+// ── admin routes (all-agent property management, allowlist-gated) ──
+const createAdminRouter = require("./routes/admin");
+app.use("/api/admin", createAdminRouter({
+  verifySession, readToken, normalizeAuthPhone,
+  authSecret: AUTH_SECRET,
+  pageBaseUrl: PAGE_BASE_URL,
+  uploadDir: UPLOAD_DIR,
+  adminPhones: ADMIN_PHONES,
+}));
+
 // signup redirect at root level
 app.get("/signup", (req, res) => {
   const session = verifySession(AUTH_SECRET, readToken(req));
@@ -124,7 +141,8 @@ app.listen(PORT, () => {
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
-  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
+  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set NADLAN_JWT_SECRET)" : "enabled"}`);
+  console.log(`  admin panel: ${ADMIN_PHONES.length ? `${BASE_URL}/admin.html (${ADMIN_PHONES.length} admin${ADMIN_PHONES.length > 1 ? "s" : ""})` : "LOCKED (set ADMIN_PHONES)"}`);
   startExpiryScheduler({
     pageBaseUrl: PAGE_BASE_URL,
     authSecret: AUTH_SECRET,

@@ -5,7 +5,8 @@
   "description": "Standalone intake server for the nadlan demo: serves the agent forms, accepts photo uploads to local disk with public URLs, creates listings, and kicks the n8n WW1 pipeline. No Firebase Functions or emulator involved.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "local": "node index.js"
   },
   "engines": {
     "node": ">=20"

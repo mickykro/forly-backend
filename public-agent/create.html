@@ -47,6 +47,16 @@
   .lang-opt:hover{background:rgba(23,20,15,.06)}
   .lang-opt .fl{font-size:1.15rem}
   .lang-opt[aria-selected="true"]{background:rgba(185,138,47,.14);font-weight:600}
+  /* optional sub-form (area breakdown) + feature checkboxes + extra-agent block */
+  .collapsible{border:1px solid rgba(23,20,15,.14);border-radius:10px;margin:2px 0 14px}
+  .collapsible summary{padding:10px 14px;cursor:pointer;font-size:.9rem;font-weight:500;color:var(--ink-soft,#5c554c)}
+  .collapsible[open] summary{border-bottom:1px solid rgba(23,20,15,.1)}
+  .collapsible .collapsible-content{padding:12px 14px 0}
+  .feature-row{display:flex;gap:18px;flex-wrap:wrap;margin:2px 0 14px}
+  .feature-row label{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.9rem;color:var(--ink-soft,#5c554c);font-weight:400}
+  .feature-row input{width:auto}
+  .sub-block{border:1px solid rgba(23,20,15,.14);border-radius:12px;padding:14px 14px 2px;margin:10px 0 14px}
+  .sub-block-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 </style>
 </head>
 <body>
@@ -96,8 +106,34 @@
               </select>
               <input id="agPhone" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
             </div>
+            <button type="button" class="chip-btn" id="addPhone2" style="margin-top:6px" data-i18n="btn_add_phone">+ מספר נוסף</button>
           </div>
           <div class="field"><label data-i18n="lbl_license">מס׳ רישיון תיווך</label><input id="agLicense" placeholder="3205419"></div>
+          <div class="field hidden" id="phone2Field">
+            <label data-i18n="lbl_phone2">נייד נוסף (וואטסאפ)</label>
+            <div style="display:flex;gap:8px">
+              <select id="agCC2" style="width:auto;flex:0 0 auto"></select>
+              <input id="agPhone2" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
+              <button type="button" class="chip-btn" id="rmPhone2" style="flex:0 0 auto">✕</button>
+            </div>
+          </div>
+        </div>
+        <button type="button" class="chip-btn" id="addAgent2" style="margin-bottom:12px" data-i18n="btn_add_agent">+ סוכן נוסף</button>
+        <div class="sub-block hidden" id="agent2Block">
+          <div class="sub-block-head">
+            <b style="font-size:.9rem" data-i18n="lbl_agent2_title">סוכן נוסף</b>
+            <button type="button" class="chip-btn" id="rmAgent2">✕ <span data-i18n="btn_remove">הסרה</span></button>
+          </div>
+          <div class="grid-2">
+            <div class="field"><label data-i18n="lbl_agent2_name">שם מלא</label><input id="ag2Name" placeholder="רון גולן" data-i18n-ph="ph_agName"></div>
+            <div class="field">
+              <label data-i18n="lbl_agent2_phone">נייד (וואטסאפ)</label>
+              <div style="display:flex;gap:8px">
+                <select id="ag2CC" style="width:auto;flex:0 0 auto"></select>
+                <input id="ag2Phone" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
+              </div>
+            </div>
+          </div>
         </div>
         <div class="field"><label data-i18n="lbl_logo">לוגו (אופציונלי)</label><input id="agLogo" type="file" accept="image/png,image/jpeg,image/webp"></div>
       </div>
@@ -128,6 +164,16 @@
         <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
         <div class="field"><label data-i18n="lbl_sqm">מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
       </div>
+      <details class="collapsible">
+        <summary data-i18n="sum_size_details">פירוט שטחים (בנוי / מרפסות / חצר)</summary>
+        <div class="collapsible-content">
+          <div class="grid-3">
+            <div class="field"><label data-i18n="lbl_size_built">בנוי (מ״ר)</label><input id="pSqmBuilt" type="number" inputmode="numeric" placeholder="95"></div>
+            <div class="field"><label data-i18n="lbl_size_balcony">מרפסות (מ״ר)</label><input id="pSqmBalcony" type="number" inputmode="numeric" placeholder="12"></div>
+            <div class="field"><label data-i18n="lbl_size_garden">חצר / גינה (מ״ר)</label><input id="pSqmGarden" type="number" inputmode="numeric" placeholder="0"></div>
+          </div>
+        </div>
+      </details>
       <div class="grid-3">
         <div class="field"><label data-i18n="lbl_floor">קומה</label><input id="pFloor" type="number" inputmode="numeric" placeholder="5"></div>
         <div class="field"><label data-i18n="lbl_parking">חניות</label><input id="pParking" type="number" inputmode="numeric" placeholder="1"></div>
@@ -136,6 +182,11 @@
             <input id="pNoBuilding" type="checkbox" style="width:auto"> <span data-i18n="lbl_no_building">הנכס אינו בבניין (בית פרטי / צמוד קרקע)</span>
           </label>
         </div>
+      </div>
+      <div class="feature-row">
+        <label><input id="pStorage" type="checkbox"> <span data-i18n="lbl_storage">מחסן</span></label>
+        <label><input id="pElevator" type="checkbox"> <span data-i18n="lbl_elevator">מעלית</span></label>
+        <label><input id="pShabbatElevator" type="checkbox"> <span data-i18n="lbl_shabbat_elevator">מעלית שבת</span></label>
       </div>
       <div class="field">
         <label data-i18n="lbl_description">תיאור חופשי</label>
@@ -442,6 +493,37 @@
     else floor.placeholder = "5";
   });
 
+  // a Shabbat elevator is an elevator
+  $("#pShabbatElevator").addEventListener("change", function () {
+    if (this.checked) $("#pElevator").checked = true;
+  });
+
+  // ── extra phone + extra agent (agent block) ──
+  // The country-code lists mirror the main one so there's a single source.
+  $("#agCC2").innerHTML = $("#agCC").innerHTML;
+  $("#ag2CC").innerHTML = $("#agCC").innerHTML;
+  $("#addPhone2").addEventListener("click", function () {
+    $("#phone2Field").classList.remove("hidden");
+    this.style.display = "none";
+    $("#agPhone2").focus();
+  });
+  $("#rmPhone2").addEventListener("click", function () {
+    $("#agPhone2").value = "";
+    $("#phone2Field").classList.add("hidden");
+    $("#addPhone2").style.display = "";
+  });
+  $("#addAgent2").addEventListener("click", function () {
+    $("#agent2Block").classList.remove("hidden");
+    this.style.display = "none";
+    $("#ag2Name").focus();
+  });
+  $("#rmAgent2").addEventListener("click", function () {
+    $("#ag2Name").value = "";
+    $("#ag2Phone").value = "";
+    $("#agent2Block").classList.add("hidden");
+    $("#addAgent2").style.display = "";
+  });
+
   // ── uploader UI ──
   var drop = $("#drop"), input = $("#fileInput");
   drop.addEventListener("click", function () { input.click(); });
@@ -703,12 +785,33 @@
       return;
     }
     var agPhone = "";
+    var agPhone2 = "";
+    var agent2 = null;
     if (isDemo) {
       agPhone = normalizeAgentPhone($("#agCC").value, $("#agPhone").value);
       if (agPhone.length < 10 || agPhone.length > 15) {
         err.textContent = FT("err_bad_phone");
         err.classList.add("show");
         return;
+      }
+      if (!$("#phone2Field").classList.contains("hidden") && $("#agPhone2").value.trim()) {
+        agPhone2 = normalizeAgentPhone($("#agCC2").value, $("#agPhone2").value);
+        if (agPhone2.length < 10 || agPhone2.length > 15) {
+          err.textContent = FT("err_bad_phone");
+          err.classList.add("show");
+          return;
+        }
+      }
+      // Second agent: ignore an untouched block; a partly-filled one is an error.
+      if (!$("#agent2Block").classList.contains("hidden") &&
+          ($("#ag2Name").value.trim() || $("#ag2Phone").value.trim())) {
+        var ag2Phone = normalizeAgentPhone($("#ag2CC").value, $("#ag2Phone").value);
+        if (!$("#ag2Name").value.trim() || ag2Phone.length < 10 || ag2Phone.length > 15) {
+          err.textContent = FT("err_agent2_incomplete");
+          err.classList.add("show");
+          return;
+        }
+        agent2 = { name: $("#ag2Name").value.trim(), phone: ag2Phone };
       }
     }
 
@@ -748,8 +851,14 @@
           price: priceValue(),
           rooms: Number($("#pRooms").value),
           size_sqm: Number($("#pSqm").value) || 0,
+          size_built: Number($("#pSqmBuilt").value) || 0,
+          size_balcony: Number($("#pSqmBalcony").value) || 0,
+          size_garden: Number($("#pSqmGarden").value) || 0,
           floor: $("#pNoBuilding").checked ? 0 : (Number($("#pFloor").value) || 0),
           parking: Number($("#pParking").value) || 0,
+          storage: $("#pStorage").checked,
+          elevator: $("#pElevator").checked,
+          shabbat_elevator: $("#pShabbatElevator").checked,
           description: $("#pDesc").value.trim(),
           photos_urls: photoUrls,
           own_video_url: videoUrl,
@@ -761,9 +870,11 @@
             name: $("#agName").value.trim(),
             brand_name: $("#agBrand").value.trim(),
             phone: agPhone,
+            phone2: agPhone2 || null,
             license: $("#agLicense").value.trim(),
             logo_url: logoUrl,
           };
+          if (agent2) body.agent2 = agent2;
         }
         btn.textContent = FT("status_creating");
         var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";

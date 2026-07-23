@@ -30,7 +30,8 @@
 #      GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa-key.json
 #      GREENAPI_INSTANCE=...            # required for OTP + notifications
 #      GREENAPI_TOKEN=...
-#      NADLAN_JWT_SECRET=...            # required for agent login/dashboard (openssl rand -hex 32)
+#      FORLY_JWT_SECRET=...             # required for agent login/dashboard (openssl rand -hex 32)
+#      ADMIN_PHONES=972542045280,...    # allowlist for the /admin.html console (comma-separated)
 #    and place the Firebase service-account key at /root/forly-backend/sa-key.json
 #    NOTE: use the SAME NADLAN_JWT_SECRET the Cloud Functions used, so existing
 #    agent session cookies keep working after the cutover to this server.
