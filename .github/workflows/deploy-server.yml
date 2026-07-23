@@ -30,7 +30,7 @@
 #      GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa-key.json
 #      GREENAPI_INSTANCE=...            # required for OTP + notifications
 #      GREENAPI_TOKEN=...
-#      FORLY_JWT_SECRET=...             # required for agent login/dashboard (openssl rand -hex 32)
+#      NADLAN_JWT_SECRET=...            # required for agent login/dashboard (openssl rand -hex 32)
 #      ADMIN_PHONES=972542045280,...    # allowlist for the /admin.html console (comma-separated)
 #    and place the Firebase service-account key at /root/forly-backend/sa-key.json
 #    NOTE: use the SAME NADLAN_JWT_SECRET the Cloud Functions used, so existing
@@ -57,16 +57,35 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Probe VPS reachability
+        run: |
+          # Diagnostic only (never fails the job). Tells us whether the runner
+          # can open a TCP connection to the SSH port — distinguishes a real
+          # firewall/DNS/wrong-host problem from an ssh-key/auth problem. The
+          # host value is masked by Actions, so nothing secret is printed.
+          host='${{ secrets.VPS_HOST }}'
+          port="${VPS_SSH_PORT:-22}"
+          echo "host set: $([ -n "$host" ] && echo yes || echo 'NO — VPS_HOST secret is empty')"
+          if timeout 15 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; then
+            echo "tcp $port: OPEN — runner can reach the VPS ssh port"
+          else
+            echo "tcp $port: UNREACHABLE — DNS failure, wrong host, wrong port, VPS down, or firewall blocking GitHub Actions IPs"
+          fi
+
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          # Best-effort: pre-seed the host key so the deploy is pinned when the
+          # host is reachable. `|| true` so a keyscan hiccup (it exits 1 on zero
+          # keys under `bash -e`) never fails the job — the ssh step below uses
+          # accept-new and is the real reachability check, with a clearer error.
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Pull latest main on VPS, rebuild, restart
         run: |
-          ssh -i ~/.ssh/id_deploy "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" 'bash -seuo pipefail' <<'REMOTE'
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" 'bash -seuo pipefail' <<'REMOTE'
           cd /root/forly-backend
           git fetch origin main
           git checkout -B main origin/main
