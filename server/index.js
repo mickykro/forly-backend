@@ -23,7 +23,10 @@ const auth = require("./auth");
 })();
 
 // ── config ──
-const PORT = Number(process.env.PORT || 8787);
+// Port precedence: CLI arg (e.g. `npm run local 3111`) → PORT env → default.
+const cliPort = Number(process.argv[2]);
+const PORT = Number.isInteger(cliPort) && cliPort > 0 && cliPort < 65536 ?
+  cliPort : Number(process.env.PORT || 8787);
 const BASE_URL = (process.env.BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads");
 const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, "");
