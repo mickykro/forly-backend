@@ -8,6 +8,8 @@
  * listings cache in routes/portal.js can invalidate itself.
  */
 
+const { deriveTags, sanitizeTags } = require("./tags");
+
 const clients = new Set();
 let version = 0;
 
@@ -64,6 +66,8 @@ function toCard(p, pageBaseUrl) {
     size_sqm: Number(prop.size_sqm) || 0,
     floor: Number.isFinite(Number(prop.floor)) ? Number(prop.floor) : null,
     parking: Number(prop.parking) || 0,
+    // Agent-curated tags when present, else derived from the property text.
+    tags: prop.tags && prop.tags.length ? sanitizeTags(prop.tags) : deriveTags(prop),
     agent: {
       name: agent.name || "",
       brand_name: agent.brand_name || agent.name || "",

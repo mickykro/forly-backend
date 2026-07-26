@@ -13,6 +13,7 @@
 <style>
   .chip-btn{border:1px solid rgba(23,20,15,.18);background:#fff;border-radius:100px;padding:4px 12px;font-size:.85rem;cursor:pointer;color:var(--ink,#17140f);line-height:1.4}
   .chip-btn:hover{border-color:var(--gold,#b98a2f);color:var(--gold,#b98a2f)}
+  .chip-btn.on{background:var(--gold,#b98a2f);border-color:var(--gold,#b98a2f);color:#fff}
   .th-pick{border:none;border-radius:10px;color:#fff;font-weight:600;font-size:.85rem;cursor:pointer;min-height:40px;text-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .1s}
   .th-pick:active{transform:scale(.98)}
   .th-pick.chosen{box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.3))}
@@ -141,6 +142,11 @@
         <label data-i18n="lbl_description">תיאור חופשי</label>
         <textarea id="pDesc" rows="3" placeholder="משופצת אדריכלית, מרפסת שמש לים, ממ״ד..." data-i18n-ph="ph_description"></textarea>
         <div class="hint" data-i18n="hint_description">התיאור עוזר ל-AI לכתוב את הדף — ככל שתפרטו, הדף יהיה טוב יותר.</div>
+      </div>
+      <div class="field">
+        <label data-i18n="lbl_tags">תגיות (לסינון בפורטל)</label>
+        <div id="pTags" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        <div class="hint" data-i18n="hint_tags">בחרו את המאפיינים הבולטים של הנכס — הם משמשים לסינון מהיר בפורטל.</div>
       </div>
 
       <div class="sec-title" data-i18n="sec_photos">תמונות הנכס (3–12)</div>
@@ -433,6 +439,20 @@
   }
   $("#pPrice").addEventListener("input", refreshPrice);
   renderPriceChips();
+
+  // ── property tags (portal filter chips) — value must match server/tags.js ──
+  var TAG_LABELS = [["גן","דירת גן"],["פנטהאוז","פנטהאוז"],["מרפסת","מרפסת"],["חניה","חניה"],
+    ["ים","נוף/קרבה לים"],["דופלקס","דופלקס"],["בלעדיות","בלעדיות"],["משופצת","משופצת"]];
+  $("#pTags").innerHTML = TAG_LABELS.map(function (t) {
+    return '<button type="button" class="chip-btn" data-tag="' + t[0] + '">' + t[1] + "</button>";
+  }).join("");
+  Array.prototype.forEach.call($("#pTags").children, function (b) {
+    b.addEventListener("click", function () { b.classList.toggle("on"); });
+  });
+  function selectedTags() {
+    return Array.prototype.filter.call($("#pTags").children, function (b) { return b.classList.contains("on"); })
+      .map(function (b) { return b.getAttribute("data-tag"); });
+  }
 
   // ── "not in a building" (private house): no floor field ──
   $("#pNoBuilding").addEventListener("change", function () {
@@ -750,6 +770,7 @@
           size_sqm: Number($("#pSqm").value) || 0,
           floor: $("#pNoBuilding").checked ? 0 : (Number($("#pFloor").value) || 0),
           parking: Number($("#pParking").value) || 0,
+          tags: selectedTags(),
           description: $("#pDesc").value.trim(),
           photos_urls: photoUrls,
           own_video_url: videoUrl,

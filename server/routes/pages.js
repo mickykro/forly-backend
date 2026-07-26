@@ -13,6 +13,7 @@ const db = require("../db");
 const pageEdit = require("../edit");
 const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+const { sanitizeTags, deriveTags } = require("../tags");
 
 // Portal era: pages no longer expire (the expiry scheduler is retired). New
 // pages get a far-future expires_at to keep the schema intact; /api/extend
@@ -49,6 +50,41 @@ module.exports = function createPagesRouter(ctx) {
       texts: d.texts || null,
     };
   }
+
+  // ── maintenance: backfill property.tags on pages created before tags existed.
+  // Guarded by a shared secret so it's never open on prod. Run locally with:
+  //   curl -X POST -H "x-admin-secret: $FORLY_JWT_SECRET" \
+  //        "http://127.0.0.1:8787/api/admin/backfill-tags?dry=1"
+  // ?dry=1 reports without writing; ?force=1 recomputes even where tags exist.
+  router.post("/api/admin/backfill-tags", async (req, res) => {
+    if (authSecret === "change-me-in-env" || req.get("x-admin-secret") !== authSecret) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const dry = req.query.dry === "1";
+    const force = req.query.force === "1";
+    try {
+      const pages = await db.listPublicPages(1000);
+      const changes = [];
+      for (const p of pages) {
+        const existing = (p.property && p.property.tags) || [];
+        if (existing.length && !force) continue;
+        // Description lives on the listing, not the page — join it in for richer tags.
+        const listing = await db.getListing(p.listing_id).catch(() => null);
+        const tags = deriveTags(p.property || {}, listing && listing.description);
+        if (!tags.length) continue;
+        changes.push({ page_id: p.page_id, from: existing, to: tags });
+        if (!dry) {
+          await db.updatePage(p.page_id, { "property.tags": tags });
+          const fresh = await db.getPage(p.page_id);
+          if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
+        }
+      }
+      res.json({ scanned: pages.length, updated: changes.length, dry, force, changes });
+    } catch (err) {
+      console.error("backfill-tags failed:", err);
+      res.status(500).json({ error: err instanceof Error ? err.message : "internal error" });
+    }
+  });
 
   // ── page builder (called by n8n) ──
   router.post("/createPropertyPage", async (req, res) => {
@@ -124,6 +160,8 @@ module.exports = function createPagesRouter(ctx) {
           size_sqm: Number(body.property && body.property.size_sqm) || 0,
           floor: Number(body.property && body.property.floor) || 0,
           parking: Number(body.property && body.property.parking) || 0,
+          // Agent-curated tags ride on the listing when n8n doesn't forward them.
+          tags: sanitizeTags((body.property && body.property.tags) || (listing && listing.tags)),
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
@@ -150,6 +188,7 @@ module.exports = function createPagesRouter(ctx) {
         lead_count: reusable ? (reusable.lead_count || 0) : 0,
       };
 
+      if (!doc.property.tags.length) doc.property.tags = deriveTags(doc.property, listing && listing.description);
       await db.savePage(doc);
       await db.setListingPageId(body.listing_id, pageId);
       // Realtime: the portal shows the listing the moment it exists.
