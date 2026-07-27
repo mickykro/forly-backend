@@ -1,8 +1,8 @@
 /*
- * lifecycle.js — page expiry reminders + expiration (was expirePagesDaily on
- * Cloud Functions). Cloud Scheduler ran it at 09:00 Asia/Jerusalem; this server
- * is long-running, so an hourly tick fires the sweep once per Jerusalem day.
- * Reminders are idempotent via reminder_sent_at, so a double tick is harmless.
+ * lifecycle.js — RETIRED (portal era: pages no longer expire).
+ * The public buyer portal on call4li.com lists every live page until the agent
+ * archives it, so index.js no longer starts the scheduler and nothing calls
+ * runExpirySweep. Kept for reference in case a lifecycle policy returns.
  */
 
 const db = require("./db");

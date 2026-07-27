@@ -12,6 +12,7 @@ const fs = require("fs");
 const db = require("../db");
 const pageEdit = require("../edit");
 const { sanitizeTheme, sanitizeLang } = require("../utils");
+const { sanitizeTags } = require("../tags");
 
 const MAX_UPLOAD_FILES = 12;
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -139,6 +140,7 @@ module.exports = function createIntakeRouter(ctx) {
       storage: !!body.storage,
       elevator: !!body.elevator || !!body.shabbat_elevator,
       shabbat_elevator: !!body.shabbat_elevator,
+      tags: sanitizeTags(body.tags),
       description: String(body.description || "").slice(0, 2000),
       photos_urls: body.photos_urls.slice(0, MAX_UPLOAD_FILES),
       own_video_url: body.own_video_url || null,
