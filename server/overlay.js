@@ -1,6 +1,19 @@
 /*
- * Video title overlay — burns property titles onto the LAST 3 seconds of a
- * walkthrough video, regardless of what the footage shows or how it moves.
+ * Video stitch + title overlay — joins the Seedance clips a walkthrough was
+ * generated from and burns property titles onto the LAST 3 seconds of the
+ * result, regardless of what the footage shows or how it moves.
+ *
+ * Seedance caps a single generation at 15s, so anything longer arrives as
+ * several clips. `videoUrls` (ordered) are crossfaded together with `xfade`
+ * inside the SAME filtergraph that burns the titles, so the whole thing costs
+ * one encode rather than concat-then-overlay. A single clip still takes the
+ * original fast path. Stitched duration is `sum(durations) - (n-1) * 0.5`.
+ *
+ * Audio: clips are generated silent (generate_audio: false) and a single
+ * music bed is laid over the finished video when one is configured — see
+ * MUSIC_PATH. Without a bed a multi-clip result is silent; per-clip audio is
+ * deliberately NOT carried across a join, because independent AI-generated
+ * soundtracks butted together sound worse than nothing.
  *
  * Implementation: ffmpeg + a generated ASS subtitle track (libass), which
  * handles Hebrew RTL/BiDi shaping correctly — no generative model touches
@@ -10,8 +23,9 @@
  *
  * Room labels (optional): when the caller passes `rooms` (the Vision-Tagger
  * room types of the photos the video was generated from) and
- * ANTHROPIC_API_KEY is set, frames are sampled from the FINISHED video and
- * classified in one Claude vision call against that closed label list —
+ * ANTHROPIC_API_KEY is set, frames are sampled from the SOURCE clips (with
+ * their timestamps mapped onto the stitched timeline, so no extra encode is
+ * needed) and classified in one Claude vision call against that label list —
  * Seedance doesn't guarantee shot order/timing, so we look at what actually
  * rendered. The same call returns a short 1–2 word Hebrew descriptor per
  * frame ("מרווח ומואר"). Per-frame labels are smoothed into segments and
@@ -38,6 +52,24 @@ const MAX_LINES = 3;
 const MAX_LINE_CHARS = 60;
 const MAX_ROOMS = 12;
 const VISION_MODEL = process.env.OVERLAY_VISION_MODEL || "claude-haiku-4-5-20251001";
+
+// Stitching. XFADE_SECONDS is spent twice — once at the tail of the outgoing
+// clip and once at the head of the incoming one — so each join shortens the
+// total by exactly that much.
+const XFADE_SECONDS = 0.5;
+const MAX_CLIPS = 4;
+
+// Music bed laid over the finished video. Optional: with no readable file the
+// output is simply silent. Ships as an env override so the track can live on a
+// mounted volume instead of in the image.
+const MUSIC_PATH = process.env.OVERLAY_MUSIC_PATH ||
+  path.join(__dirname, "assets", "music", "default.m4a");
+const MUSIC_FADE_SECONDS = 2;
+
+// Vision sampling. ~1.5 frames/sec keeps a 30s video inside one Claude call
+// while still resolving the ~2.5s each room is on screen.
+const SAMPLES_PER_SECOND = 1.5;
+const MAX_VISION_FRAMES = 48;
 
 // Cream (#F7F3EC) matches the landing-page theme; the room label sits on a
 // vertical gradient that fades from transparent (top) to this cream (bottom).
@@ -186,11 +218,20 @@ function run(cmd, args, timeoutMs) {
   });
 }
 
+// "30/1" / "24000/1001" → 30 / 23.976. Falls back to 30 for the odd stream
+// that reports 0/0, which only matters as an xfade normalization target.
+function parseFps(r) {
+  const m = String(r || "").match(/^(\d+)\/(\d+)$/);
+  if (!m) return 30;
+  const fps = Number(m[1]) / Number(m[2]);
+  return isFinite(fps) && fps > 0 ? Math.round(fps * 1000) / 1000 : 30;
+}
+
 async function probe(file) {
   const out = await run(FFPROBE, [
     "-v", "error",
     "-select_streams", "v:0",
-    "-show_entries", "stream=width,height:format=duration",
+    "-show_entries", "stream=width,height,r_frame_rate:format=duration",
     "-of", "json", file,
   ], 30000);
   const j = JSON.parse(out);
@@ -199,7 +240,21 @@ async function probe(file) {
   if (!s.width || !s.height || !isFinite(duration) || duration <= 0) {
     throw new Error("could not probe video dimensions/duration");
   }
-  return { width: s.width, height: s.height, duration };
+  return { width: s.width, height: s.height, duration, fps: parseFps(s.r_frame_rate) };
+}
+
+// Where each clip starts on the stitched timeline, and how long the result is.
+// Clip k begins where the previous one starts its crossfade, so every join
+// costs XFADE_SECONDS of total running time.
+function stitchTimeline(durations) {
+  let offset = 0;
+  const offsets = durations.map((d, i) => {
+    if (i === 0) return 0;
+    offset += durations[i - 1] - XFADE_SECONDS;
+    return offset;
+  });
+  const duration = durations.reduce((a, b) => a + b, 0) - XFADE_SECONDS * (durations.length - 1);
+  return { offsets, duration };
 }
 
 // ASS timestamps are h:mm:ss.cc (centiseconds)
@@ -334,7 +389,7 @@ async function classifyFrames(frames, allowed, apiKey) {
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: VISION_MODEL, max_tokens: 1500, temperature: 0, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: VISION_MODEL, max_tokens: 3000, temperature: 0, messages: [{ role: "user", content }] }),
     signal: AbortSignal.timeout(90000),
   });
   if (!resp.ok) throw new Error(`vision api ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
@@ -357,27 +412,43 @@ async function classifyFrames(frames, allowed, apiKey) {
   });
 }
 
-// Sample ~2 fps (8–24 frames), downscaled to 384px height to keep vision
-// tokens cheap, classify, smooth into segments, and attach a descriptor.
-// Segments are clipped to end before the title window so the closing shot
-// stays clean.
-async function detectRoomSegments(inFile, tmp, info, rooms) {
+// Sample one clip at `count` frames, downscaled to 384px height to keep vision
+// tokens cheap. Returned timestamps are already shifted onto the stitched
+// timeline by `offset`, so callers never deal with per-clip time.
+async function sampleClipFrames(file, framesDir, prefix, duration, count, offset) {
+  await run(FFMPEG, [
+    "-y", "-i", file,
+    "-vf", `fps=${count / duration},scale=-2:384`,
+    "-q:v", "5",
+    path.join(framesDir, `${prefix}_%03d.jpg`),
+  ], 60000);
+  const files = fs.readdirSync(framesDir)
+    .filter((f) => f.startsWith(`${prefix}_`) && f.endsWith(".jpg")).sort();
+  return files.map((f, i) => ({
+    file: path.join(framesDir, f),
+    t: offset + ((i + 0.5) * duration) / files.length,
+  }));
+}
+
+// Sample every clip, classify the lot in one call, smooth into segments, and
+// attach a descriptor. Frames come from the SOURCE clips rather than the
+// stitched output so no throwaway encode is needed; the few frames that land
+// inside a crossfade show a blend and get smoothed out as noise. Segments are
+// clipped to end before the title window so the closing shot stays clean.
+async function detectRoomSegments(clips, tmp, info, rooms) {
   const allowed = [...new Set(rooms.map(roomLabel).filter(Boolean))];
   if (!allowed.length) return [];
   const framesDir = path.join(tmp, "frames");
   fs.mkdirSync(framesDir);
-  const count = Math.min(24, Math.max(8, Math.round(info.duration * 2)));
-  await run(FFMPEG, [
-    "-y", "-i", inFile,
-    "-vf", `fps=${count / info.duration},scale=-2:384`,
-    "-q:v", "5",
-    path.join(framesDir, "f_%03d.jpg"),
-  ], 60000);
-  const files = fs.readdirSync(framesDir).filter((f) => f.endsWith(".jpg")).sort();
-  const frames = files.map((f, i) => ({
-    file: path.join(framesDir, f),
-    t: ((i + 0.5) * info.duration) / files.length,
-  }));
+  const budget = Math.min(MAX_VISION_FRAMES, Math.max(8, Math.round(info.duration * SAMPLES_PER_SECOND)));
+  const totalClipSeconds = clips.reduce((s, c) => s + c.duration, 0);
+  const frames = [];
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    const share = Math.max(2, Math.round((budget * c.duration) / totalClipSeconds));
+    frames.push(...await sampleClipFrames(c.file, framesDir, `c${i}`, c.duration, share, c.offset));
+  }
+  frames.sort((a, b) => a.t - b.t);
   if (!frames.length) return [];
   const items = await classifyFrames(frames, allowed, process.env.ANTHROPIC_API_KEY);
   const times = frames.map((f) => f.t);
@@ -401,15 +472,23 @@ async function download(url, dest) {
   fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
 }
 
-// Build the ffmpeg args. With room segments we overlay a pre-rendered cream
-// gradient PNG (enabled only while a room label shows) and burn the ASS track
-// over it; without, a plain ASS pass. execFile passes args verbatim (no
-// shell), so commas inside the enable expression are escaped with \, for
-// ffmpeg's filtergraph parser.
-function buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments, gradFile) {
-  if (!roomSegments.length) {
+// Build the ffmpeg args. One encode does everything: crossfade the clips
+// together, overlay a pre-rendered cream gradient PNG (enabled only while a
+// room label shows), burn the ASS track over that, and lay down the music bed.
+// A single clip with no rooms and no music keeps the original cheap `-vf ass`
+// path, audio copied through. execFile passes args verbatim (no shell), so
+// commas inside the enable expression are escaped with \, for ffmpeg's
+// filtergraph parser.
+//
+// xfade needs its inputs to agree on size, SAR, frame rate and pixel format,
+// so every clip is normalized to the first one's geometry before joining.
+function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegments, gradFile, musicFile }) {
+  const n = inFiles.length;
+  const useGradient = Boolean(gradFile && roomSegments.length);
+
+  if (n === 1 && !useGradient && !musicFile) {
     return [
-      "-y", "-i", inFile,
+      "-y", "-i", inFiles[0],
       "-vf", `ass=${assFile}`,
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
       "-c:a", "copy",
@@ -417,40 +496,92 @@ function buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments, gradFile)
       outFile,
     ];
   }
-  const y = info.height - bandHeight(info.height);
-  const enable = roomSegments
-    .map((s) => `between(t\\,${s.start.toFixed(2)}\\,${s.end.toFixed(2)})`)
-    .join("+");
-  const filter =
-    `[0:v][1:v]overlay=x=0:y=${y}:enable=${enable}[bg];` +
-    `[bg]format=yuv420p,ass=${assFile}[v]`;
-  return [
-    "-y", "-i", inFile,
-    "-i", gradFile,
-    "-filter_complex", filter,
-    "-map", "[v]", "-map", "0:a?",
+
+  const parts = [];
+  const norm = `scale=${info.width}:${info.height},setsar=1,fps=${info.fps},format=yuv420p`;
+  if (n === 1) {
+    parts.push(`[0:v]${norm}[vcat]`);
+  } else {
+    for (let i = 0; i < n; i++) parts.push(`[${i}:v]${norm}[v${i}]`);
+    let prev = "v0";
+    let joined = durations[0];
+    for (let i = 1; i < n; i++) {
+      const label = i === n - 1 ? "vcat" : `x${i}`;
+      const offset = (joined - XFADE_SECONDS).toFixed(3);
+      parts.push(`[${prev}][v${i}]xfade=transition=fade:duration=${XFADE_SECONDS}:offset=${offset}[${label}]`);
+      prev = label;
+      joined += durations[i] - XFADE_SECONDS;
+    }
+  }
+
+  let last = "vcat";
+  if (useGradient) {
+    const y = info.height - bandHeight(info.height);
+    const enable = roomSegments
+      .map((s) => `between(t\\,${s.start.toFixed(2)}\\,${s.end.toFixed(2)})`)
+      .join("+");
+    parts.push(`[${last}][${n}:v]overlay=x=0:y=${y}:enable=${enable}[bg]`);
+    last = "bg";
+  }
+  parts.push(`[${last}]format=yuv420p,ass=${assFile}[v]`);
+
+  if (musicFile) {
+    const idx = n + (useGradient ? 1 : 0);
+    const fadeAt = Math.max(0, info.duration - MUSIC_FADE_SECONDS).toFixed(3);
+    parts.push(
+      `[${idx}:a]atrim=0:${info.duration.toFixed(3)},asetpts=PTS-STARTPTS,` +
+      `afade=t=out:st=${fadeAt}:d=${MUSIC_FADE_SECONDS}[a]`
+    );
+  }
+
+  const args = ["-y"];
+  for (const f of inFiles) args.push("-i", f);
+  if (useGradient) args.push("-i", gradFile);
+  // -stream_loop applies to the input that follows it, so a bed shorter than
+  // the video repeats instead of cutting out; atrim above bounds it again.
+  if (musicFile) args.push("-stream_loop", "-1", "-i", musicFile);
+  args.push("-filter_complex", parts.join(";"), "-map", "[v]");
+  if (musicFile) args.push("-map", "[a]", "-c:a", "aac", "-b:a", "128k");
+  else if (n === 1) args.push("-map", "0:a?", "-c:a", "copy");
+  args.push(
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-    "-c:a", "copy",
     "-movflags", "+faststart",
-    outFile,
-  ];
+    outFile
+  );
+  return args;
 }
 
 /**
- * Overlay `lines` on the last 3 seconds of the video at `videoUrl`, and —
- * when `rooms` is provided and ANTHROPIC_API_KEY is set — vision-detected
- * room-name labels (with a short descriptor, over a cream gradient) on the
- * segments where each room is on screen.
+ * Stitch the clips at `videoUrls` (ordered; `videoUrl` is accepted as a
+ * single-clip shorthand), overlay `lines` on the last 3 seconds of the
+ * result, and — when `rooms` is provided and ANTHROPIC_API_KEY is set —
+ * vision-detected room-name labels (with a short descriptor, over a cream
+ * gradient) on the segments where each room is on screen.
  * Writes the result under `uploadDir`/overlays and returns its public URL.
  */
-async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
+async function overlayVideo({ videoUrl, videoUrls, lines, rooms, uploadDir, baseUrl }) {
+  const urls = (Array.isArray(videoUrls) && videoUrls.length ? videoUrls : [videoUrl])
+    .filter((u) => typeof u === "string" && /^https?:\/\//.test(u));
+  if (!urls.length) throw new Error("no video url given");
+  if (urls.length > MAX_CLIPS) throw new Error(`at most ${MAX_CLIPS} clips can be stitched`);
+
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "overlay-"));
   try {
-    const inFile = path.join(tmp, "in.mp4");
     const assFile = path.join(tmp, "titles.ass");
     const outFile = path.join(tmp, "out.mp4");
-    await download(videoUrl, inFile);
-    const info = await probe(inFile);
+    const inFiles = [];
+    const probes = [];
+    for (let i = 0; i < urls.length; i++) {
+      const f = path.join(tmp, `in${i}.mp4`);
+      await download(urls[i], f);
+      inFiles.push(f);
+      probes.push(await probe(f));
+    }
+    const durations = probes.map((p) => p.duration);
+    const { offsets, duration } = stitchTimeline(durations);
+    // Geometry comes from the first clip; the rest are scaled to match it.
+    const info = { width: probes[0].width, height: probes[0].height, fps: probes[0].fps, duration };
+    const clips = inFiles.map((file, i) => ({ file, duration: durations[i], offset: offsets[i] }));
     let roomSegments = [];
     // room_debug surfaces WHY labels are/aren't present, right in the API
     // response (visible in the n8n execution) instead of only in server logs.
@@ -462,7 +593,7 @@ async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
       } else {
         // Room labels are best-effort — a vision failure must not sink the video.
         try {
-          roomSegments = await detectRoomSegments(inFile, tmp, info, rooms.slice(0, MAX_ROOMS));
+          roomSegments = await detectRoomSegments(clips, tmp, info, rooms.slice(0, MAX_ROOMS));
           roomDebug = roomSegments.length ? "ok" : "no_segments_detected";
         } catch (err) {
           roomDebug = "error: " + err.message.slice(0, 200);
@@ -476,18 +607,35 @@ async function overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl }) {
       gradFile = path.join(tmp, "grad.png");
       fs.writeFileSync(gradFile, gradientPng(info.width, bandHeight(info.height), CREAM_RGB, GRADIENT_PEAK_ALPHA));
     }
-    await run(FFMPEG, buildFfmpegArgs(inFile, assFile, outFile, info, roomSegments, gradFile), 240000);
+    // A missing bed is normal (none shipped yet) — the video just goes out silent.
+    const musicFile = fs.existsSync(MUSIC_PATH) ? MUSIC_PATH : null;
+    if (!musicFile && inFiles.length > 1) {
+      console.warn(`video-overlay: no music bed at ${MUSIC_PATH}; stitched video will be silent`);
+    }
+    const args = buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegments, gradFile, musicFile });
+    await run(FFMPEG, args, 240000);
     const rel = `overlays/${crypto.randomUUID()}.mp4`;
     const finalPath = path.join(uploadDir, rel);
     fs.mkdirSync(path.dirname(finalPath), { recursive: true });
     fs.copyFileSync(outFile, finalPath);
-    return { video_url: `${baseUrl}/files/${rel}`, duration: info.duration, room_segments: roomSegments, room_debug: roomDebug };
+    return {
+      video_url: `${baseUrl}/files/${rel}`,
+      duration: info.duration,
+      clip_count: inFiles.length,
+      clip_durations: durations,
+      has_music: Boolean(musicFile),
+      room_segments: roomSegments,
+      room_debug: roomDebug,
+    };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 }
 
 module.exports = {
-  overlayVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS,
-  _test: { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime, modeOf, gradientPng, bandHeight },
+  overlayVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS,
+  _test: {
+    buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
+    modeOf, gradientPng, bandHeight, stitchTimeline, parseFps,
+  },
 };

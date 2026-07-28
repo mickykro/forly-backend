@@ -4,8 +4,9 @@
  */
 const assert = require("assert");
 const zlib = require("zlib");
-const { _test, MAX_ROOMS } = require("./overlay");
-const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng, bandHeight } = _test;
+const { _test, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS } = require("./overlay");
+const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng,
+        bandHeight, stitchTimeline, parseFps } = _test;
 
 // ── roomLabel mapping ──
 assert.equal(roomLabel("living room"), "סלון");
@@ -72,25 +73,90 @@ assert.ok(ass.includes("Dialogue: 0,0:00:07.00,0:00:11.00,Title,"), "title event
 const ass2 = buildAss({ width: 720, height: 1280, duration: 10 }, ["שורה"]);
 assert.ok(!ass2.includes(",Room,,"), "no room events without segments");
 
+// ── parseFps ──
+assert.equal(parseFps("30/1"), 30);
+assert.equal(parseFps("24000/1001"), 23.976);
+assert.equal(parseFps("0/0"), 30, "degenerate rate falls back to 30");
+assert.equal(parseFps(undefined), 30);
+
+// ── stitchTimeline: each join costs XFADE_SECONDS of running time ──
+assert.equal(XFADE_SECONDS, 0.5);
+const one = stitchTimeline([15]);
+assert.deepEqual(one.offsets, [0]);
+assert.equal(one.duration, 15, "single clip is untouched");
+const two = stitchTimeline([15, 15]);
+assert.deepEqual(two.offsets, [0, 14.5]);
+assert.equal(two.duration, 29.5, "2x15s with one 0.5s crossfade");
+const uneven = stitchTimeline([15, 12]);
+assert.deepEqual(uneven.offsets, [0, 14.5]);
+assert.equal(uneven.duration, 26.5, "11 photos → 6+5 → 15s+12s");
+const three = stitchTimeline([10, 8, 5]);
+assert.deepEqual(three.offsets, [0, 9.5, 17]);
+assert.equal(three.duration, 22, "23 - 2 joins");
+
 // ── buildFfmpegArgs ──
-const info = { width: 720, height: 1280, duration: 10 };
+const info = { width: 720, height: 1280, duration: 10, fps: 30 };
 assert.equal(bandHeight(1280), 282, "band height = round(1280*0.22)");
-// no rooms → simple -vf ass pass, audio copied
-const plain = buildFfmpegArgs("in.mp4", "t.ass", "out.mp4", info, [], null);
+// single clip, no rooms, no music → cheap -vf ass pass, audio copied
+const plain = buildFfmpegArgs({
+  inFiles: ["in.mp4"], assFile: "t.ass", outFile: "out.mp4", info,
+  durations: [10], roomSegments: [], gradFile: null, musicFile: null,
+});
 assert.ok(plain.includes("-vf") && plain[plain.indexOf("-vf") + 1] === "ass=t.ass");
 assert.ok(!plain.includes("-filter_complex"), "no filter_complex without rooms");
 
 // rooms → gradient PNG overlay + ass, enable windows, escaped commas
-const fc = buildFfmpegArgs("in.mp4", "t.ass", "out.mp4", info, rs, "grad.png");
+const fc = buildFfmpegArgs({
+  inFiles: ["in.mp4"], assFile: "t.ass", outFile: "out.mp4", info,
+  durations: [10], roomSegments: rs, gradFile: "grad.png", musicFile: null,
+});
 const li = fc.indexOf("-filter_complex");
 assert.ok(li > 0, "filter_complex present with rooms");
 const filter = fc[li + 1];
 assert.ok(fc.includes("grad.png"), "gradient PNG is a second input");
 assert.ok(!fc.join(" ").includes("geq") && !fc.join(" ").includes("lavfi"), "no geq/lavfi gradient tricks");
-assert.ok(filter.startsWith("[0:v][1:v]overlay=x=0:y=998:"), "gradient overlaid at bottom (1280-282)");
+assert.ok(filter.includes("[vcat][1:v]overlay=x=0:y=998:"), "gradient overlaid at bottom (1280-282)");
 assert.ok(filter.includes("between(t\\,0.00\\,4.00)+between(t\\,4.00\\,7.25)"), "per-segment enable, escaped commas");
 assert.ok(filter.includes("format=yuv420p,ass=t.ass"), "yuv420p then ass burn");
 assert.ok(fc.includes("0:a?"), "audio mapped optionally");
+
+// ── two clips: xfade chain, offsets from stitchTimeline ──
+const stitchInfo = { width: 720, height: 1280, duration: 29.5, fps: 30 };
+const two2 = buildFfmpegArgs({
+  inFiles: ["a.mp4", "b.mp4"], assFile: "t.ass", outFile: "out.mp4", info: stitchInfo,
+  durations: [15, 15], roomSegments: [], gradFile: null, musicFile: null,
+});
+const twoFilter = two2[two2.indexOf("-filter_complex") + 1];
+assert.equal(two2.filter((a) => a === "-i").length, 2, "one -i per clip");
+assert.ok(twoFilter.includes("[0:v]scale=720:1280,setsar=1,fps=30,format=yuv420p[v0]"), "clip 0 normalized");
+assert.ok(twoFilter.includes("[1:v]scale=720:1280,setsar=1,fps=30,format=yuv420p[v1]"), "clip 1 normalized");
+assert.ok(twoFilter.includes("[v0][v1]xfade=transition=fade:duration=0.5:offset=14.500[vcat]"), "join at 14.5s");
+assert.ok(!two2.includes("0:a?"), "no per-clip audio carried across a join");
+
+// three clips chain through intermediate labels
+const three3 = buildFfmpegArgs({
+  inFiles: ["a.mp4", "b.mp4", "c.mp4"], assFile: "t.ass", outFile: "out.mp4",
+  info: { width: 720, height: 1280, duration: 22, fps: 30 },
+  durations: [10, 8, 5], roomSegments: [], gradFile: null, musicFile: null,
+});
+const threeFilter = three3[three3.indexOf("-filter_complex") + 1];
+assert.ok(threeFilter.includes("[v0][v1]xfade=transition=fade:duration=0.5:offset=9.500[x1]"), "first join");
+assert.ok(threeFilter.includes("[x1][v2]xfade=transition=fade:duration=0.5:offset=17.000[vcat]"), "second join");
+
+// ── music bed: looped input, trimmed to the stitched length, faded out ──
+const withMusic = buildFfmpegArgs({
+  inFiles: ["a.mp4", "b.mp4"], assFile: "t.ass", outFile: "out.mp4", info: stitchInfo,
+  durations: [15, 15], roomSegments: rs, gradFile: "grad.png", musicFile: "bed.m4a",
+});
+const musicFilter = withMusic[withMusic.indexOf("-filter_complex") + 1];
+// inputs: 0,1 = clips, 2 = gradient, 3 = music
+assert.ok(musicFilter.includes("[vcat][2:v]overlay="), "gradient is input 2 behind two clips");
+assert.ok(musicFilter.includes("[3:a]atrim=0:29.500"), "music trimmed to stitched duration");
+assert.ok(musicFilter.includes("afade=t=out:st=27.500:d=2[a]"), "2s fade out at the end");
+const loopAt = withMusic.indexOf("-stream_loop");
+assert.equal(withMusic[loopAt + 1], "-1", "music loops");
+assert.equal(withMusic[loopAt + 3], "bed.m4a", "-stream_loop applies to the music input");
+assert.ok(withMusic.includes("[a]"), "music mapped as the audio track");
 
 // ── gradientPng: valid RGBA PNG with a vertical alpha ramp ──
 const png = gradientPng(4, 10, [0xF7, 0xF3, 0xEC], 242);
@@ -112,4 +178,5 @@ assert.equal(raw[9 * rowLen + 1 + 3], 242, "bottom row alpha = peak");
 assert.equal(raw[1], 0xF7, "cream R"); assert.equal(raw[2], 0xF3, "cream G"); assert.equal(raw[3], 0xEC, "cream B");
 
 assert.equal(MAX_ROOMS, 12);
+assert.equal(MAX_CLIPS, 4);
 console.log("all overlay tests passed");
