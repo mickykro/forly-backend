@@ -6,7 +6,7 @@ const assert = require("assert");
 const zlib = require("zlib");
 const { _test, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS } = require("./overlay");
 const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng,
-        bandHeight, stitchTimeline, parseFps, pickAudioUrl } = _test;
+        bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin } = _test;
 
 // ── roomLabel mapping ──
 assert.equal(roomLabel("living room"), "סלון");
@@ -36,8 +36,20 @@ let segs = labelsToSegments(
 assert.equal(segs.length, 3);
 assert.equal(segs[0].start, 0);
 assert.equal(segs[2].end, 10);
-assert.ok(Math.abs(segs[0].end - 4.0) < 1e-9);
-assert.ok(Math.abs(segs[1].start - 4.0) < 1e-9);
+// Edges sit ON the confirming samples, never midway between them: sample 7
+// (t=3.75) is the last that showed room a, sample 8 (t=4.25) the first that
+// showed b. The old midpoint (4.0) opened b's label a quarter-second before b
+// was ever seen on screen.
+assert.ok(Math.abs(segs[0].end - 3.75) < 1e-9, "closes on the last confirming sample");
+assert.ok(Math.abs(segs[1].start - 4.25) < 1e-9, "opens on the first confirming sample");
+// The invariant that matters: a label never opens before the previous room's
+// last confirmed sighting — it can only ever trail the cut.
+for (let i = 1; i < segs.length; i++) {
+  assert.ok(segs[i].start > segs[i - 1].end, `segment ${i} opens after the previous closes`);
+}
+// And every edge is a real sample time, so it's always backed by a frame.
+const sampleTimes = new Set(times);
+assert.ok(sampleTimes.has(segs[1].start) && sampleTimes.has(segs[0].end));
 
 // single-blip healing
 segs = labelsToSegments(["a", "a", "b", "a", "a", null, null, null, null, null], times.slice(0, 10), 5);
@@ -47,6 +59,23 @@ assert.equal(segs[0].label, "a");
 // short runs dropped
 segs = labelsToSegments(["a", "b", "c", "d", "e", "f"], times.slice(0, 6), 3);
 assert.equal(segs.length, 0);
+
+// ── afterJoin: a label may not open inside a crossfade ──
+// Two 15s clips -> clip 1 starts at 14.5, crossfade runs 14.5..15.0. Frames in
+// that window come from clip 1's source (fully its opening room) while the
+// output is still mostly clip 0.
+const twoClips = [{ offset: 0 }, { offset: 14.5 }];
+assert.equal(afterJoin(14.6, twoClips), 15.0, "start inside the join is held to the join end");
+assert.equal(afterJoin(14.5, twoClips), 15.0, "start exactly at the join is held");
+assert.equal(afterJoin(15.0, twoClips), 15.0, "join end itself is already clear");
+assert.equal(afterJoin(14.4, twoClips), 14.4, "before the join is untouched");
+assert.equal(afterJoin(20.0, twoClips), 20.0, "well clear is untouched");
+assert.equal(afterJoin(3.0, [{ offset: 0 }]), 3.0, "single clip has no joins");
+// Three clips: 10 + 8 + 5 -> offsets 0, 9.5, 17
+const threeClips = [{ offset: 0 }, { offset: 9.5 }, { offset: 17 }];
+assert.equal(afterJoin(9.7, threeClips), 10.0, "held at the first join");
+assert.equal(afterJoin(17.2, threeClips), 17.5, "held at the second join");
+assert.equal(afterJoin(12.0, threeClips), 12.0, "between joins is untouched");
 
 // ── buildAss with cornered room segments (name + descriptor) ──
 const rs = [

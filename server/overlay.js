@@ -349,8 +349,13 @@ function buildAss({ width, height, duration }, lines, roomSegments = []) {
 
 // Collapse per-frame labels into display segments. A lone mislabeled/null
 // frame between two identical neighbors is treated as its neighbors; runs
-// shorter than MIN_RUN samples (~1s at 2 fps — Seedance shots run ~1s each)
-// are dropped as noise. Segment edges land midway between samples.
+// shorter than MIN_RUN samples are dropped as noise.
+//
+// Segment edges sit ON the confirming samples, not midway between them. The
+// midpoint is a guess at where the cut fell and lands early half the time,
+// which shows the label before its room arrives — far more noticeable than
+// the reverse. Anchoring to a frame the room was verifiably on screen means
+// a label can only ever trail the cut, by at most one sampling interval.
 function labelsToSegments(labels, times, duration) {
   const MIN_RUN = 2;
   const filled = labels.slice();
@@ -367,8 +372,12 @@ function labelsToSegments(labels, times, duration) {
       if (label && i - runStart >= MIN_RUN) {
         segs.push({
           label,
-          start: runStart === 0 ? 0 : (times[runStart - 1] + times[runStart]) / 2,
-          end: i === filled.length ? duration : (times[i - 1] + times[i]) / 2,
+          // First frame that actually showed this room (or 0 — the opening
+          // shot is on screen from the very start).
+          start: runStart === 0 ? 0 : times[runStart],
+          // Last frame that still showed it, so the label does not bleed
+          // into the room that follows.
+          end: i === filled.length ? duration : times[i - 1],
         });
       }
       runStart = i;
@@ -394,8 +403,12 @@ async function classifyFrames(frames, allowed, apiKey) {
       `These ${frames.length} frames are sampled in order from one real-estate walkthrough video.\n` +
       `Allowed room labels:\n${allowed.map((l) => `- ${l}`).join("\n")}\n` +
       `For each frame return an object {"label": ..., "desc": ...}:\n` +
-      `- label: the allowed label matching the room/space shown, or null for a ` +
-      `transition/blend between rooms or a frame matching no label.\n` +
+      `- label: the allowed label matching the room/space shown, or null.\n` +
+      `  Return null whenever the frame is mid-transition — a dissolve, a blend, ` +
+      `or two spaces visible at once — even if you can tell which room is ` +
+      `emerging. Do NOT guess the incoming room: a frame that is only partly ` +
+      `the new room is not yet that room. Also return null for a frame ` +
+      `matching no label.\n` +
       `- desc: a SHORT 1-2 word Hebrew descriptor of a notable, clearly VISIBLE ` +
       `quality of that space (e.g. "מרווח ומואר", "מטבח מודרני", "נוף פתוח"), or ` +
       `null if nothing notable is visible. Keep it factual — describe only what ` +
@@ -427,6 +440,19 @@ async function classifyFrames(frames, allowed, apiKey) {
     // Tolerate a model that returned a bare label string instead of an object.
     return { label: set.has(e) ? e : null, desc: null };
   });
+}
+
+// Frames are sampled from the SOURCE clips, but during a crossfade the output
+// shows both clips at once — a frame taken 0.1s into clip N is already fully
+// its opening room while the stitched picture is still mostly clip N-1. A
+// label starting in that window is therefore guaranteed to lead the picture,
+// so hold it until the join finishes.
+function afterJoin(t, clips) {
+  for (let i = 1; i < clips.length; i++) {
+    const joinStart = clips[i].offset;
+    if (t >= joinStart && t < joinStart + XFADE_SECONDS) return joinStart + XFADE_SECONDS;
+  }
+  return t;
 }
 
 // Sample one clip at `count` frames, downscaled to 384px height to keep vision
@@ -472,7 +498,7 @@ async function detectRoomSegments(clips, tmp, info, rooms) {
   const segs = labelsToSegments(items.map((x) => x.label), times, info.duration);
   const cutoff = Math.max(0, info.duration - OVERLAY_SECONDS);
   return segs
-    .map((s) => ({ ...s, end: Math.min(s.end, cutoff) }))
+    .map((s) => ({ ...s, start: afterJoin(s.start, clips), end: Math.min(s.end, cutoff) }))
     .filter((s) => s.end - s.start >= 0.5) // too short after clipping → drop
     .map((s) => {
       const descs = frames
@@ -748,6 +774,6 @@ module.exports = {
   overlayVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS,
   _test: {
     buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
-    modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl,
+    modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin,
   },
 };
