@@ -70,13 +70,17 @@ const MAX_CLIPS = 4;
 const MUSIC_PATH = process.env.OVERLAY_MUSIC_PATH ||
   path.join(__dirname, "assets", "music", "default.m4a");
 const MUSIC_FADE_SECONDS = 2;
-const MUSIC_MODEL = process.env.OVERLAY_MUSIC_MODEL || "cassetteai/music-generator";
+// Model id is case-sensitive in the URL path — "CassetteAI", not "cassetteai".
+const MUSIC_MODEL = process.env.OVERLAY_MUSIC_MODEL || "CassetteAI/music-generator";
 const MUSIC_PROMPT = process.env.OVERLAY_MUSIC_PROMPT ||
   "Cinematic ambient background music for a luxury real estate tour. Warm minimal " +
   "piano with soft sustained strings and a gentle low pulse. Elegant, calm, " +
   "understated and uplifting. No drums, no vocals. Key: C Major, Tempo: 80 BPM.";
-// CassetteAI renders 30s in a couple of seconds, so the synchronous endpoint is
-// fine — no queue polling needed. Budget generously anyway for a cold start.
+// fal documents this model on the queue endpoint only, so submit → poll →
+// fetch rather than a single blocking call. CassetteAI renders 30s of audio in
+// a couple of seconds, so this usually settles on the first or second poll.
+const MUSIC_QUEUE_BASE = process.env.OVERLAY_MUSIC_QUEUE_BASE || "https://queue.fal.run";
+const MUSIC_POLL_MS = 1000;
 const MUSIC_TIMEOUT_MS = 120000;
 
 // Vision sampling. ~1.5 frames/sec keeps a 30s video inside one Claude call
@@ -485,14 +489,13 @@ async function download(url, dest) {
   fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
 }
 
-// fal returns generated files as an object under a per-model key. Audio models
-// conventionally use `audio: { url }`, but the key varies across endpoints and
-// has changed before, so accept any of the shapes rather than hard-coding one
-// and breaking on a rename.
+// This model returns `audio_file: { url, file_name, content_type, file_size }`.
+// The sibling keys are accepted too: fal names the output field per model, so a
+// swap of OVERLAY_MUSIC_MODEL should not need a code change to keep working.
 function pickAudioUrl(body) {
   if (!body || typeof body !== "object") return null;
   const candidates = [
-    body.audio, body.audio_file, body.audio_url, body.output, body.file, body.url,
+    body.audio_file, body.audio, body.audio_url, body.output, body.file, body.url,
   ];
   for (const c of candidates) {
     if (typeof c === "string" && /^https?:\/\//.test(c)) return c;
@@ -503,22 +506,50 @@ function pickAudioUrl(body) {
   return null;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function falJson(url, key, init = {}, timeoutMs = 30000) {
+  const resp = await fetch(url, {
+    ...init,
+    headers: { authorization: `Key ${key}`, "content-type": "application/json", ...(init.headers || {}) },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!resp.ok) throw new Error(`fal ${resp.status} ${url.split("/").pop()}: ${(await resp.text()).slice(0, 300)}`);
+  return resp.json();
+}
+
 /**
  * Generate a music bed of roughly `seconds` on fal.ai and return its URL.
+ * Submits to the queue, polls until COMPLETED, then fetches the result.
  * Length does not need to be exact — the filtergraph loops and trims whatever
  * comes back to the stitched duration.
  */
 async function generateMusic(seconds, prompt) {
   const key = process.env.FAL_KEY;
   if (!key) throw new Error("FAL_KEY not set");
-  const resp = await fetch(`https://fal.run/${MUSIC_MODEL}`, {
+  const submit = await falJson(`${MUSIC_QUEUE_BASE}/${MUSIC_MODEL}`, key, {
     method: "POST",
-    headers: { "authorization": `Key ${key}`, "content-type": "application/json" },
     body: JSON.stringify({ prompt: prompt || MUSIC_PROMPT, duration: Math.ceil(seconds) }),
-    signal: AbortSignal.timeout(MUSIC_TIMEOUT_MS),
   });
-  if (!resp.ok) throw new Error(`fal ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-  const body = await resp.json();
+  const requestId = submit.request_id;
+  if (!requestId) throw new Error(`fal submit returned no request_id: ${JSON.stringify(submit).slice(0, 200)}`);
+  // fal hands back absolute status/response URLs; prefer them over rebuilding
+  // the path ourselves, and fall back if a future reply omits them.
+  const base = `${MUSIC_QUEUE_BASE}/${MUSIC_MODEL}/requests/${requestId}`;
+  const statusUrl = submit.status_url || `${base}/status`;
+  const resultUrl = submit.response_url || base;
+
+  const deadline = Date.now() + MUSIC_TIMEOUT_MS;
+  let status = submit.status;
+  while (status !== "COMPLETED") {
+    if (Date.now() > deadline) throw new Error(`fal request ${requestId} still ${status} after ${MUSIC_TIMEOUT_MS}ms`);
+    await sleep(MUSIC_POLL_MS);
+    status = (await falJson(statusUrl, key)).status;
+    if (status === "FAILED" || status === "ERROR" || status === "CANCELLED") {
+      throw new Error(`fal request ${requestId} ${status}`);
+    }
+  }
+  const body = await falJson(resultUrl, key);
   const url = pickAudioUrl(body);
   if (!url) throw new Error(`fal reply had no audio url: ${JSON.stringify(body).slice(0, 300)}`);
   return url;

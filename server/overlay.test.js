@@ -178,6 +178,13 @@ assert.equal(raw[9 * rowLen + 1 + 3], 242, "bottom row alpha = peak");
 assert.equal(raw[1], 0xF7, "cream R"); assert.equal(raw[2], 0xF3, "cream G"); assert.equal(raw[3], 0xEC, "cream B");
 
 // ── pickAudioUrl: fal wraps generated files under a per-model key ──
+// The documented CassetteAI/music-generator output, verbatim from its API page.
+assert.equal(pickAudioUrl({
+  audio_file: {
+    url: "https://v3.fal.media/files/panda/T-GP6cbpo1lgL8ll4oKGj_generated.wav",
+    file_name: null, content_type: null, file_size: null,
+  },
+}), "https://v3.fal.media/files/panda/T-GP6cbpo1lgL8ll4oKGj_generated.wav");
 assert.equal(pickAudioUrl({ audio: { url: "https://fal.media/x.wav" } }), "https://fal.media/x.wav");
 assert.equal(pickAudioUrl({ audio_file: { url: "https://fal.media/y.wav" } }), "https://fal.media/y.wav");
 assert.equal(pickAudioUrl({ audio_url: "https://fal.media/z.wav" }), "https://fal.media/z.wav");
