@@ -6,7 +6,7 @@ const assert = require("assert");
 const zlib = require("zlib");
 const { _test, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS } = require("./overlay");
 const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng,
-        bandHeight, stitchTimeline, parseFps } = _test;
+        bandHeight, stitchTimeline, parseFps, pickAudioUrl } = _test;
 
 // ── roomLabel mapping ──
 assert.equal(roomLabel("living room"), "סלון");
@@ -176,6 +176,19 @@ assert.equal(raw[0], 0, "row filter byte 0");
 assert.equal(raw[1 + 3], 0, "top row alpha = 0 (transparent)");
 assert.equal(raw[9 * rowLen + 1 + 3], 242, "bottom row alpha = peak");
 assert.equal(raw[1], 0xF7, "cream R"); assert.equal(raw[2], 0xF3, "cream G"); assert.equal(raw[3], 0xEC, "cream B");
+
+// ── pickAudioUrl: fal wraps generated files under a per-model key ──
+assert.equal(pickAudioUrl({ audio: { url: "https://fal.media/x.wav" } }), "https://fal.media/x.wav");
+assert.equal(pickAudioUrl({ audio_file: { url: "https://fal.media/y.wav" } }), "https://fal.media/y.wav");
+assert.equal(pickAudioUrl({ audio_url: "https://fal.media/z.wav" }), "https://fal.media/z.wav");
+assert.equal(pickAudioUrl({ output: { url: "https://fal.media/o.wav" } }), "https://fal.media/o.wav");
+assert.equal(pickAudioUrl({ url: "https://fal.media/t.wav" }), "https://fal.media/t.wav");
+// anything that is not a usable http url is rejected rather than passed to ffmpeg
+assert.equal(pickAudioUrl({ audio: { url: "/tmp/local.wav" } }), null, "non-http url rejected");
+assert.equal(pickAudioUrl({ detail: "validation error" }), null, "error body yields no url");
+assert.equal(pickAudioUrl({}), null);
+assert.equal(pickAudioUrl(null), null);
+assert.equal(pickAudioUrl("nope"), null);
 
 assert.equal(MAX_ROOMS, 12);
 assert.equal(MAX_CLIPS, 4);

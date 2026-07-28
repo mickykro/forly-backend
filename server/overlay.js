@@ -9,11 +9,12 @@
  * one encode rather than concat-then-overlay. A single clip still takes the
  * original fast path. Stitched duration is `sum(durations) - (n-1) * 0.5`.
  *
- * Audio: clips are generated silent (generate_audio: false) and a single
- * music bed is laid over the finished video when one is configured — see
- * MUSIC_PATH. Without a bed a multi-clip result is silent; per-clip audio is
- * deliberately NOT carried across a join, because independent AI-generated
- * soundtracks butted together sound worse than nothing.
+ * Audio: clips are generated silent (generate_audio: false) and one music bed
+ * is laid over the whole finished video — generated per video on fal.ai at the
+ * stitched length (FAL_KEY + MUSIC_MODEL), with a static track and then plain
+ * silence as fallbacks. Per-clip audio is deliberately NOT carried across a
+ * join, because independent AI-generated soundtracks butted together sound
+ * worse than nothing.
  *
  * Implementation: ffmpeg + a generated ASS subtitle track (libass), which
  * handles Hebrew RTL/BiDi shaping correctly — no generative model touches
@@ -59,12 +60,24 @@ const VISION_MODEL = process.env.OVERLAY_VISION_MODEL || "claude-haiku-4-5-20251
 const XFADE_SECONDS = 0.5;
 const MAX_CLIPS = 4;
 
-// Music bed laid over the finished video. Optional: with no readable file the
-// output is simply silent. Ships as an env override so the track can live on a
-// mounted volume instead of in the image.
+// Music bed laid over the finished video. Resolved in this order:
+//   1. an explicit `musicUrl` from the caller
+//   2. generated on fal.ai when FAL_KEY is set (the normal path)
+//   3. a static fallback track at MUSIC_PATH, if one is present
+//   4. nothing — the video ships silent
+// The bed is requested at the stitched length, which is only known after the
+// clips are probed, so generation happens here rather than upstream in n8n.
 const MUSIC_PATH = process.env.OVERLAY_MUSIC_PATH ||
   path.join(__dirname, "assets", "music", "default.m4a");
 const MUSIC_FADE_SECONDS = 2;
+const MUSIC_MODEL = process.env.OVERLAY_MUSIC_MODEL || "cassetteai/music-generator";
+const MUSIC_PROMPT = process.env.OVERLAY_MUSIC_PROMPT ||
+  "Cinematic ambient background music for a luxury real estate tour. Warm minimal " +
+  "piano with soft sustained strings and a gentle low pulse. Elegant, calm, " +
+  "understated and uplifting. No drums, no vocals. Key: C Major, Tempo: 80 BPM.";
+// CassetteAI renders 30s in a couple of seconds, so the synchronous endpoint is
+// fine — no queue polling needed. Budget generously anyway for a cold start.
+const MUSIC_TIMEOUT_MS = 120000;
 
 // Vision sampling. ~1.5 frames/sec keeps a 30s video inside one Claude call
 // while still resolving the ~2.5s each room is on screen.
@@ -472,6 +485,76 @@ async function download(url, dest) {
   fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
 }
 
+// fal returns generated files as an object under a per-model key. Audio models
+// conventionally use `audio: { url }`, but the key varies across endpoints and
+// has changed before, so accept any of the shapes rather than hard-coding one
+// and breaking on a rename.
+function pickAudioUrl(body) {
+  if (!body || typeof body !== "object") return null;
+  const candidates = [
+    body.audio, body.audio_file, body.audio_url, body.output, body.file, body.url,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && /^https?:\/\//.test(c)) return c;
+    if (c && typeof c === "object" && typeof c.url === "string" && /^https?:\/\//.test(c.url)) {
+      return c.url;
+    }
+  }
+  return null;
+}
+
+/**
+ * Generate a music bed of roughly `seconds` on fal.ai and return its URL.
+ * Length does not need to be exact — the filtergraph loops and trims whatever
+ * comes back to the stitched duration.
+ */
+async function generateMusic(seconds, prompt) {
+  const key = process.env.FAL_KEY;
+  if (!key) throw new Error("FAL_KEY not set");
+  const resp = await fetch(`https://fal.run/${MUSIC_MODEL}`, {
+    method: "POST",
+    headers: { "authorization": `Key ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({ prompt: prompt || MUSIC_PROMPT, duration: Math.ceil(seconds) }),
+    signal: AbortSignal.timeout(MUSIC_TIMEOUT_MS),
+  });
+  if (!resp.ok) throw new Error(`fal ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+  const body = await resp.json();
+  const url = pickAudioUrl(body);
+  if (!url) throw new Error(`fal reply had no audio url: ${JSON.stringify(body).slice(0, 300)}`);
+  return url;
+}
+
+/**
+ * Settle on a music bed for a video of `duration` seconds, writing any remote
+ * track into `tmp`. Never throws — a bed is a nice-to-have, and losing it must
+ * not cost the caller the whole video. Returns { file, debug }.
+ */
+async function resolveMusic({ duration, musicUrl, musicPrompt, tmp }) {
+  const dest = path.join(tmp, "bed.audio");
+  if (musicUrl) {
+    try {
+      await download(musicUrl, dest);
+      return { file: dest, debug: "caller_url" };
+    } catch (err) {
+      console.warn("video-overlay: music_url download failed:", err.message);
+      return { file: null, debug: "error: caller_url " + err.message.slice(0, 160) };
+    }
+  }
+  if (process.env.FAL_KEY) {
+    try {
+      const url = await generateMusic(duration, musicPrompt);
+      await download(url, dest);
+      return { file: dest, debug: `generated:${MUSIC_MODEL}` };
+    } catch (err) {
+      console.warn("video-overlay: music generation failed, falling back:", err.message);
+      if (fs.existsSync(MUSIC_PATH)) return { file: MUSIC_PATH, debug: "fallback_static_after_error" };
+      return { file: null, debug: "error: " + err.message.slice(0, 200) };
+    }
+  }
+  if (fs.existsSync(MUSIC_PATH)) return { file: MUSIC_PATH, debug: "static" };
+  return { file: null, debug: "no_fal_key_and_no_static_track" };
+}
+
 // Build the ffmpeg args. One encode does everything: crossfade the clips
 // together, overlay a pre-rendered cream gradient PNG (enabled only while a
 // room label shows), burn the ASS track over that, and lay down the music bed.
@@ -559,7 +642,7 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
  * gradient) on the segments where each room is on screen.
  * Writes the result under `uploadDir`/overlays and returns its public URL.
  */
-async function overlayVideo({ videoUrl, videoUrls, lines, rooms, uploadDir, baseUrl }) {
+async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl }) {
   const urls = (Array.isArray(videoUrls) && videoUrls.length ? videoUrls : [videoUrl])
     .filter((u) => typeof u === "string" && /^https?:\/\//.test(u));
   if (!urls.length) throw new Error("no video url given");
@@ -607,11 +690,8 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, uploadDir, base
       gradFile = path.join(tmp, "grad.png");
       fs.writeFileSync(gradFile, gradientPng(info.width, bandHeight(info.height), CREAM_RGB, GRADIENT_PEAK_ALPHA));
     }
-    // A missing bed is normal (none shipped yet) — the video just goes out silent.
-    const musicFile = fs.existsSync(MUSIC_PATH) ? MUSIC_PATH : null;
-    if (!musicFile && inFiles.length > 1) {
-      console.warn(`video-overlay: no music bed at ${MUSIC_PATH}; stitched video will be silent`);
-    }
+    const music = await resolveMusic({ duration, musicUrl, musicPrompt, tmp });
+    const musicFile = music.file;
     const args = buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegments, gradFile, musicFile });
     await run(FFMPEG, args, 240000);
     const rel = `overlays/${crypto.randomUUID()}.mp4`;
@@ -624,6 +704,7 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, uploadDir, base
       clip_count: inFiles.length,
       clip_durations: durations,
       has_music: Boolean(musicFile),
+      music_debug: music.debug,
       room_segments: roomSegments,
       room_debug: roomDebug,
     };
@@ -636,6 +717,6 @@ module.exports = {
   overlayVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS,
   _test: {
     buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
-    modeOf, gradientPng, bandHeight, stitchTimeline, parseFps,
+    modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl,
   },
 };
