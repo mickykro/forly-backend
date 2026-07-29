@@ -201,6 +201,7 @@
       </div>
 
       <div class="sec-title" data-i18n="sec_photos">תמונות הנכס (3–12)</div>
+      <div class="hint" data-i18n="hint_photos_video">כל תמונה הופכת לקטע וידאו של כ-2.5 שניות — עד 12 תמונות.</div>
       <div class="drop" id="drop">
         <div style="font-size:1.6rem">📸</div>
         <span data-i18n="drop_prompt">גררו תמונות לכאן או</span> <b style="color:var(--gold)" data-i18n="drop_click">לחצו לבחירה</b>
@@ -835,11 +836,19 @@
       }
     }
 
+    var videoFile = $("#videoInput").files[0] || null;
+    // Video + photos both supplied: ask whether to still auto-generate a tour
+    // from the photos. Accept → generate the tour AND show their video first in
+    // the gallery; decline → just use their video (no generation).
+    var tourFromPhotos = false;
+    if (videoFile && photos.length >= 3) {
+      tourFromPhotos = window.confirm(FT("confirm_video_and_photos"));
+    }
+
     var btn = this;
     btn.disabled = true;
     btn.textContent = FT("status_uploading");
 
-    var videoFile = $("#videoInput").files[0] || null;
     var logoFile = isDemo && $("#agLogo").files[0] ? $("#agLogo").files[0] : null;
     var fontFile = (fontFilesNeeded() && $("#thFontFile").files[0]) ? $("#thFontFile").files[0] : null;
 
@@ -882,7 +891,10 @@
           tags: selectedTags(),
           description: $("#pDesc").value.trim(),
           photos_urls: photoUrls,
-          own_video_url: videoUrl,
+          // Decline → their video replaces generation; accept → generate a tour
+          // and pass their video to sit first in the gallery.
+          own_video_url: tourFromPhotos ? null : videoUrl,
+          gallery_video_url: tourFromPhotos ? videoUrl : null,
           theme: theme,
           language: $("#pLang").value,
         };
@@ -905,6 +917,12 @@
           headers: Object.assign({ "Content-Type": "application/json" }, uploadHeaders),
           body: JSON.stringify(body),
         }).then(function (r) {
+          // Session expired / not logged in on the real path → go log in,
+          // matching FLY.req. (Demo has no login, so let its error surface.)
+          if (r.status === 401 && !isDemo) {
+            location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
+            throw new Error("unauthenticated");
+          }
           return r.json().then(function (d) {
             if (!r.ok) throw new Error(d.error || "create failed");
             return d;
