@@ -451,20 +451,30 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
-  // ── video overlay ──
-  const { overlayVideo, MAX_LINES, MAX_ROOMS } = require("../overlay");
+  // ── video stitch + overlay ──
+  const { overlayVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
-    const videoUrl = String(body.video_url || "");
+    // video_urls (ordered clips, stitched with a crossfade) is the current
+    // shape; video_url stays supported for single-clip callers.
+    const videoUrls = (Array.isArray(body.video_urls) ? body.video_urls : [body.video_url])
+      .map((u) => String(u || "").trim())
+      .filter((u) => /^https?:\/\//.test(u));
     const lines = Array.isArray(body.lines) ?
       body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
     // Optional room labels: strings or {room_type} objects, in any order.
     const rooms = Array.isArray(body.rooms) ? body.rooms.slice(0, MAX_ROOMS) : [];
-    if (!/^https?:\/\//.test(videoUrl) || lines.length < 1 || lines.length > MAX_LINES) {
-      return res.status(400).json({ error: `video_url and 1-${MAX_LINES} lines required` });
+    // Optional music: an explicit track wins, otherwise a bed is generated to
+    // fit the stitched length. music_prompt tailors that generation per listing.
+    const musicUrl = /^https?:\/\//.test(String(body.music_url || "")) ? String(body.music_url) : null;
+    const musicPrompt = body.music_prompt ? String(body.music_prompt).trim().slice(0, 500) : null;
+    if (!videoUrls.length || videoUrls.length > MAX_CLIPS || lines.length < 1 || lines.length > MAX_LINES) {
+      return res.status(400).json({
+        error: `1-${MAX_CLIPS} video urls (video_urls or video_url) and 1-${MAX_LINES} lines required`,
+      });
     }
     try {
-      const result = await overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);

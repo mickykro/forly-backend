@@ -125,6 +125,7 @@ interface CreateBody {
   description?: string;
   photos_urls?: string[];
   own_video_url?: string | null;
+  gallery_video_url?: string | null;
   agent?: Partial<AgentInfo>;
 }
 
@@ -156,6 +157,7 @@ async function createListingAndKickPipeline(
     description: String(body.description || "").slice(0, 2000),
     photos_urls: body.photos_urls.slice(0, MAX_UPLOAD_FILES),
     own_video_url: body.own_video_url || null,
+    gallery_video_url: body.gallery_video_url || null,
     status: "active",
     page_id: null,
     agent: agentOverride ? {
@@ -182,6 +184,7 @@ async function createListingAndKickPipeline(
   } : {
     phone,
     image_urls: listing.photos_urls,
+    gallery_video_url: listing.gallery_video_url,
     listing_id: listingId,
     trigger_source: "dashboard",
     property_details: {

@@ -115,6 +115,8 @@ export interface Listing {
   description: string;
   photos_urls: string[];
   own_video_url: string | null;
+  /** Agent's own video to show first in the gallery while a tour is generated. */
+  gallery_video_url: string | null;
   status: ListingStatus;
   page_id: string | null;
   /** Demo/dashboard flows may carry agent data on the listing until signup exists. */
