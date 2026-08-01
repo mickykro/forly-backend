@@ -251,10 +251,12 @@
       var g = document.querySelector('[data-cg="' + i + '"]');
       return { num: n ? n.value : s.num, title: t ? t.value : s.title, body: b ? b.value : s.body, tag: g ? g.value : s.tag };
     });
-    fetch("/api/page/update", {
+    // FLY.req so an expired session bounces to login instead of failing
+    // silently while the agent keeps typing, and so a rejected save doesn't
+    // refresh the preview as if it had worked.
+    FLY.req("/api/page/update", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload(slides)),
+      body: buildPayload(slides),
     }).then(function () {
       $("#preview").src = "/p/" + pageId + "?t=" + Date.now();
     }).catch(function () {});
@@ -506,9 +508,9 @@
     btn.addEventListener("click", function () {
       var name = btn.getAttribute("data-tpl");
       setActiveTpl(name);
-      fetch("/api/page/update", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ page_id: pageId, theme: { template: name } }),
+      FLY.req("/api/page/update", {
+        method: "POST",
+        body: { page_id: pageId, theme: { template: name } },
       }).then(function () {
         $("#preview").src = "/p/" + pageId + "?t=" + Date.now();
         FLY.toast("✓ התבנית עודכנה");

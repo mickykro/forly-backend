@@ -135,6 +135,9 @@ app.use(createPagesRouter({
   greenToken: GREENAPI_TOKEN,
   requireAuth, verifyActionToken,
   authSecret: AUTH_SECRET,
+  // page/update ownership check (see server/page-auth.js)
+  verifySession, readToken, normalizeAuthPhone,
+  adminPhones: ADMIN_PHONES,
 }));
 
 // ── start ──

@@ -11,6 +11,7 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
+const pageAuth = require("../page-auth");
 const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
@@ -36,7 +37,13 @@ const expiredLinkHtml = () =>
 
 module.exports = function createPagesRouter(ctx) {
   const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,
-          requireAuth, verifyActionToken, authSecret } = ctx;
+          requireAuth, verifyActionToken, authSecret,
+          verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
+
+  // Admin allowlist, normalized once so "050-…", "+972…" and "972…" all match
+  // the canonical form a session carries (same treatment as routes/admin.js).
+  const adminSet = pageAuth.normalizeSet(adminPhones, normalizeAuthPhone);
+  const authMode = pageAuth.readMode(process.env.PAGE_UPDATE_AUTH);
 
   const router = express.Router();
 
@@ -283,15 +290,31 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── POST /api/page/update — dashboard page editor (auth via session) ──
+  // Owner-only (admins may edit any page). See page-auth.js for the rollout
+  // switch and why both phone forms are normalized before comparing.
   router.post("/api/page/update", async (req, res) => {
     const body = req.body || {};
     const pageId = String(body.page_id || "");
     if (!pageId) return res.status(400).json({ error: "page_id required" });
     const d = await db.getPage(pageId);
     if (!d) return res.status(404).json({ error: "not found" });
-    // ponytail: session auth would go here; for now allow any update
+
+    const verdict = pageAuth.checkPageAccess({
+      session: verifySession(authSecret, readToken(req)),
+      page: d,
+      adminSet,
+      normalize: normalizeAuthPhone,
+    });
+    if (!verdict.ok) {
+      console.warn(pageAuth.denialLog(pageId, verdict, authMode));
+      if (authMode === pageAuth.MODE_ENFORCE) {
+        return res.status(verdict.status).json({ error: verdict.error });
+      }
+      // MODE_LOG: recorded above, write allowed through this deploy only.
+    }
+
     try {
-      const patch = { updated_at: new Date() };
+      const patch = { updated_at: new Date(), edit_count: (d.edit_count || 0) + 1 };
       if (body.hero_phrase != null) patch["hero.phrase"] = String(body.hero_phrase).slice(0, 120);
       // Agent
       if (body.agent && typeof body.agent === "object") {
