@@ -53,8 +53,8 @@
 <body>
 
 <header class="topbar">
-  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
-  <a class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
+  <a class="brand" id="backBrand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <a class="btn btn-ghost btn-sm" id="backLink" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
 </header>
 
 <div class="container">
@@ -220,8 +220,14 @@
 (function () {
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
-  var pageId = new URLSearchParams(location.search).get("id");
+  var qs = new URLSearchParams(location.search);
+  var pageId = qs.get("id");
   if (!pageId) { location.href = "/"; return; }
+  if (qs.get("from") === "admin") {
+    $("#backLink").href = "/admin.html";
+    $("#backLink").textContent = "← חזרה לניהול";
+    $("#backBrand").href = "/admin.html";
+  }
 
   var payload = null;
   var galleryState = [];

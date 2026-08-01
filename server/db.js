@@ -7,7 +7,7 @@ const { asMillis } = require("./utils");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(), otps: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(), otps: new Map(), portalEvents: [] };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -55,6 +55,15 @@ async function listListingsByPhone(phone) {
   return [...mem.listings.values()].filter((l) => l.business_phone === phone);
 }
 
+// ── admin: full-collection reads (no phone filter) ──
+async function listAllListings(limit = 1000) {
+  if (db) {
+    const snap = await db.collection("listings").limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listings.values()];
+}
+
 // ── pages ──
 async function savePage(p) {
   if (db) await db.collection("property_pages").doc(p.page_id).set(p);
@@ -64,6 +73,15 @@ async function savePage(p) {
 async function getPage(id) {
   if (db) { const d = await db.collection("property_pages").doc(id).get(); return d.exists ? d.data() : null; }
   return mem.pages.get(id) || null;
+}
+
+// ── admin: full-collection page read (no phone filter) ──
+async function listAllPages(limit = 1000) {
+  if (db) {
+    const snap = await db.collection("property_pages").limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.pages.values()];
 }
 
 async function findActivePageByListing(listingId) {
@@ -117,6 +135,32 @@ async function uniquePageId(agent) {
   return `${base}-${shortCode(8)}`;
 }
 
+// Live pages for the public buyer portal (call4li.com). "expiring" is kept for
+// pages flagged before the expiry system was retired. Sorted in memory to
+// avoid a Firestore composite index on status+created_at.
+async function listPublicPages(limit = 200) {
+  let pages;
+  if (db) {
+    const snap = await db.collection("property_pages")
+      .where("status", "in", ["active", "expiring"])
+      .limit(limit).get();
+    pages = snap.docs.map((d) => d.data());
+  } else {
+    pages = [...mem.pages.values()]
+      .filter((p) => p.status === "active" || p.status === "expiring")
+      .slice(0, limit);
+  }
+  return pages.sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at));
+}
+
+// Append-only analytics/trigger log for portal interactions (phone reveals
+// etc.). Queryable per business_phone; future automations can watch it.
+async function logPortalEvent(evt) {
+  const doc = { ...evt, at: new Date() };
+  if (db) await db.collection("portal_events").add(doc);
+  else mem.portalEvents.push(doc);
+}
+
 // Pages at or past `soonMs`, for the daily reminder/expire sweep.
 async function listPagesForExpiry(soonMs) {
   if (db) {
@@ -162,6 +206,13 @@ async function setBusiness(phone, data, merge = true) {
   await db.collection("businesses").doc(phone).set(data, { merge });
 }
 
+// ── admin: all businesses (agent directory) ──
+async function listAllBusinesses(limit = 1000) {
+  if (!db) return [];
+  const snap = await db.collection("businesses").limit(limit).get();
+  return snap.docs.map((d) => d.data());
+}
+
 // ── leads ──
 async function saveLead(phone, lead) {
   if (db) await db.collection("leads").doc(phone).set(lead, { merge: true });
@@ -172,8 +223,8 @@ module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
-  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone,
-  savePage, getPage, findActivePageByListing, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
-  getBusiness, setBusiness,
-  saveLead,
+  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages,
+  getBusiness, setBusiness, listAllBusinesses,
+  saveLead, logPortalEvent,
 };

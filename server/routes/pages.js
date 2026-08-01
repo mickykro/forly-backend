@@ -11,9 +11,14 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
+const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+const { sanitizeTags, deriveTags } = require("../tags");
 
-const PAGE_LIFESPAN_DAYS = 30;
+// Portal era: pages no longer expire (the expiry scheduler is retired). New
+// pages get a far-future expires_at to keep the schema intact; /api/extend
+// stays functional for legacy reminder links already sent.
+const PAGE_LIFESPAN_DAYS = 36500;
 const LEAD_MAX_PER_HOUR = 3;
 const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel"]);
 
@@ -46,6 +51,41 @@ module.exports = function createPagesRouter(ctx) {
       texts: d.texts || null,
     };
   }
+
+  // ── maintenance: backfill property.tags on pages created before tags existed.
+  // Guarded by a shared secret so it's never open on prod. Run locally with:
+  //   curl -X POST -H "x-admin-secret: $FORLY_JWT_SECRET" \
+  //        "http://127.0.0.1:8787/api/admin/backfill-tags?dry=1"
+  // ?dry=1 reports without writing; ?force=1 recomputes even where tags exist.
+  router.post("/api/admin/backfill-tags", async (req, res) => {
+    if (authSecret === "change-me-in-env" || req.get("x-admin-secret") !== authSecret) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const dry = req.query.dry === "1";
+    const force = req.query.force === "1";
+    try {
+      const pages = await db.listPublicPages(1000);
+      const changes = [];
+      for (const p of pages) {
+        const existing = (p.property && p.property.tags) || [];
+        if (existing.length && !force) continue;
+        // Description lives on the listing, not the page — join it in for richer tags.
+        const listing = await db.getListing(p.listing_id).catch(() => null);
+        const tags = deriveTags(p.property || {}, listing && listing.description);
+        if (!tags.length) continue;
+        changes.push({ page_id: p.page_id, from: existing, to: tags });
+        if (!dry) {
+          await db.updatePage(p.page_id, { "property.tags": tags });
+          const fresh = await db.getPage(p.page_id);
+          if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
+        }
+      }
+      res.json({ scanned: pages.length, updated: changes.length, dry, force, changes });
+    } catch (err) {
+      console.error("backfill-tags failed:", err);
+      res.status(500).json({ error: err instanceof Error ? err.message : "internal error" });
+    }
+  });
 
   // ── page builder (called by n8n) ──
   router.post("/createPropertyPage", async (req, res) => {
@@ -136,10 +176,12 @@ module.exports = function createPagesRouter(ctx) {
           size_balcony: propNum("size_balcony"),
           size_garden: propNum("size_garden"),
           floor: Number(body.property && body.property.floor) || 0,
-          parking: propNum("parking"),
           storage: propBool("storage"),
           elevator: propBool("elevator") || propBool("shabbat_elevator"),
           shabbat_elevator: propBool("shabbat_elevator"),
+          parking: Number(body.property && body.property.parking) || 0,
+          // Agent-curated tags ride on the listing when n8n doesn't forward them.
+          tags: sanitizeTags((body.property && body.property.tags) || (listing && listing.tags)),
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
@@ -166,8 +208,12 @@ module.exports = function createPagesRouter(ctx) {
         lead_count: reusable ? (reusable.lead_count || 0) : 0,
       };
 
+      if (!doc.property.tags.length) doc.property.tags = deriveTags(doc.property, listing && listing.description);
       await db.savePage(doc);
       await db.setListingPageId(body.listing_id, pageId);
+      // Realtime: the portal shows the listing the moment it exists.
+      portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
+        portalStream.toCard(doc, pageBaseUrl));
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
@@ -227,6 +273,8 @@ module.exports = function createPagesRouter(ctx) {
       patch["edit_count"] = (d.edit_count || 0) + 1;
       patch["updated_at"] = new Date();
       await db.updatePage(pageId, patch);
+      const fresh = await db.getPage(pageId).catch(() => null);
+      if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true, edit_count: patch["edit_count"] });
     } catch (err) {
       console.error("edit-text failed:", err);
@@ -295,6 +343,8 @@ module.exports = function createPagesRouter(ctx) {
         patch["sections.area"] = !!body.sections.area;
       }
       await db.updatePage(pageId, patch);
+      const fresh = await db.getPage(pageId).catch(() => null);
+      if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true });
     } catch (err) {
       console.error("page/update failed:", err);
@@ -401,20 +451,30 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
-  // ── video overlay ──
-  const { overlayVideo, MAX_LINES, MAX_ROOMS } = require("../overlay");
+  // ── video stitch + overlay ──
+  const { overlayVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
-    const videoUrl = String(body.video_url || "");
+    // video_urls (ordered clips, stitched with a crossfade) is the current
+    // shape; video_url stays supported for single-clip callers.
+    const videoUrls = (Array.isArray(body.video_urls) ? body.video_urls : [body.video_url])
+      .map((u) => String(u || "").trim())
+      .filter((u) => /^https?:\/\//.test(u));
     const lines = Array.isArray(body.lines) ?
       body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
     // Optional room labels: strings or {room_type} objects, in any order.
     const rooms = Array.isArray(body.rooms) ? body.rooms.slice(0, MAX_ROOMS) : [];
-    if (!/^https?:\/\//.test(videoUrl) || lines.length < 1 || lines.length > MAX_LINES) {
-      return res.status(400).json({ error: `video_url and 1-${MAX_LINES} lines required` });
+    // Optional music: an explicit track wins, otherwise a bed is generated to
+    // fit the stitched length. music_prompt tailors that generation per listing.
+    const musicUrl = /^https?:\/\//.test(String(body.music_url || "")) ? String(body.music_url) : null;
+    const musicPrompt = body.music_prompt ? String(body.music_prompt).trim().slice(0, 500) : null;
+    if (!videoUrls.length || videoUrls.length > MAX_CLIPS || lines.length < 1 || lines.length > MAX_LINES) {
+      return res.status(400).json({
+        error: `1-${MAX_CLIPS} video urls (video_urls or video_url) and 1-${MAX_LINES} lines required`,
+      });
     }
     try {
-      const result = await overlayVideo({ videoUrl, lines, rooms, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);
@@ -423,14 +483,29 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── events beacon ──
-  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click"]);
+  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click", "phone_reveal"]);
   router.post("/api/property-event", express.text({ type: () => true }), async (req, res) => {
     let body = {};
     try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
     const { page_id: pageId, event } = body;
     if (!pageId || !event || !EVENTS.has(event)) return res.status(204).send("");
-    try { if (event === "view") await db.incrPageCounter(pageId, "view_count", 1); }
-    catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
+    try {
+      if (event === "view") await db.incrPageCounter(pageId, "view_count", 1);
+      else if (event === "phone_reveal") {
+        // Counter on the page + a queryable event record with the business id
+        // (derived server-side from the page — never trusted from the client).
+        await db.incrPageCounter(pageId, "phone_reveal_count", 1);
+        const page = await db.getPage(pageId).catch(() => null);
+        if (page) {
+          await db.logPortalEvent({
+            type: "phone_reveal",
+            page_id: pageId,
+            listing_id: page.listing_id || null,
+            business_phone: page.business_phone || null,
+          });
+        }
+      }
+    } catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
     res.status(204).send("");
   });
 

@@ -16,6 +16,7 @@
 <header class="topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
   <span class="who" id="who"></span>
+  <button class="btn btn-sm hidden" id="btnLogout" style="margin-inline-start:auto;background:rgba(255,255,255,.12);color:#fff">התנתקות</button>
 </header>
 
 <!-- ── LOGIN ── -->
@@ -134,6 +135,11 @@
     $("#stepPhone").classList.remove("hidden");
   });
 
+  $("#btnLogout").addEventListener("click", function () {
+    FLY.req("/api/auth/logout", { method: "POST", noRedirect: true })
+      .finally(function () { location.href = "/"; });
+  });
+
   $("#verifyOtp").addEventListener("click", function () {
     var code = cells.map(function (c) { return c.value; }).join("");
     var err = $("#codeErr");
@@ -222,6 +228,7 @@
   function showList(agent) {
     $("#viewLogin").classList.add("hidden");
     $("#viewList").classList.remove("hidden");
+    $("#btnLogout").classList.remove("hidden");
     if (agent && (agent.brand_name || agent.name)) {
       $("#who").textContent = agent.brand_name || agent.name;
     }
@@ -290,6 +297,7 @@
     .then(function (d) {
       $("#viewLogin").classList.add("hidden");
       $("#viewList").classList.remove("hidden");
+      $("#btnLogout").classList.remove("hidden");
       var items = d.properties || [];
       $("#countLine").textContent = items.length ? items.length + " נכסים" : "";
       $("#propGrid").innerHTML = items.map(cardHtml).join("");
