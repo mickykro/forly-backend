@@ -43,8 +43,8 @@
       <div class="otp-row" id="otpRow">
         <input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric"><input maxlength="1" inputmode="numeric">
       </div>
-      <button class="btn btn-gold" id="verifyOtp" style="width:100%">כניסה</button>
       <p class="form-err" id="codeErr"></p>
+      <button class="btn btn-ghost btn-sm" id="resendBtn" style="margin-top:12px">שליחת קוד מחדש</button>
       <button class="btn btn-ghost btn-sm" id="backBtn" style="margin-top:12px">← מספר אחר</button>
     </div>
   </div>
@@ -115,10 +115,11 @@
     c.addEventListener("input", function () {
       c.value = c.value.replace(/\D/g, "").slice(0, 1);
       if (c.value && i < cells.length - 1) cells[i + 1].focus();
+      maybeVerify();
     });
     c.addEventListener("keydown", function (e) {
       if (e.key === "Backspace" && !c.value && i > 0) cells[i - 1].focus();
-      if (e.key === "Enter") $("#verifyOtp").click();
+      if (e.key === "Enter") verify();
     });
     c.addEventListener("paste", function (e) {
       var digits = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
@@ -126,9 +127,15 @@
         e.preventDefault();
         cells.forEach(function (cc, j) { cc.value = digits[j]; });
         cells[5].focus();
+        maybeVerify();
       }
     });
   });
+
+  // auto-submit once all 6 cells are filled
+  function maybeVerify() {
+    if (cells.every(function (c) { return c.value; })) verify();
+  }
 
   $("#backBtn").addEventListener("click", function () {
     $("#stepCode").classList.add("hidden");
@@ -140,12 +147,13 @@
       .finally(function () { location.href = "/"; });
   });
 
-  $("#verifyOtp").addEventListener("click", function () {
+  var verifying = false;
+  function verify() {
     var code = cells.map(function (c) { return c.value; }).join("");
     var err = $("#codeErr");
     err.classList.remove("show");
-    if (code.length !== 6) { err.textContent = "נא להזין 6 ספרות"; err.classList.add("show"); return; }
-    var btn = this; btn.disabled = true;
+    if (code.length !== 6 || verifying) return;
+    verifying = true;
     FLY.req("/api/auth/verify", { method: "POST", body: { phone: phoneVal, code: code }, noRedirect: true })
       .then(function (d) {
         var next = new URLSearchParams(location.search).get("next");
@@ -156,8 +164,28 @@
         err.textContent = e.code === "wrong_code" ? "קוד שגוי (" + (e.data.attempts_left || 0) + " נסיונות נותרו)" :
           e.code === "expired" ? "הקוד פג — שלחו קוד חדש" : "שגיאה באימות";
         err.classList.add("show");
+        cells.forEach(function (c) { c.value = ""; });
+        cells[0].focus();
       })
-      .finally(function () { btn.disabled = false; });
+      .finally(function () { verifying = false; });
+  }
+
+  $("#resendBtn").addEventListener("click", function () {
+    var btn = this; btn.disabled = true;
+    var err = $("#codeErr");
+    err.classList.remove("show");
+    FLY.req("/api/auth/otp", { method: "POST", body: { phone: phoneVal }, noRedirect: true })
+      .then(function () {
+        cells.forEach(function (c) { c.value = ""; });
+        cells[0].focus();
+        err.textContent = "קוד חדש נשלח בוואטסאפ";
+        err.classList.add("show");
+      })
+      .catch(function (e) {
+        err.textContent = e.code === "too_soon" ? "רגע... נסו שוב בעוד דקה" : "שגיאה בשליחת הקוד";
+        err.classList.add("show");
+      })
+      .finally(function () { setTimeout(function () { btn.disabled = false; }, 1000); });
   });
 
   // ── property list ──

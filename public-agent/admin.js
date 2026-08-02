@@ -39,6 +39,7 @@
   }
 
   function renderStats() {
+    console.log("renderStats", stats);
     $("#statGrid").innerHTML =
       statCard((stats.total_properties || 0), "נכסים") +
       statCard((stats.total_agents || 0), "סוכנים") +
@@ -171,6 +172,11 @@
     $("#viewDenied").classList.remove("hidden");
     if (msg) $("#deniedMsg").textContent = msg;
   }
+
+  $("#btnLogout").addEventListener("click", function () {
+    FLY.req("/api/auth/logout", { method: "POST", noRedirect: true })
+      .finally(function () { location.href = "/"; });
+  });
 
   // boot: verify admin access, then load. 401 → login (with return path);
   // 403 → access-denied view.
