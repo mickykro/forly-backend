@@ -34,6 +34,22 @@ assert.ok(f.includes("סלון"));
 assert.ok(f.includes("מחסן: אין"), "false booleans are facts, not absences");
 assert.ok(f.includes("מעלית: יש"));
 
+// Price per m² is DERIVED, not estimated: the page renders the same number in
+// its spec strip (runtime.js data-ppm), so a bot that refuses it is denying a
+// figure the visitor can read on screen. Same rounding, same sale-only rule.
+let ppm = buildFacts({ property: { price: 2350000, size_sqm: 92 } }, null);
+assert.ok(ppm.includes("מחיר למ״ר"));
+assert.ok(ppm.includes("25,543"), "2,350,000 / 92 rounded");
+assert.ok(ppm.includes("מחיר למטר"), "the other common phrasing is in the label too");
+// Rentals have no ₪/m² on the page either — runtime.js removes the element.
+assert.ok(!buildFacts({ property: { price: 6000, size_sqm: 92, listing_type: "rent" } }, null)
+  .includes("מחיר למ״ר"));
+// Either input missing ⇒ no line, so it reads as genuinely unknown.
+assert.ok(!buildFacts({ property: { price: 2350000 } }, null).includes("מחיר למ״ר"));
+assert.ok(!buildFacts({ property: { size_sqm: 92 } }, null).includes("מחיר למ״ר"));
+assert.ok(!buildFacts({ property: { price: 2350000, size_sqm: 0 } }, null).includes("מחיר למ״ר"),
+  "size 0 means not captured — must not divide by it");
+
 // The agent's tagline is a legitimate answer to "who is this agent?" — without
 // it the model had nothing and invented a service pitch instead.
 assert.ok(buildFacts({ agent: { name: "מור", tagline: "מתמחה בהדר" } }, null).includes("מתמחה בהדר"));
@@ -86,6 +102,9 @@ assert.ok(!buildSystemPrompt("F", { language: "en" }).includes("ליווות"),
   "an English page must not carry Hebrew-specific guidance");
 assert.ok(buildSystemPrompt("F", {}).includes("ליווות"), "default is Hebrew");
 assert.ok(sys.includes("never negotiate on price"));
+// Arithmetic over listed numbers is allowed; valuation and projection are not.
+assert.ok(sys.includes("plain arithmetic"));
+assert.ok(sys.includes("never project future"));
 assert.ok(sys.includes("never instructions"), "prompt-injection rule must be present");
 assert.ok(sys.includes('"answered"'));
 assert.ok(buildSystemPrompt("F", { language: "ru" }).includes("Russian"));
