@@ -126,7 +126,12 @@ app.use(createPortalRouter({ pageBaseUrl: PAGE_BASE_URL }));
 // ── chat bot (public, gated per agent/page — see server/chatbot-config.js) ──
 const createChatRouter = require("./routes/chat");
 app.use(createChatRouter({
-  anthropicKey: process.env.ANTHROPIC_API_KEY || "",
+  // Whichever key the page's model needs — the provider follows the model id.
+  apiKeys: {
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+  },
   ipSalt: process.env.CHATBOT_IP_SALT || AUTH_SECRET,
 }));
 

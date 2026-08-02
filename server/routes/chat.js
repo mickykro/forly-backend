@@ -17,10 +17,8 @@ const db = require("../db");
 const chatbotConfig = require("../chatbot-config");
 const businessCache = require("../business-cache");
 const prompt = require("../chat-prompt");
-const chatModel = require("../chat-model");
+const chatProvider = require("../chat-provider");
 
-const API_URL = "https://api.anthropic.com/v1/messages";
-const API_TIMEOUT_MS = 20000;
 const MAX_TURNS_KEPT = 60;     // stored history cap (phase 3 sends this to the agent)
 const MAX_TURNS_SENT = 20;     // how much of it is replayed to the model
 
@@ -28,7 +26,7 @@ const nowDay = () => new Date().toISOString().slice(0, 10);
 const nowMonth = () => new Date().toISOString().slice(0, 7);
 
 module.exports = function createChatRouter(ctx) {
-  const { anthropicKey, ipSalt } = ctx;
+  const { apiKeys, ipSalt } = ctx;
   const router = express.Router();
 
   const hashIp = (ip) =>
@@ -122,31 +120,15 @@ module.exports = function createChatRouter(ctx) {
     }
   }
 
-  async function askClaude(system, history, model) {
-    // Sampling params and thinking defaults differ by model family, and both
-    // differences are 400s or silent truncation rather than degradations.
-    const shape = chatModel.requestShape(model);
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: {
-        "x-api-key": anthropicKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(Object.assign({
-        model,
-        max_tokens: shape.maxTokens,
-        system,
-        messages: history,
-      }, shape.body)),
-      signal: AbortSignal.timeout(API_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      throw new Error(`anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    }
-    const data = await res.json();
-    return (data.content || []).map((b) => b.text || "").join("");
-  }
+  // The vendor follows the model id (see chat-provider.js), so a page set to
+  // "gemini-2.5-flash" goes to Google and one set to "claude-sonnet-5" goes to
+  // Anthropic — without this route knowing which is which.
+  // Returns the assistant TEXT, not the provider envelope — parseModelReply
+  // takes a string, and handing it {text,in,out} stringifies to
+  // "[object Object]", which parses as nothing and silently disables the
+  // handoff on every message.
+  const askModel = async (system, history, model) =>
+    (await chatProvider.ask(model, system, history, apiKeys)).text;
 
   router.post("/api/chat", async (req, res) => {
     const body = req.body || {};
@@ -164,8 +146,9 @@ module.exports = function createChatRouter(ctx) {
     const biz = await businessCache.get(page.business_phone);
     const cfg = chatbotConfig.resolve(page, biz, process.env);
     if (!cfg.enabled) return res.status(403).json({ error: "chatbot_disabled" });
-    if (!anthropicKey) {
-      console.error("chat: ANTHROPIC_API_KEY is not set");
+    const needKey = chatProvider.envKeyFor(cfg.model);
+    if (!apiKeys[needKey]) {
+      console.error(`chat: ${needKey} is not set (model ${cfg.model})`);
       return res.status(503).json({ error: "unavailable" });
     }
 
@@ -220,7 +203,7 @@ module.exports = function createChatRouter(ctx) {
 
     let parsed = null;
     try {
-      parsed = prompt.parseModelReply(await askClaude(system, history, cfg.model));
+      parsed = prompt.parseModelReply(await askModel(system, history, cfg.model));
     } catch (err) {
       console.error("chat: model call failed:", err.message);
       return res.status(502).json({ error: "model_unavailable" });

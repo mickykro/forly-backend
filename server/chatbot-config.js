@@ -19,7 +19,11 @@
 // configuration anywhere, and these are product decisions rather than
 // deployment ones.
 const DEFAULTS = {
-  model: "claude-haiku-4-5-20251001",
+  // Gemini Flash: cheapest and fastest of the tiers evaluated, strong Hebrew,
+  // and Google is already a named data processor in the privacy policy.
+  // Override per page or per business with chatbot.model — the vendor follows
+  // the id (chat-provider.js), so "claude-sonnet-5" here just works.
+  model: "gemini-2.5-flash",
   greeting: null,              // null ⇒ the widget falls back to its i18n string
   limits: {
     max_msgs_per_convo: 20,

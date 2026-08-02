@@ -22,7 +22,8 @@
 const db = require("./db");
 const prompt = require("./chat-prompt");
 const { DEFAULTS } = require("./chatbot-config");
-const { PROVIDERS, priceOf } = require("./chat-eval-providers");
+const { priceOf } = require("./chat-eval-providers");
+const chatProvider = require("./chat-provider");
 
 const QUESTIONS = [
   ["YES", "כמה חדרים יש בדירה?"],
@@ -51,8 +52,9 @@ const QUESTIONS = [
 
 const usage = { input: 0, output: 0 };
 
-async function ask(system, question, model, provider) {
-  const r = await provider.ask(system, question, model, process.env[provider.envKey]);
+async function ask(system, question, model) {
+  const r = await chatProvider.ask(model, system,
+    [{ role: "user", content: question }], process.env);
   usage.input += r.in;
   usage.output += r.out;
   return r.text;
@@ -61,18 +63,13 @@ async function ask(system, question, model, provider) {
 (async () => {
   const args = process.argv.slice(2);
   const pageId = args.find((a) => !a.startsWith("--"));
-  const providerName = (args.includes("--provider") && args[args.indexOf("--provider") + 1]) || "anthropic";
-  const provider = PROVIDERS[providerName];
-  if (!provider) {
-    console.error(`unknown provider "${providerName}" — one of: ${Object.keys(PROVIDERS).join(", ")}`);
-    process.exit(1);
-  }
-  const model = (args.includes("--model") && args[args.indexOf("--model") + 1]) ||
-    (providerName === "anthropic" ? DEFAULTS.model : provider.defaultModel);
+  // The vendor follows the model id, so there is no --provider flag to get wrong.
+  const model = (args.includes("--model") && args[args.indexOf("--model") + 1]) || DEFAULTS.model;
+  const providerName = chatProvider.providerFor(model);
   const one = args.includes("--ask") && args[args.indexOf("--ask") + 1];
   if (!pageId) {
     console.error("usage: node server/chat-eval.js <page_id> [--facts] " +
-      "[--provider anthropic|openai|gemini] [--model M] [--ask \"…\"]");
+      "[--model gemini-2.5-flash|claude-sonnet-5|gpt-4o-mini|…] [--ask \"…\"]");
     process.exit(1);
   }
 
@@ -92,8 +89,9 @@ async function ask(system, question, model, provider) {
     process.exit(0);
   }
 
-  if (!process.env[provider.envKey]) {
-    console.error(`${provider.envKey} is not set`);
+  const needKey = chatProvider.envKeyFor(model);
+  if (!process.env[needKey]) {
+    console.error(`${needKey} is not set (required for model ${model})`);
     process.exit(1);
   }
 
@@ -112,7 +110,7 @@ async function ask(system, question, model, provider) {
     let mark = "  ";
     let out;
     try {
-      const parsed = prompt.parseModelReply(await ask(system, q, model, provider));
+      const parsed = prompt.parseModelReply(await ask(system, q, model));
       if (!parsed) {
         out = "⚠️  UNPARSABLE — no answer, no handoff";
         mismatches++;
