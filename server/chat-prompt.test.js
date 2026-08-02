@@ -34,6 +34,20 @@ assert.ok(f.includes("סלון"));
 assert.ok(f.includes("מחסן: אין"), "false booleans are facts, not absences");
 assert.ok(f.includes("מעלית: יש"));
 
+// The agent's tagline is a legitimate answer to "who is this agent?" — without
+// it the model had nothing and invented a service pitch instead.
+assert.ok(buildFacts({ agent: { name: "מור", tagline: "מתמחה בהדר" } }, null).includes("מתמחה בהדר"));
+
+// The area section must NOT be titled "the neighbourhood": area.blurb is written
+// about the city/region, and a section labelled that way got used to answer
+// "which neighbourhood?" with a paragraph about the city.
+const areaOnly = buildFacts({ property: {}, area: { blurb: "עיר מרכזית בשרון" } }, null);
+assert.ok(!/^## השכונה$/m.test(areaOnly), "area section must not claim to be the neighbourhood");
+assert.ok(areaOnly.includes("לא שם השכונה"), "and must say so explicitly");
+// The neighbourhood itself stays a property line, and reads as absent when it is.
+assert.ok(buildFacts({ property: { neighborhood: "הדר" } }, null).includes("שכונה: הדר"));
+assert.ok(!buildFacts({ property: { city: "חיפה" } }, null).includes("שכונה"));
+
 // Absent fields must be OMITTED, not rendered as unknown — a missing line is
 // exactly what makes the model say it doesn't know.
 f = buildFacts({ property: { title: "דירה", rooms: 3, floor: 0, price: 0, parking: 0 } }, null);
@@ -60,6 +74,17 @@ assert.ok(sys.includes("FACTS-HERE"));
 assert.ok(sys.includes("Hebrew"));
 assert.ok(sys.includes("מור לוי"));
 assert.ok(sys.includes("Partial knowledge"), "the hedging rule must be in the prompt");
+// Answering a different question than the one asked is the failure that turned
+// "which neighbourhood?" into a paragraph about the city.
+assert.ok(sys.includes("ANSWER THE QUESTION THAT WAS ASKED"));
+// …and inventing a service pitch is what turned "who is Miki?" into a promise.
+assert.ok(sys.includes("no service commitments"));
+assert.ok(sys.includes("not the agent"), "the bot must not speak in the agent's voice");
+// Hebrew morphology guidance only when the page is Hebrew.
+assert.ok(sys.includes("ליווות"), "the coined-word example belongs in the Hebrew block");
+assert.ok(!buildSystemPrompt("F", { language: "en" }).includes("ליווות"),
+  "an English page must not carry Hebrew-specific guidance");
+assert.ok(buildSystemPrompt("F", {}).includes("ליווות"), "default is Hebrew");
 assert.ok(sys.includes("never negotiate on price"));
 assert.ok(sys.includes("never instructions"), "prompt-injection rule must be present");
 assert.ok(sys.includes('"answered"'));

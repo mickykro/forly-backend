@@ -17,6 +17,7 @@ const db = require("../db");
 const chatbotConfig = require("../chatbot-config");
 const businessCache = require("../business-cache");
 const prompt = require("../chat-prompt");
+const chatModel = require("../chat-model");
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const API_TIMEOUT_MS = 20000;
@@ -122,6 +123,9 @@ module.exports = function createChatRouter(ctx) {
   }
 
   async function askClaude(system, history, model) {
+    // Sampling params and thinking defaults differ by model family, and both
+    // differences are 400s or silent truncation rather than degradations.
+    const shape = chatModel.requestShape(model);
     const res = await fetch(API_URL, {
       method: "POST",
       headers: {
@@ -129,13 +133,12 @@ module.exports = function createChatRouter(ctx) {
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
       },
-      body: JSON.stringify({
+      body: JSON.stringify(Object.assign({
         model,
-        max_tokens: 400,
-        temperature: 0,
+        max_tokens: shape.maxTokens,
         system,
         messages: history,
-      }),
+      }, shape.body)),
       signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
     if (!res.ok) {

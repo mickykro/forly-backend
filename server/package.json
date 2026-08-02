@@ -60,7 +60,7 @@
     "    docker run --rm -p 8787:8787 -e BASE_URL=https://<your-tunnel> forly-intake"
   ],
   "scripts": {
-    "test": "node overlay.test.js && node pages-auth.test.js && node chatbot-readiness.test.js && node chatbot-config.test.js && node chat-prompt.test.js",
+    "test": "node overlay.test.js && node pages-auth.test.js && node chatbot-readiness.test.js && node chatbot-config.test.js && node chat-prompt.test.js && node chat-model.test.js",
     "start": "node index.js",
     "local": "node index.js",
     "tunnel": "npx cloudflared tunnel --url http://localhost:8787",
