@@ -10,15 +10,15 @@
  * vendor's live pricing page before making a cost decision.
  */
 
-// USD per million tokens.
+// USD per million tokens. Frontier tiers are deliberately absent — see the
+// header note in chat-provider.js. A model with no entry here still runs; the
+// eval just says it has no price rather than printing a confident zero.
 const PRICING = {
   "gemini-2.5-flash": { in: 0.3, out: 2.5 },
   "gemini-2.0-flash": { in: 0.1, out: 0.4 },
   "gpt-4o-mini": { in: 0.15, out: 0.6 },
   "claude-haiku-4-5": { in: 1, out: 5 },
   "claude-sonnet-5": { in: 2, out: 10 },      // introductory; list is 3/15
-  "claude-opus-5": { in: 5, out: 25 },
-  "claude-fable-5": { in: 10, out: 50 },
 };
 
 function priceOf(model) {

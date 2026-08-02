@@ -54,12 +54,20 @@ assert.equal(r.headers["x-api-key"], "KEY");
 assert.equal(r.body.system, "FACTS");
 assert.equal(r.body.output_config.format.type, "json_schema");
 assert.equal(r.body.output_config.format.schema.additionalProperties, false);
-// Family-specific shaping still applies (see chat-model.js).
+// Sonnet 5 removed sampling params and defaults thinking ON.
 assert.deepEqual(r.body.thinking, { type: "disabled" });
 // output_config carries both effort and format — merging them, not clobbering.
 assert.equal(r.body.output_config.effort, "low");
 assert.equal(r.body.temperature, undefined);
-assert.equal(build("claude-haiku-4-5").body.temperature, 0);
+// Haiku 4.5 is the opposite: temperature is accepted, there is no effort knob,
+// and there is no thinking to switch off.
+r = build("claude-haiku-4-5");
+assert.equal(r.body.temperature, 0);
+assert.equal(r.body.thinking, undefined);
+assert.equal(r.body.output_config.effort, undefined);
+assert.equal(r.body.output_config.format.type, "json_schema", "the schema applies to every tier");
+assert.equal(build("claude-haiku-4-5-20251001").body.temperature, 0, "dated snapshots resolve the same");
+assert.deepEqual(build("claude-opus-4-8").body.thinking, { type: "disabled" });
 
 // ── OpenAI ──
 r = build("gpt-5-mini");

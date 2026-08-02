@@ -15,9 +15,13 @@
  * can't cover (a refusal, a truncated body).
  *
  * `buildRequest` is pure and unit-tested; `ask` is the thin fetch around it.
+ *
+ * Supported here are the tiers that make sense for a public, capped, per-message
+ * endpoint. The frontier tiers (Claude Opus/Fable, and their equivalents) are
+ * deliberately absent: they cost 10-50x per message for a bot that reads five
+ * facts off a page, and Fable additionally rejects `thinking: disabled`, so
+ * setting one would surface as a vendor 400 rather than working expensively.
  */
-const chatModel = require("./chat-model");
-
 const TIMEOUT_MS = 20000;
 const MAX_OUT = 400;
 
@@ -44,18 +48,30 @@ const envKeyFor = (model) => PROVIDERS[providerFor(model)].envKey;
 
 // ── per-vendor request bodies ──
 
+// Sonnet 5 and Opus 4.7+ removed the sampling parameters (sending `temperature`
+// is a 400) and turned thinking ON by default — and `max_tokens` caps thinking
+// and reply together, so leaving it implicit truncates the answer mid-sentence.
+// Haiku 4.5 is the opposite on both counts. Matched by prefix so a dated
+// snapshot resolves the same way.
+const CLAUDE_NO_SAMPLING = /^claude-(opus-5|sonnet-5|opus-4-8|opus-4-7)/;
+
 function anthropicRequest(model, system, messages, key) {
-  const shape = chatModel.requestShape(model);
-  // `output_config` carries BOTH the response format and the effort level, so
-  // the two have to be merged — a plain Object.assign of the family shape drops
-  // the schema and silently reverts to prompt-instructed JSON.
-  const body = Object.assign({
+  const modern = CLAUDE_NO_SAMPLING.test(String(model));
+  const body = {
     model,
-    max_tokens: shape.maxTokens,
+    max_tokens: MAX_OUT,
     system,
     messages,
-  }, shape.body);
-  body.output_config = Object.assign({}, shape.body.output_config, {
+  };
+  if (modern) {
+    body.thinking = { type: "disabled" };   // explicit: omitting it means ON
+  } else {
+    body.temperature = 0;                   // Haiku 4.5 and older
+  }
+  // `output_config` carries BOTH the response format and the effort level, so
+  // they have to be built together — assigning one over the other drops the
+  // schema and silently reverts to prompt-instructed JSON.
+  body.output_config = Object.assign(modern ? { effort: "low" } : {}, {
     format: {
       type: "json_schema",
       schema: {
