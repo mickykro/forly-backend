@@ -13,6 +13,8 @@
 
   var all = [];   // full property list from the server
   var stats = {};
+  var agents = [];      // agent directory, loaded lazily when the tab is opened
+  var agentStats = {};
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -127,12 +129,99 @@
     });
   }
 
+  // ── agents view: premium feature flags, one row per agent ──
+
+  function readinessPills(r) {
+    r = r || {};
+    // Only show the buckets that exist, so a tidy agent doesn't get three zeros.
+    var parts = [];
+    if (r.rich) parts.push('<span class="rich" title="דפים עם הרבה מידע">' + r.rich + " מלא</span>");
+    if (r.ok) parts.push('<span title="דפים עם מידע בסיסי">' + r.ok + " בסיסי</span>");
+    if (r.thin) parts.push('<span class="thin" title="דפים דלים — הבוט יעביר לסוכן כמעט מיד">' + r.thin + " דל</span>");
+    return parts.length ? '<div class="rd">' + parts.join("") + "</div>" : '<span class="p-addr">—</span>';
+  }
+
+  function agentRowHtml(a) {
+    var demo = a.is_demo ? '<span class="tag-demo">demo</span>' : "";
+    return "<tr>" +
+      '<td class="agent"><div class="agent-name">' + esc(a.name) + demo + "</div>" +
+        '<div class="p-addr num" dir="ltr">' + esc(a.phone) + "</div></td>" +
+      '<td class="num">' + esc(a.active_pages) + "</td>" +
+      '<td class="num">' + Number(a.views || 0).toLocaleString("he-IL") + "</td>" +
+      '<td class="num">' + Number(a.leads || 0).toLocaleString("he-IL") + "</td>" +
+      "<td>" + readinessPills(a.readiness) + "</td>" +
+      '<td><label class="switch"><input type="checkbox" data-chatbot="' + esc(a.phone) + '"' +
+        (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
+      "</tr>";
+  }
+
+  function applyAgentFilter() {
+    var q = ($("#agentSearch").value || "").trim().toLowerCase();
+    var shown = agents.filter(function (a) {
+      return !q || (a.name + " " + a.phone).toLowerCase().indexOf(q) !== -1;
+    });
+    $("#agentRows").innerHTML = shown.map(agentRowHtml).join("");
+    $("#agentEmpty").classList.toggle("hidden", shown.length > 0);
+    $("#agentCount").textContent = agentStats.chatbot_agents != null ?
+      agentStats.chatbot_agents + " מתוך " + agents.length + " עם צ׳אט · " +
+      agentStats.chatbot_pages + " דפים" : "";
+    bindAgentActions();
+  }
+
+  function bindAgentActions() {
+    document.querySelectorAll("[data-chatbot]").forEach(function (input) {
+      input.addEventListener("change", function () {
+        var phone = input.dataset.chatbot;
+        var want = input.checked;
+        input.disabled = true;
+        FLY.req("/api/admin/business/features", {
+          method: "POST",
+          body: { phone: phone, feature: "chatbot", enabled: want },
+          noRedirect: true,
+        }).then(function () {
+          // Keep the local copy in step so a re-filter doesn't revert the switch.
+          var a = agents.filter(function (x) { return x.phone === phone; })[0];
+          if (a) a.chatbot_enabled = want;
+          agentStats.chatbot_agents = agents.filter(function (x) { return x.chatbot_enabled; }).length;
+          agentStats.chatbot_pages = agents.reduce(function (n, x) {
+            return n + (x.chatbot_enabled ? x.active_pages : 0);
+          }, 0);
+          applyAgentFilter();
+          FLY.toast(want ? "✅ צ׳אט בוט הופעל לכל הדפים של הסוכן" : "צ׳אט בוט כובה");
+        }).catch(function (e) {
+          input.checked = !want;   // the server refused — don't lie about the state
+          input.disabled = false;
+          FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
+        });
+      });
+    });
+  }
+
+  function loadAgents() {
+    return FLY.req("/api/admin/agents", { noRedirect: true }).then(function (d) {
+      agents = d.agents || [];
+      agentStats = d.stats || {};
+      applyAgentFilter();
+    });
+  }
+
+  function showTab(which) {
+    var onAgents = which === "agents";
+    $("#tabAgents").classList.toggle("on", onAgents);
+    $("#tabProps").classList.toggle("on", !onAgents);
+    $("#paneAgents").classList.toggle("hidden", !onAgents);
+    $("#paneProps").classList.toggle("hidden", onAgents);
+    if (onAgents && !agents.length) loadAgents();
+  }
+
   function load() {
     return FLY.req("/api/admin/properties", { noRedirect: true }).then(function (d) {
       all = d.properties || [];
       stats = d.stats || {};
       renderStats();
       applyFilters();
+      // Refresh the agents view too, but only once it has been opened.
+      if (agents.length) return loadAgents();
     });
   }
 
@@ -150,6 +239,9 @@
       $("#who").textContent = me.phone || "";
       $("#search").addEventListener("input", applyFilters);
       $("#statusFilter").addEventListener("change", applyFilters);
+      $("#agentSearch").addEventListener("input", applyAgentFilter);
+      $("#tabProps").addEventListener("click", function () { showTab("props"); });
+      $("#tabAgents").addEventListener("click", function () { showTab("agents"); });
       $("#refreshBtn").addEventListener("click", function () {
         FLY.toast("מרענן…"); load();
       });

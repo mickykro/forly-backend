@@ -129,6 +129,92 @@ module.exports = function createAdminRouter(ctx) {
     }
   });
 
+  // ── agent directory: one row per agent, with their premium feature flags ──
+  // The property table is one row per listing, so a per-property toggle would
+  // show an agent with six listings six switches that all set the same flag.
+  // Features belong to the agent, so they get their own view.
+  router.get("/agents", requireAdmin, async (req, res) => {
+    try {
+      const [businesses, pages, listings] = await Promise.all([
+        db.listAllBusinesses(),
+        db.listAllPages(),
+        db.listAllListings(),
+      ]);
+      const listingById = new Map(listings.map((l) => [l.listing_id, l]));
+
+      // Roll each agent's pages up, so the toggle sits next to the evidence for
+      // whether flipping it is a good idea (see chatbot-readiness.js).
+      const byPhone = new Map();
+      for (const b of businesses) {
+        byPhone.set(b.phone, {
+          phone: b.phone,
+          name: b.business_name || b.full_name || "—",
+          plan: b.plan || "",
+          onboarding_state: b.onboarding_state || "",
+          is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
+          chatbot_enabled: !!(b.features && b.features.chatbot),
+          pages: 0, active_pages: 0, views: 0, leads: 0,
+          readiness: { rich: 0, ok: 0, thin: 0 },
+        });
+      }
+      for (const p of pages) {
+        const row = byPhone.get(p.business_phone);
+        if (!row || p.status === "archived") continue;
+        row.pages++;
+        if (p.status === "active" || p.status === "expiring") row.active_pages++;
+        row.views += p.view_count || 0;
+        row.leads += p.lead_count || 0;
+        const { verdict } = readiness.scorePage(
+          p, p.listing_id ? listingById.get(p.listing_id) || null : null
+        );
+        row.readiness[verdict]++;
+      }
+
+      const agents = [...byPhone.values()]
+        .sort((a, b) => (b.active_pages - a.active_pages) || a.name.localeCompare(b.name, "he"));
+      res.json({
+        agents,
+        stats: {
+          total_agents: agents.length,
+          chatbot_agents: agents.filter((a) => a.chatbot_enabled).length,
+          chatbot_pages: agents.reduce((n, a) => n + (a.chatbot_enabled ? a.active_pages : 0), 0),
+        },
+      });
+    } catch (err) {
+      console.error("admin/agents failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── grant/revoke a premium feature for one agent ──
+  // Flipping this on turns the bot on for every page that agent owns, old ones
+  // included: entitlement is resolved live from the business, never stamped
+  // onto the page. Revoking is immediate in the same way.
+  const FEATURES = new Set(["chatbot"]);
+
+  router.post("/business/features", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const phone = normalizeAuthPhone(body.phone || "");
+    const feature = String(body.feature || "");
+    // Whitelisted so an admin session can never write an arbitrary key onto a
+    // business document just by renaming the field in the request.
+    if (!phone || !FEATURES.has(feature) || typeof body.enabled !== "boolean") {
+      return res.status(400).json({ error: "invalid_input" });
+    }
+    try {
+      const biz = await db.getBusiness(phone);
+      if (!biz) return res.status(404).json({ error: "unknown_agent" });
+      const features = Object.assign({}, biz.features || {}, { [feature]: body.enabled });
+      await db.setBusiness(phone, { features, updated_at: new Date() });
+      console.log(`admin_feature_set feature=${feature} enabled=${body.enabled} ` +
+        `agent=${phone} by=${req.user.userId}`);
+      res.json({ ok: true, phone, feature, enabled: body.enabled });
+    } catch (err) {
+      console.error("admin/business/features failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
   // ── chatbot readiness: what would the bot actually know, page by page? ──
   // Read-only. Run this before granting an agent the chatbot so you can see
   // which of their existing pages carry enough data to hold a conversation —
