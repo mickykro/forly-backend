@@ -62,6 +62,7 @@
     actions.push('<button class="btn btn-danger btn-sm" data-delete="' + esc(p.listing_id) + '">מחיקה</button>');
 
     var priceLine = p.price ? '<div class="p-addr num">' + esc(money(p.price)) + "</div>" : "";
+    var cb = chatbotCell(p);
 
     return "<tr>" +
       "<td>" + thumb + "</td>" +
@@ -74,8 +75,31 @@
       '<td class="num">' + esc(p.view_count) + "</td>" +
       '<td class="num">' + esc(p.lead_count) + "</td>" +
       '<td class="num">' + (p.days_left != null ? esc(p.days_left) : "—") + "</td>" +
+      "<td>" + cb + "</td>" +
       '<td><div class="row-actions">' + actions.join("") + "</div></td>" +
       "</tr>";
+  }
+
+  // Per-page chat-bot override: "" = inherit the agent, on = force on for this
+  // page even if the agent is off, off = force off even if the agent is on.
+  // The line underneath spells out what "inherit" currently works out to,
+  // since otherwise the selector alone never tells you the actual state.
+  var CB_REASON = {
+    page_on: "מופעל לדף הזה", page_off: "כבוי לדף הזה",
+    agent_on: "מופעל דרך הסוכן", agent_off: "כבוי — הסוכן לא מורשה",
+    global_off: "כבוי גלובלית",
+  };
+
+  function chatbotCell(p) {
+    if (!p.page_id || !p.chatbot) return '<span class="p-addr">—</span>';
+    var v = p.chatbot.page === true ? "on" : p.chatbot.page === false ? "off" : "";
+    return '<select class="cb ' + esc(v) + '" data-cb="' + esc(p.page_id) + '">' +
+      '<option value=""' + (v === "" ? " selected" : "") + ">ירושה מהסוכן</option>" +
+      '<option value="on"' + (v === "on" ? " selected" : "") + ">מופעל</option>" +
+      '<option value="off"' + (v === "off" ? " selected" : "") + ">כבוי</option>" +
+      "</select>" +
+      '<span class="cb-eff">' + (p.chatbot.effective ? "✓ " : "") +
+      esc(CB_REASON[p.chatbot.reason] || "") + "</span>";
   }
 
   function applyFilters() {
@@ -117,6 +141,30 @@
           .then(function () { FLY.toast("הנכס הועבר לארכיון"); load(); })
           .catch(function () { FLY.toast("שגיאה"); b.disabled = false; });
       });
+    });
+    document.querySelectorAll("[data-cb]").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var prev = sel.dataset.prev != null ? sel.dataset.prev : "";
+        var val = sel.value;
+        sel.disabled = true;
+        FLY.req("/api/admin/page/chatbot", {
+          method: "POST",
+          body: { page_id: sel.dataset.cb, enabled: val === "on" ? true : val === "off" ? false : null },
+          noRedirect: true,
+        }).then(function (d) {
+          // Patch the local row so re-filtering doesn't revert the selector.
+          var row = all.filter(function (x) { return x.page_id === sel.dataset.cb; })[0];
+          if (row) row.chatbot = d.chatbot;
+          applyFilters();
+          FLY.toast(d.chatbot && d.chatbot.effective ?
+            "✅ צ׳אט בוט פעיל בדף" : "צ׳אט בוט כבוי בדף");
+        }).catch(function () {
+          sel.value = prev;          // the server refused — don't show a lie
+          sel.disabled = false;
+          FLY.toast("שגיאה בעדכון");
+        });
+      });
+      sel.dataset.prev = sel.value;
     });
     document.querySelectorAll("[data-delete]").forEach(function (b) {
       b.addEventListener("click", function () {

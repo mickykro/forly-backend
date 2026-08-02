@@ -45,6 +45,14 @@
   .rd span{padding:2px 7px;border-radius:100px;border:1px solid rgba(23,20,15,.12);color:var(--ink-soft)}
   .rd .rich{background:rgba(45,140,80,.12);border-color:rgba(45,140,80,.3)}
   .rd .thin{background:rgba(190,60,50,.1);border-color:rgba(190,60,50,.28)}
+  /* per-page chat-bot selector. No tri-state control exists in app.css and
+     .switch is strictly two-state, so this is a plain select: "" = inherit. */
+  select.cb{font-family:var(--sans);font-size:.8rem;color:var(--ink);background:var(--paper);
+    border:1px solid rgba(23,20,15,.16);border-radius:100px;padding:5px 10px;outline:none;cursor:pointer}
+  select.cb:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-faint)}
+  select.cb.on{border-color:rgba(45,140,80,.45);background:rgba(45,140,80,.08)}
+  select.cb.off{border-color:rgba(190,60,50,.35);background:rgba(190,60,50,.06)}
+  .cb-eff{display:block;font-size:.68rem;color:var(--ink-soft);margin-top:3px;font-weight:300}
   /* .switch is a <label>, i.e. inline, so its width/height collapse outside a
      flex row (app.css only ever uses it inside .toggle-row). Blockify it here. */
   table.admin .switch{display:inline-block;vertical-align:middle}
@@ -143,6 +151,7 @@
           <th class="num">צפיות</th>
           <th class="num">לידים</th>
           <th class="num">ימים</th>
+          <th>צ׳אט בוט</th>
           <th>פעולות</th>
         </tr>
       </thead>

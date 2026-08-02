@@ -123,6 +123,13 @@ app.get("/signup", (req, res) => {
 const createPortalRouter = require("./routes/portal");
 app.use(createPortalRouter({ pageBaseUrl: PAGE_BASE_URL }));
 
+// ── chat bot (public, gated per agent/page — see server/chatbot-config.js) ──
+const createChatRouter = require("./routes/chat");
+app.use(createChatRouter({
+  anthropicKey: process.env.ANTHROPIC_API_KEY || "",
+  ipSalt: process.env.CHATBOT_IP_SALT || AUTH_SECRET,
+}));
+
 // ── pages routes (builder, serving, leads) ──
 const createPagesRouter = require("./routes/pages");
 app.use(createPagesRouter({

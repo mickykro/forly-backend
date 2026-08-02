@@ -372,6 +372,22 @@
     document.body.appendChild(s);
   }
 
+  // Chat bot assets load only when the server says the bot is on for this page,
+  // and never inside the agent's edit preview (this shell is iframed by
+  // edit.html) — mirrors the IS_PREVIEW guard the template runtime uses.
+  function loadChat(d) {
+    if (!d.chatbot || !d.chatbot.enabled) return;
+    if (editToken || window.self !== window.top) return;
+    var css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/tpl/chat.css";
+    document.head.appendChild(css);
+    var s = document.createElement("script");
+    s.src = "/tpl/chat.js";
+    s.onload = function () { if (window.FlyChat) window.FlyChat.init(d); };
+    document.body.appendChild(s);
+  }
+
   function notice(msg) {
     var n = document.createElement("div");
     n.style.cssText = "position:fixed;bottom:18px;right:50%;transform:translateX(50%);" +
@@ -525,6 +541,7 @@
         if (d.editable) loadEditor(d);
         else notice("קישור העריכה אינו תקף — מוצג מצב צפייה בלבד");
       }
+      loadChat(d);
     })
     .catch(function () { setState("notfound"); });
 

@@ -18,6 +18,8 @@ const path = require("path");
 const fs = require("fs");
 const db = require("../db");
 const readiness = require("../chatbot-readiness");
+const chatbotConfig = require("../chatbot-config");
+const businessCache = require("../business-cache");
 
 const PAGE_LIFESPAN_DAYS = 30;
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
@@ -108,6 +110,9 @@ module.exports = function createAdminRouter(ctx) {
           view_count: views,
           lead_count: leads,
           created_at: asMillis(l.created_at) || null,
+          // {page: true|false|null(inherit), effective, reason} — drives the
+          // per-page selector. No extra read: page and biz are already loaded.
+          chatbot: page ? chatbotConfig.adminState(page, biz, process.env) : null,
         });
       }
 
@@ -206,11 +211,43 @@ module.exports = function createAdminRouter(ctx) {
       if (!biz) return res.status(404).json({ error: "unknown_agent" });
       const features = Object.assign({}, biz.features || {}, { [feature]: body.enabled });
       await db.setBusiness(phone, { features, updated_at: new Date() });
+      // Pages resolve the entitlement through a 60s cache; drop it so the
+      // change is visible on the next request instead of up to a minute later.
+      businessCache.invalidate(phone);
       console.log(`admin_feature_set feature=${feature} enabled=${body.enabled} ` +
         `agent=${phone} by=${req.user.userId}`);
       res.json({ ok: true, phone, feature, enabled: body.enabled });
     } catch (err) {
       console.error("admin/business/features failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── per-page chat-bot override ──
+  // enabled:true forces the bot on for one page even when the agent is off;
+  // false forces it off even when the agent is on; null clears back to
+  // inheriting the agent's entitlement (see chatbot-config.js).
+  router.post("/page/chatbot", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const pageId = String(body.page_id || "");
+    const enabled = body.enabled;
+    if (!pageId || !(enabled === true || enabled === false || enabled === null)) {
+      return res.status(400).json({ error: "invalid_input" });
+    }
+    try {
+      const page = await db.getPage(pageId);
+      if (!page) return res.status(404).json({ error: "not_found" });
+      await db.updatePage(pageId, { "chatbot.enabled": enabled, updated_at: new Date() });
+      const biz = await businessCache.get(page.business_phone);
+      const state = chatbotConfig.adminState(
+        Object.assign({}, page, { chatbot: Object.assign({}, page.chatbot, { enabled }) }),
+        biz, process.env
+      );
+      console.log(`admin_page_chatbot page=${pageId} enabled=${enabled} ` +
+        `effective=${state.effective} by=${req.user.userId}`);
+      res.json({ ok: true, page_id: pageId, chatbot: state });
+    } catch (err) {
+      console.error("admin/page/chatbot failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });

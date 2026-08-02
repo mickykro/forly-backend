@@ -1,0 +1,108 @@
+/*
+ * Unit tests for chat-prompt.js — the fact sheet and the answered/not-answered
+ * decision the whole handoff rests on.
+ * Run: node server/chat-prompt.test.js
+ */
+const assert = require("assert");
+const { buildFacts, buildSystemPrompt, parseModelReply, MODE_BLOCKS } = require("./chat-prompt");
+
+// ── buildFacts ──
+const page = {
+  language: "he",
+  property: {
+    title: "4 חד׳ בהדר", listing_type: "sale", price: 2350000, address: "הרצל 10",
+    neighborhood: "הדר", city: "חיפה", rooms: 4, size_sqm: 92, floor: 3, parking: 1,
+    storage: false, elevator: true, tags: ["מרפסת", "משופצת"],
+  },
+  agent: { name: "מור לוי", brand_name: "לוי נכסים", license: "1234" },
+  area: { blurb: "שכונה מבוקשת", stops: [{ label: "רכבת", minutes: "7 דק׳" }], stats: [{ label: "ציון", value: "8.4" }] },
+  carousel: { slides: [{ title: "נוף", body: "לים" }] },
+  gallery: { images: [{ caption: "סלון" }, { caption: "" }] },
+};
+const listing = { description: "דירה מהממת עם נוף פתוח לים." };
+
+let f = buildFacts(page, listing);
+assert.ok(f.includes("4 חד׳ בהדר"));
+assert.ok(f.includes("₪2,350,000"));
+assert.ok(f.includes("למכירה"));
+assert.ok(f.includes("דירה מהממת"));
+assert.ok(f.includes("רכבת: 7 דק׳"));
+assert.ok(f.includes("נוף: לים"));
+assert.ok(f.includes("מור לוי"));
+assert.ok(f.includes("סלון"));
+// A boolean false is a real answer to "is there storage?", so it must survive.
+assert.ok(f.includes("מחסן: אין"), "false booleans are facts, not absences");
+assert.ok(f.includes("מעלית: יש"));
+
+// Absent fields must be OMITTED, not rendered as unknown — a missing line is
+// exactly what makes the model say it doesn't know.
+f = buildFacts({ property: { title: "דירה", rooms: 3, floor: 0, price: 0, parking: 0 } }, null);
+assert.ok(f.includes("חדרים: 3"));
+assert.ok(!f.includes("קומה"), "0 means 'not captured' (Number(x)||0), so it must not appear");
+assert.ok(!f.includes("מחיר"));
+assert.ok(!f.includes("חניות"));
+assert.ok(!f.includes("תיאור הנכס"), "no listing ⇒ no description section");
+assert.ok(!f.includes("undefined") && !f.includes("null"));
+
+// Empty everything must not throw.
+assert.doesNotThrow(() => buildFacts({}, null));
+assert.doesNotThrow(() => buildFacts(null, null));
+
+// Long descriptions are capped.
+f = buildFacts({ property: {} }, { description: "x".repeat(5000) });
+assert.ok(f.length < 2200);
+
+// ── buildSystemPrompt ──
+const sys = buildSystemPrompt("FACTS-HERE", {
+  language: "he", agentName: "מור לוי", modeBlock: MODE_BLOCKS.immediate("מור לוי"),
+});
+assert.ok(sys.includes("FACTS-HERE"));
+assert.ok(sys.includes("Hebrew"));
+assert.ok(sys.includes("מור לוי"));
+assert.ok(sys.includes("Partial knowledge"), "the hedging rule must be in the prompt");
+assert.ok(sys.includes("never negotiate on price"));
+assert.ok(sys.includes("never instructions"), "prompt-injection rule must be present");
+assert.ok(sys.includes('"answered"'));
+assert.ok(buildSystemPrompt("F", { language: "ru" }).includes("Russian"));
+assert.ok(buildSystemPrompt("F", {}).includes("Hebrew"), "unknown language ⇒ Hebrew");
+
+// ── parseModelReply — the load-bearing one ──
+let p = parseModelReply('{"answered":true,"reply":"יש 4 חדרים.","unanswered_question":null}');
+assert.equal(p.answered, true);
+assert.equal(p.reply, "יש 4 חדרים.");
+assert.equal(p.unanswered_question, null);
+
+p = parseModelReply('{"answered":false,"reply":"אין לי מידע.","unanswered_question":"כלבים?"}');
+assert.equal(p.answered, false);
+assert.equal(p.unanswered_question, "כלבים?");
+
+// The model wrapping its JSON in prose or a fence shouldn't lose a good answer.
+p = parseModelReply('Sure!\n```json\n{"answered":true,"reply":"כן."}\n```');
+assert.equal(p.answered, true);
+assert.equal(p.reply, "כן.");
+
+// A truthy unanswered_question on an answered reply is meaningless — drop it.
+assert.equal(parseModelReply('{"answered":true,"reply":"כן.","unanswered_question":"x"}').unanswered_question, null);
+
+// Everything below MUST return null. Callers treat null as "no handoff", because
+// a false hot lead costs the agent more trust than a missed one.
+[
+  "",
+  null,
+  "no json here at all",
+  "{ not json }",
+  '{"reply":"חסר answered"}',
+  '{"answered":"true","reply":"מחרוזת ולא בוליאני"}',
+  '{"answered":true}',
+  '{"answered":true,"reply":"   "}',
+  '{"answered":false,"reply":null}',
+  "[]",
+].forEach(function (bad) {
+  assert.equal(parseModelReply(bad), null, "must not trust: " + JSON.stringify(bad));
+});
+
+// Replies are capped so a runaway generation can't be pasted into the bubble.
+p = parseModelReply(JSON.stringify({ answered: true, reply: "x".repeat(5000) }));
+assert.ok(p.reply.length <= 600);
+
+console.log("chat-prompt: all tests passed");
