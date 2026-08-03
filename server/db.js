@@ -223,8 +223,8 @@ module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
-  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone,
-  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
-  getBusiness, setBusiness,
+  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages,
+  getBusiness, setBusiness, listAllBusinesses,
   saveLead, logPortalEvent,
 };
