@@ -11,11 +11,63 @@
  */
 
 const MAX_REPLY_CHARS = 600;
+const MAX_DESC_CHARS = 2000;
+const MAX_TEXT_CHARS = 300;
 
 const money = (n) => (Number(n) > 0 ? "₪" + Number(n).toLocaleString("en-US") : null);
 
 function line(label, value) {
   return value === null || value === undefined || value === "" ? null : `- ${label}: ${value}`;
+}
+
+/*
+ * Hebrew labels for the property fields we know about. This is a LABEL map, not
+ * an allowlist — an unrecognised key is still emitted under its own name. That
+ * direction matters: hand-picking which fields to include is what hid the
+ * neighbourhood and ₪/m² from the bot, and a field added to the page next month
+ * would have been invisible again. Better an awkward English key in the fact
+ * sheet than a fact the bot swears it doesn't have.
+ */
+const PROPERTY_LABELS = {
+  title: "כותרת",
+  address: "כתובת",
+  neighborhood: "שכונה",
+  city: "עיר",
+  rooms: "חדרים",
+  size_sqm: "שטח במ״ר",
+  size_built: "שטח בנוי במ״ר",
+  size_balcony: "מרפסת במ״ר",
+  size_garden: "גינה במ״ר",
+  floor: "קומה",
+  parking: "חניות",
+  storage: "מחסן",
+  elevator: "מעלית",
+  shabbat_elevator: "מעלית שבת",
+  tags: "מאפיינים",
+};
+
+// Handled explicitly elsewhere in the sheet, so skip them in the generic pass.
+const PROPERTY_SPECIAL = new Set(["price", "listing_type"]);
+
+/*
+ * Render one field. Numeric 0 and empty strings are dropped — createPropertyPage
+ * writes `Number(x) || 0` for anything never captured, so a stored 0 means
+ * "unknown" far more often than it means zero, and the bot must read it as
+ * absent. Booleans are kept in BOTH directions: "is there a lift?" is answered
+ * by false just as well as by true.
+ */
+function fieldLine(key, value, labels) {
+  const label = (labels && labels[key]) || key;
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return line(label, value ? "יש" : "אין");
+  if (typeof value === "number") return Number(value) > 0 ? line(label, value) : null;
+  if (Array.isArray(value)) {
+    const items = value.filter((v) => v !== null && v !== undefined && v !== "");
+    return items.length ? line(label, items.join(", ")) : null;
+  }
+  if (typeof value === "object") return null;      // nested blocks get their own section
+  const s = String(value).trim();
+  return s ? line(label, s) : null;
 }
 
 /*
@@ -26,53 +78,42 @@ function line(label, value) {
  * writes `Number(x) || 0` for values that were never captured.
  */
 function buildFacts(page, listing) {
-  const p = (page && page.property) || {};
-  const a = (page && page.agent) || {};
-  const area = (page && page.area) || {};
+  const pg = page || {};
+  const p = pg.property || {};
+  const area = pg.area || {};
   const isRent = p.listing_type === "rent";
 
-  const facts = [
-    "## הנכס",
-    line("כותרת", p.title),
+  // ── the property: every field it carries, not a chosen few ──
+  const facts = ["## הנכס"];
+  const head = [
     line("סוג עסקה", p.listing_type ? (isRent ? "להשכרה" : "למכירה") : null),
     line(isRent ? "שכר דירה חודשי" : "מחיר מבוקש", money(p.price)),
-    line("כתובת", p.address),
-    line("שכונה", p.neighborhood),
-    line("עיר", p.city),
-    line("חדרים", Number(p.rooms) > 0 ? p.rooms : null),
-    line("שטח במ״ר", Number(p.size_sqm) > 0 ? p.size_sqm : null),
-    line("שטח בנוי במ״ר", Number(p.size_built) > 0 ? p.size_built : null),
-    line("מרפסת במ״ר", Number(p.size_balcony) > 0 ? p.size_balcony : null),
-    line("גינה במ״ר", Number(p.size_garden) > 0 ? p.size_garden : null),
-    // Derived, not estimated: the page itself renders this number in the spec
-    // strip (runtime.js `data-ppm`, same rounding and same sale-only rule), so
-    // a visitor can read ₪/m² off the screen. Without the line the bot was
-    // refusing a figure that was visible right next to the chat bubble.
+    // Derived, not estimated: the page renders this same number in its spec
+    // strip (runtime.js `data-ppm`, same rounding, same sale-only rule), so a
+    // bot that refuses it denies a figure the visitor can read on screen.
     !isRent && Number(p.price) > 0 && Number(p.size_sqm) > 0 ?
       line("מחיר למ״ר (מחיר למטר)",
         "₪" + Math.round(Number(p.price) / Number(p.size_sqm)).toLocaleString("en-US")) : null,
-    line("קומה", Number(p.floor) > 0 ? p.floor : null),
-    line("חניות", Number(p.parking) > 0 ? p.parking : null),
-    // Booleans are facts in both directions — "is there a lift?" is answerable
-    // by false just as well as by true — so they are included when present.
-    line("מחסן", typeof p.storage === "boolean" ? (p.storage ? "יש" : "אין") : null),
-    line("מעלית", typeof p.elevator === "boolean" ? (p.elevator ? "יש" : "אין") : null),
-    line("מעלית שבת", typeof p.shabbat_elevator === "boolean" ? (p.shabbat_elevator ? "יש" : "אין") : null),
-    Array.isArray(p.tags) && p.tags.length ? line("מאפיינים", p.tags.join(", ")) : null,
   ].filter(Boolean);
+  const rest = Object.keys(p)
+    .filter((k) => !PROPERTY_SPECIAL.has(k))
+    .map((k) => fieldLine(k, p[k], PROPERTY_LABELS))
+    .filter(Boolean);
+  facts.push(...head, ...rest);
 
   const desc = String((listing && listing.description) || "").trim();
-  if (desc) facts.push("", "## תיאור הנכס מאת המתווך", desc.slice(0, 2000));
+  if (desc) facts.push("", "## תיאור הנכס מאת המתווך", desc.slice(0, MAX_DESC_CHARS));
 
-  const slides = ((page && page.carousel) || {}).slides || [];
-  if (slides.length) {
-    facts.push("", "## נקודות מפתח");
-    slides.forEach((s) => {
-      const t = String(s.title || "").trim();
-      const b = String(s.body || "").trim();
-      if (t || b) facts.push(`- ${[t, b].filter(Boolean).join(": ")}`);
-    });
-  }
+  const phrase = String((pg.hero || {}).phrase || "").trim();
+  if (phrase) facts.push("", "## המשפט שמופיע בראש הדף", phrase);
+
+  const slides = (pg.carousel || {}).slides || [];
+  const slideLines = slides.map((s) => {
+    const t = String((s && s.title) || "").trim();
+    const b = String((s && s.body) || "").trim();
+    return (t || b) ? `- ${[t, b].filter(Boolean).join(": ")}` : null;
+  }).filter(Boolean);
+  if (slideLines.length) facts.push("", "## נקודות מפתח", ...slideLines);
 
   const areaLines = [];
   if (String(area.blurb || "").trim()) areaLines.push(area.blurb.trim());
@@ -91,15 +132,51 @@ function buildFacts(page, listing) {
     facts.push("", "## הסביבה, העיר והאזור (מידע כללי — לא שם השכונה)", ...areaLines);
   }
 
-  const agentLines = [
-    line("שם", a.name),
-    line("משרד", a.brand_name),
-    line("תיאור קצר", a.tagline),
-    line("רישיון תיווך", a.license),
+  const cta = pg.cta || {};
+  const ctaLines = [
+    line("כותרת", cta.headline),
+    line("משפט משנה", cta.sub),
+    Array.isArray(cta.bullets) && cta.bullets.length ?
+      line("נקודות", cta.bullets.filter(Boolean).join(" · ")) : null,
   ].filter(Boolean);
-  if (agentLines.length) facts.push("", "## המתווך", ...agentLines);
+  if (ctaLines.length) facts.push("", "## הקריאה לפעולה בתחתית הדף", ...ctaLines);
 
-  const gallery = ((page && page.gallery) || {}).images || [];
+  // Text the agent edited in place. This is what the visitor actually reads, so
+  // it can differ from the generated copy above — and it was invisible to the
+  // bot entirely. Some keys are UI chrome; they are harmless and cheaper to
+  // pass through than to maintain a second list of which ones matter.
+  const texts = pg.texts && typeof pg.texts === "object" ? pg.texts : null;
+  if (texts) {
+    const tLines = Object.keys(texts)
+      .map((k) => {
+        const v = String(texts[k] == null ? "" : texts[k]).trim();
+        return v ? `- ${k}: ${v.slice(0, MAX_TEXT_CHARS)}` : null;
+      })
+      .filter(Boolean);
+    if (tLines.length) {
+      facts.push("", "## טקסטים שהמתווך התאים בדף (עשוי לחזור על מידע שלמעלה)", ...tLines);
+    }
+  }
+
+  // Agents. Phone numbers are deliberately withheld even though the page holds
+  // them: every contact route on the landing page funnels through the lead form
+  // so Forly relays the lead (see the `data-wa` note in runtime.js). A bot that
+  // reads out a mobile number quietly bypasses that, and the agent stops
+  // getting the lead they are paying for.
+  const agentBlock = (a, heading) => {
+    const lines = [
+      line("שם", a.name),
+      line("משרד", a.brand_name),
+      line("תיאור קצר", a.tagline),
+      line("תפקיד", a.role),
+      line("רישיון תיווך", a.license),
+    ].filter(Boolean);
+    if (lines.length) facts.push("", heading, ...lines);
+  };
+  if (pg.agent) agentBlock(pg.agent, "## המתווך");
+  if (pg.agent2) agentBlock(pg.agent2, "## מתווך נוסף בדף");
+
+  const gallery = (pg.gallery || {}).images || [];
   const caps = gallery.map((i) => String((i && i.caption) || "").trim()).filter(Boolean);
   if (caps.length) facts.push("", "## תמונות בדף", ...caps.map((c) => `- ${c}`));
 

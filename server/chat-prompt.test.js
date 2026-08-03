@@ -78,6 +78,43 @@ assert.ok(!f.includes("undefined") && !f.includes("null"));
 assert.doesNotThrow(() => buildFacts({}, null));
 assert.doesNotThrow(() => buildFacts(null, null));
 
+// ── every field on the property reaches the sheet, including ones added later ──
+// Hand-listing fields is what hid the neighbourhood and ₪/m²; a new key must
+// surface on its own rather than waiting for someone to remember it.
+const future = buildFacts({ property: { rooms: 3, pool: true, year_built: 1998, view_type: "ים" } }, null);
+assert.ok(future.includes("pool: יש"), "unknown boolean key still appears");
+assert.ok(future.includes("year_built: 1998"), "unknown numeric key still appears");
+assert.ok(future.includes("view_type: ים"), "unknown string key still appears");
+
+// agent2 is a whole second agent on the page and was entirely missing.
+const two = buildFacts({
+  agent: { name: "מיקי" },
+  agent2: { name: "דנה", brand_name: "כהן נכסים", role: "שותפה" },
+}, null);
+assert.ok(two.includes("מתווך נוסף"));
+assert.ok(two.includes("דנה") && two.includes("שותפה"));
+
+// Phone numbers are withheld on purpose: every contact route funnels through
+// the lead form, and a bot reading out a mobile bypasses the lead entirely.
+const withPhone = buildFacts({
+  agent: { name: "מיקי", phone: "972501234567", phone2: "0509998888", logo_url: "https://x/y.png" },
+}, null);
+assert.ok(!withPhone.includes("972501234567"));
+assert.ok(!withPhone.includes("0509998888"));
+assert.ok(!withPhone.includes("y.png"), "asset URLs are not facts either");
+
+// Page copy the visitor actually reads.
+const copy = buildFacts({
+  hero: { phrase: "נוף פתוח לים" },
+  cta: { headline: "רוצים לראות?", sub: "השאירו פרטים", bullets: ["ללא עמלה", "זמין מיידית"] },
+  texts: { hero_sub: "משופצת מהיסוד", empty_one: "  " },
+}, null);
+assert.ok(copy.includes("נוף פתוח לים"));
+assert.ok(copy.includes("רוצים לראות?"));
+assert.ok(copy.includes("ללא עמלה") && copy.includes("זמין מיידית"));
+assert.ok(copy.includes("משופצת מהיסוד"), "in-page edits are what the visitor reads");
+assert.ok(!copy.includes("empty_one"), "blank overrides are not facts");
+
 // Long descriptions are capped.
 f = buildFacts({ property: {} }, { description: "x".repeat(5000) });
 assert.ok(f.length < 2200);
