@@ -115,6 +115,62 @@ assert.ok(copy.includes("ללא עמלה") && copy.includes("זמין מיידי
 assert.ok(copy.includes("משופצת מהיסוד"), "in-page edits are what the visitor reads");
 assert.ok(!copy.includes("empty_one"), "blank overrides are not facts");
 
+// Phone-shaped and link-shaped values are dropped even under a key nobody
+// thought to block — the value check is what makes the filter fail closed.
+const sneaky = buildFacts({
+  agent: { name: "מיקי", mobile: "050-123-4567", contact: "miki@example.com", site: "www.x.co.il" },
+}, null);
+assert.ok(!sneaky.includes("123-4567") && !sneaky.includes("@example.com"));
+assert.ok(!sneaky.includes("www.x.co.il"));
+// But a descriptive field we never listed still reaches the sheet.
+assert.ok(buildFacts({ agent: { name: "מיקי", years_active: 12 } }, null).includes("years_active: 12"));
+
+// ── the fact sheet must cover everything the templates actually render ──
+// This is the bug class itself, not an instance of it: three separate "the bot
+// is wrong" reports were all a value on screen that never reached the model.
+// Rather than wait for a fourth, read the templates and assert every bound path
+// survives the trip. A new data-bind in a template fails here, not in the wild.
+const fs = require("fs"), pathmod = require("path");
+const TPL_DIR = pathmod.join(__dirname, "..", "public-nadlan", "templates");
+const bound = new Set();
+for (const name of ["nocturne", "galerie", "reel"]) {
+  const html = fs.readFileSync(pathmod.join(TPL_DIR, name + ".html"), "utf8");
+  for (const m of html.matchAll(/data-(?:bind|show|list)="([^"]+)"/g)) {
+    m[1].split("||").forEach((p) => p.trim() && bound.add(p.trim()));
+  }
+}
+assert.ok(bound.size > 15, `expected to find the template bindings, got ${bound.size}`);
+
+// Lists render their items, so they carry a sentinel per item field instead.
+const LIST_ITEMS = {
+  "area.stops": { label: "SENT_stops_label", minutes: "SENT_stops_minutes" },
+  "area.stats": { label: "SENT_stats_label", value: "SENT_stats_value" },
+  "carousel.slides": { title: "SENT_slides_title", body: "SENT_slides_body" },
+};
+const probe = {};
+const expected = [];
+for (const p of bound) {
+  const parts = p.split(".");
+  let node = probe;
+  for (let i = 0; i < parts.length - 1; i++) node = node[parts[i]] || (node[parts[i]] = {});
+  const leaf = parts[parts.length - 1];
+  if (p === "property.price") {
+    node[leaf] = 1234567;              // must be a real number: money() formats it
+    expected.push("₪1,234,567");
+  } else if (LIST_ITEMS[p]) {
+    node[leaf] = [LIST_ITEMS[p]];
+    expected.push(...Object.values(LIST_ITEMS[p]));
+  } else {
+    const sentinel = "SENT_" + parts.join("_");
+    node[leaf] = sentinel;
+    expected.push(sentinel);
+  }
+}
+const covered = buildFacts(probe, null);
+const missing = expected.filter((s) => !covered.includes(s));
+assert.deepEqual(missing, [],
+  "these values are rendered on the page but never reach the bot: " + missing.join(", "));
+
 // Long descriptions are capped.
 f = buildFacts({ property: {} }, { description: "x".repeat(5000) });
 assert.ok(f.length < 2200);

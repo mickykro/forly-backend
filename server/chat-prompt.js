@@ -49,6 +49,18 @@ const PROPERTY_LABELS = {
 // Handled explicitly elsewhere in the sheet, so skip them in the generic pass.
 const PROPERTY_SPECIAL = new Set(["price", "listing_type"]);
 
+const AGENT_LABELS = {
+  name: "שם", brand_name: "משרד", tagline: "תיאור קצר",
+  role: "תפקיד", license: "רישיון תיווך", languages: "שפות",
+};
+
+// Anything on an agent record that is a way to reach them, a stored asset, or
+// an internal identifier. Matched against the KEY.
+const CONTACT_KEY = /phone|tel|mobile|whats|mail|url|link|href|photo|avatar|logo|image|token|_id$|^id$/i;
+// …and against the VALUE, so an unforeseen key can't smuggle the same data
+// through: a run of digits long enough to dial, an @-address, or a link.
+const CONTACT_VALUE = /^[+(]?[\d][\d\s()+.-]{6,}$|\S+@\S+|^https?:|^www\./i;
+
 /*
  * Render one field. Numeric 0 and empty strings are dropped — createPropertyPage
  * writes `Number(x) || 0` for anything never captured, so a stored 0 means
@@ -158,19 +170,24 @@ function buildFacts(page, listing) {
     }
   }
 
-  // Agents. Phone numbers are deliberately withheld even though the page holds
-  // them: every contact route on the landing page funnels through the lead form
-  // so Forly relays the lead (see the `data-wa` note in runtime.js). A bot that
-  // reads out a mobile number quietly bypasses that, and the agent stops
-  // getting the lead they are paying for.
+  // Agents. Enumerated like the property — but filtered, which the property is
+  // not, because the two carry opposite risks. A property field we forget to
+  // forward just makes the bot say "I don't know". An agent field we forward by
+  // accident is a phone number: every contact route on the landing page funnels
+  // through the lead form so Forly relays the lead (see the `data-wa` note in
+  // runtime.js), and a bot that reads out a mobile quietly bypasses that — the
+  // agent stops getting the lead they are paying for.
+  //
+  // So this fails closed twice over: on the key name, and on the value shape.
+  // The value check is the one that matters, because it still catches a field
+  // named something nobody predicted (`mobile`, `contact`, `line2`) as long as
+  // what is in it looks like a phone, an address, or a link.
   const agentBlock = (a, heading) => {
-    const lines = [
-      line("שם", a.name),
-      line("משרד", a.brand_name),
-      line("תיאור קצר", a.tagline),
-      line("תפקיד", a.role),
-      line("רישיון תיווך", a.license),
-    ].filter(Boolean);
+    const lines = Object.keys(a)
+      .filter((k) => !CONTACT_KEY.test(k))
+      .filter((k) => !CONTACT_VALUE.test(String(a[k] == null ? "" : a[k]).trim()))
+      .map((k) => fieldLine(k, a[k], AGENT_LABELS))
+      .filter(Boolean);
     if (lines.length) facts.push("", heading, ...lines);
   };
   if (pg.agent) agentBlock(pg.agent, "## המתווך");
