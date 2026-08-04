@@ -31,6 +31,9 @@ const DEFAULTS = {
     max_msgs_per_ip_hour: 30,
     max_msgs_per_page_day: 300,
     max_msgs_per_agent_month: 3000,
+    // After a lead is captured the bot answers this many more, then closes with
+    // a fixed line — it can't promise an agent it can't deliver.
+    max_msgs_after_handoff: 5,
   },
 };
 
@@ -87,7 +90,11 @@ function resolve(page, business, env) {
   const bl = bd.limits || {};
   const limits = {};
   for (const k of Object.keys(DEFAULTS.limits)) {
-    limits[k] = Number(firstDefined(pl[k], bl[k], DEFAULTS.limits[k]));
+    // A bad value in Firestore (string, null-ish, non-numeric) must fall back
+    // to the default rather than becoming NaN — every comparison against NaN
+    // is false, which silently disables that cap entirely.
+    const raw = Number(firstDefined(pl[k], bl[k], DEFAULTS.limits[k]));
+    limits[k] = Number.isFinite(raw) && raw > 0 ? raw : DEFAULTS.limits[k];
   }
   if (isDemoBusiness(business) && pl.max_msgs_per_agent_month == null &&
       bl.max_msgs_per_agent_month == null) {

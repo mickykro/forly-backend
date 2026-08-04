@@ -13,6 +13,7 @@ const db = require("../db");
 const pageEdit = require("../edit");
 const pageAuth = require("../page-auth");
 const chatbotConfig = require("../chatbot-config");
+const { submitLead } = require("../leads");
 const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
@@ -447,13 +448,7 @@ module.exports = function createPagesRouter(ctx) {
     db.mem.throttle.set(prospectPhone, { windowStart: count === 0 ? now : t.windowStart, count: count + 1 });
 
     try {
-      const lead = {
-        phone: prospectPhone, prospect_name: name, source: "landing_page",
-        page_id: body.page_id, listing_id: page.listing_id,
-        agent_phone: page.business_phone, status: "new", last_activity_at: new Date(),
-      };
-      await db.saveLead(prospectPhone, lead);
-      await db.incrPageCounter(body.page_id, "lead_count", 1);
+      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [] });
 
       // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
       if (!n8nLeadWebhook) {
@@ -520,7 +515,7 @@ module.exports = function createPagesRouter(ctx) {
 
   // ── events beacon ──
   const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click", "phone_reveal",
-    "chat_open", "chat_proactive", "chat_dismiss", "chat_message"]);
+    "chat_open", "chat_proactive", "chat_dismiss", "chat_message", "chat_handoff", "chat_lead"]);
   router.post("/api/property-event", express.text({ type: () => true }), async (req, res) => {
     let body = {};
     try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
@@ -541,6 +536,14 @@ module.exports = function createPagesRouter(ctx) {
             business_phone: page.business_phone || null,
           });
         }
+      } else if (event.startsWith("chat_") && db.db) {
+        // Funnel data — same day-bucket shape chat.js countMessage writes for
+        // chat_msg. Firestore only (no local counter store); one field per event.
+        const FieldValue = require("firebase-admin").firestore.FieldValue;
+        const day = new Date().toISOString().slice(0, 10);
+        await db.db.collection("property_pages").doc(pageId)
+          .collection("metrics").doc(day)
+          .set({ [event]: FieldValue.increment(1) }, { merge: true });
       }
     } catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
     res.status(204).send("");
