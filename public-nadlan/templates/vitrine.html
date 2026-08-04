@@ -43,7 +43,7 @@
   .bg{width:100%;height:100%;display:block;background:#05070B}
   /* an arbitrary listing video sits behind every panel, so text legibility can
      never assume a dark frame — this scrim guarantees the floor */
-  .bg-scrim{background:linear-gradient(180deg,rgba(6,9,14,.72),rgba(6,9,14,.55) 40%,rgba(6,9,14,.8))}
+  .bg-scrim{background:linear-gradient(180deg,rgba(6,9,14,.58),rgba(6,9,14,.38) 40%,rgba(6,9,14,.66))}
   main{position:relative;z-index:1}
   section{padding:clamp(80px,12vh,150px) 0}
 
@@ -105,6 +105,18 @@
     padding-block:clamp(96px,14vh,140px) clamp(56px,9vh,110px);overflow:hidden}
 
   /* ── 2 · why here — an opaque cream sheet interrupting the dark page ── */
+  /* Each panel carries its own room: a canvas showing that section's frame of
+     the tour, with a tint over it for legibility. Painting the room *into* the
+     panel rather than letting a translucent panel reveal the page background is
+     what keeps the stack clean — the panels stay opaque, so the sheet underneath
+     never ghosts through the one climbing over it. */
+  .panel>.room,.panel>.tint{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:0}
+  .panel>.tint{z-index:1}
+  .panel>.wrap{position:relative;z-index:2}
+  .p-cream>.tint{background:rgba(242,234,220,.88)}
+  .p-gallery>.tint{background:rgba(8,11,17,.58)}
+  .p-area>.tint{background:rgba(10,13,19,.66)}
+
   .p-cream{background:var(--cream);color:var(--ink)}
   .p-cream .kick{color:#9A7736}
   .p-cream .lede{color:var(--ink-2)}
@@ -199,7 +211,7 @@
 <main>
 
 <!-- ── 1 · hero ────────────────────────────────────────────── -->
-<section class="s-hero">
+<section class="s-hero" data-room>
   <div class="frame" data-anim>
     <div class="frame-in">
       <video data-video autoplay muted loop playsinline preload="auto"></video>
@@ -226,7 +238,9 @@
 <div class="stack">
 
   <!-- ── 2 · why here ──────────────────────────────────────── -->
-  <section class="panel p-cream" data-panel>
+  <section class="panel p-cream" data-panel data-room>
+    <canvas class="room" aria-hidden="true"></canvas>
+    <div class="tint"></div>
     <div class="wrap">
       <span class="kick" data-i18n="why_here">למה דווקא כאן</span>
       <h2 data-i18n="why_head">נכס כזה לא מגיע ללוחות.</h2>
@@ -255,7 +269,9 @@
   </section>
 
   <!-- ── 3 · gallery ───────────────────────────────────────── -->
-  <section class="panel p-gallery" id="gallery" data-panel>
+  <section class="panel p-gallery" id="gallery" data-panel data-room>
+    <canvas class="room" aria-hidden="true"></canvas>
+    <div class="tint"></div>
     <div class="wrap">
       <span class="kick" data-i18n="gallery">גלריה</span>
       <h2 data-i18n="gallery_head">כל חדר, מכל זווית.</h2>
@@ -274,7 +290,9 @@
   </section>
 
   <!-- ── 4 · area ──────────────────────────────────────────── -->
-  <section class="panel p-area" data-panel>
+  <section class="panel p-area" data-panel data-room>
+    <canvas class="room" aria-hidden="true"></canvas>
+    <div class="tint"></div>
     <div class="wrap">
       <span class="kick" data-i18n="the_area">השכונה</span>
       <h2 data-bind="property.neighborhood">הצפון הישן</h2>
@@ -285,7 +303,7 @@
 </div>
 
 <!-- ── 5 · CTA ─────────────────────────────────────────────── -->
-<section class="s-cta" id="contact">
+<section class="s-cta" id="contact" data-room>
   <img class="canopy" src="assets/vitrine/canopy.webp" alt="" aria-hidden="true">
   <div class="wrap">
     <div class="cta-panel" data-anim>
@@ -415,15 +433,17 @@
     render(true);
   }
 
-  function blit(f, alpha) {
+  // cover-fit a cached frame into any canvas — shared by the page ground and
+  // by each panel's own room canvas
+  function blitInto(c, cw, ch, f, alpha) {
     if (!f) return;
-    // cover-fit the frame into the viewport canvas
-    var s = Math.max(cv.width / f.width, cv.height / f.height);
+    var s = Math.max(cw / f.width, ch / f.height);
     var w = f.width * s, h = f.height * s;
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(f, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
-    ctx.globalAlpha = 1;
+    c.globalAlpha = alpha;
+    c.drawImage(f, (cw - w) / 2, (ch - h) / 2, w, h);
+    c.globalAlpha = 1;
   }
+  function blit(f, alpha) { blitInto(ctx, cv.width, cv.height, f, alpha); }
 
   var target = 0, cur = 0;
   function render(force) {
@@ -472,7 +492,67 @@
   addEventListener("resize", sizeCanvas, { passive: true });
   sampleFrames((DATA.hero && DATA.hero.video_url) || "");
 
+  // The five rooms, in page order — hoisted above the reduced-motion branch
+  // because painting the rooms still happens there, only their motion does not.
+  var ROOMS = Array.prototype.slice.call(document.querySelectorAll("[data-room]"));
+  var panels = Array.prototype.slice.call(document.querySelectorAll("[data-panel]"));
+
+
+  // ── each panel's own room ────────────────────────────────────────────────
+  // Panels sit on their own frame of the tour, a few frames apart, so moving
+  // from one to the next reads as stepping into a different room. The frame
+  // drifts a little while you pass through, which keeps a pinned panel from
+  // feeling like a still photograph.
+  var rooms = panels.map(function (p) {
+    var c = p.querySelector("canvas.room");
+    return c ? { el: c, ctx: c.getContext("2d"), at: -99 } : null;
+  });
+
+  function sizeRooms() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    panels.forEach(function (p, i) {
+      var r = rooms[i];
+      if (!r) return;
+      r.el.width = Math.max(1, Math.round(p.offsetWidth * dpr));
+      r.el.height = Math.max(1, Math.round(p.offsetHeight * dpr));
+      r.at = -99;                                  // force a repaint at the new size
+    });
+  }
+
+  // `all` paints every room regardless of where it sits — used once for the
+  // reduced-motion pass, where no later tick will come along to catch up.
+  function paintRooms(all) {
+    if (!ready) return;
+    var span = Math.max(1, ROOMS.length - 1);
+    var vh = window.innerHeight;
+    panels.forEach(function (p, i) {
+      var r = rooms[i];
+      if (!r) return;
+      var box = p.getBoundingClientRect();
+      if (!all && (box.bottom < -240 || box.top > vh + 240)) return;   // off-screen, skip
+      var t = Math.min(1, Math.max(0, (vh - box.top) / (vh + box.height)));
+      var base = ((i + 1) / span) * (ready - 1);
+      var f = Math.max(0, Math.min(ready - 1, base + (t - 0.5) * 2.5));
+      if (Math.abs(f - r.at) < 0.02) return;
+      r.at = f;
+      var lo = Math.floor(f), hi = Math.min(ready - 1, lo + 1), frac = f - lo;
+      r.ctx.clearRect(0, 0, r.el.width, r.el.height);
+      blitInto(r.ctx, r.el.width, r.el.height, frames[lo], 1);
+      if (frac > 0.004) blitInto(r.ctx, r.el.width, r.el.height, frames[hi], frac);
+    });
+  }
+
+  sizeRooms();
+  addEventListener("resize", sizeRooms, { passive: true });
+
   if (reduce) {
+    // Each room still gets painted once — the rooms are the design, only their
+    // movement is the motion — but nothing animates after that.
+    panels.forEach(function (p) {
+      if (p.offsetHeight > window.innerHeight + 1) p.style.position = "static";
+    });
+    sizeRooms();
+    var once = setInterval(function () { if (ready) { paintRooms(true); clearInterval(once); } }, 150);
     // Hold one frame rather than animate: the background is decoration.
     document.querySelectorAll("[data-video]").forEach(function (v) {
       v.removeAttribute("autoplay"); v.removeAttribute("loop");
@@ -490,23 +570,54 @@
   gsap.ticker.add(function (t) { lenis.raf(t * 1000); });
   gsap.ticker.lagSmoothing(0);
 
-  ScrollTrigger.create({
-    trigger: document.documentElement, start: "top top", end: "bottom bottom",
-    onUpdate: function (self) { target = self.progress; },
-  });
+  // ── rooms ────────────────────────────────────────────────────────────────
+  // A straight scroll-to-frame sweep just drifts. Instead each section owns a
+  // point in the frame sequence and *dwells* there while you read it, then the
+  // frames travel to the next section's point as you leave — so every section
+  // feels like a different room, and a pinned panel holds its room still.
+  // With more frames than sections (36 here, or 18 on touch) the gap between
+  // rooms is many frames wide, which is what makes the move between them read
+  // as walking rather than cutting. Fewer frames than that still works; the
+  // rooms simply sit closer together in the sequence.
+  var DWELL = 0.55;   // share of a section spent holding its room
+  var marks = [];
 
-  // The canvas eases toward the scroll position on its own clock, so the
-  // background keeps gliding for a beat after the wheel stops.
+  function measureRooms() {
+    var y = window.scrollY || window.pageYOffset || 0;
+    marks = ROOMS.map(function (el) {
+      return { top: el.getBoundingClientRect().top + y, h: Math.max(1, el.offsetHeight) };
+    });
+  }
+
+  function roomProgress() {
+    var last = marks.length - 1;
+    if (last < 1) return 0;
+    var y = (window.scrollY || window.pageYOffset || 0) + window.innerHeight * 0.5;
+    var i = 0;
+    for (var k = 0; k <= last; k++) if (y >= marks[k].top) i = k;
+    if (i >= last) return 1;
+    var t = Math.min(1, Math.max(0, (y - marks[i].top) / marks[i].h));
+    var travel = t <= DWELL ? 0 : (t - DWELL) / (1 - DWELL);
+    travel = travel * travel * (3 - 2 * travel);       // smoothstep the doorway
+    return (i + travel) / last;
+  }
+
+  measureRooms();
+  addEventListener("resize", measureRooms, { passive: true });
+  ScrollTrigger.addEventListener("refresh", measureRooms);
+
+  // The canvas eases toward its room on its own clock, so the background keeps
+  // settling for a beat after the wheel stops instead of snapping.
   gsap.ticker.add(function () {
+    target = roomProgress();
     var d = target - cur;
     if (Math.abs(d) < 0.00015) return;
-    cur += d * 0.09;
+    cur += d * 0.075;
     render();
   });
 
   // A panel taller than the viewport cannot usefully stick — its bottom would
   // be unreachable — so those opt out and simply scroll.
-  var panels = gsap.utils.toArray("[data-panel]");
   function stickiness() {
     panels.forEach(function (p) {
       p.style.position = p.offsetHeight > window.innerHeight + 1 ? "static" : "sticky";
@@ -515,6 +626,11 @@
   }
   stickiness();
   addEventListener("resize", stickiness, { passive: true });
+  // panel heights are settled now, so the room canvases can take their size
+  sizeRooms();
+  // wrapped, not passed directly: the ticker hands its callback a time argument,
+  // which would arrive as `all` and disable the off-screen cull every frame
+  gsap.ticker.add(function () { paintRooms(false); });
 
   gsap.utils.toArray("[data-anim]").forEach(function (el) {
     gsap.from(el, { opacity: 0, y: 34, duration: .95, ease: "power3.out",
