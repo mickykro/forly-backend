@@ -172,6 +172,20 @@
   .p-gallery .wrap,.p-area .wrap{text-shadow:0 1px 14px rgba(4,6,10,.75),0 0 3px rgba(4,6,10,.45)}
   .p-gallery .thumb,.p-gallery .window,.p-gallery .win-nav button{text-shadow:none}
 
+  /* A phone can be handed a layout viewport far wider than the device — an
+     embedded preview, or any context where the viewport meta never applied — and
+     then every max-width query above silently misses and the cards sit two-up on
+     a phone. Pointer type and screen size describe the device itself rather than
+     the box the page was given, so they decide the phone layout instead. */
+  html[data-phone] .frame{width:calc(100% - 2*var(--pad))}
+  html[data-phone] .frame-in{height:auto}
+  html[data-phone] .frame-media{position:relative;height:50svh}
+  html[data-phone] .plate{position:static;background:rgba(5,7,11,.92)}
+  html[data-phone] .plate h1{font-size:1.5rem}
+  html[data-phone] .why-grid{grid-template-columns:1fr}
+  html[data-phone] .cta-panel{grid-template-columns:1fr}
+  html[data-phone] .window{height:clamp(320px,50svh,520px)}
+
   /* ── 5 · CTA ── */
   .s-cta{position:relative;overflow:hidden;padding-block:clamp(96px,14vh,170px)}
   .canopy{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
@@ -204,6 +218,18 @@
 </style>
 </head>
 <body>
+
+<script>
+(function () {
+  // Runs before anything renders: screen size and pointer type describe the
+  // device, unlike innerWidth, which describes whatever box the page was given.
+  var s = window.screen || {};
+  var min = Math.min(s.width || window.innerWidth, s.height || window.innerHeight);
+  if (matchMedia("(pointer:coarse)").matches && min <= 540) {
+    document.documentElement.setAttribute("data-phone", "");
+  }
+})();
+</script>
 
 <canvas class="bg" id="bgCanvas" aria-hidden="true"></canvas>
 
