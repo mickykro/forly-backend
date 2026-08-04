@@ -41,11 +41,11 @@
      scrolling back rewinds it. Frames are captured once from a throwaway
      <video> and cached, so only the hero's video ever decodes live and a scrub
      costs two blits rather than a seek. ── */
-  .bg,.bg-scrim{position:fixed;inset:0;z-index:0;pointer-events:none}
-  .bg{width:100%;height:100%;display:block;background:#05070B}
-  /* an arbitrary listing video plays behind every panel, so text legibility can
-     never assume a dark frame — this scrim guarantees the floor */
-  .bg-scrim{background:linear-gradient(180deg,rgba(6,9,14,.6),rgba(6,9,14,.42) 40%,rgba(6,9,14,.68))}
+  /* No scrim over the canvas. A fixed full-screen wash is the one thing that
+     cannot move, so it flattened the tour into a static gradient no matter how
+     fast the frames advanced. Each panel carries its own tint instead, which
+     scrolls with the panel and still guarantees the contrast floor. */
+  .bg{position:fixed;inset:0;z-index:0;pointer-events:none;width:100%;height:100%;display:block;background:#05070B}
   main{position:relative;z-index:1}
   section{padding:clamp(80px,12vh,150px) 0}
 
@@ -120,7 +120,7 @@
     padding-block:clamp(96px,14vh,140px) clamp(56px,9vh,110px)}
 
   /* ── 2 · why here — a cream sheet with the tour moving behind it ── */
-  .p-cream{background:rgba(242,234,220,.86);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);color:var(--ink)}
+  .p-cream{background:rgba(242,234,220,.84);color:var(--ink)}
   .p-cream .kick{color:#9A7736}
   .p-cream .lede{color:var(--ink-2)}
   .why-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:40px}
@@ -138,7 +138,7 @@
   .art-pool{display:none}
 
   /* ── 3 · gallery: a window that is not fully raised ── */
-  .p-gallery{background:rgba(8,11,17,.52);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);border-top:1px solid var(--line)}
+  .p-gallery{background:rgba(8,11,17,.5);border-top:1px solid var(--line)}
   .rail{display:flex;gap:10px;overflow-x:auto;padding-bottom:10px;margin-top:28px;scrollbar-width:thin}
   .thumb{flex:0 0 auto;width:clamp(74px,9vw,116px);aspect-ratio:4/3;border-radius:6px;overflow:hidden;position:relative;padding:0;cursor:pointer;background:var(--panel-2);border:1px solid var(--glass-line);opacity:.5;transition:opacity .3s,border-color .3s}
   .thumb.on{opacity:1;border-color:var(--champ)}
@@ -163,8 +163,14 @@
   .win-nav button:hover{border-color:var(--champ);color:var(--champ-lite)}
 
   /* ── 4 · area: text outranks the picture here, so the scrim is heavier ── */
-  .p-area{background:rgba(10,13,19,.68);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);border-top:1px solid var(--line)}
+  .p-area{background:rgba(10,13,19,.62);border-top:1px solid var(--line)}
   .p-area .lede{max-width:66ch}
+
+  /* The tint is the contrast floor, but a listing tour can be a white kitchen in
+     daylight. A shadow guards the ivory text over a bright frame without making
+     the tint heavier — heavier tint would cost the very motion we just bought. */
+  .p-gallery .wrap,.p-area .wrap{text-shadow:0 1px 14px rgba(4,6,10,.75),0 0 3px rgba(4,6,10,.45)}
+  .p-gallery .thumb,.p-gallery .window,.p-gallery .win-nav button{text-shadow:none}
 
   /* ── 5 · CTA ── */
   .s-cta{position:relative;overflow:hidden;padding-block:clamp(96px,14vh,170px)}
@@ -200,7 +206,6 @@
 <body>
 
 <canvas class="bg" id="bgCanvas" aria-hidden="true"></canvas>
-<div class="bg-scrim"></div>
 
 <header class="topbar" id="topbar">
   <a class="brand" href="#" data-logo><span data-bind="agent.brand_name">רוזנברג</span><small data-bind="agent.tagline" data-show="agent.tagline"></small></a>
