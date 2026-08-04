@@ -89,6 +89,22 @@
 .flychat-cta a { display: inline-block; background: #17140f; color: #fff; text-decoration: none;
   font-size: .84rem; font-weight: 500; padding: 8px 16px; border-radius: 100px; }
 
+/* inline name+phone capture form */
+.flychat-lead { background: rgba(23, 20, 15, .04); border-radius: 14px; padding: 12px;
+  margin: 2px 0; font-size: .86rem; color: #17140f; }
+.flychat-lead-intro { margin-bottom: 9px; line-height: 1.35; }
+.flychat-lead-f { display: flex; flex-wrap: wrap; gap: 7px; }
+.flychat-lead-f input { flex: 1 1 44%; min-width: 0; font-family: inherit; font-size: .86rem;
+  color: #17140f; background: #fff; border: 1px solid rgba(23, 20, 15, .12);
+  border-radius: 10px; padding: 9px 12px; outline: none; }
+.flychat-lead-f input:focus { border-color: rgba(23, 20, 15, .3); }
+.flychat-lead-f button { flex: 1 1 100%; background: #17140f; color: #fff; border: 0;
+  border-radius: 10px; padding: 10px; font-size: .88rem; font-weight: 500; cursor: pointer; }
+.flychat-lead-f button:disabled { opacity: .4; cursor: default; }
+
+/* composer greyed out once the conversation is closed */
+.flychat-f-off { opacity: .5; }
+
 .flychat-f { border-top: 1px solid rgba(23, 20, 15, .08); padding: 10px; display: flex; gap: 8px; }
 .flychat-f input {
   flex: 1; min-width: 0; font-family: inherit; font-size: .88rem; color: #17140f;

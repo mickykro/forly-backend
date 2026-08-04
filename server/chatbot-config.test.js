@@ -86,4 +86,27 @@ assert.deepEqual(adminState(page(false), ON, {}), { page: false, effective: fals
 assert.deepEqual(adminState(page(true), OFF, {}), { page: true, effective: true, reason: "page_on" });
 assert.equal(adminState({ chatbot: {} }, ON, {}).page, null);
 
+// ── the post-handoff tail limit cascades page → business → default ──
+assert.equal(r(page(), ON).limits.max_msgs_after_handoff, DEFAULTS.limits.max_msgs_after_handoff);
+assert.equal(
+  r({ chatbot: { limits: { max_msgs_after_handoff: 2 } } }, ON).limits.max_msgs_after_handoff, 2);
+assert.equal(
+  r(page(), { features: { chatbot: true }, chatbot_defaults: { limits: { max_msgs_after_handoff: 8 } } })
+    .limits.max_msgs_after_handoff, 8);
+
+// ── a bad override value falls back to the default instead of becoming NaN ──
+assert.equal(
+  r({ chatbot: { limits: { max_msgs_per_convo: "not-a-number" } } }, ON).limits.max_msgs_per_convo,
+  DEFAULTS.limits.max_msgs_per_convo, "garbage override must not disable the cap"
+);
+assert.equal(
+  r({ chatbot: { limits: { max_msgs_per_convo: -5 } } }, ON).limits.max_msgs_per_convo,
+  DEFAULTS.limits.max_msgs_per_convo, "non-positive override falls back too"
+);
+
+// ── public leaks neither model nor limits ──
+const pubOut = r(page(), ON).public;
+assert.equal(pubOut.model, undefined, "public must not carry the model");
+assert.equal(pubOut.limits, undefined, "public must not carry the limits");
+
 console.log("chatbot-config: all tests passed");

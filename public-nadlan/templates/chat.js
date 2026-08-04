@@ -31,6 +31,9 @@
       ph: "כתבו שאלה…", send: "שליחה", close: "סגירה",
       cta: "השאירו פרטים", err: "משהו השתבש. נסו שוב.",
       note: "העוזר החכם של Forly — עונה מהמידע שבדף",
+      lead_intro: "אשמח שהמתווך יחזור אליכם עם התשובה. השאירו שם וטלפון:",
+      lead_name: "שם", lead_phone: "טלפון", lead_send: "שליחה",
+      lead_sent: "תודה! העברתי את הפרטים למתווך 🙌",
     },
     en: {
       title: "Questions?", sub: "I reply instantly",
@@ -39,6 +42,9 @@
       ph: "Ask a question…", send: "Send", close: "Close",
       cta: "Leave your details", err: "Something went wrong. Please try again.",
       note: "Forly assistant — answers from this page",
+      lead_intro: "I'll have the agent get back to you with the answer. Leave your name and phone:",
+      lead_name: "Name", lead_phone: "Phone", lead_send: "Send",
+      lead_sent: "Thanks! I've passed your details to the agent 🙌",
     },
   };
 
@@ -175,15 +181,64 @@
       log.scrollTop = log.scrollHeight;
       return m;
     }
-    function pushCta() {
-      var w = el("div", "flychat-cta");
-      var a = document.createElement("a");
-      a.href = "#contact";
-      a.textContent = t("cta");
-      a.addEventListener("click", function () { setOpen(false); });
-      w.appendChild(a);
+    // Mini name+phone form, inline in the log, shown ONCE per conversation.
+    // On submit it WhatsApps the agent (server side) and collapses to a thanks.
+    var handoffShown = false;
+    function pushLeadForm() {
+      if (handoffShown) return;                // never stack two forms
+      handoffShown = true;
+      var w = el("div", "flychat-lead");
+      var intro = el("div", "flychat-lead-intro");
+      intro.textContent = t("lead_intro");
+      var f = document.createElement("form");
+      f.className = "flychat-lead-f";
+      var nm = document.createElement("input");
+      nm.type = "text"; nm.placeholder = t("lead_name"); nm.setAttribute("aria-label", t("lead_name"));
+      nm.maxLength = 60; nm.required = true;
+      var ph = document.createElement("input");
+      ph.type = "tel"; ph.placeholder = t("lead_phone"); ph.setAttribute("aria-label", t("lead_phone"));
+      ph.maxLength = 20; ph.required = true;
+      var sub = document.createElement("button");
+      sub.type = "submit"; sub.textContent = t("lead_send");
+      f.appendChild(nm); f.appendChild(ph); f.appendChild(sub);
+      w.appendChild(intro); w.appendChild(f);
       log.appendChild(w);
       log.scrollTop = log.scrollHeight;
+      beacon("chat_handoff");
+
+      f.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var name = nm.value.trim(), phone = ph.value.trim();
+        if (name.length < 2 || phone.length < 9) return;
+        sub.disabled = true; nm.disabled = true; ph.disabled = true;
+        fetch("/api/chat/handoff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ page_id: pageId, conversation_id: cid, name: name, phone: phone }),
+        }).then(function (r) { return r.json().catch(function () { return {}; }); })
+          .then(function (d) {
+            if (d && d.ok) {
+              w.textContent = t("lead_sent");   // collapse to confirmation
+              beacon("chat_lead");
+            } else {
+              sub.disabled = false; nm.disabled = false; ph.disabled = false;
+              push("err", t("err"));
+            }
+          }).catch(function () {
+            sub.disabled = false; nm.disabled = false; ph.disabled = false;
+            push("err", t("err"));
+          });
+      });
+    }
+
+    // Conversation capped/closed: show the line, kill the composer.
+    var closed = false;
+    function closeChat(text) {
+      closed = true;
+      if (text) push("bot", text);
+      input.disabled = true;
+      form.querySelector("button").disabled = true;
+      form.classList.add("flychat-f-off");
     }
 
     form.addEventListener("submit", function (e) {
@@ -213,17 +268,20 @@
           cid = d.conversation_id;
           try { sessionStorage.setItem(SS_KEY + pageId, cid); } catch (e) {}
         }
-        push("bot", d.reply);
         beacon("chat_message");
+        // Capped/closed conversation: render the line and disable the composer,
+        // rather than letting the visitor type into a dead conversation.
+        if (d.state === "closed") { closeChat(d.reply); return; }
+        push("bot", d.reply);
         // The bot has hit something it has no data for — the warm-lead moment.
-        // Phase 3 captures name and phone here and WhatsApps the agent; for now
-        // it hands the visitor to the form that already exists.
-        if (d.state === "handoff") pushCta();
+        // Offer the name+phone form (once); on submit the agent is WhatsApped.
+        if (d.state === "handoff") pushLeadForm();
       }).catch(function () {
         dots.remove();
         push("err", t("err"));
       }).finally(function () {
         busy = false;
+        if (closed) return;                    // don't revive a dead composer
         form.querySelector("button").disabled = false;
         input.focus();
       });

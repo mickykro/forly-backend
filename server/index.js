@@ -133,6 +133,9 @@ app.use(createChatRouter({
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   },
   ipSalt: process.env.CHATBOT_IP_SALT || AUTH_SECRET,
+  // Chat leads WhatsApp the agent directly (the form path relays via n8n).
+  greenInstance: GREENAPI_INSTANCE,
+  greenToken: GREENAPI_TOKEN,
 }));
 
 // ── pages routes (builder, serving, leads) ──

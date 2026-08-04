@@ -18,6 +18,8 @@ const chatbotConfig = require("../chatbot-config");
 const businessCache = require("../business-cache");
 const prompt = require("../chat-prompt");
 const chatProvider = require("../chat-provider");
+const { submitLead } = require("../leads");
+const { normalizePhone, sendWhatsApp } = require("../utils");
 
 const MAX_TURNS_KEPT = 60;     // stored history cap (phase 3 sends this to the agent)
 const MAX_TURNS_SENT = 20;     // how much of it is replayed to the model
@@ -26,7 +28,7 @@ const nowDay = () => new Date().toISOString().slice(0, 10);
 const nowMonth = () => new Date().toISOString().slice(0, 7);
 
 module.exports = function createChatRouter(ctx) {
-  const { apiKeys, ipSalt } = ctx;
+  const { apiKeys, ipSalt, greenInstance, greenToken } = ctx;
   const router = express.Router();
 
   const hashIp = (ip) =>
@@ -65,6 +67,8 @@ module.exports = function createChatRouter(ctx) {
     } catch { return 0; }
   }
 
+  // Fails CLOSED, unlike pageDayCount: a Firestore outage must not silently
+  // remove the one cap that bounds total spend across a whole agent's traffic.
   async function agentMonthCount(phone) {
     const store = db.db;
     if (!store || !phone) return 0;
@@ -73,10 +77,16 @@ module.exports = function createChatRouter(ctx) {
         .collection("quota").doc("current").get();
       if (!d.exists || d.get("chat_msgs_month_key") !== nowMonth()) return 0;
       return d.get("chat_msgs_month") || 0;
-    } catch { return 0; }
+    } catch (err) {
+      console.warn("agentMonthCount failed (denying):", err.message);
+      return Infinity;
+    }
   }
 
-  async function countMessage(pageId, phone) {
+  // tokens: {in,out} from the provider envelope. Monthly caps count messages,
+  // not tokens, so a long conversation on a data-rich page can cost many times
+  // a short one without tripping any limit — this at least makes it visible.
+  async function countMessage(pageId, phone, tokens) {
     const store = db.db;
     if (!store) return;
     const FieldValue = require("firebase-admin").firestore.FieldValue;
@@ -92,6 +102,8 @@ module.exports = function createChatRouter(ctx) {
         tx.set(q, {
           chat_msgs_month_key: nowMonth(),
           chat_msgs_month: fresh ? 1 : (d.get("chat_msgs_month") || 0) + 1,
+          chat_tokens_in: fresh ? (tokens && tokens.in) || 0 : (d.get("chat_tokens_in") || 0) + ((tokens && tokens.in) || 0),
+          chat_tokens_out: fresh ? (tokens && tokens.out) || 0 : (d.get("chat_tokens_out") || 0) + ((tokens && tokens.out) || 0),
         }, { merge: true });
       }));
     }
@@ -123,12 +135,12 @@ module.exports = function createChatRouter(ctx) {
   // The vendor follows the model id (see chat-provider.js), so a page set to
   // "gemini-2.5-flash" goes to Google and one set to "claude-sonnet-5" goes to
   // Anthropic — without this route knowing which is which.
-  // Returns the assistant TEXT, not the provider envelope — parseModelReply
-  // takes a string, and handing it {text,in,out} stringifies to
-  // "[object Object]", which parses as nothing and silently disables the
+  // Returns the full provider envelope {text,in,out} — callers must pull
+  // .text before handing it to parseModelReply, which takes a string; handing
+  // it the object stringifies to "[object Object]" and silently disables the
   // handoff on every message.
   const askModel = async (system, history, model) =>
-    (await chatProvider.ask(model, system, history, apiKeys)).text;
+    chatProvider.ask(model, system, history, apiKeys);
 
   router.post("/api/chat", async (req, res) => {
     const body = req.body || {};
@@ -179,11 +191,24 @@ module.exports = function createChatRouter(ctx) {
         mode: "immediate", variant: "immediate",
         started_at: new Date(), history: [], message_count: 0,
         handoff: { triggered: false, at: null, question: null },
-        lead: { captured: false }, ip_hash: ipHash, status: "open",
+        unanswered: [], lead: { captured: false }, post_handoff_count: 0,
+        ip_hash: ipHash, status: "open",
       };
     }
+    // Defend every read on a possibly-truncated doc — one missing field must not
+    // 500 the whole handler.
+    convo.handoff = convo.handoff || { triggered: false, at: null, question: null };
+    convo.lead = convo.lead || { captured: false };
     if (convo.message_count >= lim.max_msgs_per_convo) {
       return res.json({ conversation_id: cid, state: "closed", reply: capReply(page) });
+    }
+
+    // ── the tail after a lead is captured: answer a few more, then close ──
+    // Fixed line, no model call — it costs nothing and can't hallucinate a
+    // promise. Anchored to lead capture: if no lead, no agent is coming.
+    const postCount = convo.post_handoff_count || 0;
+    if (convo.lead.captured && postCount >= lim.max_msgs_after_handoff) {
+      return res.json({ conversation_id: cid, state: "closed", reply: closingReply(page) });
     }
 
     const history = (convo.history || []).map((t) => ({
@@ -202,8 +227,11 @@ module.exports = function createChatRouter(ctx) {
     });
 
     let parsed = null;
+    let tokens = { in: 0, out: 0 };
     try {
-      parsed = prompt.parseModelReply(await askModel(system, history, cfg.model));
+      const envelope = await askModel(system, history, cfg.model);
+      tokens = { in: envelope.in || 0, out: envelope.out || 0 };
+      parsed = prompt.parseModelReply(envelope.text);
     } catch (err) {
       console.error("chat: model call failed:", err.message);
       return res.status(502).json({ error: "model_unavailable" });
@@ -221,13 +249,22 @@ module.exports = function createChatRouter(ctx) {
       .slice(-MAX_TURNS_KEPT);
     convo.message_count = (convo.message_count || 0) + 1;
     convo.last_at = at;
-    if (!answered && parsed && !convo.handoff.triggered) {
-      convo.handoff = { triggered: true, at, question: parsed.unanswered_question || message };
-      convo.status = "handoff_pending";
+    if (convo.lead.captured) convo.post_handoff_count = postCount + 1;
+    if (!answered && parsed) {
+      // Every unanswered question, not just the first — the handoff message lists
+      // them all. Capped so a hostile visitor can't grow the doc unbounded.
+      convo.unanswered = (convo.unanswered || [])
+        .concat([parsed.unanswered_question || message]).slice(-10);
+      if (!convo.handoff.triggered) {
+        // "triggered" now means the form has been offered; lead.captured means
+        // the agent has actually been told.
+        convo.handoff = { triggered: true, at, question: parsed.unanswered_question || message };
+        convo.status = "handoff_pending";
+      }
     }
 
     await saveConversation(pageId, cid, convo);
-    await countMessage(pageId, page.business_phone);
+    await countMessage(pageId, page.business_phone, tokens);
 
     res.json({
       conversation_id: cid,
@@ -238,8 +275,79 @@ module.exports = function createChatRouter(ctx) {
     });
   });
 
+  // ── POST /api/chat/handoff — the warm lead: name + phone → agent WhatsApp ──
+  //   { page_id, conversation_id, name, phone } → { ok: true }
+  router.post("/api/chat/handoff", async (req, res) => {
+    const body = req.body || {};
+    const pageId = String(body.page_id || "");
+    const cid = String(body.conversation_id || "").slice(0, 64);
+    const name = String(body.name || "").trim().slice(0, 60);
+    const prospectPhone = normalizePhone(body.phone || "");
+    if (!pageId || !cid) return res.status(400).json({ error: "invalid_input" });
+    if (name.length < 2) return res.status(400).json({ error: "invalid_name" });
+    if (!prospectPhone) return res.status(400).json({ error: "invalid_phone" });
+
+    const page = await db.getPage(pageId).catch(() => null);
+    if (!page) return res.status(404).json({ error: "not_found" });
+    if (page.status !== "active" && page.status !== "expiring") {
+      return res.status(410).json({ error: "page_inactive" });
+    }
+
+    // Never trust the client's gate — re-resolve server-side.
+    const biz = await businessCache.get(page.business_phone);
+    const cfg = chatbotConfig.resolve(page, biz, process.env);
+    if (!cfg.enabled) return res.status(403).json({ error: "chatbot_disabled" });
+
+    const convo = await loadConversation(pageId, cid);
+    if (!convo || convo.page_id !== pageId) return res.status(404).json({ error: "not_found" });
+    // Idempotent: a double-tap must not fire two WhatsApps.
+    if (convo.lead && convo.lead.captured) return res.json({ ok: true });
+
+    // Per-IP throttle (same store as /api/chat). The per-convo lead.captured
+    // guard already stops repeat submits on one conversation.
+    const ipHash = hashIp(req.headers["x-forwarded-for"] || req.socket.remoteAddress);
+    if (!(await ipAllowed(ipHash, cfg.limits.max_msgs_per_ip_hour))) {
+      return res.status(429).json({ error: "rate_limited" });
+    }
+
+    const questions = (convo.unanswered || []).filter(Boolean);
+
+    // Lead saved BEFORE the send — a Green API outage must never lose it.
+    try {
+      await submitLead({ page, name, phone: prospectPhone, source: "chat", questions });
+    } catch (err) {
+      console.error("chat submitLead failed:", err.message);
+      return res.status(500).json({ error: "internal" });
+    }
+
+    const title = (page.property && page.property.title) || "";
+    const msg =
+      `🔔 ליד חדש מדף הנכס "${title}"\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
+      (questions.length ? "❓ שאלות שלא נענו:\n" + questions.map((q) => `• ${q}`).join("\n") + "\n" : "") +
+      `דברו איתו עכשיו: https://wa.me/${prospectPhone}`;
+    sendWhatsApp(page.business_phone, msg, greenInstance, greenToken)
+      .catch((e) => console.error("chat lead notify failed:", e.message));
+
+    const at = new Date();
+    convo.lead = { captured: true, at, name, phone: prospectPhone };
+    convo.status = "lead_captured";
+    convo.post_handoff_count = 0;
+    await saveConversation(pageId, cid, convo);
+
+    res.json({ ok: true });
+  });
+
   return router;
 };
+
+// The closing line after the post-lead tail runs out. Never promises anything
+// the facts don't support — just that the details were passed on.
+function closingReply(page) {
+  const agent = (page.agent && (page.agent.name || page.agent.brand_name)) || "המתווך";
+  return (page.language || "he") === "he" ?
+    `שמחתי לעזור! העברתי את הפרטים ל${agent} והוא יחזור אליכם עם התשובות.` :
+    `Glad I could help! I've passed your details to ${agent}, who'll get back to you.`;
+}
 
 // Hebrew-first, but a page in another language should not get a Hebrew wall.
 function capReply(page) {
