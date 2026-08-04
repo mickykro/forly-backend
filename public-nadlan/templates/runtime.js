@@ -1,7 +1,8 @@
 /* Forly Nadlan — shared template runtime.
-   Renders any of the data-driven landing templates (nocturne/galerie/reel) from
-   a single page payload. In production the server injects window.__PAGE__ with
-   the real listing; for previews the template ships a window.__DEMO__ fallback.
+   Renders any of the data-driven landing templates (nocturne/galerie/reel/
+   atelier/revue) from a single page payload. In production the server injects
+   window.__PAGE__ with the real listing; for previews the template ships a
+   window.__DEMO__ fallback.
 
    Binding contract (attributes the templates use):
      data-bind="a.b.c"        → element.textContent = value at that path
@@ -17,10 +18,15 @@
      data-ppm                 → price-per-sqm line (sale listings with price+sqm)
      data-list="area.stops"   → clone the child <template> per array item,
                                 filling [data-field="k"] from item[k]
-     data-gallery data-gallery-class="g"  → build N tiles from the video's frames
+     data-gallery data-gallery-class="g"  → build N tiles from the listing photos
+       data-gallery-captions  → also print each tile's caption into <span class="g-cap">
+     data-photo="k"           → <img>.src = gallery.images[k] — a single editorial
+                                photo slot, outside the gallery grid
      data-lead-form           → submit posts /api/property-lead
        [data-lead="name|phone|message"], [data-lead-sent]
      data-count               → animate the number up when scrolled into view
+       data-count-bind="a.b"  → take that number from the payload instead of the
+                                attribute; drops [data-count-item] when it's empty
    Interactions: scroll-reveal (.reveal), lightbox, view/CTA beacons. */
 (function () {
   "use strict";
@@ -77,6 +83,17 @@
   each("[data-price-label]", document, function (el) { el.textContent = isRent ? T("monthly_rent") : T("asking_price"); });
   each("[data-show]", document, function (el) { if (!get(el.getAttribute("data-show"))) el.remove(); });
 
+  // ── count-up targets taken from the payload rather than a hard-coded
+  //    attribute. Runs before the observer below so the element is already
+  //    carrying data-count by the time it is registered. A listing with no
+  //    value for the field drops its whole stat ([data-count-item]) instead of
+  //    animating up to a meaningless zero.
+  each("[data-count-bind]", document, function (el) {
+    var v = +get(el.getAttribute("data-count-bind"));
+    if (v > 0) el.setAttribute("data-count", v);
+    else (el.closest("[data-count-item]") || el).remove();
+  });
+
   // ── document title / meta ──
   var title = get("property.title"), brand = get("agent.brand_name") || get("agent.name");
   if (title) document.title = title + (brand ? " · " + brand : "");
@@ -87,6 +104,55 @@
     if (poster) v.poster = poster;
     if (vsrc) { v.src = vsrc; v.load(); var p = v.play && v.play(); if (p && p.catch) p.catch(function () {}); }
   });
+
+  // ── editorial photo slots — the single, full-bleed images the magazine-style
+  //    templates hang their layout on, outside the gallery grid. data-photo="k"
+  //    takes gallery.images[k] (wrapping round when the listing has fewer
+  //    photos than the template has slots). The demo preview ships captions but
+  //    no URLs, so it falls back to frames sampled from the tour video — a
+  //    template never renders with a hole where a photo should be.
+  (function photoSlots() {
+    var slots = [], images = get("gallery.images"), caps = get("gallery.captions") || [];
+    var have = Array.isArray(images) ? images.length : 0;
+    each("img[data-photo]", document, function (img) {
+      var k = Math.max(0, +img.getAttribute("data-photo") || 0);
+      var pic = have ? images[k % have] : null;
+      if (pic && pic.url) {
+        img.src = pic.url;
+        img.alt = img.alt || pic.caption || caps[k % have] || "";
+      } else {
+        slots.push({ img: img, k: k });
+      }
+    });
+    if (!slots.length) return;
+    if (!vsrc) {
+      // nothing to sample from either — drop the empty slots so the layout
+      // falls back to each container's own backdrop instead of holding a
+      // sourceless <img>.
+      slots.forEach(function (s) { s.img.remove(); });
+      return;
+    }
+    var vv = document.createElement("video");
+    vv.src = vsrc; vv.muted = true; vv.playsInline = true; vv.preload = "auto"; vv.crossOrigin = "anonymous";
+    vv.addEventListener("loadedmetadata", function () {
+      var i = 0;
+      function seek() {
+        if (i >= slots.length) return;
+        vv.currentTime = Math.max(0.1, (0.08 + 0.78 * ((slots[i].k % 6) / 5)) * vv.duration);
+      }
+      vv.addEventListener("seeked", function () {
+        try {
+          var c = document.createElement("canvas");
+          c.width = vv.videoWidth; c.height = vv.videoHeight;
+          c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height);
+          slots[i].img.src = c.toDataURL("image/jpeg", 0.85);
+        } catch (e) {} // tainted canvas (cross-origin video) — leave the slot to its CSS backdrop
+        i++; seek();
+      });
+      seek();
+    });
+    vv.load();
+  })();
 
   // ── contact links: everything funnels into the lead form (#contact). Forly
   //    relays the lead to the agent from its own WhatsApp number — the page
@@ -174,11 +240,18 @@
     var count = useImages ?
       Math.min(images.length, 12) :
       +(host.getAttribute("data-gallery-count") || 6);
+    var wantCaps = host.hasAttribute("data-gallery-captions");
+    function capOf(k) { return (useImages && images[k] && images[k].caption) || caps[k] || ""; }
     var frames = [], srcs = [], tiles = [], i;
     for (i = 0; i < count; i++) {
       var b = document.createElement("button");
       b.className = cls; b.type = "button";
       b.innerHTML = '<span class="g-no">' + (i < 9 ? "0" : "") + (i + 1) + "</span>";
+      if (wantCaps && capOf(i)) {
+        var cp = document.createElement("span");
+        cp.className = "g-cap"; cp.textContent = capOf(i);
+        b.appendChild(cp);
+      }
       (function (idx) { b.addEventListener("click", function () { openLB(idx); }); })(i);
       host.appendChild(b); tiles.push(b);
     }
