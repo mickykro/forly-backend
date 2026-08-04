@@ -219,6 +219,9 @@ module.exports = function createIntakeRouter(ctx) {
         onboarding_state: "demo_partial",
         onboarding_pct: 30,
         source: "demo",
+        // Demos get the chat bot on by default — it's the feature worth
+        // showing off, and cost is bounded by DEMO_MONTHLY_CAP (chatbot-config.js).
+        features: { chatbot: true },
         created_at: now, updated_at: now,
       });
     }

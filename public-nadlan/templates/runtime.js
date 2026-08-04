@@ -294,4 +294,20 @@
       beacon("cta_click");
     });
   });
+
+  // ── chat bot: premium, resolved server-side (see server/chatbot-config.js).
+  //    Assets load only when it is on, so other pages pay nothing. Never in a
+  //    template preview — those iframe /tpl/*.html with no window.__PAGE__. ──
+  (function loadChat() {
+    if (IS_PREVIEW || !PAGE_ID) return;
+    if (!DATA.chatbot || !DATA.chatbot.enabled) return;
+    var css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "/tpl/chat.css";
+    document.head.appendChild(css);
+    var s = document.createElement("script");
+    s.src = "/tpl/chat.js";
+    s.onload = function () { if (window.FlyChat) window.FlyChat.init(DATA); };
+    document.body.appendChild(s);
+  })();
 })();

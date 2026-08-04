@@ -1,0 +1,134 @@
+/* Forly Nadlan — landing-page chat bot.
+   Loaded only on pages where the bot is enabled (see chat.js), so no page pays
+   for it otherwise. Self-contained: it must look right dropped into any of the
+   templates or the legacy SPA, none of which share a design system beyond a
+   couple of custom properties.
+
+   Corner: bottom-inline-START. The reel template already parks a round sound
+   button at bottom / inset-inline-end, and the bubble would sit on top of it
+   for the whole hero.
+   z-index 90: above the SPA sticky bar (60) and nocturne's fixed topbar (40),
+   below the shared lightbox (100). */
+
+.flychat-b,
+.flychat-p { position: fixed; inset-inline-start: 18px; z-index: 90; }
+
+/* ── bubble ── */
+.flychat-b {
+  bottom: 18px; width: 58px; height: 58px; border-radius: 50%; border: 0; padding: 0;
+  cursor: pointer; overflow: hidden; background: #17140f; color: #fff;
+  font-family: inherit; font-size: 1.05rem; font-weight: 600; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
+  transition: transform .18s ease, opacity .18s ease;
+}
+.flychat-b:hover { transform: scale(1.06); }
+.flychat-b img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.flychat-b.hidden,
+.flychat-p.hidden { opacity: 0; pointer-events: none; transform: translateY(8px); }
+
+/* Unread/attention dot for the proactive opener. */
+.flychat-b::after {
+  content: ""; position: absolute; top: 4px; inset-inline-end: 4px;
+  width: 12px; height: 12px; border-radius: 50%; background: #e5484d;
+  border: 2px solid #fff; opacity: 0; transition: opacity .2s;
+}
+.flychat-b.ping::after { opacity: 1; }
+
+/* ── teaser (the proactive hook line) ── */
+.flychat-t {
+  position: fixed; inset-inline-start: 86px; bottom: 30px; z-index: 90;
+  max-width: min(260px, calc(100vw - 110px));
+  background: #fffdf9; color: #17140f; border: 1px solid rgba(23, 20, 15, .12);
+  border-radius: 16px; padding: 11px 14px; font-size: .88rem; line-height: 1.45;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .16); cursor: pointer;
+  transition: opacity .22s ease, transform .22s ease;
+}
+.flychat-t.hidden { opacity: 0; pointer-events: none; transform: translateY(6px); }
+.flychat-t b { position: absolute; top: 2px; inset-inline-end: 7px; font-size: .95rem;
+  color: rgba(23, 20, 15, .35); font-weight: 400; }
+
+/* ── panel ── */
+.flychat-p {
+  bottom: 18px; width: min(370px, calc(100vw - 32px)); height: min(560px, calc(100vh - 110px));
+  background: #fffdf9; border: 1px solid rgba(23, 20, 15, .1); border-radius: 20px;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .24);
+  transition: opacity .2s ease, transform .2s ease;
+}
+.flychat-h {
+  display: flex; align-items: center; gap: 10px; padding: 13px 15px;
+  border-bottom: 1px solid rgba(23, 20, 15, .08); background: #17140f; color: #fff;
+}
+.flychat-h .av { width: 34px; height: 34px; border-radius: 50%; overflow: hidden; flex: 0 0 auto;
+  background: rgba(255, 255, 255, .14); display: flex; align-items: center; justify-content: center;
+  font-size: .8rem; font-weight: 600; }
+.flychat-h .av img { width: 100%; height: 100%; object-fit: cover; }
+.flychat-h .nm { font-weight: 600; font-size: .92rem; line-height: 1.2; }
+.flychat-h .sb { font-size: .72rem; opacity: .68; font-weight: 300; }
+.flychat-h .x { margin-inline-start: auto; background: none; border: 0; color: #fff; opacity: .7;
+  font-size: 1.15rem; cursor: pointer; padding: 4px 6px; line-height: 1; }
+.flychat-h .x:hover { opacity: 1; }
+
+.flychat-log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 9px; }
+.flychat-m { max-width: 84%; padding: 9px 13px; border-radius: 15px; font-size: .89rem; line-height: 1.5;
+  white-space: pre-wrap; word-wrap: break-word; }
+.flychat-m.bot { align-self: flex-start; background: rgba(23, 20, 15, .055); color: #17140f;
+  border-end-start-radius: 5px; }
+.flychat-m.me { align-self: flex-end; background: #17140f; color: #fff; border-end-end-radius: 5px; }
+.flychat-m.err { align-self: center; background: rgba(190, 60, 50, .09); color: #8a2f28; font-size: .82rem; }
+
+.flychat-dots { align-self: flex-start; display: flex; gap: 4px; padding: 11px 13px; }
+.flychat-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(23, 20, 15, .3);
+  animation: flychat-b 1.1s infinite; }
+.flychat-dots i:nth-child(2) { animation-delay: .16s; }
+.flychat-dots i:nth-child(3) { animation-delay: .32s; }
+@keyframes flychat-b { 0%, 60%, 100% { opacity: .3; } 30% { opacity: 1; } }
+
+.flychat-cta { margin: 2px 0 0; align-self: flex-start; }
+.flychat-cta a { display: inline-block; background: #17140f; color: #fff; text-decoration: none;
+  font-size: .84rem; font-weight: 500; padding: 8px 16px; border-radius: 100px; }
+
+/* inline name+phone capture form */
+.flychat-lead { background: rgba(23, 20, 15, .04); border-radius: 14px; padding: 12px;
+  margin: 2px 0; font-size: .86rem; color: #17140f; }
+.flychat-lead-intro { margin-bottom: 9px; line-height: 1.35; }
+.flychat-lead-f { display: flex; flex-wrap: wrap; gap: 7px; }
+.flychat-lead-f input { flex: 1 1 44%; min-width: 0; font-family: inherit; font-size: .86rem;
+  color: #17140f; background: #fff; border: 1px solid rgba(23, 20, 15, .12);
+  border-radius: 10px; padding: 9px 12px; outline: none; }
+.flychat-lead-f input:focus { border-color: rgba(23, 20, 15, .3); }
+.flychat-lead-f button { flex: 1 1 100%; background: #17140f; color: #fff; border: 0;
+  border-radius: 10px; padding: 10px; font-size: .88rem; font-weight: 500; cursor: pointer; }
+.flychat-lead-f button:disabled { opacity: .4; cursor: default; }
+
+/* composer greyed out once the conversation is closed */
+.flychat-f-off { opacity: .5; }
+
+.flychat-f { border-top: 1px solid rgba(23, 20, 15, .08); padding: 10px; display: flex; gap: 8px; }
+.flychat-f input {
+  flex: 1; min-width: 0; font-family: inherit; font-size: .88rem; color: #17140f;
+  background: rgba(23, 20, 15, .04); border: 1px solid transparent; border-radius: 100px;
+  padding: 10px 14px; outline: none;
+}
+.flychat-f input:focus { border-color: rgba(23, 20, 15, .18); background: #fff; }
+.flychat-f button { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 0;
+  background: #17140f; color: #fff; cursor: pointer; font-size: 1rem; }
+.flychat-f button:disabled { opacity: .4; cursor: default; }
+.flychat-note { font-size: .68rem; color: rgba(23, 20, 15, .45); text-align: center;
+  padding: 0 10px 9px; font-weight: 300; }
+
+/* The legacy SPA shows a full-width fixed action bar under 880px; lift the
+   bubble above it while it is on screen so they never overlap. */
+.flychat-lift .flychat-b { bottom: 86px; }
+.flychat-lift .flychat-t { bottom: 98px; }
+.flychat-lift .flychat-p { bottom: 86px; height: min(560px, calc(100vh - 178px)); }
+
+@media (max-width: 480px) {
+  .flychat-p { inset-inline-start: 16px; inset-inline-end: 16px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flychat-b, .flychat-p, .flychat-t { transition: none; }
+  .flychat-b:hover { transform: none; }
+  .flychat-dots i { animation: none; opacity: .55; }
+}
