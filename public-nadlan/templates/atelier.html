@@ -68,7 +68,33 @@
   /* no tour video on the listing → let the section backdrop show through */
   video[data-video]:not([src]){display:none}
   .hero-in{position:relative;z-index:4;width:100%;max-width:1240px;margin:0 auto;padding-inline:var(--pad)}
-  .hero-card{background:rgba(246,242,234,.94);backdrop-filter:blur(10px);border-top:3px solid var(--gold);border-radius:4px;padding:clamp(24px,3.4vw,44px);max-width:min(760px,100%);box-shadow:0 28px 60px -30px rgba(0,0,0,.55)}
+  /* The plate: opposite corners cut away, the gold showing through as a
+     hairline along the bevel. drop-shadow rather than box-shadow, because a
+     box-shadow is squared off by the clip and would betray the shape. */
+  .hero-card{--bevel:clamp(20px,2.6vw,38px);
+    position:relative;max-width:min(760px,100%);width:fit-content;
+    background:var(--gold);padding:1.5px;
+    clip-path:polygon(var(--bevel) 0,100% 0,100% calc(100% - var(--bevel)),calc(100% - var(--bevel)) 100%,0 100%,0 var(--bevel));
+    filter:drop-shadow(0 22px 34px rgba(0,0,0,.42));
+    touch-action:auto}
+  .hero-card-in{position:relative;background:rgba(246,242,234,.96);
+    clip-path:polygon(var(--bevel) 0,100% 0,100% calc(100% - var(--bevel)),calc(100% - var(--bevel)) 100%,0 100%,0 var(--bevel))}
+  /* registration ticks on the two square corners, like a mounted print */
+  .hero-card-in::before,.hero-card-in::after{content:"";position:absolute;width:16px;height:16px;border:1px solid var(--gold);opacity:.7}
+  .hero-card-in::before{top:9px;right:9px;border-width:1px 1px 0 0}
+  .hero-card-in::after{bottom:9px;left:9px;border-width:0 0 1px 1px}
+  .card-body{padding:clamp(20px,3vw,40px)}
+  /* grip: the drag affordance, and the only place a touch drag may start so a
+     swipe anywhere else on the card still scrolls the page */
+  .card-grip{display:flex;align-items:center;justify-content:center;gap:5px;height:26px;
+    border-bottom:1px solid var(--line-soft);cursor:grab;touch-action:none}
+  .card-grip i{width:4px;height:4px;border-radius:50%;background:var(--muted);opacity:.6;transition:.2s}
+  .card-grip:hover i,.card-grip:focus-visible i{opacity:1;background:var(--gold-ink)}
+  .hero-card.dragging{filter:drop-shadow(0 34px 48px rgba(0,0,0,.55))}
+  .hero-card.dragging .card-grip{cursor:grabbing}
+  .hero-card.snapping{transition:transform .45s cubic-bezier(.2,.7,.3,1)}
+  @media(hover:hover) and (pointer:fine){.card-body{cursor:grab}.hero-card.dragging .card-body{cursor:grabbing}}
+  .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .hero h1{font-family:var(--disp);font-weight:700;font-size:clamp(2rem,5.4vw,4.1rem);line-height:1.04;letter-spacing:-.028em;margin:14px 0 14px;text-wrap:balance;color:var(--ink)}
   .hero-copy{font-size:clamp(.98rem,1.45vw,1.12rem);line-height:1.7;color:var(--ink-2);max-width:48ch}
   .hero-acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:22px}
@@ -244,13 +270,21 @@
 <section class="hero">
   <video class="hero-video" data-video autoplay muted loop playsinline></video>
   <div class="hero-in">
-    <div class="hero-card">
-      <span class="kick"><span data-deal>למכירה</span> · <span data-bind="property.neighborhood||property.city">הצפון הישן</span></span>
-      <h1 data-bind="property.title">דירת 4 חדרים · דיזנגוף 156</h1>
-      <p class="hero-copy" data-bind="hero.phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד — נכס שמגיעים אליו פעם בעשור.</p>
-      <div class="hero-acts">
-        <a class="btn btn-gold" href="#gallery" data-i18n="view_gallery">צפו בגלריה</a>
-        <a class="btn btn-line" href="#contact" data-i18n="book_visit_private">תיאום ביקור פרטי</a>
+    <div class="hero-card" id="heroCard">
+      <div class="hero-card-in">
+        <div class="card-grip" data-drag-handle role="button" tabindex="0">
+          <span class="vh" data-i18n="drag_to_move">גררו להזזה</span>
+          <i></i><i></i><i></i>
+        </div>
+        <div class="card-body">
+          <span class="kick"><span data-deal>למכירה</span> · <span data-bind="property.neighborhood||property.city">הצפון הישן</span></span>
+          <h1 data-bind="property.title">דירת 4 חדרים · דיזנגוף 156</h1>
+          <p class="hero-copy" data-bind="hero.phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד — נכס שמגיעים אליו פעם בעשור.</p>
+          <div class="hero-acts">
+            <a class="btn btn-gold" href="#gallery" data-i18n="view_gallery">צפו בגלריה</a>
+            <a class="btn btn-line" href="#contact" data-i18n="book_visit_private">תיאום ביקור פרטי</a>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -453,6 +487,95 @@
     var y = target.getBoundingClientRect().top + (window.scrollY || 0) - BAR;
     scrollTo({ top: Math.max(0, y), behavior: reduce ? "auto" : "smooth" });
   });
+
+  // ── the hero plate can be pushed around ───────────────────────────────────
+  //    Mouse drags start anywhere on the plate; touch drags only from the grip,
+  //    so a swipe across the card still scrolls the page. The plate is kept
+  //    inside the hero, and a double-click (or Escape) puts it back.
+  (function draggablePlate() {
+    var card = document.getElementById("heroCard");
+    var hero = card && card.closest(".hero");
+    if (!card || !hero) return;
+    var grip = card.querySelector("[data-drag-handle]");
+    var tx = 0, ty = 0, sx = 0, sy = 0, ox = 0, oy = 0, moved = false, active = false, base = null;
+    var MARGIN = 8, THRESHOLD = 4;
+
+    function apply() { card.style.transform = tx || ty ? "translate(" + tx + "px," + ty + "px)" : ""; }
+    function clampTo(nx, ny) {
+      var h = hero.getBoundingClientRect();
+      return [
+        Math.min(Math.max(nx, h.left + MARGIN - base.left), h.right - MARGIN - base.right),
+        Math.min(Math.max(ny, h.top + MARGIN - base.top), h.bottom - MARGIN - base.bottom),
+      ];
+    }
+    function reset() {
+      if (tx === 0 && ty === 0) return;
+      card.classList.add("snapping");
+      tx = ty = 0; apply();
+      setTimeout(function () { card.classList.remove("snapping"); }, 500);
+    }
+
+    card.addEventListener("pointerdown", function (e) {
+      if (e.button != null && e.button !== 0) return;
+      // never hijack a press on something the visitor meant to activate
+      if (e.target.closest && e.target.closest("a,button,input,textarea,select,label")) return;
+      // on touch, only the grip drags — everything else must stay scrollable
+      if (e.pointerType !== "mouse" && !(grip && grip.contains(e.target))) return;
+      var r = card.getBoundingClientRect();
+      base = { left: r.left - tx, right: r.right - tx, top: r.top - ty, bottom: r.bottom - ty };
+      sx = e.clientX; sy = e.clientY; ox = tx; oy = ty; moved = false; active = true;
+      card.classList.remove("snapping");
+    });
+
+    card.addEventListener("pointermove", function (e) {
+      if (!active) return;
+      var dx = e.clientX - sx, dy = e.clientY - sy;
+      if (!moved) {
+        if (Math.abs(dx) < THRESHOLD && Math.abs(dy) < THRESHOLD) return;
+        moved = true;
+        card.classList.add("dragging");
+        document.body.style.userSelect = "none";
+        try { card.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      var next = clampTo(ox + dx, oy + dy);
+      tx = next[0]; ty = next[1]; apply();
+      e.preventDefault();
+    });
+
+    function end(e) {
+      if (!active) return;
+      active = false;
+      card.classList.remove("dragging");
+      document.body.style.userSelect = "";
+      try { if (e && e.pointerId != null) card.releasePointerCapture(e.pointerId); } catch (err) {}
+      // a press that never became a drag stays a plain click
+      if (moved) { var kill = function (ev) { ev.stopPropagation(); ev.preventDefault(); };
+        card.addEventListener("click", kill, { capture: true, once: true });
+        setTimeout(function () { card.removeEventListener("click", kill, true); }, 0); }
+    }
+    card.addEventListener("pointerup", end);
+    card.addEventListener("pointercancel", end);
+    card.addEventListener("dblclick", reset);
+
+    // keyboard: the grip is focusable, so the plate is movable without a pointer
+    if (grip) grip.addEventListener("keydown", function (e) {
+      var step = e.shiftKey ? 40 : 12, dx = 0, dy = 0;
+      if (e.key === "ArrowLeft") dx = -step;
+      else if (e.key === "ArrowRight") dx = step;
+      else if (e.key === "ArrowUp") dy = -step;
+      else if (e.key === "ArrowDown") dy = step;
+      else if (e.key === "Escape" || e.key === "Home") { reset(); return; }
+      else return;
+      e.preventDefault();
+      var r = card.getBoundingClientRect();
+      base = { left: r.left - tx, right: r.right - tx, top: r.top - ty, bottom: r.bottom - ty };
+      var next = clampTo(tx + dx, ty + dy);
+      tx = next[0]; ty = next[1]; apply();
+    });
+
+    // a resize invalidates where "inside the hero" was, so start over
+    addEventListener("resize", function () { tx = ty = 0; apply(); });
+  })();
 
   // ── gallery: thumbnails + arrows drive a normal horizontal scroller ────────
   var track = document.getElementById("galTrack");
