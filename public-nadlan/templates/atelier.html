@@ -101,6 +101,20 @@
   .btn-line{border-color:var(--line);color:var(--ink)}
   .btn-line:hover{border-color:var(--gold-ink);color:var(--gold-ink)}
 
+  /* Phones: the plate was taking over half the hero at 320px, leaving the clip
+     as a sliver. Tighter type, tighter padding and the two actions sharing a
+     row bring it back to roughly a third. */
+  @media(max-width:700px){
+    .hero{padding-top:calc(var(--bar) + 3.5svh)}
+    .card-grip{height:22px}
+    .card-body{padding:15px 17px 17px}
+    .hero h1{font-size:clamp(1.45rem,6.1vw,2.2rem);margin:9px 0 9px}
+    .hero-copy{font-size:.9rem;line-height:1.55}
+    .hero-acts{gap:8px;margin-top:15px;flex-wrap:nowrap}
+    .hero-acts .btn{flex:1 1 0;min-width:0;padding:11px 8px;font-size:.78rem;letter-spacing:0}
+    .hero-card-in::before,.hero-card-in::after{width:12px;height:12px}
+  }
+
   /* ── key figures ── sit at the foot of the hero, in the same section ── */
   .stats{position:relative;z-index:4;width:100%}
   .stats-in{display:flex;background:rgba(246,242,234,.94);backdrop-filter:blur(10px);border-top:2px solid var(--gold);overflow-x:auto;scrollbar-width:none}
@@ -143,7 +157,17 @@
      until at the end of its scroll it fills the frame completely. */
   .peek{position:relative;height:300vh;background:var(--paper-2)}
   .peek-sticky{position:sticky;top:0;height:100svh;overflow:hidden}
-  .peek-word{position:absolute;z-index:1;white-space:nowrap;font-family:var(--disp);font-size:clamp(5rem,18vw,15rem);line-height:1;color:rgba(27,24,21,.055);inset-inline-end:-4vw;top:32%;transform:translateX(var(--word-x,0))}
+  /* The word exists twice, pinned to the same spot and moving together: one
+     copy behind the aperture, one in front of it. Scrolling cross-fades the
+     back copy out and the front copy in, so the word appears to travel through
+     the photo and land on top of it. A z-index cannot be tweened, which is why
+     this is two layers rather than one that changes stacking. */
+  .peek-word{position:absolute;white-space:nowrap;font-family:var(--disp);
+    font-size:clamp(5rem,18vw,15rem);line-height:1;inset-inline-end:5vw;top:32%;
+    pointer-events:none;transform:translateX(var(--word-x,0)) scale(var(--word-s,1))}
+  .peek-word.back{z-index:1;color:rgba(27,24,21,.06);opacity:var(--word-back,1)}
+  .peek-word.front{z-index:4;color:var(--paper);opacity:var(--word-front,0);
+    text-shadow:0 2px 34px rgba(0,0,0,.4)}
   .peek-title{position:absolute;z-index:5;inset-inline-start:var(--pad);top:calc(var(--bar) + 8vh);max-width:min(540px,72vw);background:rgba(246,242,234,.93);backdrop-filter:blur(8px);border-inline-start:3px solid var(--gold);border-radius:3px;padding:16px 22px}
   .peek-title h2{margin:12px 0 0}
   /* the aperture: inset shrinks to nothing, so the frame opens to full bleed */
@@ -248,6 +272,7 @@
     .track{scroll-behavior:auto}
     .peek-frame{inset:8vh 6vw;border-radius:6px}
     .peek-word{transform:none!important}
+    .peek-word.front{display:none}
   }
 </style>
 </head>
@@ -354,7 +379,8 @@
 
 <section class="peek" aria-label="הצצה פנימה">
   <div class="peek-sticky">
-    <span class="peek-word" data-i18n="your_home" aria-hidden="true">הבית שלך</span>
+    <span class="peek-word back" data-i18n="your_home" aria-hidden="true">הבית שלך</span>
+    <span class="peek-word front" data-i18n="your_home" aria-hidden="true">הבית שלך</span>
     <div class="peek-title">
       <span class="kick" data-i18n="your_home">הבית שלך</span>
       <h2 data-i18n="peek_inside">הצצה פנימה</h2>
@@ -669,7 +695,7 @@
     if (peek) {
       var span = peek.offsetHeight - innerHeight;
       var p = span > 0 ? Math.max(0, Math.min(1, (scrollY - peek.offsetTop) / span)) : 0;
-      var f = peek.querySelector(".peek-frame"), word = peek.querySelector(".peek-word");
+      var f = peek.querySelector(".peek-frame"), sticky = peek.querySelector(".peek-sticky");
       if (f) {
         // ease out so most of the opening happens early and it settles wide open
         var e = 1 - Math.pow(1 - p, 2);
@@ -678,7 +704,17 @@
         f.style.setProperty("--peek-r", (150 - e * 150) + "px");
         f.style.setProperty("--zoom", (1.18 - e * 0.18).toFixed(3));
       }
-      if (word) word.style.setProperty("--word-x", (p * -22) + "vw");
+      if (sticky) {
+        // both copies of the word read these, so they stay exactly aligned
+        // through the cross-fade and the swap is invisible
+        var c01 = function (v) { return Math.max(0, Math.min(1, v)); };
+        // slides in rather than out: the phrase is whole by the time it is in
+        // front, instead of drifting its last word off the edge
+        sticky.style.setProperty("--word-x", (p * 12 - 12) + "vw");
+        sticky.style.setProperty("--word-s", (0.96 + p * 0.12).toFixed(3));
+        sticky.style.setProperty("--word-back", c01(1 - (p - 0.28) / 0.26).toFixed(3));
+        sticky.style.setProperty("--word-front", c01((p - 0.40) / 0.30).toFixed(3));
+      }
     }
     raf = requestAnimationFrame(frame);
   }
