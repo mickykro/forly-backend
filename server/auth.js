@@ -22,17 +22,9 @@ const MAX_ATTEMPTS = 5;                // wrong-code attempts before lockout
 const SESSION_TTL_S = 12 * 60 * 60;    // 12 hours
 
 // ── phone ──
-// The server's own normalizePhone() is Israel-only and returns null otherwise.
-// Auth must also work for non-IL test numbers, so accept international digits.
-function normalizeAny(raw) {
-  let p = String(raw || "").replace(/\D/g, "");
-  if (!p) return null;
-  if (p.startsWith("00")) p = p.slice(2);
-  if (/^05\d{8}$/.test(p)) return "972" + p.slice(1);   // 0501234567 → 972501234567
-  if (/^5\d{8}$/.test(p)) return "972" + p;             // 501234567  → 972501234567
-  if (p.length >= 9 && p.length <= 15) return p;        // already international
-  return null;
-}
+// Canonical form lives in utils.js so ownership checks and their tests can
+// reach it without loading Express. Aliased here to keep call sites unchanged.
+const normalizeAny = require("./utils").normalizeAuthPhone;
 
 // ── crypto ──
 const hashCode = (secret, phone, code) =>

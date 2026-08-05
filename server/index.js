@@ -123,6 +123,21 @@ app.get("/signup", (req, res) => {
 const createPortalRouter = require("./routes/portal");
 app.use(createPortalRouter({ pageBaseUrl: PAGE_BASE_URL }));
 
+// ── chat bot (public, gated per agent/page — see server/chatbot-config.js) ──
+const createChatRouter = require("./routes/chat");
+app.use(createChatRouter({
+  // Whichever key the page's model needs — the provider follows the model id.
+  apiKeys: {
+    GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+  },
+  ipSalt: process.env.CHATBOT_IP_SALT || AUTH_SECRET,
+  // Chat leads WhatsApp the agent directly (the form path relays via n8n).
+  greenInstance: GREENAPI_INSTANCE,
+  greenToken: GREENAPI_TOKEN,
+}));
+
 // ── pages routes (builder, serving, leads) ──
 const createPagesRouter = require("./routes/pages");
 app.use(createPagesRouter({
@@ -135,6 +150,9 @@ app.use(createPagesRouter({
   greenToken: GREENAPI_TOKEN,
   requireAuth, verifyActionToken,
   authSecret: AUTH_SECRET,
+  // page/update ownership check (see server/page-auth.js)
+  verifySession, readToken, normalizeAuthPhone,
+  adminPhones: ADMIN_PHONES,
 }));
 
 // ── start ──
@@ -144,6 +162,13 @@ app.listen(PORT, () => {
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
+  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set NADLAN_JWT_SECRET)" : "enabled"}`);
+  // startExpiryScheduler({
+  //   pageBaseUrl: PAGE_BASE_URL,
+  //   authSecret: AUTH_SECRET,
+  //   greenInstance: GREENAPI_INSTANCE,
+  //   greenToken: GREENAPI_TOKEN,
+  // });
   console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
   // Expiry scheduler retired: property pages no longer expire — the public
   // portal (call4li.com) lists every live page until the agent archives it.

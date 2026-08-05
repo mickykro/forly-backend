@@ -11,6 +11,10 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
+const pageAuth = require("../page-auth");
+const chatbotConfig = require("../chatbot-config");
+const { submitLead } = require("../leads");
+const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
@@ -36,12 +40,21 @@ const expiredLinkHtml = () =>
 
 module.exports = function createPagesRouter(ctx) {
   const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,
-          requireAuth, verifyActionToken, authSecret } = ctx;
+          requireAuth, verifyActionToken, authSecret,
+          verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
+
+  // Admin allowlist, normalized once so "050-…", "+972…" and "972…" all match
+  // the canonical form a session carries (same treatment as routes/admin.js).
+  const adminSet = pageAuth.normalizeSet(adminPhones, normalizeAuthPhone);
+  const authMode = pageAuth.readMode(process.env.PAGE_UPDATE_AUTH);
 
   const router = express.Router();
 
-  // shared page payload builder
-  function pagePayload(id, d) {
+  // shared page payload builder.
+  // `chatbot` is the PUBLIC half of the resolved config (see chatbot-config.js)
+  // — never the model or the spend limits. Both callers pass it in rather than
+  // this being async, since resolving needs an await on the business doc.
+  function pagePayload(id, d, chatbot) {
     return {
       page_id: id, status: d.status, agent: d.agent, agent2: d.agent2 || null,
       property: d.property,
@@ -49,7 +62,14 @@ module.exports = function createPagesRouter(ctx) {
       cta: d.cta, sections: d.sections, theme: d.theme || null,
       language: d.language || "he",
       texts: d.texts || null,
+      chatbot: chatbot || { enabled: false, greeting: null },
     };
+  }
+
+  /** Resolve the chat bot for a page: agent entitlement + per-page override. */
+  async function resolveChatbot(d) {
+    const biz = await businessCache.get(d.business_phone);
+    return chatbotConfig.resolve(d, biz, process.env);
   }
 
   // ── maintenance: backfill property.tags on pages created before tags existed.
@@ -246,7 +266,8 @@ module.exports = function createPagesRouter(ctx) {
       else pageEdit.noteEditFail(id);
     }
     res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
-    res.json({ ...pagePayload(id, d), ...(editable ? { editable: true } : {}) });
+    const bot = await resolveChatbot(d);
+    res.json({ ...pagePayload(id, d, bot.public), ...(editable ? { editable: true } : {}) });
   }
   router.get("/api/property-page", getPageHandler);
   router.get("/api/page", getPageHandler); // alias for edit.html
@@ -283,15 +304,31 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── POST /api/page/update — dashboard page editor (auth via session) ──
+  // Owner-only (admins may edit any page). See page-auth.js for the rollout
+  // switch and why both phone forms are normalized before comparing.
   router.post("/api/page/update", async (req, res) => {
     const body = req.body || {};
     const pageId = String(body.page_id || "");
     if (!pageId) return res.status(400).json({ error: "page_id required" });
     const d = await db.getPage(pageId);
     if (!d) return res.status(404).json({ error: "not found" });
-    // ponytail: session auth would go here; for now allow any update
+
+    const verdict = pageAuth.checkPageAccess({
+      session: verifySession(authSecret, readToken(req)),
+      page: d,
+      adminSet,
+      normalize: normalizeAuthPhone,
+    });
+    if (!verdict.ok) {
+      console.warn(pageAuth.denialLog(pageId, verdict, authMode));
+      if (authMode === pageAuth.MODE_ENFORCE) {
+        return res.status(verdict.status).json({ error: verdict.error });
+      }
+      // MODE_LOG: recorded above, write allowed through this deploy only.
+    }
+
     try {
-      const patch = { updated_at: new Date() };
+      const patch = { updated_at: new Date(), edit_count: (d.edit_count || 0) + 1 };
       if (body.hero_phrase != null) patch["hero.phrase"] = String(body.hero_phrase).slice(0, 120);
       // Agent
       if (body.agent && typeof body.agent === "object") {
@@ -411,13 +448,7 @@ module.exports = function createPagesRouter(ctx) {
     db.mem.throttle.set(prospectPhone, { windowStart: count === 0 ? now : t.windowStart, count: count + 1 });
 
     try {
-      const lead = {
-        phone: prospectPhone, prospect_name: name, source: "landing_page",
-        page_id: body.page_id, listing_id: page.listing_id,
-        agent_phone: page.business_phone, status: "new", last_activity_at: new Date(),
-      };
-      await db.saveLead(prospectPhone, lead);
-      await db.incrPageCounter(body.page_id, "lead_count", 1);
+      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [] });
 
       // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
       if (!n8nLeadWebhook) {
@@ -483,7 +514,8 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── events beacon ──
-  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click", "phone_reveal"]);
+  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click", "phone_reveal",
+    "chat_open", "chat_proactive", "chat_dismiss", "chat_message", "chat_handoff", "chat_lead"]);
   router.post("/api/property-event", express.text({ type: () => true }), async (req, res) => {
     let body = {};
     try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
@@ -504,6 +536,14 @@ module.exports = function createPagesRouter(ctx) {
             business_phone: page.business_phone || null,
           });
         }
+      } else if (event.startsWith("chat_") && db.db) {
+        // Funnel data — same day-bucket shape chat.js countMessage writes for
+        // chat_msg. Firestore only (no local counter store); one field per event.
+        const FieldValue = require("firebase-admin").firestore.FieldValue;
+        const day = new Date().toISOString().slice(0, 10);
+        await db.db.collection("property_pages").doc(pageId)
+          .collection("metrics").doc(day)
+          .set({ [event]: FieldValue.increment(1) }, { merge: true });
       }
     } catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
     res.status(204).send("");
@@ -522,7 +562,8 @@ module.exports = function createPagesRouter(ctx) {
     const file = path.join(templatesDir, tpl + ".html");
     if (!fs.existsSync(file)) return res.sendFile(origShell);
     let html = fs.readFileSync(file, "utf8");
-    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d)).replace(/</g, "\\u003c")};</script>`;
+    const bot = await resolveChatbot(d);
+    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
     html = html.replace("</head>", inject + "</head>");
     res.set("Cache-Control", "public, max-age=60");
     res.type("html").send(html);
