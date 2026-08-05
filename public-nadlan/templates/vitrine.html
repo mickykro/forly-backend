@@ -149,9 +149,12 @@
   .p-cream{background:rgba(242,234,220,.84);color:var(--ink)}
   .p-cream .kick{color:#9A7736}
   .p-cream .lede{color:var(--ink-2)}
-  .why-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:40px}
-  @media(max-width:1040px){.why-grid{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:560px){.why-grid{grid-template-columns:1fr}}
+  /* Two to a row at every width, phones included. Two-up needs a shorter art
+     tile than four-up did, or two rows of cards overrun the viewport and the
+     section can no longer pin. */
+  .why-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:36px}
+  .why-grid .card-art{aspect-ratio:16/10}
+  @media(max-width:560px){.why-grid{grid-template-columns:repeat(2,1fr);gap:10px}}
   .card{background:#FBF7F0;border:1px solid var(--ink-line);border-radius:14px;
     padding:16px 16px 24px;display:flex;flex-direction:column;transition:transform .35s,box-shadow .35s}
   .card:hover{transform:translateY(-4px);box-shadow:0 18px 40px -22px rgba(23,19,15,.55)}
@@ -209,7 +212,14 @@
   html[data-phone] .hero-grid>.frame{width:max-content;max-width:100%;margin-inline:auto}
   html[data-phone] .frame-in{height:clamp(320px,50svh,560px);max-width:100%}
   html[data-phone] .plate h1{font-size:1.5rem}
-  html[data-phone] .why-grid{grid-template-columns:1fr}
+  /* two cards across a phone leaves each about 170px, so the card's own padding
+     and type have to come down with it or the copy has nowhere to go */
+  html[data-phone] .why-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+  html[data-phone] .why-grid .card{padding:10px 10px 16px;border-radius:11px}
+  html[data-phone] .why-grid .card h3{font-size:1rem;margin:4px 0 6px}
+  html[data-phone] .why-grid .card p{font-size:.8rem;line-height:1.6}
+  html[data-phone] .why-grid .card .n{font-size:.72rem}
+  html[data-phone] .why-grid .card .tag{font-size:.56rem;padding:4px 9px;margin-top:10px}
   html[data-phone] .cta-panel{grid-template-columns:1fr}
   html[data-phone] .window{height:clamp(320px,50svh,520px)}
 
