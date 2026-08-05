@@ -486,15 +486,25 @@
   var cv = document.getElementById("bgCanvas");
   var ctx = cv.getContext("2d", { alpha: false });
   var frames = [], ready = 0;
-  // Frames only ever serve as a scrimmed background, so they are stored small.
-  // The ceiling is the source anyway — a 496px-wide tour cannot fill a desktop
-  // viewport sharply no matter what we keep, and behind the scrim the softness
-  // reads as depth of field.
-  var COUNT = coarse ? 50 : 100;
-  var MAXH = coarse ? 380 : 600;
+  // Two numbers decide how smooth the scroll animation reads, and they trade
+  // against each other through memory:
+  //   px of scroll per frame — the page is ~6400px, so 180 frames is ~35px,
+  //     about one wheel tick. Past ~80px it visibly steps.
+  //   ms of footage per frame — under ~80ms the cross-blend reads as motion;
+  //     over that it reads as a crossfade between two different pictures.
+  // COUNT is the memory guard rather than the operative limit: a short tour is
+  // capped by its own frame count long before this, and a long one stops here
+  // instead of growing without bound. 180 x 253x440x4B ~ 80MB, 90 x 195x340x4B
+  // ~ 24MB on touch.
+  var COUNT = coarse ? 90 : 180;
+  var MAXH = coarse ? 340 : 440;
 
   function sizeCanvas() {
-    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    // The source is 496px wide, so a full-bleed desktop background is already
+    // upscaled ~4x before device pixels enter into it. Painting at 2x DPR asks
+    // for detail the footage does not have and costs ~3x the paint time, which
+    // is frame rate spent on nothing.
+    var dpr = Math.min(1.25, window.devicePixelRatio || 1);
     cv.width = Math.round(innerWidth * dpr);
     cv.height = Math.round(innerHeight * dpr);
     render();
@@ -568,9 +578,12 @@
       H = Math.max(2, Math.round(vh * scale));
       step = (isFinite(v.duration) ? v.duration : 8) / COUNT;
       if (v.requestVideoFrameCallback) {
-        // 3x leaves enough presented frames to land all COUNT samples; faster
-        // and the browser starts dropping them
-        v.playbackRate = 3;
+        // rVFC only fires for frames the browser actually presents, and never
+        // more than once per compositor tick — so supply is not simply a
+        // function of playback rate. Measured on the 8s demo tour: 3x yields
+        // ~30 frames, 2x ~90, and a slower 1.6x pass yields ~65 for a longer
+        // wait. 2x won on every run; slower is not better here.
+        v.playbackRate = 2;
         v.requestVideoFrameCallback(onFrame);
         var p = v.play();
         if (p && p.catch) p.catch(seekMode);
