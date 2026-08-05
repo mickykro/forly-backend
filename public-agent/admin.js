@@ -26,6 +26,11 @@
     return '<span class="chip ' + esc(status) + '">' + (STATUS_LABELS[status] || esc(status)) + "</span>";
   }
 
+  function fmtDate(ms) {
+    if (!ms) return "—";
+    return new Date(ms).toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  }
+
   function money(n) {
     if (!n) return "";
     return "₪" + Number(n).toLocaleString("he-IL");
@@ -36,6 +41,7 @@
   }
 
   function renderStats() {
+    console.log("renderStats", stats);
     $("#statGrid").innerHTML =
       statCard((stats.total_properties || 0), "נכסים") +
       statCard((stats.total_agents || 0), "סוכנים") +
@@ -54,6 +60,7 @@
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="' + esc(p.page_url) + '">צפייה</a>');
     }
     if (p.page_id && p.page_status !== "building") {
+      actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + esc(p.page_id) + '&from=admin">עריכה</a>');
       actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + esc(p.page_id) + '">+30</button>');
     }
     if (p.listing_status !== "archived") {
@@ -70,6 +77,7 @@
         '<div class="p-addr">' + esc(p.address || "") + "</div>" + priceLine + "</td>" +
       '<td class="agent">' + esc(p.agent_name) +
         '<div class="p-addr num" dir="ltr">' + esc(p.business_phone || "") + "</div></td>" +
+      '<td class="p-addr num">' + esc(fmtDate(p.created_at)) + "</td>" +
       "<td>" + chip(p.page_status) +
         (p.listing_status === "archived" ? " " + chip("archived") : "") + "</td>" +
       '<td class="num">' + esc(p.view_count) + "</td>" +
@@ -105,7 +113,10 @@
   function applyFilters() {
     var q = ($("#search").value || "").trim().toLowerCase();
     var status = $("#statusFilter").value;
+    var agent = $("#agentFilter").value;
+    var sort = $("#sortBy").value;
     var shown = all.filter(function (p) {
+      if (agent && p.business_phone !== agent) return false;
       if (status) {
         var matches = p.page_status === status ||
           (status === "archived" && p.listing_status === "archived");
@@ -117,6 +128,10 @@
       }
       return true;
     });
+    if (sort === "views" || sort === "leads") {
+      var key = sort === "views" ? "view_count" : "lead_count";
+      shown.sort(function (a, b) { return (Number(b[key]) || 0) - (Number(a[key]) || 0); });
+    }
     $("#rows").innerHTML = shown.map(rowHtml).join("");
     $("#emptyState").classList.toggle("hidden", shown.length > 0);
     $("#shownCount").textContent = shown.length === all.length ?
@@ -262,11 +277,27 @@
     if (onAgents && !agents.length) loadAgents();
   }
 
+  function fillAgentFilter() {
+    var sel = $("#agentFilter");
+    var prev = sel.value;
+    var seen = {};
+    var opts = ['<option value="">כל הסוכנים</option>'];
+    all.forEach(function (p) {
+      if (!p.business_phone || seen[p.business_phone]) return;
+      seen[p.business_phone] = 1;
+      opts.push('<option value="' + esc(p.business_phone) + '">' +
+        esc(p.agent_name || p.business_phone) + "</option>");
+    });
+    sel.innerHTML = opts.join("");
+    if (seen[prev]) sel.value = prev;
+  }
+
   function load() {
     return FLY.req("/api/admin/properties", { noRedirect: true }).then(function (d) {
       all = d.properties || [];
       stats = d.stats || {};
       renderStats();
+      fillAgentFilter();
       applyFilters();
       // Refresh the agents view too, but only once it has been opened.
       if (agents.length) return loadAgents();
@@ -279,6 +310,11 @@
     if (msg) $("#deniedMsg").textContent = msg;
   }
 
+  $("#btnLogout").addEventListener("click", function () {
+    FLY.req("/api/auth/logout", { method: "POST", noRedirect: true })
+      .finally(function () { location.href = "/"; });
+  });
+
   // boot: verify admin access, then load. 401 → login (with return path);
   // 403 → access-denied view.
   FLY.req("/api/admin/me", { noRedirect: true })
@@ -290,6 +326,8 @@
       $("#agentSearch").addEventListener("input", applyAgentFilter);
       $("#tabProps").addEventListener("click", function () { showTab("props"); });
       $("#tabAgents").addEventListener("click", function () { showTab("agents"); });
+      $("#agentFilter").addEventListener("change", applyFilters);
+      $("#sortBy").addEventListener("change", applyFilters);
       $("#refreshBtn").addEventListener("click", function () {
         FLY.toast("מרענן…"); load();
       });

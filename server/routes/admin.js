@@ -76,12 +76,14 @@ module.exports = function createAdminRouter(ctx) {
       const bizByPhone = new Map(businesses.map((b) => [b.phone, b]));
 
       const properties = [];
+      const agentPhones = new Set();   // agents = businesses that actually have listings
       let totalViews = 0;
       let totalLeads = 0;
       let activePages = 0;
 
       for (const l of listings) {
         if (l.status === "deleted") continue;
+        if (l.business_phone) agentPhones.add(l.business_phone);
         const page = l.page_id ? pageById.get(l.page_id) : null;
         const biz = bizByPhone.get(l.business_phone);
         const expires = page ? asDate(page.expires_at) : null;
@@ -122,7 +124,7 @@ module.exports = function createAdminRouter(ctx) {
         properties,
         stats: {
           total_properties: properties.length,
-          total_agents: businesses.length,
+          total_agents: agentPhones.size,
           active_pages: activePages,
           total_views: totalViews,
           total_leads: totalLeads,

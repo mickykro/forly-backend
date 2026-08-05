@@ -16,20 +16,24 @@
 /* ── bubble ── */
 .flychat-b {
   bottom: 18px; width: 58px; height: 58px; border-radius: 50%; border: 0; padding: 0;
-  cursor: pointer; overflow: hidden; background: #17140f; color: #fff;
+  cursor: pointer; background: #17140f; color: #fff;
   font-family: inherit; font-size: 1.05rem; font-weight: 600; line-height: 1;
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .28);
   transition: transform .18s ease, opacity .18s ease;
 }
 .flychat-b:hover { transform: scale(1.06); }
+/* clips the avatar to the circle; kept separate from .flychat-b so the
+   notification dot below can sit outside the circle instead of being clipped */
+.flychat-b .flychat-b-in { width: 100%; height: 100%; border-radius: 50%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; }
 .flychat-b img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .flychat-b.hidden,
 .flychat-p.hidden { opacity: 0; pointer-events: none; transform: translateY(8px); }
 
-/* Unread/attention dot for the proactive opener. */
+/* Unread/attention dot for the proactive opener, poking outside the circle. */
 .flychat-b::after {
-  content: ""; position: absolute; top: 4px; inset-inline-end: 4px;
+  content: ""; position: absolute; top: -2px; inset-inline-end: -2px;
   width: 12px; height: 12px; border-radius: 50%; background: #e5484d;
   border: 2px solid #fff; opacity: 0; transition: opacity .2s;
 }

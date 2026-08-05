@@ -78,7 +78,7 @@
     var bubble = el("button", "flychat-b");
     bubble.type = "button";
     bubble.setAttribute("aria-label", t("title"));
-    bubble.innerHTML = avatarHtml(agent);
+    bubble.innerHTML = '<span class="flychat-b-in">' + avatarHtml(agent) + "</span>";
     root.appendChild(bubble);
 
     var teaser = el("div", "flychat-t hidden");

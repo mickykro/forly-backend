@@ -65,7 +65,10 @@
 
 <header class="topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Admin Console</span></a>
-  <span class="who" id="who"></span>
+  <span style="display:flex;align-items:center;gap:14px">
+    <span class="who" id="who"></span>
+    <button class="btn btn-ghost btn-sm" id="btnLogout">התנתקות</button>
+  </span>
 </header>
 
 <!-- ── ACCESS DENIED ── -->
@@ -129,6 +132,9 @@
   <div id="paneProps">
   <div class="toolbar">
     <input type="search" id="search" placeholder="חיפוש לפי כתובת, עיר, סוכן…">
+    <select id="agentFilter">
+      <option value="">כל הסוכנים</option>
+    </select>
     <select id="statusFilter">
       <option value="">כל הסטטוסים</option>
       <option value="active">פעיל</option>
@@ -136,6 +142,11 @@
       <option value="expired">פג תוקף</option>
       <option value="building">בבנייה</option>
       <option value="archived">בארכיון</option>
+    </select>
+    <select id="sortBy">
+      <option value="">מיון ברירת מחדל</option>
+      <option value="views">הכי הרבה צפיות</option>
+      <option value="leads">הכי הרבה לידים</option>
     </select>
     <span class="who num" id="shownCount"></span>
   </div>
@@ -147,6 +158,7 @@
           <th></th>
           <th>נכס</th>
           <th>סוכן</th>
+          <th>נוצר</th>
           <th>סטטוס</th>
           <th class="num">צפיות</th>
           <th class="num">לידים</th>
