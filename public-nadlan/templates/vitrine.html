@@ -65,25 +65,47 @@
   .glass{background:var(--glass);backdrop-filter:blur(18px) saturate(1.15);-webkit-backdrop-filter:blur(18px) saturate(1.15);
     border:1px solid var(--glass-line);border-radius:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
 
-  /* ── 1 · hero ── */
+  /* ── 1 · hero ──
+     The video and the data are two separate boxes. Stretched to one 86vw-wide
+     container, a vertical tour is a narrow strip marooned in a field of its own
+     blurred fill, with the copy stranded on top of the blur — which is exactly
+     what a wide screen showed. So the frame takes the footage's own proportions
+     and the data sits in its own panel beside it. Below 1000px they stack,
+     video first. */
   .s-hero{min-height:100svh;display:grid;align-content:center;padding:clamp(104px,15vh,150px) 0 clamp(48px,8vh,90px)}
-  .frame{width:min(1600px,86vw);margin-inline:auto;padding:5px;border-radius:16px;
+  /* The panel is capped rather than filling the row: stretched to the full 1600
+     it leaves the copy at one end of a very wide dark rectangle. Capped, the two
+     blocks read as a pair and centre together. */
+  .hero-grid{width:min(1600px,86vw);margin-inline:auto;display:grid;align-items:center;
+    justify-content:center;grid-template-columns:minmax(0,640px) auto;gap:clamp(26px,4vw,80px)}
+  /* both explicitly on row 1: placing the frame in column 2 while it comes first
+     in the markup would otherwise push the plate onto a row of its own */
+  .hero-grid>.plate{grid-column:1;grid-row:1}
+  .hero-grid>.frame{grid-column:2;grid-row:1}
+  .frame{padding:5px;border-radius:16px;
     background:linear-gradient(145deg,var(--champ-lite) 0%,rgba(255,255,255,.3) 26%,rgba(0,0,0,.62) 68%,var(--champ) 100%);
     box-shadow:0 34px 74px -26px rgba(0,0,0,.9),0 2px 0 rgba(255,255,255,.16),inset 0 1px 0 rgba(255,255,255,.45)}
-  .frame-in{position:relative;border-radius:11px;overflow:hidden;background:#05070B;height:clamp(400px,72svh,780px);box-shadow:inset 0 2px 8px rgba(0,0,0,.75)}
+  /* --vid-ar is written from the video's own dimensions the moment its metadata
+     lands, so the box is the shape of the footage and there is nothing left to
+     letterbox. 9/16 is the holding shape — listing tours are shot vertical. The
+     max-width catches a listing that shipped landscape. */
+  .frame-in{position:relative;border-radius:11px;overflow:hidden;background:#05070B;
+    height:clamp(400px,72svh,760px);aspect-ratio:var(--vid-ar,9/16);max-width:min(44vw,520px);
+    box-shadow:inset 0 2px 8px rgba(0,0,0,.75)}
   .frame-media{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
-  /* Listing tours are shot vertical (the demo is 496x864). Contained, the whole
-     frame stays visible; a blurred, scaled copy of its own first frame fills the
-     rest of the box, so the frame keeps its full width without black bars. */
+  /* the fill only has anything to cover in the moment before metadata lands, or
+     if a listing ships footage the box cannot match */
   .frame-fill{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
     filter:blur(30px) saturate(1.3) brightness(.72);transform:scale(1.25);z-index:0}
   .frame-media video{position:relative;z-index:1;display:block;height:100%;width:auto;max-width:100%;object-fit:contain}
 
-  /* the data plate sits on the video's lower edge: title, then subtitle, then
-     the property facts on one inline rule */
-  .plate{position:absolute;inset-inline:0;bottom:0;z-index:2;padding:clamp(22px,4vw,48px);
-    background:linear-gradient(to top,rgba(5,7,11,.94) 12%,rgba(5,7,11,.62) 58%,transparent)}
-  .plate h1{font-size:clamp(1.6rem,3.6vw,3.2rem);margin:12px 0 8px}
+  /* the data panel: title, then subtitle, then the property facts on one
+     inline rule */
+  .plate{padding:clamp(24px,2.6vw,40px);border-radius:16px;
+    background:rgba(9,12,18,.58);backdrop-filter:blur(16px) saturate(1.15);-webkit-backdrop-filter:blur(16px) saturate(1.15);
+    border:1px solid var(--glass-line);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 30px 70px -34px rgba(0,0,0,.85)}
+  .plate h1{font-size:clamp(1.6rem,3.2vw,3rem);margin:12px 0 8px}
   .plate .phrase{color:var(--ivory-2);font-size:clamp(.92rem,1.35vw,1.15rem);max-width:60ch;margin-bottom:clamp(14px,2vw,22px)}
   .facts-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:clamp(14px,2.4vw,38px);
     padding-top:clamp(12px,1.6vw,18px);border-top:1px solid var(--glass-line)}
@@ -95,13 +117,17 @@
   .fact .ppm{font-size:.66rem;color:var(--ivory-2)}
   .hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:clamp(16px,2.4vw,26px)}
 
+  /* narrow enough that two columns would starve both: stack them, video first */
+  /* Stacked, the frame still keeps the footage's shape and centres — letting it
+     run the full width just moves the marooned-strip problem down a breakpoint. */
+  @media(max-width:1000px){
+    .hero-grid{grid-template-columns:minmax(0,1fr);gap:clamp(16px,2.4vw,24px)}
+    .hero-grid>.frame{grid-column:1;grid-row:1;width:max-content;max-width:100%;margin-inline:auto}
+    .hero-grid>.plate{grid-column:1;grid-row:2}
+    .frame-in{height:clamp(320px,50svh,560px);max-width:100%}
+  }
   @media(max-width:820px){
-    .frame{width:calc(100% - 2*var(--pad))}
-    /* on a phone the video takes half the viewport and the plate moves below it,
-       where the copy has room to breathe instead of fighting the picture */
-    .frame-in{height:auto}
-    .frame-media{position:relative;height:50svh}
-    .plate{position:static;background:rgba(5,7,11,.92)}
+    .hero-grid{width:calc(100% - 2*var(--pad))}
     .plate h1{font-size:1.5rem}
   }
 
@@ -177,10 +203,11 @@
      then every max-width query above silently misses and the cards sit two-up on
      a phone. Pointer type and screen size describe the device itself rather than
      the box the page was given, so they decide the phone layout instead. */
-  html[data-phone] .frame{width:calc(100% - 2*var(--pad))}
-  html[data-phone] .frame-in{height:auto}
-  html[data-phone] .frame-media{position:relative;height:50svh}
-  html[data-phone] .plate{position:static;background:rgba(5,7,11,.92)}
+  html[data-phone] .hero-grid{width:calc(100% - 2*var(--pad));grid-template-columns:minmax(0,1fr);gap:clamp(16px,2.4vw,24px)}
+  html[data-phone] .hero-grid>.frame{grid-column:1;grid-row:1}
+  html[data-phone] .hero-grid>.plate{grid-column:1;grid-row:2}
+  html[data-phone] .hero-grid>.frame{width:max-content;max-width:100%;margin-inline:auto}
+  html[data-phone] .frame-in{height:clamp(320px,50svh,560px);max-width:100%}
   html[data-phone] .plate h1{font-size:1.5rem}
   html[data-phone] .why-grid{grid-template-columns:1fr}
   html[data-phone] .cta-panel{grid-template-columns:1fr}
@@ -242,12 +269,15 @@
 
 <!-- ── 1 · hero ────────────────────────────────────────────── -->
 <section class="s-hero">
-  <div class="frame" data-anim>
-    <div class="frame-in">
-      <div class="frame-media">
-        <canvas class="frame-fill" id="frameFill" aria-hidden="true"></canvas>
-        <video data-video autoplay muted loop playsinline preload="auto"></video>
+  <div class="hero-grid" data-anim>
+    <div class="frame">
+      <div class="frame-in">
+        <div class="frame-media">
+          <canvas class="frame-fill" id="frameFill" aria-hidden="true"></canvas>
+          <video data-video autoplay muted loop playsinline preload="auto"></video>
+        </div>
       </div>
+    </div>
       <div class="plate">
         <span class="kick"><span data-deal>למכירה</span> · <span data-bind="property.neighborhood">הצפון הישן</span></span>
         <h1 data-bind="property.title">דיזנגוף 156</h1>
@@ -263,7 +293,6 @@
           <a class="btn btn-champ" href="#contact" data-i18n="book_visit_private">תיאום ביקור פרטי</a>
           <a class="btn btn-line" href="#gallery" data-i18n="view_gallery">צפו בגלריה</a>
         </div>
-      </div>
     </div>
   </div>
 </section>
@@ -371,6 +400,19 @@
   var reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
   var coarse = matchMedia("(hover:none),(pointer:coarse)").matches;
   var VSRC = (DATA.hero && DATA.hero.video_url) || "";
+
+  // ── 1 · give the hero frame the shape of the footage it holds, so a vertical
+  //        tour gets a vertical box and there is nothing left to letterbox ──
+  (function () {
+    var v = document.querySelector("[data-video]");
+    var box = document.querySelector(".frame-in");
+    if (!v || !box) return;
+    function shape() {
+      if (v.videoWidth && v.videoHeight) box.style.setProperty("--vid-ar", v.videoWidth + " / " + v.videoHeight);
+    }
+    v.addEventListener("loadedmetadata", shape);
+    shape();   // in case metadata landed before this ran
+  })();
 
   // ── 2 · assign the four guide illustrations, cycling if the payload carries
   //        a different number of slides than the four the demo ships ──
