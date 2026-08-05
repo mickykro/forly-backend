@@ -7,7 +7,7 @@ const { asMillis } = require("./utils");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), throttle: new Map(), otps: new Map(), portalEvents: [] };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [] };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -214,17 +214,29 @@ async function listAllBusinesses(limit = 1000) {
 }
 
 // ── leads ──
+async function getLead(phone) {
+  if (db) { const d = await db.collection("leads").doc(phone).get(); return d.exists ? d.data() : null; }
+  return mem.leads.get(phone) || null;
+}
+
 async function saveLead(phone, lead) {
   if (db) await db.collection("leads").doc(phone).set(lead, { merge: true });
-  else mem.leads.set(phone, lead);
+  else mem.leads.set(phone, { ...(mem.leads.get(phone) || {}), ...lead });
+}
+
+// Immutable, one doc per submission — a chat lead and a form lead from the same
+// prospect must not collapse into one leads/{phone} summary and lose the first.
+async function addLeadSubmission(doc) {
+  if (db) await db.collection("lead_submissions").add(doc);
+  else mem.leadSubmissions.push(doc);
 }
 
 module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
-  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone,
-  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId,
-  getBusiness, setBusiness,
-  saveLead, logPortalEvent,
+  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages,
+  getBusiness, setBusiness, listAllBusinesses,
+  getLead, saveLead, addLeadSubmission, logPortalEvent,
 };

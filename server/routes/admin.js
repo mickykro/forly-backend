@@ -17,6 +17,9 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const db = require("../db");
+const readiness = require("../chatbot-readiness");
+const chatbotConfig = require("../chatbot-config");
+const businessCache = require("../business-cache");
 
 const PAGE_LIFESPAN_DAYS = 30;
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
@@ -36,11 +39,18 @@ module.exports = function createAdminRouter(ctx) {
       .filter(Boolean)
   );
 
+  // The allowlist above is normalized, so the session side must be too —
+  // comparing a raw userId against it only happens to work because the OTP
+  // flow signs an already-canonical phone. Normalizing is idempotent, so this
+  // costs nothing and stops a differently-signed session silently losing admin.
+  const isAdmin = (session) =>
+    !!session && allow.has(normalizeAuthPhone(session.userId) || "");
+
   // ── requireAdmin: valid session AND phone on the allowlist ──
   function requireAdmin(req, res, next) {
     const session = verifySession(authSecret, readToken(req));
     if (!session) return res.status(401).json({ error: "unauthenticated" });
-    if (!allow.has(session.userId)) return res.status(403).json({ error: "not_admin" });
+    if (!isAdmin(session)) return res.status(403).json({ error: "not_admin" });
     req.user = session;
     next();
   }
@@ -49,8 +59,7 @@ module.exports = function createAdminRouter(ctx) {
   router.get("/me", (req, res) => {
     const session = verifySession(authSecret, readToken(req));
     if (!session) return res.status(401).json({ error: "unauthenticated" });
-    const isAdmin = allow.has(session.userId);
-    if (!isAdmin) return res.status(403).json({ error: "not_admin" });
+    if (!isAdmin(session)) return res.status(403).json({ error: "not_admin" });
     res.json({ ok: true, is_admin: true, phone: session.userId });
   });
 
@@ -67,12 +76,14 @@ module.exports = function createAdminRouter(ctx) {
       const bizByPhone = new Map(businesses.map((b) => [b.phone, b]));
 
       const properties = [];
+      const agentPhones = new Set();   // agents = businesses that actually have listings
       let totalViews = 0;
       let totalLeads = 0;
       let activePages = 0;
 
       for (const l of listings) {
         if (l.status === "deleted") continue;
+        if (l.business_phone) agentPhones.add(l.business_phone);
         const page = l.page_id ? pageById.get(l.page_id) : null;
         const biz = bizByPhone.get(l.business_phone);
         const expires = page ? asDate(page.expires_at) : null;
@@ -101,6 +112,9 @@ module.exports = function createAdminRouter(ctx) {
           view_count: views,
           lead_count: leads,
           created_at: asMillis(l.created_at) || null,
+          // {page: true|false|null(inherit), effective, reason} — drives the
+          // per-page selector. No extra read: page and biz are already loaded.
+          chatbot: page ? chatbotConfig.adminState(page, biz, process.env) : null,
         });
       }
 
@@ -110,7 +124,7 @@ module.exports = function createAdminRouter(ctx) {
         properties,
         stats: {
           total_properties: properties.length,
-          total_agents: businesses.length,
+          total_agents: agentPhones.size,
           active_pages: activePages,
           total_views: totalViews,
           total_leads: totalLeads,
@@ -118,6 +132,184 @@ module.exports = function createAdminRouter(ctx) {
       });
     } catch (err) {
       console.error("admin/properties failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── agent directory: one row per agent, with their premium feature flags ──
+  // The property table is one row per listing, so a per-property toggle would
+  // show an agent with six listings six switches that all set the same flag.
+  // Features belong to the agent, so they get their own view.
+  router.get("/agents", requireAdmin, async (req, res) => {
+    try {
+      const [businesses, pages, listings] = await Promise.all([
+        db.listAllBusinesses(),
+        db.listAllPages(),
+        db.listAllListings(),
+      ]);
+      const listingById = new Map(listings.map((l) => [l.listing_id, l]));
+
+      // Roll each agent's pages up, so the toggle sits next to the evidence for
+      // whether flipping it is a good idea (see chatbot-readiness.js).
+      const byPhone = new Map();
+      for (const b of businesses) {
+        byPhone.set(b.phone, {
+          phone: b.phone,
+          name: b.business_name || b.full_name || "—",
+          plan: b.plan || "",
+          onboarding_state: b.onboarding_state || "",
+          is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
+          chatbot_enabled: !!(b.features && b.features.chatbot),
+          pages: 0, active_pages: 0, views: 0, leads: 0,
+          readiness: { rich: 0, ok: 0, thin: 0 },
+        });
+      }
+      for (const p of pages) {
+        const row = byPhone.get(p.business_phone);
+        if (!row || p.status === "archived") continue;
+        row.pages++;
+        if (p.status === "active" || p.status === "expiring") row.active_pages++;
+        row.views += p.view_count || 0;
+        row.leads += p.lead_count || 0;
+        const { verdict } = readiness.scorePage(
+          p, p.listing_id ? listingById.get(p.listing_id) || null : null
+        );
+        row.readiness[verdict]++;
+      }
+
+      const agents = [...byPhone.values()]
+        .sort((a, b) => (b.active_pages - a.active_pages) || a.name.localeCompare(b.name, "he"));
+      res.json({
+        agents,
+        stats: {
+          total_agents: agents.length,
+          chatbot_agents: agents.filter((a) => a.chatbot_enabled).length,
+          chatbot_pages: agents.reduce((n, a) => n + (a.chatbot_enabled ? a.active_pages : 0), 0),
+        },
+      });
+    } catch (err) {
+      console.error("admin/agents failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── grant/revoke a premium feature for one agent ──
+  // Flipping this on turns the bot on for every page that agent owns, old ones
+  // included: entitlement is resolved live from the business, never stamped
+  // onto the page. Revoking is immediate in the same way.
+  const FEATURES = new Set(["chatbot"]);
+
+  router.post("/business/features", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const phone = normalizeAuthPhone(body.phone || "");
+    const feature = String(body.feature || "");
+    // Whitelisted so an admin session can never write an arbitrary key onto a
+    // business document just by renaming the field in the request.
+    if (!phone || !FEATURES.has(feature) || typeof body.enabled !== "boolean") {
+      return res.status(400).json({ error: "invalid_input" });
+    }
+    try {
+      const biz = await db.getBusiness(phone);
+      if (!biz) return res.status(404).json({ error: "unknown_agent" });
+      const features = Object.assign({}, biz.features || {}, { [feature]: body.enabled });
+      await db.setBusiness(phone, { features, updated_at: new Date() });
+      // Pages resolve the entitlement through a 60s cache; drop it so the
+      // change is visible on the next request instead of up to a minute later.
+      businessCache.invalidate(phone);
+      console.log(`admin_feature_set feature=${feature} enabled=${body.enabled} ` +
+        `agent=${phone} by=${req.user.userId}`);
+      res.json({ ok: true, phone, feature, enabled: body.enabled });
+    } catch (err) {
+      console.error("admin/business/features failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── per-page chat-bot override ──
+  // enabled:true forces the bot on for one page even when the agent is off;
+  // false forces it off even when the agent is on; null clears back to
+  // inheriting the agent's entitlement (see chatbot-config.js).
+  router.post("/page/chatbot", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const pageId = String(body.page_id || "");
+    const enabled = body.enabled;
+    if (!pageId || !(enabled === true || enabled === false || enabled === null)) {
+      return res.status(400).json({ error: "invalid_input" });
+    }
+    try {
+      const page = await db.getPage(pageId);
+      if (!page) return res.status(404).json({ error: "not_found" });
+      await db.updatePage(pageId, { "chatbot.enabled": enabled, updated_at: new Date() });
+      const biz = await businessCache.get(page.business_phone);
+      const state = chatbotConfig.adminState(
+        Object.assign({}, page, { chatbot: Object.assign({}, page.chatbot, { enabled }) }),
+        biz, process.env
+      );
+      console.log(`admin_page_chatbot page=${pageId} enabled=${enabled} ` +
+        `effective=${state.effective} by=${req.user.userId}`);
+      res.json({ ok: true, page_id: pageId, chatbot: state });
+    } catch (err) {
+      console.error("admin/page/chatbot failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── chatbot readiness: what would the bot actually know, page by page? ──
+  // Read-only. Run this before granting an agent the chatbot so you can see
+  // which of their existing pages carry enough data to hold a conversation —
+  // older pages predate the area/carousel work and can be very thin.
+  //   ?verdict=thin   only pages that would hand off almost immediately
+  //   ?phone=…        one agent's back catalogue
+  router.get("/chatbot-readiness", requireAdmin, async (req, res) => {
+    try {
+      const [pages, listings, businesses] = await Promise.all([
+        db.listAllPages(),
+        db.listAllListings(),
+        db.listAllBusinesses(),
+      ]);
+      // Map once rather than a getListing() per page — this scans everything.
+      const listingById = new Map(listings.map((l) => [l.listing_id, l]));
+      const bizByPhone = new Map(businesses.map((b) => [b.phone, b]));
+
+      const wantPhone = normalizeAuthPhone(req.query.phone || "") || null;
+      const wantVerdict = String(req.query.verdict || "").trim() || null;
+
+      const reports = [];
+      for (const p of pages) {
+        if (p.status === "archived") continue;
+        const phone = p.business_phone || "";
+        if (wantPhone && normalizeAuthPhone(phone) !== wantPhone) continue;
+
+        const biz = bizByPhone.get(phone);
+        const { verdict, signals, gaps } = readiness.scorePage(
+          p, p.listing_id ? listingById.get(p.listing_id) || null : null
+        );
+        if (wantVerdict && verdict !== wantVerdict) continue;
+
+        reports.push({
+          page_id: p.page_id,
+          page_url: `${pageBaseUrl}/p/${p.page_id}`,
+          page_status: p.status || "",
+          title: (p.property && p.property.title) || "—",
+          business_phone: phone,
+          agent_name: (biz && (biz.business_name || biz.full_name)) ||
+            (p.agent && (p.agent.brand_name || p.agent.name)) || "—",
+          // Entitlement as it stands today. Flipping this on the business turns
+          // the bot on for every page that agent owns, this one included.
+          chatbot_enabled: !!(biz && biz.features && biz.features.chatbot),
+          verdict,
+          signals,
+          gaps,
+        });
+      }
+
+      const order = { thin: 0, ok: 1, rich: 2 };
+      reports.sort((a, b) => (order[a.verdict] - order[b.verdict]) ||
+        (a.signals.description_chars - b.signals.description_chars));
+
+      res.json({ summary: readiness.summarize(reports), pages: reports });
+    } catch (err) {
+      console.error("admin/chatbot-readiness failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });
