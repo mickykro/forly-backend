@@ -198,10 +198,22 @@
       var FR = [];
       for (i = 0; i < count; i++) FR.push(0.06 + (0.86 * i) / Math.max(1, count - 1));
       var vv = document.createElement("video");
-      vv.src = vsrc; vv.muted = true; vv.playsInline = true; vv.preload = "auto"; vv.crossOrigin = "anonymous";
+      vv.src = vsrc; vv.muted = true; vv.playsInline = true; vv.preload = "auto";
+      // Only a cross-origin fetch needs the CORS opt-in, and only it can taint
+      // the canvas. On a blob:/data: source WebKit reads the attribute as a
+      // failed CORS check and refuses the load, so it has to stay off there.
+      if (/^https?:/i.test(vsrc)) vv.crossOrigin = "anonymous";
+      // iOS will not decode a detached <video>; it has to be in the document and
+      // laid out, so park it off-screen at 2px rather than display:none.
+      vv.setAttribute("aria-hidden", "true");
+      vv.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
+      document.body.appendChild(vv);
       vv.addEventListener("loadedmetadata", function () {
         var k = 0;
-        function seek() { if (k >= count) return; vv.currentTime = Math.max(0.1, FR[k] * vv.duration); }
+        function seek() {
+          if (k >= count) { if (vv.parentNode) vv.parentNode.removeChild(vv); return; }
+          vv.currentTime = Math.max(0.1, FR[k] * vv.duration);
+        }
         vv.addEventListener("seeked", function () {
           var c = document.createElement("canvas"); c.width = vv.videoWidth; c.height = vv.videoHeight;
           try { c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height); frames[k] = c; tiles[k].insertBefore(c, tiles[k].firstChild); tiles[k].classList.add("loaded"); } catch (e) {}

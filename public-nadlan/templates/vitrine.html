@@ -504,7 +504,11 @@
     if (!src) return;
     var v = document.createElement("video");
     v.src = src; v.muted = true; v.playsInline = true; v.preload = "auto";
-    v.crossOrigin = "anonymous"; v.setAttribute("aria-hidden", "true");
+    // Only a cross-origin fetch needs the CORS opt-in, and only it can taint the
+    // canvas. On a blob:/data: source WebKit treats the attribute as a failed
+    // CORS check and refuses the load outright, so it has to stay off there.
+    if (/^https?:/i.test(src)) v.crossOrigin = "anonymous";
+    v.setAttribute("aria-hidden", "true");
     v.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
     document.body.appendChild(v);
 
