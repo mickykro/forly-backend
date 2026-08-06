@@ -8,6 +8,8 @@ const fs = require("fs");
 
 const pad = (n) => String(n).padStart(2, "0");
 const daysFromNow = (d) => new Date(Date.now() + d * 86400000);
+// Firestore hands back Timestamps, the in-memory store plain Dates.
+const asMillis = (v) => (v && v.toMillis ? v.toMillis() : v ? new Date(v).getTime() : 0);
 
 // ── theme sanitization ──
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -43,6 +45,21 @@ function normalizePhone(raw) {
   return null;
 }
 
+// The canonical phone form used for businesses/{phone} doc ids, session
+// userIds and page ownership checks. normalizePhone() above is Israel-only and
+// returns null otherwise; auth must also work for non-IL test numbers, so this
+// one accepts international digits. Lives here rather than in auth.js so
+// callers (and tests) can reach it without pulling in Express.
+function normalizeAuthPhone(raw) {
+  let p = String(raw || "").replace(/\D/g, "");
+  if (!p) return null;
+  if (p.startsWith("00")) p = p.slice(2);
+  if (/^05\d{8}$/.test(p)) return "972" + p.slice(1);   // 0501234567 → 972501234567
+  if (/^5\d{8}$/.test(p)) return "972" + p;             // 501234567  → 972501234567
+  if (p.length >= 9 && p.length <= 15) return p;        // already international
+  return null;
+}
+
 // ── asset helpers ──
 function guessImageExt(url) {
   const m = url.split("?")[0].match(/\.(png|webp|jpe?g)$/i);
@@ -73,7 +90,7 @@ async function sendWhatsApp(phone, message, instance, token) {
 }
 
 module.exports = {
-  pad, daysFromNow,
-  sanitizeTheme, sanitizeLang, normalizePhone,
+  pad, daysFromNow, asMillis,
+  sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
   guessImageExt, rehost, sendWhatsApp,
 };

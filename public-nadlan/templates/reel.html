@@ -46,7 +46,7 @@
   .hl-list{margin-top:18px;display:grid;gap:22px}.hl{border-top:1px solid var(--line);padding-top:16px}.hl .n{font-family:var(--disp);font-weight:800;font-size:.9rem;color:var(--wine);letter-spacing:.04em}.hl h3{font-family:var(--disp);font-weight:700;font-size:1.05rem;margin:6px 0 0}.hl p{color:var(--ink-2);font-size:.94rem;line-height:1.7;margin-top:6px}.hl p:empty{display:none}.hl .tag{display:inline-block;margin-top:10px;font-size:.78rem;letter-spacing:.03em;color:var(--stone)}.hl .tag:empty{display:none}
   .strip-head{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:30px}
   .strip{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:10px}.strip::-webkit-scrollbar{height:6px}.strip::-webkit-scrollbar-thumb{background:var(--line);border-radius:10px}
-  .shot{flex:0 0 clamp(260px,42vw,440px);scroll-snap-align:start;aspect-ratio:16/11;overflow:hidden;border-radius:8px;position:relative;background:#e6e1d5;cursor:pointer;border:none;padding:0}.shot.loaded{background:#0c0a09}.shot canvas{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s}.shot:hover canvas{transform:scale(1.05)}
+  .shot{flex:0 0 clamp(260px,42vw,440px);scroll-snap-align:start;aspect-ratio:16/11;overflow:hidden;border-radius:8px;position:relative;background:#e6e1d5;cursor:pointer;border:none;padding:0}.shot.loaded{background:#0c0a09}.shot canvas,.shot img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s}.shot:hover canvas,.shot:hover img{transform:scale(1.05)}
   .shot .g-no{position:absolute;top:10px;inset-inline-start:12px;font-size:.64rem;font-weight:700;color:#fff;mix-blend-mode:difference;z-index:2}
   .strip-hint{font-size:.8rem;color:var(--stone);margin-top:12px}
   .band{background:var(--ink);color:var(--paper)}.band .kick{color:#E8A48A}.band .kick::before{background:#E8A48A}
@@ -94,6 +94,7 @@
       <div class="fig"><b class="num"><span data-bind="property.size_sqm">140</span></b><span data-i18n="built_area">מ״ר בנוי</span></div>
       <div class="fig" data-show="property.floor"><b class="num" data-bind="property.floor">7</b><span data-i18n="floor">קומה</span></div>
     </dl>
+    <div data-amenities style="margin-top:20px"></div>
   </div>
 </section>
 
@@ -139,7 +140,7 @@
       <span class="kick" data-i18n="book_visit">תיאום ביקור</span>
       <h2 style="margin-top:16px" data-bind="cta.headline">הנכסים הטובים באמת לא מחכים</h2>
       <p class="lede" data-bind="cta.sub">השאירו פרטים ונחזור אליכם עוד היום לתיאום ביקור פרטי בנכס.</p>
-      <div class="agent"><div class="av" data-avatar>ש</div><div><b data-bind="agent.name">שלום רוזנברג</b><span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · <span data-i18n="license_label">רישיון תיווך</span> <span data-bind="agent.license">3205419</span></span></div></div>
+      <div class="agent"><div class="av" data-avatar>ש</div><div><b><span data-bind="agent.name">שלום רוזנברג</span><span data-show="agent2.name"> &amp; <span data-bind="agent2.name"></span></span></b><span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · <span data-i18n="license_label">רישיון תיווך</span> <span data-bind="agent.license">3205419</span></span></div></div>
     </div>
     <form data-lead-form class="reveal">
       <div class="field"><label data-i18n="form_name">שם מלא</label><input data-lead="name" type="text" placeholder="ישראל ישראלי" data-i18n-ph="ph_name" required></div>

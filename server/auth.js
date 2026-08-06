@@ -22,17 +22,9 @@ const MAX_ATTEMPTS = 5;                // wrong-code attempts before lockout
 const SESSION_TTL_S = 12 * 60 * 60;    // 12 hours
 
 // ── phone ──
-// The server's own normalizePhone() is Israel-only and returns null otherwise.
-// Auth must also work for non-IL test numbers, so accept international digits.
-function normalizeAny(raw) {
-  let p = String(raw || "").replace(/\D/g, "");
-  if (!p) return null;
-  if (p.startsWith("00")) p = p.slice(2);
-  if (/^05\d{8}$/.test(p)) return "972" + p.slice(1);   // 0501234567 → 972501234567
-  if (/^5\d{8}$/.test(p)) return "972" + p;             // 501234567  → 972501234567
-  if (p.length >= 9 && p.length <= 15) return p;        // already international
-  return null;
-}
+// Canonical form lives in utils.js so ownership checks and their tests can
+// reach it without loading Express. Aliased here to keep call sites unchanged.
+const normalizeAny = require("./utils").normalizeAuthPhone;
 
 // ── crypto ──
 const hashCode = (secret, phone, code) =>
@@ -270,6 +262,17 @@ module.exports.readToken = readToken;
 // Canonical phone form used for businesses/{phone} doc ids and session userIds.
 // Exported so callers (demo signup, listing ownership) key on the same string.
 module.exports.normalizeAuthPhone = normalizeAny;
+
+// One-tap action token (e.g. the WhatsApp "extend page" link). Bind it to a
+// value the action itself changes (expires_at) and it self-invalidates on use.
+const signActionToken = (parts, secret) =>
+  crypto.createHmac("sha256", secret).update(parts.join(":")).digest("base64url");
+module.exports.signActionToken = signActionToken;
+module.exports.verifyActionToken = (parts, token, secret) => {
+  const a = Buffer.from(String(token || ""));
+  const b = Buffer.from(signActionToken(parts, secret));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
 
 module.exports.requireAuth = (secret) => (req, res, next) => {
   const session = verifySession(secret, readToken(req));

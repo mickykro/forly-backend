@@ -65,7 +65,7 @@
   .gal{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:minmax(130px,1fr);gap:12px;margin-top:44px}
   .g{position:relative;overflow:hidden;border-radius:5px;background:#12161f;cursor:pointer;border:none;padding:0;aspect-ratio:16/11}
   .g:first-child{grid-column:span 2;grid-row:span 2;aspect-ratio:auto}
-  .g.loaded{background:#05070B}.g canvas{width:100%;height:100%;object-fit:cover;display:block;transition:transform .6s}.g:hover canvas{transform:scale(1.05)}
+  .g.loaded{background:#05070B}.g canvas,.g img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .6s}.g:hover canvas,.g:hover img{transform:scale(1.05)}
   .g .g-no{position:absolute;bottom:12px;inset-inline-start:14px;z-index:2;font-size:.7rem;color:var(--ivory);letter-spacing:.1em}
   @media(max-width:720px){.gal{grid-template-columns:repeat(2,1fr)}.g:first-child{grid-column:span 2;grid-row:auto;aspect-ratio:16/11}}
   .band{background:linear-gradient(var(--panel),var(--void))}
@@ -117,6 +117,8 @@
   </dl>
 </div>
 
+<div class="wrap" data-amenities style="margin-top:22px"></div>
+
 <section>
   <div class="wrap">
     <span class="kick reveal" data-i18n="why_here" data-bind="texts.why_title">למה דווקא כאן</span>
@@ -158,7 +160,7 @@
         <span class="kick" data-i18n="book_visit">תיאום ביקור</span>
         <h2 data-bind="cta.headline">הנכסים הטובים באמת לא מחכים</h2>
         <p class="lede" data-bind="cta.sub">השאירו פרטים ונחזור אליכם עוד היום לתיאום ביקור פרטי.</p>
-        <div class="agent"><div class="av" data-avatar>ש</div><div><b data-bind="agent.name">שלום רוזנברג</b><span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · <span data-i18n="license_label">רישיון תיווך</span> <span data-bind="agent.license">3205419</span></span></div></div>
+        <div class="agent"><div class="av" data-avatar>ש</div><div><b><span data-bind="agent.name">שלום רוזנברג</span><span data-show="agent2.name"> &amp; <span data-bind="agent2.name"></span></span></b><span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · <span data-i18n="license_label">רישיון תיווך</span> <span data-bind="agent.license">3205419</span></span></div></div>
       </div>
       <form data-lead-form>
         <div class="field"><label data-i18n="form_name">שם מלא</label><input data-lead="name" type="text" placeholder="ישראל ישראלי" data-i18n-ph="ph_name" required></div>

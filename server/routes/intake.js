@@ -12,6 +12,7 @@ const fs = require("fs");
 const db = require("../db");
 const pageEdit = require("../edit");
 const { sanitizeTheme, sanitizeLang } = require("../utils");
+const { sanitizeTags } = require("../tags");
 
 const MAX_UPLOAD_FILES = 12;
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -132,7 +133,14 @@ module.exports = function createIntakeRouter(ctx) {
       listing_type: body.listing_type === "rent" ? "rent" : "sale",
       price: Number(body.price) || 0, rooms: Number(body.rooms) || 0,
       size_sqm: Number(body.size_sqm) || 0, floor: Number(body.floor) || 0,
+      size_built: Number(body.size_built) || 0,
+      size_balcony: Number(body.size_balcony) || 0,
+      size_garden: Number(body.size_garden) || 0,
       parking: Number(body.parking) || 0,
+      storage: !!body.storage,
+      elevator: !!body.elevator || !!body.shabbat_elevator,
+      shabbat_elevator: !!body.shabbat_elevator,
+      tags: sanitizeTags(body.tags),
       description: String(body.description || "").slice(0, 2000),
       photos_urls: body.photos_urls.slice(0, MAX_UPLOAD_FILES),
       own_video_url: body.own_video_url || null,
@@ -143,7 +151,14 @@ module.exports = function createIntakeRouter(ctx) {
         logo_url: agentOverride.logo_url || null,
         tagline: String(agentOverride.tagline || ""),
         phone: String(agentOverride.phone || phone),
+        phone2: agentOverride.phone2
+          ? String(agentOverride.phone2).replace(/\D/g, "").slice(0, 15) || null
+          : null,
         license: String(agentOverride.license || ""),
+      } : null,
+      agent2: body.agent2 && body.agent2.name && body.agent2.phone ? {
+        name: String(body.agent2.name).slice(0, 60),
+        phone: String(body.agent2.phone).replace(/\D/g, "").slice(0, 15),
       } : null,
       theme: sanitizeTheme(body.theme),
       language: sanitizeLang(body.language),
@@ -162,7 +177,12 @@ module.exports = function createIntakeRouter(ctx) {
         listing_type: listing.listing_type,
         address: listing.address, neighborhood: listing.neighborhood, city: listing.city,
         price: listing.price, rooms: listing.rooms, size_sqm: listing.size_sqm,
-        floor: listing.floor, parking: listing.parking, description: listing.description,
+        size_built: listing.size_built, size_balcony: listing.size_balcony,
+        size_garden: listing.size_garden,
+        floor: listing.floor, parking: listing.parking,
+        storage: listing.storage, elevator: listing.elevator,
+        shabbat_elevator: listing.shabbat_elevator,
+        description: listing.description,
       },
     };
     if (webhook) {
@@ -199,6 +219,9 @@ module.exports = function createIntakeRouter(ctx) {
         onboarding_state: "demo_partial",
         onboarding_pct: 30,
         source: "demo",
+        // Demos get the chat bot on by default — it's the feature worth
+        // showing off, and cost is bounded by DEMO_MONTHLY_CAP (chatbot-config.js).
+        features: { chatbot: true },
         created_at: now, updated_at: now,
       });
     }

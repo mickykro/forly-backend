@@ -71,7 +71,18 @@
       "Bash(/opt/homebrew/bin/node --version)",
       "Bash(/usr/local/bin/node --version)",
       "Read(//Users/MichaelKrotorio/.nvm/versions/node/**)",
-      "Bash(cd /tmp; node -e ' *)"
+      "Bash(cd /tmp; node -e ' *)",
+      "Bash(npx astro *)",
+      "Bash(node -c server/portal-stream.js)",
+      "Bash(node -c server/routes/intake.js)",
+      "Bash(node -c server/routes/pages.js)",
+      "Bash(node -c server/scripts/backfill-tags.js)",
+      "Bash(node -c public-agent/form-i18n.js)",
+      "Bash(curl -s -i -X POST -H \"x-admin-secret: 328rDmEFjxDyDdF6/AV76DQjhOTHCzJF3WAGwvcOTQ0\" \"http://127.0.0.1:8787/api/admin/backfill-tags?dry=1\")",
+      "Bash(ls -la /Users/MichaelKrotorio/.config/gcloud/application_default_credentials.json 2>&1 | head -1)",
+      "Read(//Users/MichaelKrotorio/.config/gcloud/**)",
+      "Bash(PORT=8788 FORLY_JWT_SECRET=328rDmEFjxDyDdF6/AV76DQjhOTHCzJF3WAGwvcOTQ0 node server/index.js)",
+      "Bash(curl -sX POST -H \"x-admin-secret: 328rDmEFjxDyDdF6/AV76DQjhOTHCzJF3WAGwvcOTQ0\" \"http://127.0.0.1:8899/api/admin/backfill-tags?dry=1\")"
     ],
     "deny": [
       "Bash(firebase deploy:*)",

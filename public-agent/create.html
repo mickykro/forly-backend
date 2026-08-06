@@ -13,6 +13,7 @@
 <style>
   .chip-btn{border:1px solid rgba(23,20,15,.18);background:#fff;border-radius:100px;padding:4px 12px;font-size:.85rem;cursor:pointer;color:var(--ink,#17140f);line-height:1.4}
   .chip-btn:hover{border-color:var(--gold,#b98a2f);color:var(--gold,#b98a2f)}
+  .chip-btn.on{background:var(--gold,#b98a2f);border-color:var(--gold,#b98a2f);color:#fff}
   .th-pick{border:none;border-radius:10px;color:#fff;font-weight:600;font-size:.85rem;cursor:pointer;min-height:40px;text-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .1s}
   .th-pick:active{transform:scale(.98)}
   .th-pick.chosen{box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.3))}
@@ -47,6 +48,16 @@
   .lang-opt:hover{background:rgba(23,20,15,.06)}
   .lang-opt .fl{font-size:1.15rem}
   .lang-opt[aria-selected="true"]{background:rgba(185,138,47,.14);font-weight:600}
+  /* optional sub-form (area breakdown) + feature checkboxes + extra-agent block */
+  .collapsible{border:1px solid rgba(23,20,15,.14);border-radius:10px;margin:2px 0 14px}
+  .collapsible summary{padding:10px 14px;cursor:pointer;font-size:.9rem;font-weight:500;color:var(--ink-soft,#5c554c)}
+  .collapsible[open] summary{border-bottom:1px solid rgba(23,20,15,.1)}
+  .collapsible .collapsible-content{padding:12px 14px 0}
+  .feature-row{display:flex;gap:18px;flex-wrap:wrap;margin:2px 0 14px}
+  .feature-row label{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.9rem;color:var(--ink-soft,#5c554c);font-weight:400}
+  .feature-row input{width:auto}
+  .sub-block{border:1px solid rgba(23,20,15,.14);border-radius:12px;padding:14px 14px 2px;margin:10px 0 14px}
+  .sub-block-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 </style>
 </head>
 <body>
@@ -96,8 +107,34 @@
               </select>
               <input id="agPhone" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
             </div>
+            <button type="button" class="chip-btn" id="addPhone2" style="margin-top:6px" data-i18n="btn_add_phone">+ מספר נוסף</button>
           </div>
           <div class="field"><label data-i18n="lbl_license">מס׳ רישיון תיווך</label><input id="agLicense" placeholder="3205419"></div>
+          <div class="field hidden" id="phone2Field">
+            <label data-i18n="lbl_phone2">נייד נוסף (וואטסאפ)</label>
+            <div style="display:flex;gap:8px">
+              <select id="agCC2" style="width:auto;flex:0 0 auto"></select>
+              <input id="agPhone2" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
+              <button type="button" class="chip-btn" id="rmPhone2" style="flex:0 0 auto">✕</button>
+            </div>
+          </div>
+        </div>
+        <button type="button" class="chip-btn" id="addAgent2" style="margin-bottom:12px" data-i18n="btn_add_agent">+ סוכן נוסף</button>
+        <div class="sub-block hidden" id="agent2Block">
+          <div class="sub-block-head">
+            <b style="font-size:.9rem" data-i18n="lbl_agent2_title">סוכן נוסף</b>
+            <button type="button" class="chip-btn" id="rmAgent2">✕ <span data-i18n="btn_remove">הסרה</span></button>
+          </div>
+          <div class="grid-2">
+            <div class="field"><label data-i18n="lbl_agent2_name">שם מלא</label><input id="ag2Name" placeholder="רון גולן" data-i18n-ph="ph_agName"></div>
+            <div class="field">
+              <label data-i18n="lbl_agent2_phone">נייד (וואטסאפ)</label>
+              <div style="display:flex;gap:8px">
+                <select id="ag2CC" style="width:auto;flex:0 0 auto"></select>
+                <input id="ag2Phone" type="tel" placeholder="050-0000000" style="flex:1 1 auto">
+              </div>
+            </div>
+          </div>
         </div>
         <div class="field"><label data-i18n="lbl_logo">לוגו (אופציונלי)</label><input id="agLogo" type="file" accept="image/png,image/jpeg,image/webp"></div>
       </div>
@@ -118,15 +155,26 @@
         <div class="field"><label data-i18n="lbl_city">עיר *</label><input id="pCity" placeholder="תל אביב" data-i18n-ph="ph_city"></div>
         <div class="field"><label data-i18n="lbl_neighborhood">שכונה</label><input id="pHood" placeholder="בבלי" data-i18n-ph="ph_hood"></div>
       </div>
-      <div class="grid-3">
-        <div class="field"><label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label><input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="4,900,000"></div>
-        <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
-        <div class="field"><label data-i18n="lbl_sqm">מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
-      </div>
-      <div class="field" style="margin-top:-6px">
+      <div class="field">
+        <label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label>
+        <input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="4,900,000">
         <div class="hint" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span data-i18n="quick_price">בחירה מהירה:</span><span id="priceChips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span></div>
         <div class="hint" id="priceWords" style="color:var(--gold);font-weight:600;min-height:1.2em"></div>
       </div>
+      <div class="grid-2">
+        <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
+        <div class="field"><label data-i18n="lbl_sqm">מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
+      </div>
+      <details class="collapsible">
+        <summary data-i18n="sum_size_details">פירוט שטחים (בנוי / מרפסות / חצר)</summary>
+        <div class="collapsible-content">
+          <div class="grid-3">
+            <div class="field"><label data-i18n="lbl_size_built">בנוי (מ״ר)</label><input id="pSqmBuilt" type="number" inputmode="numeric" placeholder="95"></div>
+            <div class="field"><label data-i18n="lbl_size_balcony">מרפסות (מ״ר)</label><input id="pSqmBalcony" type="number" inputmode="numeric" placeholder="12"></div>
+            <div class="field"><label data-i18n="lbl_size_garden">חצר / גינה (מ״ר)</label><input id="pSqmGarden" type="number" inputmode="numeric" placeholder="0"></div>
+          </div>
+        </div>
+      </details>
       <div class="grid-3">
         <div class="field"><label data-i18n="lbl_floor">קומה</label><input id="pFloor" type="number" inputmode="numeric" placeholder="5"></div>
         <div class="field"><label data-i18n="lbl_parking">חניות</label><input id="pParking" type="number" inputmode="numeric" placeholder="1"></div>
@@ -136,13 +184,24 @@
           </label>
         </div>
       </div>
+      <div class="feature-row">
+        <label><input id="pStorage" type="checkbox"> <span data-i18n="lbl_storage">מחסן</span></label>
+        <label><input id="pElevator" type="checkbox"> <span data-i18n="lbl_elevator">מעלית</span></label>
+        <label><input id="pShabbatElevator" type="checkbox"> <span data-i18n="lbl_shabbat_elevator">מעלית שבת</span></label>
+      </div>
       <div class="field">
         <label data-i18n="lbl_description">תיאור חופשי</label>
         <textarea id="pDesc" rows="3" placeholder="משופצת אדריכלית, מרפסת שמש לים, ממ״ד..." data-i18n-ph="ph_description"></textarea>
         <div class="hint" data-i18n="hint_description">התיאור עוזר ל-AI לכתוב את הדף — ככל שתפרטו, הדף יהיה טוב יותר.</div>
       </div>
+      <div class="field">
+        <label data-i18n="lbl_tags">תגיות (לסינון בפורטל)</label>
+        <div id="pTags" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        <div class="hint" data-i18n="hint_tags">בחרו את המאפיינים הבולטים של הנכס — הם משמשים לסינון מהיר בפורטל.</div>
+      </div>
 
       <div class="sec-title" data-i18n="sec_photos">תמונות הנכס (3–12)</div>
+      <div class="hint" data-i18n="hint_photos_video">כל תמונה הופכת לקטע וידאו של כ-2.5 שניות — עד 12 תמונות.</div>
       <div class="drop" id="drop">
         <div style="font-size:1.6rem">📸</div>
         <span data-i18n="drop_prompt">גררו תמונות לכאן או</span> <b style="color:var(--gold)" data-i18n="drop_click">לחצו לבחירה</b>
@@ -433,12 +492,57 @@
   $("#pPrice").addEventListener("input", refreshPrice);
   renderPriceChips();
 
+  // ── property tags (portal filter chips) — value must match server/tags.js ──
+  var TAG_LABELS = [["גן","דירת גן"],["פנטהאוז","פנטהאוז"],["מרפסת","מרפסת"],["חניה","חניה"],
+    ["ים","נוף/קרבה לים"],["דופלקס","דופלקס"],["בלעדיות","בלעדיות"],["משופצת","משופצת"]];
+  $("#pTags").innerHTML = TAG_LABELS.map(function (t) {
+    return '<button type="button" class="chip-btn" data-tag="' + t[0] + '">' + t[1] + "</button>";
+  }).join("");
+  Array.prototype.forEach.call($("#pTags").children, function (b) {
+    b.addEventListener("click", function () { b.classList.toggle("on"); });
+  });
+  function selectedTags() {
+    return Array.prototype.filter.call($("#pTags").children, function (b) { return b.classList.contains("on"); })
+      .map(function (b) { return b.getAttribute("data-tag"); });
+  }
+
   // ── "not in a building" (private house): no floor field ──
   $("#pNoBuilding").addEventListener("change", function () {
     var floor = $("#pFloor");
     floor.disabled = this.checked;
     if (this.checked) { floor.value = ""; floor.placeholder = FT("lbl_floor_disabled"); }
     else floor.placeholder = "5";
+  });
+
+  // a Shabbat elevator is an elevator
+  $("#pShabbatElevator").addEventListener("change", function () {
+    if (this.checked) $("#pElevator").checked = true;
+  });
+
+  // ── extra phone + extra agent (agent block) ──
+  // The country-code lists mirror the main one so there's a single source.
+  $("#agCC2").innerHTML = $("#agCC").innerHTML;
+  $("#ag2CC").innerHTML = $("#agCC").innerHTML;
+  $("#addPhone2").addEventListener("click", function () {
+    $("#phone2Field").classList.remove("hidden");
+    this.style.display = "none";
+    $("#agPhone2").focus();
+  });
+  $("#rmPhone2").addEventListener("click", function () {
+    $("#agPhone2").value = "";
+    $("#phone2Field").classList.add("hidden");
+    $("#addPhone2").style.display = "";
+  });
+  $("#addAgent2").addEventListener("click", function () {
+    $("#agent2Block").classList.remove("hidden");
+    this.style.display = "none";
+    $("#ag2Name").focus();
+  });
+  $("#rmAgent2").addEventListener("click", function () {
+    $("#ag2Name").value = "";
+    $("#ag2Phone").value = "";
+    $("#agent2Block").classList.add("hidden");
+    $("#addAgent2").style.display = "";
   });
 
   // ── uploader UI ──
@@ -702,6 +806,8 @@
       return;
     }
     var agPhone = "";
+    var agPhone2 = "";
+    var agent2 = null;
     if (isDemo) {
       agPhone = normalizeAgentPhone($("#agCC").value, $("#agPhone").value);
       if (agPhone.length < 10 || agPhone.length > 15) {
@@ -709,13 +815,40 @@
         err.classList.add("show");
         return;
       }
+      if (!$("#phone2Field").classList.contains("hidden") && $("#agPhone2").value.trim()) {
+        agPhone2 = normalizeAgentPhone($("#agCC2").value, $("#agPhone2").value);
+        if (agPhone2.length < 10 || agPhone2.length > 15) {
+          err.textContent = FT("err_bad_phone");
+          err.classList.add("show");
+          return;
+        }
+      }
+      // Second agent: ignore an untouched block; a partly-filled one is an error.
+      if (!$("#agent2Block").classList.contains("hidden") &&
+          ($("#ag2Name").value.trim() || $("#ag2Phone").value.trim())) {
+        var ag2Phone = normalizeAgentPhone($("#ag2CC").value, $("#ag2Phone").value);
+        if (!$("#ag2Name").value.trim() || ag2Phone.length < 10 || ag2Phone.length > 15) {
+          err.textContent = FT("err_agent2_incomplete");
+          err.classList.add("show");
+          return;
+        }
+        agent2 = { name: $("#ag2Name").value.trim(), phone: ag2Phone };
+      }
+    }
+
+    var videoFile = $("#videoInput").files[0] || null;
+    // Video + photos both supplied: ask whether to still auto-generate a tour
+    // from the photos. Accept → generate the tour AND show their video first in
+    // the gallery; decline → just use their video (no generation).
+    var tourFromPhotos = false;
+    if (videoFile && photos.length >= 3) {
+      tourFromPhotos = window.confirm(FT("confirm_video_and_photos"));
     }
 
     var btn = this;
     btn.disabled = true;
     btn.textContent = FT("status_uploading");
 
-    var videoFile = $("#videoInput").files[0] || null;
     var logoFile = isDemo && $("#agLogo").files[0] ? $("#agLogo").files[0] : null;
     var fontFile = (fontFilesNeeded() && $("#thFontFile").files[0]) ? $("#thFontFile").files[0] : null;
 
@@ -747,11 +880,21 @@
           price: priceValue(),
           rooms: Number($("#pRooms").value),
           size_sqm: Number($("#pSqm").value) || 0,
+          size_built: Number($("#pSqmBuilt").value) || 0,
+          size_balcony: Number($("#pSqmBalcony").value) || 0,
+          size_garden: Number($("#pSqmGarden").value) || 0,
           floor: $("#pNoBuilding").checked ? 0 : (Number($("#pFloor").value) || 0),
           parking: Number($("#pParking").value) || 0,
+          storage: $("#pStorage").checked,
+          elevator: $("#pElevator").checked,
+          shabbat_elevator: $("#pShabbatElevator").checked,
+          tags: selectedTags(),
           description: $("#pDesc").value.trim(),
           photos_urls: photoUrls,
-          own_video_url: videoUrl,
+          // Decline → their video replaces generation; accept → generate a tour
+          // and pass their video to sit first in the gallery.
+          own_video_url: tourFromPhotos ? null : videoUrl,
+          gallery_video_url: tourFromPhotos ? videoUrl : null,
           theme: theme,
           language: $("#pLang").value,
         };
@@ -760,9 +903,11 @@
             name: $("#agName").value.trim(),
             brand_name: $("#agBrand").value.trim(),
             phone: agPhone,
+            phone2: agPhone2 || null,
             license: $("#agLicense").value.trim(),
             logo_url: logoUrl,
           };
+          if (agent2) body.agent2 = agent2;
         }
         btn.textContent = FT("status_creating");
         var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
@@ -772,6 +917,12 @@
           headers: Object.assign({ "Content-Type": "application/json" }, uploadHeaders),
           body: JSON.stringify(body),
         }).then(function (r) {
+          // Session expired / not logged in on the real path → go log in,
+          // matching FLY.req. (Demo has no login, so let its error surface.)
+          if (r.status === 401 && !isDemo) {
+            location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
+            throw new Error("unauthenticated");
+          }
           return r.json().then(function (d) {
             if (!r.ok) throw new Error(d.error || "create failed");
             return d;

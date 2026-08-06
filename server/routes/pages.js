@@ -1,7 +1,7 @@
 /*
  * routes/pages.js — landing page builder + serving + leads
  * Handles: /createPropertyPage, /api/property-page, /api/property-lead,
- *          /api/property-event, /api/video-overlay, /p/:id
+ *          /api/property-event, /api/video-overlay, /api/extend, /p/:id
  */
 
 const express = require("express");
@@ -11,27 +11,101 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
-const { pad, daysFromNow, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+const pageAuth = require("../page-auth");
+const chatbotConfig = require("../chatbot-config");
+const { submitLead } = require("../leads");
+const businessCache = require("../business-cache");
+const portalStream = require("../portal-stream");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+const { sanitizeTags, deriveTags } = require("../tags");
 
-const PAGE_LIFESPAN_DAYS = 30;
+// Portal era: pages no longer expire (the expiry scheduler is retired). New
+// pages get a far-future expires_at to keep the schema intact; /api/extend
+// stays functional for legacy reminder links already sent.
+const PAGE_LIFESPAN_DAYS = 36500;
 const LEAD_MAX_PER_HOUR = 3;
 const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel"]);
 
+const confirmHtml = (title, sub) =>
+  `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
+  `<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title>` +
+  `<style>body{font-family:-apple-system,'Segoe UI',sans-serif;background:#F7F3EC;color:#17140F;` +
+  `display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}` +
+  `.card{background:#FFFDF9;border:1px solid rgba(185,138,47,.3);border-radius:22px;padding:48px 36px;` +
+  `max-width:340px;box-shadow:0 20px 60px rgba(23,20,15,.08)}h1{font-size:1.5rem;margin:0 0 10px}` +
+  `p{color:#5A5348;margin:0}</style></head>` +
+  `<body><div class="card"><h1>${title}</h1><p>${sub}</p></div></body></html>`;
+const expiredLinkHtml = () =>
+  confirmHtml("הקישור אינו תקף", "ייתכן שהדף כבר הוארך. ניתן להאריך גם דרך agent.call4li.com");
+
 module.exports = function createPagesRouter(ctx) {
-  const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken } = ctx;
+  const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,
+          requireAuth, verifyActionToken, authSecret,
+          verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
+
+  // Admin allowlist, normalized once so "050-…", "+972…" and "972…" all match
+  // the canonical form a session carries (same treatment as routes/admin.js).
+  const adminSet = pageAuth.normalizeSet(adminPhones, normalizeAuthPhone);
+  const authMode = pageAuth.readMode(process.env.PAGE_UPDATE_AUTH);
 
   const router = express.Router();
 
-  // shared page payload builder
-  function pagePayload(id, d) {
+  // shared page payload builder.
+  // `chatbot` is the PUBLIC half of the resolved config (see chatbot-config.js)
+  // — never the model or the spend limits. Both callers pass it in rather than
+  // this being async, since resolving needs an await on the business doc.
+  function pagePayload(id, d, chatbot) {
     return {
-      page_id: id, status: d.status, agent: d.agent, property: d.property,
+      page_id: id, status: d.status, agent: d.agent, agent2: d.agent2 || null,
+      property: d.property,
       hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
       cta: d.cta, sections: d.sections, theme: d.theme || null,
       language: d.language || "he",
       texts: d.texts || null,
+      chatbot: chatbot || { enabled: false, greeting: null },
     };
   }
+
+  /** Resolve the chat bot for a page: agent entitlement + per-page override. */
+  async function resolveChatbot(d) {
+    const biz = await businessCache.get(d.business_phone);
+    return chatbotConfig.resolve(d, biz, process.env);
+  }
+
+  // ── maintenance: backfill property.tags on pages created before tags existed.
+  // Guarded by a shared secret so it's never open on prod. Run locally with:
+  //   curl -X POST -H "x-admin-secret: $FORLY_JWT_SECRET" \
+  //        "http://127.0.0.1:8787/api/admin/backfill-tags?dry=1"
+  // ?dry=1 reports without writing; ?force=1 recomputes even where tags exist.
+  router.post("/api/admin/backfill-tags", async (req, res) => {
+    if (authSecret === "change-me-in-env" || req.get("x-admin-secret") !== authSecret) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const dry = req.query.dry === "1";
+    const force = req.query.force === "1";
+    try {
+      const pages = await db.listPublicPages(1000);
+      const changes = [];
+      for (const p of pages) {
+        const existing = (p.property && p.property.tags) || [];
+        if (existing.length && !force) continue;
+        // Description lives on the listing, not the page — join it in for richer tags.
+        const listing = await db.getListing(p.listing_id).catch(() => null);
+        const tags = deriveTags(p.property || {}, listing && listing.description);
+        if (!tags.length) continue;
+        changes.push({ page_id: p.page_id, from: existing, to: tags });
+        if (!dry) {
+          await db.updatePage(p.page_id, { "property.tags": tags });
+          const fresh = await db.getPage(p.page_id);
+          if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
+        }
+      }
+      res.json({ scanned: pages.length, updated: changes.length, dry, force, changes });
+    } catch (err) {
+      console.error("backfill-tags failed:", err);
+      res.status(500).json({ error: err instanceof Error ? err.message : "internal error" });
+    }
+  });
 
   // ── page builder (called by n8n) ──
   router.post("/createPropertyPage", async (req, res) => {
@@ -42,7 +116,7 @@ module.exports = function createPagesRouter(ctx) {
     }
     try {
       const reusable = await db.findActivePageByListing(body.listing_id);
-      const pageId = reusable ? reusable.page_id : crypto.randomUUID();
+      const pageId = reusable ? reusable.page_id : await db.uniquePageId(body.agent);
       const base = `pages/${pageId}`;
 
       // Theme and agent are chosen on the intake form and stored on the listing;
@@ -54,6 +128,17 @@ module.exports = function createPagesRouter(ctx) {
       const agentIn = body.agent || {};
       const agentField = (k) => String(agentIn[k] || listingAgent[k] || "");
       const logoSrc = agentIn.logo_url || listingAgent.logo_url || null;
+      // Co-listing agent (optional). n8n may not forward it, so fall back to the
+      // listing where the intake form stored it.
+      const agent2In = body.agent2 || (listing && listing.agent2) || null;
+      const agent2Doc = agent2In && agent2In.name ? {
+        name: String(agent2In.name).slice(0, 60),
+        phone: String(agent2In.phone || "").replace(/\D/g, "").slice(0, 15) || null,
+      } : null;
+      // Property amenities + area breakdown: prefer the builder payload, fall
+      // back to the listing (the intake form is the source of truth for these).
+      const propNum = (k) => Number((body.property && body.property[k]) || (listing && listing[k])) || 0;
+      const propBool = (k) => !!((body.property && body.property[k]) || (listing && listing[k]));
       if (theme && theme.font_url) {
         const fext = (theme.font_url.split("?")[0].match(/\.(woff2|woff|ttf|otf)$/i) || [, "woff2"])[1].toLowerCase();
         theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`, uploadDir, baseUrl).catch(() => theme.font_url);
@@ -93,8 +178,10 @@ module.exports = function createPagesRouter(ctx) {
           logo_url: logoUrl,
           tagline: agentField("tagline"),
           phone: agentField("phone") || body.business_phone,
+          phone2: agentField("phone2") || null,
           license: agentField("license"),
         },
+        agent2: agent2Doc,
         property: {
           title: (body.property && body.property.title) ||
             `${(body.property && body.property.rooms) || ""} חד׳ ב${(body.property && (body.property.neighborhood || body.property.city)) || ""}`.trim(),
@@ -105,8 +192,16 @@ module.exports = function createPagesRouter(ctx) {
           price: Number(body.property && body.property.price) || 0,
           rooms: Number(body.property && body.property.rooms) || 0,
           size_sqm: Number(body.property && body.property.size_sqm) || 0,
+          size_built: propNum("size_built"),
+          size_balcony: propNum("size_balcony"),
+          size_garden: propNum("size_garden"),
           floor: Number(body.property && body.property.floor) || 0,
+          storage: propBool("storage"),
+          elevator: propBool("elevator") || propBool("shabbat_elevator"),
+          shabbat_elevator: propBool("shabbat_elevator"),
           parking: Number(body.property && body.property.parking) || 0,
+          // Agent-curated tags ride on the listing when n8n doesn't forward them.
+          tags: sanitizeTags((body.property && body.property.tags) || (listing && listing.tags)),
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
@@ -133,8 +228,12 @@ module.exports = function createPagesRouter(ctx) {
         lead_count: reusable ? (reusable.lead_count || 0) : 0,
       };
 
+      if (!doc.property.tags.length) doc.property.tags = deriveTags(doc.property, listing && listing.description);
       await db.savePage(doc);
       await db.setListingPageId(body.listing_id, pageId);
+      // Realtime: the portal shows the listing the moment it exists.
+      portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
+        portalStream.toCard(doc, pageBaseUrl));
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
@@ -167,7 +266,8 @@ module.exports = function createPagesRouter(ctx) {
       else pageEdit.noteEditFail(id);
     }
     res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
-    res.json({ ...pagePayload(id, d), ...(editable ? { editable: true } : {}) });
+    const bot = await resolveChatbot(d);
+    res.json({ ...pagePayload(id, d, bot.public), ...(editable ? { editable: true } : {}) });
   }
   router.get("/api/property-page", getPageHandler);
   router.get("/api/page", getPageHandler); // alias for edit.html
@@ -194,6 +294,8 @@ module.exports = function createPagesRouter(ctx) {
       patch["edit_count"] = (d.edit_count || 0) + 1;
       patch["updated_at"] = new Date();
       await db.updatePage(pageId, patch);
+      const fresh = await db.getPage(pageId).catch(() => null);
+      if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true, edit_count: patch["edit_count"] });
     } catch (err) {
       console.error("edit-text failed:", err);
@@ -202,15 +304,31 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── POST /api/page/update — dashboard page editor (auth via session) ──
+  // Owner-only (admins may edit any page). See page-auth.js for the rollout
+  // switch and why both phone forms are normalized before comparing.
   router.post("/api/page/update", async (req, res) => {
     const body = req.body || {};
     const pageId = String(body.page_id || "");
     if (!pageId) return res.status(400).json({ error: "page_id required" });
     const d = await db.getPage(pageId);
     if (!d) return res.status(404).json({ error: "not found" });
-    // ponytail: session auth would go here; for now allow any update
+
+    const verdict = pageAuth.checkPageAccess({
+      session: verifySession(authSecret, readToken(req)),
+      page: d,
+      adminSet,
+      normalize: normalizeAuthPhone,
+    });
+    if (!verdict.ok) {
+      console.warn(pageAuth.denialLog(pageId, verdict, authMode));
+      if (authMode === pageAuth.MODE_ENFORCE) {
+        return res.status(verdict.status).json({ error: verdict.error });
+      }
+      // MODE_LOG: recorded above, write allowed through this deploy only.
+    }
+
     try {
-      const patch = { updated_at: new Date() };
+      const patch = { updated_at: new Date(), edit_count: (d.edit_count || 0) + 1 };
       if (body.hero_phrase != null) patch["hero.phrase"] = String(body.hero_phrase).slice(0, 120);
       // Agent
       if (body.agent && typeof body.agent === "object") {
@@ -262,11 +380,54 @@ module.exports = function createPagesRouter(ctx) {
         patch["sections.area"] = !!body.sections.area;
       }
       await db.updatePage(pageId, patch);
+      const fresh = await db.getPage(pageId).catch(() => null);
+      if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true });
     } catch (err) {
       console.error("page/update failed:", err);
       res.status(500).json({ error: "internal" });
     }
+  });
+
+  // ── page expiry extension ──
+  // Two entry points, one effect: the dashboard button (session auth) and the
+  // one-tap link in the expiry-reminder WhatsApp (signed token, no session).
+  async function applyExtension(pageId, page) {
+    const from = Math.max(Date.now(), asMillis(page.expires_at));
+    const expiresAt = new Date(from + PAGE_LIFESPAN_DAYS * 86400000);
+    await db.updatePage(pageId, {
+      expires_at: expiresAt, status: "active",
+      extension_count: (page.extension_count || 0) + 1,
+      reminder_sent_at: null, updated_at: new Date(),
+    });
+    return expiresAt;
+  }
+
+  router.post("/api/page/extend", requireAuth(authSecret), async (req, res) => {
+    const pageId = String((req.body && req.body.page_id) || "");
+    const page = await db.getPage(pageId);
+    if (!page) return res.status(404).json({ error: "not found" });
+    if (page.business_phone !== req.user.userId) return res.status(403).json({ error: "not_owner" });
+    const expiresAt = await applyExtension(pageId, page);
+    res.json({ ok: true, expires_at: expiresAt.toISOString() });
+  });
+
+  // Token is bound to the current expires_at, so extending invalidates the link
+  // it came from — one tap per reminder, no replay.
+  router.get("/api/extend", async (req, res) => {
+    const pageId = String(req.query.id || "");
+    const e = String(req.query.e || "");
+    const t = String(req.query.t || "");
+    if (!pageId || !e || !t || !verifyActionToken([pageId, e], t, authSecret)) {
+      return res.status(401).type("html").send(expiredLinkHtml());
+    }
+    const page = await db.getPage(pageId);
+    if (!page || asMillis(page.expires_at) !== Number(e)) {
+      return res.status(401).type("html").send(expiredLinkHtml());
+    }
+    const expiresAt = await applyExtension(pageId, page);
+    const dateStr = expiresAt.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" });
+    res.type("html").send(confirmHtml("✅ הדף הוארך בהצלחה", `הדף פעיל עד ${dateStr}.`));
   });
 
   // ── lead capture ──
@@ -287,13 +448,7 @@ module.exports = function createPagesRouter(ctx) {
     db.mem.throttle.set(prospectPhone, { windowStart: count === 0 ? now : t.windowStart, count: count + 1 });
 
     try {
-      const lead = {
-        phone: prospectPhone, prospect_name: name, source: "landing_page",
-        page_id: body.page_id, listing_id: page.listing_id,
-        agent_phone: page.business_phone, status: "new", last_activity_at: new Date(),
-      };
-      await db.saveLead(prospectPhone, lead);
-      await db.incrPageCounter(body.page_id, "lead_count", 1);
+      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [] });
 
       // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
       if (!n8nLeadWebhook) {
@@ -313,7 +468,9 @@ module.exports = function createPagesRouter(ctx) {
               name: page.agent?.name || "",
               brand_name: page.agent?.brand_name || "",
               phone: page.agent?.phone || page.business_phone,
+              phone2: page.agent?.phone2 || null,
             },
+            agent2: page.agent2 || null,
           }),
           signal: AbortSignal.timeout(10000),
         }).catch((e) => console.error("leads-handler webhook failed:", e.message));
@@ -325,18 +482,30 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
-  // ── video overlay ──
-  const { overlayVideo, MAX_LINES } = require("../overlay");
+  // ── video stitch + overlay ──
+  const { overlayVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
-    const videoUrl = String(body.video_url || "");
+    // video_urls (ordered clips, stitched with a crossfade) is the current
+    // shape; video_url stays supported for single-clip callers.
+    const videoUrls = (Array.isArray(body.video_urls) ? body.video_urls : [body.video_url])
+      .map((u) => String(u || "").trim())
+      .filter((u) => /^https?:\/\//.test(u));
     const lines = Array.isArray(body.lines) ?
       body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
-    if (!/^https?:\/\//.test(videoUrl) || lines.length < 1 || lines.length > MAX_LINES) {
-      return res.status(400).json({ error: `video_url and 1-${MAX_LINES} lines required` });
+    // Optional room labels: strings or {room_type} objects, in any order.
+    const rooms = Array.isArray(body.rooms) ? body.rooms.slice(0, MAX_ROOMS) : [];
+    // Optional music: an explicit track wins, otherwise a bed is generated to
+    // fit the stitched length. music_prompt tailors that generation per listing.
+    const musicUrl = /^https?:\/\//.test(String(body.music_url || "")) ? String(body.music_url) : null;
+    const musicPrompt = body.music_prompt ? String(body.music_prompt).trim().slice(0, 500) : null;
+    if (!videoUrls.length || videoUrls.length > MAX_CLIPS || lines.length < 1 || lines.length > MAX_LINES) {
+      return res.status(400).json({
+        error: `1-${MAX_CLIPS} video urls (video_urls or video_url) and 1-${MAX_LINES} lines required`,
+      });
     }
     try {
-      const result = await overlayVideo({ videoUrl, lines, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);
@@ -345,14 +514,38 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── events beacon ──
-  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click"]);
+  const EVENTS = new Set(["view", "scroll_50", "scroll_90", "video_play", "cta_click", "phone_reveal",
+    "chat_open", "chat_proactive", "chat_dismiss", "chat_message", "chat_handoff", "chat_lead"]);
   router.post("/api/property-event", express.text({ type: () => true }), async (req, res) => {
     let body = {};
     try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
     const { page_id: pageId, event } = body;
     if (!pageId || !event || !EVENTS.has(event)) return res.status(204).send("");
-    try { if (event === "view") await db.incrPageCounter(pageId, "view_count", 1); }
-    catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
+    try {
+      if (event === "view") await db.incrPageCounter(pageId, "view_count", 1);
+      else if (event === "phone_reveal") {
+        // Counter on the page + a queryable event record with the business id
+        // (derived server-side from the page — never trusted from the client).
+        await db.incrPageCounter(pageId, "phone_reveal_count", 1);
+        const page = await db.getPage(pageId).catch(() => null);
+        if (page) {
+          await db.logPortalEvent({
+            type: "phone_reveal",
+            page_id: pageId,
+            listing_id: page.listing_id || null,
+            business_phone: page.business_phone || null,
+          });
+        }
+      } else if (event.startsWith("chat_") && db.db) {
+        // Funnel data — same day-bucket shape chat.js countMessage writes for
+        // chat_msg. Firestore only (no local counter store); one field per event.
+        const FieldValue = require("firebase-admin").firestore.FieldValue;
+        const day = new Date().toISOString().slice(0, 10);
+        await db.db.collection("property_pages").doc(pageId)
+          .collection("metrics").doc(day)
+          .set({ [event]: FieldValue.increment(1) }, { merge: true });
+      }
+    } catch (err) { console.warn("trackPropertyEvent failed:", err.message); }
     res.status(204).send("");
   });
 
@@ -369,7 +562,8 @@ module.exports = function createPagesRouter(ctx) {
     const file = path.join(templatesDir, tpl + ".html");
     if (!fs.existsSync(file)) return res.sendFile(origShell);
     let html = fs.readFileSync(file, "utf8");
-    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d)).replace(/</g, "\\u003c")};</script>`;
+    const bot = await resolveChatbot(d);
+    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
     html = html.replace("</head>", inject + "</head>");
     res.set("Cache-Control", "public, max-age=60");
     res.type("html").send(html);

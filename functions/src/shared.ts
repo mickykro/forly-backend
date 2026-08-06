@@ -18,7 +18,9 @@ export const greenApiToken = defineSecret("GREENAPI_TOKEN");
 export const nadlanJwtSecret = defineSecret("NADLAN_JWT_SECRET");
 export const demoSecret = defineSecret("DEMO_SECRET");
 export const pageBaseUrl = defineString("PAGE_BASE_URL", {
-  default: "https://call4li-nadlan.web.app",
+  // Branded ("pretty") domain — pages resolve here directly instead of the
+  // raw *.web.app host, which only redirects to it anyway.
+  default: "https://nadlan.call4li.com",
 });
 export const n8nLeadWebhookUrl = defineString("N8N_LEAD_WEBHOOK_URL", {default: ""});
 export const n8nPipelineWebhookUrl = defineString("N8N_PIPELINE_WEBHOOK_URL", {default: ""});
