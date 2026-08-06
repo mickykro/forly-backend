@@ -33,6 +33,8 @@ const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, ""
 const REMOTE_UPLOAD_BASE = (process.env.REMOTE_UPLOAD_BASE || "").replace(/\/+$/, "");
 const UPLOAD_PUBLIC_BASE = REMOTE_UPLOAD_BASE || BASE_URL;
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
+const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
+const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
 const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
@@ -82,8 +84,11 @@ app.use("/api", createIntakeRouter({
   uploadDir: UPLOAD_DIR,
   uploadPublicBase: UPLOAD_PUBLIC_BASE,
   remoteUploadBase: REMOTE_UPLOAD_BASE,
-  n8nWw1Webhook: N8N_WW1_WEBHOOK_URL,
-  n8nPipelineWebhook: N8N_PIPELINE_WEBHOOK_URL,
+  n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+  n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
+  isDevRun: !!N8N_DEV_WEBHOOK_URL,
+  isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL,
+  baseUrl: BASE_URL,
   authSecret: AUTH_SECRET,
   sessionTtl: SESSION_TTL_S,
   pageBaseUrl: PAGE_BASE_URL,
@@ -161,7 +166,8 @@ app.listen(PORT, () => {
   console.log(`  demo form:   ${BASE_URL}/create.html?key=demo`);
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
-  console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
+  console.log(`  WW1 webhook: ${N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL || "(not set)"}${N8N_DEV_WEBHOOK_URL ? " [DEV]" : ""}`);
+  console.log(`  pipeline webhook: ${N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL || "(not set)"}${N8N_DEV_PIPELINE_WEBHOOK_URL ? " [DEV]" : ""}`);
   console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set NADLAN_JWT_SECRET)" : "enabled"}`);
   // startExpiryScheduler({
   //   pageBaseUrl: PAGE_BASE_URL,
