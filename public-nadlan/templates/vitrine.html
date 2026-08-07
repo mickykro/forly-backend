@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly Nadlan</title>
+<meta name="description" content="">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700;800&family=Heebo:wght@200;300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#0A0D13;--panel:#0F141D;--panel-2:#141B26;
+    --ivory:#F4EFE4;--ivory-2:rgba(244,239,228,.72);
+    --champ:var(--accent,#C6A667);--champ-lite:var(--accent-lite,#E6D2A2);--mist:#79828F;
+    --line:rgba(244,239,228,.14);
+    --glass:rgba(255,255,255,.13);--glass-line:rgba(255,255,255,.26);
+    --cream:#F2EADC;--ink:#17130F;--ink-2:rgba(23,19,15,.72);--ink-line:rgba(23,19,15,.16);
+    --serif:'Frank Ruhl Libre','David Libre',serif;--sans:'Heebo',-apple-system,sans-serif;
+    --pad:clamp(20px,5vw,72px);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{background:var(--void)}
+  body{font-family:var(--sans);font-weight:300;background:transparent;color:var(--ivory);line-height:1.8;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}::selection{background:var(--champ);color:var(--void)}
+  .num{font-variant-numeric:tabular-nums}:focus-visible{outline:2px solid var(--champ);outline-offset:3px}
+  h1,h2,h3{font-family:var(--serif);font-weight:600;text-wrap:balance}
+  h1{font-weight:700;letter-spacing:-.02em;line-height:1.05}
+  h2{font-size:clamp(1.9rem,3.6vw,2.9rem);line-height:1.18;margin:18px 0 22px}
+  .lede{font-size:1.1rem;color:var(--ivory-2)}
+  .kick{display:inline-flex;align-items:center;gap:14px;font-size:.7rem;letter-spacing:.42em;text-transform:uppercase;color:var(--champ-lite)}
+  .kick::before{content:"";width:42px;height:1px;background:linear-gradient(90deg,transparent,currentColor)}
+  /* width:100% matters inside the grid panels — auto inline margins on a grid
+     item make it shrink-to-fit, which collapses the narrower panels' content */
+  .wrap{width:100%;max-width:1240px;margin:0 auto;padding-inline:var(--pad)}
+
+  /* ── the page ground ──────────────────────────────────────────────────────
+     The tour is cut into frames and the scroll position is the playhead: every
+     step of scroll shows the next frame, so scrolling plays the walkthrough and
+     scrolling back rewinds it. Frames are captured once from a throwaway
+     <video> and cached, so only the hero's video ever decodes live and a scrub
+     costs two blits rather than a seek. ── */
+  /* No scrim over the canvas. A fixed full-screen wash is the one thing that
+     cannot move, so it flattened the tour into a static gradient no matter how
+     fast the frames advanced. Each panel carries its own tint instead, which
+     scrolls with the panel and still guarantees the contrast floor. */
+  .bg{position:fixed;inset:0;z-index:0;pointer-events:none;width:100%;height:100%;display:block;background:#05070B}
+  main{position:relative;z-index:1}
+  section{padding:clamp(80px,12vh,150px) 0}
+
+  /* ── chrome ── */
+  .topbar{position:fixed;inset:0 0 auto 0;z-index:40;display:flex;justify-content:space-between;align-items:center;padding:20px var(--pad);transition:.4s;border-bottom:1px solid transparent}
+  .topbar.solid{background:rgba(10,13,19,.72);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-color:var(--line);padding-block:14px}
+  .brand{font-family:var(--serif);font-weight:700;font-size:1.15rem;letter-spacing:.12em}
+  .brand small{display:block;font-family:var(--sans);font-weight:300;font-size:.58rem;letter-spacing:.44em;color:var(--champ);margin-top:2px}
+  .top-phone{font-size:.82rem;border:1px solid var(--glass-line);background:var(--glass);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:100px;padding:9px 20px;transition:.3s}
+  .top-phone:hover{border-color:var(--champ);color:var(--champ-lite)}
+
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:11px;font-size:.9rem;letter-spacing:.04em;padding:15px 32px;border-radius:100px;border:1px solid transparent;cursor:pointer;transition:.25s;font-family:inherit}
+  .btn-champ{background:linear-gradient(120deg,var(--champ-lite),var(--champ));color:#1A140A;font-weight:500}
+  .btn-champ:hover{transform:translateY(-3px);box-shadow:0 18px 44px -18px rgba(198,166,103,.7)}
+  .btn-line{border-color:var(--glass-line);background:var(--glass);color:var(--ivory)}
+  .btn-line:hover{border-color:var(--champ);color:var(--champ-lite)}
+  .glass{background:var(--glass);backdrop-filter:blur(18px) saturate(1.15);-webkit-backdrop-filter:blur(18px) saturate(1.15);
+    border:1px solid var(--glass-line);border-radius:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
+
+  /* ── 1 · hero ──
+     The video and the data are two separate boxes. Stretched to one 86vw-wide
+     container, a vertical tour is a narrow strip marooned in a field of its own
+     blurred fill, with the copy stranded on top of the blur — which is exactly
+     what a wide screen showed. So the frame takes the footage's own proportions
+     and the data sits in its own panel beside it. Below 1000px they stack,
+     video first. */
+  .s-hero{min-height:100svh;display:grid;align-content:center;padding:clamp(104px,15vh,150px) 0 clamp(48px,8vh,90px)}
+  /* The panel is capped rather than filling the row: stretched to the full 1600
+     it leaves the copy at one end of a very wide dark rectangle. Capped, the two
+     blocks read as a pair and centre together. */
+  .hero-grid{width:min(1600px,86vw);margin-inline:auto;display:grid;align-items:center;
+    justify-content:center;grid-template-columns:minmax(0,640px) auto;gap:clamp(26px,4vw,80px)}
+  /* both explicitly on row 1: placing the frame in column 2 while it comes first
+     in the markup would otherwise push the plate onto a row of its own */
+  .hero-grid>.plate{grid-column:1;grid-row:1}
+  .hero-grid>.frame{grid-column:2;grid-row:1}
+  .frame{padding:5px;border-radius:16px;
+    background:linear-gradient(145deg,var(--champ-lite) 0%,rgba(255,255,255,.3) 26%,rgba(0,0,0,.62) 68%,var(--champ) 100%);
+    box-shadow:0 34px 74px -26px rgba(0,0,0,.9),0 2px 0 rgba(255,255,255,.16),inset 0 1px 0 rgba(255,255,255,.45)}
+  /* --vid-ar is written from the video's own dimensions the moment its metadata
+     lands, so the box is the shape of the footage and there is nothing left to
+     letterbox. 9/16 is the holding shape — listing tours are shot vertical. The
+     max-width catches a listing that shipped landscape. */
+  .frame-in{position:relative;border-radius:11px;overflow:hidden;background:#05070B;
+    height:clamp(400px,72svh,760px);aspect-ratio:var(--vid-ar,9/16);max-width:min(44vw,520px);
+    box-shadow:inset 0 2px 8px rgba(0,0,0,.75)}
+  .frame-media{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  /* the fill only has anything to cover in the moment before metadata lands, or
+     if a listing ships footage the box cannot match */
+  .frame-fill{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+    filter:blur(30px) saturate(1.3) brightness(.72);transform:scale(1.25);z-index:0}
+  .frame-media video{position:relative;z-index:1;display:block;height:100%;width:auto;max-width:100%;object-fit:contain}
+
+  /* the data panel: title, then subtitle, then the property facts on one
+     inline rule */
+  .plate{padding:clamp(24px,2.6vw,40px);border-radius:16px;
+    background:rgba(9,12,18,.58);backdrop-filter:blur(16px) saturate(1.15);-webkit-backdrop-filter:blur(16px) saturate(1.15);
+    border:1px solid var(--glass-line);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 30px 70px -34px rgba(0,0,0,.85)}
+  .plate h1{font-size:clamp(1.6rem,3.2vw,3rem);margin:12px 0 8px}
+  .plate .phrase{color:var(--ivory-2);font-size:clamp(.92rem,1.35vw,1.15rem);max-width:60ch;margin-bottom:clamp(14px,2vw,22px)}
+  .facts-row{display:flex;flex-wrap:wrap;align-items:baseline;gap:clamp(14px,2.4vw,38px);
+    padding-top:clamp(12px,1.6vw,18px);border-top:1px solid var(--glass-line)}
+  .fact{display:flex;align-items:baseline;gap:9px}
+  .fact dt{font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ivory-2);white-space:nowrap}
+  .fact dd{font-family:var(--serif);font-weight:600;font-size:clamp(1rem,1.6vw,1.35rem);line-height:1}
+  .fact dd small{font-family:var(--sans);font-weight:300;font-size:.7rem;color:var(--ivory-2)}
+  .fact.price dd{color:var(--champ-lite);font-size:clamp(1.2rem,2vw,1.75rem)}
+  .fact .ppm{font-size:.66rem;color:var(--ivory-2)}
+  .hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:clamp(16px,2.4vw,26px)}
+
+  /* narrow enough that two columns would starve both: stack them, video first */
+  /* Stacked, the frame still keeps the footage's shape and centres — letting it
+     run the full width just moves the marooned-strip problem down a breakpoint. */
+  @media(max-width:1000px){
+    .hero-grid{grid-template-columns:minmax(0,1fr);gap:clamp(16px,2.4vw,24px)}
+    .hero-grid>.frame{grid-column:1;grid-row:1;width:max-content;max-width:100%;margin-inline:auto}
+    .hero-grid>.plate{grid-column:1;grid-row:2}
+    .frame-in{height:clamp(320px,50svh,560px);max-width:100%}
+  }
+  @media(max-width:820px){
+    .hero-grid{width:calc(100% - 2*var(--pad))}
+    .plate h1{font-size:1.5rem}
+  }
+
+  /* ── the panels ───────────────────────────────────────────────────────────
+     Each pins in place while you read it, then releases and scrolls away; the
+     next starts below it. They never overlap, which is what lets them stay
+     translucent — a panel sliding *over* another would show the one underneath
+     through it. Translucent is the whole point: the tour keeps playing behind
+     every section. ── */
+  /* The panel is a tall block that carries the tint; its content is what pins,
+     for the first 70svh of the panel, then rides up and out. Keeping the tint on
+     the tall block rather than on the pinned content means there is never a bare
+     gap between sections — the tour plays continuously behind all of them. */
+  .panel{position:relative;min-height:170svh}
+  .panel>.wrap{position:sticky;top:0;min-height:100svh;display:grid;align-content:center;
+    padding-block:clamp(96px,14vh,140px) clamp(56px,9vh,110px)}
+
+  /* ── 2 · why here — a cream sheet with the tour moving behind it ── */
+  .p-cream{background:rgba(242,234,220,.84);color:var(--ink)}
+  .p-cream .kick{color:#9A7736}
+  .p-cream .lede{color:var(--ink-2)}
+  /* Two to a row at every width, phones included. Two-up needs a shorter art
+     tile than four-up did, or two rows of cards overrun the viewport and the
+     section can no longer pin. */
+  .why-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:36px}
+  .why-grid .card-art{aspect-ratio:16/10}
+  @media(max-width:560px){.why-grid{grid-template-columns:repeat(2,1fr);gap:10px}}
+  .card{background:#FBF7F0;border:1px solid var(--ink-line);border-radius:14px;
+    padding:16px 16px 24px;display:flex;flex-direction:column;transition:transform .35s,box-shadow .35s}
+  .card:hover{transform:translateY(-4px);box-shadow:0 18px 40px -22px rgba(23,19,15,.55)}
+  .card-art{aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:var(--panel-2);margin-bottom:14px}
+  .card-art img{width:100%;height:100%;object-fit:cover;display:block}
+  .card .n{font-family:var(--serif);color:#9A7736;font-size:.85rem;letter-spacing:.1em;padding-inline:6px}
+  .card h3{font-size:1.18rem;margin:6px 0 8px;padding-inline:6px;color:var(--ink)}
+  .card p{font-size:.92rem;color:var(--ink-2);padding-inline:6px;flex:1}
+  .card .tag{margin:14px 6px 0;align-self:flex-start;font-size:.64rem;letter-spacing:.16em;text-transform:uppercase;color:#9A7736;border:1px solid var(--ink-line);border-radius:100px;padding:5px 12px}
+  .art-pool{display:none}
+
+  /* ── 3 · gallery: a window that is not fully raised ── */
+  .p-gallery{background:rgba(8,11,17,.5);border-top:1px solid var(--line)}
+  .rail{display:flex;gap:10px;overflow-x:auto;padding-bottom:10px;margin-top:28px;scrollbar-width:thin}
+  .thumb{flex:0 0 auto;width:clamp(74px,9vw,116px);aspect-ratio:4/3;border-radius:6px;overflow:hidden;position:relative;padding:0;cursor:pointer;background:var(--panel-2);border:1px solid var(--glass-line);opacity:.5;transition:opacity .3s,border-color .3s}
+  .thumb.on{opacity:1;border-color:var(--champ)}
+  .thumb img,.thumb canvas{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb .g-no{position:absolute;bottom:4px;inset-inline-start:6px;font-size:.6rem;letter-spacing:.08em;color:var(--ivory);text-shadow:0 1px 3px rgba(0,0,0,.9)}
+
+  /* an explicit height, not an aspect ratio: capping a 16/9 box by height also
+     caps its width, which left the window floating narrow in a wide panel */
+  .window{margin-top:16px;display:grid;grid-template-rows:4fr 1fr;width:100%;height:clamp(300px,44svh,540px);overflow:hidden;padding:0}
+  @media(max-width:700px){.window{height:clamp(320px,50svh,520px)}}
+  .win-view{position:relative;overflow:hidden;background:#05070B;cursor:zoom-in}
+  .win-view img,.win-view canvas{width:100%;height:100%;object-fit:cover;display:block}
+  /* the sash: the pane that has not been raised the rest of the way, so the
+     lower fifth of the opening is still panelling rather than view */
+  .win-sash{position:relative;display:flex;align-items:center;justify-content:space-between;gap:18px;
+    padding:0 clamp(16px,2.4vw,30px);background:rgba(10,13,19,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+    box-shadow:inset 0 6px 14px -8px rgba(0,0,0,.9)}
+  .win-sash::before{content:"";position:absolute;inset-inline:0;top:0;height:2px;background:linear-gradient(90deg,transparent,var(--champ-lite),transparent);opacity:.75}
+  .win-cap{font-family:var(--serif);font-weight:600;font-size:clamp(.95rem,1.7vw,1.35rem);color:var(--ivory)}
+  .win-nav{display:flex;gap:8px;flex:0 0 auto}
+  .win-nav button{width:40px;height:40px;border-radius:50%;border:1px solid var(--glass-line);background:var(--glass);color:var(--ivory);font-size:1rem;cursor:pointer;transition:.25s;display:grid;place-items:center}
+  .win-nav button:hover{border-color:var(--champ);color:var(--champ-lite)}
+
+  /* ── 4 · area: text outranks the picture here, so the scrim is heavier ── */
+  .p-area{background:rgba(10,13,19,.62);border-top:1px solid var(--line)}
+  .p-area .lede{max-width:66ch}
+  .area-in{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,340px);gap:clamp(30px,4vw,64px);align-items:start}
+  .stops{list-style:none;margin-top:26px;max-width:52ch}
+  .stops li{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--glass-line);font-size:.95rem}
+  .stops li span{color:var(--ivory-2);font-size:.85rem;white-space:nowrap}
+  .metrics{border-radius:14px;overflow:hidden;display:grid;grid-template-columns:1fr 1fr}
+  .metric{padding:24px 22px;border-inline-end:1px solid var(--glass-line);border-block-end:1px solid var(--glass-line)}
+  .metric:nth-child(2n){border-inline-end:none}
+  .metric b{font-family:var(--serif);font-weight:600;font-size:1.7rem;color:var(--champ-lite);display:block;line-height:1}
+  .metric span{font-size:.78rem;color:var(--ivory-2);margin-top:8px;display:block}
+  @media(max-width:820px){.area-in{grid-template-columns:1fr}}
+
+  /* The tint is the contrast floor, but a listing tour can be a white kitchen in
+     daylight. A shadow guards the ivory text over a bright frame without making
+     the tint heavier — heavier tint would cost the very motion we just bought. */
+  .p-gallery .wrap,.p-area .wrap{text-shadow:0 1px 14px rgba(4,6,10,.75),0 0 3px rgba(4,6,10,.45)}
+  .p-gallery .thumb,.p-gallery .window,.p-gallery .win-nav button{text-shadow:none}
+
+  /* A phone can be handed a layout viewport far wider than the device — an
+     embedded preview, or any context where the viewport meta never applied — and
+     then every max-width query above silently misses and the cards sit two-up on
+     a phone. Pointer type and screen size describe the device itself rather than
+     the box the page was given, so they decide the phone layout instead. */
+  html[data-phone] .hero-grid{width:calc(100% - 2*var(--pad));grid-template-columns:minmax(0,1fr);gap:clamp(16px,2.4vw,24px)}
+  html[data-phone] .hero-grid>.frame{grid-column:1;grid-row:1}
+  html[data-phone] .hero-grid>.plate{grid-column:1;grid-row:2}
+  html[data-phone] .hero-grid>.frame{width:max-content;max-width:100%;margin-inline:auto}
+  html[data-phone] .frame-in{height:clamp(320px,50svh,560px);max-width:100%}
+  html[data-phone] .plate h1{font-size:1.5rem}
+  /* two cards across a phone leaves each about 170px, so the card's own padding
+     and type have to come down with it or the copy has nowhere to go */
+  html[data-phone] .why-grid{grid-template-columns:repeat(2,1fr);gap:10px}
+  html[data-phone] .why-grid .card{padding:10px 10px 16px;border-radius:11px}
+  html[data-phone] .why-grid .card h3{font-size:1rem;margin:4px 0 6px}
+  html[data-phone] .why-grid .card p{font-size:.8rem;line-height:1.6}
+  html[data-phone] .why-grid .card .n{font-size:.72rem}
+  html[data-phone] .why-grid .card .tag{font-size:.56rem;padding:4px 9px;margin-top:10px}
+  html[data-phone] .cta-panel{grid-template-columns:1fr}
+  html[data-phone] .window{height:clamp(320px,50svh,520px)}
+
+  /* ── 5 · CTA ── */
+  .s-cta{position:relative;overflow:hidden;padding-block:clamp(96px,14vh,170px)}
+  .canopy{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}
+  /* lightest at the top so the sky between building and branches survives */
+  .s-cta::after{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(6,9,14,.2),rgba(6,9,14,.5) 45%,rgba(6,9,14,.78))}
+  .s-cta .wrap{position:relative;z-index:2}
+  .cta-panel{padding:clamp(30px,4.6vw,64px);display:grid;grid-template-columns:1fr 1fr;gap:clamp(30px,4vw,64px);align-items:center;background:rgba(10,13,19,.55);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+  @media(max-width:820px){.cta-panel{grid-template-columns:1fr}}
+  .agent{display:flex;align-items:center;gap:15px;margin-top:26px;padding-top:22px;border-top:1px solid var(--glass-line)}
+  .agent .av{width:54px;height:54px;border-radius:50%;background:linear-gradient(140deg,var(--champ-lite),var(--champ));color:#1A140A;display:grid;place-items:center;font-family:var(--serif);font-weight:600;font-size:1.25rem;overflow:hidden}
+  .agent .av img{width:100%;height:100%;object-fit:cover}
+  .agent b{display:block;font-weight:500}.agent span{font-size:.8rem;color:var(--ivory-2)}
+  form .field{margin-bottom:14px}
+  form label{display:block;font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ivory-2);margin-bottom:7px}
+  form input,form textarea{width:100%;background:rgba(5,7,11,.45);border:1px solid var(--glass-line);border-radius:8px;color:var(--ivory);font-family:var(--sans);font-weight:300;font-size:.98rem;padding:13px 15px}
+  form input:focus,form textarea:focus{outline:none;border-color:var(--champ)}
+  form input::placeholder,form textarea::placeholder{color:var(--mist)}
+  .form-actions{display:grid;gap:12px;margin-top:20px}
+  .btn-sub{background:var(--champ);color:#1A140A;font-weight:500}
+  .btn-sub:hover{background:var(--champ-lite);transform:translateY(-2px)}
+  .sent{display:none;margin-top:12px;text-align:center;color:var(--champ-lite);font-size:.9rem}
+
+  footer{position:relative;z-index:1;border-top:1px solid var(--line);padding:24px 0;font-size:.78rem;color:var(--ivory-2);background:rgba(6,9,14,.7)}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  .fbrand{font-family:var(--serif);letter-spacing:.14em}
+
+  /* Motion is opt-in. The script bails on this query before it captures frames
+     or touches GSAP, so everything here is already in its final state. */
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<script>
+(function () {
+  // Runs before anything renders: screen size and pointer type describe the
+  // device, unlike innerWidth, which describes whatever box the page was given.
+  var s = window.screen || {};
+  var min = Math.min(s.width || window.innerWidth, s.height || window.innerHeight);
+  if (matchMedia("(pointer:coarse)").matches && min <= 540) {
+    document.documentElement.setAttribute("data-phone", "");
+  }
+})();
+</script>
+
+<canvas class="bg" id="bgCanvas" aria-hidden="true"></canvas>
+
+<header class="topbar" id="topbar">
+  <a class="brand" href="#" data-logo><span data-bind="agent.brand_name">רוזנברג</span><small data-bind="agent.tagline" data-show="agent.tagline"></small></a>
+  <a class="top-phone" href="#contact" data-i18n="leave_details">השאירו פרטים</a>
+</header>
+
+<main>
+
+<!-- ── 1 · hero ────────────────────────────────────────────── -->
+<section class="s-hero">
+  <div class="hero-grid" data-anim>
+    <div class="frame">
+      <div class="frame-in">
+        <div class="frame-media">
+          <canvas class="frame-fill" id="frameFill" aria-hidden="true"></canvas>
+          <video data-video autoplay muted loop playsinline preload="auto"></video>
+        </div>
+      </div>
+    </div>
+      <div class="plate">
+        <span class="kick"><span data-deal>למכירה</span> · <span data-bind="property.neighborhood">הצפון הישן</span></span>
+        <h1 data-bind="property.title">דיזנגוף 156</h1>
+        <p class="phrase" data-bind="hero.phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד.</p>
+        <dl class="facts-row">
+          <div class="fact price"><dt data-price-label>מחיר מבוקש</dt><dd class="num" data-bind="property.price" data-fmt="price">₪8,400,000</dd><span class="ppm num" data-ppm></span></div>
+          <div class="fact"><dt data-i18n="rooms">חדרים</dt><dd class="num" data-bind="property.rooms">4</dd></div>
+          <div class="fact"><dt data-i18n="built_area">שטח בנוי</dt><dd class="num"><span data-bind="property.size_sqm">140</span> <small data-i18n="sqm">מ״ר</small></dd></div>
+          <div class="fact" data-show="property.floor"><dt data-i18n="floor">קומה</dt><dd class="num" data-bind="property.floor">7</dd></div>
+          <div class="fact" data-show="property.parking"><dt data-i18n="parking">חניות</dt><dd class="num" data-bind="property.parking">3</dd></div>
+        </dl>
+        <div class="hero-cta">
+          <a class="btn btn-champ" href="#contact" data-i18n="book_visit_private">תיאום ביקור פרטי</a>
+          <a class="btn btn-line" href="#gallery" data-i18n="view_gallery">צפו בגלריה</a>
+        </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── 2 · why here ──────────────────────────────────────────── -->
+<section class="panel p-cream" data-panel>
+    <div class="wrap">
+      <span class="kick" data-i18n="why_here">למה דווקא כאן</span>
+      <h2 data-i18n="why_head">נכס כזה לא מגיע ללוחות.</h2>
+      <p class="lede" data-i18n="why_sub">כמה סיבות שבגללן הנכס הזה שווה ביקור.</p>
+      <div class="why-grid" data-list="carousel.slides">
+        <template>
+          <article class="card" data-stagger>
+            <div class="card-art"><img alt="" loading="lazy" decoding="async"></div>
+            <span class="n" data-field="num">01</span>
+            <h3 data-field="title">נוף</h3>
+            <p data-field="body">תיאור</p>
+            <span class="tag" data-field="tag"></span>
+          </article>
+        </template>
+      </div>
+      <!-- The card copy is written per listing, so these four are generic by
+           necessity: one guide, four gestures, assigned by index % 4. Kept as real
+           <img> so the artifact bundler inlines them like any other image. -->
+      <div class="art-pool" aria-hidden="true">
+        <img src="/tpl/assets/vitrine/guide-1.webp" alt="">
+        <img src="/tpl/assets/vitrine/guide-2.webp" alt="">
+        <img src="/tpl/assets/vitrine/guide-3.webp" alt="">
+        <img src="/tpl/assets/vitrine/guide-4.webp" alt="">
+      </div>
+    </div>
+  </section>
+
+<!-- ── 3 · gallery ───────────────────────────────────────────── -->
+<section class="panel p-gallery" id="gallery" data-panel>
+    <div class="wrap">
+      <span class="kick" data-i18n="gallery">גלריה</span>
+      <h2 data-i18n="gallery_head">כל חדר, מכל זווית.</h2>
+      <div class="rail" data-gallery data-gallery-class="thumb" data-gallery-count="6"></div>
+      <div class="window glass">
+        <div class="win-view" id="winView"></div>
+        <div class="win-sash">
+          <p class="win-cap" id="winCap"></p>
+          <div class="win-nav">
+            <button type="button" id="winPrev" aria-label="הקודם">›</button>
+            <button type="button" id="winNext" aria-label="הבא">‹</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+<!-- ── 4 · area ──────────────────────────────────────────────── -->
+<section class="panel p-area" data-panel>
+    <div class="wrap area-in">
+      <div>
+        <span class="kick" data-i18n="the_area">השכונה</span>
+        <h2 data-bind="property.neighborhood">הצפון הישן</h2>
+        <p class="lede" data-bind="area.blurb">בין שדרות בן־גוריון לכיכר דיזנגוף, השכונה משלבת את הבאוהאוס של העיר הלבנה עם בתי הקפה והמסעדות הטובים בעיר.</p>
+        <ul class="stops" data-list="area.stops">
+          <template><li><b data-field="label"></b><span data-field="minutes"></span></li></template>
+        </ul>
+      </div>
+      <div class="metrics glass" data-list="area.stats">
+        <template><div class="metric"><b data-field="value"></b><span data-field="label"></span></div></template>
+      </div>
+    </div>
+  </section>
+
+<!-- ── 5 · CTA ─────────────────────────────────────────────── -->
+<section class="s-cta" id="contact">
+  <img class="canopy" src="/tpl/assets/vitrine/canopy.webp" alt="" aria-hidden="true">
+  <div class="wrap">
+    <div class="cta-panel" data-anim>
+      <div>
+        <span class="kick" data-i18n="book_visit">תיאום ביקור</span>
+        <h2 data-bind="cta.headline">הנכסים הטובים באמת לא מחכים</h2>
+        <p class="lede" data-bind="cta.sub">השאירו פרטים ונחזור אליכם עוד היום לתיאום ביקור פרטי בנכס, בדיסקרטיות מלאה.</p>
+        <div class="agent">
+          <div class="av" data-avatar>ש</div>
+          <div>
+            <b><span data-bind="agent.name">שלום רוזנברג</span><span data-show="agent2.name"> &amp; <span data-bind="agent2.name"></span></span></b>
+            <span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · <span data-i18n="license_label">רישיון תיווך</span> <span data-bind="agent.license">3205419</span></span>
+          </div>
+        </div>
+      </div>
+      <form data-lead-form>
+        <div class="field"><label data-i18n="form_name">שם מלא</label><input data-lead="name" type="text" placeholder="ישראל ישראלי" data-i18n-ph="ph_name" required></div>
+        <div class="field"><label data-i18n="form_phone">טלפון נייד</label><input data-lead="phone" type="tel" class="num" placeholder="050-000-0000" required></div>
+        <div class="field"><label data-i18n="form_message">הודעה (אופציונלי)</label><textarea data-lead="message" rows="2" placeholder="אשמח לתאם ביקור..." data-i18n-ph="ph_message"></textarea></div>
+        <div class="form-actions"><button class="btn btn-sub" type="submit" data-i18n="send_details">שלחו לי פרטים</button></div>
+        <p class="sent" data-lead-sent data-i18n="lead_sent" data-bind="texts.done_title">✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
+      </form>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer><div class="wrap"><span class="fbrand" data-bind="texts.footer_brand||agent.brand_name">רוזנברג</span><span><span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉</span> · <a href="/legal/privacy.html" data-i18n="privacy_policy" style="color:inherit;text-decoration:underline">מדיניות פרטיות</a> · <a href="/legal/accessibility.html" data-i18n="accessibility" style="color:inherit;text-decoration:underline">הצהרת נגישות</a></span></div></footer>
+
+<script>(function(){var tb=document.getElementById("topbar");addEventListener("scroll",function(){tb.classList.toggle("solid",(window.scrollY||0)>60);},{passive:true});})();</script>
+<script src="/tpl/demo.js"></script>
+<script src="/templates/i18n.js"></script>
+<script src="/tpl/runtime.js"></script>
+<script src="/tpl/vendor/gsap.min.js"></script>
+<script src="/tpl/vendor/ScrollTrigger.min.js"></script>
+<script src="/tpl/vendor/lenis.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  var DATA = window.__PAGE__ || window.__DEMO__ || {};
+  var reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var coarse = matchMedia("(hover:none),(pointer:coarse)").matches;
+  var VSRC = (DATA.hero && DATA.hero.video_url) || "";
+
+  // ── 1 · give the hero frame the shape of the footage it holds, so a vertical
+  //        tour gets a vertical box and there is nothing left to letterbox ──
+  (function () {
+    var v = document.querySelector("[data-video]");
+    var box = document.querySelector(".frame-in");
+    if (!v || !box) return;
+    function shape() {
+      if (v.videoWidth && v.videoHeight) box.style.setProperty("--vid-ar", v.videoWidth + " / " + v.videoHeight);
+    }
+    v.addEventListener("loadedmetadata", shape);
+    shape();   // in case metadata landed before this ran
+  })();
+
+  // ── 2 · assign the four guide illustrations, cycling if the payload carries
+  //        a different number of slides than the four the demo ships ──
+  (function () {
+    var pool = document.querySelectorAll(".art-pool img");
+    if (!pool.length) return;
+    Array.prototype.forEach.call(document.querySelectorAll(".why-grid .card-art img"), function (img, i) {
+      img.src = pool[i % pool.length].src;
+    });
+  })();
+
+  // ── 3 · the window: thumbnails select, they do not zoom ──
+  (function () {
+    var rail = document.querySelector("[data-gallery]");
+    var view = document.getElementById("winView");
+    var cap = document.getElementById("winCap");
+    if (!rail || !view) return;
+    var caps = (DATA.gallery && DATA.gallery.captions) || [];
+    var idx = 0, viaMain = false;
+
+    function paint() {
+      var tiles = rail.children;
+      if (!tiles.length) return;
+      idx = (idx + tiles.length) % tiles.length;
+      var tile = tiles[idx];
+      var im = tile.querySelector("img"), cv2 = tile.querySelector("canvas");
+      view.innerHTML = "";
+      if (im) {
+        var n = new Image(); n.src = im.src; n.alt = im.alt || ""; view.appendChild(n);
+      } else if (cv2) {
+        // demo payloads have no photo URLs; runtime samples the tour video into
+        // a <canvas> per tile, so copy the pixels rather than a src
+        var c = document.createElement("canvas");
+        c.width = cv2.width; c.height = cv2.height;
+        c.getContext("2d").drawImage(cv2, 0, 0);
+        view.appendChild(c);
+      }
+      cap.textContent = caps[idx] || "";
+      Array.prototype.forEach.call(tiles, function (t, i) { t.classList.toggle("on", i === idx); });
+    }
+
+    // Capture phase: stop the event before it reaches the per-tile lightbox
+    // handler runtime.js attached, so a thumbnail click selects instead.
+    rail.addEventListener("click", function (e) {
+      if (viaMain) return;
+      var tile = e.target.closest ? e.target.closest("." + (rail.getAttribute("data-gallery-class") || "g")) : null;
+      if (!tile || tile.parentNode !== rail) return;
+      e.stopPropagation();
+      idx = Array.prototype.indexOf.call(rail.children, tile);
+      paint();
+    }, true);
+
+    // The main pane keeps the lightbox — re-dispatch to the selected tile with
+    // the flag raised so the capture listener above lets it through.
+    view.addEventListener("click", function () {
+      var tile = rail.children[idx];
+      if (!tile) return;
+      viaMain = true; tile.click(); viaMain = false;
+    });
+
+    document.getElementById("winPrev").addEventListener("click", function () { idx -= 1; paint(); });
+    document.getElementById("winNext").addEventListener("click", function () { idx += 1; paint(); });
+
+    // Tiles fill asynchronously — photos load, or the tour is sampled frame by
+    // frame — so repaint as their contents land.
+    new MutationObserver(function () { paint(); }).observe(rail, { childList: true, subtree: true });
+    paint();
+  })();
+
+  // ── the frame cache ───────────────────────────────────────────────────────
+  var cv = document.getElementById("bgCanvas");
+  var ctx = cv.getContext("2d", { alpha: false });
+  var frames = [], ready = 0;
+  // Two numbers decide how smooth the scroll animation reads, and they trade
+  // against each other through memory:
+  //   px of scroll per frame — the page is ~6400px, so 180 frames is ~35px,
+  //     about one wheel tick. Past ~80px it visibly steps.
+  //   ms of footage per frame — under ~80ms the cross-blend reads as motion;
+  //     over that it reads as a crossfade between two different pictures.
+  // COUNT is the memory guard rather than the operative limit: a short tour is
+  // capped by its own frame count long before this, and a long one stops here
+  // instead of growing without bound. 180 x 253x440x4B ~ 80MB, 90 x 195x340x4B
+  // ~ 24MB on touch.
+  var COUNT = coarse ? 90 : 180;
+  var MAXH = coarse ? 340 : 440;
+
+  function sizeCanvas() {
+    // The source is 496px wide, so a full-bleed desktop background is already
+    // upscaled ~4x before device pixels enter into it. Painting at 2x DPR asks
+    // for detail the footage does not have and costs ~3x the paint time, which
+    // is frame rate spent on nothing.
+    var dpr = Math.min(1.25, window.devicePixelRatio || 1);
+    cv.width = Math.round(innerWidth * dpr);
+    cv.height = Math.round(innerHeight * dpr);
+    render();
+  }
+
+  // cover-fit a cached frame into a canvas
+  function blitInto(c, cw, ch, f, alpha) {
+    if (!f) return;
+    var s = Math.max(cw / f.width, ch / f.height);
+    var w = f.width * s, h = f.height * s;
+    c.globalAlpha = alpha;
+    c.drawImage(f, (cw - w) / 2, (ch - h) / 2, w, h);
+    c.globalAlpha = 1;
+  }
+
+  var target = 0, cur = 0;
+  function render() {
+    if (!ready) return;
+    var f = cur * (ready - 1), i = Math.floor(f), t = f - i;
+    ctx.fillStyle = "#05070B";
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    blitInto(ctx, cv.width, cv.height, frames[i], 1);
+    // blend into the next frame so the sequence reads as motion, not as steps
+    if (t > 0.004 && frames[i + 1]) blitInto(ctx, cv.width, cv.height, frames[i + 1], t);
+  }
+
+  // The hero frame is wide and the tour is vertical, so the box is filled with a
+  // blurred, scaled copy of the tour's own opening frame instead of black bars.
+  function paintFill() {
+    var el = document.getElementById("frameFill");
+    if (!el || !frames[0]) return;
+    el.width = 64; el.height = Math.round(64 * frames[0].height / frames[0].width);
+    blitInto(el.getContext("2d"), el.width, el.height, frames[0], 1);
+  }
+
+  function keep(v, W, H, k) {
+    var c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    try { c.getContext("2d").drawImage(v, 0, 0, W, H); } catch (e) { return false; }
+    frames[k] = c; ready = Math.max(ready, k + 1);
+    if (k === 0) { render(); paintFill(); }
+    return true;
+  }
+
+  // Capture by playing once at speed and grabbing presented frames, rather than
+  // seeking COUNT times — a hundred seeks takes fifteen seconds or more, this
+  // takes two or three. Falls back to seeking where rVFC is missing.
+  function capture(src, done) {
+    if (!src) return;
+    var v = document.createElement("video");
+    v.src = src; v.muted = true; v.playsInline = true; v.preload = "auto";
+    // Only a cross-origin fetch needs the CORS opt-in, and only it can taint the
+    // canvas. On a blob:/data: source WebKit treats the attribute as a failed
+    // CORS check and refuses the load outright, so it has to stay off there.
+    if (/^https?:/i.test(src)) v.crossOrigin = "anonymous";
+    v.setAttribute("aria-hidden", "true");
+    v.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
+    document.body.appendChild(v);
+
+    var W = 0, H = 0, step = 0, k = 0, finished = false;
+    function finish() {
+      if (finished) return; finished = true;
+      try { v.pause(); v.removeAttribute("src"); v.load(); } catch (e) {}
+      if (v.parentNode) v.parentNode.removeChild(v);
+      done && done();
+    }
+    v.addEventListener("loadedmetadata", function () {
+      var vh = v.videoHeight || 864, vw = v.videoWidth || 496;
+      var scale = Math.min(1, MAXH / vh);
+      W = Math.max(2, Math.round(vw * scale));
+      H = Math.max(2, Math.round(vh * scale));
+      step = (isFinite(v.duration) ? v.duration : 8) / COUNT;
+      if (v.requestVideoFrameCallback) {
+        // rVFC only fires for frames the browser actually presents, and never
+        // more than once per compositor tick — so supply is not simply a
+        // function of playback rate. Measured on the 8s demo tour: 3x yields
+        // ~30 frames, 2x ~90, and a slower 1.6x pass yields ~65 for a longer
+        // wait. 2x won on every run; slower is not better here.
+        v.playbackRate = 2;
+        v.requestVideoFrameCallback(onFrame);
+        var p = v.play();
+        if (p && p.catch) p.catch(seekMode);
+      } else {
+        seekMode();
+      }
+    });
+    // rVFC simply stops firing at the end of the clip, so the element has to be
+    // released on `ended` too or it lingers as a second live decoder
+    v.addEventListener("ended", finish);
+    setTimeout(finish, 30000);   // last resort: never leave a decoder attached
+    function onFrame(now, meta) {
+      if (finished) return;
+      if (k >= COUNT || (isFinite(v.duration) && meta.mediaTime >= v.duration - 0.02 && k > 2)) { finish(); return; }
+      if (meta.mediaTime >= k * step - 1e-3) { keep(v, W, H, k); k++; }
+      v.requestVideoFrameCallback(onFrame);
+    }
+    // fallback: seek frame by frame (slower, but works without rVFC)
+    function seekMode() {
+      v.removeEventListener("seeked", onSeek);
+      v.addEventListener("seeked", onSeek);
+      nextSeek();
+    }
+    function nextSeek() {
+      if (k >= COUNT || !isFinite(v.duration)) { finish(); return; }
+      v.currentTime = Math.min(v.duration - 0.05, k * step);
+    }
+    function onSeek() { if (finished) return; keep(v, W, H, k); k++; nextSeek(); }
+    v.addEventListener("error", finish);
+    v.load();
+  }
+
+  sizeCanvas();
+  addEventListener("resize", sizeCanvas, { passive: true });
+
+  var panels = Array.prototype.slice.call(document.querySelectorAll("[data-panel]"));
+
+  if (reduce) {
+    // One frame, held. The rooms are the design; only their movement is motion.
+    COUNT = 1;
+    capture(VSRC);
+    document.querySelectorAll("[data-video]").forEach(function (v) {
+      v.removeAttribute("autoplay"); v.removeAttribute("loop");
+      v.addEventListener("loadeddata", function () { v.pause(); });
+    });
+    // a panel taller than the viewport cannot usefully pin — its bottom would be
+    // unreachable — so it opts out and simply scrolls
+    panels.forEach(function (p) {
+      var inner = p.querySelector(".wrap");
+      if (inner && inner.offsetHeight > innerHeight + 1) {
+        inner.style.position = "static";
+        p.style.minHeight = "0px";
+      }
+    });
+    return;
+  }
+
+  capture(VSRC);
+
+  gsap.registerPlugin(ScrollTrigger);
+
+  // lerp-based smoothing reads calmer than a fixed duration on long scrolls
+  var lenis = new Lenis({ lerp: 0.075, wheelMultiplier: 0.9, smoothWheel: true, syncTouch: true });
+  lenis.on("scroll", ScrollTrigger.update);
+  gsap.ticker.add(function (t) { lenis.raf(t * 1000); });
+  gsap.ticker.lagSmoothing(0);
+
+  // ── scroll is the playhead ────────────────────────────────────────────────
+  // Straight linear mapping over the whole document: every step of scroll shows
+  // the next frame, top to bottom, and scrolling back rewinds it. `cur` chases
+  // `target` so the tour keeps settling for a beat after the wheel stops.
+  function docProgress() {
+    var max = document.documentElement.scrollHeight - innerHeight;
+    if (max <= 0) return 0;
+    return Math.min(1, Math.max(0, (window.scrollY || window.pageYOffset || 0) / max));
+  }
+  gsap.ticker.add(function () {
+    target = docProgress();
+    var d = target - cur;
+    if (Math.abs(d) < 0.00012) return;
+    cur += d * 0.11;
+    render();
+  });
+
+  // Content taller than the viewport cannot usefully pin — its bottom would be
+  // unreachable — so it opts out and the panel shrinks to just hold it.
+  function pinning() {
+    panels.forEach(function (p) {
+      var inner = p.querySelector(".wrap");
+      if (!inner) return;
+      var tall = inner.offsetHeight > innerHeight + 1;
+      inner.style.position = tall ? "static" : "";
+      p.style.minHeight = tall ? "0px" : "";
+    });
+    ScrollTrigger.refresh();
+  }
+  pinning();
+  addEventListener("resize", pinning, { passive: true });
+
+  gsap.utils.toArray("[data-anim]").forEach(function (el) {
+    gsap.from(el, { opacity: 0, y: 34, duration: .95, ease: "power3.out",
+      scrollTrigger: { trigger: el, start: "top 88%" } });
+  });
+  gsap.from("[data-stagger]", {
+    opacity: 0, y: 36, duration: .8, ease: "power3.out", stagger: 0.1,
+    scrollTrigger: { trigger: ".why-grid", start: "top 86%" },
+  });
+
+  addEventListener("load", function () { ScrollTrigger.refresh(); });
+})();
+</script>
+</body>
+</html>
