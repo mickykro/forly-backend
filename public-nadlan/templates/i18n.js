@@ -13,7 +13,7 @@
 (function () {
   "use strict";
   var DICT = {
-    "he": {
+    "he": { "nav_prev": "הקודם", "nav_next": "הבא",
       "contact_agent": "שיחה עם המתווך", "book_visit": "תיאום ביקור", "book_visit_private": "תיאום ביקור פרטי", "book_visit_property": "תיאום ביקור בנכס",
       "gallery_and_spec": "גלריה ומפרט", "view_gallery": "צפו בגלריה", "see_it_myself": "אני רוצה לראות אותו", "about_area_arrow": "על השכונה ↓",
       "talk_about_property": "דברו איתי על הנכס", "send_details": "שלחו לי פרטים", "direct_whatsapp": "וואטסאפ ישיר", "whatsapp_talk": "דברו איתי בוואטסאפ", "whatsapp": "וואטסאפ",
@@ -34,7 +34,7 @@
       "parking": "חניות", "registered": "בטאבו", "storage": "מחסן", "elevator": "מעלית", "shabbat_elevator": "מעלית שבת", "balconies": "מרפסות", "garden": "חצר / גינה", "form_error": "משהו השתבש — נסו שוב או פנו בוואטסאפ", "here_area": "השכונה",
       "per_sqm": "למ״ר", "leave_details": "השאירו פרטים", "privacy_policy": "מדיניות פרטיות", "accessibility": "הצהרת נגישות"
     },
-    "en": {
+    "en": { "nav_prev": "Previous", "nav_next": "Next",
       "contact_agent": "Speak with the agent", "book_visit": "Book a visit", "book_visit_private": "Book a private visit", "book_visit_property": "Book a viewing",
       "gallery_and_spec": "Gallery & specs", "view_gallery": "View gallery", "see_it_myself": "I want to see it", "about_area_arrow": "About the area ↓",
       "talk_about_property": "Talk to me about the property", "send_details": "Send me details", "direct_whatsapp": "WhatsApp direct", "whatsapp_talk": "Chat with me on WhatsApp", "whatsapp": "WhatsApp",
@@ -55,7 +55,7 @@
       "parking": "parking", "registered": "registered", "storage": "Storage", "elevator": "Elevator", "shabbat_elevator": "Shabbat elevator", "balconies": "Balconies", "garden": "Yard / garden", "form_error": "Something went wrong — try again or reach out on WhatsApp", "here_area": "The area",
       "per_sqm": "per m²", "leave_details": "Leave your details", "privacy_policy": "Privacy policy", "accessibility": "Accessibility statement"
     },
-    "ar": {
+    "ar": { "nav_prev": "السابق", "nav_next": "التالي",
       "contact_agent": "التحدث مع الوسيط", "book_visit": "تحديد موعد زيارة", "book_visit_private": "تحديد موعد زيارة خاصة", "book_visit_property": "تحديد موعد معاينة العقار",
       "gallery_and_spec": "المعرض والمواصفات", "view_gallery": "استعرض المعرض", "see_it_myself": "أريد أن أراه بنفسي", "about_area_arrow": "عن الحي ↓",
       "talk_about_property": "تحدث معي عن العقار", "send_details": "أرسل لي التفاصيل", "direct_whatsapp": "واتساب مباشر", "whatsapp_talk": "تحدث معي عبر واتساب", "whatsapp": "واتساب",
@@ -76,7 +76,7 @@
       "parking": "مواقف", "registered": "مسجّلة", "storage": "مخزن", "elevator": "مصعد", "shabbat_elevator": "مصعد السبت", "balconies": "شرفات", "garden": "فناء / حديقة", "form_error": "حدث خطأ ما — حاول مرة أخرى أو تواصل عبر واتساب", "here_area": "الحي",
       "per_sqm": "للم²", "leave_details": "اترك تفاصيلك", "privacy_policy": "سياسة الخصوصية", "accessibility": "بيان إمكانية الوصول"
     },
-    "ru": {
+    "ru": { "nav_prev": "Назад", "nav_next": "Далее",
       "contact_agent": "Связаться с агентом", "book_visit": "Записаться на просмотр", "book_visit_private": "Записаться на частный просмотр", "book_visit_property": "Записаться на осмотр объекта",
       "gallery_and_spec": "Галерея и характеристики", "view_gallery": "Смотреть галерею", "see_it_myself": "Хочу увидеть лично", "about_area_arrow": "О районе ↓",
       "talk_about_property": "Обсудить объект со мной", "send_details": "Пришлите мне детали", "direct_whatsapp": "WhatsApp напрямую", "whatsapp_talk": "Напишите мне в WhatsApp", "whatsapp": "WhatsApp",
@@ -97,7 +97,7 @@
       "parking": "парковка", "registered": "в реестре", "storage": "Кладовая", "elevator": "Лифт", "shabbat_elevator": "Субботний лифт", "balconies": "Балконы", "garden": "Двор / сад", "form_error": "Что-то пошло не так — попробуйте ещё раз или напишите в WhatsApp", "here_area": "Район",
       "per_sqm": "за м²", "leave_details": "Оставьте контакты", "privacy_policy": "Политика конфиденциальности", "accessibility": "Заявление о доступности"
     },
-    "es": {
+    "es": { "nav_prev": "Anterior", "nav_next": "Siguiente",
       "contact_agent": "Hablar con el agente", "book_visit": "Agendar una visita", "book_visit_private": "Agendar una visita privada", "book_visit_property": "Agendar una visita al inmueble",
       "gallery_and_spec": "Galería y detalles", "view_gallery": "Ver galería", "see_it_myself": "Quiero verlo", "about_area_arrow": "Sobre la zona ↓",
       "talk_about_property": "Háblame del inmueble", "send_details": "Envíame los detalles", "direct_whatsapp": "WhatsApp directo", "whatsapp_talk": "Escríbeme por WhatsApp", "whatsapp": "WhatsApp",
@@ -118,7 +118,7 @@
       "parking": "plazas de garaje", "registered": "registradas", "storage": "Trastero", "elevator": "Ascensor", "shabbat_elevator": "Ascensor de Shabat", "balconies": "Balcones", "garden": "Patio / jardín", "form_error": "Algo salió mal — inténtalo de nuevo o escríbenos por WhatsApp", "here_area": "La zona",
       "per_sqm": "por m²", "leave_details": "Deja tus datos", "privacy_policy": "Política de privacidad", "accessibility": "Declaración de accesibilidad"
     },
-    "fr": {
+    "fr": { "nav_prev": "Précédent", "nav_next": "Suivant",
       "contact_agent": "Parler à l'agent", "book_visit": "Planifier une visite", "book_visit_private": "Planifier une visite privée", "book_visit_property": "Planifier une visite du bien",
       "gallery_and_spec": "Galerie et détails", "view_gallery": "Voir la galerie", "see_it_myself": "Je veux le voir", "about_area_arrow": "À propos du quartier ↓",
       "talk_about_property": "Parlez-moi du bien", "send_details": "Envoyez-moi les détails", "direct_whatsapp": "WhatsApp direct", "whatsapp_talk": "Écrivez-moi sur WhatsApp", "whatsapp": "WhatsApp",
