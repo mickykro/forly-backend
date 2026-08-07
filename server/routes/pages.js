@@ -24,7 +24,7 @@ const { sanitizeTags, deriveTags } = require("../tags");
 // stays functional for legacy reminder links already sent.
 const PAGE_LIFESPAN_DAYS = 36500;
 const LEAD_MAX_PER_HOUR = 3;
-const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel", "atelier", "revue", "vitrine"]);
+const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel", "atelier", "revue", "vitrine", "loupe"]);
 
 const confirmHtml = (title, sub) =>
   `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
