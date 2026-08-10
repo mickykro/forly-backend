@@ -222,9 +222,16 @@
      840px photo is 32px of overhang, landing straight on the caption beside
      it — and there is no wrapper here to clip it: the runtime hands over a
      flat button, photo and caption as siblings. */
-  .g-item>img,.g-item>canvas{grid-column:1/9;grid-row:1/3;width:100%;height:clamp(320px,52vw,600px);object-fit:cover;object-position:50% var(--py,50%);border-radius:4px;filter:saturate(.85);transition:filter .6s,object-position .1s linear}
+  /* !important because the runtime writes height:100% inline on every gallery
+     image. In a template whose tile is a sized box that is right; here the
+     photo is what gives the row its height, and an inline 100% against an auto
+     row falls back to the picture's own aspect — a portrait frame out of a
+     vertical tour clip then renders 1383px tall instead of 600. */
+  .g-item>img,.g-item>canvas{grid-column:1/9;grid-row:1/3;width:100%;height:clamp(320px,52vw,600px)!important;object-fit:cover;object-position:50% var(--py,50%);border-radius:4px;filter:saturate(.85);transition:filter .6s,object-position .1s linear}
   .g-item:hover>img,.g-item:hover>canvas{filter:saturate(1)}
-  .g-item::before{content:"";grid-column:1/9;grid-row:1/3;z-index:2;border-radius:4px;background:linear-gradient(120deg,var(--panel2),var(--shade));transform:scaleX(1);transform-origin:left;transition:transform 1.1s var(--ease) .15s}
+  /* align-self, because the grid centres its items: without it the wipe has no
+     content to give it height and covers nothing. */
+  .g-item::before{content:"";grid-column:1/9;grid-row:1/3;align-self:stretch;z-index:2;border-radius:4px;background:linear-gradient(120deg,var(--panel2),var(--shade));transform:scaleX(1);transform-origin:left;transition:transform 1.1s var(--ease) .15s}
   html[dir=rtl] .g-item::before{transform-origin:right}
   .g-item.in::before{transform:scaleX(0)}
   .g-no{grid-column:9/13;grid-row:1;align-self:end;padding-inline-start:8px;font:300 60px var(--serif);color:transparent;-webkit-text-stroke:1px var(--gold);line-height:1}
@@ -682,7 +689,10 @@
   //    a tour, so the controls follow the clip: no clip, no buttons.
   var hv = document.getElementById("heroVideo");
   var ctrls = document.getElementById("videoCtrls");
-  function videoReady() { return hv && hv.getAttribute("src"); }
+  // hasAttribute, not getAttribute: a preview build inlines the clip as a data
+  // URI, and this is asked on every intersection change — no reason to
+  // materialise a multi-megabyte string to answer a yes/no question.
+  function videoReady() { return !!(hv && hv.hasAttribute("src")); }
 
   if (hv && !reduce) {
     hv.addEventListener("canplay", function () { hv.classList.add("on"); hv.play().catch(function () {}); });
