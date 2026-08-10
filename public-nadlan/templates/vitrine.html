@@ -524,15 +524,54 @@
   // capped by its own frame count long before this, and a long one stops here
   // instead of growing without bound. 180 x 253x440x4B ~ 80MB, 90 x 195x340x4B
   // ~ 24MB on touch.
-  var COUNT = coarse ? 90 : 180;
-  var MAXH = coarse ? 340 : 440;
+  // Resolution and frame count both come out of one pot of memory. Fixing each
+  // to a constant meant the tour was shrunk to MAXH before anything else
+  // happened — a 496x864 master arrived as 253x440, three quarters of it thrown
+  // away, and then upscaled ~12x to fill a desktop background. So fix the pot
+  // instead and spend it on detail first: keep the source's own pixels, then
+  // take as many frames as what is left allows. Nothing here clamps the master,
+  // so a sharper tour reaches the screen instead of being capped away.
+  var BUDGET = coarse ? 28e6 : 96e6;      // bytes of decoded frame cache
+  var MINCOUNT = 90;                      // below this the scroll visibly steps
+  var MAXCOUNT = coarse ? 90 : 180;
+  var COUNT = MAXCOUNT;
+  var FRAME_W = 0;                        // width actually captured, once known
+
+  // Cover-fit means a landscape viewport only ever shows a horizontal band of a
+  // portrait tour — at 2560x1440 that is ~280 of the 864 rows. Storing the other
+  // 580 is memory spent on pixels nobody sees, so take the band at the source's
+  // own width rather than shrinking the whole frame to fit. The headroom covers
+  // a reshaped window; frames are not recaptured on resize.
+  function frameBox(vw, vh) {
+    var aspect = innerWidth / Math.max(1, innerHeight);
+    var bandW = vw, bandH = vh;
+    // cover is width-driven whenever the viewport is wider than the frame
+    if (aspect >= vw / vh) bandH = Math.min(vh, Math.ceil((vw / aspect) * 1.35));
+    else bandW = Math.min(vw, Math.ceil(vh * aspect * 1.35));
+    var w = bandW, h = bandH;
+    var count = Math.floor(BUDGET / (w * h * 4));
+    if (count < MINCOUNT) {
+      // the band alone overruns the budget (phones, or a large master): give up
+      // resolution rather than frame density, which is the more visible of the two
+      var k = Math.sqrt(BUDGET / (MINCOUNT * w * h * 4));
+      w = Math.max(2, Math.round(w * k));
+      h = Math.max(2, Math.round(h * k));
+      count = MINCOUNT;
+    }
+    return {
+      w: w, h: h, count: Math.min(MAXCOUNT, count),
+      sx: Math.max(0, Math.round((vw - bandW) / 2)), sy: Math.max(0, Math.round((vh - bandH) / 2)),
+      sw: bandW, sh: bandH,
+    };
+  }
 
   function sizeCanvas() {
-    // The source is 496px wide, so a full-bleed desktop background is already
-    // upscaled ~4x before device pixels enter into it. Painting at 2x DPR asks
-    // for detail the footage does not have and costs ~3x the paint time, which
-    // is frame rate spent on nothing.
-    var dpr = Math.min(1.25, window.devicePixelRatio || 1);
+    // Painting more device pixels than the frames can feed is frame rate spent
+    // on nothing, so the ceiling follows the source instead of being a constant:
+    // today's 496px tour still lands on 1.25, and a sharper master lifts it on
+    // its own up to 2 rather than being clamped away.
+    var supply = (FRAME_W || 496) / Math.max(1, innerWidth);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2, Math.max(1.25, supply * 2));
     cv.width = Math.round(innerWidth * dpr);
     cv.height = Math.round(innerHeight * dpr);
     render();
@@ -568,10 +607,11 @@
     blitInto(el.getContext("2d"), el.width, el.height, frames[0], 1);
   }
 
-  function keep(v, W, H, k) {
+  function keep(v, box, k) {
     var c = document.createElement("canvas");
-    c.width = W; c.height = H;
-    try { c.getContext("2d").drawImage(v, 0, 0, W, H); } catch (e) { return false; }
+    c.width = box.w; c.height = box.h;
+    try { c.getContext("2d").drawImage(v, box.sx, box.sy, box.sw, box.sh, 0, 0, box.w, box.h); }
+    catch (e) { return false; }
     frames[k] = c; ready = Math.max(ready, k + 1);
     if (k === 0) { render(); paintFill(); }
     return true;
@@ -592,7 +632,7 @@
     v.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
     document.body.appendChild(v);
 
-    var W = 0, H = 0, step = 0, k = 0, finished = false;
+    var box = null, step = 0, k = 0, finished = false;
     function finish() {
       if (finished) return; finished = true;
       try { v.pause(); v.removeAttribute("src"); v.load(); } catch (e) {}
@@ -601,9 +641,12 @@
     }
     v.addEventListener("loadedmetadata", function () {
       var vh = v.videoHeight || 864, vw = v.videoWidth || 496;
-      var scale = Math.min(1, MAXH / vh);
-      W = Math.max(2, Math.round(vw * scale));
-      H = Math.max(2, Math.round(vh * scale));
+      box = frameBox(vw, vh);
+      COUNT = box.count;
+      // the canvas ceiling is derived from what was actually captured, so it can
+      // only be set once the master's real dimensions are known
+      FRAME_W = box.w;
+      sizeCanvas();
       step = (isFinite(v.duration) ? v.duration : 8) / COUNT;
       if (v.requestVideoFrameCallback) {
         // rVFC only fires for frames the browser actually presents, and never
@@ -626,7 +669,7 @@
     function onFrame(now, meta) {
       if (finished) return;
       if (k >= COUNT || (isFinite(v.duration) && meta.mediaTime >= v.duration - 0.02 && k > 2)) { finish(); return; }
-      if (meta.mediaTime >= k * step - 1e-3) { keep(v, W, H, k); k++; }
+      if (meta.mediaTime >= k * step - 1e-3) { keep(v, box, k); k++; }
       v.requestVideoFrameCallback(onFrame);
     }
     // fallback: seek frame by frame (slower, but works without rVFC)
@@ -639,7 +682,7 @@
       if (k >= COUNT || !isFinite(v.duration)) { finish(); return; }
       v.currentTime = Math.min(v.duration - 0.05, k * step);
     }
-    function onSeek() { if (finished) return; keep(v, W, H, k); k++; nextSeek(); }
+    function onSeek() { if (finished) return; keep(v, box, k); k++; nextSeek(); }
     v.addEventListener("error", finish);
     v.load();
   }

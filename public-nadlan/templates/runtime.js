@@ -145,7 +145,11 @@
           var c = document.createElement("canvas");
           c.width = vv.videoWidth; c.height = vv.videoHeight;
           c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height);
-          slots[i].img.src = c.toDataURL("image/jpeg", 0.85);
+          // 0.85 was visibly soft on the editorial slots, which are the largest
+          // thing a sampled frame ever fills. The frames are already the weakest
+          // picture on the page — a 480p tour blown up full-bleed — so spending
+          // a few KB here rather than compounding the loss is the better trade.
+          slots[i].img.src = c.toDataURL("image/jpeg", 0.92);
         } catch (e) {} // tainted canvas (cross-origin video) — leave the slot to its CSS backdrop
         i++; seek();
       });
