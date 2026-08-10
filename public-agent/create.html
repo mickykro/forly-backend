@@ -409,6 +409,11 @@
     if (myProps) myProps.style.display = "none";
     // ponytail: autosave agent fields on blur during demo
     initDemoAutosave();
+  } else {
+    // Real (non-demo) create is session-gated, but nothing checked that on
+    // load — a logged-out user could fill the whole form before the 401
+    // surfaced on submit. FLY.req redirects to login on 401 by default.
+    FLY.req("/api/profile").catch(function () {});
   }
 
   // ponytail: autosave agent fields during demo — writes to businesses/{phone}

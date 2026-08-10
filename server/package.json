@@ -63,6 +63,7 @@
     "test": "node overlay.test.js && node pages-auth.test.js && node chatbot-readiness.test.js && node chatbot-config.test.js && node chat-prompt.test.js && node chat-provider.test.js && node leads.test.js",
     "start": "node index.js",
     "local": "node index.js",
+    "g-login": "gcloud auth application-default login",
     "tunnel": "npx cloudflared tunnel --url http://localhost:8787",
     "local:tunnel": "BASE_URL=${BASE_URL:?set BASE_URL to the https://<name>.trycloudflare.com URL printed by \"npm run tunnel\" — see the \"//\" notes in package.json} node index.js"
   },
