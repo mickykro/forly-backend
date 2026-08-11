@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="he" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -236,8 +236,8 @@ section.block{padding:clamp(70px,10vw,120px) clamp(20px,4.5vw,48px)}
   display:flex;align-items:center;justify-content:center;transition:background .25s;z-index:2;
 }
 .lb-arrow:hover{background:rgba(217,177,92,.6)}
-.lb-prev{right:14px}
-.lb-next{left:14px}
+.lb-prev{left:14px}
+.lb-next{right:14px}
 .lb-meta{
   position:absolute;bottom:max(18px,env(safe-area-inset-bottom));right:0;left:0;
   display:flex;flex-direction:column;align-items:center;gap:4px;
@@ -343,16 +343,16 @@ section.block{padding:clamp(70px,10vw,120px) clamp(20px,4.5vw,48px)}
 .astat span{font-size:.82rem;font-weight:300;color:rgba(255,255,255,.68)}
 .map-line{
   margin-top:26px;display:flex;flex-direction:column;gap:0;
-  border-right:1px solid rgba(217,177,92,.35);
+  border-left:1px solid rgba(217,177,92,.35);
 }
 .map-line .stop{
-  display:flex;align-items:center;gap:14px;padding:9px 18px 9px 0;
+  display:flex;align-items:center;gap:14px;padding:9px 0 9px 18px;
   font-size:.92rem;font-weight:300;color:rgba(255,255,255,.8);position:relative;
 }
 .map-line .stop::before{
   content:"";width:9px;height:9px;border-radius:50%;
   background:var(--gold-bright);
-  position:absolute;right:-5px;
+  position:absolute;left:-5px;
 }
 .map-line .stop b{font-weight:600;color:#fff}
 .map-line .stop .min{margin-inline-start:auto;font-family:var(--serif);color:var(--gold-bright);font-size:1.05rem;white-space:nowrap}
@@ -439,7 +439,7 @@ footer a{color:rgba(255,255,255,.7);text-decoration:none}
   .gal{grid-template-columns:repeat(2,1fr);gap:10px}
   .gal-item:first-child{grid-column:span 2;grid-row:auto;aspect-ratio:4/3}
   .lb-arrow{width:44px;height:44px}
-  .lb-prev{right:8px}.lb-next{left:8px}
+  .lb-prev{left:8px}.lb-next{right:8px}
   footer{padding-bottom:130px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -481,20 +481,20 @@ body.has-state.state-notfound #stateNotfound{display:flex}
 <body>
 
 <!-- app states -->
-<div class="app-state" id="stateLoading"><div class="loader" aria-label="טוען"></div></div>
+<div class="app-state" id="stateLoading"><div class="loader" aria-label="Loading"></div></div>
 <div class="app-state" id="stateExpired">
   <div class="state-card">
     <span class="big">🌙</span>
-    <h2>הדף אינו פעיל</h2>
-    <p id="expiredSub">תוקף הדף הסתיים. לפרטים על הנכס אפשר לפנות ישירות למתווך.</p>
-    <a class="btn btn-gold" id="expiredWa" href="#" style="display:none">💬 דברו עם המתווך</a>
+    <h2>This page is no longer active</h2>
+    <p id="expiredSub">This page has expired. For details about the property, please contact the agent directly.</p>
+    <a class="btn btn-gold" id="expiredWa" href="#" style="display:none">💬 Talk to the agent</a>
   </div>
 </div>
 <div class="app-state" id="stateNotfound">
   <div class="state-card">
     <span class="big">🔍</span>
-    <h2>הדף לא נמצא</h2>
-    <p>ייתכן שהקישור שגוי או שהדף הוסר.</p>
+    <h2>Page not found</h2>
+    <p>The link may be incorrect, or the page may have been removed.</p>
   </div>
 </div>
 
@@ -505,7 +505,7 @@ body.has-state.state-notfound #stateNotfound{display:flex}
     <b>GOLAN</b>
     <span>Luxury Real Estate</span>
   </a>
-  <a class="top-cta" href="#contact">לתיאום ביקור</a>
+  <a class="top-cta" href="#contact">Book a visit</a>
 </header>
 
 <!-- ══════════ HERO ══════════ -->
@@ -513,32 +513,32 @@ body.has-state.state-notfound #stateNotfound{display:flex}
   <div class="hero-bg"></div>
   <div class="hero-inner">
     <div class="hero-copy">
-      <span class="eyebrow reveal in">בלעדי · מגדל בבלי, תל אביב</span>
-      <h1 class="reveal in" data-delay="1">החיים,<br><em>מקומה 32.</em></h1>
-      <p class="sub reveal in" data-delay="2">פנטהאוז 5 חדרים עם קו ראשון לפארק ונוף פתוח לים — נכס שמגיעים אליו פעם בעשור.</p>
+      <span class="eyebrow reveal in">Exclusive · Bavli Tower, Tel Aviv</span>
+      <h1 class="reveal in" data-delay="1">Life,<br><em>from the 32nd floor.</em></h1>
+      <p class="sub reveal in" data-delay="2">A 5-room penthouse with a front-row park view and open sea views — a property that comes around once a decade.</p>
       <div class="hero-actions reveal in" data-delay="3">
-        <a class="btn btn-gold" href="#contact">אני רוצה לראות אותו</a>
-        <a class="btn btn-ghost" href="#area">על השכונה ↓</a>
+        <a class="btn btn-gold" href="#contact">I want to see it</a>
+        <a class="btn btn-ghost" href="#area">About the area ↓</a>
       </div>
     </div>
     <div class="hero-video-wrap reveal in" data-delay="2" id="videoWrap">
-      <div class="video-badge"><span class="dot"></span> סיור וידאו</div>
+      <div class="video-badge"><span class="dot"></span> Video tour</div>
       <video id="walkthrough" src="https://nadlan.call4li.com/previews/tour.mp4" autoplay muted loop playsinline poster="">
-        
+
       </video>
-      <button class="sound-toggle" id="soundBtn" aria-label="הפעלת קול">🔇</button>
+      <button class="sound-toggle" id="soundBtn" aria-label="Turn on sound">🔇</button>
     </div>
   </div>
-  <div class="scroll-hint"><span>גללו</span><span class="line"></span></div>
+  <div class="scroll-hint"><span>Scroll</span><span class="line"></span></div>
 </section>
 
 <!-- ══════════ SPECS ══════════ -->
 <div class="specs">
   <div class="specs-inner">
-    <div class="spec reveal"><b>₪14.9M</b><span>מחיר מבוקש</span></div>
-    <div class="spec reveal" data-delay="1"><b>5 חד׳</b><span>210 מ״ר + מרפסת 60 מ״ר</span></div>
-    <div class="spec reveal" data-delay="2"><b>קומה 32</b><span>נוף פתוח לים ולפארק</span></div>
-    <div class="spec reveal" data-delay="3"><b>2 חניות</b><span>+ מחסן וכניסה פרטית</span></div>
+    <div class="spec reveal"><b>₪14.9M</b><span>Asking price</span></div>
+    <div class="spec reveal" data-delay="1"><b>5 rooms</b><span>210 sqm + 60 sqm terrace</span></div>
+    <div class="spec reveal" data-delay="2"><b>Floor 32</b><span>Open sea & park views</span></div>
+    <div class="spec reveal" data-delay="3"><b>2 parking</b><span>+ storage & private entrance</span></div>
   </div>
 </div>
 
@@ -546,27 +546,27 @@ body.has-state.state-notfound #stateNotfound{display:flex}
 <section class="block" id="gallery">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="kicker">הצצה פנימה</span>
-      <h2>כל חדר, מכל זווית.</h2>
-      <p>מה שהסיור לא הספיק להראות — לחצו על תמונה לצפייה במסך מלא.</p>
+      <span class="kicker">A peek inside</span>
+      <h2>Every room, from every angle.</h2>
+      <p>What the tour didn't have time to show — tap a photo to view full screen.</p>
     </div>
     <div class="gal reveal" id="gal">
-      <button class="gal-item" data-cap="הסלון — נוף פתוח למערב"><img src="" alt="הסלון" loading="lazy"><span class="cap">הסלון — נוף פתוח למערב</span></button>
-      <button class="gal-item" data-cap="הבריכה במתחם המגדל"><img src="" alt="הבריכה" loading="lazy"><span class="cap">הבריכה במתחם המגדל</span></button>
-      <button class="gal-item" data-cap="המטבח — נגיעות שחור מט"><img src="" alt="המטבח" loading="lazy"><span class="cap">המטבח — נגיעות שחור מט</span></button>
-      <button class="gal-item" data-cap="חדר השינה הראשי"><img src="" alt="חדר השינה" loading="lazy"><span class="cap">חדר השינה הראשי</span></button>
-      <button class="gal-item" data-cap="פינת האוכל והאי"><img src="" alt="פינת האוכל" loading="lazy"><span class="cap">פינת האוכל והאי</span></button>
-      <button class="gal-item" data-cap="חדר הילדים"><img src="" alt="חדר הילדים" loading="lazy"><span class="cap">חדר הילדים</span></button>
+      <button class="gal-item" data-cap="Living room — open view to the west"><img src="" alt="Living room" loading="lazy"><span class="cap">Living room — open view to the west</span></button>
+      <button class="gal-item" data-cap="The pool in the tower complex"><img src="" alt="Pool" loading="lazy"><span class="cap">The pool in the tower complex</span></button>
+      <button class="gal-item" data-cap="Kitchen — matte black accents"><img src="" alt="Kitchen" loading="lazy"><span class="cap">Kitchen — matte black accents</span></button>
+      <button class="gal-item" data-cap="Master bedroom"><img src="" alt="Master bedroom" loading="lazy"><span class="cap">Master bedroom</span></button>
+      <button class="gal-item" data-cap="Dining area & island"><img src="" alt="Dining area" loading="lazy"><span class="cap">Dining area & island</span></button>
+      <button class="gal-item" data-cap="Kids' room"><img src="" alt="Kids' room" loading="lazy"><span class="cap">Kids' room</span></button>
     </div>
   </div>
 </section>
 
 <!-- lightbox -->
-<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="גלריית תמונות">
-  <button class="lb-close" id="lbClose" aria-label="סגירה">✕</button>
-  <button class="lb-arrow lb-prev" id="lbPrev" aria-label="הקודם">→</button>
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo gallery">
+  <button class="lb-close" id="lbClose" aria-label="Close">✕</button>
+  <button class="lb-arrow lb-prev" id="lbPrev" aria-label="Previous">←</button>
   <img id="lbImg" src="" alt="">
-  <button class="lb-arrow lb-next" id="lbNext" aria-label="הבא">←</button>
+  <button class="lb-arrow lb-next" id="lbNext" aria-label="Next">→</button>
   <div class="lb-meta">
     <span class="lb-cap" id="lbCap"></span>
     <span class="lb-count" id="lbCount"></span>
@@ -577,50 +577,50 @@ body.has-state.state-notfound #stateNotfound{display:flex}
 <section class="block" id="why">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="kicker">למה דווקא כאן</span>
-      <h2>נכס כזה לא מגיע ללוחות.<br>הוא מגיע לאנשים הנכונים.</h2>
-      <p>ארבע סיבות שבגללן הפנטהאוז הזה שווה את הביקור — ולמה כדאי שתגיעו לפני כולם.</p>
+      <span class="kicker">Why here</span>
+      <h2>A property like this never hits the listings.<br>It reaches the right people.</h2>
+      <p>Four reasons this penthouse is worth the visit — and why you'll want to get there before everyone else.</p>
     </div>
     <div class="carousel-outer">
       <div class="carousel" id="carousel">
         <article class="card reveal">
           <span class="num">01</span>
-          <h3>נוף שאי אפשר לשכפל</h3>
-          <p>קו ראשון לפארק בבלי ונוף פתוח לים — ללא בנייה עתידית חוסמת. בקומה 32, השקיעה היא חלק מהסלון.</p>
-          <span class="tag">חזית מערבית</span>
+          <h3>A view that can't be replicated</h3>
+          <p>Front-row to Bavli Park with open sea views — no future construction to block it. On the 32nd floor, the sunset is part of the living room.</p>
+          <span class="tag">West-facing frontage</span>
         </article>
         <article class="card reveal" data-delay="1">
           <span class="num">02</span>
-          <h3>סטנדרט של מגדל יוקרה</h3>
-          <p>לובי מלון, קונסיירז׳ 24/7, בריכה, חדר כושר וספא לדיירים בלבד. הבית מתחיל כבר בכניסה למגדל.</p>
-          <span class="tag">שירותי דיירים</span>
+          <h3>Luxury tower standard</h3>
+          <p>Hotel-style lobby, 24/7 concierge, pool, gym and spa for residents only. Home begins the moment you enter the tower.</p>
+          <span class="tag">Resident services</span>
         </article>
         <article class="card reveal" data-delay="2">
           <span class="num">03</span>
-          <h3>מומחה של השכונה הזאת</h3>
-          <p>רון גולן ליווה 47 עסקאות במגדלי בבלי בעשור האחרון — יותר מכל מתווך אחר באזור. הוא יודע בדיוק מה הנכס הזה שווה, ולמי.</p>
-          <span class="tag">47 עסקאות בבבלי</span>
+          <h3>An expert in this exact neighborhood</h3>
+          <p>Ron Golan has closed 47 deals in Bavli towers over the last decade — more than any other agent in the area. He knows exactly what this property is worth, and to whom.</p>
+          <span class="tag">47 deals in Bavli</span>
         </article>
         <article class="card reveal" data-delay="3">
           <span class="num">04</span>
-          <h3>תהליך דיסקרטי ומהיר</h3>
-          <p>ביקורים מתואמים אישית, חדר נתונים מסודר לרוכש הרציני, וליווי משפטי־פיננסי עד למסירת מפתח.</p>
-          <span class="tag">ליווי מלא</span>
+          <h3>A discreet, fast process</h3>
+          <p>Personally scheduled visits, an organized data room for the serious buyer, and legal-financial guidance through to key handover.</p>
+          <span class="tag">Full support</span>
         </article>
       </div>
       <div class="car-nav">
-        <button id="prevBtn" aria-label="הקודם">→</button>
-        <button id="nextBtn" aria-label="הבא">←</button>
+        <button id="prevBtn" aria-label="Previous">←</button>
+        <button id="nextBtn" aria-label="Next">→</button>
       </div>
     </div>
 
     <div class="agent-strip reveal">
-      <div class="avatar">ר״ג</div>
+      <div class="avatar">RG</div>
       <div class="agent-meta">
-        <b>רון גולן</b>
-        <span>מייסד גולן נכסים · מומחה נדל״ן יוקרה בצפון ת״א · רישיון תיווך 3205419</span>
+        <b>Ron Golan</b>
+        <span>Founder, Golan Properties · Luxury real estate expert in North Tel Aviv · Broker license 3205419</span>
       </div>
-      <a class="btn btn-gold" href="#contact">דברו איתי על הנכס</a>
+      <a class="btn btn-gold" href="#contact">Talk to me about the property</a>
     </div>
   </div>
 </section>
@@ -629,26 +629,26 @@ body.has-state.state-notfound #stateNotfound{display:flex}
 <section class="block area" id="area">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="kicker">השכונה</span>
-      <h2>בבלי. השקט של פארק,<br>במרחק נגיעה מהעיר.</h2>
-      <p>אחת השכונות המבוקשות בתל אביב — וזה לא במקרה.</p>
+      <span class="kicker">The area</span>
+      <h2>Bavli. The quiet of a park,<br>a touch away from the city.</h2>
+      <p>One of the most sought-after neighborhoods in Tel Aviv — and that's no accident.</p>
     </div>
     <div class="area-grid">
       <div class="area-copy reveal">
-        <p>בבלי היא הסוד הכי גלוי של תל אביב: שכונה ירוקה ושקטה שיושבת <b>צמוד לפארק הירקון</b>, ועדיין במרחק דקות מהשדרות, מהים ומכל מה שהעיר יודעת להציע.</p>
-        <p>בעשור האחרון הפכה בבלי למוקד מגדלי היוקרה של העיר, עם ביקוש עקבי ו<b>עליית ערך של כ־42% בחמש שנים</b> — אחת הגבוהות בתל אביב.</p>
+        <p>Bavli is Tel Aviv's least-kept secret: a green, quiet neighborhood sitting <b>right next to Yarkon Park</b>, yet just minutes from the boulevards, the sea, and everything the city has to offer.</p>
+        <p>Over the last decade Bavli has become the city's luxury tower hub, with steady demand and <b>roughly 42% value growth over five years</b> — among the highest in Tel Aviv.</p>
         <div class="map-line">
-          <div class="stop"><b>פארק הירקון</b><span class="min">2 דק׳ הליכה</span></div>
-          <div class="stop"><b>נמל תל אביב והים</b><span class="min">6 דק׳ נסיעה</span></div>
-          <div class="stop"><b>מתחם הבימה והשדרות</b><span class="min">8 דק׳ נסיעה</span></div>
-          <div class="stop"><b>הרכבת הקלה — תחנת ארלוזורוב</b><span class="min">7 דק׳ נסיעה</span></div>
+          <div class="stop"><b>Yarkon Park</b><span class="min">2 min walk</span></div>
+          <div class="stop"><b>Tel Aviv Port & the sea</b><span class="min">6 min drive</span></div>
+          <div class="stop"><b>Habima & the boulevards</b><span class="min">8 min drive</span></div>
+          <div class="stop"><b>Light rail — Arlozorov station</b><span class="min">7 min drive</span></div>
         </div>
       </div>
       <div class="area-stats">
-        <div class="astat reveal"><b>+42%</b><span>עליית ערך בחמש השנים האחרונות</span></div>
-        <div class="astat reveal" data-delay="1"><b>350 דונם</b><span>של פארק הירקון — הריאה הירוקה בפתח הבית</span></div>
-        <div class="astat reveal" data-delay="2"><b>9.2 / 10</b><span>דירוג בתי הספר היסודיים בסביבה</span></div>
-        <div class="astat reveal" data-delay="3"><b>4 דק׳</b><span>לנתיבי איילון — יציאה מהירה לכל הארץ</span></div>
+        <div class="astat reveal"><b>+42%</b><span>Value increase over the last five years</span></div>
+        <div class="astat reveal" data-delay="1"><b>350 dunams</b><span>of Yarkon Park — the green lung at your doorstep</span></div>
+        <div class="astat reveal" data-delay="2"><b>9.2 / 10</b><span>Local elementary school rating</span></div>
+        <div class="astat reveal" data-delay="3"><b>4 min</b><span>to the Ayalon Highway — a fast exit to anywhere</span></div>
       </div>
     </div>
   </div>
@@ -659,31 +659,31 @@ body.has-state.state-notfound #stateNotfound{display:flex}
   <div class="container">
     <div class="cta-panel reveal">
       <div class="cta-info">
-        <h2>הצעד הבא?<br><em>לראות אותו במו עיניכם.</em></h2>
-        <p>השאירו פרטים ונחזור אליכם באופן אישי לתיאום ביקור — בדיסקרטיות מלאה וללא התחייבות.</p>
+        <h2>The next step?<br><em>Seeing it for yourself.</em></h2>
+        <p>Leave your details and we'll get back to you personally to schedule a visit — in full discretion and with no obligation.</p>
         <div class="trust">
-          <div><span class="tick">✦</span> מענה אישי בתוך שעתיים בשעות הפעילות</div>
-          <div><span class="tick">✦</span> ביקור מתואם אישית, בזמן שנוח לכם</div>
-          <div><span class="tick">✦</span> הפרטים שלכם נשארים אצלנו בלבד</div>
+          <div><span class="tick">✦</span> Personal reply within two hours during business hours</div>
+          <div><span class="tick">✦</span> A visit arranged personally, at a time that suits you</div>
+          <div><span class="tick">✦</span> Your details stay with us alone</div>
         </div>
       </div>
       <form class="cta-form" id="leadForm">
         <div>
-          <label for="name">שם מלא</label>
-          <input id="name" name="name" type="text" placeholder="ישראל ישראלי" required autocomplete="name">
+          <label for="name">Full name</label>
+          <input id="name" name="name" type="text" placeholder="John Smith" required autocomplete="name">
         </div>
         <div>
-          <label for="phone">טלפון נייד</label>
+          <label for="phone">Mobile phone</label>
           <input id="phone" name="phone" type="tel" placeholder="050-0000000" required autocomplete="tel" inputmode="tel">
         </div>
-        <button class="btn btn-gold" type="submit">תיאום ביקור בנכס</button>
-        <div class="or">או</div>
-        <a class="btn btn-wa" href="https://wa.me/972500000000?text=%D7%94%D7%99%D7%99%20%D7%90%D7%9C%D7%95%D7%9F%2C%20%D7%A8%D7%90%D7%99%D7%AA%D7%99%20%D7%90%D7%AA%20%D7%94%D7%A4%D7%A0%D7%98%D7%94%D7%90%D7%95%D7%96%20%D7%91%D7%91%D7%91%D7%9C%D7%99%20%D7%95%D7%90%D7%A9%D7%9E%D7%97%20%D7%9C%D7%A4%D7%A8%D7%98%D7%99%D7%9D" target="_blank" rel="noopener">💬 דברו איתי בוואטסאפ</a>
+        <button class="btn btn-gold" type="submit">Book a viewing</button>
+        <div class="or">or</div>
+        <a class="btn btn-wa" href="https://wa.me/972500000000?text=Hi%2C%20I%20saw%20the%20penthouse%20and%20I%27d%20love%20to%20book%20a%20visit." target="_blank" rel="noopener">💬 Chat with me on WhatsApp</a>
       </form>
       <div class="form-done" id="formDone">
         <span class="big">🥂</span>
-        <h3>הפרטים אצלנו.</h3>
-        <p>נחזור אליכם באופן אישי בהקדם.<br>בינתיים — שווה לצפות בסיור עוד פעם 😉</p>
+        <h3>We've got your details.</h3>
+        <p>We'll get back to you personally very soon.<br>In the meantime — the tour is worth another look 😉</p>
       </div>
     </div>
   </div>
@@ -693,14 +693,14 @@ body.has-state.state-notfound #stateNotfound{display:flex}
 <footer>
   <div class="container">
     <span class="fbrand">GOLAN · LUXURY REAL ESTATE</span>
-    <span>הדף נוצר אוטומטית ע״י <a href="https://call4li.com">Forly 🦉</a></span>
+    <span>This page was generated automatically by <a href="https://call4li.com">Forly 🦉</a></span>
   </div>
 </footer>
 
 <!-- ══════════ STICKY MOBILE BAR ══════════ -->
 <div class="sticky-bar" id="stickyBar">
-  <a class="btn btn-wa" href="https://wa.me/972500000000" target="_blank" rel="noopener">💬 וואטסאפ</a>
-  <a class="btn btn-gold" href="#contact">תיאום ביקור</a>
+  <a class="btn btn-wa" href="https://wa.me/972500000000" target="_blank" rel="noopener">💬 WhatsApp</a>
+  <a class="btn btn-gold" href="#contact">Book a visit</a>
 </div>
 
 <script>
@@ -748,8 +748,8 @@ body.has-state.state-notfound #stateNotfound{display:flex}
   var car=document.getElementById("carousel");
   function cw(){ var f=car&&car.querySelector(".card"); return f?f.getBoundingClientRect().width+18:340; }
   var nb=document.getElementById("nextBtn"), pb=document.getElementById("prevBtn");
-  if(nb) nb.addEventListener("click",function(){ car.scrollBy({left:-cw(),behavior:"smooth"}); });
-  if(pb) pb.addEventListener("click",function(){ car.scrollBy({left:cw(),behavior:"smooth"}); });
+  if(nb) nb.addEventListener("click",function(){ car.scrollBy({left:cw(),behavior:"smooth"}); });
+  if(pb) pb.addEventListener("click",function(){ car.scrollBy({left:-cw(),behavior:"smooth"}); });
 
   // lightbox
   var lb=document.getElementById("lightbox"),lbImg=document.getElementById("lbImg"),lbCap=document.getElementById("lbCap"),lbCount=document.getElementById("lbCount");
@@ -762,7 +762,7 @@ body.has-state.state-notfound #stateNotfound{display:flex}
   var lp=document.getElementById("lbPrev"); if(lp) lp.addEventListener("click",function(){ stepLb(-1); });
   var ln=document.getElementById("lbNext"); if(ln) ln.addEventListener("click",function(){ stepLb(1); });
   if(lb) lb.addEventListener("click",function(e){ if(e.target===lb) closeLb(); });
-  document.addEventListener("keydown",function(e){ if(!lb||!lb.classList.contains("open"))return; if(e.key==="Escape")closeLb(); if(e.key==="ArrowRight")stepLb(-1); if(e.key==="ArrowLeft")stepLb(1); });
+  document.addEventListener("keydown",function(e){ if(!lb||!lb.classList.contains("open"))return; if(e.key==="Escape")closeLb(); if(e.key==="ArrowLeft")stepLb(-1); if(e.key==="ArrowRight")stepLb(1); });
 
   // lead form
   var lf=document.getElementById("leadForm"), fd=document.getElementById("formDone");
