@@ -13,7 +13,7 @@ const asMillis = (v) => (v && v.toMillis ? v.toMillis() : v ? new Date(v).getTim
 
 // ── theme sanitization ──
 const HEX = /^#[0-9a-fA-F]{6}$/;
-const TEMPLATES = { original: 1, nocturne: 1, galerie: 1, reel: 1, atelier: 1, revue: 1, vitrine: 1, loupe: 1, orbite: 1 };
+const TEMPLATES = { original: 1, nocturne: 1, reel: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1 };
 
 function sanitizeTheme(t) {
   if (!t || typeof t !== "object") return null;

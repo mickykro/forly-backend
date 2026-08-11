@@ -1,5 +1,5 @@
 /* Forly Nadlan — shared template runtime.
-   Renders any of the data-driven landing templates (nocturne/galerie/reel/
+   Renders any of the data-driven landing templates (nocturne/reel/
    atelier/revue) from a single page payload. In production the server injects
    window.__PAGE__ with the real listing; for previews the template ships a
    window.__DEMO__ fallback.

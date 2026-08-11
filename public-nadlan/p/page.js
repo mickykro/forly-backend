@@ -70,13 +70,13 @@
   }
   var rgbStr = function (c) { return "rgb(" + c.r + "," + c.g + "," + c.b + ")"; };
 
-  var TEMPLATES = { original: 1, nocturne: 1, galerie: 1, reel: 1, atelier: 1, revue: 1, vitrine: 1, loupe: 1, orbite: 1 };
+  var TEMPLATES = { original: 1, nocturne: 1, reel: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1 };
 
   function applyTheme(theme) {
     if (!theme) return;
     var root = document.documentElement.style;
 
-    // Layout template — original renders here; nocturne/galerie/reel are served
+    // Layout template — original renders here; nocturne/reel are served
     // as their own pages by the server (see /previews and template rendering).
     document.documentElement.setAttribute("data-template",
       TEMPLATES[theme.template] ? theme.template : "original");
