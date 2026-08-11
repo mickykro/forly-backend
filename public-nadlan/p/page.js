@@ -249,18 +249,29 @@
     var avatar = $(".agent-strip .avatar");
     if (a.logo_url) {
       // Same rule runtime.js applies to [data-avatar]: keep the slot's height,
-      // let its width follow the logo, drop the fill and the gold ring, and
-      // contain rather than cover so a wide mark keeps both ends. Height is
-      // read before anything is mutated. Initials keep the circle.
-      var avH = Math.round(avatar.getBoundingClientRect().height);
+      // give it a definite width matching the logo's proportions, drop the fill
+      // and the gold ring, and contain rather than cover so a wide mark keeps
+      // both ends. offsetHeight rather than the client rect, and a definite
+      // width rather than shrink-to-fit — see the note in runtime.js for why
+      // either shortcut lets the picture spill out of the slot.
+      var avH = avatar.offsetHeight;
       if (avH > 0) avatar.style.height = avH + "px";
-      avatar.style.width = "auto";
       avatar.style.aspectRatio = "auto";
-      avatar.style.maxWidth = "200px";
       avatar.style.background = "none";
       avatar.style.border = "0";
       avatar.style.borderRadius = "0";
-      avatar.innerHTML = '<img src="' + escapeAttr(a.logo_url) + '" alt="" style="height:100%;width:auto;max-width:100%;object-fit:contain;display:block">';
+      avatar.style.overflow = "hidden";
+      avatar.classList.add("has-logo");
+      var avImg = document.createElement("img");
+      avImg.alt = "";
+      avImg.style.cssText = "width:100%;height:100%;object-fit:contain;display:block";
+      avImg.addEventListener("load", function () {
+        if (!avH || !avImg.naturalWidth || !avImg.naturalHeight) return;
+        avatar.style.width = Math.min(200, Math.round((avH * avImg.naturalWidth) / avImg.naturalHeight)) + "px";
+      });
+      avImg.src = a.logo_url;
+      avatar.textContent = "";
+      avatar.appendChild(avImg);
     } else {
       avatar.textContent = initials;
     }

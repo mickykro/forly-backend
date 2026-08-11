@@ -1035,6 +1035,18 @@ footer { font-size: 14px; letter-spacing: .08em; }
    declared — an inline style outranks any selector. */
 .amenities span { font-size: 14px !important; }
 
+/* ── the logo slots ───────────────────────────────────────────────────────── */
+/* Both slots are circles built for initials, dressed with a spinning dashed
+   ring and a pulsing halo. runtime.js marks the slot when it puts a logo in it;
+   the decoration is for the circle, and the circle is gone. */
+.brand > b.has-logo,
+.agent-avatar.has-logo {
+  animation: none;
+  box-shadow: none;
+}
+
+.agent-avatar.has-logo::after { display: none; }
+
 </style>
 </head>
 <body>
@@ -1251,7 +1263,6 @@ footer { font-size: 14px; letter-spacing: .08em; }
   }
 
   var deck = document.querySelector(".room-thumbnails");
-  var slides = get("carousel.slides") || [];
   var active = 0;
 
   function tiles() { return Array.prototype.slice.call(deck.children); }
@@ -1290,12 +1301,16 @@ footer { font-size: 14px; letter-spacing: .08em; }
     document.getElementById("room-count").textContent = two(active + 1);
     document.getElementById("slide-counter").textContent = two(active + 1) + " / " + two(all.length);
     document.getElementById("room-name").textContent = capOf(tile);
-    // The deck has one slide per photo but the listing writes a fixed number of
-    // narrative slides, so the copy block only fills while they last.
-    var s = slides[active] || null;
-    document.getElementById("room-eyebrow").textContent = s && s.tag ? s.tag : "";
-    document.getElementById("room-title").textContent = s && s.title ? s.title : capOf(tile);
-    document.getElementById("room-copy").textContent = s && s.body ? s.body : "";
+    // The card describes THIS photo, and the photo's caption is the only copy
+    // in the payload that does. carousel.slides is a fixed set of
+    // property-level highlights — four of them, in an order owing nothing to
+    // the photos — so indexing it by the tile's position captioned the kitchen
+    // "rare in the area" and the balcony "rebuilt from the ground up". Filling
+    // the panel is not worth describing the wrong room.
+    var cap = capOf(tile);
+    document.getElementById("room-eyebrow").textContent = "";
+    document.getElementById("room-title").textContent = cap;
+    document.getElementById("room-copy").textContent = "";
     all.forEach(function (t, k) {
       t.classList.toggle("active", k === active);
       t.setAttribute("aria-selected", String(k === active));

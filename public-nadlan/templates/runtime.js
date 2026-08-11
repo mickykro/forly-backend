@@ -183,20 +183,39 @@
     // slot's own fill and ring come off so the logo sits on the page rather
     // than on a coloured disc. Initials keep the circle: see the else branch.
     each("[data-avatar]", document, function (el) {
-      // Keep the height the design chose, then let the width follow the logo's
-      // own proportions. `contain` inside the square the slot normally is would
-      // fit a 4:1 wordmark at a quarter of the slot's height — technically
-      // uncropped, practically unreadable. Read the height before anything is
-      // mutated, or it is measured against the rules being replaced.
-      var h = Math.round(el.getBoundingClientRect().height);
+      // Keep the height the design chose and give the slot a width to match the
+      // logo's proportions, so a wide wordmark is neither cropped nor shrunk to
+      // a quarter of the slot's height.
+      //
+      // Both numbers are definite, and they have to be. Sizing the slot
+      // shrink-to-fit around an image that is itself capped to the slot's width
+      // is circular, and CSS breaks the tie by falling back to the picture's
+      // intrinsic size — which on a 520x400 logo in an 88px slot came out
+      // 184x142 and spilled over the agent's name underneath.
+      //
+      // offsetHeight, not getBoundingClientRect(): several templates reveal this
+      // block with a transform, and the rect is the *transformed* box, so a card
+      // mid-animation at scale(.92) pins the slot 8% short and never recovers.
+      var h = el.offsetHeight;
       if (h > 0) el.style.height = h + "px";
-      el.style.width = "auto";
       el.style.aspectRatio = "auto";
-      el.style.maxWidth = "200px";
       el.style.background = "none";
       el.style.border = "0";
       el.style.borderRadius = "0";
-      el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="" style="height:100%;width:auto;max-width:100%;object-fit:contain;display:block">';
+      el.style.overflow = "hidden";
+      // a hook for the decoration templates hang off the slot — spinning rings,
+      // pulsing haloes — which are drawn for a circle that is no longer there
+      el.classList.add("has-logo");
+      var im = document.createElement("img");
+      im.alt = "";
+      im.style.cssText = "width:100%;height:100%;object-fit:contain;display:block";
+      im.addEventListener("load", function () {
+        if (!h || !im.naturalWidth || !im.naturalHeight) return;
+        el.style.width = Math.min(200, Math.round((h * im.naturalWidth) / im.naturalHeight)) + "px";
+      });
+      im.src = logoUrl;
+      el.textContent = "";
+      el.appendChild(im);
     });
   } else {
     var initials = String(get("agent.name") || "").split(/\s+/).map(function (w) { return w.charAt(0); }).join("").slice(0, 2);
