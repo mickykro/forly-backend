@@ -1073,6 +1073,108 @@ html.has-logo-bg .agent-scan { display: none; }
 /* the slot no longer needs to hold its own ground — it is the same colour */
 html.has-logo-bg .agent-avatar.has-logo { background: none; }
 
+/* ── why here ─────────────────────────────────────────────────────────────── */
+/* carousel.slides is what the copy generator writes about the property itself —
+   the view, the building, the agent, the process. Four of them, in that order,
+   with nothing tying any one to a particular photograph. They used to be dealt
+   out under the gallery's pictures, which put the parking under the kitchen;
+   they belong in a section of their own, which is where every other template
+   puts them. */
+.reasons {
+  position: relative;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 14vh 7vw;
+  overflow: hidden;
+}
+
+.reasons-intro { max-width: 900px; margin-bottom: clamp(48px, 7vw, 96px); }
+
+.reasons-intro h2 {
+  font: 800 clamp(44px, 6vw, 96px)/.86 var(--font-rubik);
+  letter-spacing: -.07em;
+  margin: 28px 0 22px;
+}
+
+.reasons-intro h2 em { font-style: normal; color: var(--violet); }
+
+.reasons-intro > p {
+  max-width: 640px;
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+/* the same hairline-celled grid the figures use, so the two blocks read as one
+   system rather than two designs */
+.reason-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+}
+
+.reason-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 34px 30px 38px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px #10111825;
+}
+
+/* the accent disc that rolls in on the figures, kept here too */
+.reason-card::after {
+  content: "";
+  position: absolute;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: var(--acid);
+  inset-inline-end: -55px;
+  bottom: -55px;
+  transition: .35s;
+}
+
+.reason-card:hover::after { inset-inline-end: -20px; bottom: -20px; }
+
+.reason-card b {
+  font: 800 clamp(40px, 4vw, 54px)/1 var(--font-rubik);
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--acid);
+}
+
+.reason-card .reason-tag {
+  font: 800 14px var(--font-rubik);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--violet);
+}
+
+/* a slide the generator left without a tag must not leave a gap where one was */
+.reason-card .reason-tag:empty { display: none; }
+
+.reason-card h3 {
+  margin: 0;
+  font: 800 clamp(23px, 2.3vw, 31px)/1.1 var(--font-rubik);
+  letter-spacing: -.04em;
+}
+
+.reason-card p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.reason-card p:empty { display: none; }
+
+@media (max-width: 1000px) {
+  .reasons { padding: 100px 22px; }
+  .reasons-intro h2 { font-size: 48px; }
+  .reason-card { padding: 28px 24px 32px; }
+}
+
 </style>
 </head>
 <body>
@@ -1183,6 +1285,24 @@ html.has-logo-bg .agent-avatar.has-logo { background: none; }
     </div>
   </section>
 
+  <section class="reasons" id="why">
+    <div class="reasons-intro" data-reveal>
+      <span class="section-index" data-i18n="why_here">למה דווקא כאן</span>
+      <h2 data-bind="texts.why_title" data-i18n="why_head">נכס כזה לא מגיע ללוחות. הוא מגיע לאנשים הנכונים.</h2>
+      <p data-bind="texts.why_sub" data-i18n="why_sub">כמה סיבות שבגללן הנכס הזה שווה ביקור — ולמה כדאי להגיע לפני כולם.</p>
+    </div>
+    <div class="reason-grid" data-list="carousel.slides" data-reveal>
+      <template>
+        <article class="reason-card">
+          <b class="num" data-field="num">01</b>
+          <span class="reason-tag" data-field="tag"></span>
+          <h3 data-field="title">כותרת</h3>
+          <p data-field="body"></p>
+        </article>
+      </template>
+    </div>
+  </section>
+
   <section class="area" id="area">
     <div class="area-radar" aria-hidden="true"><i></i><i></i><i></i><span data-bind="property.neighborhood||property.city">הצפון הישן</span></div>
     <div class="area-image" data-reveal><img data-photo="3" alt=""><span data-bind="property.city">תל אביב–יפו</span></div>
@@ -1288,6 +1408,16 @@ html.has-logo-bg .agent-avatar.has-logo { background: none; }
   } else {
     Array.prototype.forEach.call(document.querySelectorAll("[data-reveal]"), function (n) { n.classList.add("is-visible"); });
   }
+
+  // A listing with no generated copy leaves data-list nothing to clone and the
+  // <template> sitting where the cards should be — a heading over an empty
+  // grid. Drop the section instead.
+  (function pruneReasons() {
+    var host = document.querySelector(".reason-grid");
+    if (!host || host.querySelector(".reason-card")) return;
+    var sec = host.closest("section");
+    if (sec) sec.remove();
+  })();
 
   var deck = document.querySelector(".room-thumbnails");
   var active = 0;
