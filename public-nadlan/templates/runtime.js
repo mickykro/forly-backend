@@ -176,8 +176,27 @@
       el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="' + escAttr(get("agent.brand_name") || get("agent.name") || "") +
         '" style="height:38px;max-width:150px;object-fit:contain;display:block">';
     });
+    // The avatar slot is dressed for initials: a filled circle, in places with
+    // a ring around it. A logo dropped into that was `cover`-cropped to the
+    // circle, so anything wider than it is tall lost both ends — which is most
+    // agency logos. `contain` fits the whole mark inside instead, and the
+    // slot's own fill and ring come off so the logo sits on the page rather
+    // than on a coloured disc. Initials keep the circle: see the else branch.
     each("[data-avatar]", document, function (el) {
-      el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+      // Keep the height the design chose, then let the width follow the logo's
+      // own proportions. `contain` inside the square the slot normally is would
+      // fit a 4:1 wordmark at a quarter of the slot's height — technically
+      // uncropped, practically unreadable. Read the height before anything is
+      // mutated, or it is measured against the rules being replaced.
+      var h = Math.round(el.getBoundingClientRect().height);
+      if (h > 0) el.style.height = h + "px";
+      el.style.width = "auto";
+      el.style.aspectRatio = "auto";
+      el.style.maxWidth = "200px";
+      el.style.background = "none";
+      el.style.border = "0";
+      el.style.borderRadius = "0";
+      el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="" style="height:100%;width:auto;max-width:100%;object-fit:contain;display:block">';
     });
   } else {
     var initials = String(get("agent.name") || "").split(/\s+/).map(function (w) { return w.charAt(0); }).join("").slice(0, 2);

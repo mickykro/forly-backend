@@ -147,8 +147,8 @@
     // topbar brand
     var brand = $(".brand");
     if (a.logo_url) {
-      brand.innerHTML = '<img src="' + a.logo_url + '" alt="' + a.brand_name +
-        '" style="height:40px;max-width:150px;object-fit:contain">';
+      brand.innerHTML = '<img src="' + escapeAttr(a.logo_url) + '" alt="' + escapeAttr(a.brand_name) +
+        '" style="height:40px;max-width:150px;object-fit:contain;display:block">';
     } else {
       brand.querySelector("b").textContent = a.brand_name || a.name;
       brand.querySelector("span").textContent = a.tagline || "";
@@ -248,7 +248,19 @@
     var initials = (a.name || "").split(" ").map(function (w) { return w[0] || ""; }).join("״").slice(0, 3);
     var avatar = $(".agent-strip .avatar");
     if (a.logo_url) {
-      avatar.innerHTML = '<img src="' + a.logo_url + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+      // Same rule runtime.js applies to [data-avatar]: keep the slot's height,
+      // let its width follow the logo, drop the fill and the gold ring, and
+      // contain rather than cover so a wide mark keeps both ends. Height is
+      // read before anything is mutated. Initials keep the circle.
+      var avH = Math.round(avatar.getBoundingClientRect().height);
+      if (avH > 0) avatar.style.height = avH + "px";
+      avatar.style.width = "auto";
+      avatar.style.aspectRatio = "auto";
+      avatar.style.maxWidth = "200px";
+      avatar.style.background = "none";
+      avatar.style.border = "0";
+      avatar.style.borderRadius = "0";
+      avatar.innerHTML = '<img src="' + escapeAttr(a.logo_url) + '" alt="" style="height:100%;width:auto;max-width:100%;object-fit:contain;display:block">';
     } else {
       avatar.textContent = initials;
     }
