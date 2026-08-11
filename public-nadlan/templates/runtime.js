@@ -168,6 +168,62 @@
     a.textContent = T("leave_details");
   });
 
+  // ── the logo's own background ─────────────────────────────────────────────
+  // Most agency logos arrive as a flat image with a solid card baked in —
+  // usually white — which shows as a pasted-on rectangle wherever the page is
+  // not that colour. Rather than key it out (which mangles a mark with a soft
+  // edge or a drop shadow), read what that colour is and let the template paint
+  // with it, so the card the logo sits on and the card inside the logo are the
+  // same colour and the seam disappears.
+  //
+  // Publishing re-hosts the logo onto this origin, so the canvas is readable.
+  // Everything here is best-effort: a cut-out logo, a photographic one, a
+  // cross-origin host without CORS, or an old browser all end with the template
+  // left exactly as authored.
+  function srgb(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+
+  function sampleLogoBackground(url) {
+    var probe = new Image();
+    probe.crossOrigin = "anonymous";
+    probe.addEventListener("error", function () {});
+    probe.addEventListener("load", function () {
+      var w = probe.naturalWidth, h = probe.naturalHeight;
+      if (w < 4 || h < 4) return;
+      var first = null;
+      try {
+        var c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        var ctx = c.getContext("2d");
+        ctx.drawImage(probe, 0, 0);
+        // four corners and the middle of each edge. A mark on a solid card
+        // agrees on all eight; a cut-out is transparent at the corners and a
+        // photographic or gradient background disagrees between them.
+        var pts = [[1, 1], [w - 2, 1], [1, h - 2], [w - 2, h - 2],
+                   [w >> 1, 1], [w >> 1, h - 2], [1, h >> 1], [w - 2, h >> 1]];
+        for (var i = 0; i < pts.length; i++) {
+          var d = ctx.getImageData(pts[i][0], pts[i][1], 1, 1).data;
+          if (d[3] < 250) return;            // transparent — there is no card to match
+          if (!first) { first = d; continue; }
+          if (Math.abs(d[0] - first[0]) > 6 ||
+              Math.abs(d[1] - first[1]) > 6 ||
+              Math.abs(d[2] - first[2]) > 6) return;   // not one flat colour
+        }
+      } catch (e) { return; }                // tainted canvas
+      if (!first) return;
+      var rs = document.documentElement.style;
+      rs.setProperty("--logo-bg", "rgb(" + first[0] + "," + first[1] + "," + first[2] + ")");
+      // Whatever the template puts on that ground has to be readable on it, and
+      // a logo card can just as easily be near-black as near-white.
+      var lum = 0.2126 * srgb(first[0]) + 0.7152 * srgb(first[1]) + 0.0722 * srgb(first[2]);
+      var dark = lum > 0.42;
+      rs.setProperty("--logo-ink", dark ? "#14151b" : "#f7f5f0");
+      rs.setProperty("--logo-ink-soft", dark ? "rgba(20,21,27,.68)" : "rgba(247,245,240,.74)");
+      rs.setProperty("--logo-line", dark ? "rgba(20,21,27,.16)" : "rgba(247,245,240,.2)");
+      document.documentElement.classList.add("has-logo-bg");
+    });
+    probe.src = url;
+  }
+
   // ── agent logo: brand slot + avatar circle ──
   var logoUrl = String(get("agent.logo_url") || "");
   var escAttr = function (s) { return String(s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); };
@@ -217,6 +273,7 @@
       el.textContent = "";
       el.appendChild(im);
     });
+    sampleLogoBackground(logoUrl);
   } else {
     var initials = String(get("agent.name") || "").split(/\s+/).map(function (w) { return w.charAt(0); }).join("").slice(0, 2);
     each("[data-avatar]", document, function (el) { if (initials) el.textContent = initials; });

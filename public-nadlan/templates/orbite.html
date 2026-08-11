@@ -1047,6 +1047,32 @@ footer { font-size: 14px; letter-spacing: .08em; }
 
 .agent-avatar.has-logo::after { display: none; }
 
+/* When the logo carries a solid card of its own, runtime.js reads that colour
+   and publishes it; the agent card takes it so the two are one surface instead
+   of a pale rectangle pasted onto a dark one. --logo-ink comes back with it,
+   picked against that colour's luminance, because a logo card is as likely to
+   be near-black as near-white. Without a readable background — a cut-out logo,
+   a photographic one — none of this is set and the card stays as authored. */
+html.has-logo-bg .agent {
+  background: var(--logo-bg);
+  color: var(--logo-ink);
+  /* A white logo card on the cream section would otherwise have no edge at
+     all. Inset, because clip-path takes the outer shadow with it. */
+  box-shadow: inset 0 0 0 1px var(--logo-line);
+}
+
+html.has-logo-bg .agent h3 { color: var(--logo-ink); }
+
+html.has-logo-bg .agent > p,
+html.has-logo-bg .agent > small,
+html.has-logo-bg .agent-top > span { color: var(--logo-ink-soft); }
+
+/* the scan sweep is a light wash tuned for a near-black card */
+html.has-logo-bg .agent-scan { display: none; }
+
+/* the slot no longer needs to hold its own ground — it is the same colour */
+html.has-logo-bg .agent-avatar.has-logo { background: none; }
+
 </style>
 </head>
 <body>
