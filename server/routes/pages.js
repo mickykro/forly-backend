@@ -19,6 +19,7 @@ const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { roomLabel } = require("../rooms");
+const { describePhotos } = require("../photo-vision");
 
 // Portal era: pages no longer expire (the expiry scheduler is retired). New
 // pages get a far-future expires_at to keep the schema intact; /api/extend
@@ -177,7 +178,26 @@ module.exports = function createPagesRouter(ctx) {
         if (explicit) return explicit.slice(0, 60);
         return roomLabel(p.room_type || p.room || p.label || roomsIn[i] || "").slice(0, 60);
       };
-      const galleryImages = photoUrls.map((u, i) => ({ url: u, caption: captionFor(i) }));
+      // A sentence per photo saying what is in it. The payload's own
+      // `description` wins where n8n sends one; otherwise the photos are looked
+      // at here. Best-effort and skipped without ANTHROPIC_API_KEY — the
+      // gallery then carries captions alone, as it did before.
+      const localPhotoPath = (i) => path.join(uploadDir, `${base}/photo-${pad(i + 1)}.${guessImageExt(body.photos[i].url)}`);
+      const needVision = photoUrls.some((_, i) => {
+        const p = body.photos[i] || {};
+        return !String(p.description || "").trim() || !captionFor(i);
+      });
+      const seen = needVision ?
+        await describePhotos(photoUrls.map((_, i) => localPhotoPath(i)), roomsIn) :
+        photoUrls.map(() => ({ caption: "", desc: "" }));
+      const galleryImages = photoUrls.map((u, i) => {
+        const p = body.photos[i] || {};
+        return {
+          url: u,
+          caption: captionFor(i) || String(seen[i].caption || "").slice(0, 60),
+          description: (String(p.description || "").trim() || seen[i].desc || "").slice(0, 110),
+        };
+      });
       const now = new Date();
       const doc = {
         page_id: pageId, listing_id: body.listing_id, business_phone: body.business_phone,
@@ -362,9 +382,12 @@ module.exports = function createPagesRouter(ctx) {
         if (body.property.floor != null) patch["property.floor"] = Number(body.property.floor) || 0;
       }
       if (Array.isArray(body.gallery_images)) {
+        // description rides along: an edit that reorders or recaptions the
+        // gallery must not silently drop the sentence under each photo.
         patch["gallery.images"] = body.gallery_images.slice(0, 12).map((img) => ({
           url: String(img.url || ""),
           caption: String(img.caption || "").slice(0, 60),
+          description: String(img.description || "").slice(0, 110),
         }));
       }
       if (Array.isArray(body.carousel_slides)) {

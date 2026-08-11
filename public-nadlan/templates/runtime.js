@@ -20,6 +20,9 @@
                                 filling [data-field="k"] from item[k]
      data-gallery data-gallery-class="g"  → build N tiles from the listing photos
        data-gallery-captions  → also print each tile's caption into <span class="g-cap">
+                                each tile also carries data-desc, the photo's
+                                one-line description, for templates with room
+                                to show it
      data-photo="k"           → <img>.src = gallery.images[k] — a single editorial
                                 photo slot, outside the gallery grid
      data-lead-form           → submit posts /api/property-lead
@@ -341,6 +344,7 @@
       +(host.getAttribute("data-gallery-count") || 6);
     var wantCaps = host.hasAttribute("data-gallery-captions");
     function capOf(k) { return (useImages && images[k] && images[k].caption) || caps[k] || ""; }
+    function descOf(k) { return (useImages && images[k] && images[k].description) || ""; }
     var frames = [], srcs = [], tiles = [], i;
     for (i = 0; i < count; i++) {
       var b = document.createElement("button");
@@ -351,6 +355,12 @@
         cp.className = "g-cap"; cp.textContent = capOf(i);
         b.appendChild(cp);
       }
+      // The photo's sentence goes on the tile as an attribute rather than into
+      // it: a thumbnail has no room for a line of prose, but a template that
+      // gives a photo a panel of its own (orbite's deck) needs somewhere to
+      // read it from.
+      var dsc = descOf(i);
+      if (dsc) b.setAttribute("data-desc", dsc);
       (function (idx) { b.addEventListener("click", function () { openLB(idx); }); })(i);
       host.appendChild(b); tiles.push(b);
     }

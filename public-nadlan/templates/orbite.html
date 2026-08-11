@@ -1448,6 +1448,10 @@ html.has-logo-bg .agent-avatar.has-logo { background: none; }
     var c = tile && tile.querySelector(".g-cap");
     return c ? c.textContent : "";
   }
+  // The sentence describing this photo. runtime.js parks it on the tile rather
+  // than printing it, because the thumbnail strip has no room for it — the deck
+  // does.
+  function descOf(tile) { return (tile && tile.getAttribute("data-desc")) || ""; }
 
   function updateRoom(i) {
     var all = tiles();
@@ -1471,7 +1475,7 @@ html.has-logo-bg .agent-avatar.has-logo { background: none; }
     document.getElementById("room-eyebrow").textContent = "";
     document.getElementById("room-title").textContent =
       cap || T2("photo_n_of_m", { n: active + 1, m: all.length });
-    document.getElementById("room-copy").textContent = "";
+    document.getElementById("room-copy").textContent = descOf(tile);
     all.forEach(function (t, k) {
       t.classList.toggle("active", k === active);
       t.setAttribute("aria-selected", String(k === active));
