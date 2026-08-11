@@ -653,6 +653,388 @@
   .cursor-aura{display:none}
   *,*:before,*:after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   Desktop legibility pass. This design came from a portfolio piece whose type
+   was set as texture — 8-to-11px uppercase labels read as a graphic device at
+   presentation size and as unreadable at a desk. Everything below either
+   raises a size, closes the gap between a figure and the word explaining it,
+   or gives a control the ground it needs to be seen against a photo.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the video stage ── an overlay, not a fullscreen takeover ─────────────── */
+.video-stage {
+  position: fixed;
+  z-index: 150;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #090a0fe8;
+  backdrop-filter: blur(18px);
+  animation: confirmFade .28s ease both;
+}
+
+.video-stage[hidden] { display: none; }
+
+/* The frame shrink-wraps the clip so the accent border hugs the picture. A
+   fixed 80vw x 80vh box would letterbox a portrait walkthrough — which is what
+   a phone-shot tour is — in black bars on both sides. */
+.video-stage-frame {
+  position: relative;
+  display: flex;
+  border: 3px solid var(--acid);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 40px 120px #000a, 0 0 0 1px #ffffff1a;
+  animation: confirmEnter .45s cubic-bezier(.18,.9,.2,1.06) both;
+}
+
+.video-stage-frame video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 80vw;
+  max-height: 80vh;
+  background: #050608;
+}
+
+.video-stage-close {
+  position: absolute;
+  z-index: 3;
+  top: 24px;
+  inset-inline-end: 24px;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--acid);
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.video-stage-close:focus-visible {
+  outline: 3px solid var(--paper);
+  outline-offset: 3px;
+}
+
+@media (max-width: 1000px) {
+  .video-stage-frame video { max-width: 92vw; max-height: 74vh; }
+  .video-stage-close { top: 14px; inset-inline-end: 14px; width: 48px; height: 48px; }
+}
+
+/* ── lightbox ── the photo as shot, on a dark overlay ─────────────────────── */
+/* The frame used to paint #050608 behind a contained image, so any photo that
+   did not match the frame's proportions sat in a black box. Nothing behind the
+   picture now: what shows around it is the overlay itself. The corner-cut
+   clip-path goes too — it was slicing the photo. */
+.lightbox { background: rgba(5, 6, 8, .86); }
+
+.lightbox-frame { clip-path: none; }
+
+.lightbox-frame img,
+.lightbox-frame .lightbox-media canvas { background: none; }
+
+/* top:50% alone left the arrows hanging a half-button below centre. */
+.lightbox-prev,
+.lightbox-next {
+  top: 50%;
+  transform: translateY(-50%);
+  width: 68px;
+  height: 68px;
+  background: none;
+  color: #fff;
+  font-size: 46px;
+  font-weight: 800;
+  line-height: 1;
+  -webkit-text-stroke: 1.5px currentColor;
+  text-shadow: 0 2px 22px #000c;
+  transition: transform .25s, opacity .25s;
+  opacity: .88;
+}
+
+.lightbox-prev:hover,
+.lightbox-next:hover { opacity: 1; }
+
+.lightbox-prev:hover { transform: translateY(-50%) translateX(-4px); }
+.lightbox-next:hover { transform: translateY(-50%) translateX(4px); }
+
+.lightbox-prev:focus-visible,
+.lightbox-next:focus-visible { outline: 3px solid var(--paper); outline-offset: 4px; }
+
+@media (max-width: 560px) {
+  .lightbox-prev, .lightbox-next { top: auto; bottom: 12px; transform: none; }
+  .lightbox-prev:hover { transform: translateX(-4px); }
+  .lightbox-next:hover { transform: translateX(4px); }
+}
+
+/* ── hero figures ── they sat as bare type on the photo and disappeared ───── */
+.hero-proof {
+  background: rgba(9, 10, 15, .72);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.hero-proof > span { padding: 20px 28px; }
+
+.hero-proof b { font-size: 32px; }
+
+/* 28px against 9px read as a figure with a footnote. 32 against 16 reads as a
+   figure with its label. */
+.hero-proof small {
+  font-size: 16px;
+  letter-spacing: .08em;
+  color: #d8d9df;
+  text-transform: none;
+}
+
+.hero-proof .availability { font-size: 15px; letter-spacing: .06em; text-transform: none; }
+
+/* ── the figures block ── same gap, same treatment ────────────────────────── */
+.fact-grid b { font-size: 40px; margin-bottom: 6px; }
+
+.fact-grid span,
+.fact-grid small {
+  font-size: 16px;
+  letter-spacing: .06em;
+  text-transform: none;
+}
+
+.facts-copy > p { font-size: 22px; }
+
+/* ── the agent card ── under the figures, not beside them ─────────────────── */
+.facts-agent {
+  grid-template-columns: 1fr;
+  gap: 70px;
+  align-items: start;
+}
+
+.agent {
+  width: 60%;
+  min-height: 0;
+  padding: 40px;
+  background: linear-gradient(148deg, #1b1d28 0%, var(--ink) 46%, #2a1a22 100%);
+}
+
+@supports (background: color-mix(in srgb, red 50%, blue)) {
+  .agent {
+    background: linear-gradient(148deg,
+      color-mix(in srgb, var(--acid) 16%, #16171f) 0%,
+      var(--ink) 46%,
+      color-mix(in srgb, var(--acid) 34%, var(--ink)) 100%);
+  }
+}
+
+.agent h3 { margin: 30px 0 18px; font-size: 42px; }
+
+/* ── the deck ── arrows only, riding over the slide ───────────────────────── */
+.room-deck { position: relative; }
+
+.room-deck-controls {
+  position: absolute;
+  z-index: 6;
+  inset-inline: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0;
+  gap: 0;
+  pointer-events: none;
+}
+
+/* the counter and the worded labels go — the arrows carry it */
+.room-deck-controls > div,
+.room-deck-controls > button span { display: none; }
+
+.room-deck-controls > button {
+  pointer-events: auto;
+  min-height: 0;
+  width: 66px;
+  height: 66px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  box-shadow: none;
+  /* the slide underneath is cream, so the arrows are ink with a paper halo */
+  /* One arrow sits over the cream copy panel and the other over the photo, so
+     no single colour works for both. Difference blending inverts each against
+     whatever it happens to be over. */
+  color: #fff;
+  mix-blend-mode: difference;
+  transition: transform .25s, opacity .25s;
+  opacity: .9;
+}
+
+.room-deck-controls > button:hover { background: none; opacity: 1; }
+
+/* :first-child / :last-child in the block above carry a pseudo-class, so they
+   outrank a bare `> button` selector however late it comes. Matched here. */
+.room-deck-controls > button:first-child,
+.room-deck-controls > button:last-child {
+  background: none;
+  border-radius: 50%;
+  color: var(--ink);
+}
+
+.room-deck-controls > button b {
+  width: auto;
+  height: auto;
+  background: none;
+  color: inherit;
+  font-size: 46px;
+  font-weight: 800;
+  line-height: 1;
+  -webkit-text-stroke: 1.5px currentColor;
+}
+
+.room-deck-controls > button:first-child:hover { transform: translateX(4px); }
+.room-deck-controls > button:last-child:hover { transform: translateX(-4px); }
+
+.room-deck-controls > button:focus-visible { outline: 3px solid var(--acid); outline-offset: 2px; }
+
+/* ── the 14px floor ───────────────────────────────────────────────────────── */
+/* Raising a tracked-out uppercase label from 9px to 14px makes it ~55% wider,
+   so the tracking comes back down wherever the line has somewhere to be. */
+.brand > b { font-size: 15px; }
+.brand > b span { font-size: 14px; }
+.brand > span,
+.topbar nav { font-size: 14px; letter-spacing: .1em; }
+
+.kicker,
+.section-index { font-size: 14px; letter-spacing: .13em; }
+
+.portal-interface > span,
+.portal-interface small { font-size: 14px; letter-spacing: .09em; padding: 10px 14px; }
+
+.peek-hole span { font-size: 14px; letter-spacing: .06em; padding: 6px 10px; }
+
+.portal-note { font-size: 14px; letter-spacing: .13em; }
+
+.agent-top > span { font-size: 14px; letter-spacing: .09em; }
+
+.area-radar span { font-size: 14px; letter-spacing: .08em; }
+
+.area-image span { font-size: 14px; letter-spacing: .08em; padding: 11px 15px; }
+
+.area-list b { font-size: 14px; }
+
+.final-cta > span { font-size: 14px; letter-spacing: .15em; }
+
+footer { font-size: 14px; letter-spacing: .08em; }
+
+.conversion-bar span { font-size: 14px; }
+
+.lead-form label { font-size: 14px; letter-spacing: .1em; }
+
+.lead-form button { font-size: 15px; letter-spacing: .08em; }
+
+.final-cta .legal { font-size: 14px; }
+
+/* ── the deck's own small type ─────────────────────────────────────────────── */
+.room-thumbnails span { font-size: 14px; letter-spacing: .06em; }
+.room-thumbnails span b { font-size: 14px; }
+.room-thumbnails .room-thumb .g-no { font-size: 14px; }
+.room-thumbnails .room-thumb .g-cap { font-size: 14px; letter-spacing: .05em; padding: 16px 9px 7px; }
+.room-slide-image span { font-size: 14px; letter-spacing: .08em; }
+.slide-topline { font-size: 14px; letter-spacing: .09em; }
+.slide-title > span { font-size: 14px; letter-spacing: .13em; }
+.room-slide-copy li { font-size: 14px; letter-spacing: .05em; padding: 10px 14px; }
+
+/* ── the hero's second call to action ─────────────────────────────────────── */
+/* Every other call to action on this page sits on a filled shape; this one was
+   bare type over the photo, which is the one place it cannot be relied on to
+   be legible. It stays secondary — outlined, not filled. */
+.text-link {
+  padding: 13px 20px;
+  border: 1px solid #ffffff5c;
+  border-radius: 999px;
+  background: #090a0f8f;
+  backdrop-filter: blur(10px);
+  transition: background .25s, border-color .25s, transform .25s;
+}
+
+.text-link:hover { background: #090a0fc7; border-color: var(--acid); transform: translateY(-2px); }
+
+.text-link i { width: 34px; height: 34px; border-color: #ffffff7a; }
+
+@media (max-width: 1000px) {
+  .agent { width: 100%; }
+  .facts-agent { gap: 56px; }
+  .room-deck-controls { inset-inline: 8px; }
+  .room-deck-controls > button { width: 54px; height: 54px; }
+  .room-deck-controls > button b { font-size: 38px; }
+  .hero-proof > span { padding: 15px 18px; }
+  .hero-proof b { font-size: 26px; }
+  .hero-proof small { font-size: 15px; }
+}
+
+/* ── the calls to action ──────────────────────────────────────────────────── */
+/* The submit button was filled with --acid on a section whose background is the
+   same --accent it derives from: an invisible button on the one screen whose
+   only job is to be pressed. Cream on the accent ground instead. */
+.final-cta .lead-form button {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.final-cta .lead-form button:hover { background: var(--ink); color: var(--paper); }
+
+/* --muted is a slate grey chosen against cream; on the accent ground it is
+   nearly the same value as what is behind it. */
+.final-cta .lead-form label { color: #ffffffc4; }
+.final-cta p { color: #ffffffde; }
+.final-cta .legal { color: #ffffffb8; }
+.final-cta .legal a { color: #fff; }
+.final-cta .lead-sent span { color: #ffffffcf; }
+
+/* At 14px the labels no longer fit the width these buttons were sized for, and
+   both were breaking onto two lines. */
+.primary-button,
+.agent-button,
+.text-link,
+.conversion-bar a,
+.lead-form button { white-space: nowrap; }
+
+.primary-button, .agent-button { gap: 18px; }
+.text-link { gap: 12px; }
+
+/* ── the portal chips ─────────────────────────────────────────────────────── */
+/* The interface sits inside a circle with overflow hidden. Padding measured
+   from the bounding box put the corner chips outside the circle once they grew;
+   a percentage inset follows the diameter instead. */
+/* The children were pinned to opposite corners of a square box that is then
+   clipped to a circle — the two worst places to put anything. On the vertical
+   axis the circle is at its widest, so nothing is cut. */
+.portal-interface { padding: 9%; }
+
+.portal-interface > span,
+.portal-interface > b,
+.portal-interface small {
+  align-self: center;
+  text-align: center;
+}
+
+.peek-hole span { padding: 5px 9px; letter-spacing: .04em; }
+
+/* ── the figures grid ─────────────────────────────────────────────────────── */
+/* The grid painted its gaps by showing its own background between cells, so a
+   listing missing one of the four fields left a filled rectangle where the
+   fourth cell would have been. The hairlines belong to the cells. */
+.fact-grid { background: none; gap: 0; }
+
+.fact-grid article { box-shadow: 0 0 0 1px #10111825; }
+
+/* runtime.js builds the amenity chips with an inline font-size (.82rem, which
+   is 13.12px), so on this template the floor has to be asserted rather than
+   declared — an inline style outranks any selector. */
+.amenities span { font-size: 14px !important; }
+
 </style>
 </head>
 <body>
@@ -820,15 +1202,10 @@
     <a href="#contact" data-i18n="book_visit">תיאום ביקור</a>
   </div>
 
-  <div class="video-confirm" id="video-confirm" role="presentation" hidden>
-    <div class="video-confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="video-confirm-title">
-      <span data-i18n="video_tour">סיור וידאו</span>
-      <h2 id="video-confirm-title" data-i18n="tour_video">הסיור בנכס</h2>
-      <p data-i18n="video_sound">הסרטון יופעל מחדש עם קול</p>
-      <div>
-        <button id="video-stay" data-i18n="nav_prev">הקודם</button>
-        <button id="video-enter"><span data-i18n="video_tour">סיור וידאו</span> <b>↗</b></button>
-      </div>
+  <div class="video-stage" id="video-stage" role="dialog" aria-modal="true" aria-label="סיור וידאו" hidden>
+    <button class="video-stage-close" id="video-stage-close" aria-label="סגירה">×</button>
+    <div class="video-stage-frame">
+      <video id="stage-video" controls playsinline preload="none"></video>
     </div>
   </div>
 
@@ -979,36 +1356,65 @@
   document.getElementById("lightbox-next").addEventListener("click", function () { openLB(lbIdx + 1); });
   lb.addEventListener("click", function (e) { if (e.target === lb) closeLB(); });
 
-  // ── the walkthrough asks before it takes over the screen ──
+  // ── the walkthrough opens on a stage, not in fullscreen ──────────────────
+  // Native fullscreen put the clip edge-to-edge with no chrome of its own: the
+  // only way out was a keyboard Escape or a browser gesture, which on a landing
+  // page reads as being trapped. The stage is an ordinary overlay — capped at
+  // 80% of the viewport, framed in the site's accent, with a close button, a
+  // click-outside and Escape. The hero clip keeps its place in the orbit; the
+  // stage runs its own <video> off the same source, handed the hero's position
+  // so playback continues from where it was rather than restarting.
   var video = document.getElementById("walkthrough");
-  var prompt = document.getElementById("video-confirm");
-  function openPrompt() { prompt.hidden = false; document.getElementById("video-enter").focus(); }
-  function closePrompt() { prompt.hidden = true; }
-  video.addEventListener("click", openPrompt);
-  video.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPrompt(); }
-  });
-  document.getElementById("video-stay").addEventListener("click", closePrompt);
-  prompt.addEventListener("click", function (e) { if (e.target === prompt) closePrompt(); });
-  document.getElementById("video-enter").addEventListener("click", function () {
-    closePrompt();
-    video.controls = true; video.muted = false; video.currentTime = 0;
-    try {
-      if (video.requestFullscreen) video.requestFullscreen();
-      else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
-    } catch (e) {}
-    var p = video.play(); if (p && p.catch) p.catch(function () {});
-  });
-  function restore() {
-    if (document.fullscreenElement) return;
-    video.controls = false; video.muted = true;
-    var p = video.play(); if (p && p.catch) p.catch(function () {});
+  var stage = document.getElementById("video-stage");
+  var stageVideo = document.getElementById("stage-video");
+  var stageOpen = false;
+
+  // The clip's own proportions decide the frame, fitted inside 80% of the
+  // viewport. Left to CSS the frame would shrink-wrap a <video> that has not
+  // read its metadata yet, which is 300x150 — a postage stamp for as long as
+  // the first bytes take to arrive. The hero clip is already playing, so its
+  // dimensions are known before the stage is ever opened.
+  function sizeStage() {
+    var frame = stage.querySelector(".video-stage-frame");
+    var vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) { frame.style.width = frame.style.height = ""; return; }
+    var scale = Math.min((innerWidth * 0.8) / vw, (innerHeight * 0.8) / vh);
+    frame.style.width = Math.round(vw * scale) + "px";
+    frame.style.height = Math.round(vh * scale) + "px";
   }
-  document.addEventListener("fullscreenchange", restore);
-  video.addEventListener("webkitendfullscreen", restore);
+  addEventListener("resize", function () { if (stageOpen) sizeStage(); });
+
+  function openStage() {
+    var src = video.currentSrc || video.src;
+    if (!src) return; // listing has no tour clip — nothing to open
+    if (stageVideo.src !== src) stageVideo.src = src;
+    sizeStage();
+    stage.hidden = false;
+    stageOpen = true;
+    document.body.style.overflow = "hidden";
+    try { stageVideo.currentTime = video.currentTime || 0; } catch (e) {}
+    video.pause();
+    var p = stageVideo.play(); if (p && p.catch) p.catch(function () {});
+    document.getElementById("video-stage-close").focus();
+  }
+  function closeStage() {
+    if (!stageOpen) return;
+    stageOpen = false;
+    stage.hidden = true;
+    document.body.style.overflow = "";
+    stageVideo.pause();
+    var p = video.play(); if (p && p.catch) p.catch(function () {});
+    try { video.focus({ preventScroll: true }); } catch (e) { video.focus(); }
+  }
+  video.addEventListener("click", openStage);
+  video.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openStage(); }
+  });
+  document.getElementById("video-stage-close").addEventListener("click", closeStage);
+  stage.addEventListener("click", function (e) { if (e.target === stage) closeStage(); });
 
   addEventListener("keydown", function (e) {
-    if (e.key === "Escape") { closeLB(); closePrompt(); }
+    if (e.key === "Escape") { closeLB(); closeStage(); }
     if (lb.hidden) return;
     if (e.key === "ArrowRight") openLB(lbIdx + 1);
     if (e.key === "ArrowLeft") openLB(lbIdx - 1);
