@@ -1272,6 +1272,7 @@ html.has-logo-bg .agent-avatar.has-logo { background: none; }
   var reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
   function get(p) { return p.split(".").reduce(function (o, k) { return (o == null) ? null : o[k]; }, DATA); }
   function T(k) { return window.I18N ? window.I18N.t(LANG, k) : k; }
+  function T2(k, vars) { return window.I18N ? window.I18N.t(LANG, k, vars) : k; }
 
   var root = document.documentElement;
 
@@ -1333,9 +1334,13 @@ html.has-logo-bg .agent-avatar.has-logo { background: none; }
     // the photos — so indexing it by the tile's position captioned the kitchen
     // "rare in the area" and the balcony "rebuilt from the ground up". Filling
     // the panel is not worth describing the wrong room.
+    // A listing whose photos were never captioned — no agent caption, nothing
+    // from the Vision Tagger — would otherwise leave the panel blank. Say which
+    // photo it is rather than say nothing.
     var cap = capOf(tile);
     document.getElementById("room-eyebrow").textContent = "";
-    document.getElementById("room-title").textContent = cap;
+    document.getElementById("room-title").textContent =
+      cap || T2("photo_n_of_m", { n: active + 1, m: all.length });
     document.getElementById("room-copy").textContent = "";
     all.forEach(function (t, k) {
       t.classList.toggle("active", k === active);

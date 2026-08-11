@@ -18,6 +18,7 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
+const { roomLabel } = require("../rooms");
 
 // Portal era: pages no longer expire (the expiry scheduler is retired). New
 // pages get a far-future expires_at to keep the schema intact; /api/extend
@@ -160,7 +161,23 @@ module.exports = function createPagesRouter(ctx) {
       const mapUrl = mapP ? rest[cursor++] : null;
       const logoUrl = logoP ? rest[cursor++] : null;
 
-      const galleryImages = photoUrls.map((u, i) => ({ url: u, caption: (body.photos[i] && body.photos[i].caption) || "" }));
+      // Per-photo captions. An explicit caption wins; failing that, whatever the
+      // Vision Tagger said this photo was. The tagger already classifies every
+      // photo upstream — that is where the `rooms` list sent to
+      // /api/video-overlay comes from — but it arrives there collapsed into an
+      // unordered vocabulary for the video, and the per-photo mapping is lost.
+      // Accepting it here, either on the photo or as a parallel array, keeps
+      // that mapping and lets n8n forward the tagger's raw output untranslated:
+      // rooms.js turns "master_bedroom" into "חדר שינה ראשי" with the same map
+      // the burned-in video labels use.
+      const roomsIn = Array.isArray(body.rooms) ? body.rooms : [];
+      const captionFor = (i) => {
+        const p = body.photos[i] || {};
+        const explicit = String(p.caption || "").trim();
+        if (explicit) return explicit.slice(0, 60);
+        return roomLabel(p.room_type || p.room || p.label || roomsIn[i] || "").slice(0, 60);
+      };
+      const galleryImages = photoUrls.map((u, i) => ({ url: u, caption: captionFor(i) }));
       const now = new Date();
       const doc = {
         page_id: pageId, listing_id: body.listing_id, business_phone: body.business_phone,

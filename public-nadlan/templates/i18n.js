@@ -33,7 +33,7 @@
       "trust_personal": "מענה אישי בתוך שעתיים בשעות הפעילות", "trust_scheduled": "ביקור מתואם אישית, בזמן שנוח לכם", "trust_private": "הפרטים שלכם נשארים אצלנו בלבד",
       "parking": "חניות", "registered": "בטאבו", "storage": "מחסן", "elevator": "מעלית", "shabbat_elevator": "מעלית שבת", "balconies": "מרפסות", "garden": "חצר / גינה", "form_error": "משהו השתבש — נסו שוב או פנו בוואטסאפ", "here_area": "השכונה",
       "per_sqm": "למ״ר", "leave_details": "השאירו פרטים", "privacy_policy": "מדיניות פרטיות", "accessibility": "הצהרת נגישות",
-      "personal_guidance": "ליווי אישי", "represented_by": "הנכס בליווי של", "video_mute": "השתקה", "video_fullscreen": "מסך מלא", "skip_to_content": "דילוג לתוכן"
+      "personal_guidance": "ליווי אישי", "represented_by": "הנכס בליווי של", "video_mute": "השתקה", "video_fullscreen": "מסך מלא", "skip_to_content": "דילוג לתוכן", "photo_n_of_m": "תמונה {n} מתוך {m}"
     },
     "en": { "nav_prev": "Previous", "nav_next": "Next",
       "contact_agent": "Speak with the agent", "book_visit": "Book a visit", "book_visit_private": "Book a private visit", "book_visit_property": "Book a viewing",
@@ -55,7 +55,7 @@
       "trust_personal": "Personal reply within two hours during business hours", "trust_scheduled": "A visit arranged personally, at a time that suits you", "trust_private": "Your details stay with us alone",
       "parking": "parking", "registered": "registered", "storage": "Storage", "elevator": "Elevator", "shabbat_elevator": "Shabbat elevator", "balconies": "Balconies", "garden": "Yard / garden", "form_error": "Something went wrong — try again or reach out on WhatsApp", "here_area": "The area",
       "per_sqm": "per m²", "leave_details": "Leave your details", "privacy_policy": "Privacy policy", "accessibility": "Accessibility statement",
-      "personal_guidance": "Personal guidance", "represented_by": "This property is represented by", "video_mute": "Mute", "video_fullscreen": "Full screen", "skip_to_content": "Skip to content"
+      "personal_guidance": "Personal guidance", "represented_by": "This property is represented by", "video_mute": "Mute", "video_fullscreen": "Full screen", "skip_to_content": "Skip to content", "photo_n_of_m": "Photo {n} of {m}"
     },
     "ar": { "nav_prev": "السابق", "nav_next": "التالي",
       "contact_agent": "التحدث مع الوسيط", "book_visit": "تحديد موعد زيارة", "book_visit_private": "تحديد موعد زيارة خاصة", "book_visit_property": "تحديد موعد معاينة العقار",
@@ -77,7 +77,7 @@
       "trust_personal": "رد شخصي خلال ساعتين ضمن ساعات العمل", "trust_scheduled": "زيارة مرتّبة شخصيًا، في الوقت المناسب لك", "trust_private": "تبقى تفاصيلك لدينا وحدنا",
       "parking": "مواقف", "registered": "مسجّلة", "storage": "مخزن", "elevator": "مصعد", "shabbat_elevator": "مصعد السبت", "balconies": "شرفات", "garden": "فناء / حديقة", "form_error": "حدث خطأ ما — حاول مرة أخرى أو تواصل عبر واتساب", "here_area": "الحي",
       "per_sqm": "للم²", "leave_details": "اترك تفاصيلك", "privacy_policy": "سياسة الخصوصية", "accessibility": "بيان إمكانية الوصول",
-      "personal_guidance": "مرافقة شخصية", "represented_by": "العقار بمرافقة", "video_mute": "كتم الصوت", "video_fullscreen": "ملء الشاشة", "skip_to_content": "تخطي إلى المحتوى"
+      "personal_guidance": "مرافقة شخصية", "represented_by": "العقار بمرافقة", "video_mute": "كتم الصوت", "video_fullscreen": "ملء الشاشة", "skip_to_content": "تخطي إلى المحتوى", "photo_n_of_m": "صورة {n} من {m}"
     },
     "ru": { "nav_prev": "Назад", "nav_next": "Далее",
       "contact_agent": "Связаться с агентом", "book_visit": "Записаться на просмотр", "book_visit_private": "Записаться на частный просмотр", "book_visit_property": "Записаться на осмотр объекта",
@@ -99,7 +99,7 @@
       "trust_personal": "Личный ответ в течение двух часов в рабочее время", "trust_scheduled": "Просмотр, организованный лично, в удобное для вас время", "trust_private": "Ваши данные остаются только у нас",
       "parking": "парковка", "registered": "в реестре", "storage": "Кладовая", "elevator": "Лифт", "shabbat_elevator": "Субботний лифт", "balconies": "Балконы", "garden": "Двор / сад", "form_error": "Что-то пошло не так — попробуйте ещё раз или напишите в WhatsApp", "here_area": "Район",
       "per_sqm": "за м²", "leave_details": "Оставьте контакты", "privacy_policy": "Политика конфиденциальности", "accessibility": "Заявление о доступности",
-      "personal_guidance": "Личное сопровождение", "represented_by": "Объект представляет", "video_mute": "Выключить звук", "video_fullscreen": "Во весь экран", "skip_to_content": "Перейти к содержимому"
+      "personal_guidance": "Личное сопровождение", "represented_by": "Объект представляет", "video_mute": "Выключить звук", "video_fullscreen": "Во весь экран", "skip_to_content": "Перейти к содержимому", "photo_n_of_m": "Фото {n} из {m}"
     },
     "es": { "nav_prev": "Anterior", "nav_next": "Siguiente",
       "contact_agent": "Hablar con el agente", "book_visit": "Agendar una visita", "book_visit_private": "Agendar una visita privada", "book_visit_property": "Agendar una visita al inmueble",
@@ -121,7 +121,7 @@
       "trust_personal": "Respuesta personal en menos de dos horas en horario laboral", "trust_scheduled": "Una visita organizada personalmente, a la hora que te convenga", "trust_private": "Tus datos se quedan solo con nosotros",
       "parking": "plazas de garaje", "registered": "registradas", "storage": "Trastero", "elevator": "Ascensor", "shabbat_elevator": "Ascensor de Shabat", "balconies": "Balcones", "garden": "Patio / jardín", "form_error": "Algo salió mal — inténtalo de nuevo o escríbenos por WhatsApp", "here_area": "La zona",
       "per_sqm": "por m²", "leave_details": "Deja tus datos", "privacy_policy": "Política de privacidad", "accessibility": "Declaración de accesibilidad",
-      "personal_guidance": "Acompañamiento personal", "represented_by": "Propiedad representada por", "video_mute": "Silenciar", "video_fullscreen": "Pantalla completa", "skip_to_content": "Saltar al contenido"
+      "personal_guidance": "Acompañamiento personal", "represented_by": "Propiedad representada por", "video_mute": "Silenciar", "video_fullscreen": "Pantalla completa", "skip_to_content": "Saltar al contenido", "photo_n_of_m": "Foto {n} de {m}"
     },
     "fr": { "nav_prev": "Précédent", "nav_next": "Suivant",
       "contact_agent": "Parler à l'agent", "book_visit": "Planifier une visite", "book_visit_private": "Planifier une visite privée", "book_visit_property": "Planifier une visite du bien",
@@ -143,7 +143,7 @@
       "trust_personal": "Réponse personnelle sous deux heures pendant les heures d'ouverture", "trust_scheduled": "Une visite organisée personnellement, à l'heure qui vous convient", "trust_private": "Vos coordonnées restent chez nous uniquement",
       "parking": "places de parking", "registered": "enregistrées", "storage": "Débarras", "elevator": "Ascenseur", "shabbat_elevator": "Ascenseur de Shabbat", "balconies": "Balcons", "garden": "Cour / jardin", "form_error": "Une erreur s'est produite — réessayez ou contactez-nous sur WhatsApp", "here_area": "Le quartier",
       "per_sqm": "par m²", "leave_details": "Laissez vos coordonnées", "privacy_policy": "Politique de confidentialité", "accessibility": "Déclaration d'accessibilité",
-      "personal_guidance": "Accompagnement personnel", "represented_by": "Bien accompagné par", "video_mute": "Couper le son", "video_fullscreen": "Plein écran", "skip_to_content": "Aller au contenu"
+      "personal_guidance": "Accompagnement personnel", "represented_by": "Bien accompagné par", "video_mute": "Couper le son", "video_fullscreen": "Plein écran", "skip_to_content": "Aller au contenu", "photo_n_of_m": "Photo {n} sur {m}"
     }
   };
   var RTL = { he: 1, ar: 1 };
