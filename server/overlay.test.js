@@ -20,6 +20,51 @@ assert.equal(roomLabel("second_balcony"), "מרפסת");
 assert.equal(roomLabel("weird_type"), "");           // unknown → dropped, not shown
 assert.equal(roomLabel("utility_closet"), "");
 assert.equal(roomLabel(""), "");
+
+// ── roomLabel: page language ──
+// The Tagger answers in English whatever the page language is, so the type is
+// a lookup key and the label must come out in the caller's language.
+assert.equal(roomLabel("kitchen", "en"), "Kitchen");
+assert.equal(roomLabel("kitchen", "ar"), "مطبخ");
+assert.equal(roomLabel("kitchen", "ru"), "Кухня");
+assert.equal(roomLabel("kitchen", "es"), "Cocina");
+assert.equal(roomLabel("kitchen", "fr"), "Cuisine");
+assert.equal(roomLabel("kitchen", "he"), "מטבח");
+assert.equal(roomLabel("kitchen"), "מטבח");          // no language → Hebrew, as before
+assert.equal(roomLabel("kitchen", "de"), "מטבח");    // unsupported language → Hebrew
+// keyword fallback resolves the concept, then localizes it
+assert.equal(roomLabel("guest_bedroom", "es"), "Dormitorio");
+assert.equal(roomLabel("open_plan_apartment", "fr"), "Espace ouvert");
+assert.equal(roomLabel("Master-Bedroom", "en"), "Master bedroom");
+assert.equal(roomLabel("second_balcony", "ru"), "Балкон");
+// aliases collapse onto one concept, in every language
+assert.equal(roomLabel("lounge", "en"), roomLabel("living_room", "en"));
+assert.equal(roomLabel("rooftop", "ar"), roomLabel("roof", "ar"));
+assert.equal(roomLabel("exterior", "fr"), roomLabel("facade", "fr"));
+// unknown stays dropped whatever the language — never a raw type on the video
+assert.equal(roomLabel("weird_type", "en"), "");
+assert.equal(roomLabel("weird_type", "ru"), "");
+// already-localized labels pass through untouched
+assert.equal(roomLabel("סלון", "en"), "סלון");
+assert.equal(roomLabel("Кухня", "ru"), "Кухня");
+// accented Latin stays on the lookup path (it is not a display label)
+assert.equal(roomLabel("salón", "es"), "");
+// every language covers every concept the tables can produce
+{
+  const { ROOM_LABELS, ROOM_CONCEPTS, ROOM_KEYWORDS } = _test;
+  const concepts = new Set([...Object.values(ROOM_CONCEPTS), ...ROOM_KEYWORDS.map((k) => k[1])]);
+  for (const lang of Object.keys(ROOM_LABELS)) {
+    for (const c of concepts) {
+      assert.ok(ROOM_LABELS[lang][c], `ROOM_LABELS.${lang} is missing concept "${c}"`);
+    }
+  }
+  // and no table carries a concept nothing can map to
+  for (const lang of Object.keys(ROOM_LABELS)) {
+    for (const c of Object.keys(ROOM_LABELS[lang])) {
+      assert.ok(concepts.has(c), `ROOM_LABELS.${lang} has unreachable concept "${c}"`);
+    }
+  }
+}
 assert.equal(roomLabel(null), "");
 
 // ── modeOf ──

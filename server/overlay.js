@@ -28,15 +28,18 @@
  * their timestamps mapped onto the stitched timeline, so no extra encode is
  * needed) and classified in one Claude vision call against that label list —
  * Seedance doesn't guarantee shot order/timing, so we look at what actually
- * rendered. The same call returns a short 1–2 word Hebrew descriptor per
- * frame ("מרווח ומואר"). Per-frame labels are smoothed into segments and
+ * rendered. The same call returns a short 1–2 word descriptor per frame
+ * ("מרווח ומואר"). Room names and descriptors are both written in the page
+ * `language` (he/en/ar/ru/es/fr — the Tagger's room types are English lookup
+ * keys, not display text). Per-frame labels are smoothed into segments and
  * burned bottom-right (room name + descriptor beneath it, white text with a
  * black outline) over a vertical cream→transparent gradient composited by
  * ffmpeg. Room labels stop before the end-title window so the closing shot
  * stays clean. Vision failure is non-fatal: the video ships with titles only.
  *
- * Requires ffmpeg + ffprobe with libass on PATH (see Dockerfile), and a
- * Hebrew-capable font (Noto Sans Hebrew / DejaVu Sans).
+ * Requires ffmpeg + ffprobe with libass on PATH (see Dockerfile), and fonts
+ * covering every page language: Noto Sans Hebrew, Noto Sans Arabic, and
+ * DejaVu Sans (Latin + Cyrillic + digits).
  */
 
 const path = require("path");
@@ -45,6 +48,7 @@ const os = require("os");
 const zlib = require("zlib");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
+const { sanitizeLang } = require("./utils");
 
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE = process.env.FFPROBE_PATH || "ffprobe";
@@ -149,63 +153,144 @@ function gradientPng(width, height, rgb, peakAlpha) {
   ]);
 }
 
-// Vision-Tagger room types → Hebrew display labels (exact, normalized key).
-const ROOM_HE = {
-  living_room: "סלון", livingroom: "סלון", salon: "סלון", lounge: "סלון",
-  open_plan_living_dining_kitchen: "חלל פתוח", open_plan: "חלל פתוח",
-  living_dining_kitchen: "חלל פתוח", living_dining: "סלון ופינת אוכל",
-  kitchen: "מטבח", kitchenette: "מטבחון",
-  bedroom: "חדר שינה", master_bedroom: "חדר שינה ראשי",
-  kids_room: "חדר ילדים", children_room: "חדר ילדים", nursery: "חדר ילדים",
-  bathroom: "חדר רחצה", toilet: "שירותים", shower: "מקלחת",
-  balcony: "מרפסת", terrace: "מרפסת", sun_balcony: "מרפסת שמש",
-  dining_room: "פינת אוכל", dining_area: "פינת אוכל",
-  office: "חדר עבודה", study: "חדר עבודה",
-  entrance: "כניסה", entry: "כניסה", hallway: "מסדרון", corridor: "מסדרון",
-  mamad: "ממ״ד", safe_room: "ממ״ד",
-  garden: "גינה", yard: "חצר",
-  roof: "גג", rooftop: "גג",
-  parking: "חניה", storage: "מחסן", laundry: "חדר כביסה",
-  building: "הבניין", exterior: "חזית הבניין", facade: "חזית הבניין",
-  view: "נוף", lobby: "לובי", pool: "בריכה", gym: "חדר כושר",
+// Vision-Tagger room types → a language-neutral CONCEPT (exact, normalized
+// key). The Tagger answers in English whatever the page language is, so the
+// type it returns is a lookup key, never something to show a viewer.
+const ROOM_CONCEPTS = {
+  living_room: "living_room", livingroom: "living_room", salon: "living_room", lounge: "living_room",
+  open_plan_living_dining_kitchen: "open_plan", open_plan: "open_plan",
+  living_dining_kitchen: "open_plan", living_dining: "living_dining",
+  kitchen: "kitchen", kitchenette: "kitchenette",
+  bedroom: "bedroom", master_bedroom: "master_bedroom",
+  kids_room: "kids_room", children_room: "kids_room", nursery: "kids_room",
+  bathroom: "bathroom", toilet: "toilet", shower: "shower",
+  balcony: "balcony", terrace: "balcony", sun_balcony: "sun_balcony",
+  dining_room: "dining", dining_area: "dining",
+  office: "office", study: "office",
+  entrance: "entrance", entry: "entrance", hallway: "hallway", corridor: "hallway",
+  mamad: "mamad", safe_room: "mamad",
+  garden: "garden", yard: "yard",
+  roof: "roof", rooftop: "roof",
+  parking: "parking", storage: "storage", laundry: "laundry",
+  building: "building", exterior: "facade", facade: "facade",
+  view: "view", lobby: "lobby", pool: "pool", gym: "gym",
 };
 
-// Ordered substring → Hebrew fallbacks for compound/unseen types the Tagger
+// Ordered substring → concept fallbacks for compound/unseen types the Tagger
 // invents ("open_plan_apartment", "guest_bedroom", "second_balcony"). Most
 // specific first — the first substring found in the normalized key wins.
 const ROOM_KEYWORDS = [
-  ["open_plan", "חלל פתוח"], ["open_space", "חלל פתוח"],
-  ["master", "חדר שינה ראשי"],
-  ["kids", "חדר ילדים"], ["children", "חדר ילדים"], ["nursery", "חדר ילדים"],
-  ["bedroom", "חדר שינה"],
-  ["living", "סלון"], ["salon", "סלון"], ["lounge", "סלון"],
-  ["kitchen", "מטבח"],
-  ["dining", "פינת אוכל"],
-  ["bathroom", "חדר רחצה"], ["shower", "מקלחת"], ["toilet", "שירותים"],
-  ["mamad", "ממ״ד"], ["safe_room", "ממ״ד"],
-  ["balcony", "מרפסת"], ["terrace", "מרפסת"],
-  ["office", "חדר עבודה"], ["study", "חדר עבודה"],
-  ["hallway", "מסדרון"], ["corridor", "מסדרון"], ["entrance", "כניסה"],
-  ["garden", "גינה"], ["yard", "חצר"], ["roof", "גג"],
-  ["parking", "חניה"], ["storage", "מחסן"], ["laundry", "חדר כביסה"],
-  ["facade", "חזית הבניין"], ["exterior", "חזית הבניין"], ["building", "הבניין"],
-  ["lobby", "לובי"], ["pool", "בריכה"], ["gym", "חדר כושר"], ["view", "נוף"],
+  ["open_plan", "open_plan"], ["open_space", "open_plan"],
+  ["master", "master_bedroom"],
+  ["kids", "kids_room"], ["children", "kids_room"], ["nursery", "kids_room"],
+  ["bedroom", "bedroom"],
+  ["living", "living_room"], ["salon", "living_room"], ["lounge", "living_room"],
+  ["kitchen", "kitchen"],
+  ["dining", "dining"],
+  ["bathroom", "bathroom"], ["shower", "shower"], ["toilet", "toilet"],
+  ["mamad", "mamad"], ["safe_room", "mamad"],
+  ["balcony", "balcony"], ["terrace", "balcony"],
+  ["office", "office"], ["study", "office"],
+  ["hallway", "hallway"], ["corridor", "hallway"], ["entrance", "entrance"],
+  ["garden", "garden"], ["yard", "yard"], ["roof", "roof"],
+  ["parking", "parking"], ["storage", "storage"], ["laundry", "laundry"],
+  ["facade", "facade"], ["exterior", "facade"], ["building", "building"],
+  ["lobby", "lobby"], ["pool", "pool"], ["gym", "gym"], ["view", "view"],
 ];
 
-// Map a Tagger room type to a Hebrew label: exact match → keyword fallback →
-// drop. Values already in Hebrew pass through. Unknown English is DROPPED
-// (returns ""), never burned onto the video as a raw type string.
-function roomLabel(r) {
+// Concept → display label, per page language. A language missing a concept
+// falls back to Hebrew, so a gap here degrades to the old behaviour for that
+// one label rather than dropping it.
+const ROOM_LABELS = {
+  he: {
+    living_room: "סלון", open_plan: "חלל פתוח", living_dining: "סלון ופינת אוכל",
+    kitchen: "מטבח", kitchenette: "מטבחון", bedroom: "חדר שינה",
+    master_bedroom: "חדר שינה ראשי", kids_room: "חדר ילדים", bathroom: "חדר רחצה",
+    toilet: "שירותים", shower: "מקלחת", balcony: "מרפסת", sun_balcony: "מרפסת שמש",
+    dining: "פינת אוכל", office: "חדר עבודה", entrance: "כניסה", hallway: "מסדרון",
+    mamad: "ממ״ד", garden: "גינה", yard: "חצר", roof: "גג", parking: "חניה",
+    storage: "מחסן", laundry: "חדר כביסה", building: "הבניין", facade: "חזית הבניין",
+    view: "נוף", lobby: "לובי", pool: "בריכה", gym: "חדר כושר",
+  },
+  en: {
+    living_room: "Living room", open_plan: "Open-plan space", living_dining: "Living & dining",
+    kitchen: "Kitchen", kitchenette: "Kitchenette", bedroom: "Bedroom",
+    master_bedroom: "Master bedroom", kids_room: "Kids' room", bathroom: "Bathroom",
+    toilet: "Toilet", shower: "Shower", balcony: "Balcony", sun_balcony: "Sun balcony",
+    dining: "Dining area", office: "Home office", entrance: "Entrance", hallway: "Hallway",
+    mamad: "Safe room", garden: "Garden", yard: "Yard", roof: "Rooftop", parking: "Parking",
+    storage: "Storage", laundry: "Laundry", building: "The building", facade: "Building facade",
+    view: "View", lobby: "Lobby", pool: "Pool", gym: "Gym",
+  },
+  ar: {
+    living_room: "غرفة المعيشة", open_plan: "مساحة مفتوحة", living_dining: "معيشة وطعام",
+    kitchen: "مطبخ", kitchenette: "مطبخ صغير", bedroom: "غرفة نوم",
+    master_bedroom: "غرفة النوم الرئيسية", kids_room: "غرفة الأطفال", bathroom: "حمام",
+    toilet: "مرحاض", shower: "دش", balcony: "شرفة", sun_balcony: "شرفة شمسية",
+    dining: "ركن الطعام", office: "مكتب", entrance: "مدخل", hallway: "ممر",
+    mamad: "غرفة محصنة", garden: "حديقة", yard: "فناء", roof: "سطح", parking: "موقف سيارات",
+    storage: "مخزن", laundry: "غرفة غسيل", building: "المبنى", facade: "واجهة المبنى",
+    view: "إطلالة", lobby: "بهو", pool: "مسبح", gym: "صالة رياضية",
+  },
+  ru: {
+    living_room: "Гостиная", open_plan: "Открытое пространство", living_dining: "Гостиная-столовая",
+    kitchen: "Кухня", kitchenette: "Кухонный уголок", bedroom: "Спальня",
+    master_bedroom: "Главная спальня", kids_room: "Детская", bathroom: "Ванная",
+    toilet: "Туалет", shower: "Душевая", balcony: "Балкон", sun_balcony: "Солнечный балкон",
+    dining: "Столовая", office: "Кабинет", entrance: "Прихожая", hallway: "Коридор",
+    mamad: "Защищённая комната", garden: "Сад", yard: "Двор", roof: "Крыша", parking: "Парковка",
+    storage: "Кладовая", laundry: "Прачечная", building: "Здание", facade: "Фасад",
+    view: "Вид", lobby: "Лобби", pool: "Бассейн", gym: "Спортзал",
+  },
+  es: {
+    living_room: "Salón", open_plan: "Espacio abierto", living_dining: "Salón-comedor",
+    kitchen: "Cocina", kitchenette: "Cocina pequeña", bedroom: "Dormitorio",
+    master_bedroom: "Dormitorio principal", kids_room: "Habitación infantil", bathroom: "Baño",
+    toilet: "Aseo", shower: "Ducha", balcony: "Balcón", sun_balcony: "Balcón soleado",
+    dining: "Comedor", office: "Despacho", entrance: "Entrada", hallway: "Pasillo",
+    mamad: "Habitación segura", garden: "Jardín", yard: "Patio", roof: "Azotea", parking: "Aparcamiento",
+    storage: "Trastero", laundry: "Lavadero", building: "El edificio", facade: "Fachada",
+    view: "Vistas", lobby: "Vestíbulo", pool: "Piscina", gym: "Gimnasio",
+  },
+  fr: {
+    living_room: "Salon", open_plan: "Espace ouvert", living_dining: "Salon-salle à manger",
+    kitchen: "Cuisine", kitchenette: "Kitchenette", bedroom: "Chambre",
+    master_bedroom: "Chambre principale", kids_room: "Chambre d'enfant", bathroom: "Salle de bain",
+    toilet: "Toilettes", shower: "Douche", balcony: "Balcon", sun_balcony: "Balcon ensoleillé",
+    dining: "Coin repas", office: "Bureau", entrance: "Entrée", hallway: "Couloir",
+    mamad: "Pièce sécurisée", garden: "Jardin", yard: "Cour", roof: "Toit-terrasse", parking: "Parking",
+    storage: "Débarras", laundry: "Buanderie", building: "L'immeuble", facade: "Façade",
+    view: "Vue", lobby: "Hall", pool: "Piscine", gym: "Salle de sport",
+  },
+};
+
+// Anything outside the Latin blocks is already a localized display label (the
+// caller passed "סלון" / "Кухня" rather than a Tagger type) and is shown as-is.
+// Accented Latin (español, français) stays on the lookup path — those labels
+// come from the table, and a raw type string must never reach the video.
+const NON_LATIN = /[^ -ɏ]/;
+
+/**
+ * Map a Tagger room type to a display label in `lang`: exact match → keyword
+ * fallback → drop. Unknown types are DROPPED (return ""), never burned onto
+ * the video as a raw type string. Defaults to Hebrew so existing callers that
+ * pass no language keep their current output.
+ */
+function roomLabel(r, lang) {
   const raw = typeof r === "string" ? r : (r && (r.room_type || r.label)) || "";
   const s = String(raw).trim();
   if (!s) return "";
-  if (/[֐-׿]/.test(s)) return s.slice(0, 30); // already Hebrew
+  if (NON_LATIN.test(s)) return s.slice(0, 30); // already a display label
+  const table = ROOM_LABELS[lang] || ROOM_LABELS.he;
   const key = s.toLowerCase().replace(/[\s-]+/g, "_");
-  if (ROOM_HE[key]) return ROOM_HE[key];
-  for (const [needle, he] of ROOM_KEYWORDS) {
-    if (key.includes(needle)) return he;
+  let concept = ROOM_CONCEPTS[key];
+  if (!concept) {
+    for (const [needle, c] of ROOM_KEYWORDS) {
+      if (key.includes(needle)) { concept = c; break; }
+    }
   }
-  return "";
+  if (!concept) return "";
+  return table[concept] || ROOM_LABELS.he[concept] || "";
 }
 
 // Most frequent value in an array (first-seen wins ties); null if empty.
@@ -388,7 +473,21 @@ function labelsToSegments(labels, times, duration) {
 
 // One Claude vision call: all sampled frames in order, closed label list.
 // Returns one {label, desc} per frame; label outside the list → null.
-async function classifyFrames(frames, allowed, apiKey) {
+// The descriptor is burned onto the video right under the room label, so it
+// has to be written in the page language — otherwise an English page gets an
+// English room name with a Hebrew line beneath it. Examples are given in the
+// target language because naming the language alone is a weaker instruction.
+const DESC_LANG = {
+  he: { name: "Hebrew", examples: '"מרווח ומואר", "מטבח מודרני", "נוף פתוח"' },
+  en: { name: "English", examples: '"bright and airy", "modern kitchen", "open view"' },
+  ar: { name: "Arabic", examples: '"واسع ومضيء", "مطبخ عصري", "إطلالة مفتوحة"' },
+  ru: { name: "Russian", examples: '"светло и просторно", "современная кухня", "открытый вид"' },
+  es: { name: "Spanish", examples: '"amplio y luminoso", "cocina moderna", "vistas abiertas"' },
+  fr: { name: "French", examples: '"spacieux et lumineux", "cuisine moderne", "vue dégagée"' },
+};
+
+async function classifyFrames(frames, allowed, apiKey, lang) {
+  const desc = DESC_LANG[lang] || DESC_LANG.he;
   const content = [];
   frames.forEach((f, i) => {
     content.push({ type: "text", text: `Frame ${i} (t≈${f.t.toFixed(1)}s):` });
@@ -409,10 +508,10 @@ async function classifyFrames(frames, allowed, apiKey) {
       `emerging. Do NOT guess the incoming room: a frame that is only partly ` +
       `the new room is not yet that room. Also return null for a frame ` +
       `matching no label.\n` +
-      `- desc: a SHORT 1-2 word Hebrew descriptor of a notable, clearly VISIBLE ` +
-      `quality of that space (e.g. "מרווח ומואר", "מטבח מודרני", "נוף פתוח"), or ` +
-      `null if nothing notable is visible. Keep it factual — describe only what ` +
-      `the frame shows.\n` +
+      `- desc: a SHORT 1-2 word ${desc.name} descriptor of a notable, clearly VISIBLE ` +
+      `quality of that space (e.g. ${desc.examples}), or ` +
+      `null if nothing notable is visible. Write it in ${desc.name}. Keep it ` +
+      `factual — describe only what the frame shows.\n` +
       `Reply with ONLY a JSON array of exactly ${frames.length} objects, where ` +
       `entry i corresponds to frame i.`,
   });
@@ -478,8 +577,8 @@ async function sampleClipFrames(file, framesDir, prefix, duration, count, offset
 // stitched output so no throwaway encode is needed; the few frames that land
 // inside a crossfade show a blend and get smoothed out as noise. Segments are
 // clipped to end before the title window so the closing shot stays clean.
-async function detectRoomSegments(clips, tmp, info, rooms) {
-  const allowed = [...new Set(rooms.map(roomLabel).filter(Boolean))];
+async function detectRoomSegments(clips, tmp, info, rooms, lang) {
+  const allowed = [...new Set(rooms.map((r) => roomLabel(r, lang)).filter(Boolean))];
   if (!allowed.length) return [];
   const framesDir = path.join(tmp, "frames");
   fs.mkdirSync(framesDir);
@@ -493,7 +592,7 @@ async function detectRoomSegments(clips, tmp, info, rooms) {
   }
   frames.sort((a, b) => a.t - b.t);
   if (!frames.length) return [];
-  const items = await classifyFrames(frames, allowed, process.env.ANTHROPIC_API_KEY);
+  const items = await classifyFrames(frames, allowed, process.env.ANTHROPIC_API_KEY, lang);
   const times = frames.map((f) => f.t);
   const segs = labelsToSegments(items.map((x) => x.label), times, info.duration);
   const cutoff = Math.max(0, info.duration - OVERLAY_SECONDS);
@@ -699,7 +798,8 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
  * gradient) on the segments where each room is on screen.
  * Writes the result under `uploadDir`/overlays and returns its public URL.
  */
-async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl }) {
+async function overlayVideo({ videoUrl, videoUrls, lines, rooms, language, musicUrl, musicPrompt, uploadDir, baseUrl }) {
+  const lang = sanitizeLang(language);
   const urls = (Array.isArray(videoUrls) && videoUrls.length ? videoUrls : [videoUrl])
     .filter((u) => typeof u === "string" && /^https?:\/\//.test(u));
   if (!urls.length) throw new Error("no video url given");
@@ -733,7 +833,7 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
       } else {
         // Room labels are best-effort — a vision failure must not sink the video.
         try {
-          roomSegments = await detectRoomSegments(clips, tmp, info, rooms.slice(0, MAX_ROOMS));
+          roomSegments = await detectRoomSegments(clips, tmp, info, rooms.slice(0, MAX_ROOMS), lang);
           roomDebug = roomSegments.length ? "ok" : "no_segments_detected";
         } catch (err) {
           roomDebug = "error: " + err.message.slice(0, 200);
@@ -775,5 +875,6 @@ module.exports = {
   _test: {
     buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
     modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin,
+    ROOM_LABELS, ROOM_CONCEPTS, ROOM_KEYWORDS, DESC_LANG,
   },
 };

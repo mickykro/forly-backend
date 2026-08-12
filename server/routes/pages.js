@@ -495,6 +495,9 @@ module.exports = function createPagesRouter(ctx) {
       body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
     // Optional room labels: strings or {room_type} objects, in any order.
     const rooms = Array.isArray(body.rooms) ? body.rooms.slice(0, MAX_ROOMS) : [];
+    // Room names and their descriptors are burned onto the video, so they have
+    // to match the page language rather than defaulting to Hebrew.
+    const language = sanitizeLang(body.language);
     // Optional music: an explicit track wins, otherwise a bed is generated to
     // fit the stitched length. music_prompt tailors that generation per listing.
     const musicUrl = /^https?:\/\//.test(String(body.music_url || "")) ? String(body.music_url) : null;
@@ -505,7 +508,7 @@ module.exports = function createPagesRouter(ctx) {
       });
     }
     try {
-      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, rooms, language, musicUrl, musicPrompt, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);

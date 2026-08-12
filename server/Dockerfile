@@ -13,8 +13,9 @@ FROM node:22-alpine
 # ffmpeg (with libass) for /api/video-overlay. Fonts: Noto Sans Hebrew covers
 # the Hebrew glyphs but ships no Latin digits, so numbers (prices, room counts)
 # rendered as tofu boxes. DejaVu Sans provides the digit/Latin fallback libass
-# substitutes per-glyph via fontconfig.
-RUN apk add --no-cache ffmpeg font-noto-hebrew font-dejavu
+# substitutes per-glyph via fontconfig, and also covers Cyrillic (ru). Noto
+# Sans Arabic is needed for ar room labels — DejaVu has no Arabic coverage.
+RUN apk add --no-cache ffmpeg font-noto-hebrew font-noto-arabic font-dejavu
 WORKDIR /app
 COPY server/package.json server/
 RUN cd server && npm install --omit=dev
