@@ -144,6 +144,7 @@ module.exports = function createIntakeRouter(ctx) {
       description: String(body.description || "").slice(0, 2000),
       photos_urls: body.photos_urls.slice(0, MAX_UPLOAD_FILES),
       own_video_url: body.own_video_url || null,
+      gallery_video_url: body.gallery_video_url || null,
       status: "active", page_id: null,
       agent: agentOverride ? {
         name: String(agentOverride.name || ""),
@@ -172,6 +173,7 @@ module.exports = function createIntakeRouter(ctx) {
       language: listing.language,
     } : {
       phone, image_urls: listing.photos_urls, listing_id: listingId, trigger_source: "dashboard",
+      gallery_video_url: listing.gallery_video_url,
       language: listing.language,
       property_details: {
         listing_type: listing.listing_type,
