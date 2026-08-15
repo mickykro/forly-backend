@@ -559,12 +559,13 @@
   // Photos upload the moment they're picked (progress on the thumb); removing a
   // photo also deletes the already-uploaded file from storage.
   // Restartable so a photo that failed on a flaky connection can retry at submit.
+  function setBar(bar, pct, color) { if (bar) { bar.style.width = pct + "%"; bar.style.background = color || ""; } }
   function startUpload(entry) {
     var bar = entry.el.querySelector(".bar i");
-    if (bar) { bar.style.width = "0%"; bar.style.background = ""; }
+    setBar(bar, 0);
     entry.failed = false;
     entry.uploadPromise = FLY.uploadFiles([entry.file], uploadHeaders, function (_i, pct) {
-      if (bar) bar.style.width = pct + "%";
+      setBar(bar, pct);
     }).then(function (urls) {
       entry.publicUrl = urls[0];
       // removed while the upload was in flight — clean up the orphan
@@ -572,11 +573,10 @@
       return urls[0];
     }).catch(function (e) {
       entry.failed = true;
-      if (bar) { bar.style.width = "100%"; bar.style.background = "#c0392b"; }
+      setBar(bar, 100, "#c0392b");
       FLY.toast(entry.file.name + ": " + e.message);
       return null;
     });
-    return entry.uploadPromise;
   }
 
   function addFiles(list) {
