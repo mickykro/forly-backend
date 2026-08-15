@@ -58,6 +58,18 @@
   .feature-row input{width:auto}
   .sub-block{border:1px solid rgba(23,20,15,.14);border-radius:12px;padding:14px 14px 2px;margin:10px 0 14px}
   .sub-block-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .wizard-panel[hidden]{display:none!important}
+  .wizard-panel{animation:wizardIn .24s cubic-bezier(.23,1,.32,1)}
+  @keyframes wizardIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .wizard-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:28px;padding-top:18px;border-top:1px solid rgba(23,20,15,.1)}
+  .wizard-actions .stage-note{font-size:.78rem;color:var(--ink-soft);line-height:1.5}
+  .wizard-actions .btn{min-width:158px}
+  .wizard-step{display:flex;align-items:center;gap:8px;white-space:nowrap;color:var(--atelier-mute,var(--ink-soft));font-family:var(--sans);font-size:.8rem;border:0;background:transparent;padding:0;cursor:pointer}
+  .wizard-step:focus-visible{outline:2px solid var(--gold);outline-offset:4px;border-radius:5px}
+  .wizard-step.active{color:var(--ink);font-weight:700}
+  .wizard-step i{display:grid;place-items:center;width:26px;height:26px;border:1px solid rgba(23,20,15,.14);border-radius:50%;font-style:normal;font-size:.7rem}
+  .wizard-step.active i{background:var(--dark);border-color:var(--dark);color:#fff}
+  @media(max-width:540px){.wizard-actions{align-items:stretch;flex-direction:column-reverse}.wizard-actions .btn{width:100%}.wizard-actions .stage-note{text-align:center}}
 </style>
 </head>
 <body class="atelier-page creation-page">
@@ -85,10 +97,12 @@
       </div>
       <div class="atelier-aside"><small>PROCESS NOTE</small><b>מהפרטים לדף שמוכן לשיתוף.</b><span>המערכת שומרת את המדיה בזמן אמת ומכינה את חומרי הגלם לעמוד הנכס.</span></div>
     </div>
-    <div class="atelier-progress" aria-label="שלבי יצירת הנכס"><span class="active"><i>01</i>פרטי הנכס</span><span><i>02</i>תמונות וסרטון</span><span><i>03</i>עיצוב והפקה</span></div>
+    <div class="atelier-progress" aria-label="שלבי יצירת הנכס"><button type="button" class="wizard-step active" data-wizard-step="1"><i>01</i>פרטי הנכס</button><button type="button" class="wizard-step" data-wizard-step="2"><i>02</i>תמונות וסרטון</button><button type="button" class="wizard-step" data-wizard-step="3"><i>03</i>עיצוב והפקה</button></div>
     <div id="demoAtelierNote" class="demo-notice hidden"><span class="demo-index">DEMO / 01</span><div><strong>בונים דף הדגמה אישי.</strong><span>מלאו גם את פרטי המתווך, ונשמור אותם אוטומטית לאורך התהליך.</span></div></div>
 
     <div class="card creation-card">
+      <p class="form-err" id="formErr"></p>
+      <section class="wizard-panel" data-wizard-panel="1">
       <!-- demo-only agent block: shown when ?key= is present (no login) -->
       <div id="agentBlock" class="hidden">
         <div class="sec-title" data-step="00" data-i18n="sec_agent">פרטי המתווך</div>
@@ -203,7 +217,10 @@
         <div id="pTags" style="display:flex;gap:6px;flex-wrap:wrap"></div>
         <div class="hint" data-i18n="hint_tags">בחרו את המאפיינים הבולטים של הנכס — הם משמשים לסינון מהיר בפורטל.</div>
       </div>
+      <div class="wizard-actions"><span class="stage-note">שמרו את הבסיס: כתובת, מחיר, חדרים והמאפיינים הבולטים של הנכס.</span><button type="button" class="btn btn-gold" id="nextStage1">המשך לתמונות ←</button></div>
+      </section>
 
+      <section class="wizard-panel" data-wizard-panel="2" hidden>
       <div class="sec-title" data-step="02" data-i18n="sec_photos">תמונות הנכס (3–12)</div>
       <div class="hint" data-i18n="hint_photos_video">כל תמונה הופכת לקטע וידאו של כ-2.5 שניות — עד 12 תמונות.</div>
       <div class="drop" id="drop">
@@ -218,7 +235,10 @@
         <input id="videoInput" type="file" accept="video/mp4,video/quicktime">
         <div class="hint" data-i18n="hint_video">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</div>
       </div>
+      <div class="wizard-actions"><button type="button" class="btn btn-ghost" id="prevStage2">→ חזרה לפרטים</button><button type="button" class="btn btn-gold" id="nextStage2">המשך לעיצוב ←</button></div>
+      </section>
 
+      <section class="wizard-panel" data-wizard-panel="3" hidden>
       <div class="sec-title" data-step="03" data-i18n="sec_design">עיצוב הדף</div>
 
       <!-- live preview of the chosen fonts + colors -->
@@ -310,8 +330,8 @@
         </div>
       </div>
 
-      <p class="form-err" id="formErr"></p>
-      <button class="btn btn-gold" id="submitBtn" style="width:100%;margin-top:14px" data-i18n="btn_submit">🚀 צרו לי דף נכס</button>
+      <div class="wizard-actions"><button type="button" class="btn btn-ghost" id="prevStage3">→ חזרה לתמונות</button><button class="btn btn-gold" id="submitBtn" data-i18n="btn_submit">🚀 צרו לי דף נכס</button></div>
+      </section>
     </div>
   </div>
 
@@ -386,6 +406,64 @@
   var keyMatch = location.search.match(/[?&]key=([^&]*)/);
   var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
   var isDemo = !!demoKey;
+
+  // ── functional three-stage creation wizard ──
+  // The inputs and APIs stay exactly as they were; panels only decide when each
+  // group becomes visible. This keeps the authenticated and ?key= demo paths
+  // on one form contract.
+  var wizardStage = 1;
+  var wizardPanels = Array.prototype.slice.call(document.querySelectorAll("[data-wizard-panel]"));
+  var wizardSteps = Array.prototype.slice.call(document.querySelectorAll("[data-wizard-step]"));
+  function clearWizardError() { $("#formErr").classList.remove("show"); }
+  function wizardError(message, fieldId) {
+    var err = $("#formErr");
+    err.textContent = message;
+    err.classList.add("show");
+    if (fieldId && $(fieldId)) $(fieldId).focus();
+    return false;
+  }
+  function setWizardStage(stage, moveFocus) {
+    wizardStage = stage;
+    wizardPanels.forEach(function (panel) { panel.hidden = Number(panel.getAttribute("data-wizard-panel")) !== stage; });
+    wizardSteps.forEach(function (step) { step.classList.toggle("active", Number(step.getAttribute("data-wizard-step")) === stage); });
+    clearWizardError();
+    if (moveFocus) {
+      var firstField = { 1: "#pAddress", 2: "#fileInput", 3: "#tplGrid" }[stage];
+      var target = firstField && $(firstField);
+      if (target) { target.scrollIntoView({ behavior: "smooth", block: "start" }); target.focus && target.focus(); }
+    }
+  }
+  function validateStageOne() {
+    var required = [["#pAddress", "fld_address"], ["#pCity", "fld_city"], ["#pPrice", "fld_price"], ["#pRooms", "fld_rooms"]];
+    if (isDemo) required.unshift(["#agName", "fld_agent_name"], ["#agPhone", "fld_agent_phone"]);
+    for (var i = 0; i < required.length; i++) {
+      if (!$(required[i][0]).value.trim()) return wizardError(FT("err_missing") + FT(required[i][1]), required[i][0]);
+    }
+    return true;
+  }
+  function validateStageTwo() {
+    if (photos.length < 3) return wizardError(FT("err_min_photos"), "#fileInput");
+    return true;
+  }
+  function moveWizard(direction) {
+    if (direction > wizardStage) {
+      if (wizardStage === 1 && !validateStageOne()) return;
+      if (wizardStage === 2 && !validateStageTwo()) return;
+    }
+    setWizardStage(Math.max(1, Math.min(3, direction)), true);
+  }
+  $("#nextStage1").addEventListener("click", function () { moveWizard(2); });
+  $("#prevStage2").addEventListener("click", function () { moveWizard(1); });
+  $("#nextStage2").addEventListener("click", function () { moveWizard(3); });
+  $("#prevStage3").addEventListener("click", function () { moveWizard(2); });
+  wizardSteps.forEach(function (step) {
+    step.addEventListener("click", function () {
+      var requested = Number(step.getAttribute("data-wizard-step"));
+      if (requested < wizardStage) setWizardStage(requested, true);
+      else if (requested > wizardStage) moveWizard(wizardStage + 1);
+    });
+  });
+  setWizardStage(1, false);
   if (isDemo) {
     $("#agentBlock").classList.remove("hidden");
     $("#demoAtelierNote").classList.remove("hidden");

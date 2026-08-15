@@ -6,3 +6,5 @@
 - [x] Apply the same design system to the remaining server-delivered pages.
 - [x] Validate the redesigned routes and commit the changes on a new branch.
 - [x] Push `feat/property-atelier-server-redesign` to the remote repository for testing.
+- [x] Convert `create.html` into functional property-details, media, and design/build wizard stages.
+- [x] Validate the three-stage wizard in demo and authenticated creation modes, then push the correction.
