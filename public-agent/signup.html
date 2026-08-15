@@ -10,18 +10,20 @@
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 </head>
-<body>
+<body class="atelier-page signup-page">
 
-<header class="topbar">
+<header class="topbar atelier-topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
 </header>
 
 <div class="auth-wrap">
   <div class="card auth-card" style="width:min(460px,100%)">
-    <div class="logo">🦉</div>
+    <div class="auth-mark">F</div>
+    <span class="atelier-kicker">Join the Atelier</span>
     <h1 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:2px">הרשמה לפורלי</h1>
     <p class="sub">דקה אחת — ואפשר לפתוח נכס ראשון</p>
 
+    <div class="atelier-progress" aria-label="שלבי ההרשמה"><span class="active"><i>01</i>פרטים</span><span><i>02</i>אימות</span><span><i>03</i>פתיחה</span></div>
     <!-- step 1: details -->
     <div id="step1" style="text-align:right">
       <div class="field"><label>שם מלא *</label><input id="sName" autocomplete="name"></div>
@@ -68,6 +70,10 @@
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
   var phoneVal = "";
+  var signupStages = Array.prototype.slice.call(document.querySelectorAll(".atelier-progress span"));
+  function setSignupStage(step) {
+    signupStages.forEach(function (stage, index) { stage.classList.toggle("active", index + 1 === step); });
+  }
 
   $("#toOtp").addEventListener("click", function () {
     var err = $("#err1");
@@ -86,6 +92,7 @@
       $("#sSentTo").textContent = phoneVal;
       $("#step1").classList.add("hidden");
       $("#step2").classList.remove("hidden");
+      setSignupStage(2);
       $("#otpRow input").focus();
     }).catch(function (e) {
       err.textContent = e.code === "already_registered" ? "המספר כבר רשום — אפשר פשוט להיכנס" :
@@ -108,6 +115,7 @@
   $("#back2").addEventListener("click", function () {
     $("#step2").classList.add("hidden");
     $("#step1").classList.remove("hidden");
+    setSignupStage(1);
   });
 
   $("#finishBtn").addEventListener("click", function () {
@@ -142,6 +150,7 @@
     }).then(function () {
       $("#step2").classList.add("hidden");
       $("#step3").classList.remove("hidden");
+      setSignupStage(3);
     }).catch(function (e) {
       err.textContent = e.code === "wrong_code" ? "קוד שגוי" :
         e.code === "expired" ? "הקוד פג — חזרו אחורה ושלחו חדש" :

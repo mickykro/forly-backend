@@ -11,9 +11,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 </head>
-<body>
+<body class="atelier-page dashboard-page">
 
-<header class="topbar">
+<header class="topbar atelier-topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
   <span class="who" id="who"></span>
   <button class="btn btn-sm hidden" id="btnLogout" style="margin-inline-start:auto;background:rgba(255,255,255,.12);color:#fff">התנתקות</button>
@@ -22,7 +22,8 @@
 <!-- ── LOGIN ── -->
 <div class="auth-wrap" id="viewLogin">
   <div class="card auth-card">
-    <div class="logo">🦉</div>
+    <div class="auth-mark">F</div>
+    <span class="atelier-kicker">Property Atelier</span>
     <h1 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:2px">כניסה לפורלי</h1>
     <p class="sub">נשלח לך קוד אימות בוואטסאפ</p>
 
@@ -51,7 +52,7 @@
 </div>
 
 <!-- ── PROPERTY LIST ── -->
-<div class="container hidden" id="viewList">
+<div class="atelier-shell hidden" id="viewList">
   <!-- ponytail: notification banner for incomplete profiles -->
   <div id="profileBanner" class="hidden" style="background:linear-gradient(90deg,#b98a2f 0%,#d4a84b 100%);color:#fff;padding:14px 20px;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <span style="font-size:1.5rem">👋</span>
@@ -61,11 +62,12 @@
     </div>
     <a href="/signup" class="btn" style="background:#fff;color:#b98a2f;font-weight:600;border:none">השלמת פרופיל</a>
   </div>
-  <div class="page-head">
+  <div class="atelier-hero page-head">
     <div>
       <h1>הנכסים שלי</h1>
       <p id="countLine"></p>
     </div>
+    <div class="atelier-aside"><small>ATELIER / 01</small><b>הנכסים שלכם, במבט אחד.</b><span>יצירה, עריכה ומעקב במקום שקט ומדויק.</span></div>
     <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
   </div>
   <div class="prop-grid" id="propGrid"></div>
@@ -294,7 +296,7 @@
     $("#viewList").classList.remove("hidden");
     $("#who").textContent = "תצוגת הדגמה";
     $("#countLine").textContent = records.length === 1 ? "נכס אחד" : records.length + " נכסים";
-    var banner = FLY.el("div", "card",
+    var banner = FLY.el("div", "card demo-notice",
       '🦉 <b>זה האזור האישי שלך.</b> הנכס שיצרת מופיע כאן — ' +
       '<a href="/signup.html" style="color:var(--gold);font-weight:600">הרשמה מלאה</a> ' +
       'תאפשר לערוך, להאריך ולנהל את כל הנכסים שלך.');

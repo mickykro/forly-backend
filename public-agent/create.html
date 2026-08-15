@@ -60,9 +60,9 @@
   .sub-block-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 </style>
 </head>
-<body>
+<body class="atelier-page creation-page">
 
-<header class="topbar">
+<header class="topbar atelier-topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
   <div class="topbar-actions">
     <div class="lang-switch" id="langSwitch">
@@ -73,21 +73,25 @@
   </div>
 </header>
 
-<div class="container" style="max-width:760px">
+<div class="container atelier-shell" style="max-width:1040px">
 
   <!-- ── FORM ── -->
   <div id="viewForm">
-    <div class="page-head">
+    <div class="atelier-hero page-head">
       <div>
+        <span class="atelier-kicker">Property Atelier / 01</span>
         <h1 data-i18n="h1_new_property">נכס חדש</h1>
         <p data-i18n="subtitle">ממלאים פרטים, מעלים תמונות — ותוך דקות יש דף נחיתה עם וידאו.</p>
       </div>
+      <div class="atelier-aside"><small>PROCESS NOTE</small><b>מהפרטים לדף שמוכן לשיתוף.</b><span>המערכת שומרת את המדיה בזמן אמת ומכינה את חומרי הגלם לעמוד הנכס.</span></div>
     </div>
+    <div class="atelier-progress" aria-label="שלבי יצירת הנכס"><span class="active"><i>01</i>פרטי הנכס</span><span><i>02</i>תמונות וסרטון</span><span><i>03</i>עיצוב והפקה</span></div>
+    <div id="demoAtelierNote" class="demo-notice hidden"><span class="demo-index">DEMO / 01</span><div><strong>בונים דף הדגמה אישי.</strong><span>מלאו גם את פרטי המתווך, ונשמור אותם אוטומטית לאורך התהליך.</span></div></div>
 
-    <div class="card">
+    <div class="card creation-card">
       <!-- demo-only agent block: shown when ?key= is present (no login) -->
       <div id="agentBlock" class="hidden">
-        <div class="sec-title" data-i18n="sec_agent">פרטי המתווך</div>
+        <div class="sec-title" data-step="00" data-i18n="sec_agent">פרטי המתווך</div>
         <div class="grid-2">
           <div class="field"><label data-i18n="lbl_fullname">שם מלא *</label><input id="agName" placeholder="רון גולן" data-i18n-ph="ph_agName"></div>
           <div class="field"><label data-i18n="lbl_brand">שם המשרד</label><input id="agBrand" placeholder="גולן נכסים" data-i18n-ph="ph_agBrand"></div>
@@ -140,7 +144,7 @@
       </div>
 
       <input type="hidden" id="pLang" value="he">
-      <div class="sec-title" data-i18n="sec_property">פרטי הנכס</div>
+      <div class="sec-title" data-step="01" data-i18n="sec_property">פרטי הנכס</div>
       <div class="grid-2">
         <div class="field">
           <label data-i18n="lbl_deal_type">סוג העסקה *</label>
@@ -200,7 +204,7 @@
         <div class="hint" data-i18n="hint_tags">בחרו את המאפיינים הבולטים של הנכס — הם משמשים לסינון מהיר בפורטל.</div>
       </div>
 
-      <div class="sec-title" data-i18n="sec_photos">תמונות הנכס (3–12)</div>
+      <div class="sec-title" data-step="02" data-i18n="sec_photos">תמונות הנכס (3–12)</div>
       <div class="hint" data-i18n="hint_photos_video">כל תמונה הופכת לקטע וידאו של כ-2.5 שניות — עד 12 תמונות.</div>
       <div class="drop" id="drop">
         <div style="font-size:1.6rem">📸</div>
@@ -209,13 +213,13 @@
       </div>
       <div class="thumbs" id="thumbs"></div>
 
-      <div class="sec-title" data-i18n="sec_video">וידאו (אופציונלי)</div>
+      <div class="sec-title" data-step="02A" data-i18n="sec_video">וידאו (אופציונלי)</div>
       <div class="field">
         <input id="videoInput" type="file" accept="video/mp4,video/quicktime">
         <div class="hint" data-i18n="hint_video">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</div>
       </div>
 
-      <div class="sec-title" data-i18n="sec_design">עיצוב הדף</div>
+      <div class="sec-title" data-step="03" data-i18n="sec_design">עיצוב הדף</div>
 
       <!-- live preview of the chosen fonts + colors -->
       <div id="thPreview" style="border:1px solid rgba(23,20,15,.14);border-radius:14px;padding:18px 20px;margin-bottom:14px;background:var(--bg)">
@@ -384,6 +388,7 @@
   var isDemo = !!demoKey;
   if (isDemo) {
     $("#agentBlock").classList.remove("hidden");
+    $("#demoAtelierNote").classList.remove("hidden");
     // standalone demo — not for signed-in users: hide the "my properties" nav
     var myProps = $("#navMyProps");
     if (myProps) myProps.style.display = "none";
