@@ -8,3 +8,6 @@
 - [x] Push `feat/property-atelier-server-redesign` to the remote repository for testing.
 - [x] Convert `create.html` into functional property-details, media, and design/build wizard stages.
 - [x] Validate the three-stage wizard in demo and authenticated creation modes, then push the correction.
+- [x] Audit the approved Property Atelier preview against the server create page.
+- [x] Port the preview’s exact visual composition and interactions into create.html while preserving runtime contracts.
+- [x] Validate, commit, and push the preview-fidelity correction.

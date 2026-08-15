@@ -70,39 +70,59 @@
   .wizard-step i{display:grid;place-items:center;width:26px;height:26px;border:1px solid rgba(23,20,15,.14);border-radius:50%;font-style:normal;font-size:.7rem}
   .wizard-step.active i{background:var(--dark);border-color:var(--dark);color:#fff}
   @media(max-width:540px){.wizard-actions{align-items:stretch;flex-direction:column-reverse}.wizard-actions .btn{width:100%}.wizard-actions .stage-note{text-align:center}}
+
+  /* ── Approved Property Atelier preview port ── */
+  :root{--pa-paper:#f7f3ec;--pa-ink:#17140f;--pa-soft:#5e574e;--pa-faint:#938b7e;--pa-gold:#b98a2f;--pa-line:rgba(33,28,21,.13);--pa-white:#fffdfa;--pa-sage:#607d70;--pa-ease:cubic-bezier(.23,1,.32,1)}
+  body.atelier-page.creation-page{background:var(--pa-paper);color:var(--pa-ink)}
+  body.atelier-page.creation-page::before{display:none}.creation-page .forly-create{min-height:100vh;overflow:hidden;background:radial-gradient(circle at 94% 0%,rgba(185,138,47,.13),transparent 25rem),linear-gradient(160deg,#faf7f1 0%,var(--pa-paper) 42%,#f0e9dd 100%)}
+  .creation-page #createHeader{width:min(1260px,calc(100% - 44px));height:88px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--pa-line);padding:0;background:transparent;box-shadow:none;position:relative;z-index:2}
+  .creation-page .forly-brand{display:flex;align-items:center;gap:10px;color:var(--pa-ink);text-decoration:none;font-family:'Frank Ruhl Libre',serif;font-size:1.35rem;font-weight:700;letter-spacing:.05em}.creation-page .forly-brand img{width:35px;height:35px;object-fit:contain}.creation-page .forly-brand small{display:block;margin-top:-1px;color:var(--pa-faint);font-family:'Heebo',sans-serif;font-size:.53rem;font-weight:500;letter-spacing:.02em}.creation-page .header-right{display:flex;align-items:center;gap:9px}.creation-page .lang-btn,.creation-page .my-listings{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--pa-line);border-radius:999px;background:rgba(255,253,250,.58);padding:8px 12px;color:var(--pa-soft);font-size:.75rem}.creation-page .my-listings{border-color:transparent;background:var(--pa-ink);color:#fff;font-weight:600;transition:transform .16s var(--pa-ease),background .16s var(--pa-ease)}.creation-page .my-listings:hover{background:#30291e}.creation-page .my-listings:active,.creation-page .primary-action:active,.creation-page .secondary-action:active{transform:scale(.97)}
+  .creation-page .create-hero{width:min(1260px,calc(100% - 44px));margin:0 auto;padding:60px 0 34px;display:flex;align-items:flex-end;justify-content:space-between;gap:42px}.creation-page .eyebrow{display:flex;align-items:center;gap:9px;margin:0;color:var(--pa-gold);font-size:.72rem;font-weight:700;letter-spacing:.08em}.creation-page .eyebrow span{width:7px;height:7px;border-radius:50%;background:var(--pa-gold);box-shadow:0 0 0 5px rgba(185,138,47,.12)}.creation-page .create-hero h1{margin:13px 0 12px;font-family:'Frank Ruhl Libre',serif;font-size:clamp(2.7rem,5vw,5.25rem);font-weight:600;line-height:.93;letter-spacing:-.07em}.creation-page .create-hero h1 em{color:var(--pa-gold);font-style:normal}.creation-page .create-hero>div>p:not(.eyebrow){max-width:470px;margin:0;color:var(--pa-soft);font-size:1rem;line-height:1.75}.creation-page .hero-note{max-width:260px;display:flex;align-items:flex-start;gap:10px;border-right:1px solid var(--pa-gold);padding:7px 14px 7px 0;color:var(--pa-soft);font-size:.78rem;line-height:1.6}.hero-note-mark{color:var(--pa-gold);font-size:1.15rem}
+  .creation-page .stage-nav{width:min(1260px,calc(100% - 44px));margin:0 auto 26px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;border-bottom:1px solid var(--pa-line);padding-bottom:13px}.creation-page .stage-nav .wizard-step{display:flex;align-items:center;gap:10px;border:0;background:transparent;padding:8px 4px;color:var(--pa-faint);text-align:right;transition:color .18s var(--pa-ease)}.creation-page .stage-nav .wizard-step span{display:grid;width:25px;height:25px;place-items:center;border:1px solid var(--pa-line);border-radius:50%;font-size:.65rem}.creation-page .stage-nav .wizard-step b{font-size:.82rem}.creation-page .stage-nav .wizard-step.current{color:var(--pa-ink)}.creation-page .stage-nav .wizard-step.current span{border-color:var(--pa-gold);background:var(--pa-gold);color:#fff;box-shadow:0 0 0 4px rgba(185,138,47,.13)}.creation-page .stage-nav .wizard-step.done{color:var(--pa-sage)}.creation-page .stage-nav .wizard-step.done span{border-color:var(--pa-sage);background:var(--pa-sage);color:#fff}
+  .creation-page .creation-grid{width:min(1260px,calc(100% - 44px));margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:26px;align-items:start}.creation-page .form-card{border:1px solid var(--pa-line);border-radius:22px;background:rgba(255,253,250,.78);box-shadow:0 20px 50px rgba(45,34,20,.06);padding:clamp(22px,3vw,38px)}.creation-page .section-intro{display:flex;align-items:flex-start;gap:12px;margin-bottom:25px}.creation-page .section-number{display:grid;width:28px;height:28px;flex:none;place-items:center;border-radius:8px;background:var(--pa-ink);color:#fff;font-family:'Frank Ruhl Libre',serif;font-size:.8rem}.creation-page .section-intro h2{margin:0;font-family:'Frank Ruhl Libre',serif;font-size:1.72rem;letter-spacing:-.04em}.creation-page .section-intro p{margin:2px 0 0;color:var(--pa-soft);font-size:.82rem}.creation-page .legacy-sec-title{display:none}.creation-page .form-card .grid-2,.creation-page .form-card .grid-3{gap:13px;margin-bottom:13px}.creation-page .form-card .field{margin:0 0 13px}.creation-page .form-card .field label{margin-bottom:7px;color:var(--pa-soft);font-size:.73rem;font-weight:700}.creation-page .form-card input:not([type=checkbox]):not([type=color]),.creation-page .form-card textarea,.creation-page .form-card select{border:1px solid var(--pa-line);border-radius:10px;background:var(--pa-white);padding:11px 12px;color:var(--pa-ink);font-size:.87rem;transition:border-color .18s var(--pa-ease),box-shadow .18s var(--pa-ease)}.creation-page .form-card input:focus,.creation-page .form-card textarea:focus,.creation-page .form-card select:focus{border-color:var(--pa-gold);box-shadow:0 0 0 4px rgba(185,138,47,.11);outline:0}.creation-page .form-card textarea{resize:vertical;line-height:1.6}.creation-page .form-card .hint{color:var(--pa-faint);font-size:.64rem}.creation-page .form-card .collapsible{border-color:var(--pa-line);margin-bottom:16px}.creation-page .form-card .collapsible summary{background:transparent;padding:12px 0;color:var(--pa-soft);font-size:.76rem;font-weight:600}.creation-page .form-card .feature-row{gap:7px;margin:20px 0}.creation-page .form-card .feature-row label{display:flex;align-items:center;gap:5px;border:1px solid var(--pa-line);border-radius:9px;background:var(--pa-white);padding:7px 9px;color:var(--pa-soft);font-size:.71rem}.creation-page .form-card .chip-btn{border-color:var(--pa-line);background:transparent;color:var(--pa-soft);font-size:.67rem}.creation-page .form-card .chip-btn.on{border-color:var(--pa-ink);background:var(--pa-ink);color:#fff}.creation-page #priceChips .chip-btn{border-radius:999px;padding:5px 9px}.creation-page .wizard-actions{margin-top:27px;border-top:1px solid var(--pa-line);padding-top:18px}.creation-page .form-hint{display:block;flex:1;color:#a96d40;font-size:.67rem}.creation-page .primary-action,.creation-page .secondary-action{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:12px 15px;font-size:.79rem;font-weight:700;transition:transform .16s var(--pa-ease),background .16s var(--pa-ease)}.creation-page .primary-action{background:var(--pa-gold);color:#fff;box-shadow:0 8px 18px rgba(185,138,47,.23)}.creation-page .primary-action:hover{background:#a67a25}.creation-page .secondary-action{border:1px solid var(--pa-line);background:transparent;color:var(--pa-soft)}.creation-page .secondary-action:hover{background:#f4ede2}
+  .creation-page .visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}.creation-page .deal-toggle{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:20px;border:1px solid var(--pa-line);border-radius:11px;padding:4px;background:#f2ece2}.creation-page .deal-toggle button{border:0;border-radius:8px;padding:9px;background:transparent;color:var(--pa-soft);font-size:.82rem}.creation-page .deal-toggle button.selected{background:var(--pa-white);box-shadow:0 3px 12px rgba(45,34,20,.09);color:var(--pa-ink);font-weight:700}.creation-page .price-presets{display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 18px}.creation-page #priceChips{display:flex;flex-wrap:wrap;gap:6px}
+  .creation-page .upload-zone{display:flex;width:100%;flex-direction:column;align-items:center;border:1px dashed rgba(185,138,47,.6);border-radius:15px;background:linear-gradient(135deg,#fdf9f2,#f6eddf);padding:30px 18px;color:var(--pa-soft);transition:background .18s var(--pa-ease),transform .18s var(--pa-ease)}.creation-page .upload-zone:hover{background:#f6e8d2}.creation-page .upload-zone:active{transform:scale(.99)}.creation-page .upload-icon{display:grid;width:46px;height:46px;place-items:center;border-radius:14px;background:var(--pa-gold);color:#fff;box-shadow:0 9px 20px rgba(185,138,47,.22);font-size:1.55rem}.creation-page .upload-zone b{margin-top:12px;color:var(--pa-ink);font-size:.86rem}.creation-page .upload-zone>span{margin-top:3px;font-size:.67rem}.creation-page .thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;min-height:80px;margin-top:12px}.creation-page .thumbs .t{position:relative;width:auto;height:auto;aspect-ratio:1;border-radius:10px;overflow:hidden;background:#e8e0d4}.creation-page .thumbs .t img{width:100%;height:100%;object-fit:cover}.creation-page .thumbs .t .x{position:absolute;left:5px;top:5px;width:23px;height:23px;border:0;border-radius:50%;background:rgba(255,255,255,.88);color:var(--pa-ink);font-size:12px}.creation-page .video-card{display:flex;align-items:center;gap:10px;margin-top:14px;border:1px solid var(--pa-line);border-radius:12px;padding:11px;background:var(--pa-white)}.creation-page .video-card>div{flex:1}.creation-page .video-card b{font-size:.72rem}.creation-page .video-icon{color:var(--pa-gold)}.creation-page .video-card #videoInput{width:100%;margin-top:6px}.creation-page .creation-promise{margin-top:19px;border-radius:12px;background:var(--pa-ink);padding:15px;color:#fff}.creation-page .creation-promise>div{display:flex;align-items:center;gap:7px;color:#d3ac63;font-size:.7rem;font-weight:700}.creation-page .promise-mark{font-size:1.05rem}.creation-page .creation-promise p{margin:6px 0 0;color:#d5cfc5;font-size:.69rem;line-height:1.6}.creation-page .create-action{background:var(--pa-ink)}.creation-page .create-action:hover{background:#312a20}
+  .creation-page .preview-column{position:sticky;top:20px}.creation-page .preview-label{display:flex;justify-content:space-between;align-items:center;margin:2px 3px 9px;color:var(--pa-soft);font-size:.66rem}.creation-page .preview-label>span{display:flex;align-items:center;gap:6px;font-weight:700}.creation-page .preview-label>span>span{width:6px;height:6px;border-radius:50%;background:var(--pa-sage)}.creation-page .preview-label small{font-size:.59rem;color:var(--pa-faint)}.creation-page .listing-preview{overflow:hidden;border:1px solid rgba(28,23,16,.2);border-radius:18px;background:var(--pa-white);box-shadow:0 25px 44px rgba(53,38,16,.13)}.creation-page .preview-image{position:relative;height:205px;background:#e6dfd3}.creation-page .preview-image>img{width:100%;height:100%;object-fit:cover}.creation-page .preview-image:after{content:"";position:absolute;inset:auto 0 0;height:46%;background:linear-gradient(transparent,rgba(0,0,0,.38))}.creation-page .deal-badge{position:absolute;z-index:1;top:12px;right:12px;border-radius:99px;background:rgba(255,253,250,.9);padding:6px 9px;color:var(--pa-ink);font-size:.63rem;font-weight:700}.creation-page .preview-image button{position:absolute;z-index:1;top:11px;left:11px;width:29px;height:29px;border:0;border-radius:50%;background:rgba(23,20,15,.6);color:#fff;font-size:1rem}.creation-page .preview-body{padding:17px}.creation-page .preview-location{display:block;color:var(--pa-gold);font-size:.64rem;font-weight:700}.creation-page .preview-body h2{min-height:42px;margin:7px 0 6px;font-family:'Frank Ruhl Libre',serif;font-size:1.28rem;line-height:1.1;letter-spacing:-.035em}.creation-page .preview-body>strong{display:block;font-family:'Frank Ruhl Libre',serif;font-size:1.32rem}.creation-page .preview-specs{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;color:var(--pa-soft);font-size:.62rem}.creation-page .preview-tags{display:flex;flex-wrap:wrap;gap:5px;border-top:1px solid var(--pa-line);padding-top:11px}.creation-page .preview-tags span{border-radius:5px;background:#f0eade;padding:4px 6px;color:var(--pa-soft);font-size:.56rem}.creation-page .view-button{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:16px;border:0;border-radius:8px;background:var(--pa-ink);padding:10px;color:#fff;font-size:.7rem;font-weight:700}.creation-page .listing-preview.nocturne{background:#17140f;color:#f7f3ec}.creation-page .listing-preview.nocturne .preview-body>strong,.creation-page .listing-preview.nocturne .preview-body h2{color:#fff}.creation-page .listing-preview.nocturne .preview-specs,.creation-page .listing-preview.nocturne .preview-tags span{color:#ded4c5}.creation-page .listing-preview.nocturne .preview-tags{border-color:rgba(255,255,255,.15)}.creation-page .listing-preview.nocturne .preview-tags span{background:rgba(255,255,255,.09)}.creation-page .listing-preview.nocturne .view-button{background:var(--pa-gold)}.creation-page .preview-status{display:flex;gap:9px;margin-top:13px;border:1px solid var(--pa-line);border-radius:12px;padding:10px;background:rgba(255,253,250,.48)}.creation-page .status-sun{display:grid;width:25px;height:25px;flex:none;place-items:center;border-radius:8px;background:#f0dfbc;color:var(--pa-gold)}.creation-page .preview-status p{margin:0;color:var(--pa-soft);font-size:.64rem;line-height:1.55}.creation-page .preview-status b{color:var(--pa-ink)}.creation-page .creation-summary{margin-top:13px;border-top:1px solid var(--pa-line);padding:14px 4px;color:var(--pa-soft);font-size:.66rem}.creation-page .creation-summary>span{font-weight:700}.creation-page .creation-summary>div{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}.creation-page .creation-summary p{margin:0;font-size:.59rem;line-height:1.5}.creation-page .creation-summary b{display:block;color:var(--pa-ink);font-family:'Frank Ruhl Libre',serif;font-size:1rem}.creation-page .create-footer{width:min(1260px,calc(100% - 44px));display:flex;justify-content:space-between;margin:58px auto 0;border-top:1px solid var(--pa-line);padding:18px 0 26px;color:var(--pa-faint);font-size:.6rem}
+  .creation-page .tpl-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.creation-page .tpl-card{border:1px solid var(--pa-line);border-radius:13px;background:var(--pa-white);padding:0;text-align:right;overflow:hidden}.creation-page .tpl-card[data-tpl="galerie"],.creation-page .tpl-card[data-tpl="reel"]{display:none}.creation-page .tpl-card.selected{border-color:var(--pa-gold);box-shadow:0 0 0 3px rgba(185,138,47,.13)}.creation-page .tpl-frame{aspect-ratio:1.75;background:#e9e0d1}.creation-page .template-cover{display:block;width:100%;height:100%;object-fit:cover}.creation-page .tpl-bar{display:block;padding:10px 11px;background:var(--pa-white)}.creation-page .tpl-name,.creation-page .tpl-bar small{display:block}.creation-page .tpl-name{font-family:'Frank Ruhl Libre',serif;font-size:1.04rem;color:var(--pa-ink)}.creation-page .tpl-bar small{margin-top:1px;color:var(--pa-faint);font-size:.61rem}.creation-page .tpl-full{display:none}.creation-page .tpl-check{top:9px;inset-inline-start:auto;right:9px;width:23px;height:23px;background:var(--pa-gold);font-size:.7rem;box-shadow:none}
+  .creation-page .build-screen{position:fixed;inset:0;z-index:100;min-height:100vh;overflow:auto;background:radial-gradient(circle at 50% 0%,#eee0c5 0%,#f7f3ec 40%,#e8ddcb 100%);color:var(--pa-ink)}.creation-page .build-arch{position:absolute;border:1px solid rgba(185,138,47,.18);border-radius:999px 999px 0 0}.creation-page .build-arch-one{width:48rem;height:48rem;top:-39rem;right:-11rem}.creation-page .build-arch-two{width:34rem;height:34rem;bottom:-25rem;left:-12rem}.creation-page .build-header{position:relative;width:min(980px,calc(100% - 44px));margin:0 auto;padding:27px 0;display:flex;justify-content:space-between;color:var(--pa-soft);font-size:.73rem}.creation-page .forly-wordmark{font-family:'Frank Ruhl Libre',serif;color:var(--pa-ink);font-size:1.2rem;font-weight:700;letter-spacing:.1em}.creation-page .build-card{position:relative;width:min(610px,calc(100% - 36px));max-width:none;margin:8vh auto 0;border:1px solid rgba(185,138,47,.22);border-radius:22px;background:rgba(255,253,250,.82);box-shadow:0 30px 60px rgba(51,38,17,.12);padding:clamp(24px,5vw,44px);text-align:center}.creation-page .building-cue{display:flex;justify-content:center;gap:6px}.creation-page .building-cue span{width:8px;height:8px;border-radius:50%;background:var(--pa-gold);animation:building-breathe 1s infinite alternate}.creation-page .building-cue span:nth-child(2){animation-delay:.17s}.creation-page .building-cue span:nth-child(3){animation-delay:.34s}.creation-page .build-card h2{margin:14px 0 6px;font-family:'Frank Ruhl Libre',serif;font-size:clamp(2rem,4vw,3rem);letter-spacing:-.05em}.creation-page .build-steps{margin-top:28px;text-align:right!important}.creation-page .build-steps li{display:grid;grid-template-columns:34px 1fr;border-top:1px solid var(--pa-line);padding:13px 0;color:var(--pa-faint)}@keyframes building-breathe{from{transform:translateY(0);opacity:.4}to{transform:translateY(-7px);opacity:1}}
+  @media(max-width:900px){.creation-page .creation-grid{grid-template-columns:1fr}.creation-page .preview-column{position:relative;top:auto;order:-1;display:grid;grid-template-columns:1fr 1fr;gap:12px}.creation-page .preview-label,.creation-page .creation-summary{display:none}.creation-page .preview-status{margin:0}.creation-page .listing-preview{display:grid;grid-template-columns:180px 1fr}.creation-page .preview-image{height:100%}.creation-page .preview-body{padding:14px}.creation-page .view-button{display:none}}
+  @media(max-width:620px){.creation-page #createHeader,.creation-page .create-hero,.creation-page .stage-nav,.creation-page .creation-grid,.creation-page .create-footer{width:min(100% - 28px,600px)}.creation-page #createHeader{height:75px}.creation-page .forly-brand{font-size:1.08rem}.creation-page .forly-brand small,.creation-page .lang-switch{display:none}.creation-page .create-hero{padding:42px 0 25px;display:block}.creation-page .create-hero h1{font-size:clamp(2.75rem,15vw,4.1rem)}.creation-page .hero-note{display:none}.creation-page .stage-nav{gap:0}.creation-page .stage-nav .wizard-step{display:block;text-align:center;padding:7px 1px}.creation-page .stage-nav .wizard-step span{margin:auto}.creation-page .stage-nav .wizard-step b{display:block;margin-top:5px;font-size:.63rem}.creation-page .form-card{padding:22px 16px;border-radius:17px}.creation-page .form-card .grid-2,.creation-page .form-card .grid-3{grid-template-columns:1fr}.creation-page .preview-column{display:block}.creation-page .preview-status{margin-top:11px}.creation-page .listing-preview{display:block}.creation-page .preview-image{height:205px}.creation-page .tpl-grid{grid-template-columns:1fr}.creation-page .thumbs{grid-template-columns:repeat(3,1fr)}.creation-page .create-footer{display:block;margin-top:42px}.creation-page .create-footer span+span{display:block;margin-top:6px}.creation-page .build-card{margin-top:4vh}}
 </style>
 </head>
 <body class="atelier-page creation-page">
 
-<header class="topbar atelier-topbar">
-  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
-  <div class="topbar-actions">
+<header class="create-header" id="createHeader">
+  <a class="forly-brand" href="/" aria-label="Forly home"><img src="/assets/forly-doorway-mark.png" alt=""><span>FORLY<small>Real estate, thoughtfully presented</small></span></a>
+  <div class="header-right topbar-actions">
     <div class="lang-switch" id="langSwitch">
       <button type="button" class="lang-btn" id="langBtn" aria-haspopup="true" aria-expanded="false"><span class="fl" id="langFlag">🇮🇱</span><span id="langName">עברית</span><span aria-hidden="true">▾</span></button>
       <div class="lang-menu" id="langMenu" role="menu"></div>
     </div>
-    <a id="navMyProps" class="btn btn-ghost btn-sm" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)" data-i18n="nav_my_properties">← הנכסים שלי</a>
+    <a id="navMyProps" class="my-listings" href="/" data-i18n="nav_my_properties">← הנכסים שלי</a>
   </div>
 </header>
 
-<div class="container atelier-shell" style="max-width:1040px">
+<main class="forly-create">
 
   <!-- ── FORM ── -->
   <div id="viewForm">
-    <div class="atelier-hero page-head">
+    <section class="create-hero" id="top">
       <div>
-        <span class="atelier-kicker">Property Atelier / 01</span>
-        <h1 data-i18n="h1_new_property">נכס חדש</h1>
-        <p data-i18n="subtitle">ממלאים פרטים, מעלים תמונות — ותוך דקות יש דף נחיתה עם וידאו.</p>
+        <p class="eyebrow"><span></span> סטודיו ליצירת נכסים</p>
+        <h1>נכס טוב מתחיל<br><em>בסיפור מדויק.</em></h1>
+        <p>ממלאים פרטים, מעלים תמונות — ותוך דקות יש דף נכס עם וידאו שנראה כמו אתם.</p>
       </div>
-      <div class="atelier-aside"><small>PROCESS NOTE</small><b>מהפרטים לדף שמוכן לשיתוף.</b><span>המערכת שומרת את המדיה בזמן אמת ומכינה את חומרי הגלם לעמוד הנכס.</span></div>
-    </div>
-    <div class="atelier-progress" aria-label="שלבי יצירת הנכס"><button type="button" class="wizard-step active" data-wizard-step="1"><i>01</i>פרטי הנכס</button><button type="button" class="wizard-step" data-wizard-step="2"><i>02</i>תמונות וסרטון</button><button type="button" class="wizard-step" data-wizard-step="3"><i>03</i>עיצוב והפקה</button></div>
+      <div class="hero-note"><span class="hero-note-mark">⌂</span><span>הפרטים שלכם הופכים לדף שהקונים ירצו להישאר בו.</span></div>
+    </section>
+    <nav class="stage-nav" aria-label="שלבי יצירת דף נכס"><button type="button" class="wizard-step current" data-wizard-step="1"><span>01</span><b>פרטי הנכס</b></button><button type="button" class="wizard-step" data-wizard-step="2"><span>02</span><b>תמונות וסרטון</b></button><button type="button" class="wizard-step" data-wizard-step="3"><span>03</span><b>עיצוב ויצירה</b></button></nav>
+    <div class="creation-grid">
+    <div class="form-column">
     <div id="demoAtelierNote" class="demo-notice hidden"><span class="demo-index">DEMO / 01</span><div><strong>בונים דף הדגמה אישי.</strong><span>מלאו גם את פרטי המתווך, ונשמור אותם אוטומטית לאורך התהליך.</span></div></div>
 
-    <div class="card creation-card">
+    <div class="card creation-card form-card">
       <p class="form-err" id="formErr"></p>
       <section class="wizard-panel" data-wizard-panel="1">
+      <div class="section-intro"><span class="section-number">01</span><div><h2>הפרטים שעושים את ההבדל</h2><p>כמה עובדות טובות מספיקות כדי להתחיל לספר את סיפור הנכס.</p></div></div>
       <!-- demo-only agent block: shown when ?key= is present (no login) -->
       <div id="agentBlock" class="hidden">
         <div class="sec-title" data-step="00" data-i18n="sec_agent">פרטי המתווך</div>
@@ -158,27 +178,28 @@
       </div>
 
       <input type="hidden" id="pLang" value="he">
-      <div class="sec-title" data-step="01" data-i18n="sec_property">פרטי הנכס</div>
+      <span class="legacy-sec-title" data-i18n="sec_property">פרטי הנכס</span>
+      <div class="deal-toggle" aria-label="סוג עסקה">
+        <button type="button" class="selected" data-deal="sale" data-i18n="opt_sale">למכירה</button>
+        <button type="button" data-deal="rent" data-i18n="opt_rent">להשכרה</button>
+        <select id="pType" class="visually-hidden" tabindex="-1" aria-hidden="true">
+          <option value="sale" selected data-i18n="opt_sale">למכירה</option>
+          <option value="rent" data-i18n="opt_rent">להשכרה</option>
+        </select>
+      </div>
       <div class="grid-2">
-        <div class="field">
-          <label data-i18n="lbl_deal_type">סוג העסקה *</label>
-          <select id="pType">
-            <option value="sale" selected data-i18n="opt_sale">למכירה</option>
-            <option value="rent" data-i18n="opt_rent">להשכרה</option>
-          </select>
-        </div>
         <div class="field"><label data-i18n="lbl_address">כתובת *</label><input id="pAddress" placeholder="ברודצקי 12, דירה 34" data-i18n-ph="ph_address"></div>
+        <div class="field"><label data-i18n="lbl_city">עיר *</label><input id="pCity" placeholder="תל אביב" data-i18n-ph="ph_city"></div>
       </div>
       <div class="grid-2">
-        <div class="field"><label data-i18n="lbl_city">עיר *</label><input id="pCity" placeholder="תל אביב" data-i18n-ph="ph_city"></div>
         <div class="field"><label data-i18n="lbl_neighborhood">שכונה</label><input id="pHood" placeholder="בבלי" data-i18n-ph="ph_hood"></div>
+        <div class="field">
+          <label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label>
+          <input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="4,900,000">
+          <div class="hint" id="priceWords" style="color:var(--gold);font-weight:600;min-height:1.2em"></div>
+        </div>
       </div>
-      <div class="field">
-        <label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label>
-        <input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="4,900,000">
-        <div class="hint" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span data-i18n="quick_price">בחירה מהירה:</span><span id="priceChips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span></div>
-        <div class="hint" id="priceWords" style="color:var(--gold);font-weight:600;min-height:1.2em"></div>
-      </div>
+      <div class="price-presets"><span id="priceChips"></span></div>
       <div class="grid-2">
         <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
         <div class="field"><label data-i18n="lbl_sqm">מ״ר</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
@@ -217,29 +238,35 @@
         <div id="pTags" style="display:flex;gap:6px;flex-wrap:wrap"></div>
         <div class="hint" data-i18n="hint_tags">בחרו את המאפיינים הבולטים של הנכס — הם משמשים לסינון מהיר בפורטל.</div>
       </div>
-      <div class="wizard-actions"><span class="stage-note">שמרו את הבסיס: כתובת, מחיר, חדרים והמאפיינים הבולטים של הנכס.</span><button type="button" class="btn btn-gold" id="nextStage1">המשך לתמונות ←</button></div>
+      <div class="wizard-actions form-actions"><span class="stage-note form-hint show">השלימו כתובת, עיר, מחיר וחדרים כדי להמשיך</span><button type="button" class="btn btn-gold primary-action" id="nextStage1">המשך לתמונות ←</button></div>
       </section>
 
       <section class="wizard-panel" data-wizard-panel="2" hidden>
-      <div class="sec-title" data-step="02" data-i18n="sec_photos">תמונות הנכס (3–12)</div>
+      <div class="section-intro"><span class="section-number">02</span><div><h2>תמונות שמזמינות פנימה</h2><p>כל תמונה הופכת לרגע קטן בסרטון הסיור שלכם.</p></div></div>
+      <span class="legacy-sec-title" data-i18n="sec_photos">תמונות הנכס (3–12)</span>
       <div class="hint" data-i18n="hint_photos_video">כל תמונה הופכת לקטע וידאו של כ-2.5 שניות — עד 12 תמונות.</div>
-      <div class="drop" id="drop">
-        <div style="font-size:1.6rem">📸</div>
-        <span data-i18n="drop_prompt">גררו תמונות לכאן או</span> <b style="color:var(--gold)" data-i18n="drop_click">לחצו לבחירה</b>
+      <div class="drop upload-zone" id="drop">
+        <div class="upload-icon">⇧</div>
+        <b data-i18n="drop_prompt">גררו לכאן תמונות או לחצו לבחירה</b>
+        <span>PNG, JPG או WEBP · עד 12 תמונות</span>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden">
       </div>
       <div class="thumbs" id="thumbs"></div>
 
-      <div class="sec-title" data-step="02A" data-i18n="sec_video">וידאו (אופציונלי)</div>
-      <div class="field">
+      <span class="legacy-sec-title" data-i18n="sec_video">וידאו (אופציונלי)</span>
+      <div class="field video-card">
+        <span class="video-icon">▶</span><div>
+        <b>יש לכם וידאו מוכן?</b>
         <input id="videoInput" type="file" accept="video/mp4,video/quicktime">
         <div class="hint" data-i18n="hint_video">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</div>
+        </div>
       </div>
-      <div class="wizard-actions"><button type="button" class="btn btn-ghost" id="prevStage2">→ חזרה לפרטים</button><button type="button" class="btn btn-gold" id="nextStage2">המשך לעיצוב ←</button></div>
+      <div class="wizard-actions form-actions split"><button type="button" class="btn btn-ghost secondary-action" id="prevStage2">→ חזרה לפרטים</button><button type="button" class="btn btn-gold primary-action" id="nextStage2">המשך לעיצוב ←</button></div>
       </section>
 
       <section class="wizard-panel" data-wizard-panel="3" hidden>
-      <div class="sec-title" data-step="03" data-i18n="sec_design">עיצוב הדף</div>
+      <div class="section-intro"><span class="section-number">03</span><div><h2>תנו לנכס את האופי שלו</h2><p>בחרו כיוון עיצובי. אפשר לשנות הכול גם אחר כך.</p></div></div>
+      <span class="legacy-sec-title" data-i18n="sec_design">עיצוב הדף</span>
 
       <!-- live preview of the chosen fonts + colors -->
       <div id="thPreview" style="border:1px solid rgba(23,20,15,.14);border-radius:14px;padding:18px 20px;margin-bottom:14px;background:var(--bg)">
@@ -253,13 +280,13 @@
         <div class="tpl-grid" id="tplGrid">
           <div class="tpl-card selected" data-tpl="original">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/previews/original.html" title="Original" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
-            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_classic">קלאסי</span><button type="button" class="tpl-full" data-src="/previews/original.html">⛶</button></div>
+            <div class="tpl-frame"><img class="template-cover" src="/assets/forly-style-calm.png" alt="תצוגת עיצוב קלאסי"></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_classic">קלאסי</span><small>בהיר, חם, נצחי</small><button type="button" class="tpl-full" data-src="/previews/original.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="nocturne">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/nocturne.html" title="Nocturne" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
-            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_nocturne">נוקטורן · דרמטי</span><button type="button" class="tpl-full" data-src="/tpl/nocturne.html">⛶</button></div>
+            <div class="tpl-frame"><img class="template-cover" src="/assets/forly-style-nocturne.png" alt="תצוגת עיצוב נוקטורן"></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_nocturne">נוקטורן</span><small>דרמטי, אלגנטי, ערב</small><button type="button" class="tpl-full" data-src="/tpl/nocturne.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="galerie">
             <div class="tpl-check">✓</div>
@@ -330,15 +357,30 @@
         </div>
       </div>
 
-      <div class="wizard-actions"><button type="button" class="btn btn-ghost" id="prevStage3">→ חזרה לתמונות</button><button class="btn btn-gold" id="submitBtn" data-i18n="btn_submit">🚀 צרו לי דף נכס</button></div>
+      <div class="creation-promise"><div><span class="promise-mark">✦</span><span>מה יקרה אחרי הלחיצה?</span></div><p>התמונות יהפכו לסרטון, הפרטים ייכתבו לסיפור, ודף נכס אישי יהיה מוכן לשליחה.</p></div>
+      <div class="wizard-actions form-actions split"><button type="button" class="btn btn-ghost secondary-action" id="prevStage3">→ חזרה לתמונות</button><button class="btn btn-gold primary-action create-action" id="submitBtn" data-i18n="btn_submit">✦ צרו לי דף נכס</button></div>
       </section>
     </div>
+    </div>
+    <aside class="preview-column" aria-label="תצוגה חיה של דף הנכס">
+      <div class="preview-label"><span><span></span> תצוגה חיה</span><small>מתעדכן בזמן אמת</small></div>
+      <article class="listing-preview" id="livePreviewCard">
+        <div class="preview-image"><img id="livePreviewImage" src="/assets/forly-property-hero.png" alt="תצוגה מקדימה של הנכס"><span class="deal-badge" id="liveDealBadge">למכירה</span><button type="button" aria-label="שמירת הנכס">♡</button></div>
+        <div class="preview-body"><span class="preview-location" id="liveLocation">תל אביב · בבלי</span><h2 id="liveTitle">למכירה · ברודצקי 12, דירה 34</h2><strong id="livePrice">₪4,900,000</strong><div class="preview-specs"><span id="liveRooms">4 חדרים</span><span id="liveSqm">110 מ״ר</span><span id="liveFloor">קומה 5</span></div><div class="preview-tags" id="liveTags"></div><button class="view-button" type="button">תיאום ביקור ←</button></div>
+      </article>
+      <div class="preview-status"><span class="status-sun">✦</span><p><b>תמונה אחת יכולה לספר התחלה שלמה.</b> דף הנכס יתאים את עצמו לחומרים שתבחרו.</p></div>
+      <div class="creation-summary"><span>היצירה שלכם</span><div><p><b id="livePhotoCount">0</b> תמונות נבחרו</p><p><b id="liveTemplate">קלאסי</b> כיוון עיצובי</p><p><b id="liveFeatureCount">0</b> מאפיינים בולטים</p></div></div>
+    </aside>
+    </div>
+    <footer class="create-footer"><span>FORLY · דפי נכסים שנשארים בזיכרון</span><span>המידע נשמר באופן מאובטח</span></footer>
   </div>
 
   <!-- ── BUILDING ── -->
-  <div id="viewBuilding" class="hidden">
-    <div class="card center" style="max-width:460px;margin:8vh auto">
-      <div class="spinner" id="buildSpin"></div>
+  <div id="viewBuilding" class="build-screen hidden">
+    <div class="build-arch build-arch-one"></div><div class="build-arch build-arch-two"></div>
+    <div class="build-header"><span class="forly-wordmark">FORLY</span><span>יצירת נכס חדש</span></div>
+    <div class="card center build-card">
+      <div class="building-cue" id="buildSpin"><span></span><span></span><span></span></div>
       <h2 style="font-family:var(--serif);margin:18px 0 4px" data-i18n="build_title">הדף בבנייה 🏗️</h2>
       <p style="color:var(--ink-soft);font-weight:300;font-size:.92rem" data-i18n="build_sub">זה לוקח בדרך כלל 2–4 דקות. אפשר לחכות כאן — או שנעדכן בוואטסאפ כשהדף מוכן.</p>
       <ul class="build-steps" style="text-align:start">
@@ -374,7 +416,7 @@
       </div>
     </div>
   </div>
-</div>
+</main>
 
 <!-- fullscreen template preview overlay -->
 <div id="tplFull"><button type="button" id="tplFullClose" data-i18n="fullscreen_close">✕ סגירה</button><iframe id="tplFullFrame" title="תצוגה מקדימה" data-i18n-aria="iframe_preview"></iframe></div>
@@ -425,13 +467,56 @@
   function setWizardStage(stage, moveFocus) {
     wizardStage = stage;
     wizardPanels.forEach(function (panel) { panel.hidden = Number(panel.getAttribute("data-wizard-panel")) !== stage; });
-    wizardSteps.forEach(function (step) { step.classList.toggle("active", Number(step.getAttribute("data-wizard-step")) === stage); });
+    wizardSteps.forEach(function (step) {
+      var stepNumber = Number(step.getAttribute("data-wizard-step"));
+      step.classList.toggle("current", stepNumber === stage);
+      step.classList.toggle("done", stepNumber < stage);
+      step.classList.toggle("active", stepNumber === stage);
+    });
     clearWizardError();
     if (moveFocus) {
       var firstField = { 1: "#pAddress", 2: "#fileInput", 3: "#tplGrid" }[stage];
       var target = firstField && $(firstField);
       if (target) { target.scrollIntoView({ behavior: "smooth", block: "start" }); target.focus && target.focus(); }
     }
+  }
+  // The preview card projects the same fields and uploaded media that go into
+  // the actual payload; it does not introduce another source of truth.
+  function liveText(id, value) { var el = $(id); if (el) el.textContent = value; }
+  function selectedPreviewFeatures() {
+    var values = [];
+    if ($("#pStorage").checked) values.push(FT("lbl_storage"));
+    if ($("#pElevator").checked) values.push(FT("lbl_elevator"));
+    if ($("#pShabbatElevator").checked) values.push(FT("lbl_shabbat_elevator"));
+    return values.concat(selectedTags()).slice(0, 3);
+  }
+  function updateLivePreview() {
+    var deal = $("#pType").value === "rent" ? FT("opt_rent") : FT("opt_sale");
+    var address = $("#pAddress").value.trim() || "ברודצקי 12, דירה 34";
+    var city = $("#pCity").value.trim() || "תל אביב";
+    var hood = $("#pHood").value.trim() || "בבלי";
+    var price = $("#pPrice").value.trim() || "4,900,000";
+    var roomValue = $("#pRooms").value.trim() || "4";
+    var sqmValue = $("#pSqm").value.trim() || "110";
+    var floorValue = $("#pFloor").value.trim() || "5";
+    var features = selectedPreviewFeatures();
+    var currentPhotos = typeof photos === "undefined" ? [] : photos;
+    var firstPhoto = currentPhotos.length && currentPhotos[0].previewUrl;
+    liveText("#liveDealBadge", deal);
+    liveText("#liveLocation", city + (hood ? " · " + hood : ""));
+    liveText("#liveTitle", deal + " · " + address);
+    liveText("#livePrice", "₪" + price + ($("#pType").value === "rent" ? " / חודש" : ""));
+    liveText("#liveRooms", roomValue + " חדרים");
+    liveText("#liveSqm", sqmValue + " מ״ר");
+    liveText("#liveFloor", "קומה " + floorValue);
+    liveText("#livePhotoCount", String(currentPhotos.length));
+    liveText("#liveFeatureCount", String(features.length));
+    var template = $("#thTemplate").value || "original";
+    var templateNames = { original: "קלאסי", nocturne: "נוקטורן", galerie: "גלריה", reel: "ריל" };
+    liveText("#liveTemplate", templateNames[template] || "קלאסי");
+    $("#livePreviewCard").classList.toggle("nocturne", template === "nocturne");
+    if (firstPhoto) $("#livePreviewImage").src = firstPhoto;
+    $("#liveTags").innerHTML = features.map(function (feature) { return "<span>" + feature + "</span>"; }).join("");
   }
   function validateStageOne() {
     var required = [["#pAddress", "fld_address"], ["#pCity", "fld_city"], ["#pPrice", "fld_price"], ["#pRooms", "fld_rooms"]];
@@ -558,6 +643,7 @@
     var d = priceDigits();
     $("#pPrice").value = d ? fmtThousands(d) : "";
     $("#priceWords").textContent = priceWords(Number(d || 0));
+    updateLivePreview();
   }
   function renderPriceChips() {
     var presets = $("#pType").value === "rent" ? RENT_PRESETS : SALE_PRESETS;
@@ -582,7 +668,7 @@
     return '<button type="button" class="chip-btn" data-tag="' + t[0] + '">' + t[1] + "</button>";
   }).join("");
   Array.prototype.forEach.call($("#pTags").children, function (b) {
-    b.addEventListener("click", function () { b.classList.toggle("on"); });
+    b.addEventListener("click", function () { b.classList.toggle("on"); updateLivePreview(); });
   });
   function selectedTags() {
     return Array.prototype.filter.call($("#pTags").children, function (b) { return b.classList.contains("on"); })
@@ -595,11 +681,13 @@
     floor.disabled = this.checked;
     if (this.checked) { floor.value = ""; floor.placeholder = FT("lbl_floor_disabled"); }
     else floor.placeholder = "5";
+    updateLivePreview();
   });
 
   // a Shabbat elevator is an elevator
   $("#pShabbatElevator").addEventListener("change", function () {
     if (this.checked) $("#pElevator").checked = true;
+    updateLivePreview();
   });
 
   // ── extra phone + extra agent (agent block) ──
@@ -649,7 +737,7 @@
       var url = URL.createObjectURL(f);
       var t = FLY.el("div", "t",
         '<img src="' + url + '"><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
-      var entry = { file: f, el: t, publicUrl: null, removed: false, failed: false };
+      var entry = { file: f, el: t, publicUrl: null, previewUrl: url, removed: false, failed: false };
       entry.uploadPromise = FLY.uploadFiles([f], uploadHeaders, function (_i, pct) {
         var bar = t.querySelector(".bar i");
         if (bar) bar.style.width = pct + "%";
@@ -669,9 +757,11 @@
         photos = photos.filter(function (p) { return p.el !== t; });
         t.remove();
         if (entry.publicUrl) FLY.deleteUpload(entry.publicUrl, uploadHeaders);
+        updateLivePreview();
       });
       $("#thumbs").appendChild(t);
       photos.push(entry);
+      updateLivePreview();
     });
   }
 
@@ -680,7 +770,22 @@
     updatePriceLabel();
     $("#pPrice").placeholder = this.value === "rent" ? "12,000" : "4,900,000";
     renderPriceChips();
+    updateLivePreview();
   });
+  function syncDealButtons() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-deal]"), function (button) {
+      button.classList.toggle("selected", button.getAttribute("data-deal") === $("#pType").value);
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-deal]"), function (button) {
+    button.addEventListener("click", function () {
+      $("#pType").value = button.getAttribute("data-deal");
+      $("#pType").dispatchEvent(new Event("change"));
+      syncDealButtons();
+    });
+  });
+  $("#pType").addEventListener("change", syncDealButtons);
+  syncDealButtons();
 
   // ── theme (fonts + colors) ──
   // CSS font-family stack for a role; "custom" uses the uploaded font.
@@ -718,6 +823,7 @@
       c.classList.toggle("selected", c.getAttribute("data-tpl") === tpl);
     });
     updatePreview();
+    updateLivePreview();
   }
   Array.prototype.forEach.call(document.querySelectorAll(".tpl-card"), function (c) {
     c.addEventListener("click", function (e) {
@@ -736,6 +842,12 @@
   addEventListener("resize", scaleFrames);
   scaleFrames();
   setTimeout(scaleFrames, 300); // after fonts/layout settle
+  ["#pAddress", "#pCity", "#pHood", "#pRooms", "#pSqm", "#pFloor", "#pParking", "#pDesc"].forEach(function (id) {
+    $(id).addEventListener("input", updateLivePreview);
+    $(id).addEventListener("change", updateLivePreview);
+  });
+  ["#pStorage", "#pElevator"].forEach(function (id) { $(id).addEventListener("change", updateLivePreview); });
+  updateLivePreview();
 
   // fullscreen preview overlay
   var tplFull = $("#tplFull"), tplFullFrame = $("#tplFullFrame");

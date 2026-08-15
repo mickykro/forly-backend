@@ -17,6 +17,16 @@ const createPage = fs.readFileSync(path.join(__dirname, "..", "public-agent", "c
   "function validateStageOne()",
   "function validateStageTwo()",
   "function setWizardStage(stage, moveFocus)",
+  'class="create-hero"',
+  'class="stage-nav"',
+  'class="creation-grid"',
+  'class="preview-column"',
+  'id="livePreviewCard"',
+  'id="livePreviewImage"',
+  'class="deal-toggle"',
+  'data-deal="sale"',
+  'data-deal="rent"',
+  "function updateLivePreview()",
 ].forEach((marker) => {
   assert.ok(createPage.includes(marker), `missing wizard marker: ${marker}`);
 });
