@@ -10,20 +10,20 @@
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 </head>
-<body class="atelier-page signup-page">
+<body class="agent-page signup-page">
 
-<header class="topbar atelier-topbar">
+<header class="topbar agent-topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
 </header>
 
 <div class="auth-wrap">
   <div class="card auth-card" style="width:min(460px,100%)">
     <div class="auth-mark">F</div>
-    <span class="atelier-kicker">Join the Atelier</span>
+    <span class="agent-kicker">Join Forly</span>
     <h1 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:2px">הרשמה לפורלי</h1>
     <p class="sub">דקה אחת — ואפשר לפתוח נכס ראשון</p>
 
-    <div class="atelier-progress" aria-label="שלבי ההרשמה"><span class="active"><i>01</i>פרטים</span><span><i>02</i>אימות</span><span><i>03</i>פתיחה</span></div>
+    <div class="agent-progress" aria-label="שלבי ההרשמה"><span class="active"><i>01</i>פרטים</span><span><i>02</i>אימות</span><span><i>03</i>פתיחה</span></div>
     <!-- step 1: details -->
     <div id="step1" style="text-align:right">
       <div class="field"><label>שם מלא *</label><input id="sName" autocomplete="name"></div>
@@ -70,7 +70,7 @@
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
   var phoneVal = "";
-  var signupStages = Array.prototype.slice.call(document.querySelectorAll(".atelier-progress span"));
+  var signupStages = Array.prototype.slice.call(document.querySelectorAll(".agent-progress span"));
   function setSignupStage(step) {
     signupStages.forEach(function (stage, index) { stage.classList.toggle("active", index + 1 === step); });
   }
@@ -160,5 +160,6 @@
   });
 })();
 </script>
+<footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

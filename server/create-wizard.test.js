@@ -31,7 +31,7 @@ const createPage = fs.readFileSync(path.join(__dirname, "..", "public-agent", "c
   assert.ok(createPage.includes(marker), `missing wizard marker: ${marker}`);
 });
 
-assert.ok(createPage.includes('if (photos.length < 3)'), "media-stage validation must retain the three-photo requirement");
+assert.ok(createPage.includes('if (photos.length < 4)'), "media-stage validation must retain the four-photo requirement");
 assert.ok(createPage.includes('"/api/properties/demo-create"'), "demo creation endpoint must remain available");
 assert.ok(createPage.includes('"/api/properties/create"'), "authenticated creation endpoint must remain available");
 assert.ok(createPage.includes("data-wizard-step=\"3\""), "progress rail must expose the final design stage");
