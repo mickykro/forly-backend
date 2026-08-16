@@ -50,19 +50,24 @@
 .collapsible-content{padding:12px}
 </style>
 </head>
-<body>
+<body class="agent-page edit-page">
 
-<header class="topbar">
+<header class="topbar agent-topbar">
   <a class="brand" id="backBrand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
   <a class="btn btn-ghost btn-sm" id="backLink" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
 </header>
 
-<div class="container">
-  <div class="page-head">
+<!-- shown until the property + its assets finish loading -->
+<div class="vloader" id="vLoader"><video src="/assets/loading.mp4" autoplay muted playsinline></video><span class="vloader-msg">טוענים את הנכס…</span></div>
+
+<div class="container agent-shell edit-studio hidden" id="editShell">
+  <div class="agent-hero page-head">
     <div>
+      <span class="agent-kicker">Property Studio / 02</span>
       <h1>עריכת דף הנכס</h1>
       <p>שינויים מתעדכנים בזמן אמת בתצוגה המקדימה. לחצו שמירה כדי לעדכן את הדף החי.</p>
     </div>
+    <div class="agent-aside"><small>LIVE CANVAS</small><b>הטקסט והעיצוב, מולכם.</b><span>שנו, צפו ושמרו — ללא ניתוק מהעמוד החי.</span></div>
     <a class="btn btn-ghost" id="openPage" target="_blank" href="#">פתיחת הדף ↗</a>
   </div>
 
@@ -423,7 +428,10 @@
       // Load preview
       $("#preview").src = "/p/" + pageId + "?t=" + Date.now();
       $("#openPage").href = "/p/" + pageId;
-    }).catch(function () { FLY.toast("שגיאה בטעינת הדף"); });
+    }).catch(function () { FLY.toast("שגיאה בטעינת הדף"); })
+      .finally(function () {
+        FLY.loaderHide(function () { $("#editShell").classList.remove("hidden"); });
+      });
   }
 
   function renderGallery() {
@@ -552,5 +560,6 @@
   });
 })();
 </script>
+<footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

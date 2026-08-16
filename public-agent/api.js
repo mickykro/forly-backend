@@ -89,5 +89,61 @@ window.FLY = (function () {
     return e;
   }
 
-  return { req: req, toast: toast, uploadFiles: uploadFiles, deleteUpload: deleteUpload, el: el };
+  // ── loader video ──────────────────────────────────────────────────────────
+  // Once it starts it always plays whole cycles: loaderHide() during playback
+  // parks the callback and runs it at the next clean end, so the animation is
+  // never cut off mid-stroke. Looping is driven here rather than by the `loop`
+  // attribute, which would suppress the "ended" event we need.
+  function loaderBox() { return document.querySelector(".vloader"); }
+
+  function loaderShow(msg) {
+    var box = loaderBox();
+    if (!box) return;
+    box._pending = null;
+    if (msg) {
+      var m = box.querySelector(".vloader-msg");
+      if (m) m.textContent = msg;
+    }
+    box.classList.remove("hidden");
+    var v = box.querySelector("video");
+    // currentTime throws if metadata has not loaded yet — the reset is cosmetic.
+    if (v) { try { v.currentTime = 0; } catch (e) { /* not seekable yet */ }
+             var p = v.play(); if (p && p.catch) p.catch(function () {}); }
+  }
+
+  // then() runs after the loader is gone — put the "reveal the content" work there.
+  function loaderHide(then) {
+    var box = loaderBox();
+    var done = function () {
+      if (box) { box.classList.add("hidden"); clearTimeout(box._safety); }
+      if (then) then();
+    };
+    var v = box && box.querySelector("video");
+    // Nothing on screen to wait for.
+    if (!box || box.classList.contains("hidden") || !v) return done();
+    box._pending = done;
+    // A visible loader counts as started even if playback has not kicked in yet
+    // (autoplay begins async). But blocked autoplay or a codec failure means
+    // "ended" never fires, so never let that strand the page.
+    var wait = (v.duration || 5) * 1000 - (v.currentTime || 0) * 1000 + 400;
+    clearTimeout(box._safety);
+    box._safety = setTimeout(function () {
+      if (box._pending) { var f = box._pending; box._pending = null; f(); }
+    }, Math.max(400, wait));
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".vloader video").forEach(function (v) {
+      v.addEventListener("ended", function () {
+        var box = v.closest(".vloader");
+        if (box && box._pending) { var f = box._pending; box._pending = null; return f(); }
+        v.currentTime = 0;
+        var p = v.play();
+        if (p && p.catch) p.catch(function () {});
+      });
+    });
+  });
+
+  return { req: req, toast: toast, uploadFiles: uploadFiles, deleteUpload: deleteUpload, el: el,
+           loaderShow: loaderShow, loaderHide: loaderHide };
 })();
