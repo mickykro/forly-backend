@@ -147,6 +147,9 @@
   });
 
   $("#btnLogout").addEventListener("click", function () {
+    // Also drop the local demo records: without this the demo dashboard is a
+    // dead end — it renders instead of the login form on every later visit.
+    try { localStorage.removeItem("forly_demo_listings"); } catch (e) { /* private mode */ }
     FLY.req("/api/auth/logout", { method: "POST", noRedirect: true })
       .finally(function () { location.href = "/"; });
   });
@@ -301,6 +304,9 @@
     $("#viewLogin").classList.add("hidden");
     $("#viewList").classList.remove("hidden");
     $("#who").textContent = "תצוגת הדגמה";
+    // the only way out of the demo view — there is no session to end here
+    $("#btnLogout").textContent = "יציאה מהדגמה";
+    $("#btnLogout").classList.remove("hidden");
     $("#countLine").textContent = records.length === 1 ? "נכס אחד" : records.length + " נכסים";
     var banner = FLY.el("div", "card demo-notice",
       '🦉 <b>זה האזור האישי שלך.</b> הנכס שיצרת מופיע כאן — ' +
