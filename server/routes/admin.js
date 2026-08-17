@@ -160,6 +160,7 @@ module.exports = function createAdminRouter(ctx) {
           onboarding_state: b.onboarding_state || "",
           is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
           chatbot_enabled: !!(b.features && b.features.chatbot),
+          distribution_enabled: !!(b.features && b.features.distribution),
           pages: 0, active_pages: 0, views: 0, leads: 0,
           readiness: { rich: 0, ok: 0, thin: 0 },
         });
@@ -197,7 +198,10 @@ module.exports = function createAdminRouter(ctx) {
   // Flipping this on turns the bot on for every page that agent owns, old ones
   // included: entitlement is resolved live from the business, never stamped
   // onto the page. Revoking is immediate in the same way.
-  const FEATURES = new Set(["chatbot"]);
+  // Flipping "distribution" arms the page-ready hook for every future page
+  // that agent creates (resolved live, like chatbot). Off by default —
+  // pilots first (spec §2 "Rollout").
+  const FEATURES = new Set(["chatbot", "distribution"]);
 
   router.post("/business/features", requireAdmin, async (req, res) => {
     const body = req.body || {};

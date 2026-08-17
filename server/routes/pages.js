@@ -17,6 +17,7 @@ const { submitLead } = require("../leads");
 const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
+const distributionJobs = require("../distribution/jobs");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 
@@ -48,6 +49,10 @@ module.exports = function createPagesRouter(ctx) {
   // the canonical form a session carries (same treatment as routes/admin.js).
   const adminSet = pageAuth.normalizeSet(adminPhones, normalizeAuthPhone);
   const authMode = pageAuth.readMode(process.env.PAGE_UPDATE_AUTH);
+  const distDeps = distributionJobs.liveDeps({
+    greenInstance: greenInstance, greenToken: greenToken,
+    pageBaseUrl: pageBaseUrl, authSecret: authSecret,
+  });
 
   const router = express.Router();
 
@@ -235,6 +240,10 @@ module.exports = function createPagesRouter(ctx) {
       // Realtime: the portal shows the listing the moment it exists.
       portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
         portalStream.toCard(doc, pageBaseUrl));
+      // Distribution hook: fire-and-forget — never delays or fails page
+      // creation (spec §4). Entitlement + duplicate checks live in maybeOffer.
+      distributionJobs.maybeOffer(distDeps, doc)
+        .catch((e) => console.warn("distribution offer failed:", e && e.message));
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
