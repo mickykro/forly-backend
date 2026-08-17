@@ -24,6 +24,330 @@
 - Env names (exact): `META_APP_ID`, `META_APP_SECRET`, `META_REDIRECT_URL`, `META_GRAPH_VERSION`, `DISTRIBUTION_ENABLED` (absent ⇒ on).
 - Commit after every task (small, descriptive messages). Run `cd server && npm test` before every commit.
 
+---
+
+# Part I — Architecture
+
+## 1.1 System context
+
+```
+                 ┌─────────────────────────────  VPS (single container) ─────────────────────────────┐
+                 │                                                                                    │
+ n8n WW1         │  routes/pages.js                 distribution/jobs.js            Green-API         │
+ pipeline ──────►│  createPropertyPage ──hook──►  distributions queue  ──sweep──►  WhatsApp ─────────►│──► agent's phone
+ (video ready)   │        │                        (Firestore, 60s tick)   │                          │    (confirm link,
+                 │        ▼                              │                 │                          │     share kit,
+                 │  property_pages doc                   │                 ▼                          │     summaries)
+                 │        │                              │        distribution/meta.js ──────────────►│──► Meta Graph API
+                 │        ▼                              │        distribution/instagram.js           │    (Page post, IG)
+ buyer ─────────►│  GET /p/:id  (+ og.js tags)           ▼                                            │
+                 │                              post_actions audit                                    │
+ agent ─────────►│  public-agent/distribution.html ──► routes/distribution.js                         │
+ (dashboard)     │                                      (OAuth, confirm, publish, groups, status)     │
+                 │                                                                                    │
+ operator ──────►│  routes/admin.js  (features.distribution toggle)                                   │
+                 └────────────────────────────────────────────────────────────────────────────────────┘
+                                             │
+                                             ▼
+                                   Firestore (Admin SDK only)
+                 businesses/{phone} · businesses/{phone}/connections/facebook
+                 property_pages · distributions · post_actions
+```
+
+Nothing new is deployed: the feature is additional modules inside the existing
+`server/` Express process, the same one that already builds pages, sends
+WhatsApp, and talks to Firestore.
+
+## 1.2 Decision record (why it's built this way)
+
+| Decision | Choice | Rationale / rejected alternative |
+|---|---|---|
+| Where the code runs | Existing Express server on the VPS (Approach A) | The page docs, GreenAPI creds, auth, and admin panel all live here already. Cloud Functions (Approach B) would split the feature across two deploy surfaces and duplicate auth + WhatsApp plumbing for zero gain at this scale. |
+| Queue | `distributions` collection + in-process 60s sweeper | Job state must survive restarts (⇒ Firestore, not an in-memory array), but execution doesn't need Cloud Tasks/PubSub at ~tens of posts/day. 60s latency is invisible next to a WhatsApp confirm step. Known limitation: one container — a second container would double-post; the claim would need a Firestore precondition write. Documented in `jobs.js`. |
+| Trigger | Auto-offer on page-ready, gated by one-tap WhatsApp confirm | Fully automatic posting was rejected (agent must control what appears under their name); fully manual was rejected (agents forget). The confirm link is the middle: zero-effort but explicit. |
+| Facebook groups | WhatsApp share kit, no automation | Meta removed the Groups publishing API (2022). Browser automation risks the agent's personal account — rejected outright. The kit turns group posting into ~5 taps. |
+| Snapshot at enqueue | Post content frozen into `distributions.snapshot` when the agent confirms | What the agent approved is what posts, even if the page is edited while the job waits. Also makes the audit log exact. |
+| Tokens | Per-agent Meta tokens in `businesses/{phone}/connections/facebook` | They're per-agent *data*, not deployment config — Secret Manager/env is for app-level secrets (`META_APP_SECRET`). Firestore client access is already denied globally; only the Admin SDK reads them. |
+| Kill switch | `DISTRIBUTION_ENABLED` env (absent ⇒ on) | Same reasoning as `CHATBOT_ENABLED`: "stop everything now" must not depend on Firestore being healthy. |
+| Entitlement | `features.distribution` resolved live per request | Flipping the admin toggle affects the agent's whole catalogue instantly (60s business-cache, invalidated on admin writes) — never stamped onto pages. |
+| Re-publish | Blocked page-wide; explicit `force:true` after a dialog | The #1 nightmare is the same apartment posted twice. Every path re-checks; repost is a deliberate two-step. |
+| Marketplace feeds / takedown | Out of scope | Product-owner decisions on record in the spec. `GET /packet` was dropped from the routes. |
+
+## 1.3 Module dependency graph
+
+```
+routes/distribution.js ─┬─► distribution/jobs.js ─┬─► distribution/meta.js      (no deps)
+routes/pages.js (hook) ─┘                          ├─► distribution/instagram.js ─► meta.js
+                                                   ├─► distribution/share-kit.js (no deps)
+routes/admin.js (toggle only)                      ├─► distribution/config.js    (no deps)
+                                                   ├─► db.js                     (firebase-admin)
+og.js (no deps) ◄─ routes/pages.js                 ├─► business-cache.js ─► db.js
+                                                   └─► auth.js (signActionToken) · utils.js (sendWhatsApp)
+```
+
+Arrows point at dependencies; there are no cycles. Every impure edge into
+`jobs.js` goes through the injected `deps` object, which is what makes the
+whole state machine testable with fakes (`liveDeps()` is the only place the
+real modules are wired together).
+
+## 1.4 Runtime characteristics
+
+- **Throughput ceiling:** sweeper claims ≤10 queued jobs/minute ⇒ ~600
+  posts/hour — two orders of magnitude above need. Videos are posted by
+  `file_url`, so Facebook pulls the file itself; the server never streams
+  video bytes to Meta.
+- **Added load on page views:** zero extra Firestore reads — OG tags render
+  from the page doc already being fetched; entitlement uses the existing
+  60s business cache.
+- **Timeouts:** video publish 120s, photos/IG 60s, everything else 30s,
+  WhatsApp 20s (existing). All explicit `AbortSignal.timeout`.
+- **Blast radius:** the hook is fire-and-forget (page creation can never
+  fail because of distribution); the sweeper isolates per job; WhatsApp
+  sends are best-effort; the kill switch stops new offers and, because
+  entitlement is re-checked at offer time only and execution requires a
+  queued doc, drains to silence within one sweep of flipping it.
+
+---
+
+# Part II — Technical deep dive
+
+## 2.1 End-to-end sequences
+
+**Connect (once per agent):**
+
+```mermaid
+sequenceDiagram
+    participant A as Agent (browser)
+    participant S as server
+    participant FB as Facebook
+    A->>S: GET /api/distribution/oauth/start (session cookie)
+    S->>A: 302 → facebook.com/dialog/oauth (state = HMAC{phone, exp 10min})
+    A->>FB: consent (5 scopes)
+    FB->>S: GET /oauth/callback?code&state
+    S->>S: readState(state) → phone   (identity from state ONLY)
+    S->>FB: code → short token → long-lived token (60d)
+    S->>FB: GET /me/accounts → pages + page tokens
+    alt one page
+        S->>S: storeConnection (+ instagram_business_account lookup)
+        S->>A: "החיבור הושלם" card
+    else several pages
+        S->>A: picker card (forms carry a fresh state token)
+        A->>S: POST /oauth/select {state, page_id}
+        S->>S: storeConnection from pending_pages
+    end
+```
+
+**Auto publish (per property):**
+
+```mermaid
+sequenceDiagram
+    participant N as n8n
+    participant S as server
+    participant W as WhatsApp
+    participant FB as Graph API
+    N->>S: POST /createPropertyPage
+    S->>S: savePage → hook (fire-and-forget): entitled? no sibling post/in-flight?
+    S->>W: confirm offer (signed link, distributions doc = awaiting_confirm)
+    W->>S: agent taps GET /confirm?d&t
+    S->>S: verify token → snapshot page+groups → status queued
+    Note over S: next sweep (≤60s)
+    S->>S: claim job (running) → page-wide duplicate re-check
+    S->>FB: POST /{page}/videos (or photos+feed)
+    FB->>S: {id}
+    S->>S: persist post_id FIRST → audit "published"
+    S->>W: share kit (copy + sharer link + groups)
+    S->>S: audit "share_kit_sent" → status done
+    S->>W: summary with post link
+```
+
+**Dashboard repost:** `POST /publish` → `409 already_published` → repost
+dialog → `POST /publish {force:true}` → supersede stale offers → queued doc
+with `force` → sweeper posts → audit `reposted`.
+
+## 2.2 Distribution state machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> awaiting_confirm : hook offer (auto)
+    [*] --> queued : dashboard publish (explicit ⇒ skips confirm)
+    awaiting_confirm --> queued : GET /confirm (token ok)\nsnapshot taken here
+    awaiting_confirm --> superseded : dashboard publish for same page
+    queued --> running : sweeper claim
+    running --> done : posted / posted-with-skips
+    running --> failed : terminal target failure
+    running --> skipped_duplicate : sibling has post_id ∧ ¬force
+    running --> queued : transient Graph error, attempts < 3\n(NEVER after facebook posted)
+```
+
+Target-level: `facebook_page` `pending→posted|failed|skipped`,
+`instagram` likewise (`skipped` when no linked IG account), `share_kit`
+`pending→sent|skipped`. The doc's terminal status is `failed` iff any
+attempted target failed; skips don't fail the job.
+
+## 2.3 API contract
+
+| Method & path | Auth | Request | Success | Errors |
+|---|---|---|---|---|
+| `GET /api/distribution/oauth/start` | session | — | 302 to Facebook | 401; 503 `distribution_not_configured` (env missing) |
+| `GET /api/distribution/oauth/callback` | HMAC `state` (10-min TTL) | `code`,`state` | HTML success card / page picker | 401 expired-state card; 502 card on Graph failure |
+| `POST /api/distribution/oauth/select` | HMAC `state` | form `state`,`page_id` | HTML success card | 401 / 400 cards |
+| `GET /api/distribution/confirm` | action token `[id,"confirm"]` | `d`,`t` | HTML: אושר / כבר בתהליך / כבר פורסם | 401/404 invalid-link card |
+| `POST /api/distribution/publish` | session + owner | `{page_id, force?}` | `{ok, distribution_id}` | 400/403 `not_owner`/`not_entitled`/404; **409 `already_in_flight`**, **409 `already_published`** |
+| `POST /api/distribution/groups` | session | `{groups:[]}` | `{ok, groups, min_recommended:5}` | 401 |
+| `GET /api/distribution/status[?page_id]` | session (+owner for page_id) | — | `{entitled, connection{connected,page_name,needs_reconnect,instagram_linked}, groups, listing?{posted,post_url,in_flight,last_status}}` | 401, 404 |
+| `POST /api/admin/business/features` (existing) | admin allowlist | `{phone, feature:"distribution", enabled}` | `{ok,…}` | existing semantics |
+
+Never in any response: tokens, snapshots, vendor error text.
+
+## 2.4 Firestore schema (field-by-field)
+
+**`businesses/{phone}/connections/facebook`** — `user_token` (long-lived, ~60d),
+`page_id`, `page_name`, `page_token` (non-expiring), `ig_business_id` (nullable),
+`pending_pages` (transient array during multi-page pick, cleared on select),
+`scopes[]`, `connected_at`, `needs_reconnect` (bool — set on Graph 190/OAuthException,
+cleared by `storeConnection` on reconnect).
+
+**`businesses/{phone}`** — adds `features.distribution` (admin-gated bool)
+and `distribution.groups` (≤20 sanitized group URLs).
+
+**`distributions/{uuid}`** — `id`, `page_id`, `business_phone`, `status`,
+`trigger`, `force`, `targets.{facebook_page,instagram,share_kit}` (per-target
+`status/post_id/post_url/media_id/permalink/error/attempts`),
+`snapshot{title, page_url, video_url, poster_url, photo_urls[≤10], copy, groups}`,
+`created_at`, `updated_at`, `confirmed_at`.
+
+**`post_actions/{auto}`** (append-only) — `business_phone`, `page_id`,
+`distribution_id`, `target`, `action`, `at`, `trigger`, `post_id`, `post_url`,
+`content{copy, media_type: video|photos|none, media_count, media_urls[]}`,
+`error`. Written on success AND failure; this is the reporting surface.
+
+**Indexes:** all queries are single-field `where` (+ in-memory sort/filter) —
+no composite indexes, no `firestore.indexes.json` change.
+
+## 2.5 Security & token model
+
+| Surface | Identity | Why |
+|---|---|---|
+| oauth/start, publish, groups, status | session cookie (`requireAuth`) | agent is in the dashboard |
+| oauth/callback, oauth/select | HMAC state token, 10-min TTL | agent may arrive with no cookie (WhatsApp browser); state is minted server-side for a specific phone |
+| confirm | HMAC action token bound to the distribution id | one-tap from WhatsApp; replay is harmless (status has moved on → honest card, never a second post) |
+
+Token lifecycle: OAuth `code` → short user token → long-lived user token →
+page token (non-expiring when derived from a long-lived token). Death:
+Graph 190/OAuthException at publish time ⇒ `needs_reconnect=true`, one
+WhatsApp nudge, all FB/IG publishing skipped for that agent until they
+reconnect (which overwrites the connection doc and clears the flag).
+
+Hardening baked into the tasks: group URLs whitelisted to
+`facebook.com/groups/<slug>` and capped; all card HTML escaped; OG injection
+$-safe; app secret only in env; page picker can only choose from
+server-stored `pending_pages`; owner checks compare `business_phone` to the
+session like `routes/pages.js` does.
+
+## 2.6 Failure-mode matrix
+
+| Failure | Detected by | Job behavior | Agent sees | Recovery |
+|---|---|---|---|---|
+| Token expired/revoked (190) | `isAuthError` | target `failed`, terminal | one reconnect nudge | reconnect from dashboard |
+| Transient Graph error | `GraphError`, other codes | requeued, ≤3 attempts | nothing until resolved | automatic |
+| Timeout/network on visible post | non-GraphError | **terminal, never retried** | "ייתכן שהפוסט כן עלה — בדקו בדף" | agent checks page; repost is `force` |
+| IG fails after FB posted | any | IG terminal (no requeue — would re-run FB) | "פייסבוק עלה, אינסטגרם נכשל" | retry from dashboard |
+| Not connected / no IG | missing connection fields | target `skipped`, job continues | honest "לא חובר" line; share kit still arrives | connect once |
+| Duplicate attempt | page-wide sibling check | `skipped_duplicate` | "כבר פורסם" | deliberate repost path |
+| Malformed job doc | executor validation | that doc `failed` | — | sweep continues unharmed |
+| Sweeper crash mid-job | catch in `runSweep` | doc back to `queued` | — | next sweep |
+| WhatsApp down | catch on send | job unaffected | message lost (logged) | — |
+| Firestore down | hook/sweep catches | offers/sweeps skip, page creation unaffected | — | self-heals |
+| Runaway spend / emergency | operator | — | — | `DISTRIBUTION_ENABLED=false` + restart |
+
+## 2.7 Rollout plan
+
+1. **Dark ship (end of Day 2):** deploy with zero entitled agents — the only
+   behavioral change anyone can observe is OG tags on `/p/:id` (pure win).
+2. **Pilot:** flip `features.distribution` for 1–3 chosen agents who are
+   Testers on the Meta app (Dev Mode). Watch `post_actions`.
+3. **Widen:** after App Review approval + Live Mode, flip agents freely —
+   no code change involved; the toggle is the rollout.
+4. **Rollback at any point:** flip the agent off (per-agent) or set
+   `DISTRIBUTION_ENABLED=false` (global). No schema rollback needed —
+   the collections are additive.
+
+---
+
+# Part III — Manual tasks: the product owner's checklist
+
+Things only you can do — accounts, secrets, approvals. Each has a "when" so
+nothing blocks the build. (Full context for the Meta items:
+`docs/distribution/META-APP-SETUP.md`, written on Day 6, and the
+walkthrough I gave you in chat.)
+
+## Now, before/while Day 1 runs (longest lead times)
+
+- [ ] **Create the Meta Business Portfolio** (business.facebook.com) for
+  Forly/Call4li and **start Business Verification** (company registration
+  docs, domain/phone). Days-to-weeks in Israel; App Review is blocked
+  without it. Nothing else waits on it, so just start it.
+- [ ] **Create the Meta app** at developers.facebook.com: Business use case,
+  name **"Forly Publisher"**, attach to the portfolio.
+- [ ] **Add the Facebook Login for Business product** and set the redirect
+  URI to `https://<prod-host>/api/distribution/oauth/callback` (confirm the
+  exact host with me — it must equal `META_REDIRECT_URL` character for
+  character).
+- [ ] **Pick 1–3 pilot agents** (plus your own account) and decide which
+  Facebook Page each will post to.
+
+## Before the MVP can be exercised (end of Day 2)
+
+- [ ] **Put the app credentials on the VPS:** add `META_APP_ID`,
+  `META_APP_SECRET`, `META_REDIRECT_URL` to `server/.env` and restart the
+  process. Never paste the secret into chat, the repo, or a ticket. (I'll
+  tell you the exact moment this is needed; the code no-ops gracefully
+  until then.)
+- [ ] **Add app roles:** App Roles → Testers → yourself + the pilot agents;
+  they must accept the invite at developers.facebook.com. Dev Mode posting
+  only works for role-holders.
+- [ ] **Two-minute Graph sanity check** (proves the whole chain before any
+  code runs): Graph API Explorer → select Forly Publisher → grant the five
+  permissions → `GET /me/accounts` → copy a page token →
+  `POST /{page-id}/feed` with `message=test`. If that post appears, the
+  server flow will work.
+- [ ] **Approve the deploy** when I tell you the MVP is green (per
+  CLAUDE.md every deploy needs your explicit per-action "yes" — I will
+  show you the exact command and wait).
+- [ ] **Flip the pilot toggle:** admin panel → the agent →
+  `distribution` on (or I run it and you approve, since it's a prod
+  Firestore write).
+
+## During Days 3–5
+
+- [ ] **Run the pilot e2e with me** (checklist §7 of META-APP-SETUP.md):
+  create a real listing, tap the confirm, see the post, check the share kit.
+- [ ] **For Instagram (Day 5):** on the pilot Page, link its **Instagram
+  Business account** (Page settings → Linked accounts). Personal IG
+  accounts won't work — convert to Business/Creator first.
+- [ ] **Website pages for Meta compliance:** App Review requires a public
+  **Privacy Policy URL** and a **Data Deletion instructions URL**. These
+  belong on the Ruflo site (`forli-creator-website`) — say the word and I'll
+  draft both pages as a separate small task; then paste their URLs into
+  App settings → Basic.
+
+## Day 6–7 and after
+
+- [ ] **Record the App Review screencast** (I'll drive, you record, or
+  vice versa): dashboard → connect → consent screen → one-tap confirm →
+  the post appearing on the Page. One continuous take, real UI.
+- [ ] **Submit App Review** for Advanced Access on the five permissions,
+  with the use-case text from META-APP-SETUP.md §5. Turnaround days-to-2-weeks.
+- [ ] **On approval: switch the app to Live Mode** — from that moment any
+  agent (not just Testers) can connect, and rollout is purely the admin toggle.
+- [ ] **Standing decisions that stay yours:** every deploy, every prod
+  Firestore script, flipping any non-pilot agent on, and scheduling the
+  marketplace-feeds investigation (yad2/madlan/keyz) as its own project.
+
+---
+
+# Part IV — Implementation tasks (day by day)
+
 ## File Structure (what exists at the end)
 
 ```
