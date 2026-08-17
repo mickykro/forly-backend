@@ -16,11 +16,11 @@ function fakeDb() {
     dists, actions, conns, pages, bizs,
     getPage: async (id) => pages.get(id) || null,
     getBusiness: async (p) => bizs.get(p) || null,
-    getConnection: async (p) => conns.get(p) || null,
-    setConnection: async (p, patch) => {
-      const cur = conns.get(p) || {};
-      conns.set(p, Object.assign(cur, patch));
-    },
+    // Copies both ways: production Firestore reads return snapshots, so the
+    // fake must too — otherwise stale-connection-read bugs pass the suite.
+    getConnection: async (p) => (conns.has(p) ? { ...conns.get(p) } : null),
+    setConnection: async (p, patch) =>
+      conns.set(p, Object.assign({ ...(conns.get(p) || {}) }, patch)),
     saveDistribution: async (d) => dists.set(d.id, JSON.parse(JSON.stringify(d))),
     getDistribution: async (id) => dists.get(id) || null,
     updateDistribution: async (id, patch) => {
@@ -303,6 +303,38 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.notEqual(done.status, "queued", "must never requeue after an FB post");
     assert.equal(done.targets.instagram.status, "failed");
     assert.ok(sent.some((s) => s.msg.includes("אינסטגרם נכשל")));
+  }
+
+  // ── FB auth error with IG linked: ONE nudge, IG never tries the dead token ──
+  {
+    const db = fakeDb(); seed(db, { conn: { ...CONN, ig_business_id: "IG1" } });
+    const authErr = new meta.GraphError("expired", { code: 190, type: "OAuthException" });
+    const { deps, sent } = makeDeps({ db, metaMod: fakeMeta({ video: [authErr] }) });
+    let igCalls = 0;
+    deps.instagram = { publishToInstagram: async () => { igCalls++;
+      throw new meta.GraphError("expired", { code: 190, type: "OAuthException" }); } };
+    const d = await queuedDist(deps);
+    await jobs.runSweep(deps);
+    assert.equal(igCalls, 0, "IG must not attempt publishing with a dead token");
+    assert.equal(sent.filter((s) => s.msg.includes("חיבור")).length, 1, "exactly one nudge");
+    assert.equal(db.dists.get(d.id).targets.instagram.status, "skipped");
+  }
+
+  // ── FB timeout warning is NOT lost when IG transiently requeues the job ──
+  {
+    const db = fakeDb(); seed(db, { conn: { ...CONN, ig_business_id: "IG1" } });
+    const { deps, sent } = makeDeps({ db, metaMod: fakeMeta({ video: [new Error("fetch timeout")] }) });
+    deps.instagram = { publishToInstagram: scripted([
+      new meta.GraphError("busy", { code: 2 }),
+      { media_id: "M2", permalink: null }]) };
+    const d = await queuedDist(deps);
+    await jobs.runSweep(deps);   // FB timeout (terminal) + IG transient → requeued
+    assert.ok(sent.some((s) => s.msg.includes("בדקו בדף")),
+      "check-your-page warning sent before the IG requeue");
+    assert.equal(db.dists.get(d.id).status, "queued");
+    await jobs.runSweep(deps);   // IG retry succeeds
+    assert.equal(db.dists.get(d.id).targets.instagram.status, "posted");
+    assert.equal(db.dists.get(d.id).status, "failed", "FB terminal failure keeps the doc failed");
   }
 
   console.log("jobs.test.js OK");

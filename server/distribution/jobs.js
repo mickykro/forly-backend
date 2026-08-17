@@ -46,7 +46,7 @@ const M = {
     `בדקו בדף הפייסבוק שלכם לפני ניסיון נוסף.`,
   igPosted: (title, link) => `📸 "${title}" פורסם גם באינסטגרם!${link ? `\n${link}` : ""}`,
   igFailedFbOk: (title) =>
-    `⚠️ "${title}": הפוסט בפייסבוק עלה, אבל הפרסום באינסטגרם נכשל. אפשר לנסות שוב מהדשבורד.`,
+    `⚠️ "${title}": הפרסום באינסטגרם נכשל — הפוסט בפייסבוק עלה כרגיל.`,
 };
 
 // ── pure helpers ──
@@ -180,6 +180,43 @@ async function createQueued(deps, { page, business, trigger, force }) {
   return dist;
 }
 
+// Shared error classification for a publish target — one implementation so
+// the facebook_page and instagram branches can't drift apart.
+// Returns "auth" | "requeued" | "terminal". On auth errors the local `conn`
+// is mutated too: in prod getConnection returned a snapshot, and without
+// this the next target in the SAME run would still see needs_reconnect=false
+// (stale read ⇒ dead-token publish attempt + a second reconnect nudge).
+async function failTarget(deps, dist, conn, targetKey, err, { attempts, canRequeue }) {
+  const { db } = deps;
+  const vendorText = String((err && err.message) || "unknown").slice(0, 500);
+  const base = `targets.${targetKey}`;
+  if (deps.meta.isAuthError(err)) {
+    const firstNotice = !(conn && conn.needs_reconnect);
+    await db.setConnection(dist.business_phone, { needs_reconnect: true });
+    if (conn) conn.needs_reconnect = true;
+    await db.updateDistribution(dist.id, {
+      [`${base}.status`]: "failed", [`${base}.error`]: vendorText,
+      [`${base}.attempts`]: attempts, updated_at: deps.now(),
+    });
+    await audit(deps, dist, targetKey, "publish_failed", { error: vendorText });
+    if (firstNotice) await notify(deps, dist.business_phone, M.reconnect());
+    return "auth";
+  }
+  if (err instanceof deps.meta.GraphError && attempts < MAX_ATTEMPTS && canRequeue) {
+    await db.updateDistribution(dist.id, {
+      status: "queued", [`${base}.attempts`]: attempts,
+      [`${base}.error`]: vendorText, updated_at: deps.now(),
+    });
+    return "requeued";
+  }
+  await db.updateDistribution(dist.id, {
+    [`${base}.status`]: "failed", [`${base}.error`]: vendorText,
+    [`${base}.attempts`]: attempts, updated_at: deps.now(),
+  });
+  await audit(deps, dist, targetKey, "publish_failed", { error: vendorText });
+  return "terminal";
+}
+
 // ── execution ──
 async function executeJob(deps, dist) {
   if (!dist.page_id || !dist.targets || !dist.snapshot) {
@@ -236,37 +273,15 @@ async function executeJob(deps, dist) {
         summary = M.posted(title, postUrl);
       } catch (err) {
         const attempts = (fb.attempts || 0) + 1;
-        const vendorText = String((err && err.message) || "unknown").slice(0, 500);
-        if (deps.meta.isAuthError(err)) {
-          const firstNotice = !(conn && conn.needs_reconnect);
-          await db.setConnection(dist.business_phone, { needs_reconnect: true });
-          await db.updateDistribution(dist.id, {
-            "targets.facebook_page.status": "failed",
-            "targets.facebook_page.error": vendorText,
-            "targets.facebook_page.attempts": attempts, updated_at: deps.now(),
-          });
-          fb.status = "failed";
-          await audit(deps, dist, "facebook_page", "publish_failed", { error: vendorText });
-          if (firstNotice) await notify(deps, dist.business_phone, M.reconnect());
-        } else if (err instanceof deps.meta.GraphError && attempts < MAX_ATTEMPTS) {
-          // Transient Graph error — back to queued for the next sweep.
-          await db.updateDistribution(dist.id, {
-            status: "queued",
-            "targets.facebook_page.attempts": attempts,
-            "targets.facebook_page.error": vendorText, updated_at: deps.now(),
-          });
-          return;
-        } else {
-          // Exhausted Graph retries, or Layer 3: a non-Graph failure
-          // (timeout/network) on the visible post — terminal, never retried.
+        // Transient Graph errors requeue (≤3 attempts); auth errors flip
+        // needs_reconnect; a non-Graph failure (timeout/network) on the
+        // visible post is Layer 3: terminal, never retried.
+        const outcome = await failTarget(deps, dist, conn, "facebook_page", err,
+          { attempts, canRequeue: true });
+        if (outcome === "requeued") return;
+        fb.status = "failed";
+        if (outcome === "terminal") {
           const isTimeout = !(err instanceof deps.meta.GraphError);
-          await db.updateDistribution(dist.id, {
-            "targets.facebook_page.status": "failed",
-            "targets.facebook_page.error": vendorText,
-            "targets.facebook_page.attempts": attempts, updated_at: deps.now(),
-          });
-          fb.status = "failed";
-          await audit(deps, dist, "facebook_page", "publish_failed", { error: vendorText });
           summary = isTimeout ? M.timeoutCheck(title) : M.failed(title);
         }
       }
@@ -302,35 +317,19 @@ async function executeJob(deps, dist) {
         summary = (summary ? summary + "\n" : "") + M.igPosted(title, r.permalink);
       } catch (err) {
         const attempts = (ig.attempts || 0) + 1;
-        const vendorText = String((err && err.message) || "unknown").slice(0, 500);
-        const canRequeue = fb.status !== "posted";
-        if (deps.meta.isAuthError(err)) {
-          const firstNotice = !(conn && conn.needs_reconnect);
-          await db.setConnection(dist.business_phone, { needs_reconnect: true });
-          await db.updateDistribution(dist.id, {
-            "targets.instagram.status": "failed",
-            "targets.instagram.error": vendorText,
-            "targets.instagram.attempts": attempts, updated_at: deps.now(),
-          });
-          ig.status = "failed";
-          await audit(deps, dist, "instagram", "publish_failed", { error: vendorText });
-          if (firstNotice) await notify(deps, dist.business_phone, M.reconnect());
-        } else if (err instanceof deps.meta.GraphError && attempts < MAX_ATTEMPTS && canRequeue) {
-          await db.updateDistribution(dist.id, {
-            status: "queued",
-            "targets.instagram.attempts": attempts,
-            "targets.instagram.error": vendorText, updated_at: deps.now(),
-          });
+        // Once Facebook has posted, this doc may never requeue (the sweeper
+        // would re-run the whole job) — IG transient failures become terminal.
+        const outcome = await failTarget(deps, dist, conn, "instagram", err,
+          { attempts, canRequeue: fb.status !== "posted" });
+        if (outcome === "requeued") {
+          // Don't lose an already-composed FB failure/timeout warning — the
+          // next sweep starts with a fresh (null) summary.
+          if (summary) await notify(deps, dist.business_phone, summary);
           return;
-        } else {
-          await db.updateDistribution(dist.id, {
-            "targets.instagram.status": "failed",
-            "targets.instagram.error": vendorText,
-            "targets.instagram.attempts": attempts, updated_at: deps.now(),
-          });
-          ig.status = "failed";
-          await audit(deps, dist, "instagram", "publish_failed", { error: vendorText });
-          if (fb.status === "posted") summary = M.igFailedFbOk(title);
+        }
+        ig.status = "failed";
+        if (outcome === "terminal" && fb.status === "posted") {
+          summary = (summary ? summary + "\n" : "") + M.igFailedFbOk(title);
         }
       }
     }

@@ -241,8 +241,10 @@ module.exports = function createDistributionRouter(ctx) {
         page_id: pageId,
         posted: !!posted,
         post_url: posted ? posted.targets.facebook_page.post_url : null,
-        in_flight: dists.some((d) =>
-          d.status === "awaiting_confirm" || d.status === "queued" || d.status === "running"),
+        // Only queued/running block the publish button: an awaiting_confirm
+        // offer is deliberately supersedable by POST /publish, so it must not
+        // freeze the dashboard.
+        in_flight: dists.some((d) => d.status === "queued" || d.status === "running"),
         last_status: dists.length
           ? dists.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))[0].status
           : null,

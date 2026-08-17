@@ -69,10 +69,29 @@ function driver(responses) {
     for (let i = 0; i < 10; i++) rs.push({ status_code: "IN_PROGRESS" });
     const d = driver(rs);
     await assert.rejects(() => publishToInstagram({ igBusinessId: "IG1", pageToken: "PT",
-      snapshot: { video_url: "https://x.test/v.mp4", photo_urls: [], copy: "c" },
+      snapshot: { video_url: null, photo_urls: ["https://x.test/1.jpg"], copy: "c" },
       graphVersion: "v21.0", fetchFn: d.fetchFn, sleep: d.sleep }),
       /container not ready/);
+    assert.equal(d.calls.length, 11, "image budget is exactly 10 polls");
   }
+
+  // ── video gets the long poll budget (>10 polls before giving up) ──
+  {
+    const rs = [{ id: "C1" }];
+    for (let i = 0; i < 12; i++) rs.push({ status_code: "IN_PROGRESS" });
+    rs.push({ status_code: "FINISHED" }, { id: "M1" }, { permalink: "p" });
+    const d = driver(rs);
+    const r = await publishToInstagram({ igBusinessId: "IG1", pageToken: "PT",
+      snapshot: { video_url: "https://x.test/v.mp4", photo_urls: [], copy: "c" },
+      graphVersion: "v21.0", fetchFn: d.fetchFn, sleep: d.sleep });
+    assert.equal(r.media_id, "M1", "video survives 12 slow polls");
+  }
+
+  // ── no media at all ⇒ clear error, never an empty carousel ──
+  await assert.rejects(() => publishToInstagram({ igBusinessId: "IG1", pageToken: "PT",
+    snapshot: { video_url: null, photo_urls: [], copy: "c" },
+    graphVersion: "v21.0", fetchFn: async () => { throw new Error("must not fetch"); },
+    sleep: async () => {} }), /no media/);
 
   console.log("instagram.test.js OK");
 })().catch((e) => { console.error(e); process.exit(1); });

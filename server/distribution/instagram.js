@@ -9,12 +9,16 @@
 
 const meta = require("./meta");
 
-const MAX_POLLS = 10;
+// Video (REELS) containers routinely take minutes to process; images are
+// near-instant. A too-small budget makes every video listing fail IG
+// publishing terminally (after an FB post the job may never requeue).
+const MAX_POLLS_IMAGE = 10;   //  50s
+const MAX_POLLS_VIDEO = 36;   // 180s
 const POLL_MS = 5000;
 const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function waitReady({ containerId, pageToken, graphVersion, fetchFn, sleep }) {
-  for (let i = 0; i < MAX_POLLS; i++) {
+async function waitReady({ containerId, pageToken, graphVersion, fetchFn, sleep, maxPolls }) {
+  for (let i = 0; i < maxPolls; i++) {
     const r = await meta.graphCall(`/${containerId}`, { graphVersion, fetchFn,
       token: pageToken, params: { fields: "status_code" } });
     if (r.status_code === "FINISHED") return;
@@ -28,6 +32,9 @@ async function waitReady({ containerId, pageToken, graphVersion, fetchFn, sleep 
 
 async function publishToInstagram({ igBusinessId, pageToken, snapshot,
   graphVersion, fetchFn, sleep = defaultSleep }) {
+  if (!snapshot.video_url && !(snapshot.photo_urls || []).length) {
+    throw new Error("instagram: snapshot has no media");
+  }
   const g = { graphVersion, fetchFn, token: pageToken, timeoutMs: 60000 };
   let containerId;
   if (snapshot.video_url) {
@@ -48,7 +55,8 @@ async function publishToInstagram({ igBusinessId, pageToken, snapshot,
       method: "POST", params: { media_type: "CAROUSEL",
         children: children.join(","), caption: snapshot.copy } })).id;
   }
-  await waitReady({ containerId, pageToken, graphVersion, fetchFn, sleep });
+  await waitReady({ containerId, pageToken, graphVersion, fetchFn, sleep,
+    maxPolls: snapshot.video_url ? MAX_POLLS_VIDEO : MAX_POLLS_IMAGE });
   const pub = await meta.graphCall(`/${igBusinessId}/media_publish`, { ...g,
     method: "POST", params: { creation_id: containerId } });
   let permalink = null;
@@ -59,4 +67,4 @@ async function publishToInstagram({ igBusinessId, pageToken, snapshot,
   return { media_id: pub.id, permalink };
 }
 
-module.exports = { publishToInstagram, MAX_POLLS, POLL_MS };
+module.exports = { publishToInstagram, MAX_POLLS_IMAGE, MAX_POLLS_VIDEO, POLL_MS };
