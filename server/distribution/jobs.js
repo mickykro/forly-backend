@@ -44,11 +44,15 @@ const M = {
   timeoutCheck: (title) =>
     `⚠️ הפרסום של "${title}" לא אושר על ידי פייסבוק בזמן. ייתכן שהפוסט כן עלה — ` +
     `בדקו בדף הפייסבוק שלכם לפני ניסיון נוסף.`,
+  igPosted: (title, link) => `📸 "${title}" פורסם גם באינסטגרם!${link ? `\n${link}` : ""}`,
+  igFailedFbOk: (title) =>
+    `⚠️ "${title}": הפוסט בפייסבוק עלה, אבל הפרסום באינסטגרם נכשל. אפשר לנסות שוב מהדשבורד.`,
 };
 
 // ── pure helpers ──
 const baseTargets = () => ({
   facebook_page: { status: "pending", attempts: 0 },
+  instagram: { status: "pending", attempts: 0 },
   share_kit: { status: "pending" },
 });
 const livePostOf = (d) =>
@@ -63,11 +67,12 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, env = pr
   const meta = require("./meta");
   const shareKit = require("./share-kit");
   const config = require("./config");
+  const instagram = require("./instagram");
   const businessCache = require("../business-cache");
   const { signActionToken } = require("../auth");
   const { sendWhatsApp } = require("../utils");
   return {
-    db, meta, shareKit, config, env, pageBaseUrl,
+    db, meta, shareKit, config, instagram, env, pageBaseUrl,
     graphVersion: env.META_GRAPH_VERSION || meta.DEFAULT_VERSION,
     signActionToken: (parts) => signActionToken(parts, authSecret),
     sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, greenInstance, greenToken),
@@ -268,6 +273,69 @@ async function executeJob(deps, dist) {
     }
   }
 
+  // Instagram target (day 5): same rules, one difference — once Facebook has
+  // posted, this doc may never return to "queued" (the sweeper would re-run
+  // the whole job), so IG transient failures become terminal after an FB post.
+  const ig = dist.targets.instagram;
+  if (ig && ig.status === "pending") {
+    const media = !!dist.snapshot.video_url || (dist.snapshot.photo_urls || []).length > 0;
+    if (!conn || !conn.page_token || conn.needs_reconnect || !conn.ig_business_id || !media) {
+      await db.updateDistribution(dist.id, {
+        "targets.instagram.status": "skipped",
+        "targets.instagram.error": (conn && conn.ig_business_id) ? "not_available" : "no_ig_account",
+        updated_at: deps.now(),
+      });
+      ig.status = "skipped";
+    } else {
+      try {
+        const r = await deps.instagram.publishToInstagram({
+          igBusinessId: conn.ig_business_id, pageToken: conn.page_token,
+          snapshot: dist.snapshot, graphVersion: deps.graphVersion });
+        await db.updateDistribution(dist.id, {
+          "targets.instagram.status": "posted",
+          "targets.instagram.media_id": r.media_id,
+          "targets.instagram.permalink": r.permalink, updated_at: deps.now(),
+        });
+        ig.status = "posted";
+        await audit(deps, dist, "instagram", dist.force ? "reposted" : "published",
+          { post_id: r.media_id, post_url: r.permalink });
+        summary = (summary ? summary + "\n" : "") + M.igPosted(title, r.permalink);
+      } catch (err) {
+        const attempts = (ig.attempts || 0) + 1;
+        const vendorText = String((err && err.message) || "unknown").slice(0, 500);
+        const canRequeue = fb.status !== "posted";
+        if (deps.meta.isAuthError(err)) {
+          const firstNotice = !(conn && conn.needs_reconnect);
+          await db.setConnection(dist.business_phone, { needs_reconnect: true });
+          await db.updateDistribution(dist.id, {
+            "targets.instagram.status": "failed",
+            "targets.instagram.error": vendorText,
+            "targets.instagram.attempts": attempts, updated_at: deps.now(),
+          });
+          ig.status = "failed";
+          await audit(deps, dist, "instagram", "publish_failed", { error: vendorText });
+          if (firstNotice) await notify(deps, dist.business_phone, M.reconnect());
+        } else if (err instanceof deps.meta.GraphError && attempts < MAX_ATTEMPTS && canRequeue) {
+          await db.updateDistribution(dist.id, {
+            status: "queued",
+            "targets.instagram.attempts": attempts,
+            "targets.instagram.error": vendorText, updated_at: deps.now(),
+          });
+          return;
+        } else {
+          await db.updateDistribution(dist.id, {
+            "targets.instagram.status": "failed",
+            "targets.instagram.error": vendorText,
+            "targets.instagram.attempts": attempts, updated_at: deps.now(),
+          });
+          ig.status = "failed";
+          await audit(deps, dist, "instagram", "publish_failed", { error: vendorText });
+          if (fb.status === "posted") summary = M.igFailedFbOk(title);
+        }
+      }
+    }
+  }
+
   // Share kit: always attempted, never able to fail the job.
   if (dist.targets.share_kit.status === "pending") {
     try {
@@ -289,7 +357,8 @@ async function executeJob(deps, dist) {
   }
 
   await db.updateDistribution(dist.id, {
-    status: fb.status === "failed" ? "failed" : "done", updated_at: deps.now(),
+    status: (fb.status === "failed" || (ig && ig.status === "failed")) ? "failed" : "done",
+    updated_at: deps.now(),
   });
   if (summary) await notify(deps, dist.business_phone, summary);
 }

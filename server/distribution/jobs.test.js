@@ -264,5 +264,46 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.ok(d.snapshot.copy.includes("דירה"), "copy frozen into the snapshot");
   }
 
+  // ── IG posts after FB, audited, both links in the summary ──
+  {
+    const db = fakeDb(); seed(db, { conn: { ...CONN, ig_business_id: "IG1" } });
+    const { deps, sent } = makeDeps({ db, metaMod: fakeMeta({ video: [{ id: "V1" }] }) });
+    deps.instagram = { publishToInstagram: scripted([
+      { media_id: "M1", permalink: "https://www.instagram.com/p/x/" }]) };
+    const d = await queuedDist(deps);
+    await jobs.runSweep(deps);
+    const done = db.dists.get(d.id);
+    assert.equal(done.targets.instagram.status, "posted");
+    assert.equal(done.targets.instagram.media_id, "M1");
+    assert.ok(db.actions.some((a) => a.target === "instagram" && a.action === "published"));
+    assert.ok(sent.some((s) => s.msg.includes("instagram.com/p/x")));
+  }
+
+  // ── no IG account linked ⇒ skipped, not failed, job still done ──
+  {
+    const db = fakeDb(); seed(db);   // CONN has no ig_business_id
+    const { deps } = makeDeps({ db, metaMod: fakeMeta({ video: [{ id: "V1" }] }) });
+    deps.instagram = { publishToInstagram: scripted([]) };
+    const d = await queuedDist(deps);
+    await jobs.runSweep(deps);
+    assert.equal(db.dists.get(d.id).targets.instagram.status, "skipped");
+    assert.equal(db.dists.get(d.id).status, "done");
+  }
+
+  // ── FB already posted + IG transient error ⇒ TERMINAL (no requeue!) ──
+  {
+    const db = fakeDb(); seed(db, { conn: { ...CONN, ig_business_id: "IG1" } });
+    const { deps, sent } = makeDeps({ db, metaMod: fakeMeta({ video: [{ id: "V1" }] }) });
+    deps.instagram = { publishToInstagram: scripted([
+      new meta.GraphError("busy", { code: 2 })]) };
+    const d = await queuedDist(deps);
+    await jobs.runSweep(deps);
+    const done = db.dists.get(d.id);
+    assert.equal(done.targets.facebook_page.post_id, "V1");
+    assert.notEqual(done.status, "queued", "must never requeue after an FB post");
+    assert.equal(done.targets.instagram.status, "failed");
+    assert.ok(sent.some((s) => s.msg.includes("אינסטגרם נכשל")));
+  }
+
   console.log("jobs.test.js OK");
 })().catch((e) => { console.error(e); process.exit(1); });
