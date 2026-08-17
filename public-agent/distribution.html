@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>הפצה — Forly</title>
+<style>
+  :root{--bg:#F7F3EC;--card:#FFFDF9;--ink:#17140F;--muted:#5A5348;--gold:#B98A2F;
+    --line:rgba(185,138,47,.3);--ok:#3E7A4E;--warn:#9B3B30}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,'Segoe UI',sans-serif;padding:20px;max-width:720px;margin-inline:auto}
+  h1{font-size:1.5rem}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
+    padding:20px;margin-bottom:16px}
+  .card h2{font-size:1.05rem;margin:0 0 8px}
+  .muted{color:var(--muted);font-size:.9rem;margin:0 0 12px}
+  button{background:var(--gold);color:#fff;border:0;border-radius:10px;
+    padding:10px 16px;font-size:.95rem;cursor:pointer}
+  button.secondary{background:transparent;color:var(--gold);border:1px solid var(--gold)}
+  button:disabled{opacity:.5;cursor:default}
+  .chip{display:inline-block;font-size:.75rem;font-weight:600;border-radius:999px;
+    padding:2px 10px;border:1px solid var(--line)}
+  .chip.ok{color:var(--ok)} .chip.warn{color:var(--warn)}
+  textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;
+    padding:10px;font:inherit;direction:ltr;text-align:left}
+  .prop{display:flex;align-items:center;gap:10px;padding:10px 0;
+    border-top:1px solid rgba(23,20,15,.07)}
+  .prop:first-of-type{border-top:0}
+  .prop .t{flex:1;min-width:0}
+  .prop .t .name{font-weight:600;font-size:.95rem;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .prop a{color:var(--gold);font-size:.8rem}
+  dialog{border:1px solid var(--line);border-radius:16px;padding:24px;max-width:320px}
+  dialog::backdrop{background:rgba(23,20,15,.4)}
+  #msg{position:fixed;bottom:16px;inset-inline:16px;background:var(--ink);color:#fff;
+    border-radius:12px;padding:12px 16px;font-size:.9rem;display:none;text-align:center}
+</style>
+</head>
+<body>
+<h1>הפצת נכסים</h1>
+
+<div class="card" id="entitleCard" hidden>
+  <h2>הפצה אינה פעילה בחשבון</h2>
+  <p class="muted">פרסום אוטומטי לפייסבוק פתוח כרגע למשתתפי הפיילוט. דברו איתנו כדי להצטרף.</p>
+</div>
+
+<div class="card" id="connectCard" hidden>
+  <h2>חיבור פייסבוק <span class="chip" id="connChip"></span></h2>
+  <p class="muted" id="connText"></p>
+  <button id="connectBtn">חיבור חשבון פייסבוק</button>
+</div>
+
+<div class="card" id="groupsCard" hidden>
+  <h2>הקבוצות שלי</h2>
+  <p class="muted">קישור קבוצה בכל שורה (facebook.com/groups/...). מומלץ 5 ומעלה —
+    <span id="groupCount"></span></p>
+  <textarea id="groupsBox" placeholder="https://www.facebook.com/groups/..."></textarea>
+  <button id="saveGroups">שמירת קבוצות</button>
+</div>
+
+<div class="card" id="propsCard" hidden>
+  <h2>הנכסים שלי</h2>
+  <div id="propList"></div>
+</div>
+
+<dialog id="repostDlg">
+  <h2 style="font-size:1.05rem;margin:0 0 8px">לפרסם שוב?</h2>
+  <p class="muted">הנכס הזה כבר פורסם בדף הפייסבוק. פרסום נוסף ייצור פוסט חדש.</p>
+  <button id="repostYes">כן, לפרסם שוב</button>
+  <button class="secondary" id="repostNo" style="margin-top:8px">ביטול</button>
+</dialog>
+
+<div id="msg" role="status"></div>
+<script src="distribution.js"></script>
+</body>
+</html>
