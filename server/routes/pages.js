@@ -16,6 +16,7 @@ const chatbotConfig = require("../chatbot-config");
 const { submitLead } = require("../leads");
 const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
+const og = require("../og");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 
@@ -555,14 +556,25 @@ module.exports = function createPagesRouter(ctx) {
     const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
     let d = null;
     try { d = await db.getPage(id); } catch (e) { /* fall back */ }
+    const pageUrl = `${pageBaseUrl}/p/${id}`;
     const tpl = d && d.theme && d.theme.template;
     if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
+      // Shell branch: still inject OG tags for active pages so shared links
+      // preview — crawlers don't run the JS that renders this shell.
+      if (d && d.status === "active") {
+        try {
+          const shell = fs.readFileSync(origShell, "utf8");
+          res.set("Cache-Control", "public, max-age=60");
+          return res.type("html").send(og.inject(shell, d, pageUrl));
+        } catch (e) { /* fall through to sendFile */ }
+      }
       return res.sendFile(origShell);
     }
     const file = path.join(templatesDir, tpl + ".html");
     if (!fs.existsSync(file)) return res.sendFile(origShell);
     let html = fs.readFileSync(file, "utf8");
     const bot = await resolveChatbot(d);
+    html = og.inject(html, d, pageUrl);
     const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
     html = html.replace("</head>", inject + "</head>");
     res.set("Cache-Control", "public, max-age=60");
