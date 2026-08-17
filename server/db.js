@@ -7,7 +7,7 @@ const { asMillis } = require("./utils");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [] };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [] };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -213,6 +213,93 @@ async function listAllBusinesses(limit = 1000) {
   return snap.docs.map((d) => d.data());
 }
 
+// ── distribution: agent Meta connection ──
+// businesses/{phone}/connections/facebook — per-agent tokens are DATA (spec
+// §5): they live here, never in env or Secret Manager.
+function deepMerge(target, patch) {
+  for (const [k, v] of Object.entries(patch)) {
+    if (v && typeof v === "object" && !Array.isArray(v) &&
+        target[k] && typeof target[k] === "object" && !Array.isArray(target[k])) {
+      deepMerge(target[k], v);
+    } else {
+      target[k] = v;
+    }
+  }
+  return target;
+}
+
+async function getConnection(phone) {
+  if (db) {
+    const d = await db.collection("businesses").doc(phone)
+      .collection("connections").doc("facebook").get();
+    return d.exists ? d.data() : null;
+  }
+  return mem.connections.get(phone) || null;
+}
+
+// merge:true in Firestore deep-merges maps; the mem fallback must match or
+// tests would pass against behavior prod doesn't have (spec §4 "deep-merge
+// parity").
+async function setConnection(phone, patch) {
+  if (db) {
+    await db.collection("businesses").doc(phone)
+      .collection("connections").doc("facebook").set(patch, { merge: true });
+    return;
+  }
+  mem.connections.set(phone, deepMerge(mem.connections.get(phone) || {}, patch));
+}
+
+// ── distribution: publish jobs ──
+async function saveDistribution(d) {
+  if (db) await db.collection("distributions").doc(d.id).set(d);
+  else mem.distributions.set(d.id, JSON.parse(JSON.stringify(d)));
+}
+
+async function getDistribution(id) {
+  if (db) { const d = await db.collection("distributions").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.distributions.get(id) || null;
+}
+
+// Dot-path patch, same semantics as updatePage — a full set() would clobber
+// fields a concurrent sweep just wrote.
+async function updateDistribution(id, patch) {
+  if (db) { await db.collection("distributions").doc(id).update(patch); return; }
+  const d = mem.distributions.get(id);
+  if (!d) return;
+  for (const [key, val] of Object.entries(patch)) {
+    const parts = key.split(".");
+    let o = d;
+    while (parts.length > 1) { const k = parts.shift(); o[k] = o[k] || {}; o = o[k]; }
+    o[parts[0]] = val;
+  }
+}
+
+// Single-field where, filtered/sorted in memory — no composite index needed.
+async function listDistributionsByPage(pageId, limit = 50) {
+  if (db) {
+    const snap = await db.collection("distributions")
+      .where("page_id", "==", pageId).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.distributions.values()].filter((d) => d.page_id === pageId).slice(0, limit);
+}
+
+async function listQueuedDistributions(limit = 10) {
+  if (db) {
+    const snap = await db.collection("distributions")
+      .where("status", "==", "queued").limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.distributions.values()].filter((d) => d.status === "queued").slice(0, limit);
+}
+
+// ── distribution: append-only audit (spec §5 post_actions) ──
+async function addPostAction(doc) {
+  const rec = { at: new Date(), ...doc };
+  if (db) await db.collection("post_actions").add(rec);
+  else mem.postActions.push(rec);
+}
+
 // ── leads ──
 async function getLead(phone) {
   if (db) { const d = await db.collection("leads").doc(phone).get(); return d.exists ? d.data() : null; }
@@ -239,4 +326,7 @@ module.exports = {
   savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
+  getConnection, setConnection,
+  saveDistribution, getDistribution, updateDistribution,
+  listDistributionsByPage, listQueuedDistributions, addPostAction,
 };
