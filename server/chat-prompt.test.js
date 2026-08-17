@@ -133,7 +133,7 @@ assert.ok(buildFacts({ agent: { name: "מיקי", years_active: 12 } }, null).in
 const fs = require("fs"), pathmod = require("path");
 const TPL_DIR = pathmod.join(__dirname, "..", "public-nadlan", "templates");
 const bound = new Set();
-for (const name of ["nocturne", "galerie", "reel"]) {
+for (const name of ["nocturne", "reel"]) {
   const html = fs.readFileSync(pathmod.join(TPL_DIR, name + ".html"), "utf8");
   for (const m of html.matchAll(/data-(?:bind|show|list)="([^"]+)"/g)) {
     m[1].split("||").forEach((p) => p.trim() && bound.add(p.trim()));

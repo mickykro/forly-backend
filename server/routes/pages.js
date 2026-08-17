@@ -18,13 +18,15 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
+const { roomLabel } = require("../rooms");
+const { describePhotos } = require("../photo-vision");
 
 // Portal era: pages no longer expire (the expiry scheduler is retired). New
 // pages get a far-future expires_at to keep the schema intact; /api/extend
 // stays functional for legacy reminder links already sent.
 const PAGE_LIFESPAN_DAYS = 36500;
 const LEAD_MAX_PER_HOUR = 3;
-const SERVER_TEMPLATES = new Set(["nocturne", "galerie", "reel"]);
+const SERVER_TEMPLATES = new Set(["nocturne", "reel", "atelier", "revue", "loupe", "orbite"]);
 
 const confirmHtml = (title, sub) =>
   `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
@@ -160,7 +162,42 @@ module.exports = function createPagesRouter(ctx) {
       const mapUrl = mapP ? rest[cursor++] : null;
       const logoUrl = logoP ? rest[cursor++] : null;
 
-      const galleryImages = photoUrls.map((u, i) => ({ url: u, caption: (body.photos[i] && body.photos[i].caption) || "" }));
+      // Per-photo captions. An explicit caption wins; failing that, whatever the
+      // Vision Tagger said this photo was. The tagger already classifies every
+      // photo upstream — that is where the `rooms` list sent to
+      // /api/video-overlay comes from — but it arrives there collapsed into an
+      // unordered vocabulary for the video, and the per-photo mapping is lost.
+      // Accepting it here, either on the photo or as a parallel array, keeps
+      // that mapping and lets n8n forward the tagger's raw output untranslated:
+      // rooms.js turns "master_bedroom" into "חדר שינה ראשי" with the same map
+      // the burned-in video labels use.
+      const roomsIn = Array.isArray(body.rooms) ? body.rooms : [];
+      const captionFor = (i) => {
+        const p = body.photos[i] || {};
+        const explicit = String(p.caption || "").trim();
+        if (explicit) return explicit.slice(0, 60);
+        return roomLabel(p.room_type || p.room || p.label || roomsIn[i] || "").slice(0, 60);
+      };
+      // A sentence per photo saying what is in it. The payload's own
+      // `description` wins where n8n sends one; otherwise the photos are looked
+      // at here. Best-effort and skipped without ANTHROPIC_API_KEY — the
+      // gallery then carries captions alone, as it did before.
+      const localPhotoPath = (i) => path.join(uploadDir, `${base}/photo-${pad(i + 1)}.${guessImageExt(body.photos[i].url)}`);
+      const needVision = photoUrls.some((_, i) => {
+        const p = body.photos[i] || {};
+        return !String(p.description || "").trim() || !captionFor(i);
+      });
+      const seen = needVision ?
+        await describePhotos(photoUrls.map((_, i) => localPhotoPath(i)), roomsIn) :
+        photoUrls.map(() => ({ caption: "", desc: "" }));
+      const galleryImages = photoUrls.map((u, i) => {
+        const p = body.photos[i] || {};
+        return {
+          url: u,
+          caption: captionFor(i) || String(seen[i].caption || "").slice(0, 60),
+          description: (String(p.description || "").trim() || seen[i].desc || "").slice(0, 110),
+        };
+      });
       const now = new Date();
       const doc = {
         page_id: pageId, listing_id: body.listing_id, business_phone: body.business_phone,
@@ -345,9 +382,12 @@ module.exports = function createPagesRouter(ctx) {
         if (body.property.floor != null) patch["property.floor"] = Number(body.property.floor) || 0;
       }
       if (Array.isArray(body.gallery_images)) {
+        // description rides along: an edit that reorders or recaptions the
+        // gallery must not silently drop the sentence under each photo.
         patch["gallery.images"] = body.gallery_images.slice(0, 12).map((img) => ({
           url: String(img.url || ""),
           caption: String(img.caption || "").slice(0, 60),
+          description: String(img.description || "").slice(0, 110),
         }));
       }
       if (Array.isArray(body.carousel_slides)) {
@@ -453,7 +493,7 @@ module.exports = function createPagesRouter(ctx) {
       // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
       if (!n8nLeadWebhook) {
         sendWhatsApp(page.business_phone,
-          `🔔 ליד חדש מדף הנכס "${page.property.title}"!\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
+          `🔔 ליד חדש מדף הנכס "${page.property.address}, ${page.property.city}"!\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
           `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
           greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
       }

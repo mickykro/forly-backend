@@ -194,11 +194,11 @@
         </select>
       </div>
       <div class="grid-2">
-        <div class="field"><label data-i18n="lbl_address">כתובת *</label><input id="pAddress" placeholder="ברודצקי 12, דירה 34" data-i18n-ph="ph_address"></div>
-        <div class="field"><label data-i18n="lbl_city">עיר *</label><input id="pCity" placeholder="תל אביב" data-i18n-ph="ph_city"></div>
+        <div class="field"><label data-i18n="lbl_address">כתובת *</label><input id="pAddress" maxlength="180" placeholder="ברודצקי 12, דירה 34" data-i18n-ph="ph_address"></div>
+        <div class="field"><label data-i18n="lbl_city">עיר *</label><input id="pCity" maxlength="80" placeholder="תל אביב" data-i18n-ph="ph_city"></div>
       </div>
       <div class="grid-2">
-        <div class="field"><label data-i18n="lbl_neighborhood">שכונה</label><input id="pHood" placeholder="בבלי" data-i18n-ph="ph_hood"></div>
+        <div class="field"><label data-i18n="lbl_neighborhood">שכונה</label><input id="pHood" maxlength="80" placeholder="בבלי" data-i18n-ph="ph_hood"></div>
         <div class="field">
           <label id="pPriceLabel" data-i18n="lbl_price">מחיר (₪) *</label>
           <input id="pPrice" type="text" inputmode="numeric" autocomplete="off" placeholder="4,900,000">
@@ -207,22 +207,22 @@
       </div>
       <div class="price-presets"><span id="priceChips"></span></div>
       <div class="grid-2">
-        <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" placeholder="4"></div>
-        <div class="field"><label data-i18n="lbl_sqm">מ״ר *</label><input id="pSqm" type="number" inputmode="numeric" placeholder="110"></div>
+        <div class="field"><label data-i18n="lbl_rooms">חדרים *</label><input id="pRooms" type="number" inputmode="decimal" step="0.5" min="1" max="30" placeholder="4"></div>
+        <div class="field"><label data-i18n="lbl_sqm">מ״ר *</label><input id="pSqm" type="number" inputmode="numeric" min="5" max="2000" placeholder="110"></div>
       </div>
       <details class="collapsible">
         <summary data-i18n="sum_size_details">פירוט שטחים (בנוי / מרפסות / חצר)</summary>
         <div class="collapsible-content">
           <div class="grid-3">
-            <div class="field"><label data-i18n="lbl_size_built">בנוי (מ״ר)</label><input id="pSqmBuilt" type="number" inputmode="numeric" placeholder="95"></div>
-            <div class="field"><label data-i18n="lbl_size_balcony">מרפסות (מ״ר)</label><input id="pSqmBalcony" type="number" inputmode="numeric" placeholder="12"></div>
-            <div class="field"><label data-i18n="lbl_size_garden">חצר / גינה (מ״ר)</label><input id="pSqmGarden" type="number" inputmode="numeric" placeholder="0"></div>
+            <div class="field"><label data-i18n="lbl_size_built">בנוי (מ״ר)</label><input id="pSqmBuilt" type="number" inputmode="numeric" min="0" max="2000" placeholder="95"></div>
+            <div class="field"><label data-i18n="lbl_size_balcony">מרפסות (מ״ר)</label><input id="pSqmBalcony" type="number" inputmode="numeric" min="0" max="500" placeholder="12"></div>
+            <div class="field"><label data-i18n="lbl_size_garden">חצר / גינה (מ״ר)</label><input id="pSqmGarden" type="number" inputmode="numeric" min="0" max="5000" placeholder="0"></div>
           </div>
         </div>
       </details>
       <div class="grid-3">
-        <div class="field"><label data-i18n="lbl_floor">קומה</label><input id="pFloor" type="number" inputmode="numeric" placeholder="5"></div>
-        <div class="field"><label data-i18n="lbl_parking">חניות</label><input id="pParking" type="number" inputmode="numeric" placeholder="1"></div>
+        <div class="field"><label data-i18n="lbl_floor">קומה</label><input id="pFloor" type="number" inputmode="numeric" min="-5" max="120" placeholder="5"></div>
+        <div class="field"><label data-i18n="lbl_parking">חניות</label><input id="pParking" type="number" inputmode="numeric" min="0" max="20" placeholder="1"></div>
         <div class="field" style="display:flex;align-items:end">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.85rem;color:var(--ink-soft);font-weight:400;padding-bottom:10px">
             <input id="pNoBuilding" type="checkbox" style="width:auto"> <span data-i18n="lbl_no_building">הנכס אינו בבניין (בית פרטי / צמוד קרקע)</span>
@@ -236,7 +236,7 @@
       </div>
       <div class="field">
         <label data-i18n="lbl_description">תיאור חופשי</label>
-        <textarea id="pDesc" rows="3" placeholder="משופצת אדריכלית, מרפסת שמש לים, ממ״ד..." data-i18n-ph="ph_description"></textarea>
+        <textarea id="pDesc" rows="3" maxlength="2000" placeholder="משופצת אדריכלית, מרפסת שמש לים, ממ״ד..." data-i18n-ph="ph_description"></textarea>
         <div class="hint" data-i18n="hint_description">התיאור עוזר ל-AI לכתוב את הדף — ככל שתפרטו, הדף יהיה טוב יותר.</div>
       </div>
       <div class="wizard-actions form-actions"><span class="stage-note form-hint show" data-i18n="stage1_hint">השלימו כתובת, עיר, מחיר וחדרים כדי להמשיך</span><button type="button" class="btn btn-gold primary-action" id="nextStage1" data-i18n="btn_next_photos">המשך לתמונות ←</button></div>
@@ -290,18 +290,28 @@
             <div class="tpl-frame"><img class="template-cover" src="/assets/forly-style-nocturne.png" alt="תצוגת עיצוב נוקטורן" data-i18n-alt="alt_tpl_nocturne"></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_nocturne">נוקטורן</span><small data-i18n="tpl_desc_nocturne">דרמטי, אלגנטי, ערב</small><button type="button" class="tpl-full" data-src="/tpl/nocturne.html">⛶</button></div>
           </div>
-          <div class="tpl-card" data-tpl="galerie">
-            <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/galerie.html" title="Galerie" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
-            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_galerie">גלריה</span><small data-i18n="tpl_desc_galerie">בהיר, מרווח, גלריתי</small><button type="button" class="tpl-full" data-src="/tpl/galerie.html">⛶</button></div>
-          </div>
           <div class="tpl-card" data-tpl="reel">
             <div class="tpl-check">✓</div>
             <div class="tpl-frame"><iframe src="/tpl/reel.html" title="Reel" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_reel">ריל</span><small data-i18n="tpl_desc_reel">תנועה, קצבי, מודרני</small><button type="button" class="tpl-full" data-src="/tpl/reel.html">⛶</button></div>
           </div>
-        </div>
+          <div class="tpl-card" data-tpl="atelier">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><iframe src="/tpl/atelier.html" title="Atelier" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_atelier">אטלייה · קולנועי</span><button type="button" class="tpl-full" data-src="/tpl/atelier.html">⛶</button></div>
+          </div>
+          <div class="tpl-card" data-tpl="loupe">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><iframe src="/tpl/loupe.html" title="Loupe" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_loupe">לופה · אינטראקטיבי</span><button type="button" class="tpl-full" data-src="/tpl/loupe.html">⛶</button></div>
+          </div>
+          <div class="tpl-card" data-tpl="orbite">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><iframe src="/tpl/orbite.html" title="Orbite" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_orbite">אורביט · חללים</span><button type="button" class="tpl-full" data-src="/tpl/orbite.html">⛶</button></div>
+          </div>
         <input type="hidden" id="thTemplate" value="original">
+      </div>
       </div>
       <button type="button" id="thSurprise" class="btn btn-ghost" style="width:100%;margin-bottom:12px" data-i18n="btn_surprise">🎲 עיצוב אקראי</button>
 
@@ -569,7 +579,7 @@
     liveText("#livePhotoCount", String(photos.length));
     liveText("#liveFeatureCount", String(features.length));
     var template = $("#thTemplate").value || "original";
-    var templateNames = { original: FT("tpl_name_classic"), nocturne: FT("tpl_name_nocturne"), galerie: FT("tpl_name_galerie"), reel: FT("tpl_name_reel") };
+    var templateNames = { original: FT("tpl_name_classic"), nocturne: FT("tpl_name_nocturne"), reel: FT("tpl_name_reel") };
     liveText("#liveTemplate", templateNames[template] || FT("tpl_name_classic"));
     $("#livePreviewCard").classList.toggle("nocturne", template === "nocturne");
     if (firstPhoto) $("#livePreviewImage").src = firstPhoto;
@@ -610,6 +620,14 @@
       if (!$(r[0]).value.trim()) { fieldError(r[0], ["err_missing", r[1]]); firstBad = firstBad || r[0]; }
     });
     if (firstBad) { revealField(firstBad); return false; }
+    // Ranges live on the inputs as min/max — let the browser judge them and
+    // phrase the message; it already speaks the visitor's language.
+    var outOfRange = ["#pRooms", "#pSqm", "#pSqmBuilt", "#pSqmBalcony", "#pSqmGarden", "#pFloor", "#pParking"]
+      .map($).filter(function (el) { return el && !el.checkValidity(); })[0];
+    if (outOfRange) { revealField("#" + outOfRange.id); setTimeout(function () { outOfRange.reportValidity(); }, 320); return false; }
+    // price is a formatted text field, so it is checked here rather than by min/max
+    var priceNum = Number(priceDigits());
+    if (!priceNum || priceNum > 999999999) { fieldError("#pPrice", ["err_bad_price"]); revealField("#pPrice"); return false; }
     if (!validateAreaBreakdown()) { revealField("#pSqmBuilt"); return false; }
     return true;
   }
@@ -649,6 +667,11 @@
     if (myProps) myProps.style.display = "none";
     // ponytail: autosave agent fields on blur during demo
     initDemoAutosave();
+  } else {
+    // Real (non-demo) create is session-gated, but nothing checked that on
+    // load — a logged-out user could fill the whole form before the 401
+    // surfaced on submit. FLY.req redirects to login on 401 by default.
+    FLY.req("/api/profile").catch(function () {});
   }
 
   // ponytail: autosave agent fields during demo — writes to businesses/{phone}
@@ -961,7 +984,7 @@
   // "Surprise me" — compose a fresh design: random template + font pairing +
   // a tasteful palette (switches to manual colors so the palette is visible).
   var TH_FONTS = ["", "Heebo", "Assistant", "Rubik", "Frank Ruhl Libre", "Secular One"];
-  var TH_TEMPLATES = ["original", "nocturne", "galerie", "reel"];
+  var TH_TEMPLATES = ["original", "nocturne", "reel"];
   var TH_PALETTES = [
     ["#b98a2f", "#14110c"], ["#2e86de", "#17436f"], ["#8e44ad", "#3d1f4d"],
     ["#127a5b", "#0b3b2c"], ["#c0392b", "#4d1410"], ["#0f766e", "#134e4a"], ["#1f2937", "#111827"],

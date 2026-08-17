@@ -183,10 +183,14 @@
     }
     // Mini name+phone form, inline in the log, shown ONCE per conversation.
     // On submit it WhatsApps the agent (server side) and collapses to a thanks.
-    var handoffShown = false;
+    // Tracks an open, unanswered form — not "a form was shown once". Two must
+    // never stack, but a visitor who asks something else later and hits handoff
+    // again is a second lead the agent still needs to hear about. The server
+    // swallows a genuine double-tap (same number inside its dedupe window).
+    var leadPending = false;
     function pushLeadForm() {
-      if (handoffShown) return;                // never stack two forms
-      handoffShown = true;
+      if (leadPending) return;                 // never stack two forms
+      leadPending = true;
       var w = el("div", "flychat-lead");
       var intro = el("div", "flychat-lead-intro");
       intro.textContent = t("lead_intro");
@@ -219,6 +223,7 @@
           .then(function (d) {
             if (d && d.ok) {
               w.textContent = t("lead_sent");   // collapse to confirmation
+              leadPending = false;              // a later handoff may ask again
               beacon("chat_lead");
             } else {
               sub.disabled = false; nm.disabled = false; ph.disabled = false;

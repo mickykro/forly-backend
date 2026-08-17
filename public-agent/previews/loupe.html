@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly Nadlan · loupe · דוגמה</title>
+<meta name="description" content="">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@300;400;500;600;700&family=Heebo:wght@300;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* ── tokens ────────────────────────────────────────────────────────────────
+   --accent/--accent-lite/--accent2 and the font roles are what runtime.js
+   overrides from the listing's theme; everything else is derived from them so
+   a custom palette carries through the whole page. */
+:root {
+  --bg: #F7F3EC;
+  --paper: #FFFDF9;
+  --ink: #17140F;
+  --ink-soft: #5A5348;
+  --gold: var(--accent, #B98A2F);
+  --gold-bright: var(--accent-lite, #D9B15C);
+  --gold-faint: rgba(185,138,47,.16);
+  --gold-line: rgba(185,138,47,.28);
+  --dark: #14110C;
+  --dark-2: #1D1913;
+  --radius: 22px;
+  --serif: 'Frank Ruhl Libre', 'David Libre', 'Times New Roman', serif;
+  --sans: 'Heebo', -apple-system, 'Segoe UI', sans-serif;
+  /* the lens ring / hero accent — the theme's secondary colour when set */
+  --sage: var(--accent2, #8E9775);
+  --sage-l: var(--accent2, #B5C4A0);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; background: var(--bg); }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+a { color: inherit; text-decoration: none; }
+::selection { background: var(--gold); color: #fff; }
+.num { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--gold-bright); outline-offset: 3px; }
+
+/* ── cursor (desktop only; the custom dot replaces the pointer) ── */
+#cur, #cur-r { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  body, body * { cursor: none; }
+  #cur { display: block; position: fixed; width: 10px; height: 10px; background: var(--sage); border-radius: 50%; pointer-events: none; z-index: 99999; transform: translate(-50%,-50%); transition: width .25s, height .25s; }
+  #cur-r { display: block; position: fixed; width: 36px; height: 36px; border: 1.5px solid var(--sage); border-radius: 50%; pointer-events: none; z-index: 99998; transform: translate(-50%,-50%); opacity: .5; }
+}
+
+/* ── progress ── */
+#prog { position: fixed; top: 0; right: 0; height: 2px; background: linear-gradient(-90deg, var(--sage), var(--gold-bright)); z-index: 99997; width: 0; }
+
+/* ══ NAV ══ */
+.topbar {
+  position: fixed; top: 0; right: 0; left: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px clamp(18px,4vw,44px);
+  transition: background .4s, box-shadow .4s, padding .4s;
+}
+.topbar.scrolled {
+  background: rgba(20,17,12,.85);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 1px 0 var(--gold-line);
+  padding-top: 10px; padding-bottom: 10px;
+}
+.brand { display: flex; flex-direction: column; line-height: 1.1; }
+.brand b { font-family: var(--serif); font-size: 1.3rem; letter-spacing: .12em; color: #fff; font-weight: 600; }
+.brand small { font-size: .6rem; letter-spacing: .28em; color: var(--gold-bright); text-transform: uppercase; }
+.top-cta {
+  font-family: var(--sans); font-size: .85rem; font-weight: 700; color: var(--dark);
+  background: var(--gold-bright); border: none; border-radius: 100px;
+  padding: 9px 22px; transition: transform .25s, box-shadow .25s;
+}
+.top-cta:hover { transform: translateY(-1px); box-shadow: 0 8px 22px rgba(217,177,92,.4); }
+.nav-menu-btn { display: none; background: none; border: none; padding: 4px; flex-direction: column; gap: 5px; }
+.nav-menu-btn span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; }
+.nav-mobile { display: none; position: fixed; inset: 0; background: rgba(20,17,12,.97); backdrop-filter: blur(20px); z-index: 999; flex-direction: column; align-items: center; justify-content: center; gap: 36px; }
+.nav-mobile.open { display: flex; }
+.nav-mobile a { font-family: var(--serif); font-size: 2rem; font-weight: 500; color: #fff; letter-spacing: .02em; }
+.nav-mobile a:hover { color: var(--gold-bright); }
+.nav-mobile-close { position: absolute; top: 24px; left: 24px; background: none; border: none; font-size: 28px; color: rgba(255,255,255,.6); }
+
+/* ══ HERO ══ */
+.hero { position: relative; height: 100svh; min-height: 600px; display: flex; align-items: flex-end; overflow: hidden; background: var(--dark); }
+.hero-bg-vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform-origin: center; will-change: transform; }
+.hero-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(10,10,10,.8) 0%, rgba(10,10,10,.25) 50%, rgba(10,10,10,.1) 100%); }
+
+/* ── the lens ───────────────────────────────────────────────────────────────
+   A round window dragged across the hero. Where it sits along the hero's width
+   picks which layer shows, so sweeping it left-to-right plays through the
+   listing: a photo, then a number, then the next photo. Layers are built at
+   runtime from whatever the gallery resolved to (photos, or frames sampled from
+   the tour) — never baked into the file. */
+/* Above .hero-content, not below it: the content block is a full-width flex row
+   covering the bottom half of the hero, so at a lower z-index it swallows the
+   pointer and the lens can never be picked up again once dragged down there.
+   The wrap itself is pointer-events:none, so only the circle catches events —
+   the hero's own links and stats stay clickable everywhere it isn't sitting. */
+#peephole-wrap { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 20; }
+#peephole { position: absolute; border-radius: 50%; pointer-events: all; cursor: grab; will-change: left, top; touch-action: none; }
+#peephole:active { cursor: grabbing; }
+#peephole-clip { position: absolute; inset: 0; border-radius: 50%; overflow: hidden; border: 2.5px solid rgba(255,255,255,.55); box-shadow: 0 0 0 1px var(--sage), 0 16px 50px rgba(0,0,0,.45); }
+#peephole-inner { position: absolute; inset: 0; }
+.peep-layer { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity .5s ease; border-radius: 50%; overflow: hidden; }
+.peep-layer.active { opacity: 1; }
+.peep-layer img, .peep-layer canvas { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .4s ease; }
+.peep-img-layer { cursor: zoom-in; }
+.peep-img-layer:hover img, .peep-img-layer:hover canvas { transform: scale(1.06); }
+.peep-zoom-hint { position: absolute; bottom: 14%; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.55); backdrop-filter: blur(6px); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .14em; padding: 5px 12px; border-radius: 100px; pointer-events: none; opacity: 0; transition: opacity .3s; white-space: nowrap; }
+.peep-img-layer:hover .peep-zoom-hint { opacity: 1; }
+.peep-text-layer { background: var(--dark-2); flex-direction: column; gap: 2px; text-align: center; padding: 16px; }
+.peep-big { font-size: clamp(30px, 5.5vw, 50px); font-weight: 900; color: #fff; letter-spacing: -.03em; line-height: 1; }
+.peep-unit { font-size: clamp(17px, 3.2vw, 25px); font-weight: 700; color: var(--gold-bright); margin-top: 2px; }
+.peep-sub { font-size: clamp(9px, 1.5vw, 11px); font-weight: 700; letter-spacing: .2em; color: rgba(255,255,255,.42); margin-top: 8px; }
+#peep-ring { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); pointer-events: none; overflow: visible; animation: spin-ring 14s linear infinite; }
+@keyframes spin-ring { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+/* ── hero content ── */
+.hero-content { position: relative; z-index: 10; padding: 0 clamp(20px,4vw,40px) 64px; width: 100%; display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; }
+.hero-text { max-width: 500px; flex-shrink: 0; }
+.hero-tag { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,.12); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.25); padding: 6px 14px; border-radius: 100px; font-size: 11px; font-weight: 700; letter-spacing: .14em; color: #fff; margin-bottom: 16px; }
+.hero-tag::before { content: ''; width: 6px; height: 6px; background: var(--sage-l); border-radius: 50%; animation: blink 2s infinite; flex-shrink: 0; }
+@keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+.hero-title { font-family: var(--serif); font-size: clamp(34px, 5.2vw, 68px); font-weight: 700; line-height: 1.06; letter-spacing: -.02em; color: #fff; text-shadow: 0 2px 24px rgba(0,0,0,.5); margin-bottom: 14px; text-wrap: balance; }
+.hero-title .accent { color: var(--sage-l); font-style: italic; font-weight: 500; }
+.hero-subtitle { font-size: clamp(13px, 1.8vw, 15px); font-weight: 300; color: rgba(255,255,255,.78); line-height: 1.7; max-width: 400px; margin-bottom: 28px; }
+.hero-btns { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.btn-hero-p { background: #fff; color: var(--dark); padding: 13px 28px; border-radius: 100px; font-size: 13px; font-weight: 800; letter-spacing: .03em; transition: background .3s, transform .3s; display: inline-block; white-space: nowrap; }
+.btn-hero-p:hover { background: var(--sage-l); transform: translateY(-2px); }
+.btn-hero-s { color: rgba(255,255,255,.8); font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 8px; transition: gap .3s; white-space: nowrap; }
+.btn-hero-s:hover { gap: 14px; }
+.btn-hero-s-arrow { width: 32px; height: 32px; border: 1.5px solid rgba(255,255,255,.4); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.hero-stats { display: flex; background: rgba(255,255,255,.13); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.22); border-radius: 16px; overflow: hidden; flex-shrink: 0; }
+.hstat { padding: 16px 20px; text-align: center; border-inline-start: 1px solid rgba(255,255,255,.15); }
+.hstat:first-child { border-inline-start: none; }
+.hstat-v { font-size: clamp(14px, 2vw, 20px); font-weight: 900; color: #fff; display: block; line-height: 1; white-space: nowrap; }
+.hstat-l { font-size: 9px; font-weight: 700; letter-spacing: .1em; color: rgba(255,255,255,.5); margin-top: 4px; display: block; white-space: nowrap; }
+
+/* ══ MARQUEE ══ */
+.marquee { background: var(--dark); padding: 13px 0; overflow: hidden; }
+.marquee-t { display: flex; width: max-content; animation: mq 28s linear infinite; }
+.mq-item { display: flex; align-items: center; gap: 16px; padding: 0 32px; font-size: 11px; font-weight: 700; letter-spacing: .16em; color: rgba(255,255,255,.5); white-space: nowrap; }
+.mq-item::before { content: ""; width: 4px; height: 4px; background: var(--gold-bright); border-radius: 50%; flex-shrink: 0; }
+@keyframes mq { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+/* ══ SPECS STRIP ══ */
+.specs { background: var(--dark-2); color: #fff; border-top: 1px solid var(--gold-line); border-bottom: 1px solid var(--gold-line); overflow-x: auto; scrollbar-width: none; }
+.specs::-webkit-scrollbar { display: none; }
+/* auto-flow: a listing with no floor or no price-per-m² drops that cell and the
+   rest spread out, instead of leaving a gap in a fixed 5-column track */
+.specs-inner { width: min(1180px,100%); margin: 0 auto; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0,1fr); padding: 0 clamp(20px,4.5vw,48px); }
+.spec { text-align: center; padding: 28px 8px; position: relative; }
+.spec:not(:last-child)::after { content: ""; position: absolute; left: 0; top: 26%; height: 48%; width: 1px; background: var(--gold-line); }
+.spec b { display: block; font-family: var(--serif); font-weight: 500; font-size: clamp(1.3rem,2.5vw,2rem); color: var(--gold-bright); letter-spacing: .02em; }
+.spec span { font-size: .78rem; font-weight: 300; color: rgba(255,255,255,.66); letter-spacing: .04em; }
+@media (max-width: 880px) {
+  .specs-inner { width: max-content; min-width: 100%; grid-auto-columns: minmax(120px,1fr); padding: 0 16px; }
+  .spec { padding: 18px 12px; }
+  .spec b { font-size: 1.15rem; }
+  .spec span { font-size: .7rem; }
+}
+
+/* ══ SECTIONS ══ */
+section.block { padding: clamp(60px,9vw,110px) clamp(20px,4.5vw,48px); }
+.container { width: min(1180px,100%); margin: 0 auto; }
+.sec-head { max-width: 640px; margin-bottom: clamp(32px,5vw,56px); }
+.sec-head .kicker { display: inline-flex; align-items: center; gap: 10px; font-size: .75rem; font-weight: 600; letter-spacing: .28em; color: var(--gold); margin-bottom: 12px; }
+.sec-head .kicker::before { content: ""; width: 30px; height: 1px; background: var(--gold); }
+.sec-head h2 { font-family: var(--serif); font-weight: 500; font-size: clamp(1.8rem,4vw,2.9rem); line-height: 1.18; margin-bottom: 12px; text-wrap: balance; }
+.sec-head p { color: var(--ink-soft); font-weight: 300; font-size: 1.02rem; }
+
+.reveal { opacity: 0; transform: translateY(28px); transition: opacity .9s cubic-bezier(.2,.65,.25,1), transform .9s cubic-bezier(.2,.65,.25,1); }
+.reveal.in { opacity: 1; transform: none; }
+.reveal[data-delay="1"] { transition-delay: .12s; }
+.reveal[data-delay="2"] { transition-delay: .24s; }
+.reveal[data-delay="3"] { transition-delay: .36s; }
+
+/* ══ GALLERY — tiles are built by runtime.js into [data-gallery] ══ */
+.gal { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
+.gal-item { position: relative; display: block; border-radius: 18px; overflow: hidden; aspect-ratio: 3/4; cursor: zoom-in; border: 1px solid rgba(23,20,15,.08); background: var(--dark); padding: 0; }
+.gal-item:first-child { grid-column: span 2; grid-row: span 2; aspect-ratio: auto; }
+.gal-item img, .gal-item canvas { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .7s cubic-bezier(.2,.65,.25,1); }
+.gal-item:hover img, .gal-item:hover canvas { transform: scale(1.055); }
+.gal-item .g-no { position: absolute; top: 12px; inset-inline-end: 14px; font-family: var(--serif); font-size: .8rem; letter-spacing: .12em; color: rgba(255,255,255,.75); text-shadow: 0 1px 6px rgba(0,0,0,.5); z-index: 1; }
+.gal-item .g-cap { position: absolute; right: 0; left: 0; bottom: 0; padding: 34px 16px 12px; background: linear-gradient(transparent,rgba(20,17,12,.75)); color: #fff; font-size: .85rem; font-weight: 500; letter-spacing: .03em; display: flex; align-items: center; gap: 8px; opacity: 0; transform: translateY(8px); transition: opacity .4s, transform .4s; }
+.gal-item .g-cap::before { content: ""; width: 16px; height: 1px; background: var(--gold-bright); flex-shrink: 0; }
+.gal-item:hover .g-cap, .gal-item:focus-visible .g-cap { opacity: 1; transform: none; }
+
+/* ── lightbox (this template's own — paged, captioned, swipeable) ── */
+.lightbox { position: fixed; inset: 0; z-index: 100; display: none; background: rgba(15,12,8,.96); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); align-items: center; justify-content: center; touch-action: pan-y; flex-direction: column; }
+.lightbox.open { display: flex; }
+.lb-img-wrap { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; padding: 60px 20px 0; }
+.lightbox img, .lightbox canvas { max-width: min(92vw,560px); max-height: 72svh; object-fit: contain; border-radius: 16px; box-shadow: 0 30px 90px rgba(0,0,0,.6), 0 0 0 1px var(--gold-line); user-select: none; animation: lbIn .35s cubic-bezier(.2,.65,.25,1); display: block; }
+@keyframes lbIn { from { opacity:0; transform:scale(.94); } to { opacity:1; transform:none; } }
+.lb-close { position: absolute; top: max(16px,env(safe-area-inset-top)); left: 16px; width: 46px; height: 46px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.06); color: #fff; font-size: 1.15rem; display: flex; align-items: center; justify-content: center; transition: background .25s; z-index: 2; }
+.lb-close:hover { background: var(--gold); }
+.lb-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.06); color: #fff; font-size: 1.25rem; display: flex; align-items: center; justify-content: center; transition: background .25s; z-index: 2; }
+.lb-arrow:hover { background: var(--gold); }
+.lb-prev { right: 14px; }
+.lb-next { left: 14px; }
+.lb-bottom { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 14px 20px calc(14px + env(safe-area-inset-bottom)); gap: 12px; flex-shrink: 0; }
+.lb-meta { display: flex; flex-direction: column; align-items: center; gap: 3px; color: #fff; flex: 1; }
+.lb-meta .lb-cap { font-family: var(--serif); font-size: 1rem; letter-spacing: .04em; text-align: center; }
+.lb-meta .lb-count { font-size: .75rem; color: var(--gold-bright); letter-spacing: .3em; direction: ltr; }
+.lb-nav-btn { display: none; width: 52px; height: 52px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.3); background: rgba(255,255,255,.08); color: #fff; font-size: 1.3rem; align-items: center; justify-content: center; flex-shrink: 0; transition: background .25s; -webkit-tap-highlight-color: transparent; }
+.lb-nav-btn:active { background: var(--gold); }
+@media (max-width: 880px) {
+  .lb-arrow { display: none; }
+  .lb-nav-btn { display: flex; }
+  .lb-img-wrap { padding-top: 70px; }
+  .lightbox img, .lightbox canvas { max-width: 94vw; max-height: 62svh; border-radius: 12px; }
+  .lb-bottom { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
+
+/* ══ WHY CARDS ══ */
+.carousel-outer { position: relative; }
+.carousel { display: flex; gap: clamp(14px,2vw,24px); overflow-x: auto; scroll-snap-type: x mandatory; padding: 6px 4px 26px; scrollbar-width: none; }
+.carousel::-webkit-scrollbar { display: none; }
+.card { scroll-snap-align: start; flex: 0 0 min(320px,80vw); background: var(--paper); border-radius: var(--radius); padding: 34px 28px 30px; border: 1px solid rgba(23,20,15,.07); box-shadow: 0 10px 34px rgba(23,20,15,.06); display: flex; flex-direction: column; gap: 14px; transition: transform .35s, box-shadow .35s; }
+.card:hover { transform: translateY(-6px); box-shadow: 0 22px 50px rgba(23,20,15,.11); }
+.card .cnum { font-family: var(--serif); font-size: .95rem; color: var(--gold); display: flex; align-items: center; gap: 12px; letter-spacing: .14em; }
+.card .cnum::after { content: ""; flex: 1; height: 1px; background: var(--gold-faint); }
+.card h3 { font-family: var(--serif); font-weight: 600; font-size: 1.35rem; line-height: 1.3; }
+.card p { font-size: .94rem; font-weight: 300; color: var(--ink-soft); }
+.card .tag { margin-top: auto; align-self: flex-start; font-size: .75rem; font-weight: 600; color: var(--gold); background: var(--gold-faint); border-radius: 100px; padding: 5px 14px; }
+.car-nav { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+.car-nav button { width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(23,20,15,.18); background: var(--paper); font-size: 1rem; color: var(--ink); transition: background .25s, color .25s, border-color .25s; }
+.car-nav button:hover { background: var(--gold); border-color: var(--gold); color: #fff; }
+
+.agent-strip { margin-top: clamp(36px,5vw,56px); background: var(--paper); border: 1px solid var(--gold-line); border-radius: var(--radius); display: flex; align-items: center; gap: 24px; flex-wrap: wrap; padding: 24px clamp(20px,3vw,36px); }
+.avatar { width: 70px; height: 70px; border-radius: 50%; flex-shrink: 0; background: linear-gradient(135deg,var(--dark),#3A3123); color: var(--gold-bright); font-family: var(--serif); font-size: 1.5rem; font-weight: 600; display: flex; align-items: center; justify-content: center; border: 2px solid var(--gold-bright); overflow: hidden; }
+.agent-meta { flex: 1; min-width: 200px; }
+.agent-meta b { font-family: var(--serif); font-size: 1.2rem; font-weight: 600; display: block; }
+.agent-meta span { font-size: .86rem; color: var(--ink-soft); font-weight: 300; }
+
+/* ══ AREA ══ */
+.area { background: var(--dark); color: #fff; position: relative; overflow: hidden; }
+.area::before { content: ""; position: absolute; inset: 0; background: radial-gradient(680px 340px at 12% -8%, var(--gold-faint), transparent 60%), radial-gradient(560px 300px at 92% 108%, var(--gold-faint), transparent 60%); pointer-events: none; }
+.area .sec-head h2 { color: #fff; }
+.area .sec-head p { color: rgba(255,255,255,.7); }
+.area-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: clamp(28px,5vw,60px); align-items: center; position: relative; z-index: 1; }
+.area-copy p { font-weight: 300; font-size: 1rem; color: rgba(255,255,255,.82); margin-bottom: 16px; }
+.area-stats { display: grid; grid-template-columns: repeat(2,1fr); gap: 14px; }
+.astat { background: rgba(255,255,255,.045); border: 1px solid var(--gold-line); border-radius: 18px; padding: 22px 18px; transition: border-color .3s, transform .3s; }
+.astat:hover { border-color: var(--gold-bright); transform: translateY(-3px); }
+.astat b { display: block; font-family: var(--serif); font-weight: 500; font-size: clamp(1.4rem,2.4vw,1.9rem); color: var(--gold-bright); margin-bottom: 2px; }
+.astat span { font-size: .8rem; font-weight: 300; color: rgba(255,255,255,.68); }
+.map-line { margin-top: 24px; display: flex; flex-direction: column; border-inline-start: 1px solid var(--gold-line); }
+.map-line .stop { display: flex; align-items: center; gap: 14px; padding: 9px 0 9px 18px; font-size: .9rem; font-weight: 300; color: rgba(255,255,255,.8); position: relative; }
+.map-line .stop::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--gold-bright); position: absolute; inset-inline-start: -5px; }
+.map-line .stop b { font-weight: 600; color: #fff; }
+.map-line .stop .min { margin-inline-start: auto; font-family: var(--serif); color: var(--gold-bright); font-size: 1rem; white-space: nowrap; }
+
+/* ══ CTA ══ */
+.cta { background: var(--bg); }
+.cta-panel { background: var(--paper); border: 1px solid var(--gold-line); border-radius: calc(var(--radius) + 8px); box-shadow: 0 30px 80px rgba(23,20,15,.10); display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
+.cta-info { background: linear-gradient(150deg,var(--dark) 0%,#2A2318 100%); color: #fff; padding: clamp(32px,4.5vw,52px); display: flex; flex-direction: column; gap: 16px; }
+.cta-info h2 { font-family: var(--serif); font-weight: 500; font-size: clamp(1.6rem,3vw,2.3rem); line-height: 1.2; }
+.cta-info h2 em { font-style: normal; color: var(--gold-bright); display: block; }
+.cta-info p { font-weight: 300; color: rgba(255,255,255,.75); font-size: .96rem; }
+.trust { margin-top: auto; display: flex; flex-direction: column; gap: 8px; font-size: .84rem; color: rgba(255,255,255,.65); }
+.trust div { display: flex; gap: 9px; align-items: center; }
+.trust .tick { color: var(--gold-bright); }
+.cta-form { padding: clamp(32px,4.5vw,52px); display: flex; flex-direction: column; gap: 14px; }
+.cta-form label { font-size: .82rem; font-weight: 600; letter-spacing: .04em; color: var(--ink-soft); display: block; margin-bottom: 6px; }
+.cta-form input { width: 100%; font-family: var(--sans); font-size: 1rem; color: var(--ink); background: var(--bg); border: 1px solid rgba(23,20,15,.14); border-radius: 14px; padding: 14px 18px; outline: none; transition: border-color .25s, box-shadow .25s; }
+.cta-form input:focus { border-color: var(--gold); box-shadow: 0 0 0 4px var(--gold-faint); }
+.btn { display: inline-flex; align-items: center; gap: 9px; font-family: var(--sans); font-weight: 600; font-size: .96rem; border-radius: 100px; padding: 14px 28px; text-decoration: none; transition: transform .25s, box-shadow .25s, background .25s; border: none; justify-content: center; }
+.btn-gold { background: linear-gradient(115deg,var(--gold-bright),var(--gold)); color: var(--dark); }
+.btn-gold:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(217,177,92,.35); }
+.btn-ghost { background: transparent; color: var(--ink); border: 1px solid rgba(23,20,15,.2); }
+.btn-ghost:hover { background: var(--gold-faint); border-color: var(--gold); }
+.or { display: flex; align-items: center; gap: 14px; color: var(--ink-soft); font-size: .8rem; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: rgba(23,20,15,.12); }
+.form-done { display: none; text-align: center; padding: clamp(32px,4.5vw,52px); }
+.form-done .big { font-size: 3rem; display: block; }
+.form-done h3 { font-family: var(--serif); font-size: 1.6rem; font-weight: 600; margin: 12px 0 8px; }
+.form-done p { color: var(--ink-soft); font-weight: 300; }
+
+/* ══ FOOTER ══ */
+footer { background: var(--dark); color: rgba(255,255,255,.55); padding: 32px clamp(20px,4.5vw,48px) 110px; font-size: .8rem; font-weight: 300; }
+footer .container { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: center; }
+footer .fbrand { font-family: var(--serif); letter-spacing: .16em; color: var(--gold-bright); }
+footer a { color: rgba(255,255,255,.7); text-decoration: underline; }
+
+/* ══ STICKY MOBILE BAR ══ */
+.sticky-bar { position: fixed; bottom: 0; right: 0; left: 0; z-index: 60; display: none; gap: 10px; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); background: rgba(20,17,12,.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-top: 1px solid var(--gold-line); transform: translateY(110%); transition: transform .45s cubic-bezier(.2,.65,.25,1); }
+.sticky-bar.show { transform: none; }
+.sticky-bar .btn { flex: 1; padding: 13px 10px; font-size: .9rem; }
+.sticky-bar .btn-ghost { color: #fff; border-color: rgba(255,255,255,.3); }
+
+/* ══ RESPONSIVE ══ */
+@media (max-width: 880px) {
+  .topbar { padding: 14px 20px; }
+  .nav-menu-btn { display: flex; }
+  .top-cta { display: none; }
+  .hero-content { flex-direction: column; align-items: flex-start; padding: 0 20px 48px; gap: 16px; }
+  .hero-text { max-width: 100%; }
+  .hero-title { font-size: clamp(30px, 8.5vw, 50px); }
+  .hero-stats { width: 100%; border-radius: 14px; }
+  .hstat { flex: 1; padding: 12px 8px; }
+  .hstat-v { font-size: 13px; }
+  .hstat-l { font-size: 8px; }
+  .area-grid { grid-template-columns: 1fr; }
+  .cta-panel { grid-template-columns: 1fr; }
+  .sticky-bar { display: flex; }
+  .gal { grid-template-columns: repeat(2,1fr); gap: 10px; }
+  .gal-item:first-child { grid-column: span 2; grid-row: auto; aspect-ratio: 4/3; }
+  footer { padding-bottom: 130px; }
+}
+@media (max-width: 560px) {
+  .hero-btns { flex-direction: column; align-items: stretch; }
+  .btn-hero-p { text-align: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal { transition: none; opacity: 1; transform: none; }
+  html { scroll-behavior: auto; }
+  .marquee-t, #peep-ring, .hero-tag::before { animation: none; }
+  .peep-layer { transition: none; }
+}
+</style>
+</head>
+<body>
+<!-- Example render of the loupe template (public-nadlan/templates/loupe.html).
+     Same markup and script as the template itself; only the payload below differs,
+     so it can be opened on its own to see the template with example content. -->
+
+<div id="prog"></div>
+<div id="cur"></div>
+<div id="cur-r"></div>
+
+<div class="nav-mobile" id="navMobile">
+  <button class="nav-mobile-close" id="navClose" aria-label="סגירה">✕</button>
+  <a href="#gallery" data-i18n="gallery">גלריה</a>
+  <a href="#specs" data-i18n="the_property">הנכס</a>
+  <a href="#area" data-i18n="the_area">השכונה</a>
+  <a href="#contact" style="color:var(--gold-bright)" data-i18n="book_visit">תיאום ביקור</a>
+</div>
+
+<header class="topbar" id="topbar">
+  <a class="brand" href="#" data-logo>
+    <b data-bind="agent.brand_name||agent.name">רוזנברג</b>
+    <small data-bind="agent.tagline" data-show="agent.tagline"></small>
+  </a>
+  <a class="top-cta" href="#contact" data-i18n="book_visit">תיאום ביקור</a>
+  <button class="nav-menu-btn" id="navMenuBtn" aria-label="תפריט">
+    <span></span><span></span><span></span>
+  </button>
+</header>
+
+<!-- ══ HERO ══ -->
+<section class="hero" id="hero">
+  <video class="hero-bg-vid" id="heroBg" data-video autoplay muted loop playsinline></video>
+  <div class="hero-overlay"></div>
+  <div id="peephole-wrap">
+    <div id="peephole">
+      <div id="peephole-clip">
+        <div id="peephole-inner"></div>
+      </div>
+    </div>
+  </div>
+  <div class="hero-content">
+    <div class="hero-text">
+      <div class="hero-tag"><span data-deal>למכירה</span> · <span data-bind="property.neighborhood||property.city">הצפון הישן</span></div>
+      <h1 class="hero-title">
+        <span data-bind="property.title">דיזנגוף 156</span><br>
+        <span class="accent" data-bind="property.city">תל אביב–יפו</span>
+      </h1>
+      <p class="hero-subtitle" data-bind="hero.phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד.</p>
+      <div class="hero-btns">
+        <a href="#gallery" class="btn-hero-p" data-i18n="view_gallery">צפו בגלריה</a>
+        <a href="#contact" class="btn-hero-s"><span data-i18n="book_visit">תיאום ביקור</span><span class="btn-hero-s-arrow">←</span></a>
+      </div>
+    </div>
+    <div class="hero-stats">
+      <div class="hstat" data-show="property.size_sqm"><span class="hstat-v num"><span data-bind="property.size_sqm">140</span> <span data-i18n="sqm">מ״ר</span></span><span class="hstat-l" data-i18n="built_area">שטח בנוי</span></div>
+      <div class="hstat" data-show="property.rooms"><span class="hstat-v num" data-bind="property.rooms">4</span><span class="hstat-l" data-i18n="rooms">חדרים</span></div>
+      <div class="hstat" data-show="property.floor"><span class="hstat-v num" data-bind="property.floor">7</span><span class="hstat-l" data-i18n="floor">קומה</span></div>
+      <div class="hstat" data-show="property.parking"><span class="hstat-v num" data-bind="property.parking">3</span><span class="hstat-l" data-i18n="parking">חניות</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ MARQUEE — filled from the listing by the script below ══ -->
+<div class="marquee"><div class="marquee-t" id="marquee"></div></div>
+
+<!-- ══ SPECS ══ -->
+<div class="specs" id="specs">
+  <div class="specs-inner">
+    <div class="spec reveal"><b class="num" data-bind="property.price" data-fmt="price">₪8,400,000</b><span data-price-label>מחיר מבוקש</span></div>
+    <div class="spec reveal" data-delay="1" data-show="property.rooms"><b class="num" data-bind="property.rooms">4</b><span data-i18n="rooms">חדרים</span></div>
+    <div class="spec reveal" data-delay="2" data-show="property.size_sqm"><b class="num"><span data-bind="property.size_sqm">140</span></b><span data-i18n="built_area">שטח בנוי</span></div>
+    <div class="spec reveal" data-delay="3" data-show="property.floor"><b class="num" data-bind="property.floor">7</b><span data-i18n="floor">קומה</span></div>
+    <div class="spec reveal" data-delay="3" data-show="property.parking"><b class="num" data-bind="property.parking">3</b><span data-i18n="parking">חניות</span></div>
+  </div>
+</div>
+
+<!-- ══ GALLERY ══ -->
+<section class="block" id="gallery" style="background:var(--paper)">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker" data-i18n="peek_inside">הצצה פנימה</span>
+      <h2 data-i18n="gallery_head">כל חדר, מכל זווית.</h2>
+      <p data-i18n="gallery_hint_click">לחצו על תמונה להגדלה</p>
+    </div>
+    <div class="gal reveal" id="gal" data-gallery data-gallery-class="gal-item" data-gallery-captions data-gallery-count="6"></div>
+  </div>
+</section>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="גלריית תמונות">
+  <button class="lb-close" id="lbClose" aria-label="סגירה">✕</button>
+  <button class="lb-arrow lb-prev" id="lbPrev" aria-label="הקודם">→</button>
+  <button class="lb-arrow lb-next" id="lbNext" aria-label="הבא">←</button>
+  <div class="lb-img-wrap" id="lbWrap"></div>
+  <div class="lb-bottom">
+    <button class="lb-nav-btn" id="lbPrevMobile" aria-label="הקודם">→</button>
+    <div class="lb-meta">
+      <span class="lb-cap" id="lbCap"></span>
+      <span class="lb-count num" id="lbCount"></span>
+    </div>
+    <button class="lb-nav-btn" id="lbNextMobile" aria-label="הבא">←</button>
+  </div>
+</div>
+
+<!-- ══ WHY ══ -->
+<section class="block" style="background:var(--bg)">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker" data-i18n="why_here">למה דווקא כאן</span>
+      <h2 data-i18n="why_head">נכס כזה לא מגיע ללוחות. הוא מגיע לאנשים הנכונים.</h2>
+      <p data-i18n="why_sub">כמה סיבות שבגללן הנכס הזה שווה ביקור.</p>
+    </div>
+    <div class="carousel-outer">
+      <div class="carousel" id="carousel" data-list="carousel.slides">
+        <template>
+          <article class="card reveal">
+            <span class="cnum" data-field="num">01</span>
+            <h3 data-field="title">נוף שאי אפשר לשכפל</h3>
+            <p data-field="body"></p>
+            <span class="tag" data-field="tag"></span>
+          </article>
+        </template>
+      </div>
+      <div class="car-nav">
+        <button id="carPrev" aria-label="הקודם">→</button>
+        <button id="carNext" aria-label="הבא">←</button>
+      </div>
+    </div>
+    <div class="agent-strip reveal">
+      <div class="avatar" data-avatar>ש״ר</div>
+      <div class="agent-meta">
+        <b><span data-bind="agent.name">שלום רוזנברג</span><span data-show="agent2.name"> &amp; <span data-bind="agent2.name"></span></span></b>
+        <span>
+          <span data-bind="agent.brand_name">רוזנברג נכסים</span>
+          <span data-show="agent.license"> · <span data-i18n="license_label">רישיון תיווך</span> <span class="num" data-bind="agent.license">3205419</span></span>
+        </span>
+      </div>
+      <a class="btn btn-gold" href="#contact" data-i18n="talk_about_property">דברו איתי על הנכס</a>
+    </div>
+  </div>
+</section>
+
+<!-- ══ AREA ══ -->
+<section class="block area" id="area">
+  <div class="container">
+    <div class="sec-head reveal">
+      <span class="kicker" data-i18n="the_area">השכונה</span>
+      <h2 data-bind="property.neighborhood||property.city">הצפון הישן</h2>
+      <p data-i18n="area_sub">אחת השכונות המבוקשות באזור — וזה לא במקרה.</p>
+    </div>
+    <div class="area-grid">
+      <div class="area-copy reveal">
+        <p data-bind="area.blurb">בין שדרות בן־גוריון לכיכר דיזנגוף, השכונה משלבת את הבאוהאוס של העיר הלבנה עם בתי הקפה והמסעדות הטובים בעיר.</p>
+        <div class="map-line" data-list="area.stops">
+          <template>
+            <div class="stop"><b data-field="label"></b><span class="min" data-field="minutes"></span></div>
+          </template>
+        </div>
+      </div>
+      <div class="area-stats" data-list="area.stats">
+        <template>
+          <div class="astat reveal"><b data-field="value"></b><span data-field="label"></span></div>
+        </template>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ CTA ══ -->
+<section class="block cta" id="contact">
+  <div class="container">
+    <div class="cta-panel reveal">
+      <div class="cta-info">
+        <h2><span data-i18n="step_next">הצעד הבא?</span><em data-bind="cta.headline">לראות אותה במו עיניכם.</em></h2>
+        <p data-bind="cta.sub">השאירו פרטים ונחזור אליכם באופן אישי לתיאום ביקור — בדיסקרטיות מלאה וללא התחייבות.</p>
+        <div class="trust">
+          <div><span class="tick">✦</span> <span data-i18n="trust_personal">מענה אישי בתוך שעתיים בשעות הפעילות</span></div>
+          <div><span class="tick">✦</span> <span data-i18n="trust_scheduled">ביקור מתואם אישית, בזמן שנוח לכם</span></div>
+          <div><span class="tick">✦</span> <span data-i18n="trust_private">הפרטים שלכם נשארים אצלנו בלבד</span></div>
+        </div>
+      </div>
+      <form class="cta-form" id="leadForm" data-lead-form>
+        <div>
+          <label for="lf-name" data-i18n="form_name">שם מלא</label>
+          <input id="lf-name" data-lead="name" type="text" placeholder="ישראל ישראלי" data-i18n-ph="ph_name" required autocomplete="name">
+        </div>
+        <div>
+          <label for="lf-phone" data-i18n="form_phone">טלפון נייד</label>
+          <input id="lf-phone" data-lead="phone" type="tel" class="num" placeholder="050-000-0000" required autocomplete="tel" inputmode="tel">
+        </div>
+        <button class="btn btn-gold" type="submit" data-i18n="book_visit_property">תיאום ביקור בנכס</button>
+        <div class="or" data-i18n="or">או</div>
+        <a class="btn btn-ghost" data-wa href="#contact">השאירו פרטים</a>
+      </form>
+      <div class="form-done" id="formDone" data-lead-sent>
+        <span class="big">🥂</span>
+        <h3 data-i18n="sent_title">הפרטים אצלנו.</h3>
+        <p data-i18n="sent_body">נחזור אליכם באופן אישי בהקדם.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <span class="fbrand" data-bind="texts.footer_brand||agent.brand_name||agent.name">רוזנברג</span>
+    <span>
+      <span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉</span> ·
+      <a href="/legal/privacy.html" data-i18n="privacy_policy">מדיניות פרטיות</a> ·
+      <a href="/legal/accessibility.html" data-i18n="accessibility">הצהרת נגישות</a>
+    </span>
+  </div>
+</footer>
+
+<div class="sticky-bar" id="stickyBar">
+  <a class="btn btn-ghost" data-wa href="#contact">השאירו פרטים</a>
+  <a class="btn btn-gold" href="#contact" data-i18n="book_visit">תיאום ביקור</a>
+</div>
+
+<script>
+/* Example payload for this page. Uses __DEMO__ rather than __PAGE__ on purpose:
+   runtime.js treats a __PAGE__ as a live listing and would fire view/CTA beacons
+   and POST the lead form. As a demo payload the page stays inert and offline.
+   The shape below is the whole contract a loupe page consumes — the sibling
+   tour.mp4 stands in for the listing video, and the gallery ships captions with
+   no image URLs so runtime samples the tour for its tiles, which is also what
+   feeds the lens photo layers. */
+window.__DEMO__ = {
+  page_id: "", status: "active", language: "he",
+  property: {
+    title: "דירת 5 חדרים · בבלי", address: "אבן גבירול 210", neighborhood: "בבלי",
+    city: "תל אביב–יפו", price: 4850000, rooms: 5, size_sqm: 125, floor: 3,
+    parking: 2, listing_type: "sale", storage: true, elevator: true
+  },
+  agent: {
+    name: "שלום רוזנברג", brand_name: "רוזנברג נכסים", phone: "972505555555",
+    license: "3205419", tagline: "נדל״ן יוקרה · תל אביב", logo_url: null
+  },
+  hero: {
+    phrase: "דירת 5 חדרים מעוצבת בקפידה, עם מרפסת שמש ונוף פתוח לשכונת בבלי הירוקה.",
+    video_url: "tour.mp4", poster_url: null
+  },
+  carousel: { slides: [
+    { num: "01", title: "עיצוב אדריכלי מושלם", body: "תכנון פנים מקצועי המנצל כל מטר, עם חומרים יוקרתיים ואור טבעי מרבי בכל חדר.", tag: "עיצוב פרימיום" },
+    { num: "02", title: "מיקום שאי אפשר לשכפל", body: "בלב שכונת בבלי השקטה — מרחק הליכה מפארק הירקון ומבתי ספר מצוינים.", tag: "בבלי, תל אביב" },
+    { num: "03", title: "מרפסת שמש רחבת ידיים", body: "18 מ״ר הפונים לנוף ירוק ופתוח — לאירוח ולרגעי שקט בלב העיר.", tag: "נוף פתוח" },
+    { num: "04", title: "מפרט טכני ללא פשרות", body: "מטבח משודרג עם אי, מיזוג מרכזי חכם ומערכת בית חכם מלאה.", tag: "בית חכם" }
+  ] },
+  area: {
+    blurb: "בבלי היא הסוד הכי גלוי של תל אביב: שכונה ירוקה ושקטה שיושבת צמוד לפארק הירקון, ועדיין במרחק דקות מהשדרות, מהים ומכל מה שהעיר יודעת להציע.",
+    stops: [
+      { label: "פארק הירקון", minutes: "5 דק׳ הליכה" },
+      { label: "נמל תל אביב והים", minutes: "8 דק׳ נסיעה" },
+      { label: "מתחם הבימה והשדרות", minutes: "10 דק׳ נסיעה" },
+      { label: "הרכבת הקלה — ארלוזורוב", minutes: "7 דק׳ נסיעה" }
+    ],
+    stats: [
+      { value: "+42%", label: "עליית ערך בחמש השנים האחרונות" },
+      { value: "350 דונם", label: "פארק הירקון — הריאה הירוקה בפתח הבית" },
+      { value: "9.4 / 10", label: "דירוג בתי הספר היסודיים בסביבה" },
+      { value: "4 דק׳", label: "לנתיבי איילון — יציאה מהירה לכל הארץ" }
+    ]
+  },
+  cta: {
+    headline: "לראות אותה במו עיניכם.",
+    sub: "השאירו פרטים ונחזור אליכם באופן אישי לתיאום ביקור — בדיסקרטיות מלאה וללא התחייבות."
+  },
+  gallery: { captions: ["חזית הבניין", "סלון ומרפסת שמש", "מטבח מעוצב", "חדר שינה ראשי", "חדר ילדים", "חדר עבודה"] }
+};
+</script>
+<script src="/templates/i18n.js"></script>
+<script src="/tpl/runtime.js"></script>
+<script>
+/* Template-specific behaviour. Everything data-driven — bindings, the gallery
+   tiles, the lead POST, beacons — is runtime.js's job; this file adds the lens,
+   the marquee, the paged lightbox and the chrome. */
+(function () {
+  "use strict";
+  var DATA = window.__PAGE__ || window.__DEMO__ || {};
+  var LANG = DATA.language || "he";
+  var reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
+  function get(path) { return path.split(".").reduce(function (o, k) { return (o == null) ? null : o[k]; }, DATA); }
+  function T(k) { return window.I18N ? window.I18N.t(LANG, k) : k; }
+  var P = get("property") || {};
+  var isRent = P.listing_type === "rent";
+
+  // ── marquee: the listing's own facts, looped. The -50% keyframe needs the
+  //    run duplicated exactly once, so build the items then append a clone. ──
+  (function marquee() {
+    var host = document.getElementById("marquee");
+    var bits = [];
+    bits.push(isRent ? T("for_rent") : T("for_sale"));
+    if (P.rooms) bits.push(P.rooms + " " + T("rooms"));
+    if (P.size_sqm) bits.push(P.size_sqm + " " + T("sqm"));
+    if (P.floor) bits.push(T("floor") + " " + P.floor);
+    if (P.parking) bits.push(P.parking + " " + T("parking"));
+    if (P.storage) bits.push(T("storage"));
+    if (P.shabbat_elevator) bits.push(T("shabbat_elevator"));
+    else if (P.elevator) bits.push(T("elevator"));
+    if (P.neighborhood) bits.push(P.neighborhood);
+    if (P.city) bits.push(P.city);
+    (get("carousel.slides") || []).forEach(function (s) { if (s && s.tag) bits.push(s.tag); });
+    if (!bits.length) { host.parentNode.remove(); return; }
+    // A short run leaves a visible gap mid-scroll, so repeat it until the strip
+    // is comfortably wider than the widest viewport before duplicating.
+    while (bits.length < 10) bits = bits.concat(bits);
+    function run() {
+      var f = document.createDocumentFragment();
+      bits.forEach(function (b) {
+        var d = document.createElement("div");
+        d.className = "mq-item"; d.textContent = b;
+        f.appendChild(d);
+      });
+      return f;
+    }
+    host.appendChild(run());
+    host.appendChild(run()); // the -50% keyframe needs the run present exactly twice
+  })();
+
+  // ── the lens ──────────────────────────────────────────────────────────────
+  //    Layers alternate photo / figure. Photos are taken from whatever
+  //    runtime.js resolved the gallery to — <img> for a real listing, a sampled
+  //    <canvas> in preview — so the lens never needs its own copy of the media.
+  var gal = document.getElementById("gal");
+  var hero = document.getElementById("hero");
+  var ph = document.getElementById("peephole");
+  var inner = document.getElementById("peephole-inner");
+  var layers = [];
+
+  function figures() {
+    var out = [];
+    if (P.size_sqm) out.push({ big: P.size_sqm, unit: T("sqm"), sub: T("built_area") });
+    if (P.price) {
+      var n = +P.price;
+      var big = n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 2).replace(/\.?0+$/, "") + "M" : Math.round(n / 1000) + "K";
+      out.push({ big: big, unit: "₪", sub: isRent ? T("monthly_rent") : T("asking_price") });
+    }
+    if (P.rooms) out.push({ big: P.rooms, unit: T("rooms"), sub: T("the_property") });
+    if (P.floor) out.push({ big: P.floor, unit: T("floor"), sub: T("the_property") });
+    if (P.parking) out.push({ big: P.parking, unit: T("parking"), sub: T("the_property") });
+    return out;
+  }
+
+  function buildLayers() {
+    var tiles = Array.prototype.slice.call(gal.children).filter(function (t) {
+      return t.querySelector("img, canvas");
+    });
+    var figs = figures();
+    if (!tiles.length && !figs.length) return;
+    inner.innerHTML = "";
+    layers = [];
+    var max = Math.max(tiles.length, figs.length), i;
+    for (i = 0; i < max; i++) {
+      if (tiles[i]) layers.push(photoLayer(tiles[i]));
+      if (figs[i]) layers.push(figureLayer(figs[i]));
+    }
+    layers.forEach(function (l, k) { l.el.classList.toggle("active", k === 0); inner.appendChild(l.el); });
+    paintLens();
+  }
+
+  function photoLayer(tile) {
+    var el = document.createElement("div");
+    el.className = "peep-layer peep-img-layer";
+    var src = tile.querySelector("img"), cv = tile.querySelector("canvas");
+    if (src) {
+      var n = new Image();
+      n.src = src.src; n.alt = src.alt || ""; n.loading = "lazy";
+      el.appendChild(n);
+    } else if (cv) {
+      // preview mode: the tour frame lives in a <canvas>; clone the pixels
+      var c = document.createElement("canvas");
+      c.width = cv.width; c.height = cv.height;
+      c.getContext("2d").drawImage(cv, 0, 0);
+      el.appendChild(c);
+    }
+    var hint = document.createElement("div");
+    hint.className = "peep-zoom-hint";
+    hint.textContent = T("gallery_hint_click");
+    el.appendChild(hint);
+    el.addEventListener("click", function (e) {
+      if (dragged) return;
+      e.stopPropagation();
+      lbOpen(Array.prototype.indexOf.call(gal.children, tile));
+    });
+    return { el: el };
+  }
+
+  function figureLayer(f) {
+    var el = document.createElement("div");
+    el.className = "peep-layer peep-text-layer";
+    el.innerHTML = '<div class="peep-big num"></div><div class="peep-unit"></div><div class="peep-sub"></div>';
+    el.children[0].textContent = f.big;
+    el.children[1].textContent = f.unit;
+    el.children[2].textContent = f.sub;
+    return { el: el };
+  }
+
+  // Tiles fill asynchronously — photos load, or the tour is sampled frame by
+  // frame — so rebuild as their contents land.
+  new MutationObserver(function () { buildLayers(); }).observe(gal, { childList: true, subtree: true });
+  buildLayers();
+
+  // ── lens geometry. Positions are hero-local, not viewport, so dragging still
+  //    lands where the pointer is once the page has scrolled. ──
+  var posX = 0, posY = 0, size = 0, animId = 0;
+
+  function lensSize() {
+    return innerWidth <= 768 ? Math.max(120, Math.min(200, innerWidth * 0.2)) : 320;
+  }
+  function rect() { return hero.getBoundingClientRect(); }
+  function clamp(x, y) {
+    var r = rect(), half = size / 2;
+    return {
+      x: Math.max(half, Math.min(r.width - half, x)),
+      y: Math.max(half, Math.min(r.height - half, y)),
+    };
+  }
+  function place() { ph.style.left = posX + "px"; ph.style.top = posY + "px"; }
+  function paintLens() {
+    if (!layers.length) return;
+    var r = rect();
+    var rel = Math.max(0, Math.min(0.9999, posX / (r.width || 1)));
+    var idx = Math.min(layers.length - 1, Math.floor(rel * layers.length));
+    layers.forEach(function (l, i) { l.el.classList.toggle("active", i === idx); });
+  }
+  function applySize() {
+    size = lensSize();
+    ph.style.width = size + "px";
+    ph.style.height = size + "px";
+    buildRing();
+    var c = clamp(posX, posY); posX = c.x; posY = c.y; place(); paintLens();
+  }
+  function buildRing() {
+    var old = document.getElementById("peep-ring");
+    if (old) old.remove();
+    var r = size / 2 + 14, box = size + 60, cx = box / 2;
+    var msg = " · " + T("drag_to_move") + " · DRAG TO EXPLORE ";
+    var text = msg;
+    while ((text + msg).length * 7 < 2 * Math.PI * r) text += msg;
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.id = "peep-ring";
+    svg.setAttribute("width", box); svg.setAttribute("height", box);
+    svg.setAttribute("aria-hidden", "true");
+    var defs = document.createElementNS(NS, "defs");
+    var path = document.createElementNS(NS, "path");
+    path.id = "peep-ring-path";
+    path.setAttribute("d", "M " + cx + " " + cx + " m -" + r + " 0 a " + r + " " + r + " 0 1 1 " + (r * 2) + " 0 a " + r + " " + r + " 0 1 1 -" + (r * 2) + " 0");
+    defs.appendChild(path); svg.appendChild(defs);
+    var t = document.createElementNS(NS, "text");
+    t.setAttribute("font-family", "Heebo, sans-serif");
+    t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
+    t.setAttribute("fill", "rgba(255,255,255,.6)"); t.setAttribute("letter-spacing", "2");
+    // The page is dir="rtl" and an inherited direction:rtl makes Blink drop the
+    // textPath binding outright — the run collapses to the SVG origin and paints
+    // above the viewport, i.e. invisible. Anchoring the run LTR keeps it on the
+    // circle; the Hebrew inside it still shapes right-to-left via bidi.
+    t.setAttribute("direction", "ltr");
+    var tp = document.createElementNS(NS, "textPath");
+    tp.setAttribute("href", "#peep-ring-path");
+    tp.textContent = text;
+    t.appendChild(tp); svg.appendChild(t); ph.appendChild(svg);
+  }
+
+  ph.style.position = "absolute";
+  ph.style.transform = "translate(-50%,-50%)";
+  size = lensSize();
+  posX = rect().width / 2; posY = rect().height * 0.42;
+  applySize();
+  place();
+  addEventListener("resize", applySize);
+
+  function glideTo(x, y) {
+    cancelAnimationFrame(animId);
+    velX = velY = 0;
+    var c = clamp(x, y);
+    if (reduce) { posX = c.x; posY = c.y; place(); paintLens(); return; }
+    (function ease() {
+      posX += (c.x - posX) * 0.18;
+      posY += (c.y - posY) * 0.18;
+      place(); paintLens();
+      if (Math.abs(c.x - posX) > 0.5 || Math.abs(c.y - posY) > 0.5) animId = requestAnimationFrame(ease);
+      else { posX = c.x; posY = c.y; place(); paintLens(); }
+    })();
+  }
+
+  var dragging = false, dragged = false, offX = 0, offY = 0, lastX = 0, lastY = 0, velX = 0, velY = 0;
+
+  function local(e) {
+    var r = rect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  function start(e) {
+    var p = local(e);
+    dragging = true; dragged = false;
+    offX = p.x - posX; offY = p.y - posY;
+    lastX = p.x; lastY = p.y; velX = velY = 0;
+    cancelAnimationFrame(animId);
+    e.preventDefault(); e.stopPropagation();
+  }
+  function move(e) {
+    if (!dragging) return;
+    var p = local(e);
+    if (Math.abs(p.x - lastX) + Math.abs(p.y - lastY) > 2) dragged = true;
+    velX = p.x - lastX; velY = p.y - lastY;
+    lastX = p.x; lastY = p.y;
+    var c = clamp(p.x - offX, p.y - offY);
+    posX = c.x; posY = c.y; place(); paintLens();
+  }
+  function end() {
+    if (!dragging) return;
+    dragging = false;
+    if (reduce) return;
+    (function momentum() {
+      if (Math.abs(velX) < 0.4 && Math.abs(velY) < 0.4) return;
+      velX *= 0.88; velY *= 0.88;
+      var c = clamp(posX + velX, posY + velY);
+      if (c.x !== posX + velX) velX = 0;
+      if (c.y !== posY + velY) velY = 0;
+      posX = c.x; posY = c.y; place(); paintLens();
+      animId = requestAnimationFrame(momentum);
+    })();
+    // let the click that follows a drag through only if the lens did not move
+    setTimeout(function () { dragged = false; }, 0);
+  }
+
+  if (window.PointerEvent) {
+    ph.addEventListener("pointerdown", function (e) { ph.setPointerCapture(e.pointerId); start(e); });
+    ph.addEventListener("pointermove", move);
+    ph.addEventListener("pointerup", end);
+    ph.addEventListener("pointercancel", end);
+  } else {
+    ph.addEventListener("mousedown", start);
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", end);
+    ph.addEventListener("touchstart", function (e) { start(e.touches[0]); }, { passive: false });
+    document.addEventListener("touchmove", function (e) { if (dragging) { e.preventDefault(); move(e.touches[0]); } }, { passive: false });
+    document.addEventListener("touchend", end);
+  }
+
+  // tapping the hero sends the lens there
+  hero.addEventListener("click", function (e) {
+    if (dragging || dragged) return;
+    if (e.target.closest("a, button, #peephole")) return;
+    var p = local(e);
+    glideTo(p.x, p.y);
+  });
+
+  // ── lightbox. runtime.js attaches its own per-tile handler; intercept in the
+  //    capture phase so the click opens this paged one instead. ──
+  var lb = document.getElementById("lightbox");
+  var lbWrap = document.getElementById("lbWrap");
+  var lbCap = document.getElementById("lbCap");
+  var lbCount = document.getElementById("lbCount");
+  var lbIdx = 0;
+
+  function tiles() { return Array.prototype.slice.call(gal.children); }
+  function lbPaint() {
+    var all = tiles(), t = all[lbIdx];
+    if (!t) return;
+    var src = t.querySelector("img"), cv = t.querySelector("canvas");
+    lbWrap.innerHTML = "";
+    if (src) {
+      var n = new Image(); n.src = src.src; n.alt = src.alt || "";
+      lbWrap.appendChild(n);
+    } else if (cv) {
+      var c = document.createElement("canvas");
+      c.width = cv.width; c.height = cv.height;
+      c.getContext("2d").drawImage(cv, 0, 0);
+      lbWrap.appendChild(c);
+    }
+    var cap = t.querySelector(".g-cap");
+    lbCap.textContent = cap ? cap.textContent : "";
+    lbCount.textContent = (lbIdx + 1) + " / " + all.length;
+  }
+  function lbShow(i) {
+    var n = tiles().length;
+    if (!n) return;
+    lbIdx = (i + n) % n;
+    lbPaint();
+  }
+  function lbOpen(i) {
+    lbShow(i);
+    lb.classList.add("open");
+    document.body.style.overflow = "hidden";
+  }
+  function lbClose() { lb.classList.remove("open"); document.body.style.overflow = ""; }
+
+  gal.addEventListener("click", function (e) {
+    var tile = e.target.closest ? e.target.closest(".gal-item") : null;
+    if (!tile || tile.parentNode !== gal) return;
+    e.stopPropagation();
+    lbOpen(Array.prototype.indexOf.call(gal.children, tile));
+  }, true);
+
+  document.getElementById("lbClose").addEventListener("click", lbClose);
+  document.getElementById("lbNext").addEventListener("click", function () { lbShow(lbIdx + 1); });
+  document.getElementById("lbPrev").addEventListener("click", function () { lbShow(lbIdx - 1); });
+  document.getElementById("lbNextMobile").addEventListener("click", function () { lbShow(lbIdx + 1); });
+  document.getElementById("lbPrevMobile").addEventListener("click", function () { lbShow(lbIdx - 1); });
+  lb.addEventListener("click", function (e) { if (e.target === lb) lbClose(); });
+  addEventListener("keydown", function (e) {
+    if (!lb.classList.contains("open")) return;
+    if (e.key === "Escape") lbClose();
+    if (e.key === "ArrowLeft") lbShow(lbIdx + 1);
+    if (e.key === "ArrowRight") lbShow(lbIdx - 1);
+  });
+  var swipeX = null;
+  lb.addEventListener("touchstart", function (e) { swipeX = e.touches[0].clientX; }, { passive: true });
+  lb.addEventListener("touchend", function (e) {
+    if (swipeX === null) return;
+    var dx = e.changedTouches[0].clientX - swipeX;
+    if (Math.abs(dx) > 48) lbShow(lbIdx + (dx < 0 ? 1 : -1));
+    swipeX = null;
+  }, { passive: true });
+
+  // ── carousel arrows (RTL: scrollBy is negative to advance) ──
+  var car = document.getElementById("carousel");
+  var step = function () { return Math.min(344, car.clientWidth * 0.85); };
+  document.getElementById("carNext").addEventListener("click", function () { car.scrollBy({ left: -step(), behavior: "smooth" }); });
+  document.getElementById("carPrev").addEventListener("click", function () { car.scrollBy({ left: step(), behavior: "smooth" }); });
+
+  // ── cursor ──
+  if (matchMedia("(hover: hover) and (pointer: fine)").matches) {
+    var cur = document.getElementById("cur"), curR = document.getElementById("cur-r");
+    var mx = 0, my = 0, rx = 0, ry = 0;
+    document.addEventListener("mousemove", function (e) {
+      mx = e.clientX; my = e.clientY;
+      cur.style.left = mx + "px"; cur.style.top = my + "px";
+    });
+    (function ring() {
+      rx += (mx - rx) * 0.13; ry += (my - ry) * 0.13;
+      curR.style.left = rx + "px"; curR.style.top = ry + "px";
+      requestAnimationFrame(ring);
+    })();
+    document.addEventListener("mouseover", function (e) {
+      var hot = e.target.closest("a, button, .card, .gal-item, .astat, #peephole");
+      cur.style.width = cur.style.height = hot ? "18px" : "10px";
+      curR.style.width = curR.style.height = hot ? "54px" : "36px";
+    });
+  }
+
+  // ── progress, topbar, sticky bar, hero parallax ──
+  var topbar = document.getElementById("topbar");
+  var sticky = document.getElementById("stickyBar");
+  var heroBg = document.getElementById("heroBg");
+  var canParallax = !reduce && matchMedia("(hover: hover)").matches;
+  addEventListener("scroll", function () {
+    var y = scrollY || 0;
+    var max = document.documentElement.scrollHeight - innerHeight;
+    document.getElementById("prog").style.width = (max > 0 ? (y / max) * 100 : 0) + "%";
+    topbar.classList.toggle("scrolled", y > 40);
+    sticky.classList.toggle("show", y > hero.offsetHeight * 0.7);
+    if (canParallax) heroBg.style.transform = "translateY(" + y * 0.18 + "px)";
+  }, { passive: true });
+
+  // ── mobile nav ──
+  var navMobile = document.getElementById("navMobile");
+  document.getElementById("navMenuBtn").addEventListener("click", function () { navMobile.classList.add("open"); });
+  document.getElementById("navClose").addEventListener("click", function () { navMobile.classList.remove("open"); });
+  navMobile.addEventListener("click", function (e) { if (e.target.closest("a")) navMobile.classList.remove("open"); });
+
+  // ── lead form: runtime.js posts it and reveals [data-lead-sent]; swap the
+  //    form out for the confirmation panel so only one of the two shows. ──
+  document.getElementById("leadForm").addEventListener("submit", function () {
+    document.getElementById("leadForm").style.display = "none";
+    document.getElementById("formDone").style.display = "block";
+  });
+})();
+</script>
+</body>
+</html>

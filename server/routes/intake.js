@@ -25,7 +25,8 @@ const MAX_FONT_MB = 5;
 
 module.exports = function createIntakeRouter(ctx) {
   const { requireAuth, normalizeAuthPhone, signSession, uploadDir, uploadPublicBase, remoteUploadBase,
-    n8nWw1Webhook, n8nPipelineWebhook, authSecret, sessionTtl, pageBaseUrl } = ctx;
+    n8nWw1Webhook, n8nPipelineWebhook, authSecret, sessionTtl, pageBaseUrl, isDevRun, isDevPipelineRun,
+    baseUrl } = ctx;
 
   const router = express.Router();
 
@@ -169,10 +170,10 @@ module.exports = function createIntakeRouter(ctx) {
     const webhook = listing.own_video_url ? n8nPipelineWebhook : n8nWw1Webhook;
     const payload = listing.own_video_url ? {
       listing_id: listingId, business_phone: phone, video_url: listing.own_video_url,
-      language: listing.language,
+      language: listing.language, dev: !!isDevPipelineRun, base_url: baseUrl,
     } : {
       phone, image_urls: listing.photos_urls, listing_id: listingId, trigger_source: "dashboard",
-      language: listing.language,
+      language: listing.language, dev: !!isDevRun, base_url: baseUrl,
       property_details: {
         listing_type: listing.listing_type,
         address: listing.address, neighborhood: listing.neighborhood, city: listing.city,

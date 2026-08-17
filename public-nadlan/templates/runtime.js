@@ -1,7 +1,8 @@
 /* Forly Nadlan — shared template runtime.
-   Renders any of the data-driven landing templates (nocturne/galerie/reel) from
-   a single page payload. In production the server injects window.__PAGE__ with
-   the real listing; for previews the template ships a window.__DEMO__ fallback.
+   Renders any of the data-driven landing templates (nocturne/reel/
+   atelier/revue) from a single page payload. In production the server injects
+   window.__PAGE__ with the real listing; for previews the template ships a
+   window.__DEMO__ fallback.
 
    Binding contract (attributes the templates use):
      data-bind="a.b.c"        → element.textContent = value at that path
@@ -17,10 +18,18 @@
      data-ppm                 → price-per-sqm line (sale listings with price+sqm)
      data-list="area.stops"   → clone the child <template> per array item,
                                 filling [data-field="k"] from item[k]
-     data-gallery data-gallery-class="g"  → build N tiles from the video's frames
+     data-gallery data-gallery-class="g"  → build N tiles from the listing photos
+       data-gallery-captions  → also print each tile's caption into <span class="g-cap">
+                                each tile also carries data-desc, the photo's
+                                one-line description, for templates with room
+                                to show it
+     data-photo="k"           → <img>.src = gallery.images[k] — a single editorial
+                                photo slot, outside the gallery grid
      data-lead-form           → submit posts /api/property-lead
        [data-lead="name|phone|message"], [data-lead-sent]
      data-count               → animate the number up when scrolled into view
+       data-count-bind="a.b"  → take that number from the payload instead of the
+                                attribute; drops [data-count-item] when it's empty
    Interactions: scroll-reveal (.reveal), lightbox, view/CTA beacons. */
 (function () {
   "use strict";
@@ -77,6 +86,17 @@
   each("[data-price-label]", document, function (el) { el.textContent = isRent ? T("monthly_rent") : T("asking_price"); });
   each("[data-show]", document, function (el) { if (!get(el.getAttribute("data-show"))) el.remove(); });
 
+  // ── count-up targets taken from the payload rather than a hard-coded
+  //    attribute. Runs before the observer below so the element is already
+  //    carrying data-count by the time it is registered. A listing with no
+  //    value for the field drops its whole stat ([data-count-item]) instead of
+  //    animating up to a meaningless zero.
+  each("[data-count-bind]", document, function (el) {
+    var v = +get(el.getAttribute("data-count-bind"));
+    if (v > 0) el.setAttribute("data-count", v);
+    else (el.closest("[data-count-item]") || el).remove();
+  });
+
   // ── document title / meta ──
   var title = get("property.title"), brand = get("agent.brand_name") || get("agent.name");
   if (title) document.title = title + (brand ? " · " + brand : "");
@@ -88,6 +108,59 @@
     if (vsrc) { v.src = vsrc; v.load(); var p = v.play && v.play(); if (p && p.catch) p.catch(function () {}); }
   });
 
+  // ── editorial photo slots — the single, full-bleed images the magazine-style
+  //    templates hang their layout on, outside the gallery grid. data-photo="k"
+  //    takes gallery.images[k] (wrapping round when the listing has fewer
+  //    photos than the template has slots). The demo preview ships captions but
+  //    no URLs, so it falls back to frames sampled from the tour video — a
+  //    template never renders with a hole where a photo should be.
+  (function photoSlots() {
+    var slots = [], images = get("gallery.images"), caps = get("gallery.captions") || [];
+    var have = Array.isArray(images) ? images.length : 0;
+    each("img[data-photo]", document, function (img) {
+      var k = Math.max(0, +img.getAttribute("data-photo") || 0);
+      var pic = have ? images[k % have] : null;
+      if (pic && pic.url) {
+        img.src = pic.url;
+        img.alt = img.alt || pic.caption || caps[k % have] || "";
+      } else {
+        slots.push({ img: img, k: k });
+      }
+    });
+    if (!slots.length) return;
+    if (!vsrc) {
+      // nothing to sample from either — drop the empty slots so the layout
+      // falls back to each container's own backdrop instead of holding a
+      // sourceless <img>.
+      slots.forEach(function (s) { s.img.remove(); });
+      return;
+    }
+    var vv = document.createElement("video");
+    vv.src = vsrc; vv.muted = true; vv.playsInline = true; vv.preload = "auto"; vv.crossOrigin = "anonymous";
+    vv.addEventListener("loadedmetadata", function () {
+      var i = 0;
+      function seek() {
+        if (i >= slots.length) return;
+        vv.currentTime = Math.max(0.1, (0.08 + 0.78 * ((slots[i].k % 6) / 5)) * vv.duration);
+      }
+      vv.addEventListener("seeked", function () {
+        try {
+          var c = document.createElement("canvas");
+          c.width = vv.videoWidth; c.height = vv.videoHeight;
+          c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height);
+          // 0.85 was visibly soft on the editorial slots, which are the largest
+          // thing a sampled frame ever fills. The frames are already the weakest
+          // picture on the page — a 480p tour blown up full-bleed — so spending
+          // a few KB here rather than compounding the loss is the better trade.
+          slots[i].img.src = c.toDataURL("image/jpeg", 0.92);
+        } catch (e) {} // tainted canvas (cross-origin video) — leave the slot to its CSS backdrop
+        i++; seek();
+      });
+      seek();
+    });
+    vv.load();
+  })();
+
   // ── contact links: everything funnels into the lead form (#contact). Forly
   //    relays the lead to the agent from its own WhatsApp number — the page
   //    never links prospects directly to the agent.
@@ -98,6 +171,62 @@
     a.textContent = T("leave_details");
   });
 
+  // ── the logo's own background ─────────────────────────────────────────────
+  // Most agency logos arrive as a flat image with a solid card baked in —
+  // usually white — which shows as a pasted-on rectangle wherever the page is
+  // not that colour. Rather than key it out (which mangles a mark with a soft
+  // edge or a drop shadow), read what that colour is and let the template paint
+  // with it, so the card the logo sits on and the card inside the logo are the
+  // same colour and the seam disappears.
+  //
+  // Publishing re-hosts the logo onto this origin, so the canvas is readable.
+  // Everything here is best-effort: a cut-out logo, a photographic one, a
+  // cross-origin host without CORS, or an old browser all end with the template
+  // left exactly as authored.
+  function srgb(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+
+  function sampleLogoBackground(url) {
+    var probe = new Image();
+    probe.crossOrigin = "anonymous";
+    probe.addEventListener("error", function () {});
+    probe.addEventListener("load", function () {
+      var w = probe.naturalWidth, h = probe.naturalHeight;
+      if (w < 4 || h < 4) return;
+      var first = null;
+      try {
+        var c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        var ctx = c.getContext("2d");
+        ctx.drawImage(probe, 0, 0);
+        // four corners and the middle of each edge. A mark on a solid card
+        // agrees on all eight; a cut-out is transparent at the corners and a
+        // photographic or gradient background disagrees between them.
+        var pts = [[1, 1], [w - 2, 1], [1, h - 2], [w - 2, h - 2],
+                   [w >> 1, 1], [w >> 1, h - 2], [1, h >> 1], [w - 2, h >> 1]];
+        for (var i = 0; i < pts.length; i++) {
+          var d = ctx.getImageData(pts[i][0], pts[i][1], 1, 1).data;
+          if (d[3] < 250) return;            // transparent — there is no card to match
+          if (!first) { first = d; continue; }
+          if (Math.abs(d[0] - first[0]) > 6 ||
+              Math.abs(d[1] - first[1]) > 6 ||
+              Math.abs(d[2] - first[2]) > 6) return;   // not one flat colour
+        }
+      } catch (e) { return; }                // tainted canvas
+      if (!first) return;
+      var rs = document.documentElement.style;
+      rs.setProperty("--logo-bg", "rgb(" + first[0] + "," + first[1] + "," + first[2] + ")");
+      // Whatever the template puts on that ground has to be readable on it, and
+      // a logo card can just as easily be near-black as near-white.
+      var lum = 0.2126 * srgb(first[0]) + 0.7152 * srgb(first[1]) + 0.0722 * srgb(first[2]);
+      var dark = lum > 0.42;
+      rs.setProperty("--logo-ink", dark ? "#14151b" : "#f7f5f0");
+      rs.setProperty("--logo-ink-soft", dark ? "rgba(20,21,27,.68)" : "rgba(247,245,240,.74)");
+      rs.setProperty("--logo-line", dark ? "rgba(20,21,27,.16)" : "rgba(247,245,240,.2)");
+      document.documentElement.classList.add("has-logo-bg");
+    });
+    probe.src = url;
+  }
+
   // ── agent logo: brand slot + avatar circle ──
   var logoUrl = String(get("agent.logo_url") || "");
   var escAttr = function (s) { return String(s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); };
@@ -106,9 +235,48 @@
       el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="' + escAttr(get("agent.brand_name") || get("agent.name") || "") +
         '" style="height:38px;max-width:150px;object-fit:contain;display:block">';
     });
+    // The avatar slot is dressed for initials: a filled circle, in places with
+    // a ring around it. A logo dropped into that was `cover`-cropped to the
+    // circle, so anything wider than it is tall lost both ends — which is most
+    // agency logos. `contain` fits the whole mark inside instead, and the
+    // slot's own fill and ring come off so the logo sits on the page rather
+    // than on a coloured disc. Initials keep the circle: see the else branch.
     each("[data-avatar]", document, function (el) {
-      el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+      // Keep the height the design chose and give the slot a width to match the
+      // logo's proportions, so a wide wordmark is neither cropped nor shrunk to
+      // a quarter of the slot's height.
+      //
+      // Both numbers are definite, and they have to be. Sizing the slot
+      // shrink-to-fit around an image that is itself capped to the slot's width
+      // is circular, and CSS breaks the tie by falling back to the picture's
+      // intrinsic size — which on a 520x400 logo in an 88px slot came out
+      // 184x142 and spilled over the agent's name underneath.
+      //
+      // offsetHeight, not getBoundingClientRect(): several templates reveal this
+      // block with a transform, and the rect is the *transformed* box, so a card
+      // mid-animation at scale(.92) pins the slot 8% short and never recovers.
+      var h = el.offsetHeight;
+      if (h > 0) el.style.height = h + "px";
+      el.style.aspectRatio = "auto";
+      el.style.background = "none";
+      el.style.border = "0";
+      el.style.borderRadius = "0";
+      el.style.overflow = "hidden";
+      // a hook for the decoration templates hang off the slot — spinning rings,
+      // pulsing haloes — which are drawn for a circle that is no longer there
+      el.classList.add("has-logo");
+      var im = document.createElement("img");
+      im.alt = "";
+      im.style.cssText = "width:100%;height:100%;object-fit:contain;display:block";
+      im.addEventListener("load", function () {
+        if (!h || !im.naturalWidth || !im.naturalHeight) return;
+        el.style.width = Math.min(200, Math.round((h * im.naturalWidth) / im.naturalHeight)) + "px";
+      });
+      im.src = logoUrl;
+      el.textContent = "";
+      el.appendChild(im);
     });
+    sampleLogoBackground(logoUrl);
   } else {
     var initials = String(get("agent.name") || "").split(/\s+/).map(function (w) { return w.charAt(0); }).join("").slice(0, 2);
     each("[data-avatar]", document, function (el) { if (initials) el.textContent = initials; });
@@ -174,11 +342,25 @@
     var count = useImages ?
       Math.min(images.length, 12) :
       +(host.getAttribute("data-gallery-count") || 6);
+    var wantCaps = host.hasAttribute("data-gallery-captions");
+    function capOf(k) { return (useImages && images[k] && images[k].caption) || caps[k] || ""; }
+    function descOf(k) { return (useImages && images[k] && images[k].description) || ""; }
     var frames = [], srcs = [], tiles = [], i;
     for (i = 0; i < count; i++) {
       var b = document.createElement("button");
       b.className = cls; b.type = "button";
       b.innerHTML = '<span class="g-no">' + (i < 9 ? "0" : "") + (i + 1) + "</span>";
+      if (wantCaps && capOf(i)) {
+        var cp = document.createElement("span");
+        cp.className = "g-cap"; cp.textContent = capOf(i);
+        b.appendChild(cp);
+      }
+      // The photo's sentence goes on the tile as an attribute rather than into
+      // it: a thumbnail has no room for a line of prose, but a template that
+      // gives a photo a panel of its own (orbite's deck) needs somewhere to
+      // read it from.
+      var dsc = descOf(i);
+      if (dsc) b.setAttribute("data-desc", dsc);
       (function (idx) { b.addEventListener("click", function () { openLB(idx); }); })(i);
       host.appendChild(b); tiles.push(b);
     }
@@ -198,10 +380,22 @@
       var FR = [];
       for (i = 0; i < count; i++) FR.push(0.06 + (0.86 * i) / Math.max(1, count - 1));
       var vv = document.createElement("video");
-      vv.src = vsrc; vv.muted = true; vv.playsInline = true; vv.preload = "auto"; vv.crossOrigin = "anonymous";
+      vv.src = vsrc; vv.muted = true; vv.playsInline = true; vv.preload = "auto";
+      // Only a cross-origin fetch needs the CORS opt-in, and only it can taint
+      // the canvas. On a blob:/data: source WebKit reads the attribute as a
+      // failed CORS check and refuses the load, so it has to stay off there.
+      if (/^https?:/i.test(vsrc)) vv.crossOrigin = "anonymous";
+      // iOS will not decode a detached <video>; it has to be in the document and
+      // laid out, so park it off-screen at 2px rather than display:none.
+      vv.setAttribute("aria-hidden", "true");
+      vv.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
+      document.body.appendChild(vv);
       vv.addEventListener("loadedmetadata", function () {
         var k = 0;
-        function seek() { if (k >= count) return; vv.currentTime = Math.max(0.1, FR[k] * vv.duration); }
+        function seek() {
+          if (k >= count) { if (vv.parentNode) vv.parentNode.removeChild(vv); return; }
+          vv.currentTime = Math.max(0.1, FR[k] * vv.duration);
+        }
         vv.addEventListener("seeked", function () {
           var c = document.createElement("canvas"); c.width = vv.videoWidth; c.height = vv.videoHeight;
           try { c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height); frames[k] = c; tiles[k].insertBefore(c, tiles[k].firstChild); tiles[k].classList.add("loaded"); } catch (e) {}
@@ -277,21 +471,70 @@
   each("[data-wa],[href='#contact'],a[href*='wa.me']", document, function (a) { a.addEventListener("click", function () { beacon("cta_click"); }); });
 
   // ── lead form ──
+  // The same rules the server enforces on /api/property-lead, so a visitor is
+  // told here instead of losing the lead to a silent 400: an Israeli mobile and
+  // a real name. Constraints are set from here rather than in seven templates.
+  function normalizePhone(raw) {
+    var d = String(raw || "").replace(/\D/g, "");
+    if (/^05\d{8}$/.test(d)) return "972" + d.slice(1);
+    if (/^9725\d{8}$/.test(d)) return d;
+    if (/^5\d{8}$/.test(d)) return "972" + d;
+    return null;
+  }
   each("[data-lead-form]", document, function (form) {
+    var nameEl = form.querySelector("[data-lead='name']");
+    var phEl = form.querySelector("[data-lead='phone']");
+    var msgEl = form.querySelector("[data-lead='message']");
+    if (nameEl) { nameEl.required = true; nameEl.minLength = 2; nameEl.maxLength = 60; }
+    if (phEl) { phEl.required = true; phEl.setAttribute("inputmode", "tel"); phEl.maxLength = 20; }
+    if (msgEl) msgEl.maxLength = 500;
+    // a custom error sticks until it is cleared, so drop it as soon as they type
+    if (phEl) phEl.addEventListener("input", function () { phEl.setCustomValidity(""); });
+
+    // the error line is built here so every template gets one without markup
+    var err = form.querySelector("[data-lead-error]");
+    function showErr(text) {
+      if (!err) {
+        err = document.createElement("p");
+        err.setAttribute("data-lead-error", "");
+        err.style.cssText = "margin:10px 0 0;font-size:14px;color:#c0392b";
+        form.appendChild(err);
+      }
+      err.textContent = text;
+      err.style.display = text ? "block" : "none";
+    }
+
     form.addEventListener("submit", function (e) {
       e.preventDefault();
-      var name = (form.querySelector("[data-lead='name']") || {}).value || "";
-      var ph = (form.querySelector("[data-lead='phone']") || {}).value || "";
-      var msg = (form.querySelector("[data-lead='message']") || {}).value || "";
-      name = String(name).trim(); ph = String(ph).trim(); msg = String(msg).trim();
-      if (!IS_PREVIEW && PAGE_ID && name && ph) {
-        fetch("/api/property-lead", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ page_id: PAGE_ID, name: name, phone: ph, message: msg }),
-        }).catch(function () {});
-      }
-      var sent = form.querySelector("[data-lead-sent]"); if (sent) sent.style.display = "block";
-      beacon("cta_click");
+      showErr("");
+      var name = String((nameEl || {}).value || "").trim();
+      var msg = String((msgEl || {}).value || "").trim().slice(0, 500);
+      var phone = normalizePhone((phEl || {}).value);
+      if (phEl) phEl.setCustomValidity(phone ? "" : T("form_bad_phone"));
+      // novalidate is set on some templates' forms, so ask explicitly
+      if (!form.checkValidity()) { form.reportValidity(); return; }
+      if (name.length < 2) { if (nameEl) nameEl.reportValidity(); return; }
+
+      var done = function () {
+        var sent = form.querySelector("[data-lead-sent]"); if (sent) sent.style.display = "block";
+        form.style.display = "none";
+        beacon("cta_click");
+      };
+      if (IS_PREVIEW || !PAGE_ID) return done();
+
+      var btn = form.querySelector("[type=submit],button:not([type])");
+      if (btn) btn.disabled = true;
+      fetch("/api/property-lead", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page_id: PAGE_ID, name: name, phone: phone, message: msg }),
+      }).then(function (r) {
+        // the lead is what matters — a failed post must not look like a success
+        if (!r.ok) throw new Error(r.status);
+        done();
+      }).catch(function () {
+        if (btn) btn.disabled = false;
+        showErr(T("form_error"));
+      });
     });
   });
 
