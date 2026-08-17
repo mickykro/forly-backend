@@ -110,6 +110,17 @@ app.use("/api/admin", createAdminRouter({
   adminPhones: ADMIN_PHONES,
 }));
 
+// ── distribution routes (Meta OAuth, one-tap confirm, publish, groups) ──
+const createDistributionRouter = require("./routes/distribution");
+const distributionJobs = require("./distribution/jobs");
+app.use("/api/distribution", createDistributionRouter({
+  requireAuth, verifyActionToken,
+  authSecret: AUTH_SECRET,
+  pageBaseUrl: PAGE_BASE_URL,
+  greenInstance: GREENAPI_INSTANCE,
+  greenToken: GREENAPI_TOKEN,
+}));
+
 // signup redirect at root level
 app.get("/signup", (req, res) => {
   const session = verifySession(AUTH_SECRET, readToken(req));
@@ -172,4 +183,8 @@ app.listen(PORT, () => {
   console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
   // Expiry scheduler retired: property pages no longer expire — the public
   // portal (call4li.com) lists every live page until the agent archives it.
+  distributionJobs.startSweeper(distributionJobs.liveDeps({
+    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN,
+    pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
+  }));
 });
