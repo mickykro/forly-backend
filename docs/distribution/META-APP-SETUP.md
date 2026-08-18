@@ -76,6 +76,45 @@ reconnects from the dashboard and everything resumes.
 
 ## 7. Manual end-to-end verification (Dev Mode) — run after each phase ships
 
+### 7.0 Testing locally BEFORE any merge/deploy (the tunnel path)
+
+Nothing needs to reach main to test: a Meta app accepts multiple Valid
+OAuth Redirect URIs, so a temporary tunnel URL can sit next to the future
+production one.
+
+1. Check out the feature branch locally; `cd server`.
+2. `server/.env` needs: `META_APP_ID`, `META_APP_SECRET`,
+   `NADLAN_JWT_SECRET` (any non-default string — auth is disabled without
+   it), real `GREENAPI_INSTANCE`/`GREENAPI_TOKEN` (so the confirm link and
+   share kit actually reach your phone), and
+   `GOOGLE_APPLICATION_CREDENTIALS` pointing at the service-account JSON —
+   entitlement lives on `businesses/{phone}`, so the flow needs real
+   Firestore; use YOUR OWN phone's business as the only entitled test agent.
+3. Terminal 1: `npm run tunnel` → prints `https://<name>.trycloudflare.com`.
+4. Meta app → Facebook Login for Business → Settings → ADD
+   `https://<name>.trycloudflare.com/api/distribution/oauth/callback` to the
+   Valid OAuth Redirect URIs (keep the production URI listed too).
+5. Terminal 2 — the three URLs must all be the tunnel, or links point at
+   localhost:
+
+   ```
+   BASE_URL=https://<name>.trycloudflare.com \
+   PAGE_BASE_URL=https://<name>.trycloudflare.com \
+   META_REDIRECT_URL=https://<name>.trycloudflare.com/api/distribution/oauth/callback \
+   node index.js
+   ```
+6. Open `https://<name>.trycloudflare.com/distribution.html`, log in with
+   the WhatsApp OTP, and run checklist §7 below. Posts go to your own test
+   Page (Dev Mode + Tester role — no real agent is affected).
+7. Each tunnel run prints a NEW hostname: update the Meta redirect URI (or
+   create a named Cloudflare tunnel for a stable URL) and restart with the
+   new value. Remove tunnel URIs from the Meta app when you finish.
+
+Once the tunnel run is clean, merge/deploy and the production URI —
+already registered — works with zero further Meta changes.
+
+### 7.1 The checklist
+
 Setup: `.env` with real `META_APP_ID/SECRET`, `META_REDIRECT_URL` through a
 `npm run tunnel` URL, GreenAPI creds, and a test business with
 `features.distribution: true` (flip via the admin panel).
