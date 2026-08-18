@@ -106,9 +106,13 @@ production one.
 6. Open `https://<name>.trycloudflare.com/distribution.html`, log in with
    the WhatsApp OTP, and run checklist §7 below. Posts go to your own test
    Page (Dev Mode + Tester role — no real agent is affected).
-7. Each tunnel run prints a NEW hostname: update the Meta redirect URI (or
-   create a named Cloudflare tunnel for a stable URL) and restart with the
-   new value. Remove tunnel URIs from the Meta app when you finish.
+7. Each quick-tunnel run prints a NEW hostname (and trycloudflare URLs are
+   not guaranteed past ~a day), so for anything beyond a single session use
+   a STABLE tunnel instead: ngrok's free static domain (dashboard → Domains
+   → claim one, `ngrok config add-authtoken <token>` once, then
+   `ngrok http --domain=<yours>.ngrok-free.app 8787`). Register that URL's
+   callback in the Meta app once and it stays valid across restarts. Remove
+   tunnel URIs from the Meta app when testing ends.
 
 Once the tunnel run is clean, merge/deploy and the production URI —
 already registered — works with zero further Meta changes.
