@@ -77,7 +77,7 @@ function buildShareKitMessage({ copy, pageUrl, groups }) {
     String(copy || ""),
     FENCE,
     "",
-    `שיתוף מהיר בפייסבוק: ${sharerLink(pageUrl)}`,
+    `לשיתוף בפרופיל האישי שלכם (שתי הקשות): ${sharerLink(pageUrl)}`,
   ];
   const gs = Array.isArray(groups) ? groups : [];
   if (gs.length) {
