@@ -104,6 +104,7 @@
     for (const prop of active) {
       const pageId = prop.page_id;
       const row = document.createElement("div"); row.className = "prop";
+      row.id = "prop-" + pageId;
       const t = document.createElement("div"); t.className = "t";
       const name = document.createElement("div"); name.className = "name";
       name.textContent = prop.title || pageId;
@@ -134,6 +135,19 @@
         }
       }).catch(() => { chip.textContent = "—"; });
     }
+    // Deep link from the main dashboard: /distribution.html?page=<id>
+    // scrolls to that property and highlights it briefly.
+    const focus = new URLSearchParams(location.search).get("page");
+    if (focus) {
+      const el = document.getElementById("prop-" + focus);
+      if (el) {
+        el.scrollIntoView({ block: "center" });
+        el.style.outline = "2px solid var(--gold)";
+        el.style.outlineOffset = "4px";
+        el.style.borderRadius = "10px";
+        setTimeout(() => { el.style.outline = ""; }, 4000);
+      }
+    }
   }
 
   (async () => {
@@ -144,5 +158,11 @@
     renderConnection(st);
     renderGroups(st);
     loadProps();
+    // Landed here from a successful OAuth connect → confirm it, clean the URL
+    // (but keep ?page= deep links intact for the highlight above).
+    if (new URLSearchParams(location.search).get("connected") === "1") {
+      toast("החיבור לפייסבוק הושלם ✅");
+      history.replaceState(null, "", location.pathname);
+    }
   })();
 })();

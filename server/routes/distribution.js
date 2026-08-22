@@ -24,8 +24,11 @@ const esc = (s) => String(s == null ? "" : s)
   .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // Same card shell as routes/pages.js confirmHtml — Hebrew, RTL, self-contained.
-const card = (title, sub, extraHtml = "") =>
+// `redirectTo` auto-forwards after 2s (used to land back on the dashboard
+// once a connect completes) while the card gives visible confirmation.
+const card = (title, sub, extraHtml = "", redirectTo = null) =>
   `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
+  (redirectTo ? `<meta http-equiv="refresh" content="2;url=${esc(redirectTo)}">` : "") +
   `<meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${esc(title)}</title>` +
   `<style>body{font-family:-apple-system,'Segoe UI',sans-serif;background:#F7F3EC;color:#17140F;` +
   `display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}` +
@@ -108,7 +111,9 @@ module.exports = function createDistributionRouter(ctx) {
       if (pages.length === 1) {
         await storeConnection(state.phone, long.access_token, pages[0]);
         return res.type("html").send(card("✅ החיבור הושלם",
-          `הדף "${pages[0].name}" חובר. מהנכס הבא — פרסום בקליק אחד.`));
+          `הדף "${pages[0].name}" חובר. מחזירים אתכם לעמוד ההפצה…`,
+          `<a href="/distribution.html?connected=1"><button>לעמוד ההפצה</button></a>`,
+          "/distribution.html?connected=1"));
       }
       // Multi-page: stash the candidates, re-sign a fresh state, render picker.
       await db.setConnection(state.phone, {
@@ -146,7 +151,9 @@ module.exports = function createDistributionRouter(ctx) {
     }
     await storeConnection(state.phone, conn.user_token, pick);
     res.type("html").send(card("✅ החיבור הושלם",
-      `הדף "${pick.name}" חובר. מהנכס הבא — פרסום בקליק אחד.`));
+      `הדף "${pick.name}" חובר. מחזירים אתכם לעמוד ההפצה…`,
+      `<a href="/distribution.html?connected=1"><button>לעמוד ההפצה</button></a>`,
+      "/distribution.html?connected=1"));
   });
 
   // ── GET /confirm?d=&t= — the one-tap WhatsApp link ──

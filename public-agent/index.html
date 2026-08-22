@@ -205,6 +205,7 @@
     if (p.page_url && (p.page_status === "active" || p.page_status === "expiring")) {
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" href="' + p.page_url + '">צפייה</a>');
       actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + p.page_id + '">עריכה</a>');
+      actions.push('<a class="btn btn-ghost btn-sm" href="/distribution.html?page=' + p.page_id + '">הפצה</a>');
     }
     if (p.page_id && p.page_status !== "building") {
       actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + p.page_id + '">הארכה +30</button>');
