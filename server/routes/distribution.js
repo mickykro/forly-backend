@@ -46,6 +46,13 @@ module.exports = function createDistributionRouter(ctx) {
   const envOk = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET &&
     process.env.META_REDIRECT_URL);
   const gv = () => process.env.META_GRAPH_VERSION || meta.DEFAULT_VERSION;
+  // META_SCOPES (comma-separated) narrows the OAuth request while some
+  // permissions aren't yet enabled on the Meta app; absent ⇒ full SCOPES.
+  const activeScopes = () => {
+    const raw = String(process.env.META_SCOPES || "").trim();
+    const list = raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    return list.length ? list : meta.SCOPES;
+  };
 
   // ── GET /oauth/start — logged-in agent → Facebook consent ──
   router.get("/oauth/start", requireAuth(authSecret), (req, res) => {
@@ -54,7 +61,7 @@ module.exports = function createDistributionRouter(ctx) {
     res.redirect(meta.oauthStartUrl({
       appId: process.env.META_APP_ID,
       redirectUrl: process.env.META_REDIRECT_URL,
-      state, graphVersion: gv(),
+      state, graphVersion: gv(), scopes: activeScopes(),
     }));
   });
 
@@ -70,7 +77,7 @@ module.exports = function createDistributionRouter(ctx) {
     await db.setConnection(phone, {
       user_token: userToken, page_id: page.id, page_name: page.name,
       page_token: page.access_token, ig_business_id: igBusinessId,
-      scopes: meta.SCOPES, connected_at: new Date(),
+      scopes: activeScopes(), connected_at: new Date(),
       needs_reconnect: false, pending_pages: null,
     });
   }

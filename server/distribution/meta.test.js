@@ -15,6 +15,10 @@ const meta = require("./meta");
   assert.equal(u.searchParams.get("redirect_uri"), "https://x.test/cb");
   assert.equal(u.searchParams.get("state"), "S1");
   assert.equal(u.searchParams.get("scope"), meta.SCOPES.join(","));
+  // explicit scopes narrow the request (used while the app lacks IG perms)
+  const u2 = new URL(meta.oauthStartUrl({ appId: "123", redirectUrl: "https://x.test/cb",
+    state: "S1", scopes: ["pages_show_list", "pages_manage_posts"] }));
+  assert.equal(u2.searchParams.get("scope"), "pages_show_list,pages_manage_posts");
 
   // ── state tokens: round-trip, tamper-proof, 10-minute TTL ──
   const t0 = 1_000_000_000_000;

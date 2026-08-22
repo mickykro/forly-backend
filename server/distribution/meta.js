@@ -57,10 +57,14 @@ function readState(token, secret, nowMs = Date.now()) {
   } catch { return null; }
 }
 
-function oauthStartUrl({ appId, redirectUrl, state, graphVersion = DEFAULT_VERSION }) {
+// `scopes` may narrow the default list: Meta rejects a login dialog that
+// requests scopes the app doesn't have enabled ("Invalid Scopes"), so while
+// the app's Instagram use case is pending, META_SCOPES can drop the IG pair.
+function oauthStartUrl({ appId, redirectUrl, state, graphVersion = DEFAULT_VERSION, scopes }) {
+  const list = Array.isArray(scopes) && scopes.length ? scopes : SCOPES;
   const q = new URLSearchParams({
     client_id: appId, redirect_uri: redirectUrl, state,
-    scope: SCOPES.join(","), response_type: "code",
+    scope: list.join(","), response_type: "code",
   });
   return `https://www.facebook.com/${graphVersion}/dialog/oauth?${q}`;
 }
