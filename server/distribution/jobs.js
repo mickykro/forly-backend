@@ -341,6 +341,7 @@ async function executeJob(deps, dist) {
       const kit = deps.shareKit.buildShareKitMessage({
         copy: dist.snapshot.copy, pageUrl: dist.snapshot.page_url,
         groups: dist.snapshot.groups,
+        appId: (deps.env && deps.env.META_APP_ID) || null,
       });
       await deps.sendWhatsApp(dist.business_phone, kit);
       await db.updateDistribution(dist.id,

@@ -7,7 +7,7 @@ const { asMillis } = require("./utils");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [] };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [] };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -293,6 +293,24 @@ async function listQueuedDistributions(limit = 10) {
   return [...mem.distributions.values()].filter((d) => d.status === "queued").slice(0, limit);
 }
 
+// ── distribution: curated group catalog ──
+// Operator-maintained list of recommended Facebook groups shown in the
+// dashboard. Agent suggestions land here with active:false until curated.
+async function listGroupCatalog(limit = 200) {
+  if (db) {
+    const snap = await db.collection("group_catalog").limit(limit).get();
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  }
+  return mem.groupCatalog.slice(0, limit);
+}
+
+async function addGroupCatalogEntry(doc) {
+  const rec = { created_at: new Date(), ...doc };
+  if (db) { const ref = await db.collection("group_catalog").add(rec); return ref.id; }
+  mem.groupCatalog.push(rec);
+  return String(mem.groupCatalog.length);
+}
+
 // ── distribution: append-only audit (spec §5 post_actions) ──
 async function addPostAction(doc) {
   const rec = { at: new Date(), ...doc };
@@ -329,4 +347,5 @@ module.exports = {
   getConnection, setConnection,
   saveDistribution, getDistribution, updateDistribution,
   listDistributionsByPage, listQueuedDistributions, addPostAction,
+  listGroupCatalog, addGroupCatalogEntry,
 };

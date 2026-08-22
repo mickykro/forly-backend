@@ -62,13 +62,26 @@ function sanitizeGroups(urls) {
   return out;
 }
 
-function sharerLink(pageUrl) {
-  return `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(String(pageUrl || ""))}`;
+// Share link. With opts.quote the post text rides along (Facebook's Share
+// Dialog attaches it as a quote — no copy-paste needed); with opts.appId the
+// official dialog is used instead of the legacy sharer.
+function sharerLink(pageUrl, opts = {}) {
+  const quote = opts.quote ? String(opts.quote) : null;
+  if (opts.appId) {
+    const q = new URLSearchParams({
+      app_id: String(opts.appId), display: "popup", href: String(pageUrl || "") });
+    if (quote) q.set("quote", quote);
+    return `https://www.facebook.com/dialog/share?${q}`;
+  }
+  const q = new URLSearchParams({ u: String(pageUrl || "") });
+  if (quote) q.set("quote", quote);
+  return `https://www.facebook.com/sharer/sharer.php?${q}`;
 }
 
 const FENCE = "──────────";
 
-function buildShareKitMessage({ copy, pageUrl, groups }) {
+function buildShareKitMessage({ copy, pageUrl, groups, appId }) {
+  const quickShare = sharerLink(pageUrl, { quote: copy, appId });
   const parts = [
     "📣 ערכת שיתוף לקבוצות פייסבוק",
     "",
@@ -77,7 +90,7 @@ function buildShareKitMessage({ copy, pageUrl, groups }) {
     String(copy || ""),
     FENCE,
     "",
-    `לשיתוף בפרופיל האישי שלכם (שתי הקשות): ${sharerLink(pageUrl)}`,
+    `לשיתוף בפרופיל או בקבוצה — הטקסט כבר מצורף, רק בוחרים איפה: ${quickShare}`,
   ];
   const gs = Array.isArray(groups) ? groups : [];
   if (gs.length) {

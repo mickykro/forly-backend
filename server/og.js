@@ -22,22 +22,45 @@ function description(page) {
   return [loc, facts.join(" · "), agent].filter(Boolean).join(" | ");
 }
 
-function buildOgTags(page, pageUrl) {
+// The share-preview headline: built from the facts ("4 חדרים בבבלי, תל אביב
+// · למכירה") rather than the page's internal title, falling back to it only
+// when there are no facts to build from.
+function ogTitle(page) {
   const p = (page && page.property) || {};
+  const loc = [p.neighborhood, p.city].filter(Boolean).join(", ");
+  const bits = [];
+  if (Number(p.rooms) > 0) bits.push(`${p.rooms} חדרים`);
+  if (loc) bits.push(bits.length ? `ב${loc}` : loc);
+  let t = bits.join(" ");
+  if (t) t += p.listing_type === "rent" ? " · להשכרה" : " · למכירה";
+  return t || p.title || "נכס למכירה";
+}
+
+// Preview image: a gallery photo first (what the product owner wants shown),
+// the video poster only as fallback.
+function ogImage(page) {
+  const imgs = (page && page.gallery && Array.isArray(page.gallery.images))
+    ? page.gallery.images : [];
+  return (imgs[0] && imgs[0].url) || ((page && page.hero) || {}).poster_url || null;
+}
+
+function buildOgTags(page, pageUrl) {
   const hero = (page && page.hero) || {};
+  const title = ogTitle(page);
+  const image = ogImage(page);
   const tag = (attr, name, content) =>
     content ? `<meta ${attr}="${esc(name)}" content="${esc(content)}">` : "";
   const lines = [
     tag("property", "og:type", "website"),
-    tag("property", "og:title", p.title || "נכס למכירה"),
+    tag("property", "og:title", title),
     tag("property", "og:description", description(page)),
     tag("property", "og:url", pageUrl),
-    tag("property", "og:image", hero.poster_url),
+    tag("property", "og:image", image),
     tag("property", "og:video", hero.video_url),
     hero.video_url ? tag("property", "og:video:type", "video/mp4") : "",
-    tag("name", "twitter:card", hero.poster_url ? "summary_large_image" : "summary"),
-    tag("name", "twitter:title", p.title || ""),
-    tag("name", "twitter:image", hero.poster_url),
+    tag("name", "twitter:card", image ? "summary_large_image" : "summary"),
+    tag("name", "twitter:title", title),
+    tag("name", "twitter:image", image),
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -48,4 +71,4 @@ function inject(html, page, pageUrl) {
   return html.replace("</head>", () => `${tags}\n</head>`);
 }
 
-module.exports = { buildOgTags, inject };
+module.exports = { buildOgTags, inject, ogTitle, ogImage };

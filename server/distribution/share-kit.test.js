@@ -49,17 +49,29 @@ assert.equal(sanitizeGroups(many).length, MAX_GROUPS, "capped at MAX_GROUPS");
 // ── sharer link URL-encodes the page URL ──
 assert.equal(sharerLink("https://x.test/p/a?b=1"),
   "https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent("https://x.test/p/a?b=1"));
+// quote rides along so the post text needs no copy-paste
+const quoted = new URL(sharerLink(url, { quote: "טקסט מוכן" }));
+assert.equal(quoted.searchParams.get("quote"), "טקסט מוכן");
+// with an app id the official Share Dialog is used
+const dlg = new URL(sharerLink(url, { quote: "q", appId: "123" }));
+assert.equal(dlg.origin + dlg.pathname, "https://www.facebook.com/dialog/share");
+assert.equal(dlg.searchParams.get("app_id"), "123");
+assert.equal(dlg.searchParams.get("href"), url);
+assert.equal(dlg.searchParams.get("quote"), "q");
 
-// ── share-kit message: copy between markers, sharer link, numbered groups ──
+// ── share-kit message: copy between markers, quick-share link, numbered groups ──
 const kit = buildShareKitMessage({ copy: "COPYBLOCK", pageUrl: url,
   groups: ["https://www.facebook.com/groups/a", "https://www.facebook.com/groups/b"] });
 assert.ok(kit.includes("COPYBLOCK"));
 const marker = kit.split("\n").find((l) => /^─+$/.test(l));
 assert.ok(marker, "copy is fenced between ── marker lines");
 assert.equal(kit.split("\n").filter((l) => l === marker).length, 2, "two marker lines");
-assert.ok(kit.includes(sharerLink(url)));
+assert.ok(kit.includes(sharerLink(url, { quote: "COPYBLOCK" })), "quick-share carries the copy as quote");
 assert.ok(kit.includes("1. https://www.facebook.com/groups/a"));
 assert.ok(kit.includes("2. https://www.facebook.com/groups/b"));
+// appId flips the quick-share to the official dialog
+const kitDlg = buildShareKitMessage({ copy: "C", pageUrl: url, groups: [], appId: "123" });
+assert.ok(kitDlg.includes("facebook.com/dialog/share"), "dialog link when appId present");
 
 // ── no groups saved yet: honest nudge instead of an empty list ──
 const empty = buildShareKitMessage({ copy: "C", pageUrl: url, groups: [] });

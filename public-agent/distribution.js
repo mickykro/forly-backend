@@ -39,23 +39,86 @@
     btn.onclick = () => { location.href = "/api/distribution/oauth/start"; };
   }
 
+  // The curated catalog renders as checkboxes; anything the agent has saved
+  // that ISN'T in the catalog lives in the free-text box. Saving merges both.
+  let catalog = [];
   function renderGroups(st) {
     $("groupsCard").hidden = false;
-    $("groupsBox").value = (st.groups || []).join("\n");
-    updateGroupCount(st.groups || []);
+    const mine = st.groups || [];
+    api("/api/distribution/group-catalog").then((r) => {
+      catalog = r.groups || [];
+      const box = $("catalogList");
+      box.textContent = "";
+      if (!catalog.length) {
+        const p = document.createElement("p");
+        p.className = "muted";
+        p.textContent = "אין עדיין קבוצות מומלצות — הציעו קבוצות ונוסיף אותן לקטלוג.";
+        box.appendChild(p);
+      }
+      for (const g of catalog) {
+        const label = document.createElement("label");
+        label.style.cssText = "display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.value = g.url; cb.checked = mine.includes(g.url);
+        cb.className = "catalog-cb";
+        const span = document.createElement("span");
+        span.textContent = g.name + (g.city ? ` · ${g.city}` : "");
+        label.append(cb, span);
+        box.appendChild(label);
+      }
+      const catalogUrls = catalog.map((g) => g.url);
+      $("groupsBox").value = mine.filter((u) => !catalogUrls.includes(u)).join("\n");
+      updateGroupCount(mine);
+    }).catch(() => { $("groupsBox").value = mine.join("\n"); updateGroupCount(mine); });
+
+    const collectSelection = () => {
+      const checked = [...document.querySelectorAll(".catalog-cb")]
+        .filter((cb) => cb.checked).map((cb) => cb.value);
+      const own = $("groupsBox").value.split("\n").map((s) => s.trim()).filter(Boolean);
+      return [...checked, ...own];
+    };
+
     $("saveGroups").onclick = async () => {
-      const groups = $("groupsBox").value.split("\n").map((s) => s.trim()).filter(Boolean);
+      const groups = collectSelection();
       try {
         const r = await api("/api/distribution/groups", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ groups }),
         });
-        $("groupsBox").value = r.groups.join("\n");
         updateGroupCount(r.groups);
         toast(r.groups.length < groups.length
           ? "נשמר. שימו לב: קישורים שאינם קבוצות פייסבוק הוסרו."
           : "הקבוצות נשמרו.");
       } catch { toast("השמירה נכשלה — נסו שוב."); }
+    };
+
+    // Offer a group: usable immediately, suggested to the shared catalog.
+    $("suggestBtn").onclick = async () => {
+      const url = $("suggestUrl").value.trim();
+      if (!url) return;
+      try {
+        const r = await api("/api/distribution/group-catalog/suggest", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        $("suggestUrl").value = "";
+        const catalogUrls = catalog.map((g) => g.url);
+        $("groupsBox").value = r.groups.filter((u) => !catalogUrls.includes(u)).join("\n");
+        updateGroupCount(r.groups);
+        toast("הקבוצה נוספה לרשימה שלכם והוצעה לקטלוג המשותף.");
+      } catch (e) {
+        toast(e.code === "invalid_group_url"
+          ? "זה לא נראה כמו קישור לקבוצת פייסבוק (facebook.com/groups/...)"
+          : "ההוספה נכשלה — נסו שוב.");
+      }
+    };
+
+    // Facebook killed the group-search API — the honest path is opening
+    // Facebook's own search prefilled; the agent copies the group URL back.
+    $("fbSearchBtn").onclick = () => {
+      const q = $("fbSearchBox").value.trim();
+      if (q) window.open("https://www.facebook.com/search/groups?q=" + encodeURIComponent(q),
+        "_blank", "noopener");
     };
   }
 

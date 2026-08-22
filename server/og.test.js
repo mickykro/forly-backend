@@ -10,25 +10,36 @@ const page = {
     rooms: 4, size_sqm: 105, price: 4200000 },
   agent: { name: "דנה לוי" },
   hero: { poster_url: "https://x.test/poster.jpg", video_url: "https://x.test/v.mp4" },
+  gallery: { images: [{ url: "https://x.test/g1.jpg" }, { url: "https://x.test/g2.jpg" }] },
 };
 const url = "https://forly.example/p/dana-abc12";
 const tags = buildOgTags(page, url);
 
-assert.ok(tags.includes('property="og:title" content="4 חד׳ בבבלי"'));
+// title is BUILT from the facts (rooms + area + city + deal type), not the raw page title
+assert.ok(tags.includes('property="og:title" content="4 חדרים בבבלי, תל אביב · למכירה"'));
 assert.ok(tags.includes('property="og:url" content="' + url + '"'));
-assert.ok(tags.includes('property="og:image" content="https://x.test/poster.jpg"'));
+// image comes from the GALLERY, not the video poster
+assert.ok(tags.includes('property="og:image" content="https://x.test/g1.jpg"'));
+assert.ok(!tags.includes("poster.jpg"), "poster not used when a gallery photo exists");
 assert.ok(tags.includes('property="og:video" content="https://x.test/v.mp4"'));
 assert.ok(tags.includes('property="og:video:type" content="video/mp4"'));
 assert.ok(tags.includes('name="twitter:card" content="summary_large_image"'));
 assert.ok(tags.includes("og:description"), "description tag present");
 assert.ok(tags.includes("4 חדרים"), "description carries the facts");
 
-// no video ⇒ no video tags; no poster ⇒ no image tag; never emits empty content
+// rent listings say להשכרה
+const rent = buildOgTags({ property: { rooms: 3, city: "חיפה", listing_type: "rent" } }, url);
+assert.ok(rent.includes("3 חדרים בחיפה · להשכרה"));
+
+// no gallery ⇒ poster fallback; no video ⇒ no video tags; bare page ⇒ no image, no empties
+const noGallery = buildOgTags({ ...page, gallery: { images: [] } }, url);
+assert.ok(noGallery.includes('property="og:image" content="https://x.test/poster.jpg"'));
 const noVideo = buildOgTags({ ...page, hero: { poster_url: "https://x.test/p.jpg" } }, url);
 assert.ok(!noVideo.includes("og:video"));
 const bare = buildOgTags({ property: { title: "t" } }, url);
 assert.ok(!bare.includes("og:image"));
 assert.ok(!bare.includes('content=""'));
+assert.ok(bare.includes('property="og:title" content="t"'), "no facts ⇒ falls back to page title");
 
 // escaping: titles with quotes/angle brackets can't break out of the attribute
 const evil = buildOgTags({ property: { title: '"><script>x</script>' } }, url);

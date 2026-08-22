@@ -220,6 +220,33 @@ module.exports = function createDistributionRouter(ctx) {
     res.json({ ok: true, distribution_id: dist.id });
   });
 
+  // ── GET /group-catalog — curated groups for the dashboard picker ──
+  router.get("/group-catalog", requireAuth(authSecret), async (req, res) => {
+    const all = await db.listGroupCatalog();
+    const groups = all
+      .filter((g) => g.active !== false && g.url)
+      .map((g) => ({ name: g.name || g.url, url: g.url, city: g.city || null }));
+    res.json({ groups });
+  });
+
+  // ── POST /group-catalog/suggest — agent offers a group ──
+  // Immediately usable by the suggesting agent (merged into their own list);
+  // lands in the catalog as active:false until the operator curates it.
+  router.post("/group-catalog/suggest", requireAuth(authSecret), async (req, res) => {
+    const url = shareKit.sanitizeGroups([(req.body && req.body.url) || ""])[0];
+    if (!url) return res.status(400).json({ error: "invalid_group_url" });
+    const name = String((req.body && req.body.name) || "").slice(0, 80);
+    await db.addGroupCatalogEntry({ url, name, active: false,
+      suggested_by: req.user.userId });
+    const biz = await db.getBusiness(req.user.userId);
+    const groups = shareKit.sanitizeGroups(
+      [...((biz && biz.distribution && biz.distribution.groups) || []), url]);
+    await db.setBusiness(req.user.userId, {
+      distribution: { groups }, updated_at: new Date() });
+    businessCache.invalidate(req.user.userId);
+    res.json({ ok: true, url, groups });
+  });
+
   // ── POST /groups — save the agent's group list ──
   router.post("/groups", requireAuth(authSecret), async (req, res) => {
     const groups = shareKit.sanitizeGroups((req.body && req.body.groups) || []);
