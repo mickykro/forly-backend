@@ -247,6 +247,33 @@ module.exports = function createDistributionRouter(ctx) {
     res.json({ ok: true, url, groups });
   });
 
+  // ── POST /group-catalog/import — bulk import from research automations ──
+  // Secret-gated (same pattern as /api/admin/backfill-tags): the n8n → Manus
+  // group-research workflow posts { groups: [{name,url,city,members}] } here
+  // with the x-admin-secret header. Dedupes by URL; entries land active:true.
+  router.post("/group-catalog/import", async (req, res) => {
+    if (authSecret === "change-me-in-env" || req.get("x-admin-secret") !== authSecret) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    const items = Array.isArray(req.body && req.body.groups) ? req.body.groups : [];
+    const existing = new Set((await db.listGroupCatalog(500)).map((g) => g.url));
+    let added = 0, skipped = 0;
+    for (const item of items.slice(0, 200)) {
+      const url = shareKit.sanitizeGroups([(item && item.url) || ""])[0];
+      if (!url || existing.has(url)) { skipped++; continue; }
+      existing.add(url);
+      await db.addGroupCatalogEntry({
+        url,
+        name: String((item && item.name) || "").slice(0, 80) || url,
+        city: item && item.city ? String(item.city).slice(0, 40) : null,
+        members: Number(item && item.members) || null,
+        active: true, source: "import",
+      });
+      added++;
+    }
+    res.json({ ok: true, added, skipped, received: items.length });
+  });
+
   // ── POST /groups — save the agent's group list ──
   router.post("/groups", requireAuth(authSecret), async (req, res) => {
     const groups = shareKit.sanitizeGroups((req.body && req.body.groups) || []);

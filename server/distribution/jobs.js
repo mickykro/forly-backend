@@ -271,6 +271,27 @@ async function executeJob(deps, dist) {
         await audit(deps, dist, "facebook_page",
           dist.force ? "reposted" : "published", { post_id: res.id, post_url: postUrl });
         summary = M.posted(title, postUrl);
+        // One post can't carry video AND photos — attach gallery photos as
+        // Page comments under the video post. Best-effort: a comment failure
+        // never touches the (already persisted, audited) post.
+        if (dist.snapshot.video_url && (dist.snapshot.photo_urls || []).length &&
+            typeof deps.meta.commentWithPhoto === "function") {
+          let attached = 0;
+          for (const photoUrl of dist.snapshot.photo_urls.slice(0, 4)) {
+            try {
+              await deps.meta.commentWithPhoto({
+                objectId: res.id, pageToken: conn.page_token,
+                message: attached === 0 ? "עוד תמונות מהנכס 👇" : "",
+                photoUrl, graphVersion: deps.graphVersion });
+              attached++;
+            } catch (e) { break; }
+          }
+          if (attached) {
+            await db.updateDistribution(dist.id, {
+              "targets.facebook_page.photo_comments": attached,
+              updated_at: deps.now() });
+          }
+        }
       } catch (err) {
         const attempts = (fb.attempts || 0) + 1;
         // Transient Graph errors requeue (≤3 attempts); auth errors flip

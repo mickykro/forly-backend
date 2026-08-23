@@ -42,9 +42,17 @@ const scripted = (script) => async () => {
   if (r instanceof Error) throw r;
   return r;
 };
-function fakeMeta({ video = [], photos = [] } = {}) {
+function fakeMeta({ video = [], photos = [], comments = [] } = {}) {
+  const commentCalls = [];
   return { GraphError: meta.GraphError, isAuthError: meta.isAuthError, postUrl: meta.postUrl,
-    publishVideo: scripted(video), publishPhotos: scripted(photos) };
+    publishVideo: scripted(video), publishPhotos: scripted(photos),
+    commentCalls,
+    commentWithPhoto: async (args) => {
+      commentCalls.push(args);
+      const r = comments.shift();
+      if (r instanceof Error) throw r;
+      return r || { id: `CM${commentCalls.length}` };
+    } };
 }
 function makeDeps({ db, metaMod }) {
   const sent = [];
@@ -303,6 +311,34 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.notEqual(done.status, "queued", "must never requeue after an FB post");
     assert.equal(done.targets.instagram.status, "failed");
     assert.ok(sent.some((s) => s.msg.includes("אינסטגרם נכשל")));
+  }
+
+  // ── video post gets gallery photos attached as Page comments ──
+  {
+    const db = fakeDb(); seed(db);
+    const metaMod = fakeMeta({ video: [{ id: "V1" }] });
+    const { deps } = makeDeps({ db, metaMod });
+    const d = await queuedDist(deps);
+    await jobs.runSweep(deps);
+    assert.equal(metaMod.commentCalls.length, 2, "both gallery photos commented");
+    assert.equal(metaMod.commentCalls[0].objectId, "V1");
+    assert.equal(metaMod.commentCalls[0].photoUrl, "https://x.test/1.jpg");
+    assert.ok(metaMod.commentCalls[0].message.includes("עוד תמונות"), "first comment labeled");
+    assert.equal(metaMod.commentCalls[1].message, "", "later comments unlabeled");
+    assert.equal(db.dists.get(d.id).targets.facebook_page.photo_comments, 2);
+  }
+
+  // ── a comment failure never touches the already-posted job ──
+  {
+    const db = fakeDb(); seed(db);
+    const metaMod = fakeMeta({ video: [{ id: "V1" }], comments: [new Error("nope")] });
+    const { deps } = makeDeps({ db, metaMod });
+    const d = await queuedDist(deps);
+    await jobs.runSweep(deps);
+    const done = db.dists.get(d.id);
+    assert.equal(done.status, "done");
+    assert.equal(done.targets.facebook_page.post_id, "V1");
+    assert.equal(done.targets.facebook_page.photo_comments, undefined, "no count on failure");
   }
 
   // ── FB auth error with IG linked: ONE nudge, IG never tries the dead token ──

@@ -138,6 +138,14 @@ async function publishPhotos({ pageId, pageToken, photoUrls, message, graphVersi
       message, attached_media: JSON.stringify(ids.map((id) => ({ media_fbid: id }))) } });
 }
 
+// Attach a photo to an existing post/video as a Page comment. A feed post is
+// single-media (video OR photos) — the standard way to get gallery photos
+// under a video post is Page comments beneath it.
+const commentWithPhoto = ({ objectId, pageToken, message, photoUrl, graphVersion, fetchFn }) =>
+  graphCall(`/${objectId}/comments`, { method: "POST", graphVersion, fetchFn,
+    token: pageToken, timeoutMs: 60000,
+    params: { message: message || undefined, attachment_url: photoUrl } });
+
 // Facebook redirects /{id} to the canonical post/video URL — good enough for
 // the WhatsApp summary link without another Graph read.
 const postUrl = (postId) => `https://www.facebook.com/${postId}`;
@@ -145,5 +153,6 @@ const postUrl = (postId) => `https://www.facebook.com/${postId}`;
 module.exports = {
   DEFAULT_VERSION, SCOPES, GraphError, isAuthError,
   makeState, readState, oauthStartUrl, graphCall,
-  exchangeCode, longLivedToken, listPages, publishVideo, publishPhotos, postUrl,
+  exchangeCode, longLivedToken, listPages, publishVideo, publishPhotos,
+  commentWithPhoto, postUrl,
 };

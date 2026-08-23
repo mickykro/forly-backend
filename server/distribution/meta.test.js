@@ -86,6 +86,17 @@ const meta = require("./meta");
   assert.deepEqual(JSON.parse(feed.body.get("attached_media")),
     [{ media_fbid: "PH1" }, { media_fbid: "PH2" }]);
 
+  // ── commentWithPhoto: photo attached to an existing post via comment ──
+  const ccalls = [];
+  const cFetch = async (url, opts) => { ccalls.push({ url: String(url),
+    body: new URLSearchParams(opts.body) }); return { ok: true, json: async () => ({ id: "CM1" }) }; };
+  await meta.commentWithPhoto({ objectId: "VID1", pageToken: "PT",
+    message: "עוד תמונות", photoUrl: "https://x.test/1.jpg",
+    graphVersion: "v21.0", fetchFn: cFetch });
+  assert.ok(ccalls[0].url.endsWith("/VID1/comments"));
+  assert.equal(ccalls[0].body.get("attachment_url"), "https://x.test/1.jpg");
+  assert.equal(ccalls[0].body.get("message"), "עוד תמונות");
+
   assert.equal(meta.postUrl("123_456"), "https://www.facebook.com/123_456");
   console.log("meta.test.js OK");
 })().catch((e) => { console.error(e); process.exit(1); });
