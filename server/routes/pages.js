@@ -574,7 +574,8 @@ module.exports = function createPagesRouter(ctx) {
         try {
           const shell = fs.readFileSync(origShell, "utf8");
           res.set("Cache-Control", "public, max-age=60");
-          return res.type("html").send(og.inject(shell, d, pageUrl));
+          return res.type("html").send(og.inject(shell, d, pageUrl,
+            { appId: process.env.META_APP_ID || null }));
         } catch (e) { /* fall through to sendFile */ }
       }
       return res.sendFile(origShell);
@@ -583,7 +584,7 @@ module.exports = function createPagesRouter(ctx) {
     if (!fs.existsSync(file)) return res.sendFile(origShell);
     let html = fs.readFileSync(file, "utf8");
     const bot = await resolveChatbot(d);
-    html = og.inject(html, d, pageUrl);
+    html = og.inject(html, d, pageUrl, { appId: process.env.META_APP_ID || null });
     const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
     html = html.replace("</head>", inject + "</head>");
     res.set("Cache-Control", "public, max-age=60");

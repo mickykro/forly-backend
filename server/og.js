@@ -44,7 +44,7 @@ function ogImage(page) {
   return (imgs[0] && imgs[0].url) || ((page && page.hero) || {}).poster_url || null;
 }
 
-function buildOgTags(page, pageUrl) {
+function buildOgTags(page, pageUrl, opts = {}) {
   const hero = (page && page.hero) || {};
   const title = ogTitle(page);
   const image = ogImage(page);
@@ -55,18 +55,24 @@ function buildOgTags(page, pageUrl) {
     tag("property", "og:title", title),
     tag("property", "og:description", description(page)),
     tag("property", "og:url", pageUrl),
+    tag("property", "og:locale", opts.locale || "he_IL"),
+    opts.appId ? tag("property", "fb:app_id", opts.appId) : "",
     tag("property", "og:image", image),
+    image ? tag("property", "og:image:secure_url", image) : "",
     tag("property", "og:video", hero.video_url),
+    hero.video_url ? tag("property", "og:video:secure_url", hero.video_url) : "",
     hero.video_url ? tag("property", "og:video:type", "video/mp4") : "",
     tag("name", "twitter:card", image ? "summary_large_image" : "summary"),
     tag("name", "twitter:title", title),
     tag("name", "twitter:image", image),
+    // Canonical: the undecorated page URL, so shares aggregate on one object.
+    pageUrl ? `<link rel="canonical" href="${esc(pageUrl)}">` : "",
   ];
   return lines.filter(Boolean).join("\n");
 }
 
-function inject(html, page, pageUrl) {
-  const tags = buildOgTags(page, pageUrl);
+function inject(html, page, pageUrl, opts) {
+  const tags = buildOgTags(page, pageUrl, opts);
   // Function replacement: a "$&" inside a title is content, not a pattern.
   return html.replace("</head>", () => `${tags}\n</head>`);
 }

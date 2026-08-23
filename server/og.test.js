@@ -27,6 +27,15 @@ assert.ok(tags.includes('name="twitter:card" content="summary_large_image"'));
 assert.ok(tags.includes("og:description"), "description tag present");
 assert.ok(tags.includes("4 חדרים"), "description carries the facts");
 
+// hardening tags: locale, secure urls, canonical, and fb:app_id when given
+assert.ok(tags.includes('property="og:locale" content="he_IL"'));
+assert.ok(tags.includes('property="og:image:secure_url" content="https://x.test/g1.jpg"'));
+assert.ok(tags.includes('property="og:video:secure_url" content="https://x.test/v.mp4"'));
+assert.ok(tags.includes('<link rel="canonical" href="' + url + '">'));
+assert.ok(!tags.includes("fb:app_id"), "no app id tag without opts.appId");
+const withApp = buildOgTags(page, url, { appId: "123" });
+assert.ok(withApp.includes('property="fb:app_id" content="123"'));
+
 // rent listings say להשכרה
 const rent = buildOgTags({ property: { rooms: 3, city: "חיפה", listing_type: "rent" } }, url);
 assert.ok(rent.includes("3 חדרים בחיפה · להשכרה"));

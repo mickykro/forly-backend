@@ -184,7 +184,7 @@ module.exports = function createDistributionRouter(ctx) {
     try {
       await jobs.enqueueFromConfirm(deps, dist, "confirm_link");
       return res.type("html").send(card("✅ אושר!",
-        "הנכס בדרך לפייסבוק. עדכון ישלח בוואטסאפ בדקות הקרובות.",
+        "הנכס בדרך לדף הפייסבוק שלכם. עדכון ישלח בוואטסאפ בדקות הקרובות.",
         `<a href="${esc(`${pageBaseUrl}/p/${dist.page_id}`)}"><button>לצפייה בדף הנכס</button></a>`));
     } catch (err) {
       console.error("confirm enqueue failed:", err && err.message);

@@ -317,7 +317,7 @@
           distState.listings[pid] = d.listing || {};
           if (d.listing && d.listing.in_flight) { pollDist(pid, n + 1); return; }
           renderDistSlots();
-          if (d.listing && d.listing.posted) FLY.toast("✅ הנכס פורסם בפייסבוק!");
+          if (d.listing && d.listing.posted) FLY.toast("✅ הנכס פורסם בדף הפייסבוק!");
         })
         .catch(function () { /* next poll or give up */ });
     }, 10000);

@@ -13,7 +13,9 @@
 
 const crypto = require("crypto");
 
-const DEFAULT_VERSION = "v21.0";
+// Graph versions live ~2 years after the NEXT release; keep this near-current
+// (v25.0 is current as of 2026-02) and override per deploy with META_GRAPH_VERSION.
+const DEFAULT_VERSION = "v25.0";
 const STATE_TTL_MS = 10 * 60 * 1000;
 
 // IG scopes requested from day one: adding them later would force every

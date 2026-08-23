@@ -4,6 +4,7 @@
  */
 
 const { asMillis } = require("./utils");
+const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
@@ -229,24 +230,29 @@ function deepMerge(target, patch) {
 }
 
 async function getConnection(phone) {
+  const key = tokenVault.keyFrom(process.env);
   if (db) {
     const d = await db.collection("businesses").doc(phone)
       .collection("connections").doc("facebook").get();
-    return d.exists ? d.data() : null;
+    return d.exists ? tokenVault.openConnection(d.data(), key) : null;
   }
-  return mem.connections.get(phone) || null;
+  const c = mem.connections.get(phone);
+  return c ? tokenVault.openConnection(c, key) : null;
 }
 
 // merge:true in Firestore deep-merges maps; the mem fallback must match or
 // tests would pass against behavior prod doesn't have (spec §4 "deep-merge
 // parity").
+// Tokens are sealed (AES-GCM, META_TOKEN_KEY) before they touch storage —
+// see distribution/token-vault.js. Without a key this is a passthrough.
 async function setConnection(phone, patch) {
+  const sealed = tokenVault.sealConnection(patch, tokenVault.keyFrom(process.env));
   if (db) {
     await db.collection("businesses").doc(phone)
-      .collection("connections").doc("facebook").set(patch, { merge: true });
+      .collection("connections").doc("facebook").set(sealed, { merge: true });
     return;
   }
-  mem.connections.set(phone, deepMerge(mem.connections.get(phone) || {}, patch));
+  mem.connections.set(phone, deepMerge(mem.connections.get(phone) || {}, sealed));
 }
 
 // ── distribution: publish jobs ──
