@@ -169,9 +169,13 @@ module.exports = function createDistributionRouter(ctx) {
       "אפשר לפרסם דרך עמוד ההפצה בדשבורד."));
     // Replay / stale link handling: honest cards, no accidental repost.
     const sibs = await db.listDistributionsByPage(dist.page_id);
-    if (jobs.hasLivePost(sibs)) {
+    const posted = sibs.find((s) => jobs.hasLivePost([s]));
+    if (posted) {
+      const postUrl = posted.targets.facebook_page.post_url;
       return res.type("html").send(card("הנכס כבר פורסם",
-        "כדי לפרסם שוב בכוונה — עמוד ההפצה בדשבורד."));
+        "כדי לפרסם שוב בכוונה — עמוד ההפצה בדשבורד.",
+        (postUrl ? `<a href="${esc(postUrl)}"><button>לצפייה בפוסט</button></a>` : "") +
+        `<a href="/distribution.html"><button>לעמוד ההפצה</button></a>`));
     }
     if (dist.status !== "awaiting_confirm") {
       return res.type("html").send(card("הפרסום כבר בתהליך",
@@ -180,7 +184,8 @@ module.exports = function createDistributionRouter(ctx) {
     try {
       await jobs.enqueueFromConfirm(deps, dist, "confirm_link");
       return res.type("html").send(card("✅ אושר!",
-        "הנכס בדרך לפייסבוק. עדכון ישלח בוואטסאפ בדקות הקרובות."));
+        "הנכס בדרך לפייסבוק. עדכון ישלח בוואטסאפ בדקות הקרובות.",
+        `<a href="${esc(`${pageBaseUrl}/p/${dist.page_id}`)}"><button>לצפייה בדף הנכס</button></a>`));
     } catch (err) {
       console.error("confirm enqueue failed:", err && err.message);
       return res.status(500).type("html").send(card("משהו השתבש",
@@ -298,6 +303,30 @@ module.exports = function createDistributionRouter(ctx) {
     res.json({ ok: true, groups, min_recommended: 5 });
   });
 
+  // ── GET /share-kit?page_id= — the share kit for the dashboard dialog ──
+  // Same content the WhatsApp kit carries, as JSON: post copy (for the
+  // copy-to-clipboard button), the quote-prefilled quick-share link, and the
+  // agent's group links. Built live from the current page + groups.
+  router.get("/share-kit", requireAuth(authSecret), async (req, res) => {
+    const pageId = String(req.query.page_id || "");
+    if (!pageId) return res.status(400).json({ error: "page_id required" });
+    const page = await db.getPage(pageId);
+    if (!page || page.business_phone !== req.user.userId) {
+      return res.status(404).json({ error: "not_found" });
+    }
+    const biz = await db.getBusiness(req.user.userId);
+    const pageUrl = `${pageBaseUrl}/p/${pageId}`;
+    const copy = shareKit.buildPostCopy(page, pageUrl);
+    res.json({
+      copy,
+      page_url: pageUrl,
+      quick_share: shareKit.sharerLink(pageUrl,
+        { quote: copy, appId: process.env.META_APP_ID || null }),
+      groups: shareKit.sanitizeGroups(
+        (biz && biz.distribution && biz.distribution.groups) || []),
+    });
+  });
+
   // ── GET /status — connection + per-listing state; never tokens ──
   router.get("/status", requireAuth(authSecret), async (req, res) => {
     const phone = req.user.userId;
@@ -324,6 +353,7 @@ module.exports = function createDistributionRouter(ctx) {
         page_id: pageId,
         posted: !!posted,
         post_url: posted ? posted.targets.facebook_page.post_url : null,
+        posted_at: posted ? (posted.updated_at || posted.confirmed_at || null) : null,
         // Only queued/running block the publish button: an awaiting_confirm
         // offer is deliberately supersedable by POST /publish, so it must not
         // freeze the dashboard.

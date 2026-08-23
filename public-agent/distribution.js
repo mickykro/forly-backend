@@ -1,5 +1,8 @@
 /*
  * distribution.js — the הפצה dashboard page.
+ *
+ * Flow (product decision): ① connect Facebook → ② choose property/ies →
+ * ③ choose groups → ④ publish. Steps 2–4 stay locked until connected.
  * All server data is written with textContent / value — never innerHTML.
  */
 (() => {
@@ -16,39 +19,235 @@
   function toast(text) {
     const m = $("msg");
     m.textContent = text; m.style.display = "block";
-    clearTimeout(toastT); toastT = setTimeout(() => { m.style.display = "none"; }, 4000);
+    clearTimeout(toastT); toastT = setTimeout(() => { m.style.display = "none"; }, 4500);
   }
 
-  function renderConnection(st) {
+  // ── state ──
+  let st = null;                    // /status payload
+  let props = [];                   // active properties
+  const listingState = new Map();   // page_id → /status?page_id listing object
+  const selectedProps = new Set();
+  let catalog = [];
+  let selected = new Set();         // selected catalog group urls
+  let pollT = null;
+
+  const connected = () =>
+    !!(st && st.connection.connected && !st.connection.needs_reconnect);
+
+  // ── stepper ──
+  function renderStepper() {
+    const doneMap = {
+      1: connected(),
+      2: selectedProps.size > 0,
+      3: [...selected, ...ownGroupLines()].length > 0,
+      4: false,
+    };
+    let current = !doneMap[1] ? 1 : !doneMap[2] ? 2 : !doneMap[3] ? 3 : 4;
+    for (const el of document.querySelectorAll(".step")) {
+      const n = Number(el.dataset.step);
+      el.classList.toggle("done", !!doneMap[n] && n !== current);
+      el.classList.toggle("current", n === current);
+    }
+    const locked = !connected();
+    for (const id of ["propsCard", "groupsCard", "publishCard"]) {
+      $(id).classList.toggle("locked", locked);
+    }
+    const n = selectedProps.size;
+    $("publishSummary").textContent = !connected()
+      ? "קודם מתחברים לפייסבוק (שלב 1)."
+      : n === 0 ? "בחרו לפחות נכס אחד (שלב 2)."
+      : `${n} נכסים ייפורסמו לדף "${st.connection.page_name || ""}" + ערכת שיתוף לקבוצות.`.replace("1 נכסים ייפורסמו", "נכס אחד יפורסם");
+    $("publishBtn").disabled = false; // guard handled on click, with guidance
+  }
+
+  // ── step 1: connection ──
+  function renderConnection() {
     $("connectCard").hidden = false;
     const chip = $("connChip"), txt = $("connText"), btn = $("connectBtn");
     if (st.connection.needs_reconnect) {
-      chip.textContent = "נדרש חיבור מחדש"; chip.className = "chip warn";
+      chip.textContent = "נדרש חיבור מחדש"; chip.className = "conn-chip warn";
       txt.textContent = "החיבור פג תוקף — הפרסום מושהה עד חיבור מחדש.";
-      btn.textContent = "חיבור מחדש"; btn.hidden = false;
+      btn.textContent = "חיבור מחדש";
     } else if (st.connection.connected) {
-      chip.textContent = "מחובר"; chip.className = "chip ok";
+      chip.textContent = "מחובר"; chip.className = "conn-chip ok";
       txt.textContent = `מפרסמים לדף: ${st.connection.page_name || ""}` +
         (st.connection.instagram_linked ? " · אינסטגרם מקושר" : "");
-      btn.textContent = "החלפת דף / חיבור מחדש"; btn.hidden = false;
+      btn.textContent = "החלפת דף / חיבור מחדש";
     } else {
-      chip.textContent = "לא מחובר"; chip.className = "chip warn";
+      chip.textContent = "לא מחובר"; chip.className = "conn-chip warn";
       txt.textContent = "חיבור חד-פעמי — ומהנכס הבא הפרסום בקליק אחד.";
-      btn.hidden = false;
     }
     btn.onclick = () => { location.href = "/api/distribution/oauth/start"; };
   }
 
-  // The curated catalog renders as checkboxes; anything the agent has saved
-  // that ISN'T in the catalog lives in the free-text box. Saving merges both.
-  // Selection state lives in `selected` — checked groups are PINNED to a
-  // section at the top (immune to the filter); unchecking returns a group to
-  // its city section.
-  let catalog = [];
-  let selected = new Set();
+  // ── step 2: properties ──
+  function daysAgo(iso) {
+    if (!iso) return "";
+    const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    return d <= 0 ? "פורסם היום" : d === 1 ? "פורסם אתמול" : `פורסם לפני ${d} ימים`;
+  }
 
+  function propRow(prop) {
+    const pageId = prop.page_id;
+    const row = document.createElement("div");
+    row.className = "prop-row"; row.id = "prop-" + pageId;
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.onchange = () => {
+      if (cb.checked) selectedProps.add(pageId); else selectedProps.delete(pageId);
+      renderStepper();
+    };
+    const img = document.createElement("img");
+    img.loading = "lazy"; img.alt = "";
+    if (prop.thumb_url) img.src = prop.thumb_url;
+    const t = document.createElement("div"); t.className = "t";
+    const name = document.createElement("div"); name.className = "name";
+    name.textContent = prop.title || pageId;
+    const sub = document.createElement("div"); sub.className = "sub";
+    sub.textContent = prop.address || "";
+    t.append(name, sub);
+    const chip = document.createElement("span"); chip.className = "chip";
+    chip.textContent = "…";
+    const kitBtn = document.createElement("button");
+    kitBtn.className = "btn btn-ghost btn-sm"; kitBtn.textContent = "ערכת שיתוף";
+    kitBtn.onclick = () => openKit(pageId);
+    row.append(cb, img, t, chip, kitBtn);
+    row._els = { cb, chip, sub, t };
+    return row;
+  }
+
+  function applyListingState(row, prop, L) {
+    const { cb, chip, sub, t } = row._els;
+    if (L.posted) {
+      chip.textContent = "פורסם"; chip.className = "chip active";
+      const when = daysAgo(L.posted_at);
+      if (when) sub.textContent = [prop.address, when].filter(Boolean).join(" · ");
+      let a = t.querySelector("a");
+      if (!a && L.post_url) {
+        a = document.createElement("a");
+        a.target = "_blank"; a.rel = "noopener"; a.textContent = "לפוסט";
+        t.appendChild(a);
+      }
+      if (a && L.post_url) a.href = L.post_url;
+    } else if (L.in_flight) {
+      chip.textContent = "בתהליך"; chip.className = "chip building";
+      cb.checked = false; cb.disabled = true;
+      selectedProps.delete(prop.page_id);
+    } else if (L.last_status === "failed") {
+      chip.textContent = "נכשל"; chip.className = "chip expired";
+    } else {
+      chip.textContent = "טרם פורסם"; chip.className = "chip";
+    }
+    if (!L.in_flight) cb.disabled = false;
+  }
+
+  async function refreshListing(prop, row) {
+    try {
+      const r = await api(`/api/distribution/status?page_id=${encodeURIComponent(prop.page_id)}`);
+      listingState.set(prop.page_id, r.listing || {});
+      applyListingState(row, prop, r.listing || {});
+    } catch { row._els.chip.textContent = "—"; }
+  }
+
+  async function loadProps() {
+    const r = await api("/api/properties").catch(() => null);
+    props = ((r && r.properties) || []).filter((p) => p.page_id && p.page_status === "active");
+    $("propsCard").hidden = false;
+    const box = $("propList");
+    box.textContent = "";
+    if (!props.length) {
+      const p = document.createElement("p");
+      p.className = "muted"; p.textContent = "אין עדיין נכסים פעילים.";
+      box.appendChild(p);
+      return;
+    }
+    const rows = new Map();
+    for (const prop of props) {
+      const row = propRow(prop);
+      rows.set(prop.page_id, row);
+      box.appendChild(row);
+    }
+    await Promise.all(props.map((p) => refreshListing(p, rows.get(p.page_id))));
+    // Default selection: everything not yet published, so the common case
+    // (new property → publish) is zero extra taps.
+    for (const prop of props) {
+      const L = listingState.get(prop.page_id) || {};
+      if (!L.posted && !L.in_flight) {
+        selectedProps.add(prop.page_id);
+        rows.get(prop.page_id)._els.cb.checked = true;
+      }
+    }
+    renderStepper();
+    startPollingIfNeeded(rows);
+    focusDeepLink(rows);
+  }
+
+  // Live refresh: while any job is in flight, poll every 10s (max ~5 min)
+  // so chips flip to "פורסם" with the post link by themselves.
+  function startPollingIfNeeded(rows) {
+    clearInterval(pollT);
+    let ticks = 0;
+    const anyInFlight = () =>
+      [...listingState.values()].some((L) => L.in_flight);
+    if (!anyInFlight()) return;
+    pollT = setInterval(async () => {
+      ticks++;
+      const inFlight = props.filter((p) => (listingState.get(p.page_id) || {}).in_flight);
+      await Promise.all(inFlight.map((p) => refreshListing(p, rows.get(p.page_id))));
+      if (!anyInFlight() || ticks > 30) { clearInterval(pollT); renderStepper(); }
+    }, 10000);
+  }
+
+  function focusDeepLink(rows) {
+    const focus = new URLSearchParams(location.search).get("page");
+    if (!focus || !rows.has(focus)) return;
+    const el = rows.get(focus);
+    el.scrollIntoView({ block: "center" });
+    el._els.cb.checked = true; selectedProps.add(focus);
+    el.style.outline = "2px solid var(--gold)";
+    el.style.outlineOffset = "4px"; el.style.borderRadius = "12px";
+    setTimeout(() => { el.style.outline = ""; }, 4000);
+    renderStepper();
+  }
+
+  // ── share-kit dialog ──
+  async function openKit(pageId) {
+    try {
+      const k = await api(`/api/distribution/share-kit?page_id=${encodeURIComponent(pageId)}`);
+      $("kitCopy").value = k.copy;
+      $("kitShare").href = k.quick_share;
+      const gbox = $("kitGroups");
+      gbox.textContent = "";
+      if (k.groups.length) {
+        const h = document.createElement("div");
+        h.textContent = "הקבוצות שלכם:"; h.style.cssText = "font-weight:600;font-size:.85rem";
+        gbox.appendChild(h);
+        for (const g of k.groups) {
+          const a = document.createElement("a");
+          a.href = g; a.target = "_blank"; a.rel = "noopener"; a.textContent = g;
+          gbox.appendChild(a);
+        }
+      }
+      $("kitCopyBtn").onclick = () => {
+        navigator.clipboard.writeText(k.copy)
+          .then(() => toast("הטקסט הועתק — אפשר להדביק בקבוצה"))
+          .catch(() => { $("kitCopy").select(); document.execCommand("copy"); toast("הטקסט הועתק"); });
+      };
+      $("kitDlg").showModal();
+    } catch { toast("טעינת ערכת השיתוף נכשלה."); }
+  }
+  $("kitClose").onclick = () => $("kitDlg").close();
+
+  // ── step 3: groups (catalog picker with pinned selection) ──
   function ownGroupLines() {
     return $("groupsBox").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  }
+
+  function updateGroupCount(groups) {
+    const el = $("groupCount");
+    el.textContent = groups.length >= 5
+      ? `יש ${groups.length} קבוצות 👍`
+      : `כרגע ${groups.length}. הוסיפו עוד ${5 - groups.length} להגעה מיטבית.`;
   }
 
   function catalogRow(g, showCity) {
@@ -56,9 +255,10 @@
     label.style.cssText = "display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;font-size:.9rem";
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.checked = selected.has(g.url);
+    cb.style.accentColor = "var(--gold)";
     cb.onchange = () => {
       if (cb.checked) selected.add(g.url); else selected.delete(g.url);
-      renderCatalog();
+      renderCatalog(); renderStepper();
     };
     const span = document.createElement("span");
     span.textContent = g.name +
@@ -90,10 +290,9 @@
     // Pinned: the agent's selected groups, always on top, never filtered out.
     const chosen = catalog.filter((g) => selected.has(g.url)).sort(bySize);
     if (chosen.length) {
-      box.appendChild(sectionHead(`✓ הקבוצות שנבחרו (${chosen.length})`, "var(--ok)"));
+      box.appendChild(sectionHead(`✓ הקבוצות שנבחרו (${chosen.length})`, "#157A3F"));
       for (const g of chosen) box.appendChild(catalogRow(g, true));
     }
-    // The rest, grouped by city, biggest first, filterable.
     const byCity = new Map();
     for (const g of catalog) {
       if (selected.has(g.url)) continue;
@@ -110,7 +309,7 @@
     updateGroupCount([...selected, ...ownGroupLines()]);
   }
 
-  function renderGroups(st) {
+  function renderGroups() {
     $("groupsCard").hidden = false;
     const mine = st.groups || [];
     api("/api/distribution/group-catalog").then((r) => {
@@ -120,7 +319,11 @@
       $("groupsBox").value = mine.filter((u) => !catalogUrls.includes(u)).join("\n");
       renderCatalog();
       $("catalogFilter").oninput = renderCatalog;
-      $("groupsBox").oninput = () => updateGroupCount([...selected, ...ownGroupLines()]);
+      $("groupsBox").oninput = () => {
+        updateGroupCount([...selected, ...ownGroupLines()]);
+        renderStepper();
+      };
+      renderStepper();
     }).catch(() => { $("groupsBox").value = mine.join("\n"); updateGroupCount(mine); });
 
     const collectSelection = () => [...selected, ...ownGroupLines()];
@@ -139,7 +342,6 @@
       } catch { toast("השמירה נכשלה — נסו שוב."); }
     };
 
-    // Offer a group: usable immediately, suggested to the shared catalog.
     $("suggestBtn").onclick = async () => {
       const url = $("suggestUrl").value.trim();
       if (!url) return;
@@ -160,8 +362,6 @@
       }
     };
 
-    // Facebook killed the group-search API — the honest path is opening
-    // Facebook's own search prefilled; the agent copies the group URL back.
     $("fbSearchBtn").onclick = () => {
       const q = $("fbSearchBox").value.trim();
       if (q) window.open("https://www.facebook.com/search/groups?q=" + encodeURIComponent(q),
@@ -169,110 +369,90 @@
     };
   }
 
-  function updateGroupCount(groups) {
-    const el = $("groupCount");
-    el.textContent = groups.length >= 5
-      ? `יש ${groups.length} קבוצות 👍`
-      : `כרגע ${groups.length}. הוסיפו עוד ${5 - groups.length} להגעה מיטבית.`;
-  }
-
-  async function publish(pageId, force, btn) {
-    btn.disabled = true;
+  // ── step 4: publish ──
+  async function publishOne(pageId, force) {
     try {
       await api("/api/distribution/publish", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ page_id: pageId, force }),
       });
-      toast("נשלח לפרסום — עדכון יגיע בוואטסאפ.");
-      setTimeout(loadProps, 1500);
-    } catch (e) {
-      if (e.code === "already_published") {
-        const dlg = $("repostDlg");
-        dlg.showModal();
-        $("repostYes").onclick = () => { dlg.close(); publish(pageId, true, btn); };
-        $("repostNo").onclick = () => dlg.close();
-      } else if (e.code === "already_in_flight") {
-        toast("הפרסום כבר בתהליך.");
-      } else {
-        toast("הפרסום נכשל — נסו שוב בעוד רגע.");
-      }
-    } finally { btn.disabled = false; }
+      return "ok";
+    } catch (e) { return e.code || "error"; }
   }
 
-  async function loadProps() {
-    const props = await api("/api/properties").catch(() => null);
-    const list = (props && props.properties) || [];
-    $("propsCard").hidden = false;
-    const box = $("propList");
-    box.textContent = "";
-    const active = list.filter((p) => p.page_id && p.page_status === "active");
-    if (!active.length) {
-      const p = document.createElement("p");
-      p.className = "muted"; p.textContent = "אין עדיין נכסים פעילים.";
-      box.appendChild(p); return;
+  async function publishSelected(forceRepublished) {
+    if (!connected()) {
+      toast("קודם מתחברים לפייסבוק — שלב 1 👆");
+      $("connectCard").scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
     }
-    for (const prop of active) {
-      const pageId = prop.page_id;
-      const row = document.createElement("div"); row.className = "prop";
-      row.id = "prop-" + pageId;
-      const t = document.createElement("div"); t.className = "t";
-      const name = document.createElement("div"); name.className = "name";
-      name.textContent = prop.title || pageId;
-      t.appendChild(name);
-      const chip = document.createElement("span"); chip.className = "chip";
-      chip.textContent = "…";
-      const btn = document.createElement("button");
-      btn.textContent = "פרסום"; btn.onclick = () => publish(pageId, false, btn);
-      row.append(t, chip, btn); box.appendChild(row);
-      api(`/api/distribution/status?page_id=${encodeURIComponent(pageId)}`).then((st) => {
-        const L = st.listing || {};
-        if (L.posted) {
-          chip.textContent = "פורסם"; chip.className = "chip ok";
-          btn.textContent = "פרסום מחדש";
-          if (L.post_url) {
-            const a = document.createElement("a");
-            a.href = L.post_url; a.target = "_blank"; a.rel = "noopener";
-            a.textContent = "לפוסט";
-            t.appendChild(a);
-          }
-        } else if (L.in_flight) {
-          chip.textContent = "בתהליך"; btn.disabled = true;
-        } else if (L.last_status === "failed") {
-          chip.textContent = "נכשל"; chip.className = "chip warn";
-          btn.textContent = "ניסיון נוסף";
-        } else {
-          chip.textContent = "טרם פורסם";
+    const picks = [...selectedProps];
+    if (!picks.length) {
+      toast("בחרו לפחות נכס אחד לפרסום (שלב 2).");
+      $("propsCard").scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    if ([...selected, ...ownGroupLines()].length === 0) {
+      toast("טיפ: בחרו קבוצות (שלב 3) כדי לקבל ערכת שיתוף מלאה.");
+    }
+    $("publishBtn").disabled = true;
+    const fresh = [], published = [];
+    for (const id of picks) {
+      const L = listingState.get(id) || {};
+      (L.posted ? published : fresh).push(id);
+    }
+    let started = 0, failed = 0;
+    for (const id of fresh) {
+      const r = await publishOne(id, false);
+      if (r === "ok" || r === "already_in_flight") started++; else failed++;
+    }
+    if (published.length && !forceRepublished) {
+      $("repostText").textContent = published.length === 1
+        ? "אחד מהנכסים שנבחרו כבר פורסם. פרסום נוסף ייצור פוסט חדש בדף."
+        : `${published.length} מהנכסים שנבחרו כבר פורסמו. פרסום נוסף ייצור פוסטים חדשים.`;
+      $("repostDlg").showModal();
+      $("repostYes").onclick = async () => {
+        $("repostDlg").close();
+        for (const id of published) {
+          const r = await publishOne(id, true);
+          if (r === "ok") started++; else failed++;
         }
-      }).catch(() => { chip.textContent = "—"; });
+        finishPublish(started, failed);
+      };
+      $("repostNo").onclick = () => { $("repostDlg").close(); finishPublish(started, failed); };
+      return;
     }
-    // Deep link from the main dashboard: /distribution.html?page=<id>
-    // scrolls to that property and highlights it briefly.
-    const focus = new URLSearchParams(location.search).get("page");
-    if (focus) {
-      const el = document.getElementById("prop-" + focus);
-      if (el) {
-        el.scrollIntoView({ block: "center" });
-        el.style.outline = "2px solid var(--gold)";
-        el.style.outlineOffset = "4px";
-        el.style.borderRadius = "10px";
-        setTimeout(() => { el.style.outline = ""; }, 4000);
+    if (published.length && forceRepublished) {
+      for (const id of published) {
+        const r = await publishOne(id, true);
+        if (r === "ok") started++; else failed++;
       }
     }
+    finishPublish(started, failed);
   }
 
+  function finishPublish(started, failed) {
+    $("publishBtn").disabled = false;
+    if (started) toast(`🚀 ${started} פרסומים בדרך — עדכון יגיע בוואטסאפ.`);
+    else if (failed) toast("הפרסום נכשל — נסו שוב בעוד רגע.");
+    setTimeout(loadProps, 1500);
+  }
+
+  $("publishBtn").onclick = () => publishSelected(false);
+
+  // ── init ──
   (async () => {
-    let st;
     try { st = await api("/api/distribution/status"); }
     catch { return; }               // 401 already redirected
     if (!st.entitled) { $("entitleCard").hidden = false; return; }
-    renderConnection(st);
-    renderGroups(st);
+    renderConnection();
+    $("publishCard").hidden = false;
+    renderGroups();
     loadProps();
-    // Landed here from a successful OAuth connect → confirm it, clean the URL
-    // (but keep ?page= deep links intact for the highlight above).
+    renderStepper();
     if (new URLSearchParams(location.search).get("connected") === "1") {
       toast("החיבור לפייסבוק הושלם ✅");
-      history.replaceState(null, "", location.pathname);
+      history.replaceState(null, "", location.pathname + location.hash);
     }
   })();
 })();

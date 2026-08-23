@@ -1,52 +1,254 @@
 [
-  {"name": "דירות מפה לאוזן בת\"א", "url": "https://www.facebook.com/groups/35819517694", "city": "תל אביב", "members": 250000},
-  {"name": "דירות להשכרה רמת גן / גבעתיים", "url": "https://www.facebook.com/groups/402682483445663", "city": "רמת גן", "members": 138000},
-  {"name": "דירות ברמת גן - גבעתיים להשכרה בעוד חודש +", "url": "https://www.facebook.com/groups/1068642559922565", "city": "רמת גן", "members": 104000},
-  {"name": "דירות מפה לאוזן ברמת גן", "url": "https://www.facebook.com/groups/192850633573", "city": "רמת גן", "members": 100000},
-  {"name": "דירות להשכרה ברמת גן", "url": "https://www.facebook.com/groups/253957624766723", "city": "רמת גן", "members": 97000},
-  {"name": "לוח דירות תל אביב", "url": "https://www.facebook.com/groups/665278950172707", "city": "תל אביב", "members": 88000},
-  {"name": "דירות להשכרה גבעתיים - רמת גן - תל אביב", "url": "https://www.facebook.com/groups/186810449287215", "city": "רמת גן", "members": 82000},
-  {"name": "דירות להשכרה מכירה תל אביב Tel Aviv Apartments", "url": "https://www.facebook.com/groups/1196843027043598", "city": "תל אביב", "members": 70000},
-  {"name": "סאבלט תל אביב יפו והמרכז - Sublet Tel Aviv", "url": "https://www.facebook.com/groups/515098902161687", "city": "תל אביב", "members": 66000},
-  {"name": "דירות להשכרה בתל אביב רמת השרון הרצליה", "url": "https://www.facebook.com/groups/1642482759337919", "city": "תל אביב", "members": 63000},
-  {"name": "דירות מפה לאוזן בירושלים", "url": "https://www.facebook.com/groups/172544843294", "city": "ירושלים", "members": 119000},
-  {"name": "דירות להשכרה בירושלים", "url": "https://www.facebook.com/groups/apartmentsrentjerusalem", "city": "ירושלים", "members": 107000},
-  {"name": "דירות למכירה והשכרה בירושלים לפני שמתפרסמות", "url": "https://www.facebook.com/groups/157890721001581", "city": "ירושלים", "members": 50000},
-  {"name": "דירות זולות באמת בירושלים", "url": "https://www.facebook.com/groups/1387264628220377", "city": "ירושלים", "members": 47000},
-  {"name": "דירות שותפים בירושלים", "url": "https://www.facebook.com/groups/jerusalemroommates", "city": "ירושלים", "members": 40000},
-  {"name": "דירות מפה לאוזן בחיפה", "url": "https://www.facebook.com/groups/173351201739", "city": "חיפה", "members": 86000},
-  {"name": "Доска объявлений Хайфа и Крайот", "url": "https://www.facebook.com/groups/702696598399546", "city": "חיפה", "members": 60000},
-  {"name": "דירות לסטודנטים חיפה", "url": "https://www.facebook.com/groups/110907419268500", "city": "חיפה", "members": 56000},
-  {"name": "דירות חיפה Haifa City Apartments", "url": "https://www.facebook.com/groups/haifacityapartments", "city": "חיפה", "members": 44000},
-  {"name": "דירות להשכרה חיפה - תיווך ללא תיווך", "url": "https://www.facebook.com/groups/TLTisrael", "city": "חיפה", "members": 42000},
-  {"name": "דירות למכירה להשכרה בחיפה נשר קריות", "url": "https://www.facebook.com/groups/273403923451682", "city": "חיפה", "members": 29000},
-  {"name": "סטודנטים - השכרת דירות סובב טכניון, חיפה וקריות", "url": "https://www.facebook.com/groups/599082480989761", "city": "חיפה", "members": 25000},
-  {"name": "דירות להשכרה בבאר שבע", "url": "https://www.facebook.com/groups/864908790226104", "city": "באר שבע", "members": 77000},
-  {"name": "סטודנטים דירות להשכרה באר שבע", "url": "https://www.facebook.com/groups/661709787239277", "city": "באר שבע", "members": 76000},
-  {"name": "דירות מפה לאוזן בבאר שבע", "url": "https://www.facebook.com/groups/170744879507", "city": "באר שבע", "members": 75000},
-  {"name": "דירות להשכרה בבאר שבע - לכניסה מידית", "url": "https://www.facebook.com/groups/2302505389980235", "city": "באר שבע", "members": 54000},
-  {"name": "דירות למכירה והשכרה באשקלון", "url": "https://www.facebook.com/groups/293774011042858", "city": "אשקלון", "members": 53000},
-  {"name": "דירות להשכרה אשקלון בלבד!", "url": "https://www.facebook.com/groups/130369664285144", "city": "אשקלון", "members": 43000},
-  {"name": "דירות להשכרה ומכירה אשדוד והסביבה", "url": "https://www.facebook.com/groups/1624818081000281", "city": "אשדוד", "members": 35000},
-  {"name": "דירות להשכרה בהרצליה, רעננה, כפר סבא, רמת השרון והוד השרון", "url": "https://www.facebook.com/groups/dirotlehascarabeherzelia", "city": "השרון", "members": 85000},
-  {"name": "דירות להשכרה בפתח תקווה", "url": "https://www.facebook.com/groups/683985451631971", "city": "פתח תקווה", "members": 78000},
-  {"name": "דירות להשכרה חולון בת ים ראשון לציון", "url": "https://www.facebook.com/groups/963153170558917", "city": "חולון ובת ים", "members": 75000},
-  {"name": "דירות להשכרה בהרצליה בלבד", "url": "https://www.facebook.com/groups/550870795608828", "city": "הרצליה", "members": 68000},
-  {"name": "דירות בראשון לציון, רחובות, נס ציונה, באר יעקב", "url": "https://www.facebook.com/groups/801398193551481", "city": "ראשון לציון", "members": 67000},
-  {"name": "דירות מפה לאוזן ברחובות", "url": "https://www.facebook.com/groups/358558367546893", "city": "רחובות", "members": 61000},
-  {"name": "דירות להשכרה ומכירה בעיר אילת והסביבה", "url": "https://www.facebook.com/groups/197805427313558", "city": "אילת", "members": 50000},
-  {"name": "דירות להשכרה למכירה נתניה והסביבה", "url": "https://www.facebook.com/groups/1784140705161722", "city": "נתניה", "members": 36000},
-  {"name": "דירות למכירה ולהשכרה במודיעין והסביבה", "url": "https://www.facebook.com/groups/diramodiin", "city": "מודיעין", "members": 33000},
-  {"name": "Secret Haifa", "url": "https://www.facebook.com/groups/445887735495943", "city": "חיפה", "members": null},
-  {"name": "Apartments/roommates in Haifa", "url": "https://www.facebook.com/groups/57812275694", "city": "חיפה", "members": null},
-  {"name": "Secret Jerusalem", "url": "https://www.facebook.com/groups/secretjerusalem", "city": "ירושלים", "members": null},
-  {"name": "House Hunting in Israel", "url": "https://www.facebook.com/groups/househuntinginisrael", "city": "ארצי", "members": null},
-  {"name": "Looking for an Apartment in Jerusalem", "url": "https://www.facebook.com/groups/JerusalemApartments", "city": "ירושלים", "members": null},
-  {"name": "Jerusalem Apartments - Buy/Sell/Rent/Trade!", "url": "https://www.facebook.com/groups/1383311245241458", "city": "ירושלים", "members": null},
-  {"name": "Secret Tel Aviv", "url": "https://www.facebook.com/groups/secrettelaviv", "city": "תל אביב", "members": null},
-  {"name": "Tel Aviv Apartments - Buy/Sell/Rent/Trade!!!!", "url": "https://www.facebook.com/groups/188430365379", "city": "תל אביב", "members": null},
-  {"name": "Looking for an apartment in Tel Aviv", "url": "https://www.facebook.com/groups/TelAvivApartments", "city": "תל אביב", "members": null},
-  {"name": "Apartments/roommates in Tel Aviv", "url": "https://www.facebook.com/groups/telavivrealestate", "city": "תל אביב", "members": null},
-  {"name": "דירות מפה לאוזן בגבעתיים", "url": "https://www.facebook.com/groups/115046608513246", "city": "גבעתיים", "members": null},
-  {"name": "דירות במחירים שפויים גבעתיים רמת גן והסביבה", "url": "https://www.facebook.com/groups/1386194455009158", "city": "גבעתיים", "members": null}
+ {
+  "name": "דירות להשכרה רמת גן / גבעתיים",
+  "url": "https://www.facebook.com/groups/402682483445663",
+  "city": "רמת גן",
+  "members": 138000
+ },
+ {
+  "name": "דירות ברמת גן - גבעתיים להשכרה בעוד חודש +",
+  "url": "https://www.facebook.com/groups/1068642559922565",
+  "city": "רמת גן",
+  "members": 104000
+ },
+ {
+  "name": "דירות להשכרה ברמת גן",
+  "url": "https://www.facebook.com/groups/253957624766723",
+  "city": "רמת גן",
+  "members": 97000
+ },
+ {
+  "name": "לוח דירות תל אביב",
+  "url": "https://www.facebook.com/groups/665278950172707",
+  "city": "תל אביב",
+  "members": 88000
+ },
+ {
+  "name": "דירות להשכרה גבעתיים - רמת גן - תל אביב",
+  "url": "https://www.facebook.com/groups/186810449287215",
+  "city": "רמת גן",
+  "members": 82000
+ },
+ {
+  "name": "דירות להשכרה מכירה תל אביב Tel Aviv Apartments",
+  "url": "https://www.facebook.com/groups/1196843027043598",
+  "city": "תל אביב",
+  "members": 70000
+ },
+ {
+  "name": "סאבלט תל אביב יפו והמרכז - Sublet Tel Aviv",
+  "url": "https://www.facebook.com/groups/515098902161687",
+  "city": "תל אביב",
+  "members": 66000
+ },
+ {
+  "name": "דירות להשכרה בתל אביב רמת השרון הרצליה",
+  "url": "https://www.facebook.com/groups/1642482759337919",
+  "city": "תל אביב",
+  "members": 63000
+ },
+ {
+  "name": "דירות להשכרה בירושלים",
+  "url": "https://www.facebook.com/groups/apartmentsrentjerusalem",
+  "city": "ירושלים",
+  "members": 107000
+ },
+ {
+  "name": "דירות למכירה והשכרה בירושלים לפני שמתפרסמות",
+  "url": "https://www.facebook.com/groups/157890721001581",
+  "city": "ירושלים",
+  "members": 50000
+ },
+ {
+  "name": "דירות זולות באמת בירושלים",
+  "url": "https://www.facebook.com/groups/1387264628220377",
+  "city": "ירושלים",
+  "members": 47000
+ },
+ {
+  "name": "דירות שותפים בירושלים",
+  "url": "https://www.facebook.com/groups/jerusalemroommates",
+  "city": "ירושלים",
+  "members": 40000
+ },
+ {
+  "name": "Доска объявлений Хайфа и Крайот",
+  "url": "https://www.facebook.com/groups/702696598399546",
+  "city": "חיפה",
+  "members": 60000
+ },
+ {
+  "name": "דירות לסטודנטים חיפה",
+  "url": "https://www.facebook.com/groups/110907419268500",
+  "city": "חיפה",
+  "members": 56000
+ },
+ {
+  "name": "דירות חיפה Haifa City Apartments",
+  "url": "https://www.facebook.com/groups/haifacityapartments",
+  "city": "חיפה",
+  "members": 44000
+ },
+ {
+  "name": "דירות למכירה להשכרה בחיפה נשר קריות",
+  "url": "https://www.facebook.com/groups/273403923451682",
+  "city": "חיפה",
+  "members": 29000
+ },
+ {
+  "name": "סטודנטים - השכרת דירות סובב טכניון, חיפה וקריות",
+  "url": "https://www.facebook.com/groups/599082480989761",
+  "city": "חיפה",
+  "members": 25000
+ },
+ {
+  "name": "דירות להשכרה בבאר שבע",
+  "url": "https://www.facebook.com/groups/864908790226104",
+  "city": "באר שבע",
+  "members": 77000
+ },
+ {
+  "name": "סטודנטים דירות להשכרה באר שבע",
+  "url": "https://www.facebook.com/groups/661709787239277",
+  "city": "באר שבע",
+  "members": 76000
+ },
+ {
+  "name": "דירות להשכרה בבאר שבע - לכניסה מידית",
+  "url": "https://www.facebook.com/groups/2302505389980235",
+  "city": "באר שבע",
+  "members": 54000
+ },
+ {
+  "name": "דירות למכירה והשכרה באשקלון",
+  "url": "https://www.facebook.com/groups/293774011042858",
+  "city": "אשקלון",
+  "members": 53000
+ },
+ {
+  "name": "דירות להשכרה אשקלון בלבד!",
+  "url": "https://www.facebook.com/groups/130369664285144",
+  "city": "אשקלון",
+  "members": 43000
+ },
+ {
+  "name": "דירות להשכרה ומכירה אשדוד והסביבה",
+  "url": "https://www.facebook.com/groups/1624818081000281",
+  "city": "אשדוד",
+  "members": 35000
+ },
+ {
+  "name": "דירות להשכרה בהרצליה, רעננה, כפר סבא, רמת השרון והוד השרון",
+  "url": "https://www.facebook.com/groups/dirotlehascarabeherzelia",
+  "city": "השרון",
+  "members": 85000
+ },
+ {
+  "name": "דירות להשכרה בפתח תקווה",
+  "url": "https://www.facebook.com/groups/683985451631971",
+  "city": "פתח תקווה",
+  "members": 78000
+ },
+ {
+  "name": "דירות להשכרה חולון בת ים ראשון לציון",
+  "url": "https://www.facebook.com/groups/963153170558917",
+  "city": "חולון ובת ים",
+  "members": 75000
+ },
+ {
+  "name": "דירות להשכרה בהרצליה בלבד",
+  "url": "https://www.facebook.com/groups/550870795608828",
+  "city": "הרצליה",
+  "members": 68000
+ },
+ {
+  "name": "דירות בראשון לציון, רחובות, נס ציונה, באר יעקב",
+  "url": "https://www.facebook.com/groups/801398193551481",
+  "city": "ראשון לציון",
+  "members": 67000
+ },
+ {
+  "name": "דירות להשכרה ומכירה בעיר אילת והסביבה",
+  "url": "https://www.facebook.com/groups/197805427313558",
+  "city": "אילת",
+  "members": 50000
+ },
+ {
+  "name": "דירות להשכרה למכירה נתניה והסביבה",
+  "url": "https://www.facebook.com/groups/1784140705161722",
+  "city": "נתניה",
+  "members": 36000
+ },
+ {
+  "name": "דירות למכירה ולהשכרה במודיעין והסביבה",
+  "url": "https://www.facebook.com/groups/diramodiin",
+  "city": "מודיעין",
+  "members": 33000
+ },
+ {
+  "name": "Secret Haifa",
+  "url": "https://www.facebook.com/groups/445887735495943",
+  "city": "חיפה",
+  "members": null
+ },
+ {
+  "name": "Apartments/roommates in Haifa",
+  "url": "https://www.facebook.com/groups/57812275694",
+  "city": "חיפה",
+  "members": null
+ },
+ {
+  "name": "Secret Jerusalem",
+  "url": "https://www.facebook.com/groups/secretjerusalem",
+  "city": "ירושלים",
+  "members": null
+ },
+ {
+  "name": "House Hunting in Israel",
+  "url": "https://www.facebook.com/groups/househuntinginisrael",
+  "city": "ארצי",
+  "members": null
+ },
+ {
+  "name": "Looking for an Apartment in Jerusalem",
+  "url": "https://www.facebook.com/groups/JerusalemApartments",
+  "city": "ירושלים",
+  "members": null
+ },
+ {
+  "name": "Jerusalem Apartments - Buy/Sell/Rent/Trade!",
+  "url": "https://www.facebook.com/groups/1383311245241458",
+  "city": "ירושלים",
+  "members": null
+ },
+ {
+  "name": "Secret Tel Aviv",
+  "url": "https://www.facebook.com/groups/secrettelaviv",
+  "city": "תל אביב",
+  "members": null
+ },
+ {
+  "name": "Tel Aviv Apartments - Buy/Sell/Rent/Trade!!!!",
+  "url": "https://www.facebook.com/groups/188430365379",
+  "city": "תל אביב",
+  "members": null
+ },
+ {
+  "name": "Looking for an apartment in Tel Aviv",
+  "url": "https://www.facebook.com/groups/TelAvivApartments",
+  "city": "תל אביב",
+  "members": null
+ },
+ {
+  "name": "Apartments/roommates in Tel Aviv",
+  "url": "https://www.facebook.com/groups/telavivrealestate",
+  "city": "תל אביב",
+  "members": null
+ },
+ {
+  "name": "דירות במחירים שפויים גבעתיים רמת גן והסביבה",
+  "url": "https://www.facebook.com/groups/1386194455009158",
+  "city": "גבעתיים",
+  "members": null
+ }
 ]

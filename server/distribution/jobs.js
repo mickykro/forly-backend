@@ -24,19 +24,23 @@ const MAX_ATTEMPTS = 3;
 const SWEEP_MS = 60 * 1000;
 
 // ── Hebrew strings (user-facing; vendor error text NEVER goes here) ──
+const FENCE = "──────────";
 const M = {
-  confirmOffer: (title, pageUrl, confirmLink) =>
+  // The copy is shown in full: the agent approves EXACTLY what will appear
+  // under their name — that is the trust moment of the whole feature.
+  confirmOffer: (title, pageUrl, confirmLink, copy) =>
     `🚀 דף הנכס "${title}" מוכן!\n${pageUrl}\n\n` +
+    (copy ? `כך ייראה הפוסט:\n${FENCE}\n${copy}\n${FENCE}\n\n` : "") +
     `לפרסום אוטומטי בפייסבוק + ערכת שיתוף לקבוצות, הקישו לאישור:\n${confirmLink}\n\n` +
     `לא מפרסמים בלי האישור שלכם.`,
   duplicate: (title) =>
     `ℹ️ הנכס "${title}" כבר פורסם בעבר — לא פרסמנו שוב.\n` +
     `אפשר לפרסם מחדש בכוונה דרך עמוד ההפצה בדשבורד.`,
-  notConnected: (title) =>
+  notConnected: (title, dashUrl) =>
     `⚠️ הנכס "${title}" לא פורסם בפייסבוק — החשבון עדיין לא חובר.\n` +
-    `מתחברים פעם אחת בעמוד ההפצה בדשבורד, ומהפעם הבאה הפרסום אוטומטי.`,
-  reconnect: () =>
-    `⚠️ החיבור לפייסבוק פג תוקף. פרסום אוטומטי מושהה עד חיבור מחדש בעמוד ההפצה בדשבורד.`,
+    `מתחברים פעם אחת ומהפעם הבאה הפרסום אוטומטי:\n${dashUrl}`,
+  reconnect: (dashUrl) =>
+    `⚠️ החיבור לפייסבוק פג תוקף. פרסום אוטומטי מושהה עד חיבור מחדש:\n${dashUrl}`,
   posted: (title, postUrl) =>
     `✅ הנכס "${title}" פורסם בפייסבוק!\n${postUrl}`,
   failed: (title) =>
@@ -123,8 +127,9 @@ async function maybeOffer(deps, page) {
   });
   const link = `${deps.pageBaseUrl}/api/distribution/confirm?d=${id}&t=${deps.signActionToken([id, "confirm"])}`;
   const title = (page.property && page.property.title) || "";
+  const pageUrl = `${deps.pageBaseUrl}/p/${page.page_id}`;
   await notify(deps, page.business_phone,
-    M.confirmOffer(title, `${deps.pageBaseUrl}/p/${page.page_id}`, link));
+    M.confirmOffer(title, pageUrl, link, deps.shareKit.buildPostCopy(page, pageUrl)));
   return { offered: true, id };
 }
 
@@ -199,7 +204,10 @@ async function failTarget(deps, dist, conn, targetKey, err, { attempts, canReque
       [`${base}.attempts`]: attempts, updated_at: deps.now(),
     });
     await audit(deps, dist, targetKey, "publish_failed", { error: vendorText });
-    if (firstNotice) await notify(deps, dist.business_phone, M.reconnect());
+    if (firstNotice) {
+      await notify(deps, dist.business_phone,
+        M.reconnect(`${deps.pageBaseUrl}/distribution.html`));
+    }
     return "auth";
   }
   if (err instanceof deps.meta.GraphError && attempts < MAX_ATTEMPTS && canRequeue) {
@@ -249,7 +257,9 @@ async function executeJob(deps, dist) {
         "targets.facebook_page.error": why, updated_at: deps.now(),
       });
       fb.status = "skipped";
-      if (why !== "no_media") summary = M.notConnected(title);
+      if (why !== "no_media") {
+        summary = M.notConnected(title, `${deps.pageBaseUrl}/distribution.html`);
+      }
     } else {
       try {
         const g = { pageId: conn.page_id, pageToken: conn.page_token,
@@ -281,7 +291,8 @@ async function executeJob(deps, dist) {
             try {
               await deps.meta.commentWithPhoto({
                 objectId: res.id, pageToken: conn.page_token,
-                message: attached === 0 ? "עוד תמונות מהנכס 👇" : "",
+                message: attached === 0
+                  ? `עוד תמונות מהנכס 👇\n${dist.snapshot.page_url}` : "",
                 photoUrl, graphVersion: deps.graphVersion });
               attached++;
             } catch (e) { break; }

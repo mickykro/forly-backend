@@ -4,84 +4,141 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>הפצה — Forly</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
 <style>
-  :root{--bg:#F7F3EC;--card:#FFFDF9;--ink:#17140F;--muted:#5A5348;--gold:#B98A2F;
-    --line:rgba(185,138,47,.3);--ok:#3E7A4E;--warn:#9B3B30}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font-family:-apple-system,'Segoe UI',sans-serif;padding:20px;max-width:720px;margin-inline:auto}
-  h1{font-size:1.5rem}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;
-    padding:20px;margin-bottom:16px}
-  .card h2{font-size:1.05rem;margin:0 0 8px}
-  .muted{color:var(--muted);font-size:.9rem;margin:0 0 12px}
-  button{background:var(--gold);color:#fff;border:0;border-radius:10px;
-    padding:10px 16px;font-size:.95rem;cursor:pointer}
-  button.secondary{background:transparent;color:var(--gold);border:1px solid var(--gold)}
-  button:disabled{opacity:.5;cursor:default}
-  .chip{display:inline-block;font-size:.75rem;font-weight:600;border-radius:999px;
-    padding:2px 10px;border:1px solid var(--line)}
-  .chip.ok{color:var(--ok)} .chip.warn{color:var(--warn)}
-  textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;
-    padding:10px;font:inherit;direction:ltr;text-align:left}
-  .prop{display:flex;align-items:center;gap:10px;padding:10px 0;
+  .step-strip{display:flex;gap:4px;margin:0 0 22px;flex-wrap:wrap}
+  .step{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:100px;
+    font-size:.85rem;font-weight:600;color:var(--ink-soft);background:rgba(23,20,15,.05)}
+  .step .n{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-size:.75rem;background:rgba(23,20,15,.1)}
+  .step.current{background:var(--gold-faint);color:var(--ink)}
+  .step.current .n{background:var(--gold);color:#fff}
+  .step.done{color:#157A3F}
+  .step.done .n{background:rgba(31,175,90,.15);color:#157A3F}
+  .dist-card{margin-bottom:18px;position:relative}
+  .dist-card h2{font-family:var(--serif);font-weight:600;font-size:1.15rem;margin-bottom:6px}
+  .dist-card .muted{color:var(--ink-soft);font-size:.9rem;font-weight:300;margin-bottom:12px}
+  .dist-card.locked{opacity:.45;pointer-events:none}
+  .conn-chip{display:inline-flex;font-size:.72rem;font-weight:600;border-radius:100px;
+    padding:3px 11px;margin-inline-start:8px}
+  .conn-chip.ok{background:rgba(31,175,90,.12);color:#157A3F}
+  .conn-chip.warn{background:rgba(192,57,43,.1);color:var(--red)}
+  .prop-row{display:flex;align-items:center;gap:12px;padding:10px 0;
     border-top:1px solid rgba(23,20,15,.07)}
-  .prop:first-of-type{border-top:0}
-  .prop .t{flex:1;min-width:0}
-  .prop .t .name{font-weight:600;font-size:.95rem;overflow:hidden;
+  .prop-row:first-child{border-top:0}
+  .prop-row img{width:64px;height:48px;object-fit:cover;border-radius:10px;background:var(--dark)}
+  .prop-row .t{flex:1;min-width:0}
+  .prop-row .t .name{font-weight:600;font-size:.95rem;overflow:hidden;
     text-overflow:ellipsis;white-space:nowrap}
-  .prop a{color:var(--gold);font-size:.8rem}
-  dialog{border:1px solid var(--line);border-radius:16px;padding:24px;max-width:320px}
-  dialog::backdrop{background:rgba(23,20,15,.4)}
-  #msg{position:fixed;bottom:16px;inset-inline:16px;background:var(--ink);color:#fff;
-    border-radius:12px;padding:12px 16px;font-size:.9rem;display:none;text-align:center}
+  .prop-row .t .sub{font-size:.78rem;color:var(--ink-soft);font-weight:300}
+  .prop-row .t a{color:var(--gold);font-size:.8rem}
+  .prop-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--gold)}
+  textarea#groupsBox{width:100%;min-height:90px;border:1px solid rgba(23,20,15,.14);
+    border-radius:12px;padding:10px;font:inherit;direction:ltr;text-align:left;background:var(--bg)}
+  .inline-row{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+  .inline-row input{flex:1;min-width:180px;border:1px solid rgba(23,20,15,.14);
+    border-radius:12px;padding:9px 12px;font:inherit;background:var(--bg)}
+  #catalogFilter{width:100%;border:1px solid rgba(23,20,15,.14);border-radius:12px;
+    padding:9px 12px;font:inherit;background:var(--bg);margin-bottom:8px}
+  #catalogList{margin-bottom:14px;max-height:280px;overflow-y:auto;
+    border:1px solid rgba(23,20,15,.07);border-radius:12px;padding:6px 14px}
+  dialog{border:1px solid rgba(185,138,47,.3);border-radius:20px;padding:24px;
+    max-width:420px;width:calc(100% - 40px);font-family:var(--sans)}
+  dialog::backdrop{background:rgba(23,20,15,.45)}
+  dialog h2{font-family:var(--serif);font-size:1.1rem;margin-bottom:8px}
+  dialog .muted{color:var(--ink-soft);font-size:.88rem;font-weight:300;margin-bottom:12px}
+  #kitCopy{width:100%;min-height:140px;border:1px solid rgba(23,20,15,.14);border-radius:12px;
+    padding:10px;font:inherit;font-size:.88rem;background:var(--bg)}
+  #kitGroups a{display:block;color:var(--gold);font-size:.85rem;padding:3px 0}
+  #msg{position:fixed;bottom:22px;right:50%;transform:translate(50%,0);background:var(--dark);
+    color:#fff;border-radius:100px;padding:11px 22px;font-size:.88rem;display:none;z-index:50;
+    text-align:center;max-width:calc(100% - 40px)}
 </style>
 </head>
 <body>
-<h1>הפצת נכסים</h1>
 
-<div class="card" id="entitleCard" hidden>
-  <h2>הפצה אינה פעילה בחשבון</h2>
-  <p class="muted">פרסום אוטומטי לפייסבוק פתוח כרגע למשתתפי הפיילוט. דברו איתנו כדי להצטרף.</p>
-</div>
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <a class="btn btn-sm" href="/" style="margin-inline-start:auto;background:rgba(255,255,255,.12);color:#fff">← הנכסים שלי</a>
+</header>
 
-<div class="card" id="connectCard" hidden>
-  <h2>חיבור פייסבוק <span class="chip" id="connChip"></span></h2>
-  <p class="muted" id="connText"></p>
-  <button id="connectBtn">חיבור חשבון פייסבוק</button>
-</div>
+<div class="container">
+  <div class="page-head"><div>
+    <h1>הפצת נכסים</h1>
+    <p>פרסום אוטומטי לפייסבוק + ערכת שיתוף לקבוצות ולפרופיל</p>
+  </div></div>
 
-<div class="card" id="groupsCard" hidden>
-  <h2>קבוצות פייסבוק</h2>
-  <p class="muted">סמנו קבוצות מהרשימה המומלצת, או הוסיפו משלכם. מומלץ 5 ומעלה —
-    <span id="groupCount"></span></p>
-  <input id="catalogFilter" placeholder="סינון לפי עיר או שם קבוצה…"
-    style="width:100%;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;margin-bottom:8px">
-  <div id="catalogList" style="margin-bottom:14px;max-height:280px;overflow-y:auto;
-    border:1px solid rgba(23,20,15,.07);border-radius:10px;padding:6px 12px"></div>
-  <h3 style="font-size:.92rem;margin:0 0 6px">קבוצות נוספות שלי</h3>
-  <textarea id="groupsBox" placeholder="https://www.facebook.com/groups/..."></textarea>
-  <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
-    <input id="suggestUrl" placeholder="קישור לקבוצה להוספה" style="flex:1;min-width:180px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;direction:ltr">
-    <button class="secondary" id="suggestBtn">הוספה + הצעה לקטלוג</button>
+  <div class="step-strip" id="stepStrip">
+    <div class="step" data-step="1"><span class="n">1</span>חיבור פייסבוק</div>
+    <div class="step" data-step="2"><span class="n">2</span>בחירת נכסים</div>
+    <div class="step" data-step="3"><span class="n">3</span>קבוצות</div>
+    <div class="step" data-step="4"><span class="n">4</span>פרסום</div>
   </div>
-  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-    <input id="fbSearchBox" placeholder="לא מוצאים קבוצה? חפשו בפייסבוק" style="flex:1;min-width:180px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit">
-    <button class="secondary" id="fbSearchBtn">חיפוש בפייסבוק</button>
-  </div>
-  <button id="saveGroups">שמירת קבוצות</button>
-</div>
 
-<div class="card" id="propsCard" hidden>
-  <h2>הנכסים שלי</h2>
-  <div id="propList"></div>
+  <div class="card dist-card" id="entitleCard" hidden>
+    <h2>הפצה אינה פעילה בחשבון</h2>
+    <p class="muted">פרסום אוטומטי לפייסבוק פתוח כרגע למשתתפי הפיילוט. דברו איתנו כדי להצטרף.</p>
+  </div>
+
+  <div class="card dist-card" id="connectCard" hidden>
+    <h2>חיבור פייסבוק <span class="conn-chip" id="connChip"></span></h2>
+    <p class="muted" id="connText"></p>
+    <button class="btn btn-gold" id="connectBtn">חיבור חשבון פייסבוק</button>
+  </div>
+
+  <div class="card dist-card" id="propsCard" hidden>
+    <h2>בחירת נכסים לפרסום</h2>
+    <p class="muted">סמנו נכס אחד או יותר. נכסים שכבר פורסמו יבקשו אישור לפני פרסום חוזר.</p>
+    <div id="propList"></div>
+  </div>
+
+  <div class="card dist-card" id="groupsCard" hidden>
+    <h2>קבוצות פייסבוק</h2>
+    <p class="muted">סמנו קבוצות מהרשימה המומלצת, או הוסיפו משלכם. מומלץ 5 ומעלה —
+      <span id="groupCount"></span></p>
+    <input id="catalogFilter" placeholder="סינון לפי עיר או שם קבוצה…">
+    <div id="catalogList"></div>
+    <h3 style="font-size:.92rem;margin:0 0 6px">קבוצות נוספות שלי</h3>
+    <textarea id="groupsBox" placeholder="https://www.facebook.com/groups/..."></textarea>
+    <div class="inline-row">
+      <input id="suggestUrl" placeholder="קישור לקבוצה להוספה" style="direction:ltr">
+      <button class="btn btn-ghost btn-sm" id="suggestBtn">הוספה + הצעה לקטלוג</button>
+    </div>
+    <div class="inline-row">
+      <input id="fbSearchBox" placeholder="לא מוצאים קבוצה? חפשו בפייסבוק">
+      <button class="btn btn-ghost btn-sm" id="fbSearchBtn">חיפוש בפייסבוק</button>
+    </div>
+    <button class="btn btn-ghost" id="saveGroups">שמירת קבוצות</button>
+  </div>
+
+  <div class="card dist-card" id="publishCard" hidden>
+    <h2>פרסום</h2>
+    <p class="muted" id="publishSummary"></p>
+    <button class="btn btn-gold" id="publishBtn">פרסום הנכסים שנבחרו</button>
+  </div>
 </div>
 
 <dialog id="repostDlg">
-  <h2 style="font-size:1.05rem;margin:0 0 8px">לפרסם שוב?</h2>
-  <p class="muted">הנכס הזה כבר פורסם בדף הפייסבוק. פרסום נוסף ייצור פוסט חדש.</p>
-  <button id="repostYes">כן, לפרסם שוב</button>
-  <button class="secondary" id="repostNo" style="margin-top:8px">ביטול</button>
+  <h2>לפרסם שוב?</h2>
+  <p class="muted" id="repostText">חלק מהנכסים שנבחרו כבר פורסמו בדף הפייסבוק. פרסום נוסף ייצור פוסט חדש.</p>
+  <button class="btn btn-gold" id="repostYes" style="width:100%">כן, לפרסם שוב</button>
+  <button class="btn btn-ghost" id="repostNo" style="width:100%;margin-top:8px">ביטול</button>
+</dialog>
+
+<dialog id="kitDlg">
+  <h2>ערכת שיתוף</h2>
+  <p class="muted">העתיקו את הטקסט, או שתפו בקליק — הטקסט כבר מצורף לקישור השיתוף.</p>
+  <textarea id="kitCopy" readonly></textarea>
+  <div class="inline-row" style="margin-top:10px">
+    <button class="btn btn-gold btn-sm" id="kitCopyBtn">העתקת הטקסט</button>
+    <a class="btn btn-ghost btn-sm" id="kitShare" target="_blank" rel="noopener">שיתוף בפייסבוק</a>
+  </div>
+  <div id="kitGroups" style="margin-top:8px"></div>
+  <button class="btn btn-ghost" id="kitClose" style="width:100%;margin-top:12px">סגירה</button>
 </dialog>
 
 <div id="msg" role="status"></div>
