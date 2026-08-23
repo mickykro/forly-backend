@@ -28,8 +28,16 @@
   const listingState = new Map();   // page_id → /status?page_id listing object
   const selectedProps = new Set();
   let catalog = [];
+  let catalogType = "";             // listing type the catalog was matched for
   let selected = new Set();         // selected catalog group urls
   let pollT = null;
+
+  // Which kind of listing the agent is about to share — drives group matching.
+  function currentListingType() {
+    const picked = props.filter((p) => selectedProps.has(p.page_id));
+    const types = (picked.length ? picked : props).map((p) => p.listing_type || "sale");
+    return types.includes("rent") && !types.includes("sale") ? "rent" : "sale";
+  }
 
   const connected = () =>
     !!(st && st.connection.connected && !st.connection.needs_reconnect);
@@ -70,8 +78,12 @@
       btn.textContent = "חיבור מחדש";
     } else if (st.connection.connected) {
       chip.textContent = "מחובר"; chip.className = "conn-chip ok";
+      // Say plainly whether Instagram will be posted to — silence here reads
+      // as "it's working" and the agent finds out only from the summary.
       txt.textContent = `מפרסמים לדף: ${st.connection.page_name || ""}` +
-        (st.connection.instagram_linked ? " · אינסטגרם מקושר" : "");
+        (st.connection.instagram_linked
+          ? " · אינסטגרם מקושר — יפורסם גם שם"
+          : " · אינסטגרם לא מקושר (קשרו חשבון עסקי לדף בפייסבוק, ואז חברו מחדש כאן)");
       btn.textContent = "החלפת דף / חיבור מחדש";
     } else {
       chip.textContent = "לא מחובר"; chip.className = "conn-chip warn";
@@ -96,6 +108,7 @@
     cb.onchange = () => {
       if (cb.checked) selectedProps.add(pageId); else selectedProps.delete(pageId);
       renderStepper();
+      syncCatalogType();
     };
     const img = document.createElement("img");
     img.loading = "lazy"; img.alt = "";
@@ -109,7 +122,7 @@
     const chip = document.createElement("span"); chip.className = "chip";
     chip.textContent = "…";
     const kitBtn = document.createElement("button");
-    kitBtn.className = "btn btn-ghost btn-sm"; kitBtn.textContent = "ערכת שיתוף";
+    kitBtn.className = "btn btn-ghost btn-sm"; kitBtn.textContent = "שיתוף לקבוצות";
     kitBtn.onclick = () => openKit(pageId);
     row.append(cb, img, t, chip, kitBtn);
     row._els = { cb, chip, sub, t };
@@ -178,6 +191,7 @@
       }
     }
     renderStepper();
+    syncCatalogType();
     startPollingIfNeeded(rows);
     focusDeepLink(rows);
   }
@@ -210,33 +224,18 @@
     renderStepper();
   }
 
-  // ── share-kit dialog ──
+  // ── the sharing queue ──
+  // Opens (or reopens) a per-property queue: copy → open group → mark posted,
+  // resumable, with per-group tracking. Same screen the WhatsApp link opens.
   async function openKit(pageId) {
     try {
-      const k = await api(`/api/distribution/share-kit?page_id=${encodeURIComponent(pageId)}`);
-      $("kitCopy").value = k.copy;
-      $("kitShare").href = k.quick_share;
-      const gbox = $("kitGroups");
-      gbox.textContent = "";
-      if (k.groups.length) {
-        const h = document.createElement("div");
-        h.textContent = "הקבוצות שלכם:"; h.style.cssText = "font-weight:600;font-size:.85rem";
-        gbox.appendChild(h);
-        for (const g of k.groups) {
-          const a = document.createElement("a");
-          a.href = g; a.target = "_blank"; a.rel = "noopener"; a.textContent = g;
-          gbox.appendChild(a);
-        }
-      }
-      $("kitCopyBtn").onclick = () => {
-        navigator.clipboard.writeText(k.copy)
-          .then(() => toast("הטקסט הועתק — אפשר להדביק בקבוצה"))
-          .catch(() => { $("kitCopy").select(); document.execCommand("copy"); toast("הטקסט הועתק"); });
-      };
-      $("kitDlg").showModal();
-    } catch { toast("טעינת ערכת השיתוף נכשלה."); }
+      const s = await api("/api/distribution/share-session", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ page_id: pageId }),
+      });
+      location.href = `/share.html?s=${encodeURIComponent(s.id)}`;
+    } catch { toast("פתיחת ערכת השיתוף נכשלה."); }
   }
-  $("kitClose").onclick = () => $("kitDlg").close();
 
   // ── step 3: groups (catalog picker with pinned selection) ──
   function ownGroupLines() {
@@ -294,9 +293,13 @@
       for (const g of chosen) box.appendChild(catalogRow(g, true));
     }
     const byCity = new Map();
+    const mismatched = [];
     for (const g of catalog) {
       if (selected.has(g.url)) continue;
       if (q && !(g.name + " " + (g.city || "")).toLowerCase().includes(q)) continue;
+      // Groups that don't take this listing type are shown LAST, never hidden
+      // — the agent decides, but a sale shouldn't lead with rental groups.
+      if (g.match === false) { mismatched.push(g); continue; }
       const c = g.city || "ארצי";
       if (!byCity.has(c)) byCity.set(c, []);
       byCity.get(c).push(g);
@@ -306,13 +309,35 @@
       groups.sort(bySize);
       for (const g of groups) box.appendChild(catalogRow(g, false));
     }
+    if (mismatched.length) {
+      const label = catalogType === "rent"
+        ? "פחות מתאימות לשכירות" : "פחות מתאימות למכירה";
+      box.appendChild(sectionHead(`${label} (${mismatched.length})`, "var(--ink-soft)"));
+      mismatched.sort(bySize);
+      for (const g of mismatched) box.appendChild(catalogRow(g, true));
+    }
     updateGroupCount([...selected, ...ownGroupLines()]);
+  }
+
+  // Re-fetch the catalog when the selection flips sale ↔ rent, so matching
+  // always reflects what's actually about to be shared.
+  function syncCatalogType() {
+    const want = currentListingType();
+    if (catalog.length && want !== catalogType) loadCatalog(want);
+  }
+
+  function loadCatalog(type) {
+    catalogType = type;
+    return api(`/api/distribution/group-catalog?listing_type=${encodeURIComponent(type)}`)
+      .then((r) => { catalog = r.groups || []; renderCatalog(); })
+      .catch(() => { /* keep whatever is rendered */ });
   }
 
   function renderGroups() {
     $("groupsCard").hidden = false;
     const mine = st.groups || [];
-    api("/api/distribution/group-catalog").then((r) => {
+    catalogType = currentListingType();
+    api(`/api/distribution/group-catalog?listing_type=${encodeURIComponent(catalogType)}`).then((r) => {
       catalog = r.groups || [];
       const catalogUrls = catalog.map((g) => g.url);
       selected = new Set(mine.filter((u) => catalogUrls.includes(u)));

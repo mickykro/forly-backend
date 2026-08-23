@@ -114,7 +114,7 @@ app.use("/api/admin", createAdminRouter({
 const createDistributionRouter = require("./routes/distribution");
 const distributionJobs = require("./distribution/jobs");
 app.use("/api/distribution", createDistributionRouter({
-  requireAuth, verifyActionToken,
+  requireAuth, verifyActionToken, verifySession, readToken,
   authSecret: AUTH_SECRET,
   pageBaseUrl: PAGE_BASE_URL,
   greenInstance: GREENAPI_INSTANCE,

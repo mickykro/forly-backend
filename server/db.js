@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [] };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map() };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -317,6 +317,44 @@ async function addGroupCatalogEntry(doc) {
   return String(mem.groupCatalog.length);
 }
 
+// ── distribution: group share sessions (the in-app sharing queue) ──
+// One doc per (property × sharing run) holding the frozen copy and the
+// per-group progress the agent confirms by hand. Forly never claims a group
+// post it didn't see — every state here is agent-confirmed or a skip.
+async function saveShareSession(s) {
+  if (db) await db.collection("share_sessions").doc(s.id).set(s);
+  else mem.shareSessions.set(s.id, JSON.parse(JSON.stringify(s)));
+}
+
+async function getShareSession(id) {
+  if (db) { const d = await db.collection("share_sessions").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.shareSessions.get(id) || null;
+}
+
+async function updateShareSession(id, patch) {
+  if (db) { await db.collection("share_sessions").doc(id).update(patch); return; }
+  const s = mem.shareSessions.get(id);
+  if (!s) return;
+  for (const [key, val] of Object.entries(patch)) {
+    const parts = key.split(".");
+    let o = s;
+    while (parts.length > 1) { const k = parts.shift(); o[k] = o[k] || {}; o = o[k]; }
+    o[parts[0]] = val;
+  }
+}
+
+async function findOpenShareSession(pageId) {
+  if (db) {
+    const snap = await db.collection("share_sessions")
+      .where("page_id", "==", pageId).limit(20).get();
+    const docs = snap.docs.map((d) => d.data());
+    return docs.sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at))[0] || null;
+  }
+  return [...mem.shareSessions.values()]
+    .filter((s) => s.page_id === pageId)
+    .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at))[0] || null;
+}
+
 // ── distribution: append-only audit (spec §5 post_actions) ──
 async function addPostAction(doc) {
   const rec = { at: new Date(), ...doc };
@@ -354,4 +392,5 @@ module.exports = {
   saveDistribution, getDistribution, updateDistribution,
   listDistributionsByPage, listQueuedDistributions, addPostAction,
   listGroupCatalog, addGroupCatalogEntry,
+  saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
 };

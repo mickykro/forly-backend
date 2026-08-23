@@ -34,6 +34,10 @@ module.exports = function createDashboardRouter(ctx) {
         page_id: l.page_id || null,
         page_url: l.page_id ? `${pageBaseUrl}/p/${l.page_id}` : null,
         page_status: page ? page.status : "building",
+        // Drives group matching on the distribution page: a sale listing must
+        // not be pushed at rental-only groups.
+        listing_type: (page && page.property && page.property.listing_type) ||
+          l.listing_type || "sale",
         // Pages no longer expire — null hides the countdown bar in the UI.
         days_left: null,
         view_count: (page && page.view_count) || 0,

@@ -18,6 +18,18 @@ function localPhone(p) {
   return /^9725\d{8}$/.test(s) ? "0" + s.slice(3) : s;
 }
 
+// A per-(session,group) tracked link: the SHARED url carries attribution,
+// while the page keeps serving an undecorated canonical og:url so Facebook
+// still aggregates every share onto one object.
+function trackedUrl(pageUrl, { session, group }) {
+  if (!session || !group) return pageUrl;
+  const u = new URL(String(pageUrl));
+  u.searchParams.set("src", "fb_group");
+  u.searchParams.set("s", String(session));
+  u.searchParams.set("g", String(group));
+  return u.toString();
+}
+
 function buildPostCopy(page, pageUrl) {
   const p = (page && page.property) || {};
   const a = (page && page.agent) || {};
@@ -102,4 +114,18 @@ function buildShareKitMessage({ copy, pageUrl, groups, appId }) {
   return parts.join("\n");
 }
 
-module.exports = { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink, buildShareKitMessage };
+// The WhatsApp alert that replaces the old wall of raw links: a short
+// heads-up plus one deep link into the in-app sharing queue, where the copy
+// and each group live with resumable progress.
+function buildQueueMessage({ title, groupCount, queueUrl, postUrl }) {
+  const lines = [];
+  if (postUrl) lines.push(`✅ "${title}" פורסם בדף הפייסבוק שלכם!`, postUrl, "");
+  lines.push(groupCount
+    ? `📣 ${groupCount} קבוצות מחכות לשיתוף — הטקסט מוכן, עוברים קבוצה־קבוצה:`
+    : "📣 ערכת השיתוף מוכנה (עדיין לא בחרתם קבוצות):");
+  lines.push(queueUrl);
+  return lines.join("\n");
+}
+
+module.exports = { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink,
+  buildShareKitMessage, buildQueueMessage, trackedUrl };

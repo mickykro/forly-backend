@@ -225,6 +225,47 @@ async function failTarget(deps, dist, conn, targetKey, err, { attempts, canReque
   return "terminal";
 }
 
+// ── group share sessions (the in-app sharing queue) ──
+// Facebook has no Groups publishing API, so Forly automates the PREPARATION
+// and never the Facebook action: per-group copy with a tracked link, an open
+// button, and states the agent confirms by hand (spec §1, review §1).
+const groupKey = (url) =>
+  crypto.createHash("sha256").update(url).digest("base64url").slice(0, 10);
+
+async function createShareSession(deps, { page, business, copy, postUrl }) {
+  const id = crypto.randomUUID();
+  const now = deps.now();
+  const pageUrl = `${deps.pageBaseUrl}/p/${page.page_id}`;
+  const groups = deps.shareKit.sanitizeGroups(
+    (business && business.distribution && business.distribution.groups) || []);
+  const session = {
+    id, business_phone: page.business_phone, page_id: page.page_id,
+    created_at: now, updated_at: now,
+    snapshot: {
+      title: (page.property && page.property.title) || "",
+      page_url: pageUrl,
+      copy: copy || deps.shareKit.buildPostCopy(page, pageUrl),
+      listing_type: (page.property && page.property.listing_type) || "sale",
+      post_url: postUrl || null,
+    },
+    groups: groups.map((url) => ({
+      key: groupKey(url), url,
+      // Per-group attribution token (review §5): rides the SHARED link only.
+      token: crypto.randomBytes(6).toString("base64url"),
+      state: "ready",
+      copied_at: null, opened_at: null, marked_posted_at: null,
+      skipped_at: null, skip_reason: null,
+    })),
+  };
+  await deps.db.saveShareSession(session);
+  return session;
+}
+
+function queueUrl(deps, session) {
+  return `${deps.pageBaseUrl}/share.html?s=${session.id}` +
+    `&t=${deps.signActionToken([session.id, "share"])}`;
+}
+
 // ── execution ──
 async function executeJob(deps, dist) {
   if (!dist.page_id || !dist.targets || !dist.snapshot) {
@@ -367,18 +408,33 @@ async function executeJob(deps, dist) {
     }
   }
 
-  // Share kit: always attempted, never able to fail the job.
+  // Share queue: always attempted, never able to fail the job. Instead of a
+  // wall of raw links, the agent gets one deep link into a resumable in-app
+  // queue (created here so the WhatsApp message can carry it).
   if (dist.targets.share_kit.status === "pending") {
     try {
-      const kit = deps.shareKit.buildShareKitMessage({
-        copy: dist.snapshot.copy, pageUrl: dist.snapshot.page_url,
-        groups: dist.snapshot.groups,
-        appId: (deps.env && deps.env.META_APP_ID) || null,
+      const page = await db.getPage(dist.page_id);
+      const business = await db.getBusiness(dist.business_phone);
+      const session = await createShareSession(deps, {
+        page: page || { page_id: dist.page_id, business_phone: dist.business_phone,
+          property: { title: dist.snapshot.title } },
+        business, copy: dist.snapshot.copy,
+        postUrl: (fb && fb.post_url) || null,
       });
-      await deps.sendWhatsApp(dist.business_phone, kit);
-      await db.updateDistribution(dist.id,
-        { "targets.share_kit.status": "sent", updated_at: deps.now() });
+      await deps.sendWhatsApp(dist.business_phone, deps.shareKit.buildQueueMessage({
+        title: dist.snapshot.title,
+        groupCount: session.groups.length,
+        queueUrl: queueUrl(deps, session),
+        postUrl: (fb && fb.post_url) || null,
+      }));
+      await db.updateDistribution(dist.id, {
+        "targets.share_kit.status": "sent",
+        "targets.share_kit.session_id": session.id,
+        updated_at: deps.now() });
       await audit(deps, dist, "share_kit", "share_kit_sent", {});
+      // The queue message already opened with the post link — don't send a
+      // second WhatsApp saying the same thing.
+      if (fb.status === "posted" && summary === M.posted(title, fb.post_url)) summary = null;
     } catch (e) {
       await db.updateDistribution(dist.id, {
         "targets.share_kit.status": "skipped",
@@ -436,4 +492,5 @@ module.exports = {
   MAX_ATTEMPTS, M, baseTargets, hasLivePost, hasInFlight,
   liveDeps, maybeOffer, enqueueFromConfirm, createQueued,
   executeJob, runSweep, startSweeper,
+  createShareSession, queueUrl, groupKey,
 };

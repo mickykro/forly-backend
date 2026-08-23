@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>שיתוף לקבוצות — Forly</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;600&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  body{background:var(--bg)}
+  .wrap{width:min(560px,100%);margin:0 auto;padding:18px 16px 100px}
+  .head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .head h1{font-family:var(--serif);font-size:1.25rem;font-weight:600}
+  .sub{color:var(--ink-soft);font-size:.86rem;font-weight:300;margin-bottom:14px}
+  .progress{height:8px;border-radius:8px;background:var(--gold-faint);overflow:hidden;margin-bottom:6px}
+  .progress i{display:block;height:100%;background:linear-gradient(90deg,var(--gold-bright),var(--gold));
+    width:0%;transition:width .3s}
+  .pcount{font-size:.8rem;color:var(--ink-soft);margin-bottom:16px}
+  .copybox{background:var(--paper);border:1px solid rgba(185,138,47,.25);border-radius:16px;
+    padding:14px;margin-bottom:14px}
+  .copybox textarea{width:100%;min-height:150px;border:none;background:transparent;
+    font:inherit;font-size:.9rem;color:var(--ink);resize:vertical;outline:none}
+  .gcard{background:var(--paper);border:1px solid rgba(185,138,47,.25);border-radius:18px;
+    padding:16px;margin-bottom:12px}
+  .gcard.done{opacity:.55}
+  .gname{font-weight:600;font-size:.98rem;margin-bottom:2px;word-break:break-word}
+  .gmeta{font-size:.76rem;color:var(--ink-soft);margin-bottom:12px}
+  .gactions{display:flex;gap:8px;flex-wrap:wrap}
+  .gactions .btn{min-height:42px}
+  .state-tag{font-size:.72rem;font-weight:600;border-radius:100px;padding:3px 10px}
+  .state-tag.posted{background:rgba(31,175,90,.12);color:#157A3F}
+  .state-tag.skipped{background:rgba(23,20,15,.08);color:var(--ink-soft)}
+  .state-tag.opened,.state-tag.copied{background:var(--gold-faint);color:#8A6A1E}
+  .done-card{text-align:center;padding:30px 20px}
+  #msg{position:fixed;bottom:18px;right:50%;transform:translate(50%,0);background:var(--dark);
+    color:#fff;border-radius:100px;padding:11px 22px;font-size:.88rem;display:none;z-index:50}
+  .rules{font-size:.76rem;color:var(--ink-soft);background:rgba(185,138,47,.08);
+    border-radius:12px;padding:10px 12px;margin-bottom:14px;font-weight:300}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <a class="btn btn-sm" href="/distribution.html" style="margin-inline-start:auto;background:rgba(255,255,255,.12);color:#fff">עמוד ההפצה</a>
+</header>
+
+<div class="wrap">
+  <div id="loading" class="center" style="padding:60px 0">
+    <div class="spinner"></div>
+    <p class="sub" style="margin-top:14px">טוען את ערכת השיתוף…</p>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="head"><h1 id="title"></h1></div>
+    <p class="sub" id="postLine"></p>
+
+    <div class="progress"><i id="bar"></i></div>
+    <p class="pcount" id="pcount"></p>
+
+    <div class="rules">שימו לב: לכל קבוצה יש חוקים משלה. בדקו את כללי הקבוצה לפני פרסום —
+      חלק מהקבוצות אינן מאפשרות פרסום מתווכים.</div>
+
+    <div class="copybox">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <b style="font-size:.9rem">הטקסט לפרסום</b>
+        <button class="btn btn-gold btn-sm" id="copyMain">העתקה</button>
+      </div>
+      <textarea id="copyText" readonly></textarea>
+    </div>
+
+    <div id="groups"></div>
+
+    <div class="card done-card hidden" id="allDone">
+      <div style="font-size:2rem">🎉</div>
+      <h3 style="font-family:var(--serif);margin:6px 0">סיימתם את כל הקבוצות</h3>
+      <p class="sub">אפשר לעקוב אחרי הצפיות והלידים בדשבורד.</p>
+      <a class="btn btn-gold" href="/">לנכסים שלי</a>
+    </div>
+  </div>
+
+  <div id="badlink" class="card center hidden" style="padding:40px 24px">
+    <h3 style="font-family:var(--serif);margin-bottom:6px">הקישור אינו תקף</h3>
+    <p class="sub">אפשר לפתוח את ערכת השיתוף מעמוד ההפצה בדשבורד.</p>
+    <a class="btn btn-gold" href="/distribution.html">לעמוד ההפצה</a>
+  </div>
+</div>
+
+<div id="msg" role="status"></div>
+<script src="share.js"></script>
+</body>
+</html>

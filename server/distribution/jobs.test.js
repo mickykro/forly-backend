@@ -11,9 +11,12 @@ const config = require("./config");
 
 // ── fakes ──
 function fakeDb() {
-  const dists = new Map(), actions = [], conns = new Map(), pages = new Map(), bizs = new Map();
+  const dists = new Map(), actions = [], conns = new Map(), pages = new Map(),
+    bizs = new Map(), sessions = new Map();
   return {
-    dists, actions, conns, pages, bizs,
+    dists, actions, conns, pages, bizs, sessions,
+    saveShareSession: async (s) => sessions.set(s.id, JSON.parse(JSON.stringify(s))),
+    getShareSession: async (id) => sessions.get(id) || null,
     getPage: async (id) => pages.get(id) || null,
     getBusiness: async (p) => bizs.get(p) || null,
     // Copies both ways: production Firestore reads return snapshots, so the
@@ -105,9 +108,20 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.equal(pub.content.media_type, "video");
     assert.ok(pub.content.copy.includes("דירה"), "exact copy audited");
     assert.equal(pub.trigger, "dashboard");
-    // share kit + summary both went to the agent
-    assert.ok(sent.some((s) => s.msg.includes("ערכת שיתוף")));
-    assert.ok(sent.some((s) => s.msg.includes("https://www.facebook.com/V1")));
+    // the agent gets ONE message: the post link + a deep link into the queue
+    const queueMsg = sent.find((s) => s.msg.includes("/share.html?s="));
+    assert.ok(queueMsg, "share queue link sent");
+    assert.ok(queueMsg.msg.includes("https://www.facebook.com/V1"), "post link in the same message");
+    assert.equal(sent.filter((s) => s.msg.includes("https://www.facebook.com/V1")).length, 1,
+      "no duplicate 'posted' message alongside the queue message");
+    // a resumable session exists with one group, ready and untouched
+    const session = [...db.sessions.values()][0];
+    assert.ok(session, "share session persisted");
+    assert.equal(session.page_id, "pg1");
+    assert.equal(session.groups.length, 1);
+    assert.equal(session.groups[0].state, "ready");
+    assert.ok(session.groups[0].token, "per-group attribution token minted");
+    assert.equal(session.snapshot.post_url, "https://www.facebook.com/V1");
   }
 
   // ── no video ⇒ multi-photo post ──

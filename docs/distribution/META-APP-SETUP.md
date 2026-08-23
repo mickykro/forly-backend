@@ -38,6 +38,28 @@ serves every agent; each agent grants it access to their own Page via
 `instagram_basic`, `instagram_content_publish` — exactly the list in
 `server/distribution/meta.js SCOPES`. Nothing else.
 
+### Enabling them (use cases, not a permissions list)
+
+Meta now groups permissions into **use cases** (מקרי שימוש):
+
+1. **Facebook Pages** — open the "Manage Pages"/Page-publishing use case →
+   **Customize** → add `pages_manage_posts` and `pages_read_engagement`
+   (`pages_show_list` is included). They should read *Ready for testing*.
+2. **Instagram** — the IG permissions do NOT live in the Pages use case. Add
+   the **Instagram** use case to the app (Use cases → Add use case →
+   Instagram / "Publish content to Instagram"), then Customize → add
+   `instagram_basic` and `instagram_content_publish`.
+
+**Until the Instagram use case is added**, set
+`META_SCOPES=pages_show_list,pages_read_engagement,pages_manage_posts` in
+`.env` — the login dialog rejects scopes the app doesn't have ("Invalid
+Scopes") and this narrows the request. Once IG is added: delete that env
+line, restart, and **reconnect from the dashboard** (new scopes require
+fresh consent). The agent's Instagram must also be a **Business/Creator**
+account linked to the Facebook Page (Page settings → Linked accounts) —
+until it is, `ig_business_id` stays null and Instagram is skipped, never
+failed.
+
 ## 4. Dev Mode — the pilot path (no review needed)
 
 While the app is in **Development Mode** it can post to Pages of anyone

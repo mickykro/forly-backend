@@ -39,8 +39,8 @@ const card = (title, sub, extraHtml = "", redirectTo = null) =>
   `<body><div class="card"><h1>${esc(title)}</h1><p>${esc(sub)}</p>${extraHtml}</div></body></html>`;
 
 module.exports = function createDistributionRouter(ctx) {
-  const { requireAuth, verifyActionToken, authSecret, pageBaseUrl,
-          greenInstance, greenToken } = ctx;
+  const { requireAuth, verifyActionToken, verifySession, readToken,
+          authSecret, pageBaseUrl, greenInstance, greenToken } = ctx;
   const deps = jobs.liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret });
   const router = express.Router();
   // The page-picker posts a plain HTML form (no session, no JS required).
@@ -242,11 +242,26 @@ module.exports = function createDistributionRouter(ctx) {
       const url = g.url && shareKit.sanitizeGroups([g.url])[0];
       if (url) byUrl.set(url, { ...(byUrl.get(url) || {}), ...g, url });
     }
+    // listing_type=sale|rent marks which groups actually accept that kind of
+    // listing, so a sale isn't pushed at rental-only groups. Nothing is
+    // hidden — mismatches are flagged and sorted last, the agent decides.
+    const want = String(req.query.listing_type || "").trim();
     const groups = [...byUrl.values()]
       .filter((g) => g.active !== false)
-      .map((g) => ({ name: g.name || g.url, url: g.url,
-        city: g.city || null, members: Number(g.members) || null }));
-    res.json({ groups });
+      .map((g) => {
+        const types = Array.isArray(g.listing_types) ? g.listing_types : [];
+        return {
+          name: g.name || g.url, url: g.url,
+          city: g.city || null, members: Number(g.members) || null,
+          listing_types: types,
+          languages: Array.isArray(g.languages) ? g.languages : [],
+          // "unknown" is honest: group rules can't be inferred from a name —
+          // only a curator's verified entry may say allowed/owner_only.
+          agent_policy: g.agent_policy || "unknown",
+          match: !want || !types.length || types.includes(want),
+        };
+      });
+    res.json({ groups, listing_type: want || null });
   });
 
   // ── POST /group-catalog/suggest — agent offers a group ──
@@ -325,6 +340,99 @@ module.exports = function createDistributionRouter(ctx) {
       groups: shareKit.sanitizeGroups(
         (biz && biz.distribution && biz.distribution.groups) || []),
     });
+  });
+
+  // ── the group sharing queue ──
+  // Auth is EITHER the owner's session OR the signed link from WhatsApp, so
+  // the agent goes from the message to the queue in one tap on mobile.
+  async function loadSession(req) {
+    const id = String(req.query.s || (req.body && req.body.s) || "");
+    if (!id) return null;
+    const session = await db.getShareSession(id);
+    if (!session) return null;
+    const token = String(req.query.t || (req.body && req.body.t) || "");
+    if (token && verifyActionToken([id, "share"], token, authSecret)) return session;
+    const sess = verifySession && readToken && verifySession(authSecret, readToken(req));
+    if (sess && sess.userId === session.business_phone) return session;
+    return null;
+  }
+
+  const publicSession = (s) => ({
+    id: s.id, page_id: s.page_id,
+    title: s.snapshot.title, page_url: s.snapshot.page_url,
+    post_url: s.snapshot.post_url || null,
+    copy: s.snapshot.copy,
+    quick_share: shareKit.sharerLink(s.snapshot.page_url,
+      { quote: s.snapshot.copy, appId: process.env.META_APP_ID || null }),
+    groups: (s.groups || []).map((g) => ({
+      key: g.key, url: g.url, state: g.state,
+      // Per-group copy: identical facts, tracked link (review §3 + §5).
+      copy: s.snapshot.copy.replace(s.snapshot.page_url,
+        shareKit.trackedUrl(s.snapshot.page_url, { session: s.id, group: g.token })),
+    })),
+  });
+
+  // Create (or reopen) a queue for one property — the dashboard button.
+  router.post("/share-session", requireAuth(authSecret), async (req, res) => {
+    const pageId = String((req.body && req.body.page_id) || "");
+    const page = await db.getPage(pageId);
+    if (!page || page.business_phone !== req.user.userId) {
+      return res.status(404).json({ error: "not_found" });
+    }
+    const existing = await db.findOpenShareSession(pageId);
+    const biz = await db.getBusiness(req.user.userId);
+    const currentGroups = shareKit.sanitizeGroups(
+      (biz && biz.distribution && biz.distribution.groups) || []);
+    // Reuse an existing queue unless the agent's group list changed since —
+    // progress is worth more than a perfectly fresh snapshot.
+    const sameGroups = existing &&
+      existing.groups.length === currentGroups.length &&
+      existing.groups.every((g) => currentGroups.includes(g.url));
+    const session = sameGroups ? existing
+      : await jobs.createShareSession(deps, { page, business: biz });
+    res.json(publicSession(session));
+  });
+
+  router.get("/share-session", async (req, res) => {
+    const session = await loadSession(req);
+    if (!session) return res.status(401).json({ error: "invalid_link" });
+    res.json(publicSession(session));
+  });
+
+  // Record what the agent actually did. Nothing here claims Forly posted:
+  // copied/opened are preparation, posted/skipped are agent-confirmed.
+  const ACTIONS = { copied: "copied", opened: "opened", posted: "posted", skipped: "skipped" };
+  router.post("/share-session/mark", async (req, res) => {
+    const session = await loadSession(req);
+    if (!session) return res.status(401).json({ error: "invalid_link" });
+    const key = String((req.body && req.body.group) || "");
+    const action = ACTIONS[String((req.body && req.body.action) || "")];
+    const idx = (session.groups || []).findIndex((g) => g.key === key);
+    if (!action || idx < 0) return res.status(400).json({ error: "invalid_input" });
+    const now = new Date();
+    const patch = { updated_at: now, [`groups.${idx}.state`]: action };
+    if (action === "copied") patch[`groups.${idx}.copied_at`] = now;
+    if (action === "opened") patch[`groups.${idx}.opened_at`] = now;
+    if (action === "posted") patch[`groups.${idx}.marked_posted_at`] = now;
+    if (action === "skipped") {
+      patch[`groups.${idx}.skipped_at`] = now;
+      patch[`groups.${idx}.skip_reason`] =
+        String((req.body && req.body.reason) || "").slice(0, 60) || null;
+    }
+    await db.updateShareSession(session.id, patch);
+    // Only an agent-confirmed publish enters the audit log.
+    if (action === "posted") {
+      await db.addPostAction({
+        business_phone: session.business_phone, page_id: session.page_id,
+        distribution_id: session.id, target: "facebook_group",
+        action: "published", at: now, trigger: "share_queue",
+        post_id: null, post_url: session.groups[idx].url,
+        content: { copy: session.snapshot.copy, media_type: "none",
+          media_count: 0, media_urls: [] },
+        error: null, source: "agent_confirmed",
+      });
+    }
+    res.json({ ok: true, state: action });
   });
 
   // ── GET /status — connection + per-listing state; never tokens ──

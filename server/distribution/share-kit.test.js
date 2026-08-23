@@ -3,7 +3,8 @@
  * Run: node server/distribution/share-kit.test.js
  */
 const assert = require("assert");
-const { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink, buildShareKitMessage } = require("./share-kit");
+const { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink, buildShareKitMessage,
+  buildQueueMessage, trackedUrl } = require("./share-kit");
 
 const page = {
   property: { title: "4 חד׳ בבבלי", neighborhood: "בבלי", city: "תל אביב",
@@ -77,5 +78,24 @@ assert.ok(kitDlg.includes("facebook.com/dialog/share"), "dialog link when appId 
 const empty = buildShareKitMessage({ copy: "C", pageUrl: url, groups: [] });
 assert.ok(!empty.includes("1. "), "no numbered lines");
 assert.ok(empty.includes("לא הוגדרו"), "tells the agent no groups are saved yet");
+
+// ── tracked links: attribution rides the SHARED url only ──
+const tracked = new URL(trackedUrl(url, { session: "S1", group: "g7" }));
+assert.equal(tracked.searchParams.get("src"), "fb_group");
+assert.equal(tracked.searchParams.get("s"), "S1");
+assert.equal(tracked.searchParams.get("g"), "g7");
+assert.equal(tracked.pathname, new URL(url).pathname, "same page, only query added");
+assert.equal(trackedUrl(url, {}), url, "no session/group ⇒ untouched canonical url");
+
+// ── the queue message replaces the wall of raw links ──
+const qm = buildQueueMessage({ title: "דירה", groupCount: 8,
+  queueUrl: "https://x.test/share.html?s=1&t=2", postUrl: "https://fb.com/P1" });
+assert.ok(qm.includes("https://fb.com/P1"), "post link included");
+assert.ok(qm.includes("8 קבוצות"), "group count included");
+assert.ok(qm.includes("https://x.test/share.html?s=1&t=2"), "queue deep link included");
+assert.ok(qm.length < 400, "short alert, not a wall of text");
+const qm0 = buildQueueMessage({ title: "דירה", groupCount: 0, queueUrl: "https://x.test/q" });
+assert.ok(qm0.includes("עדיין לא בחרתם קבוצות"), "honest empty-group line");
+assert.ok(!qm0.includes("undefined"));
 
 console.log("share-kit.test.js OK");

@@ -566,6 +566,17 @@ module.exports = function createPagesRouter(ctx) {
     let d = null;
     try { d = await db.getPage(id); } catch (e) { /* fall back */ }
     const pageUrl = `${pageBaseUrl}/p/${id}`;
+    // Group-share attribution (?src=fb_group&s=&g=): record which sharing
+    // session/group sent this visitor. Best-effort and fire-and-forget — the
+    // canonical og:url stays undecorated so Facebook aggregates shares.
+    if (d && req.query.src === "fb_group" && req.query.g) {
+      db.logPortalEvent({
+        type: "group_visit", page_id: id,
+        listing_id: d.listing_id || null, business_phone: d.business_phone || null,
+        share_session: String(req.query.s || "").slice(0, 64),
+        group_token: String(req.query.g).slice(0, 24),
+      }).catch(() => { /* never block a page render on analytics */ });
+    }
     const tpl = d && d.theme && d.theme.template;
     if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
       // Shell branch: still inject OG tags for active pages so shared links
