@@ -41,74 +41,89 @@
 
   // The curated catalog renders as checkboxes; anything the agent has saved
   // that ISN'T in the catalog lives in the free-text box. Saving merges both.
+  // Selection state lives in `selected` — checked groups are PINNED to a
+  // section at the top (immune to the filter); unchecking returns a group to
+  // its city section.
   let catalog = [];
+  let selected = new Set();
+
+  function ownGroupLines() {
+    return $("groupsBox").value.split("\n").map((s) => s.trim()).filter(Boolean);
+  }
+
+  function catalogRow(g, showCity) {
+    const label = document.createElement("label");
+    label.style.cssText = "display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;font-size:.9rem";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = selected.has(g.url);
+    cb.onchange = () => {
+      if (cb.checked) selected.add(g.url); else selected.delete(g.url);
+      renderCatalog();
+    };
+    const span = document.createElement("span");
+    span.textContent = g.name +
+      (showCity && g.city ? ` · ${g.city}` : "") +
+      (g.members ? ` · ~${Math.round(g.members / 1000)}K חברים` : "");
+    label.append(cb, span);
+    return label;
+  }
+
+  function sectionHead(text, color) {
+    const h = document.createElement("div");
+    h.textContent = text;
+    h.style.cssText = `font-weight:700;font-size:.85rem;color:${color};margin:8px 0 2px`;
+    return h;
+  }
+
+  function renderCatalog() {
+    const box = $("catalogList");
+    box.textContent = "";
+    if (!catalog.length) {
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "אין עדיין קבוצות מומלצות — הציעו קבוצות ונוסיף אותן לקטלוג.";
+      box.appendChild(p);
+      return;
+    }
+    const q = ($("catalogFilter").value || "").trim().toLowerCase();
+    const bySize = (a, b) => (b.members || 0) - (a.members || 0);
+    // Pinned: the agent's selected groups, always on top, never filtered out.
+    const chosen = catalog.filter((g) => selected.has(g.url)).sort(bySize);
+    if (chosen.length) {
+      box.appendChild(sectionHead(`✓ הקבוצות שנבחרו (${chosen.length})`, "var(--ok)"));
+      for (const g of chosen) box.appendChild(catalogRow(g, true));
+    }
+    // The rest, grouped by city, biggest first, filterable.
+    const byCity = new Map();
+    for (const g of catalog) {
+      if (selected.has(g.url)) continue;
+      if (q && !(g.name + " " + (g.city || "")).toLowerCase().includes(q)) continue;
+      const c = g.city || "ארצי";
+      if (!byCity.has(c)) byCity.set(c, []);
+      byCity.get(c).push(g);
+    }
+    for (const [city, groups] of byCity) {
+      box.appendChild(sectionHead(city, "var(--gold)"));
+      groups.sort(bySize);
+      for (const g of groups) box.appendChild(catalogRow(g, false));
+    }
+    updateGroupCount([...selected, ...ownGroupLines()]);
+  }
+
   function renderGroups(st) {
     $("groupsCard").hidden = false;
     const mine = st.groups || [];
     api("/api/distribution/group-catalog").then((r) => {
       catalog = r.groups || [];
-      const box = $("catalogList");
-      box.textContent = "";
-      if (!catalog.length) {
-        const p = document.createElement("p");
-        p.className = "muted";
-        p.textContent = "אין עדיין קבוצות מומלצות — הציעו קבוצות ונוסיף אותן לקטלוג.";
-        box.appendChild(p);
-      }
-      // Grouped by city, biggest groups first inside each city.
-      const byCity = new Map();
-      for (const g of catalog) {
-        const c = g.city || "ארצי";
-        if (!byCity.has(c)) byCity.set(c, []);
-        byCity.get(c).push(g);
-      }
-      for (const [city, groups] of byCity) {
-        const section = document.createElement("div");
-        section.className = "city-section";
-        const h = document.createElement("div");
-        h.textContent = city;
-        h.style.cssText = "font-weight:700;font-size:.85rem;color:var(--gold);margin:8px 0 2px";
-        section.appendChild(h);
-        groups.sort((a, b) => (b.members || 0) - (a.members || 0));
-        for (const g of groups) {
-          const label = document.createElement("label");
-          label.style.cssText = "display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;font-size:.9rem";
-          const cb = document.createElement("input");
-          cb.type = "checkbox"; cb.value = g.url; cb.checked = mine.includes(g.url);
-          cb.className = "catalog-cb";
-          const span = document.createElement("span");
-          span.textContent = g.name +
-            (g.members ? ` · ~${Math.round(g.members / 1000)}K חברים` : "");
-          label.append(cb, span);
-          label.dataset.search = (g.name + " " + city).toLowerCase();
-          section.appendChild(label);
-        }
-        box.appendChild(section);
-      }
-      // Live filter: hides non-matching rows and empty city sections.
-      $("catalogFilter").oninput = () => {
-        const q = $("catalogFilter").value.trim().toLowerCase();
-        for (const section of box.querySelectorAll(".city-section")) {
-          let visible = 0;
-          for (const label of section.querySelectorAll("label")) {
-            const hit = !q || label.dataset.search.includes(q);
-            label.style.display = hit ? "flex" : "none";
-            if (hit) visible++;
-          }
-          section.style.display = visible ? "" : "none";
-        }
-      };
       const catalogUrls = catalog.map((g) => g.url);
+      selected = new Set(mine.filter((u) => catalogUrls.includes(u)));
       $("groupsBox").value = mine.filter((u) => !catalogUrls.includes(u)).join("\n");
-      updateGroupCount(mine);
+      renderCatalog();
+      $("catalogFilter").oninput = renderCatalog;
+      $("groupsBox").oninput = () => updateGroupCount([...selected, ...ownGroupLines()]);
     }).catch(() => { $("groupsBox").value = mine.join("\n"); updateGroupCount(mine); });
 
-    const collectSelection = () => {
-      const checked = [...document.querySelectorAll(".catalog-cb")]
-        .filter((cb) => cb.checked).map((cb) => cb.value);
-      const own = $("groupsBox").value.split("\n").map((s) => s.trim()).filter(Boolean);
-      return [...checked, ...own];
-    };
+    const collectSelection = () => [...selected, ...ownGroupLines()];
 
     $("saveGroups").onclick = async () => {
       const groups = collectSelection();
