@@ -341,6 +341,22 @@ module.exports = function createDistributionRouter(ctx) {
       },
       groups: (biz && biz.distribution && biz.distribution.groups) || [],
     };
+    // full=1: distribution state for ALL the agent's pages in one call —
+    // the main dashboard uses this to put a live control on every card.
+    if (req.query.full === "1") {
+      const listings = {};
+      const mine = (await db.listListingsByPhone(phone)).filter((l) => l.page_id);
+      await Promise.all(mine.map(async (l) => {
+        const dists = await db.listDistributionsByPage(l.page_id);
+        const posted = dists.find((d) => jobs.hasLivePost([d]));
+        listings[l.page_id] = {
+          posted: !!posted,
+          post_url: posted ? posted.targets.facebook_page.post_url : null,
+          in_flight: dists.some((d) => d.status === "queued" || d.status === "running"),
+        };
+      }));
+      out.listings = listings;
+    }
     const pageId = typeof req.query.page_id === "string" ? req.query.page_id : "";
     if (pageId) {
       const page = await db.getPage(pageId);
