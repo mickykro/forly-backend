@@ -387,5 +387,52 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.equal(db.dists.get(d.id).status, "failed", "FB terminal failure keeps the doc failed");
   }
 
+  // ── interactive buttons: sent when supported, with the link as a button ──
+  {
+    const db = fakeDb(); seed(db);
+    const { deps, sent } = makeDeps({ db, metaMod: fakeMeta({ video: [{ id: "V1" }] }) });
+    const rich = [];
+    deps.sendWhatsAppButtons = async (phone, payload) => rich.push({ phone, payload });
+    await jobs.maybeOffer(deps, PAGE);
+    const offer = rich.find((r) => r.payload.buttons.some((b) => b.buttonId === "confirm"));
+    assert.ok(offer, "confirm offer sent as buttons");
+    assert.ok(offer.payload.buttons[0].url.includes("/api/distribution/confirm?d="));
+    assert.ok(offer.payload.body.includes("דירה"), "post preview in the body");
+    assert.equal(sent.length, 0, "no plain-text duplicate when buttons succeed");
+    // every button obeys Green API limits: ≤3 buttons, ≤25 chars of text
+    for (const r of rich) {
+      assert.ok(r.payload.buttons.length <= 3, "at most 3 buttons");
+      for (const b of r.payload.buttons) {
+        assert.ok(b.buttonText.length <= 25, `button text ≤25: ${b.buttonText}`);
+        assert.ok(b.type === "url" ? !!b.url : true, "url buttons carry a url");
+      }
+    }
+  }
+
+  // ── buttons unsupported/rejected ⇒ silent fallback to the text message ──
+  {
+    const db = fakeDb(); seed(db);
+    const { deps, sent } = makeDeps({ db, metaMod: fakeMeta({ video: [{ id: "V1" }] }) });
+    deps.sendWhatsAppButtons = async () => { throw new Error("not supported"); };
+    await jobs.maybeOffer(deps, PAGE);
+    assert.ok(sent.some((s) => s.msg.includes("/api/distribution/confirm?d=")),
+      "confirm link still delivered as plain text");
+  }
+
+  // ── the queue message becomes buttons too, carrying both links ──
+  {
+    const db = fakeDb(); seed(db);
+    const { deps } = makeDeps({ db, metaMod: fakeMeta({ video: [{ id: "V1" }] }) });
+    const rich = [];
+    deps.sendWhatsAppButtons = async (phone, payload) => rich.push(payload);
+    const d = await queuedDist(deps);
+    await jobs.runSweep(deps);
+    const q = rich.find((p) => p.buttons.some((b) => b.buttonId === "queue"));
+    assert.ok(q, "queue message sent as buttons");
+    assert.ok(q.buttons.find((b) => b.buttonId === "queue").url.includes("/share.html?s="));
+    assert.ok(q.buttons.find((b) => b.buttonId === "post").url === "https://www.facebook.com/V1");
+    assert.equal(db.dists.get(d.id).status, "done");
+  }
+
   console.log("jobs.test.js OK");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -89,8 +89,41 @@ async function sendWhatsApp(phone, message, instance, token) {
   });
 }
 
+/*
+ * Interactive buttons (Green API sendInteractiveButtons).
+ * Limits enforced here rather than trusted from call sites: at most 3
+ * buttons, button text ≤ 25 chars — Green API rejects the whole message
+ * otherwise, and a rejected message is a lost notification.
+ * Throws on a non-2xx so callers can fall back to a plain text send.
+ */
+async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, instance, token) {
+  if (!instance || !token) return;
+  const clean = (buttons || []).slice(0, 3).map((b, i) => ({
+    ...b,
+    buttonId: String(b.buttonId || i + 1),
+    buttonText: String(b.buttonText || "").slice(0, 25),
+  }));
+  const resp = await fetch(
+    `https://api.green-api.com/waInstance${instance}/sendInteractiveButtons/${token}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chatId: `${phone}@c.us`,
+        header: header || undefined,
+        body: String(body || ""),
+        footer: footer || undefined,
+        buttons: clean,
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+  if (!resp.ok) {
+    throw new Error(`sendInteractiveButtons ${resp.status}`);
+  }
+  return resp.json().catch(() => ({}));
+}
+
 module.exports = {
   pad, daysFromNow, asMillis,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
-  guessImageExt, rehost, sendWhatsApp,
+  guessImageExt, rehost, sendWhatsApp, sendWhatsAppButtons,
 };

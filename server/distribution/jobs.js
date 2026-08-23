@@ -53,6 +53,46 @@ const M = {
     `⚠️ "${title}": הפרסום באינסטגרם נכשל — הפוסט בדף הפייסבוק עלה כרגיל.`,
 };
 
+/*
+ * Interactive variants (Green API sendInteractiveButtons). Each returns the
+ * button payload; the matching M.* text is always passed as the fallback, so
+ * an instance that can't render buttons still delivers the link.
+ * WhatsApp body caps around 1KB — the post preview is clipped, never the CTA.
+ */
+const clip = (s, n) => {
+  const t = String(s || "");
+  return t.length <= n ? t : t.slice(0, n - 1) + "…";
+};
+
+const BTN = {
+  confirmOffer: ({ title, pageUrl, confirmLink, copy }) => ({
+    header: "🚀 הנכס מוכן לפרסום",
+    body: `"${title}"\n\nכך ייראה הפוסט:\n${FENCE}\n${clip(copy, 650)}\n${FENCE}`,
+    footer: "לא מפרסמים בלי האישור שלכם",
+    buttons: [
+      { type: "url", buttonId: "confirm", buttonText: "✅ אישור ופרסום", url: confirmLink },
+      { type: "url", buttonId: "page", buttonText: "👀 לצפייה בדף", url: pageUrl },
+    ],
+  }),
+  queue: ({ title, groupCount, queueUrl, postUrl }) => ({
+    header: postUrl ? "✅ פורסם בדף הפייסבוק" : "📣 ערכת השיתוף מוכנה",
+    body: `"${title}"\n\n` + (groupCount
+      ? `${groupCount} קבוצות מחכות לשיתוף — הטקסט כבר מוכן, עוברים קבוצה־קבוצה.`
+      : "עדיין לא בחרתם קבוצות — אפשר להוסיף אותן בעמוד ההפצה."),
+    footer: "פרסום בקבוצות נעשה על ידכם, בהקשה אחת לכל קבוצה",
+    buttons: [
+      { type: "url", buttonId: "queue", buttonText: "📣 שיתוף לקבוצות", url: queueUrl },
+      ...(postUrl
+        ? [{ type: "url", buttonId: "post", buttonText: "לצפייה בפוסט", url: postUrl }]
+        : []),
+    ],
+  }),
+  dashboard: ({ header, body, footer, dashUrl, label }) => ({
+    header, body, footer,
+    buttons: [{ type: "url", buttonId: "dash", buttonText: label, url: dashUrl }],
+  }),
+};
+
 // ── pure helpers ──
 const baseTargets = () => ({
   facebook_page: { status: "pending", attempts: 0 },
@@ -74,12 +114,14 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, env = pr
   const instagram = require("./instagram");
   const businessCache = require("../business-cache");
   const { signActionToken } = require("../auth");
-  const { sendWhatsApp } = require("../utils");
+  const { sendWhatsApp, sendWhatsAppButtons } = require("../utils");
   return {
     db, meta, shareKit, config, instagram, env, pageBaseUrl,
     graphVersion: env.META_GRAPH_VERSION || meta.DEFAULT_VERSION,
     signActionToken: (parts) => signActionToken(parts, authSecret),
     sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, greenInstance, greenToken),
+    sendWhatsAppButtons: (phone, payload) =>
+      sendWhatsAppButtons(phone, payload, greenInstance, greenToken),
     now: () => new Date(),
     getBusinessCached: (phone) => businessCache.get(phone),
   };
@@ -89,6 +131,21 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, env = pr
 async function notify(deps, phone, msg) {
   try { await deps.sendWhatsApp(phone, msg); }
   catch (e) { console.warn("distribution notify failed:", e && e.message); }
+}
+
+// Interactive send with a guaranteed text fallback: buttons are a nicety,
+// the link is the message. Any button failure (unsupported instance, API
+// rejection) silently degrades to the plain text version.
+async function notifyRich(deps, phone, payload, fallbackText) {
+  if (deps.sendWhatsAppButtons) {
+    try {
+      await deps.sendWhatsAppButtons(phone, payload);
+      return;
+    } catch (e) {
+      console.warn("interactive send failed, falling back to text:", e && e.message);
+    }
+  }
+  await notify(deps, phone, fallbackText);
 }
 
 async function audit(deps, dist, target, action, extra = {}) {
@@ -128,8 +185,10 @@ async function maybeOffer(deps, page) {
   const link = `${deps.pageBaseUrl}/api/distribution/confirm?d=${id}&t=${deps.signActionToken([id, "confirm"])}`;
   const title = (page.property && page.property.title) || "";
   const pageUrl = `${deps.pageBaseUrl}/p/${page.page_id}`;
-  await notify(deps, page.business_phone,
-    M.confirmOffer(title, pageUrl, link, deps.shareKit.buildPostCopy(page, pageUrl)));
+  const copy = deps.shareKit.buildPostCopy(page, pageUrl);
+  await notifyRich(deps, page.business_phone,
+    BTN.confirmOffer({ title, pageUrl, confirmLink: link, copy }),
+    M.confirmOffer(title, pageUrl, link, copy));
   return { offered: true, id };
 }
 
@@ -205,8 +264,13 @@ async function failTarget(deps, dist, conn, targetKey, err, { attempts, canReque
     });
     await audit(deps, dist, targetKey, "publish_failed", { error: vendorText });
     if (firstNotice) {
-      await notify(deps, dist.business_phone,
-        M.reconnect(`${deps.pageBaseUrl}/distribution.html`));
+      const dashUrl = `${deps.pageBaseUrl}/distribution.html`;
+      await notifyRich(deps, dist.business_phone, BTN.dashboard({
+        header: "⚠️ החיבור לפייסבוק פג תוקף",
+        body: "הפרסום האוטומטי מושהה עד שתחברו מחדש. זה לוקח פחות מדקה.",
+        footer: "הנכסים והקבוצות שלכם נשמרו",
+        dashUrl, label: "חיבור מחדש",
+      }), M.reconnect(dashUrl));
     }
     return "auth";
   }
@@ -280,13 +344,27 @@ async function executeJob(deps, dist) {
   if (hasLivePost(sibs) && !dist.force) {
     await db.updateDistribution(dist.id,
       { status: "skipped_duplicate", updated_at: deps.now() });
-    await notify(deps, dist.business_phone, M.duplicate(title));
+    const postUrl = (sibs.map(livePostOf).filter(Boolean).length &&
+      sibs.find((d) => livePostOf(d)).targets.facebook_page.post_url) || null;
+    await notifyRich(deps, dist.business_phone, {
+      header: "ℹ️ הנכס כבר פורסם",
+      body: `"${title}" פורסם בעבר — לא פרסמנו שוב.\n` +
+        "אפשר לפרסם מחדש בכוונה מעמוד ההפצה.",
+      footer: "הגנה מפני פרסום כפול",
+      buttons: [
+        ...(postUrl ? [{ type: "url", buttonId: "post",
+          buttonText: "לצפייה בפוסט", url: postUrl }] : []),
+        { type: "url", buttonId: "dash", buttonText: "עמוד ההפצה",
+          url: `${deps.pageBaseUrl}/distribution.html` },
+      ],
+    }, M.duplicate(title));
     return;
   }
 
   const conn = await db.getConnection(dist.business_phone);
   const fb = dist.targets.facebook_page;
-  let summary = null;
+  let summary = null;      // plain-text fallback, always set when notifying
+  let summaryBtn = null;   // interactive variant when there's a clear next step
 
   if (fb.status === "pending") {
     const hasMedia = !!dist.snapshot.video_url || (dist.snapshot.photo_urls || []).length > 0;
@@ -299,7 +377,15 @@ async function executeJob(deps, dist) {
       });
       fb.status = "skipped";
       if (why !== "no_media") {
-        summary = M.notConnected(title, `${deps.pageBaseUrl}/distribution.html`);
+        const dashUrl = `${deps.pageBaseUrl}/distribution.html`;
+        summary = M.notConnected(title, dashUrl);
+        summaryBtn = BTN.dashboard({
+          header: "⚠️ הנכס לא פורסם",
+          body: `"${title}" לא פורסם — דף הפייסבוק עדיין לא חובר.\n` +
+            "חיבור חד-פעמי, ומהנכס הבא הפרסום אוטומטי.",
+          footer: "ערכת השיתוף לקבוצות נשלחה בכל מקרה",
+          dashUrl, label: "חיבור דף הפייסבוק",
+        });
       }
     } else {
       try {
@@ -421,12 +507,11 @@ async function executeJob(deps, dist) {
         business, copy: dist.snapshot.copy,
         postUrl: (fb && fb.post_url) || null,
       });
-      await deps.sendWhatsApp(dist.business_phone, deps.shareKit.buildQueueMessage({
-        title: dist.snapshot.title,
-        groupCount: session.groups.length,
-        queueUrl: queueUrl(deps, session),
-        postUrl: (fb && fb.post_url) || null,
-      }));
+      const qUrl = queueUrl(deps, session);
+      const qArgs = { title: dist.snapshot.title, groupCount: session.groups.length,
+        queueUrl: qUrl, postUrl: (fb && fb.post_url) || null };
+      await notifyRich(deps, dist.business_phone,
+        BTN.queue(qArgs), deps.shareKit.buildQueueMessage(qArgs));
       await db.updateDistribution(dist.id, {
         "targets.share_kit.status": "sent",
         "targets.share_kit.session_id": session.id,
@@ -448,7 +533,10 @@ async function executeJob(deps, dist) {
     status: (fb.status === "failed" || (ig && ig.status === "failed")) ? "failed" : "done",
     updated_at: deps.now(),
   });
-  if (summary) await notify(deps, dist.business_phone, summary);
+  if (summary) {
+    if (summaryBtn) await notifyRich(deps, dist.business_phone, summaryBtn, summary);
+    else await notify(deps, dist.business_phone, summary);
+  }
 }
 
 // ── the sweeper ──
@@ -489,7 +577,7 @@ function startSweeper(deps) {
 }
 
 module.exports = {
-  MAX_ATTEMPTS, M, baseTargets, hasLivePost, hasInFlight,
+  MAX_ATTEMPTS, M, BTN, baseTargets, hasLivePost, hasInFlight,
   liveDeps, maybeOffer, enqueueFromConfirm, createQueued,
   executeJob, runSweep, startSweeper,
   createShareSession, queueUrl, groupKey,
