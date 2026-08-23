@@ -55,7 +55,10 @@
   <h2>קבוצות פייסבוק</h2>
   <p class="muted">סמנו קבוצות מהרשימה המומלצת, או הוסיפו משלכם. מומלץ 5 ומעלה —
     <span id="groupCount"></span></p>
-  <div id="catalogList" style="margin-bottom:14px"></div>
+  <input id="catalogFilter" placeholder="סינון לפי עיר או שם קבוצה…"
+    style="width:100%;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;margin-bottom:8px">
+  <div id="catalogList" style="margin-bottom:14px;max-height:280px;overflow-y:auto;
+    border:1px solid rgba(23,20,15,.07);border-radius:10px;padding:6px 12px"></div>
   <h3 style="font-size:.92rem;margin:0 0 6px">קבוצות נוספות שלי</h3>
   <textarea id="groupsBox" placeholder="https://www.facebook.com/groups/..."></textarea>
   <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">

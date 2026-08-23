@@ -221,11 +221,26 @@ module.exports = function createDistributionRouter(ctx) {
   });
 
   // ── GET /group-catalog — curated groups for the dashboard picker ──
+  // The bundled seed (Manus research, 50 groups — see
+  // docs/distribution/GROUP-CATALOG.md) is the always-present default;
+  // Firestore entries merge ON TOP by URL, so the operator can add groups,
+  // override names/cities, or disable a seed entry with active:false —
+  // all without a deploy. URLs normalized so checkbox state matches the
+  // agent's saved (sanitized) list.
+  const GROUP_SEED = require("../distribution/group-seed.json")
+    .map((g) => ({ ...g, url: shareKit.sanitizeGroups([g.url])[0] }))
+    .filter((g) => g.url);
   router.get("/group-catalog", requireAuth(authSecret), async (req, res) => {
-    const all = await db.listGroupCatalog();
-    const groups = all
-      .filter((g) => g.active !== false && g.url)
-      .map((g) => ({ name: g.name || g.url, url: g.url, city: g.city || null }));
+    const byUrl = new Map();
+    for (const g of GROUP_SEED) byUrl.set(g.url, { ...g, active: true });
+    for (const g of await db.listGroupCatalog()) {
+      const url = g.url && shareKit.sanitizeGroups([g.url])[0];
+      if (url) byUrl.set(url, { ...(byUrl.get(url) || {}), ...g, url });
+    }
+    const groups = [...byUrl.values()]
+      .filter((g) => g.active !== false)
+      .map((g) => ({ name: g.name || g.url, url: g.url,
+        city: g.city || null, members: Number(g.members) || null }));
     res.json({ groups });
   });
 

@@ -1,10 +1,28 @@
-# Group Catalog — filling it with real groups (Manus research pipeline)
+# Group Catalog — the built-in default + the Manus research pipeline
 
-The dashboard's group picker reads the `group_catalog` Firestore collection.
-Facebook removed the group-search API, so the catalog is filled from OUTSIDE
-the Graph API — by a research agent (Manus, which is logged into Facebook)
+The dashboard's group picker is fed from TWO layers:
+
+1. **The bundled seed** — `server/distribution/group-seed.json`: 50 Israeli
+   real-estate groups by city with member estimates, from the Manus research
+   of 2026-08-23 (full report: `manus-group-research-2026-08.md` beside this
+   file). Ships with the server, so every agent sees a full picker with zero
+   Firestore setup.
+2. **The `group_catalog` Firestore collection** — merged ON TOP of the seed
+   by URL. Use it to add groups, correct a name/city, or KILL a dead seed
+   entry (create a doc with the same `url` and `active: false`) — all
+   without a deploy. Agent suggestions from the dashboard land here with
+   `active: false` until curated.
+
+Facebook removed the group-search API, so refreshing the list happens
+OUTSIDE the Graph API — by a research agent (Manus, logged into Facebook)
 running through n8n, the same pattern as the carousel workflow
-(n8n → Manus → HTTP callback).
+(n8n → Manus → HTTP callback). Big refreshes can also just replace the seed
+file in a normal code change.
+
+> From the Manus report, worth honoring in the product: many groups are
+> rental-focused or "owner only / no brokers" — agents should read a group's
+> rules before posting. The share kit's per-group links make that natural
+> (the agent lands in the group before posting).
 
 ## The import endpoint
 

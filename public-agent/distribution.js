@@ -55,17 +55,49 @@
         p.textContent = "אין עדיין קבוצות מומלצות — הציעו קבוצות ונוסיף אותן לקטלוג.";
         box.appendChild(p);
       }
+      // Grouped by city, biggest groups first inside each city.
+      const byCity = new Map();
       for (const g of catalog) {
-        const label = document.createElement("label");
-        label.style.cssText = "display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer";
-        const cb = document.createElement("input");
-        cb.type = "checkbox"; cb.value = g.url; cb.checked = mine.includes(g.url);
-        cb.className = "catalog-cb";
-        const span = document.createElement("span");
-        span.textContent = g.name + (g.city ? ` · ${g.city}` : "");
-        label.append(cb, span);
-        box.appendChild(label);
+        const c = g.city || "ארצי";
+        if (!byCity.has(c)) byCity.set(c, []);
+        byCity.get(c).push(g);
       }
+      for (const [city, groups] of byCity) {
+        const section = document.createElement("div");
+        section.className = "city-section";
+        const h = document.createElement("div");
+        h.textContent = city;
+        h.style.cssText = "font-weight:700;font-size:.85rem;color:var(--gold);margin:8px 0 2px";
+        section.appendChild(h);
+        groups.sort((a, b) => (b.members || 0) - (a.members || 0));
+        for (const g of groups) {
+          const label = document.createElement("label");
+          label.style.cssText = "display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer;font-size:.9rem";
+          const cb = document.createElement("input");
+          cb.type = "checkbox"; cb.value = g.url; cb.checked = mine.includes(g.url);
+          cb.className = "catalog-cb";
+          const span = document.createElement("span");
+          span.textContent = g.name +
+            (g.members ? ` · ~${Math.round(g.members / 1000)}K חברים` : "");
+          label.append(cb, span);
+          label.dataset.search = (g.name + " " + city).toLowerCase();
+          section.appendChild(label);
+        }
+        box.appendChild(section);
+      }
+      // Live filter: hides non-matching rows and empty city sections.
+      $("catalogFilter").oninput = () => {
+        const q = $("catalogFilter").value.trim().toLowerCase();
+        for (const section of box.querySelectorAll(".city-section")) {
+          let visible = 0;
+          for (const label of section.querySelectorAll("label")) {
+            const hit = !q || label.dataset.search.includes(q);
+            label.style.display = hit ? "flex" : "none";
+            if (hit) visible++;
+          }
+          section.style.display = visible ? "" : "none";
+        }
+      };
       const catalogUrls = catalog.map((g) => g.url);
       $("groupsBox").value = mine.filter((u) => !catalogUrls.includes(u)).join("\n");
       updateGroupCount(mine);
