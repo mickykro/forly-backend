@@ -296,12 +296,25 @@ async function failTarget(deps, dist, conn, targetKey, err, { attempts, canReque
 const groupKey = (url) =>
   crypto.createHash("sha256").update(url).digest("base64url").slice(0, 10);
 
-async function createShareSession(deps, { page, business, copy, postUrl }) {
+// Groups for one property: its own saved selection first, the agent's
+// default list only as a fallback. Callers may pass `groups` explicitly.
+async function resolveGroups(deps, page, business, explicit) {
+  if (Array.isArray(explicit)) return deps.shareKit.sanitizeGroups(explicit);
+  const own = deps.db.getPropertyGroups
+    ? await deps.db.getPropertyGroups(page.page_id).catch(() => null)
+    : null;
+  if (own && Array.isArray(own.groups) && own.groups.length) {
+    return deps.shareKit.sanitizeGroups(own.groups);
+  }
+  return deps.shareKit.sanitizeGroups(
+    (business && business.distribution && business.distribution.groups) || []);
+}
+
+async function createShareSession(deps, { page, business, copy, postUrl, groups: explicit }) {
   const id = crypto.randomUUID();
   const now = deps.now();
   const pageUrl = `${deps.pageBaseUrl}/p/${page.page_id}`;
-  const groups = deps.shareKit.sanitizeGroups(
-    (business && business.distribution && business.distribution.groups) || []);
+  const groups = await resolveGroups(deps, page, business, explicit);
   const session = {
     id, business_phone: page.business_phone, page_id: page.page_id,
     created_at: now, updated_at: now,
@@ -310,6 +323,8 @@ async function createShareSession(deps, { page, business, copy, postUrl }) {
       page_url: pageUrl,
       copy: copy || deps.shareKit.buildPostCopy(page, pageUrl),
       listing_type: (page.property && page.property.listing_type) || "sale",
+      // City drives the "same city ⇒ reuse those groups" offer in the queue.
+      city: (page.property && page.property.city) || null,
       post_url: postUrl || null,
     },
     groups: groups.map((url) => ({
@@ -580,5 +595,5 @@ module.exports = {
   MAX_ATTEMPTS, M, BTN, baseTargets, hasLivePost, hasInFlight,
   liveDeps, maybeOffer, enqueueFromConfirm, createQueued,
   executeJob, runSweep, startSweeper,
-  createShareSession, queueUrl, groupKey,
+  createShareSession, queueUrl, groupKey, resolveGroups,
 };

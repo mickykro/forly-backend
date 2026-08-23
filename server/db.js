@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map() };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -317,6 +317,35 @@ async function addGroupCatalogEntry(doc) {
   return String(mem.groupCatalog.length);
 }
 
+// ── distribution: per-property group selections ──
+// Deliberately its own collection, NOT a field on property_pages: savePage()
+// overwrites the whole page doc every time n8n rebuilds a page, which would
+// silently wipe the agent's group choices. `city` is stored so a later
+// property in the same city can offer to reuse the same groups.
+async function getPropertyGroups(pageId) {
+  if (db) {
+    const d = await db.collection("property_groups").doc(pageId).get();
+    return d.exists ? d.data() : null;
+  }
+  return mem.propertyGroups.get(pageId) || null;
+}
+
+async function savePropertyGroups(doc) {
+  const rec = { ...doc, updated_at: new Date() };
+  if (db) await db.collection("property_groups").doc(doc.page_id).set(rec, { merge: true });
+  else mem.propertyGroups.set(doc.page_id, { ...(mem.propertyGroups.get(doc.page_id) || {}), ...rec });
+  return rec;
+}
+
+async function listPropertyGroupsByPhone(phone, limit = 100) {
+  if (db) {
+    const snap = await db.collection("property_groups")
+      .where("business_phone", "==", phone).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.propertyGroups.values()].filter((d) => d.business_phone === phone);
+}
+
 // ── distribution: group share sessions (the in-app sharing queue) ──
 // One doc per (property × sharing run) holding the frozen copy and the
 // per-group progress the agent confirms by hand. Forly never claims a group
@@ -393,4 +422,5 @@ module.exports = {
   listDistributionsByPage, listQueuedDistributions, addPostAction,
   listGroupCatalog, addGroupCatalogEntry,
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
+  getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
 };

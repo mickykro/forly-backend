@@ -71,6 +71,26 @@
 
     <div id="groups"></div>
 
+    <!-- No groups picked for this property yet: choose them right here. -->
+    <div class="card hidden" id="pickCard" style="padding:18px">
+      <h3 style="font-family:var(--serif);font-size:1.05rem;margin-bottom:4px">בחירת קבוצות לנכס הזה</h3>
+      <p class="sub" id="pickHint">כל נכס משויך לקבוצות משלו — בחרו את הקבוצות המתאימות.</p>
+
+      <div class="card hidden" id="reuseBox"
+        style="padding:12px;margin:10px 0;background:var(--gold-faint);border:none">
+        <div id="reuseText" style="font-size:.88rem;margin-bottom:8px"></div>
+        <button class="btn btn-gold btn-sm" id="reuseBtn">שימוש באותן קבוצות</button>
+      </div>
+
+      <input id="pickFilter" placeholder="סינון לפי עיר או שם קבוצה…"
+        style="width:100%;border:1px solid rgba(23,20,15,.14);border-radius:12px;
+        padding:9px 12px;font:inherit;background:var(--bg);margin:10px 0 8px">
+      <div id="pickList" style="max-height:300px;overflow-y:auto;
+        border:1px solid rgba(23,20,15,.07);border-radius:12px;padding:6px 12px"></div>
+      <button class="btn btn-gold" id="savePick" style="width:100%;margin-top:12px">
+        שמירה והתחלת שיתוף</button>
+    </div>
+
     <div class="card done-card hidden" id="allDone">
       <div style="font-size:2rem">🎉</div>
       <h3 style="font-family:var(--serif);margin:6px 0">סיימתם את כל הקבוצות</h3>

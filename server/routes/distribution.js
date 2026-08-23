@@ -12,6 +12,7 @@
  */
 
 const express = require("express");
+const crypto = require("crypto");
 const db = require("../db");
 const jobs = require("../distribution/jobs");
 const meta = require("../distribution/meta");
@@ -235,18 +236,17 @@ module.exports = function createDistributionRouter(ctx) {
   const GROUP_SEED = require("../distribution/group-seed.json")
     .map((g) => ({ ...g, url: shareKit.sanitizeGroups([g.url])[0] }))
     .filter((g) => g.url);
-  router.get("/group-catalog", requireAuth(authSecret), async (req, res) => {
+  // listing_type=sale|rent marks which groups actually accept that kind of
+  // listing, so a sale isn't pushed at rental-only groups. Nothing is
+  // hidden — mismatches are flagged and sorted last, the agent decides.
+  async function mergedCatalog(want) {
     const byUrl = new Map();
     for (const g of GROUP_SEED) byUrl.set(g.url, { ...g, active: true });
     for (const g of await db.listGroupCatalog()) {
       const url = g.url && shareKit.sanitizeGroups([g.url])[0];
       if (url) byUrl.set(url, { ...(byUrl.get(url) || {}), ...g, url });
     }
-    // listing_type=sale|rent marks which groups actually accept that kind of
-    // listing, so a sale isn't pushed at rental-only groups. Nothing is
-    // hidden — mismatches are flagged and sorted last, the agent decides.
-    const want = String(req.query.listing_type || "").trim();
-    const groups = [...byUrl.values()]
+    return [...byUrl.values()]
       .filter((g) => g.active !== false)
       .map((g) => {
         const types = Array.isArray(g.listing_types) ? g.listing_types : [];
@@ -261,7 +261,11 @@ module.exports = function createDistributionRouter(ctx) {
           match: !want || !types.length || types.includes(want),
         };
       });
-    res.json({ groups, listing_type: want || null });
+  }
+
+  router.get("/group-catalog", requireAuth(authSecret), async (req, res) => {
+    const want = String(req.query.listing_type || "").trim();
+    res.json({ groups: await mergedCatalog(want), listing_type: want || null });
   });
 
   // ── POST /group-catalog/suggest — agent offers a group ──
@@ -357,20 +361,52 @@ module.exports = function createDistributionRouter(ctx) {
     return null;
   }
 
-  const publicSession = (s) => ({
+  const publicSession = (s, extra = {}) => ({
     id: s.id, page_id: s.page_id,
     title: s.snapshot.title, page_url: s.snapshot.page_url,
     post_url: s.snapshot.post_url || null,
     copy: s.snapshot.copy,
+    city: s.snapshot.city || null,
+    listing_type: s.snapshot.listing_type || "sale",
     quick_share: shareKit.sharerLink(s.snapshot.page_url,
       { quote: s.snapshot.copy, appId: process.env.META_APP_ID || null }),
     groups: (s.groups || []).map((g) => ({
       key: g.key, url: g.url, state: g.state,
+      name: (catalogNames.get(g.url) || null),
       // Per-group copy: identical facts, tracked link (review §3 + §5).
       copy: s.snapshot.copy.replace(s.snapshot.page_url,
         shareKit.trackedUrl(s.snapshot.page_url, { session: s.id, group: g.token })),
     })),
+    ...extra,
   });
+
+  // Name lookup for group URLs, so the queue shows "דירות להשכרה בחיפה"
+  // rather than a raw slug. Built once from the bundled seed.
+  const catalogNames = new Map(GROUP_SEED.map((g) => [g.url, g.name]));
+
+  // Everything the queue needs to pick groups on the spot: the matched
+  // catalog, plus — the point of the feature — an offer to reuse the groups
+  // already chosen for another property in the SAME city.
+  async function pickerFor(session) {
+    const catalog = await mergedCatalog(session.snapshot.listing_type || "sale");
+    let suggestion = null;
+    const city = session.snapshot.city;
+    if (city) {
+      const mine = await db.listPropertyGroupsByPhone(session.business_phone)
+        .catch(() => []);
+      const sameCity = mine
+        .filter((d) => d.page_id !== session.page_id && d.city === city &&
+          Array.isArray(d.groups) && d.groups.length)
+        .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0];
+      if (sameCity) {
+        suggestion = {
+          city, from_page_id: sameCity.page_id,
+          title: sameCity.title || "", groups: sameCity.groups,
+        };
+      }
+    }
+    return { catalog, suggestion };
+  }
 
   // Create (or reopen) a queue for one property — the dashboard button.
   router.post("/share-session", requireAuth(authSecret), async (req, res) => {
@@ -381,8 +417,8 @@ module.exports = function createDistributionRouter(ctx) {
     }
     const existing = await db.findOpenShareSession(pageId);
     const biz = await db.getBusiness(req.user.userId);
-    const currentGroups = shareKit.sanitizeGroups(
-      (biz && biz.distribution && biz.distribution.groups) || []);
+    // This property's own groups win; the agent's default list is a fallback.
+    const currentGroups = await jobs.resolveGroups(deps, page, biz);
     // Reuse an existing queue unless the agent's group list changed since —
     // progress is worth more than a perfectly fresh snapshot.
     const sameGroups = existing &&
@@ -390,13 +426,44 @@ module.exports = function createDistributionRouter(ctx) {
       existing.groups.every((g) => currentGroups.includes(g.url));
     const session = sameGroups ? existing
       : await jobs.createShareSession(deps, { page, business: biz });
-    res.json(publicSession(session));
+    const extra = (session.groups || []).length ? {} : await pickerFor(session);
+    res.json(publicSession(session, extra));
   });
 
   router.get("/share-session", async (req, res) => {
     const session = await loadSession(req);
     if (!session) return res.status(401).json({ error: "invalid_link" });
-    res.json(publicSession(session));
+    // With no groups yet, the queue has nothing to do — so it ships the
+    // picker (and any same-city reuse offer) in the same payload instead of
+    // sending the agent back to the dashboard.
+    const extra = (session.groups || []).length ? {} : await pickerFor(session);
+    res.json(publicSession(session, extra));
+  });
+
+  // Set THIS property's groups from inside the queue. Saved per property
+  // (property_groups/{page_id}) — not on the agent's default list, and not
+  // on the page doc, which n8n overwrites on every rebuild.
+  router.post("/share-session/groups", async (req, res) => {
+    const session = await loadSession(req);
+    if (!session) return res.status(401).json({ error: "invalid_link" });
+    const groups = shareKit.sanitizeGroups((req.body && req.body.groups) || []);
+    await db.savePropertyGroups({
+      page_id: session.page_id, business_phone: session.business_phone,
+      city: session.snapshot.city || null, title: session.snapshot.title || "",
+      groups,
+    });
+    // Rebuild the queue's entries, preserving progress on groups that stay.
+    const byUrl = new Map((session.groups || []).map((g) => [g.url, g]));
+    const next = groups.map((url) => byUrl.get(url) || {
+      key: jobs.groupKey(url), url,
+      token: crypto.randomBytes(6).toString("base64url"),
+      state: "ready", copied_at: null, opened_at: null,
+      marked_posted_at: null, skipped_at: null, skip_reason: null,
+    });
+    await db.updateShareSession(session.id, { groups: next, updated_at: new Date() });
+    const fresh = { ...session, groups: next };
+    const extra = next.length ? {} : await pickerFor(fresh);
+    res.json(publicSession(fresh, extra));
   });
 
   // Record what the agent actually did. Nothing here claims Forly posted:

@@ -62,9 +62,9 @@
     const nameWrap = document.createElement("div");
     const name = document.createElement("div");
     name.className = "gname";
-    // The catalog name isn't in the session payload — show the group slug,
-    // which is what the agent recognises in Facebook's own UI.
-    name.textContent = decodeURIComponent(g.url.replace(/^https:\/\/www\.facebook\.com\/groups\//, ""));
+    // The catalog name when we know it, the group slug otherwise.
+    name.textContent = g.name ||
+      decodeURIComponent(g.url.replace(/^https:\/\/www\.facebook\.com\/groups\//, ""));
     const meta = document.createElement("div");
     meta.className = "gmeta"; meta.textContent = `קבוצה ${index + 1}`;
     nameWrap.append(name, meta);
@@ -109,14 +109,92 @@
     return card;
   }
 
+  // ── inline group picker (shown when this property has no groups yet) ──
+  const picked = new Set();
+
+  function renderPicker() {
+    const hasGroups = (session.groups || []).length > 0;
+    $("pickCard").classList.toggle("hidden", hasGroups);
+    if (hasGroups) return;
+
+    const cat = session.catalog || [];
+    const sug = session.suggestion;
+    if (sug && sug.groups && sug.groups.length) {
+      $("reuseBox").classList.remove("hidden");
+      $("reuseText").textContent =
+        `בנכס "${sug.title || "קודם"}" ב${sug.city} בחרתם ${sug.groups.length} קבוצות — ` +
+        "לשייך את אותן הקבוצות גם לנכס הזה?";
+      $("reuseBtn").onclick = () => savePicked(sug.groups);
+    } else {
+      $("reuseBox").classList.add("hidden");
+    }
+    if (session.city) {
+      $("pickHint").textContent =
+        `כל נכס משויך לקבוצות משלו. הנכס הזה ב${session.city} — הקבוצות המקומיות מופיעות ראשונות.`;
+    }
+
+    const q = ($("pickFilter").value || "").trim().toLowerCase();
+    const box = $("pickList");
+    box.textContent = "";
+    if (!cat.length) {
+      const p = document.createElement("p");
+      p.className = "sub"; p.textContent = "לא נמצאו קבוצות מומלצות.";
+      box.appendChild(p); return;
+    }
+    // Same-city groups first, then the rest; mismatched listing types last.
+    const rank = (g) => (g.city && session.city && g.city === session.city ? 0 : 1) +
+      (g.match === false ? 2 : 0);
+    const rows = cat
+      .filter((g) => !q || (g.name + " " + (g.city || "")).toLowerCase().includes(q))
+      .sort((a, b) => rank(a) - rank(b) || (b.members || 0) - (a.members || 0));
+    let lastBand = null;
+    for (const g of rows) {
+      const band = rank(g) >= 2 ? "פחות מתאימות לנכס הזה"
+        : rank(g) === 0 ? `בעיר ${session.city}` : "קבוצות נוספות";
+      if (band !== lastBand) {
+        const h = document.createElement("div");
+        h.textContent = band;
+        h.style.cssText = "font-weight:700;font-size:.82rem;margin:8px 0 2px;color:" +
+          (rank(g) === 0 ? "#157A3F" : rank(g) >= 2 ? "var(--ink-soft)" : "var(--gold)");
+        box.appendChild(h);
+        lastBand = band;
+      }
+      const label = document.createElement("label");
+      label.style.cssText = "display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer;font-size:.9rem";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = picked.has(g.url);
+      cb.style.accentColor = "var(--gold)";
+      cb.onchange = () => { cb.checked ? picked.add(g.url) : picked.delete(g.url); };
+      const span = document.createElement("span");
+      span.textContent = g.name + (g.city ? ` · ${g.city}` : "") +
+        (g.members ? ` · ~${Math.round(g.members / 1000)}K` : "");
+      label.append(cb, span);
+      box.appendChild(label);
+    }
+  }
+
+  async function savePicked(groups) {
+    const list = groups || [...picked];
+    if (!list.length) { toast("בחרו לפחות קבוצה אחת"); return; }
+    try {
+      session = await api("/api/distribution/share-session/groups", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ s: S, t: T, groups: list }),
+      });
+      toast(`${session.groups.length} קבוצות שויכו לנכס ✓`);
+      render();
+    } catch { toast("השמירה נכשלה — נסו שוב"); }
+  }
+
   function render() {
+    renderPicker();
     const groups = session.groups || [];
     const done = groups.filter((g) => g.state === "posted" || g.state === "skipped").length;
     const posted = groups.filter((g) => g.state === "posted").length;
     $("bar").style.width = groups.length ? Math.round(done / groups.length * 100) + "%" : "0%";
     $("pcount").textContent = groups.length
       ? `${done} מתוך ${groups.length} קבוצות · ${posted} פורסמו`
-      : "לא הוגדרו קבוצות — אפשר להוסיף בעמוד ההפצה";
+      : "עדיין לא שויכו קבוצות לנכס הזה — בוחרים למטה 👇";
 
     const box = $("groups");
     box.textContent = "";
@@ -151,6 +229,8 @@
     }
     $("copyText").value = session.copy;
     $("copyMain").onclick = () => copy(session.copy);
+    $("pickFilter").oninput = renderPicker;
+    $("savePick").onclick = () => savePicked();
     render();
   })();
 })();
