@@ -165,6 +165,9 @@
   async function loadProps() {
     const r = await api("/api/properties").catch(() => null);
     props = ((r && r.properties) || []).filter((p) => p.page_id && p.page_status === "active");
+    // Reloads (including the refresh after a publish) start from a clean
+    // slate — a stale tick must never publish something a second time.
+    selectedProps.clear();
     $("propsCard").hidden = false;
     const box = $("propList");
     box.textContent = "";
@@ -181,15 +184,9 @@
       box.appendChild(row);
     }
     await Promise.all(props.map((p) => refreshListing(p, rows.get(p.page_id))));
-    // Default selection: everything not yet published, so the common case
-    // (new property → publish) is zero extra taps.
-    for (const prop of props) {
-      const L = listingState.get(prop.page_id) || {};
-      if (!L.posted && !L.in_flight) {
-        selectedProps.add(prop.page_id);
-        rows.get(prop.page_id)._els.cb.checked = true;
-      }
-    }
+    // Nothing is pre-selected: publishing under an agent's own name is an
+    // explicit act, so the agent ticks what they mean to publish. The only
+    // exception is an explicit deep link (?page=…), handled below.
     renderStepper();
     syncCatalogType();
     startPollingIfNeeded(rows);
