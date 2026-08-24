@@ -389,22 +389,20 @@ module.exports = function createDistributionRouter(ctx) {
   // already chosen for another property in the SAME city.
   async function pickerFor(session) {
     const catalog = await mergedCatalog(session.snapshot.listing_type || "sale");
-    let suggestion = null;
+    // Reuse offer: the same city is the best match, but "the groups I picked
+    // last time" is worth offering in ANY city — most agents work one area
+    // and re-tick the same list otherwise.
     const city = session.snapshot.city;
-    if (city) {
-      const mine = await db.listPropertyGroupsByPhone(session.business_phone)
-        .catch(() => []);
-      const sameCity = mine
-        .filter((d) => d.page_id !== session.page_id && d.city === city &&
-          Array.isArray(d.groups) && d.groups.length)
-        .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0];
-      if (sameCity) {
-        suggestion = {
-          city, from_page_id: sameCity.page_id,
-          title: sameCity.title || "", groups: sameCity.groups,
-        };
-      }
-    }
+    const mine = (await db.listPropertyGroupsByPhone(session.business_phone)
+      .catch(() => []))
+      .filter((d) => d.page_id !== session.page_id &&
+        Array.isArray(d.groups) && d.groups.length)
+      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+    const src = (city && mine.find((d) => d.city === city)) || mine[0] || null;
+    const suggestion = src ? {
+      city: src.city || null, same_city: !!(city && src.city === city),
+      from_page_id: src.page_id, title: src.title || "", groups: src.groups,
+    } : null;
     return { catalog, suggestion };
   }
 
@@ -477,16 +475,22 @@ module.exports = function createDistributionRouter(ctx) {
     const idx = (session.groups || []).findIndex((g) => g.key === key);
     if (!action || idx < 0) return res.status(400).json({ error: "invalid_input" });
     const now = new Date();
-    const patch = { updated_at: now, [`groups.${idx}.state`]: action };
-    if (action === "copied") patch[`groups.${idx}.copied_at`] = now;
-    if (action === "opened") patch[`groups.${idx}.opened_at`] = now;
-    if (action === "posted") patch[`groups.${idx}.marked_posted_at`] = now;
+    // Firestore has no array indexing in field paths: `groups.0.state` would
+    // REPLACE the array with a map {"0": …} and every later read of the
+    // session would blow up. Rewrite the whole array instead.
+    // ponytail: last-write-wins across two open tabs; a transaction if that
+    // ever actually bites.
+    const groups = [...session.groups];
+    const g = { ...groups[idx], state: action };
+    if (action === "copied") g.copied_at = now;
+    if (action === "opened") g.opened_at = now;
+    if (action === "posted") g.marked_posted_at = now;
     if (action === "skipped") {
-      patch[`groups.${idx}.skipped_at`] = now;
-      patch[`groups.${idx}.skip_reason`] =
-        String((req.body && req.body.reason) || "").slice(0, 60) || null;
+      g.skipped_at = now;
+      g.skip_reason = String((req.body && req.body.reason) || "").slice(0, 60) || null;
     }
-    await db.updateShareSession(session.id, patch);
+    groups[idx] = g;
+    await db.updateShareSession(session.id, { groups, updated_at: now });
     // Only an agent-confirmed publish enters the audit log.
     if (action === "posted") {
       await db.addPostAction({

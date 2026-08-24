@@ -121,9 +121,14 @@
     const sug = session.suggestion;
     if (sug && sug.groups && sug.groups.length) {
       $("reuseBox").classList.remove("hidden");
-      $("reuseText").textContent =
-        `בנכס "${sug.title || "קודם"}" ב${sug.city} בחרתם ${sug.groups.length} קבוצות — ` +
-        "לשייך את אותן הקבוצות גם לנכס הזה?";
+      $("reuseText").textContent = sug.same_city
+        ? `בנכס "${sug.title || "קודם"}" ב${sug.city} בחרתם ${sug.groups.length} קבוצות — ` +
+          "לשייך את אותן הקבוצות גם לנכס הזה?"
+        : `בבחירה האחרונה שלכם${sug.title ? ` (הנכס "${sug.title}")` : ""} ` +
+          `היו ${sug.groups.length} קבוצות — לשייך אותן גם לנכס הזה?`;
+      $("reuseBtn").textContent = sug.same_city
+        ? `שיוך ${sug.groups.length} הקבוצות`
+        : `שימוש בבחירה האחרונה (${sug.groups.length})`;
       $("reuseBtn").onclick = () => savePicked(sug.groups);
     } else {
       $("reuseBox").classList.add("hidden");
@@ -147,18 +152,12 @@
     const rows = cat
       .filter((g) => !q || (g.name + " " + (g.city || "")).toLowerCase().includes(q))
       .sort((a, b) => rank(a) - rank(b) || (b.members || 0) - (a.members || 0));
-    let lastBand = null;
-    for (const g of rows) {
-      const band = rank(g) >= 2 ? "פחות מתאימות לנכס הזה"
-        : rank(g) === 0 ? `בעיר ${session.city}` : "קבוצות נוספות";
-      if (band !== lastBand) {
-        const h = document.createElement("div");
-        h.textContent = band;
-        h.style.cssText = "font-weight:700;font-size:.82rem;margin:8px 0 2px;color:" +
-          (rank(g) === 0 ? "#157A3F" : rank(g) >= 2 ? "var(--ink-soft)" : "var(--gold)");
-        box.appendChild(h);
-        lastBand = band;
-      }
+    // The city's own groups stay open; every other band folds into a native
+    // <details> so a long catalog doesn't bury the list that matters. A
+    // filter query opens them — you can't search inside a closed fold.
+    const bandOf = (g) => rank(g) >= 2 ? "פחות מתאימות לנכס הזה"
+      : rank(g) === 0 ? `בעיר ${session.city}` : "קבוצות נוספות";
+    const groupRow = (g) => {
       const label = document.createElement("label");
       label.style.cssText = "display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer;font-size:.9rem";
       const cb = document.createElement("input");
@@ -169,7 +168,42 @@
       span.textContent = g.name + (g.city ? ` · ${g.city}` : "") +
         (g.members ? ` · ~${Math.round(g.members / 1000)}K` : "");
       label.append(cb, span);
-      box.appendChild(label);
+      return label;
+    };
+    const bands = new Map();
+    for (const g of rows) {
+      const b = bandOf(g);
+      if (!bands.has(b)) bands.set(b, []);
+      bands.get(b).push(g);
+    }
+    // With no local band (property has no city), the first fold opens —
+    // otherwise the whole catalog would arrive collapsed.
+    const hasLocal = [...bands.keys()].some((b) => b.startsWith("בעיר"));
+    let first = true;
+    for (const [band, list] of bands) {
+      const open = band.startsWith("בעיר");
+      const color = open ? "#157A3F"
+        : band.startsWith("פחות") ? "var(--ink-soft)" : "var(--gold)";
+      const head = `font-weight:700;font-size:.82rem;color:${color}`;
+      let target = box;
+      if (open) {
+        const h = document.createElement("div");
+        h.textContent = band;
+        h.style.cssText = `${head};margin:8px 0 2px`;
+        box.appendChild(h);
+      } else {
+        const d = document.createElement("details");
+        d.open = !!q || (!hasLocal && first);
+        first = false;
+        d.style.cssText = "margin:8px 0 2px";
+        const sm = document.createElement("summary");
+        sm.style.cssText = `${head};cursor:pointer`;
+        sm.textContent = `${band} (${list.length})`;
+        d.appendChild(sm);
+        box.appendChild(d);
+        target = d;
+      }
+      for (const g of list) target.appendChild(groupRow(g));
     }
   }
 

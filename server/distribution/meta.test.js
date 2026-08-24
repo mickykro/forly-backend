@@ -50,6 +50,13 @@ const meta = require("./meta");
     () => meta.graphCall("/me", { fetchFn: errFetch }),
     (e) => e instanceof meta.GraphError && e.code === 190 && e.subcode === 463
       && e.type === "OAuthException" && meta.isAuthError(e));
+
+  // A missing scope is OAuthException too, but the token is alive: it must
+  // NOT be reported to the agent as an expired connection.
+  const permErr = new meta.GraphError("(#200) requires pages_manage_posts",
+    { code: 200, type: "OAuthException" });
+  assert.equal(meta.isAuthError(permErr), false);
+  assert.equal(meta.isPermissionError(permErr), true);
   assert.equal(meta.isAuthError(new Error("network down")), false);
   assert.equal(meta.isAuthError(new meta.GraphError("x", { code: 1 })), false);
 

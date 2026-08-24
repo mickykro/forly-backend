@@ -34,8 +34,17 @@ class GraphError extends Error {
   }
 }
 
+// A dead token — and ONLY that — means "reconnect, it expired": code 190
+// (all subcodes) and 102. Permission failures are OAuthException too
+// (200/10/3/803) but the token is perfectly valid — the Page just didn't
+// grant a scope, so "your connection expired" is a lie that sends the agent
+// through a reconnect which changes nothing.
 const isAuthError = (err) =>
-  err instanceof GraphError && (err.code === 190 || err.type === "OAuthException");
+  err instanceof GraphError && (err.code === 190 || err.code === 102);
+
+const PERMISSION_CODES = [200, 10, 3, 803];
+const isPermissionError = (err) =>
+  err instanceof GraphError && PERMISSION_CODES.includes(err.code);
 
 // ── OAuth state (HMAC, TTL — the callback's only source of identity) ──
 const stateSig = (body, secret) =>
@@ -153,7 +162,7 @@ const commentWithPhoto = ({ objectId, pageToken, message, photoUrl, graphVersion
 const postUrl = (postId) => `https://www.facebook.com/${postId}`;
 
 module.exports = {
-  DEFAULT_VERSION, SCOPES, GraphError, isAuthError,
+  DEFAULT_VERSION, SCOPES, GraphError, isAuthError, isPermissionError,
   makeState, readState, oauthStartUrl, graphCall,
   exchangeCode, longLivedToken, listPages, publishVideo, publishPhotos,
   commentWithPhoto, postUrl,

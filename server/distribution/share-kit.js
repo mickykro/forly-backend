@@ -65,8 +65,10 @@ function sanitizeGroups(urls) {
     try { u = new URL(String(raw).trim()); } catch { continue; }
     if (u.protocol !== "https:" && u.protocol !== "http:") continue;
     if (!/^(www\.|m\.|web\.)?facebook\.com$/i.test(u.hostname)) continue;
-    const m = u.pathname.match(/^\/groups\/([A-Za-z0-9._-]+)\/?$/);
-    if (!m) continue;
+    // Slug first, rest of the path ignored: real links carry Hebrew vanity
+    // names (percent-encoded by URL) and deep paths (/groups/x/posts/123).
+    const m = u.pathname.match(/^\/groups\/([^/]+)(\/.*)?$/);
+    if (!m || /^(feed|discover|create|joins|browse)$/i.test(m[1])) continue;
     const clean = `https://www.facebook.com/groups/${m[1]}`;
     if (!out.includes(clean)) out.push(clean);
     if (out.length >= MAX_GROUPS) break;

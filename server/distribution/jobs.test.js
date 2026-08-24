@@ -66,6 +66,8 @@ function makeDeps({ db, metaMod }) {
     sendWhatsApp: async (phone, msg) => sent.push({ phone, msg }),
     now: () => new Date("2026-08-16T10:00:00Z"),
     getBusinessCached: (p) => db.getBusiness(p),
+    // HEAD probe for media reachability — 200 unless a test overrides it.
+    fetchFn: async () => ({ ok: true, status: 200 }),
   };
   return { deps, sent };
 }
@@ -205,12 +207,15 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.ok(db.actions.some((a) => a.action === "publish_failed"));
     // vendor text stays in the doc/audit, never in WhatsApp
     assert.ok(!sent.some((s) => s.msg.includes("expired")));
-    // second job while needs_reconnect: fb skipped, NO second nudge
-    const before = sent.filter((s) => s.msg.includes("חיבור")).length;
+    // second job while needs_reconnect: fb skipped, and the agent is told the
+    // publishing is PAUSED — not that the Page was never connected.
+    const before = sent.length;
     const d2 = await queuedDist(deps, { force: true });
     await jobs.runSweep(deps);
     assert.equal(db.dists.get(d2.id).targets.facebook_page.status, "skipped");
-    assert.equal(sent.filter((s) => s.msg.includes("חיבור")).length, before, "single nudge");
+    const after = sent.slice(before).map((s) => s.msg).join("\n");
+    assert.ok(after.includes("פג תוקף"), "paused notice");
+    assert.ok(!after.includes("עדיין לא חובר"), "no false not-connected claim");
   }
 
   // ── transient Graph error: retried up to 3 attempts, then failed ──
@@ -436,3 +441,31 @@ async function queuedDist(deps, { force = false } = {}) {
 
   console.log("jobs.test.js OK");
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// ── media URLs are re-pointed at the public media host ──
+// A page built while BASE_URL was a dev tunnel must still post: Facebook
+// fetches the file itself and cannot reach the tunnel.
+{
+  const deps = { mediaBaseUrl: "https://media.example.com" };
+  assert.equal(jobs.publicMedia(deps, "https://tunnel.trycloudflare.com/files/pages/x/v.mp4"),
+    "https://media.example.com/files/pages/x/v.mp4");
+  assert.equal(jobs.publicMedia(deps, "https://cdn.other.com/img/1.jpg"),
+    "https://cdn.other.com/img/1.jpg");   // not ours — left alone
+  assert.equal(jobs.publicMedia(deps, null), null);
+  assert.equal(jobs.publicMedia({}, "https://t/files/a.mp4"), "https://t/files/a.mp4");
+  console.log("publicMedia OK");
+}
+
+// ── media the public internet can't fetch: skipped with an honest message,
+// never three retries of a publish Facebook is guaranteed to reject ──
+(async () => {
+  const db = fakeDb(); seed(db);
+  const { deps, sent } = makeDeps({ db, metaMod: fakeMeta({}) });
+  deps.fetchFn = async () => ({ ok: false, status: 404 });
+  const d = await queuedDist(deps);
+  await jobs.runSweep(deps);
+  assert.equal(db.dists.get(d.id).targets.facebook_page.status, "skipped");
+  assert.equal(db.dists.get(d.id).targets.facebook_page.error, "media_unreachable");
+  assert.ok(sent.some((s) => s.msg.includes("אינם זמינים לפייסבוק")));
+  console.log("media reachability OK");
+})();

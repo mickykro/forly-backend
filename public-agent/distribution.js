@@ -350,19 +350,7 @@
 
     const collectSelection = () => [...selected, ...ownGroupLines()];
 
-    $("saveGroups").onclick = async () => {
-      const groups = collectSelection();
-      try {
-        const r = await api("/api/distribution/groups", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ groups }),
-        });
-        updateGroupCount(r.groups);
-        toast(r.groups.length < groups.length
-          ? "נשמר. שימו לב: קישורים שאינם קבוצות פייסבוק הוסרו."
-          : "הקבוצות נשמרו.");
-      } catch { toast("השמירה נכשלה — נסו שוב."); }
-    };
+    $("saveGroups").onclick = () => saveGroups(true);
 
     $("suggestBtn").onclick = async () => {
       const url = $("suggestUrl").value.trim();
@@ -391,6 +379,28 @@
     };
   }
 
+  // Ticked boxes are not a saved list: publishing with unsaved ticks used to
+  // drop them silently and the share queue arrived empty. Publish saves first.
+  async function saveGroups(loud) {
+    const groups = [...selected, ...ownGroupLines()];
+    try {
+      const r = await api("/api/distribution/groups", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ groups }),
+      });
+      updateGroupCount(r.groups);
+      if (loud) {
+        toast(r.groups.length < groups.length
+          ? "נשמר. שימו לב: קישורים שאינם קבוצות פייסבוק הוסרו."
+          : "הקבוצות נשמרו.");
+      }
+      return r.groups;
+    } catch {
+      if (loud) toast("השמירה נכשלה — נסו שוב.");
+      return null;
+    }
+  }
+
   // ── step 4: publish ──
   async function publishOne(pageId, force) {
     try {
@@ -414,8 +424,12 @@
       $("propsCard").scrollIntoView({ block: "center", behavior: "smooth" });
       return;
     }
-    if ([...selected, ...ownGroupLines()].length === 0) {
+    const groups = [...selected, ...ownGroupLines()];
+    if (groups.length === 0) {
       toast("טיפ: בחרו קבוצות (שלב 3) כדי לקבל ערכת שיתוף מלאה.");
+    } else {
+      const saved = await saveGroups(false);
+      if (saved === null) { toast("שמירת הקבוצות נכשלה — נסו שוב."); return; }
     }
     $("publishBtn").disabled = true;
     const fresh = [], published = [];

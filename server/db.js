@@ -355,9 +355,23 @@ async function saveShareSession(s) {
   else mem.shareSessions.set(s.id, JSON.parse(JSON.stringify(s)));
 }
 
+// Sessions written by the old `groups.<idx>.state` patch have groups as a
+// map {"0": …} instead of an array — heal them on read so existing queues
+// keep working instead of throwing on .map().
+function healGroups(s) {
+  if (!s || !s.groups || Array.isArray(s.groups)) return s;
+  const groups = Object.keys(s.groups)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((k) => s.groups[k]);
+  return { ...s, groups };
+}
+
 async function getShareSession(id) {
-  if (db) { const d = await db.collection("share_sessions").doc(id).get(); return d.exists ? d.data() : null; }
-  return mem.shareSessions.get(id) || null;
+  if (db) {
+    const d = await db.collection("share_sessions").doc(id).get();
+    return d.exists ? healGroups(d.data()) : null;
+  }
+  return healGroups(mem.shareSessions.get(id)) || null;
 }
 
 async function updateShareSession(id, patch) {
@@ -377,7 +391,7 @@ async function findOpenShareSession(pageId) {
     const snap = await db.collection("share_sessions")
       .where("page_id", "==", pageId).limit(20).get();
     const docs = snap.docs.map((d) => d.data());
-    return docs.sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at))[0] || null;
+    return healGroups(docs.sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at))[0]) || null;
   }
   return [...mem.shareSessions.values()]
     .filter((s) => s.page_id === pageId)
@@ -421,6 +435,6 @@ module.exports = {
   saveDistribution, getDistribution, updateDistribution,
   listDistributionsByPage, listQueuedDistributions, addPostAction,
   listGroupCatalog, addGroupCatalogEntry,
-  saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
+  saveShareSession, getShareSession, updateShareSession, findOpenShareSession, healGroups,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
 };

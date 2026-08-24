@@ -41,8 +41,14 @@ const M = {
     `מתחברים פעם אחת ומהפעם הבאה הפרסום אוטומטי:\n${dashUrl}`,
   reconnect: (dashUrl) =>
     `⚠️ החיבור לפייסבוק פג תוקף. פרסום אוטומטי מושהה עד חיבור מחדש:\n${dashUrl}`,
+  noPermission: (title, dashUrl) =>
+    `⚠️ "${title}" לא פורסם — פייסבוק לא אישר לנו לפרסם בדף.\n` +
+    `חברו מחדש ואשרו את כל ההרשאות שמתבקשות:\n${dashUrl}`,
   posted: (title, postUrl) =>
     `✅ הנכס "${title}" פורסם בדף הפייסבוק שלכם!\n${postUrl}`,
+  mediaUnreachable: (title) =>
+    `⚠️ "${title}" לא פורסם — קובצי המדיה של הנכס אינם זמינים לפייסבוק.\n` +
+    `בנו את דף הנכס מחדש ונסו שוב.`,
   failed: (title) =>
     `❌ הפרסום של "${title}" בדף הפייסבוק נכשל. ננסה שוב אוטומטית מאוחר יותר.`,
   timeoutCheck: (title) =>
@@ -117,6 +123,9 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, env = pr
   const { sendWhatsApp, sendWhatsAppButtons } = require("../utils");
   return {
     db, meta, shareKit, config, instagram, env, pageBaseUrl,
+    // Where Facebook fetches media from: the stable upload host, not a
+    // per-session BASE_URL (which may be a dev tunnel Meta can't reach).
+    mediaBaseUrl: (env.REMOTE_UPLOAD_BASE || pageBaseUrl || "").replace(/\/+$/, ""),
     graphVersion: env.META_GRAPH_VERSION || meta.DEFAULT_VERSION,
     signActionToken: (parts) => signActionToken(parts, authSecret),
     sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, greenInstance, greenToken),
@@ -192,6 +201,34 @@ async function maybeOffer(deps, page) {
   return { offered: true, id };
 }
 
+// Facebook fetches media from OUR host, so the URL must be one the public
+// internet can reach. Page docs are built with whatever BASE_URL was live at
+// build time — a dev tunnel, sometimes — which Meta answers with "Unable to
+// fetch video file from URL". Anything under /files/ is served by this app,
+// so it is re-pointed at the stable media host at publish time.
+function publicMedia(deps, url) {
+  if (!url || !deps.mediaBaseUrl) return url || null;
+  try {
+    const u = new URL(String(url));
+    if (!u.pathname.startsWith("/files/")) return url;
+    return `${deps.mediaBaseUrl}${u.pathname}${u.search}`;
+  } catch { return url; }
+}
+
+// Facebook fetches media by URL; if our own host 404s (page built against a
+// base that no longer serves the files) the publish CANNOT succeed, so it is
+// stopped here with an honest message instead of three retries and "we'll
+// try again later". Network hiccups and HEAD-hostile hosts pass through —
+// only an explicit 4xx/5xx counts as unreachable.
+async function mediaUnreachable(deps, url) {
+  if (!url) return false;
+  const f = deps.fetchFn || fetch;
+  try {
+    const r = await f(url, { method: "HEAD", signal: AbortSignal.timeout(10000) });
+    return !r.ok && r.status !== 405 && r.status !== 501;
+  } catch { return false; }
+}
+
 // Snapshot at enqueue: what the agent confirmed is what posts, even if the
 // page is edited while the job waits (spec §5).
 async function snapshotFor(deps, pageId, phone) {
@@ -202,9 +239,10 @@ async function snapshotFor(deps, pageId, phone) {
   return {
     title: (page.property && page.property.title) || "",
     page_url: pageUrl,
-    video_url: (page.hero && page.hero.video_url) || null,
-    poster_url: (page.hero && page.hero.poster_url) || null,
-    photo_urls: ((page.gallery && page.gallery.images) || []).map((i) => i.url).slice(0, 10),
+    video_url: publicMedia(deps, (page.hero && page.hero.video_url) || null),
+    poster_url: publicMedia(deps, (page.hero && page.hero.poster_url) || null),
+    photo_urls: ((page.gallery && page.gallery.images) || [])
+      .map((i) => publicMedia(deps, i.url)).slice(0, 10),
     copy: deps.shareKit.buildPostCopy(page, pageUrl),
     groups: deps.shareKit.sanitizeGroups(
       (biz && biz.distribution && biz.distribution.groups) || []),
@@ -223,21 +261,11 @@ async function enqueueFromConfirm(deps, dist, trigger) {
 async function createQueued(deps, { page, business, trigger, force }) {
   const id = crypto.randomUUID();
   const now = deps.now();
-  const pageUrl = `${deps.pageBaseUrl}/p/${page.page_id}`;
   const dist = {
     id, page_id: page.page_id, business_phone: page.business_phone,
     status: "queued", trigger, force: !!force,
     targets: baseTargets(),
-    snapshot: {
-      title: (page.property && page.property.title) || "",
-      page_url: pageUrl,
-      video_url: (page.hero && page.hero.video_url) || null,
-      poster_url: (page.hero && page.hero.poster_url) || null,
-      photo_urls: ((page.gallery && page.gallery.images) || []).map((i) => i.url).slice(0, 10),
-      copy: deps.shareKit.buildPostCopy(page, pageUrl),
-      groups: deps.shareKit.sanitizeGroups(
-        (business && business.distribution && business.distribution.groups) || []),
-    },
+    snapshot: await snapshotFor(deps, page.page_id, page.business_phone),
     created_at: now, updated_at: now, confirmed_at: now,
   };
   await deps.db.saveDistribution(dist);
@@ -273,6 +301,16 @@ async function failTarget(deps, dist, conn, targetKey, err, { attempts, canReque
       }), M.reconnect(dashUrl));
     }
     return "auth";
+  }
+  // Missing scope on the Page: the token is valid, retrying can't help, and
+  // it is NOT an expiry — the agent must reconnect and grant the permission.
+  if (deps.meta.isPermissionError && deps.meta.isPermissionError(err)) {
+    await db.updateDistribution(dist.id, {
+      [`${base}.status`]: "failed", [`${base}.error`]: vendorText,
+      [`${base}.attempts`]: attempts, updated_at: deps.now(),
+    });
+    await audit(deps, dist, targetKey, "publish_failed", { error: vendorText });
+    return "permission";
   }
   if (err instanceof deps.meta.GraphError && attempts < MAX_ATTEMPTS && canRequeue) {
     await db.updateDistribution(dist.id, {
@@ -392,16 +430,33 @@ async function executeJob(deps, dist) {
       });
       fb.status = "skipped";
       if (why !== "no_media") {
+        // "not connected" and "connected but paused" are different problems;
+        // telling a connected agent their Page isn't linked sends them
+        // hunting for a setting that is already correct.
         const dashUrl = `${deps.pageBaseUrl}/distribution.html`;
-        summary = M.notConnected(title, dashUrl);
+        const paused = why === "needs_reconnect";
+        summary = paused ? M.reconnect(dashUrl) : M.notConnected(title, dashUrl);
         summaryBtn = BTN.dashboard({
-          header: "⚠️ הנכס לא פורסם",
-          body: `"${title}" לא פורסם — דף הפייסבוק עדיין לא חובר.\n` +
-            "חיבור חד-פעמי, ומהנכס הבא הפרסום אוטומטי.",
+          header: paused ? "⚠️ הפרסום מושהה" : "⚠️ הנכס לא פורסם",
+          body: paused
+            ? `"${title}" לא פורסם — החיבור לפייסבוק דורש חידוש.\n` +
+              "חיבור מחדש לוקח פחות מדקה, והנכסים והקבוצות שלכם נשמרו."
+            : `"${title}" לא פורסם — דף הפייסבוק עדיין לא חובר.\n` +
+              "חיבור חד-פעמי, ומהנכס הבא הפרסום אוטומטי.",
           footer: "ערכת השיתוף לקבוצות נשלחה בכל מקרה",
-          dashUrl, label: "חיבור דף הפייסבוק",
+          dashUrl, label: paused ? "חיבור מחדש" : "חיבור דף הפייסבוק",
         });
       }
+    } else if (await mediaUnreachable(deps,
+        dist.snapshot.video_url || (dist.snapshot.photo_urls || [])[0])) {
+      await db.updateDistribution(dist.id, {
+        "targets.facebook_page.status": "skipped",
+        "targets.facebook_page.error": "media_unreachable", updated_at: deps.now(),
+      });
+      fb.status = "skipped";
+      await audit(deps, dist, "facebook_page", "publish_failed",
+        { error: "media_unreachable" });
+      summary = M.mediaUnreachable(title);
     } else {
       try {
         const g = { pageId: conn.page_id, pageToken: conn.page_token,
@@ -454,7 +509,17 @@ async function executeJob(deps, dist) {
           { attempts, canRequeue: true });
         if (outcome === "requeued") return;
         fb.status = "failed";
-        if (outcome === "terminal") {
+        if (outcome === "permission") {
+          const dashUrl = `${deps.pageBaseUrl}/distribution.html`;
+          summary = M.noPermission(title, dashUrl);
+          summaryBtn = BTN.dashboard({
+            header: "⚠️ הפרסום לא אושר על ידי פייסבוק",
+            body: `"${title}" לא פורסם — חסרה הרשאת פרסום לדף.\n` +
+              "חברו מחדש ואשרו את כל ההרשאות. פחות מדקה.",
+            footer: "ערכת השיתוף לקבוצות נשלחה בכל מקרה",
+            dashUrl, label: "חיבור מחדש",
+          });
+        } else if (outcome === "terminal") {
           const isTimeout = !(err instanceof deps.meta.GraphError);
           summary = isTimeout ? M.timeoutCheck(title) : M.failed(title);
         }
@@ -593,7 +658,7 @@ function startSweeper(deps) {
 
 module.exports = {
   MAX_ATTEMPTS, M, BTN, baseTargets, hasLivePost, hasInFlight,
-  liveDeps, maybeOffer, enqueueFromConfirm, createQueued,
+  liveDeps, maybeOffer, enqueueFromConfirm, createQueued, publicMedia,
   executeJob, runSweep, startSweeper,
   createShareSession, queueUrl, groupKey, resolveGroups,
 };
