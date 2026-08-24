@@ -57,8 +57,14 @@ async function step() {
       quiet_hours: "מחוץ לשעות הפרסום (09:00–21:00) — נמשיך מחר",
       daily_cap: `הגענו למכסה היומית (${next.wait.cap}) — נמשיך מחר`,
       too_soon: "ממתינים בין פוסטים כדי להיראות טבעי",
+      needs_group_sync: "צריך לסנכרן את הקבוצות שלכם — לחצו «סנכרון הקבוצות שלי»",
     }[next.wait.reason] || "ממתינים";
     await log(msg);
+    // Nothing will change until the agent syncs, so stop instead of polling.
+    if (next.wait.reason === "needs_group_sync") {
+      await setStore({ running: false });
+      return;
+    }
     const retry = next.wait.retry_at ? new Date(next.wait.retry_at).getTime() - Date.now() : 30 * 60 * 1000;
     return schedule(Math.max(60 * 1000, Math.min(retry + 5000, 6 * 60 * 60 * 1000)));
   }

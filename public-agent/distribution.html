@@ -115,6 +115,30 @@
     <button class="btn btn-ghost" id="saveGroups">שמירת קבוצות</button>
   </div>
 
+  <div class="card dist-card" id="extCard" hidden>
+    <h2>פרסום לקבוצות עם התוסף <span class="conn-chip" id="extChip"></span></h2>
+    <p class="muted" id="extText"></p>
+    <div class="inline-row">
+      <button class="btn btn-gold btn-sm" id="extPair">חיבור התוסף</button>
+      <a class="btn btn-ghost btn-sm" id="extHelp" href="#" hidden>סנכרון הקבוצות שלי</a>
+    </div>
+    <div style="margin-top:12px">
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:.9rem">
+        <input type="radio" name="extmode" value="assist" id="modeAssist" style="margin-top:4px">
+        <span><b>אישור ידני (מומלץ)</b><br>
+          <span class="muted">התוסף פותח את הקבוצה וכותב את הפוסט. אתם קוראים ולוחצים «פרסום» בפייסבוק.
+          הבטוח ביותר לחשבון.</span></span>
+      </label>
+      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:.9rem;margin-top:8px">
+        <input type="radio" name="extmode" value="auto" id="modeAuto" style="margin-top:4px">
+        <span><b>אוטומטי</b><br>
+          <span class="muted">התוסף גם לוחץ «פרסום». מהיר יותר, אבל מגדיל את הסיכון לחסימה זמנית של
+          חשבון הפייסבוק האישי שלכם.</span></span>
+      </label>
+    </div>
+    <p class="muted" id="extPlan" style="margin-top:10px"></p>
+  </div>
+
   <div class="card dist-card" id="publishCard" hidden>
     <h2>פרסום</h2>
     <p class="muted" id="publishSummary"></p>

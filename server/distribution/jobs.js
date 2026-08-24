@@ -80,17 +80,22 @@ const BTN = {
       { type: "url", buttonId: "page", buttonText: "👀 לצפייה בדף", url: pageUrl },
     ],
   }),
-  queue: ({ title, groupCount, queueUrl, postUrl }) => ({
+  // Three buttons, the Green API maximum: copy the link straight to the
+  // clipboard, open the live post, and open the sharing queue.
+  queue: ({ title, groupCount, queueUrl, postUrl, copyUrl }) => ({
     header: postUrl ? "✅ פורסם בדף הפייסבוק" : "📣 ערכת השיתוף מוכנה",
     body: `"${title}"\n\n` + (groupCount
       ? `${groupCount} קבוצות מחכות לשיתוף — הטקסט כבר מוכן, עוברים קבוצה־קבוצה.`
       : "עדיין לא בחרתם קבוצות — אפשר להוסיף אותן בעמוד ההפצה."),
     footer: "פרסום בקבוצות נעשה על ידכם, בהקשה אחת לכל קבוצה",
     buttons: [
-      { type: "url", buttonId: "queue", buttonText: "📣 שיתוף לקבוצות", url: queueUrl },
+      ...(copyUrl
+        ? [{ type: "copy", buttonId: "copy", buttonText: "העתקת הקישור", copyCode: copyUrl }]
+        : []),
       ...(postUrl
         ? [{ type: "url", buttonId: "post", buttonText: "לצפייה בפוסט", url: postUrl }]
         : []),
+      { type: "url", buttonId: "queue", buttonText: "📣 שיתוף לקבוצות", url: queueUrl },
     ],
   }),
   dashboard: ({ header, body, footer, dashUrl, label }) => ({
@@ -589,7 +594,10 @@ async function executeJob(deps, dist) {
       });
       const qUrl = queueUrl(deps, session);
       const qArgs = { title: dist.snapshot.title, groupCount: session.groups.length,
-        queueUrl: qUrl, postUrl: (fb && fb.post_url) || null };
+        queueUrl: qUrl, postUrl: (fb && fb.post_url) || null,
+        // The copy button puts the shareable link straight on the clipboard —
+        // the post itself when it exists, otherwise the property page.
+        copyUrl: (fb && fb.post_url) || dist.snapshot.page_url };
       await notifyRich(deps, dist.business_phone,
         BTN.queue(qArgs), deps.shareKit.buildQueueMessage(qArgs));
       await db.updateDistribution(dist.id, {

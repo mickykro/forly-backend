@@ -19,6 +19,7 @@ const meta = require("../distribution/meta");
 const shareKit = require("../distribution/share-kit");
 const config = require("../distribution/config");
 const pacing = require("../distribution/pacing");
+const scheduler = require("../distribution/scheduler");
 const businessCache = require("../business-cache");
 
 const esc = (s) => String(s == null ? "" : s)
@@ -574,7 +575,13 @@ module.exports = function createDistributionRouter(ctx) {
     const nonce = crypto.randomBytes(12).toString("base64url");
     await db.saveGroupPosting(phone, { ...prev, ext_nonce: nonce,
       ext_paired_at: new Date(), mode: prev.mode || "assist" });
-    res.json({ token: makeExtToken(phone, nonce), mode: prev.mode || "assist" });
+    res.json({
+      token: makeExtToken(phone, nonce),
+      mode: prev.mode || "assist",
+      // Set EXTENSION_ID once the unpacked/store id is known, and the
+      // dashboard hands the token over with no copy/paste.
+      extension_id: process.env.EXTENSION_ID || null,
+    });
   });
 
   // What should the extension do next? Either one group task, or an honest
@@ -591,11 +598,14 @@ module.exports = function createDistributionRouter(ctx) {
     if (!pending.length) return res.json({ done: true });
 
     const page = await db.getPage(session.page_id).catch(() => null);
-    // Verified membership (empty ⇒ never synced ⇒ don't block on it) and the
-    // catalog's member counts, which set how long this group must rest.
+    // Membership is a hard precondition for the assisted path: we post only
+    // where the agent is already a member, so without a sync there is
+    // nothing we're willing to schedule.
     const joinedList = auth.state.joined_groups;
-    const joinedSet = Array.isArray(joinedList) && joinedList.length
-      ? new Set(joinedList.map((g) => g.url)) : null;
+    if (!Array.isArray(joinedList) || !joinedList.length) {
+      return res.json({ wait: { reason: "needs_group_sync" } });
+    }
+    const joinedSet = new Set(joinedList.map((g) => g.url));
     const sizeOf = new Map(GROUP_SEED.map((g) => [g.url, g.members]));
 
     for (const g of pending) {
@@ -731,16 +741,33 @@ module.exports = function createDistributionRouter(ctx) {
   });
 
   router.get("/extension/status", requireAuth(authSecret), async (req, res) => {
-    const s = (await db.getGroupPosting(req.user.userId)) || {};
+    const phone = req.user.userId;
+    const s = (await db.getGroupPosting(phone)) || {};
     const posts = Array.isArray(s.posts) ? s.posts : [];
     const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
+    const dailyCap = pacing.dailyCap(s.first_post_at, Date.now());
+
+    // An honest ETA beats a promise: with this many listings and this many
+    // joined groups, a full distribution takes this long.
+    const listings = (await db.listListingsByPhone(phone).catch(() => []))
+      .filter((l) => l.page_id && l.status !== "archived");
+    const plan = joined.length && listings.length
+      ? scheduler.forecast({
+          propertyCount: listings.length, groupCount: joined.length,
+          dailyCap, groupCooldownMs: pacing.GROUP_COOLDOWN_MS })
+      : null;
+
     res.json({
       paired: !!s.ext_nonce,
       mode: s.mode || "assist",
       locked_until: s.locked_until || null,
       lock_reason: s.lock_reason || null,
       posted_today: posts.filter((p) => new Date(p.at).getTime() > dayAgo).length,
-      daily_cap: pacing.dailyCap(s.first_post_at, Date.now()),
+      daily_cap: dailyCap,
+      joined_count: joined.length,
+      joined_synced_at: s.joined_synced_at || null,
+      plan,
     });
   });
 

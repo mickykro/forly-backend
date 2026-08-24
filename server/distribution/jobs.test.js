@@ -436,6 +436,11 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.ok(q, "queue message sent as buttons");
     assert.ok(q.buttons.find((b) => b.buttonId === "queue").url.includes("/share.html?s="));
     assert.ok(q.buttons.find((b) => b.buttonId === "post").url === "https://www.facebook.com/V1");
+    // a native copy button puts the link on the clipboard, no selection needed
+    const copyBtn = q.buttons.find((b) => b.buttonId === "copy");
+    assert.ok(copyBtn && copyBtn.type === "copy", "copy button present");
+    assert.equal(copyBtn.copyCode, "https://www.facebook.com/V1");
+    assert.equal(q.buttons.length, 3, "Green API allows at most 3");
     assert.equal(db.dists.get(d.id).status, "done");
   }
 

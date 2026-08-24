@@ -252,6 +252,13 @@
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.checked = selected.has(g.url);
     cb.style.accentColor = "var(--gold)";
+    // We publish only where the agent is already a member, so once the
+    // membership list is synced, everything else is visible but unselectable.
+    if (g.joined === false) {
+      cb.disabled = true;
+      label.style.opacity = ".5";
+      label.title = "אינכם חברים בקבוצה — הצטרפו בפייסבוק וסנכרנו שוב";
+    }
     cb.onchange = () => {
       if (cb.checked) selected.add(g.url); else selected.delete(g.url);
       renderCatalog(); renderStepper();
@@ -299,6 +306,8 @@
       if (selected.has(g.url)) continue;
       if (q && !(g.name + " " + (g.city || "")).toLowerCase().includes(q)) continue;
       if (g.joined) { myGroups.push(g); continue; }
+      // Not a member ⇒ rendered separately at the bottom, unselectable.
+      if (g.joined === false) continue;
       // Groups that don't take this listing type are shown LAST, never hidden
       // — the agent decides, but a sale shouldn't lead with rental groups.
       if (g.match === false) { mismatched.push(g); continue; }
@@ -322,6 +331,13 @@
       box.appendChild(sectionHead(`${label} (${mismatched.length})`, "var(--ink-soft)"));
       mismatched.sort(bySize);
       for (const g of mismatched) box.appendChild(catalogRow(g, true));
+    }
+    const notJoined = catalog.filter((g) => g.joined === false && !selected.has(g.url));
+    if (notJoined.length) {
+      box.appendChild(sectionHead(
+        `לא חברים בקבוצה — הצטרפו כדי לפרסם (${notJoined.length})`, "var(--ink-soft)"));
+      notJoined.sort(bySize);
+      for (const g of notJoined.slice(0, 30)) box.appendChild(catalogRow(g, true));
     }
     updateGroupCount([...selected, ...ownGroupLines()]);
   }
@@ -486,6 +502,62 @@
 
   $("publishBtn").onclick = () => publishSelected(false);
 
+  // ── the extension: pairing, mode choice, and an honest ETA ──
+  // The extension id comes from the server so a rebuilt/unpacked extension
+  // doesn't need a code change here.
+  async function renderExtension() {
+    let st2;
+    try { st2 = await api("/api/distribution/extension/status"); }
+    catch { return; }
+    $("extCard").hidden = false;
+    const chip = $("extChip");
+    if (st2.locked_until && new Date(st2.locked_until) > new Date()) {
+      chip.textContent = "מושהה"; chip.className = "conn-chip warn";
+    } else if (st2.paired) {
+      chip.textContent = "מחובר"; chip.className = "conn-chip ok";
+    } else {
+      chip.textContent = "לא מחובר"; chip.className = "conn-chip warn";
+    }
+    $("extText").textContent = !st2.paired
+      ? "התוסף כותב את הפוסט בכל קבוצה במקומכם. מפרסמים רק בקבוצות שאתם כבר חברים בהן."
+      : st2.joined_count
+        ? `${st2.joined_count} קבוצות מסונכרנות · ${st2.posted_today}/${st2.daily_cap} פרסומים היום`
+        : "חסר סנכרון קבוצות — פתחו את התוסף ולחצו «סנכרון הקבוצות שלי».";
+    $("extPlan").textContent = st2.plan
+      ? `לפי ${st2.joined_count} קבוצות: ${st2.plan.total_posts} פרסומים, ` +
+        `כ-${st2.plan.posts_per_day} ביום — כ-${st2.plan.days} ימים לכל הנכסים ` +
+        `(${st2.plan.limited_by === "groups" ? "מוגבל במספר הקבוצות" : "מוגבל במכסה היומית"}).`
+      : "";
+    (st2.mode === "auto" ? $("modeAuto") : $("modeAssist")).checked = true;
+    for (const el of [$("modeAssist"), $("modeAuto")]) {
+      el.onchange = () => {
+        if (el.value === "auto" && !confirm(
+          "מצב אוטומטי מגדיל את הסיכון לחסימה זמנית של חשבון הפייסבוק האישי שלכם.\n" +
+          "להפעיל בכל זאת?")) { $("modeAssist").checked = true; return; }
+        api("/api/distribution/extension/mode", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode: el.value }),
+        }).then(() => toast(el.value === "auto" ? "מצב אוטומטי הופעל" : "מצב אישור ידני הופעל"))
+          .catch(() => toast("העדכון נכשל"));
+      };
+    }
+    $("extPair").onclick = async () => {
+      try {
+        const r = await api("/api/distribution/extension/pair", { method: "POST" });
+        const id = r.extension_id;
+        if (id && chrome?.runtime?.sendMessage) {
+          chrome.runtime.sendMessage(id,
+            { forly: "pair", token: r.token, base: location.origin, mode: r.mode },
+            () => toast("התוסף חובר ✓"));
+        } else {
+          // No extension present (or a dev domain): give them the token.
+          prompt("העתיקו את קוד החיבור והדביקו בתוסף:", r.token);
+        }
+        renderExtension();
+      } catch { toast("החיבור נכשל — ודאו שההפצה פעילה בחשבון"); }
+    };
+  }
+
   // ── init ──
   (async () => {
     try { st = await api("/api/distribution/status"); }
@@ -494,6 +566,7 @@
     renderConnection();
     $("publishCard").hidden = false;
     renderGroups();
+    renderExtension();
     loadProps();
     renderStepper();
     if (new URLSearchParams(location.search).get("connected") === "1") {
