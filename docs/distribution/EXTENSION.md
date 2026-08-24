@@ -25,13 +25,14 @@ Agents must opt in knowing this. Default the pilot to **assist mode**.
 
 | Signal Meta looks for | Our countermeasure |
 |---|---|
-| Bursts of posts, and *fixed* intervals (a constant cadence is more damning than volume) | Server-enforced daily cap + a **randomized** 4–20 minute gap (`pacing.nextGapMs`) |
-| A brand-new account behaving like a power user | Warm-up ramp: 2 posts/day on day one → 8 after two weeks |
+| Bursts of posts, and *fixed* intervals (a constant cadence is more damning than volume) | Server-enforced daily cap + a **randomized** 4–20 minute gap; plus a cross-agent throttle so one group never receives two Forly posts within 10–20 minutes |
+| A brand-new account behaving like a power user | Warm-up ramp: 2 posts/day on day one → `DAILY_CAP` (12) after two weeks |
 | Posting at 04:00 | Israel-local 09:00–21:00 window only |
-| The same text+link in many groups | Per-group tracked links; the same property never goes to the same group twice; 7-day per-group cooldown |
+| The same text+link in many groups | A different copy variant per group (facts identical); the same property never goes to the same group twice, ever; 24h per-group cooldown between different properties |
 | **An external domain repeated across groups → the domain gets blocked platform-wide** | We share the **Facebook post URL**, not a `forly.*` link. This is the one that would hurt every agent at once, so it gets the strongest fix |
-| Machine-speed interaction (instant fill, no scroll, no dwell) | Scroll + 2–4s dwell before typing, text typed in chunks with 35–110ms pauses |
+| Machine-speed interaction (instant fill, no scroll, no dwell) | Scroll + 2–4s dwell, text typed in randomized 18–24 char chunks at 35–110ms, field re-focused each chunk, then a read-back pause scaled to length |
 | Continuing after a warning | One block/checkpoint report → **24h lockout** for that agent, enforced server-side |
+| Posting where you aren't a member (fastest route to a report) | The extension syncs the agent's **actual joined groups**; anything else is refused (`not_a_member`), and nothing is scheduled at all until that sync exists |
 
 Also, by construction: no credentials are ever collected (the extension uses
 the session already in the browser), nothing is scraped, one tab at a time,
