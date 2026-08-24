@@ -30,11 +30,36 @@ function trackedUrl(pageUrl, { session, group }) {
   return u.toString();
 }
 
-function buildPostCopy(page, pageUrl) {
+/*
+ * Per-group phrasing. Identical text pasted into many groups is the classic
+ * spam fingerprint — and it also reads like a bot to human members. The FACTS
+ * never change (price, rooms, size, link); only the framing does, and the
+ * variant is derived from the property+group so a retry reproduces the same
+ * text rather than inventing a new one each time.
+ */
+const OPENERS = ["🏠", "🔑", "🏡", "✨", "📍"];
+const CTAS = [
+  "לכל הפרטים, תמונות וסרטון ⬅️",
+  "סרטון הליכה, תמונות ומידע מלא ⬅️",
+  "כל הפרטים והסרטון כאן ⬅️",
+  "לצפייה בסרטון ובפרטים המלאים ⬅️",
+];
+const CLOSERS = ["", "מוזמנים לפנות 🙂", "אשמח להעביר פרטים נוספים", "פתוח לשאלות"];
+
+function variantIndex(seed, mod) {
+  const s = String(seed || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % mod;
+}
+
+function buildPostCopy(page, pageUrl, opts = {}) {
   const p = (page && page.property) || {};
   const a = (page && page.agent) || {};
+  const seed = opts.variantSeed || "";
+  const pick = (arr) => arr[seed ? variantIndex(seed + arr.length, arr.length) : 0];
   const lines = [];
-  lines.push(`🏠 ${p.title || "נכס חדש"}`);
+  lines.push(`${pick(OPENERS)} ${p.title || "נכס חדש"}`);
   const loc = [p.neighborhood, p.city].filter(Boolean).join(", ");
   if (loc) lines.push(`📍 ${loc}`);
   const facts = [];
@@ -47,11 +72,20 @@ function buildPostCopy(page, pageUrl) {
     lines.push(`💰 ${verb}: ₪${Number(p.price).toLocaleString("en-US")}`);
   }
   lines.push("");
-  lines.push(`לכל הפרטים, תמונות וסרטון ⬅️ ${pageUrl}`);
+  // linkInComment: many groups treat an external link in the post body as
+  // spam (and Facebook scores the domain for it). The agent posts the link
+  // as the first comment instead — standard practice in these groups.
+  if (opts.linkInComment) {
+    lines.push("קישור לסרטון ולפרטים המלאים בתגובה הראשונה 👇");
+  } else {
+    lines.push(`${pick(CTAS)} ${pageUrl}`);
+  }
   if (a.name) {
     const phone = localPhone(a.phone);
     lines.push(`${a.name}${phone ? ` · ${phone}` : ""}`);
   }
+  const closer = pick(CLOSERS);
+  if (closer) lines.push(closer);
   return lines.join("\n");
 }
 
@@ -130,4 +164,4 @@ function buildQueueMessage({ title, groupCount, queueUrl, postUrl }) {
 }
 
 module.exports = { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink,
-  buildShareKitMessage, buildQueueMessage, trackedUrl };
+  buildShareKitMessage, buildQueueMessage, trackedUrl, variantIndex };

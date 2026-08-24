@@ -18,6 +18,7 @@ const jobs = require("../distribution/jobs");
 const meta = require("../distribution/meta");
 const shareKit = require("../distribution/share-kit");
 const config = require("../distribution/config");
+const pacing = require("../distribution/pacing");
 const businessCache = require("../business-cache");
 
 const esc = (s) => String(s == null ? "" : s)
@@ -504,6 +505,190 @@ module.exports = function createDistributionRouter(ctx) {
       });
     }
     res.json({ ok: true, state: action });
+  });
+
+  /* ── the browser-extension bridge (assisted group posting) ──────────────
+   * Facebook has no Groups API, so the only thing that can put a post into a
+   * group is the agent's own logged-in browser. The extension is a typing
+   * assistant for exactly that: it fills the group composer and — in the
+   * default "assist" mode — stops so the agent presses Post themselves.
+   *
+   * Every safety rule is enforced HERE, not in the extension, so a tampered
+   * or stale client cannot pace its way around them (see distribution/pacing.js).
+   */
+  const extSign = (body) =>
+    crypto.createHmac("sha256", authSecret).update(`ext:${body}`).digest("base64url");
+
+  function makeExtToken(phone, nonce) {
+    const body = Buffer.from(JSON.stringify({ phone, nonce })).toString("base64url");
+    return `${body}.${extSign(body)}`;
+  }
+
+  function readExtToken(token) {
+    if (typeof token !== "string" || !token.includes(".")) return null;
+    const [body, sig] = token.split(".");
+    const a = Buffer.from(sig || ""), b = Buffer.from(extSign(body));
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    try { return JSON.parse(Buffer.from(body, "base64url").toString("utf8")); }
+    catch { return null; }
+  }
+
+  // The nonce lives in the agent's own state doc, so re-pairing instantly
+  // invalidates any token on a device the agent no longer controls.
+  async function extAuth(req) {
+    const raw = String(req.get("x-forly-ext") ||
+      (req.body && req.body.token) || req.query.token || "");
+    const claim = readExtToken(raw);
+    if (!claim || !claim.phone) return null;
+    const state = await db.getGroupPosting(claim.phone);
+    if (!state || !state.ext_nonce || state.ext_nonce !== claim.nonce) return null;
+    return { phone: claim.phone, state };
+  }
+
+  router.post("/extension/pair", requireAuth(authSecret), async (req, res) => {
+    const phone = req.user.userId;
+    const biz = await db.getBusiness(phone);
+    if (!config.resolve(biz, process.env).enabled) {
+      return res.status(403).json({ error: "not_entitled" });
+    }
+    const prev = (await db.getGroupPosting(phone)) || {};
+    const nonce = crypto.randomBytes(12).toString("base64url");
+    await db.saveGroupPosting(phone, { ...prev, ext_nonce: nonce,
+      ext_paired_at: new Date(), mode: prev.mode || "assist" });
+    res.json({ token: makeExtToken(phone, nonce), mode: prev.mode || "assist" });
+  });
+
+  // What should the extension do next? Either one group task, or an honest
+  // "wait, and here's why" — never a queue the client can race through.
+  router.get("/extension/next", async (req, res) => {
+    const auth = await extAuth(req);
+    if (!auth) return res.status(401).json({ error: "unpaired" });
+    const sessionId = String(req.query.s || "");
+    const session = sessionId ? await db.getShareSession(sessionId) : null;
+    if (!session || session.business_phone !== auth.phone) {
+      return res.status(404).json({ error: "no_session" });
+    }
+    const pending = (session.groups || []).filter((g) => g.state !== "posted" && g.state !== "skipped");
+    if (!pending.length) return res.json({ done: true });
+
+    const page = await db.getPage(session.page_id).catch(() => null);
+    const owned = await db.getPropertyGroups(session.page_id).catch(() => null);
+
+    for (const g of pending) {
+      // Cross-agent throttle for this group, plus how long the agent has had
+      // it on their list (a proxy for membership age).
+      const throttle = await db.getGroupThrottle(g.key).catch(() => null);
+      const verdict = pacing.canPost(auth.state, {
+        groupUrl: g.url, pageId: session.page_id,
+        groupLastPostAt: throttle && throttle.last_post_at,
+        groupAddedAt: owned && owned.updated_at,
+      });
+      if (!verdict.ok) {
+        // Per-group reasons only block that group; agent-wide reasons block
+        // everything, so stop asking.
+        if (["group_cooldown", "already_posted_here", "group_busy", "too_new_in_group"]
+          .includes(verdict.reason)) continue;
+        return res.json({ wait: verdict });
+      }
+      const tracked = shareKit.trackedUrl(session.snapshot.page_url,
+        { session: session.id, group: g.token });
+      // Sharing the Facebook post keeps the forly domain out of group spam
+      // heuristics entirely and shows the video inline; when there's no post
+      // to share, the link goes in the first comment instead of the body.
+      const hasPost = !!session.snapshot.post_url;
+      const text = page
+        ? shareKit.buildPostCopy(page, hasPost ? session.snapshot.post_url : tracked, {
+            variantSeed: `${session.page_id}|${g.key}`,
+            linkInComment: !hasPost,
+          })
+        : session.snapshot.copy.replace(session.snapshot.page_url, tracked);
+      return res.json({
+        task: {
+          session_id: session.id, group_key: g.key, group_url: g.url,
+          share_url: session.snapshot.post_url || tracked,
+          // What the agent pastes as the first comment when the body carries
+          // no link — the standard, lower-risk pattern in these groups.
+          comment_url: hasPost ? null : tracked,
+          text,
+        },
+        mode: auth.state.mode || "assist",
+        gap_ms: pacing.nextGapMs(),
+        remaining_today: verdict.remaining_today,
+      });
+    }
+    res.json({ done: true, skipped_all: true });
+  });
+
+  // The extension reports what actually happened. "posted" is the agent's
+  // own confirmation (assist mode) or a verified submit (auto mode); any
+  // block/checkpoint freezes this agent for 24h.
+  router.post("/extension/result", async (req, res) => {
+    const auth = await extAuth(req);
+    if (!auth) return res.status(401).json({ error: "unpaired" });
+    const body = req.body || {};
+    const session = await db.getShareSession(String(body.session_id || ""));
+    if (!session || session.business_phone !== auth.phone) {
+      return res.status(404).json({ error: "no_session" });
+    }
+    const idx = (session.groups || []).findIndex((g) => g.key === String(body.group_key || ""));
+    if (idx < 0) return res.status(400).json({ error: "unknown_group" });
+    const group = session.groups[idx];
+    const status = String(body.status || "");
+    const now = new Date();
+
+    if (status === "blocked") {
+      await db.saveGroupPosting(auth.phone,
+        pacing.lock(auth.state, body.detail || "reported_block"));
+      return res.json({ ok: true, locked: true });
+    }
+    if (status !== "posted") {
+      await db.updateShareSession(session.id, {
+        [`groups.${idx}.state`]: "ready", updated_at: now });
+      return res.json({ ok: true });
+    }
+
+    await db.saveGroupPosting(auth.phone,
+      pacing.recordPost(auth.state, { groupUrl: group.url, pageId: session.page_id }));
+    // Stamp the shared throttle so no OTHER agent posts into this group for
+    // the next few hours.
+    await db.touchGroupThrottle(group.key, group.url).catch(() => {});
+    await db.updateShareSession(session.id, {
+      [`groups.${idx}.state`]: "posted",
+      [`groups.${idx}.marked_posted_at`]: now, updated_at: now });
+    await db.addPostAction({
+      business_phone: auth.phone, page_id: session.page_id,
+      distribution_id: session.id, target: "facebook_group",
+      action: "published", at: now, trigger: "extension",
+      post_id: null, post_url: group.url,
+      content: { copy: session.snapshot.copy, media_type: "none",
+        media_count: 0, media_urls: [] },
+      error: null,
+      // Honest provenance: in assist mode a human pressed Post.
+      source: (auth.state.mode || "assist") === "assist" ? "agent_confirmed" : "extension_auto",
+    });
+    res.json({ ok: true, gap_ms: pacing.nextGapMs() });
+  });
+
+  // Agent-facing switch + live safety state for the dashboard.
+  router.post("/extension/mode", requireAuth(authSecret), async (req, res) => {
+    const mode = String((req.body && req.body.mode) || "") === "auto" ? "auto" : "assist";
+    const prev = (await db.getGroupPosting(req.user.userId)) || {};
+    await db.saveGroupPosting(req.user.userId, { ...prev, mode });
+    res.json({ ok: true, mode });
+  });
+
+  router.get("/extension/status", requireAuth(authSecret), async (req, res) => {
+    const s = (await db.getGroupPosting(req.user.userId)) || {};
+    const posts = Array.isArray(s.posts) ? s.posts : [];
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    res.json({
+      paired: !!s.ext_nonce,
+      mode: s.mode || "assist",
+      locked_until: s.locked_until || null,
+      lock_reason: s.lock_reason || null,
+      posted_today: posts.filter((p) => new Date(p.at).getTime() > dayAgo).length,
+      daily_cap: pacing.dailyCap(s.first_post_at, Date.now()),
+    });
   });
 
   // ── GET /status — connection + per-listing state; never tokens ──

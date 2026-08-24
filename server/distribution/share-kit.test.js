@@ -98,4 +98,29 @@ const qm0 = buildQueueMessage({ title: "דירה", groupCount: 0, queueUrl: "htt
 assert.ok(qm0.includes("עדיין לא בחרתם קבוצות"), "honest empty-group line");
 assert.ok(!qm0.includes("undefined"));
 
+// ── per-group variation: same facts, different framing, stable per seed ──
+{
+  const a = buildPostCopy(page, url, { variantSeed: "pg1|groupA" });
+  const b = buildPostCopy(page, url, { variantSeed: "pg1|groupB" });
+  const aAgain = buildPostCopy(page, url, { variantSeed: "pg1|groupA" });
+  assert.equal(a, aAgain, "same seed ⇒ identical text (a retry must not rewrite the post)");
+  const seeds = ["g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8"]
+    .map((s) => buildPostCopy(page, url, { variantSeed: s }));
+  assert.ok(new Set(seeds).size > 1, "different groups get different phrasing");
+  // facts are never varied — only the framing is
+  for (const text of [a, b, ...seeds]) {
+    assert.ok(text.includes("₪4,200,000"), "price identical everywhere");
+    assert.ok(text.includes("4 חדרים") && text.includes("105"), "facts identical everywhere");
+    assert.ok(text.includes("4 חד׳ בבבלי"), "title identical everywhere");
+  }
+}
+
+// ── link-in-first-comment keeps the domain out of the post body ──
+{
+  const body = buildPostCopy(page, url, { linkInComment: true });
+  assert.ok(!body.includes(url), "no external link in the post body");
+  assert.ok(body.includes("בתגובה הראשונה"), "tells the reader where the link is");
+  assert.ok(body.includes("₪4,200,000"), "facts still present");
+}
+
 console.log("share-kit.test.js OK");
