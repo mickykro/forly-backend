@@ -24,6 +24,11 @@
       "matches": ["https://www.facebook.com/groups/*", "https://web.facebook.com/groups/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.facebook.com/groups/joins*", "https://web.facebook.com/groups/joins*"],
+      "js": ["groups.js"],
+      "run_at": "document_idle"
     }
   ]
 }

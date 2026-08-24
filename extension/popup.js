@@ -33,6 +33,17 @@ function refresh() {
 $("start").onclick = () => chrome.runtime.sendMessage({ forly: "start" }, refresh);
 $("stop").onclick = () => chrome.runtime.sendMessage({ forly: "stop" }, refresh);
 
+$("sync").onclick = () => {
+  $("sync").disabled = true;
+  $("sync").textContent = "מסנכרן…";
+  chrome.runtime.sendMessage({ forly: "sync-groups" }, (r) => {
+    $("sync").disabled = false;
+    $("sync").textContent = r && r.count
+      ? `סונכרנו ${r.count} קבוצות ✓` : "סנכרון הקבוצות שלי";
+    refresh();
+  });
+};
+
 $("pairBtn").onclick = () => {
   const token = $("tokenIn").value.trim();
   const base = $("baseIn").value.trim().replace(/\/+$/, "");

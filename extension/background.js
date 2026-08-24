@@ -117,10 +117,46 @@ async function runTask(task, mode, gapMs) {
   }
 }
 
+// ── one-shot read of the agent's own joined groups ────────────────────────
+// Opens their group list, lets groups.js collect id/name/url, uploads it, and
+// closes the tab. Only on request — never on a timer.
+async function syncGroups() {
+  const tab = await chrome.tabs.create({
+    url: "https://www.facebook.com/groups/joins/", active: true });
+  const groups = await new Promise((resolve) => {
+    const timer = setTimeout(() => done([]), 60000);
+    function onMsg(msg, sender) {
+      if (!msg || msg.forly !== "groups" || sender.tab?.id !== tab.id) return;
+      done(msg.groups || []);
+    }
+    function done(g) {
+      clearTimeout(timer);
+      chrome.runtime.onMessage.removeListener(onMsg);
+      resolve(g);
+    }
+    chrome.runtime.onMessage.addListener(onMsg);
+    let tries = 0;
+    const send = () => chrome.tabs.sendMessage(tab.id, { forly: "scan-groups" }, () => {
+      if (chrome.runtime.lastError && tries++ < 12) setTimeout(send, 800);
+    });
+    setTimeout(send, 2500);
+  });
+  try { await chrome.tabs.remove(tab.id); } catch { /* already closed */ }
+  if (!groups.length) { await log("לא נמצאו קבוצות — ודאו שאתם מחוברים לפייסבוק"); return 0; }
+  await API.call("/api/distribution/extension/groups", {
+    method: "POST", body: JSON.stringify({ groups }),
+  });
+  await log(`סונכרנו ${groups.length} קבוצות שאתם חברים בהן ✓`);
+  return groups.length;
+}
+
 // ── messages from the popup and from the Forly web page ───────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   (async () => {
-    if (msg.forly === "pair") {
+    if (msg.forly === "sync-groups") {
+      const n = await syncGroups().catch(() => 0);
+      reply({ ok: true, count: n });
+    } else if (msg.forly === "pair") {
       await setStore({ base: msg.base, token: msg.token, mode: msg.mode || "assist" });
       await log("התוסף חובר לחשבון ✓");
       reply({ ok: true });

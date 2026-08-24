@@ -42,14 +42,40 @@ const findTextbox = () =>
 
 // Facebook's editor (Lexical) ignores textContent writes; execCommand is the
 // one path that produces the same internal state as real typing.
+// Chunk length and pause are both randomized per chunk: a constant rhythm is
+// as machine-like as instant fill. The field is focused before every chunk,
+// the way a real cursor stays in the box.
 async function typeInto(el, text) {
   el.focus();
-  const chunks = text.match(/[\s\S]{1,24}/g) || [];
-  for (const chunk of chunks) {
+  el.dispatchEvent(new Event("focus", { bubbles: true }));
+  let i = 0;
+  while (i < text.length) {
+    const size = Math.round(rand(18, 24));
+    const chunk = text.slice(i, i + size);
+    i += size;
+    if (document.activeElement !== el) el.focus();
     document.execCommand("insertText", false, chunk);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
     await sleep(rand(35, 110));
   }
-  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+// Put the link in the first comment on the post that was just published.
+// Best effort by design: if the new post can't be identified we leave the
+// agent the copy button instead of typing into the wrong place.
+const COMMENT_LABELS = [/write a comment/i, /כתוב תגובה/, /כתבו תגובה/, /הגב/];
+
+async function commentWithLink(url) {
+  await sleep(rand(2500, 4000));
+  const article = document.querySelector('[role="article"]');
+  if (!article) return false;
+  const trigger = [...article.querySelectorAll('[role="button"],[aria-label]')]
+    .find((el) => matchesAny(el.getAttribute("aria-label") || el.textContent, COMMENT_LABELS));
+  if (trigger) { trigger.click(); await sleep(rand(800, 1500)); }
+  const box = article.querySelector('[role="textbox"][contenteditable="true"]');
+  if (!box) return false;
+  await typeInto(box, url);
+  return true;
 }
 
 function blocked() {
@@ -179,7 +205,18 @@ async function run(task, mode) {
       bar.firstChild.textContent = "מאמת פרסום…";
       await sleep(3500);
       if (blocked()) return report("blocked", "blocked_after_post");
-      if (!findTextbox()) report("posted", "assist");
+      if (findTextbox()) return;                       // dialog still open
+      // Posted. If the link belongs in a comment, type it into the new
+      // post's comment box and let the agent press Enter.
+      if (task.comment_url) {
+        const filled = await commentWithLink(task.comment_url);
+        bar.firstChild.textContent = filled
+          ? "הקישור מוכן בתגובה — לחצו Enter לשליחה."
+          : "פורסם. הדביקו את הקישור בתגובה הראשונה.";
+        if (!filled) navigator.clipboard?.writeText(task.comment_url).catch(() => {});
+        await sleep(filled ? 6000 : 3000);
+      }
+      report("posted", "assist");
     }, { once: true });
   }
 }

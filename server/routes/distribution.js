@@ -266,7 +266,26 @@ module.exports = function createDistributionRouter(ctx) {
 
   router.get("/group-catalog", requireAuth(authSecret), async (req, res) => {
     const want = String(req.query.listing_type || "").trim();
-    res.json({ groups: await mergedCatalog(want), listing_type: want || null });
+    const catalog = await mergedCatalog(want);
+    // Fold in the groups the agent is actually a member of: catalog entries
+    // get flagged `joined`, and groups we've never heard of are appended so
+    // the agent can pick the ones they already belong to.
+    const s = (await db.getGroupPosting(req.user.userId)) || {};
+    const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
+    const known = new Set(catalog.map((g) => g.url));
+    const joinedSet = new Set(joined.map((g) => g.url));
+    for (const g of catalog) g.joined = joinedSet.size ? joinedSet.has(g.url) : null;
+    for (const g of joined) {
+      if (known.has(g.url)) continue;
+      catalog.push({ name: g.name, url: g.url, city: null, members: null,
+        listing_types: [], languages: [], agent_policy: "unknown",
+        match: true, joined: true, own: true });
+    }
+    res.json({
+      groups: catalog, listing_type: want || null,
+      joined_synced_at: s.joined_synced_at || null,
+      joined_count: joined.length,
+    });
   });
 
   // ── POST /group-catalog/suggest — agent offers a group ──
@@ -572,21 +591,25 @@ module.exports = function createDistributionRouter(ctx) {
     if (!pending.length) return res.json({ done: true });
 
     const page = await db.getPage(session.page_id).catch(() => null);
-    const owned = await db.getPropertyGroups(session.page_id).catch(() => null);
+    // Verified membership (empty ⇒ never synced ⇒ don't block on it) and the
+    // catalog's member counts, which set how long this group must rest.
+    const joinedList = auth.state.joined_groups;
+    const joinedSet = Array.isArray(joinedList) && joinedList.length
+      ? new Set(joinedList.map((g) => g.url)) : null;
+    const sizeOf = new Map(GROUP_SEED.map((g) => [g.url, g.members]));
 
     for (const g of pending) {
-      // Cross-agent throttle for this group, plus how long the agent has had
-      // it on their list (a proxy for membership age).
       const throttle = await db.getGroupThrottle(g.key).catch(() => null);
       const verdict = pacing.canPost(auth.state, {
         groupUrl: g.url, pageId: session.page_id,
         groupLastPostAt: throttle && throttle.last_post_at,
-        groupAddedAt: owned && owned.updated_at,
+        groupMembers: sizeOf.get(g.url),
+        joined: joinedSet ? joinedSet.has(g.url) : undefined,
       });
       if (!verdict.ok) {
         // Per-group reasons only block that group; agent-wide reasons block
         // everything, so stop asking.
-        if (["group_cooldown", "already_posted_here", "group_busy", "too_new_in_group"]
+        if (["group_cooldown", "already_posted_here", "group_busy", "not_a_member"]
           .includes(verdict.reason)) continue;
         return res.json({ wait: verdict });
       }
@@ -667,6 +690,36 @@ module.exports = function createDistributionRouter(ctx) {
       source: (auth.state.mode || "assist") === "assist" ? "agent_confirmed" : "extension_auto",
     });
     res.json({ ok: true, gap_ms: pacing.nextGapMs() });
+  });
+
+  // The groups this agent is actually a member of, synced from their own
+  // Facebook account by the extension. This is what makes "post only where
+  // you're a member" a fact rather than a guess.
+  router.post("/extension/groups", async (req, res) => {
+    const auth = await extAuth(req);
+    if (!auth) return res.status(401).json({ error: "unpaired" });
+    const raw = Array.isArray(req.body && req.body.groups) ? req.body.groups : [];
+    const seen = new Map();
+    for (const g of raw.slice(0, 400)) {
+      const url = shareKit.sanitizeGroups([(g && g.url) || ""])[0];
+      if (url && !seen.has(url)) {
+        seen.set(url, String((g && g.name) || "").slice(0, 90) || url);
+      }
+    }
+    const joined = [...seen.entries()].map(([url, name]) => ({ url, name }));
+    await db.saveGroupPosting(auth.phone, {
+      ...auth.state, joined_groups: joined, joined_synced_at: new Date(),
+    });
+    res.json({ ok: true, count: joined.length });
+  });
+
+  // The dashboard reads the synced list to build its picker.
+  router.get("/joined-groups", requireAuth(authSecret), async (req, res) => {
+    const s = (await db.getGroupPosting(req.user.userId)) || {};
+    res.json({
+      groups: s.joined_groups || [],
+      synced_at: s.joined_synced_at || null,
+    });
   });
 
   // Agent-facing switch + live safety state for the dashboard.

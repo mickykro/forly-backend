@@ -19,23 +19,41 @@
  * Pure functions: `now` and `rand` are injected so the tests are deterministic.
  */
 
-// Cross-agent spacing into ONE group. Per-account limits don't catch this:
-// twenty agents posting once each is twenty normal humans, but several of
-// them hitting the same group with the same domain inside a few minutes is
-// the coordinated-behavior signal — and the admin sees a burst of Forly
-// posts. So one group receives at most one Forly post every few hours,
-// across the entire platform.
-const GROUP_GLOBAL_GAP_MS = 3 * 60 * 60 * 1000;
-// A group the agent only just added is a group they aren't a real member of
-// yet. Posting into it on day one is the fastest way to get reported.
-const MEMBERSHIP_MIN_DAYS = 7;
+/*
+ * Cross-agent spacing into ONE group. Per-account limits don't catch this:
+ * twenty agents posting once each is twenty normal humans, but several of
+ * them landing in the same group within a minute or two is what a member
+ * (and an admin) notices.
+ *
+ * It can be short, because the two things that made it dangerous are gone:
+ * each agent's text is a different variant, and the shared link is the
+ * Facebook post rather than a repeated external domain. What remains is
+ * human perception, and a group that receives hundreds of posts a day does
+ * not notice two listings twenty minutes apart. Big groups absorb more, so
+ * the gap scales down with membership.
+ */
+const GROUP_GAP_MIN_MS = 10 * 60 * 1000;   // busy groups (50k+ members)
+const GROUP_GAP_MAX_MS = 20 * 60 * 1000;   // small groups
+const BUSY_GROUP_MEMBERS = 50000;
+
+function groupGapMs(members) {
+  const n = Number(members) || 0;
+  return n >= BUSY_GROUP_MEMBERS ? GROUP_GAP_MIN_MS : GROUP_GAP_MAX_MS;
+}
 
 const DAILY_CAP = 8;                 // steady-state ceiling per agent
 const WARMUP_START = 2;              // day-1 ceiling for a new agent
 const WARMUP_DAYS = 14;              // days to ramp from START to CAP
 const MIN_GAP_MS = 4 * 60 * 1000;    // never two posts inside 4 minutes
 const MAX_GAP_MS = 20 * 60 * 1000;   // upper end of the randomized gap
-const COOLDOWN_DAYS = 7;             // per-group rest between posts
+/*
+ * Rest between DIFFERENT properties in the same group. A week was far too
+ * strict — an agent with five listings in one city would need five weeks to
+ * distribute them, which is not a product. Two days is ~3 posts/week into a
+ * group, comfortably inside what these listing groups exist for, while the
+ * "same property twice" rule below stays absolute.
+ */
+const GROUP_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 const LOCKOUT_MS = 24 * 60 * 60 * 1000;
 const HOUR_START = 9;                // Israel local
 const HOUR_END = 21;
@@ -69,7 +87,7 @@ function dailyCap(firstPostAt, now) {
  * Returns { ok } or { ok:false, reason, retry_at } — reason is a stable code
  * the UI maps to Hebrew, never raw text.
  */
-function canPost(state, { groupUrl, pageId, groupLastPostAt, groupAddedAt },
+function canPost(state, { groupUrl, pageId, groupLastPostAt, groupMembers, joined },
   { now = Date.now() } = {}) {
   const s = state || {};
   const posts = Array.isArray(s.posts) ? s.posts : [];
@@ -105,30 +123,26 @@ function canPost(state, { groupUrl, pageId, groupLastPostAt, groupAddedAt },
 
   const groupLast = posts.filter((p) => p.group_url === groupUrl)
     .reduce((m, p) => Math.max(m, at(p)), 0);
-  if (groupLast && now - groupLast < COOLDOWN_DAYS * DAY_MS) {
+  if (groupLast && now - groupLast < GROUP_COOLDOWN_MS) {
     return { ok: false, reason: "group_cooldown",
-      retry_at: new Date(groupLast + COOLDOWN_DAYS * DAY_MS).toISOString() };
+      retry_at: new Date(groupLast + GROUP_COOLDOWN_MS).toISOString() };
   }
 
   // Platform-wide spacing for this group, across every Forly agent.
   if (groupLastPostAt) {
-    const since = now - new Date(groupLastPostAt).getTime();
-    if (since < GROUP_GLOBAL_GAP_MS) {
+    const gap = groupGapMs(groupMembers);
+    const stamp = new Date(groupLastPostAt).getTime();
+    if (now - stamp < gap) {
       return { ok: false, reason: "group_busy",
-        retry_at: new Date(new Date(groupLastPostAt).getTime() + GROUP_GLOBAL_GAP_MS).toISOString() };
+        retry_at: new Date(stamp + gap).toISOString() };
     }
   }
 
-  // Don't post into a group the agent joined/added days ago — practitioner
-  // consensus (no official Meta figure exists) is 1–2 weeks of membership
-  // before a first promotional post.
-  if (groupAddedAt) {
-    const age = now - new Date(groupAddedAt).getTime();
-    if (age < MEMBERSHIP_MIN_DAYS * DAY_MS) {
-      return { ok: false, reason: "too_new_in_group",
-        retry_at: new Date(new Date(groupAddedAt).getTime() + MEMBERSHIP_MIN_DAYS * DAY_MS).toISOString() };
-    }
-  }
+  // Membership is VERIFIED, not guessed: the extension syncs the groups the
+  // agent actually belongs to, so posting into a group they never joined —
+  // the fastest route to a spam report — simply cannot be scheduled.
+  // `joined === undefined` means "not synced yet", which stays permitted.
+  if (joined === false) return { ok: false, reason: "not_a_member" };
 
   return { ok: true, remaining_today: cap - today.length };
 }
@@ -141,8 +155,10 @@ function nextGapMs(rand = Math.random) {
 
 function recordPost(state, { groupUrl, pageId }, { now = Date.now() } = {}) {
   const s = state || {};
+  // Keep a week of history: longer than any cooldown, short enough that the
+  // doc can't grow without bound.
   const posts = (Array.isArray(s.posts) ? s.posts : [])
-    .filter((p) => now - new Date(p.at).getTime() < COOLDOWN_DAYS * DAY_MS * 2);
+    .filter((p) => now - new Date(p.at).getTime() < 7 * DAY_MS);
   posts.push({ at: new Date(now).toISOString(), group_url: groupUrl, page_id: pageId });
   return {
     ...s,
@@ -164,7 +180,7 @@ function lock(state, reason, { now = Date.now() } = {}) {
 
 module.exports = {
   DAILY_CAP, WARMUP_START, WARMUP_DAYS, MIN_GAP_MS, MAX_GAP_MS,
-  COOLDOWN_DAYS, LOCKOUT_MS, HOUR_START, HOUR_END,
-  GROUP_GLOBAL_GAP_MS, MEMBERSHIP_MIN_DAYS,
-  localHour, dailyCap, canPost, nextGapMs, recordPost, lock,
+  GROUP_COOLDOWN_MS, LOCKOUT_MS, HOUR_START, HOUR_END,
+  GROUP_GAP_MIN_MS, GROUP_GAP_MAX_MS, BUSY_GROUP_MEMBERS,
+  localHour, dailyCap, groupGapMs, canPost, nextGapMs, recordPost, lock,
 };

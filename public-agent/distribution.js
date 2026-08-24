@@ -257,9 +257,10 @@
       renderCatalog(); renderStepper();
     };
     const span = document.createElement("span");
-    span.textContent = g.name +
+    span.textContent = (g.joined ? "✓ " : "") + g.name +
       (showCity && g.city ? ` · ${g.city}` : "") +
       (g.members ? ` · ~${Math.round(g.members / 1000)}K חברים` : "");
+    if (g.joined) span.title = "אתם חברים בקבוצה הזו";
     label.append(cb, span);
     return label;
   }
@@ -289,17 +290,26 @@
       box.appendChild(sectionHead(`✓ הקבוצות שנבחרו (${chosen.length})`, "#157A3F"));
       for (const g of chosen) box.appendChild(catalogRow(g, true));
     }
+    // Groups the agent already belongs to come first: those are the ones
+    // they can actually post to today.
+    const myGroups = [];
     const byCity = new Map();
     const mismatched = [];
     for (const g of catalog) {
       if (selected.has(g.url)) continue;
       if (q && !(g.name + " " + (g.city || "")).toLowerCase().includes(q)) continue;
+      if (g.joined) { myGroups.push(g); continue; }
       // Groups that don't take this listing type are shown LAST, never hidden
       // — the agent decides, but a sale shouldn't lead with rental groups.
       if (g.match === false) { mismatched.push(g); continue; }
       const c = g.city || "ארצי";
       if (!byCity.has(c)) byCity.set(c, []);
       byCity.get(c).push(g);
+    }
+    if (myGroups.length) {
+      box.appendChild(sectionHead(`הקבוצות שאתם חברים בהן (${myGroups.length})`, "#157A3F"));
+      myGroups.sort(bySize);
+      for (const g of myGroups) box.appendChild(catalogRow(g, true));
     }
     for (const [city, groups] of byCity) {
       box.appendChild(sectionHead(city, "var(--gold)"));

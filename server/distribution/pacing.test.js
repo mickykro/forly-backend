@@ -66,12 +66,12 @@ assert.ok(P.dailyCap(ago(7 * DAY), NOON) < P.DAILY_CAP);
 // ── per-group cooldown, even for a different property ──
 {
   const state = { first_post_at: ago(30 * DAY),
-    posts: [{ at: ago(2 * DAY), group_url: G.groupUrl, page_id: "other" }] };
+    posts: [{ at: ago(6 * 60 * 60 * 1000), group_url: G.groupUrl, page_id: "other" }] };
   const r = P.canPost(state, G, { now: NOON });
   assert.equal(r.reason, "group_cooldown");
-  // ...and it clears once the cooldown has elapsed
+  // ...and it clears after two days, so several listings a week are fine
   const old = { first_post_at: ago(30 * DAY),
-    posts: [{ at: ago((P.COOLDOWN_DAYS + 1) * DAY), group_url: G.groupUrl, page_id: "other" }] };
+    posts: [{ at: ago(P.GROUP_COOLDOWN_MS + 60000), group_url: G.groupUrl, page_id: "other" }] };
   assert.equal(P.canPost(old, G, { now: NOON }).ok, true);
 }
 
@@ -84,23 +84,28 @@ assert.ok(P.dailyCap(ago(7 * DAY), NOON) < P.DAILY_CAP);
     "unfreezes after the lockout");
 }
 
-// ── cross-agent: one group receives one Forly post every few hours, total ──
+// ── cross-agent gap: short, and shorter still for a busy group ──
 {
   const clean = { first_post_at: ago(30 * DAY), posts: [] };
-  const busy = P.canPost(clean, { ...G, groupLastPostAt: ago(30 * 60 * 1000) }, { now: NOON });
-  assert.equal(busy.reason, "group_busy", "another agent just posted there");
-  assert.ok(new Date(busy.retry_at).getTime() > NOON);
+  assert.equal(P.groupGapMs(250000), P.GROUP_GAP_MIN_MS, "big groups absorb more");
+  assert.equal(P.groupGapMs(9000), P.GROUP_GAP_MAX_MS, "small groups get more room");
+  const busy = P.canPost(clean,
+    { ...G, groupLastPostAt: ago(2 * 60 * 1000), groupMembers: 250000 }, { now: NOON });
+  assert.equal(busy.reason, "group_busy", "another agent posted there moments ago");
   const settled = P.canPost(clean,
-    { ...G, groupLastPostAt: ago(P.GROUP_GLOBAL_GAP_MS + 60000) }, { now: NOON });
-  assert.equal(settled.ok, true, "clears once the global gap has passed");
+    { ...G, groupLastPostAt: ago(12 * 60 * 1000), groupMembers: 250000 }, { now: NOON });
+  assert.equal(settled.ok, true, "a big group clears in ~10 minutes");
+  const small = P.canPost(clean,
+    { ...G, groupLastPostAt: ago(12 * 60 * 1000), groupMembers: 9000 }, { now: NOON });
+  assert.equal(small.reason, "group_busy", "a small group still waits");
 }
 
-// ── a group the agent only just added is off-limits for a week ──
+// ── verified membership: a group the agent never joined is never scheduled ──
 {
   const clean = { first_post_at: ago(30 * DAY), posts: [] };
-  assert.equal(P.canPost(clean, { ...G, groupAddedAt: ago(2 * DAY) }, { now: NOON }).reason,
-    "too_new_in_group");
-  assert.equal(P.canPost(clean, { ...G, groupAddedAt: ago(10 * DAY) }, { now: NOON }).ok, true);
+  assert.equal(P.canPost(clean, { ...G, joined: false }, { now: NOON }).reason, "not_a_member");
+  assert.equal(P.canPost(clean, { ...G, joined: true }, { now: NOON }).ok, true);
+  assert.equal(P.canPost(clean, G, { now: NOON }).ok, true, "not synced yet ⇒ still allowed");
 }
 
 // ── the gap is randomized, never a constant cadence ──
