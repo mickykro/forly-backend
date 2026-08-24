@@ -41,19 +41,28 @@ function groupGapMs(members) {
   return n >= BUSY_GROUP_MEMBERS ? GROUP_GAP_MIN_MS : GROUP_GAP_MAX_MS;
 }
 
-const DAILY_CAP = 8;                 // steady-state ceiling per agent
+/*
+ * Steady-state ceiling for a fully warmed-up agent. Twelve posts spread over
+ * a twelve-hour window is roughly one an hour — busy, but squarely inside
+ * what an active professional does by hand. Lower it for a cautious pilot
+ * with DISTRIBUTION_DAILY_CAP; a new agent never starts here anyway, the
+ * warm-up ramp below takes two weeks to reach it.
+ */
+const DAILY_CAP = Math.max(1, Math.min(20,
+  Number(process.env.DISTRIBUTION_DAILY_CAP) || 12));
 const WARMUP_START = 2;              // day-1 ceiling for a new agent
 const WARMUP_DAYS = 14;              // days to ramp from START to CAP
 const MIN_GAP_MS = 4 * 60 * 1000;    // never two posts inside 4 minutes
 const MAX_GAP_MS = 20 * 60 * 1000;   // upper end of the randomized gap
 /*
- * Rest between DIFFERENT properties in the same group. A week was far too
- * strict — an agent with five listings in one city would need five weeks to
- * distribute them, which is not a product. Two days is ~3 posts/week into a
- * group, comfortably inside what these listing groups exist for, while the
- * "same property twice" rule below stays absolute.
+ * Rest between DIFFERENT properties in the same group. One post per group per
+ * day is what these listing groups' own rules typically permit, so this is
+ * the group's rule rather than a limit invented on top of it. It is also the
+ * single biggest lever on how long a backlog takes to clear: at 48h an agent
+ * with 40 listings needed a month, at 24h it halves. The "same property never
+ * twice in the same group" rule below stays absolute either way.
  */
-const GROUP_COOLDOWN_MS = 48 * 60 * 60 * 1000;
+const GROUP_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const LOCKOUT_MS = 24 * 60 * 60 * 1000;
 const HOUR_START = 9;                // Israel local
 const HOUR_END = 21;

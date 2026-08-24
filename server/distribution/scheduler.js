@@ -138,6 +138,15 @@ function forecast({ propertyCount, groupCount, dailyCap, groupCooldownMs,
     days: Math.ceil(totalPosts / perDay),
     limited_by: groupSlotsPerDay < dailyCap ? "groups" : "daily_cap",
     per_property_groups: perProperty,
+    /*
+     * The number an agent actually cares about. Because fairness comes first,
+     * every listing reaches its first group before any reaches its second —
+     * so the whole portfolio is *visible* in a fraction of the time it takes
+     * to finish every placement. "Everything live somewhere in 4 days" is the
+     * honest headline; "40 days to finish" is the footnote.
+     */
+    days_to_first_exposure: Math.ceil(propertyCount / perDay),
+    days_top10: Math.ceil(Math.min(propertyCount, 10) * perProperty / perDay),
   };
 }
 

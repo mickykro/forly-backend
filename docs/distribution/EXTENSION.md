@@ -66,6 +66,39 @@ so tightening the rules takes effect everywhere without shipping a new build.
 For a wider rollout the extension should be published to the Chrome Web Store
 (unlisted is fine) so agents get updates without re-loading a folder.
 
+## How long a backlog takes (and why that number is misleading)
+
+The scarce resource is group slots, not properties: each group accepts one
+post per day (its own rule), so 12 joined groups yield 12 slots/day, and the
+agent's own ceiling is `DAILY_CAP`.
+
+For an agent onboarding with **40 existing listings** and 10–15 joined groups,
+at 4 groups per property:
+
+| | 10 groups | 12–15 groups |
+|---|---|---|
+| Every listing live *somewhere* | **4 days** | **4 days** |
+| Top 10 listings fully distributed | **4 days** | **4 days** |
+| All 160 placements finished | 16 days | 14 days |
+
+The headline is the first row, not the last. Fairness-first rotation means
+every property reaches its first group before any property reaches its
+second, so the whole portfolio is visible within days; "14 days" is only when
+the last of 160 placements lands.
+
+And this is a **one-time onboarding backlog**. In steady state an agent adding
+~3 listings a week needs ~12 posts a week — under 2 a day, far below any
+limit here.
+
+Levers, in order of how much they help and how defensible they are:
+
+1. **Join more groups.** The only lever with no downside at all.
+2. **Fewer groups per property** (4 → 3) — 25% faster, and the fourth-best
+   group is usually a poor fit anyway.
+3. **`DISTRIBUTION_DAILY_CAP`** — 12 by default, reachable only after the
+   two-week warm-up. Run the pilot at 8 and raise it after a clean fortnight.
+   Do not exceed 12 without a very good reason.
+
 ## Operating rules for the pilot
 
 - Start with **one** agent, assist mode, and watch `group_posting/{phone}` for

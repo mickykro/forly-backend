@@ -106,6 +106,10 @@ assert.equal(S.planNext({ properties: [prop("A", 1)], groups: [], ...base }).rea
   assert.equal(f.total_posts, 200);
   assert.equal(f.limited_by, "groups", "10 groups × 1 per 48h = 5/day < 8/day");
   assert.equal(f.days, 40);
+  // fairness first ⇒ the whole portfolio is visible long before it's finished
+  assert.equal(f.days_to_first_exposure, 10);
+  assert.ok(f.days_to_first_exposure < f.days / 3);
+  assert.equal(f.days_top10, 8, "the ten best listings are fully out in ~a week");
   // with more groups the agent's own daily cap becomes the limit
   const g = S.forecast({ propertyCount: 50, groupCount: 40, dailyCap: 8,
     groupCooldownMs: COOLDOWN });
