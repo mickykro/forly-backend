@@ -447,6 +447,18 @@ module.exports = function createDistributionRouter(ctx) {
     return { catalog, suggestion };
   }
 
+  // The selected queue is server-authoritative. It lets the paired extension
+  // discover the current property even when the share page is hosted on a
+  // temporary origin that Chrome is not allowed to message from directly.
+  async function selectShareSession(phone, sessionId) {
+    const prev = (await db.getGroupPosting(phone)) || {};
+    await db.saveGroupPosting(phone, {
+      ...prev,
+      selected_session_id: sessionId || null,
+      selected_session_at: sessionId ? new Date() : null,
+    });
+  }
+
   // Create (or reopen) a queue for one property — the dashboard button.
   router.post("/share-session", requireAuth(authSecret), async (req, res) => {
     const pageId = String((req.body && req.body.page_id) || "");
@@ -465,6 +477,7 @@ module.exports = function createDistributionRouter(ctx) {
       existing.groups.every((g) => currentGroups.includes(g.url));
     const session = sameGroups ? existing
       : await jobs.createShareSession(deps, { page, business: biz });
+    await selectShareSession(req.user.userId, session.id);
     const extra = (session.groups || []).length ? {} : await pickerFor(session);
     res.json(publicSession(session, extra));
   });
@@ -500,6 +513,7 @@ module.exports = function createDistributionRouter(ctx) {
       marked_posted_at: null, skipped_at: null, skip_reason: null,
     });
     await db.updateShareSession(session.id, { groups: next, updated_at: new Date() });
+    await selectShareSession(session.business_phone, session.id);
     const fresh = { ...session, groups: next };
     const extra = next.length ? {} : await pickerFor(fresh);
     res.json(publicSession(fresh, extra));
@@ -630,6 +644,7 @@ module.exports = function createDistributionRouter(ctx) {
         active_count: active.length,
         synced_at: auth.state.joined_synced_at || null,
       },
+      selected_session_id: auth.state.selected_session_id || null,
       mode: auth.state.mode || "assist",
     });
   });
@@ -708,7 +723,8 @@ module.exports = function createDistributionRouter(ctx) {
   router.get("/extension/session", async (req, res) => {
     const auth = await extAuth(req);
     if (!auth) return res.status(401).json({ error: "unpaired" });
-    const sessionId = String(req.query.s || "");
+    const requestedSessionId = String(req.query.s || "");
+    const sessionId = requestedSessionId || String(auth.state.selected_session_id || "");
     const session = sessionId ? await db.getShareSession(sessionId) : null;
     if (!session || session.business_phone !== auth.phone) {
       return res.status(404).json({ error: "no_session" });
@@ -737,6 +753,13 @@ module.exports = function createDistributionRouter(ctx) {
       progress,
       groups,
     });
+  });
+
+  router.post("/extension/session/clear", async (req, res) => {
+    const auth = await extAuth(req);
+    if (!auth) return res.status(401).json({ error: "unpaired" });
+    await selectShareSession(auth.phone, null);
+    res.json({ ok: true });
   });
 
   // The extension reports what actually happened. "posted" is the agent's
