@@ -672,6 +672,43 @@ module.exports = function createDistributionRouter(ctx) {
     res.json({ done: true, skipped_all: true });
   });
 
+  // The persistent extension panel shows only the active agent's selected
+  // property and its chosen queue. This makes progress visible without
+  // exposing a pairing token, property copy, or any other agent's data.
+  router.get("/extension/session", async (req, res) => {
+    const auth = await extAuth(req);
+    if (!auth) return res.status(401).json({ error: "unpaired" });
+    const sessionId = String(req.query.s || "");
+    const session = sessionId ? await db.getShareSession(sessionId) : null;
+    if (!session || session.business_phone !== auth.phone) {
+      return res.status(404).json({ error: "no_session" });
+    }
+    const groups = (session.groups || []).map((g) => ({
+      key: g.key,
+      name: catalogNames.get(g.url) || null,
+      url: g.url,
+      state: g.state || "ready",
+    }));
+    const progress = groups.reduce((acc, group) => {
+      acc.total += 1;
+      if (group.state === "posted") acc.posted += 1;
+      else if (group.state === "skipped") acc.skipped += 1;
+      else acc.pending += 1;
+      return acc;
+    }, { total: 0, posted: 0, skipped: 0, pending: 0 });
+    return res.json({
+      session_id: session.id,
+      property: {
+        title: session.snapshot.title || "נכס נבחר",
+        city: session.snapshot.city || null,
+        listing_type: session.snapshot.listing_type || "sale",
+        page_url: session.snapshot.page_url || null,
+      },
+      progress,
+      groups,
+    });
+  });
+
   // The extension reports what actually happened. "posted" is the agent's
   // own confirmation (assist mode) or a verified submit (auto mode); any
   // block/checkpoint freezes this agent for 24h.
