@@ -408,6 +408,9 @@ module.exports = function createDistributionRouter(ctx) {
     listing_type: s.snapshot.listing_type || "sale",
     quick_share: shareKit.sharerLink(s.snapshot.page_url,
       { quote: s.snapshot.copy, appId: process.env.META_APP_ID || null }),
+    // Non-secret target for a user-triggered external start message. The
+    // extension keeps its pairing token in local Chrome storage.
+    extension_id: process.env.EXTENSION_ID || null,
     groups: (s.groups || []).map((g) => ({
       key: g.key, url: g.url, state: g.state,
       name: (catalogNames.get(g.url) || null),
