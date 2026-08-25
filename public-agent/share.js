@@ -217,6 +217,7 @@
       });
       toast(`${session.groups.length} קבוצות שויכו לנכס ✓`);
       render();
+      previewInExtension();
     } catch { toast("השמירה נכשלה — נסו שוב"); }
   }
 
@@ -231,6 +232,15 @@
     button.disabled = false;
     button.textContent = "התחלה בתוסף";
     text.textContent = "התוסף יעבור על הקבוצות שנבחרו לפי המצב שבחרתם. אפשר להמשיך להשתמש בקישורים הידניים אם התוסף אינו מותקן בדפדפן הזה.";
+  }
+
+  function previewInExtension() {
+    if (!session.extension_id || !(session.groups || []).length) return;
+    if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    chrome.runtime.sendMessage(session.extension_id, { forly: "preview-session", session: session.id }, (reply) => {
+      if (chrome.runtime.lastError || !reply || !reply.ok) return;
+      $("extensionStartText").textContent = "הנכס והקבוצות שנבחרו מוצגים כעת בחלון התוסף. לחצו «התחלה בתוסף» כדי להתחיל את התור.";
+    });
   }
 
   function startInExtension() {
@@ -314,5 +324,6 @@
     $("savePick").onclick = () => savePicked();
     $("startExtension").onclick = startInExtension;
     render();
+    previewInExtension();
   })();
 })();
