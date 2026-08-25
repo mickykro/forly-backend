@@ -215,6 +215,8 @@
       "<td>" + readinessPills(a.readiness) + "</td>" +
       '<td><label class="switch"><input type="checkbox" data-chatbot="' + esc(a.phone) + '"' +
         (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
+      '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
+        (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
       "</tr>";
   }
 
@@ -232,6 +234,30 @@
   }
 
   function bindAgentActions() {
+    // Distribution entitlement: arms the page-ready hook (WhatsApp one-tap
+    // publish offer) for every FUTURE page this agent creates.
+    document.querySelectorAll("[data-distribution]").forEach(function (input) {
+      input.addEventListener("change", function () {
+        var phone = input.dataset.distribution;
+        var want = input.checked;
+        input.disabled = true;
+        FLY.req("/api/admin/business/features", {
+          method: "POST",
+          body: { phone: phone, feature: "distribution", enabled: want },
+          noRedirect: true,
+        }).then(function () {
+          var a = agents.filter(function (x) { return x.phone === phone; })[0];
+          if (a) a.distribution_enabled = want;
+          input.disabled = false;
+          FLY.toast(want ? "✅ הפצה הופעלה — נכסים חדשים יקבלו הצעת פרסום בוואטסאפ"
+            : "הפצה כובתה לסוכן");
+        }).catch(function (e) {
+          input.checked = !want;   // the server refused — don't lie about the state
+          input.disabled = false;
+          FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
+        });
+      });
+    });
     document.querySelectorAll("[data-chatbot]").forEach(function (input) {
       input.addEventListener("change", function () {
         var phone = input.dataset.chatbot;

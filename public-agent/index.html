@@ -70,7 +70,10 @@
       <h1>הנכסים שלי</h1>
       <p id="countLine"></p>
     </div>
-    <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-ghost" href="/distribution.html">הפצה</a>
+      <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
+    </div>
   </div>
   <div class="prop-grid" id="propGrid"></div>
   <div class="card center hidden" id="emptyState" style="padding:56px 24px">
@@ -209,6 +212,11 @@
     if (p.page_url && (p.page_status === "active" || p.page_status === "expiring")) {
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" href="' + p.page_url + '">צפייה</a>');
       actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + p.page_id + '">עריכה</a>');
+      // Distribution slot: starts as a link to the הפצה page; once the
+      // status call resolves (entitled agents) it upgrades to a live control
+      // — one-tap publish / in-progress / link to the post.
+      actions.push('<span class="dist-slot" data-dist="' + p.page_id + '">' +
+        '<a class="btn btn-ghost btn-sm" href="/distribution.html?page=' + p.page_id + '">הפצה</a></span>');
     }
     if (p.page_id && p.page_status !== "building") {
       actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + p.page_id + '">הארכה +30</button>');
@@ -240,9 +248,90 @@
       $("#propGrid").innerHTML = items.map(cardHtml).join("");
       $("#emptyState").classList.toggle("hidden", items.length > 0);
       bindActions();
+      loadDistribution();
     }).finally(function () {
       FLY.loaderHide(function () { $("#viewList").classList.remove("hidden"); });
     });
+  }
+
+  // ── distribution controls on the property cards ──
+  // Entitled agents get a live control instead of the plain הפצה link:
+  // one-tap publish, an in-progress state that polls itself, and a link to
+  // the live post once it's up. Not entitled / status error ⇒ the link stays.
+  var distState = null;
+  function loadDistribution() {
+    FLY.req("/api/distribution/status?full=1", { noRedirect: true }).then(function (d) {
+      if (!d.entitled) return;
+      distState = d;
+      renderDistSlots();
+    }).catch(function () { /* plain links remain */ });
+  }
+
+  function renderDistSlots() {
+    document.querySelectorAll("[data-dist]").forEach(function (slot) {
+      var pid = slot.dataset.dist;
+      var L = (distState.listings || {})[pid] || {};
+      var html;
+      if (L.in_flight) {
+        html = '<button class="btn btn-ghost btn-sm" disabled>⏳ בתהליך…</button>';
+      } else if (L.posted) {
+        html = (L.post_url ? '<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="' +
+            esc(L.post_url) + '">לפוסט ✓</a>' : "") +
+          '<a class="btn btn-ghost btn-sm" href="/distribution.html?page=' + esc(pid) + '">הפצה</a>';
+      } else if (!distState.connection.connected || distState.connection.needs_reconnect) {
+        // Not connected yet — the הפצה page walks them through step 1.
+        html = '<a class="btn btn-gold btn-sm" href="/distribution.html?page=' + esc(pid) + '">🚀 הפצה</a>';
+      } else {
+        html = '<button class="btn btn-gold btn-sm" data-publish="' + esc(pid) + '">🚀 פרסום</button>';
+      }
+      slot.innerHTML = html;
+    });
+    bindPublish();
+  }
+
+  function bindPublish() {
+    document.querySelectorAll("[data-publish]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var pid = b.dataset.publish;
+        b.disabled = true; b.textContent = "⏳ בתהליך…";
+        publishReq(pid, false);
+      });
+    });
+  }
+
+  function publishReq(pid, force) {
+    FLY.req("/api/distribution/publish", {
+      method: "POST", body: { page_id: pid, force: force }, noRedirect: true,
+    }).then(function () {
+      FLY.toast("🚀 הפרסום בדרך — עדכון יגיע בוואטסאפ");
+      pollDist(pid, 0);
+    }).catch(function (e) {
+      if (e.code === "already_published" && !force) {
+        if (confirm("הנכס כבר פורסם בעבר בדף הפייסבוק. לפרסם שוב?")) publishReq(pid, true);
+        else renderDistSlots();
+      } else if (e.code === "already_in_flight") {
+        FLY.toast("הפרסום כבר בתהליך");
+        pollDist(pid, 0);
+      } else {
+        FLY.toast("שגיאה בפרסום — נסו שוב בעוד רגע");
+        renderDistSlots();
+      }
+    });
+  }
+
+  function pollDist(pid, n) {
+    if (n > 30 || !distState) return;   // ~5 minutes, then give up quietly
+    setTimeout(function () {
+      FLY.req("/api/distribution/status?page_id=" + encodeURIComponent(pid), { noRedirect: true })
+        .then(function (d) {
+          distState.listings = distState.listings || {};
+          distState.listings[pid] = d.listing || {};
+          if (d.listing && d.listing.in_flight) { pollDist(pid, n + 1); return; }
+          renderDistSlots();
+          if (d.listing && d.listing.posted) FLY.toast("✅ הנכס פורסם בדף הפייסבוק!");
+        })
+        .catch(function () { /* next poll or give up */ });
+    }, 10000);
   }
 
   function bindActions() {

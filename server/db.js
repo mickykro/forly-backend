@@ -4,10 +4,11 @@
  */
 
 const { asMillis } = require("./utils");
+const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [] };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), groupPosting: new Map(), groupThrottle: new Map() };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -213,6 +214,233 @@ async function listAllBusinesses(limit = 1000) {
   return snap.docs.map((d) => d.data());
 }
 
+// ── distribution: agent Meta connection ──
+// businesses/{phone}/connections/facebook — per-agent tokens are DATA (spec
+// §5): they live here, never in env or Secret Manager.
+function deepMerge(target, patch) {
+  for (const [k, v] of Object.entries(patch)) {
+    if (v && typeof v === "object" && !Array.isArray(v) &&
+        target[k] && typeof target[k] === "object" && !Array.isArray(target[k])) {
+      deepMerge(target[k], v);
+    } else {
+      target[k] = v;
+    }
+  }
+  return target;
+}
+
+async function getConnection(phone) {
+  const key = tokenVault.keyFrom(process.env);
+  if (db) {
+    const d = await db.collection("businesses").doc(phone)
+      .collection("connections").doc("facebook").get();
+    return d.exists ? tokenVault.openConnection(d.data(), key) : null;
+  }
+  const c = mem.connections.get(phone);
+  return c ? tokenVault.openConnection(c, key) : null;
+}
+
+// merge:true in Firestore deep-merges maps; the mem fallback must match or
+// tests would pass against behavior prod doesn't have (spec §4 "deep-merge
+// parity").
+// Tokens are sealed (AES-GCM, META_TOKEN_KEY) before they touch storage —
+// see distribution/token-vault.js. Without a key this is a passthrough.
+async function setConnection(phone, patch) {
+  const sealed = tokenVault.sealConnection(patch, tokenVault.keyFrom(process.env));
+  if (db) {
+    await db.collection("businesses").doc(phone)
+      .collection("connections").doc("facebook").set(sealed, { merge: true });
+    return;
+  }
+  mem.connections.set(phone, deepMerge(mem.connections.get(phone) || {}, sealed));
+}
+
+// ── distribution: publish jobs ──
+async function saveDistribution(d) {
+  if (db) await db.collection("distributions").doc(d.id).set(d);
+  else mem.distributions.set(d.id, JSON.parse(JSON.stringify(d)));
+}
+
+async function getDistribution(id) {
+  if (db) { const d = await db.collection("distributions").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.distributions.get(id) || null;
+}
+
+// Dot-path patch, same semantics as updatePage — a full set() would clobber
+// fields a concurrent sweep just wrote.
+async function updateDistribution(id, patch) {
+  if (db) { await db.collection("distributions").doc(id).update(patch); return; }
+  const d = mem.distributions.get(id);
+  if (!d) return;
+  for (const [key, val] of Object.entries(patch)) {
+    const parts = key.split(".");
+    let o = d;
+    while (parts.length > 1) { const k = parts.shift(); o[k] = o[k] || {}; o = o[k]; }
+    o[parts[0]] = val;
+  }
+}
+
+// Single-field where, filtered/sorted in memory — no composite index needed.
+async function listDistributionsByPage(pageId, limit = 50) {
+  if (db) {
+    const snap = await db.collection("distributions")
+      .where("page_id", "==", pageId).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.distributions.values()].filter((d) => d.page_id === pageId).slice(0, limit);
+}
+
+async function listQueuedDistributions(limit = 10) {
+  if (db) {
+    const snap = await db.collection("distributions")
+      .where("status", "==", "queued").limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.distributions.values()].filter((d) => d.status === "queued").slice(0, limit);
+}
+
+// ── distribution: curated group catalog ──
+// Operator-maintained list of recommended Facebook groups shown in the
+// dashboard. Agent suggestions land here with active:false until curated.
+async function listGroupCatalog(limit = 200) {
+  if (db) {
+    const snap = await db.collection("group_catalog").limit(limit).get();
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  }
+  return mem.groupCatalog.slice(0, limit);
+}
+
+async function addGroupCatalogEntry(doc) {
+  const rec = { created_at: new Date(), ...doc };
+  if (db) { const ref = await db.collection("group_catalog").add(rec); return ref.id; }
+  mem.groupCatalog.push(rec);
+  return String(mem.groupCatalog.length);
+}
+
+// ── distribution: cross-agent group throttle ──
+// One doc per group URL, shared by EVERY agent: per-account limits can't see
+// that five different agents just posted the same domain into one group.
+async function getGroupThrottle(key) {
+  if (db) {
+    const d = await db.collection("group_throttle").doc(key).get();
+    return d.exists ? d.data() : null;
+  }
+  return mem.groupThrottle.get(key) || null;
+}
+
+async function touchGroupThrottle(key, groupUrl) {
+  const rec = { group_url: groupUrl, last_post_at: new Date() };
+  if (db) await db.collection("group_throttle").doc(key).set(rec, { merge: true });
+  else mem.groupThrottle.set(key, rec);
+  return rec;
+}
+
+// ── distribution: assisted group-posting state (pacing + lockouts) ──
+// Its own doc per agent: it must exist and be writable even for an agent who
+// never connected a Facebook Page, and it is written on every assisted post.
+async function getGroupPosting(phone) {
+  if (db) {
+    const d = await db.collection("group_posting").doc(phone).get();
+    return d.exists ? d.data() : null;
+  }
+  return mem.groupPosting.get(phone) || null;
+}
+
+async function saveGroupPosting(phone, state) {
+  const rec = { ...state, business_phone: phone, updated_at: new Date() };
+  if (db) await db.collection("group_posting").doc(phone).set(rec);
+  else mem.groupPosting.set(phone, rec);
+  return rec;
+}
+
+// ── distribution: per-property group selections ──
+// Deliberately its own collection, NOT a field on property_pages: savePage()
+// overwrites the whole page doc every time n8n rebuilds a page, which would
+// silently wipe the agent's group choices. `city` is stored so a later
+// property in the same city can offer to reuse the same groups.
+async function getPropertyGroups(pageId) {
+  if (db) {
+    const d = await db.collection("property_groups").doc(pageId).get();
+    return d.exists ? d.data() : null;
+  }
+  return mem.propertyGroups.get(pageId) || null;
+}
+
+async function savePropertyGroups(doc) {
+  const rec = { ...doc, updated_at: new Date() };
+  if (db) await db.collection("property_groups").doc(doc.page_id).set(rec, { merge: true });
+  else mem.propertyGroups.set(doc.page_id, { ...(mem.propertyGroups.get(doc.page_id) || {}), ...rec });
+  return rec;
+}
+
+async function listPropertyGroupsByPhone(phone, limit = 100) {
+  if (db) {
+    const snap = await db.collection("property_groups")
+      .where("business_phone", "==", phone).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.propertyGroups.values()].filter((d) => d.business_phone === phone);
+}
+
+// ── distribution: group share sessions (the in-app sharing queue) ──
+// One doc per (property × sharing run) holding the frozen copy and the
+// per-group progress the agent confirms by hand. Forly never claims a group
+// post it didn't see — every state here is agent-confirmed or a skip.
+async function saveShareSession(s) {
+  if (db) await db.collection("share_sessions").doc(s.id).set(s);
+  else mem.shareSessions.set(s.id, JSON.parse(JSON.stringify(s)));
+}
+
+// Sessions written by the old `groups.<idx>.state` patch have groups as a
+// map {"0": …} instead of an array — heal them on read so existing queues
+// keep working instead of throwing on .map().
+function healGroups(s) {
+  if (!s || !s.groups || Array.isArray(s.groups)) return s;
+  const groups = Object.keys(s.groups)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((k) => s.groups[k]);
+  return { ...s, groups };
+}
+
+async function getShareSession(id) {
+  if (db) {
+    const d = await db.collection("share_sessions").doc(id).get();
+    return d.exists ? healGroups(d.data()) : null;
+  }
+  return healGroups(mem.shareSessions.get(id)) || null;
+}
+
+async function updateShareSession(id, patch) {
+  if (db) { await db.collection("share_sessions").doc(id).update(patch); return; }
+  const s = mem.shareSessions.get(id);
+  if (!s) return;
+  for (const [key, val] of Object.entries(patch)) {
+    const parts = key.split(".");
+    let o = s;
+    while (parts.length > 1) { const k = parts.shift(); o[k] = o[k] || {}; o = o[k]; }
+    o[parts[0]] = val;
+  }
+}
+
+async function findOpenShareSession(pageId) {
+  if (db) {
+    const snap = await db.collection("share_sessions")
+      .where("page_id", "==", pageId).limit(20).get();
+    const docs = snap.docs.map((d) => d.data());
+    return healGroups(docs.sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at))[0]) || null;
+  }
+  return [...mem.shareSessions.values()]
+    .filter((s) => s.page_id === pageId)
+    .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at))[0] || null;
+}
+
+// ── distribution: append-only audit (spec §5 post_actions) ──
+async function addPostAction(doc) {
+  const rec = { at: new Date(), ...doc };
+  if (db) await db.collection("post_actions").add(rec);
+  else mem.postActions.push(rec);
+}
+
 // ── leads ──
 async function getLead(phone) {
   if (db) { const d = await db.collection("leads").doc(phone).get(); return d.exists ? d.data() : null; }
@@ -239,4 +467,11 @@ module.exports = {
   savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
+  getConnection, setConnection,
+  saveDistribution, getDistribution, updateDistribution,
+  listDistributionsByPage, listQueuedDistributions, addPostAction,
+  listGroupCatalog, addGroupCatalogEntry,
+  saveShareSession, getShareSession, updateShareSession, findOpenShareSession, healGroups,
+  getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
+  getGroupPosting, saveGroupPosting, getGroupThrottle, touchGroupThrottle,
 };

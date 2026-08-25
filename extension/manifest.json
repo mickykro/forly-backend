@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Forly — פרסום לקבוצות",
+  "version": "0.1.0",
+  "description": "ממלא את הפוסט בקבוצות הפייסבוק שלכם. אתם מאשרים ומפרסמים.",
+  "default_locale": "he",
+  "permissions": ["storage", "tabs", "alarms"],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://web.facebook.com/*"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://forly.srv1173890.hstgr.cloud/*",
+      "https://agent.call4li.com/*",
+      "http://127.0.0.1/*",
+      "http://localhost/*"
+    ]
+  },
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Forly" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.facebook.com/groups/*", "https://web.facebook.com/groups/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.facebook.com/groups/joins*", "https://web.facebook.com/groups/joins*"],
+      "js": ["groups.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
