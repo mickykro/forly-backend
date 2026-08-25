@@ -139,6 +139,28 @@
     <p class="muted" id="extPlan" style="margin-top:10px"></p>
   </div>
 
+  <div class="card dist-card" id="myGroupsCard" hidden>
+    <h2>הקבוצות שלי</h2>
+    <p class="muted" id="myGroupsSummary"></p>
+    <p class="muted" id="myGroupsSync"></p>
+    <div class="inline-row">
+      <input id="myGroupsSearch" placeholder="חיפוש בשם קבוצה…">
+      <select id="myGroupsFilter" aria-label="סינון קבוצות">
+        <option value="all">כל הקבוצות</option>
+        <option value="relevant">רלוונטיות</option>
+        <option value="review">לבדיקה</option>
+        <option value="irrelevant">לא רלוונטיות</option>
+        <option value="enabled">פעילות בלבד</option>
+      </select>
+    </div>
+    <div class="inline-row">
+      <button class="btn btn-ghost btn-sm" id="refreshMyGroups">רענון רשימה</button>
+      <button class="btn btn-gold btn-sm" id="applyMyGroups">שימוש בקבוצות הפעילות כברירת מחדל</button>
+    </div>
+    <p class="muted" style="font-size:.82rem">הסינון הוא המלצה לפי שם הקבוצה בלבד. בדקו את חוקי הקבוצה לפני פרסום. סנכרון מחדש נעשה מתוך התוסף.</p>
+    <div id="myGroupsList"></div>
+  </div>
+
   <div class="card dist-card" id="publishCard" hidden>
     <h2>פרסום</h2>
     <p class="muted" id="publishSummary"></p>

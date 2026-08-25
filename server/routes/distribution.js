@@ -20,6 +20,7 @@ const shareKit = require("../distribution/share-kit");
 const config = require("../distribution/config");
 const pacing = require("../distribution/pacing");
 const scheduler = require("../distribution/scheduler");
+const { decorateJoinedGroup } = require("../distribution/group-relevance");
 const businessCache = require("../business-cache");
 
 const esc = (s) => String(s == null ? "" : s)
@@ -274,18 +275,34 @@ module.exports = function createDistributionRouter(ctx) {
     const s = (await db.getGroupPosting(req.user.userId)) || {};
     const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
     const known = new Set(catalog.map((g) => g.url));
-    const joinedSet = new Set(joined.map((g) => g.url));
-    for (const g of catalog) g.joined = joinedSet.size ? joinedSet.has(g.url) : null;
+    const joinedByUrl = new Map(joined.map((g) => [g.url, g]));
+    for (const g of catalog) {
+      const own = joinedByUrl.get(g.url);
+      g.joined = joined.length ? !!own : null;
+      if (own) Object.assign(g, {
+        enabled: !!own.enabled,
+        relevance: own.relevance || "review",
+        relevance_score: Number(own.relevance_score) || 0,
+        relevance_signals: Array.isArray(own.relevance_signals) ? own.relevance_signals : [],
+        relevance_source: own.relevance_source || "legacy",
+      });
+    }
     for (const g of joined) {
       if (known.has(g.url)) continue;
       catalog.push({ name: g.name, url: g.url, city: null, members: null,
         listing_types: [], languages: [], agent_policy: "unknown",
-        match: true, joined: true, own: true });
+        match: true, joined: true, own: true,
+        enabled: !!g.enabled, relevance: g.relevance || "review",
+        relevance_score: Number(g.relevance_score) || 0,
+        relevance_signals: Array.isArray(g.relevance_signals) ? g.relevance_signals : [],
+        relevance_source: g.relevance_source || "legacy" });
     }
     res.json({
       groups: catalog, listing_type: want || null,
       joined_synced_at: s.joined_synced_at || null,
       joined_count: joined.length,
+      enabled_count: joined.filter((g) => g.enabled).length,
+      relevant_count: joined.filter((g) => g.relevance === "relevant").length,
     });
   });
 
@@ -704,32 +721,112 @@ module.exports = function createDistributionRouter(ctx) {
 
   // The groups this agent is actually a member of, synced from their own
   // Facebook account by the extension. This is what makes "post only where
-  // you're a member" a fact rather than a guess.
+  // you're a member" a fact rather than a guess. We retain explicit agent
+  // choices across re-syncs and classify only the Group NAME, never posts or
+  // members. The practical cap protects Firestore documents and the browser.
   router.post("/extension/groups", async (req, res) => {
     const auth = await extAuth(req);
     if (!auth) return res.status(401).json({ error: "unpaired" });
     const raw = Array.isArray(req.body && req.body.groups) ? req.body.groups : [];
     const seen = new Map();
-    for (const g of raw.slice(0, 400)) {
+    for (const g of raw.slice(0, 1000)) {
       const url = shareKit.sanitizeGroups([(g && g.url) || ""])[0];
       if (url && !seen.has(url)) {
-        seen.set(url, String((g && g.name) || "").slice(0, 90) || url);
+        seen.set(url, String((g && g.name) || "").slice(0, 140) || url);
       }
     }
-    const joined = [...seen.entries()].map(([url, name]) => ({ url, name }));
+    const catalogByUrl = new Map((await mergedCatalog()).map((g) => [g.url, g]));
+    const previousByUrl = new Map(
+      (Array.isArray(auth.state.joined_groups) ? auth.state.joined_groups : [])
+        .map((g) => [g.url, g]),
+    );
+    const joined = [...seen.entries()].map(([url, name]) => decorateJoinedGroup({
+      url, name, previous: previousByUrl.get(url) || null,
+      catalogEntry: catalogByUrl.get(url) || null,
+    }));
+    const sync = req.body && req.body.sync && typeof req.body.sync === "object" ? req.body.sync : {};
     await db.saveGroupPosting(auth.phone, {
-      ...auth.state, joined_groups: joined, joined_synced_at: new Date(),
+      ...auth.state,
+      joined_groups: joined,
+      joined_synced_at: new Date(),
+      joined_sync: {
+        received: raw.length, accepted: joined.length,
+        complete: sync.complete === true,
+        capped: sync.capped === true,
+        scrolls: Number(sync.scrolls) || null,
+        scanned_at: new Date(),
+      },
     });
-    res.json({ ok: true, count: joined.length });
+    res.json({
+      ok: true, count: joined.length,
+      relevant_count: joined.filter((g) => g.relevance === "relevant").length,
+      enabled_count: joined.filter((g) => g.enabled).length,
+      capped: raw.length > 1000 || sync.capped === true,
+    });
   });
 
-  // The dashboard reads the synced list to build its picker.
+  // Full synced Group list for the My Groups settings UI. Search and visual
+  // filtering happen in the client so a user can change filters instantly.
   router.get("/joined-groups", requireAuth(authSecret), async (req, res) => {
     const s = (await db.getGroupPosting(req.user.userId)) || {};
+    const groups = Array.isArray(s.joined_groups) ? s.joined_groups : [];
     res.json({
-      groups: s.joined_groups || [],
+      groups,
       synced_at: s.joined_synced_at || null,
+      sync: s.joined_sync || null,
+      summary: {
+        total: groups.length,
+        relevant: groups.filter((g) => g.relevance === "relevant").length,
+        review: groups.filter((g) => g.relevance === "review").length,
+        irrelevant: groups.filter((g) => g.relevance === "irrelevant").length,
+        enabled: groups.filter((g) => g.enabled).length,
+      },
     });
+  });
+
+  // One Group at a time: the agent may enable/disable it and override the
+  // recommendation. `relevance: auto` clears an earlier override.
+  router.post("/joined-groups/preference", requireAuth(authSecret), async (req, res) => {
+    const url = shareKit.sanitizeGroups([(req.body && req.body.url) || ""])[0];
+    if (!url) return res.status(400).json({ error: "invalid_group_url" });
+    const s = (await db.getGroupPosting(req.user.userId)) || {};
+    const groups = Array.isArray(s.joined_groups) ? s.joined_groups : [];
+    const index = groups.findIndex((g) => g.url === url);
+    if (index < 0) return res.status(404).json({ error: "group_not_synced" });
+    const current = groups[index];
+    if (typeof req.body.enabled === "boolean") current.enabled = req.body.enabled;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "relevance")) {
+      const choice = String(req.body.relevance || "auto");
+      if (!["auto", "relevant", "review", "irrelevant"].includes(choice)) {
+        return res.status(400).json({ error: "invalid_relevance" });
+      }
+      current.relevance_override = choice === "auto" ? null : choice;
+      current.relevance = current.relevance_override || current.automatic_relevance || "review";
+      current.relevance_source = current.relevance_override ? "agent" : "heuristic";
+      if (current.relevance === "irrelevant" && typeof req.body.enabled !== "boolean") {
+        current.enabled = false;
+      }
+    }
+    groups[index] = current;
+    await db.saveGroupPosting(req.user.userId, { ...s, joined_groups: groups });
+    res.json({ ok: true, group: current });
+  });
+
+  // Copies the agent-approved subset into the default distribution setting.
+  // This is deliberate: a re-sync never silently starts posting to new Groups.
+  router.post("/joined-groups/apply", requireAuth(authSecret), async (req, res) => {
+    const s = (await db.getGroupPosting(req.user.userId)) || {};
+    const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
+    const groups = joined
+      .filter((g) => g.enabled && g.relevance !== "irrelevant")
+      .map((g) => g.url);
+    const business = await db.getBusiness(req.user.userId);
+    await db.setBusiness(req.user.userId, {
+      distribution: { ...((business && business.distribution) || {}), groups },
+      updated_at: new Date(),
+    });
+    businessCache.invalidate(req.user.userId);
+    res.json({ ok: true, groups, count: groups.length });
   });
 
   // Agent-facing switch + live safety state for the dashboard.
@@ -746,15 +843,16 @@ module.exports = function createDistributionRouter(ctx) {
     const posts = Array.isArray(s.posts) ? s.posts : [];
     const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
     const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
+    const activeJoined = joined.filter((g) => g.enabled && g.relevance !== "irrelevant");
     const dailyCap = pacing.dailyCap(s.first_post_at, Date.now());
 
     // An honest ETA beats a promise: with this many listings and this many
     // joined groups, a full distribution takes this long.
     const listings = (await db.listListingsByPhone(phone).catch(() => []))
       .filter((l) => l.page_id && l.status !== "archived");
-    const plan = joined.length && listings.length
+    const plan = activeJoined.length && listings.length
       ? scheduler.forecast({
-          propertyCount: listings.length, groupCount: joined.length,
+          propertyCount: listings.length, groupCount: activeJoined.length,
           dailyCap, groupCooldownMs: pacing.GROUP_COOLDOWN_MS })
       : null;
 
@@ -766,7 +864,10 @@ module.exports = function createDistributionRouter(ctx) {
       posted_today: posts.filter((p) => new Date(p.at).getTime() > dayAgo).length,
       daily_cap: dailyCap,
       joined_count: joined.length,
+      joined_relevant_count: joined.filter((g) => g.relevance === "relevant").length,
+      joined_active_count: activeJoined.length,
       joined_synced_at: s.joined_synced_at || null,
+      joined_sync: s.joined_sync || null,
       plan,
     });
   });
