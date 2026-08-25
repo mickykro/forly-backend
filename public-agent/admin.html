@@ -61,9 +61,9 @@
     border:1px solid rgba(23,20,15,.16);border-radius:100px;padding:1px 7px;margin-inline-start:6px}
 </style>
 </head>
-<body>
+<body class="agent-page admin-page">
 
-<header class="topbar">
+<header class="topbar agent-topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Admin Console</span></a>
   <span style="display:flex;align-items:center;gap:14px">
     <span class="who" id="who"></span>
@@ -72,7 +72,7 @@
 </header>
 
 <!-- ── ACCESS DENIED ── -->
-<div class="container hidden" id="viewDenied">
+<div class="container agent-shell hidden" id="viewDenied">
   <div class="card denied">
     <div style="font-size:2.4rem;margin-bottom:8px">🔒</div>
     <h1 style="font-family:var(--serif);font-size:1.3rem;margin-bottom:6px">אין הרשאת ניהול</h1>
@@ -84,12 +84,14 @@
 </div>
 
 <!-- ── ADMIN DASHBOARD ── -->
-<div class="container hidden" id="viewAdmin">
-  <div class="page-head">
+<div class="container agent-shell hidden" id="viewAdmin">
+  <div class="agent-hero page-head">
     <div>
+      <span class="agent-kicker">Operations / 01</span>
       <h1>ניהול נכסים<span class="admin-badge">Admin</span></h1>
       <p>כל הנכסים של כל הסוכנים במערכת</p>
     </div>
+    <div class="agent-aside"><small>SYSTEM VIEW</small><b>שליטה שקטה על כל הנכסים.</b><span>תמונת מצב, פעולות מערכת, וסוכנים בממשק אחד.</span></div>
     <button class="btn btn-ghost btn-sm" id="refreshBtn">↻ רענון</button>
   </div>
 
@@ -177,5 +179,6 @@
 
 <script src="/api.js"></script>
 <script src="/admin.js"></script>
+<footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

@@ -70,13 +70,13 @@
   }
   var rgbStr = function (c) { return "rgb(" + c.r + "," + c.g + "," + c.b + ")"; };
 
-  var TEMPLATES = { original: 1, nocturne: 1, galerie: 1, reel: 1 };
+  var TEMPLATES = { original: 1, nocturne: 1, reel: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1 };
 
   function applyTheme(theme) {
     if (!theme) return;
     var root = document.documentElement.style;
 
-    // Layout template — original renders here; nocturne/galerie/reel are served
+    // Layout template — original renders here; nocturne/reel are served
     // as their own pages by the server (see /previews and template rendering).
     document.documentElement.setAttribute("data-template",
       TEMPLATES[theme.template] ? theme.template : "original");
@@ -147,8 +147,8 @@
     // topbar brand
     var brand = $(".brand");
     if (a.logo_url) {
-      brand.innerHTML = '<img src="' + a.logo_url + '" alt="' + a.brand_name +
-        '" style="height:40px;max-width:150px;object-fit:contain">';
+      brand.innerHTML = '<img src="' + escapeAttr(a.logo_url) + '" alt="' + escapeAttr(a.brand_name) +
+        '" style="height:40px;max-width:150px;object-fit:contain;display:block">';
     } else {
       brand.querySelector("b").textContent = a.brand_name || a.name;
       brand.querySelector("span").textContent = a.tagline || "";
@@ -248,7 +248,30 @@
     var initials = (a.name || "").split(" ").map(function (w) { return w[0] || ""; }).join("״").slice(0, 3);
     var avatar = $(".agent-strip .avatar");
     if (a.logo_url) {
-      avatar.innerHTML = '<img src="' + a.logo_url + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">';
+      // Same rule runtime.js applies to [data-avatar]: keep the slot's height,
+      // give it a definite width matching the logo's proportions, drop the fill
+      // and the gold ring, and contain rather than cover so a wide mark keeps
+      // both ends. offsetHeight rather than the client rect, and a definite
+      // width rather than shrink-to-fit — see the note in runtime.js for why
+      // either shortcut lets the picture spill out of the slot.
+      var avH = avatar.offsetHeight;
+      if (avH > 0) avatar.style.height = avH + "px";
+      avatar.style.aspectRatio = "auto";
+      avatar.style.background = "none";
+      avatar.style.border = "0";
+      avatar.style.borderRadius = "0";
+      avatar.style.overflow = "hidden";
+      avatar.classList.add("has-logo");
+      var avImg = document.createElement("img");
+      avImg.alt = "";
+      avImg.style.cssText = "width:100%;height:100%;object-fit:contain;display:block";
+      avImg.addEventListener("load", function () {
+        if (!avH || !avImg.naturalWidth || !avImg.naturalHeight) return;
+        avatar.style.width = Math.min(200, Math.round((avH * avImg.naturalWidth) / avImg.naturalHeight)) + "px";
+      });
+      avImg.src = a.logo_url;
+      avatar.textContent = "";
+      avatar.appendChild(avImg);
     } else {
       avatar.textContent = initials;
     }

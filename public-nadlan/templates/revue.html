@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly Nadlan</title>
+<meta name="description" content="">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Assistant:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cream:#EEE7DC;--cream-2:#E3DACB;--ink:#12110F;--ink-soft:#5A554C;--dark:#181714;
+    --red:var(--accent,#B52A22);--pink:var(--accent-lite,#D8A2A0);--acid:var(--accent2,#D8E34F);
+    --rule:rgba(18,17,15,.22);--rule-light:rgba(255,255,255,.22);
+    --serif:'Frank Ruhl Libre','David Libre',serif;
+    --disp:'Frank Ruhl Libre','David Libre',serif;
+    --sans:'Assistant',-apple-system,'Segoe UI',sans-serif;
+    --pad:clamp(20px,4.5vw,64px);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{font-family:var(--sans);background:var(--cream);color:var(--ink);line-height:1.7;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  img,video{display:block}
+  ::selection{background:var(--red);color:#fff}
+  :focus-visible{outline:2px solid var(--red);outline-offset:3px}
+  .num{font-variant-numeric:tabular-nums}
+  .wrap{max-width:1320px;margin:0 auto;padding-inline:var(--pad)}
+
+  /* Outlined display type. Where -webkit-text-stroke is unavailable the fill is
+     restored, so an outlined word never renders as a blank gap. */
+  .outline{-webkit-text-stroke:1px currentColor;color:transparent}
+  @supports not (-webkit-text-stroke:1px currentColor){.outline{color:inherit}}
+
+  .kicker{display:inline-flex;gap:12px;align-items:center;font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--red)}
+  .kicker::before{content:"";width:44px;height:2px;background:currentColor;flex:none}
+  h2{font-family:var(--disp);font-weight:400;letter-spacing:-.035em;line-height:.94;text-wrap:balance;margin:0}
+
+  /* ── topbar ── over the dark cover it is white; past the cover it flips to a
+     solid cream bar. No blend modes, so the label is legible on every section. */
+  .topbar{position:fixed;z-index:60;inset:0 0 auto 0;height:70px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;padding:0 var(--pad);color:#fff;border-bottom:1px solid var(--rule-light);transition:.35s}
+  .topbar.solid{background:var(--cream);color:var(--ink);border-bottom-color:var(--rule)}
+  .brand{font-size:1.15rem;font-weight:700;letter-spacing:.24em;justify-self:start;line-height:1.2}
+  .brand small{display:block;font-size:.55rem;font-weight:400;letter-spacing:.24em;opacity:.75;margin-top:2px}
+  .issue{font-size:.68rem;letter-spacing:.16em;text-align:center;opacity:.85}
+  .menu{justify-self:end;display:flex;gap:22px;font-size:.84rem;align-items:center}
+  .menu .cta{border:1px solid currentColor;border-radius:100px;padding:7px 16px;white-space:nowrap}
+  @media(max-width:820px){.topbar{height:60px;grid-template-columns:1fr auto}.issue{display:none}.menu a:not(.cta){display:none}}
+
+  /* ── cover ── */
+  .cover{position:relative;min-height:100svh;overflow:hidden;background:#141310;color:#fff;display:flex;align-items:flex-end;padding:clamp(120px,20vh,200px) 0 clamp(52px,8vh,84px)}
+  .cover-media{position:absolute;inset:0}
+  .cover-media video{width:100%;height:100%;object-fit:cover;filter:saturate(.82);transform:scale(1.08);animation:coverIn 2.2s cubic-bezier(.16,1,.3,1) forwards}
+  @keyframes coverIn{to{transform:scale(1)}}
+  /* no tour video on the listing → let the section backdrop show through */
+  video[data-video]:not([src]){display:none}
+  .cover-media::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,rgba(20,19,16,.95) 4%,rgba(20,19,16,.34) 52%,rgba(20,19,16,.55)),linear-gradient(to left,rgba(20,19,16,.85),transparent 62%)}
+  .cover-in{position:relative;z-index:3;width:100%;max-width:1320px;margin:0 auto;padding-inline:var(--pad)}
+  .cover .kicker{color:var(--acid)}
+  .cover h1{font-family:var(--disp);font-weight:400;font-size:clamp(2.6rem,8.6vw,7.4rem);line-height:.88;letter-spacing:-.045em;margin:16px 0 26px;max-width:14ch;text-wrap:balance}
+  .cover-foot{display:grid;grid-template-columns:1fr auto;gap:clamp(24px,4vw,4vw);align-items:end;max-width:900px}
+  .cover-foot p{font-size:clamp(1rem,1.5vw,1.14rem);line-height:1.6;color:#DDD9D2;margin:0;max-width:46ch}
+  .cover-cta{display:inline-flex;justify-content:space-between;align-items:center;gap:20px;border-bottom:2px solid var(--acid);padding:10px 0;font-weight:600;white-space:nowrap}
+  .cover-cta span{font-size:1.5rem;transition:.3s}
+  .cover-cta:hover span{transform:translateX(-10px)}
+  .scribble{position:absolute;z-index:4;inset-inline-end:var(--pad);top:22%;width:180px;height:96px;border:2px solid var(--pink);border-radius:50%;transform:rotate(-12deg);display:grid;place-items:center;color:var(--pink);font-size:.72rem;letter-spacing:.2em;text-align:center;padding:8px}
+  .scribble span{transform:rotate(12deg)}
+  @media(max-width:1100px){.scribble{display:none}}
+  @media(max-width:700px){.cover-foot{grid-template-columns:1fr;align-items:start}}
+
+  /* ── ticker ── ink bar so its contrast never depends on a themed colour.
+     The tilt is scaled up so its corners still cover the full width; the
+     wrapper clips the extra so the page never gains a horizontal scrollbar. */
+  .ticker-clip{overflow:hidden;position:relative;z-index:5}
+  .ticker{background:var(--ink);color:var(--cream);overflow:hidden;padding:12px 0;transform:rotate(-1deg) scale(1.03);margin-block:-8px 8px}
+  .ticker-track{display:flex;width:max-content;animation:marquee 28s linear infinite;font-weight:500;letter-spacing:.06em}
+  .ticker-track span{white-space:nowrap}
+  .ticker-track b{padding:0 20px;color:var(--acid);font-weight:400}
+  @keyframes marquee{to{transform:translateX(50%)}}
+
+  /* ── manifesto ── */
+  .manifesto{padding:clamp(80px,11vw,140px) 0 clamp(60px,8vw,110px);position:relative}
+  .manifesto-in{display:grid;grid-template-columns:.4fr 1.6fr;gap:clamp(28px,5vw,6vw)}
+  .page-mark{font-family:var(--disp);font-size:clamp(3.4rem,8vw,7rem);line-height:1;opacity:.5}
+  .manifesto h2{font-size:clamp(2rem,5.6vw,4.6rem)}
+  .manifesto h2 i{color:var(--red);font-style:normal}
+  .manifesto-bottom{display:grid;grid-template-columns:1fr 1fr;gap:clamp(24px,4vw,5vw);margin-top:38px;border-top:1px solid var(--rule);padding-top:22px}
+  .manifesto-bottom p{font-size:clamp(1rem,1.6vw,1.2rem);line-height:1.65;margin:0}
+  .manifesto-bottom .small{font-size:.9rem;line-height:1.75;color:var(--ink-soft)}
+  .sticker{position:absolute;z-index:2;inset-inline-end:6vw;bottom:8%;width:118px;height:118px;border-radius:50%;background:var(--red);color:#fff;display:grid;place-items:center;text-align:center;font-size:.7rem;letter-spacing:.12em;line-height:1.6;transform:rotate(-11deg);animation:sticker 11s ease-in-out infinite;padding:10px}
+  @keyframes sticker{50%{transform:rotate(9deg) translateY(-10px)}}
+  @media(max-width:900px){.manifesto-in{grid-template-columns:1fr;gap:14px}.manifesto-bottom{grid-template-columns:1fr}.sticker{display:none}}
+
+  /* ── scroll spread ── */
+  .spread{position:relative;height:270vh;background:var(--dark);color:#fff}
+  .spread-sticky{position:sticky;top:0;height:100svh;overflow:hidden}
+  .spread-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:60% center;filter:saturate(.7) brightness(.72);clip-path:inset(var(--clip,15%) round var(--round,140px));transform:scale(var(--scale,1.1))}
+  .spread-title{position:absolute;z-index:5;top:14%;inset-inline-start:var(--pad);font-size:clamp(2.2rem,7vw,6.5rem);line-height:.86;max-width:min(560px,76vw)}
+  .spread-title span{color:var(--pink);font-style:italic}
+  .floating-word{position:absolute;z-index:4;inset-inline-end:-4vw;top:46%;font-size:clamp(5rem,16vw,15rem);font-weight:600;line-height:.8;letter-spacing:-.07em;white-space:nowrap;-webkit-text-stroke:1px rgba(255,255,255,.6);color:transparent;transform:translateX(var(--word,0))}
+  @supports not (-webkit-text-stroke:1px rgba(255,255,255,.6)){.floating-word{color:rgba(255,255,255,.12)}}
+  .spread-cap{position:absolute;z-index:5;bottom:6%;inset-inline-end:var(--pad);inset-inline-start:var(--pad);display:flex;gap:22px;align-items:center;justify-content:flex-start}
+  .spread-cap b{font-family:var(--disp);font-weight:400;font-size:clamp(2.2rem,5vw,3.6rem);color:var(--acid);line-height:1;flex:none}
+  .spread-cap p{max-width:38ch;font-size:.95rem;margin:0}
+  @media(max-width:820px){.spread{height:220vh}}
+
+  /* ── facts ── */
+  .facts{display:grid;grid-template-columns:repeat(4,1fr);border-block:1px solid var(--rule)}
+  .fact{min-height:250px;padding:32px clamp(18px,2.6vw,34px);border-inline-start:1px solid var(--rule);display:flex;flex-direction:column;justify-content:space-between;gap:12px;position:relative;overflow:hidden}
+  .fact:first-child{border-inline-start:none}
+  .fact::before{content:"";position:absolute;width:150px;height:150px;border-radius:50%;background:var(--pink);inset-inline-start:-80px;bottom:-96px;transition:.55s;opacity:.85}
+  .fact:hover::before{transform:scale(2.4)}
+  .fact>*{position:relative;z-index:2}
+  .fact small{font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;opacity:.7}
+  .fact strong{font-family:var(--disp);font-weight:400;font-size:clamp(2.6rem,5.4vw,5rem);line-height:1}
+  .fact .cap{font-size:.9rem}
+  .fact.red{background:var(--red);color:#fff}
+  .fact.dark{background:#21201D;color:#fff}
+  .fact.acid{background:var(--acid);color:var(--ink)}
+  .fact.red::before,.fact.dark::before{background:rgba(255,255,255,.16)}
+  .fact.acid::before{background:rgba(18,17,15,.14)}
+  @media(max-width:860px){.facts{grid-template-columns:1fr 1fr}.fact{min-height:190px}.fact:nth-child(odd){border-inline-start:none}.fact:nth-child(n+3){border-top:1px solid var(--rule)}}
+  .chips{padding:26px 0}
+
+  /* ── editorial gallery ── */
+  .editorial{padding:clamp(80px,10vw,130px) 0}
+  .editorial-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;border-bottom:2px solid var(--ink);padding-bottom:20px}
+  .editorial-head h2{font-size:clamp(2.2rem,6.6vw,5.6rem)}
+  .editorial-head h2 i{color:var(--red);font-style:normal}
+  .editorial-head p{max-width:34ch;font-size:.9rem;color:var(--ink-soft);margin:0}
+  .gal-hint-narrow{display:none}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));grid-auto-rows:clamp(230px,24vw,330px);gap:16px;margin-top:26px}
+  /* dark placeholder: the white tile number has to stay readable on a listing
+     whose photos have not been attached yet */
+  .tile{position:relative;overflow:hidden;background:#2A2724;border:none;padding:0;cursor:pointer;text-align:start;color:inherit;font-family:inherit}
+  .tile:first-child:nth-last-child(n+4){grid-column:span 2;grid-row:span 2}
+  .tile img,.tile canvas{width:100%;height:100%;object-fit:cover;filter:saturate(.78);transition:1s cubic-bezier(.16,1,.3,1)}
+  .tile:hover img,.tile:hover canvas{transform:scale(1.07);filter:saturate(1)}
+  .tile .g-no{position:absolute;z-index:2;top:12px;inset-inline-start:14px;color:#fff;font-family:var(--disp);font-size:1.9rem;line-height:1;text-shadow:0 2px 12px rgba(0,0,0,.6)}
+  .tile .g-cap{position:absolute;z-index:2;bottom:0;inset-inline-start:0;background:var(--cream);color:var(--ink);padding:11px 16px;font-family:var(--disp);font-size:1.15rem;line-height:1.3;max-width:82%}
+  @media(max-width:800px){
+    /* the grid turns into a swipeable strip, so the hint has to say so */
+    .gal-hint-wide{display:none}.gal-hint-narrow{display:block}
+    .grid{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:14px;padding-bottom:10px;-webkit-overflow-scrolling:touch}
+    /* width must be explicit: flex:none resolves an auto width from the photo's
+       intrinsic size, which made wide images blow the tile past the screen */
+    .tile,.tile:first-child:nth-last-child(n+4){flex:none;width:80vw;min-width:80vw;max-width:80vw;height:min(60vh,440px);grid-column:auto;grid-row:auto;scroll-snap-align:center}
+  }
+
+  /* ── quote ── */
+  .quote{background:var(--pink);padding:clamp(70px,9vw,120px) 0}
+  .quote-in{display:grid;grid-template-columns:.7fr 1.3fr;gap:clamp(30px,5vw,6vw);align-items:center}
+  .quote-photo{aspect-ratio:3/4;transform:rotate(-3deg);background:var(--cream-2);overflow:hidden}
+  .quote-photo img{width:100%;height:100%;object-fit:cover;filter:grayscale(1)}
+  blockquote{font-family:var(--disp);font-weight:400;font-size:clamp(1.7rem,4.6vw,3.6rem);line-height:1.02;margin:0;color:var(--ink)}
+  blockquote i{color:var(--red);font-style:normal}
+  cite{display:block;margin-top:26px;font-style:normal;border-top:1px solid rgba(18,17,15,.35);padding-top:12px;font-size:.92rem;color:var(--ink)}
+  @media(max-width:860px){.quote-in{grid-template-columns:1fr}.quote-photo{width:74%;aspect-ratio:4/3}}
+
+  /* ── location ── */
+  .location{position:relative;min-height:74svh;background:#171614;color:#fff;overflow:hidden;display:flex;align-items:center;padding-block:clamp(70px,10vw,120px)}
+  .location>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.5;filter:grayscale(.5)}
+  .location::after{content:"";position:absolute;inset:0;background:linear-gradient(to left,#171614,rgba(23,22,20,.35) 70%,transparent)}
+  .location-in{position:relative;z-index:3;width:100%;max-width:1320px;margin:0 auto;padding-inline:var(--pad)}
+  .location .kicker{color:var(--acid)}
+  .location h2{font-size:clamp(2.2rem,7vw,5.4rem);margin:14px 0 22px}
+  .location h2 em{color:var(--acid);font-style:normal}
+  .location p{font-size:clamp(1rem,1.5vw,1.16rem);max-width:46ch}
+  .stops{list-style:none;margin-top:26px;max-width:520px}
+  .stops li{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--rule-light);font-size:.95rem}
+  .stops li span{opacity:.72;font-size:.86rem}
+  .pin{position:absolute;z-index:4;inset-inline-end:14%;top:26%;width:104px;height:104px;border-radius:50% 50% 50% 0;background:var(--red);color:#fff;transform:rotate(-45deg);display:grid;place-items:center;animation:pin 3s ease-in-out infinite;box-shadow:0 18px 40px rgba(0,0,0,.4)}
+  .pin span{transform:rotate(45deg);font-size:.72rem;text-align:center;line-height:1.4;padding:6px}
+  @keyframes pin{50%{transform:rotate(-45deg) translate(7px,-7px)}}
+  @media(max-width:1100px){.pin{display:none}}
+
+  /* ── contact ── */
+  .contact{position:relative;overflow:hidden;background:var(--red);color:#fff;padding:clamp(80px,11vw,130px) 0 clamp(50px,7vw,90px)}
+  .ring{position:absolute;z-index:0;width:min(110vw,460px);aspect-ratio:1;border-radius:50%;border:1px solid rgba(255,255,255,.35);inset-inline-end:-120px;top:6%;animation:ring 22s linear infinite}
+  .ring::before{content:"";position:absolute;inset:30px;border:1px dashed rgba(255,255,255,.6);border-radius:50%}
+  @keyframes ring{to{transform:rotate(360deg)}}
+  .contact-in{position:relative;z-index:2}
+  .contact small.eyebrow{font-size:.7rem;letter-spacing:.2em;text-transform:uppercase;opacity:.85}
+  .contact h2{font-size:clamp(2.6rem,9vw,7rem);margin:20px 0 32px;letter-spacing:-.05em}
+  .contact h2 i{color:var(--pink);font-style:normal}
+  .contact-row{display:grid;grid-template-columns:1fr 1fr;gap:clamp(30px,5vw,6vw);align-items:start}
+  .contact-row>p{font-size:clamp(1rem,1.6vw,1.2rem);margin:0}
+  .agent-card{display:flex;align-items:center;gap:14px;margin-top:26px;padding-top:20px;border-top:1px solid var(--rule-light)}
+  .agent-card .av{flex:none;width:52px;height:52px;border-radius:50%;background:#fff;color:var(--red);display:grid;place-items:center;font-family:var(--disp);font-size:1.2rem;overflow:hidden}
+  .agent-card b{display:block;font-weight:600}
+  .agent-card span{font-size:.8rem;opacity:.8}
+  form .field{margin-bottom:14px}
+  form label{display:block;font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;opacity:.85;margin-bottom:6px}
+  form input,form textarea{width:100%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.45);border-radius:8px;color:#fff;font-family:var(--sans);font-size:1rem;padding:13px 15px}
+  form input::placeholder,form textarea::placeholder{color:rgba(255,255,255,.65)}
+  form input:focus,form textarea:focus{outline:none;border-color:var(--acid);background:rgba(255,255,255,.16)}
+  .contact-btn{width:100%;margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:66px;border:2px solid #fff;border-radius:60px;padding:0 28px;font-size:1.05rem;font-weight:600;font-family:inherit;background:transparent;color:#fff;cursor:pointer;transition:.35s}
+  .contact-btn span{font-size:1.6rem}
+  .contact-btn:hover{background:var(--acid);color:var(--ink);border-color:var(--acid)}
+  .privacy-note{margin-top:12px;font-size:.76rem;opacity:.85;text-align:center}
+  .sent{display:none;margin-top:12px;text-align:center;font-size:.92rem;font-weight:600}
+  @media(max-width:820px){.contact-row{grid-template-columns:1fr}}
+
+  footer{background:var(--ink);color:#fff;padding:22px 0;font-size:.78rem}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+  footer b{letter-spacing:.2em}
+  footer a{text-decoration:underline;opacity:.85}
+
+  .reveal{opacity:0;transform:translateY(38px);transition:opacity 1s cubic-bezier(.16,1,.3,1),transform 1s cubic-bezier(.16,1,.3,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  @media(prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    *{animation:none!important;transition:none!important}
+    .reveal{opacity:1!important;transform:none!important}
+    .spread-photo{clip-path:none;transform:none!important}
+    .floating-word{transform:none!important}
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar" id="topbar">
+  <a class="brand" href="#" data-logo><span data-bind="agent.brand_name">FORLY</span><small data-bind="agent.tagline" data-show="agent.tagline"></small></a>
+  <span class="issue"><span data-deal>למכירה</span> · <span data-bind="property.city">תל אביב</span></span>
+  <nav class="menu">
+    <a href="#story" data-i18n="the_property">הנכס</a>
+    <a href="#gallery" data-i18n="gallery">גלריה</a>
+    <a class="cta" href="#contact" data-i18n="leave_details">השאירו פרטים</a>
+  </nav>
+</header>
+
+<main>
+
+<section class="cover">
+  <div class="cover-media"><video data-video autoplay muted loop playsinline></video></div>
+  <div class="scribble" aria-hidden="true"><span data-i18n="the_property">הנכס</span></div>
+  <div class="cover-in">
+    <span class="kicker"><span data-bind="property.neighborhood||property.city">בבלי</span> · <span data-bind="property.city">תל אביב</span></span>
+    <h1 data-bind="property.title">בית עם אופי. באמת.</h1>
+    <div class="cover-foot">
+      <p data-bind="hero.phrase">180 מ״ר של אדריכלות, אור וחומר. דירה שלא מנסה להרשים — היא פשוט עושה את זה.</p>
+      <a class="cover-cta" href="#story" data-i18n="view_gallery">צפו בגלריה <span>←</span></a>
+    </div>
+  </div>
+</section>
+
+<div class="ticker-clip" aria-hidden="true"><div class="ticker">
+  <div class="ticker-track">
+    <span>
+      <span data-bind="property.rooms">4</span> <span data-i18n="rooms">חדרים</span> <b>✦</b>
+      <span data-bind="property.size_sqm">140</span> <span data-i18n="sqm">מ״ר</span> <b>✦</b>
+      <span data-bind="property.neighborhood">הצפון הישן</span> <b>✦</b>
+      <span data-bind="property.city">תל אביב</span> <b>✦</b>
+      <span data-bind="property.rooms">4</span> <span data-i18n="rooms">חדרים</span> <b>✦</b>
+      <span data-bind="property.size_sqm">140</span> <span data-i18n="sqm">מ״ר</span> <b>✦</b>
+      <span data-bind="property.neighborhood">הצפון הישן</span> <b>✦</b>
+      <span data-bind="property.city">תל אביב</span> <b>✦</b>
+    </span>
+    <span>
+      <span data-bind="property.rooms">4</span> <span data-i18n="rooms">חדרים</span> <b>✦</b>
+      <span data-bind="property.size_sqm">140</span> <span data-i18n="sqm">מ״ר</span> <b>✦</b>
+      <span data-bind="property.neighborhood">הצפון הישן</span> <b>✦</b>
+      <span data-bind="property.city">תל אביב</span> <b>✦</b>
+      <span data-bind="property.rooms">4</span> <span data-i18n="rooms">חדרים</span> <b>✦</b>
+      <span data-bind="property.size_sqm">140</span> <span data-i18n="sqm">מ״ר</span> <b>✦</b>
+      <span data-bind="property.neighborhood">הצפון הישן</span> <b>✦</b>
+      <span data-bind="property.city">תל אביב</span> <b>✦</b>
+    </span>
+  </div>
+</div></div>
+
+<section class="manifesto" id="story">
+  <div class="wrap manifesto-in">
+    <div class="page-mark outline" aria-hidden="true">01</div>
+    <div>
+      <h2 class="reveal" data-bind="texts.why_sub||hero.phrase">לא עוד רשימת פרטים. זה <i>סיפור</i> על דרך חיים.</h2>
+      <div class="manifesto-bottom reveal">
+        <p data-bind="area.blurb">בתוך השקט של השכונה מסתתרת דירה עם נוכחות נדירה. לא ראוותנית. לא צפויה. מדויקת.</p>
+        <p class="small" data-bind="cta.sub">החללים תוכננו כדי לנוע ביניהם באופן טבעי. האור משתנה לאורך היום, החומרים מתיישנים יפה, וכל פינה מרגישה כאילו תמיד הייתה שם.</p>
+      </div>
+    </div>
+  </div>
+  <div class="sticker" aria-hidden="true"><span data-bind="agent.brand_name">FORLY</span></div>
+</section>
+
+<section class="spread" aria-label="סיור בנכס">
+  <div class="spread-sticky">
+    <img class="spread-photo" data-photo="0" alt="">
+    <h2 class="spread-title"><span data-i18n="peek_inside">הצצה פנימה</span></h2>
+    <span class="floating-word" aria-hidden="true">SPACE TO LIVE</span>
+    <div class="spread-cap">
+      <b>02</b>
+      <p data-i18n="moments_from_tour" data-bind="texts.gallery_sub">רגעים מתוך הסיור</p>
+    </div>
+  </div>
+</section>
+
+<section id="details">
+  <div class="facts">
+    <article class="fact" data-count-item>
+      <small data-i18n="built_area">שטח בנוי</small>
+      <strong class="num" data-count-bind="property.size_sqm">140</strong>
+      <span class="cap" data-i18n="sqm">מ״ר</span>
+    </article>
+    <article class="fact red" data-count-item>
+      <small data-i18n="rooms">חדרים</small>
+      <strong class="num" data-count-bind="property.rooms">4</strong>
+      <span class="cap" data-i18n="rooms">חדרים</span>
+    </article>
+    <article class="fact dark">
+      <small data-price-label>מחיר מבוקש</small>
+      <strong class="num" data-bind="property.price" data-fmt="price" style="font-size:clamp(1.8rem,3.6vw,3rem)">₪8.4M</strong>
+      <span class="cap num" data-ppm></span>
+    </article>
+    <article class="fact acid" data-count-item>
+      <small data-i18n="floor">קומה</small>
+      <strong class="num" data-count-bind="property.floor">7</strong>
+      <span class="cap" data-i18n="floor">קומה</span>
+    </article>
+  </div>
+  <div class="wrap"><div class="chips" data-amenities></div></div>
+</section>
+
+<section class="editorial" id="gallery">
+  <div class="wrap">
+    <div class="editorial-head">
+      <h2 class="reveal" data-i18n="moments_from_tour" data-bind="texts.gallery_title">רגעים מתוך הסיור</h2>
+      <p class="gal-hint-wide" data-i18n="gallery_hint_click">לחצו על תמונה להגדלה</p>
+      <p class="gal-hint-narrow" data-i18n="gallery_hint_drag">↔ גררו לצדדים · לחצו להגדלה</p>
+    </div>
+    <div class="grid" data-gallery data-gallery-class="tile" data-gallery-count="6" data-gallery-captions></div>
+  </div>
+</section>
+
+<section class="quote">
+  <div class="wrap quote-in">
+    <div class="quote-photo reveal"><img data-photo="1" alt=""></div>
+    <div class="reveal">
+      <blockquote>„<span data-bind="hero.phrase">הנכסים הטובים באמת לא מחכים</span>”</blockquote>
+      <cite><span data-bind="agent.name">שלום רוזנברג</span> · <span data-bind="agent.brand_name">רוזנברג נכסים</span></cite>
+    </div>
+  </div>
+</section>
+
+<section class="location">
+  <img data-photo="2" alt="">
+  <div class="location-in">
+    <div class="reveal">
+      <span class="kicker" data-i18n="the_area">השכונה</span>
+      <h2><span data-bind="property.neighborhood">בבלי</span>.<br><em data-bind="property.city">תל אביב</em></h2>
+      <p data-bind="texts.area_sub||area.blurb">קהילה שקטה בלב העיר. דקות מהפארק, מהים וממרכז העיר — אבל מספיק רחוק כדי לשמוע את השקט.</p>
+      <ul class="stops" data-list="area.stops">
+        <template><li><b data-field="label"></b><span data-field="minutes"></span></li></template>
+      </ul>
+    </div>
+  </div>
+  <div class="pin" aria-hidden="true"><span data-bind="property.address">הרב ניסים 9</span></div>
+</section>
+
+<section class="contact" id="contact">
+  <span class="ring" aria-hidden="true"></span>
+  <div class="wrap contact-in">
+    <small class="eyebrow" data-i18n="book_visit_private">תיאום ביקור פרטי</small>
+    <h2 class="reveal" data-bind="cta.headline">רוצים לראות <i>איך זה מרגיש?</i></h2>
+    <div class="contact-row">
+      <div>
+        <p data-bind="cta.sub">תיאום סיור פרטי בדירה, בלי רעש ובלי לחץ. אתם, הבית, והאפשרות שזה בדיוק מה שחיפשתם.</p>
+        <div class="agent-card">
+          <div class="av" data-avatar>ש</div>
+          <div>
+            <b><span data-bind="agent.name">שלום רוזנברג</span><span data-show="agent2.name"> &amp; <span data-bind="agent2.name"></span></span></b>
+            <span><span data-bind="agent.brand_name">רוזנברג נכסים</span> · <span data-i18n="license_label">רישיון תיווך</span> <span data-bind="agent.license">3205419</span></span>
+          </div>
+        </div>
+      </div>
+      <form data-lead-form>
+        <div class="field"><label data-i18n="form_name">שם מלא</label><input data-lead="name" type="text" placeholder="ישראל ישראלי" data-i18n-ph="ph_name" required></div>
+        <div class="field"><label data-i18n="form_phone">טלפון נייד</label><input data-lead="phone" type="tel" class="num" placeholder="050-000-0000" required></div>
+        <div class="field"><label data-i18n="form_message">הודעה (אופציונלי)</label><textarea data-lead="message" rows="2" placeholder="אשמח לתאם ביקור..." data-i18n-ph="ph_message"></textarea></div>
+        <button class="contact-btn" type="submit"><span style="font-size:1.05rem" data-i18n="send_details">שלחו לי פרטים</span> <span>←</span></button>
+        <p class="privacy-note" data-i18n="trust_private">הפרטים שלכם נשארים אצלנו בלבד</p>
+        <p class="sent" data-lead-sent data-i18n="lead_sent">✓ הפרטים נשלחו — נחזור אליכם בהקדם</p>
+      </form>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <b data-bind="texts.footer_brand||agent.brand_name">FORLY</b>
+    <span>
+      <span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉</span> ·
+      <a href="/legal/privacy.html" data-i18n="privacy_policy">מדיניות פרטיות</a> ·
+      <a href="/legal/accessibility.html" data-i18n="accessibility">הצהרת נגישות</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var tb = document.getElementById("topbar");
+  var cover = document.querySelector(".cover");
+
+  function onScroll() {
+    // flip to the solid cream bar once the dark cover has scrolled away, so the
+    // white-on-photo header never lands on the cream body underneath it.
+    var edge = cover ? cover.offsetHeight - tb.offsetHeight : 120;
+    tb.classList.toggle("solid", (window.scrollY || 0) > edge);
+  }
+  addEventListener("scroll", onScroll, { passive: true });
+  addEventListener("resize", onScroll);
+  onScroll();
+
+  if (reduce) return;
+
+  var spread = document.querySelector(".spread");
+  var raf = 0;
+  function frame() {
+    if (spread) {
+      var span = spread.offsetHeight - innerHeight;
+      var p = span > 0 ? Math.max(0, Math.min(1, (scrollY - spread.offsetTop) / span)) : 0;
+      spread.style.setProperty("--clip", (15 - p * 15) + "%");
+      spread.style.setProperty("--round", Math.max(0, 140 - p * 140) + "px");
+      spread.style.setProperty("--scale", 1.1 - p * 0.1);
+      spread.style.setProperty("--word", (p * 26) + "vw");
+    }
+    raf = requestAnimationFrame(frame);
+  }
+  frame();
+  addEventListener("visibilitychange", function () {
+    if (document.hidden) cancelAnimationFrame(raf); else frame();
+  });
+})();
+</script>
+<script src="/tpl/demo.js"></script>
+<script src="/templates/i18n.js"></script>
+<script src="/tpl/runtime.js"></script>
+</body>
+</html>

@@ -33,6 +33,8 @@ const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, ""
 const REMOTE_UPLOAD_BASE = (process.env.REMOTE_UPLOAD_BASE || "").replace(/\/+$/, "");
 const UPLOAD_PUBLIC_BASE = REMOTE_UPLOAD_BASE || BASE_URL;
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
+const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
+const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
 const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
@@ -43,6 +45,11 @@ const AUTH_SECRET = process.env.NADLAN_JWT_SECRET || "change-me-in-env";
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || "")
   .split(",").map((s) => s.trim()).filter(Boolean);
 const WEB_SIGNUP_BASE = process.env.WEB_SIGNUP_URL || "https://call4li.web.app/signup";
+// This public extension ID is used for a narrow CORS allowlist on the
+// companion's authenticated API routes. Leave unset until the extension is
+// packaged or loaded from its stable path; an unset value allows no extension
+// cross-origin requests rather than falling back to a wildcard.
+const EXTENSION_ID = String(process.env.EXTENSION_ID || "").trim();
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
 const TEMPLATES_DIR = path.join(__dirname, "..", "public-nadlan", "templates");
 
@@ -57,10 +64,16 @@ const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
 const { sendWhatsApp } = require("./utils");
+const createExtensionCors = require("./extension-cors");
 
 // ── app ──
 const app = express();
 app.use(express.json({ limit: "2mb" }));
+
+// The Forly browser companion sends its paired token as X-Forly-Ext. That
+// non-simple header causes Chrome to preflight the request. Permit only the
+// exact configured chrome-extension:// origin, and only on its own API route.
+app.use("/api/distribution/extension", createExtensionCors(EXTENSION_ID));
 
 // static files
 app.use(express.static(path.join(__dirname, "..", "public-agent"), { index: "index.html" }));
@@ -82,8 +95,11 @@ app.use("/api", createIntakeRouter({
   uploadDir: UPLOAD_DIR,
   uploadPublicBase: UPLOAD_PUBLIC_BASE,
   remoteUploadBase: REMOTE_UPLOAD_BASE,
-  n8nWw1Webhook: N8N_WW1_WEBHOOK_URL,
-  n8nPipelineWebhook: N8N_PIPELINE_WEBHOOK_URL,
+  n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+  n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
+  isDevRun: !!N8N_DEV_WEBHOOK_URL,
+  isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL,
+  baseUrl: BASE_URL,
   authSecret: AUTH_SECRET,
   sessionTtl: SESSION_TTL_S,
   pageBaseUrl: PAGE_BASE_URL,
@@ -172,7 +188,8 @@ app.listen(PORT, () => {
   console.log(`  demo form:   ${BASE_URL}/create.html?key=demo`);
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
-  console.log(`  WW1 webhook: ${N8N_WW1_WEBHOOK_URL || "(not set)"}`);
+  console.log(`  WW1 webhook: ${N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL || "(not set)"}${N8N_DEV_WEBHOOK_URL ? " [DEV]" : ""}`);
+  console.log(`  pipeline webhook: ${N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL || "(not set)"}${N8N_DEV_PIPELINE_WEBHOOK_URL ? " [DEV]" : ""}`);
   console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set NADLAN_JWT_SECRET)" : "enabled"}`);
   // startExpiryScheduler({
   //   pageBaseUrl: PAGE_BASE_URL,

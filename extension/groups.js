@@ -1,59 +1,90 @@
 /*
- * groups.js — reads the groups THIS agent has joined, once, on request.
+ * groups.js — one-shot collection of Groups THIS agent has joined.
  *
- * Why this exists: knowing the real membership list means Forly can offer
- * only groups the agent actually belongs to, and can refuse to schedule a
- * post into a group they never joined — the single fastest way to get
- * reported as a spammer.
- *
- * Deliberate limits, because reading pages is the part of an extension that
- * carries real enforcement risk:
- *   • only the agent's OWN joined-groups page, never anyone else's;
- *   • only id, name and URL — never members, posts, or admins;
- *   • only when the agent presses the button, never on a schedule;
- *   • the page is opened and scrolled at human speed, then closed.
+ * The scan reads only a Group name and canonical URL from Facebook's own
+ * joined-Groups page. It is never scheduled: the agent explicitly starts it.
+ * Facebook lazy-loads the list while scrolling, so we keep an accumulated set
+ * until the list stays unchanged for several passes or a conservative hard
+ * ceiling is reached. The ceiling is reported to Forly; it is not presented as
+ * a complete result.
  */
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const rand = (a, b) => a + Math.random() * (b - a);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const rand = (min, max) => min + Math.random() * (max - min);
+const MAX_SCROLLS = 120;
+const STABLE_PASSES = 6;
+const SKIP_GROUP_PATHS = new Set(["feed", "joins", "discover", "create", "search"]);
 
-// Collect /groups/<id-or-slug> links from the agent's own group list.
-function harvest() {
-  const found = new Map();
-  for (const a of document.querySelectorAll('a[href*="/groups/"]')) {
-    let u;
-    try { u = new URL(a.href, location.origin); } catch { continue; }
-    const m = u.pathname.match(/^\/groups\/([A-Za-z0-9._-]+)\/?$/);
-    if (!m) continue;
-    const slug = m[1];
-    if (["feed", "joins", "discover", "create", "search"].includes(slug)) continue;
-    const name = (a.innerText || "").trim().split("\n")[0];
-    if (!name || name.length > 90) continue;
-    found.set(`https://www.facebook.com/groups/${slug}`, name);
+function normalizeGroupUrl(href) {
+  try {
+    const url = new URL(href, location.origin);
+    const match = url.pathname.match(/^\/groups\/([^/?#]+)\/?$/i);
+    if (!match) return null;
+    const slug = decodeURIComponent(match[1]).trim();
+    if (!slug || SKIP_GROUP_PATHS.has(slug.toLowerCase())) return null;
+    return `https://www.facebook.com/groups/${encodeURIComponent(slug)}`;
+  } catch {
+    return null;
   }
-  return [...found.entries()].map(([url, name]) => ({ url, name }));
+}
+
+function groupName(anchor) {
+  const candidates = [
+    anchor.getAttribute("aria-label"), anchor.innerText, anchor.textContent,
+    anchor.querySelector?.("span")?.textContent,
+  ];
+  for (const candidate of candidates) {
+    const name = String(candidate || "").replace(/\s+/g, " ").trim();
+    if (name && name.length <= 140) return name;
+  }
+  return null;
+}
+
+function harvest(into) {
+  const anchors = [...document.querySelectorAll("a[href]")];
+  for (const anchor of anchors) {
+    const url = normalizeGroupUrl(anchor.href || anchor.getAttribute("href"));
+    const name = url && groupName(anchor);
+    if (url && name && !into.has(url)) into.set(url, name);
+  }
+  return anchors.length;
 }
 
 async function scan() {
-  // Scroll the list the way a person reviewing their groups would, so the
-  // lazy-loaded rows render.
-  let last = 0;
-  for (let i = 0; i < 12; i++) {
-    window.scrollBy({ top: 700 + rand(0, 400), behavior: "smooth" });
-    await sleep(rand(700, 1400));
-    const count = harvest().length;
-    if (count === last && i > 3) break;      // list stopped growing
-    last = count;
+  const found = new Map();
+  let inspectedAnchors = 0;
+  let stablePasses = 0;
+  let previousCount = 0;
+  let scrolls = 0;
+
+  for (; scrolls < MAX_SCROLLS; scrolls++) {
+    inspectedAnchors = Math.max(inspectedAnchors, harvest(found));
+    window.scrollBy({ top: 850 + rand(0, 500), behavior: "smooth" });
+    await sleep(rand(950, 1700));
+    harvest(found);
+
+    if (found.size === previousCount) stablePasses++;
+    else stablePasses = 0;
+    previousCount = found.size;
+    if (stablePasses >= STABLE_PASSES) break;
   }
-  return harvest();
+  const passes = Math.min(scrolls + 1, MAX_SCROLLS);
+
+  return {
+    groups: [...found.entries()].map(([url, name]) => ({ url, name })),
+    inspected_anchors: inspectedAnchors,
+    scrolls: passes,
+    complete: stablePasses >= STABLE_PASSES,
+    capped: passes >= MAX_SCROLLS && stablePasses < STABLE_PASSES,
+  };
 }
 
-chrome.runtime.onMessage.addListener((msg, _s, reply) => {
+chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg && msg.forly === "scan-groups") {
     scan()
-      .then((groups) => chrome.runtime.sendMessage({ forly: "groups", groups }))
-      .catch(() => chrome.runtime.sendMessage({ forly: "groups", groups: [] }));
-    reply({ ok: true });
+      .then((result) => reply({ ok: true, ...result }))
+      .catch(() => reply({ ok: false, groups: [], inspected_anchors: 0, scrolls: 0, complete: false }));
+    return true;
   }
-  return true;
+  return false;
 });

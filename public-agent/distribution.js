@@ -30,6 +30,9 @@
   let catalog = [];
   let catalogType = "";             // listing type the catalog was matched for
   let selected = new Set();         // selected catalog group urls
+  let joinedGroups = [];             // full synced Facebook Group records
+  let joinedSummary = null;
+  let joinedSync = null;
   let pollT = null;
 
   // Which kind of listing the agent is about to share — drives group matching.
@@ -502,6 +505,126 @@
 
   $("publishBtn").onclick = () => publishSelected(false);
 
+  // ── My Groups: full synced membership list with agent-controlled curation ─
+  const relevanceLabel = {
+    relevant: "רלוונטית", review: "לבדיקה", irrelevant: "לא רלוונטית",
+  };
+
+  function formatSyncDate(value) {
+    if (!value) return "טרם סונכרן";
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? "סונכרן" : `סונכרן ${d.toLocaleString("he-IL")}`;
+  }
+
+  function filteredJoinedGroups() {
+    const q = ($("myGroupsSearch").value || "").trim().toLowerCase();
+    const filter = $("myGroupsFilter").value;
+    return joinedGroups.filter((g) => {
+      if (q && !String(g.name || "").toLowerCase().includes(q)) return false;
+      if (filter === "enabled") return !!g.enabled;
+      return filter === "all" || g.relevance === filter;
+    }).sort((a, b) => {
+      const rank = { relevant: 0, review: 1, irrelevant: 2 };
+      return (rank[a.relevance] ?? 9) - (rank[b.relevance] ?? 9) ||
+        String(a.name || "").localeCompare(String(b.name || ""), "he");
+    });
+  }
+
+  async function saveGroupPreference(group, patch) {
+    const result = await api("/api/distribution/joined-groups/preference", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: group.url, ...patch }),
+    });
+    const i = joinedGroups.findIndex((item) => item.url === group.url);
+    if (i >= 0) joinedGroups[i] = result.group;
+    joinedSummary = {
+      total: joinedGroups.length,
+      relevant: joinedGroups.filter((g) => g.relevance === "relevant").length,
+      review: joinedGroups.filter((g) => g.relevance === "review").length,
+      irrelevant: joinedGroups.filter((g) => g.relevance === "irrelevant").length,
+      enabled: joinedGroups.filter((g) => g.enabled).length,
+    };
+    renderMyGroups();
+    loadCatalog(currentListingType());
+  }
+
+  function joinedGroupRow(group) {
+    const row = document.createElement("div");
+    row.className = "catalog-row";
+    row.style.cssText = "display:flex;align-items:flex-start;gap:9px;padding:10px 0;border-bottom:1px solid rgba(23,20,15,.08)";
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox"; enabled.checked = !!group.enabled;
+    enabled.title = "להפעיל או להשבית קבוצה לפרסום";
+    enabled.onchange = () => saveGroupPreference(group, { enabled: enabled.checked })
+      .catch(() => { enabled.checked = !enabled.checked; toast("שמירת הקבוצה נכשלה"); });
+
+    const body = document.createElement("div");
+    body.style.cssText = "flex:1;min-width:0";
+    const link = document.createElement("a");
+    link.href = group.url; link.target = "_blank"; link.rel = "noopener";
+    link.textContent = group.name || group.url;
+    link.style.fontWeight = "700";
+    body.appendChild(link);
+
+    const note = document.createElement("div");
+    note.className = "muted"; note.style.fontSize = ".8rem";
+    const signals = Array.isArray(group.relevance_signals) ? group.relevance_signals.slice(0, 2) : [];
+    note.textContent = signals.length ? signals.join(" · ") : "ללא אותות רלוונטיות בשם הקבוצה";
+    body.appendChild(note);
+
+    const select = document.createElement("select");
+    select.style.cssText = "max-width:132px;font-size:.8rem";
+    const choices = [
+      ["auto", `אוטומטי: ${relevanceLabel[group.automatic_relevance] || relevanceLabel[group.relevance] || "לבדיקה"}`],
+      ["relevant", "רלוונטית"], ["review", "לבדיקה"], ["irrelevant", "לא רלוונטית"],
+    ];
+    for (const [value, label] of choices) {
+      const option = document.createElement("option"); option.value = value; option.textContent = label;
+      select.appendChild(option);
+    }
+    select.value = group.relevance_override || "auto";
+    select.onchange = () => saveGroupPreference(group, { relevance: select.value })
+      .catch(() => { select.value = group.relevance_override || "auto"; toast("עדכון הרלוונטיות נכשל"); });
+
+    row.append(enabled, body, select);
+    return row;
+  }
+
+  function renderMyGroups() {
+    const card = $("myGroupsCard");
+    card.hidden = false;
+    const summary = joinedSummary || { total: 0, relevant: 0, review: 0, irrelevant: 0, enabled: 0 };
+    $("myGroupsSummary").textContent = summary.total
+      ? `${summary.total} קבוצות סונכרנו · ${summary.relevant} רלוונטיות · ${summary.review} לבדיקה · ${summary.enabled} פעילות`
+      : "אין עדיין קבוצות מסונכרנות. פתחו את התוסף ולחצו «סנכרון הקבוצות שלי».";
+    const partial = joinedSync && joinedSync.complete === false;
+    $("myGroupsSync").textContent = `${formatSyncDate(joinedSync && joinedSync.scanned_at)}${partial ? " · סריקה חלקית — סנכרנו שוב להשלמה" : ""}`;
+    const list = $("myGroupsList"); list.textContent = "";
+    const visible = filteredJoinedGroups();
+    if (!visible.length) {
+      const empty = document.createElement("p"); empty.className = "muted";
+      empty.textContent = joinedGroups.length ? "אין קבוצות התואמות לסינון." : "לא נמצאו קבוצות מסונכרנות.";
+      list.appendChild(empty);
+      return;
+    }
+    const count = document.createElement("p"); count.className = "muted"; count.style.fontSize = ".82rem";
+    count.textContent = `מציגים ${visible.length} מתוך ${joinedGroups.length}`;
+    list.appendChild(count);
+    for (const group of visible) list.appendChild(joinedGroupRow(group));
+  }
+
+  async function loadMyGroups() {
+    try {
+      const data = await api("/api/distribution/joined-groups");
+      joinedGroups = data.groups || [];
+      joinedSummary = data.summary || null;
+      joinedSync = data.sync || (data.synced_at ? { scanned_at: data.synced_at } : null);
+      renderMyGroups();
+    } catch {
+      // The extension card remains usable even when this optional view fails.
+    }
+  }
+
   // ── the extension: pairing, mode choice, and an honest ETA ──
   // The extension id comes from the server so a rebuilt/unpacked extension
   // doesn't need a code change here.
@@ -510,6 +633,7 @@
     try { st2 = await api("/api/distribution/extension/status"); }
     catch { return; }
     $("extCard").hidden = false;
+    loadMyGroups();
     const chip = $("extChip");
     if (st2.locked_until && new Date(st2.locked_until) > new Date()) {
       chip.textContent = "מושהה"; chip.className = "conn-chip warn";
@@ -521,10 +645,10 @@
     $("extText").textContent = !st2.paired
       ? "התוסף כותב את הפוסט בכל קבוצה במקומכם. מפרסמים רק בקבוצות שאתם כבר חברים בהן."
       : st2.joined_count
-        ? `${st2.joined_count} קבוצות מסונכרנות · ${st2.posted_today}/${st2.daily_cap} פרסומים היום`
+        ? `${st2.joined_count} קבוצות סונכרנו · ${st2.joined_relevant_count || 0} רלוונטיות · ${st2.joined_active_count || 0} פעילות · ${st2.posted_today}/${st2.daily_cap} פרסומים היום`
         : "חסר סנכרון קבוצות — פתחו את התוסף ולחצו «סנכרון הקבוצות שלי».";
     $("extPlan").textContent = st2.plan
-      ? `לפי ${st2.joined_count} קבוצות: ${st2.plan.total_posts} פרסומים, ` +
+      ? `לפי ${st2.joined_active_count || 0} קבוצות פעילות: ${st2.plan.total_posts} פרסומים, ` +
         `כ-${st2.plan.posts_per_day} ביום — כ-${st2.plan.days} ימים לכל הנכסים ` +
         `(${st2.plan.limited_by === "groups" ? "מוגבל במספר הקבוצות" : "מוגבל במכסה היומית"}).`
       : "";
@@ -557,6 +681,33 @@
       } catch { toast("החיבור נכשל — ודאו שההפצה פעילה בחשבון"); }
     };
   }
+
+  $("myGroupsSearch").oninput = renderMyGroups;
+  $("myGroupsFilter").onchange = renderMyGroups;
+  $("refreshMyGroups").onclick = async () => {
+    const btn = $("refreshMyGroups");
+    btn.disabled = true;
+    await loadMyGroups();
+    btn.disabled = false;
+    toast("רשימת הקבוצות עודכנה");
+  };
+  $("applyMyGroups").onclick = async () => {
+    const btn = $("applyMyGroups");
+    btn.disabled = true;
+    try {
+      const result = await api("/api/distribution/joined-groups/apply", { method: "POST" });
+      st.groups = result.groups || [];
+      selected = new Set(st.groups);
+      $("groupsBox").value = "";
+      await loadCatalog(currentListingType());
+      renderStepper();
+      toast(`${result.count} קבוצות פעילות הוגדרו כברירת מחדל להפצה`);
+    } catch {
+      toast("לא הצלחנו להחיל את הקבוצות הפעילות");
+    } finally {
+      btn.disabled = false;
+    }
+  };
 
   // ── init ──
   (async () => {

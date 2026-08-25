@@ -25,7 +25,7 @@
 .field .hint{font-size:.75rem;color:#888;margin-top:4px}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-.tpl-pick{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.tpl-pick{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px}
 .tpl-pick button{padding:12px 8px;border:1.5px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;font:inherit;font-size:.9rem;font-weight:600;color:#333;transition:.15s}
 .tpl-pick button:hover{border-color:var(--gold)}
 .tpl-pick button.on{border-color:var(--gold);background:var(--gold,#c8a24a);color:#fff}
@@ -50,19 +50,24 @@
 .collapsible-content{padding:12px}
 </style>
 </head>
-<body>
+<body class="agent-page edit-page">
 
-<header class="topbar">
+<header class="topbar agent-topbar">
   <a class="brand" id="backBrand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
   <a class="btn btn-ghost btn-sm" id="backLink" href="/" style="color:#fff;border-color:rgba(255,255,255,.3)">← הנכסים שלי</a>
 </header>
 
-<div class="container">
-  <div class="page-head">
+<!-- shown until the property + its assets finish loading -->
+<div class="vloader" id="vLoader"><video src="/assets/loading.mp4" autoplay muted playsinline></video><span class="vloader-msg">טוענים את הנכס…</span></div>
+
+<div class="container agent-shell edit-studio hidden" id="editShell">
+  <div class="agent-hero page-head">
     <div>
+      <span class="agent-kicker">Property Studio / 02</span>
       <h1>עריכת דף הנכס</h1>
       <p>שינויים מתעדכנים בזמן אמת בתצוגה המקדימה. לחצו שמירה כדי לעדכן את הדף החי.</p>
     </div>
+    <div class="agent-aside"><small>LIVE CANVAS</small><b>הטקסט והעיצוב, מולכם.</b><span>שנו, צפו ושמרו — ללא ניתוק מהעמוד החי.</span></div>
     <a class="btn btn-ghost" id="openPage" target="_blank" href="#">פתיחת הדף ↗</a>
   </div>
 
@@ -73,8 +78,11 @@
         <div class="sec-title">תבנית העיצוב</div>
         <div class="tpl-pick" id="tplPick">
           <button type="button" data-tpl="nocturne">נוקטרן</button>
-          <button type="button" data-tpl="galerie">גלריה</button>
           <button type="button" data-tpl="reel">ריל</button>
+          <button type="button" data-tpl="atelier">אטלייה</button>
+          <button type="button" data-tpl="revue">מגזין</button>
+          <button type="button" data-tpl="loupe">לופה</button>
+          <button type="button" data-tpl="orbite">אורביט</button>
         </div>
         <div class="hint">התוכן נשמר — רק המראה משתנה.</div>
       </div>
@@ -109,12 +117,12 @@
         <div class="sec-title">פרטי הנכס</div>
         <div class="field"><label>כותרת הנכס</label><input id="fTitle" maxlength="80" data-live="property.title"></div>
         <div class="grid-3">
-          <div class="field"><label>מחיר (₪)</label><input id="fPrice" type="number"></div>
-          <div class="field"><label>חדרים</label><input id="fRooms" type="number" step="0.5"></div>
-          <div class="field"><label>מ״ר</label><input id="fSqm" type="number"></div>
+          <div class="field"><label>מחיר (₪)</label><input id="fPrice" type="number" min="0" max="999999999"></div>
+          <div class="field"><label>חדרים</label><input id="fRooms" type="number" step="0.5" min="1" max="30"></div>
+          <div class="field"><label>מ״ר</label><input id="fSqm" type="number" min="5" max="2000"></div>
         </div>
         <div class="grid-2">
-          <div class="field"><label>קומה</label><input id="fFloor" type="number"></div>
+          <div class="field"><label>קומה</label><input id="fFloor" type="number" min="-5" max="120"></div>
           <div class="field"><label>שכונה/עיר</label><input id="fEyebrow" maxlength="80" data-live="texts.eyebrow"></div>
         </div>
       </div>
@@ -248,8 +256,15 @@
     }, 400);
   }
 
+  // The numeric fields carry min/max; anything out of range would land on the
+  // live page and in the bot's fact sheet, so both save paths ask first.
+  function badNumberField() {
+    return ["#fPrice", "#fRooms", "#fSqm", "#fFloor"].map($).filter(function (el) { return el && !el.checkValidity(); })[0] || null;
+  }
+
   // Quick save without UI feedback (for live preview)
   function quickSave() {
+    if (badNumberField()) return;   // silent path: say nothing, save nothing
     var slides = (payload.carousel.slides || []).map(function (s, i) {
       var n = document.querySelector('[data-cn="' + i + '"]');
       var t = document.querySelector('[data-ct="' + i + '"]');
@@ -423,7 +438,10 @@
       // Load preview
       $("#preview").src = "/p/" + pageId + "?t=" + Date.now();
       $("#openPage").href = "/p/" + pageId;
-    }).catch(function () { FLY.toast("שגיאה בטעינת הדף"); });
+    }).catch(function () { FLY.toast("שגיאה בטעינת הדף"); })
+      .finally(function () {
+        FLY.loaderHide(function () { $("#editShell").classList.remove("hidden"); });
+      });
   }
 
   function renderGallery() {
@@ -527,6 +545,10 @@
   load();
 
   $("#saveBtn").addEventListener("click", function () {
+    // out-of-range numbers reach the page and the fact sheet, so stop here —
+    // the inputs carry min/max and the browser phrases the complaint
+    var bad = badNumberField();
+    if (bad) { bad.reportValidity(); return; }
     var btn = this;
     btn.disabled = true;
     $("#saveMsg").textContent = "שומרים...";
@@ -552,5 +574,6 @@
   });
 })();
 </script>
+<footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

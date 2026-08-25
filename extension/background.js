@@ -128,31 +128,40 @@ async function runTask(task, mode, gapMs) {
 // closes the tab. Only on request — never on a timer.
 async function syncGroups() {
   const tab = await chrome.tabs.create({
-    url: "https://www.facebook.com/groups/joins/", active: true });
-  const groups = await new Promise((resolve) => {
-    const timer = setTimeout(() => done([]), 60000);
-    function onMsg(msg, sender) {
-      if (!msg || msg.forly !== "groups" || sender.tab?.id !== tab.id) return;
-      done(msg.groups || []);
-    }
-    function done(g) {
+    url: "https://www.facebook.com/groups/joins/", active: false });
+  const result = await new Promise((resolve) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      chrome.runtime.onMessage.removeListener(onMsg);
-      resolve(g);
-    }
-    chrome.runtime.onMessage.addListener(onMsg);
+      resolve(value);
+    };
+    // A genuine full scan can take several minutes on a long lazy-loaded list.
+    const timer = setTimeout(() => done({ groups: [], complete: false, timed_out: true }), 4 * 60 * 1000);
     let tries = 0;
-    const send = () => chrome.tabs.sendMessage(tab.id, { forly: "scan-groups" }, () => {
-      if (chrome.runtime.lastError && tries++ < 12) setTimeout(send, 800);
+    const send = () => chrome.tabs.sendMessage(tab.id, { forly: "scan-groups" }, (response) => {
+      if (chrome.runtime.lastError) {
+        if (tries++ < 12) return setTimeout(send, 800);
+        return done({ groups: [], complete: false, scanner_unavailable: true });
+      }
+      return done(response && response.ok ? response : { groups: [], complete: false, scan_failed: true });
     });
     setTimeout(send, 2500);
   });
   try { await chrome.tabs.remove(tab.id); } catch { /* already closed */ }
-  if (!groups.length) { await log("לא נמצאו קבוצות — ודאו שאתם מחוברים לפייסבוק"); return 0; }
+  const groups = Array.isArray(result.groups) ? result.groups : [];
+  if (!groups.length) {
+    await log(result.timed_out ? "סריקת הקבוצות ארכה יותר מדי זמן" : "לא נמצאו קבוצות — ודאו שאתם מחוברים לפייסבוק");
+    return 0;
+  }
   await API.call("/api/distribution/extension/groups", {
-    method: "POST", body: JSON.stringify({ groups }),
+    method: "POST", body: JSON.stringify({
+      groups,
+      sync: { complete: result.complete === true, capped: result.capped === true, scrolls: result.scrolls || null },
+    }),
   });
-  await log(`סונכרנו ${groups.length} קבוצות שאתם חברים בהן ✓`);
+  await log(`סונכרנו ${groups.length} קבוצות שאתם חברים בהן${result.complete ? " ✓" : " (סריקה חלקית)"}`);
   return groups.length;
 }
 

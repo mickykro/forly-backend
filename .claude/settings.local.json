@@ -83,9 +83,9 @@
       "Read(//Users/MichaelKrotorio/.config/gcloud/**)",
       "Bash(PORT=8788 FORLY_JWT_SECRET=328rDmEFjxDyDdF6/AV76DQjhOTHCzJF3WAGwvcOTQ0 node server/index.js)",
       "Bash(curl -sX POST -H \"x-admin-secret: 328rDmEFjxDyDdF6/AV76DQjhOTHCzJF3WAGwvcOTQ0\" \"http://127.0.0.1:8899/api/admin/backfill-tags?dry=1\")",
-      "Bash(cd /Users/MichaelKrotorio/development/forly && grep -rn \"פג תוקף\" --include=*.ts --include=*.tsx . 2>/dev/null | grep -v node_modules | head -20)",
-      "Read(//Users/MichaelKrotorio/development/forly/**)",
-      "Bash(cd /Users/MichaelKrotorio/development/forly && grep -rn \"פג תוקף\" . --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=lib --exclude-dir=dist 2>/dev/null | head -30)"
+      "Bash(cat /tmp/forly-server.log)",
+      "Read(//private/tmp/**)",
+      "Bash(grep -n \"#.*$\" /Users/MichaelKrotorio/development/forly/forly-backend/server/.env)"
     ],
     "deny": [
       "Bash(firebase deploy:*)",

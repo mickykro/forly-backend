@@ -104,7 +104,7 @@ export const submitPropertyLead = onRequest(
       try {
         await sendWhatsAppMessage(
           page.business_phone,
-          `🔔 ליד חדש מדף הנכס "${page.property.title}"!\n` +
+          `🔔 ליד חדש מדף הנכס "${page.property.address}, ${page.property.city}"!\n` +
           `👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
           `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
           greenApiInstance.value(),

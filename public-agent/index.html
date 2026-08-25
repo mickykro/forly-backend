@@ -11,18 +11,22 @@
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
 </head>
-<body>
+<body class="agent-page dashboard-page">
 
-<header class="topbar">
+<header class="topbar agent-topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
   <span class="who" id="who"></span>
   <button class="btn btn-sm hidden" id="btnLogout" style="margin-inline-start:auto;background:rgba(255,255,255,.12);color:#fff">התנתקות</button>
 </header>
 
+<!-- shown until the boot session check settles, so the login form doesn't flash -->
+<div class="vloader" id="vLoader"><video src="/assets/loading.mp4" autoplay muted playsinline></video></div>
+
 <!-- ── LOGIN ── -->
-<div class="auth-wrap" id="viewLogin">
+<div class="auth-wrap hidden" id="viewLogin">
   <div class="card auth-card">
-    <div class="logo">🦉</div>
+    <div class="auth-mark">F</div>
+    <span class="agent-kicker">Forly Workspace</span>
     <h1 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:2px">כניסה לפורלי</h1>
     <p class="sub">נשלח לך קוד אימות בוואטסאפ</p>
 
@@ -51,7 +55,7 @@
 </div>
 
 <!-- ── PROPERTY LIST ── -->
-<div class="container hidden" id="viewList">
+<div class="agent-shell hidden" id="viewList">
   <!-- ponytail: notification banner for incomplete profiles -->
   <div id="profileBanner" class="hidden" style="background:linear-gradient(90deg,#b98a2f 0%,#d4a84b 100%);color:#fff;padding:14px 20px;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
     <span style="font-size:1.5rem">👋</span>
@@ -61,7 +65,7 @@
     </div>
     <a href="/signup" class="btn" style="background:#fff;color:#b98a2f;font-weight:600;border:none">השלמת פרופיל</a>
   </div>
-  <div class="page-head">
+  <div class="agent-hero page-head">
     <div>
       <h1>הנכסים שלי</h1>
       <p id="countLine"></p>
@@ -146,6 +150,9 @@
   });
 
   $("#btnLogout").addEventListener("click", function () {
+    // Also drop the local demo records: without this the demo dashboard is a
+    // dead end — it renders instead of the login form on every later visit.
+    try { localStorage.removeItem("forly_demo_listings"); } catch (e) { /* private mode */ }
     FLY.req("/api/auth/logout", { method: "POST", noRedirect: true })
       .finally(function () { location.href = "/"; });
   });
@@ -233,6 +240,8 @@
   }
 
   function loadList() {
+    FLY.loaderShow("טוענים את הנכסים…");
+    $("#viewList").classList.add("hidden");
     FLY.req("/api/properties", { noRedirect: true }).then(function (d) {
       var items = d.properties || [];
       $("#countLine").textContent = items.length ? items.length + " נכסים" : "";
@@ -240,6 +249,8 @@
       $("#emptyState").classList.toggle("hidden", items.length > 0);
       bindActions();
       loadDistribution();
+    }).finally(function () {
+      FLY.loaderHide(function () { $("#viewList").classList.remove("hidden"); });
     });
   }
 
@@ -382,8 +393,11 @@
     $("#viewLogin").classList.add("hidden");
     $("#viewList").classList.remove("hidden");
     $("#who").textContent = "תצוגת הדגמה";
+    // the only way out of the demo view — there is no session to end here
+    $("#btnLogout").textContent = "יציאה מהדגמה";
+    $("#btnLogout").classList.remove("hidden");
     $("#countLine").textContent = records.length === 1 ? "נכס אחד" : records.length + " נכסים";
-    var banner = FLY.el("div", "card",
+    var banner = FLY.el("div", "card demo-notice",
       '🦉 <b>זה האזור האישי שלך.</b> הנכס שיצרת מופיע כאן — ' +
       '<a href="/signup.html" style="color:var(--gold);font-weight:600">הרשמה מלאה</a> ' +
       'תאפשר לערוך, להאריך ולנהל את כל הנכסים שלך.');
@@ -410,25 +424,32 @@
 
   // boot: session check → real list; otherwise fall back to the demo view when
   // this browser created a demo page; otherwise stay on login.
+  // The view is built here but revealed by loaderHide, so it appears only once
+  // the loader animation has finished its current pass.
+  var reveal;
   FLY.req("/api/properties", { noRedirect: true })
     .then(function (d) {
-      $("#viewLogin").classList.add("hidden");
-      $("#viewList").classList.remove("hidden");
-      $("#btnLogout").classList.remove("hidden");
       var items = d.properties || [];
       $("#countLine").textContent = items.length ? items.length + " נכסים" : "";
       $("#propGrid").innerHTML = items.map(cardHtml).join("");
       $("#emptyState").classList.toggle("hidden", items.length > 0);
       bindActions();
-      checkProfile(); // ponytail: check if profile needs completion
+      reveal = function () {
+        $("#viewLogin").classList.add("hidden");
+        $("#viewList").classList.remove("hidden");
+        $("#btnLogout").classList.remove("hidden");
+        checkProfile(); // ponytail: check if profile needs completion
+      };
     })
     .catch(function () {
       var records = [];
       try { records = JSON.parse(localStorage.getItem("forly_demo_listings") || "[]"); } catch (e) { /* ignore */ }
-      if (records.length) showDemoDashboard(records);
-      /* else: stay on login */
-    });
+      reveal = records.length ? function () { showDemoDashboard(records); }
+        : function () { $("#viewLogin").classList.remove("hidden"); }; // not logged in → login
+    })
+    .finally(function () { FLY.loaderHide(reveal); });
 })();
 </script>
+<footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

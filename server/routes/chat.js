@@ -19,7 +19,7 @@ const businessCache = require("../business-cache");
 const prompt = require("../chat-prompt");
 const chatProvider = require("../chat-provider");
 const { submitLead } = require("../leads");
-const { normalizePhone, sendWhatsApp } = require("../utils");
+const { normalizePhone, sendWhatsApp, asMillis } = require("../utils");
 
 const MAX_TURNS_KEPT = 60;     // stored history cap (phase 3 sends this to the agent)
 const MAX_TURNS_SENT = 20;     // how much of it is replayed to the model
@@ -300,8 +300,17 @@ module.exports = function createChatRouter(ctx) {
 
     const convo = await loadConversation(pageId, cid);
     if (!convo || convo.page_id !== pageId) return res.status(404).json({ error: "not_found" });
-    // Idempotent: a double-tap must not fire two WhatsApps.
-    if (convo.lead && convo.lead.captured) return res.json({ ok: true });
+    // Idempotent for a double-tap, not for the rest of the conversation: the
+    // same number resubmitting within the window is the retry we want to
+    // swallow, while a later handoff — a second question, a different person on
+    // the same device — is a real lead the agent must still hear about.
+    // ponytail: a time+phone window, not a per-conversation latch.
+    const DEDUPE_MS = 10 * 60 * 1000;
+    const prev = convo.lead;
+    if (prev && prev.captured && prev.phone === prospectPhone &&
+        Date.now() - asMillis(prev.at) < DEDUPE_MS) {
+      return res.json({ ok: true });
+    }
 
     // Per-IP throttle (same store as /api/chat). The per-convo lead.captured
     // guard already stops repeat submits on one conversation.
@@ -320,9 +329,10 @@ module.exports = function createChatRouter(ctx) {
       return res.status(500).json({ error: "internal" });
     }
 
-    const title = (page.property && page.property.title) || "";
+    const title = (page.property && page.property.address) || "";
+    const city = (page.property && page.property.city) || "";
     const msg =
-      `🔔 ליד חדש מדף הנכס "${title}"\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
+      `🔔 ליד חדש מדף הנכס "${title}, ${city}"\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
       (questions.length ? "❓ שאלות שלא נענו:\n" + questions.map((q) => `• ${q}`).join("\n") + "\n" : "") +
       `דברו איתו עכשיו: https://wa.me/${prospectPhone}`;
     sendWhatsApp(page.business_phone, msg, greenInstance, greenToken)
