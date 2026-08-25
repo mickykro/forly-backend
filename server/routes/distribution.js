@@ -604,6 +604,36 @@ module.exports = function createDistributionRouter(ctx) {
     });
   });
 
+  // A compact identity card for the persistent extension panel. The extension
+  // can prove this is the Forly account that paired it, but deliberately does
+  // not scrape or disclose the personal Facebook profile running in Chrome.
+  router.get("/extension/context", async (req, res) => {
+    const auth = await extAuth(req);
+    if (!auth) return res.status(401).json({ error: "unpaired" });
+    const [business, connection] = await Promise.all([
+      db.getBusiness(auth.phone), db.getConnection(auth.phone),
+    ]);
+    const joined = Array.isArray(auth.state.joined_groups) ? auth.state.joined_groups : [];
+    const active = joined.filter((g) => g.enabled && g.relevance !== "irrelevant");
+    const label = (business && (business.business_name || business.full_name || business.name)) || "חשבון Forly";
+    const suffix = String(auth.phone || "").slice(-4);
+    return res.json({
+      agent: { label, account_suffix: suffix ? `••••${suffix}` : null },
+      facebook_page: {
+        connected: !!(connection && connection.page_token),
+        name: (connection && connection.page_name) || null,
+        needs_reconnect: !!(connection && connection.needs_reconnect),
+      },
+      personal_facebook_profile: "not_inspected",
+      groups: {
+        synced_count: joined.length,
+        active_count: active.length,
+        synced_at: auth.state.joined_synced_at || null,
+      },
+      mode: auth.state.mode || "assist",
+    });
+  });
+
   // What should the extension do next? Either one group task, or an honest
   // "wait, and here's why" — never a queue the client can race through.
   router.get("/extension/next", async (req, res) => {
