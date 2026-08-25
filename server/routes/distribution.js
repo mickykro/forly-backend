@@ -649,6 +649,28 @@ module.exports = function createDistributionRouter(ctx) {
     });
   });
 
+  // Explicit user action in the extension can select the Forly public property
+  // page currently open in Chrome. The server verifies ownership and resolves
+  // the same property-specific Group list used everywhere else.
+  router.post("/extension/select-page", async (req, res) => {
+    const auth = await extAuth(req);
+    if (!auth) return res.status(401).json({ error: "unpaired" });
+    const pageId = String((req.body && req.body.page_id) || "").trim();
+    if (!pageId || pageId.length > 160) return res.status(400).json({ error: "invalid_page" });
+    const page = await db.getPage(pageId);
+    if (!page || page.business_phone !== auth.phone) return res.status(404).json({ error: "not_found" });
+    const business = await db.getBusiness(auth.phone);
+    const existing = await db.findOpenShareSession(pageId);
+    const groups = await jobs.resolveGroups(deps, page, business);
+    const sameGroups = existing && Array.isArray(existing.groups) &&
+      existing.groups.length === groups.length &&
+      existing.groups.every((g) => groups.includes(g.url));
+    const session = sameGroups ? existing
+      : await jobs.createShareSession(deps, { page, business, groups });
+    await selectShareSession(auth.phone, session.id);
+    res.json({ ok: true, session_id: session.id, group_count: (session.groups || []).length });
+  });
+
   // What should the extension do next? Either one group task, or an honest
   // "wait, and here's why" — never a queue the client can race through.
   router.get("/extension/next", async (req, res) => {
