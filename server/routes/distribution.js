@@ -852,7 +852,12 @@ module.exports = function createDistributionRouter(ctx) {
         skip_reason: String(body.detail || "extension_skip").slice(0, 60),
       };
       await db.updateShareSession(session.id, { groups, updated_at: now });
-      return res.json({ ok: true, skipped: true, advance_immediately: true });
+      const remainingPending = groups.filter((g) =>
+        g.state !== "posted" && g.state !== "skipped").length;
+      return res.json({
+        ok: true, skipped: true, advance_immediately: true,
+        remaining_pending: remainingPending,
+      });
     }
     if (status === "failed") {
       groups[idx] = { ...group, state: "ready" };

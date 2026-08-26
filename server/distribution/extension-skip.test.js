@@ -13,6 +13,7 @@ assert.ok(resultRoute.includes('if (status === "skipped")'));
 assert.ok(resultRoute.includes('state: "skipped"'));
 assert.ok(resultRoute.includes('skipped_at: now'));
 assert.ok(resultRoute.includes('advance_immediately: true'));
+assert.ok(resultRoute.includes('remaining_pending: remainingPending'));
 assert.ok(resultRoute.includes('if (status === "failed")'));
 assert.ok(resultRoute.includes('state: "ready"'));
 assert.ok(resultRoute.includes('if (status !== "posted")'));
