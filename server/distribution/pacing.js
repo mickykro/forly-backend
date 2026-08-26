@@ -50,6 +50,12 @@ function groupGapMs(members) {
  */
 const DAILY_CAP = Math.max(1, Math.min(20,
   Number(process.env.DISTRIBUTION_DAILY_CAP) || 12));
+// Development-only escape hatch for exercising a multi-Group queue. It does
+// NOT disable account lockouts, quiet hours, per-post delays, duplicate-post
+// protection, membership checks, or per-Group cooldowns. Remove or set false
+// before production.
+const DAILY_CAP_DISABLED = /^(1|true|yes)$/i.test(
+  String(process.env.DISTRIBUTION_DISABLE_DAILY_CAP || ""));
 const WARMUP_START = 2;              // day-1 ceiling for a new agent
 const WARMUP_DAYS = 14;              // days to ramp from START to CAP
 const MIN_GAP_MS = 4 * 60 * 1000;    // never two posts inside 4 minutes
@@ -113,7 +119,7 @@ function canPost(state, { groupUrl, pageId, groupLastPostAt, groupMembers, joine
 
   const today = posts.filter((p) => now - at(p) < DAY_MS);
   const cap = dailyCap(s.first_post_at, now);
-  if (today.length >= cap) {
+  if (!DAILY_CAP_DISABLED && today.length >= cap) {
     return { ok: false, reason: "daily_cap", cap,
       retry_at: new Date(at(today[today.length - 1]) + DAY_MS).toISOString() };
   }
@@ -153,7 +159,11 @@ function canPost(state, { groupUrl, pageId, groupLastPostAt, groupMembers, joine
   // `joined === undefined` means "not synced yet", which stays permitted.
   if (joined === false) return { ok: false, reason: "not_a_member" };
 
-  return { ok: true, remaining_today: cap - today.length };
+  return {
+    ok: true,
+    remaining_today: DAILY_CAP_DISABLED ? null : cap - today.length,
+    daily_cap_disabled: DAILY_CAP_DISABLED,
+  };
 }
 
 // The gap the client must wait before the NEXT post. Randomized on purpose:
@@ -188,7 +198,7 @@ function lock(state, reason, { now = Date.now() } = {}) {
 }
 
 module.exports = {
-  DAILY_CAP, WARMUP_START, WARMUP_DAYS, MIN_GAP_MS, MAX_GAP_MS,
+  DAILY_CAP, DAILY_CAP_DISABLED, WARMUP_START, WARMUP_DAYS, MIN_GAP_MS, MAX_GAP_MS,
   GROUP_COOLDOWN_MS, LOCKOUT_MS, HOUR_START, HOUR_END,
   GROUP_GAP_MIN_MS, GROUP_GAP_MAX_MS, BUSY_GROUP_MEMBERS,
   localHour, dailyCap, groupGapMs, canPost, nextGapMs, recordPost, lock,

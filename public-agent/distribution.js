@@ -651,12 +651,12 @@
     $("extText").textContent = !st2.paired
       ? "התוסף כותב את הפוסט בכל קבוצה במקומכם. מפרסמים רק בקבוצות שאתם כבר חברים בהן."
       : st2.joined_count
-        ? `${st2.joined_count} קבוצות סונכרנו · ${st2.joined_relevant_count || 0} רלוונטיות · ${st2.joined_active_count || 0} פעילות · ${st2.posted_today}/${st2.daily_cap} פרסומים היום`
+        ? `${st2.joined_count} קבוצות סונכרנו · ${st2.joined_relevant_count || 0} רלוונטיות · ${st2.joined_active_count || 0} פעילות · ${st2.daily_cap_disabled ? `${st2.posted_today} פרסומים היום · מכסה יומית כבויה לפיתוח` : `${st2.posted_today}/${st2.daily_cap} פרסומים היום`}`
         : "חסר סנכרון קבוצות — פתחו את התוסף ולחצו «סנכרון הקבוצות שלי».";
     $("extPlan").textContent = st2.plan
       ? `לפי ${st2.joined_active_count || 0} קבוצות פעילות: ${st2.plan.total_posts} פרסומים, ` +
         `כ-${st2.plan.posts_per_day} ביום — כ-${st2.plan.days} ימים לכל הנכסים ` +
-        `(${st2.plan.limited_by === "groups" ? "מוגבל במספר הקבוצות" : "מוגבל במכסה היומית"}).`
+        `(${st2.daily_cap_disabled || st2.plan.limited_by === "groups" ? "מוגבל בכללי הקבוצות" : "מוגבל במכסה היומית"}).`
       : "";
     (st2.mode === "auto" ? $("modeAuto") : $("modeAssist")).checked = true;
     for (const el of [$("modeAssist"), $("modeAuto")]) {
