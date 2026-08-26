@@ -60,7 +60,7 @@
     "    docker run --rm -p 8787:8787 -e BASE_URL=https://<your-tunnel> forly-intake"
   ],
   "scripts": {
-    "test": "node overlay.test.js && node rooms.test.js && node photo-vision.test.js && node pages-auth.test.js && node chatbot-readiness.test.js && node chatbot-config.test.js && node chat-prompt.test.js && node chat-provider.test.js && node leads.test.js && node distribution/config.test.js && node distribution/share-kit.test.js && node distribution/meta.test.js && node og.test.js && node distribution/jobs.test.js && node distribution/instagram.test.js && node distribution/token-vault.test.js && node distribution/session-groups.test.js && node distribution/pacing.test.js && node distribution/scheduler.test.js && node distribution/group-relevance.test.js && node distribution/queue-outcomes.test.js && node extension-cors.test.js",
+    "test": "node overlay.test.js && node rooms.test.js && node photo-vision.test.js && node pages-auth.test.js && node chatbot-readiness.test.js && node chatbot-config.test.js && node chat-prompt.test.js && node chat-provider.test.js && node leads.test.js && node distribution/config.test.js && node distribution/share-kit.test.js && node distribution/meta.test.js && node og.test.js && node distribution/jobs.test.js && node distribution/instagram.test.js && node distribution/token-vault.test.js && node distribution/session-groups.test.js && node distribution/pacing.test.js && node distribution/scheduler.test.js && node distribution/group-relevance.test.js && node distribution/queue-outcomes.test.js && node distribution/selected-session-groups.test.js && node extension-cors.test.js",
     "start": "node index.js",
     "local": "node index.js",
     "g-login": "gcloud auth application-default login",

@@ -594,8 +594,14 @@
     const card = $("myGroupsCard");
     card.hidden = false;
     const summary = joinedSummary || { total: 0, relevant: 0, review: 0, irrelevant: 0, enabled: 0 };
+    const defaults = Array.isArray(st && st.groups) ? st.groups.length : 0;
+    const defaultState = summary.enabled === defaults
+      ? `${defaults} יעד כברירת מחדל`
+      : summary.enabled
+        ? `${defaults} יעד כברירת מחדל — לחצו «שימוש בקבוצות הפעילות» כדי להחיל את ${summary.enabled} הקבוצות הפעילות`
+        : "אין קבוצות יעד כברירת מחדל";
     $("myGroupsSummary").textContent = summary.total
-      ? `${summary.total} קבוצות סונכרנו · ${summary.relevant} רלוונטיות · ${summary.review} לבדיקה · ${summary.enabled} פעילות`
+      ? `${summary.total} קבוצות סונכרנו · ${summary.relevant} רלוונטיות · ${summary.review} לבדיקה · ${summary.enabled} פעילות · ${defaultState}`
       : "אין עדיין קבוצות מסונכרנות. פתחו את התוסף ולחצו «סנכרון הקבוצות שלי».";
     const partial = joinedSync && joinedSync.complete === false;
     $("myGroupsSync").textContent = `${formatSyncDate(joinedSync && joinedSync.scanned_at)}${partial ? " · סריקה חלקית — סנכרנו שוב להשלמה" : ""}`;
@@ -701,7 +707,9 @@
       $("groupsBox").value = "";
       await loadCatalog(currentListingType());
       renderStepper();
-      toast(`${result.count} קבוצות פעילות הוגדרו כברירת מחדל להפצה`);
+      toast(result.refreshed_selected_empty_session
+        ? `${result.count} קבוצות פעילות הוגדרו כברירת מחדל והתור הנבחר עודכן`
+        : `${result.count} קבוצות פעילות הוגדרו כברירת מחדל להפצה`);
     } catch {
       toast("לא הצלחנו להחיל את הקבוצות הפעילות");
     } finally {
