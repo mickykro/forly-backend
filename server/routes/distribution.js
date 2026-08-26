@@ -681,8 +681,21 @@ module.exports = function createDistributionRouter(ctx) {
     if (!session || session.business_phone !== auth.phone) {
       return res.status(404).json({ error: "no_session" });
     }
+    const queueSummary = (session.groups || []).reduce((acc, group) => {
+      acc.total += 1;
+      if (group.state === "posted") acc.posted += 1;
+      else if (group.state === "skipped") acc.skipped += 1;
+      else acc.pending += 1;
+      return acc;
+    }, { total: 0, posted: 0, skipped: 0, pending: 0 });
     const pending = (session.groups || []).filter((g) => g.state !== "posted" && g.state !== "skipped");
-    if (!pending.length) return res.json({ done: true });
+    if (!pending.length) {
+      return res.json({
+        done: true,
+        completion: queueSummary.posted ? "posted_complete" : (queueSummary.skipped ? "no_posts_skipped" : "no_targets"),
+        summary: queueSummary,
+      });
+    }
 
     const page = await db.getPage(session.page_id).catch(() => null);
     // Membership is a hard precondition for the assisted path: we post only
@@ -695,6 +708,7 @@ module.exports = function createDistributionRouter(ctx) {
     const joinedSet = new Set(joinedList.map((g) => g.url));
     const sizeOf = new Map(GROUP_SEED.map((g) => [g.url, g.members]));
 
+    const unavailable = [];
     for (const g of pending) {
       const throttle = await db.getGroupThrottle(g.key).catch(() => null);
       const verdict = pacing.canPost(auth.state, {
@@ -707,8 +721,11 @@ module.exports = function createDistributionRouter(ctx) {
         // Per-group reasons only block that group; agent-wide reasons block
         // everything, so stop asking.
         if (["group_cooldown", "already_posted_here", "group_busy", "not_a_member"]
-          .includes(verdict.reason)) continue;
-        return res.json({ wait: verdict });
+          .includes(verdict.reason)) {
+          unavailable.push({ key: g.key, reason: verdict.reason });
+          continue;
+        }
+        return res.json({ wait: verdict, summary: queueSummary });
       }
       const tracked = shareKit.trackedUrl(session.snapshot.page_url,
         { session: session.id, group: g.token });
@@ -736,7 +753,13 @@ module.exports = function createDistributionRouter(ctx) {
         remaining_today: verdict.remaining_today,
       });
     }
-    res.json({ done: true, skipped_all: true });
+    res.json({
+      wait: {
+        reason: "no_eligible_groups",
+        unavailable: unavailable.slice(0, 20),
+      },
+      summary: queueSummary,
+    });
   });
 
   // The persistent extension panel shows only the active agent's selected
