@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>הפצה — Forly</title>
+<title>חיבורים וקבוצות — Forly</title>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -68,16 +68,9 @@
 
 <div class="container">
   <div class="page-head"><div>
-    <h1>הפצת נכסים</h1>
-    <p>פרסום אוטומטי לדף הפייסבוק שלכם + ערכת שיתוף לקבוצות ולפרופיל</p>
+    <h1>חיבורים וקבוצות</h1>
+    <p>חברו את דף הפייסבוק וייבאו את הקבוצות שלכם. את הנכס עצמו מפרסמים ישירות מכפתור «פרסום» בדשבורד.</p>
   </div></div>
-
-  <div class="step-strip" id="stepStrip">
-    <div class="step" data-step="1"><span class="n">1</span>חיבור פייסבוק</div>
-    <div class="step" data-step="2"><span class="n">2</span>בחירת נכסים</div>
-    <div class="step" data-step="3"><span class="n">3</span>קבוצות</div>
-    <div class="step" data-step="4"><span class="n">4</span>פרסום</div>
-  </div>
 
   <div class="card dist-card" id="entitleCard" hidden>
     <h2>הפצה אינה פעילה בחשבון</h2>
@@ -90,15 +83,15 @@
     <button class="btn btn-gold" id="connectBtn">חיבור חשבון פייסבוק</button>
   </div>
 
-  <div class="card dist-card" id="propsCard" hidden>
+  <div class="card dist-card" id="propsCard" hidden aria-hidden="true">
     <h2>בחירת נכסים לפרסום</h2>
     <p class="muted">סמנו נכס אחד או יותר. נכסים שכבר פורסמו יבקשו אישור לפני פרסום חוזר.</p>
     <div id="propList"></div>
   </div>
 
   <div class="card dist-card" id="groupsCard" hidden>
-    <h2>קבוצות פייסבוק</h2>
-    <p class="muted">סמנו קבוצות מהרשימה המומלצת, או הוסיפו משלכם. מומלץ 5 ומעלה —
+    <h2>קבוצות ברירת מחדל</h2>
+    <p class="muted">אפשר לבחור קבוצות ברירת מחדל. בכל נכס אפשר לאשר או לשנות את הקבוצות בעמוד הפרסום שלו —
       <span id="groupCount"></span></p>
     <input id="catalogFilter" placeholder="סינון לפי עיר או שם קבוצה…">
     <div id="catalogList"></div>
@@ -147,7 +140,7 @@
     <div id="myGroupsList"></div>
   </div>
 
-  <div class="card dist-card" id="publishCard" hidden>
+  <div class="card dist-card" id="publishCard" hidden aria-hidden="true">
     <h2>פרסום</h2>
     <p class="muted" id="publishSummary"></p>
     <button class="btn btn-gold" id="publishBtn">פרסום הנכסים שנבחרו</button>
