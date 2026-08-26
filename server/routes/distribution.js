@@ -447,6 +447,26 @@ module.exports = function createDistributionRouter(ctx) {
     return { catalog, suggestion };
   }
 
+  // Use one implementation whenever a queue's target URLs change. A retained
+  // queue must keep its existing progress for URLs that remain selected, while
+  // a newly added URL receives a fresh tracking key/token. This prevents the
+  // dashboard, property picker, and extension from disagreeing about targets.
+  function queueEntriesForGroups(session, urls) {
+    const byUrl = new Map((session.groups || []).map((g) => [g.url, g]));
+    return urls.map((url) => byUrl.get(url) || {
+      key: jobs.groupKey(url), url,
+      token: crypto.randomBytes(6).toString("base64url"),
+      state: "ready", copied_at: null, opened_at: null,
+      marked_posted_at: null, skipped_at: null, skip_reason: null,
+    });
+  }
+
+  async function replaceShareSessionGroups(session, urls) {
+    const groups = queueEntriesForGroups(session, urls);
+    await db.updateShareSession(session.id, { groups, updated_at: new Date() });
+    return { ...session, groups };
+  }
+
   // The selected queue is server-authoritative. It lets the paired extension
   // discover the current property even when the share page is hosted on a
   // temporary origin that Chrome is not allowed to message from directly.
@@ -505,17 +525,9 @@ module.exports = function createDistributionRouter(ctx) {
       groups,
     });
     // Rebuild the queue's entries, preserving progress on groups that stay.
-    const byUrl = new Map((session.groups || []).map((g) => [g.url, g]));
-    const next = groups.map((url) => byUrl.get(url) || {
-      key: jobs.groupKey(url), url,
-      token: crypto.randomBytes(6).toString("base64url"),
-      state: "ready", copied_at: null, opened_at: null,
-      marked_posted_at: null, skipped_at: null, skip_reason: null,
-    });
-    await db.updateShareSession(session.id, { groups: next, updated_at: new Date() });
+    const fresh = await replaceShareSessionGroups(session, groups);
     await selectShareSession(session.business_phone, session.id);
-    const fresh = { ...session, groups: next };
-    const extra = next.length ? {} : await pickerFor(fresh);
+    const extra = fresh.groups.length ? {} : await pickerFor(fresh);
     res.json(publicSession(fresh, extra));
   });
 
@@ -964,7 +976,28 @@ module.exports = function createDistributionRouter(ctx) {
       updated_at: new Date(),
     });
     businessCache.invalidate(req.user.userId);
-    res.json({ ok: true, groups, count: groups.length });
+
+    // The agent has just made an explicit default-choice. If the selected
+    // property queue was created before that action and contains no targets,
+    // repair THAT empty snapshot immediately. Do not overwrite a non-empty
+    // property-specific queue: it is an intentional per-property choice.
+    const selectedId = String(s.selected_session_id || "");
+    const selectedSession = selectedId ? await db.getShareSession(selectedId) : null;
+    const refreshedSelectedSession = selectedSession &&
+      selectedSession.business_phone === req.user.userId &&
+      Array.isArray(selectedSession.groups) && selectedSession.groups.length === 0
+      ? await replaceShareSessionGroups(selectedSession, groups)
+      : null;
+
+    res.json({
+      ok: true, groups, count: groups.length,
+      selected_session_id: selectedId || null,
+      selected_session_group_count: refreshedSelectedSession
+        ? refreshedSelectedSession.groups.length
+        : (selectedSession && Array.isArray(selectedSession.groups)
+          ? selectedSession.groups.length : null),
+      refreshed_selected_empty_session: !!refreshedSelectedSession,
+    });
   });
 
   // Agent-facing switch + live safety state for the dashboard.
