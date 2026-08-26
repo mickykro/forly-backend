@@ -1036,6 +1036,7 @@ module.exports = function createDistributionRouter(ctx) {
     const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
     const activeJoined = joined.filter((g) => g.enabled && g.relevance !== "irrelevant");
     const dailyCap = pacing.dailyCap(s.first_post_at, Date.now());
+    const dailyCapDisabled = pacing.DAILY_CAP_DISABLED;
 
     // An honest ETA beats a promise: with this many listings and this many
     // joined groups, a full distribution takes this long.
@@ -1044,7 +1045,8 @@ module.exports = function createDistributionRouter(ctx) {
     const plan = activeJoined.length && listings.length
       ? scheduler.forecast({
           propertyCount: listings.length, groupCount: activeJoined.length,
-          dailyCap, groupCooldownMs: pacing.GROUP_COOLDOWN_MS })
+          dailyCap: dailyCapDisabled ? Number.MAX_SAFE_INTEGER : dailyCap,
+          groupCooldownMs: pacing.GROUP_COOLDOWN_MS })
       : null;
 
     res.json({
@@ -1053,7 +1055,8 @@ module.exports = function createDistributionRouter(ctx) {
       locked_until: s.locked_until || null,
       lock_reason: s.lock_reason || null,
       posted_today: posts.filter((p) => new Date(p.at).getTime() > dayAgo).length,
-      daily_cap: dailyCap,
+      daily_cap: dailyCapDisabled ? null : dailyCap,
+      daily_cap_disabled: dailyCapDisabled,
       joined_count: joined.length,
       joined_relevant_count: joined.filter((g) => g.relevance === "relevant").length,
       joined_active_count: activeJoined.length,
