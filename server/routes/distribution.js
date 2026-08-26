@@ -841,10 +841,26 @@ module.exports = function createDistributionRouter(ctx) {
         pacing.lock(auth.state, body.detail || "reported_block"));
       return res.json({ ok: true, locked: true });
     }
+
+    // Firestore cannot safely update an array entry through `groups.<idx>`:
+    // that converts the array into a map on some writes. Rewrite the array for
+    // every result, just like the manual share-queue mark route does.
+    const groups = [...session.groups];
+    if (status === "skipped") {
+      groups[idx] = {
+        ...group, state: "skipped", skipped_at: now,
+        skip_reason: String(body.detail || "extension_skip").slice(0, 60),
+      };
+      await db.updateShareSession(session.id, { groups, updated_at: now });
+      return res.json({ ok: true, skipped: true, advance_immediately: true });
+    }
+    if (status === "failed") {
+      groups[idx] = { ...group, state: "ready" };
+      await db.updateShareSession(session.id, { groups, updated_at: now });
+      return res.json({ ok: true, retry: true, gap_ms: 5 * 60 * 1000 });
+    }
     if (status !== "posted") {
-      await db.updateShareSession(session.id, {
-        [`groups.${idx}.state`]: "ready", updated_at: now });
-      return res.json({ ok: true });
+      return res.status(400).json({ error: "invalid_status" });
     }
 
     await db.saveGroupPosting(auth.phone,
@@ -852,9 +868,8 @@ module.exports = function createDistributionRouter(ctx) {
     // Stamp the shared throttle so no OTHER agent posts into this group for
     // the next few hours.
     await db.touchGroupThrottle(group.key, group.url).catch(() => {});
-    await db.updateShareSession(session.id, {
-      [`groups.${idx}.state`]: "posted",
-      [`groups.${idx}.marked_posted_at`]: now, updated_at: now });
+    groups[idx] = { ...group, state: "posted", marked_posted_at: now };
+    await db.updateShareSession(session.id, { groups, updated_at: now });
     await db.addPostAction({
       business_phone: auth.phone, page_id: session.page_id,
       distribution_id: session.id, target: "facebook_group",
