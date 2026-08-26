@@ -1,16 +1,18 @@
 /*
- * share.js — the group sharing queue (mobile-first, opened from WhatsApp).
+ * publish.js — one property, one publishing workspace.
  *
- * Forly automates the PREPARATION, never the Facebook action: per-group copy
- * with a tracked link, an open button, and states the agent confirms by hand.
- * Nothing here claims a group post that wasn't confirmed by the agent.
+ * Facebook Page posts use the supported backend publishing path. Group sharing
+ * remains manual: Forly prepares copy and direct links, while the agent
+ * chooses when and whether to publish within each Group.
  */
 (() => {
   const $ = (id) => document.getElementById(id);
   const qs = new URLSearchParams(location.search);
-  const S = qs.get("s") || "";
-  const T = qs.get("t") || "";
+  let S = qs.get("s") || "";
+  let T = qs.get("t") || "";
+  const P = qs.get("page") || "";
   let session = null;
+  let pagePoll = null;
 
   const api = (path, opts) => fetch(path, { credentials: "include", ...opts })
     .then(async (r) => {
@@ -37,6 +39,93 @@
       document.body.appendChild(ta); ta.select();
       try { document.execCommand("copy"); done(); } catch { toast("ההעתקה נכשלה — סמנו והעתיקו ידנית"); }
       document.body.removeChild(ta);
+    }
+  }
+
+  function openConnectDialog() {
+    const dialog = $("facebookConnectDialog");
+    $("facebookConnectBtn").href = `/api/distribution/oauth/start?page_id=${encodeURIComponent(session.page_id)}`;
+    if (dialog.showModal) dialog.showModal(); else location.href = $("facebookConnectBtn").href;
+  }
+
+  function setPagePublish({ text, label, disabled = false, postUrl = null, onClick = null }) {
+    $("pagePublishText").textContent = text;
+    const btn = $("pagePublishBtn");
+    btn.textContent = label;
+    btn.disabled = disabled;
+    btn.onclick = onClick;
+    const link = $("pagePostLink");
+    link.classList.toggle("hidden", !postUrl);
+    if (postUrl) link.href = postUrl;
+  }
+
+  async function publishPage(force) {
+    const btn = $("pagePublishBtn");
+    btn.disabled = true;
+    setPagePublish({ text: "שולחים את הנכס לדף הפייסבוק…", label: "⏳ הפרסום בתהליך", disabled: true });
+    try {
+      await api("/api/distribution/publish", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ page_id: session.page_id, force: !!force }),
+      });
+      toast("הפרסום נשלח לדף הפייסבוק ✓");
+      refreshPagePublish(0);
+    } catch (err) {
+      if (err.code === "already_published") {
+        setPagePublish({
+          text: "הנכס כבר פורסם בדף הפייסבוק.", label: "פרסום נוסף בדף", onClick: () => {
+            if (confirm("הנכס כבר פורסם. ליצור פוסט נוסף בדף הפייסבוק?")) publishPage(true);
+          },
+        });
+      } else if (err.code === "not_connected" || err.code === "needs_reconnect") {
+        openConnectDialog();
+      } else {
+        setPagePublish({ text: "הפרסום בדף נכשל. נסו שוב בעוד רגע.", label: "ניסיון פרסום מחדש", onClick: () => publishPage(!!force) });
+      }
+    }
+  }
+
+  async function refreshPagePublish(tick = 0) {
+    clearTimeout(pagePoll);
+    try {
+      const status = await api(`/api/distribution/status?page_id=${encodeURIComponent(session.page_id)}`);
+      const conn = status.connection || {};
+      const listing = status.listing || {};
+      if (!status.entitled) {
+        setPagePublish({ text: "פרסום אוטומטי בדף אינו פעיל בחשבון זה.", label: "פרסום בדף אינו זמין", disabled: true });
+        return;
+      }
+      if (!conn.connected || conn.needs_reconnect) {
+        setPagePublish({
+          text: conn.needs_reconnect
+            ? "חיבור הדף לפייסבוק דורש חידוש לפני פרסום."
+            : "כדי לפרסם בדף העסקי, צריך לחבר את Facebook פעם אחת.",
+          label: conn.needs_reconnect ? "חידוש חיבור Facebook" : "חיבור Facebook לפרסום",
+          onClick: openConnectDialog,
+        });
+        return;
+      }
+      if (listing.in_flight) {
+        setPagePublish({ text: "הנכס מתפרסם בדף הפייסבוק…", label: "⏳ הפרסום בתהליך", disabled: true });
+        if (tick < 30) pagePoll = setTimeout(() => refreshPagePublish(tick + 1), 10000);
+        return;
+      }
+      if (listing.posted) {
+        setPagePublish({
+          text: `הנכס פורסם בדף ${conn.page_name || "הפייסבוק"}.`,
+          label: "פרסום נוסף בדף",
+          postUrl: listing.post_url || session.post_url || null,
+          onClick: () => { if (confirm("ליצור פוסט נוסף בדף הפייסבוק?")) publishPage(true); },
+        });
+        return;
+      }
+      setPagePublish({
+        text: `מוכן לפרסום אוטומטי בדף ${conn.page_name || "הפייסבוק"}.`,
+        label: "פרסום בדף הפייסבוק",
+        onClick: () => publishPage(false),
+      });
+    } catch {
+      setPagePublish({ text: "לא הצלחנו לבדוק את חיבור הדף כרגע.", label: "רענון מצב הפרסום", onClick: () => refreshPagePublish(0) });
     }
   }
 
@@ -242,9 +331,17 @@
   }
 
   (async () => {
-    if (!S) { $("loading").classList.add("hidden"); $("badlink").classList.remove("hidden"); return; }
+    if (!S && !P) { $("loading").classList.add("hidden"); $("badlink").classList.remove("hidden"); return; }
     try {
-      session = await api(`/api/distribution/share-session?s=${encodeURIComponent(S)}&t=${encodeURIComponent(T)}`);
+      if (P) {
+        session = await api("/api/distribution/share-session", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ page_id: P }),
+        });
+        S = session.id;
+      } else {
+        session = await api(`/api/distribution/share-session?s=${encodeURIComponent(S)}&t=${encodeURIComponent(T)}`);
+      }
     } catch {
       $("loading").classList.add("hidden");
       $("badlink").classList.remove("hidden");
@@ -252,7 +349,7 @@
     }
     $("loading").classList.add("hidden");
     $("app").classList.remove("hidden");
-    $("title").textContent = session.title || "שיתוף הנכס";
+    $("title").textContent = session.title || "פרסום הנכס";
     if (session.post_url) {
       const a = document.createElement("a");
       a.href = session.post_url; a.target = "_blank"; a.rel = "noopener";
@@ -265,6 +362,8 @@
     $("copyMain").onclick = () => copy(session.copy);
     $("pickFilter").oninput = renderPicker;
     $("savePick").onclick = () => savePicked();
+    $("facebookConnectCancel").onclick = () => $("facebookConnectDialog").close();
     render();
+    refreshPagePublish(0);
   })();
 })();

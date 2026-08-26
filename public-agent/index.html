@@ -71,7 +71,7 @@
       <p id="countLine"></p>
     </div>
     <div style="display:flex;gap:8px">
-      <a class="btn btn-ghost" href="/distribution.html">הפצה</a>
+      <a class="btn btn-ghost" href="/distribution.html">חיבורים וקבוצות</a>
       <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
     </div>
   </div>
@@ -212,11 +212,9 @@
     if (p.page_url && (p.page_status === "active" || p.page_status === "expiring")) {
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" href="' + p.page_url + '">צפייה</a>');
       actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + p.page_id + '">עריכה</a>');
-      // Distribution slot: starts as a link to the הפצה page; once the
-      // status call resolves (entitled agents) it upgrades to a live control
-      // — one-tap publish / in-progress / link to the post.
-      actions.push('<span class="dist-slot" data-dist="' + p.page_id + '">' +
-        '<a class="btn btn-ghost btn-sm" href="/distribution.html?page=' + p.page_id + '">הפצה</a></span>');
+      // Publishing is property-first. The workspace receives this page ID and
+      // contains the supported Page publish action plus manual Group sharing.
+      actions.push('<a class="btn btn-gold btn-sm" href="/publish.html?page=' + p.page_id + '">פרסום</a>');
     }
     if (p.page_id && p.page_status !== "building") {
       actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + p.page_id + '">הארכה +30</button>');
@@ -248,7 +246,6 @@
       $("#propGrid").innerHTML = items.map(cardHtml).join("");
       $("#emptyState").classList.toggle("hidden", items.length > 0);
       bindActions();
-      loadDistribution();
     }).finally(function () {
       FLY.loaderHide(function () { $("#viewList").classList.remove("hidden"); });
     });

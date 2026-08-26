@@ -1,8 +1,8 @@
 /*
- * distribution.js — the הפצה dashboard page.
+ * distribution.js — optional Facebook and Group settings.
  *
- * Flow (product decision): ① connect Facebook → ② choose property/ies →
- * ③ choose groups → ④ publish. Steps 2–4 stay locked until connected.
+ * Properties are published from their own dashboard card. This page only
+ * manages the Page connection, Group inventory import, and default targets.
  * All server data is written with textContent / value — never innerHTML.
  */
 (() => {
@@ -704,11 +704,8 @@
     catch { return; }               // 401 already redirected
     if (!st.entitled) { $("entitleCard").hidden = false; return; }
     renderConnection();
-    $("publishCard").hidden = false;
     renderGroups();
     renderExtension();
-    loadProps();
-    renderStepper();
     if (new URLSearchParams(location.search).get("connected") === "1") {
       toast("החיבור לפייסבוק הושלם ✅");
       history.replaceState(null, "", location.pathname + location.hash);

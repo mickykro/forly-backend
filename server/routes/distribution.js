@@ -61,10 +61,24 @@ module.exports = function createDistributionRouter(ctx) {
     return list.length ? list : meta.SCOPES;
   };
 
+  // OAuth state is signed, but never accept an arbitrary return URL from the
+  // initial request. A property workspace is the only supported direct return.
+  const publishWorkspacePath = (pageId) => {
+    const id = String(pageId || "").trim();
+    return id && id.length <= 160 ? `/publish.html?page=${encodeURIComponent(id)}&connected=1` : null;
+  };
+  const oauthReturnPath = (state) =>
+    String((state && state.return_to) || "").startsWith("/publish.html?")
+      ? state.return_to
+      : "/distribution.html?connected=1";
+
   // ── GET /oauth/start — logged-in agent → Facebook consent ──
   router.get("/oauth/start", requireAuth(authSecret), (req, res) => {
     if (!envOk()) return res.status(503).json({ error: "distribution_not_configured" });
-    const state = meta.makeState({ phone: req.user.userId }, authSecret);
+    const state = meta.makeState({
+      phone: req.user.userId,
+      return_to: publishWorkspacePath(req.query.page_id),
+    }, authSecret);
     res.redirect(meta.oauthStartUrl({
       appId: process.env.META_APP_ID,
       redirectUrl: process.env.META_REDIRECT_URL,
@@ -101,6 +115,8 @@ module.exports = function createDistributionRouter(ctx) {
         "לא ניתנה הרשאה. אפשר לנסות שוב מעמוד ההפצה בדשבורד."));
     }
     try {
+      const returnTo = oauthReturnPath(state);
+      const returnLabel = returnTo.startsWith("/publish.html?") ? "לעמוד הפרסום" : "לעמוד ההפצה";
       const short = await meta.exchangeCode({ code: String(req.query.code),
         appId: process.env.META_APP_ID, appSecret: process.env.META_APP_SECRET,
         redirectUrl: process.env.META_REDIRECT_URL, graphVersion: gv() });
@@ -115,16 +131,16 @@ module.exports = function createDistributionRouter(ctx) {
       if (pages.length === 1) {
         await storeConnection(state.phone, long.access_token, pages[0]);
         return res.type("html").send(card("✅ החיבור הושלם",
-          `הדף "${pages[0].name}" חובר. מחזירים אתכם לעמוד ההפצה…`,
-          `<a href="/distribution.html?connected=1"><button>לעמוד ההפצה</button></a>`,
-          "/distribution.html?connected=1"));
+          `הדף "${pages[0].name}" חובר. מחזירים אתכם לעמוד הפרסום…`,
+          `<a href="${esc(returnTo)}"><button>${returnLabel}</button></a>`,
+          returnTo));
       }
       // Multi-page: stash the candidates, re-sign a fresh state, render picker.
       await db.setConnection(state.phone, {
         pending_pages: pages.map((p) => ({ id: p.id, name: p.name, access_token: p.access_token })),
         user_token: long.access_token,
       });
-      const pickState = meta.makeState({ phone: state.phone }, authSecret);
+      const pickState = meta.makeState({ phone: state.phone, return_to: returnTo }, authSecret);
       const buttons = pages.map((p) =>
         `<form method="POST" action="/api/distribution/oauth/select">` +
         `<input type="hidden" name="state" value="${esc(pickState)}">` +
@@ -154,10 +170,12 @@ module.exports = function createDistributionRouter(ctx) {
         "התחילו שוב את החיבור מעמוד ההפצה בדשבורד."));
     }
     await storeConnection(state.phone, conn.user_token, pick);
+    const returnTo = oauthReturnPath(state);
+    const returnLabel = returnTo.startsWith("/publish.html?") ? "לעמוד הפרסום" : "לעמוד ההפצה";
     res.type("html").send(card("✅ החיבור הושלם",
-      `הדף "${pick.name}" חובר. מחזירים אתכם לעמוד ההפצה…`,
-      `<a href="/distribution.html?connected=1"><button>לעמוד ההפצה</button></a>`,
-      "/distribution.html?connected=1"));
+      `הדף "${pick.name}" חובר. מחזירים אתכם לעמוד הפרסום…`,
+      `<a href="${esc(returnTo)}"><button>${returnLabel}</button></a>`,
+      returnTo));
   });
 
   // ── GET /confirm?d=&t= — the one-tap WhatsApp link ──
