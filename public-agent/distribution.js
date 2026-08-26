@@ -58,9 +58,12 @@
       renderCatalog();
     };
     const text = document.createElement("span");
+    const policy = group.agent_policy === "explicitly_allowed"
+      ? " · פרסום מתווכים נתמך"
+      : " · בדקו את כללי הקבוצה";
     text.textContent = group.name +
       (showCity && group.city ? ` · ${group.city}` : "") +
-      (group.members ? ` · ~${Math.round(group.members / 1000)}K חברים` : "");
+      (group.members ? ` · ~${Math.round(group.members / 1000)}K חברים` : "") + policy;
     label.append(checkbox, text);
     return label;
   }

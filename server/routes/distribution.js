@@ -272,9 +272,13 @@ module.exports = function createDistributionRouter(ctx) {
           city: g.city || null, members: Number(g.members) || null,
           listing_types: types,
           languages: Array.isArray(g.languages) ? g.languages : [],
-          // "unknown" is honest: group rules can't be inferred from a name —
-          // only a curator's verified entry may say allowed/owner_only.
+          // "unknown" is honest: group rules cannot be inferred from a name.
+          // The curated 2026-08 set may use explicitly_allowed only when its
+          // stored public evidence names a broker/agent/professional listing rule.
           agent_policy: g.agent_policy || "unknown",
+          policy_evidence: g.policy_evidence || null,
+          source_url: g.source_url || null,
+          curated_at: g.curated_at || null,
           match: !want || !types.length || types.includes(want),
         };
       });
