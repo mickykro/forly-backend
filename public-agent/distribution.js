@@ -631,9 +631,10 @@
     }
   }
 
-  // ── the extension: pairing, mode choice, and an honest ETA ──
-  // The extension id comes from the server so a rebuilt/unpacked extension
-  // doesn't need a code change here.
+  // ── optional browser Group importer ────────────────────────────────
+  // Meta does not provide a backend-readable inventory of general Group
+  // memberships. The paired local companion imports names/URLs only; property
+  // sharing itself stays entirely in this backend share page.
   async function renderExtension() {
     let st2;
     try { st2 = await api("/api/distribution/extension/status"); }
@@ -641,43 +642,23 @@
     $("extCard").hidden = false;
     loadMyGroups();
     const chip = $("extChip");
-    if (st2.locked_until && new Date(st2.locked_until) > new Date()) {
-      chip.textContent = "מושהה"; chip.className = "conn-chip warn";
-    } else if (st2.paired) {
+    if (st2.paired) {
       chip.textContent = "מחובר"; chip.className = "conn-chip ok";
     } else {
       chip.textContent = "לא מחובר"; chip.className = "conn-chip warn";
     }
     $("extText").textContent = !st2.paired
-      ? "התוסף כותב את הפוסט בכל קבוצה במקומכם. מפרסמים רק בקבוצות שאתם כבר חברים בהן."
+      ? "חברו את מייבא הקבוצות כדי לייבא את רשימת הקבוצות מהחשבון הפעיל בפייסבוק. השיתוף עצמו מתבצע ידנית מערכת השיתוף של הנכס."
       : st2.joined_count
-        ? `${st2.joined_count} קבוצות סונכרנו · ${st2.joined_relevant_count || 0} רלוונטיות · ${st2.joined_active_count || 0} פעילות · ${st2.daily_cap_disabled ? `${st2.posted_today} פרסומים היום · מכסה יומית כבויה לפיתוח` : `${st2.posted_today}/${st2.daily_cap} פרסומים היום`}`
-        : "חסר סנכרון קבוצות — פתחו את התוסף ולחצו «סנכרון הקבוצות שלי».";
-    $("extPlan").textContent = st2.plan
-      ? `לפי ${st2.joined_active_count || 0} קבוצות פעילות: ${st2.plan.total_posts} פרסומים, ` +
-        `כ-${st2.plan.posts_per_day} ביום — כ-${st2.plan.days} ימים לכל הנכסים ` +
-        `(${st2.daily_cap_disabled || st2.plan.limited_by === "groups" ? "מוגבל בכללי הקבוצות" : "מוגבל במכסה היומית"}).`
-      : "";
-    (st2.mode === "auto" ? $("modeAuto") : $("modeAssist")).checked = true;
-    for (const el of [$("modeAssist"), $("modeAuto")]) {
-      el.onchange = () => {
-        if (el.value === "auto" && !confirm(
-          "מצב אוטומטי מגדיל את הסיכון לחסימה זמנית של חשבון הפייסבוק האישי שלכם.\n" +
-          "להפעיל בכל זאת?")) { $("modeAssist").checked = true; return; }
-        api("/api/distribution/extension/mode", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ mode: el.value }),
-        }).then(() => toast(el.value === "auto" ? "מצב אוטומטי הופעל" : "מצב אישור ידני הופעל"))
-          .catch(() => toast("העדכון נכשל"));
-      };
-    }
+        ? `${st2.joined_count} קבוצות סונכרנו · ${st2.joined_relevant_count || 0} רלוונטיות · ${st2.joined_active_count || 0} פעילות. בחרו נכס ופתחו את ערכת השיתוף כדי להעתיק, לפתוח ולסמן כל קבוצה ידנית.`
+        : "חסר סנכרון קבוצות — פתחו את מייבא הקבוצות ולחצו «סנכרון הקבוצות שלי».";
     $("extPair").onclick = async () => {
       try {
         const r = await api("/api/distribution/extension/pair", { method: "POST" });
         const id = r.extension_id;
         if (id && chrome?.runtime?.sendMessage) {
           chrome.runtime.sendMessage(id,
-            { forly: "pair", token: r.token, base: location.origin, mode: r.mode },
+            { forly: "pair", token: r.token, base: location.origin },
             () => toast("התוסף חובר ✓"));
         } else {
           // No extension present (or a dev domain): give them the token.

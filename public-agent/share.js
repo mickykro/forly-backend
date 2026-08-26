@@ -217,68 +217,11 @@
       });
       toast(`${session.groups.length} קבוצות שויכו לנכס ✓`);
       render();
-      previewInExtension();
     } catch { toast("השמירה נכשלה — נסו שוב"); }
-  }
-
-  function renderExtensionStart() {
-    const hasGroups = !!((session.groups || []).length);
-    const card = $("extensionStartCard");
-    const button = $("startExtension");
-    const text = $("extensionStartText");
-    const available = hasGroups && !!session.extension_id;
-    card.classList.toggle("hidden", !available);
-    if (!available) return;
-    button.disabled = false;
-    button.textContent = "התחלה בתוסף";
-    text.textContent = "התוסף יעבור על הקבוצות שנבחרו לפי המצב שבחרתם. אפשר להמשיך להשתמש בקישורים הידניים אם התוסף אינו מותקן בדפדפן הזה.";
-  }
-
-  function previewInExtension() {
-    if (!session.extension_id || !(session.groups || []).length) return;
-    if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) return;
-    chrome.runtime.sendMessage(session.extension_id, { forly: "preview-session", session: session.id }, (reply) => {
-      if (chrome.runtime.lastError || !reply || !reply.ok) return;
-      $("extensionStartText").textContent = "הנכס והקבוצות שנבחרו מוצגים כעת בחלון התוסף. לחצו «התחלה בתוסף» כדי להתחיל את התור.";
-    });
-  }
-
-  function startInExtension() {
-    const button = $("startExtension");
-    if (!session.extension_id || !(session.groups || []).length) return;
-    if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
-      toast("התוסף אינו זמין בדפדפן הזה — השתמשו בקישורים הידניים או פתחו את הדף בכרום שבו התוסף מותקן.");
-      return;
-    }
-    button.disabled = true;
-    button.textContent = "מחבר לתוסף…";
-    chrome.runtime.sendMessage(session.extension_id, { forly: "start", session: session.id }, (reply) => {
-      const lastError = chrome.runtime.lastError;
-      button.disabled = false;
-      if (lastError || !reply) {
-        button.textContent = "התחלה בתוסף";
-        toast("התוסף לא הגיב. ודאו שהוא מותקן, טעון ומחובר לחשבון Forly.");
-      } else if (reply.ok) {
-        button.textContent = reply.already_running ? "התוסף כבר פועל ✓" : "התוסף התחיל ✓";
-        $("extensionStartText").textContent = reply.already_running
-          ? "התוסף כבר עובד על הנכס הזה. אפשר לעקוב בחלון התוסף."
-          : "התוסף קיבל את התור ויפתח את הקבוצה הבאה שמאושרת לפרסום.";
-        toast("התור נשלח לתוסף ✓");
-      } else {
-        button.textContent = "התחלה בתוסף";
-        const message = {
-          unpaired: "חברו את התוסף לחשבון בעמוד ההפצה לפני התחלה.",
-          already_running: "התוסף כבר עובד על נכס אחר. עצרו אותו בחלון התוסף לפני החלפה.",
-          missing_session: "לא נמצא תור שיתוף תקף לנכס הזה.",
-        }[reply.error] || "לא הצלחנו להתחיל את התוסף.";
-        toast(message);
-      }
-    });
   }
 
   function render() {
     renderPicker();
-    renderExtensionStart();
     const groups = session.groups || [];
     const done = groups.filter((g) => g.state === "posted" || g.state === "skipped").length;
     const posted = groups.filter((g) => g.state === "posted").length;
@@ -322,8 +265,6 @@
     $("copyMain").onclick = () => copy(session.copy);
     $("pickFilter").oninput = renderPicker;
     $("savePick").onclick = () => savePicked();
-    $("startExtension").onclick = startInExtension;
     render();
-    previewInExtension();
   })();
 })();

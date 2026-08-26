@@ -683,11 +683,15 @@ module.exports = function createDistributionRouter(ctx) {
     res.json({ ok: true, session_id: session.id, group_count: (session.groups || []).length });
   });
 
-  // What should the extension do next? Either one group task, or an honest
-  // "wait, and here's why" — never a queue the client can race through.
+  // Retired: property sharing is now fully backend/manual. This endpoint is
+  // intentionally kept as a clear 410 response so an older installed browser
+  // companion cannot revive the abandoned Facebook posting workflow.
   router.get("/extension/next", async (req, res) => {
     const auth = await extAuth(req);
     if (!auth) return res.status(401).json({ error: "unpaired" });
+    return res.status(410).json({ error: "extension_posting_retired" });
+
+    /* Legacy task scheduler retained below for historical migration context.
     const sessionId = String(req.query.s || "");
     const session = sessionId ? await db.getShareSession(sessionId) : null;
     if (!session || session.business_phone !== auth.phone) {
@@ -772,6 +776,7 @@ module.exports = function createDistributionRouter(ctx) {
       },
       summary: queueSummary,
     });
+    */
   });
 
   // The persistent extension panel shows only the active agent's selected
@@ -819,12 +824,14 @@ module.exports = function createDistributionRouter(ctx) {
     res.json({ ok: true });
   });
 
-  // The extension reports what actually happened. "posted" is the agent's
-  // own confirmation (assist mode) or a verified submit (auto mode); any
-  // block/checkpoint freezes this agent for 24h.
+  // Retired alongside /extension/next. Manual outcomes are recorded through
+  // /share-session/mark from the backend share page instead.
   router.post("/extension/result", async (req, res) => {
     const auth = await extAuth(req);
     if (!auth) return res.status(401).json({ error: "unpaired" });
+    return res.status(410).json({ error: "extension_posting_retired" });
+
+    /* Legacy extension result handling retained below for historical migration context.
     const body = req.body || {};
     const session = await db.getShareSession(String(body.session_id || ""));
     if (!session || session.business_phone !== auth.phone) {
@@ -887,6 +894,7 @@ module.exports = function createDistributionRouter(ctx) {
       source: (auth.state.mode || "assist") === "assist" ? "agent_confirmed" : "extension_auto",
     });
     res.json({ ok: true, gap_ms: pacing.nextGapMs() });
+    */
   });
 
   // The groups this agent is actually a member of, synced from their own
