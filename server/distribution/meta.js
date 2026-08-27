@@ -161,9 +161,67 @@ const commentWithPhoto = ({ objectId, pageToken, message, photoUrl, graphVersion
 // the WhatsApp summary link without another Graph read.
 const postUrl = (postId) => `https://www.facebook.com/${postId}`;
 
+/*
+ * Engagement on a published Page post.
+ *
+ * Split into two calls on purpose, because they need DIFFERENT permissions:
+ *
+ *  - Counts (likes / comments / shares) need `pages_read_engagement`, which is
+ *    in SCOPES and every connected agent has already granted. These work today,
+ *    with no App Review and no reconnect.
+ *  - Reach and impressions need `read_insights`, which this app has NOT been
+ *    reviewed for. That call is therefore allowed to fail: the numbers we CAN
+ *    read still land, and `insights` says why the rest is missing rather than
+ *    the whole refresh failing.
+ *
+ * `.summary(true).limit(0)` asks for the count and none of the rows — a like
+ * total, not a page of likers, so the response stays small on a popular post.
+ */
+const summaryCount = (edge) =>
+  Number(edge && edge.summary && edge.summary.total_count) || 0;
+
+// Graph returns insights as [{name, values:[{value}]}] — flatten by metric name.
+function readInsights(payload) {
+  const out = {};
+  for (const row of (payload && payload.data) || []) {
+    const v = row && Array.isArray(row.values) && row.values[0];
+    out[row.name] = Number(v && v.value) || 0;
+  }
+  return out;
+}
+
+async function fetchPostMetrics({ postId, pageToken, graphVersion = DEFAULT_VERSION,
+  fetchFn = fetch, timeoutMs = 20000 } = {}) {
+  const counts = await graphCall(`/${postId}`, { graphVersion, fetchFn, timeoutMs,
+    token: pageToken,
+    params: { fields: "likes.summary(true).limit(0),comments.summary(true).limit(0),shares" } });
+  const out = {
+    likes: summaryCount(counts.likes),
+    comments: summaryCount(counts.comments),
+    shares: Number(counts.shares && counts.shares.count) || 0,
+    reach: null, impressions: null, video_views: null,
+    insights: "ok",
+  };
+  try {
+    const raw = await graphCall(`/${postId}/insights`, { graphVersion, fetchFn, timeoutMs,
+      token: pageToken,
+      params: { metric: "post_impressions_unique,post_impressions,post_video_views" } });
+    const m = readInsights(raw);
+    out.reach = m.post_impressions_unique != null ? m.post_impressions_unique : null;
+    out.impressions = m.post_impressions != null ? m.post_impressions : null;
+    out.video_views = m.post_video_views != null ? m.post_video_views : null;
+  } catch (err) {
+    // Never let a missing scope cost us the counts we already have. A dead
+    // token is different — that is the caller's problem, so it propagates.
+    if (isAuthError(err)) throw err;
+    out.insights = isPermissionError(err) ? "not_permitted" : "unavailable";
+  }
+  return out;
+}
+
 module.exports = {
   DEFAULT_VERSION, SCOPES, GraphError, isAuthError, isPermissionError,
   makeState, readState, oauthStartUrl, graphCall,
   exchangeCode, longLivedToken, listPages, publishVideo, publishPhotos,
-  commentWithPhoto, postUrl,
+  commentWithPhoto, postUrl, fetchPostMetrics,
 };

@@ -105,5 +105,68 @@ const meta = require("./meta");
   assert.equal(ccalls[0].body.get("message"), "עוד תמונות");
 
   assert.equal(meta.postUrl("123_456"), "https://www.facebook.com/123_456");
+
+  // ── fetchPostMetrics: counts always, insights best-effort ──
+  {
+    const COUNTS = { likes: { summary: { total_count: 12 } },
+      comments: { summary: { total_count: 3 } }, shares: { count: 2 } };
+    const INSIGHTS = { data: [
+      { name: "post_impressions_unique", values: [{ value: 340 }] },
+      { name: "post_impressions", values: [{ value: 512 }] },
+      { name: "post_video_views", values: [{ value: 87 }] },
+    ] };
+    // Route by path so the two calls can answer differently.
+    const twoCall = (insightsResponder) => {
+      const seen = [];
+      const fetchFn = async (url) => {
+        const u = String(url);
+        seen.push(u);
+        if (u.includes("/insights")) return insightsResponder();
+        return { ok: true, json: async () => COUNTS };
+      };
+      return { fetchFn, seen };
+    };
+
+    const ok = twoCall(() => ({ ok: true, json: async () => INSIGHTS }));
+    const m = await meta.fetchPostMetrics({ postId: "P_1", pageToken: "PT",
+      graphVersion: "v21.0", fetchFn: ok.fetchFn });
+    assert.deepEqual(m, { likes: 12, comments: 3, shares: 2, reach: 340,
+      impressions: 512, video_views: 87, insights: "ok" });
+    // .summary(true).limit(0) — the total, not a page of likers.
+    assert.ok(ok.seen[0].includes("likes.summary%28true%29.limit%280%29"),
+      "asks for counts only");
+
+    // read_insights is not granted (App Review pending) ⇒ reach is null, but
+    // the counts we CAN read must still come back.
+    const denied = twoCall(() => ({ ok: false, status: 403,
+      json: async () => ({ error: { message: "(#200) requires read_insights", code: 200 } }) }));
+    const m2 = await meta.fetchPostMetrics({ postId: "P_1", pageToken: "PT",
+      fetchFn: denied.fetchFn });
+    assert.equal(m2.insights, "not_permitted");
+    assert.equal(m2.reach, null);
+    assert.equal(m2.likes, 12, "counts survive a missing insights scope");
+
+    // Any other insights failure degrades the same way, labelled differently.
+    const broke = twoCall(() => { throw new Error("network"); });
+    const m3 = await meta.fetchPostMetrics({ postId: "P_1", pageToken: "PT",
+      fetchFn: broke.fetchFn });
+    assert.equal(m3.insights, "unavailable");
+    assert.equal(m3.comments, 3);
+
+    // A dead token is NOT a degraded read — it propagates so the caller stops.
+    const dead = twoCall(() => ({ ok: false, status: 401,
+      json: async () => ({ error: { message: "expired", code: 190 } }) }));
+    await assert.rejects(() => meta.fetchPostMetrics({ postId: "P_1", pageToken: "PT",
+      fetchFn: dead.fetchFn }), (e) => meta.isAuthError(e), "auth errors propagate");
+
+    // Absent edges (a post with no likes at all) read as 0, never NaN.
+    const empty = { fetchFn: async (url) => String(url).includes("/insights")
+      ? { ok: true, json: async () => ({ data: [] }) }
+      : { ok: true, json: async () => ({}) } };
+    const m4 = await meta.fetchPostMetrics({ postId: "P_1", pageToken: "PT",
+      fetchFn: empty.fetchFn });
+    assert.deepEqual([m4.likes, m4.comments, m4.shares], [0, 0, 0]);
+  }
+
   console.log("meta.test.js OK");
 })().catch((e) => { console.error(e); process.exit(1); });

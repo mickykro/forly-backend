@@ -38,6 +38,20 @@ serves every agent; each agent grants it access to their own Page via
 `instagram_basic`, `instagram_content_publish` — exactly the list in
 `server/distribution/meta.js SCOPES`. Nothing else.
 
+### Post engagement, and the one number that is missing
+
+The dashboard shows likes, comments and shares on each published Page post.
+Those come from `pages_read_engagement`, which is already in SCOPES — they
+work in Dev Mode, with no review and no reconnect.
+
+**Reach and impressions need `read_insights`, which this app does NOT
+request.** Adding it is a deliberate decision, not an oversight: it is a
+separate App Review item, and adding it to SCOPES forces every
+already-connected agent through a reconnect for fresh consent. Until then
+`fetchPostMetrics` returns `insights: "not_permitted"` with `reach: null`,
+the counts still land, and the dashboard simply omits the reach figure. If
+you do add it later, add it to SCOPES and expect the reconnect.
+
 ### Enabling them (use cases, not a permissions list)
 
 Meta now groups permissions into **use cases** (מקרי שימוש):

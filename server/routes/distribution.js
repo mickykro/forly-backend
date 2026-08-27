@@ -17,6 +17,7 @@ const db = require("../db");
 const jobs = require("../distribution/jobs");
 const meta = require("../distribution/meta");
 const shareKit = require("../distribution/share-kit");
+const metrics = require("../distribution/metrics");
 const config = require("../distribution/config");
 const businessCache = require("../business-cache");
 
@@ -50,6 +51,9 @@ module.exports = function createDistributionRouter(ctx) {
   const envOk = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET &&
     process.env.META_REDIRECT_URL);
   const gv = () => process.env.META_GRAPH_VERSION || meta.DEFAULT_VERSION;
+  // Background Page-post engagement refresh — see distribution/metrics.js.
+  const metricsDeps = { db, meta, now: () => new Date(),
+    get graphVersion() { return gv(); } };
   // META_SCOPES (comma-separated) narrows the OAuth request while some
   // permissions aren't yet enabled on the Meta app; absent ⇒ full SCOPES.
   const activeScopes = () => {
@@ -609,16 +613,22 @@ module.exports = function createDistributionRouter(ctx) {
         db.listListingsByPhone(phone).then((ls) => ls.filter((l) => l.page_id)),
         groupsFor(),
       ]);
+      const seen = [];
       await Promise.all(mine.map(async (l) => {
         const dists = await db.listDistributionsByPage(l.page_id);
+        seen.push(...dists);
         const posted = dists.find((d) => jobs.hasLivePost([d]));
         listings[l.page_id] = {
           posted: !!posted,
           post_url: posted ? posted.targets.facebook_page.post_url : null,
           in_flight: dists.some((d) => d.status === "queued" || d.status === "running"),
           groups: groupProgressOf(l.page_id),
+          metrics: metrics.publicMetrics(metrics.metricsOf(posted)),
         };
       }));
+      // Cached numbers went out above; anything stale refreshes behind the
+      // response and lands on the next load. Never awaited (metrics.js).
+      metrics.refreshStaleInBackground(metricsDeps, seen, conn);
       out.listings = listings;
     }
     const pageId = typeof req.query.page_id === "string" ? req.query.page_id : "";
@@ -642,7 +652,9 @@ module.exports = function createDistributionRouter(ctx) {
           ? dists.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))[0].status
           : null,
         groups: (await groupsFor())(pageId),
+        metrics: metrics.publicMetrics(metrics.metricsOf(posted)),
       };
+      metrics.refreshStaleInBackground(metricsDeps, dists, conn);
     }
     res.json(out);
   });

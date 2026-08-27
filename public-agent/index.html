@@ -21,6 +21,10 @@
   .dist-tag.ok{background:rgba(31,175,90,.12);color:#157A3F}
   .dist-tag.partial{background:var(--gold-faint);color:#8A6A1E}
   .dist-tag .n{font-variant-numeric:tabular-nums}
+  /* Engagement on the live Facebook post. Cached server-side, so it is the
+     last known figure rather than a live read — see distribution/metrics.js. */
+  .dist-stats{flex-basis:100%;font-size:.76rem;color:var(--ink-soft);
+    font-variant-numeric:tabular-nums;display:flex;gap:10px;flex-wrap:wrap}
 </style>
 </head>
 <body class="agent-page dashboard-page">
@@ -296,8 +300,23 @@
         ? distTag(done >= total ? "ok" : done ? "partial" : "",
             '👥 קבוצות <span class="n" dir="ltr">' + done + "/" + total + "</span>")
         : distTag("", "👥 לא נבחרו קבוצות");
-      row.innerHTML = feed + groups;
+      row.innerHTML = feed + groups + statsHtml(L);
     });
+  }
+
+  // Engagement on the Facebook post. Groups get no equivalent — Forly only
+  // knows the agent said they posted there, so there is nothing to count.
+  function statsHtml(L) {
+    var m = L.metrics;
+    if (!L.posted || !m) return "";
+    var bits = ["❤️ " + (Number(m.likes) || 0),
+      "💬 " + (Number(m.comments) || 0),
+      "↗ " + (Number(m.shares) || 0)];
+    // reach is null until the app is approved for read_insights — show the
+    // figure when it exists, and simply nothing when it does not.
+    if (m.reach != null) bits.push("👁 " + Number(m.reach));
+    return '<div class="dist-stats" dir="ltr">' +
+      bits.map(function (b) { return "<span>" + b + "</span>"; }).join("") + "</div>";
   }
 
   function bindActions() {
