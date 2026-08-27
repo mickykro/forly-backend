@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), groupPosting: new Map(), groupThrottle: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map() };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -317,42 +317,6 @@ async function addGroupCatalogEntry(doc) {
   return String(mem.groupCatalog.length);
 }
 
-// ── distribution: cross-agent group throttle ──
-// One doc per group URL, shared by EVERY agent: per-account limits can't see
-// that five different agents just posted the same domain into one group.
-async function getGroupThrottle(key) {
-  if (db) {
-    const d = await db.collection("group_throttle").doc(key).get();
-    return d.exists ? d.data() : null;
-  }
-  return mem.groupThrottle.get(key) || null;
-}
-
-async function touchGroupThrottle(key, groupUrl) {
-  const rec = { group_url: groupUrl, last_post_at: new Date() };
-  if (db) await db.collection("group_throttle").doc(key).set(rec, { merge: true });
-  else mem.groupThrottle.set(key, rec);
-  return rec;
-}
-
-// ── distribution: assisted group-posting state (pacing + lockouts) ──
-// Its own doc per agent: it must exist and be writable even for an agent who
-// never connected a Facebook Page, and it is written on every assisted post.
-async function getGroupPosting(phone) {
-  if (db) {
-    const d = await db.collection("group_posting").doc(phone).get();
-    return d.exists ? d.data() : null;
-  }
-  return mem.groupPosting.get(phone) || null;
-}
-
-async function saveGroupPosting(phone, state) {
-  const rec = { ...state, business_phone: phone, updated_at: new Date() };
-  if (db) await db.collection("group_posting").doc(phone).set(rec);
-  else mem.groupPosting.set(phone, rec);
-  return rec;
-}
-
 // ── distribution: per-property group selections ──
 // Deliberately its own collection, NOT a field on property_pages: savePage()
 // overwrites the whole page doc every time n8n rebuilds a page, which would
@@ -473,5 +437,4 @@ module.exports = {
   listGroupCatalog, addGroupCatalogEntry,
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession, healGroups,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
-  getGroupPosting, saveGroupPosting, getGroupThrottle, touchGroupThrottle,
 };

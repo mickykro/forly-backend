@@ -1,566 +1,4150 @@
 [
- {
-  "name": "דירות להשכרה רמת גן / גבעתיים",
-  "url": "https://www.facebook.com/groups/402682483445663",
-  "city": "רמת גן",
-  "members": 138000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות ברמת גן - גבעתיים להשכרה בעוד חודש +",
-  "url": "https://www.facebook.com/groups/1068642559922565",
-  "city": "רמת גן",
-  "members": 104000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה ברמת גן",
-  "url": "https://www.facebook.com/groups/253957624766723",
-  "city": "רמת גן",
-  "members": 97000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "לוח דירות תל אביב",
-  "url": "https://www.facebook.com/groups/665278950172707",
-  "city": "תל אביב",
-  "members": 88000,
-  "listing_types": [
-   "sale"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה גבעתיים - רמת גן - תל אביב",
-  "url": "https://www.facebook.com/groups/186810449287215",
-  "city": "רמת גן",
-  "members": 82000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה מכירה תל אביב Tel Aviv Apartments",
-  "url": "https://www.facebook.com/groups/1196843027043598",
-  "city": "תל אביב",
-  "members": 70000,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "he",
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "סאבלט תל אביב יפו והמרכז - Sublet Tel Aviv",
-  "url": "https://www.facebook.com/groups/515098902161687",
-  "city": "תל אביב",
-  "members": 66000,
-  "listing_types": [
-   "rent",
-   "sublet"
-  ],
-  "languages": [
-   "he",
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה בתל אביב רמת השרון הרצליה",
-  "url": "https://www.facebook.com/groups/1642482759337919",
-  "city": "תל אביב",
-  "members": 63000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה בירושלים",
-  "url": "https://www.facebook.com/groups/apartmentsrentjerusalem",
-  "city": "ירושלים",
-  "members": 107000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות למכירה והשכרה בירושלים לפני שמתפרסמות",
-  "url": "https://www.facebook.com/groups/157890721001581",
-  "city": "ירושלים",
-  "members": 50000,
-  "listing_types": [
-   "sale"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות זולות באמת בירושלים",
-  "url": "https://www.facebook.com/groups/1387264628220377",
-  "city": "ירושלים",
-  "members": 47000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות שותפים בירושלים",
-  "url": "https://www.facebook.com/groups/jerusalemroommates",
-  "city": "ירושלים",
-  "members": 40000,
-  "listing_types": [
-   "rent",
-   "roommates"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Доска объявлений Хайфа и Крайот",
-  "url": "https://www.facebook.com/groups/702696598399546",
-  "city": "חיפה",
-  "members": 60000,
-  "listing_types": [
-   "sale"
-  ],
-  "languages": [
-   "ru"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות לסטודנטים חיפה",
-  "url": "https://www.facebook.com/groups/110907419268500",
-  "city": "חיפה",
-  "members": 56000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות חיפה Haifa City Apartments",
-  "url": "https://www.facebook.com/groups/haifacityapartments",
-  "city": "חיפה",
-  "members": 44000,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "he",
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות למכירה להשכרה בחיפה נשר קריות",
-  "url": "https://www.facebook.com/groups/273403923451682",
-  "city": "חיפה",
-  "members": 29000,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "סטודנטים - השכרת דירות סובב טכניון, חיפה וקריות",
-  "url": "https://www.facebook.com/groups/599082480989761",
-  "city": "חיפה",
-  "members": 25000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה בבאר שבע",
-  "url": "https://www.facebook.com/groups/864908790226104",
-  "city": "באר שבע",
-  "members": 77000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "סטודנטים דירות להשכרה באר שבע",
-  "url": "https://www.facebook.com/groups/661709787239277",
-  "city": "באר שבע",
-  "members": 76000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה בבאר שבע - לכניסה מידית",
-  "url": "https://www.facebook.com/groups/2302505389980235",
-  "city": "באר שבע",
-  "members": 54000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות למכירה והשכרה באשקלון",
-  "url": "https://www.facebook.com/groups/293774011042858",
-  "city": "אשקלון",
-  "members": 53000,
-  "listing_types": [
-   "sale"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה אשקלון בלבד!",
-  "url": "https://www.facebook.com/groups/130369664285144",
-  "city": "אשקלון",
-  "members": 43000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה ומכירה אשדוד והסביבה",
-  "url": "https://www.facebook.com/groups/1624818081000281",
-  "city": "אשדוד",
-  "members": 35000,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה בהרצליה, רעננה, כפר סבא, רמת השרון והוד השרון",
-  "url": "https://www.facebook.com/groups/dirotlehascarabeherzelia",
-  "city": "השרון",
-  "members": 85000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה בפתח תקווה",
-  "url": "https://www.facebook.com/groups/683985451631971",
-  "city": "פתח תקווה",
-  "members": 78000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה חולון בת ים ראשון לציון",
-  "url": "https://www.facebook.com/groups/963153170558917",
-  "city": "חולון ובת ים",
-  "members": 75000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה בהרצליה בלבד",
-  "url": "https://www.facebook.com/groups/550870795608828",
-  "city": "הרצליה",
-  "members": 68000,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות בראשון לציון, רחובות, נס ציונה, באר יעקב",
-  "url": "https://www.facebook.com/groups/801398193551481",
-  "city": "ראשון לציון",
-  "members": 67000,
-  "listing_types": [
-   "sale"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה ומכירה בעיר אילת והסביבה",
-  "url": "https://www.facebook.com/groups/197805427313558",
-  "city": "אילת",
-  "members": 50000,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות להשכרה למכירה נתניה והסביבה",
-  "url": "https://www.facebook.com/groups/1784140705161722",
-  "city": "נתניה",
-  "members": 36000,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות למכירה ולהשכרה במודיעין והסביבה",
-  "url": "https://www.facebook.com/groups/diramodiin",
-  "city": "מודיעין",
-  "members": 33000,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Secret Haifa",
-  "url": "https://www.facebook.com/groups/445887735495943",
-  "city": "חיפה",
-  "members": null,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Apartments/roommates in Haifa",
-  "url": "https://www.facebook.com/groups/57812275694",
-  "city": "חיפה",
-  "members": null,
-  "listing_types": [
-   "rent",
-   "roommates"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Secret Jerusalem",
-  "url": "https://www.facebook.com/groups/secretjerusalem",
-  "city": "ירושלים",
-  "members": null,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "House Hunting in Israel",
-  "url": "https://www.facebook.com/groups/househuntinginisrael",
-  "city": "ארצי",
-  "members": null,
-  "listing_types": [
-   "sale"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Looking for an Apartment in Jerusalem",
-  "url": "https://www.facebook.com/groups/JerusalemApartments",
-  "city": "ירושלים",
-  "members": null,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Jerusalem Apartments - Buy/Sell/Rent/Trade!",
-  "url": "https://www.facebook.com/groups/1383311245241458",
-  "city": "ירושלים",
-  "members": null,
-  "listing_types": [
-   "sale"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Secret Tel Aviv",
-  "url": "https://www.facebook.com/groups/secrettelaviv",
-  "city": "תל אביב",
-  "members": null,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Tel Aviv Apartments - Buy/Sell/Rent/Trade!!!!",
-  "url": "https://www.facebook.com/groups/188430365379",
-  "city": "תל אביב",
-  "members": null,
-  "listing_types": [
-   "sale"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Looking for an apartment in Tel Aviv",
-  "url": "https://www.facebook.com/groups/TelAvivApartments",
-  "city": "תל אביב",
-  "members": null,
-  "listing_types": [
-   "rent"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "Apartments/roommates in Tel Aviv",
-  "url": "https://www.facebook.com/groups/telavivrealestate",
-  "city": "תל אביב",
-  "members": null,
-  "listing_types": [
-   "rent",
-   "roommates"
-  ],
-  "languages": [
-   "en"
-  ],
-  "agent_policy": "unknown"
- },
- {
-  "name": "דירות במחירים שפויים גבעתיים רמת גן והסביבה",
-  "url": "https://www.facebook.com/groups/1386194455009158",
-  "city": "גבעתיים",
-  "members": null,
-  "listing_types": [
-   "sale",
-   "rent"
-  ],
-  "languages": [
-   "he"
-  ],
-  "agent_policy": "unknown"
- }
+  {
+    "name": "דירות להשכרה רמת גן / גבעתיים",
+    "url": "https://www.facebook.com/groups/402682483445663",
+    "city": "רמת גן",
+    "members": 138000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות ברמת גן - גבעתיים להשכרה בעוד חודש +",
+    "url": "https://www.facebook.com/groups/1068642559922565",
+    "city": "רמת גן",
+    "members": 104000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה ברמת גן",
+    "url": "https://www.facebook.com/groups/253957624766723",
+    "city": "רמת גן",
+    "members": 97000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "לוח דירות תל אביב",
+    "url": "https://www.facebook.com/groups/665278950172707",
+    "city": "תל אביב",
+    "members": 88000,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה גבעתיים - רמת גן - תל אביב",
+    "url": "https://www.facebook.com/groups/186810449287215",
+    "city": "רמת גן",
+    "members": 82000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה מכירה תל אביב Tel Aviv Apartments",
+    "url": "https://www.facebook.com/groups/1196843027043598",
+    "city": "תל אביב",
+    "members": 70000,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "סאבלט תל אביב יפו והמרכז - Sublet Tel Aviv",
+    "url": "https://www.facebook.com/groups/515098902161687",
+    "city": "תל אביב",
+    "members": 66000,
+    "listing_types": [
+      "rent",
+      "sublet"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה בתל אביב רמת השרון הרצליה",
+    "url": "https://www.facebook.com/groups/1642482759337919",
+    "city": "תל אביב",
+    "members": 63000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה בירושלים",
+    "url": "https://www.facebook.com/groups/apartmentsrentjerusalem",
+    "city": "ירושלים",
+    "members": 107000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות למכירה והשכרה בירושלים לפני שמתפרסמות",
+    "url": "https://www.facebook.com/groups/157890721001581",
+    "city": "ירושלים",
+    "members": 50000,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות זולות באמת בירושלים",
+    "url": "https://www.facebook.com/groups/1387264628220377",
+    "city": "ירושלים",
+    "members": 47000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות שותפים בירושלים",
+    "url": "https://www.facebook.com/groups/jerusalemroommates",
+    "city": "ירושלים",
+    "members": 40000,
+    "listing_types": [
+      "rent",
+      "roommates"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Доска объявлений Хайфа и Крайот",
+    "url": "https://www.facebook.com/groups/702696598399546",
+    "city": "חיפה",
+    "members": 60000,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "ru"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות לסטודנטים חיפה",
+    "url": "https://www.facebook.com/groups/110907419268500",
+    "city": "חיפה",
+    "members": 56000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות חיפה Haifa City Apartments",
+    "url": "https://www.facebook.com/groups/haifacityapartments",
+    "city": "חיפה",
+    "members": 44000,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות למכירה להשכרה בחיפה נשר קריות",
+    "url": "https://www.facebook.com/groups/273403923451682",
+    "city": "חיפה",
+    "members": 29000,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "סטודנטים - השכרת דירות סובב טכניון, חיפה וקריות",
+    "url": "https://www.facebook.com/groups/599082480989761",
+    "city": "חיפה",
+    "members": 25000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה בבאר שבע",
+    "url": "https://www.facebook.com/groups/864908790226104",
+    "city": "באר שבע",
+    "members": 77000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "סטודנטים דירות להשכרה באר שבע",
+    "url": "https://www.facebook.com/groups/661709787239277",
+    "city": "באר שבע",
+    "members": 76000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה בבאר שבע - לכניסה מידית",
+    "url": "https://www.facebook.com/groups/2302505389980235",
+    "city": "באר שבע",
+    "members": 54000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות למכירה והשכרה באשקלון",
+    "url": "https://www.facebook.com/groups/293774011042858",
+    "city": "אשקלון",
+    "members": 53000,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה אשקלון בלבד!",
+    "url": "https://www.facebook.com/groups/130369664285144",
+    "city": "אשקלון",
+    "members": 43000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה ומכירה אשדוד והסביבה",
+    "url": "https://www.facebook.com/groups/1624818081000281",
+    "city": "אשדוד",
+    "members": 35000,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה בהרצליה, רעננה, כפר סבא, רמת השרון והוד השרון",
+    "url": "https://www.facebook.com/groups/dirotlehascarabeherzelia",
+    "city": "השרון",
+    "members": 85000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה בפתח תקווה",
+    "url": "https://www.facebook.com/groups/683985451631971",
+    "city": "פתח תקווה",
+    "members": 78000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה חולון בת ים ראשון לציון",
+    "url": "https://www.facebook.com/groups/963153170558917",
+    "city": "חולון ובת ים",
+    "members": 75000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה בהרצליה בלבד",
+    "url": "https://www.facebook.com/groups/550870795608828",
+    "city": "הרצליה",
+    "members": 68000,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות בראשון לציון, רחובות, נס ציונה, באר יעקב",
+    "url": "https://www.facebook.com/groups/801398193551481",
+    "city": "ראשון לציון",
+    "members": 67000,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה ומכירה בעיר אילת והסביבה",
+    "url": "https://www.facebook.com/groups/197805427313558",
+    "city": "אילת",
+    "members": 50000,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות להשכרה למכירה נתניה והסביבה",
+    "url": "https://www.facebook.com/groups/1784140705161722",
+    "city": "נתניה",
+    "members": 36000,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות למכירה ולהשכרה במודיעין והסביבה",
+    "url": "https://www.facebook.com/groups/diramodiin",
+    "city": "מודיעין",
+    "members": 33000,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Secret Haifa",
+    "url": "https://www.facebook.com/groups/445887735495943",
+    "city": "חיפה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Apartments/roommates in Haifa",
+    "url": "https://www.facebook.com/groups/57812275694",
+    "city": "חיפה",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "roommates"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Secret Jerusalem",
+    "url": "https://www.facebook.com/groups/secretjerusalem",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "House Hunting in Israel",
+    "url": "https://www.facebook.com/groups/househuntinginisrael",
+    "city": "ארצי",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Looking for an Apartment in Jerusalem",
+    "url": "https://www.facebook.com/groups/JerusalemApartments",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Jerusalem Apartments - Buy/Sell/Rent/Trade!",
+    "url": "https://www.facebook.com/groups/1383311245241458",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Secret Tel Aviv",
+    "url": "https://www.facebook.com/groups/secrettelaviv",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Tel Aviv Apartments - Buy/Sell/Rent/Trade!!!!",
+    "url": "https://www.facebook.com/groups/188430365379",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Looking for an apartment in Tel Aviv",
+    "url": "https://www.facebook.com/groups/TelAvivApartments",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "Apartments/roommates in Tel Aviv",
+    "url": "https://www.facebook.com/groups/telavivrealestate",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "roommates"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "דירות במחירים שפויים גבעתיים רמת גן והסביבה",
+    "url": "https://www.facebook.com/groups/1386194455009158",
+    "city": "גבעתיים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "unknown"
+  },
+  {
+    "name": "שת\"פ בנדל\"ן... מתווכים... יזמים... משקיעים",
+    "url": "https://www.facebook.com/groups/2098241677079216",
+    "city": "Beersheba",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "commercial"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מטרת הקבוצה להעלות פרסומים שיווקים בנושא נדל\"ן בארץ בלבד בנושאים: מסחרי, מניב, מגרשים לרוויה, צמודי קרקע, חקלאי מנהל/פרטי. צרכי לקוחות ע\"י המתווכים או יזמים",
+    "source_url": "https://www.facebook.com/groups/2098241677079216/about/",
+    "research_segment": "Israeli real-estate investor, property investment, and development groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Best Apartments for Rent in Jerusalem",
+    "url": "https://www.facebook.com/groups/jerusalemrentals",
+    "city": "Jerusalem",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Listings by property management companies (e.g., Gal Property Management) explicitly mentioning brokerage fees are present.",
+    "source_url": "https://www.facebook.com/groups/jerusalemrentals/about/",
+    "research_segment": "Jerusalem English-language and Anglo: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "פסגות אפק - ראש העין 🧿",
+    "url": "https://www.facebook.com/groups/214782530254327",
+    "city": "ראש העין",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פרסום מסחרי (למשל ע\"י מתווכים, סוכנים או בעלי מקצוע) מותר אך ורק באישור מנהל הקבוצה ולאחר הסדרת תשלום בהתאם למחירון.",
+    "source_url": "https://www.facebook.com/groups/214782530254327/about/",
+    "research_segment": "Ra'anana, Kfar Saba, Hod HaSharon, and Rosh HaAyin real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות נס ציונה",
+    "url": "https://www.facebook.com/groups/539602591571678",
+    "city": "נס ציונה",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin is a realtor; snippet mentions Marketing properties... real estate consulting before buying, selling, renting",
+    "source_url": "https://www.facebook.com/groups/539602591571678/about",
+    "research_segment": "Rehovot, Nes Ziona, Yavne, and Mazkeret Batya: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "מתווכים בירושלים והסביבה",
+    "url": "https://www.facebook.com/groups/1197394768611031",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "ברוכים הבאים לקבוצת המתווכים של ירושלים! שימו לב - כל נכס שאתם מעלים זה אך ורק אם הוא פתוח לשיתוף פעולה בין מתווכים",
+    "source_url": "https://www.facebook.com/groups/1197394768611031/about/",
+    "research_segment": "Jerusalem real-estate brokers, agents, and listing groups in Hebrew",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות / בתים להשכרה במושבים בשפלה",
+    "url": "https://www.facebook.com/groups/1414853725269536",
+    "city": "שפלה דרומית",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group is managed by \"פנטהאוס - ייעוץ ושיווק נדל\"ן\" (Penthouse - Real Estate Consulting and Marketing).",
+    "source_url": "https://www.facebook.com/groups/1414853725269536/about",
+    "research_segment": "Kiryat Gat, Kiryat Malachi, and southern Shephelah: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "שת\"פ בין מתווכים",
+    "url": "https://www.facebook.com/groups/232271123478533",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "אנחנו מייק וענבל, מתווכים מורשים והבעלים של קבוצת לוטוס נדל״ן... עבודה צמודה בתחום השכרת וקניית נכסים",
+    "source_url": "https://www.facebook.com/groups/232271123478533/about/",
+    "research_segment": "Tel Aviv and Jaffa real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Immobilier Real Estate (Real Group Estate) Israel",
+    "url": "https://www.facebook.com/groups/Immobilier.rge.israel",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "fr"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Nous acceptons les annonces propriétaire direct et les agences si elles acceptent l'inter-cabinet.",
+    "source_url": "https://www.facebook.com/groups/Immobilier.rge.israel/about/",
+    "research_segment": "French-language and Anglo Israeli property broker and real-estate listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "לוח דירות למכירה והשכרה בגבעת שמואל, ובקעת אונו.",
+    "url": "https://www.facebook.com/groups/826305304451954",
+    "city": "גבעת שמואל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "About: 'ניתן לפרסם נכסים למכירה והשכרה, תיווך או פרטי' (Can post sale/rent, brokerage or private)",
+    "source_url": "https://www.facebook.com/groups/826305304451954/about",
+    "research_segment": "Petah Tikva and Givat Shmuel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל\"ן מסחרי, מבנה תעשייה , משרדים ומבנים לוגיסטיים להשכרה",
+    "url": "https://www.facebook.com/groups/662159944125752",
+    "city": "ארצי",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "משרד התיווך קאשי נכסים הקים את קבוצה זו במטרה ליצור שיתופי פעולה בין לקוחות אנשים פרטיים ומתווכים",
+    "source_url": "https://www.facebook.com/groups/662159944125752/about/",
+    "research_segment": "Israel new-project, land, and real-estate marketing Groups explicitly allowing professionals",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה / השכרה באשקלון",
+    "url": "https://www.facebook.com/groups/1821230364820138",
+    "city": "אשקלון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "About section says 'דירות למכירה והשכרה תיווך וללא תיווך באשקלון' (with and without brokerage).",
+    "source_url": "https://www.facebook.com/groups/1821230364820138/about",
+    "research_segment": "Ashkelon, Sderot, and southern coastal plain: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה בנשר והסביבה",
+    "url": "https://www.facebook.com/groups/1191530541331645",
+    "city": "נשר",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin Haniel Yarkoni is a licensed real estate agent (License 3205015) posting listings.",
+    "source_url": "https://www.facebook.com/groups/1191530541331645/about",
+    "research_segment": "Krayot, Nesher, and Tirat Carmel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן תל אביב",
+    "url": "https://www.facebook.com/groups/1167663593370128",
+    "city": "תל אביב - יפו",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent",
+      "commercial"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הקבוצה עוסקת בתיווך נדל\"ן פרטי ומסחרי, יזמות, בניה, קבוצות רכישה, תיווך להשקעה ועוד.",
+    "source_url": "https://www.facebook.com/groups/1167663593370128/about/",
+    "research_segment": "Tel Aviv–Jaffa: sale, rent, sublet, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל\"ן לכולם איזור השרון /רעננה/כ\"ס/הוד השרון/הרצליה/רמה\"ש",
+    "url": "https://www.facebook.com/groups/208640406998322",
+    "city": "רעננה, כפר סבא, הוד השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "כאן תוכלו להתעדכן בכל הנכסים באיזור השרון! נכסים מתיווך/נכסים פרטיים/נכסים מסחריים!",
+    "source_url": "https://www.facebook.com/groups/208640406998322/about",
+    "research_segment": "Ra'anana, Kfar Saba, and Hod HaSharon: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "שותפים לדירות בתל אביב",
+    "url": "https://www.facebook.com/groups/7298031916930520",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים? פרסום מודעה בקבוצה עולה כסף. כל פוסט תיווך מתבצע בתיאום ובתשלום מראש.",
+    "source_url": "https://www.facebook.com/groups/7298031916930520/about/",
+    "research_segment": "Roommates and shared apartments across Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "The Sublet Tel Aviv - סאבלט תל אביב",
+    "url": "https://www.facebook.com/groups/ThesubletTelaviv",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מודעות תיווך בתיאום עם האדמין (Brokerage ads in coordination with the admin)",
+    "source_url": "https://www.facebook.com/groups/ThesubletTelaviv/about",
+    "research_segment": "Tel Aviv short-term rental and sublet groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "תיווך דירות באר-שבע והסביבה",
+    "url": "https://www.facebook.com/groups/538948499579901",
+    "city": "באר שבע",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "קבוצה זאת הוקמה בעקבות דרישותם של מתווכים רבים.. כאן זה המקום שלנו כמתווכים",
+    "source_url": "https://www.facebook.com/groups/538948499579901/about/",
+    "research_segment": "Be'er Sheva, Negev, Ashdod, and Ashkelon brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל\"ן ביבנה 2026 - דירות למכירה ולהשכרה",
+    "url": "https://www.facebook.com/groups/225736267618668",
+    "city": "יבנה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "קבוצת אבירם חורי | Aviram Hori Group נדל״ן... מספר רישיון תיווך: 311102459",
+    "source_url": "https://www.facebook.com/groups/225736267618668/about/",
+    "research_segment": "Rehovot, Nes Ziona, Yavne, and Beer Yaakov real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Israel's Real Estate 🇮🇱",
+    "url": "https://www.facebook.com/groups/tovado",
+    "city": "Israel Nationwide",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group is managed by 'My Agent Profile', a service for real estate agents.",
+    "source_url": "https://www.facebook.com/groups/tovado/about",
+    "research_segment": "Israel nationwide buy, sell, rent, apartment, and home groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה /מכירה באשקלון",
+    "url": "https://www.facebook.com/groups/171837669939292",
+    "city": "אשקלון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "קבוצה זו נוצרה עבור פרסום של מכירה של הנכסים שלכם או נכסים של מתווכים.",
+    "source_url": "https://www.facebook.com/groups/171837669939292/about/",
+    "research_segment": "Israel nationwide apartment sale and rental Groups explicitly allowing brokers",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "גבעתיים ר\"ג ת\"א דירות למכירה",
+    "url": "https://www.facebook.com/groups/245180319490207",
+    "city": "גבעתיים ורמת גן",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "כאן ניתן לפרסם דירות למכירה בגבעתיים רמת גן ותל אביב😊 פרטיים ומתווכים",
+    "source_url": "https://www.facebook.com/groups/245180319490207/about/",
+    "research_segment": "Ramat Gan and Givatayim: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה לסטודנטים ברחובות בכל מוסדות הלימוד של רחובות",
+    "url": "https://www.facebook.com/groups/1439770649656799",
+    "city": "רחובות",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Rule 10: מתווכים מתבקשים ליצור קשר עם מנהלי הקבוצה ולתאם את השתתפותם.",
+    "source_url": "https://www.facebook.com/groups/1439770649656799/about/",
+    "research_segment": "Student housing and apartments across Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ומכירה במודיעין ללא תיווך",
+    "url": "https://www.facebook.com/groups/apartmentsmodiin",
+    "city": "מודיעין-מכבים-רעות",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פרסום דירות מתיווך בימי שני וחמישי בלבד ובאישור מנהלי הקבוצה בלבד!",
+    "source_url": "https://www.facebook.com/groups/apartmentsmodiin/about",
+    "research_segment": "Modi'in-Maccabim-Re'ut: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה בעכו",
+    "url": "https://www.facebook.com/groups/141600959022510",
+    "city": "עכו",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin is a real estate consultant (חמודי חסן יועץ נדל\"ן ומשכנתאות)",
+    "source_url": "https://www.facebook.com/groups/141600959022510/about",
+    "research_segment": "Acre, Nahariya, and Western Galilee: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "מאגר דירות הסטודנטים בבאר שבע",
+    "url": "https://www.facebook.com/groups/456436147719966",
+    "city": "באר שבע",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin is \"איל נדל\"ן - דירות להשקעה בבאר שבע\" (real estate agency)",
+    "source_url": "https://www.facebook.com/groups/456436147719966/about/",
+    "research_segment": "Be'er Sheva and the Negev: sale, rent, student housing and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Аренда Без Маклера в Израиле 🎯",
+    "url": "https://www.facebook.com/groups/kvartiriil",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "маклерские объявления... только по согласованию с Администратором",
+    "source_url": "https://www.facebook.com/groups/kvartiriil/about/",
+    "research_segment": "Russian-language Israeli property broker and real-estate listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות מפה לאוזן ברמת גן",
+    "url": "https://www.facebook.com/groups/192850633573",
+    "city": "רמת גן",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "ניתן ליצור קשר עמנו ולפנות אלינו בכל שאלה... פרסום מודעות עסקיות",
+    "source_url": "https://www.facebook.com/groups/192850633573/about/",
+    "research_segment": "Ramat Gan and Givatayim real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "НЕТАНИЯ - ТОЛЬКО квартиры на съем | שכירויות בלבד",
+    "url": "https://www.facebook.com/groups/rentinnetanya",
+    "city": "נתניה",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "ru",
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by Кристиנה Абрамов консультант по недвижимости в Нетании",
+    "source_url": "https://www.facebook.com/groups/rentinnetanya/about/",
+    "research_segment": "Netanya and Emek Hefer: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "עפולה והסביבה",
+    "url": "https://www.facebook.com/groups/503599004054398",
+    "city": "עפולה / נוף הגליל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים מנצרת ונוף הגליל – זה בשבילכם! ... חיבור לרשת מתווכים",
+    "source_url": "https://www.facebook.com/groups/503599004054398/about/",
+    "research_segment": "Galilee, Afula, Carmiel, and Tiberias brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ולמכירה בראשון לציון",
+    "url": "https://www.facebook.com/groups/369537586455596",
+    "city": "ראשון לציון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים צריכים לפרסם גילוי נאות מודעה ללא כל הפרטים לא תעלה",
+    "source_url": "https://www.facebook.com/groups/369537586455596/about",
+    "research_segment": "Rishon LeZion, Holon, and Bat Yam: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "משקיעים בנדל״ן",
+    "url": "https://www.facebook.com/groups/729659191803062",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "אנו מזמינים גם יזמים, מתווכים, עו\"ד המתמחים במקרקעין ומיסוי",
+    "source_url": "https://www.facebook.com/groups/729659191803062/about/",
+    "research_segment": "Israel investment property, development, land, and real-estate investor groups that allow professionals",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות הרצליה, רמת השרון, הוד השרון, רעננה וכפר סבא",
+    "url": "https://www.facebook.com/groups/894105193968092",
+    "city": "הרצליה, רמת השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הקבוצה פונה למוכרים, קונים, שוכרים, משכירים, מתווכים ועוד.",
+    "source_url": "https://www.facebook.com/groups/894105193968092/about/",
+    "research_segment": "Herzliya and Ramat HaSharon: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "פרלמנט נדל\"ן אשדוד ,אשקלון והסביבה (דירות, מגרשים,מכירה והשכרה )",
+    "url": "https://www.facebook.com/groups/1788318694741200",
+    "city": "אשדוד",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin is אנגלו - סכסון סניף אשקלון והסביבה (major agency)",
+    "source_url": "https://www.facebook.com/groups/1788318694741200/about/",
+    "research_segment": "Ashdod: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "גליל ים החדשה - דירות למכירה והשכרה - הקבוצה הרשמית!",
+    "url": "https://www.facebook.com/groups/realestateglilyam",
+    "city": "הרצליה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים איכותיים עם לקוחות רלוונטיים מוזמנים לשיתוף פעולה",
+    "source_url": "https://www.facebook.com/groups/realestateglilyam/about/",
+    "research_segment": "Herzliya, Ramat HaSharon, and Sharon real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בני ברק - דירות להשכרה ומכירה מתחם הסופרים",
+    "url": "https://www.facebook.com/groups/504540295273217",
+    "city": "בני ברק",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הקבוצה מאפשרת לפרסם מודעות להשכרה ומכירה, פרטיות ותיווך",
+    "source_url": "https://www.facebook.com/groups/504540295273217/about/",
+    "research_segment": "Bnei Brak, Elad, and Modi'in Illit: housing and property groups with public posting rules",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים למכירה בגליל העליון | הרחבות, קיבוצים, מושבים",
+    "url": "https://www.facebook.com/groups/nadlangalil",
+    "city": "גליל עליון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by בתים למכירה ולהשכרה בגליל - יקי תיווך נדל\"ן",
+    "source_url": "https://www.facebook.com/groups/nadlangalil/about/",
+    "research_segment": "Kibbutz, moshav, rural-home, and community housing groups in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Maale Adumim Real Estate",
+    "url": "https://www.facebook.com/groups/maaleadumimrealestate",
+    "city": "מעלה אדומים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en",
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Esther Cohen, a real estate agent at Maale Adumim",
+    "source_url": "https://www.facebook.com/groups/maaleadumimrealestate/about/",
+    "research_segment": "Beit Shemesh, Efrat, Gush Etzion, and Maale Adumim brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל\"ן מסחרי",
+    "url": "https://www.facebook.com/groups/581262349259655",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "אם כותב הפוסט הינו מתווך/כת , יש לציין זאת בפוסט",
+    "source_url": "https://www.facebook.com/groups/581262349259655/about/",
+    "research_segment": "Israel commercial real-estate brokers, office, retail, warehouse, and industrial listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן חיפה - מכירה בלבד",
+    "url": "https://www.facebook.com/groups/nadlan.haifa1",
+    "city": "חיפה",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Description: הצעות נדל\"ן מפרטיים וממתווכי האזור",
+    "source_url": "https://www.facebook.com/groups/nadlan.haifa1/about",
+    "research_segment": "Haifa Hebrew-language: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "פרסום נדלן פרטי מסחרי בין מתווכים נתניה והסביבה",
+    "url": "https://www.facebook.com/groups/1096364397489018",
+    "city": "נתניה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פרסום נדלן פרטי מסחרי בין מתווכים נתניה והסביבה",
+    "source_url": "https://www.facebook.com/groups/1096364397489018/about/",
+    "research_segment": "Netanya, Hadera, and Emek Hefer real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה והשכרה בת\"א לב העיר מרכז והצפון הישן",
+    "url": "https://www.facebook.com/groups/1445210362209803",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "דירות ובתים למכירה והשכרה ע\"י פרטיים ומתווכים",
+    "source_url": "https://www.facebook.com/groups/1445210362209803/about/",
+    "research_segment": "Israel city real-estate groups with explicit ‘פרטיים ומתווכים’ or ‘תיווך’ posting policies",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות מפה לאוזן בלוד , רמלה",
+    "url": "https://www.facebook.com/groups/512147718851893",
+    "city": "לוד",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "עמיר לוי מתווך נדל\"ן... רישיון תיווך: 314169",
+    "source_url": "https://www.facebook.com/groups/512147718851893/about/",
+    "research_segment": "Modi'in, Lod, Ramla, and Shoham real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה בדרום תל אביב",
+    "url": "https://www.facebook.com/groups/191591524188001",
+    "city": "דרום תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "לגבי מתווכים-יש לציין בהודעה שאתם מתווכים",
+    "source_url": "https://www.facebook.com/groups/191591524188001/about/",
+    "research_segment": "Rishon LeZion, Holon, Bat Yam, and south Tel Aviv real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה | מכירה בירושלים",
+    "url": "https://www.facebook.com/groups/108387882545483",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "אפשר לפרסם ולשתף גם למתווכים וגם פרטיים",
+    "source_url": "https://www.facebook.com/groups/108387882545483/about/",
+    "research_segment": "Jerusalem Hebrew-language: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ומכירה בחיפה והסביבה - פרטי ותיווך שקוף",
+    "url": "https://www.facebook.com/groups/1176156872409885",
+    "city": "חיפה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "תיווך שקוף: מתווכים מורשים לפרסם",
+    "source_url": "https://www.facebook.com/groups/1176156872409885/about/",
+    "research_segment": "Haifa real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים למכירה והשכרה במושבה זכרון יעקב",
+    "url": "https://www.facebook.com/groups/663887884831125",
+    "city": "זכרון יעקב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin includes משכן הברון נדל\"ן",
+    "source_url": "https://www.facebook.com/groups/663887884831125/about/",
+    "research_segment": "Pardes Hanna-Karkur, Zichron Yaakov, and Binyamina: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "שיתוף פעולה בין מתווכים עכו נהריה חיפה והקריות",
+    "url": "https://www.facebook.com/groups/363157517618508",
+    "city": "עכו, נהריה, חיפה, קריות",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "שיתוף פעולה בין מתווכים",
+    "source_url": "https://www.facebook.com/groups/363157517618508/about/",
+    "research_segment": "Krayot, Acre, Nahariya, and northern coast brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות 🏆🏆 להשכרה ולמכירה בתל אביב",
+    "url": "https://www.facebook.com/groups/334021647014275",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים מוזמנים לשת\"פ",
+    "source_url": "https://www.facebook.com/groups/334021647014275/about/",
+    "research_segment": "Israel short-term rental, sublet, and property marketing Groups explicitly allowing agents",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Janglo",
+    "url": "https://www.facebook.com/groups/52095716979",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Main Facebook group for the Janglo classifieds platform, which is primarily used for real estate listings including those by agents.",
+    "source_url": "https://www.facebook.com/groups/52095716979/",
+    "research_segment": "New immigrant housing and aliyah apartment groups in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה כרמיאל",
+    "url": "https://www.facebook.com/groups/1055443847984924",
+    "city": "כרמיאל",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group described as 'קבוצת פרסום חופשית' (Free advertising group) with visible agent posts from Shahar Nagati - Naveh Real Estate.",
+    "source_url": "https://www.facebook.com/groups/1055443847984924/",
+    "research_segment": "Carmiel, Afula, Tiberias, and the Galilee: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נכסים בנדלן לציבור הדתי לאומי",
+    "url": "https://www.facebook.com/groups/myycommunity",
+    "city": "ישראל",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בקבוצה זו יוצגו נכסים שמותאמים לציבור הדתי לאומי : פרויקטים מקבלן, קבוצות רכישה, פריסיילים, מבצעים ונכסים להשקעה",
+    "source_url": "https://www.facebook.com/groups/myycommunity/",
+    "research_segment": "Israel real-estate groups focused on property sale listings and new projects",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה ולהשקעה באילת",
+    "url": "https://www.facebook.com/groups/801584169944931",
+    "city": "אילת",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group description mentions 'מתווכים המעוניינים לפרסם בקבוצה' and posts include agent license numbers.",
+    "source_url": "https://www.facebook.com/groups/801584169944931/",
+    "research_segment": "Eilat and Arava: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "RBS / BS Real Estate Everything, with and without agents' fees",
+    "url": "https://www.facebook.com/groups/356805995253770",
+    "city": "Beit Shemesh",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Everyone welcome to post regarding Real Estate services in RBS/BS... with and without agents' fees",
+    "source_url": "https://www.facebook.com/groups/356805995253770/",
+    "research_segment": "Beit Shemesh and surrounding communities: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Квартиры в Ашдоде ( Недвижимость в Ашдоде)/דירות באשדוד",
+    "url": "https://www.facebook.com/groups/992569020761120",
+    "city": "Ашдод",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "ru",
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "About section explicitly states posts are accepted from both private individuals and brokers.",
+    "source_url": "https://www.facebook.com/groups/992569020761120/",
+    "research_segment": "Russian-language Israeli property and housing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "משרדים להשכרה/למכירה מפה לאוזן",
+    "url": "https://www.facebook.com/groups/393229491193075",
+    "city": "ישראל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Featured posts from agents like Rami Ben Shushan are visible; largest commercial group.",
+    "source_url": "https://www.facebook.com/groups/393229491193075/",
+    "research_segment": "Commercial property, office, retail, warehouse, and industrial real estate in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "שיתוף פעולה בין מתווכים",
+    "url": "https://www.facebook.com/groups/shituf",
+    "city": "ישראל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "שתוף פעולה בין מתווכים קבוצה שנפתחה למען חברים למקצוע המעוניינים לשתף פעולה",
+    "source_url": "https://www.facebook.com/groups/shituf/",
+    "research_segment": "Israeli real-estate broker, agent, listing, and property-marketing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Israel Property Find, Buy or Sell Israel Real Estate",
+    "url": "https://www.facebook.com/groups/israelproperty",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en",
+      "fr"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Real Agents, owners and property developers post your properties for sale",
+    "source_url": "https://www.facebook.com/groups/israelproperty/",
+    "research_segment": "French-language and English-language Israel property and housing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "🇮🇱🇮🇱🇮🇱 דירות למכירה במעלה אדומים 🇮🇱🇮🇱🇮🇱",
+    "url": "https://www.facebook.com/groups/167131908208881",
+    "city": "מעלה אדומים",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Post by \"Michel Shayanmehr\" mentions \"בלעדית חדשה\" (broker exclusivity).",
+    "source_url": "https://www.facebook.com/groups/167131908208881/",
+    "research_segment": "Ma'ale Adumim, Efrat, and Gush Etzion: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Jerusalem Real Estate",
+    "url": "https://www.facebook.com/groups/2364784660478177",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Leah Salter... brokers. It specializes in marketing unique, high-end",
+    "source_url": "https://www.facebook.com/groups/2364784660478177/",
+    "research_segment": "Jerusalem English-language property brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ומכירה - ראש העין והסביבה",
+    "url": "https://www.facebook.com/groups/1708849729366373",
+    "city": "ראש העין",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "משרדי תיווך המעוניינים לפרסם - יש לפנות בפרטי למנהלי הקבוצה",
+    "source_url": "https://www.facebook.com/groups/1708849729366373/",
+    "research_segment": "Harish, Rosh HaAyin, Shoham, and central new towns: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "כל אילת חברים",
+    "url": "https://www.facebook.com/groups/620680954760887",
+    "city": "אילת",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "רישיון תיווך... תיווך ענק הנדל\"ן... RE/MAX Sea Side אילת",
+    "source_url": "https://www.facebook.com/groups/620680954760887/",
+    "research_segment": "Eilat, Arava, and southern Israel brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות ובתים להשכרה עם בעלי חיים",
+    "url": "https://www.facebook.com/groups/104268403251954",
+    "city": "Nationwide",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "כל מודעה שלא תכלול... והאם ממתווך או לא המודעה תמחק",
+    "source_url": "https://www.facebook.com/groups/104268403251954/",
+    "research_segment": "Pet-friendly rentals and apartment groups in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נטו נדל\"ן בפתח תקווה מגורים ומסחרי",
+    "url": "https://www.facebook.com/groups/1540428886259257",
+    "city": "פתח תקווה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "להתחבר עם מתווכים מקצועיים - לקבלת ייעוץ וליווי",
+    "source_url": "https://www.facebook.com/groups/1540428886259257/",
+    "research_segment": "Petah Tikva, Givat Shmuel, and Bnei Brak real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה והשכרה / רמלה / לוד / ראשל״צ / רחובות / יבנה / נס ציונה",
+    "url": "https://www.facebook.com/groups/140974480089370",
+    "city": "רמלה, לוד, באר יעקב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "למכירה בבלעדיות בשכונה החדשה... מיכאל פוזיילוב",
+    "source_url": "https://www.facebook.com/groups/140974480089370/",
+    "research_segment": "Lod, Ramla, and Be'er Ya'akov: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "חדרה | אור עקיבא | קיסריה | פרדס חנה | זכרון יעקוב | בינימינה.",
+    "url": "https://www.facebook.com/groups/1151125022932953",
+    "city": "חדרה, אור עקיבא, קיסריה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Smart real estate - אור עקיבא קיסריה והסביבה",
+    "source_url": "https://www.facebook.com/groups/1151125022932953/",
+    "research_segment": "Hadera, Or Akiva, Caesarea, and Hof HaCarmel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "פרסום חינם לעסקים עצמאים ומתווכי נדל\"ן",
+    "url": "https://www.facebook.com/groups/617581978335140",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "קבוצה פתוחה לכל העסקים, העצמאים, הפרילנסרים, מתווכי נדל\"ן שרוצים לפרסם באופן חופשי וחינמי.",
+    "source_url": "https://www.facebook.com/groups/617581978335140/about/",
+    "research_segment": "Israeli real-estate investor, property investment, and development groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה והשכרה ראש העין והסביבה",
+    "url": "https://www.facebook.com/groups/6240523915963485",
+    "city": "ראש העין",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מלי מגן - מובילת עסקאות נדל״ן בפסגות אפק שיווק בלעדי נדל״ן... מספר רישיון תיווך 3143698.",
+    "source_url": "https://www.facebook.com/groups/6240523915963485/about/",
+    "research_segment": "Ra'anana, Kfar Saba, Hod HaSharon, and Rosh HaAyin real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה ברחובות",
+    "url": "https://www.facebook.com/groups/743300832520453",
+    "city": "רחובות",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group run by פנטהאוס - ייעוץ ושיווק נדל\"ן (Penthouse - Real Estate Consulting and Marketing)",
+    "source_url": "https://www.facebook.com/groups/743300832520453/about",
+    "research_segment": "Rehovot, Nes Ziona, Yavne, and Mazkeret Batya: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות בירושלים והסביבה למכירה/השכרה",
+    "url": "https://www.facebook.com/groups/6767517093272139",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים ופרטיים – כולם מוזמנים",
+    "source_url": "https://www.facebook.com/groups/6767517093272139/about/",
+    "research_segment": "Jerusalem real-estate brokers, agents, and listing groups in Hebrew",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה והשכרה בקרית מלאכי והסביבה",
+    "url": "https://www.facebook.com/groups/253432751707964",
+    "city": "קרית מלאכי",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin \"ישראל\" is identified as \"ישראל ברכת הנדלן\" (Israel Real Estate Blessing) in public listings.",
+    "source_url": "https://www.facebook.com/groups/253432751707964/about",
+    "research_segment": "Kiryat Gat, Kiryat Malachi, and southern Shephelah: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות מפה לאוזן בת\"א",
+    "url": "https://www.facebook.com/groups/35819517694",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים, המחויבים לציין שמדובר בתיווך, להיות אדיבים לגולשים ומוגבלים במכסת המודעות",
+    "source_url": "https://www.facebook.com/groups/35819517694/about/",
+    "research_segment": "Tel Aviv and Jaffa real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "se loger en israel achat/vente/location/vacances",
+    "url": "https://www.facebook.com/groups/elisanadlan770",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "fr",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Prendre rendez-vous en agence ou par téléphone - Make an appointment at the agency",
+    "source_url": "https://www.facebook.com/groups/elisanadlan770/about/",
+    "research_segment": "French-language and Anglo Israeli property broker and real-estate listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות בגבעת שמואל Givat Shmuel Apartments",
+    "url": "https://www.facebook.com/groups/gsapartments",
+    "city": "גבעת שמואל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Rules 2 & 4 explicitly mention agent fees and broker identification ('עלות תיווך', 'מתווך.ת')",
+    "source_url": "https://www.facebook.com/groups/gsapartments/about",
+    "research_segment": "Petah Tikva and Givat Shmuel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "הוד השרון ישובי דרום השרון לוח נדלן - דירות, בניה חדשה, בתים פרטים, מגרשים",
+    "url": "https://www.facebook.com/groups/368352340332422",
+    "city": "הוד השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הוד השרון ישובי דרום השרון לוח נדלן... מתווכים לכם הצלחות” ⭐ משרד Top 3 בהוד השרון",
+    "source_url": "https://www.facebook.com/groups/368352340332422/about/",
+    "research_segment": "Israel new-project, land, and real-estate marketing Groups explicitly allowing professionals",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "הקבוצה בתים להשכרה מפה לאוזן שדרות והסביבה",
+    "url": "https://www.facebook.com/groups/1217685598598161",
+    "city": "שדרות",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Rule 4 states it covers 'כולל מכירה ועסקים בנדלן' (including sale and real estate businesses).",
+    "source_url": "https://www.facebook.com/groups/1217685598598161/about",
+    "research_segment": "Ashkelon, Sderot, and southern coastal plain: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בלעדיות מתווכים קריות",
+    "url": "https://www.facebook.com/groups/139854419698787",
+    "city": "קריות",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group name 'Exclusivity for Agents Krayot' and description for sharing agent listings.",
+    "source_url": "https://www.facebook.com/groups/139854419698787/about",
+    "research_segment": "Krayot, Nesher, and Tirat Carmel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "משרדים להשכרה בתל אביב",
+    "url": "https://www.facebook.com/groups/nadlann",
+    "city": "תל אביב - יפו",
+    "members": null,
+    "listing_types": [
+      "commercial"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "לפרסום יעיל ניתן לפנות בפרטי... פנה אלי ל lior assayag ונשמח לעזור.",
+    "source_url": "https://www.facebook.com/groups/nadlann/about/",
+    "research_segment": "Tel Aviv–Jaffa: sale, rent, sublet, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "לוח נדל\"ן בכפר סבא, רעננה, הוד השרון, והרצליה",
+    "url": "https://www.facebook.com/groups/191627481266584",
+    "city": "כפר סבא, רעננה, הוד השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווך שמעלה פוסט נדל\"ן, חייב לציין בו את מספר רישיון התיווך שלו.",
+    "source_url": "https://www.facebook.com/groups/191627481266584/about",
+    "research_segment": "Ra'anana, Kfar Saba, and Hod HaSharon: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ריקות או שותפים בתל אביב",
+    "url": "https://www.facebook.com/groups/ApartmentsTelAviv",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בכל מודעה יש לציין בתחילתה או בסופה שהדירה מתיווך בכל דרך שהיא",
+    "source_url": "https://www.facebook.com/groups/ApartmentsTelAviv/about/",
+    "research_segment": "Roommates and shared apartments across Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל״ן ירוחם - עסקאות והזדמנויות",
+    "url": "https://www.facebook.com/groups/819552787543704",
+    "city": "ירוחם",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הקבוצה מיועדת למתווכים, משקיעים ואנשים פרטיים",
+    "source_url": "https://www.facebook.com/groups/819552787543704/about/",
+    "research_segment": "Be'er Sheva, Negev, Ashdod, and Ashkelon brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל\"ן בעיר- נכסים למכירה/קניה והשכרה ברחובות והסביבה",
+    "url": "https://www.facebook.com/groups/490135571337643",
+    "city": "רחובות",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "נועדה לפרסם נכסים למכירה והשכרה מתיווך בלבד",
+    "source_url": "https://www.facebook.com/groups/490135571337643/about/",
+    "research_segment": "Rehovot, Nes Ziona, Yavne, and Beer Yaakov real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה",
+    "url": "https://www.facebook.com/groups/163886806999160",
+    "city": "Israel Nationwide",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Brokerage ads present in group: 'עכשיו ב50% הנחה בתיווך'",
+    "source_url": "https://www.facebook.com/groups/163886806999160/about",
+    "research_segment": "Israel nationwide buy, sell, rent, apartment, and home groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה ולהשכרה בפתח תקווה",
+    "url": "https://www.facebook.com/groups/303630815385821",
+    "city": "פתח תקווה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "גם למתווכים",
+    "source_url": "https://www.facebook.com/groups/303630815385821/about/",
+    "research_segment": "Israel nationwide apartment sale and rental Groups explicitly allowing brokers",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "הקבוצה של רמת גן גבעתיים",
+    "url": "https://www.facebook.com/groups/525610664799369",
+    "city": "רמת גן וגבעתיים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "נבחרת הנדל\"ן שלך הופכים עסקאות נדל\"ן מורכבות לפשוטות ומשתלמות",
+    "source_url": "https://www.facebook.com/groups/525610664799369/about/",
+    "research_segment": "Ramat Gan and Givatayim: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות שותפים שוות",
+    "url": "https://www.facebook.com/groups/5612809662118963",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Rule 4: מתווכים? יש לציין זאת!",
+    "source_url": "https://www.facebook.com/groups/5612809662118963/about/",
+    "research_segment": "Student housing and apartments across Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה במודיעין",
+    "url": "https://www.facebook.com/groups/321422243043239",
+    "city": "מודיעין-מכבים-רעות",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "דירות להשכרה בלבד מתווך או שלא מתווך במודיעין והסביבה",
+    "source_url": "https://www.facebook.com/groups/321422243043239/about",
+    "research_segment": "Modi'in-Maccabim-Re'ut: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "עכו נהריה והסביבה",
+    "url": "https://www.facebook.com/groups/1121082361306682",
+    "city": "עכו, נהריה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בעלי עסקים מוזמנים להצטרף לאתר NetPage",
+    "source_url": "https://www.facebook.com/groups/1121082361306682/about",
+    "research_segment": "Acre, Nahariya, and Western Galilee: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "למכירה/השכרה/השקעה בבאר שבע",
+    "url": "https://www.facebook.com/groups/1292327467509205",
+    "city": "באר שבע",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "כל תוכן הקשור לנדל\"ן ללא הגבלת פוסטים מצד המנהלים!",
+    "source_url": "https://www.facebook.com/groups/1292327467509205/about/",
+    "research_segment": "Be'er Sheva and the Negev: sale, rent, student housing and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Недвижимость в Израиле квартиры, апартаменты",
+    "url": "https://www.facebook.com/groups/yad2ruofficial",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Аренда от маклера, агентства или собственника",
+    "source_url": "https://www.facebook.com/groups/yad2ruofficial/about/",
+    "research_segment": "Russian-language Israeli property broker and real-estate listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה והשכרה ברמת אפעל, קרניצי, רמת גן, תל השומר",
+    "url": "https://www.facebook.com/groups/791076519339886",
+    "city": "רמת גן",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "רישיון תיווך 3008019) קלאס נדלן - זוכה מדד המתווכים של מדלן 2024",
+    "source_url": "https://www.facebook.com/groups/791076519339886/about/",
+    "research_segment": "Ramat Gan and Givatayim real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "יד 2 נתניה והסביבה - דירות למכירה והשכרה, ריהוט, צעצועים ללא סינון",
+    "url": "https://www.facebook.com/groups/1593419640921699",
+    "city": "נתניה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מטרת הקבוצה הינה שכולם ייהנו ממכירת מוצרי יד 2 ללא כל סינון.",
+    "source_url": "https://www.facebook.com/groups/1593419640921699/about/",
+    "research_segment": "Netanya and Emek Hefer: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות בטבריה - למכירה/השכרה",
+    "url": "https://www.facebook.com/groups/752870121503707",
+    "city": "טבריה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "קבוצה זו מיועדת לכולם- שוכרים, משכירים,מתווכים ומתעניינים",
+    "source_url": "https://www.facebook.com/groups/752870121503707/about/",
+    "research_segment": "Galilee, Afula, Carmiel, and Tiberias brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה / להשכרה בת ים, חולון והסביבה! 👍",
+    "url": "https://www.facebook.com/groups/dirot.batyam.holon",
+    "city": "בת ים, חולון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מעוניינים לפרסם בקבוצה? ניתן לפנות בפרטי!",
+    "source_url": "https://www.facebook.com/groups/dirot.batyam.holon/about",
+    "research_segment": "Rishon LeZion, Holon, and Bat Yam: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "קבוצת הומלי - לוח נדל\"ן",
+    "url": "https://www.facebook.com/groups/1033048536802670",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים! פרסום חינם ממתין לכם בלוח הנדל”ן ההולך וגדל שלנו",
+    "source_url": "https://www.facebook.com/groups/1033048536802670/about/",
+    "research_segment": "Israel investment property, development, land, and real-estate investor groups that allow professionals",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "הרצליה ב' והרצליה הירוקה",
+    "url": "https://www.facebook.com/groups/176886692380008",
+    "city": "הרצליה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים יפרסמו נכס אחד בשבוע מכל משרד",
+    "source_url": "https://www.facebook.com/groups/176886692380008/about/",
+    "research_segment": "Herzliya and Ramat HaSharon: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "אשדוד שלנו בפייסבוק",
+    "url": "https://www.facebook.com/groups/1550130125239352",
+    "city": "אשדוד",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent",
+      "commercial"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "משרד תיווך מתמחה לקניה ומכירת נכסים פרטיים ומסחריים",
+    "source_url": "https://www.facebook.com/groups/1550130125239352/about/",
+    "research_segment": "Ashdod: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן בשרון מבית מקס הום נדלן",
+    "url": "https://www.facebook.com/groups/ziv.invest",
+    "city": "השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים יקרים נשמח לשיתופי פעולה ולהביא קונים",
+    "source_url": "https://www.facebook.com/groups/ziv.invest/about/",
+    "research_segment": "Herzliya, Ramat HaSharon, and Sharon real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה/השכרה באלעד",
+    "url": "https://www.facebook.com/groups/966190760142079",
+    "city": "אלעד",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "ניתן לפרסם דירות בתיווך וללא תיווך",
+    "source_url": "https://www.facebook.com/groups/966190760142079/about/",
+    "research_segment": "Bnei Brak, Elad, and Modi'in Illit: housing and property groups with public posting rules",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים מפה לאוזן במושבים",
+    "url": "https://www.facebook.com/groups/habatim",
+    "city": "שרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by הבתים של חוה",
+    "source_url": "https://www.facebook.com/groups/habatim/about/",
+    "research_segment": "Kibbutz, moshav, rural-home, and community housing groups in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "פורטל אפרת וגוש עציון- בעלי מקצוע ומפרסמים",
+    "url": "https://www.facebook.com/groups/170897673521530",
+    "city": "אפרת",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בעלי מקצוע ומפרסמים",
+    "source_url": "https://www.facebook.com/groups/170897673521530/about/",
+    "research_segment": "Beit Shemesh, Efrat, Gush Etzion, and Maale Adumim brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "מתווכים משתפי פעולה \\ תיווך נדל\"ן \\ נדלן מסחרי",
+    "url": "https://www.facebook.com/groups/1883150898623289",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "דף זה מיועד למתווכים משתפי פעולה בתחום המסחרי",
+    "source_url": "https://www.facebook.com/groups/1883150898623289/about/",
+    "research_segment": "Israel commercial real-estate brokers, office, retail, warehouse, and industrial listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות מפה לאוזן בחיפה",
+    "url": "https://www.facebook.com/groups/173351201739",
+    "city": "חיפה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group feed contains multiple posts by licensed brokers (e.g., Tal Ben Yosef, Daniel Amar) with license numbers.",
+    "source_url": "https://www.facebook.com/groups/173351201739/",
+    "research_segment": "Haifa Hebrew-language: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה /השכרה בחדרה",
+    "url": "https://www.facebook.com/groups/1644120495892745",
+    "city": "חדרה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מיועדת לצורך פרסום חופשי מתווכים ופרטיים כאחד",
+    "source_url": "https://www.facebook.com/groups/1644120495892745/about/",
+    "research_segment": "Netanya, Hadera, and Emek Hefer real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "שיתופי פעולה נדל\"ן פתח תקווה והסביבה",
+    "url": "https://www.facebook.com/groups/1087947954550311",
+    "city": "פתח תקווה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פרטיים ומתווכים באיזור פתח תקווה והסביבה",
+    "source_url": "https://www.facebook.com/groups/1087947954550311/about/",
+    "research_segment": "Israel city real-estate groups with explicit ‘פרטיים ומתווכים’ or ‘תיווך’ posting policies",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן מודעין שוהם והסביבה (דירות,בתים,משרדים,חנויות)",
+    "url": "https://www.facebook.com/groups/198549120185030",
+    "city": "מודיעין",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "תיווך עמנואל... רישיון תיווך: 3231185",
+    "source_url": "https://www.facebook.com/groups/198549120185030/about/",
+    "research_segment": "Modi'in, Lod, Ramla, and Shoham real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ולמכירה בכל האזורים בבת ים וחולון",
+    "url": "https://www.facebook.com/groups/817575694971912",
+    "city": "חולון, בת ים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פרסומים ישירים מבעלי דירות ומתווכים",
+    "source_url": "https://www.facebook.com/groups/817575694971912/about/",
+    "research_segment": "Rishon LeZion, Holon, Bat Yam, and south Tel Aviv real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "משרדים וחנויות להשכרה בירושלים",
+    "url": "https://www.facebook.com/groups/767294936722762",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "commercial"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Multiple professional broker posts visible in group feed (e.g., Liberty Group, Pini Nissim).",
+    "source_url": "https://www.facebook.com/groups/767294936722762/",
+    "research_segment": "Jerusalem Hebrew-language: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "לוח דירות למכירה והשכרה בחיפה והסביבה",
+    "url": "https://www.facebook.com/groups/ORDANCARMEL",
+    "city": "חיפה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "כולל משרדי תיווך ומתווכים בכלל",
+    "source_url": "https://www.facebook.com/groups/ORDANCARMEL/about/",
+    "research_segment": "Haifa real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה להשכרה פרדס חנה כרכור",
+    "url": "https://www.facebook.com/groups/981468899238228",
+    "city": "פרדס חנה-כרכור",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בחסות מרלן נכסים 0522-555-433",
+    "source_url": "https://www.facebook.com/groups/981468899238228/about/",
+    "research_segment": "Pardes Hanna-Karkur, Zichron Yaakov, and Binyamina: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה/השכרה בתל אביב Tel Aviv Apartments",
+    "url": "https://www.facebook.com/groups/107090502969057",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים מוזמנים לשת\"פ",
+    "source_url": "https://www.facebook.com/groups/107090502969057/about/",
+    "research_segment": "Israel short-term rental, sublet, and property marketing Groups explicitly allowing agents",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Olim Help New Olim",
+    "url": "https://www.facebook.com/groups/355043947988282",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Snippet mentions 'We search and vet the apartments for you' and contains posts by real estate entities like Poleg Nehasim.",
+    "source_url": "https://www.facebook.com/groups/355043947988282/",
+    "research_segment": "New immigrant housing and aliyah apartment groups in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים למכירה והשכרה בגליל המערבי",
+    "url": "https://www.facebook.com/groups/387153704828123",
+    "city": "גליל מערבי",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Contains multiple agent listings marked as 'בלעדיות' (Exclusivity) from agencies like Gil Gilron Real Estate.",
+    "source_url": "https://www.facebook.com/groups/387153704828123/",
+    "research_segment": "Carmiel, Afula, Tiberias, and the Galilee: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "יזמות תמ\"א 38 פינוי בינוי/פרויקטים למכירה וקנייה",
+    "url": "https://www.facebook.com/groups/1281594211934148",
+    "city": "ישראל",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "אין לפרסם בקבוצה פרסומות שיווקיות אך ורק הדברים הנוגעים למכירה וקניה של פרויקטים יזמיים והתחדשות עירונית",
+    "source_url": "https://www.facebook.com/groups/1281594211934148/",
+    "research_segment": "Israel real-estate groups focused on property sale listings and new projects",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "קבוצת הנדל\"ן של אילת והערבה",
+    "url": "https://www.facebook.com/groups/1405160689546739",
+    "city": "אילת והערבה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Visible posts from multiple agencies including 'VIA Real Estate Eilat' and 'Key House Eilat'.",
+    "source_url": "https://www.facebook.com/groups/1405160689546739/",
+    "research_segment": "Eilat and Arava: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה / מכירה בבית שמש רמת בית שמש",
+    "url": "https://www.facebook.com/groups/beitshemesheliezerrealty",
+    "city": "בית שמש",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "דירות ללא תיווך ועם תיווך (Apartments without and with brokerage). Group run by Eliezer Realty.",
+    "source_url": "https://www.facebook.com/groups/beitshemesheliezerrealty/",
+    "research_segment": "Beit Shemesh and surrounding communities: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Израиль Жилье Квартиры Дома Аренда Сеть Помогаем Нашим!",
+    "url": "https://www.facebook.com/groups/pn.israel.housing",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "ru"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Rule 7 explicitly outlines procedures for agencies and independent agents to post.",
+    "source_url": "https://www.facebook.com/groups/pn.israel.housing/",
+    "research_segment": "Russian-language Israeli property and housing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "עסקים למכירה ונדל\"ן מסחרי בלבד.",
+    "url": "https://www.facebook.com/groups/416561312953880",
+    "city": "ישראל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Featured posts from B.P נכסים-תיווך-נדלן (B.P Properties-Brokerage-Real Estate).",
+    "source_url": "https://www.facebook.com/groups/416561312953880/",
+    "research_segment": "Commercial property, office, retail, warehouse, and industrial real estate in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "מתווכים משתפים בידע וכלים",
+    "url": "https://www.facebook.com/groups/893579724311399",
+    "city": "ישראל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הקהילה הזו קמה כדי לתת לכם המתווכים ידע, כלים ומקום לשתף",
+    "source_url": "https://www.facebook.com/groups/893579724311399/",
+    "research_segment": "Israeli real-estate broker, agent, listing, and property-marketing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Immobilier Israël",
+    "url": "https://www.facebook.com/groups/1344672168962670",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "fr",
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Tous le monde est autorisé à poster; visible posts by RE/MAX agents",
+    "source_url": "https://www.facebook.com/groups/1344672168962670/",
+    "research_segment": "French-language and English-language Israel property and housing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן קנייה-מכירה-השכרה. מעלה אדומים והסביבה 🇮🇱🇮🇱🇮🇱",
+    "url": "https://www.facebook.com/groups/Nadlanmaaleadumim",
+    "city": "מעלה אדומים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin \"אלעד רפאלי\" posts real estate listings from a brokerage center.",
+    "source_url": "https://www.facebook.com/groups/Nadlanmaaleadumim/",
+    "research_segment": "Ma'ale Adumim, Efrat, and Gush Etzion: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Secret Jerusalem UNFILTERED",
+    "url": "https://www.facebook.com/groups/1942076072798213",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Agents welcome!!",
+    "source_url": "https://www.facebook.com/groups/1942076072798213/",
+    "research_segment": "Jerusalem English-language property brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה והשכרה בדרום -אשקלון | שדרות | נתיבות | אופקים | ב''ש | דימונה",
+    "url": "https://www.facebook.com/groups/immoisraeldarom",
+    "city": "דרום",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "All-In | משרד תיווך ויזמות נדל״ן... מספר רישיון: 3226778",
+    "source_url": "https://www.facebook.com/groups/immoisraeldarom/",
+    "research_segment": "Eilat, Arava, and southern Israel brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה רמת גן גבעתיים בני ברק מתעדכון כול רגע",
+    "url": "https://www.facebook.com/groups/681450437482761",
+    "city": "בני ברק",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "דירות להשכרה ומכירה בבני ברק (גם מתווכים)",
+    "source_url": "https://www.facebook.com/groups/681450437482761/",
+    "research_segment": "Petah Tikva, Givat Shmuel, and Bnei Brak real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה / השכרה רמלה , לוד , באר יעקב",
+    "url": "https://www.facebook.com/groups/380727789941773",
+    "city": "רמלה, לוד, באר יעקב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים וקהל פרטי מוזמנים לשאול שאלות ולשתף",
+    "source_url": "https://www.facebook.com/groups/380727789941773/",
+    "research_segment": "Lod, Ramla, and Be'er Ya'akov: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים ודירות להשכרה ומכירה - אור עקיבא",
+    "url": "https://www.facebook.com/groups/orakivarealestate",
+    "city": "אור עקיבא",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פינוי בינוי עם תדהר ושיכון ובינוי למכירה",
+    "source_url": "https://www.facebook.com/groups/orakivarealestate/",
+    "research_segment": "Hadera, Or Akiva, Caesarea, and Hof HaCarmel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירה להשכרה בשרון - הוד השרון, כפר סבא, רעננה, הרצליה, רמת השרון",
+    "url": "https://www.facebook.com/groups/1682919532939891",
+    "city": "הוד השרון, כפר סבא, רעננה",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים? יש לציין באופן גלוי ומפורש בראש הפוסט כי מדובר בתיווך + דמי התיווך המבוקשים.",
+    "source_url": "https://www.facebook.com/groups/1682919532939891/about/",
+    "research_segment": "Ra'anana, Kfar Saba, Hod HaSharon, and Rosh HaAyin real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ביבנה",
+    "url": "https://www.facebook.com/groups/419209278200754",
+    "city": "יבנה",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group run by פנטהאוס - ייעוץ ושיווק נדל\"ן (Penthouse - Real Estate Consulting and Marketing)",
+    "source_url": "https://www.facebook.com/groups/419209278200754/about",
+    "research_segment": "Rehovot, Nes Ziona, Yavne, and Mazkeret Batya: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "מציאות נדל\"ן בירושלים",
+    "url": "https://www.facebook.com/groups/289746741494789",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "נדל\"ן (רישיון תיווך 30616343)",
+    "source_url": "https://www.facebook.com/groups/289746741494789/about/",
+    "research_segment": "Jerusalem real-estate brokers, agents, and listing groups in Hebrew",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה/מכירה מושבים בלבד בדרום",
+    "url": "https://www.facebook.com/groups/693995988078991",
+    "city": "שפלה דרומית",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group allows agent posts such as \"בימים אלו יוצא למכירה בייצוג בלעדי של משרדנו\".",
+    "source_url": "https://www.facebook.com/groups/693995988078991/about",
+    "research_segment": "Kiryat Gat, Kiryat Malachi, and southern Shephelah: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ולמכירה ביפו - תל אביב",
+    "url": "https://www.facebook.com/groups/126295760730491",
+    "city": "תל אביב - יפו",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים ואנשי מקצוע אשר מעוניינים לפרסם, יכולים לפנות למנהלת הקבוצה",
+    "source_url": "https://www.facebook.com/groups/126295760730491/about/",
+    "research_segment": "Tel Aviv and Jaffa real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "L'IMMOBILIER A NETANYA VENTES ET LOCATIONS",
+    "url": "https://www.facebook.com/groups/175711906314976",
+    "city": "נתניה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "fr"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "À louer | Par agence | Appartement de 5 pièces... commission d'agence",
+    "source_url": "https://www.facebook.com/groups/175711906314976/about/",
+    "research_segment": "French-language and Anglo Israeli property broker and real-estate listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן פתח תקווה",
+    "url": "https://www.facebook.com/groups/771391086305306",
+    "city": "פתח תקווה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group managed by 'גיא פלד בעלי משרד התיווך GPנכסים' (Guy Peled, owner of GP Real Estate)",
+    "source_url": "https://www.facebook.com/groups/771391086305306/about",
+    "research_segment": "Petah Tikva and Givat Shmuel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "פורום נדל\"ן מסחרי ,מגרשים , מניבים , וכו",
+    "url": "https://www.facebook.com/groups/413385435397101",
+    "city": "ארצי",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים ארצי - מטרת הקבוצה היא לפרסומים כלל ארציים הפתוחים לשת\"פ הוגן",
+    "source_url": "https://www.facebook.com/groups/413385435397101/about/",
+    "research_segment": "Israel new-project, land, and real-estate marketing Groups explicitly allowing professionals",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה / השכרה אשקלון והסביבה",
+    "url": "https://www.facebook.com/groups/167401334126918",
+    "city": "אשקלון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by ג י א א נדל\"ן שיווק ויזמות (Real Estate Agency)",
+    "source_url": "https://www.facebook.com/groups/167401334126918/about",
+    "research_segment": "Ashkelon, Sderot, and southern coastal plain: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "קריות וחיפה 🏆🏆 וכל אזור הצפון פרסום",
+    "url": "https://www.facebook.com/groups/skrim",
+    "city": "קריות, חיפה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin is 'קווי פרסום מדיה' (Advertising Media Lines), group dedicated to advertising.",
+    "source_url": "https://www.facebook.com/groups/skrim/about",
+    "research_segment": "Krayot, Nesher, and Tirat Carmel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה לזוגות, שותפים ומשפחות בתל אביב",
+    "url": "https://www.facebook.com/groups/458499457501175",
+    "city": "תל אביב - יפו",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "roommates"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בכל מודעה יש לציין בתחילתה או בסופה שהדירה מתיווך בכל דרך שהיא.",
+    "source_url": "https://www.facebook.com/groups/458499457501175/about/",
+    "research_segment": "Tel Aviv–Jaffa: sale, rent, sublet, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "פרסום דירות ובתים למכירה או השכרה כפר סבא רעננה הוד השרון והסביבה",
+    "url": "https://www.facebook.com/groups/439179719761781",
+    "city": "כפר סבא, רעננה, הוד השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פרסום חופשי-חופשי לכולם,ללא משוא פנים, וללא דרישת תשלום",
+    "source_url": "https://www.facebook.com/groups/439179719761781/about",
+    "research_segment": "Ra'anana, Kfar Saba, and Hod HaSharon: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "שיתופי פעולה בין מתווכים - אשדוד",
+    "url": "https://www.facebook.com/groups/521032594704691",
+    "city": "אשדוד",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הקבוצה מיועדת למתווכים מאשדוד והסביבה",
+    "source_url": "https://www.facebook.com/groups/521032594704691/about/",
+    "research_segment": "Be'er Sheva, Negev, Ashdod, and Ashkelon brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה בבאר יעקב והסביבה",
+    "url": "https://www.facebook.com/groups/nadlanb.co",
+    "city": "באר יעקב",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בין אם זה פרסום דרך מתווכים",
+    "source_url": "https://www.facebook.com/groups/nadlanb.co/about/",
+    "research_segment": "Rehovot, Nes Ziona, Yavne, and Beer Yaakov real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה רמת גן גבעתיים🏠",
+    "url": "https://www.facebook.com/groups/623171267840720",
+    "city": "רמת גן וגבעתיים",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הקבוצה בחסות ובניהול ברק ברנר מנכ\"ל Expert שיווק נדלן",
+    "source_url": "https://www.facebook.com/groups/623171267840720/about/",
+    "research_segment": "Ramat Gan and Givatayim: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה לשותפים וסטודנטים רמת גן גבעתיים תל אביב",
+    "url": "https://www.facebook.com/groups/1354010588113091",
+    "city": "רמת גן",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by בית המתווכים ISR",
+    "source_url": "https://www.facebook.com/groups/1354010588113091/about/",
+    "research_segment": "Student housing and apartments across Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "תיווך מודיעין דירות למכירה והשכרה מודיעין מכבים רעות 🏰 לב הנדלן",
+    "url": "https://www.facebook.com/groups/509598213607882",
+    "city": "מודיעין-מכבים-רעות",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "תושבת העיר מיום הקמתה ומתווכת נדלן מוסמכת.",
+    "source_url": "https://www.facebook.com/groups/509598213607882/about",
+    "research_segment": "Modi'in-Maccabim-Re'ut: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "גליל מערבי שלנו",
+    "url": "https://www.facebook.com/groups/621719455240142",
+    "city": "גליל מערבי",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מוזמנים לפרסם עסקים, דירות להשכרה",
+    "source_url": "https://www.facebook.com/groups/621719455240142/about",
+    "research_segment": "Acre, Nahariya, and Western Galilee: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "ערד-Arad",
+    "url": "https://www.facebook.com/groups/194140814113177",
+    "city": "ערד",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בעלי עסק מקומי (ערד) פירסום פוסט 1 ביום בלבד !!!",
+    "source_url": "https://www.facebook.com/groups/194140814113177/about/",
+    "research_segment": "Be'er Sheva and the Negev: sale, rent, student housing and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "360 Home",
+    "url": "https://www.facebook.com/groups/360home",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "360 Home Connect for Realtors",
+    "source_url": "https://www.facebook.com/groups/360home/about/",
+    "research_segment": "Russian-language Israeli property broker and real-estate listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות מפה לאוזן בגבעתיים",
+    "url": "https://www.facebook.com/groups/115046608513246",
+    "city": "גבעתיים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הנהלת המותג התירה התנהלות של מספר מתווכים",
+    "source_url": "https://www.facebook.com/groups/115046608513246/about/",
+    "research_segment": "Ramat Gan and Givatayim real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Real Estate in Netanya for English speakers",
+    "url": "https://www.facebook.com/groups/143452706339194",
+    "city": "נתניה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en",
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "One of our professionals will be delighted to answer you.",
+    "source_url": "https://www.facebook.com/groups/143452706339194/about/",
+    "research_segment": "Netanya and Emek Hefer: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה כרמיאל שלי ללא תיווך(הקבוצה המקורית)",
+    "url": "https://www.facebook.com/groups/420788384940578",
+    "city": "כרמיאל",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים יתאפשר לאחר תשלום חד פעמי של 500 ₪",
+    "source_url": "https://www.facebook.com/groups/420788384940578/about/",
+    "research_segment": "Galilee, Afula, Carmiel, and Tiberias brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "ראשון לציון | בת ים | חולון והסביבה",
+    "url": "https://www.facebook.com/groups/1000363035002829",
+    "city": "ראשון לציון, בת ים, חולון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by יונתן אברמוב - ליווי משקעים",
+    "source_url": "https://www.facebook.com/groups/1000363035002829/about",
+    "research_segment": "Rishon LeZion, Holon, and Bat Yam: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "קרקעות בישראל",
+    "url": "https://www.facebook.com/groups/lands.israel",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים? יש לציין בתחילת הפוסט ש״הנכס מתיווך״.",
+    "source_url": "https://www.facebook.com/groups/lands.israel/about/",
+    "research_segment": "Israel investment property, development, land, and real-estate investor groups that allow professionals",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל\"ן והשקעות אשדוד והסביבה",
+    "url": "https://www.facebook.com/groups/nadlanezor.ashdod",
+    "city": "אשדוד",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "קבוצה מיועדת לפירסומים בין מתווכים",
+    "source_url": "https://www.facebook.com/groups/nadlanezor.ashdod/about/",
+    "research_segment": "Ashdod: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל״ן ברמת השרון 🏘🏡הראשון ברמת השרון",
+    "url": "https://www.facebook.com/groups/1366132596796007",
+    "city": "רמת השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכי רמת השרון אנא עד שני פרסומים בשבוע",
+    "source_url": "https://www.facebook.com/groups/1366132596796007/about/",
+    "research_segment": "Herzliya, Ramat HaSharon, and Sharon real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות בית שמש והסביבה ללא תיווך וגם עם",
+    "url": "https://www.facebook.com/groups/2081319125251671",
+    "city": "בית שמש",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "ללא תיווך וגם עם",
+    "source_url": "https://www.facebook.com/groups/2081319125251671/about/",
+    "research_segment": "Beit Shemesh, Efrat, Gush Etzion, and Maale Adumim brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "משרדים להשכרה בתל אביב",
+    "url": "https://www.facebook.com/groups/819242914764956",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "תיווך מסחרי 770 - נכס מס...",
+    "source_url": "https://www.facebook.com/groups/819242914764956/",
+    "research_segment": "Israel commercial real-estate brokers, office, retail, warehouse, and industrial listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה בחדרה עד 4400 ש\"ח לחודש",
+    "url": "https://www.facebook.com/groups/2301302306751787",
+    "city": "חדרה",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים רלוונטיים – מוזמנים לפנות אליי בפרטי",
+    "source_url": "https://www.facebook.com/groups/2301302306751787/about/",
+    "research_segment": "Netanya, Hadera, and Emek Hefer real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה והשכרה בהרצליה, רעננה, ורמת השרון",
+    "url": "https://www.facebook.com/groups/346116282623407",
+    "city": "הרצליה, רעננה, רמת השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פרטיים ומתווכים כאחד",
+    "source_url": "https://www.facebook.com/groups/346116282623407/about/",
+    "research_segment": "Israel city real-estate groups with explicit ‘פרטיים ומתווכים’ or ‘תיווך’ posting policies",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים פרטיים ברמלה לוד בלבד",
+    "url": "https://www.facebook.com/groups/525289578506970",
+    "city": "רמלה",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "חדשה למכירה בצעדים נדל\"ן ופיננסים",
+    "source_url": "https://www.facebook.com/groups/525289578506970/about/",
+    "research_segment": "Modi'in, Lod, Ramla, and Shoham real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה בבת-ים",
+    "url": "https://www.facebook.com/groups/464178997327583",
+    "city": "בת ים",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "עבור מוכרי דירות פרטיים ומתווכים",
+    "source_url": "https://www.facebook.com/groups/464178997327583/about/",
+    "research_segment": "Rishon LeZion, Holon, Bat Yam, and south Tel Aviv real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "לוח דירות סודיות בחיפה והקריות",
+    "url": "https://www.facebook.com/groups/680837673126345",
+    "city": "חיפה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "פרטיים ומתווכים מוזמנים לפרסם",
+    "source_url": "https://www.facebook.com/groups/680837673126345/about/",
+    "research_segment": "Haifa real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים ודירות להשכרה ומכירה - פרדס חנה כרכור והסביבה",
+    "url": "https://www.facebook.com/groups/pardeshanarealestate",
+    "city": "פרדס חנה-כרכור",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by אדמונט שירותי נדל״ן",
+    "source_url": "https://www.facebook.com/groups/pardeshanarealestate/about/",
+    "research_segment": "Pardes Hanna-Karkur, Zichron Yaakov, and Binyamina: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Aliyah - Housing Guide (buying/renting)",
+    "url": "https://www.facebook.com/groups/440682789466963",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Snippet shows advertisements for apartments by real estate agencies such as Tivuch Shelly Real Estate.",
+    "source_url": "https://www.facebook.com/groups/440682789466963/",
+    "research_segment": "New immigrant housing and aliyah apartment groups in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "לוח דירות - מאגר הדירות של קרית שמונה והגליל העליון",
+    "url": "https://www.facebook.com/groups/1734684773482280",
+    "city": "גליל עליון",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "About section states 'תיווך או פרטי' (Brokerage or private) and features posts from Yaki Real Estate.",
+    "source_url": "https://www.facebook.com/groups/1734684773482280/",
+    "research_segment": "Carmiel, Afula, Tiberias, and the Galilee: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירה לדוגמא פרסום פרויקטים חדשים נדלן דירות חדשות למכירה מקבלנים בקריות",
+    "url": "https://www.facebook.com/groups/ModelApartment",
+    "city": "קריות",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "שיווק ופרסום פרויקטים חדשים, נדלן, דירות חדשות למכירה מקבלנים חברות בניה, קבלנים ונכסים.",
+    "source_url": "https://www.facebook.com/groups/ModelApartment/",
+    "research_segment": "Israel real-estate groups focused on property sale listings and new projects",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "קבוצה אילת והערבה - פרסום",
+    "url": "https://www.facebook.com/groups/246890345873251",
+    "city": "אילת והערבה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Exclusive sales posts from 'Sky Real Estate' agency are visible in search results.",
+    "source_url": "https://www.facebook.com/groups/246890345873251/",
+    "research_segment": "Eilat and Arava: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Apartments for sale and rent Ramat Beit Shemesh",
+    "url": "https://www.facebook.com/groups/468383153917542",
+    "city": "Beit Shemesh",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Real Estate Brokerage & Marketing by Neria Real Estate, Beit Shemesh mentioned in group info",
+    "source_url": "https://www.facebook.com/groups/468383153917542/",
+    "research_segment": "Beit Shemesh and surrounding communities: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Israel Real Estate 🇮🇱 Rentals 🇮🇱 Sales 🇮🇱 Apartments 🇮🇱 Homes 🇮🇱",
+    "url": "https://www.facebook.com/groups/6641257162617497",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "ru",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Media and featured listings include professional branding from 'YAN NADLAN'.",
+    "source_url": "https://www.facebook.com/groups/6641257162617497/",
+    "research_segment": "Russian-language Israeli property and housing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן מסחרי",
+    "url": "https://www.facebook.com/groups/1596845263915971",
+    "city": "ישראל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he",
+      "en"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Heavy activity from agencies like Supreme TLV and Metro 1 Real Estate.",
+    "source_url": "https://www.facebook.com/groups/1596845263915971/",
+    "research_segment": "Commercial property, office, retail, warehouse, and industrial real estate in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "לוח פרסום עסקים נדל\"ן מכירה קנייה השכרה",
+    "url": "https://www.facebook.com/groups/1503431096566343",
+    "city": "ישראל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "כל עסק יכול לפרסם ולתת לחברי הקבוצה להתוודע אליו",
+    "source_url": "https://www.facebook.com/groups/1503431096566343/",
+    "research_segment": "Israeli real-estate broker, agent, listing, and property-marketing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Immobilier Israël :achat/vente/location",
+    "url": "https://www.facebook.com/groups/israelimmobilier",
+    "city": "Israel",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "fr",
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "petites annonce immobilières particulier et professionnelle",
+    "source_url": "https://www.facebook.com/groups/israelimmobilier/",
+    "research_segment": "French-language and English-language Israel property and housing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "אפרת - גוש עציון",
+    "url": "https://www.facebook.com/groups/123958217637994",
+    "city": "אפרת",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Media shows ad for \"קוטג' למכירה באפרת\" by \"אושרי פחימה תיווך Realty\".",
+    "source_url": "https://www.facebook.com/groups/123958217637994/",
+    "research_segment": "Ma'ale Adumim, Efrat, and Gush Etzion: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה וקניה בבאר שבע והסביבה",
+    "url": "https://www.facebook.com/groups/219163891540903",
+    "city": "באר שבע והסביבה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "תיווך: 320525... תיווך ויזמות נדל״ן",
+    "source_url": "https://www.facebook.com/groups/219163891540903/",
+    "research_segment": "Eilat, Arava, and southern Israel brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נכסים בתים דירות למכירה פתח תקווה גבעת שמואל ראש העין",
+    "url": "https://www.facebook.com/groups/1498807514721435",
+    "city": "פתח תקווה",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מיועדת לבעלי נכסים, מתווכים, קונים",
+    "source_url": "https://www.facebook.com/groups/1498807514721435/",
+    "research_segment": "Petah Tikva, Givat Shmuel, and Bnei Brak real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה ומכירה ברמלה, לוד, באר יעקוב והסביבה",
+    "url": "https://www.facebook.com/groups/1333924010089214",
+    "city": "רמלה, לוד, באר יעקב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "אהרון אבאיב יועץ נדל״ן... למכירה בבלעדיות",
+    "source_url": "https://www.facebook.com/groups/1333924010089214/",
+    "research_segment": "Lod, Ramla, and Be'er Ya'akov: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "זכרון יעקב והסביבה -בנימינה קיסריה גבעת עדה",
+    "url": "https://www.facebook.com/groups/496271767062578",
+    "city": "קיסריה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "אמה יועצת נדל\"ן - אור עקיבא/קיסריה",
+    "source_url": "https://www.facebook.com/groups/496271767062578/",
+    "research_segment": "Hadera, Or Akiva, Caesarea, and Hof HaCarmel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "רעננה בתים ודירות למכירה ולהשכרה",
+    "url": "https://www.facebook.com/groups/1071134037627589",
+    "city": "רעננה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "הקבוצה פונה למוכרים, קונים, משכירים ושוכרים, מתווכים ועוד.",
+    "source_url": "https://www.facebook.com/groups/1071134037627589/about/",
+    "research_segment": "Ra'anana, Kfar Saba, Hod HaSharon, and Rosh HaAyin real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן ברחובות, יבנה, נס ציונה, ראשון לציון והסביבה",
+    "url": "https://www.facebook.com/groups/1415372495353223",
+    "city": "רחובות",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group run by פנטהאוס - ייעוץ ושיווק נדל\"ן (Penthouse - Real Estate Consulting and Marketing)",
+    "source_url": "https://www.facebook.com/groups/1415372495353223/about",
+    "research_segment": "Rehovot, Nes Ziona, Yavne, and Mazkeret Batya: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Jerusalem Old City Real Estate Trophy",
+    "url": "https://www.facebook.com/groups/natanel",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים מוזמנים רק אם העמלה על הקונה בלבד",
+    "source_url": "https://m.facebook.com/groups/natanel/posts/1623557708332774/",
+    "research_segment": "Jerusalem real-estate brokers, agents, and listing groups in Hebrew",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים להשכרה ולמכירה במושבים וקיבוצים",
+    "url": "https://www.facebook.com/groups/dirotbemoshavimdarom",
+    "city": "שפלה דרומית",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Rule 7 states admin Tamar Tahori helps find buyers/tenants for properties.",
+    "source_url": "https://www.facebook.com/groups/dirotbemoshavimdarom/about",
+    "research_segment": "Kiryat Gat, Kiryat Malachi, and southern Shephelah: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "מתווכים משתפים פעולה בתל אביב",
+    "url": "https://www.facebook.com/groups/1173422892687456",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים משתפים פעולה בתל אביב. מוזמנים להעלות...",
+    "source_url": "https://www.facebook.com/groups/1173422892687456/about/",
+    "research_segment": "Tel Aviv and Jaffa real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה בפתח תקווה",
+    "url": "https://www.facebook.com/groups/331634257248250",
+    "city": "פתח תקווה",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Rule 2: 'אנשי נדל\"ן... כנסו ופרסמו' (Real estate people... enter and post directly)",
+    "source_url": "https://www.facebook.com/groups/331634257248250/about",
+    "research_segment": "Petah Tikva and Givat Shmuel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות בקריות: תיווך | קנייה | מכירה | השכרה",
+    "url": "https://www.facebook.com/groups/1439697569599067",
+    "city": "קריות",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group name explicitly includes 'תיווך' (Brokerage/Agents).",
+    "source_url": "https://www.facebook.com/groups/1439697569599067/about",
+    "research_segment": "Krayot, Nesher, and Tirat Carmel: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה בהוד השרון",
+    "url": "https://www.facebook.com/groups/850386785010659",
+    "city": "הוד השרון",
+    "members": null,
+    "listing_types": [
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by Anderson Nadlan אנדרסון נדל\"ן",
+    "source_url": "https://www.facebook.com/groups/850386785010659/about",
+    "research_segment": "Ra'anana, Kfar Saba, and Hod HaSharon: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל\"ן באשקלון והסביבה",
+    "url": "https://www.facebook.com/groups/2170944666460556",
+    "city": "אשקלון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים מוזמנים להתחייב על הנכס",
+    "source_url": "https://www.facebook.com/groups/2170944666460556/about/",
+    "research_segment": "Be'er Sheva, Negev, Ashdod, and Ashkelon brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "לוח נדלן גבעתיים רמת גן וכל גוש דן",
+    "url": "https://www.facebook.com/groups/1446203822077011",
+    "city": "גבעתיים ורמת גן",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent",
+      "commercial"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "T.A נכסים דירות למכירה השכרה רמת גן גבעתיים",
+    "source_url": "https://www.facebook.com/groups/1446203822077011/about/",
+    "research_segment": "Ramat Gan and Givatayim: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה דירות למכירה במודיעין (מודיעין מוכרת מודיעין שוכרת)",
+    "url": "https://www.facebook.com/groups/1939896342906906",
+    "city": "מודיעין-מכבים-רעות",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים מורשים אך ורק לפרסם...",
+    "source_url": "https://www.facebook.com/groups/1939896342906906/about",
+    "research_segment": "Modi'in-Maccabim-Re'ut: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדל\"ן דימונה ערד וירוחם",
+    "url": "https://www.facebook.com/groups/256485207845023",
+    "city": "דימונה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Admin is \"אגם נכסים ונדלן\" (real estate agency)",
+    "source_url": "https://www.facebook.com/groups/256485207845023/about/",
+    "research_segment": "Be'er Sheva and the Negev: sale, rent, student housing and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "מתווכים משתפים פעולה בעסקאות נדל\"ן",
+    "url": "https://www.facebook.com/groups/metavch",
+    "city": "רמת גן, גבעתיים",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים משתפים פעולה בעסקאות נדל\"ן",
+    "source_url": "https://www.facebook.com/groups/metavch/about/",
+    "research_segment": "Ramat Gan and Givatayim real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "עמק חפר - פרסום חופשי",
+    "url": "https://www.facebook.com/groups/1984935601744619",
+    "city": "עמק חפר",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "עסקים פרטיים, עצמאיים... מוזמנים לשתף ולפרסם",
+    "source_url": "https://www.facebook.com/groups/1984935601744619/about/",
+    "research_segment": "Netanya and Emek Hefer: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות מפה לאוזן בכרמיאל",
+    "url": "https://www.facebook.com/groups/9372099146167706",
+    "city": "כרמיאל",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מתווכים, המחויבים לציין שמדובר בתיווך",
+    "source_url": "https://www.facebook.com/groups/9372099146167706/about/",
+    "research_segment": "Galilee, Afula, Carmiel, and Tiberias brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה/השכרה בשכונת נווה חוף - שער הים",
+    "url": "https://www.facebook.com/groups/1118222695046645",
+    "city": "ראשון לציון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "מפרטי ומתיווך",
+    "source_url": "https://www.facebook.com/groups/1118222695046645/about",
+    "research_segment": "Rishon LeZion, Holon, and Bat Yam: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "השקעות נדל\"ן איכותיות בארץ ובעולם",
+    "url": "https://www.facebook.com/groups/205132013171819",
+    "city": "כל הארץ",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בהם תמצאו משקיעים ישראלים וחברות נדל\"ן מקצועיות אשר מיועדות לפרסם פרויקטים להשקעה",
+    "source_url": "https://nadlanspot.co.il/%D7%A7%D7%91%D7%95%D7%A6%D7%95%D7%AA-%D7%A4%D7%99%D7%99%D7%A1%D7%91%D7%95%D7%A7-%D7%9C%D7%9E%D7%A9%D7%A7%D7%99%D7%A2%D7%99-%D7%A0%D7%93%D7%9C%D7%9F-%D7%99%D7%A9%D7%A8%D7%90%D7%9C%D7%99%D7%9D/%D7%94%D7%A9%D7%A7%D7%A2%D7%95%D7%AA/",
+    "research_segment": "Israel investment property, development, land, and real-estate investor groups that allow professionals",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "קבוצת נדל\"ן בשרון - תיווך ייעוץ מכירה השכרה נכסים נדלן בשרון",
+    "url": "https://www.facebook.com/groups/380793337984335",
+    "city": "השרון",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "תיווך ייעוץ מכירה השכרה נכסים נדלן בשרון",
+    "source_url": "https://www.facebook.com/groups/380793337984335/about/",
+    "research_segment": "Herzliya, Ramat HaSharon, and Sharon real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "מתווכים בנתניה",
+    "url": "https://www.facebook.com/groups/1512995135658451",
+    "city": "נתניה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "קבוצה *****למתווכים***** בנתניה בלבד!",
+    "source_url": "https://www.facebook.com/groups/1512995135658451/about/",
+    "research_segment": "Netanya, Hadera, and Emek Hefer real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "נדלן שוהם",
+    "url": "https://www.facebook.com/groups/516591317206686",
+    "city": "שוהם",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "בבלעדיות... אהד לוי יועץ הנדל\"ן",
+    "source_url": "https://www.facebook.com/groups/516591317206686/about/",
+    "research_segment": "Modi'in, Lod, Ramla, and Shoham real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "יפו תל אביב והסביבה - דירות להשכרה ולמכירה",
+    "url": "https://www.facebook.com/groups/624864027621786",
+    "city": "יפו, דרום תל אביב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "עסקאות פרטיות ומתווכים",
+    "source_url": "https://www.facebook.com/groups/624864027621786/about/",
+    "research_segment": "Rishon LeZion, Holon, Bat Yam, and south Tel Aviv real-estate brokers and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "חיפוש דירות בחיפה - שיתופי פעולה מתווכים ופרטיים",
+    "url": "https://www.facebook.com/groups/1585545884873413",
+    "city": "חיפה",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "שיתופי פעולה מתווכים ופרטיים",
+    "source_url": "https://www.facebook.com/groups/1585545884873413/about/",
+    "research_segment": "Haifa real-estate brokers, agents, and listing groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "בתים ודירות להשכרה ומכירה - זכרון יעקב והסביבה",
+    "url": "https://www.facebook.com/groups/zikhronyaakovrealestate",
+    "city": "זכרון יעקב",
+    "members": null,
+    "listing_types": [
+      "sale",
+      "rent"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group by אדמונט שירותי נדל״ן",
+    "source_url": "https://www.facebook.com/groups/zikhronyaakovrealestate/about/",
+    "research_segment": "Pardes Hanna-Karkur, Zichron Yaakov, and Binyamina: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "Secret Tel Aviv",
+    "url": "https://www.facebook.com/groups/secretelaviv",
+    "city": "תל אביב",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "en",
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group rules permit real estate posts but require clear disclosure of any agent or broker fees.",
+    "source_url": "https://www.facebook.com/groups/secretelaviv/",
+    "research_segment": "New immigrant housing and aliyah apartment groups in Israel",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות להשכרה / למכירה בטבריה ועמקים",
+    "url": "https://www.facebook.com/groups/2339740166305634",
+    "city": "טבריה",
+    "members": null,
+    "listing_types": [
+      "rent",
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "Group description states 'גם תיווך מוזמן לפרסם חינם' (Agents are also invited to post for free).",
+    "source_url": "https://www.facebook.com/groups/2339740166305634/",
+    "research_segment": "Carmiel, Afula, Tiberias, and the Galilee: sale, rent, apartment and property groups",
+    "curated_at": "2026-08-26"
+  },
+  {
+    "name": "דירות למכירה בירושלים",
+    "url": "https://www.facebook.com/groups/167233846635256",
+    "city": "ירושלים",
+    "members": null,
+    "listing_types": [
+      "sale"
+    ],
+    "languages": [
+      "he"
+    ],
+    "agent_policy": "explicitly_allowed",
+    "policy_evidence": "BG GROUP BEKMAN נדל\"ן... מחפש ללקוחות מעולים לקניה בית מלון",
+    "source_url": "https://www.facebook.com/groups/167233846635256/",
+    "research_segment": "Israel real-estate groups focused on property sale listings and new projects",
+    "curated_at": "2026-08-26"
+  }
 ]

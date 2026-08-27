@@ -11,16 +11,13 @@
  * the browser (spec §7).
  */
 
+const crypto = require("node:crypto");
 const express = require("express");
-const crypto = require("crypto");
 const db = require("../db");
 const jobs = require("../distribution/jobs");
 const meta = require("../distribution/meta");
 const shareKit = require("../distribution/share-kit");
 const config = require("../distribution/config");
-const pacing = require("../distribution/pacing");
-const scheduler = require("../distribution/scheduler");
-const { decorateJoinedGroup } = require("../distribution/group-relevance");
 const businessCache = require("../business-cache");
 
 const esc = (s) => String(s == null ? "" : s)
@@ -61,10 +58,24 @@ module.exports = function createDistributionRouter(ctx) {
     return list.length ? list : meta.SCOPES;
   };
 
+  // OAuth state is signed, but never accept an arbitrary return URL from the
+  // initial request. A property workspace is the only supported direct return.
+  const publishWorkspacePath = (pageId) => {
+    const id = String(pageId || "").trim();
+    return id && id.length <= 160 ? `/publish.html?page=${encodeURIComponent(id)}&connected=1` : null;
+  };
+  const oauthReturnPath = (state) =>
+    String((state && state.return_to) || "").startsWith("/publish.html?")
+      ? state.return_to
+      : "/distribution.html?connected=1";
+
   // ── GET /oauth/start — logged-in agent → Facebook consent ──
   router.get("/oauth/start", requireAuth(authSecret), (req, res) => {
     if (!envOk()) return res.status(503).json({ error: "distribution_not_configured" });
-    const state = meta.makeState({ phone: req.user.userId }, authSecret);
+    const state = meta.makeState({
+      phone: req.user.userId,
+      return_to: publishWorkspacePath(req.query.page_id),
+    }, authSecret);
     res.redirect(meta.oauthStartUrl({
       appId: process.env.META_APP_ID,
       redirectUrl: process.env.META_REDIRECT_URL,
@@ -101,6 +112,8 @@ module.exports = function createDistributionRouter(ctx) {
         "לא ניתנה הרשאה. אפשר לנסות שוב מעמוד ההפצה בדשבורד."));
     }
     try {
+      const returnTo = oauthReturnPath(state);
+      const returnLabel = returnTo.startsWith("/publish.html?") ? "לעמוד הפרסום" : "לעמוד ההפצה";
       const short = await meta.exchangeCode({ code: String(req.query.code),
         appId: process.env.META_APP_ID, appSecret: process.env.META_APP_SECRET,
         redirectUrl: process.env.META_REDIRECT_URL, graphVersion: gv() });
@@ -115,16 +128,16 @@ module.exports = function createDistributionRouter(ctx) {
       if (pages.length === 1) {
         await storeConnection(state.phone, long.access_token, pages[0]);
         return res.type("html").send(card("✅ החיבור הושלם",
-          `הדף "${pages[0].name}" חובר. מחזירים אתכם לעמוד ההפצה…`,
-          `<a href="/distribution.html?connected=1"><button>לעמוד ההפצה</button></a>`,
-          "/distribution.html?connected=1"));
+          `הדף "${pages[0].name}" חובר. מחזירים אתכם לעמוד הפרסום…`,
+          `<a href="${esc(returnTo)}"><button>${returnLabel}</button></a>`,
+          returnTo));
       }
       // Multi-page: stash the candidates, re-sign a fresh state, render picker.
       await db.setConnection(state.phone, {
         pending_pages: pages.map((p) => ({ id: p.id, name: p.name, access_token: p.access_token })),
         user_token: long.access_token,
       });
-      const pickState = meta.makeState({ phone: state.phone }, authSecret);
+      const pickState = meta.makeState({ phone: state.phone, return_to: returnTo }, authSecret);
       const buttons = pages.map((p) =>
         `<form method="POST" action="/api/distribution/oauth/select">` +
         `<input type="hidden" name="state" value="${esc(pickState)}">` +
@@ -154,10 +167,12 @@ module.exports = function createDistributionRouter(ctx) {
         "התחילו שוב את החיבור מעמוד ההפצה בדשבורד."));
     }
     await storeConnection(state.phone, conn.user_token, pick);
+    const returnTo = oauthReturnPath(state);
+    const returnLabel = returnTo.startsWith("/publish.html?") ? "לעמוד הפרסום" : "לעמוד ההפצה";
     res.type("html").send(card("✅ החיבור הושלם",
-      `הדף "${pick.name}" חובר. מחזירים אתכם לעמוד ההפצה…`,
-      `<a href="/distribution.html?connected=1"><button>לעמוד ההפצה</button></a>`,
-      "/distribution.html?connected=1"));
+      `הדף "${pick.name}" חובר. מחזירים אתכם לעמוד הפרסום…`,
+      `<a href="${esc(returnTo)}"><button>${returnLabel}</button></a>`,
+      returnTo));
   });
 
   // ── GET /confirm?d=&t= — the one-tap WhatsApp link ──
@@ -258,9 +273,13 @@ module.exports = function createDistributionRouter(ctx) {
           city: g.city || null, members: Number(g.members) || null,
           listing_types: types,
           languages: Array.isArray(g.languages) ? g.languages : [],
-          // "unknown" is honest: group rules can't be inferred from a name —
-          // only a curator's verified entry may say allowed/owner_only.
+          // "unknown" is honest: group rules cannot be inferred from a name.
+          // The curated 2026-08 set may use explicitly_allowed only when its
+          // stored public evidence names a broker/agent/professional listing rule.
           agent_policy: g.agent_policy || "unknown",
+          policy_evidence: g.policy_evidence || null,
+          source_url: g.source_url || null,
+          curated_at: g.curated_at || null,
           match: !want || !types.length || types.includes(want),
         };
       });
@@ -269,40 +288,14 @@ module.exports = function createDistributionRouter(ctx) {
   router.get("/group-catalog", requireAuth(authSecret), async (req, res) => {
     const want = String(req.query.listing_type || "").trim();
     const catalog = await mergedCatalog(want);
-    // Fold in the groups the agent is actually a member of: catalog entries
-    // get flagged `joined`, and groups we've never heard of are appended so
-    // the agent can pick the ones they already belong to.
-    const s = (await db.getGroupPosting(req.user.userId)) || {};
-    const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
-    const known = new Set(catalog.map((g) => g.url));
-    const joinedByUrl = new Map(joined.map((g) => [g.url, g]));
-    for (const g of catalog) {
-      const own = joinedByUrl.get(g.url);
-      g.joined = joined.length ? !!own : null;
-      if (own) Object.assign(g, {
-        enabled: !!own.enabled,
-        relevance: own.relevance || "review",
-        relevance_score: Number(own.relevance_score) || 0,
-        relevance_signals: Array.isArray(own.relevance_signals) ? own.relevance_signals : [],
-        relevance_source: own.relevance_source || "legacy",
-      });
-    }
-    for (const g of joined) {
-      if (known.has(g.url)) continue;
-      catalog.push({ name: g.name, url: g.url, city: null, members: null,
-        listing_types: [], languages: [], agent_policy: "unknown",
-        match: true, joined: true, own: true,
-        enabled: !!g.enabled, relevance: g.relevance || "review",
-        relevance_score: Number(g.relevance_score) || 0,
-        relevance_signals: Array.isArray(g.relevance_signals) ? g.relevance_signals : [],
-        relevance_source: g.relevance_source || "legacy" });
-    }
+    const business = await db.getBusiness(req.user.userId);
+    const selected = shareKit.sanitizeGroups(
+      (business && business.distribution && business.distribution.groups) || []);
     res.json({
-      groups: catalog, listing_type: want || null,
-      joined_synced_at: s.joined_synced_at || null,
-      joined_count: joined.length,
-      enabled_count: joined.filter((g) => g.enabled).length,
-      relevant_count: joined.filter((g) => g.relevance === "relevant").length,
+      groups: catalog,
+      listing_type: want || null,
+      selected_groups: selected,
+      selected_count: selected.length,
     });
   });
 
@@ -408,9 +401,6 @@ module.exports = function createDistributionRouter(ctx) {
     listing_type: s.snapshot.listing_type || "sale",
     quick_share: shareKit.sharerLink(s.snapshot.page_url,
       { quote: s.snapshot.copy, appId: process.env.META_APP_ID || null }),
-    // Non-secret target for a user-triggered external start message. The
-    // extension keeps its pairing token in local Chrome storage.
-    extension_id: process.env.EXTENSION_ID || null,
     groups: (s.groups || []).map((g) => ({
       key: g.key, url: g.url, state: g.state,
       name: (catalogNames.get(g.url) || null),
@@ -447,6 +437,26 @@ module.exports = function createDistributionRouter(ctx) {
     return { catalog, suggestion };
   }
 
+  // Use one implementation whenever a queue's target URLs change. A retained
+  // queue must keep its existing progress for URLs that remain selected, while
+  // a newly added URL receives a fresh tracking key/token. This prevents the
+  // dashboard and property picker from disagreeing about targets.
+  function queueEntriesForGroups(session, urls) {
+    const byUrl = new Map((session.groups || []).map((g) => [g.url, g]));
+    return urls.map((url) => byUrl.get(url) || {
+      key: jobs.groupKey(url), url,
+      token: crypto.randomBytes(6).toString("base64url"),
+      state: "ready", copied_at: null, opened_at: null,
+      marked_posted_at: null, skipped_at: null, skip_reason: null,
+    });
+  }
+
+  async function replaceShareSessionGroups(session, urls) {
+    const groups = queueEntriesForGroups(session, urls);
+    await db.updateShareSession(session.id, { groups, updated_at: new Date() });
+    return { ...session, groups };
+  }
+
   // Create (or reopen) a queue for one property — the dashboard button.
   router.post("/share-session", requireAuth(authSecret), async (req, res) => {
     const pageId = String((req.body && req.body.page_id) || "");
@@ -465,17 +475,18 @@ module.exports = function createDistributionRouter(ctx) {
       existing.groups.every((g) => currentGroups.includes(g.url));
     const session = sameGroups ? existing
       : await jobs.createShareSession(deps, { page, business: biz });
-    const extra = (session.groups || []).length ? {} : await pickerFor(session);
+    // The property workspace always receives the catalog so its targets can be
+    // reviewed and changed after defaults have populated the queue.
+    const extra = await pickerFor(session);
     res.json(publicSession(session, extra));
   });
 
   router.get("/share-session", async (req, res) => {
     const session = await loadSession(req);
     if (!session) return res.status(401).json({ error: "invalid_link" });
-    // With no groups yet, the queue has nothing to do — so it ships the
-    // picker (and any same-city reuse offer) in the same payload instead of
-    // sending the agent back to the dashboard.
-    const extra = (session.groups || []).length ? {} : await pickerFor(session);
+    // Always ship the picker and same-city reuse offer. A session can start
+    // with defaults and still need an explicit property-specific override.
+    const extra = await pickerFor(session);
     res.json(publicSession(session, extra));
   });
 
@@ -492,16 +503,8 @@ module.exports = function createDistributionRouter(ctx) {
       groups,
     });
     // Rebuild the queue's entries, preserving progress on groups that stay.
-    const byUrl = new Map((session.groups || []).map((g) => [g.url, g]));
-    const next = groups.map((url) => byUrl.get(url) || {
-      key: jobs.groupKey(url), url,
-      token: crypto.randomBytes(6).toString("base64url"),
-      state: "ready", copied_at: null, opened_at: null,
-      marked_posted_at: null, skipped_at: null, skip_reason: null,
-    });
-    await db.updateShareSession(session.id, { groups: next, updated_at: new Date() });
-    const fresh = { ...session, groups: next };
-    const extra = next.length ? {} : await pickerFor(fresh);
+    const fresh = await replaceShareSessionGroups(session, groups);
+    const extra = await pickerFor(fresh);
     res.json(publicSession(fresh, extra));
   });
 
@@ -547,333 +550,7 @@ module.exports = function createDistributionRouter(ctx) {
     res.json({ ok: true, state: action });
   });
 
-  /* ── the browser-extension bridge (assisted group posting) ──────────────
-   * Facebook has no Groups API, so the only thing that can put a post into a
-   * group is the agent's own logged-in browser. The extension is a typing
-   * assistant for exactly that: it fills the group composer and — in the
-   * default "assist" mode — stops so the agent presses Post themselves.
-   *
-   * Every safety rule is enforced HERE, not in the extension, so a tampered
-   * or stale client cannot pace its way around them (see distribution/pacing.js).
-   */
-  const extSign = (body) =>
-    crypto.createHmac("sha256", authSecret).update(`ext:${body}`).digest("base64url");
-
-  function makeExtToken(phone, nonce) {
-    const body = Buffer.from(JSON.stringify({ phone, nonce })).toString("base64url");
-    return `${body}.${extSign(body)}`;
-  }
-
-  function readExtToken(token) {
-    if (typeof token !== "string" || !token.includes(".")) return null;
-    const [body, sig] = token.split(".");
-    const a = Buffer.from(sig || ""), b = Buffer.from(extSign(body));
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-    try { return JSON.parse(Buffer.from(body, "base64url").toString("utf8")); }
-    catch { return null; }
-  }
-
-  // The nonce lives in the agent's own state doc, so re-pairing instantly
-  // invalidates any token on a device the agent no longer controls.
-  async function extAuth(req) {
-    const raw = String(req.get("x-forly-ext") ||
-      (req.body && req.body.token) || req.query.token || "");
-    const claim = readExtToken(raw);
-    if (!claim || !claim.phone) return null;
-    const state = await db.getGroupPosting(claim.phone);
-    if (!state || !state.ext_nonce || state.ext_nonce !== claim.nonce) return null;
-    return { phone: claim.phone, state };
-  }
-
-  router.post("/extension/pair", requireAuth(authSecret), async (req, res) => {
-    const phone = req.user.userId;
-    const biz = await db.getBusiness(phone);
-    if (!config.resolve(biz, process.env).enabled) {
-      return res.status(403).json({ error: "not_entitled" });
-    }
-    const prev = (await db.getGroupPosting(phone)) || {};
-    const nonce = crypto.randomBytes(12).toString("base64url");
-    await db.saveGroupPosting(phone, { ...prev, ext_nonce: nonce,
-      ext_paired_at: new Date(), mode: prev.mode || "assist" });
-    res.json({
-      token: makeExtToken(phone, nonce),
-      mode: prev.mode || "assist",
-      // Set EXTENSION_ID once the unpacked/store id is known, and the
-      // dashboard hands the token over with no copy/paste.
-      extension_id: process.env.EXTENSION_ID || null,
-    });
-  });
-
-  // What should the extension do next? Either one group task, or an honest
-  // "wait, and here's why" — never a queue the client can race through.
-  router.get("/extension/next", async (req, res) => {
-    const auth = await extAuth(req);
-    if (!auth) return res.status(401).json({ error: "unpaired" });
-    const sessionId = String(req.query.s || "");
-    const session = sessionId ? await db.getShareSession(sessionId) : null;
-    if (!session || session.business_phone !== auth.phone) {
-      return res.status(404).json({ error: "no_session" });
-    }
-    const pending = (session.groups || []).filter((g) => g.state !== "posted" && g.state !== "skipped");
-    if (!pending.length) return res.json({ done: true });
-
-    const page = await db.getPage(session.page_id).catch(() => null);
-    // Membership is a hard precondition for the assisted path: we post only
-    // where the agent is already a member, so without a sync there is
-    // nothing we're willing to schedule.
-    const joinedList = auth.state.joined_groups;
-    if (!Array.isArray(joinedList) || !joinedList.length) {
-      return res.json({ wait: { reason: "needs_group_sync" } });
-    }
-    const joinedSet = new Set(joinedList.map((g) => g.url));
-    const sizeOf = new Map(GROUP_SEED.map((g) => [g.url, g.members]));
-
-    for (const g of pending) {
-      const throttle = await db.getGroupThrottle(g.key).catch(() => null);
-      const verdict = pacing.canPost(auth.state, {
-        groupUrl: g.url, pageId: session.page_id,
-        groupLastPostAt: throttle && throttle.last_post_at,
-        groupMembers: sizeOf.get(g.url),
-        joined: joinedSet ? joinedSet.has(g.url) : undefined,
-      });
-      if (!verdict.ok) {
-        // Per-group reasons only block that group; agent-wide reasons block
-        // everything, so stop asking.
-        if (["group_cooldown", "already_posted_here", "group_busy", "not_a_member"]
-          .includes(verdict.reason)) continue;
-        return res.json({ wait: verdict });
-      }
-      const tracked = shareKit.trackedUrl(session.snapshot.page_url,
-        { session: session.id, group: g.token });
-      // Sharing the Facebook post keeps the forly domain out of group spam
-      // heuristics entirely and shows the video inline; when there's no post
-      // to share, the link goes in the first comment instead of the body.
-      const hasPost = !!session.snapshot.post_url;
-      const text = page
-        ? shareKit.buildPostCopy(page, hasPost ? session.snapshot.post_url : tracked, {
-            variantSeed: `${session.page_id}|${g.key}`,
-            linkInComment: !hasPost,
-          })
-        : session.snapshot.copy.replace(session.snapshot.page_url, tracked);
-      return res.json({
-        task: {
-          session_id: session.id, group_key: g.key, group_url: g.url,
-          share_url: session.snapshot.post_url || tracked,
-          // What the agent pastes as the first comment when the body carries
-          // no link — the standard, lower-risk pattern in these groups.
-          comment_url: hasPost ? null : tracked,
-          text,
-        },
-        mode: auth.state.mode || "assist",
-        gap_ms: pacing.nextGapMs(),
-        remaining_today: verdict.remaining_today,
-      });
-    }
-    res.json({ done: true, skipped_all: true });
-  });
-
-  // The extension reports what actually happened. "posted" is the agent's
-  // own confirmation (assist mode) or a verified submit (auto mode); any
-  // block/checkpoint freezes this agent for 24h.
-  router.post("/extension/result", async (req, res) => {
-    const auth = await extAuth(req);
-    if (!auth) return res.status(401).json({ error: "unpaired" });
-    const body = req.body || {};
-    const session = await db.getShareSession(String(body.session_id || ""));
-    if (!session || session.business_phone !== auth.phone) {
-      return res.status(404).json({ error: "no_session" });
-    }
-    const idx = (session.groups || []).findIndex((g) => g.key === String(body.group_key || ""));
-    if (idx < 0) return res.status(400).json({ error: "unknown_group" });
-    const group = session.groups[idx];
-    const status = String(body.status || "");
-    const now = new Date();
-
-    if (status === "blocked") {
-      await db.saveGroupPosting(auth.phone,
-        pacing.lock(auth.state, body.detail || "reported_block"));
-      return res.json({ ok: true, locked: true });
-    }
-    if (status !== "posted") {
-      await db.updateShareSession(session.id, {
-        [`groups.${idx}.state`]: "ready", updated_at: now });
-      return res.json({ ok: true });
-    }
-
-    await db.saveGroupPosting(auth.phone,
-      pacing.recordPost(auth.state, { groupUrl: group.url, pageId: session.page_id }));
-    // Stamp the shared throttle so no OTHER agent posts into this group for
-    // the next few hours.
-    await db.touchGroupThrottle(group.key, group.url).catch(() => {});
-    await db.updateShareSession(session.id, {
-      [`groups.${idx}.state`]: "posted",
-      [`groups.${idx}.marked_posted_at`]: now, updated_at: now });
-    await db.addPostAction({
-      business_phone: auth.phone, page_id: session.page_id,
-      distribution_id: session.id, target: "facebook_group",
-      action: "published", at: now, trigger: "extension",
-      post_id: null, post_url: group.url,
-      content: { copy: session.snapshot.copy, media_type: "none",
-        media_count: 0, media_urls: [] },
-      error: null,
-      // Honest provenance: in assist mode a human pressed Post.
-      source: (auth.state.mode || "assist") === "assist" ? "agent_confirmed" : "extension_auto",
-    });
-    res.json({ ok: true, gap_ms: pacing.nextGapMs() });
-  });
-
-  // The groups this agent is actually a member of, synced from their own
-  // Facebook account by the extension. This is what makes "post only where
-  // you're a member" a fact rather than a guess. We retain explicit agent
-  // choices across re-syncs and classify only the Group NAME, never posts or
-  // members. The practical cap protects Firestore documents and the browser.
-  router.post("/extension/groups", async (req, res) => {
-    const auth = await extAuth(req);
-    if (!auth) return res.status(401).json({ error: "unpaired" });
-    const raw = Array.isArray(req.body && req.body.groups) ? req.body.groups : [];
-    const seen = new Map();
-    for (const g of raw.slice(0, 1000)) {
-      const url = shareKit.sanitizeGroups([(g && g.url) || ""])[0];
-      if (url && !seen.has(url)) {
-        seen.set(url, String((g && g.name) || "").slice(0, 140) || url);
-      }
-    }
-    const catalogByUrl = new Map((await mergedCatalog()).map((g) => [g.url, g]));
-    const previousByUrl = new Map(
-      (Array.isArray(auth.state.joined_groups) ? auth.state.joined_groups : [])
-        .map((g) => [g.url, g]),
-    );
-    const joined = [...seen.entries()].map(([url, name]) => decorateJoinedGroup({
-      url, name, previous: previousByUrl.get(url) || null,
-      catalogEntry: catalogByUrl.get(url) || null,
-    }));
-    const sync = req.body && req.body.sync && typeof req.body.sync === "object" ? req.body.sync : {};
-    await db.saveGroupPosting(auth.phone, {
-      ...auth.state,
-      joined_groups: joined,
-      joined_synced_at: new Date(),
-      joined_sync: {
-        received: raw.length, accepted: joined.length,
-        complete: sync.complete === true,
-        capped: sync.capped === true,
-        scrolls: Number(sync.scrolls) || null,
-        scanned_at: new Date(),
-      },
-    });
-    res.json({
-      ok: true, count: joined.length,
-      relevant_count: joined.filter((g) => g.relevance === "relevant").length,
-      enabled_count: joined.filter((g) => g.enabled).length,
-      capped: raw.length > 1000 || sync.capped === true,
-    });
-  });
-
-  // Full synced Group list for the My Groups settings UI. Search and visual
-  // filtering happen in the client so a user can change filters instantly.
-  router.get("/joined-groups", requireAuth(authSecret), async (req, res) => {
-    const s = (await db.getGroupPosting(req.user.userId)) || {};
-    const groups = Array.isArray(s.joined_groups) ? s.joined_groups : [];
-    res.json({
-      groups,
-      synced_at: s.joined_synced_at || null,
-      sync: s.joined_sync || null,
-      summary: {
-        total: groups.length,
-        relevant: groups.filter((g) => g.relevance === "relevant").length,
-        review: groups.filter((g) => g.relevance === "review").length,
-        irrelevant: groups.filter((g) => g.relevance === "irrelevant").length,
-        enabled: groups.filter((g) => g.enabled).length,
-      },
-    });
-  });
-
-  // One Group at a time: the agent may enable/disable it and override the
-  // recommendation. `relevance: auto` clears an earlier override.
-  router.post("/joined-groups/preference", requireAuth(authSecret), async (req, res) => {
-    const url = shareKit.sanitizeGroups([(req.body && req.body.url) || ""])[0];
-    if (!url) return res.status(400).json({ error: "invalid_group_url" });
-    const s = (await db.getGroupPosting(req.user.userId)) || {};
-    const groups = Array.isArray(s.joined_groups) ? s.joined_groups : [];
-    const index = groups.findIndex((g) => g.url === url);
-    if (index < 0) return res.status(404).json({ error: "group_not_synced" });
-    const current = groups[index];
-    if (typeof req.body.enabled === "boolean") current.enabled = req.body.enabled;
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "relevance")) {
-      const choice = String(req.body.relevance || "auto");
-      if (!["auto", "relevant", "review", "irrelevant"].includes(choice)) {
-        return res.status(400).json({ error: "invalid_relevance" });
-      }
-      current.relevance_override = choice === "auto" ? null : choice;
-      current.relevance = current.relevance_override || current.automatic_relevance || "review";
-      current.relevance_source = current.relevance_override ? "agent" : "heuristic";
-      if (current.relevance === "irrelevant" && typeof req.body.enabled !== "boolean") {
-        current.enabled = false;
-      }
-    }
-    groups[index] = current;
-    await db.saveGroupPosting(req.user.userId, { ...s, joined_groups: groups });
-    res.json({ ok: true, group: current });
-  });
-
-  // Copies the agent-approved subset into the default distribution setting.
-  // This is deliberate: a re-sync never silently starts posting to new Groups.
-  router.post("/joined-groups/apply", requireAuth(authSecret), async (req, res) => {
-    const s = (await db.getGroupPosting(req.user.userId)) || {};
-    const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
-    const groups = joined
-      .filter((g) => g.enabled && g.relevance !== "irrelevant")
-      .map((g) => g.url);
-    const business = await db.getBusiness(req.user.userId);
-    await db.setBusiness(req.user.userId, {
-      distribution: { ...((business && business.distribution) || {}), groups },
-      updated_at: new Date(),
-    });
-    businessCache.invalidate(req.user.userId);
-    res.json({ ok: true, groups, count: groups.length });
-  });
-
-  // Agent-facing switch + live safety state for the dashboard.
-  router.post("/extension/mode", requireAuth(authSecret), async (req, res) => {
-    const mode = String((req.body && req.body.mode) || "") === "auto" ? "auto" : "assist";
-    const prev = (await db.getGroupPosting(req.user.userId)) || {};
-    await db.saveGroupPosting(req.user.userId, { ...prev, mode });
-    res.json({ ok: true, mode });
-  });
-
-  router.get("/extension/status", requireAuth(authSecret), async (req, res) => {
-    const phone = req.user.userId;
-    const s = (await db.getGroupPosting(phone)) || {};
-    const posts = Array.isArray(s.posts) ? s.posts : [];
-    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const joined = Array.isArray(s.joined_groups) ? s.joined_groups : [];
-    const activeJoined = joined.filter((g) => g.enabled && g.relevance !== "irrelevant");
-    const dailyCap = pacing.dailyCap(s.first_post_at, Date.now());
-
-    // An honest ETA beats a promise: with this many listings and this many
-    // joined groups, a full distribution takes this long.
-    const listings = (await db.listListingsByPhone(phone).catch(() => []))
-      .filter((l) => l.page_id && l.status !== "archived");
-    const plan = activeJoined.length && listings.length
-      ? scheduler.forecast({
-          propertyCount: listings.length, groupCount: activeJoined.length,
-          dailyCap, groupCooldownMs: pacing.GROUP_COOLDOWN_MS })
-      : null;
-
-    res.json({
-      paired: !!s.ext_nonce,
-      mode: s.mode || "assist",
-      locked_until: s.locked_until || null,
-      lock_reason: s.lock_reason || null,
-      posted_today: posts.filter((p) => new Date(p.at).getTime() > dayAgo).length,
-      daily_cap: dailyCap,
-      joined_count: joined.length,
-      joined_relevant_count: joined.filter((g) => g.relevance === "relevant").length,
-      joined_active_count: activeJoined.length,
-      joined_synced_at: s.joined_synced_at || null,
-      joined_sync: s.joined_sync || null,
-      plan,
-    });
-  });
+  // Group targets are curated and managed directly in Forly.
 
   // ── GET /status — connection + per-listing state; never tokens ──
   router.get("/status", requireAuth(authSecret), async (req, res) => {

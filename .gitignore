@@ -83,6 +83,7 @@ functions/.env.*
 !functions/.env.example
 server/node_modules
 server/data
+.worktrees/
 
 # VPS deploy secrets (live on the server, never committed)
 /deploy.env

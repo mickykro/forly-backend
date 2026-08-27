@@ -45,11 +45,6 @@ const AUTH_SECRET = process.env.NADLAN_JWT_SECRET || "change-me-in-env";
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || "")
   .split(",").map((s) => s.trim()).filter(Boolean);
 const WEB_SIGNUP_BASE = process.env.WEB_SIGNUP_URL || "https://call4li.web.app/signup";
-// This public extension ID is used for a narrow CORS allowlist on the
-// companion's authenticated API routes. Leave unset until the extension is
-// packaged or loaded from its stable path; an unset value allows no extension
-// cross-origin requests rather than falling back to a wildcard.
-const EXTENSION_ID = String(process.env.EXTENSION_ID || "").trim();
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
 const TEMPLATES_DIR = path.join(__dirname, "..", "public-nadlan", "templates");
 
@@ -64,16 +59,10 @@ const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
 const { sendWhatsApp } = require("./utils");
-const createExtensionCors = require("./extension-cors");
 
 // ── app ──
 const app = express();
 app.use(express.json({ limit: "2mb" }));
-
-// The Forly browser companion sends its paired token as X-Forly-Ext. That
-// non-simple header causes Chrome to preflight the request. Permit only the
-// exact configured chrome-extension:// origin, and only on its own API route.
-app.use("/api/distribution/extension", createExtensionCors(EXTENSION_ID));
 
 // static files
 app.use(express.static(path.join(__dirname, "..", "public-agent"), { index: "index.html" }));

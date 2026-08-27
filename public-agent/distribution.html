@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>הפצה — Forly</title>
+<title>חיבורים וקבוצות — Forly</title>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -68,16 +68,9 @@
 
 <div class="container">
   <div class="page-head"><div>
-    <h1>הפצת נכסים</h1>
-    <p>פרסום אוטומטי לדף הפייסבוק שלכם + ערכת שיתוף לקבוצות ולפרופיל</p>
+    <h1>חיבורים וקבוצות</h1>
+    <p>חברו את דף הפייסבוק וייבאו את הקבוצות שלכם. את הנכס עצמו מפרסמים ישירות מכפתור «פרסום» בדשבורד.</p>
   </div></div>
-
-  <div class="step-strip" id="stepStrip">
-    <div class="step" data-step="1"><span class="n">1</span>חיבור פייסבוק</div>
-    <div class="step" data-step="2"><span class="n">2</span>בחירת נכסים</div>
-    <div class="step" data-step="3"><span class="n">3</span>קבוצות</div>
-    <div class="step" data-step="4"><span class="n">4</span>פרסום</div>
-  </div>
 
   <div class="card dist-card" id="entitleCard" hidden>
     <h2>הפצה אינה פעילה בחשבון</h2>
@@ -90,15 +83,9 @@
     <button class="btn btn-gold" id="connectBtn">חיבור חשבון פייסבוק</button>
   </div>
 
-  <div class="card dist-card" id="propsCard" hidden>
-    <h2>בחירת נכסים לפרסום</h2>
-    <p class="muted">סמנו נכס אחד או יותר. נכסים שכבר פורסמו יבקשו אישור לפני פרסום חוזר.</p>
-    <div id="propList"></div>
-  </div>
-
   <div class="card dist-card" id="groupsCard" hidden>
-    <h2>קבוצות פייסבוק</h2>
-    <p class="muted">סמנו קבוצות מהרשימה המומלצת, או הוסיפו משלכם. מומלץ 5 ומעלה —
+    <h2>קבוצות ברירת מחדל</h2>
+    <p class="muted">אפשר לבחור קבוצות ברירת מחדל. בכל נכס אפשר לאשר או לשנות את הקבוצות בעמוד הפרסום שלו —
       <span id="groupCount"></span></p>
     <input id="catalogFilter" placeholder="סינון לפי עיר או שם קבוצה…">
     <div id="catalogList"></div>
@@ -115,77 +102,7 @@
     <button class="btn btn-ghost" id="saveGroups">שמירת קבוצות</button>
   </div>
 
-  <div class="card dist-card" id="extCard" hidden>
-    <h2>פרסום לקבוצות עם התוסף <span class="conn-chip" id="extChip"></span></h2>
-    <p class="muted" id="extText"></p>
-    <div class="inline-row">
-      <button class="btn btn-gold btn-sm" id="extPair">חיבור התוסף</button>
-      <a class="btn btn-ghost btn-sm" id="extHelp" href="#" hidden>סנכרון הקבוצות שלי</a>
-    </div>
-    <div style="margin-top:12px">
-      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:.9rem">
-        <input type="radio" name="extmode" value="assist" id="modeAssist" style="margin-top:4px">
-        <span><b>אישור ידני (מומלץ)</b><br>
-          <span class="muted">התוסף פותח את הקבוצה וכותב את הפוסט. אתם קוראים ולוחצים «פרסום» בפייסבוק.
-          הבטוח ביותר לחשבון.</span></span>
-      </label>
-      <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-size:.9rem;margin-top:8px">
-        <input type="radio" name="extmode" value="auto" id="modeAuto" style="margin-top:4px">
-        <span><b>אוטומטי</b><br>
-          <span class="muted">התוסף גם לוחץ «פרסום». מהיר יותר, אבל מגדיל את הסיכון לחסימה זמנית של
-          חשבון הפייסבוק האישי שלכם.</span></span>
-      </label>
-    </div>
-    <p class="muted" id="extPlan" style="margin-top:10px"></p>
-  </div>
-
-  <div class="card dist-card" id="myGroupsCard" hidden>
-    <h2>הקבוצות שלי</h2>
-    <p class="muted" id="myGroupsSummary"></p>
-    <p class="muted" id="myGroupsSync"></p>
-    <div class="inline-row">
-      <input id="myGroupsSearch" placeholder="חיפוש בשם קבוצה…">
-      <select id="myGroupsFilter" aria-label="סינון קבוצות">
-        <option value="all">כל הקבוצות</option>
-        <option value="relevant">רלוונטיות</option>
-        <option value="review">לבדיקה</option>
-        <option value="irrelevant">לא רלוונטיות</option>
-        <option value="enabled">פעילות בלבד</option>
-      </select>
-    </div>
-    <div class="inline-row">
-      <button class="btn btn-ghost btn-sm" id="refreshMyGroups">רענון רשימה</button>
-      <button class="btn btn-gold btn-sm" id="applyMyGroups">שימוש בקבוצות הפעילות כברירת מחדל</button>
-    </div>
-    <p class="muted" style="font-size:.82rem">הסינון הוא המלצה לפי שם הקבוצה בלבד. בדקו את חוקי הקבוצה לפני פרסום. סנכרון מחדש נעשה מתוך התוסף.</p>
-    <div id="myGroupsList"></div>
-  </div>
-
-  <div class="card dist-card" id="publishCard" hidden>
-    <h2>פרסום</h2>
-    <p class="muted" id="publishSummary"></p>
-    <button class="btn btn-gold" id="publishBtn">פרסום הנכסים שנבחרו</button>
-  </div>
 </div>
-
-<dialog id="repostDlg">
-  <h2>לפרסם שוב?</h2>
-  <p class="muted" id="repostText">חלק מהנכסים שנבחרו כבר פורסמו בדף הפייסבוק. פרסום נוסף ייצור פוסט חדש.</p>
-  <button class="btn btn-gold" id="repostYes" style="width:100%">כן, לפרסם שוב</button>
-  <button class="btn btn-ghost" id="repostNo" style="width:100%;margin-top:8px">ביטול</button>
-</dialog>
-
-<dialog id="kitDlg">
-  <h2>ערכת שיתוף</h2>
-  <p class="muted">העתיקו את הטקסט, או שתפו בקליק — הטקסט כבר מצורף לקישור השיתוף.</p>
-  <textarea id="kitCopy" readonly></textarea>
-  <div class="inline-row" style="margin-top:10px">
-    <button class="btn btn-gold btn-sm" id="kitCopyBtn">העתקת הטקסט</button>
-    <a class="btn btn-ghost btn-sm" id="kitShare" target="_blank" rel="noopener">שיתוף בפייסבוק</a>
-  </div>
-  <div id="kitGroups" style="margin-top:8px"></div>
-  <button class="btn btn-ghost" id="kitClose" style="width:100%;margin-top:12px">סגירה</button>
-</dialog>
 
 <div id="msg" role="status"></div>
 <script src="distribution.js"></script>

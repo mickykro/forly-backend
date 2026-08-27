@@ -1,16 +1,18 @@
 /*
- * share.js — the group sharing queue (mobile-first, opened from WhatsApp).
+ * publish.js — one property, one publishing workspace.
  *
- * Forly automates the PREPARATION, never the Facebook action: per-group copy
- * with a tracked link, an open button, and states the agent confirms by hand.
- * Nothing here claims a group post that wasn't confirmed by the agent.
+ * Facebook Page posts use the supported backend publishing path. Group sharing
+ * remains manual: Forly prepares copy and direct links, while the agent
+ * chooses when and whether to publish within each Group.
  */
 (() => {
   const $ = (id) => document.getElementById(id);
   const qs = new URLSearchParams(location.search);
-  const S = qs.get("s") || "";
-  const T = qs.get("t") || "";
+  let S = qs.get("s") || "";
+  let T = qs.get("t") || "";
+  const P = qs.get("page") || "";
   let session = null;
+  let pagePoll = null;
 
   const api = (path, opts) => fetch(path, { credentials: "include", ...opts })
     .then(async (r) => {
@@ -37,6 +39,93 @@
       document.body.appendChild(ta); ta.select();
       try { document.execCommand("copy"); done(); } catch { toast("ההעתקה נכשלה — סמנו והעתיקו ידנית"); }
       document.body.removeChild(ta);
+    }
+  }
+
+  function openConnectDialog() {
+    const dialog = $("facebookConnectDialog");
+    $("facebookConnectBtn").href = `/api/distribution/oauth/start?page_id=${encodeURIComponent(session.page_id)}`;
+    if (dialog.showModal) dialog.showModal(); else location.href = $("facebookConnectBtn").href;
+  }
+
+  function setPagePublish({ text, label, disabled = false, postUrl = null, onClick = null }) {
+    $("pagePublishText").textContent = text;
+    const btn = $("pagePublishBtn");
+    btn.textContent = label;
+    btn.disabled = disabled;
+    btn.onclick = onClick;
+    const link = $("pagePostLink");
+    link.classList.toggle("hidden", !postUrl);
+    if (postUrl) link.href = postUrl;
+  }
+
+  async function publishPage(force) {
+    const btn = $("pagePublishBtn");
+    btn.disabled = true;
+    setPagePublish({ text: "שולחים את הנכס לדף הפייסבוק…", label: "⏳ הפרסום בתהליך", disabled: true });
+    try {
+      await api("/api/distribution/publish", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ page_id: session.page_id, force: !!force }),
+      });
+      toast("הפרסום נשלח לדף הפייסבוק ✓");
+      refreshPagePublish(0);
+    } catch (err) {
+      if (err.code === "already_published") {
+        setPagePublish({
+          text: "הנכס כבר פורסם בדף הפייסבוק.", label: "פרסום נוסף בדף", onClick: () => {
+            if (confirm("הנכס כבר פורסם. ליצור פוסט נוסף בדף הפייסבוק?")) publishPage(true);
+          },
+        });
+      } else if (err.code === "not_connected" || err.code === "needs_reconnect") {
+        openConnectDialog();
+      } else {
+        setPagePublish({ text: "הפרסום בדף נכשל. נסו שוב בעוד רגע.", label: "ניסיון פרסום מחדש", onClick: () => publishPage(!!force) });
+      }
+    }
+  }
+
+  async function refreshPagePublish(tick = 0) {
+    clearTimeout(pagePoll);
+    try {
+      const status = await api(`/api/distribution/status?page_id=${encodeURIComponent(session.page_id)}`);
+      const conn = status.connection || {};
+      const listing = status.listing || {};
+      if (!status.entitled) {
+        setPagePublish({ text: "פרסום אוטומטי בדף אינו פעיל בחשבון זה.", label: "פרסום בדף אינו זמין", disabled: true });
+        return;
+      }
+      if (!conn.connected || conn.needs_reconnect) {
+        setPagePublish({
+          text: conn.needs_reconnect
+            ? "חיבור הדף לפייסבוק דורש חידוש לפני פרסום."
+            : "כדי לפרסם בדף העסקי, צריך לחבר את Facebook פעם אחת.",
+          label: conn.needs_reconnect ? "חידוש חיבור Facebook" : "חיבור Facebook לפרסום",
+          onClick: openConnectDialog,
+        });
+        return;
+      }
+      if (listing.in_flight) {
+        setPagePublish({ text: "הנכס מתפרסם בדף הפייסבוק…", label: "⏳ הפרסום בתהליך", disabled: true });
+        if (tick < 30) pagePoll = setTimeout(() => refreshPagePublish(tick + 1), 10000);
+        return;
+      }
+      if (listing.posted) {
+        setPagePublish({
+          text: `הנכס פורסם בדף ${conn.page_name || "הפייסבוק"}.`,
+          label: "פרסום נוסף בדף",
+          postUrl: listing.post_url || session.post_url || null,
+          onClick: () => { if (confirm("ליצור פוסט נוסף בדף הפייסבוק?")) publishPage(true); },
+        });
+        return;
+      }
+      setPagePublish({
+        text: `מוכן לפרסום אוטומטי בדף ${conn.page_name || "הפייסבוק"}.`,
+        label: "פרסום בדף הפייסבוק",
+        onClick: () => publishPage(false),
+      });
+    } catch {
+      setPagePublish({ text: "לא הצלחנו לבדוק את חיבור הדף כרגע.", label: "רענון מצב הפרסום", onClick: () => refreshPagePublish(0) });
     }
   }
 
@@ -109,13 +198,20 @@
     return card;
   }
 
-  // ── inline group picker (shown when this property has no groups yet) ──
+  // ── inline property Group picker — available for a new queue and later edits ──
   const picked = new Set();
+  let pickerHydrated = false;
+
+  function hydratePicked() {
+    if (pickerHydrated) return;
+    picked.clear();
+    for (const group of (session.groups || [])) picked.add(group.url);
+    pickerHydrated = true;
+  }
 
   function renderPicker() {
-    const hasGroups = (session.groups || []).length > 0;
-    $("pickCard").classList.toggle("hidden", hasGroups);
-    if (hasGroups) return;
+    hydratePicked();
+    $("pickCard").classList.remove("hidden");
 
     const cat = session.catalog || [];
     const sug = session.suggestion;
@@ -133,10 +229,13 @@
     } else {
       $("reuseBox").classList.add("hidden");
     }
-    if (session.city) {
-      $("pickHint").textContent =
-        `כל נכס משויך לקבוצות משלו. הנכס הזה ב${session.city} — הקבוצות המקומיות מופיעות ראשונות.`;
-    }
+    const selectedCount = picked.size;
+    $("pickHint").textContent = session.city
+      ? `כל נכס משויך לקבוצות משלו. ${cat.length} קבוצות זמינות לבחירה; הנכס הזה ב${session.city}, ולכן הקבוצות המקומיות מופיעות ראשונות.`
+      : `כל נכס משויך לקבוצות משלו. ${cat.length} קבוצות זמינות לבחירה.`;
+    $("savePick").textContent = selectedCount
+      ? `שמירת ${selectedCount} קבוצות לנכס`
+      : "שמירת קבוצות לנכס";
 
     const q = ($("pickFilter").value || "").trim().toLowerCase();
     const box = $("pickList");
@@ -163,10 +262,18 @@
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.checked = picked.has(g.url);
       cb.style.accentColor = "var(--gold)";
-      cb.onchange = () => { cb.checked ? picked.add(g.url) : picked.delete(g.url); };
+      cb.onchange = () => {
+        cb.checked ? picked.add(g.url) : picked.delete(g.url);
+        $("savePick").textContent = picked.size
+          ? `שמירת ${picked.size} קבוצות לנכס`
+          : "שמירת קבוצות לנכס";
+      };
       const span = document.createElement("span");
+      const policy = g.agent_policy === "explicitly_allowed"
+        ? " · פרסום מתווכים נתמך"
+        : " · בדקו כללים";
       span.textContent = g.name + (g.city ? ` · ${g.city}` : "") +
-        (g.members ? ` · ~${Math.round(g.members / 1000)}K` : "");
+        (g.members ? ` · ~${Math.round(g.members / 1000)}K` : "") + policy;
       label.append(cb, span);
       return label;
     };
@@ -215,60 +322,14 @@
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ s: S, t: T, groups: list }),
       });
+      pickerHydrated = false;
       toast(`${session.groups.length} קבוצות שויכו לנכס ✓`);
       render();
     } catch { toast("השמירה נכשלה — נסו שוב"); }
   }
 
-  function renderExtensionStart() {
-    const hasGroups = !!((session.groups || []).length);
-    const card = $("extensionStartCard");
-    const button = $("startExtension");
-    const text = $("extensionStartText");
-    const available = hasGroups && !!session.extension_id;
-    card.classList.toggle("hidden", !available);
-    if (!available) return;
-    button.disabled = false;
-    button.textContent = "התחלה בתוסף";
-    text.textContent = "התוסף יעבור על הקבוצות שנבחרו לפי המצב שבחרתם. אפשר להמשיך להשתמש בקישורים הידניים אם התוסף אינו מותקן בדפדפן הזה.";
-  }
-
-  function startInExtension() {
-    const button = $("startExtension");
-    if (!session.extension_id || !(session.groups || []).length) return;
-    if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
-      toast("התוסף אינו זמין בדפדפן הזה — השתמשו בקישורים הידניים או פתחו את הדף בכרום שבו התוסף מותקן.");
-      return;
-    }
-    button.disabled = true;
-    button.textContent = "מחבר לתוסף…";
-    chrome.runtime.sendMessage(session.extension_id, { forly: "start", session: session.id }, (reply) => {
-      const lastError = chrome.runtime.lastError;
-      button.disabled = false;
-      if (lastError || !reply) {
-        button.textContent = "התחלה בתוסף";
-        toast("התוסף לא הגיב. ודאו שהוא מותקן, טעון ומחובר לחשבון Forly.");
-      } else if (reply.ok) {
-        button.textContent = reply.already_running ? "התוסף כבר פועל ✓" : "התוסף התחיל ✓";
-        $("extensionStartText").textContent = reply.already_running
-          ? "התוסף כבר עובד על הנכס הזה. אפשר לעקוב בחלון התוסף."
-          : "התוסף קיבל את התור ויפתח את הקבוצה הבאה שמאושרת לפרסום.";
-        toast("התור נשלח לתוסף ✓");
-      } else {
-        button.textContent = "התחלה בתוסף";
-        const message = {
-          unpaired: "חברו את התוסף לחשבון בעמוד ההפצה לפני התחלה.",
-          already_running: "התוסף כבר עובד על נכס אחר. עצרו אותו בחלון התוסף לפני החלפה.",
-          missing_session: "לא נמצא תור שיתוף תקף לנכס הזה.",
-        }[reply.error] || "לא הצלחנו להתחיל את התוסף.";
-        toast(message);
-      }
-    });
-  }
-
   function render() {
     renderPicker();
-    renderExtensionStart();
     const groups = session.groups || [];
     const done = groups.filter((g) => g.state === "posted" || g.state === "skipped").length;
     const posted = groups.filter((g) => g.state === "posted").length;
@@ -289,9 +350,17 @@
   }
 
   (async () => {
-    if (!S) { $("loading").classList.add("hidden"); $("badlink").classList.remove("hidden"); return; }
+    if (!S && !P) { $("loading").classList.add("hidden"); $("badlink").classList.remove("hidden"); return; }
     try {
-      session = await api(`/api/distribution/share-session?s=${encodeURIComponent(S)}&t=${encodeURIComponent(T)}`);
+      if (P) {
+        session = await api("/api/distribution/share-session", {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ page_id: P }),
+        });
+        S = session.id;
+      } else {
+        session = await api(`/api/distribution/share-session?s=${encodeURIComponent(S)}&t=${encodeURIComponent(T)}`);
+      }
     } catch {
       $("loading").classList.add("hidden");
       $("badlink").classList.remove("hidden");
@@ -299,7 +368,7 @@
     }
     $("loading").classList.add("hidden");
     $("app").classList.remove("hidden");
-    $("title").textContent = session.title || "שיתוף הנכס";
+    $("title").textContent = session.title || "פרסום הנכס";
     if (session.post_url) {
       const a = document.createElement("a");
       a.href = session.post_url; a.target = "_blank"; a.rel = "noopener";
@@ -312,7 +381,8 @@
     $("copyMain").onclick = () => copy(session.copy);
     $("pickFilter").oninput = renderPicker;
     $("savePick").onclick = () => savePicked();
-    $("startExtension").onclick = startInExtension;
+    $("facebookConnectCancel").onclick = () => $("facebookConnectDialog").close();
     render();
+    refreshPagePublish(0);
   })();
 })();
