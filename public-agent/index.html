@@ -319,10 +319,13 @@
 
   function queueDist(rows) {
     rows.forEach(function (row) {
-      if (row.dataset.distState || !row.dataset.distrow) return;
+      if (row.dataset.distState) return;
       row.dataset.distState = "loading";
       if (distObserver) distObserver.unobserve(row);
-      distQueue.push(row);
+      // A listing whose page is still building has no id to ask about. Settle
+      // it here so the observer stops re-firing on it for the rest of the page.
+      if (row.dataset.distrow) distQueue.push(row);
+      else row.dataset.distState = "done";
     });
     // Coalesce the burst of intersections that fires on first paint into one
     // request instead of one per card.
