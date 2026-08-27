@@ -238,6 +238,43 @@ assert.equal(metrics.isStale(
     assert.equal(pub.likes, 12, "counts read before the post became unreadable were real");
   }
 
+
+  /*
+   * ── reconnecting clears failures the reconnect just fixed ──
+   * A missing scope makes reads fail with code 100 and earns a 24h back-off.
+   * Re-granting consent is the agent fixing exactly that, so the stamp must not
+   * outlive it — otherwise the card reads "we couldn't read the post" for
+   * another day after the problem is gone.
+   */
+  {
+    const HOUR = 60 * 60 * 1000;
+    const failed = { missing: true, error_code: 100, error_subcode: 33,
+      checked_at: new Date(NOW.getTime() - 2 * HOUR), fetched_at: null };
+    const older = { connected_at: new Date(NOW.getTime() - 5 * HOUR) };
+    const fresh = { connected_at: new Date(NOW.getTime() - 1 * HOUR) };
+
+    assert.equal(metrics.supersededByReconnect(failed, older), false,
+      "the connection predates the failure — the back-off stands");
+    assert.equal(metrics.supersededByReconnect(failed, fresh), true,
+      "reconnected AFTER the failure ⇒ that failure means nothing now");
+    assert.equal(metrics.supersededByReconnect(failed, null), false);
+    assert.equal(metrics.supersededByReconnect(null, fresh), false);
+
+    const d = dist("x", "P_RECONNECT", failed);
+    assert.equal(metrics.staleDistributions([d], NOW.getTime(), undefined, older).length, 0,
+      "still backed off on the old connection");
+    assert.equal(metrics.staleDistributions([d], NOW.getTime(), undefined, fresh).length, 1,
+      "due again on the new one");
+
+    // And the very next load fetches it inline rather than waiting for a reload.
+    const { deps } = fakeDeps(async () => payload);
+    const primed = await metrics.primeUncached(deps, [d],
+      { page_token: "PT", page_id: "PAGE", ...fresh });
+    assert.deepEqual(primed.map((p) => p.id), ["x"],
+      "a post stamped before the reconnect is primed, not just queued");
+    assert.equal(d.targets.facebook_page.metrics.likes, 12);
+  }
+
   // ── one dashboard load never storms the Graph API ──
   {
     const asked = [];

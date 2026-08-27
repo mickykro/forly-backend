@@ -48,17 +48,36 @@ function isStale(metrics, now, ttlMs = TTL_MS) {
 }
 
 /*
+ * A reconnect re-grants consent, which retroactively makes every EARLIER read
+ * failure meaningless: a post that was unreadable because a scope was missing
+ * becomes readable the moment the agent reconnects with it. So anything last
+ * checked before the current connection is due again immediately, whatever
+ * back-off its stamp earned.
+ *
+ * Without this, fixing a permission in the Meta app leaves the cards reading
+ * "we couldn't read the post" for up to another 24 hours — the failure stamp
+ * outliving the failure.
+ */
+function supersededByReconnect(metrics, conn) {
+  const connectedAt = conn && conn.connected_at;
+  const last = metrics && (metrics.checked_at || metrics.fetched_at);
+  return !!(connectedAt && last && asMillis(connectedAt) > asMillis(last));
+}
+
+/*
  * The distributions worth a Graph read right now: a live post, and numbers
- * that are missing or past their TTL — STALEST FIRST.
+ * that are missing, past their TTL, or predate the current connection —
+ * STALEST FIRST.
  *
  * The order is what makes the per-request cap safe. An agent onboarding with
  * 40 listings would otherwise fire 40 parallel Graph calls on their first
  * dashboard load; capped and sorted, each load takes the oldest slice and the
  * backlog drains over a few loads instead of arriving as one burst.
  */
-function staleDistributions(dists, now, ttlMs = TTL_MS) {
+function staleDistributions(dists, now, ttlMs = TTL_MS, conn = null) {
   return (dists || [])
-    .filter((d) => postIdOf(d) && isStale(metricsOf(d), now, ttlMs))
+    .filter((d) => postIdOf(d) &&
+      (isStale(metricsOf(d), now, ttlMs) || supersededByReconnect(metricsOf(d), conn)))
     .sort((a, b) => asMillis((metricsOf(a) || {}).fetched_at) -
       asMillis((metricsOf(b) || {}).fetched_at));
 }
@@ -157,7 +176,7 @@ async function refreshOne(deps, dist, pageToken, pageId) {
 function refreshStaleInBackground(deps, dists, conn, ttlMs = TTL_MS) {
   const pageToken = conn && conn.page_token;
   if (!pageToken || (conn && conn.needs_reconnect)) return [];
-  const due = staleDistributions(dists, asMillis(deps.now()), ttlMs)
+  const due = staleDistributions(dists, asMillis(deps.now()), ttlMs, conn)
     .slice(0, MAX_PER_REQUEST);
   for (const dist of due) {
     refreshOne(deps, dist, pageToken, conn.page_id).catch((err) => {
@@ -191,7 +210,11 @@ async function primeUncached(deps, dists, conn, { limit = MAX_PER_REQUEST,
   budgetMs = PRIME_BUDGET_MS } = {}) {
   const pageToken = conn && conn.page_token;
   if (!pageToken || conn.needs_reconnect) return [];
-  const cold = (dists || []).filter((d) => postIdOf(d) && !metricsOf(d)).slice(0, limit);
+  // Cold, or stamped before the current connection: a reconnect is the agent
+  // fixing exactly the thing that made those reads fail, so the very next load
+  // should show numbers rather than a day-old failure.
+  const cold = (dists || []).filter((d) => postIdOf(d) &&
+    (!metricsOf(d) || supersededByReconnect(metricsOf(d), conn))).slice(0, limit);
   if (!cold.length) return [];
   const work = Promise.all(cold.map((d) =>
     refreshOne(deps, d, pageToken, conn.page_id)
@@ -203,6 +226,7 @@ async function primeUncached(deps, dists, conn, { limit = MAX_PER_REQUEST,
 
 module.exports = {
   TTL_MS, MAX_PER_REQUEST, PRIME_BUDGET_MS, isStale, staleDistributions,
+  supersededByReconnect,
   publicMetrics, refreshOne, refreshStaleInBackground, primeUncached,
   postIdOf, metricsOf,
 };
