@@ -10,6 +10,18 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<style>
+  /* Distribution state on the property cards: where this listing has been
+     published. Hidden until /status answers, so a non-entitled agent (or a
+     failed status call) sees the card exactly as before. */
+  .dist-row{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px}
+  .dist-row:empty{margin:0}
+  .dist-tag{font-size:.72rem;font-weight:600;border-radius:100px;padding:3px 10px;
+    background:rgba(23,20,15,.07);color:var(--ink-soft);white-space:nowrap}
+  .dist-tag.ok{background:rgba(31,175,90,.12);color:#157A3F}
+  .dist-tag.partial{background:var(--gold-faint);color:#8A6A1E}
+  .dist-tag .n{font-variant-numeric:tabular-nums}
+</style>
 </head>
 <body class="agent-page dashboard-page">
 
@@ -227,6 +239,8 @@
       '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px"><h3>' + esc(p.title) + "</h3>" + chipFor(p.page_status) + "</div>" +
       '<div class="addr">' + esc(p.address) + "</div>" + days +
       '<div class="meta-row"><span>👁 <b>' + p.view_count + "</b> צפיות</span><span>🔔 <b>" + p.lead_count + "</b> לידים</span></div>" +
+      // Filled by renderDistTags() once /status answers; stays empty otherwise.
+      '<div class="dist-row" data-distrow="' + esc(p.page_id || "") + '"></div>' +
       '<div class="actions">' + actions.join("") + "</div>" +
       "</div></div>";
   }
@@ -246,8 +260,43 @@
       $("#propGrid").innerHTML = items.map(cardHtml).join("");
       $("#emptyState").classList.toggle("hidden", items.length > 0);
       bindActions();
+      loadDistTags();
     }).finally(function () {
       FLY.loaderHide(function () { $("#viewList").classList.remove("hidden"); });
+    });
+  }
+
+  // ── where each listing has been published ──
+  // Read-only: the Facebook feed post, and how many of the property's target
+  // groups the agent has marked as shared. Publishing itself lives in
+  // publish.html — this row reports, it never acts. A non-entitled agent or a
+  // failed status call leaves the cards exactly as they were.
+  function loadDistTags() {
+    FLY.req("/api/distribution/status?full=1", { noRedirect: true })
+      .then(function (d) { if (d.entitled) renderDistTags(d.listings || {}); })
+      .catch(function () { /* cards stay as they are */ });
+  }
+
+  function distTag(cls, label) {
+    return '<span class="dist-tag ' + cls + '">' + label + "</span>";
+  }
+
+  function renderDistTags(listings) {
+    document.querySelectorAll("[data-distrow]").forEach(function (row) {
+      var L = listings[row.dataset.distrow];
+      if (!L) return;
+      var feed = L.in_flight ? distTag("partial", "📘 בפרסום לפיד…")
+        : L.posted ? distTag("ok", "📘 פורסם בפיד")
+        : distTag("", "📘 טרם פורסם בפיד");
+      var g = L.groups || {};
+      // Only agent-confirmed group posts count — the server never invents one.
+      var done = Number(g.posted) || 0;
+      var total = Number(g.total) || 0;
+      var groups = total
+        ? distTag(done >= total ? "ok" : done ? "partial" : "",
+            '👥 קבוצות <span class="n" dir="ltr">' + done + "/" + total + "</span>")
+        : distTag("", "👥 לא נבחרו קבוצות");
+      row.innerHTML = feed + groups;
     });
   }
 

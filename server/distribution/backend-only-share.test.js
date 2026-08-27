@@ -30,6 +30,13 @@ assert.match(publishJs, /דילוג/);
 // Existing signed links retain their query parameters while migrating.
 assert.match(shareHtml, /location\.replace\("\/publish\.html\?"/);
 
+// The dashboard REPORTS where a listing was published; it never publishes.
+// Publishing belongs to publish.html — the in-card controls were removed once
+// the workspace took over, and reading status must not smuggle them back.
+assert.match(indexHtml, /data-distrow=/);
+assert.match(indexHtml, /distribution\/status\?full=1/);
+assert.doesNotMatch(indexHtml, /distribution\/publish|data-publish=|data-dist=/);
+
 // Settings contain only Page connection plus manual/default Group links.
 assert.match(distributionHtml, /חיבורים וקבוצות/);
 assert.match(distributionHtml, /קבוצות ברירת מחדל/);

@@ -4,7 +4,7 @@
  */
 const assert = require("assert");
 const { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink, buildShareKitMessage,
-  buildQueueMessage, trackedUrl } = require("./share-kit");
+  buildQueueMessage, trackedUrl, groupProgress } = require("./share-kit");
 
 const page = {
   property: { title: "4 חד׳ בבבלי", neighborhood: "בבלי", city: "תל אביב",
@@ -121,6 +121,36 @@ assert.ok(!qm0.includes("undefined"));
   assert.ok(!body.includes(url), "no external link in the post body");
   assert.ok(body.includes("בתגובה הראשונה"), "tells the reader where the link is");
   assert.ok(body.includes("₪4,200,000"), "facts still present");
+}
+
+// ── group progress: X of Z, and X counts agent-confirmed posts ONLY ──
+{
+  const session = (states) => ({ groups: states.map((state, i) => ({ key: "g" + i, state })) });
+
+  assert.deepEqual(groupProgress(session(["posted", "posted", "ready"]), []),
+    { posted: 2, total: 3 }, "counts posted against the live queue");
+  assert.deepEqual(groupProgress(session(["posted", "posted"]), []),
+    { posted: 2, total: 2 }, "a finished queue reads X === Z");
+
+  // copied/opened are preparation; skipped is a decision NOT to post. None of
+  // them may inflate the count — Forly must never claim a group post it
+  // didn't see confirmed (DECISION-no-automation.md).
+  assert.deepEqual(groupProgress(session(["copied", "opened", "skipped", "ready"]), []),
+    { posted: 0, total: 4 }, "only 'posted' counts");
+
+  // No queue yet ⇒ zero of the property's target list, sanitized so the
+  // denominator matches the links the queue will actually build.
+  assert.deepEqual(groupProgress(null, [
+    "https://www.facebook.com/groups/aaa",
+    "https://m.facebook.com/groups/aaa",        // same group, other host
+    "https://example.com/not-a-group",          // not a group at all
+  ]), { posted: 0, total: 1 }, "denominator dedupes and rejects non-groups");
+
+  assert.deepEqual(groupProgress(null, []), { posted: 0, total: 0 },
+    "no groups chosen ⇒ 0/0, not a crash");
+  assert.deepEqual(groupProgress(null, null), { posted: 0, total: 0 });
+  assert.deepEqual(groupProgress({ groups: null }, ["https://www.facebook.com/groups/aaa"]),
+    { posted: 0, total: 1 }, "a session with no group array falls back to the list");
 }
 
 console.log("share-kit.test.js OK");

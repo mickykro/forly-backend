@@ -163,5 +163,27 @@ function buildQueueMessage({ title, groupCount, queueUrl, postUrl }) {
   return lines.join("\n");
 }
 
+/*
+ * "shared to X of Z groups", for the dashboard.
+ *
+ * Z is the live queue when one exists, otherwise the property's target list —
+ * so the denominator is what the agent will actually be asked to do, not a
+ * count that changes meaning once a queue opens.
+ *
+ * X counts ONLY groups the agent marked posted by hand. Forly does not post to
+ * groups (docs/distribution/DECISION-no-automation.md), so copied/opened are
+ * preparation and must never inflate this number.
+ */
+function groupProgress(session, fallbackGroups) {
+  const groups = session && Array.isArray(session.groups) ? session.groups : null;
+  if (groups) {
+    return {
+      posted: groups.filter((g) => g && g.state === "posted").length,
+      total: groups.length,
+    };
+  }
+  return { posted: 0, total: sanitizeGroups(fallbackGroups).length };
+}
+
 module.exports = { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink,
-  buildShareKitMessage, buildQueueMessage, trackedUrl, variantIndex };
+  buildShareKitMessage, buildQueueMessage, trackedUrl, variantIndex, groupProgress };

@@ -398,6 +398,21 @@ async function findOpenShareSession(pageId) {
     .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at))[0] || null;
 }
 
+// Every session the agent owns, newest first. The dashboard needs group
+// progress for the whole catalogue at once — one query beats findOpenShareSession
+// per card, which is a read per property on every dashboard load.
+async function listShareSessionsByPhone(phone, limit = 200) {
+  const sort = (docs) => docs
+    .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at))
+    .map(healGroups);
+  if (db) {
+    const snap = await db.collection("share_sessions")
+      .where("business_phone", "==", phone).limit(limit).get();
+    return sort(snap.docs.map((d) => d.data()));
+  }
+  return sort([...mem.shareSessions.values()].filter((s) => s.business_phone === phone));
+}
+
 // ── distribution: append-only audit (spec §5 post_actions) ──
 async function addPostAction(doc) {
   const rec = { at: new Date(), ...doc };
@@ -435,6 +450,7 @@ module.exports = {
   saveDistribution, getDistribution, updateDistribution,
   listDistributionsByPage, listQueuedDistributions, addPostAction,
   listGroupCatalog, addGroupCatalogEntry,
-  saveShareSession, getShareSession, updateShareSession, findOpenShareSession, healGroups,
+  saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
+  listShareSessionsByPhone, healGroups,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
 };

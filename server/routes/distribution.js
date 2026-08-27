@@ -550,6 +550,37 @@ module.exports = function createDistributionRouter(ctx) {
 
   // Group targets are curated and managed directly in Forly.
 
+  /*
+   * Group sharing progress for the dashboard, one lookup per page.
+   *
+   * The target list is resolved the same way jobs.resolveGroups does it — the
+   * live queue first, then the property's own saved selection, then the agent's
+   * default list — and shareKit.groupProgress does the counting.
+   *
+   * Loaded as two by-phone queries for the whole catalogue rather than two reads
+   * per card, so a 40-listing dashboard costs the same as a 1-listing one.
+   *
+   * ponytail: both queries are capped (200 sessions / 100 property lists). An
+   * agent past those caps just falls back to the default-list denominator on
+   * the oldest listings — a wrong Z, never a wrong X. Paginate if anyone gets
+   * near it.
+   */
+  async function groupProgressIndex(phone, biz) {
+    const [sessions, propertyGroups] = await Promise.all([
+      db.listShareSessionsByPhone(phone).catch(() => []),
+      db.listPropertyGroupsByPhone(phone).catch(() => []),
+    ]);
+    const latest = new Map();   // newest wins — listShareSessionsByPhone sorts
+    for (const s of sessions) if (!latest.has(s.page_id)) latest.set(s.page_id, s);
+    const own = new Map(propertyGroups.map((d) => [d.page_id, d.groups]));
+    const defaults = (biz && biz.distribution && biz.distribution.groups) || [];
+    return (pageId) => {
+      const saved = own.get(pageId);
+      return shareKit.groupProgress(latest.get(pageId),
+        Array.isArray(saved) && saved.length ? saved : defaults);
+    };
+  }
+
   // ── GET /status — connection + per-listing state; never tokens ──
   router.get("/status", requireAuth(authSecret), async (req, res) => {
     const phone = req.user.userId;
@@ -564,11 +595,18 @@ module.exports = function createDistributionRouter(ctx) {
       },
       groups: (biz && biz.distribution && biz.distribution.groups) || [],
     };
+    // Built at most once per request, and only if a branch below asks for it.
+    let progressPromise = null;
+    const groupsFor = () =>
+      (progressPromise || (progressPromise = groupProgressIndex(phone, biz)));
     // full=1: distribution state for ALL the agent's pages in one call —
-    // the main dashboard uses this to put a live control on every card.
+    // the main dashboard uses this to show where each listing was published.
     if (req.query.full === "1") {
       const listings = {};
-      const mine = (await db.listListingsByPhone(phone)).filter((l) => l.page_id);
+      const [mine, groupProgressOf] = await Promise.all([
+        db.listListingsByPhone(phone).then((ls) => ls.filter((l) => l.page_id)),
+        groupsFor(),
+      ]);
       await Promise.all(mine.map(async (l) => {
         const dists = await db.listDistributionsByPage(l.page_id);
         const posted = dists.find((d) => jobs.hasLivePost([d]));
@@ -576,6 +614,7 @@ module.exports = function createDistributionRouter(ctx) {
           posted: !!posted,
           post_url: posted ? posted.targets.facebook_page.post_url : null,
           in_flight: dists.some((d) => d.status === "queued" || d.status === "running"),
+          groups: groupProgressOf(l.page_id),
         };
       }));
       out.listings = listings;
@@ -600,6 +639,7 @@ module.exports = function createDistributionRouter(ctx) {
         last_status: dists.length
           ? dists.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))[0].status
           : null,
+        groups: (await groupsFor())(pageId),
       };
     }
     res.json(out);
