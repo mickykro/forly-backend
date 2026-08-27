@@ -21,6 +21,8 @@
   .dist-tag.ok{background:rgba(31,175,90,.12);color:#157A3F}
   .dist-tag.partial{background:var(--gold-faint);color:#8A6A1E}
   .dist-tag .n{font-variant-numeric:tabular-nums}
+  a.dist-tag{text-decoration:none}
+  a.dist-tag:hover{filter:brightness(.94)}
   /* Engagement on the live Facebook post. Cached server-side, so it is the
      last known figure rather than a live read — see distribution/metrics.js. */
   .dist-stats{flex-basis:100%;font-size:.76rem;color:var(--ink-soft);
@@ -365,12 +367,22 @@
     return '<span class="dist-tag ' + cls + '">' + label + "</span>";
   }
 
+  // The "published" chip IS the link to the post — that is where the agent
+  // goes to answer a comment, so it should not need a second control. Only
+  // https URLs are linkified: post_url is server-built, and a chip is not the
+  // place to find out that assumption broke.
+  function distLink(cls, label, href) {
+    if (!/^https:\/\//.test(String(href || ""))) return distTag(cls, label);
+    return '<a class="dist-tag ' + cls + '" target="_blank" rel="noopener" href="' +
+      esc(href) + '">' + label + "</a>";
+  }
+
   function renderDistTags(listings) {
     document.querySelectorAll("[data-distrow]").forEach(function (row) {
       var L = listings[row.dataset.distrow];
       if (!L) return;
       var feed = L.in_flight ? distTag("partial", "📘 בפרסום לפיד…")
-        : L.posted ? distTag("ok", "📘 פורסם בפיד")
+        : L.posted ? distLink("ok", "📘 פורסם בפיד ↗", L.post_url)
         : distTag("", "📘 טרם פורסם בפיד");
       var g = L.groups || {};
       // Only agent-confirmed group posts count — the server never invents one.
@@ -384,16 +396,20 @@
     });
   }
 
-  // Engagement on the Facebook post. Groups get no equivalent — Forly only
-  // knows the agent said they posted there, so there is nothing to count.
+  // Engagement on the Facebook post. Nothing renders for a listing that was
+  // never published — there is no post to measure, and the server never asked
+  // Facebook about it. Groups get no equivalent either: Forly only knows the
+  // agent said they posted there, so there is nothing to count.
   function statsHtml(L) {
     var m = L.metrics;
     if (!L.posted || !m) return "";
     var bits = ["❤️ " + (Number(m.likes) || 0),
       "💬 " + (Number(m.comments) || 0),
       "↗ " + (Number(m.shares) || 0)];
-    // reach is null until the app is approved for read_insights — show the
-    // figure when it exists, and simply nothing when it does not.
+    // Views and reach both come from insights, which stays null until the app
+    // is approved for read_insights. Show each figure when it exists and
+    // simply nothing when it does not — never a fabricated 0.
+    if (m.video_views != null) bits.push("▶ " + Number(m.video_views));
     if (m.reach != null) bits.push("👁 " + Number(m.reach));
     return '<div class="dist-stats" dir="ltr">' +
       bits.map(function (b) { return "<span>" + b + "</span>"; }).join("") + "</div>";

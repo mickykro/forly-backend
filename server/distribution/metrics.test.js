@@ -97,6 +97,31 @@ assert.equal(metrics.isStale(
     assert.equal(writes.length, 1);
   }
 
+  /*
+   * ── an unpublished listing never reaches Facebook ──
+   * There is no post to measure, so there is nothing to ask about. This holds
+   * however stale the doc looks: staleness is only a question once a post id
+   * exists. A dashboard full of drafts must cost zero Graph calls.
+   */
+  {
+    const asked = [];
+    const { deps, writes } = fakeDeps(async ({ postId }) => { asked.push(postId); return payload; });
+    const drafts = [
+      dist("never-published", null),
+      dist("offered-not-posted", null, { fetched_at: minutesAgo(999) }),
+      dist("also-draft", undefined),
+    ];
+    assert.deepEqual(metrics.refreshStaleInBackground(deps, drafts, { page_token: "PT" }), []);
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(asked, [], "no Graph call for a listing that was never posted");
+    assert.equal(writes.length, 0);
+    // And the mixed case: only the published one is asked about.
+    const mixed = drafts.concat([dist("live", "P_LIVE")]);
+    metrics.refreshStaleInBackground(deps, mixed, { page_token: "PT" });
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(asked, ["P_LIVE"], "only the published listing is measured");
+  }
+
   // ── one dashboard load never storms the Graph API ──
   {
     const asked = [];

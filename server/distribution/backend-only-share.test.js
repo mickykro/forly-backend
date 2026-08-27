@@ -41,6 +41,11 @@ assert.match(shareHtml, /location\.replace\("\/publish\.html\?"/);
 assert.match(indexHtml, /data-distrow=/);
 assert.doesNotMatch(indexHtml, /distribution\/publish|data-publish=|data-dist=/);
 
+// A published listing links straight to its post — that is where the agent
+// answers a comment, so the chip carries the link rather than adding a control.
+assert.match(indexHtml, /L\.post_url/);
+assert.match(indexHtml, /rel="noopener"/);
+
 // Card state is paged in as the agent scrolls, never fetched for the whole
 // catalogue at once: each card costs a Firestore query and can trigger a
 // Graph refresh, so full=1 was removed rather than left as a second path.
