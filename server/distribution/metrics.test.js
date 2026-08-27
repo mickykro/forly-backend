@@ -275,6 +275,31 @@ assert.equal(metrics.isStale(
     assert.equal(d.targets.facebook_page.metrics.likes, 12);
   }
 
+
+  /*
+   * ── the per-card refresh button ──
+   * force ignores EVERY cache rule, including the 24h back-off on an unreadable
+   * post. That back-off is exactly what an agent runs into after fixing a
+   * permission in the Meta app: the button is how they get an answer now.
+   */
+  {
+    const { deps } = fakeDeps(async () => payload);
+    const fresh = dist("f", "P_FRESH", { likes: 1, fetched_at: NOW, checked_at: NOW });
+    const backedOff = dist("b", "P_BACKED", { missing: true, error_code: 100,
+      checked_at: new Date(NOW.getTime() - 60 * 1000), fetched_at: null });
+    const conn = { page_token: "PT", page_id: "PAGE" };
+
+    // Without force, neither is due: one is fresh, the other is backed off.
+    assert.deepEqual(await metrics.primeUncached(deps, [fresh, backedOff], conn), []);
+
+    const primed = await metrics.primeUncached(deps, [fresh, backedOff], conn, { force: true });
+    assert.deepEqual(primed.map((d) => d.id).sort(), ["b", "f"], "force refetches both");
+    assert.equal(backedOff.targets.facebook_page.metrics.likes, 12,
+      "the unreadable post is re-read on demand, not in 24 hours");
+    assert.equal(backedOff.targets.facebook_page.metrics.missing, undefined,
+      "and a successful re-read clears the failure marker");
+  }
+
   // ── one dashboard load never storms the Graph API ──
   {
     const asked = [];

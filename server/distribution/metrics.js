@@ -207,14 +207,18 @@ function refreshStaleInBackground(deps, dists, conn, ttlMs = TTL_MS) {
 const PRIME_BUDGET_MS = 6000;
 
 async function primeUncached(deps, dists, conn, { limit = MAX_PER_REQUEST,
-  budgetMs = PRIME_BUDGET_MS } = {}) {
+  budgetMs = PRIME_BUDGET_MS, force = false } = {}) {
   const pageToken = conn && conn.page_token;
   if (!pageToken || conn.needs_reconnect) return [];
   // Cold, or stamped before the current connection: a reconnect is the agent
   // fixing exactly the thing that made those reads fail, so the very next load
   // should show numbers rather than a day-old failure.
+  //
+  // `force` is the agent pressing refresh on one card. It ignores every cache
+  // rule — including the 24h back-off on an unreadable post, which is the whole
+  // point: after fixing a permission they want an answer now, not tomorrow.
   const cold = (dists || []).filter((d) => postIdOf(d) &&
-    (!metricsOf(d) || supersededByReconnect(metricsOf(d), conn))).slice(0, limit);
+    (force || !metricsOf(d) || supersededByReconnect(metricsOf(d), conn))).slice(0, limit);
   if (!cold.length) return [];
   const work = Promise.all(cold.map((d) =>
     refreshOne(deps, d, pageToken, conn.page_id)

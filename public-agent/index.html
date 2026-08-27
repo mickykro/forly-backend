@@ -23,6 +23,9 @@
   .dist-tag .n{font-variant-numeric:tabular-nums}
   a.dist-tag{text-decoration:none}
   a.dist-tag:hover{filter:brightness(.94)}
+  button.dist-tag{border:none;font-family:inherit;cursor:pointer;line-height:inherit}
+  button.dist-tag:hover:not(:disabled){filter:brightness(.94)}
+  button.dist-tag:disabled{opacity:.55;cursor:default}
   /* Engagement on the live Facebook post. Cached server-side, so it is the
      last known figure rather than a live read — see distribution/metrics.js. */
   .dist-stats{flex-basis:100%;font-size:.76rem;color:var(--ink-soft);
@@ -297,6 +300,7 @@
 
   function loadDistTags() {
     stopDist();
+    bindDistRefresh();
     distEntitled = null;
     var rows = document.querySelectorAll("[data-distrow]");
     if (!rows.length) return;
@@ -431,8 +435,50 @@
       } else if (entitled) {
         parts.push(distTag("", "👥 לא נבחרו קבוצות"));
       }
+      // Only a published listing has anything to fetch. Offered for unreadable
+      // posts too — that is how an agent re-checks after fixing a permission,
+      // instead of waiting out the back-off.
+      if (L.posted) {
+        parts.push('<button class="dist-tag" data-metrics-refresh="' +
+          esc(row.dataset.distrow) + '" title="רענון נתוני הפוסט">⟳</button>');
+      }
       row.innerHTML = parts.join("") + statsHtml(L);
     });
+  }
+
+  /*
+   * Per-card refresh. Bound ONCE by delegation on the grid: renderDistTags
+   * rewrites row.innerHTML, so a listener attached to the button itself would
+   * die on the first refresh — and re-binding per render would stack listeners.
+   */
+  var distRefreshBound = false;
+  function bindDistRefresh() {
+    if (distRefreshBound) return;
+    distRefreshBound = true;
+    $("#propGrid").addEventListener("click", function (e) {
+      var btn = e.target.closest && e.target.closest("[data-metrics-refresh]");
+      if (btn && !btn.disabled) refreshMetrics(btn.dataset.metricsRefresh, btn);
+    });
+  }
+
+  function refreshMetrics(pageId, btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳";
+    FLY.req("/api/distribution/status?refresh=1&page_ids=" + encodeURIComponent(pageId),
+      { noRedirect: true })
+      .then(function (d) {
+        // Re-renders this row, which replaces the button in its enabled state.
+        renderDistTags(d.listings || {}, !!d.entitled);
+        var L = (d.listings || {})[pageId];
+        FLY.toast(L && L.metrics && L.metrics.missing
+          ? "פייסבוק עדיין לא מחזיר נתונים לפוסט הזה"
+          : "הנתונים עודכנו ✓");
+      })
+      .catch(function () {
+        FLY.toast("הרענון נכשל — נסו שוב בעוד רגע");
+        btn.disabled = false;
+        btn.textContent = "⟳";
+      });
   }
 
   // Engagement on the Facebook post. Nothing renders for a listing that was

@@ -650,7 +650,9 @@ module.exports = function createDistributionRouter(ctx) {
       }));
       // A post nobody has measured yet is fetched inline — otherwise the first
       // view of every new post is blank and only a reload fills it in.
-      await metrics.primeUncached(metricsDeps, seen, conn);
+      // refresh=1 is the per-card refresh button: same path, cache ignored.
+      await metrics.primeUncached(metricsDeps, seen, conn,
+        { force: req.query.refresh === "1" });
       byPage.forEach((dists, pageId) => {
         const posted = currentPost(dists);
         listings[pageId] = {

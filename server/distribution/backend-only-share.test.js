@@ -58,6 +58,13 @@ assert.doesNotMatch(routes, /req\.query\.full/);
 // cap the list and intersect it with the agent's OWN listings before reading
 // anything keyed by those ids. (Route handlers are asserted at source level
 // here — the suite cannot require express.)
+// Per-card refresh: the button forces a re-read through the same path, so an
+// agent can re-check a post right after fixing a Meta permission instead of
+// waiting out the back-off.
+assert.match(indexHtml, /data-metrics-refresh=/);
+assert.match(indexHtml, /status\?refresh=1&page_ids=/);
+assert.match(routes, /force: req\.query\.refresh === "1"/);
+
 assert.match(routes, /MAX_STATUS_PAGES/);
 assert.match(routes, /slice\(0, MAX_STATUS_PAGES\)/);
 assert.match(routes, /requested\.filter\(\(id\) => ownIds\.has\(id\)\)/);
