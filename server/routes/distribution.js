@@ -48,8 +48,15 @@ module.exports = function createDistributionRouter(ctx) {
   // The page-picker posts a plain HTML form (no session, no JS required).
   router.use(express.urlencoded({ extended: false }));
 
-  const envOk = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET &&
-    process.env.META_REDIRECT_URL);
+  /*
+   * The OAuth handshake is the ONLY part of distribution that needs the app's
+   * own credentials — publishing and reading engagement use the per-agent page
+   * token already in Firestore. So an instance can publish happily for weeks
+   * and then fail the moment someone reconnects, which is a confusing way to
+   * find out these were never set.
+   */
+  const META_OAUTH_ENV = ["META_APP_ID", "META_APP_SECRET", "META_REDIRECT_URL"];
+  const missingMetaEnv = () => META_OAUTH_ENV.filter((k) => !process.env[k]);
   const gv = () => process.env.META_GRAPH_VERSION || meta.DEFAULT_VERSION;
   // The dashboard batches six cards; the cap is headroom, not the page size —
   // it stops a hand-rolled request asking for a thousand listings at once.
@@ -78,7 +85,16 @@ module.exports = function createDistributionRouter(ctx) {
 
   // ── GET /oauth/start — logged-in agent → Facebook consent ──
   router.get("/oauth/start", requireAuth(authSecret), (req, res) => {
-    if (!envOk()) return res.status(503).json({ error: "distribution_not_configured" });
+    // Both callers NAVIGATE here (location.href / <a href>), so a JSON body
+    // lands as raw text in the address bar. Answer with the same card the rest
+    // of this flow uses, and name the missing vars in the log where a developer
+    // can act on them — not to the agent, who cannot.
+    const missing = missingMetaEnv();
+    if (missing.length) {
+      console.warn("[distribution] oauth/start blocked — missing env:", missing.join(", "));
+      return res.status(503).type("html").send(card("החיבור לפייסבוק אינו זמין",
+        "התצורה בשרת חסרה. פנו לתמיכה — אין צורך לנסות שוב."));
+    }
     const state = meta.makeState({
       phone: req.user.userId,
       return_to: publishWorkspacePath(req.query.page_id),
