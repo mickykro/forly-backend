@@ -57,6 +57,18 @@ module.exports = function createDistributionRouter(ctx) {
    */
   const META_OAUTH_ENV = ["META_APP_ID", "META_APP_SECRET", "META_REDIRECT_URL"];
   const missingMetaEnv = () => META_OAUTH_ENV.filter((k) => !process.env[k]);
+
+  // Say it at BOOT, not when an agent finally clicks connect weeks later.
+  {
+    const missing = missingMetaEnv();
+    if (missing.length) {
+      console.warn(`[distribution] connecting a Facebook Page is DISABLED — missing ${missing.join(", ")} ` +
+        "in server/.env. Publishing and engagement still work from stored tokens; " +
+        "only the OAuth handshake needs these.");
+    } else {
+      console.log(`[distribution] Meta OAuth configured — redirect ${process.env.META_REDIRECT_URL}`);
+    }
+  }
   const gv = () => process.env.META_GRAPH_VERSION || meta.DEFAULT_VERSION;
   // The dashboard batches six cards; the cap is headroom, not the page size —
   // it stops a hand-rolled request asking for a thousand listings at once.
