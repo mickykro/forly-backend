@@ -190,11 +190,47 @@ function readInsights(payload) {
   return out;
 }
 
+/*
+ * Which Graph node are we actually measuring?
+ *
+ * POST /{page}/feed returns "{page}_{post}" — a feed Post.
+ * POST /{page}/videos returns a bare video id — a Video, which is a DIFFERENT
+ * node type: it has likes and comments, but no `shares` field and no
+ * post_impressions_* insights. Asking a Video for `shares` fails the whole
+ * call with code 100, which is neither an auth nor a permission error.
+ *
+ * Video is the primary Forly flow, so resolve it: the Video node carries the
+ * id of the feed post it was attached to, and THAT post is what has shares and
+ * post-level insights. Falling back to the raw video id still yields likes and
+ * comments, just with video-shaped insights.
+ */
+const isFeedPost = (id) => String(id || "").includes("_");
+
+async function resolveEngagementTarget(opts) {
+  const { postId, pageToken, graphVersion, fetchFn, timeoutMs } = opts;
+  if (isFeedPost(postId)) return { id: postId, kind: "post" };
+  try {
+    const r = await graphCall(`/${postId}`, { graphVersion, fetchFn, timeoutMs,
+      token: pageToken, params: { fields: "post_id" } });
+    if (r && r.post_id) return { id: r.post_id, kind: "post" };
+  } catch (err) {
+    if (isAuthError(err)) throw err;   // a dead token is the caller's problem
+  }
+  return { id: postId, kind: "video" };
+}
+
 async function fetchPostMetrics({ postId, pageToken, graphVersion = DEFAULT_VERSION,
   fetchFn = fetch, timeoutMs = 20000 } = {}) {
-  const counts = await graphCall(`/${postId}`, { graphVersion, fetchFn, timeoutMs,
-    token: pageToken,
-    params: { fields: "likes.summary(true).limit(0),comments.summary(true).limit(0),shares" } });
+  const call = { pageToken, graphVersion, fetchFn, timeoutMs };
+  const target = await resolveEngagementTarget({ postId, ...call });
+
+  // `shares` only exists on a feed Post; requesting it on a Video fails the
+  // whole read, so likes and comments would be lost with it.
+  const fields = ["likes.summary(true).limit(0)", "comments.summary(true).limit(0)"];
+  if (target.kind === "post") fields.push("shares");
+
+  const counts = await graphCall(`/${target.id}`, { graphVersion, fetchFn, timeoutMs,
+    token: pageToken, params: { fields: fields.join(",") } });
   const out = {
     likes: summaryCount(counts.likes),
     comments: summaryCount(counts.comments),
@@ -203,13 +239,16 @@ async function fetchPostMetrics({ postId, pageToken, graphVersion = DEFAULT_VERS
     insights: "ok",
   };
   try {
-    const raw = await graphCall(`/${postId}/insights`, { graphVersion, fetchFn, timeoutMs,
-      token: pageToken,
-      params: { metric: "post_impressions_unique,post_impressions,post_video_views" } });
+    const metric = target.kind === "post"
+      ? "post_impressions_unique,post_impressions,post_video_views"
+      : "total_video_views";
+    const raw = await graphCall(`/${target.id}/insights`, { graphVersion, fetchFn, timeoutMs,
+      token: pageToken, params: { metric } });
     const m = readInsights(raw);
     out.reach = m.post_impressions_unique != null ? m.post_impressions_unique : null;
     out.impressions = m.post_impressions != null ? m.post_impressions : null;
-    out.video_views = m.post_video_views != null ? m.post_video_views : null;
+    out.video_views = m.post_video_views != null ? m.post_video_views
+      : (m.total_video_views != null ? m.total_video_views : null);
   } catch (err) {
     // Never let a missing scope cost us the counts we already have. A dead
     // token is different — that is the caller's problem, so it propagates.
@@ -223,5 +262,5 @@ module.exports = {
   DEFAULT_VERSION, SCOPES, GraphError, isAuthError, isPermissionError,
   makeState, readState, oauthStartUrl, graphCall,
   exchangeCode, longLivedToken, listPages, publishVideo, publishPhotos,
-  commentWithPhoto, postUrl, fetchPostMetrics,
+  commentWithPhoto, postUrl, fetchPostMetrics, isFeedPost,
 };

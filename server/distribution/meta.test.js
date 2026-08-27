@@ -159,6 +159,73 @@ const meta = require("./meta");
     await assert.rejects(() => meta.fetchPostMetrics({ postId: "P_1", pageToken: "PT",
       fetchFn: dead.fetchFn }), (e) => meta.isAuthError(e), "auth errors propagate");
 
+    /*
+     * A Page VIDEO publish returns a bare id — a Video node, not a feed Post.
+     * It has no `shares` field, and asking for one fails the whole read with
+     * code 100 (not auth, not permission), which would take likes and comments
+     * down with it. Video is the primary Forly flow, so this path matters most.
+     */
+    {
+      const seen = [];
+      const fetchFn = async (url) => {
+        const u = String(url); seen.push(u);
+        if (/\/VID1\?|\/VID1$/.test(u.split("?")[0] + (u.includes("?") ? "?" : ""))
+            && u.includes("fields=post_id")) {
+          return { ok: true, json: async () => ({ post_id: "PAGE_POST" }) };
+        }
+        if (u.includes("/insights")) return { ok: true, json: async () => INSIGHTS };
+        if (u.includes("fields=")) return { ok: true, json: async () => COUNTS };
+        return { ok: true, json: async () => ({}) };
+      };
+      const m = await meta.fetchPostMetrics({ postId: "VID1", pageToken: "PT",
+        graphVersion: "v21.0", fetchFn });
+      assert.equal(m.shares, 2, "resolved to the feed post, so shares are readable");
+      assert.equal(m.reach, 340);
+      assert.ok(seen.some((u) => u.includes("fields=post_id")), "asked the video for its post");
+      assert.ok(seen.some((u) => u.includes("/PAGE_POST")), "measured the post, not the video");
+    }
+
+    // A video with no attached post still yields likes and comments — it just
+    // must not ask for `shares`, and its insights are video-shaped.
+    {
+      const seen = [];
+      const fetchFn = async (url) => {
+        const u = String(url); seen.push(u);
+        if (u.includes("fields=post_id")) {
+          return { ok: false, status: 400,
+            json: async () => ({ error: { message: "nonexisting field", code: 100 } }) };
+        }
+        if (u.includes("/insights")) {
+          return { ok: true, json: async () => ({ data: [
+            { name: "total_video_views", values: [{ value: 512 }] }] }) };
+        }
+        return { ok: true, json: async () => COUNTS };
+      };
+      const m = await meta.fetchPostMetrics({ postId: "VID2", pageToken: "PT", fetchFn });
+      assert.equal(m.likes, 12, "counts survive an unresolvable video");
+      assert.equal(m.video_views, 512, "video-shaped insights still land");
+      const countsCall = seen.find((u) => u.includes("likes.summary"));
+      assert.ok(!countsCall.includes("shares"), "never asks a Video node for shares");
+      assert.ok(seen.some((u) => u.includes("metric=total_video_views")),
+        "uses video metrics, not post_impressions_*");
+    }
+
+    // A feed post id is used as-is — no extra resolve call.
+    {
+      const seen = [];
+      const fetchFn = async (url) => {
+        const u = String(url); seen.push(u);
+        if (u.includes("/insights")) return { ok: true, json: async () => INSIGHTS };
+        return { ok: true, json: async () => COUNTS };
+      };
+      await meta.fetchPostMetrics({ postId: "PAGE_123", pageToken: "PT", fetchFn });
+      assert.ok(!seen.some((u) => u.includes("fields=post_id")),
+        "a feed post needs no resolution");
+      assert.ok(seen[0].includes("shares"), "and does carry shares");
+    }
+    assert.equal(meta.isFeedPost("123_456"), true);
+    assert.equal(meta.isFeedPost("1558976638553912"), false);
+
     // Absent edges (a post with no likes at all) read as 0, never NaN.
     const empty = { fetchFn: async (url) => String(url).includes("/insights")
       ? { ok: true, json: async () => ({ data: [] }) }
