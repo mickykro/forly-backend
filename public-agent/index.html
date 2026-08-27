@@ -334,6 +334,14 @@
     }
   }
 
+  // Blank cards have three very different causes — not entitled, nothing
+  // published, or stale assets — and they look identical on screen. Opt in with
+  // localStorage.setItem("forlyDistDebug", "1") to see which, without putting
+  // noise in every agent's console.
+  var distDebug = (function () {
+    try { return localStorage.getItem("forlyDistDebug") === "1"; } catch (e) { return false; }
+  })();
+
   function flushDist() {
     if (distLoading || distEntitled === false || !distQueue.length) return;
     var batch = distQueue.splice(0, DIST_PAGE);
@@ -343,11 +351,17 @@
       ids.map(encodeURIComponent).join(","), { noRedirect: true })
       .then(function (d) {
         distEntitled = !!d.entitled;
+        if (distDebug) {
+          console.log("[forly:dist] batch", ids, {
+            entitled: d.entitled, connection: d.connection, listings: d.listings,
+          });
+        }
         if (!distEntitled) return stopDist();   // nothing to show, ever
         renderDistTags(d.listings || {});
         batch.forEach(function (r) { r.dataset.distState = "done"; });
       })
-      .catch(function () {
+      .catch(function (err) {
+        if (distDebug) console.warn("[forly:dist] batch failed", ids, err);
         // Hand them back to the observer, which re-fires straight away for a
         // row that is still on screen. Capped at one retry so a server that
         // keeps failing cannot spin the batch.
