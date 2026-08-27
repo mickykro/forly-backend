@@ -198,13 +198,20 @@
     return card;
   }
 
-  // ── inline group picker (shown when this property has no groups yet) ──
+  // ── inline property Group picker — available for a new queue and later edits ──
   const picked = new Set();
+  let pickerHydrated = false;
+
+  function hydratePicked() {
+    if (pickerHydrated) return;
+    picked.clear();
+    for (const group of (session.groups || [])) picked.add(group.url);
+    pickerHydrated = true;
+  }
 
   function renderPicker() {
-    const hasGroups = (session.groups || []).length > 0;
-    $("pickCard").classList.toggle("hidden", hasGroups);
-    if (hasGroups) return;
+    hydratePicked();
+    $("pickCard").classList.remove("hidden");
 
     const cat = session.catalog || [];
     const sug = session.suggestion;
@@ -222,10 +229,13 @@
     } else {
       $("reuseBox").classList.add("hidden");
     }
-    if (session.city) {
-      $("pickHint").textContent =
-        `כל נכס משויך לקבוצות משלו. הנכס הזה ב${session.city} — הקבוצות המקומיות מופיעות ראשונות.`;
-    }
+    const selectedCount = picked.size;
+    $("pickHint").textContent = session.city
+      ? `כל נכס משויך לקבוצות משלו. ${cat.length} קבוצות זמינות לבחירה; הנכס הזה ב${session.city}, ולכן הקבוצות המקומיות מופיעות ראשונות.`
+      : `כל נכס משויך לקבוצות משלו. ${cat.length} קבוצות זמינות לבחירה.`;
+    $("savePick").textContent = selectedCount
+      ? `שמירת ${selectedCount} קבוצות לנכס`
+      : "שמירת קבוצות לנכס";
 
     const q = ($("pickFilter").value || "").trim().toLowerCase();
     const box = $("pickList");
@@ -252,10 +262,18 @@
       const cb = document.createElement("input");
       cb.type = "checkbox"; cb.checked = picked.has(g.url);
       cb.style.accentColor = "var(--gold)";
-      cb.onchange = () => { cb.checked ? picked.add(g.url) : picked.delete(g.url); };
+      cb.onchange = () => {
+        cb.checked ? picked.add(g.url) : picked.delete(g.url);
+        $("savePick").textContent = picked.size
+          ? `שמירת ${picked.size} קבוצות לנכס`
+          : "שמירת קבוצות לנכס";
+      };
       const span = document.createElement("span");
+      const policy = g.agent_policy === "explicitly_allowed"
+        ? " · פרסום מתווכים נתמך"
+        : " · בדקו כללים";
       span.textContent = g.name + (g.city ? ` · ${g.city}` : "") +
-        (g.members ? ` · ~${Math.round(g.members / 1000)}K` : "");
+        (g.members ? ` · ~${Math.round(g.members / 1000)}K` : "") + policy;
       label.append(cb, span);
       return label;
     };
@@ -304,6 +322,7 @@
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ s: S, t: T, groups: list }),
       });
+      pickerHydrated = false;
       toast(`${session.groups.length} קבוצות שויכו לנכס ✓`);
       render();
     } catch { toast("השמירה נכשלה — נסו שוב"); }

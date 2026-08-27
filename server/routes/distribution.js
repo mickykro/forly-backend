@@ -474,17 +474,18 @@ module.exports = function createDistributionRouter(ctx) {
       existing.groups.every((g) => currentGroups.includes(g.url));
     const session = sameGroups ? existing
       : await jobs.createShareSession(deps, { page, business: biz });
-    const extra = (session.groups || []).length ? {} : await pickerFor(session);
+    // The property workspace always receives the catalog so its targets can be
+    // reviewed and changed after defaults have populated the queue.
+    const extra = await pickerFor(session);
     res.json(publicSession(session, extra));
   });
 
   router.get("/share-session", async (req, res) => {
     const session = await loadSession(req);
     if (!session) return res.status(401).json({ error: "invalid_link" });
-    // With no groups yet, the queue has nothing to do — so it ships the
-    // picker (and any same-city reuse offer) in the same payload instead of
-    // sending the agent back to the dashboard.
-    const extra = (session.groups || []).length ? {} : await pickerFor(session);
+    // Always ship the picker and same-city reuse offer. A session can start
+    // with defaults and still need an explicit property-specific override.
+    const extra = await pickerFor(session);
     res.json(publicSession(session, extra));
   });
 
@@ -502,7 +503,7 @@ module.exports = function createDistributionRouter(ctx) {
     });
     // Rebuild the queue's entries, preserving progress on groups that stay.
     const fresh = await replaceShareSessionGroups(session, groups);
-    const extra = fresh.groups.length ? {} : await pickerFor(fresh);
+    const extra = await pickerFor(fresh);
     res.json(publicSession(fresh, extra));
   });
 

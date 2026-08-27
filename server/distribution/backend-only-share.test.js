@@ -26,6 +26,11 @@ assert.match(publishJs, /העתקת הטקסט/);
 assert.match(publishJs, /פתיחת הקבוצה/);
 assert.match(publishJs, /✓ פרסמתי/);
 assert.match(publishJs, /דילוג/);
+// Target selection remains editable even after property defaults are assigned.
+assert.match(publishJs, /inline property Group picker — available for a new queue and later edits/);
+assert.match(publishJs, /hydratePicked/);
+assert.match(publishJs, /קבוצות זמינות לבחירה/);
+assert.match(publishHtml, /בחירה ועריכה של קבוצות לנכס/);
 
 // Existing signed links retain their query parameters while migrating.
 assert.match(shareHtml, /location\.replace\("\/publish\.html\?"/);
@@ -40,6 +45,9 @@ assert.doesNotMatch(distributionJs, /extension|joined-groups|chrome\.runtime|מ�
 assert.match(routes, /publishWorkspacePath/);
 assert.match(routes, /return_to: publishWorkspacePath\(req\.query\.page_id\)/);
 assert.doesNotMatch(routes, /\/extension\/|EXTENSION_ID|joined-groups|group_posting/);
+// The session payload always includes the full catalog, even with existing targets.
+assert.match(routes, /The property workspace always receives the catalog/);
+assert.match(routes, /Always ship the picker and same-city reuse offer/);
 assert.doesNotMatch(serverIndex, /extension-cors|EXTENSION_ID|chrome-extension/);
 assert.doesNotMatch(envExample, /EXTENSION_ID|chrome-extension/);
 
