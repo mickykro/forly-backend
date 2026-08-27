@@ -37,10 +37,14 @@ const metricsOf = (dist) =>
   (dist && dist.targets && dist.targets.facebook_page &&
     dist.targets.facebook_page.metrics) || null;
 
+// Backs off against the last ATTEMPT, not the last success — otherwise a post
+// that keeps failing is retried on every single load forever.
 function isStale(metrics, now, ttlMs = TTL_MS) {
-  if (!metrics || !metrics.fetched_at) return true;
+  if (!metrics) return true;
+  const last = metrics.checked_at || metrics.fetched_at;
+  if (!last) return true;
   const ttl = metrics.missing ? Math.max(ttlMs, GONE_TTL_MS) : ttlMs;
-  return Number(now) - asMillis(metrics.fetched_at) >= ttl;
+  return Number(now) - asMillis(last) >= ttl;
 }
 
 /*
@@ -64,10 +68,18 @@ function staleDistributions(dists, now, ttlMs = TTL_MS) {
 // which is an App Review item, not an agent problem.
 function publicMetrics(metrics) {
   if (!metrics) return null;
-  // Graph would not serve the post — most often because the agent deleted it.
-  // No counts are reported for it: zeroes would read as "nobody engaged".
+  /*
+   * Graph would not serve the post. That is usually a deletion, but code 100
+   * also covers "not visible to this token", so the card links out and lets the
+   * agent see for themselves rather than asserting the post is gone.
+   * Any counts read before the failure are still reported — they were real.
+   */
   if (metrics.missing) {
-    return { missing: true, error_code: metrics.error_code || null,
+    return { missing: true,
+      error_code: metrics.error_code || null,
+      error_subcode: metrics.error_subcode || null,
+      likes: metrics.likes == null ? null : Number(metrics.likes),
+      comments: metrics.comments == null ? null : Number(metrics.comments),
       fetched_at: metrics.fetched_at || null };
   }
   return {
@@ -101,18 +113,29 @@ async function refreshOne(deps, dist, pageToken, pageId) {
     return metrics;
   } catch (err) {
     /*
-     * Stamp the failed attempt. Without this, a post that can never be read —
-     * a deleted one — looks permanently stale and is re-fetched on every single
-     * dashboard load, forever. Code 100 is Graph's "this object is gone, or not
-     * visible to this token", which is exactly what a manually deleted post
-     * returns; anything else is treated as transient and retried at the normal
-     * cadence.
+     * Stamp the failed attempt, MERGED over whatever was last read successfully.
+     *
+     * Replacing the record instead would destroy the counts: publicMetrics
+     * coerces an absent `likes` to 0, so a single socket hang-up on a post with
+     * 42 likes rendered "❤️ 0 💬 0" — a fabricated number, which is the one
+     * thing this module is not allowed to produce.
+     *
+     * `fetched_at` therefore stays pinned to the last SUCCESSFUL read (it says
+     * how old the displayed numbers are), while `checked_at` records this
+     * attempt and is what the TTL backs off against.
      */
+    const prev = metricsOf(dist) || {};
     await deps.db.updateDistribution(dist.id, {
       "targets.facebook_page.metrics": {
+        ...prev,
+        // Code 100 covers "deleted", "not visible to this token" and "node does
+        // not support this" — the subcode is the only thing that separates them,
+        // so keep it rather than asserting a cause we cannot know.
         missing: (err && err.code) === 100,
         error_code: (err && err.code) || null,
-        fetched_at: deps.now(),
+        error_subcode: (err && err.subcode) || null,
+        checked_at: deps.now(),
+        fetched_at: prev.fetched_at || null,
       },
       updated_at: deps.now(),
     }).catch(() => { /* the throw below is what the caller logs */ });

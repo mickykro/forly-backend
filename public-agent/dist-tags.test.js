@@ -80,9 +80,13 @@ assert.match(text("grp"), /2\/5/, "confirmed group shares are results too");
     metrics: { missing: true, error_code: 100, fetched_at: null } };
   seed(["gone"]);
   renderDistTags({ gone: DELETED }, true);
-  assert.match(text("gone"), /אינו זמין/, "says the post cannot be reached");
-  assert.doesNotMatch(raw("gone"), /href=/, "and does not link to a page that will 404");
-  assert.doesNotMatch(text("gone"), /❤️|💬|↗/, "no counts — zeroes would read as no engagement");
+  // Graph's code 100 covers "deleted" AND "not visible to this token", so the
+  // card states what we know — we could not read it — and links out so the
+  // agent can see which it is.
+  assert.match(text("gone"), /לא הצלחנו לקרוא/, "says what we actually know");
+  assert.match(raw("gone"), /href="https:\/\/www\.facebook\.com\/999"/,
+    "links out so the agent can check whether the post is really gone");
+  assert.doesNotMatch(text("gone"), /❤️|💬|🔁/, "no counts — zeroes would read as no engagement");
   assert.match(text("gone"), /1\/3/, "group shares the agent DID make still stand");
 }
 
@@ -94,9 +98,14 @@ assert.match(text("grp"), /2\/5/, "confirmed group shares are results too");
   assert.doesNotMatch(raw("odd"), /javascript:/, "only https urls are linkified");
   assert.match(text("odd"), /פורסם בפיד/, "still reported, just not as a link");
 
+  // Every metric keeps its slot so cards line up, but an unreadable one shows
+  // "–" rather than 0 — views need read_insights, and 0 would claim nobody
+  // watched, which is a different and false statement.
   seed(["noins"]);
   renderDistTags({ noins: PUBLISHED }, true);
-  assert.doesNotMatch(text("noins"), /👁|▶/, "reach and views absent until read_insights");
+  assert.match(text("noins"), /👁 –/, "views slot present, honestly blank");
+  assert.doesNotMatch(text("noins"), /👁 0/, "never a fabricated zero");
+  assert.match(text("noins"), /❤️ 42/);
 }
 
 // ── a listing the batch did not answer for is left alone ──

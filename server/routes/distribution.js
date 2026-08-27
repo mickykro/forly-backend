@@ -590,6 +590,19 @@ module.exports = function createDistributionRouter(ctx) {
     };
   }
 
+  /*
+   * The listing's CURRENT post.
+   *
+   * listDistributionsByPage has no orderBy, so Firestore returns docs in id
+   * order — effectively random. A page carries more than one post-bearing
+   * distribution as soon as the agent force-reposts (the old doc is marked
+   * superseded but keeps its post_id), and picking arbitrarily meant the card
+   * could show the SUPERSEDED post's url and engagement about half the time.
+   */
+  const currentPost = (dists) => (dists || [])
+    .filter((d) => jobs.hasLivePost([d]))
+    .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0] || null;
+
   // ── GET /status — connection + per-listing state; never tokens ──
   router.get("/status", requireAuth(authSecret), async (req, res) => {
     const phone = req.user.userId;
@@ -639,7 +652,7 @@ module.exports = function createDistributionRouter(ctx) {
       // view of every new post is blank and only a reload fills it in.
       await metrics.primeUncached(metricsDeps, seen, conn);
       byPage.forEach((dists, pageId) => {
-        const posted = dists.find((d) => jobs.hasLivePost([d]));
+        const posted = currentPost(dists);
         listings[pageId] = {
           posted: !!posted,
           post_url: posted ? posted.targets.facebook_page.post_url : null,
@@ -660,7 +673,7 @@ module.exports = function createDistributionRouter(ctx) {
         return res.status(404).json({ error: "not_found" });
       }
       const dists = await db.listDistributionsByPage(pageId);
-      const posted = dists.find((d) => jobs.hasLivePost([d]));
+      const posted = currentPost(dists);
       out.listing = {
         page_id: pageId,
         posted: !!posted,

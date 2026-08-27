@@ -50,6 +50,7 @@ assert.equal(metrics.isStale(
 }
 
 (async () => {
+  const metricsOfLast = (w) => w[w.length - 1].patch["targets.facebook_page.metrics"];
   const fakeDeps = (fetchImpl) => {
     const writes = [];
     return {
@@ -112,7 +113,9 @@ assert.equal(metrics.isStale(
     const stamp = writes[0].patch["targets.facebook_page.metrics"];
     assert.equal(stamp.missing, true);
     assert.equal(stamp.error_code, 100);
-    assert.deepEqual(stamp.fetched_at, NOW);
+    assert.deepEqual(stamp.checked_at, NOW, "the ATTEMPT is what backs the TTL off");
+    assert.strictEqual(stamp.fetched_at, null,
+      "and freshness stays null — this post has never been read successfully");
 
     // ...and that stamp keeps it out of the next 24h of refreshes.
     assert.equal(metrics.isStale(stamp, NOW.getTime()), false, "not retried immediately");
@@ -121,9 +124,10 @@ assert.equal(metrics.isStale(
     assert.equal(metrics.isStale(stamp, NOW.getTime() + 25 * 60 * 60 * 1000), true,
       "but re-checked daily — 'gone' and 'not visible' share one Graph code");
 
-    // The card shows no counts for it: zeroes would read as "nobody engaged".
-    assert.deepEqual(metrics.publicMetrics(stamp),
-      { missing: true, error_code: 100, fetched_at: NOW });
+    // Nothing was ever read for this one, so no counts are reported — zeroes
+    // would read as "nobody engaged".
+    assert.deepEqual(metrics.publicMetrics(stamp), { missing: true, error_code: 100,
+      error_subcode: null, likes: null, comments: null, fetched_at: null });
   }
 
   // A transient failure is NOT written off — it retries at the normal cadence.
@@ -195,6 +199,44 @@ assert.equal(metrics.isStale(
   // No connection ⇒ nothing is primed and nothing is awaited.
   assert.deepEqual(await metrics.primeUncached(fakeDeps(async () => payload).deps,
     [dist("c", "NOCONN")], null), []);
+
+
+  /*
+   * ── a failed refresh must never destroy good numbers ──
+   * The failure marker is MERGED, not written over the record: publicMetrics
+   * coerces an absent `likes` to 0, so replacing it turned one socket hang-up
+   * into a card reading "❤️ 0 💬 0" — a fabricated figure.
+   */
+  {
+    let mode = "ok";
+    const { deps, writes } = fakeDeps(async () => {
+      if (mode === "blip") throw new Error("socket hang up");
+      if (mode === "gone") throw Object.assign(new Error("does not exist"), { code: 100, subcode: 33 });
+      return payload;
+    });
+    const d = dist("keep", "P_KEEP");
+    await metrics.refreshOne(deps, d, "PT", "PAGE");
+    d.targets.facebook_page.metrics = writes[writes.length - 1].patch["targets.facebook_page.metrics"];
+    assert.equal(metrics.publicMetrics(metricsOfLast(writes)).likes, 12);
+
+    mode = "blip";
+    await metrics.refreshOne(deps, d, "PT", "PAGE").catch(() => {});
+    const afterBlip = metricsOfLast(writes);
+    assert.equal(afterBlip.likes, 12, "a transient failure keeps the last good counts");
+    assert.equal(afterBlip.missing, false);
+    assert.ok(afterBlip.checked_at, "the attempt is stamped so the TTL backs off");
+    assert.deepEqual(afterBlip.fetched_at, NOW, "but freshness still refers to the last SUCCESS");
+    d.targets.facebook_page.metrics = afterBlip;
+
+    mode = "gone";
+    await metrics.refreshOne(deps, d, "PT", "PAGE").catch(() => {});
+    const afterGone = metricsOfLast(writes);
+    assert.equal(afterGone.missing, true);
+    assert.equal(afterGone.error_subcode, 33,
+      "subcode is kept — it is the only thing separating deleted from unreadable");
+    const pub = metrics.publicMetrics(afterGone);
+    assert.equal(pub.likes, 12, "counts read before the post became unreadable were real");
+  }
 
   // ── one dashboard load never storms the Graph API ──
   {
