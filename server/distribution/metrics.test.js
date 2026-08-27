@@ -161,6 +161,41 @@ assert.equal(metrics.isStale(
     assert.deepEqual(asked, ["P_LIVE"], "only the published listing is measured");
   }
 
+  /*
+   * ── the FIRST view of a post must not be blank ──
+   * Background-only refresh means load 1 renders nothing and only a reload
+   * fills it in. Agents do not reload; they conclude the feature is broken.
+   */
+  {
+    const payload2 = { ...payload };
+    const { deps } = fakeDeps(async () => payload2);
+    const cold = dist("cold", "P1");                                   // never measured
+    const warm = dist("warm", "P2", { likes: 1, fetched_at: minutesAgo(90) }); // stale, not cold
+    const draft = dist("draft", null);
+    const primed = await metrics.primeUncached(deps, [cold, warm, draft], { page_token: "PT" });
+    assert.deepEqual(primed.map((d) => d.id), ["cold"], "only genuinely cold posts block");
+    assert.equal(cold.targets.facebook_page.metrics.likes, 12,
+      "patched onto the caller's object, so THIS response carries it");
+    assert.equal(warm.targets.facebook_page.metrics.likes, 1,
+      "a stale post keeps its cached value and refreshes in the background");
+  }
+
+  // A hanging Graph delays the dashboard by the budget and no more.
+  // NOTE: distinct post id — this refresh never settles, so it stays in the
+  // in-flight set for the rest of the file and would suppress a later fetch.
+  {
+    const { deps } = fakeDeps(() => new Promise(() => { /* never settles */ }));
+    const started = Date.now();
+    await metrics.primeUncached(deps, [dist("c", "HANGING")], { page_token: "PT" },
+      { budgetMs: 120 });
+    const waited = Date.now() - started;
+    assert.ok(waited < 1000, `gave up after ${waited}ms rather than hanging the request`);
+  }
+
+  // No connection ⇒ nothing is primed and nothing is awaited.
+  assert.deepEqual(await metrics.primeUncached(fakeDeps(async () => payload).deps,
+    [dist("c", "NOCONN")], null), []);
+
   // ── one dashboard load never storms the Graph API ──
   {
     const asked = [];

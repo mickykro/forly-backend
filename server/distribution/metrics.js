@@ -150,7 +150,36 @@ function refreshStaleInBackground(deps, dists, conn, ttlMs = TTL_MS) {
   return due;
 }
 
+/*
+ * First sight of a post: nothing is cached, so the background path would render
+ * an empty row and rely on the agent reloading to ever see a number. They don't
+ * — they conclude the feature is broken, which is exactly what happened in
+ * testing. So a COLD post (no stored metrics at all, not merely stale) is
+ * fetched inline.
+ *
+ * Bounded hard: only the batch on screen, and the whole thing is raced against
+ * PRIME_BUDGET_MS so a slow or hanging Graph delays the dashboard by that much
+ * and no more. Whatever arrives in time is patched onto the caller's own
+ * objects; the rest stays cached-and-background like everything else.
+ */
+const PRIME_BUDGET_MS = 6000;
+
+async function primeUncached(deps, dists, conn, { limit = MAX_PER_REQUEST,
+  budgetMs = PRIME_BUDGET_MS } = {}) {
+  const pageToken = conn && conn.page_token;
+  if (!pageToken || conn.needs_reconnect) return [];
+  const cold = (dists || []).filter((d) => postIdOf(d) && !metricsOf(d)).slice(0, limit);
+  if (!cold.length) return [];
+  const work = Promise.all(cold.map((d) =>
+    refreshOne(deps, d, pageToken, conn.page_id)
+      .then((m) => { if (m) d.targets.facebook_page.metrics = m; })
+      .catch(() => { /* stamped by refreshOne; the row just stays empty */ })));
+  await Promise.race([work, new Promise((r) => setTimeout(r, budgetMs))]);
+  return cold;
+}
+
 module.exports = {
-  TTL_MS, MAX_PER_REQUEST, isStale, staleDistributions, publicMetrics, refreshOne,
-  refreshStaleInBackground, postIdOf, metricsOf,
+  TTL_MS, MAX_PER_REQUEST, PRIME_BUDGET_MS, isStale, staleDistributions,
+  publicMetrics, refreshOne, refreshStaleInBackground, primeUncached,
+  postIdOf, metricsOf,
 };

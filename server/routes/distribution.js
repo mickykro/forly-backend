@@ -629,9 +629,16 @@ module.exports = function createDistributionRouter(ctx) {
       ]);
       const listings = {};
       const seen = [];
+      const byPage = new Map();
       await Promise.all(requested.filter((id) => ownIds.has(id)).map(async (pageId) => {
         const dists = await db.listDistributionsByPage(pageId);
         seen.push(...dists);
+        byPage.set(pageId, dists);
+      }));
+      // A post nobody has measured yet is fetched inline — otherwise the first
+      // view of every new post is blank and only a reload fills it in.
+      await metrics.primeUncached(metricsDeps, seen, conn);
+      byPage.forEach((dists, pageId) => {
         const posted = dists.find((d) => jobs.hasLivePost([d]));
         listings[pageId] = {
           posted: !!posted,
@@ -640,9 +647,9 @@ module.exports = function createDistributionRouter(ctx) {
           groups: groupProgressOf(pageId),
           metrics: metrics.publicMetrics(metrics.metricsOf(posted)),
         };
-      }));
-      // Cached numbers went out above; anything stale refreshes behind the
-      // response and lands on the next load. Never awaited (metrics.js).
+      });
+      // Cold posts were filled in above; anything merely STALE refreshes behind
+      // the response and lands on the next load. Never awaited (metrics.js).
       metrics.refreshStaleInBackground(metricsDeps, seen, conn);
       out.listings = listings;
     }
