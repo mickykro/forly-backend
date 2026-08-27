@@ -98,6 +98,45 @@ assert.equal(metrics.isStale(
   }
 
   /*
+   * ── a post the agent deleted on Facebook ──
+   * Graph answers a deleted object with code 100. Without a stamp the doc looks
+   * permanently stale, so every dashboard load would re-fetch it forever.
+   */
+  {
+    const gone = Object.assign(
+      new Error("Unsupported get request. Object with ID '1' does not exist"), { code: 100 });
+    const { deps, writes } = fakeDeps(async () => { throw gone; });
+    await assert.rejects(() => metrics.refreshOne(deps, dist("a", "P1"), "PT", "PAGE"),
+      (e) => e.code === 100, "the caller still hears it, so the log fires");
+    assert.equal(writes.length, 1, "the failed attempt is recorded, not dropped");
+    const stamp = writes[0].patch["targets.facebook_page.metrics"];
+    assert.equal(stamp.missing, true);
+    assert.equal(stamp.error_code, 100);
+    assert.deepEqual(stamp.fetched_at, NOW);
+
+    // ...and that stamp keeps it out of the next 24h of refreshes.
+    assert.equal(metrics.isStale(stamp, NOW.getTime()), false, "not retried immediately");
+    assert.equal(metrics.isStale(stamp, NOW.getTime() + 60 * 60 * 1000), false,
+      "nor an hour later, unlike the normal 30-minute TTL");
+    assert.equal(metrics.isStale(stamp, NOW.getTime() + 25 * 60 * 60 * 1000), true,
+      "but re-checked daily — 'gone' and 'not visible' share one Graph code");
+
+    // The card shows no counts for it: zeroes would read as "nobody engaged".
+    assert.deepEqual(metrics.publicMetrics(stamp),
+      { missing: true, error_code: 100, fetched_at: NOW });
+  }
+
+  // A transient failure is NOT written off — it retries at the normal cadence.
+  {
+    const { deps, writes } = fakeDeps(async () => { throw new Error("network"); });
+    await assert.rejects(() => metrics.refreshOne(deps, dist("b", "P2"), "PT", "PAGE"));
+    const stamp = writes[0].patch["targets.facebook_page.metrics"];
+    assert.equal(stamp.missing, false, "only code 100 means the object is gone");
+    assert.equal(metrics.isStale(stamp, NOW.getTime() + 31 * 60 * 1000), true,
+      "back on the normal 30-minute TTL");
+  }
+
+  /*
    * ── an unpublished listing never reaches Facebook ──
    * There is no post to measure, so there is nothing to ask about. This holds
    * however stale the doc looks: staleness is only a question once a post id
@@ -152,7 +191,11 @@ assert.equal(metrics.isStale(
     metrics.refreshStaleInBackground(deps,
       [dist("a", "P1", { fetched_at: minutesAgo(90) })], { page_token: "PT" });
     await new Promise((r) => setImmediate(r));
-    assert.equal(writes.length, 0, "nothing written, and no unhandled rejection");
+    // The rejection is swallowed by the caller (this is fire-and-forget), but
+    // the attempt is still stamped so the post is not re-fetched on every load.
+    assert.equal(writes.length, 1, "the attempt is recorded");
+    assert.equal(writes[0].patch["targets.facebook_page.metrics"].missing, false,
+      "a transient failure is not written off as a deleted post");
   }
 
   console.log("metrics.test.js OK");

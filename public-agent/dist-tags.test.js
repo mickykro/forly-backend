@@ -73,6 +73,19 @@ assert.match(text("grp"), /2\/5/, "confirmed group shares are results too");
   assert.equal(text("none"), "", "nothing happened and no feature ⇒ no noise on the card");
 }
 
+// ── a post deleted on Facebook is not still advertised as live ──
+{
+  const DELETED = { posted: true, post_url: "https://www.facebook.com/999", in_flight: false,
+    groups: { posted: 1, total: 3 },
+    metrics: { missing: true, error_code: 100, fetched_at: null } };
+  seed(["gone"]);
+  renderDistTags({ gone: DELETED }, true);
+  assert.match(text("gone"), /אינו זמין/, "says the post cannot be reached");
+  assert.doesNotMatch(raw("gone"), /href=/, "and does not link to a page that will 404");
+  assert.doesNotMatch(text("gone"), /❤️|💬|↗/, "no counts — zeroes would read as no engagement");
+  assert.match(text("gone"), /1\/3/, "group shares the agent DID make still stand");
+}
+
 // ── never a fabricated number, and never a link we did not build ──
 {
   seed(["odd"]);

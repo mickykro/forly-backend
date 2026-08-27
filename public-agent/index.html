@@ -411,8 +411,12 @@
     document.querySelectorAll("[data-distrow]").forEach(function (row) {
       var L = listings[row.dataset.distrow];
       if (!L) return;
+      var gone = !!(L.metrics && L.metrics.missing);
       var parts = [];
       if (L.in_flight) parts.push(distTag("partial", "📘 בפרסום לפיד…"));
+      // Facebook will not serve the post — usually because it was deleted
+      // there. Say so, and do not link to a page that will 404.
+      else if (L.posted && gone) parts.push(distTag("", "📘 הפוסט אינו זמין בפייסבוק"));
       else if (L.posted) parts.push(distLink("ok", "📘 פורסם בפיד ↗", L.post_url));
       else if (entitled) parts.push(distTag("", "📘 טרם פורסם בפיד"));
 
@@ -436,7 +440,7 @@
   // agent said they posted there, so there is nothing to count.
   function statsHtml(L) {
     var m = L.metrics;
-    if (!L.posted || !m) return "";
+    if (!L.posted || !m || m.missing) return "";
     var bits = ["❤️ " + (Number(m.likes) || 0),
       "💬 " + (Number(m.comments) || 0)];
     // Shares only exist on some Facebook node types; null means unreadable,

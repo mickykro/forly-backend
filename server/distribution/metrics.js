@@ -19,6 +19,10 @@
 const { asMillis } = require("../utils");
 
 const TTL_MS = 30 * 60 * 1000;   // refresh at most twice an hour per post
+// A post the agent deleted on Facebook is never coming back, but "gone" and
+// "not visible to this token" arrive as the same code 100, so it is re-checked
+// daily rather than written off for good.
+const GONE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_PER_REQUEST = 10;      // never let one dashboard load storm the Graph API
 // ponytail: one container, so an in-process set is enough to stop a double
 // dashboard load firing two refreshes for the same post. A second container
@@ -35,7 +39,8 @@ const metricsOf = (dist) =>
 
 function isStale(metrics, now, ttlMs = TTL_MS) {
   if (!metrics || !metrics.fetched_at) return true;
-  return Number(now) - asMillis(metrics.fetched_at) >= ttlMs;
+  const ttl = metrics.missing ? Math.max(ttlMs, GONE_TTL_MS) : ttlMs;
+  return Number(now) - asMillis(metrics.fetched_at) >= ttl;
 }
 
 /*
@@ -59,6 +64,12 @@ function staleDistributions(dists, now, ttlMs = TTL_MS) {
 // which is an App Review item, not an agent problem.
 function publicMetrics(metrics) {
   if (!metrics) return null;
+  // Graph would not serve the post — most often because the agent deleted it.
+  // No counts are reported for it: zeroes would read as "nobody engaged".
+  if (metrics.missing) {
+    return { missing: true, error_code: metrics.error_code || null,
+      fetched_at: metrics.fetched_at || null };
+  }
   return {
     likes: Number(metrics.likes) || 0,
     comments: Number(metrics.comments) || 0,
@@ -88,6 +99,24 @@ async function refreshOne(deps, dist, pageToken, pageId) {
       "targets.facebook_page.metrics": metrics, updated_at: deps.now(),
     });
     return metrics;
+  } catch (err) {
+    /*
+     * Stamp the failed attempt. Without this, a post that can never be read —
+     * a deleted one — looks permanently stale and is re-fetched on every single
+     * dashboard load, forever. Code 100 is Graph's "this object is gone, or not
+     * visible to this token", which is exactly what a manually deleted post
+     * returns; anything else is treated as transient and retried at the normal
+     * cadence.
+     */
+    await deps.db.updateDistribution(dist.id, {
+      "targets.facebook_page.metrics": {
+        missing: (err && err.code) === 100,
+        error_code: (err && err.code) || null,
+        fetched_at: deps.now(),
+      },
+      updated_at: deps.now(),
+    }).catch(() => { /* the throw below is what the caller logs */ });
+    throw err;
   } finally {
     inFlight.delete(postId);
   }
