@@ -229,10 +229,17 @@ const meta = require("./meta");
       assert.equal(m.reach, 340);
     }
 
-    // Every candidate refused ⇒ the caller hears about it, so the log names it.
+    // Every candidate refused ⇒ the error carries EVERY id it tried. Graph names
+    // only the last one, which reads as if the composite was never attempted.
     await assert.rejects(() => meta.fetchPostMetrics({ postId: "V4", pageId: "P9",
       pageToken: "PT", fetchFn: async () => UNSUPPORTED }),
-      (e) => e.code === 100, "a total failure still surfaces Graph's code");
+      (e) => {
+        assert.equal(e.code, 100, "surfaces Graph's code");
+        assert.equal(e.tried.length, 2, "both candidates reported");
+        assert.match(e.tried[0], /^P9_V4\(post\):/, "composite attempted first");
+        assert.match(e.tried[1], /^V4\(video\):/, "raw video attempted second");
+        return true;
+      });
 
     assert.equal(meta.isFeedPost("123_456"), true);
     assert.equal(meta.isFeedPost("1558976638553912"), false);

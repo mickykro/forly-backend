@@ -236,6 +236,7 @@ async function fetchPostMetrics({ postId, pageId, pageToken, graphVersion = DEFA
    */
   const FIELDS = "likes.summary(true).limit(0),comments.summary(true).limit(0)";
   let counts = null, target = null, lastErr = null;
+  const tried = [];
   for (const candidate of engagementCandidates(postId, pageId)) {
     try {
       counts = await graphCall(`/${candidate.id}`, { ...call, params: { fields: FIELDS } });
@@ -243,10 +244,16 @@ async function fetchPostMetrics({ postId, pageId, pageToken, graphVersion = DEFA
       break;
     } catch (err) {
       if (isAuthError(err)) throw err;   // a dead token is the caller's problem
+      tried.push(`${candidate.id}(${candidate.kind}): ${err && err.message}`);
       lastErr = err;
     }
   }
-  if (!target) throw lastErr;
+  if (!target) {
+    // Graph names only the LAST id it refused, which reads as if the composite
+    // form was never attempted. Carry every attempt so the log can prove it was.
+    if (lastErr) lastErr.tried = tried;
+    throw lastErr;
+  }
 
   const out = {
     likes: summaryCount(counts.likes),

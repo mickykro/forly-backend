@@ -111,9 +111,10 @@ function refreshStaleInBackground(deps, dists, conn, ttlMs = TTL_MS) {
     refreshOne(deps, dist, pageToken, conn.page_id).catch((err) => {
       // Name the post id and Graph's own code — "does not exist" and "missing
       // permissions" share one message, and only the code separates them.
-      console.warn("post metrics refresh failed:", dist.id,
+      console.warn("[metrics] refresh failed", dist.id,
         "post_id=" + postIdOf(dist), "page_id=" + conn.page_id,
         "code=" + (err && err.code), "subcode=" + (err && err.subcode),
+        "tried=" + JSON.stringify((err && err.tried) || null),
         err && err.message);
     });
   }
