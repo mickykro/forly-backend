@@ -282,14 +282,18 @@
    * Loaded LAZILY, six cards per request, as they scroll into view. Each card
    * costs the server a Firestore query and can trigger a Graph refresh, so an
    * agent with 40 listings should not pay for 40 to look at the six on screen.
-   * A non-entitled agent, or a batch that fails, leaves those cards untouched.
+   * A batch that fails leaves those cards untouched.
+   *
+   * Every agent sees their own results here, and only their own: /status keys
+   * everything off the session's phone. features.distribution is NOT a gate on
+   * this — see renderDistTags.
    */
   var DIST_PAGE = 6;
   var distObserver = null;
   var distQueue = [];
   var distTimer = null;
   var distLoading = false;
-  var distEntitled = null;      // null = not yet known, false = stop asking
+  var distEntitled = null;      // null = not yet known; decides empty-state chips only
 
   function loadDistTags() {
     stopDist();
@@ -329,7 +333,7 @@
     });
     // Coalesce the burst of intersections that fires on first paint into one
     // request instead of one per card.
-    if (!distTimer && !distLoading && distEntitled !== false) {
+    if (!distTimer && !distLoading) {
       distTimer = setTimeout(function () { distTimer = null; flushDist(); }, 60);
     }
   }
@@ -343,7 +347,7 @@
   })();
 
   function flushDist() {
-    if (distLoading || distEntitled === false || !distQueue.length) return;
+    if (distLoading || !distQueue.length) return;
     var batch = distQueue.splice(0, DIST_PAGE);
     var ids = batch.map(function (r) { return r.dataset.distrow; });
     distLoading = true;
@@ -356,8 +360,7 @@
             entitled: d.entitled, connection: d.connection, listings: d.listings,
           });
         }
-        if (!distEntitled) return stopDist();   // nothing to show, ever
-        renderDistTags(d.listings || {});
+        renderDistTags(d.listings || {}, distEntitled);
         batch.forEach(function (r) { r.dataset.distState = "done"; });
       })
       .catch(function (err) {
@@ -394,22 +397,36 @@
       esc(href) + '">' + label + "</a>";
   }
 
-  function renderDistTags(listings) {
+  /*
+   * A post the agent already made is THEIR result, so it is reported whatever
+   * features.distribution currently says: that flag gates publishing, not
+   * looking at what already happened. Revoking it, or never granting it after
+   * a pilot, must not blank an agent's own numbers.
+   *
+   * `entitled` only decides whether to show the empty, forward-looking states
+   * ("not published yet", "no groups chosen") — those are a to-do list for an
+   * agent in the programme and noise for one who is not.
+   */
+  function renderDistTags(listings, entitled) {
     document.querySelectorAll("[data-distrow]").forEach(function (row) {
       var L = listings[row.dataset.distrow];
       if (!L) return;
-      var feed = L.in_flight ? distTag("partial", "📘 בפרסום לפיד…")
-        : L.posted ? distLink("ok", "📘 פורסם בפיד ↗", L.post_url)
-        : distTag("", "📘 טרם פורסם בפיד");
+      var parts = [];
+      if (L.in_flight) parts.push(distTag("partial", "📘 בפרסום לפיד…"));
+      else if (L.posted) parts.push(distLink("ok", "📘 פורסם בפיד ↗", L.post_url));
+      else if (entitled) parts.push(distTag("", "📘 טרם פורסם בפיד"));
+
       var g = L.groups || {};
       // Only agent-confirmed group posts count — the server never invents one.
       var done = Number(g.posted) || 0;
       var total = Number(g.total) || 0;
-      var groups = total
-        ? distTag(done >= total ? "ok" : done ? "partial" : "",
-            '👥 קבוצות <span class="n" dir="ltr">' + done + "/" + total + "</span>")
-        : distTag("", "👥 לא נבחרו קבוצות");
-      row.innerHTML = feed + groups + statsHtml(L);
+      if (done > 0 || (entitled && total > 0)) {
+        parts.push(distTag(done >= total ? "ok" : done ? "partial" : "",
+          '👥 קבוצות <span class="n" dir="ltr">' + done + "/" + total + "</span>"));
+      } else if (entitled) {
+        parts.push(distTag("", "👥 לא נבחרו קבוצות"));
+      }
+      row.innerHTML = parts.join("") + statsHtml(L);
     });
   }
 
