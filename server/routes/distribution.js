@@ -11,6 +11,7 @@
  * the browser (spec §7).
  */
 
+const crypto = require("node:crypto");
 const express = require("express");
 const db = require("../db");
 const jobs = require("../distribution/jobs");
