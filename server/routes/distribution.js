@@ -51,6 +51,9 @@ module.exports = function createDistributionRouter(ctx) {
   const envOk = () => !!(process.env.META_APP_ID && process.env.META_APP_SECRET &&
     process.env.META_REDIRECT_URL);
   const gv = () => process.env.META_GRAPH_VERSION || meta.DEFAULT_VERSION;
+  // The dashboard batches six cards; the cap is headroom, not the page size —
+  // it stops a hand-rolled request asking for a thousand listings at once.
+  const MAX_STATUS_PAGES = 12;
   // Background Page-post engagement refresh — see distribution/metrics.js.
   const metricsDeps = { db, meta, now: () => new Date(),
     get graphVersion() { return gv(); } };
@@ -605,24 +608,36 @@ module.exports = function createDistributionRouter(ctx) {
     let progressPromise = null;
     const groupsFor = () =>
       (progressPromise || (progressPromise = groupProgressIndex(phone, biz)));
-    // full=1: distribution state for ALL the agent's pages in one call —
-    // the main dashboard uses this to show where each listing was published.
-    if (req.query.full === "1") {
-      const listings = {};
-      const [mine, groupProgressOf] = await Promise.all([
-        db.listListingsByPhone(phone).then((ls) => ls.filter((l) => l.page_id)),
+    /*
+     * page_ids=a,b,c — state for a SLICE of the agent's catalogue.
+     *
+     * The dashboard asks only for the cards actually on screen (six at a time
+     * as the agent scrolls), because the old full=1 shape did one Firestore
+     * query per listing and, once engagement joined it, queued a Graph refresh
+     * per post — all before the first card could show a number. An agent with
+     * 40 listings paid for 40 when they could see six.
+     */
+    const requested = String(req.query.page_ids || "")
+      .split(",").map((s) => s.trim()).filter(Boolean).slice(0, MAX_STATUS_PAGES);
+    if (requested.length) {
+      // Client-supplied ids are a trust boundary: intersect with the agent's
+      // own listings before reading anything keyed by them.
+      const [ownIds, groupProgressOf] = await Promise.all([
+        db.listListingsByPhone(phone)
+          .then((ls) => new Set(ls.map((l) => l.page_id).filter(Boolean))),
         groupsFor(),
       ]);
+      const listings = {};
       const seen = [];
-      await Promise.all(mine.map(async (l) => {
-        const dists = await db.listDistributionsByPage(l.page_id);
+      await Promise.all(requested.filter((id) => ownIds.has(id)).map(async (pageId) => {
+        const dists = await db.listDistributionsByPage(pageId);
         seen.push(...dists);
         const posted = dists.find((d) => jobs.hasLivePost([d]));
-        listings[l.page_id] = {
+        listings[pageId] = {
           posted: !!posted,
           post_url: posted ? posted.targets.facebook_page.post_url : null,
           in_flight: dists.some((d) => d.status === "queued" || d.status === "running"),
-          groups: groupProgressOf(l.page_id),
+          groups: groupProgressOf(pageId),
           metrics: metrics.publicMetrics(metrics.metricsOf(posted)),
         };
       }));

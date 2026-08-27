@@ -270,15 +270,95 @@
     });
   }
 
-  // ── where each listing has been published ──
-  // Read-only: the Facebook feed post, and how many of the property's target
-  // groups the agent has marked as shared. Publishing itself lives in
-  // publish.html — this row reports, it never acts. A non-entitled agent or a
-  // failed status call leaves the cards exactly as they were.
+  /*
+   * ── where each listing has been published ──
+   *
+   * Read-only: the Facebook feed post, its engagement, and how many of the
+   * property's target groups the agent has marked as shared. Publishing lives
+   * in publish.html — this row reports, it never acts.
+   *
+   * Loaded LAZILY, six cards per request, as they scroll into view. Each card
+   * costs the server a Firestore query and can trigger a Graph refresh, so an
+   * agent with 40 listings should not pay for 40 to look at the six on screen.
+   * A non-entitled agent, or a batch that fails, leaves those cards untouched.
+   */
+  var DIST_PAGE = 6;
+  var distObserver = null;
+  var distQueue = [];
+  var distTimer = null;
+  var distLoading = false;
+  var distEntitled = null;      // null = not yet known, false = stop asking
+
   function loadDistTags() {
-    FLY.req("/api/distribution/status?full=1", { noRedirect: true })
-      .then(function (d) { if (d.entitled) renderDistTags(d.listings || {}); })
-      .catch(function () { /* cards stay as they are */ });
+    stopDist();
+    distEntitled = null;
+    var rows = document.querySelectorAll("[data-distrow]");
+    if (!rows.length) return;
+    if (!window.IntersectionObserver) {
+      // No observer: fetch the first page only. Everything below the fold
+      // stays blank rather than dragging the whole catalogue down with it.
+      queueDist(Array.prototype.slice.call(rows, 0, DIST_PAGE));
+      return;
+    }
+    // rootMargin starts the request just before the card is reached, so the
+    // numbers are usually there by the time it is actually on screen.
+    distObserver = new IntersectionObserver(function (entries) {
+      queueDist(entries.filter(function (e) { return e.isIntersecting; })
+        .map(function (e) { return e.target; }));
+    }, { rootMargin: "200px 0px" });
+    rows.forEach(function (row) { distObserver.observe(row); });
+  }
+
+  function stopDist() {
+    if (distObserver) { distObserver.disconnect(); distObserver = null; }
+    clearTimeout(distTimer); distTimer = null;
+    distQueue = [];
+  }
+
+  function queueDist(rows) {
+    rows.forEach(function (row) {
+      if (row.dataset.distState || !row.dataset.distrow) return;
+      row.dataset.distState = "loading";
+      if (distObserver) distObserver.unobserve(row);
+      distQueue.push(row);
+    });
+    // Coalesce the burst of intersections that fires on first paint into one
+    // request instead of one per card.
+    if (!distTimer && !distLoading && distEntitled !== false) {
+      distTimer = setTimeout(function () { distTimer = null; flushDist(); }, 60);
+    }
+  }
+
+  function flushDist() {
+    if (distLoading || distEntitled === false || !distQueue.length) return;
+    var batch = distQueue.splice(0, DIST_PAGE);
+    var ids = batch.map(function (r) { return r.dataset.distrow; });
+    distLoading = true;
+    FLY.req("/api/distribution/status?page_ids=" +
+      ids.map(encodeURIComponent).join(","), { noRedirect: true })
+      .then(function (d) {
+        distEntitled = !!d.entitled;
+        if (!distEntitled) return stopDist();   // nothing to show, ever
+        renderDistTags(d.listings || {});
+        batch.forEach(function (r) { r.dataset.distState = "done"; });
+      })
+      .catch(function () {
+        // Hand them back to the observer, which re-fires straight away for a
+        // row that is still on screen. Capped at one retry so a server that
+        // keeps failing cannot spin the batch.
+        batch.forEach(function (r) {
+          var tries = Number(r.dataset.distTries || 0) + 1;
+          r.dataset.distTries = tries;
+          if (tries < 2 && distObserver) {
+            delete r.dataset.distState;
+            distObserver.observe(r);
+          } else { r.dataset.distState = "done"; }
+        });
+      })
+      .finally(function () {
+        distLoading = false;
+        if (distQueue.length) flushDist();
+      });
   }
 
   function distTag(cls, label) {

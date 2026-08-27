@@ -39,8 +39,23 @@ assert.match(shareHtml, /location\.replace\("\/publish\.html\?"/);
 // Publishing belongs to publish.html — the in-card controls were removed once
 // the workspace took over, and reading status must not smuggle them back.
 assert.match(indexHtml, /data-distrow=/);
-assert.match(indexHtml, /distribution\/status\?full=1/);
 assert.doesNotMatch(indexHtml, /distribution\/publish|data-publish=|data-dist=/);
+
+// Card state is paged in as the agent scrolls, never fetched for the whole
+// catalogue at once: each card costs a Firestore query and can trigger a
+// Graph refresh, so full=1 was removed rather than left as a second path.
+assert.match(indexHtml, /distribution\/status\?page_ids=/);
+assert.match(indexHtml, /IntersectionObserver/);
+assert.doesNotMatch(indexHtml, /status\?full=1/);
+assert.doesNotMatch(routes, /req\.query\.full/);
+
+// page_ids arrives from the browser, so it is a trust boundary: the route must
+// cap the list and intersect it with the agent's OWN listings before reading
+// anything keyed by those ids. (Route handlers are asserted at source level
+// here — the suite cannot require express.)
+assert.match(routes, /MAX_STATUS_PAGES/);
+assert.match(routes, /slice\(0, MAX_STATUS_PAGES\)/);
+assert.match(routes, /requested\.filter\(\(id\) => ownIds\.has\(id\)\)/);
 
 // Settings contain only Page connection plus manual/default Group links.
 assert.match(distributionHtml, /חיבורים וקבוצות/);
