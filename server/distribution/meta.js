@@ -180,15 +180,39 @@ const postUrl = (postId) => `https://www.facebook.com/${postId}`;
 const summaryCount = (edge) =>
   Number(edge && edge.summary && edge.summary.total_count) || 0;
 
-// Graph returns insights as [{name, values:[{value}]}] — flatten by metric name.
+/*
+ * Graph returns insights as [{name, values:[{value}]}] — flatten by metric name.
+ *
+ * Several metrics carry an OBJECT, not a scalar: post_video_likes_by_reaction_type
+ * is a reaction breakdown, post_video_retention_graph is a curve. Number({}) is
+ * NaN, which the old `|| 0` turned into a confident zero, so only finite
+ * numbers are kept.
+ */
 function readInsights(payload) {
   const out = {};
   for (const row of (payload && payload.data) || []) {
     const v = row && Array.isArray(row.values) && row.values[0];
-    out[row.name] = Number(v && v.value) || 0;
+    const n = v && v.value;
+    if (typeof n === "number" && Number.isFinite(n)) out[row.name] = n;
   }
   return out;
 }
+
+/*
+ * Insight metric names differ by node, and a Page video is not a feed post.
+ *
+ *   /{feed-post}/insights   → post_impressions_unique, post_impressions, …
+ *   /{video-id}/video_insights → post_impressions_unique, blue_reels_play_count,
+ *                                fb_reels_total_plays, …  (Reels shape)
+ *
+ * Forly publishes via POST /{page}/videos, and Facebook serves those as Reels,
+ * so video_insights is the edge that actually answers for the primary flow —
+ * confirmed against a live Page: /{video}/video_insights returned reach and
+ * play counts on the BARE id.
+ */
+const POST_METRICS = "post_impressions_unique,post_impressions,post_video_views";
+const VIDEO_METRICS = "post_impressions_unique,blue_reels_play_count," +
+  "fb_reels_total_plays,post_video_view_time,post_video_avg_time_watched";
 
 /*
  * Which Graph node are we actually measuring?
@@ -271,20 +295,44 @@ async function fetchPostMetrics({ postId, pageId, pageToken, graphVersion = DEFA
     } catch (err) { if (isAuthError(err)) throw err; }
   }
 
-  try {
-    const metric = target.kind === "post"
-      ? "post_impressions_unique,post_impressions,post_video_views"
-      : "total_video_views";
-    const raw = await graphCall(`/${target.id}/insights`, { ...call, params: { metric } });
-    const m = readInsights(raw);
-    out.reach = m.post_impressions_unique != null ? m.post_impressions_unique : null;
-    out.impressions = m.post_impressions != null ? m.post_impressions : null;
-    out.video_views = m.post_video_views != null ? m.post_video_views
-      : (m.total_video_views != null ? m.total_video_views : null);
-  } catch (err) {
-    // Never let a missing scope cost us the counts we already have.
-    if (isAuthError(err)) throw err;
-    out.insights = isPermissionError(err) ? "not_permitted" : "unavailable";
+  /*
+   * Try the edges that can answer for this node, newest-shape first, and stop
+   * at the one that returns numbers. A feed post that wraps a Reel answers
+   * /insights with nothing useful, so the raw video id gets a second go at
+   * video_insights — which is where the play counts actually live.
+   */
+  const attempts = [];
+  if (target.kind === "post") attempts.push({ path: `/${target.id}/insights`, metric: POST_METRICS });
+  if (!isFeedPost(postId)) attempts.push({ path: `/${postId}/video_insights`, metric: VIDEO_METRICS });
+
+  let m = null, lastInsightErr = null;
+  for (const attempt of attempts) {
+    try {
+      const raw = await graphCall(attempt.path, { ...call, params: { metric: attempt.metric } });
+      const parsed = readInsights(raw);
+      if (Object.keys(parsed).length) { m = parsed; break; }
+      m = m || parsed;                       // empty, but not an error
+    } catch (err) {
+      if (isAuthError(err)) throw err;       // a dead token is the caller's problem
+      lastInsightErr = err;
+    }
+  }
+
+  if (m && Object.keys(m).length) {
+    const pick = (...names) => {
+      for (const n of names) if (m[n] != null) return m[n];
+      return null;
+    };
+    out.reach = pick("post_impressions_unique");
+    out.impressions = pick("post_impressions");
+    // Views: unique plays first (blue_reels_play_count excludes replays), then
+    // total plays, then the plain-video metric. fb_reels_total_plays counts
+    // replays, so it would overstate "views" if preferred.
+    out.video_views = pick("blue_reels_play_count", "post_video_views", "fb_reels_total_plays");
+  } else if (lastInsightErr) {
+    out.insights = isPermissionError(lastInsightErr) ? "not_permitted" : "unavailable";
+  } else {
+    out.insights = "empty";                  // the call worked and returned nothing
   }
   return out;
 }

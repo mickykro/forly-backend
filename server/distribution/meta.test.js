@@ -195,16 +195,18 @@ const meta = require("./meta");
       const fetchFn = async (url) => {
         const u = String(url); seen.push(u);
         if (u.includes("/P9_V2")) return UNSUPPORTED;
-        if (u.includes("/insights")) {
+        if (u.includes("/video_insights")) {
           return { ok: true, json: async () => ({ data: [
-            { name: "total_video_views", values: [{ value: 512 }] }] }) };
+            { name: "blue_reels_play_count", values: [{ value: 512 }] }] }) };
         }
         return { ok: true, json: async () => COUNTS };
       };
       const m = await meta.fetchPostMetrics({ postId: "V2", pageId: "P9", pageToken: "PT", fetchFn });
       assert.equal(m.node, "video");
       assert.equal(m.likes, 12, "counts survive a node that refuses the post form");
-      assert.equal(m.video_views, 512, "video metrics, not post_impressions_*");
+      assert.equal(m.video_views, 512, "reads /video_insights, not /insights");
+      assert.ok(seen.some((u) => u.includes("/V2/video_insights")),
+        "the video edge is the one asked");
       assert.strictEqual(m.shares, null, "unreadable shares stay null, never a fake 0");
       assert.ok(!seen.some((u) => u.includes("fields=shares")), "does not ask a Video for shares");
     }
@@ -243,6 +245,63 @@ const meta = require("./meta");
 
     assert.equal(meta.isFeedPost("123_456"), true);
     assert.equal(meta.isFeedPost("1558976638553912"), false);
+
+
+    /*
+     * A Page video is served as a REEL, and Reels answer /video_insights with
+     * fb_reels_* / blue_reels_* metrics — not /insights with post_impressions_*.
+     * This payload is the verbatim response from a live Page.
+     */
+    {
+      const REELS = { data: [
+        { name: "post_video_likes_by_reaction_type", values: [{ value: {} }] },
+        { name: "post_video_avg_time_watched", values: [{ value: 55077 }] },
+        { name: "post_video_social_actions", values: [{ value: {} }] },
+        { name: "post_video_view_time", values: [{ value: 220310 }] },
+        { name: "post_impressions_unique", values: [{ value: 2 }] },
+        { name: "blue_reels_play_count", values: [{ value: 4 }] },
+        { name: "fb_reels_total_plays", values: [{ value: 12 }] },
+        { name: "fb_reels_replay_count", values: [{ value: 8 }] },
+        { name: "post_video_retention_graph", values: [{ value: { 0: 0.25, 1: 0 } }] },
+        { name: "post_video_followers", values: [{ value: 0 }] },
+      ] };
+      const seen = [];
+      const fetchFn = async (url) => {
+        const u = String(url); seen.push(u);
+        if (u.includes("/video_insights")) return { ok: true, json: async () => REELS };
+        if (u.includes("/insights")) return { ok: true, json: async () => ({ data: [] }) };
+        if (u.includes("fields=shares")) return { ok: true, json: async () => ({ shares: { count: 1 } }) };
+        return { ok: true, json: async () => COUNTS };
+      };
+      const m = await meta.fetchPostMetrics({ postId: "VREEL", pageId: "P9",
+        pageToken: "PT", fetchFn });
+      assert.equal(m.reach, 2, "reach comes from post_impressions_unique");
+      assert.equal(m.video_views, 4,
+        "views = blue_reels_play_count — fb_reels_total_plays counts REPLAYS and would overstate it");
+      assert.equal(m.likes, 12, "counts still come from the post node");
+      assert.equal(m.insights, "ok");
+      assert.ok(seen.some((u) => u.includes("/VREEL/video_insights")),
+        "falls through to video_insights when /insights answers empty");
+
+      // Object-valued metrics (reaction breakdown, retention curve) must not be
+      // coerced: Number({}) is NaN, which a bare `|| 0` turns into a real zero.
+      assert.notStrictEqual(m.impressions, 0, "an absent metric is null, not 0");
+      assert.strictEqual(m.impressions, null);
+    }
+
+    // An insights call that succeeds but returns nothing is labelled honestly —
+    // "ok" would claim we read it and it was empty.
+    {
+      const fetchFn = async (url) => {
+        const u = String(url);
+        if (u.includes("insights")) return { ok: true, json: async () => ({ data: [] }) };
+        if (u.includes("fields=shares")) return { ok: true, json: async () => ({ shares: { count: 0 } }) };
+        return { ok: true, json: async () => COUNTS };
+      };
+      const m = await meta.fetchPostMetrics({ postId: "P9_V9", pageToken: "PT", fetchFn });
+      assert.equal(m.insights, "empty");
+      assert.strictEqual(m.reach, null);
+    }
 
     // Absent edges (a post with no likes at all) read as 0, never NaN.
     const empty = { fetchFn: async (url) => String(url).includes("/insights")
