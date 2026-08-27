@@ -131,7 +131,8 @@ const meta = require("./meta");
     const m = await meta.fetchPostMetrics({ postId: "P_1", pageToken: "PT",
       graphVersion: "v21.0", fetchFn: ok.fetchFn });
     assert.deepEqual(m, { likes: 12, comments: 3, shares: 2, reach: 340,
-      impressions: 512, video_views: 87, insights: "ok" });
+      impressions: 512, video_views: 87, insights: "ok",
+      node: "post", node_id: "P_1" });
     // .summary(true).limit(0) — the total, not a page of likers.
     assert.ok(ok.seen[0].includes("likes.summary%28true%29.limit%280%29"),
       "asks for counts only");
@@ -160,69 +161,79 @@ const meta = require("./meta");
       fetchFn: dead.fetchFn }), (e) => meta.isAuthError(e), "auth errors propagate");
 
     /*
-     * A Page VIDEO publish returns a bare id — a Video node, not a feed Post.
-     * It has no `shares` field, and asking for one fails the whole read with
-     * code 100 (not auth, not permission), which would take likes and comments
-     * down with it. Video is the primary Forly flow, so this path matters most.
+     * A Page VIDEO publish returns a BARE id, and Graph refuses a plain
+     * GET /{video-id}: "Object with ID '…' does not exist, cannot be loaded due
+     * to missing permissions, or does not support this operation" (code 100).
+     * These are real responses observed from a running instance. Video is the
+     * primary Forly flow, so this path matters more than the feed-post one.
      */
+    const UNSUPPORTED = { ok: false, status: 400, json: async () => ({ error: {
+      message: "Unsupported get request. Object with ID 'V1' does not exist",
+      code: 100, error_subcode: 33 } }) };
+
+    // The Page post wrapping an uploaded video is "{page}_{video}".
     {
       const seen = [];
       const fetchFn = async (url) => {
         const u = String(url); seen.push(u);
-        if (/\/VID1\?|\/VID1$/.test(u.split("?")[0] + (u.includes("?") ? "?" : ""))
-            && u.includes("fields=post_id")) {
-          return { ok: true, json: async () => ({ post_id: "PAGE_POST" }) };
-        }
+        if (u.includes("/V1?") ) return UNSUPPORTED;             // bare video: refused
         if (u.includes("/insights")) return { ok: true, json: async () => INSIGHTS };
-        if (u.includes("fields=")) return { ok: true, json: async () => COUNTS };
-        return { ok: true, json: async () => ({}) };
+        if (u.includes("fields=shares")) return { ok: true, json: async () => ({ shares: { count: 2 } }) };
+        return { ok: true, json: async () => COUNTS };
       };
-      const m = await meta.fetchPostMetrics({ postId: "VID1", pageToken: "PT",
-        graphVersion: "v21.0", fetchFn });
-      assert.equal(m.shares, 2, "resolved to the feed post, so shares are readable");
-      assert.equal(m.reach, 340);
-      assert.ok(seen.some((u) => u.includes("fields=post_id")), "asked the video for its post");
-      assert.ok(seen.some((u) => u.includes("/PAGE_POST")), "measured the post, not the video");
+      const m = await meta.fetchPostMetrics({ postId: "V1", pageId: "P9",
+        pageToken: "PT", graphVersion: "v21.0", fetchFn });
+      assert.equal(m.node_id, "P9_V1", "addressed as the Page post, not the raw video");
+      assert.deepEqual([m.likes, m.comments, m.shares, m.reach], [12, 3, 2, 340]);
+      assert.ok(!seen.some((u) => u.includes("/V1?")), "never wastes a call on the bare id");
     }
 
-    // A video with no attached post still yields likes and comments — it just
-    // must not ask for `shares`, and its insights are video-shaped.
+    // If even the composite is refused, fall back to the video node: likes and
+    // comments still land, with video-shaped insights and no shares.
     {
       const seen = [];
       const fetchFn = async (url) => {
         const u = String(url); seen.push(u);
-        if (u.includes("fields=post_id")) {
-          return { ok: false, status: 400,
-            json: async () => ({ error: { message: "nonexisting field", code: 100 } }) };
-        }
+        if (u.includes("/P9_V2")) return UNSUPPORTED;
         if (u.includes("/insights")) {
           return { ok: true, json: async () => ({ data: [
             { name: "total_video_views", values: [{ value: 512 }] }] }) };
         }
         return { ok: true, json: async () => COUNTS };
       };
-      const m = await meta.fetchPostMetrics({ postId: "VID2", pageToken: "PT", fetchFn });
-      assert.equal(m.likes, 12, "counts survive an unresolvable video");
-      assert.equal(m.video_views, 512, "video-shaped insights still land");
-      const countsCall = seen.find((u) => u.includes("likes.summary"));
-      assert.ok(!countsCall.includes("shares"), "never asks a Video node for shares");
-      assert.ok(seen.some((u) => u.includes("metric=total_video_views")),
-        "uses video metrics, not post_impressions_*");
+      const m = await meta.fetchPostMetrics({ postId: "V2", pageId: "P9", pageToken: "PT", fetchFn });
+      assert.equal(m.node, "video");
+      assert.equal(m.likes, 12, "counts survive a node that refuses the post form");
+      assert.equal(m.video_views, 512, "video metrics, not post_impressions_*");
+      assert.strictEqual(m.shares, null, "unreadable shares stay null, never a fake 0");
+      assert.ok(!seen.some((u) => u.includes("fields=shares")), "does not ask a Video for shares");
     }
 
-    // A feed post id is used as-is — no extra resolve call.
+    /*
+     * "(#100) Tried accessing nonexisting field (shares)" — also observed live.
+     * Shares get their own call precisely so this cannot cost us the counts.
+     */
     {
-      const seen = [];
       const fetchFn = async (url) => {
-        const u = String(url); seen.push(u);
+        const u = String(url);
+        if (u.includes("fields=shares")) {
+          return { ok: false, status: 400, json: async () => ({ error: {
+            message: "(#100) Tried accessing nonexisting field (shares)", code: 100 } }) };
+        }
         if (u.includes("/insights")) return { ok: true, json: async () => INSIGHTS };
         return { ok: true, json: async () => COUNTS };
       };
-      await meta.fetchPostMetrics({ postId: "PAGE_123", pageToken: "PT", fetchFn });
-      assert.ok(!seen.some((u) => u.includes("fields=post_id")),
-        "a feed post needs no resolution");
-      assert.ok(seen[0].includes("shares"), "and does carry shares");
+      const m = await meta.fetchPostMetrics({ postId: "P9_V3", pageToken: "PT", fetchFn });
+      assert.equal(m.likes, 12, "a shares failure never costs the counts");
+      assert.strictEqual(m.shares, null);
+      assert.equal(m.reach, 340);
     }
+
+    // Every candidate refused ⇒ the caller hears about it, so the log names it.
+    await assert.rejects(() => meta.fetchPostMetrics({ postId: "V4", pageId: "P9",
+      pageToken: "PT", fetchFn: async () => UNSUPPORTED }),
+      (e) => e.code === 100, "a total failure still surfaces Graph's code");
+
     assert.equal(meta.isFeedPost("123_456"), true);
     assert.equal(meta.isFeedPost("1558976638553912"), false);
 

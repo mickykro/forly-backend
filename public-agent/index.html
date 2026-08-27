@@ -438,8 +438,10 @@
     var m = L.metrics;
     if (!L.posted || !m) return "";
     var bits = ["❤️ " + (Number(m.likes) || 0),
-      "💬 " + (Number(m.comments) || 0),
-      "↗ " + (Number(m.shares) || 0)];
+      "💬 " + (Number(m.comments) || 0)];
+    // Shares only exist on some Facebook node types; null means unreadable,
+    // which is not the same as nobody having shared it.
+    if (m.shares != null) bits.push("↗ " + Number(m.shares));
     // Views and reach both come from insights, which stays null until the app
     // is approved for read_insights. Show each figure when it exists and
     // simply nothing when it does not — never a fabricated 0.

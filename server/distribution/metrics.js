@@ -62,7 +62,9 @@ function publicMetrics(metrics) {
   return {
     likes: Number(metrics.likes) || 0,
     comments: Number(metrics.comments) || 0,
-    shares: Number(metrics.shares) || 0,
+    // shares/reach stay null when Graph would not serve them — "unreadable" is
+    // not "zero", and a card must not invent a number.
+    shares: metrics.shares == null ? null : Number(metrics.shares),
     reach: metrics.reach == null ? null : Number(metrics.reach),
     impressions: metrics.impressions == null ? null : Number(metrics.impressions),
     video_views: metrics.video_views == null ? null : Number(metrics.video_views),
@@ -71,13 +73,15 @@ function publicMetrics(metrics) {
   };
 }
 
-async function refreshOne(deps, dist, pageToken) {
+async function refreshOne(deps, dist, pageToken, pageId) {
   const postId = postIdOf(dist);
   if (!postId || inFlight.has(postId)) return null;
   inFlight.add(postId);
   try {
+    // pageId lets a bare video id be addressed as the Page post "{page}_{video}",
+    // which is the only form Graph will read for an uploaded video (meta.js).
     const m = await deps.meta.fetchPostMetrics({
-      postId, pageToken, graphVersion: deps.graphVersion, fetchFn: deps.fetchFn,
+      postId, pageId, pageToken, graphVersion: deps.graphVersion, fetchFn: deps.fetchFn,
     });
     const metrics = { ...m, fetched_at: deps.now() };
     await deps.db.updateDistribution(dist.id, {
@@ -104,8 +108,13 @@ function refreshStaleInBackground(deps, dists, conn, ttlMs = TTL_MS) {
   const due = staleDistributions(dists, asMillis(deps.now()), ttlMs)
     .slice(0, MAX_PER_REQUEST);
   for (const dist of due) {
-    refreshOne(deps, dist, pageToken).catch((err) => {
-      console.warn("post metrics refresh failed:", dist.id, err && err.message);
+    refreshOne(deps, dist, pageToken, conn.page_id).catch((err) => {
+      // Name the post id and Graph's own code — "does not exist" and "missing
+      // permissions" share one message, and only the code separates them.
+      console.warn("post metrics refresh failed:", dist.id,
+        "post_id=" + postIdOf(dist), "page_id=" + conn.page_id,
+        "code=" + (err && err.code), "subcode=" + (err && err.subcode),
+        err && err.message);
     });
   }
   return due;

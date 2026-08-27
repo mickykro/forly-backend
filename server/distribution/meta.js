@@ -206,52 +206,76 @@ function readInsights(payload) {
  */
 const isFeedPost = (id) => String(id || "").includes("_");
 
-async function resolveEngagementTarget(opts) {
-  const { postId, pageToken, graphVersion, fetchFn, timeoutMs } = opts;
-  if (isFeedPost(postId)) return { id: postId, kind: "post" };
-  try {
-    const r = await graphCall(`/${postId}`, { graphVersion, fetchFn, timeoutMs,
-      token: pageToken, params: { fields: "post_id" } });
-    if (r && r.post_id) return { id: r.post_id, kind: "post" };
-  } catch (err) {
-    if (isAuthError(err)) throw err;   // a dead token is the caller's problem
-  }
-  return { id: postId, kind: "video" };
+/*
+ * Which id can actually be read, in preference order.
+ *
+ * POST /{page}/feed returns "{page}_{post}" and is readable as-is. POST
+ * /{page}/videos returns a BARE video id, and Graph rejects a plain
+ * GET /{video-id} with code 100 ("does not exist, cannot be loaded due to
+ * missing permissions, or does not support this operation"). The Page post
+ * wrapping an uploaded video is addressed as "{page}_{video}", so try that
+ * first and keep the raw video id as a fallback for whatever Graph will serve.
+ */
+function engagementCandidates(postId, pageId) {
+  if (isFeedPost(postId)) return [{ id: postId, kind: "post" }];
+  const out = [];
+  if (pageId) out.push({ id: `${pageId}_${postId}`, kind: "post" });
+  out.push({ id: postId, kind: "video" });
+  return out;
 }
 
-async function fetchPostMetrics({ postId, pageToken, graphVersion = DEFAULT_VERSION,
+async function fetchPostMetrics({ postId, pageId, pageToken, graphVersion = DEFAULT_VERSION,
   fetchFn = fetch, timeoutMs = 20000 } = {}) {
-  const call = { pageToken, graphVersion, fetchFn, timeoutMs };
-  const target = await resolveEngagementTarget({ postId, ...call });
+  const call = { graphVersion, fetchFn, timeoutMs, token: pageToken };
 
-  // `shares` only exists on a feed Post; requesting it on a Video fails the
-  // whole read, so likes and comments would be lost with it.
-  const fields = ["likes.summary(true).limit(0)", "comments.summary(true).limit(0)"];
-  if (target.kind === "post") fields.push("shares");
+  /*
+   * Likes and comments ONLY. Both edges exist on every node this can land on
+   * (Post, Video, Photo); `shares` does not, and bundling it here is what made
+   * a whole read fail with "(#100) Tried accessing nonexisting field (shares)"
+   * — losing the counts that were perfectly readable. It gets its own call.
+   */
+  const FIELDS = "likes.summary(true).limit(0),comments.summary(true).limit(0)";
+  let counts = null, target = null, lastErr = null;
+  for (const candidate of engagementCandidates(postId, pageId)) {
+    try {
+      counts = await graphCall(`/${candidate.id}`, { ...call, params: { fields: FIELDS } });
+      target = candidate;
+      break;
+    } catch (err) {
+      if (isAuthError(err)) throw err;   // a dead token is the caller's problem
+      lastErr = err;
+    }
+  }
+  if (!target) throw lastErr;
 
-  const counts = await graphCall(`/${target.id}`, { graphVersion, fetchFn, timeoutMs,
-    token: pageToken, params: { fields: fields.join(",") } });
   const out = {
     likes: summaryCount(counts.likes),
     comments: summaryCount(counts.comments),
-    shares: Number(counts.shares && counts.shares.count) || 0,
-    reach: null, impressions: null, video_views: null,
-    insights: "ok",
+    // null, not 0: "we could not read this" is not "nobody shared it".
+    shares: null, reach: null, impressions: null, video_views: null,
+    node: target.kind, node_id: target.id, insights: "ok",
   };
+
+  // Shares live only on a feed Post, and only sometimes. Best-effort.
+  if (target.kind === "post") {
+    try {
+      const s = await graphCall(`/${target.id}`, { ...call, params: { fields: "shares" } });
+      out.shares = Number(s.shares && s.shares.count) || 0;
+    } catch (err) { if (isAuthError(err)) throw err; }
+  }
+
   try {
     const metric = target.kind === "post"
       ? "post_impressions_unique,post_impressions,post_video_views"
       : "total_video_views";
-    const raw = await graphCall(`/${target.id}/insights`, { graphVersion, fetchFn, timeoutMs,
-      token: pageToken, params: { metric } });
+    const raw = await graphCall(`/${target.id}/insights`, { ...call, params: { metric } });
     const m = readInsights(raw);
     out.reach = m.post_impressions_unique != null ? m.post_impressions_unique : null;
     out.impressions = m.post_impressions != null ? m.post_impressions : null;
     out.video_views = m.post_video_views != null ? m.post_video_views
       : (m.total_video_views != null ? m.total_video_views : null);
   } catch (err) {
-    // Never let a missing scope cost us the counts we already have. A dead
-    // token is different — that is the caller's problem, so it propagates.
+    // Never let a missing scope cost us the counts we already have.
     if (isAuthError(err)) throw err;
     out.insights = isPermissionError(err) ? "not_permitted" : "unavailable";
   }
