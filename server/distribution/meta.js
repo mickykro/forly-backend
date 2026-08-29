@@ -269,7 +269,10 @@ async function fetchPostMetrics({ postId, pageId, pageToken, graphVersion = DEFA
     } catch (err) {
       if (isAuthError(err)) throw err;   // a dead token is the caller's problem
       tried.push(`${candidate.id}(${candidate.kind}): ${err && err.message}`);
-      lastErr = err;
+      // A permission refusal on the composite id is the ACTIONABLE cause; the
+      // bare-video fallback then fails with a generic 100 that reads as "post
+      // deleted". Keep the first, or the card blames the agent for a scope.
+      if (!lastErr || (isPermissionError(err) && !isPermissionError(lastErr))) lastErr = err;
     }
   }
   if (!target) {

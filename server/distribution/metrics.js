@@ -150,7 +150,11 @@ async function refreshOne(deps, dist, pageToken, pageId) {
         // Code 100 covers "deleted", "not visible to this token" and "node does
         // not support this" — the subcode is the only thing that separates them,
         // so keep it rather than asserting a cause we cannot know.
-        missing: (err && err.code) === 100,
+        // ...and a permission refusal (#10) is equally "we could not read it":
+        // without this the row falls through to publicMetrics' 0-coercion and
+        // renders a fabricated "❤️ 0 💬 0".
+        missing: (err && err.code) === 100 ||
+          !!(deps.meta.isPermissionError && deps.meta.isPermissionError(err)),
         error_code: (err && err.code) || null,
         error_subcode: (err && err.subcode) || null,
         checked_at: deps.now(),

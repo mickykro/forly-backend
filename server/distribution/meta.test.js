@@ -154,6 +154,28 @@ const meta = require("./meta");
     assert.equal(m3.insights, "unavailable");
     assert.equal(m3.comments, 3);
 
+    /*
+     * Both candidates refused, but for DIFFERENT reasons: the composite id
+     * lacks pages_read_engagement (#10), the bare video gives the generic
+     * "does not exist" (100/33). The permission error is the one an agent can
+     * act on, so it must be what surfaces — otherwise the card blames a
+     * deleted post for a missing scope.
+     */
+    {
+      const fetchFn = async (url) => (String(url).includes("/P9_V9")
+        ? { ok: false, status: 400, json: async () => ({ error: {
+            message: "(#10) … requires the 'pages_read_engagement' permission",
+            code: 10 } }) }
+        : { ok: false, status: 400, json: async () => ({ error: {
+            message: "Unsupported get request.", code: 100, error_subcode: 33 } }) });
+      await assert.rejects(() => meta.fetchPostMetrics({ postId: "V9", pageId: "P9",
+        pageToken: "PT", fetchFn }), (e) => {
+        assert.equal(e.code, 10, "the permission refusal wins over the generic 100");
+        assert.equal(e.tried.length, 2, "both attempts still logged");
+        return true;
+      });
+    }
+
     // A dead token is NOT a degraded read — it propagates so the caller stops.
     const dead = twoCall(() => ({ ok: false, status: 401,
       json: async () => ({ error: { message: "expired", code: 190 } }) }));
