@@ -103,8 +103,9 @@ assert.match(text("grp"), /2\/5/, "confirmed group shares are results too");
   // watched, which is a different and false statement.
   seed(["noins"]);
   renderDistTags({ noins: PUBLISHED }, true);
-  assert.match(text("noins"), /👁 –/, "views slot present, honestly blank");
-  assert.doesNotMatch(text("noins"), /👁 0/, "never a fabricated zero");
+  assert.match(text("noins"), /👁 –/, "reach slot present, honestly blank");
+  assert.match(text("noins"), /▶ –/, "plays slot present, honestly blank");
+  assert.doesNotMatch(text("noins"), /👁 0|▶ 0/, "never a fabricated zero");
   assert.match(text("noins"), /❤️ 42/);
 }
 

@@ -496,11 +496,18 @@
      * claim nobody watched, which is a different and false statement.
      */
     var n = function (v) { return v == null ? "–" : Number(v); };
-    var views = m.video_views != null ? m.video_views : m.reach;
-    // 🔁 for shares, not ↗ — that arrow already means "opens on Facebook" on
-    // the chip above, and one glyph must not mean two things on one card.
-    var bits = ["❤️ " + n(m.likes), "💬 " + n(m.comments),
-      "🔁 " + n(m.shares), "👁 " + n(views)];
+    /*
+     * 👁 and ▶ answer DIFFERENT questions, and Facebook is explicit about it:
+     * post_impressions_unique is תפוצה — people who saw the post, "בין שהסרטון
+     * הופעל או לא". blue_reels_play_count is who actually played it. On a real
+     * post those were 2 and 4, so collapsing them into one "views" figure would
+     * misreport whichever label it kept.
+     *
+     * 🔁 for shares, not ↗ — that arrow already means "opens on Facebook" on
+     * the chip above, and one glyph must not mean two things on one card.
+     */
+    var bits = ["❤️ " + n(m.likes), "💬 " + n(m.comments), "🔁 " + n(m.shares),
+      "👁 " + n(m.reach), "▶ " + n(m.video_views)];
     return '<div class="dist-stats" dir="ltr">' +
       bits.map(function (b) { return "<span>" + b + "</span>"; }).join("") + "</div>";
   }
