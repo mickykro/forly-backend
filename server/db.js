@@ -7,7 +7,7 @@ const { asMillis } = require("./utils");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [] };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [] };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -234,6 +234,11 @@ async function saveLead(phone, lead) {
   else mem.leads.set(phone, { ...(mem.leads.get(phone) || {}), ...lead });
 }
 
+async function addAdminMessage(entry) {
+  if (db) await db.collection("admin_messages").add(entry);
+  else mem.adminMessages.push(entry);
+}
+
 // Immutable, one doc per submission — a chat lead and a form lead from the same
 // prospect must not collapse into one leads/{phone} summary and lose the first.
 async function addLeadSubmission(doc) {
@@ -248,5 +253,5 @@ module.exports = {
   saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
   savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages,
   getBusiness, setBusiness, listAllBusinesses, initQuota,
-  getLead, saveLead, addLeadSubmission, logPortalEvent,
+  getLead, saveLead, addLeadSubmission, addAdminMessage, logPortalEvent,
 };

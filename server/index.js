@@ -121,6 +121,7 @@ app.use("/api/admin", createAdminRouter({
   pageBaseUrl: PAGE_BASE_URL,
   uploadDir: UPLOAD_DIR,
   adminPhones: ADMIN_PHONES,
+  sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
 }));
 
 // ── signup / profile completion ──

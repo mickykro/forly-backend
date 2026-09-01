@@ -15,6 +15,9 @@
   var stats = {};
   var agents = [];      // agent directory, loaded lazily when the tab is opened
   var agentStats = {};
+  var customers = [];   // agent directory for the messaging tab
+  var selectedCustomers = {};
+  var maxMessageRecipients = 200;
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -268,13 +271,84 @@
     });
   }
 
+  function selectedCustomerCount() {
+    return Object.keys(selectedCustomers).filter(function (phone) { return selectedCustomers[phone]; }).length;
+  }
+
+  function customerRowHtml(customer) {
+    var checked = selectedCustomers[customer.phone] ? " checked" : "";
+    return "<tr>" +
+      '<td><input class="customer-check" type="checkbox" data-customer="' + esc(customer.phone) + '"' + checked + "></td>" +
+      '<td class="agent">' + esc(customer.name) + '</td>' +
+      '<td class="num" dir="ltr">' + esc(customer.phone) + '</td>' +
+      '<td class="num">' + esc(customer.active_pages || 0) + "</td>" +
+      "</tr>";
+  }
+
+  function updateMessageMeta() {
+    var audience = $("#messageAudience").value;
+    var count = audience === "all" ? customers.length : selectedCustomerCount();
+    $("#messageLength").textContent = ($("#customerMessage").value || "").length + " / 1500";
+    $("#messageRecipientCount").textContent = count + (audience === "all" ? " סוכנים יקבלו את ההודעה" : " סוכנים נבחרו");
+    $("#sendCustomerMessage").disabled = count === 0 || count > maxMessageRecipients;
+  }
+
+  function applyCustomerFilter() {
+    var q = ($("#customerSearch").value || "").trim().toLowerCase();
+    var shown = customers.filter(function (customer) {
+      return !q || (customer.name + " " + customer.phone).toLowerCase().indexOf(q) !== -1;
+    });
+    $("#customerRows").innerHTML = shown.map(customerRowHtml).join("");
+    $("#customerEmpty").classList.toggle("hidden", shown.length > 0);
+    $("#customerCount").textContent = shown.length === customers.length ? customers.length + " לקוחות" : shown.length + " מתוך " + customers.length;
+    document.querySelectorAll("[data-customer]").forEach(function (input) {
+      input.addEventListener("change", function () {
+        selectedCustomers[input.dataset.customer] = input.checked;
+        updateMessageMeta();
+      });
+    });
+    updateMessageMeta();
+  }
+
+  function loadCustomers() {
+    return FLY.req("/api/admin/agents", { noRedirect: true }).then(function (d) {
+      customers = d.agents || [];
+      applyCustomerFilter();
+    });
+  }
+
+  function sendCustomerMessage() {
+    var audience = $("#messageAudience").value;
+    var count = audience === "all" ? customers.length : selectedCustomerCount();
+    var message = ($("#customerMessage").value || "").trim();
+    if (!message) return FLY.toast("יש לכתוב הודעה לפני השליחה");
+    if (count > maxMessageRecipients) return FLY.toast("ניתן לשלוח לעד " + maxMessageRecipients + " סוכנים בפעולה אחת");
+    if (!count) return FLY.toast("יש לבחור לפחות סוכן אחד");
+    if (!confirm("לשלוח את ההודעה ל-" + count + " סוכנים?")) return;
+    var button = $("#sendCustomerMessage");
+    button.disabled = true;
+    FLY.req("/api/admin/messages", {
+      method: "POST",
+      body: { audience: audience, phones: Object.keys(selectedCustomers).filter(function (phone) { return selectedCustomers[phone]; }), message: message },
+      noRedirect: true,
+    }).then(function (d) {
+      FLY.toast("✅ ההודעה נשלחה ל-" + d.recipient_count + " סוכנים");
+    }).catch(function (e) {
+      FLY.toast(e.code === "too_many_recipients" ? "יש לצמצם את רשימת הסוכנים" : "שליחת ההודעה נכשלה");
+    }).finally(function () { updateMessageMeta(); });
+  }
+
   function showTab(which) {
     var onAgents = which === "agents";
+    var onMessages = which === "messages";
     $("#tabAgents").classList.toggle("on", onAgents);
-    $("#tabProps").classList.toggle("on", !onAgents);
+    $("#tabMessages").classList.toggle("on", onMessages);
+    $("#tabProps").classList.toggle("on", !onAgents && !onMessages);
     $("#paneAgents").classList.toggle("hidden", !onAgents);
-    $("#paneProps").classList.toggle("hidden", onAgents);
+    $("#paneMessages").classList.toggle("hidden", !onMessages);
+    $("#paneProps").classList.toggle("hidden", onAgents || onMessages);
     if (onAgents && !agents.length) loadAgents();
+    if (onMessages && !customers.length) loadCustomers();
   }
 
   function fillAgentFilter() {
@@ -326,8 +400,17 @@
       $("#agentSearch").addEventListener("input", applyAgentFilter);
       $("#tabProps").addEventListener("click", function () { showTab("props"); });
       $("#tabAgents").addEventListener("click", function () { showTab("agents"); });
+      $("#tabMessages").addEventListener("click", function () { showTab("messages"); });
       $("#agentFilter").addEventListener("change", applyFilters);
       $("#sortBy").addEventListener("change", applyFilters);
+      $("#customerSearch").addEventListener("input", applyCustomerFilter);
+      $("#messageAudience").addEventListener("change", updateMessageMeta);
+      $("#customerMessage").addEventListener("input", updateMessageMeta);
+      $("#welcomeTemplate").addEventListener("click", function () {
+        $("#customerMessage").value = "היי, ברוכים הבאים ל-FORLY 🏠✨\nכיף שאתם איתנו!\n\n🔗 כניסה למערכת:\nhttps://nadlan.call4li.com\n\nמוסיפים נכס, מעלים פרטים ותמונות, ואנחנו יוצרים עבורכם דף נכס מקצועי וסרטון שיווקי.\n\nלכל ההסבר על הכלים והשירותים, לחצו על סימן השאלה במערכת.\nלכל שאלה, אנחנו כאן בוואטסאפ ❤️";
+        updateMessageMeta();
+      });
+      $("#sendCustomerMessage").addEventListener("click", sendCustomerMessage);
       $("#refreshBtn").addEventListener("click", function () {
         FLY.toast("מרענן…"); load();
       });

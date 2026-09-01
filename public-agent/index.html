@@ -15,9 +15,29 @@
 
 <header class="topbar agent-topbar">
   <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
-  <span class="who" id="who"></span>
-  <button class="btn btn-sm hidden" id="btnLogout" style="margin-inline-start:auto;background:rgba(255,255,255,.12);color:#fff">התנתקות</button>
+  <div class="topbar-tools">
+    <span class="who" id="who"></span>
+    <button class="help-trigger" id="helpTrigger" type="button" aria-haspopup="dialog" aria-controls="helpDialog" aria-label="מדריך פורלי">?</button>
+    <button class="btn btn-sm hidden" id="btnLogout" style="background:rgba(255,255,255,.12);color:#fff">התנתקות</button>
+  </div>
 </header>
+
+<div class="help-overlay hidden" id="helpDialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+  <section class="help-dialog">
+    <button class="help-close" id="helpClose" type="button" aria-label="סגירת המדריך">×</button>
+    <span class="agent-kicker">FORLY GUIDE</span>
+    <h2 id="helpTitle">כל מה שצריך כדי להתחיל</h2>
+    <p class="help-intro">הכלים של FORLY נועדו להפוך נכס למהלך שיווקי מוכן, בלי לעבוד בין כמה מערכות.</p>
+    <div class="help-list">
+      <article><b>🏠 מעלים נכס</b><span>מוסיפים פרטים ותמונות, ואנחנו מכינים דף נכס עם מידע, גלריה, טופס וצ׳אטבוט.</span></article>
+      <article><b>🎬 מקבלים סרטון</b><span>כשהדף מוכן תקבלו סרטון שיווקי של הנכס, מוכן לפרסום ברשתות.</span></article>
+      <article><b>🖼️ קרוסלות ושדרוג תמונות</b><span>שולחים לנו בוואטסאפ רעיון, רפרנס או תמונות נכס, ואנחנו מכינים את התוכן או השדרוג.</span></article>
+      <article><b>💬 צ׳אטבוט 24/7</b><span>הבוט עונה על שאלות מתעניינים, אוסף פרטים ועוזר לסנן פניות.</span></article>
+      <article><b>📣 חשיפה בפייסבוק</b><span>אנחנו מפרסמים נכסים בקבוצות רלוונטיות ומבצעים שיתופים חוזרים.</span></article>
+    </div>
+    <p class="help-footer">משהו לא ברור? כתבו לנו בוואטסאפ ונעזור.</p>
+  </section>
+</div>
 
 <!-- shown until the boot session check settles, so the login form doesn't flash -->
 <div class="vloader" id="vLoader"><video src="/assets/loading.mp4" autoplay muted playsinline></video></div>
@@ -84,6 +104,22 @@
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
   var phoneVal = "";
+
+  function setHelp(open) {
+    $("#helpDialog").classList.toggle("hidden", !open);
+    document.body.classList.toggle("help-open", open);
+    if (open) $("#helpClose").focus();
+    else $("#helpTrigger").focus();
+  }
+
+  $("#helpTrigger").addEventListener("click", function () { setHelp(true); });
+  $("#helpClose").addEventListener("click", function () { setHelp(false); });
+  $("#helpDialog").addEventListener("click", function (e) {
+    if (e.target === this) setHelp(false);
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !$("#helpDialog").classList.contains("hidden")) setHelp(false);
+  });
 
   // ── OTP login flow ──
   $("#sendOtp").addEventListener("click", function () {
