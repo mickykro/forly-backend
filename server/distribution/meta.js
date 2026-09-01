@@ -211,8 +211,10 @@ function readInsights(payload) {
  * play counts on the BARE id.
  */
 const POST_METRICS = "post_impressions_unique,post_impressions,post_video_views";
-const VIDEO_METRICS = "post_impressions_unique,blue_reels_play_count," +
-  "fb_reels_total_plays,post_video_view_time,post_video_avg_time_watched";
+// video_insights takes NO metric list: naming metrics gets "(#100) The value
+// must be a valid insights metric" (verified live), while a bare GET returns
+// every metric the node has. readInsights keeps the numeric ones.
+const VIDEO_METRICS = null;
 
 /*
  * Which Graph node are we actually measuring?
@@ -269,10 +271,7 @@ async function fetchPostMetrics({ postId, pageId, pageToken, graphVersion = DEFA
     } catch (err) {
       if (isAuthError(err)) throw err;   // a dead token is the caller's problem
       tried.push(`${candidate.id}(${candidate.kind}): ${err && err.message}`);
-      // A permission refusal on the composite id is the ACTIONABLE cause; the
-      // bare-video fallback then fails with a generic 100 that reads as "post
-      // deleted". Keep the first, or the card blames the agent for a scope.
-      if (!lastErr || (isPermissionError(err) && !isPermissionError(lastErr))) lastErr = err;
+      lastErr = err;
     }
   }
   if (!target) {
@@ -311,7 +310,8 @@ async function fetchPostMetrics({ postId, pageId, pageToken, graphVersion = DEFA
   let m = null, lastInsightErr = null;
   for (const attempt of attempts) {
     try {
-      const raw = await graphCall(attempt.path, { ...call, params: { metric: attempt.metric } });
+      const raw = await graphCall(attempt.path,
+        { ...call, params: attempt.metric ? { metric: attempt.metric } : {} });
       const parsed = readInsights(raw);
       if (Object.keys(parsed).length) { m = parsed; break; }
       m = m || parsed;                       // empty, but not an error

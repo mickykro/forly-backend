@@ -415,14 +415,14 @@
     document.querySelectorAll("[data-distrow]").forEach(function (row) {
       var L = listings[row.dataset.distrow];
       if (!L) return;
-      var gone = !!(L.metrics && L.metrics.missing);
+      // Facebook would not serve the post — usually deleted there. The card
+      // treats it exactly like a post that never happened: no chip, no stats,
+      // just the forward-looking state. The server still rechecks daily, so if
+      // it ever becomes readable again the card comes back on its own.
+      var posted = !!L.posted && !(L.metrics && L.metrics.missing);
       var parts = [];
       if (L.in_flight) parts.push(distTag("partial", "📘 בפרסום לפיד…"));
-      // Facebook would not serve the post. Usually it was deleted there, but
-      // the same error covers "not visible to this token" — so say what we
-      // actually know and link out, letting the agent see for themselves.
-      else if (L.posted && gone) parts.push(distLink("", "📘 לא הצלחנו לקרוא את הפוסט ↗", L.post_url));
-      else if (L.posted) parts.push(distLink("ok", "📘 פורסם בפיד ↗", L.post_url));
+      else if (posted) parts.push(distLink("ok", "📘 פורסם בפיד ↗", L.post_url));
       else if (entitled) parts.push(distTag("", "📘 טרם פורסם בפיד"));
 
       var g = L.groups || {};
@@ -435,10 +435,8 @@
       } else if (entitled) {
         parts.push(distTag("", "👥 לא נבחרו קבוצות"));
       }
-      // Only a published listing has anything to fetch. Offered for unreadable
-      // posts too — that is how an agent re-checks after fixing a permission,
-      // instead of waiting out the back-off.
-      if (L.posted) {
+      // Only a readable post has anything to fetch.
+      if (posted) {
         parts.push('<button class="dist-tag" data-metrics-refresh="' +
           esc(row.dataset.distrow) + '" title="רענון נתוני הפוסט">⟳</button>');
       }
@@ -496,16 +494,8 @@
      * claim nobody watched, which is a different and false statement.
      */
     var n = function (v) { return v == null ? "–" : Number(v); };
-    /*
-     * 👁 and ▶ answer DIFFERENT questions, and Facebook is explicit about it:
-     * post_impressions_unique is תפוצה — people who saw the post, "בין שהסרטון
-     * הופעל או לא". blue_reels_play_count is who actually played it. On a real
-     * post those were 2 and 4, so collapsing them into one "views" figure would
-     * misreport whichever label it kept.
-     *
-     * 🔁 for shares, not ↗ — that arrow already means "opens on Facebook" on
-     * the chip above, and one glyph must not mean two things on one card.
-     */
+    // 👁 = reach (saw it), ▶ = plays. Different questions — never merged.
+    // 🔁 for shares, not ↗: that arrow already means "opens on Facebook".
     var bits = ["❤️ " + n(m.likes), "💬 " + n(m.comments), "🔁 " + n(m.shares),
       "👁 " + n(m.reach), "▶ " + n(m.video_views)];
     return '<div class="dist-stats" dir="ltr">' +
@@ -616,6 +606,8 @@
         $("#viewLogin").classList.add("hidden");
         $("#viewList").classList.remove("hidden");
         $("#btnLogout").classList.remove("hidden");
+        // Every page load lands here; loadList() only after login/extend.
+        loadDistTags();
         checkProfile(); // ponytail: check if profile needs completion
       };
     })

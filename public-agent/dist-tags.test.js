@@ -61,6 +61,19 @@ seed(["grp"]);
 renderDistTags({ grp: GROUPS_ONLY }, false);
 assert.match(text("grp"), /2\/5/, "confirmed group shares are results too");
 
+// ── every path that shows the grid must also load the engagement row ──
+// Two renderers fill #propGrid: boot (every page load) and loadList() (after a
+// login or extend/archive). The boot one shipped without loadDistTags(), so a
+// refresh rendered cards with no numbers and never called /status.
+{
+  const reveals = [...script.matchAll(/classList\.remove\("hidden"\)/g)].length;
+  assert.ok(reveals >= 2, "sanity: several code paths reveal the shell");
+  const boot = script.match(/reveal = function \(\) \{[\s\S]*?\n      \};/);
+  assert.ok(boot, "boot reveal() not found — was it renamed?");
+  assert.match(boot[0], /loadDistTags\(\)/,
+    "the boot render must load engagement too, not just loadList()");
+}
+
 // ── entitlement decides only the empty, forward-looking states ──
 {
   seed(["none"]);
@@ -73,22 +86,19 @@ assert.match(text("grp"), /2\/5/, "confirmed group shares are results too");
   assert.equal(text("none"), "", "nothing happened and no feature ⇒ no noise on the card");
 }
 
-// ── a post deleted on Facebook is not still advertised as live ──
+// ── a post Facebook will not serve is treated as if it never happened ──
 {
   const DELETED = { posted: true, post_url: "https://www.facebook.com/999", in_flight: false,
     groups: { posted: 1, total: 3 },
-    metrics: { missing: true, error_code: 100, fetched_at: null } };
+    metrics: { missing: true, error_code: 100, likes: 12, fetched_at: null } };
   seed(["gone"]);
   renderDistTags({ gone: DELETED }, true);
-  // Graph's code 100 covers "deleted" AND "not visible to this token", so the
-  // card states what we know — we could not read it — and links out so the
-  // agent can see which it is.
-  assert.match(text("gone"), /לא הצלחנו לקרוא/, "says what we actually know");
-  assert.match(raw("gone"), /href="https:\/\/www\.facebook\.com\/999"/,
-    "links out so the agent can check whether the post is really gone");
-  assert.doesNotMatch(text("gone"), /❤️|💬|🔁/, "no counts — zeroes would read as no engagement");
+  assert.match(text("gone"), /טרם פורסם/, "reads as not-posted, not as a broken feature");
+  assert.doesNotMatch(raw("gone"), /facebook\.com\/999|⟳/, "no dead link, no refresh");
+  assert.doesNotMatch(text("gone"), /❤️|💬/, "no stats row — even stale counts");
   assert.match(text("gone"), /1\/3/, "group shares the agent DID make still stand");
 }
+
 
 // ── never a fabricated number, and never a link we did not build ──
 {

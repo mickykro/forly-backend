@@ -126,8 +126,9 @@ async function refreshOne(deps, dist, pageToken, pageId) {
       postId, pageId, pageToken, graphVersion: deps.graphVersion, fetchFn: deps.fetchFn,
     });
     const metrics = { ...m, fetched_at: deps.now() };
+    // Never bump updated_at — /status elects the card's current post by it.
     await deps.db.updateDistribution(dist.id, {
-      "targets.facebook_page.metrics": metrics, updated_at: deps.now(),
+      "targets.facebook_page.metrics": metrics,
     });
     return metrics;
   } catch (err) {
@@ -150,9 +151,7 @@ async function refreshOne(deps, dist, pageToken, pageId) {
         // Code 100 covers "deleted", "not visible to this token" and "node does
         // not support this" — the subcode is the only thing that separates them,
         // so keep it rather than asserting a cause we cannot know.
-        // ...and a permission refusal (#10) is equally "we could not read it":
-        // without this the row falls through to publicMetrics' 0-coercion and
-        // renders a fabricated "❤️ 0 💬 0".
+        // #10 is also "could not read" — else publicMetrics coerces to a fake 0.
         missing: (err && err.code) === 100 ||
           !!(deps.meta.isPermissionError && deps.meta.isPermissionError(err)),
         error_code: (err && err.code) || null,
@@ -160,7 +159,6 @@ async function refreshOne(deps, dist, pageToken, pageId) {
         checked_at: deps.now(),
         fetched_at: prev.fetched_at || null,
       },
-      updated_at: deps.now(),
     }).catch(() => { /* the throw below is what the caller logs */ });
     throw err;
   } finally {

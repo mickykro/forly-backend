@@ -65,8 +65,12 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 // static files
-app.use(express.static(path.join(__dirname, "..", "public-agent"), { index: "index.html" }));
-app.use(express.static(path.join(__dirname, "..", "public-nadlan")));
+// App shell always revalidates; the ETag makes an unchanged file a 304.
+const revalidate = { index: "index.html", setHeaders: (res, file) => {
+  if (/\.(html|js|css)$/.test(file)) res.setHeader("Cache-Control", "no-cache");
+} };
+app.use(express.static(path.join(__dirname, "..", "public-agent"), revalidate));
+app.use(express.static(path.join(__dirname, "..", "public-nadlan"), revalidate));
 app.use("/files", express.static(UPLOAD_DIR, { maxAge: "1d", immutable: true }));
 app.use("/tpl", express.static(TEMPLATES_DIR));
 

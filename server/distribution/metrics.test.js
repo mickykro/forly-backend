@@ -110,6 +110,10 @@ assert.equal(metrics.isStale(
     await assert.rejects(() => metrics.refreshOne(deps, dist("a", "P1"), "PT", "PAGE"),
       (e) => e.code === 100, "the caller still hears it, so the log fires");
     assert.equal(writes.length, 1, "the failed attempt is recorded, not dropped");
+    // A metrics stamp must not touch updated_at: /status elects the card's
+    // current post by it, and a stamp on a superseded sibling stole the
+    // election — first load showed numbers, the next load showed nothing.
+    assert.ok(!("updated_at" in writes[0].patch), "metrics never bump updated_at");
     const stamp = writes[0].patch["targets.facebook_page.metrics"];
     assert.equal(stamp.missing, true);
     assert.equal(stamp.error_code, 100);
