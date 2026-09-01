@@ -62,7 +62,7 @@ const { sendWhatsApp } = require("./utils");
 // Forly client yet — self-service signup off the login screen is gone (see
 // the issue this shipped with), so the OTP route forwards them here as a
 // lead for a human to follow up instead of leaving them stuck.
-const SALES_LEAD_PHONE = normalizeAuthPhone(process.env.SALES_LEAD_PHONE || "0548018957");
+const SALES_LEAD_PHONE = normalizeAuthPhone(process.env.SALES_LEAD_PHONE || "972548018957");
 
 // ── app ──
 const app = express();
