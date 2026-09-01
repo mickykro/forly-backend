@@ -84,6 +84,26 @@ const style = page.slice(page.indexOf("<style>"), page.indexOf("</style>"));
   assert.match(script, /\* 40\)/, "the form still weights the optionals at 40%");
 }
 
+// ── every internal link on the dashboard actually resolves ──
+// "Cannot GET /profile" is what a link to a path with no file and no route
+// looks like, so check the two ways a path can be served before shipping one.
+{
+  const dashboard = read("public-agent", "index.html");
+  const index = read("server", "index.js");
+  const links = new Set();
+  // navigation only — an <a> that goes nowhere is a dead end for the agent,
+  // where a missing asset is just a missing asset.
+  for (const m of dashboard.matchAll(/<a\b[^>]*\bhref="(\/[^"#?]*)"/g)) links.add(m[1]);
+  assert.ok(links.has("/profile.html"), "the completion banner must link to the profile form");
+
+  for (const href of links) {
+    if (href === "/") continue; // the dashboard itself, served as the static index
+    const served = fs.existsSync(path.join(root, "public-agent", href.replace(/^\//, ""))) ||
+      new RegExp(`app\\.get\\("${href.replace(/\//g, "\\/")}"`).test(index);
+    assert.ok(served, `${href} is linked from the dashboard but is neither a file nor a route`);
+  }
+}
+
 // ── the server serves it, and nothing redirects off-domain any more ──
 {
   const index = read("server", "index.js");
