@@ -37,9 +37,6 @@
       </div>
       <button class="btn btn-gold" id="sendOtp" style="width:100%">שלחו לי קוד</button>
       <p class="form-err" id="phoneErr"></p>
-      <p class="hint" style="margin-top:14px;font-size:.8rem;color:var(--ink-soft)">
-        עדיין לא רשומים? <a href="/signup.html" style="color:var(--gold);font-weight:600">הרשמה</a>
-      </p>
     </div>
 
     <div id="stepCode" class="hidden">
@@ -104,7 +101,9 @@
         $("#otpRow input").focus();
       })
       .catch(function (e) {
-        err.textContent = e.code === "unknown_agent" ? "המספר לא רשום — אפשר להירשם למטה" :
+        // no self-service signup here any more — a number with no account
+        // is routed to sales as a lead server-side (server/auth.js)
+        err.textContent = e.code === "not_a_client" ? "עדיין לא לקוחות של פורלי — ניצור איתכם קשר בקרוב 🦉" :
           e.code === "too_soon" ? "רגע... נסו שוב בעוד דקה" :
           e.code === "daily_limit" ? "יותר מדי נסיונות היום" :
           e.code === "invalid_phone" ? "מספר לא תקין" : "שגיאה בשליחת הקוד";

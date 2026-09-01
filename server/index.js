@@ -58,6 +58,11 @@ const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
 const { sendWhatsApp } = require("./utils");
+// A number that tries to log in but has no businesses/{phone} doc isn't a
+// Forly client yet — self-service signup off the login screen is gone (see
+// the issue this shipped with), so the OTP route forwards them here as a
+// lead for a human to follow up instead of leaving them stuck.
+const SALES_LEAD_PHONE = normalizeAuthPhone(process.env.SALES_LEAD_PHONE || "0548018957");
 
 // ── app ──
 const app = express();
@@ -74,6 +79,7 @@ app.use("/api/auth", createAuthRouter({
   db: db.db, mem: db.mem,
   sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
   secret: AUTH_SECRET,
+  salesLeadPhone: SALES_LEAD_PHONE,
 }));
 
 // ── intake routes (uploads, property creation) ──
