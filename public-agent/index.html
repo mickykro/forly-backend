@@ -63,7 +63,7 @@
       <b style="display:block;margin-bottom:2px">השלימו את הפרופיל שלכם</b>
       <span style="font-size:.9rem;opacity:.9">כדי שנוכל להתאים את הדפים ללוגו ולסגנון שלכם</span>
     </div>
-    <a href="/signup" class="btn" style="background:#fff;color:#b98a2f;font-weight:600;border:none">השלמת פרופיל</a>
+    <a href="/profile" class="btn" style="background:#fff;color:#b98a2f;font-weight:600;border:none">השלמת פרופיל</a>
   </div>
   <div class="agent-hero page-head">
     <div>
@@ -280,7 +280,7 @@
     FLY.req("/api/profile", { noRedirect: true })
       .then(function(d) {
         if (d.needs_completion) {
-          // /signup route handles redirect with phone from session
+          // the banner links to /profile — the form reads the phone off the session
           $("#profileBanner").classList.remove("hidden");
         }
       })

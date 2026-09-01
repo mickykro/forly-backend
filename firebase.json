@@ -33,34 +33,6 @@
       ],
       "rewrites": [
         {
-          "source": "/api/signup-complete",
-          "function": {
-            "functionId": "signupComplete",
-            "region": "europe-west1"
-          }
-        },
-        {
-          "source": "/api/signup-upload",
-          "function": {
-            "functionId": "signupUpload",
-            "region": "europe-west1"
-          }
-        },
-        {
-          "source": "/api/signup-save",
-          "function": {
-            "functionId": "signupSave",
-            "region": "europe-west1"
-          }
-        },
-        {
-          "source": "/api/signup-get",
-          "function": {
-            "functionId": "signupGet",
-            "region": "europe-west1"
-          }
-        },
-        {
           "source": "/api/create-draft",
           "function": {
             "functionId": "createCarouselDraft",

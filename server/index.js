@@ -44,7 +44,6 @@ const AUTH_SECRET = process.env.NADLAN_JWT_SECRET || "change-me-in-env";
 // see/manage EVERY agent's properties. Empty ⇒ admin panel denies everyone.
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || "")
   .split(",").map((s) => s.trim()).filter(Boolean);
-const WEB_SIGNUP_BASE = process.env.WEB_SIGNUP_URL || "https://call4li.web.app/signup";
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
 const TEMPLATES_DIR = path.join(__dirname, "..", "public-nadlan", "templates");
 
@@ -94,13 +93,16 @@ app.use("/api", createIntakeRouter({
   pageBaseUrl: PAGE_BASE_URL,
 }));
 
+// ── profile onboarding (the 15-field "השלמת פרופיל" form) ──
+const createProfileRouter = require("./routes/profile");
+app.use("/api", createProfileRouter({ requireAuth, authSecret: AUTH_SECRET }));
+
 // ── dashboard routes (properties list, profile) ──
 const createDashboardRouter = require("./routes/dashboard");
 app.use("/api", createDashboardRouter({
-  requireAuth, verifySession, readToken,
+  requireAuth,
   authSecret: AUTH_SECRET,
   pageBaseUrl: PAGE_BASE_URL,
-  webSignupBase: WEB_SIGNUP_BASE,
   uploadDir: UPLOAD_DIR,
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
@@ -115,13 +117,26 @@ app.use("/api/admin", createAdminRouter({
   adminPhones: ADMIN_PHONES,
 }));
 
-// signup redirect at root level
+// ── signup / profile completion ──
+// Two different things share the "signup" name: /signup.html registers a new
+// agent (OTP), /profile.html completes the 15-field profile of one who already
+// has an account. /signup keeps serving whichever the caller needs, so links
+// sent out before the split still land somewhere sensible; the dashboard
+// banner points straight at /profile.
+const agentPage = (name) => path.join(__dirname, "..", "public-agent", name);
+
 app.get("/signup", (req, res) => {
   const session = verifySession(AUTH_SECRET, readToken(req));
-  if (session && session.userId) {
-    return res.redirect(`${WEB_SIGNUP_BASE}?phone=${encodeURIComponent(session.userId)}`);
-  }
-  res.sendFile(path.join(__dirname, "..", "public-agent", "signup.html"));
+  if (session && session.userId) return res.sendFile(agentPage("profile.html"));
+  res.sendFile(agentPage("signup.html"));
+});
+
+// Direct link to the profile form. Without a session there is nothing to
+// complete yet, so send them through login — /api/onboarding would 401 anyway.
+app.get("/profile", (req, res) => {
+  const session = verifySession(AUTH_SECRET, readToken(req));
+  if (session && session.userId) return res.sendFile(agentPage("profile.html"));
+  res.redirect("/?next=" + encodeURIComponent("/profile"));
 });
 
 // ── portal routes (public buyer-facing catalog + realtime stream) ──

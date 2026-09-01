@@ -1,6 +1,6 @@
 /*
  * routes/dashboard.js — agent dashboard endpoints
- * Handles: /api/properties (list), /api/profile, /signup redirect
+ * Handles: /api/properties (list), /api/profile, /api/signup (registration)
  */
 
 const express = require("express");
@@ -13,8 +13,7 @@ const { sendWhatsApp } = require("../utils");
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
 
 module.exports = function createDashboardRouter(ctx) {
-  const { requireAuth, verifySession, readToken, authSecret, pageBaseUrl, webSignupBase,
-          uploadDir, greenInstance, greenToken } = ctx;
+  const { requireAuth, authSecret, pageBaseUrl, uploadDir, greenInstance, greenToken } = ctx;
 
   const router = express.Router();
 
@@ -130,15 +129,6 @@ module.exports = function createDashboardRouter(ctx) {
       console.error("submitWebSignup failed:", err);
       res.status(500).json({ error: "internal" });
     }
-  });
-
-  // ── signup redirect (logged-in → web form with phone) ──
-  router.get("/signup", (req, res) => {
-    const session = verifySession(authSecret, readToken(req));
-    if (session && session.userId) {
-      return res.redirect(`${webSignupBase}?phone=${encodeURIComponent(session.userId)}`);
-    }
-    res.sendFile(path.join(__dirname, "..", "..", "public-agent", "signup.html"));
   });
 
   return router;
