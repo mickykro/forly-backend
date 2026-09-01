@@ -206,6 +206,16 @@ async function setBusiness(phone, data, merge = true) {
   await db.collection("businesses").doc(phone).set(data, { merge });
 }
 
+// Starter quota doc, seeded once when a profile is completed. Never overwrites
+// an existing one: the chat cap (routes/chat.js) and the n8n pipelines both
+// keep running counters in here.
+async function initQuota(phone, data) {
+  if (!db) return;
+  const ref = db.collection("businesses").doc(phone).collection("quota").doc("current");
+  const snap = await ref.get();
+  if (!snap.exists) await ref.set(data);
+}
+
 // ── admin: all businesses (agent directory) ──
 async function listAllBusinesses(limit = 1000) {
   if (!db) return [];
@@ -237,6 +247,6 @@ module.exports = {
   get mem() { return mem; },
   saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
   savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages,
-  getBusiness, setBusiness, listAllBusinesses,
+  getBusiness, setBusiness, listAllBusinesses, initQuota,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
 };

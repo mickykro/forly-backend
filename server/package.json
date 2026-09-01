@@ -60,7 +60,7 @@
     "    docker run --rm -p 8787:8787 -e BASE_URL=https://<your-tunnel> forly-intake"
   ],
   "scripts": {
-    "test": "node overlay.test.js && node rooms.test.js && node photo-vision.test.js && node pages-auth.test.js && node chatbot-readiness.test.js && node chatbot-config.test.js && node chat-prompt.test.js && node chat-provider.test.js && node leads.test.js",
+    "test": "node overlay.test.js && node rooms.test.js && node photo-vision.test.js && node pages-auth.test.js && node chatbot-readiness.test.js && node chatbot-config.test.js && node chat-prompt.test.js && node chat-provider.test.js && node leads.test.js && node profile-onboarding.test.js && node profile-page.test.js && node login-leads.test.js",
     "start": "node index.js",
     "local": "node index.js",
     "g-login": "gcloud auth application-default login",
