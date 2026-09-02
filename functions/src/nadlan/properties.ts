@@ -6,7 +6,7 @@ import {
   db, bucket, tokenedUrl, nadlanJwtSecret, demoSecret, pageBaseUrl,
   n8nWw1WebhookUrl, n8nPipelineWebhookUrl,
 } from "../shared";
-import {requireAuth, signSession, SESSION_COOKIE} from "./auth";
+import {requireAuth, requireAdmin, signSession, SESSION_COOKIE} from "./auth";
 import {AgentInfo, Listing, PropertyPage} from "./types";
 
 const SESSION_TTL_S = 30 * 24 * 60 * 60; // 30 days
@@ -46,15 +46,14 @@ export const getUploadUrls = onRequest(
       res.status(405).send("POST only");
       return;
     }
+    // Requires a valid session (agent or operator admin); the old x-demo-key
+    // header bypass is gone — presence of a header is not authorization.
     const phone = requireAuth(req);
-    // Demo mode: any request carrying the x-demo-key header is accepted, no
-    // secret comparison. The demo is operator-driven on a shared screen.
-    const isDemo = "x-demo-key" in req.headers;
-    if (!phone && !isDemo) {
+    if (!phone) {
       res.status(401).json({error: "unauthenticated"});
       return;
     }
-    const owner = phone || "demo";
+    const owner = phone;
     const body = req.body as {files?: Array<{name?: string; contentType?: string}>};
     if (!Array.isArray(body.files) || body.files.length < 1 || body.files.length > MAX_UPLOAD_FILES) {
       res.status(400).json({error: `1-${MAX_UPLOAD_FILES} files`});
@@ -245,7 +244,13 @@ export const demoCreateProperty = onRequest(
       res.status(405).send("POST only");
       return;
     }
-    // Demo mode: no key comparison. Operator-driven demo on a shared screen.
+    // Admin-only: this signs a session for a client-supplied agent phone, so
+    // only a trusted operator on the ADMIN_PHONE allowlist may call it. The old
+    // "no key comparison" public demo was an account-takeover vector.
+    if (!requireAdmin(req)) {
+      res.status(403).json({error: "not_admin"});
+      return;
+    }
     const body = req.body as CreateBody & {theme?: Record<string, unknown>; language?: string};
     const agentPhone = body.agent?.phone ? String(body.agent.phone) : "";
     if (!agentPhone) {
@@ -253,22 +258,29 @@ export const demoCreateProperty = onRequest(
       return;
     }
 
-    // ponytail: upsert businesses/{phone} with partial data so dashboard shows notification
+    // Upsert businesses/{phone} with partial demo data so the dashboard shows
+    // the notification — but never downgrade a business that already completed
+    // onboarding (a demo against an existing customer must not clobber them).
     const now = new Date();
     const businessRef = db.collection("businesses").doc(agentPhone);
-    await businessRef.set({
-      phone: agentPhone,
-      full_name: String(body.agent?.name || ""),
-      business_name: String(body.agent?.brand_name || body.agent?.name || ""),
-      logo_url: body.agent?.logo_url || null,
-      license_number: String(body.agent?.license || ""),
-      onboarding_state: "demo_partial", // dashboard checks this for notification
-      onboarding_pct: 30, // minimal profile from demo
-      plan: "trial",
-      paid: false,
-      created_at: now,
-      updated_at: now,
-    }, {merge: true});
+    const existing = await businessRef.get();
+    const existingState = existing.exists ?
+      (existing.data()?.onboarding_state as string | undefined) : undefined;
+    if (existingState !== "complete") {
+      await businessRef.set({
+        phone: agentPhone,
+        full_name: String(body.agent?.name || ""),
+        business_name: String(body.agent?.brand_name || body.agent?.name || ""),
+        logo_url: body.agent?.logo_url || null,
+        license_number: String(body.agent?.license || ""),
+        onboarding_state: "demo_partial", // dashboard checks this for notification
+        onboarding_pct: 30, // minimal profile from demo
+        plan: "trial",
+        paid: false,
+        created_at: now,
+        updated_at: now,
+      }, {merge: true});
+    }
 
     const result = await createListingAndKickPipeline(agentPhone, body, body.agent || {});
     if ("error" in result) {

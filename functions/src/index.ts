@@ -14,6 +14,16 @@ const ALLOWED_ORIGIN = "https://editor.call4li.com";
 // cleanupExpiredDrafts (below) relies on this being stamped at creation time.
 const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+// The carousel_id (a v4 UUID) is the editor's capability — the editor page has
+// no login. These caps bound what someone who obtains a draft id can do:
+// they cannot spam the owner's WhatsApp on every save, run the draft's edit
+// count / storage up without limit, or push oversized slide payloads.
+const MAX_DRAFT_EDITS = 100;
+const NOTIFY_COOLDOWN_MS = 5 * 60 * 1000; // ≤1 WhatsApp notification / 5 min / draft
+const MAX_SLIDE_HTML_BYTES = 256 * 1024;
+const MAX_SLIDE_PNG_BYTES = 6 * 1024 * 1024;
+const MAX_SLIDES = 5;
+
 interface InboundSlide {
   index: number;
   png_url: string;
@@ -164,9 +174,18 @@ export const saveCarouselDraft = onRequest(
       carousel_id?: string;
       slides?: SavedSlideEdit[];
     };
-    if (!carouselId || !Array.isArray(slides)) {
+    if (!carouselId || !Array.isArray(slides) || slides.length < 1 || slides.length > MAX_SLIDES) {
       res.status(400).json({error: "invalid body"});
       return;
+    }
+    // Reject oversized slide payloads before doing any work.
+    for (const s of slides) {
+      const htmlBytes = Buffer.byteLength(String(s.html || ""), "utf8");
+      const pngBytes = Math.ceil(String(s.png_base64 || "").length * 3 / 4);
+      if (htmlBytes > MAX_SLIDE_HTML_BYTES || pngBytes > MAX_SLIDE_PNG_BYTES) {
+        res.status(413).json({error: "slide too large"});
+        return;
+      }
     }
 
     const docRef = db.collection("carousel_drafts").doc(carouselId);
@@ -176,6 +195,12 @@ export const saveCarouselDraft = onRequest(
       return;
     }
     const data = doc.data() as admin.firestore.DocumentData;
+
+    // Bound total edits per draft (storage + abuse).
+    if (((data.edit_count as number) || 0) >= MAX_DRAFT_EDITS) {
+      res.status(429).json({error: "edit_limit_reached"});
+      return;
+    }
 
     const editVersion = ((data.edit_count as number) || 0) + 1;
 
@@ -202,15 +227,23 @@ export const saveCarouselDraft = onRequest(
         })
       );
 
+      // Throttle owner notifications: at most one WhatsApp per cooldown window
+      // per draft, so a save loop (or someone editing a draft they shouldn't)
+      // can't flood the owner's phone.
+      const lastNotifiedMs = data.last_notified_at ?
+        (data.last_notified_at as admin.firestore.Timestamp).toMillis() : 0;
+      const mayNotify = Date.now() - lastNotifiedMs >= NOTIFY_COOLDOWN_MS;
+
       await docRef.update({
         slides: newSlides,
         edit_count: editVersion,
         last_edited_at: new Date(),
         status: "edited",
+        ...(mayNotify && data.business_phone ? {last_notified_at: new Date()} : {}),
       });
 
       // WhatsApp send is best-effort — never let it fail the whole save.
-      if (data.business_phone) {
+      if (data.business_phone && mayNotify) {
         try {
           await sendUpdatedPngsToWhatsApp(
             data.business_phone as string,

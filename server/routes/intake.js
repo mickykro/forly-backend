@@ -11,8 +11,9 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
-const { sanitizeTheme, sanitizeLang } = require("../utils");
+const { sanitizeTheme, sanitizeLang, sniffMatchesExt } = require("../utils");
 const { sanitizeTags } = require("../tags");
+const { makeAdminGuard } = require("../admin-auth");
 
 const MAX_UPLOAD_FILES = 12;
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -26,15 +27,29 @@ const MAX_FONT_MB = 5;
 module.exports = function createIntakeRouter(ctx) {
   const { requireAuth, normalizeAuthPhone, signSession, uploadDir, uploadPublicBase, remoteUploadBase,
     n8nWw1Webhook, n8nPipelineWebhook, authSecret, sessionTtl, pageBaseUrl, isDevRun, isDevPipelineRun,
-    baseUrl } = ctx;
+    baseUrl, verifySession, readToken, adminPhones } = ctx;
 
   const router = express.Router();
 
+  // The demo flow mints a session for a client-supplied phone, so it is gated
+  // to logged-in operator admins (ADMIN_PHONES) rather than the mere presence
+  // of an x-demo-key header, which anyone could send.
+  const { requireAdmin } = makeAdminGuard({ verifySession, readToken, authSecret, adminPhones });
+
+  // Inter-instance relay secret: when this server fronts a remote file store
+  // (REMOTE_UPLOAD_BASE), it forwards the caller's own session so the remote —
+  // running this same code — re-authorizes the write. No new secret needed.
+  const relayHeaders = (req) => {
+    const h = {};
+    if (req.headers.cookie) h.cookie = req.headers.cookie;
+    if (req.headers.authorization) h.authorization = req.headers.authorization;
+    return h;
+  };
+
   // ── upload-urls ──
-  function uploadAuth(req, res, next) {
-    if ("x-demo-key" in req.headers) return next();
-    return requireAuth(authSecret)(req, res, next);
-  }
+  // Any authenticated user (agent or admin) may request upload slots; the
+  // header bypass is gone.
+  const uploadAuth = requireAuth(authSecret);
 
   router.post("/upload-urls", uploadAuth, (req, res) => {
     const files = req.body && req.body.files;
@@ -63,26 +78,38 @@ module.exports = function createIntakeRouter(ctx) {
   });
 
   // ── upload binary ──
+  // Authenticated (agent or admin); the remote-store relay forwards the same
+  // session so the remote instance re-authorizes rather than trusting the hop.
   const rawBody = express.raw({ type: () => true, limit: `${MAX_VIDEO_MB}mb` });
-  router.put("/upload/:fname", rawBody, async (req, res) => {
+  router.put("/upload/:fname", uploadAuth, rawBody, async (req, res) => {
     const fname = req.params.fname;
-    if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.test(fname)) {
+    const m = /^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.exec(fname);
+    if (!m) {
       return res.status(400).json({ error: "bad filename" });
     }
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       return res.status(400).json({ error: "empty body" });
     }
-    const isVideo = fname.endsWith(".mp4");
-    const isFont = /\.(woff2|woff|ttf|otf)$/.test(fname);
+    const ext = m[1];
+    const isVideo = ext === "mp4";
+    const isFont = /^(woff2|woff|ttf|otf)$/.test(ext);
     const maxMb = isVideo ? MAX_VIDEO_MB : isFont ? MAX_FONT_MB : MAX_IMAGE_MB;
     if (req.body.length > maxMb * 1024 * 1024) {
       return res.status(413).json({ error: "too large" });
+    }
+    // Content must match the claimed extension — a ".png" that is really
+    // HTML/JS is rejected before it can be served from the public /files store.
+    if (!sniffMatchesExt(req.body, ext)) {
+      return res.status(400).json({ error: "content does not match file type" });
     }
     if (remoteUploadBase) {
       try {
         const r = await fetch(`${remoteUploadBase}/api/upload/${fname}`, {
           method: "PUT",
-          headers: { "Content-Type": req.headers["content-type"] || "application/octet-stream" },
+          headers: {
+            ...relayHeaders(req),
+            "Content-Type": req.headers["content-type"] || "application/octet-stream",
+          },
           body: req.body,
           signal: AbortSignal.timeout(120000),
         });
@@ -97,8 +124,7 @@ module.exports = function createIntakeRouter(ctx) {
   });
 
   // Remove an uploaded file (the form deletes photos the user takes back out).
-  router.delete("/upload/:fname", async (req, res) => {
-    if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
+  router.delete("/upload/:fname", uploadAuth, async (req, res) => {
     const fname = req.params.fname;
     if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.test(fname)) {
       return res.status(400).json({ error: "bad filename" });
@@ -107,7 +133,7 @@ module.exports = function createIntakeRouter(ctx) {
       try {
         await fetch(`${remoteUploadBase}/api/upload/${fname}`, {
           method: "DELETE",
-          headers: { "x-demo-key": "relay" },
+          headers: relayHeaders(req),
           signal: AbortSignal.timeout(20000),
         });
       } catch { /* best-effort */ }
@@ -197,8 +223,9 @@ module.exports = function createIntakeRouter(ctx) {
   }
 
   // ── demo-create (sets session cookie) ──
-  router.post("/properties/demo-create", async (req, res) => {
-    if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
+  // Admin-only: this signs a session for a client-supplied agent phone, so only
+  // a trusted operator on the ADMIN_PHONES allowlist may call it.
+  router.post("/properties/demo-create", requireAdmin, async (req, res) => {
     const body = req.body || {};
     const agentPhone = normalizeAuthPhone(body.agent && body.agent.phone);
     if (!agentPhone) return res.status(400).json({ error: "valid agent.phone required" });
@@ -239,8 +266,8 @@ module.exports = function createIntakeRouter(ctx) {
   });
 
   // ── demo-save-agent (autosave on blur) ──
-  router.post("/demo-save-agent", async (req, res) => {
-    if (!("x-demo-key" in req.headers)) return res.status(401).json({ error: "unauthenticated" });
+  // Admin-only: writes to an arbitrary agent's business doc during a demo.
+  router.post("/demo-save-agent", requireAdmin, async (req, res) => {
     const body = req.body || {};
     const phone = normalizeAuthPhone(body.phone);
     const field = String(body.field || "");

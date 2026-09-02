@@ -44,8 +44,9 @@ const expiredLinkHtml = () =>
 
 module.exports = function createPagesRouter(ctx) {
   const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,
-          requireAuth, verifyActionToken, authSecret,
+          requireAuth, verifyActionToken, authSecret, adminApiSecret,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
+  const { constantTimeEqual } = require("../security");
 
   // Admin allowlist, normalized once so "050-…", "+972…" and "972…" all match
   // the canonical form a session carries (same treatment as routes/admin.js).
@@ -86,7 +87,7 @@ module.exports = function createPagesRouter(ctx) {
   //        "http://127.0.0.1:8787/api/admin/backfill-tags?dry=1"
   // ?dry=1 reports without writing; ?force=1 recomputes even where tags exist.
   router.post("/api/admin/backfill-tags", async (req, res) => {
-    if (authSecret === "change-me-in-env" || req.get("x-admin-secret") !== authSecret) {
+    if (!constantTimeEqual(req.get("x-admin-secret"), adminApiSecret)) {
       return res.status(403).json({ error: "forbidden" });
     }
     const dry = req.query.dry === "1";
@@ -111,7 +112,7 @@ module.exports = function createPagesRouter(ctx) {
       res.json({ scanned: pages.length, updated: changes.length, dry, force, changes });
     } catch (err) {
       console.error("backfill-tags failed:", err);
-      res.status(500).json({ error: err instanceof Error ? err.message : "internal error" });
+      res.status(500).json({ error: "internal error" });
     }
   });
 
@@ -284,7 +285,7 @@ module.exports = function createPagesRouter(ctx) {
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
-      res.status(500).json({ error: err instanceof Error ? err.message : "internal error" });
+      res.status(500).json({ error: "internal error" });
     }
   });
 
@@ -559,7 +560,7 @@ module.exports = function createPagesRouter(ctx) {
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);
-      res.status(500).json({ error: "overlay_failed", detail: err.message.slice(0, 300) });
+      res.status(500).json({ error: "overlay_failed" });
     }
   });
 
