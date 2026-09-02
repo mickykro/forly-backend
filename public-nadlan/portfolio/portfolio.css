@@ -1,0 +1,278 @@
+/* portfolio.css — responsive RTL portfolio styling */
+:root {
+  --primary: #B98A2F;
+  --accent: #17140F;
+  --bg: #F7F3EC;
+  --card-bg: #FFFDF9;
+  --text: #17140F;
+  --text-muted: #5A5348;
+  --border: rgba(185, 138, 47, 0.3);
+  --radius: 16px;
+  --shadow: 0 4px 20px rgba(23, 20, 15, 0.08);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+/* Loading state */
+.loading {
+  text-align: center;
+  padding: 100px 20px;
+  color: var(--text-muted);
+}
+
+/* Header */
+.portfolio-header {
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.portfolio-header h1 {
+  font-size: 2rem;
+  margin-bottom: 8px;
+}
+
+.portfolio-header .intro {
+  color: var(--text-muted);
+  max-width: 600px;
+  margin: 0 auto 16px;
+}
+
+.portfolio-header .portrait {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-bottom: 16px;
+  border: 3px solid var(--primary);
+}
+
+/* Filters */
+.filters {
+  background: var(--card-bg);
+  padding: 16px 20px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.filters input,
+.filters select {
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+}
+
+.filters input:focus,
+.filters select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* Property grid */
+.property-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 24px;
+  padding: 24px 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.property-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.property-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow);
+}
+
+.property-card img {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+}
+
+.property-card .content {
+  padding: 16px;
+}
+
+.property-card h3 {
+  font-size: 1.1rem;
+  margin-bottom: 4px;
+}
+
+.property-card .location {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+
+.property-card .price {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.property-card .details {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+}
+
+.empty-state h2 {
+  margin-bottom: 16px;
+}
+
+/* Contact form */
+.contact-section {
+  background: var(--card-bg);
+  border-top: 1px solid var(--border);
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.contact-section h2 {
+  margin-bottom: 8px;
+}
+
+.contact-section p {
+  color: var(--text-muted);
+  margin-bottom: 24px;
+}
+
+.contact-form {
+  max-width: 400px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.contact-form input,
+.contact-form textarea {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+.contact-form button {
+  background: var(--primary);
+  color: white;
+  border: none;
+  padding: 14px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.contact-form button:hover {
+  opacity: 0.9;
+}
+
+/* About & Area sections */
+.about-section,
+.area-section {
+  padding: 40px 20px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.about-section h2,
+.area-section h2 {
+  margin-bottom: 16px;
+}
+
+.area-section .locations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.area-section .location-tag {
+  background: var(--primary);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+}
+
+/* Testimonials */
+.testimonials-section {
+  background: var(--card-bg);
+  padding: 40px 20px;
+}
+
+.testimonials-section h2 {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.testimonial-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.testimonial {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.testimonial blockquote {
+  font-style: italic;
+  margin-bottom: 12px;
+}
+
+.testimonial .attribution {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* Hidden SEO content */
+#portfolio-seo-content {
+  display: none;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .portfolio-header { padding: 30px 16px; }
+  .portfolio-header h1 { font-size: 1.5rem; }
+  .filters { padding: 12px 16px; }
+  .property-grid { padding: 16px; gap: 16px; }
+}
