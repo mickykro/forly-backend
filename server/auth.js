@@ -25,6 +25,7 @@ const SESSION_TTL_S = 12 * 60 * 60;    // 12 hours
 // Canonical form lives in utils.js so ownership checks and their tests can
 // reach it without loading Express. Aliased here to keep call sites unchanged.
 const normalizeAny = require("./utils").normalizeAuthPhone;
+const { decideLoginLead, leadMessage } = require("./login-leads");
 
 // ── crypto ──
 const hashCode = (secret, phone, code) =>
@@ -66,10 +67,11 @@ function readToken(req) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret }) {
+module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, salesLeadPhone }) {
   const router = express.Router();
   if (!secret) throw new Error("auth: FORLY_JWT_SECRET is required");
   if (mem && !mem.otps) mem.otps = new Map();
+  if (mem && !mem.loginLeads) mem.loginLeads = new Map();
 
   // storage: Firestore when available, in-memory otherwise
   const saveOtp = async (phone, rec) => {
@@ -90,6 +92,31 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret }) {
     return d.exists;
   };
 
+  // ── login leads: a non-client phone that tried to log in ──
+  const getLoginLead = async (phone) => {
+    if (db) { const d = await db.collection("login_leads").doc(phone).get(); return d.exists ? d.data() : null; }
+    return mem.loginLeads.get(phone) || null;
+  };
+  const saveLoginLead = async (phone, rec) => {
+    if (db) await db.collection("login_leads").doc(phone).set(rec, { merge: true });
+    else mem.loginLeads.set(phone, { ...(mem.loginLeads.get(phone) || {}), ...rec });
+  };
+  // There is no self-service signup on the login screen any more (see the
+  // linked GitHub issue) — a number with no business doc is a sales lead, not
+  // a routing error. Cooldown/document-shape decision lives in login-leads.js
+  // so it is a pure function, testable without Express or Firestore.
+  async function notifyNotAClientLead(phone) {
+    try {
+      const prev = await getLoginLead(phone);
+      const now = new Date();
+      const { notify, doc } = decideLoginLead(prev, now);
+      await saveLoginLead(phone, { phone, ...doc });
+      if (notify && salesLeadPhone) await sendWhatsApp(salesLeadPhone, leadMessage(phone));
+    } catch (err) {
+      console.error("not-a-client lead notice failed:", err.message);
+    }
+  }
+
   // ── POST /api/auth/otp — send a code ──
   router.post("/otp", async (req, res) => {
     const phone = normalizeAny(req.body && req.body.phone);
@@ -97,7 +124,8 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret }) {
 
     try {
       if (!(await isRegistered(phone))) {
-        return res.status(404).json({ ok: false, error: "not_registered" });
+        await notifyNotAClientLead(phone);
+        return res.status(404).json({ ok: false, error: "not_a_client" });
       }
 
       // resend cooldown

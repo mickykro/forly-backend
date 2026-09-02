@@ -20,6 +20,7 @@ const db = require("../db");
 const readiness = require("../chatbot-readiness");
 const chatbotConfig = require("../chatbot-config");
 const businessCache = require("../business-cache");
+const { deliverAgentMessage, MAX_RECIPIENTS } = require("../admin-messages");
 
 const PAGE_LIFESPAN_DAYS = 30;
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
@@ -27,7 +28,7 @@ const asMillis = (v) => { const d = asDate(v); return d ? d.getTime() : 0; };
 
 module.exports = function createAdminRouter(ctx) {
   const { verifySession, readToken, authSecret, normalizeAuthPhone, pageBaseUrl,
-          uploadDir, adminPhones } = ctx;
+          uploadDir, adminPhones, sendWhatsApp } = ctx;
 
   const router = express.Router();
 
@@ -61,6 +62,36 @@ module.exports = function createAdminRouter(ctx) {
     if (!session) return res.status(401).json({ error: "unauthenticated" });
     if (!isAdmin(session)) return res.status(403).json({ error: "not_admin" });
     res.json({ ok: true, is_admin: true, phone: session.userId });
+  });
+
+  // ── agent WhatsApp messaging ──
+  router.post("/messages", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const audience = body.audience === "all" ? "all" : body.audience === "selected" ? "selected" : "";
+    if (!audience || (audience === "selected" && !Array.isArray(body.phones))) {
+      return res.status(400).json({ error: "invalid_input" });
+    }
+    try {
+      const agents = (await db.listAllBusinesses()).filter((agent) => agent.phone);
+      const phones = audience === "all" ? agents.map((agent) => agent.phone) : body.phones;
+      const result = await deliverAgentMessage({
+        agents,
+        recipientPhones: phones,
+        message: body.message,
+        send: sendWhatsApp,
+        record: db.addAdminMessage,
+        sentBy: req.user.userId,
+      });
+      console.log(`admin_agent_message recipients=${result.recipientCount} by=${req.user.userId}`);
+      res.json({ ok: true, recipient_count: result.recipientCount });
+    } catch (err) {
+      const error = err && err.message;
+      if (["message_required", "message_too_long", "no_recipients", "too_many_recipients"].includes(error)) {
+        return res.status(400).json({ error, max_recipients: MAX_RECIPIENTS });
+      }
+      console.error("admin/messages failed:", err);
+      res.status(502).json({ error: "delivery_failed" });
+    }
   });
 
   // ── every property across every agent, joined with page stats + agent name ──

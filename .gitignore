@@ -88,3 +88,6 @@ server/data
 # VPS deploy secrets (live on the server, never committed)
 /deploy.env
 /sa-key.json
+
+# Local git worktrees
+.worktrees/

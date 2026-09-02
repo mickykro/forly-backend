@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map() };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -205,6 +205,16 @@ async function getBusiness(phone) {
 async function setBusiness(phone, data, merge = true) {
   if (!db) return;
   await db.collection("businesses").doc(phone).set(data, { merge });
+}
+
+// Starter quota doc, seeded once when a profile is completed. Never overwrites
+// an existing one: the chat cap (routes/chat.js) and the n8n pipelines both
+// keep running counters in here.
+async function initQuota(phone, data) {
+  if (!db) return;
+  const ref = db.collection("businesses").doc(phone).collection("quota").doc("current");
+  const snap = await ref.get();
+  if (!snap.exists) await ref.set(data);
 }
 
 // ── admin: all businesses (agent directory) ──
@@ -431,6 +441,11 @@ async function saveLead(phone, lead) {
   else mem.leads.set(phone, { ...(mem.leads.get(phone) || {}), ...lead });
 }
 
+async function addAdminMessage(entry) {
+  if (db) await db.collection("admin_messages").add(entry);
+  else mem.adminMessages.push(entry);
+}
+
 // Immutable, one doc per submission — a chat lead and a form lead from the same
 // prospect must not collapse into one leads/{phone} summary and lose the first.
 async function addLeadSubmission(doc) {
@@ -451,6 +466,6 @@ module.exports = {
   listDistributionsByPage, listQueuedDistributions, addPostAction,
   listGroupCatalog, addGroupCatalogEntry,
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
-  listShareSessionsByPhone, healGroups,
+  listShareSessionsByPhone, healGroups, addAdminMessage,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
 };
