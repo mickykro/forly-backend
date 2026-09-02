@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly · עריכת דף נכסים</title>
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+.portfolio-editor { max-width: 700px; margin: 0 auto; padding: 20px; }
+.portfolio-editor h2 { margin: 30px 0 16px; font-size: 1.2rem; }
+.portfolio-editor h2:first-child { margin-top: 0; }
+.portfolio-editor .field { margin-bottom: 16px; }
+.portfolio-editor label { display: block; margin-bottom: 6px; font-weight: 500; }
+.portfolio-editor input, .portfolio-editor textarea { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; }
+.portfolio-editor textarea { resize: vertical; min-height: 80px; }
+.testimonial-card { background: #f9f9f9; border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.testimonial-card .remove-btn { background: none; border: none; color: #c00; cursor: pointer; font-size: 14px; float: left; }
+.page-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.page-row input[type="checkbox"] { width: 18px; height: 18px; }
+.page-row .title { flex: 1; }
+.legal-warning { background: #fff3cd; border: 1px solid #ffc107; padding: 12px; border-radius: 8px; font-size: 13px; margin-top: 16px; }
+.btn-save { width: 100%; margin-top: 24px; }
+.portfolio-link { display: flex; align-items: center; gap: 12px; background: #e8f5e9; padding: 16px; border-radius: 8px; margin-bottom: 24px; }
+.portfolio-link a { color: #2e7d32; font-weight: 600; }
+</style>
+</head>
+<body class="agent-page">
+
+<header class="topbar agent-topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <a href="/" style="margin-inline-start:auto;color:var(--gold)">← חזרה לדף הראשי</a>
+</header>
+
+<div class="agent-shell">
+  <div class="portfolio-editor" id="editor">
+    <div class="loading" style="text-align:center;padding:60px">טוען...</div>
+  </div>
+</div>
+
+<script src="/portfolio.js"></script>
+</body>
+</html>

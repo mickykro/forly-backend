@@ -103,6 +103,23 @@
     </div>
     <a href="/profile.html" class="btn" style="background:#fff;color:#b98a2f;font-weight:600;border:none">השלמת פרופיל</a>
   </div>
+  <!-- Portfolio banner -->
+  <div id="portfolioBanner" class="hidden" style="background:#e8f5e9;border:1px solid #c8e6c9;padding:14px 20px;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <span style="font-size:1.2rem">🏢</span>
+    <div style="flex:1 1 auto;min-width:200px">
+      <b style="display:block;margin-bottom:2px">דף הנכסים שלך</b>
+      <a id="portfolioUrl" href="#" target="_blank" style="color:#2e7d32;font-size:.9rem"></a>
+    </div>
+    <a href="/portfolio.html" class="btn" style="background:#2e7d32;color:#fff;font-weight:600;border:none">עריכה</a>
+  </div>
+  <div id="createPortfolioBanner" class="hidden" style="background:#fff3cd;border:1px solid #ffc107;padding:14px 20px;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <span style="font-size:1.2rem">✨</span>
+    <div style="flex:1 1 auto;min-width:200px">
+      <b style="display:block;margin-bottom:2px">צרו דף נכסים</b>
+      <span style="font-size:.9rem;color:#856404">כל הנכסים שלכם במקום אחד לשיתוף עם לקוחות</span>
+    </div>
+    <a href="/portfolio.html" class="btn" style="background:#ffc107;color:#000;font-weight:600;border:none">יצירת דף</a>
+  </div>
   <div class="agent-hero page-head">
     <div>
       <h1>הנכסים שלי</h1>
@@ -567,13 +584,22 @@
     checkProfile(); // ponytail: check if profile needs completion
   }
 
-  // ponytail: check profile completion and show banner if needed
+  // ponytail: check profile completion and portfolio status
   function checkProfile() {
     FLY.req("/api/profile", { noRedirect: true })
       .then(function(d) {
         if (d.needs_completion) {
           // the banner links to /profile — the form reads the phone off the session
           $("#profileBanner").classList.remove("hidden");
+        }
+        // Portfolio banners
+        if (d.profile && d.profile.portfolio_url) {
+          $("#portfolioBanner").classList.remove("hidden");
+          var url = d.profile.portfolio_url;
+          $("#portfolioUrl").href = url;
+          $("#portfolioUrl").textContent = url.replace(/^https?:\/\//, "");
+        } else if (d.profile && !d.profile.portfolio_url) {
+          $("#createPortfolioBanner").classList.remove("hidden");
         }
       })
       .catch(function() { /* ignore errors */ });
