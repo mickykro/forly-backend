@@ -231,12 +231,56 @@ async function addLeadSubmission(doc) {
   else mem.leadSubmissions.push(doc);
 }
 
+// ── portfolio slug reservations ──
+// ponytail: uses same shortCode alphabet for property slugs
+async function getPortfolioSlugReservation(slug) {
+  if (!db) return mem.portfolioSlugs?.get(slug) || null;
+  const d = await db.collection("portfolio_slugs").doc(slug).get();
+  return d.exists ? d.data() : null;
+}
+
+async function reservePortfolioSlug(phone, slug, oldSlug = null) {
+  const now = new Date();
+  if (!db) {
+    mem.portfolioSlugs = mem.portfolioSlugs || new Map();
+    const existing = mem.portfolioSlugs.get(slug);
+    if (existing && existing.business_phone !== phone) throw new Error("slug_taken");
+    mem.portfolioSlugs.set(slug, { business_phone: phone, current_slug: slug, created_at: now });
+    if (oldSlug && oldSlug !== slug) {
+      mem.portfolioSlugs.set(oldSlug, { business_phone: phone, current_slug: slug, created_at: now });
+    }
+    return;
+  }
+  await db.runTransaction(async (tx) => {
+    const nextRef = db.collection("portfolio_slugs").doc(slug);
+    const next = await tx.get(nextRef);
+    if (next.exists && next.get("business_phone") !== phone) throw new Error("slug_taken");
+    tx.set(nextRef, { business_phone: phone, current_slug: slug, created_at: now }, { merge: true });
+    if (oldSlug && oldSlug !== slug) {
+      tx.set(db.collection("portfolio_slugs").doc(oldSlug),
+        { business_phone: phone, current_slug: slug, created_at: now }, { merge: true });
+    }
+  });
+}
+
+// List pages by business phone (for portfolio dashboard)
+async function listPagesByPhone(phone, limit = 100) {
+  if (db) {
+    const snap = await db.collection("property_pages")
+      .where("business_phone", "==", phone).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.pages.values()].filter((p) => p.business_phone === phone).slice(0, limit);
+}
+
 module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
+  shortCode,
   saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
-  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
+  getPortfolioSlugReservation, reservePortfolioSlug,
 };

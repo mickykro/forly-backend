@@ -20,6 +20,7 @@ const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone,
 const { sanitizeTags, deriveTags } = require("../tags");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
+const { propertySlug } = require("../portfolio");
 
 // Portal era: pages no longer expire (the expiry scheduler is retired). New
 // pages get a far-future expires_at to keep the schema intact; /api/extend
@@ -263,6 +264,13 @@ module.exports = function createPagesRouter(ctx) {
         sections: { gallery: galleryImages.length >= 3, carousel: true, area: true },
         view_count: reusable ? (reusable.view_count || 0) : 0,
         lead_count: reusable ? (reusable.lead_count || 0) : 0,
+        // Portfolio fields: stable slug, visibility defaults to true for new pages
+        public_slug: reusable?.public_slug || propertySlug(
+          (body.property && body.property.address) || "",
+          db.shortCode(3)
+        ),
+        portfolio_visible: reusable?.portfolio_visible ?? true,
+        portfolio_rank: reusable?.portfolio_rank ?? null,
       };
 
       if (!doc.property.tags.length) doc.property.tags = deriveTags(doc.property, listing && listing.description);
