@@ -9,6 +9,7 @@ const fs = require("fs");
 const db = require("../db");
 const portalStream = require("../portal-stream");
 const { sendWhatsApp } = require("../utils");
+const { portfolioSlug, normalizePortfolio, visiblePortfolioPages, nextPortfolioStatus } = require("../portfolio");
 
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
 
@@ -59,6 +60,8 @@ module.exports = function createDashboardRouter(ctx) {
           logo_url: d.logo_url || null,
           onboarding_state: state,
           onboarding_pct: d.onboarding_pct || 0,
+          portfolio_url: d.portfolio?.status === "open" ? `${pageBaseUrl}/${d.portfolio.slug}` : null,
+          portfolio_status: d.portfolio?.status || null,
         },
         needs_completion: state !== "complete",
       });
@@ -128,6 +131,141 @@ module.exports = function createDashboardRouter(ctx) {
       res.json({ ok: true });
     } catch (err) {
       console.error("submitWebSignup failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── portfolio management ──
+  router.get("/my-portfolio", requireAuth(authSecret), async (req, res) => {
+    const phone = req.user.userId;
+    try {
+      const business = await db.getBusiness(phone);
+      if (!business) return res.json({ portfolio: null, pages: [] });
+      const pages = await db.listPagesByPhone(phone, 100);
+      const portfolio = business.portfolio || null;
+      res.json({
+        profile: {
+          business_name: business.business_name || "",
+          full_name: business.full_name || "",
+          city: business.city || "",
+          license_number: business.license_number || "",
+          logo_url: business.logo_url || null,
+        },
+        portfolio: portfolio ? {
+          ...portfolio,
+          url: `${pageBaseUrl}/${portfolio.slug}`,
+        } : null,
+        pages: pages.map((p) => ({
+          page_id: p.page_id,
+          title: p.property?.title || "",
+          address: p.property?.address || "",
+          status: p.status,
+          public_slug: p.public_slug,
+          portfolio_visible: p.portfolio_visible ?? true,
+          portfolio_rank: p.portfolio_rank ?? null,
+        })),
+      });
+    } catch (err) {
+      console.error("GET /api/my-portfolio failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  router.post("/my-portfolio", requireAuth(authSecret), async (req, res) => {
+    const phone = req.user.userId;
+    const body = req.body || {};
+    try {
+      const business = await db.getBusiness(phone);
+      if (!business) return res.status(404).json({ error: "not_found" });
+      const existing = business.portfolio || {};
+
+      // Handle business name change → slug reservation
+      const newBizName = body.business_name?.trim() || business.business_name;
+      let newSlug = existing.slug;
+      if (newBizName !== business.business_name && existing.slug) {
+        newSlug = portfolioSlug(newBizName);
+        await db.reservePortfolioSlug(phone, newSlug, existing.slug);
+      }
+
+      // Normalize portfolio config
+      const portfolioInput = body.portfolio || {};
+      const normalized = normalizePortfolio(portfolioInput, existing);
+      normalized.slug = newSlug || existing.slug;
+      normalized.status = existing.status || "draft";
+
+      // Update business doc
+      await db.setBusiness(phone, {
+        business_name: newBizName,
+        full_name: body.full_name?.trim() || business.full_name,
+        city: body.city?.trim() || business.city,
+        license_number: body.license_number?.trim() || business.license_number,
+        logo_url: body.logo_url ?? business.logo_url,
+        portfolio: normalized,
+      }, true);
+
+      // Update page visibility/rank if provided
+      if (Array.isArray(body.portfolio?.properties)) {
+        const pages = await db.listPagesByPhone(phone, 100);
+        const pageMap = new Map(pages.map((p) => [p.page_id, p]));
+        for (const prop of body.portfolio.properties) {
+          if (!prop.page_id || !pageMap.has(prop.page_id)) continue;
+          await db.updatePage(prop.page_id, {
+            portfolio_visible: prop.portfolio_visible ?? true,
+            portfolio_rank: prop.portfolio_rank ?? null,
+          });
+        }
+      }
+
+      res.json({
+        ok: true,
+        portfolio_url: `${pageBaseUrl}/${normalized.slug}`,
+      });
+    } catch (err) {
+      if (err.message === "slug_taken") {
+        return res.status(409).json({ error: "slug_taken" });
+      }
+      console.error("POST /api/my-portfolio failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  router.post("/my-portfolio/create", requireAuth(authSecret), async (req, res) => {
+    const phone = req.user.userId;
+    try {
+      const business = await db.getBusiness(phone);
+      if (!business) return res.status(404).json({ error: "not_found" });
+      if (business.portfolio?.slug) {
+        return res.json({
+          created: false,
+          portfolio_url: `${pageBaseUrl}/${business.portfolio.slug}`,
+        });
+      }
+      // Create new portfolio
+      const slug = portfolioSlug(business.business_name || business.full_name || "");
+      await db.reservePortfolioSlug(phone, slug);
+      const now = new Date();
+      await db.setBusiness(phone, {
+        portfolio: {
+          slug,
+          status: "open",
+          hero: { headline: "", intro: "", portrait_url: null },
+          about: { body: "" },
+          area: { headline: "", body: "", locations: [] },
+          testimonials: [],
+          theme: { primary: null, accent: null, font_url: null },
+          created_at: now,
+          updated_at: now,
+        },
+      }, true);
+      res.json({
+        created: true,
+        portfolio_url: `${pageBaseUrl}/${slug}`,
+      });
+    } catch (err) {
+      if (err.message === "slug_taken") {
+        return res.status(409).json({ error: "slug_taken" });
+      }
+      console.error("POST /api/my-portfolio/create failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });
