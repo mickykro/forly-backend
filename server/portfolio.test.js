@@ -89,4 +89,21 @@ assert.strictEqual(nextPortfolioStatus("draft", 5), "open");
 assert.strictEqual(nextPortfolioStatus("open", 0), "open");
 assert.strictEqual(nextPortfolioStatus("closed", 3), "closed");
 
+// ── render tests ──
+const { renderPortfolioDocument, renderSitemap } = require("./portfolio-render");
+const template = '<html lang="he"><head><!--PORTFOLIO_HEAD--></head><body><!--PORTFOLIO_BODY--></body></html>';
+const html = renderPortfolioDocument(template, {
+  canonical_url: "https://nadlan.call4li.com/krvytvrv-nksym",
+  agent: { name: "מיקי קרויטורו", brand_name: "קרויטורו נכסים", city: "כפר סבא" },
+  portfolio: { hero: { intro: "ליווי אישי בכפר סבא" }, area: { locations: ["כפר סבא"] } },
+  properties: [{ title: "דירה ברחוב ויצמן", url: "/krvytvrv-nksym/vyt23-a7k" }],
+});
+assert.ok(html.includes('<meta name="robots" content="index,follow">'), "should have robots meta");
+assert.ok(html.includes('<link rel="canonical" href="https://nadlan.call4li.com/krvytvrv-nksym">'), "should have canonical");
+assert.ok(html.includes("RealEstateAgent"), "should have JSON-LD");
+assert.ok(html.includes("/krvytvrv-nksym/vyt23-a7k"), "should have property link");
+
+const sitemap = renderSitemap(["https://nadlan.call4li.com/krvytvrv-nksym"]);
+assert.ok(sitemap.includes("<loc>https://nadlan.call4li.com/krvytvrv-nksym</loc>"), "sitemap should have URL");
+
 console.log("✓ portfolio.test.js: all assertions passed");
