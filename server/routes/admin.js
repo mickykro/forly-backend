@@ -160,6 +160,8 @@ module.exports = function createAdminRouter(ctx) {
           onboarding_state: b.onboarding_state || "",
           is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
           chatbot_enabled: !!(b.features && b.features.chatbot),
+          portfolio_status: b.portfolio?.status || null,
+          portfolio_url: b.portfolio?.status === "open" ? `${pageBaseUrl}/${b.portfolio.slug}` : null,
           pages: 0, active_pages: 0, views: 0, leads: 0,
           readiness: { rich: 0, ok: 0, thin: 0 },
         });
@@ -355,6 +357,33 @@ module.exports = function createAdminRouter(ctx) {
       res.json({ ok: true });
     } catch (err) {
       console.error("admin/properties/delete failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── portfolio status (admin-only open/close) ──
+  router.post("/portfolio-status", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const phone = normalizeAuthPhone(body.business_phone || "");
+    const status = String(body.status || "");
+    if (!phone || (status !== "open" && status !== "closed")) {
+      return res.status(400).json({ error: "business_phone and status(open|closed) required" });
+    }
+    try {
+      const biz = await db.getBusiness(phone);
+      if (!biz || !biz.portfolio) return res.status(404).json({ error: "portfolio_not_found" });
+      await db.setBusiness(phone, {
+        "portfolio.status": status,
+        "portfolio.updated_at": new Date(),
+      }, true);
+      console.log(`admin_portfolio_status phone=${phone} status=${status} by=${req.user.userId}`);
+      res.json({
+        ok: true,
+        status,
+        portfolio_url: status === "open" ? `${pageBaseUrl}/${biz.portfolio.slug}` : null,
+      });
+    } catch (err) {
+      console.error("admin/portfolio-status failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });
