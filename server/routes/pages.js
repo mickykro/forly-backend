@@ -694,6 +694,28 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
+  // ── portfolio events (view, filter, lead_cta) ──
+  const PORTFOLIO_EVENTS = new Set(["view", "filter_used", "lead_cta_click"]);
+  router.post("/api/portfolio-event", express.text({ type: () => true }), async (req, res) => {
+    let body = {};
+    try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
+    const { slug, event } = body;
+    if (!slug || !event || !PORTFOLIO_EVENTS.has(event)) return res.status(204).send("");
+    try {
+      const reservation = await db.getPortfolioSlugReservation(slug);
+      if (!reservation) return res.status(204).send("");
+      // ponytail: simple daily counter, no per-visitor data
+      if (db.db) {
+        const FieldValue = require("firebase-admin").firestore.FieldValue;
+        const day = new Date().toISOString().slice(0, 10);
+        await db.db.collection("businesses").doc(reservation.business_phone)
+          .collection("portfolio_metrics").doc(day)
+          .set({ [event]: FieldValue.increment(1) }, { merge: true });
+      }
+    } catch (err) { console.warn("portfolio-event failed:", err.message); }
+    res.status(204).send("");
+  });
+
   // ── portfolio lead submission ──
   router.post("/api/portfolio-lead", async (req, res) => {
     const body = req.body || {};

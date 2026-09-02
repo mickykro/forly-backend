@@ -26,6 +26,7 @@
       data = d;
       filteredProperties = d.properties || [];
       render();
+      trackEvent("view");
     })
     .catch(() => {
       app.innerHTML = "<div class='empty-state'><h2>הדף לא נמצא</h2><p>ייתכן שהדף הוסר או שהכתובת שגויה.</p></div>";
@@ -191,5 +192,9 @@
   function formatPrice(price, type) {
     const f = new Intl.NumberFormat("he-IL").format(price);
     return type === "rent" ? `₪${f}/חודש` : `₪${f}`;
+  }
+
+  function trackEvent(event) {
+    navigator.sendBeacon("/api/portfolio-event", JSON.stringify({ slug, event }));
   }
 })();
