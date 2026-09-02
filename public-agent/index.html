@@ -10,6 +10,27 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<style>
+  /* Distribution state on the property cards: where this listing has been
+     published. Hidden until /status answers, so a non-entitled agent (or a
+     failed status call) sees the card exactly as before. */
+  .dist-row{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px}
+  .dist-row:empty{margin:0}
+  .dist-tag{font-size:.72rem;font-weight:600;border-radius:100px;padding:3px 10px;
+    background:rgba(23,20,15,.07);color:var(--ink-soft);white-space:nowrap}
+  .dist-tag.ok{background:rgba(31,175,90,.12);color:#157A3F}
+  .dist-tag.partial{background:var(--gold-faint);color:#8A6A1E}
+  .dist-tag .n{font-variant-numeric:tabular-nums}
+  a.dist-tag{text-decoration:none}
+  a.dist-tag:hover{filter:brightness(.94)}
+  button.dist-tag{border:none;font-family:inherit;cursor:pointer;line-height:inherit}
+  button.dist-tag:hover:not(:disabled){filter:brightness(.94)}
+  button.dist-tag:disabled{opacity:.55;cursor:default}
+  /* Engagement on the live Facebook post. Cached server-side, so it is the
+     last known figure rather than a live read — see distribution/metrics.js. */
+  .dist-stats{flex-basis:100%;font-size:.76rem;color:var(--ink-soft);
+    font-variant-numeric:tabular-nums;display:flex;gap:10px;flex-wrap:wrap}
+</style>
 </head>
 <body class="agent-page dashboard-page">
 
@@ -87,7 +108,10 @@
       <h1>הנכסים שלי</h1>
       <p id="countLine"></p>
     </div>
-    <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
+    <div style="display:flex;gap:8px">
+      <a class="btn btn-ghost" href="/distribution.html">חיבורים וקבוצות</a>
+      <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
+    </div>
   </div>
   <div class="prop-grid" id="propGrid"></div>
   <div class="card center hidden" id="emptyState" style="padding:56px 24px">
@@ -244,6 +268,9 @@
     if (p.page_url && (p.page_status === "active" || p.page_status === "expiring")) {
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" href="' + p.page_url + '">צפייה</a>');
       actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + p.page_id + '">עריכה</a>');
+      // Publishing is property-first. The workspace receives this page ID and
+      // contains the supported Page publish action plus manual Group sharing.
+      actions.push('<a class="btn btn-gold btn-sm" href="/publish.html?page=' + p.page_id + '">פרסום</a>');
     }
     if (p.page_id && p.page_status !== "building") {
       actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + p.page_id + '">הארכה +30</button>');
@@ -256,6 +283,8 @@
       '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px"><h3>' + esc(p.title) + "</h3>" + chipFor(p.page_status) + "</div>" +
       '<div class="addr">' + esc(p.address) + "</div>" + days +
       '<div class="meta-row"><span>👁 <b>' + p.view_count + "</b> צפיות</span><span>🔔 <b>" + p.lead_count + "</b> לידים</span></div>" +
+      // Filled by renderDistTags() once /status answers; stays empty otherwise.
+      '<div class="dist-row" data-distrow="' + esc(p.page_id || "") + '"></div>' +
       '<div class="actions">' + actions.join("") + "</div>" +
       "</div></div>";
   }
@@ -275,9 +304,237 @@
       $("#propGrid").innerHTML = items.map(cardHtml).join("");
       $("#emptyState").classList.toggle("hidden", items.length > 0);
       bindActions();
+      loadDistTags();
     }).finally(function () {
       FLY.loaderHide(function () { $("#viewList").classList.remove("hidden"); });
     });
+  }
+
+  /*
+   * ── where each listing has been published ──
+   *
+   * Read-only: the Facebook feed post, its engagement, and how many of the
+   * property's target groups the agent has marked as shared. Publishing lives
+   * in publish.html — this row reports, it never acts.
+   *
+   * Loaded LAZILY, six cards per request, as they scroll into view. Each card
+   * costs the server a Firestore query and can trigger a Graph refresh, so an
+   * agent with 40 listings should not pay for 40 to look at the six on screen.
+   * A batch that fails leaves those cards untouched.
+   *
+   * Every agent sees their own results here, and only their own: /status keys
+   * everything off the session's phone. features.distribution is NOT a gate on
+   * this — see renderDistTags.
+   */
+  var DIST_PAGE = 6;
+  var distObserver = null;
+  var distQueue = [];
+  var distTimer = null;
+  var distLoading = false;
+  var distEntitled = null;      // null = not yet known; decides empty-state chips only
+
+  function loadDistTags() {
+    stopDist();
+    bindDistRefresh();
+    distEntitled = null;
+    var rows = document.querySelectorAll("[data-distrow]");
+    if (!rows.length) return;
+    if (!window.IntersectionObserver) {
+      // No observer: fetch the first page only. Everything below the fold
+      // stays blank rather than dragging the whole catalogue down with it.
+      queueDist(Array.prototype.slice.call(rows, 0, DIST_PAGE));
+      return;
+    }
+    // rootMargin starts the request just before the card is reached, so the
+    // numbers are usually there by the time it is actually on screen.
+    distObserver = new IntersectionObserver(function (entries) {
+      queueDist(entries.filter(function (e) { return e.isIntersecting; })
+        .map(function (e) { return e.target; }));
+    }, { rootMargin: "200px 0px" });
+    rows.forEach(function (row) { distObserver.observe(row); });
+  }
+
+  function stopDist() {
+    if (distObserver) { distObserver.disconnect(); distObserver = null; }
+    clearTimeout(distTimer); distTimer = null;
+    distQueue = [];
+  }
+
+  function queueDist(rows) {
+    rows.forEach(function (row) {
+      if (row.dataset.distState) return;
+      row.dataset.distState = "loading";
+      if (distObserver) distObserver.unobserve(row);
+      // A listing whose page is still building has no id to ask about. Settle
+      // it here so the observer stops re-firing on it for the rest of the page.
+      if (row.dataset.distrow) distQueue.push(row);
+      else row.dataset.distState = "done";
+    });
+    // Coalesce the burst of intersections that fires on first paint into one
+    // request instead of one per card.
+    if (!distTimer && !distLoading) {
+      distTimer = setTimeout(function () { distTimer = null; flushDist(); }, 60);
+    }
+  }
+
+  // Blank cards have three very different causes — not entitled, nothing
+  // published, or stale assets — and they look identical on screen. Opt in with
+  // localStorage.setItem("forlyDistDebug", "1") to see which, without putting
+  // noise in every agent's console.
+  var distDebug = (function () {
+    try { return localStorage.getItem("forlyDistDebug") === "1"; } catch (e) { return false; }
+  })();
+
+  function flushDist() {
+    if (distLoading || !distQueue.length) return;
+    var batch = distQueue.splice(0, DIST_PAGE);
+    var ids = batch.map(function (r) { return r.dataset.distrow; });
+    distLoading = true;
+    FLY.req("/api/distribution/status?page_ids=" +
+      ids.map(encodeURIComponent).join(","), { noRedirect: true })
+      .then(function (d) {
+        distEntitled = !!d.entitled;
+        if (distDebug) {
+          console.log("[forly:dist] batch", ids, {
+            entitled: d.entitled, connection: d.connection, listings: d.listings,
+          });
+        }
+        renderDistTags(d.listings || {}, distEntitled);
+        batch.forEach(function (r) { r.dataset.distState = "done"; });
+      })
+      .catch(function (err) {
+        if (distDebug) console.warn("[forly:dist] batch failed", ids, err);
+        // Hand them back to the observer, which re-fires straight away for a
+        // row that is still on screen. Capped at one retry so a server that
+        // keeps failing cannot spin the batch.
+        batch.forEach(function (r) {
+          var tries = Number(r.dataset.distTries || 0) + 1;
+          r.dataset.distTries = tries;
+          if (tries < 2 && distObserver) {
+            delete r.dataset.distState;
+            distObserver.observe(r);
+          } else { r.dataset.distState = "done"; }
+        });
+      })
+      .finally(function () {
+        distLoading = false;
+        if (distQueue.length) flushDist();
+      });
+  }
+
+  function distTag(cls, label) {
+    return '<span class="dist-tag ' + cls + '">' + label + "</span>";
+  }
+
+  // The "published" chip IS the link to the post — that is where the agent
+  // goes to answer a comment, so it should not need a second control. Only
+  // https URLs are linkified: post_url is server-built, and a chip is not the
+  // place to find out that assumption broke.
+  function distLink(cls, label, href) {
+    if (!/^https:\/\//.test(String(href || ""))) return distTag(cls, label);
+    return '<a class="dist-tag ' + cls + '" target="_blank" rel="noopener" href="' +
+      esc(href) + '">' + label + "</a>";
+  }
+
+  /*
+   * A post the agent already made is THEIR result, so it is reported whatever
+   * features.distribution currently says: that flag gates publishing, not
+   * looking at what already happened. Revoking it, or never granting it after
+   * a pilot, must not blank an agent's own numbers.
+   *
+   * `entitled` only decides whether to show the empty, forward-looking states
+   * ("not published yet", "no groups chosen") — those are a to-do list for an
+   * agent in the programme and noise for one who is not.
+   */
+  function renderDistTags(listings, entitled) {
+    document.querySelectorAll("[data-distrow]").forEach(function (row) {
+      var L = listings[row.dataset.distrow];
+      if (!L) return;
+      // Facebook would not serve the post — usually deleted there. The card
+      // treats it exactly like a post that never happened: no chip, no stats,
+      // just the forward-looking state. The server still rechecks daily, so if
+      // it ever becomes readable again the card comes back on its own.
+      var posted = !!L.posted && !(L.metrics && L.metrics.missing);
+      var parts = [];
+      if (L.in_flight) parts.push(distTag("partial", "📘 בפרסום לפיד…"));
+      else if (posted) parts.push(distLink("ok", "📘 פורסם בפיד ↗", L.post_url));
+      else if (entitled) parts.push(distTag("", "📘 טרם פורסם בפיד"));
+
+      var g = L.groups || {};
+      // Only agent-confirmed group posts count — the server never invents one.
+      var done = Number(g.posted) || 0;
+      var total = Number(g.total) || 0;
+      if (done > 0 || (entitled && total > 0)) {
+        parts.push(distTag(done >= total ? "ok" : done ? "partial" : "",
+          '👥 קבוצות <span class="n" dir="ltr">' + done + "/" + total + "</span>"));
+      } else if (entitled) {
+        parts.push(distTag("", "👥 לא נבחרו קבוצות"));
+      }
+      // Only a readable post has anything to fetch.
+      if (posted) {
+        parts.push('<button class="dist-tag" data-metrics-refresh="' +
+          esc(row.dataset.distrow) + '" title="רענון נתוני הפוסט">⟳</button>');
+      }
+      row.innerHTML = parts.join("") + statsHtml(L);
+    });
+  }
+
+  /*
+   * Per-card refresh. Bound ONCE by delegation on the grid: renderDistTags
+   * rewrites row.innerHTML, so a listener attached to the button itself would
+   * die on the first refresh — and re-binding per render would stack listeners.
+   */
+  var distRefreshBound = false;
+  function bindDistRefresh() {
+    if (distRefreshBound) return;
+    distRefreshBound = true;
+    $("#propGrid").addEventListener("click", function (e) {
+      var btn = e.target.closest && e.target.closest("[data-metrics-refresh]");
+      if (btn && !btn.disabled) refreshMetrics(btn.dataset.metricsRefresh, btn);
+    });
+  }
+
+  function refreshMetrics(pageId, btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳";
+    FLY.req("/api/distribution/status?refresh=1&page_ids=" + encodeURIComponent(pageId),
+      { noRedirect: true })
+      .then(function (d) {
+        // Re-renders this row, which replaces the button in its enabled state.
+        renderDistTags(d.listings || {}, !!d.entitled);
+        var L = (d.listings || {})[pageId];
+        FLY.toast(L && L.metrics && L.metrics.missing
+          ? "פייסבוק עדיין לא מחזיר נתונים לפוסט הזה"
+          : "הנתונים עודכנו ✓");
+      })
+      .catch(function () {
+        FLY.toast("הרענון נכשל — נסו שוב בעוד רגע");
+        btn.disabled = false;
+        btn.textContent = "⟳";
+      });
+  }
+
+  // Engagement on the Facebook post. Nothing renders for a listing that was
+  // never published — there is no post to measure, and the server never asked
+  // Facebook about it. Groups get no equivalent either: Forly only knows the
+  // agent said they posted there, so there is nothing to count.
+  function statsHtml(L) {
+    var m = L.metrics;
+    if (!L.posted || !m || m.missing) return "";
+    /*
+     * Every metric gets a slot, always in the same order, so cards line up and
+     * a figure never silently disappears. "–" means Facebook would not give us
+     * the number — shares are absent on some node types, and views/reach need
+     * read_insights, which the app is not approved for. A literal 0 there would
+     * claim nobody watched, which is a different and false statement.
+     */
+    var n = function (v) { return v == null ? "–" : Number(v); };
+    // 👁 = reach (saw it), ▶ = plays. Different questions — never merged.
+    // 🔁 for shares, not ↗: that arrow already means "opens on Facebook".
+    var bits = ["❤️ " + n(m.likes), "💬 " + n(m.comments), "🔁 " + n(m.shares),
+      "👁 " + n(m.reach), "▶ " + n(m.video_views)];
+    return '<div class="dist-stats" dir="ltr">' +
+      bits.map(function (b) { return "<span>" + b + "</span>"; }).join("") + "</div>";
   }
 
   function bindActions() {
@@ -384,6 +641,8 @@
         $("#viewLogin").classList.add("hidden");
         $("#viewList").classList.remove("hidden");
         $("#btnLogout").classList.remove("hidden");
+        // Every page load lands here; loadList() only after login/extend.
+        loadDistTags();
         checkProfile(); // ponytail: check if profile needs completion
       };
     })

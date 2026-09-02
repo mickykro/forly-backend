@@ -69,8 +69,12 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 // static files
-app.use(express.static(path.join(__dirname, "..", "public-agent"), { index: "index.html" }));
-app.use(express.static(path.join(__dirname, "..", "public-nadlan")));
+// App shell always revalidates; the ETag makes an unchanged file a 304.
+const revalidate = { index: "index.html", setHeaders: (res, file) => {
+  if (/\.(html|js|css)$/.test(file)) res.setHeader("Cache-Control", "no-cache");
+} };
+app.use(express.static(path.join(__dirname, "..", "public-agent"), revalidate));
+app.use(express.static(path.join(__dirname, "..", "public-nadlan"), revalidate));
 app.use("/files", express.static(UPLOAD_DIR, { maxAge: "1d", immutable: true }));
 app.use("/tpl", express.static(TEMPLATES_DIR));
 
@@ -124,6 +128,18 @@ app.use("/api/admin", createAdminRouter({
   sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
 }));
 
+// ── distribution routes (Meta OAuth, one-tap confirm, publish, groups) ──
+const createDistributionRouter = require("./routes/distribution");
+const distributionJobs = require("./distribution/jobs");
+app.use("/api/distribution", createDistributionRouter({
+  requireAuth, verifyActionToken, verifySession, readToken,
+  authSecret: AUTH_SECRET,
+  pageBaseUrl: PAGE_BASE_URL,
+  greenInstance: GREENAPI_INSTANCE,
+  greenToken: GREENAPI_TOKEN,
+}));
+
+// signup redirect at root level
 // ── signup / profile completion ──
 // Two different things share the "signup" name: /signup.html registers a new
 // agent (OTP), /profile.html completes the 15-field profile of one who already
@@ -200,4 +216,8 @@ app.listen(PORT, () => {
   console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
   // Expiry scheduler retired: property pages no longer expire — the public
   // portal (call4li.com) lists every live page until the agent archives it.
+  distributionJobs.startSweeper(distributionJobs.liveDeps({
+    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN,
+    pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
+  }));
 });
