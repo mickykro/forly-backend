@@ -304,9 +304,9 @@
         // Portfolio banners
         if (d.profile && d.profile.portfolio_url) {
           $("#portfolioBanner").classList.remove("hidden");
-          var url = d.profile.portfolio_url;
+          var url = d.profile.portfolio_url.replace(/^https?:\/\/[^/]+/, "");
           $("#portfolioUrl").href = url;
-          $("#portfolioUrl").textContent = url.replace(/^https?:\/\//, "");
+          $("#portfolioUrl").textContent = location.host + url;
           $("#portfolioViewBtn").href = url;
         } else if (d.profile && !d.profile.portfolio_url) {
           $("#createPortfolioBanner").classList.remove("hidden");

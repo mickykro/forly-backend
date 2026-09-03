@@ -623,8 +623,11 @@ module.exports = function createPagesRouter(ctx) {
       properties: visible.map((p) => ({
         page_id: p.page_id,
         title: p.property?.title || "",
-        property_slug: p.public_slug,
-        url: `${pageBaseUrl}/${business.portfolio.slug}/${p.public_slug}`,
+        property_slug: p.public_slug || p.page_id,
+        // ponytail: same-origin relative so local/staging hosts don't jump to prod
+        url: p.public_slug
+          ? `/${business.portfolio.slug}/${p.public_slug}`
+          : `/p/${p.page_id}`,
         listing_type: p.property?.listing_type || "sale",
         city: p.property?.city || "",
         neighborhood: p.property?.neighborhood || "",
@@ -680,11 +683,11 @@ module.exports = function createPagesRouter(ctx) {
       const bot = await resolveChatbot(page);
       const payload = {
         ...pagePayload(page.page_id, page, bot.public),
-        property_url: `${pageBaseUrl}/${reservation.current_slug}/${propSlug}`,
+        property_url: `/${reservation.current_slug}/${propSlug}`,
       };
       // Only include portfolio_url if portfolio is open
       if (portfolio?.status === "open") {
-        payload.portfolio_url = `${pageBaseUrl}/${portfolio.slug}`;
+        payload.portfolio_url = `/${portfolio.slug}`;
       }
       res.set("Cache-Control", "public, max-age=60");
       res.json(payload);

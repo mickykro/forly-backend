@@ -30,7 +30,7 @@
       ${hasPortfolio ? `
         <div class="portfolio-link">
           <span>דף הנכסים שלך:</span>
-          <a href="${esc(portfolio.url)}" target="_blank">${esc(portfolio.url)}</a>
+          <a href="${esc(rel(portfolio.url))}" target="_blank">${esc(location.host + rel(portfolio.url))}</a>
         </div>
       ` : `
         <div class="info-banner">
@@ -296,64 +296,32 @@
     };
   }
 
-  function showPreview() {
-    const formData = collectFormData();
-    const preview = document.getElementById("previewContent");
+  async function showPreview() {
+    const f = collectFormData();
+    // Real preview: feed the live portfolio renderer the unsaved form data.
+    let properties = [];
+    const slug = data.portfolio?.slug;
+    if (slug) {
+      properties = await fetch("/api/portfolio?slug=" + encodeURIComponent(slug))
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => (d && d.properties) || [])
+        .catch(() => []);
+    }
+    sessionStorage.setItem("portfolio_preview", JSON.stringify({
+      agent: {
+        name: f.full_name,
+        brand_name: f.business_name,
+        logo_url: data.profile.logo_url || null,
+        city: f.city,
+        license: f.license_number,
+      },
+      portfolio: f.portfolio,
+      properties,
+      canonical_url: "",
+    }));
 
-    // Render preview HTML
-    const locations = formData.portfolio.area.locations;
-    const testimonials = formData.portfolio.testimonials;
-
-    preview.innerHTML = `
-      <div class="preview-portfolio">
-        <div class="preview-hero">
-          ${portraitUrl ? `<img class="preview-portrait" src="${esc(portraitUrl)}" alt="תמונת פרופיל">` : ""}
-          <h1>${esc(formData.portfolio.hero.headline) || esc(formData.business_name) || "דף הנכסים שלי"}</h1>
-          <p class="intro">${esc(formData.portfolio.hero.intro) || ""}</p>
-          <div class="agent-info">
-            <b>${esc(formData.full_name)}</b>
-            ${formData.business_name ? `<span>${esc(formData.business_name)}</span>` : ""}
-            ${formData.city ? `<span>📍 ${esc(formData.city)}</span>` : ""}
-            ${formData.license_number ? `<span>רישיון: ${esc(formData.license_number)}</span>` : ""}
-          </div>
-        </div>
-
-        ${formData.portfolio.about.body ? `
-          <div class="preview-section">
-            <h2>אודות</h2>
-            <p>${esc(formData.portfolio.about.body)}</p>
-          </div>
-        ` : ""}
-
-        ${(formData.portfolio.area.headline || formData.portfolio.area.body || locations.length) ? `
-          <div class="preview-section">
-            <h2>${esc(formData.portfolio.area.headline) || "אזורי פעילות"}</h2>
-            ${formData.portfolio.area.body ? `<p>${esc(formData.portfolio.area.body)}</p>` : ""}
-            ${locations.length ? `<div class="location-tags">${locations.map(l => `<span class="tag">${esc(l)}</span>`).join("")}</div>` : ""}
-          </div>
-        ` : ""}
-
-        ${testimonials.length ? `
-          <div class="preview-section">
-            <h2>מה אומרים עליי</h2>
-            <div class="testimonials-grid">
-              ${testimonials.map(t => `
-                <div class="testimonial">
-                  <p>"${esc(t.quote)}"</p>
-                  <cite>— ${esc(t.attribution)}</cite>
-                </div>
-              `).join("")}
-            </div>
-          </div>
-        ` : ""}
-
-        <div class="preview-section">
-          <h2>נכסים</h2>
-          <p style="color:#666;font-style:italic">הנכסים הפעילים שלך יופיעו כאן</p>
-        </div>
-      </div>
-    `;
-
+    document.getElementById("previewContent").innerHTML =
+      '<iframe class="preview-iframe" src="/portfolio/index.html?preview=1"></iframe>';
     document.getElementById("formView").classList.add("hidden");
     document.getElementById("previewView").classList.remove("hidden");
     window.scrollTo(0, 0);
@@ -423,6 +391,9 @@
     s.style.display = "block";
     setTimeout(() => s.style.display = "none", 4000);
   }
+
+  // ponytail: server may still hand back an absolute URL — keep links same-origin
+  const rel = (u) => String(u || "").replace(/^https?:\/\/[^/]+/, "");
 
   function esc(s) {
     const d = document.createElement("div");

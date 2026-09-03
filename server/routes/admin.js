@@ -161,7 +161,7 @@ module.exports = function createAdminRouter(ctx) {
           is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
           chatbot_enabled: !!(b.features && b.features.chatbot),
           portfolio_status: b.portfolio?.status || null,
-          portfolio_url: b.portfolio?.status === "open" ? `${pageBaseUrl}/${b.portfolio.slug}` : null,
+          portfolio_url: b.portfolio?.status === "open" ? `/${b.portfolio.slug}` : null,
           pages: 0, active_pages: 0, views: 0, leads: 0,
           readiness: { rich: 0, ok: 0, thin: 0 },
         });
@@ -372,7 +372,7 @@ module.exports = function createAdminRouter(ctx) {
           name: b.business_name || b.full_name || "—",
           slug: b.portfolio.slug,
           status: b.portfolio.status,
-          url: b.portfolio.status === "open" ? `${pageBaseUrl}/${b.portfolio.slug}` : null,
+          url: b.portfolio.status === "open" ? `/${b.portfolio.slug}` : null,
           created_at: b.portfolio.created_at || null,
         }))
         .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
@@ -410,7 +410,7 @@ module.exports = function createAdminRouter(ctx) {
       res.json({
         ok: true,
         status,
-        portfolio_url: status === "open" ? `${pageBaseUrl}/${biz.portfolio.slug}` : null,
+        portfolio_url: status === "open" ? `/${biz.portfolio.slug}` : null,
       });
     } catch (err) {
       console.error("admin/portfolio-status failed:", err);
