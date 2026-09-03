@@ -60,6 +60,7 @@ module.exports = function createDashboardRouter(ctx) {
           logo_url: d.logo_url || null,
           onboarding_state: state,
           onboarding_pct: d.onboarding_pct || 0,
+          portfolio_enabled: !!(d.features && d.features.portfolio),
           portfolio_url: d.portfolio?.status === "open" ? `/${d.portfolio.slug}` : null,
           portfolio_status: d.portfolio?.status || null,
         },
@@ -136,10 +137,15 @@ module.exports = function createDashboardRouter(ctx) {
   });
 
   // ── portfolio management ──
+  // Entitlement lives on the business doc (businesses/{phone}.features.portfolio)
+  // and is flipped from the admin panel, same shape as features.chatbot.
+  const portfolioEnabled = (business) => !!(business && business.features && business.features.portfolio);
+
   router.get("/my-portfolio", requireAuth(authSecret), async (req, res) => {
     const phone = req.user.userId;
     try {
       const business = await db.getBusiness(phone);
+      if (!portfolioEnabled(business)) return res.status(403).json({ error: "feature_disabled" });
       if (!business) return res.json({ profile: { business_name: "", full_name: "", city: "", license_number: "", logo_url: null }, portfolio: null, pages: [] });
       const pages = await db.listPagesByPhone(phone, 100);
       const portfolio = business.portfolio || null;
@@ -177,6 +183,7 @@ module.exports = function createDashboardRouter(ctx) {
     try {
       const business = await db.getBusiness(phone);
       if (!business) return res.status(404).json({ error: "not_found" });
+      if (!portfolioEnabled(business)) return res.status(403).json({ error: "feature_disabled" });
       const existing = business.portfolio || {};
 
       // Handle business name change → slug reservation
@@ -233,6 +240,7 @@ module.exports = function createDashboardRouter(ctx) {
     const phone = req.user.userId;
     try {
       let business = await db.getBusiness(phone);
+      if (!portfolioEnabled(business)) return res.status(403).json({ error: "feature_disabled" });
       // Create minimal business record if none exists
       if (!business) {
         const now = new Date();

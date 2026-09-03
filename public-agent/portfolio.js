@@ -13,6 +13,10 @@
       render();
     })
     .catch((e) => {
+      if (e.status === 403) {
+        editor.innerHTML = "<p>דף הנכסים אינו פעיל בחשבון שלך. <a href='/'>חזרה</a></p>";
+        return;
+      }
       if (e.status === 401) {
         window.location.href = "/?next=" + encodeURIComponent("/portfolio.html");
         return;
