@@ -1,0 +1,84 @@
+/*
+ * quota.test.js — the pure ledger arithmetic behind paid bundles.
+ * Plain-node test, matching the rest of server/*.test.js.
+ */
+const assert = require("assert");
+const q = require("./quota");
+
+// ── consume: counts up, blocks at cap, never blocks an unset cap ──
+let r = q.applyConsume({ walkthroughs_cap: 2, walkthroughs_used: 0 }, "walkthroughs");
+assert.deepStrictEqual([r.ok, r.used, r.remaining], [true, 1, 1]);
+r = q.applyConsume(r.doc, "walkthroughs");
+assert.deepStrictEqual([r.ok, r.used, r.remaining], [true, 2, 0]);
+r = q.applyConsume(r.doc, "walkthroughs");
+assert.strictEqual(r.ok, false, "third creation on a 2-cap must block");
+assert.strictEqual(r.doc.walkthroughs_used, 2, "a blocked attempt must not count");
+assert.strictEqual(r.remaining, 0);
+
+// unset cap (legacy doc / admin hasn't configured) → allowed, remaining null
+r = q.applyConsume({}, "chat_image_edits");
+assert.deepStrictEqual([r.ok, r.used, r.remaining], [true, 1, null]);
+r = q.applyConsume({ chat_msgs_cap: null }, "chat_msgs");
+assert.strictEqual(r.ok, true);
+
+// amount > 1 must fit entirely
+r = q.applyConsume({ carousels_cap: 3, carousels_used: 2 }, "carousels", 2);
+assert.strictEqual(r.ok, false);
+r = q.applyConsume({ carousels_cap: 3, carousels_used: 1 }, "carousels", 2);
+assert.deepStrictEqual([r.ok, r.used], [true, 3]);
+
+// garbage in the doc never yields a negative or NaN counter
+r = q.applyConsume({ walkthroughs_cap: "4", walkthroughs_used: "abc" }, "walkthroughs");
+assert.deepStrictEqual([r.ok, r.used, r.cap], [true, 1, 4]);
+
+assert.throws(() => q.applyConsume({}, "not_a_kind"), /unknown quota kind/);
+
+// ── setCaps: whitelisted, records changes, reset zeroes used ──
+const now = new Date("2026-09-03T00:00:00Z");
+let s = q.applyCaps(
+  { walkthroughs_cap: 4, walkthroughs_used: 4 },
+  { caps: { walkthroughs: 10, evil_field: 99, chat_msgs: "500" }, reset_used: ["walkthroughs"], plan: "pro" },
+  "972500000000", now
+);
+assert.strictEqual(s.doc.walkthroughs_cap, 10);
+assert.strictEqual(s.doc.walkthroughs_used, 0, "reset_used zeroes the counter");
+assert.strictEqual(s.doc.chat_msgs_cap, 500, "string numbers are accepted");
+assert.strictEqual(s.doc.evil_field, undefined, "unknown kinds are ignored");
+assert.strictEqual(s.doc.evil_field_cap, undefined);
+assert.strictEqual(s.doc.plan, "pro");
+assert.strictEqual(s.doc.updated_by, "972500000000");
+assert.ok(s.changes.some((c) => c.field === "walkthroughs_cap" && c.from === 4 && c.to === 10));
+assert.ok(s.changes.some((c) => c.field === "walkthroughs_used" && c.from === 4 && c.to === 0));
+
+// no-op patch → no changes, no updated_at stamp
+s = q.applyCaps({ walkthroughs_cap: 10 }, { caps: { walkthroughs: 10 } }, "x", now);
+assert.strictEqual(s.changes.length, 0);
+assert.strictEqual(s.doc.updated_at, undefined);
+
+// clearing a cap (null) = back to "no bundle limit"
+s = q.applyCaps({ walkthroughs_cap: 10 }, { caps: { walkthroughs: null } }, "x", now);
+assert.strictEqual(s.doc.walkthroughs_cap, null);
+
+// ── summarize / seed / messages ──
+const sum = q.summarize({ walkthroughs_cap: 4, walkthroughs_used: 4, chat_msgs_used: 7 }, "https://pay.example");
+assert.strictEqual(sum.kinds.walkthroughs.exhausted, true);
+assert.strictEqual(sum.kinds.walkthroughs.remaining, 0);
+assert.strictEqual(sum.kinds.chat_msgs.cap, null);
+assert.strictEqual(sum.kinds.chat_msgs.remaining, null);
+assert.strictEqual(sum.payment_url, "https://pay.example");
+
+const seed = q.trialSeed(now);
+assert.strictEqual(seed.walkthroughs_cap, 4, "trial seed keeps the historical 4 walkthroughs");
+assert.strictEqual(seed.walkthroughs_used, 0);
+for (const k of q.KINDS) assert.ok(k + "_cap" in seed && k + "_used" in seed);
+
+const blocked = q.blockedResponse("walkthroughs", "https://pay.example", { cap: 4, used: 4 });
+assert.strictEqual(blocked.error, "quota_exceeded");
+assert.ok(blocked.message.includes("https://pay.example"));
+assert.ok(q.blockedMessage("carousels", "").length > 0, "message works without a payment link");
+
+// saved request is bounded
+assert.ok(q.trimRequest("x".repeat(20000)).length < 9000);
+assert.strictEqual(q.trimRequest(undefined), null);
+
+console.log("quota.test.js OK");

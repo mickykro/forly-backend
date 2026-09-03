@@ -220,7 +220,92 @@
         (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
       '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
         (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
+      "<td>" + quotaCellHtml(a) + "</td>" +
       "</tr>";
+  }
+
+  // ── quotas (what the client paid for) ──
+  var QUOTA_KINDS = [
+    { key: "walkthroughs", label: "יצירות נכס" },
+    { key: "chat_image_edits", label: "עריכות תמונה" },
+    { key: "chat_msgs", label: "הודעות צ׳אט" },
+    { key: "carousels", label: "קרוסלות" },
+  ];
+
+  // Compact "used/cap" per kind; "∞" = cap never set (no bundle limit yet), and
+  // a 🚫 when the client has been blocked so the operator sees who to upsell.
+  function quotaCellHtml(a) {
+    var q = a.quota && a.quota.kinds;
+    if (!q) return '<span class="p-addr">—</span>';
+    var parts = QUOTA_KINDS.map(function (k) {
+      var v = q[k.key] || {};
+      var cap = v.cap == null ? "∞" : v.cap;
+      var cls = v.exhausted ? ' class="thin"' : (v.cap == null ? ' class="p-addr"' : "");
+      return "<span" + cls + ' title="' + esc(k.label) + '">' + esc(v.used || 0) + "/" + esc(cap) + "</span>";
+    });
+    var blocked = a.quota.last_blocked ? ' <span title="נחסם: ' + esc(a.quota.last_blocked.kind || "") + '">🚫</span>' : "";
+    return '<div class="rd num" dir="ltr">' + parts.join(" · ") + "</div>" +
+      '<button type="button" class="link" data-quota="' + esc(a.phone) + '">ערוך' + blocked + "</button>";
+  }
+
+  function openQuotaEditor(phone) {
+    var a = agents.filter(function (x) { return x.phone === phone; })[0];
+    if (!a) return;
+    var dlg = $("#quotaDlg");
+    $("#qName").textContent = a.name + " · " + phone;
+    $("#qPlan").value = (a.quota && a.quota.plan) || "";
+    $("#qNotes").value = (a.quota && a.quota.notes) || "";
+    var rows = $("#qRows");
+    rows.innerHTML = "";
+    QUOTA_KINDS.forEach(function (k) {
+      var v = (a.quota && a.quota.kinds && a.quota.kinds[k.key]) || {};
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + esc(k.label) + "</td>" +
+        '<td class="num">' + esc(v.used || 0) + "</td>" +
+        '<td><input type="number" min="0" step="1" data-cap="' + esc(k.key) + '" value="' +
+          (v.cap == null ? "" : esc(v.cap)) + '" placeholder="ללא הגבלה"></td>' +
+        '<td><label><input type="checkbox" data-reset="' + esc(k.key) + '"> אפס</label></td>';
+      rows.appendChild(tr);
+    });
+    var lb = $("#qBlocked");
+    if (a.quota && a.quota.last_blocked) {
+      var b = a.quota.last_blocked;
+      lb.textContent = "🚫 ניסיון אחרון שנחסם: " + (b.kind || "") + " — " + (b.request || "");
+      lb.classList.remove("hidden");
+    } else {
+      lb.classList.add("hidden");
+    }
+    dlg.dataset.phone = phone;
+    if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
+  }
+
+  function saveQuotaEditor() {
+    var dlg = $("#quotaDlg");
+    var phone = dlg.dataset.phone;
+    var caps = {}, reset = [];
+    dlg.querySelectorAll("[data-cap]").forEach(function (inp) {
+      caps[inp.dataset.cap] = inp.value === "" ? null : Number(inp.value);
+    });
+    dlg.querySelectorAll("[data-reset]").forEach(function (cb) {
+      if (cb.checked) reset.push(cb.dataset.reset);
+    });
+    var btn = $("#qSave");
+    btn.disabled = true;
+    FLY.req("/api/admin/business/quota", {
+      method: "POST",
+      body: { phone: phone, caps: caps, reset_used: reset, plan: $("#qPlan").value, notes: $("#qNotes").value },
+      noRedirect: true,
+    }).then(function (d) {
+      var a = agents.filter(function (x) { return x.phone === phone; })[0];
+      if (a) a.quota = d.quota;
+      btn.disabled = false;
+      dlg.close ? dlg.close() : dlg.removeAttribute("open");
+      applyAgentFilter();
+      FLY.toast(d.changes && d.changes.length ? "✅ המכסות עודכנו" : "אין שינוי");
+    }).catch(function (e) {
+      btn.disabled = false;
+      FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון המכסות");
+    });
   }
 
   function applyAgentFilter() {
@@ -236,7 +321,21 @@
     bindAgentActions();
   }
 
+  var quotaDlgBound = false;
+  function bindQuotaDialogOnce() {
+    if (quotaDlgBound) return;
+    var save = $("#qSave"), cancel = $("#qCancel"), dlg = $("#quotaDlg");
+    if (!save || !cancel || !dlg) return;
+    quotaDlgBound = true;
+    save.addEventListener("click", saveQuotaEditor);
+    cancel.addEventListener("click", function () { dlg.close ? dlg.close() : dlg.removeAttribute("open"); });
+  }
+
   function bindAgentActions() {
+    bindQuotaDialogOnce();
+    document.querySelectorAll("[data-quota]").forEach(function (btn) {
+      btn.addEventListener("click", function () { openQuotaEditor(btn.dataset.quota); });
+    });
     // Distribution entitlement: arms the page-ready hook (WhatsApp one-tap
     // publish offer) for every FUTURE page this agent creates.
     document.querySelectorAll("[data-distribution]").forEach(function (input) {

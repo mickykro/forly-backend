@@ -27,7 +27,7 @@ const MAX_FONT_MB = 5;
 module.exports = function createIntakeRouter(ctx) {
   const { requireAuth, normalizeAuthPhone, signSession, uploadDir, uploadPublicBase, remoteUploadBase,
     n8nWw1Webhook, n8nPipelineWebhook, authSecret, sessionTtl, pageBaseUrl, isDevRun, isDevPipelineRun,
-    baseUrl, verifySession, readToken, adminPhones } = ctx;
+    baseUrl, verifySession, readToken, adminPhones, quota } = ctx;
 
   const router = express.Router();
 
@@ -144,13 +144,21 @@ module.exports = function createIntakeRouter(ctx) {
   });
 
   // ── shared listing creation ──
-  async function createListing(phone, body, agentOverride) {
+  // Validation is separate so the quota is only consumed for a request that
+  // would actually create something (a 400 must not burn a paid creation).
+  function validateListing(body) {
     if (!body.address || !body.city || !body.price || !body.rooms) {
       return { error: "address, city, price, rooms are required", code: 400 };
     }
     if (!Array.isArray(body.photos_urls) || body.photos_urls.length < 3) {
       return { error: "at least 3 photos required", code: 400 };
     }
+    return null;
+  }
+
+  async function createListing(phone, body, agentOverride) {
+    const invalid = validateListing(body);
+    if (invalid) return invalid;
     const listingId = crypto.randomUUID();
     const listing = {
       listing_id: listingId, business_phone: phone, source: "dashboard",
@@ -286,9 +294,23 @@ module.exports = function createIntakeRouter(ctx) {
   });
 
   // ── create (authenticated) ──
+  // Paid bundle: one creation consumes one `walkthroughs` unit, atomically, and
+  // only after the body validates. Demos (admin-driven) don't consume.
   router.post("/properties/create", requireAuth(authSecret), async (req, res) => {
     const body = req.body || {};
-    const result = await createListing(req.user.userId, body, null);
+    const phone = req.user.userId;
+    const invalid = validateListing(body);
+    if (invalid) return res.status(invalid.code).json({ error: invalid.error });
+    if (quota) {
+      const business = await db.getBusiness(phone).catch(() => null);
+      const q = await quota.consume(phone, "walkthroughs", 1, {
+        source: "dashboard", business,
+        request: { address: body.address, city: body.city, price: body.price, rooms: body.rooms,
+          photos: Array.isArray(body.photos_urls) ? body.photos_urls.length : 0 },
+      });
+      if (!q.ok) return res.status(402).json(q);
+    }
+    const result = await createListing(phone, body, null);
     if (result.error) return res.status(result.code).json({ error: result.error });
     res.json({ ...result, status: "building" });
   });

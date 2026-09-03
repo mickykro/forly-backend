@@ -8,6 +8,7 @@ import {
   db, bucket, pad, setCors, uploadBuffer, downloadAndUpload,
   greenApiInstance, greenApiToken,
 } from "./shared";
+import {consumeQuota} from "./nadlan/quota";
 
 const ALLOWED_ORIGIN = "https://editor.call4li.com";
 
@@ -46,7 +47,7 @@ interface StoredSlide {
 // 1) createCarouselDraft — called from n8n after Manus completes
 // ────────────────────────────────────────────────────────────
 export const createCarouselDraft = onRequest(
-  {timeoutSeconds: 120, memory: "512MiB", cors: false},
+  {timeoutSeconds: 120, memory: "512MiB", cors: false, secrets: [greenApiInstance, greenApiToken]},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("POST only");
@@ -61,6 +62,19 @@ export const createCarouselDraft = onRequest(
     if (!body.slides || body.slides.length !== 5) {
       res.status(400).json({error: "slides must have exactly 5 items"});
       return;
+    }
+
+    // Paid bundle: one carousel consumes one `carousels` unit on the client's
+    // ledger (atomic). A 402 carries the friendly message + payment link for
+    // n8n to forward to the client; the attempt is recorded for the operator.
+    if (body.business_phone) {
+      const q = await consumeQuota(String(body.business_phone), "carousels", 1, {
+        source: "n8n_carousel", request: {caption: (body.caption || "").slice(0, 300), format: body.format},
+      });
+      if (!q.ok) {
+        res.status(402).json(q);
+        return;
+      }
     }
 
     const carouselId = uuidv4();

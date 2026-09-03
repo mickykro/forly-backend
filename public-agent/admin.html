@@ -167,6 +167,7 @@
             <th>מוכנות לצ׳אט</th>
             <th>צ׳אט בוט</th>
             <th>הפצה</th>
+            <th title="מה הלקוח שילם עליו: נוצל/מכסה">מכסות</th>
           </tr>
         </thead>
         <tbody id="agentRows"></tbody>
@@ -224,6 +225,27 @@
   </div>
   </div>
 </div>
+
+<!-- Quota editor: what this client paid for. One-time bundles — "used" only
+     counts up until you raise the cap or tick "אפס". Empty cap = no bundle
+     limit (the pre-existing behaviour keeps applying). -->
+<dialog id="quotaDlg" style="max-width:520px;border:1px solid #ddd;border-radius:12px;padding:20px;direction:rtl;font:inherit">
+  <h3 style="margin:0 0 4px">מכסות ללקוח</h3>
+  <div id="qName" class="p-addr num" dir="ltr" style="margin-bottom:12px"></div>
+  <div id="qBlocked" class="hidden" style="background:#fff4f4;border:1px solid #f3c;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:13px;word-break:break-word"></div>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
+    <thead><tr><th style="text-align:right">סוג</th><th class="num">נוצל</th><th>מכסה (ריק = ללא הגבלה)</th><th></th></tr></thead>
+    <tbody id="qRows"></tbody>
+  </table>
+  <label style="display:block;margin-bottom:8px">תוכנית / חבילה
+    <input id="qPlan" type="text" maxlength="40" placeholder="למשל: basic-10" style="width:100%"></label>
+  <label style="display:block;margin-bottom:12px">הערות (מה שולם, מתי)
+    <textarea id="qNotes" rows="2" maxlength="500" style="width:100%"></textarea></label>
+  <div style="display:flex;gap:8px;justify-content:flex-start">
+    <button type="button" id="qSave" class="btn">שמירה</button>
+    <button type="button" id="qCancel" class="btn secondary">ביטול</button>
+  </div>
+</dialog>
 
 <script src="/api.js"></script>
 <script src="/admin.js"></script>

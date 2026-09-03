@@ -7,6 +7,8 @@ import {
   n8nWw1WebhookUrl, n8nPipelineWebhookUrl,
 } from "../shared";
 import {requireAuth, requireAdmin, signSession, SESSION_COOKIE} from "./auth";
+import {consumeQuota} from "./quota";
+import {greenApiInstance, greenApiToken} from "../shared";
 import {AgentInfo, Listing, PropertyPage} from "./types";
 
 const SESSION_TTL_S = 30 * 24 * 60 * 60; // 30 days
@@ -212,7 +214,7 @@ async function createListingAndKickPipeline(
 // createProperty — POST (session cookie)
 // ────────────────────────────────────────────────────────────
 export const createProperty = onRequest(
-  {secrets: [nadlanJwtSecret], cors: false},
+  {secrets: [nadlanJwtSecret, greenApiInstance, greenApiToken], cors: false},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("POST only");
@@ -223,7 +225,26 @@ export const createProperty = onRequest(
       res.status(401).json({error: "unauthenticated"});
       return;
     }
-    const result = await createListingAndKickPipeline(phone, req.body as CreateBody, null);
+    const body = req.body as CreateBody;
+    // Paid bundle: consume one `walkthroughs` unit (atomic) — but only for a
+    // body that would pass validation, so a 400 never burns a paid creation.
+    const wouldValidate = body && body.address && body.city && body.price && body.rooms &&
+      Array.isArray(body.photos_urls) && body.photos_urls.length >= 3;
+    if (wouldValidate) {
+      const biz = await db.collection("businesses").doc(phone).get();
+      const b = biz.exists ? biz.data() as Record<string, unknown> : {};
+      const q = await consumeQuota(phone, "walkthroughs", 1, {
+        source: "nadlan_app",
+        businessName: String(b.business_name || b.full_name || ""),
+        request: {address: body.address, city: body.city, price: body.price, rooms: body.rooms,
+          photos: body.photos_urls?.length || 0},
+      });
+      if (!q.ok) {
+        res.status(402).json(q);
+        return;
+      }
+    }
+    const result = await createListingAndKickPipeline(phone, body, null);
     if ("error" in result) {
       res.status(result.code).json({error: result.error});
       return;

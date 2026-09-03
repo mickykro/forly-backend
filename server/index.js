@@ -89,6 +89,21 @@ const { sendWhatsApp } = require("./utils");
 // lead for a human to follow up instead of leaving them stuck.
 const SALES_LEAD_PHONE = normalizeAuthPhone(process.env.SALES_LEAD_PHONE || "972548018957");
 
+// ── quotas (what each client paid for; set by hand in the admin panel) ──
+// PAYMENT_LINK_URL: the external payment page shown to a client who hit their
+// cap. N8N_WEBHOOK_SECRET: shared secret n8n sends (x-forly-secret) to
+// /api/quota/consume before an image edit. See server/quota.js.
+const PAYMENT_LINK_URL = (process.env.PAYMENT_LINK_URL || "").trim();
+const N8N_WEBHOOK_SECRET = (process.env.N8N_WEBHOOK_SECRET || "").trim();
+const { createQuota } = require("./quota");
+const quota = createQuota({
+  db: db.db,
+  FieldValue: db.db ? require("firebase-admin").firestore.FieldValue : null,
+  sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  adminPhone: SALES_LEAD_PHONE,
+  paymentUrl: PAYMENT_LINK_URL,
+});
+
 // ── app ──
 const app = express();
 // Behind the Cloud Run / hosting proxy: trust X-Forwarded-* so req.secure and
@@ -126,9 +141,15 @@ app.use("/api/auth", createAuthRouter({
 
 // ── intake routes (uploads, property creation) ──
 const createIntakeRouter = require("./routes/intake");
+// ── quota routes (n8n consume/status, agent /me) ──
+const createQuotaRouter = require("./routes/quota");
+app.use("/api/quota", createQuotaRouter({
+  quota, requireAuth, authSecret: AUTH_SECRET, n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone,
+}));
+
 app.use("/api", createIntakeRouter({
   requireAuth, normalizeAuthPhone, signSession,
-  verifySession, readToken, adminPhones: ADMIN_PHONES,
+  verifySession, readToken, adminPhones: ADMIN_PHONES, quota,
   uploadDir: UPLOAD_DIR,
   uploadPublicBase: UPLOAD_PUBLIC_BASE,
   remoteUploadBase: REMOTE_UPLOAD_BASE,
@@ -165,6 +186,7 @@ app.use("/api/admin", createAdminRouter({
   uploadDir: UPLOAD_DIR,
   adminPhones: ADMIN_PHONES,
   sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  quota,
 }));
 
 // ── distribution routes (Meta OAuth, one-tap confirm, publish, groups) ──
@@ -216,6 +238,7 @@ app.use(createChatRouter({
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   },
   ipSalt: process.env.CHATBOT_IP_SALT || AUTH_SECRET,
+  quota,
   // Chat leads WhatsApp the agent directly (the form path relays via n8n).
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
