@@ -4,8 +4,11 @@
 (function() {
   var app = document.getElementById("portfolio-app");
   var slug = window.location.pathname.split("/").filter(Boolean)[0];
+  // Preview mode: the editor stashes unsaved form data and iframes this page,
+  // so the agent sees the real site instead of a mock. No fetch, no tracking.
+  var PREVIEW = new URLSearchParams(window.location.search).has("preview");
 
-  if (!slug) {
+  if (!slug && !PREVIEW) {
     app.innerHTML = '<div class="no-results"><h2>דף לא נמצא</h2></div>';
     return;
   }
@@ -13,6 +16,17 @@
   var data = null;
   var filteredProperties = [];
   var visibleCount = 6;
+
+  if (PREVIEW) {
+    try { data = JSON.parse(sessionStorage.getItem("portfolio_preview")); } catch (e) { data = null; }
+    if (!data) {
+      app.innerHTML = '<div class="no-results"><h2>אין נתונים לתצוגה מקדימה</h2></div>';
+      return;
+    }
+    filteredProperties = data.properties || [];
+    render();
+    return;
+  }
 
   fetch("/api/portfolio?slug=" + encodeURIComponent(slug))
     .then(function(r) {
@@ -294,6 +308,7 @@
     document.querySelectorAll("#contact-form, #modal-form").forEach(function(form) {
       form.addEventListener("submit", function(e) {
         e.preventDefault();
+        if (PREVIEW) return;
         var fd = new FormData(form);
         var btn = form.querySelector("button");
         btn.disabled = true;
@@ -351,6 +366,7 @@
   }
 
   function trackEvent(event) {
+    if (PREVIEW) return;
     navigator.sendBeacon("/api/portfolio-event", JSON.stringify({ slug: slug, event: event }));
   }
 })();

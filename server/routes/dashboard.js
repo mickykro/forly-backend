@@ -63,7 +63,7 @@ module.exports = function createDashboardRouter(ctx) {
           logo_url: d.logo_url || null,
           onboarding_state: state,
           onboarding_pct: d.onboarding_pct || 0,
-          portfolio_url: d.portfolio?.status === "open" ? `${pageBaseUrl}/${d.portfolio.slug}` : null,
+          portfolio_url: d.portfolio?.status === "open" ? `/${d.portfolio.slug}` : null,
           portfolio_status: d.portfolio?.status || null,
         },
         needs_completion: state !== "complete",
@@ -156,7 +156,7 @@ module.exports = function createDashboardRouter(ctx) {
         },
         portfolio: portfolio ? {
           ...portfolio,
-          url: `${pageBaseUrl}/${portfolio.slug}`,
+          url: `/${portfolio.slug}`,
         } : null,
         pages: pages.map((p) => ({
           page_id: p.page_id,
@@ -221,7 +221,7 @@ module.exports = function createDashboardRouter(ctx) {
 
       res.json({
         ok: true,
-        portfolio_url: `${pageBaseUrl}/${normalized.slug}`,
+        portfolio_url: `/${normalized.slug}`,
       });
     } catch (err) {
       if (err.message === "slug_taken") {
@@ -245,7 +245,7 @@ module.exports = function createDashboardRouter(ctx) {
       if (business.portfolio?.slug) {
         return res.json({
           created: false,
-          portfolio_url: `${pageBaseUrl}/${business.portfolio.slug}`,
+          portfolio_url: `/${business.portfolio.slug}`,
         });
       }
       // Create new portfolio
@@ -267,7 +267,7 @@ module.exports = function createDashboardRouter(ctx) {
       }, true);
       res.json({
         created: true,
-        portfolio_url: `${pageBaseUrl}/${slug}`,
+        portfolio_url: `/${slug}`,
       });
     } catch (err) {
       if (err.message === "slug_taken") {
