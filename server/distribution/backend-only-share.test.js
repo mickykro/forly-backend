@@ -1,0 +1,88 @@
+#!/usr/bin/env node
+
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+
+const root = path.join(__dirname, "..", "..");
+const indexHtml = fs.readFileSync(path.join(root, "public-agent", "index.html"), "utf8");
+const shareHtml = fs.readFileSync(path.join(root, "public-agent", "share.html"), "utf8");
+const publishHtml = fs.readFileSync(path.join(root, "public-agent", "publish.html"), "utf8");
+const publishJs = fs.readFileSync(path.join(root, "public-agent", "publish.js"), "utf8");
+const distributionHtml = fs.readFileSync(path.join(root, "public-agent", "distribution.html"), "utf8");
+const distributionJs = fs.readFileSync(path.join(root, "public-agent", "distribution.js"), "utf8");
+const routes = fs.readFileSync(path.join(root, "server", "routes", "distribution.js"), "utf8");
+const serverIndex = fs.readFileSync(path.join(root, "server", "index.js"), "utf8");
+const envExample = fs.readFileSync(path.join(root, "server", ".env.example"), "utf8");
+
+// One selected property opens one combined Page-and-Groups workspace.
+assert.match(indexHtml, /\/publish\.html\?page=/);
+assert.match(publishJs, /share-session/);
+assert.match(publishJs, /\/api\/distribution\/publish/);
+assert.match(publishJs, /openConnectDialog/);
+assert.match(publishHtml, /פרסום בדף הפייסבוק/);
+assert.match(publishHtml, /שיתוף ידני בקבוצות/);
+assert.match(publishJs, /העתקת הטקסט/);
+assert.match(publishJs, /פתיחת הקבוצה/);
+assert.match(publishJs, /✓ פרסמתי/);
+assert.match(publishJs, /דילוג/);
+// Target selection remains editable even after property defaults are assigned.
+assert.match(publishJs, /inline property Group picker — available for a new queue and later edits/);
+assert.match(publishJs, /hydratePicked/);
+assert.match(publishJs, /קבוצות זמינות לבחירה/);
+assert.match(publishHtml, /בחירה ועריכה של קבוצות לנכס/);
+
+// Existing signed links retain their query parameters while migrating.
+assert.match(shareHtml, /location\.replace\("\/publish\.html\?"/);
+
+// The dashboard REPORTS where a listing was published; it never publishes.
+// Publishing belongs to publish.html — the in-card controls were removed once
+// the workspace took over, and reading status must not smuggle them back.
+assert.match(indexHtml, /data-distrow=/);
+assert.doesNotMatch(indexHtml, /distribution\/publish|data-publish=|data-dist=/);
+
+// A published listing links straight to its post — that is where the agent
+// answers a comment, so the chip carries the link rather than adding a control.
+assert.match(indexHtml, /L\.post_url/);
+assert.match(indexHtml, /rel="noopener"/);
+
+// Card state is paged in as the agent scrolls, never fetched for the whole
+// catalogue at once: each card costs a Firestore query and can trigger a
+// Graph refresh, so full=1 was removed rather than left as a second path.
+assert.match(indexHtml, /distribution\/status\?page_ids=/);
+assert.match(indexHtml, /IntersectionObserver/);
+assert.doesNotMatch(indexHtml, /status\?full=1/);
+assert.doesNotMatch(routes, /req\.query\.full/);
+
+// page_ids arrives from the browser, so it is a trust boundary: the route must
+// cap the list and intersect it with the agent's OWN listings before reading
+// anything keyed by those ids. (Route handlers are asserted at source level
+// here — the suite cannot require express.)
+// Per-card refresh: the button forces a re-read through the same path, so an
+// agent can re-check a post right after fixing a Meta permission instead of
+// waiting out the back-off.
+assert.match(indexHtml, /data-metrics-refresh=/);
+assert.match(indexHtml, /status\?refresh=1&page_ids=/);
+assert.match(routes, /force: req\.query\.refresh === "1"/);
+
+assert.match(routes, /MAX_STATUS_PAGES/);
+assert.match(routes, /slice\(0, MAX_STATUS_PAGES\)/);
+assert.match(routes, /requested\.filter\(\(id\) => ownIds\.has\(id\)\)/);
+
+// Settings contain only Page connection plus manual/default Group links.
+assert.match(distributionHtml, /חיבורים וקבוצות/);
+assert.match(distributionHtml, /קבוצות ברירת מחדל/);
+assert.doesNotMatch(distributionHtml, /stepStrip|מייבא הקבוצות|סנכרון הקבוצות|הקבוצות שלי/);
+assert.doesNotMatch(distributionJs, /extension|joined-groups|chrome\.runtime|מייבא הקבוצות/);
+
+// OAuth carries only a server-constructed property workspace return target.
+assert.match(routes, /publishWorkspacePath/);
+assert.match(routes, /return_to: publishWorkspacePath\(req\.query\.page_id\)/);
+assert.doesNotMatch(routes, /\/extension\/|EXTENSION_ID|joined-groups|group_posting/);
+// The session payload always includes the full catalog, even with existing targets.
+assert.match(routes, /The property workspace always receives the catalog/);
+assert.match(routes, /Always ship the picker and same-city reuse offer/);
+assert.doesNotMatch(serverIndex, /extension-cors|EXTENSION_ID|chrome-extension/);
+assert.doesNotMatch(envExample, /EXTENSION_ID|chrome-extension/);
+
+console.log("backend-only-share.test.js OK");

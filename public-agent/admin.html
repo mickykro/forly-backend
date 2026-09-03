@@ -59,6 +59,17 @@
   .agent-name{font-family:var(--serif);font-weight:600}
   .tag-demo{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);
     border:1px solid rgba(23,20,15,.16);border-radius:100px;padding:1px 7px;margin-inline-start:6px}
+  .message-grid{display:grid;grid-template-columns:minmax(280px,.9fr) minmax(340px,1.4fr);gap:18px;align-items:start}
+  .message-card{background:var(--paper);border:1px solid rgba(185,138,47,.22);border-radius:var(--radius);padding:20px}
+  .message-card h2{font-family:var(--serif);font-size:1.2rem;margin:0 0 6px}
+  .message-card p{font-size:.8rem;color:var(--ink-soft);margin:0 0 14px;font-weight:300}
+  .message-card textarea{width:100%;min-height:170px;resize:vertical;font:400 .95rem/1.65 var(--sans);color:var(--ink);background:#fffdf8;border:1px solid rgba(23,20,15,.14);border-radius:12px;padding:12px;outline:none}
+  .message-card textarea:focus{border-color:var(--gold);box-shadow:0 0 0 4px var(--gold-faint)}
+  .message-controls{display:flex;gap:9px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:12px}
+  .message-controls select{font:400 .82rem var(--sans);padding:8px 12px;border:1px solid rgba(23,20,15,.14);border-radius:100px;background:var(--paper)}
+  .message-meta{font-size:.76rem;color:var(--ink-soft)}
+  .customer-check{width:16px;height:16px;accent-color:var(--gold)}
+  @media(max-width:760px){.message-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body class="agent-page admin-page">
@@ -101,6 +112,43 @@
     <button id="tabProps" class="on">נכסים</button>
     <button id="tabAgents">סוכנים ופיצ׳רים</button>
     <button id="tabPortfolios">פורטפוליו</button>
+    <button id="tabMessages">הודעות לסוכנים</button>
+  </div>
+
+  <!-- ── AGENT MESSAGES ── -->
+  <div id="paneMessages" class="hidden">
+    <div class="message-grid">
+      <section class="message-card">
+        <h2>שליחת הודעת WhatsApp</h2>
+        <p>ההודעות נשלחות רק לסוכנים הרשומים במערכת.</p>
+        <textarea id="customerMessage" maxlength="1500" placeholder="כתבו הודעה לסוכנים…"></textarea>
+        <div class="message-controls">
+          <button class="btn btn-ghost btn-sm" id="welcomeTemplate">הודעת ברוכים הבאים</button>
+          <span class="message-meta" id="messageLength">0 / 1500</span>
+        </div>
+        <div class="message-controls">
+          <select id="messageAudience">
+            <option value="selected">סוכנים נבחרים</option>
+            <option value="all">כל הסוכנים</option>
+          </select>
+          <span class="message-meta" id="messageRecipientCount">0 סוכנים נבחרו</span>
+        </div>
+        <button class="btn btn-primary" id="sendCustomerMessage" style="width:100%;margin-top:14px">שליחה</button>
+      </section>
+      <section class="message-card">
+        <div class="toolbar" style="margin-bottom:12px">
+          <input type="search" id="customerSearch" placeholder="חיפוש סוכן לפי שם או טלפון…">
+          <span class="who num" id="customerCount"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="admin" style="min-width:420px">
+            <thead><tr><th></th><th>סוכן</th><th>טלפון</th><th>דפים פעילים</th></tr></thead>
+            <tbody id="customerRows"></tbody>
+          </table>
+          <div class="empty hidden" id="customerEmpty">לא נמצאו סוכנים תואמים.</div>
+        </div>
+      </section>
+    </div>
   </div>
 
   <!-- ── AGENTS ── -->
@@ -120,6 +168,7 @@
             <th>מוכנות לצ׳אט</th>
             <th>צ׳אט בוט</th>
             <th>דף נכסים</th>
+            <th>הפצה</th>
           </tr>
         </thead>
         <tbody id="agentRows"></tbody>

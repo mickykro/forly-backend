@@ -105,8 +105,9 @@
       "Bash(gsutil cors:*)",
       "Bash(gsutil iam:*)",
       "Bash(gsutil rm:*)",
-      "Bash(git push:*)",
       "Bash(git push --force)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(git push -f:*)",
       "Bash(npm publish:*)"
     ]
   },

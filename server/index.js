@@ -44,7 +44,6 @@ const AUTH_SECRET = process.env.NADLAN_JWT_SECRET || "change-me-in-env";
 // see/manage EVERY agent's properties. Empty ⇒ admin panel denies everyone.
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || "")
   .split(",").map((s) => s.trim()).filter(Boolean);
-const WEB_SIGNUP_BASE = process.env.WEB_SIGNUP_URL || "https://call4li.web.app/signup";
 const SESSION_TTL_S = 30 * 24 * 60 * 60;
 const TEMPLATES_DIR = path.join(__dirname, "..", "public-nadlan", "templates");
 
@@ -59,14 +58,23 @@ const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
 const { sendWhatsApp } = require("./utils");
+// A number that tries to log in but has no businesses/{phone} doc isn't a
+// Forly client yet — self-service signup off the login screen is gone (see
+// the issue this shipped with), so the OTP route forwards them here as a
+// lead for a human to follow up instead of leaving them stuck.
+const SALES_LEAD_PHONE = normalizeAuthPhone(process.env.SALES_LEAD_PHONE || "972548018957");
 
 // ── app ──
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
 // static files
-app.use(express.static(path.join(__dirname, "..", "public-agent"), { index: "index.html" }));
-app.use(express.static(path.join(__dirname, "..", "public-nadlan")));
+// App shell always revalidates; the ETag makes an unchanged file a 304.
+const revalidate = { index: "index.html", setHeaders: (res, file) => {
+  if (/\.(html|js|css)$/.test(file)) res.setHeader("Cache-Control", "no-cache");
+} };
+app.use(express.static(path.join(__dirname, "..", "public-agent"), revalidate));
+app.use(express.static(path.join(__dirname, "..", "public-nadlan"), revalidate));
 app.use("/files", express.static(UPLOAD_DIR, { maxAge: "1d", immutable: true }));
 app.use("/tpl", express.static(TEMPLATES_DIR));
 
@@ -75,6 +83,7 @@ app.use("/api/auth", createAuthRouter({
   db: db.db, mem: db.mem,
   sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
   secret: AUTH_SECRET,
+  salesLeadPhone: SALES_LEAD_PHONE,
 }));
 
 // ── intake routes (uploads, property creation) ──
@@ -94,13 +103,16 @@ app.use("/api", createIntakeRouter({
   pageBaseUrl: PAGE_BASE_URL,
 }));
 
+// ── profile onboarding (the 15-field "השלמת פרופיל" form) ──
+const createProfileRouter = require("./routes/profile");
+app.use("/api", createProfileRouter({ requireAuth, authSecret: AUTH_SECRET }));
+
 // ── dashboard routes (properties list, profile) ──
 const createDashboardRouter = require("./routes/dashboard");
 app.use("/api", createDashboardRouter({
-  requireAuth, verifySession, readToken,
+  requireAuth,
   authSecret: AUTH_SECRET,
   pageBaseUrl: PAGE_BASE_URL,
-  webSignupBase: WEB_SIGNUP_BASE,
   uploadDir: UPLOAD_DIR,
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
@@ -113,15 +125,41 @@ app.use("/api/admin", createAdminRouter({
   pageBaseUrl: PAGE_BASE_URL,
   uploadDir: UPLOAD_DIR,
   adminPhones: ADMIN_PHONES,
+  sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+}));
+
+// ── distribution routes (Meta OAuth, one-tap confirm, publish, groups) ──
+const createDistributionRouter = require("./routes/distribution");
+const distributionJobs = require("./distribution/jobs");
+app.use("/api/distribution", createDistributionRouter({
+  requireAuth, verifyActionToken, verifySession, readToken,
+  authSecret: AUTH_SECRET,
+  pageBaseUrl: PAGE_BASE_URL,
+  greenInstance: GREENAPI_INSTANCE,
+  greenToken: GREENAPI_TOKEN,
 }));
 
 // signup redirect at root level
+// ── signup / profile completion ──
+// Two different things share the "signup" name: /signup.html registers a new
+// agent (OTP), /profile.html completes the 15-field profile of one who already
+// has an account. /signup keeps serving whichever the caller needs, so links
+// sent out before the split still land somewhere sensible; the dashboard
+// banner points straight at /profile.
+const agentPage = (name) => path.join(__dirname, "..", "public-agent", name);
+
 app.get("/signup", (req, res) => {
   const session = verifySession(AUTH_SECRET, readToken(req));
-  if (session && session.userId) {
-    return res.redirect(`${WEB_SIGNUP_BASE}?phone=${encodeURIComponent(session.userId)}`);
-  }
-  res.sendFile(path.join(__dirname, "..", "public-agent", "signup.html"));
+  if (session && session.userId) return res.sendFile(agentPage("profile.html"));
+  res.sendFile(agentPage("signup.html"));
+});
+
+// Direct link to the profile form. Without a session there is nothing to
+// complete yet, so send them through login — /api/onboarding would 401 anyway.
+app.get("/profile", (req, res) => {
+  const session = verifySession(AUTH_SECRET, readToken(req));
+  if (session && session.userId) return res.sendFile(agentPage("profile.html"));
+  res.redirect("/?next=" + encodeURIComponent("/profile"));
 });
 
 // ── portal routes (public buyer-facing catalog + realtime stream) ──
@@ -178,4 +216,8 @@ app.listen(PORT, () => {
   console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
   // Expiry scheduler retired: property pages no longer expire — the public
   // portal (call4li.com) lists every live page until the agent archives it.
+  distributionJobs.startSweeper(distributionJobs.liveDeps({
+    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN,
+    pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
+  }));
 });
