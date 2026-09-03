@@ -91,3 +91,6 @@ server/data
 
 # Local git worktrees
 .worktrees/
+
+# Local Claude Code permissions (contains machine-specific allow-list entries)
+.claude/settings.local.json
