@@ -222,6 +222,8 @@
         (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
       '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
         (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
+      '<td><label class="switch"><input type="checkbox" data-portfolio-feature="' + esc(a.phone) + '"' +
+        (a.portfolio_enabled ? " checked" : "") + "><i></i></label></td>" +
       "<td>" + quotaCellHtml(a) + "</td>" +
       "</tr>";
   }
@@ -362,6 +364,28 @@
         });
       });
     });
+    document.querySelectorAll("[data-portfolio-feature]").forEach(function (input) {
+      input.addEventListener("change", function () {
+        var phone = input.dataset.portfolioFeature;
+        var want = input.checked;
+        input.disabled = true;
+        FLY.req("/api/admin/business/features", {
+          method: "POST",
+          body: { phone: phone, feature: "portfolio", enabled: want },
+          noRedirect: true,
+        }).then(function () {
+          var a = agents.filter(function (x) { return x.phone === phone; })[0];
+          if (a) a.portfolio_enabled = want;
+          input.disabled = false;
+          FLY.toast(want ? "✅ דף נכסים הופעל לסוכן" : "דף נכסים כובה");
+        }).catch(function (e) {
+          input.checked = !want;
+          input.disabled = false;
+          FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
+        });
+      });
+    });
+
     document.querySelectorAll("[data-chatbot]").forEach(function (input) {
       input.addEventListener("change", function () {
         var phone = input.dataset.chatbot;
