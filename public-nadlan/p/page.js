@@ -5,7 +5,19 @@
 (function () {
   "use strict";
 
-  var pageId = (location.pathname.split("/p/")[1] || "").split("/")[0].split("?")[0];
+  // Support both /p/{pageId} and /{portfolioSlug}/{propertySlug} formats
+  var pathParts = location.pathname.split("/").filter(Boolean);
+  var pageId = "";
+  var portfolioSlug = "";
+  var propertySlug = "";
+  if (pathParts[0] === "p" && pathParts[1]) {
+    pageId = pathParts[1].split("?")[0];
+  } else if (pathParts.length >= 2 && pathParts[0] !== "api" && pathParts[0] !== "legal" && pathParts[0] !== "assets") {
+    portfolioSlug = pathParts[0];
+    propertySlug = pathParts[1].split("?")[0];
+  } else if (new URLSearchParams(location.search).get("id")) {
+    pageId = new URLSearchParams(location.search).get("id");
+  }
   var $ = function (sel) { return document.querySelector(sel); };
   var $$ = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
 
@@ -281,6 +293,14 @@
       [a.brand_name, a.tagline, a.license ? TR("license_label") + " " + a.license : ""]
         .filter(Boolean).join(" · "));
 
+    // portfolio link (only when portfolio is open)
+    var portfolioLink = $(".portfolio-link");
+    if (d.portfolio_url && portfolioLink) {
+      portfolioLink.href = d.portfolio_url;
+      portfolioLink.textContent = "לכל הנכסים של " + (a.brand_name || a.name || "המתווך");
+      portfolioLink.style.display = "inline-flex";
+    }
+
     // area
     if (d.sections.area && d.area && (d.area.blurb || d.area.stats.length)) {
       var areaHead = $("#area .sec-head h2");
@@ -539,9 +559,11 @@
 
   // ── boot ─────────────────────────────────
 
-  if (!pageId) { setState("notfound"); return; }
-  fetch("/api/property-page?id=" + encodeURIComponent(pageId) +
-      (editToken ? "&edit_token=" + encodeURIComponent(editToken) : ""))
+  if (!pageId && !portfolioSlug) { setState("notfound"); return; }
+  var apiUrl = pageId
+    ? "/api/property-page?id=" + encodeURIComponent(pageId) + (editToken ? "&edit_token=" + encodeURIComponent(editToken) : "")
+    : "/api/property-by-slug?portfolio_slug=" + encodeURIComponent(portfolioSlug) + "&property_slug=" + encodeURIComponent(propertySlug);
+  fetch(apiUrl)
     .then(function (r) {
       if (r.status === 404) { setState("notfound"); return null; }
       if (!r.ok) throw new Error("status " + r.status);

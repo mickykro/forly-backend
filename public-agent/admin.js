@@ -15,6 +15,8 @@
   var stats = {};
   var agents = [];      // agent directory, loaded lazily when the tab is opened
   var agentStats = {};
+  var portfolios = [];  // portfolio list, loaded lazily
+  var portfolioStats = {};
   var customers = [];   // agent directory for the messaging tab
   var selectedCustomers = {};
   var maxMessageRecipients = 200;
@@ -218,6 +220,8 @@
       "<td>" + readinessPills(a.readiness) + "</td>" +
       '<td><label class="switch"><input type="checkbox" data-chatbot="' + esc(a.phone) + '"' +
         (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
+      '<td><label class="switch"><input type="checkbox" data-portfolio-feature="' + esc(a.phone) + '"' +
+        (a.portfolio_enabled ? " checked" : "") + "><i></i></label></td>" +
       '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
         (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
       "</tr>";
@@ -237,30 +241,38 @@
   }
 
   function bindAgentActions() {
-    // Distribution entitlement: arms the page-ready hook (WhatsApp one-tap
-    // publish offer) for every FUTURE page this agent creates.
-    document.querySelectorAll("[data-distribution]").forEach(function (input) {
-      input.addEventListener("change", function () {
-        var phone = input.dataset.distribution;
-        var want = input.checked;
-        input.disabled = true;
-        FLY.req("/api/admin/business/features", {
-          method: "POST",
-          body: { phone: phone, feature: "distribution", enabled: want },
-          noRedirect: true,
-        }).then(function () {
-          var a = agents.filter(function (x) { return x.phone === phone; })[0];
-          if (a) a.distribution_enabled = want;
-          input.disabled = false;
-          FLY.toast(want ? "✅ הפצה הופעלה — נכסים חדשים יקבלו הצעת פרסום בוואטסאפ"
-            : "הפצה כובתה לסוכן");
-        }).catch(function (e) {
-          input.checked = !want;   // the server refused — don't lie about the state
-          input.disabled = false;
-          FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
+    // Portfolio + distribution entitlements share one shape: flip a feature
+    // flag on the business, keep the local row in step, toast the result.
+    // (Distribution arms the WhatsApp publish offer for FUTURE pages.)
+    [
+      { attr: "portfolioFeature", sel: "[data-portfolio-feature]", feature: "portfolio", key: "portfolio_enabled",
+        on: "✅ דף נכסים הופעל לסוכן", off: "דף נכסים כובה" },
+      { attr: "distribution", sel: "[data-distribution]", feature: "distribution", key: "distribution_enabled",
+        on: "✅ הפצה הופעלה — נכסים חדשים יקבלו הצעת פרסום בוואטסאפ", off: "הפצה כובתה לסוכן" },
+    ].forEach(function (f) {
+      document.querySelectorAll(f.sel).forEach(function (input) {
+        input.addEventListener("change", function () {
+          var phone = input.dataset[f.attr];
+          var want = input.checked;
+          input.disabled = true;
+          FLY.req("/api/admin/business/features", {
+            method: "POST",
+            body: { phone: phone, feature: f.feature, enabled: want },
+            noRedirect: true,
+          }).then(function () {
+            var a = agents.filter(function (x) { return x.phone === phone; })[0];
+            if (a) a[f.key] = want;
+            input.disabled = false;
+            FLY.toast(want ? f.on : f.off);
+          }).catch(function (e) {
+            input.checked = !want;   // the server refused — don't lie about the state
+            input.disabled = false;
+            FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
+          });
         });
       });
     });
+
     document.querySelectorAll("[data-chatbot]").forEach(function (input) {
       input.addEventListener("change", function () {
         var phone = input.dataset.chatbot;
@@ -294,6 +306,75 @@
       agents = d.agents || [];
       agentStats = d.stats || {};
       applyAgentFilter();
+    });
+  }
+
+  // ── portfolios view ──
+
+  var PORTFOLIO_STATUS = { open: "פתוח", closed: "סגור", draft: "טיוטה" };
+
+  function portfolioRowHtml(p) {
+    var statusClass = p.status === "open" ? "active" : p.status === "closed" ? "expired" : "building";
+    var actions = [];
+    if (p.url) {
+      actions.push('<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="' + esc(p.url) + '">צפייה</a>');
+    }
+    if (p.status === "open") {
+      actions.push('<button class="btn btn-ghost btn-sm" data-portfolio-close="' + esc(p.phone) + '">סגירה</button>');
+    } else {
+      actions.push('<button class="btn btn-ghost btn-sm" data-portfolio-open="' + esc(p.phone) + '">פתיחה</button>');
+    }
+    return "<tr>" +
+      '<td class="agent"><div class="agent-name">' + esc(p.name) + "</div></td>" +
+      '<td><code style="font-size:.8rem">' + esc(p.slug) + "</code></td>" +
+      '<td><span class="chip ' + esc(statusClass) + '">' + (PORTFOLIO_STATUS[p.status] || esc(p.status)) + "</span></td>" +
+      '<td class="num" dir="ltr">' + esc(p.phone) + "</td>" +
+      '<td><div class="row-actions">' + actions.join("") + "</div></td>" +
+      "</tr>";
+  }
+
+  function applyPortfolioFilter() {
+    var q = ($("#portfolioSearch").value || "").trim().toLowerCase();
+    var status = $("#portfolioStatusFilter").value;
+    var shown = portfolios.filter(function (p) {
+      if (status && p.status !== status) return false;
+      return !q || (p.name + " " + p.slug + " " + p.phone).toLowerCase().indexOf(q) !== -1;
+    });
+    $("#portfolioRows").innerHTML = shown.map(portfolioRowHtml).join("");
+    $("#portfolioEmpty").classList.toggle("hidden", shown.length > 0);
+    $("#portfolioCount").textContent = portfolioStats.total != null ?
+      portfolioStats.open + " פתוחים מתוך " + portfolioStats.total : "";
+    bindPortfolioActions();
+  }
+
+  function bindPortfolioActions() {
+    document.querySelectorAll("[data-portfolio-open]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.disabled = true;
+        FLY.req("/api/admin/portfolio-status", {
+          method: "POST", body: { phone: b.dataset.portfolioOpen, status: "open" }, noRedirect: true,
+        }).then(function () {
+          FLY.toast("✅ הפורטפוליו נפתח"); loadPortfolios();
+        }).catch(function () { FLY.toast("שגיאה"); b.disabled = false; });
+      });
+    });
+    document.querySelectorAll("[data-portfolio-close]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.disabled = true;
+        FLY.req("/api/admin/portfolio-status", {
+          method: "POST", body: { phone: b.dataset.portfolioClose, status: "closed" }, noRedirect: true,
+        }).then(function () {
+          FLY.toast("הפורטפוליו נסגר"); loadPortfolios();
+        }).catch(function () { FLY.toast("שגיאה"); b.disabled = false; });
+      });
+    });
+  }
+
+  function loadPortfolios() {
+    return FLY.req("/api/admin/portfolios", { noRedirect: true }).then(function (d) {
+      portfolios = d.portfolios || [];
+      portfolioStats = d.stats || {};
+      applyPortfolioFilter();
     });
   }
 
@@ -364,17 +445,17 @@
     }).finally(function () { updateMessageMeta(); });
   }
 
+  var TABS = ["props", "agents", "portfolios", "messages"];
+  var TAB_IDS = { props: "Props", agents: "Agents", portfolios: "Portfolios", messages: "Messages" };
+
   function showTab(which) {
-    var onAgents = which === "agents";
-    var onMessages = which === "messages";
-    $("#tabAgents").classList.toggle("on", onAgents);
-    $("#tabMessages").classList.toggle("on", onMessages);
-    $("#tabProps").classList.toggle("on", !onAgents && !onMessages);
-    $("#paneAgents").classList.toggle("hidden", !onAgents);
-    $("#paneMessages").classList.toggle("hidden", !onMessages);
-    $("#paneProps").classList.toggle("hidden", onAgents || onMessages);
-    if (onAgents && !agents.length) loadAgents();
-    if (onMessages && !customers.length) loadCustomers();
+    TABS.forEach(function (t) {
+      $("#tab" + TAB_IDS[t]).classList.toggle("on", t === which);
+      $("#pane" + TAB_IDS[t]).classList.toggle("hidden", t !== which);
+    });
+    if (which === "agents" && !agents.length) loadAgents();
+    if (which === "portfolios" && !portfolios.length) loadPortfolios();
+    if (which === "messages" && !customers.length) loadCustomers();
   }
 
   function fillAgentFilter() {
@@ -426,7 +507,10 @@
       $("#agentSearch").addEventListener("input", applyAgentFilter);
       $("#tabProps").addEventListener("click", function () { showTab("props"); });
       $("#tabAgents").addEventListener("click", function () { showTab("agents"); });
+      $("#tabPortfolios").addEventListener("click", function () { showTab("portfolios"); });
       $("#tabMessages").addEventListener("click", function () { showTab("messages"); });
+      $("#portfolioSearch").addEventListener("input", applyPortfolioFilter);
+      $("#portfolioStatusFilter").addEventListener("change", applyPortfolioFilter);
       $("#agentFilter").addEventListener("change", applyFilters);
       $("#sortBy").addEventListener("change", applyFilters);
       $("#customerSearch").addEventListener("input", applyCustomerFilter);

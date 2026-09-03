@@ -22,6 +22,8 @@ const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone,
 const { sanitizeTags, deriveTags } = require("../tags");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
+const { propertySlug, parsePublicPath, visiblePortfolioPages } = require("../portfolio");
+const { renderPortfolioDocument, renderSitemap } = require("../portfolio-render");
 
 // Portal era: pages no longer expire (the expiry scheduler is retired). New
 // pages get a far-future expires_at to keep the schema intact; /api/extend
@@ -269,6 +271,13 @@ module.exports = function createPagesRouter(ctx) {
         sections: { gallery: galleryImages.length >= 3, carousel: true, area: true },
         view_count: reusable ? (reusable.view_count || 0) : 0,
         lead_count: reusable ? (reusable.lead_count || 0) : 0,
+        // Portfolio fields: stable slug, visibility defaults to true for new pages
+        public_slug: reusable?.public_slug || propertySlug(
+          (body.property && body.property.address) || "",
+          db.shortCode(3)
+        ),
+        portfolio_visible: reusable?.portfolio_visible ?? true,
+        portfolio_rank: reusable?.portfolio_rank ?? null,
       };
 
       if (!doc.property.tags.length) doc.property.tags = deriveTags(doc.property, listing && listing.description);
@@ -599,7 +608,188 @@ module.exports = function createPagesRouter(ctx) {
     res.status(204).send("");
   });
 
-  // ── page serving ──
+  // ── portfolio API ──
+  async function loadPublicPortfolio(slug) {
+    const reservation = await db.getPortfolioSlugReservation(slug);
+    if (!reservation) return { error: "not_found", status: 404 };
+    // Historical slug redirect
+    if (reservation.current_slug !== slug) {
+      return { redirect: reservation.current_slug };
+    }
+    const business = await db.getBusiness(reservation.business_phone);
+    if (!business || !business.portfolio) return { error: "not_found", status: 404 };
+    if (business.portfolio.status !== "open") return { error: "not_found", status: 404 };
+    const pages = await db.listPagesByPhone(reservation.business_phone, 100);
+    const visible = visiblePortfolioPages(pages);
+    return {
+      portfolio: business.portfolio,
+      agent: {
+        name: business.full_name || "",
+        brand_name: business.business_name || "",
+        logo_url: business.logo_url || null,
+        city: business.city || "",
+        license: business.license_number || "",
+      },
+      properties: visible.map((p) => ({
+        page_id: p.page_id,
+        title: p.property?.title || "",
+        property_slug: p.public_slug || p.page_id,
+        // ponytail: same-origin relative so local/staging hosts don't jump to prod
+        url: p.public_slug
+          ? `/${business.portfolio.slug}/${p.public_slug}`
+          : `/p/${p.page_id}`,
+        listing_type: p.property?.listing_type || "sale",
+        city: p.property?.city || "",
+        neighborhood: p.property?.neighborhood || "",
+        price: p.property?.price || 0,
+        rooms: p.property?.rooms || 0,
+        size_sqm: p.property?.size_sqm || 0,
+        image_url: (p.gallery?.images?.[0]?.url) || p.hero?.poster_url || null,
+      })),
+      canonical_url: `${pageBaseUrl}/${business.portfolio.slug}`,
+      business_phone: reservation.business_phone,
+    };
+  }
+
+  router.get("/api/portfolio", async (req, res) => {
+    const slug = String(req.query.slug || "").toLowerCase().trim();
+    if (!slug) return res.status(400).json({ error: "missing slug" });
+    try {
+      const result = await loadPublicPortfolio(slug);
+      if (result.redirect) {
+        return res.redirect(301, `${pageBaseUrl}/${result.redirect}`);
+      }
+      if (result.error) return res.status(result.status).json({ error: result.error });
+      res.set("Cache-Control", "public, max-age=60");
+      res.json(result);
+    } catch (err) {
+      console.error("GET /api/portfolio failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  router.get("/api/property-by-slug", async (req, res) => {
+    const portfolioSlugParam = String(req.query.portfolio_slug || "").toLowerCase().trim();
+    const propSlug = String(req.query.property_slug || "").toLowerCase().trim();
+    if (!portfolioSlugParam || !propSlug) {
+      return res.status(400).json({ error: "missing portfolio_slug or property_slug" });
+    }
+    try {
+      // Resolve portfolio slug first
+      const reservation = await db.getPortfolioSlugReservation(portfolioSlugParam);
+      if (!reservation) return res.status(404).json({ error: "not_found" });
+      if (reservation.current_slug !== portfolioSlugParam) {
+        return res.redirect(301, `${pageBaseUrl}/${reservation.current_slug}/${propSlug}`);
+      }
+      const business = await db.getBusiness(reservation.business_phone);
+      const portfolio = business?.portfolio;
+      // Find the page by public_slug
+      const pages = await db.listPagesByPhone(reservation.business_phone, 100);
+      const page = pages.find((p) => p.public_slug === propSlug);
+      if (!page) return res.status(404).json({ error: "not_found" });
+      if (page.status !== "active" && page.status !== "expiring") {
+        return res.status(404).json({ error: "not_found" });
+      }
+      const bot = await resolveChatbot(page);
+      const payload = {
+        ...pagePayload(page.page_id, page, bot.public),
+        property_url: `/${reservation.current_slug}/${propSlug}`,
+      };
+      // Only include portfolio_url if portfolio is open
+      if (portfolio?.status === "open") {
+        payload.portfolio_url = `/${portfolio.slug}`;
+      }
+      res.set("Cache-Control", "public, max-age=60");
+      res.json(payload);
+    } catch (err) {
+      console.error("GET /api/property-by-slug failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── portfolio events (view, filter, lead_cta) ──
+  const PORTFOLIO_EVENTS = new Set(["view", "filter_used", "lead_cta_click"]);
+  router.post("/api/portfolio-event", express.text({ type: () => true }), async (req, res) => {
+    let body = {};
+    try { body = typeof req.body === "string" && req.body ? JSON.parse(req.body) : (req.body || {}); } catch { /* ignore */ }
+    const { slug, event } = body;
+    if (!slug || !event || !PORTFOLIO_EVENTS.has(event)) return res.status(204).send("");
+    try {
+      const reservation = await db.getPortfolioSlugReservation(slug);
+      if (!reservation) return res.status(204).send("");
+      // ponytail: simple daily counter, no per-visitor data
+      if (db.db) {
+        const FieldValue = require("firebase-admin").firestore.FieldValue;
+        const day = new Date().toISOString().slice(0, 10);
+        await db.db.collection("businesses").doc(reservation.business_phone)
+          .collection("portfolio_metrics").doc(day)
+          .set({ [event]: FieldValue.increment(1) }, { merge: true });
+      }
+    } catch (err) { console.warn("portfolio-event failed:", err.message); }
+    res.status(204).send("");
+  });
+
+  // ── portfolio lead submission ──
+  router.post("/api/portfolio-lead", async (req, res) => {
+    const body = req.body || {};
+    const portfolioSlugParam = String(body.slug || "").toLowerCase().trim();
+    const name = String(body.name || "").trim().slice(0, 60);
+    const phone = normalizePhone(body.phone);
+    const message = body.message ? String(body.message).slice(0, 500) : null;
+
+    if (!portfolioSlugParam || !name || !phone) {
+      return res.status(400).json({ error: "missing_fields" });
+    }
+    try {
+      const reservation = await db.getPortfolioSlugReservation(portfolioSlugParam);
+      if (!reservation) return res.status(404).json({ error: "not_found" });
+      const business = await db.getBusiness(reservation.business_phone);
+      if (!business?.portfolio || business.portfolio.status !== "open") {
+        return res.status(404).json({ error: "not_found" });
+      }
+      // Submit lead via existing leads module
+      const leadResult = await submitLead({
+        context: {
+          business_phone: reservation.business_phone,
+          agent: {
+            name: business.full_name || "",
+            brand_name: business.business_name || "",
+          },
+        },
+        name, phone, source: "portfolio", questions: [],
+        message,
+        portfolio_url: `${pageBaseUrl}/${business.portfolio.slug}`,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("POST /api/portfolio-lead failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── public portfolio page ──
+  router.get("/:slug", async (req, res, next) => {
+    const slug = req.params.slug.toLowerCase();
+    // Skip if it looks like a file or known route
+    if (slug.includes(".") || slug === "p" || slug === "api" || slug === "files") {
+      return next();
+    }
+    try {
+      const reservation = await db.getPortfolioSlugReservation(slug);
+      if (!reservation) return next();
+      const business = await db.getBusiness(reservation.business_phone);
+      if (!business?.portfolio || business.portfolio.status !== "open") {
+        return next();
+      }
+      // Serve the portfolio shell - JS will fetch data via /api/portfolio
+      res.sendFile(path.join(__dirname, "..", "..", "public-nadlan", "portfolio", "index.html"));
+    } catch (err) {
+      console.error("GET /:slug failed:", err);
+      next();
+    }
+  });
+
+  // ── legacy /p/:id redirect to nested URL ──
   router.get("/p/:id", async (req, res) => {
     const id = req.params.id;
     const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
@@ -616,6 +806,19 @@ module.exports = function createPagesRouter(ctx) {
         share_session: String(req.query.s || "").slice(0, 64),
         group_token: String(req.query.g).slice(0, 24),
       }).catch(() => { /* never block a page render on analytics */ });
+    }
+    // Portfolio pages live at /:portfolioSlug/:pageSlug — 301 the legacy URL.
+    if (d && d.public_slug && d.business_phone) {
+      try {
+        const business = await db.getBusiness(d.business_phone);
+        if (business?.portfolio?.slug) {
+          const qs = new URLSearchParams(req.query);
+          qs.delete("edit_token");
+          const qsStr = qs.toString();
+          const nested = `${pageBaseUrl}/${business.portfolio.slug}/${d.public_slug}`;
+          return res.redirect(301, qsStr ? `${nested}?${qsStr}` : nested);
+        }
+      } catch (e) { /* fall through to the legacy shell */ }
     }
     const tpl = d && d.theme && d.theme.template;
     if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {

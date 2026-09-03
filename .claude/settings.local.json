@@ -110,5 +110,9 @@
       "Bash(git push -f:*)",
       "Bash(npm publish:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "ruflo"
+  ],
+  "enableAllProjectMcpServers": true
 }

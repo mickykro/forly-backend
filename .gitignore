@@ -89,5 +89,16 @@ server/data
 /deploy.env
 /sa-key.json
 
+# Codex local configuration
+.codex/
+
+# Claude Flow runtime data
+.claude-flow/data/
+.claude-flow/logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
 # Local git worktrees
 .worktrees/
