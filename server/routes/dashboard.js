@@ -140,7 +140,7 @@ module.exports = function createDashboardRouter(ctx) {
     const phone = req.user.userId;
     try {
       const business = await db.getBusiness(phone);
-      if (!business) return res.json({ portfolio: null, pages: [] });
+      if (!business) return res.json({ profile: { business_name: "", full_name: "", city: "", license_number: "", logo_url: null }, portfolio: null, pages: [] });
       const pages = await db.listPagesByPhone(phone, 100);
       const portfolio = business.portfolio || null;
       res.json({
@@ -232,8 +232,13 @@ module.exports = function createDashboardRouter(ctx) {
   router.post("/my-portfolio/create", requireAuth(authSecret), async (req, res) => {
     const phone = req.user.userId;
     try {
-      const business = await db.getBusiness(phone);
-      if (!business) return res.status(404).json({ error: "not_found" });
+      let business = await db.getBusiness(phone);
+      // Create minimal business record if none exists
+      if (!business) {
+        const now = new Date();
+        await db.setBusiness(phone, { phone, created_at: now }, true);
+        business = { phone };
+      }
       if (business.portfolio?.slug) {
         return res.json({
           created: false,
@@ -241,7 +246,7 @@ module.exports = function createDashboardRouter(ctx) {
         });
       }
       // Create new portfolio
-      const slug = portfolioSlug(business.business_name || business.full_name || "");
+      const slug = portfolioSlug(business.business_name || business.full_name || phone);
       await db.reservePortfolioSlug(phone, slug);
       const now = new Date();
       await db.setBusiness(phone, {

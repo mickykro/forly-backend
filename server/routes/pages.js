@@ -754,6 +754,28 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
+  // ── public portfolio page ──
+  router.get("/:slug", async (req, res, next) => {
+    const slug = req.params.slug.toLowerCase();
+    // Skip if it looks like a file or known route
+    if (slug.includes(".") || slug === "p" || slug === "api" || slug === "files") {
+      return next();
+    }
+    try {
+      const reservation = await db.getPortfolioSlugReservation(slug);
+      if (!reservation) return next();
+      const business = await db.getBusiness(reservation.business_phone);
+      if (!business?.portfolio || business.portfolio.status !== "open") {
+        return next();
+      }
+      // Serve the portfolio shell - JS will fetch data via /api/portfolio
+      res.sendFile(path.join(__dirname, "..", "..", "public-nadlan", "portfolio", "index.html"));
+    } catch (err) {
+      console.error("GET /:slug failed:", err);
+      next();
+    }
+  });
+
   // ── legacy /p/:id redirect to nested URL ──
   router.get("/p/:id", async (req, res) => {
     const id = req.params.id;

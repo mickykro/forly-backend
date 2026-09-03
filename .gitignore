@@ -87,3 +87,15 @@ server/data
 # VPS deploy secrets (live on the server, never committed)
 /deploy.env
 /sa-key.json
+
+# Codex local configuration
+.codex/
+
+# Claude Flow runtime data
+.claude-flow/data/
+.claude-flow/logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local

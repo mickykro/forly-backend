@@ -15,6 +15,8 @@
   var stats = {};
   var agents = [];      // agent directory, loaded lazily when the tab is opened
   var agentStats = {};
+  var portfolios = [];  // portfolio list, loaded lazily
+  var portfolioStats = {};
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -268,13 +270,84 @@
     });
   }
 
+  // ── portfolios view ──
+
+  var PORTFOLIO_STATUS = { open: "פתוח", closed: "סגור", draft: "טיוטה" };
+
+  function portfolioRowHtml(p) {
+    var statusClass = p.status === "open" ? "active" : p.status === "closed" ? "expired" : "building";
+    var actions = [];
+    if (p.url) {
+      actions.push('<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="' + esc(p.url) + '">צפייה</a>');
+    }
+    if (p.status === "open") {
+      actions.push('<button class="btn btn-ghost btn-sm" data-portfolio-close="' + esc(p.phone) + '">סגירה</button>');
+    } else {
+      actions.push('<button class="btn btn-ghost btn-sm" data-portfolio-open="' + esc(p.phone) + '">פתיחה</button>');
+    }
+    return "<tr>" +
+      '<td class="agent"><div class="agent-name">' + esc(p.name) + "</div></td>" +
+      '<td><code style="font-size:.8rem">' + esc(p.slug) + "</code></td>" +
+      '<td><span class="chip ' + esc(statusClass) + '">' + (PORTFOLIO_STATUS[p.status] || esc(p.status)) + "</span></td>" +
+      '<td class="num" dir="ltr">' + esc(p.phone) + "</td>" +
+      '<td><div class="row-actions">' + actions.join("") + "</div></td>" +
+      "</tr>";
+  }
+
+  function applyPortfolioFilter() {
+    var q = ($("#portfolioSearch").value || "").trim().toLowerCase();
+    var status = $("#portfolioStatusFilter").value;
+    var shown = portfolios.filter(function (p) {
+      if (status && p.status !== status) return false;
+      return !q || (p.name + " " + p.slug + " " + p.phone).toLowerCase().indexOf(q) !== -1;
+    });
+    $("#portfolioRows").innerHTML = shown.map(portfolioRowHtml).join("");
+    $("#portfolioEmpty").classList.toggle("hidden", shown.length > 0);
+    $("#portfolioCount").textContent = portfolioStats.total != null ?
+      portfolioStats.open + " פתוחים מתוך " + portfolioStats.total : "";
+    bindPortfolioActions();
+  }
+
+  function bindPortfolioActions() {
+    document.querySelectorAll("[data-portfolio-open]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.disabled = true;
+        FLY.req("/api/admin/portfolio-status", {
+          method: "POST", body: { phone: b.dataset.portfolioOpen, status: "open" }, noRedirect: true,
+        }).then(function () {
+          FLY.toast("✅ הפורטפוליו נפתח"); loadPortfolios();
+        }).catch(function () { FLY.toast("שגיאה"); b.disabled = false; });
+      });
+    });
+    document.querySelectorAll("[data-portfolio-close]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.disabled = true;
+        FLY.req("/api/admin/portfolio-status", {
+          method: "POST", body: { phone: b.dataset.portfolioClose, status: "closed" }, noRedirect: true,
+        }).then(function () {
+          FLY.toast("הפורטפוליו נסגר"); loadPortfolios();
+        }).catch(function () { FLY.toast("שגיאה"); b.disabled = false; });
+      });
+    });
+  }
+
+  function loadPortfolios() {
+    return FLY.req("/api/admin/portfolios", { noRedirect: true }).then(function (d) {
+      portfolios = d.portfolios || [];
+      portfolioStats = d.stats || {};
+      applyPortfolioFilter();
+    });
+  }
+
   function showTab(which) {
-    var onAgents = which === "agents";
-    $("#tabAgents").classList.toggle("on", onAgents);
-    $("#tabProps").classList.toggle("on", !onAgents);
-    $("#paneAgents").classList.toggle("hidden", !onAgents);
-    $("#paneProps").classList.toggle("hidden", onAgents);
-    if (onAgents && !agents.length) loadAgents();
+    $("#tabProps").classList.toggle("on", which === "props");
+    $("#tabAgents").classList.toggle("on", which === "agents");
+    $("#tabPortfolios").classList.toggle("on", which === "portfolios");
+    $("#paneProps").classList.toggle("hidden", which !== "props");
+    $("#paneAgents").classList.toggle("hidden", which !== "agents");
+    $("#panePortfolios").classList.toggle("hidden", which !== "portfolios");
+    if (which === "agents" && !agents.length) loadAgents();
+    if (which === "portfolios" && !portfolios.length) loadPortfolios();
   }
 
   function fillAgentFilter() {
@@ -326,6 +399,9 @@
       $("#agentSearch").addEventListener("input", applyAgentFilter);
       $("#tabProps").addEventListener("click", function () { showTab("props"); });
       $("#tabAgents").addEventListener("click", function () { showTab("agents"); });
+      $("#tabPortfolios").addEventListener("click", function () { showTab("portfolios"); });
+      $("#portfolioSearch").addEventListener("input", applyPortfolioFilter);
+      $("#portfolioStatusFilter").addEventListener("change", applyPortfolioFilter);
       $("#agentFilter").addEventListener("change", applyFilters);
       $("#sortBy").addEventListener("change", applyFilters);
       $("#refreshBtn").addEventListener("click", function () {
