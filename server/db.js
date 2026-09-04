@@ -300,6 +300,20 @@ async function listDistributionsByPage(pageId, limit = 50) {
   return [...mem.distributions.values()].filter((d) => d.page_id === pageId).slice(0, limit);
 }
 
+// ── admin: every distribution that reached a live Page post, across ALL agents ──
+// Equality on the nested status field is auto-indexed, so this never reads the
+// queued/failed/awaiting docs that carry no metrics.
+async function listPostedDistributions(limit = 2000) {
+  if (db) {
+    const snap = await db.collection("distributions")
+      .where("targets.facebook_page.status", "==", "posted").limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.distributions.values()]
+    .filter((d) => d.targets && d.targets.facebook_page && d.targets.facebook_page.status === "posted")
+    .slice(0, limit);
+}
+
 async function listQueuedDistributions(limit = 10) {
   if (db) {
     const snap = await db.collection("distributions")
@@ -507,7 +521,7 @@ module.exports = {
   getPortfolioSlugReservation, reservePortfolioSlug,
   getConnection, setConnection,
   saveDistribution, getDistribution, updateDistribution,
-  listDistributionsByPage, listQueuedDistributions, addPostAction,
+  listDistributionsByPage, listQueuedDistributions, listPostedDistributions, addPostAction,
   listGroupCatalog, addGroupCatalogEntry,
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
   listShareSessionsByPhone, healGroups, addAdminMessage,

@@ -445,8 +445,8 @@
     }).finally(function () { updateMessageMeta(); });
   }
 
-  var TABS = ["props", "agents", "portfolios", "messages"];
-  var TAB_IDS = { props: "Props", agents: "Agents", portfolios: "Portfolios", messages: "Messages" };
+  var TABS = ["props", "agents", "portfolios", "social", "messages"];
+  var TAB_IDS = { props: "Props", agents: "Agents", portfolios: "Portfolios", social: "Social", messages: "Messages" };
 
   function showTab(which) {
     TABS.forEach(function (t) {
@@ -455,6 +455,9 @@
     });
     if (which === "agents" && !agents.length) loadAgents();
     if (which === "portfolios" && !portfolios.length) loadPortfolios();
+    // admin-social.js — loads on first open, reloads on every later open so the
+    // background refresh the previous load kicked off shows up.
+    if (which === "social" && window.ADMIN_SOCIAL) window.ADMIN_SOCIAL.load();
     if (which === "messages" && !customers.length) loadCustomers();
   }
 
@@ -508,6 +511,7 @@
       $("#tabProps").addEventListener("click", function () { showTab("props"); });
       $("#tabAgents").addEventListener("click", function () { showTab("agents"); });
       $("#tabPortfolios").addEventListener("click", function () { showTab("portfolios"); });
+      $("#tabSocial").addEventListener("click", function () { showTab("social"); });
       $("#tabMessages").addEventListener("click", function () { showTab("messages"); });
       $("#portfolioSearch").addEventListener("input", applyPortfolioFilter);
       $("#portfolioStatusFilter").addEventListener("change", applyPortfolioFilter);

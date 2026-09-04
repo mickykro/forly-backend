@@ -9,6 +9,7 @@
  *
  *   GET  /api/admin/me                 → { is_admin, phone }
  *   GET  /api/admin/properties         → every property + agent + page stats
+ *   GET  /api/admin/social             → Facebook post engagement, every agent
  *   POST /api/admin/page/extend        → extend ANY page by 30 days
  *   POST /api/admin/properties/delete  → archive/delete ANY listing
  */
@@ -21,6 +22,8 @@ const readiness = require("../chatbot-readiness");
 const chatbotConfig = require("../chatbot-config");
 const businessCache = require("../business-cache");
 const { deliverAgentMessage, MAX_RECIPIENTS } = require("../admin-messages");
+const adminSocial = require("../admin-social");
+const meta = require("../distribution/meta");
 
 const PAGE_LIFESPAN_DAYS = 30;
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
@@ -163,6 +166,25 @@ module.exports = function createAdminRouter(ctx) {
       });
     } catch (err) {
       console.error("admin/properties failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── social engagement on every agent's live Page post (admin-social.js) ──
+  // Cached numbers only; stale ones refresh behind the response, globally capped.
+  router.get("/social", requireAdmin, async (req, res) => {
+    try {
+      const [listings, businesses, distributions] = await Promise.all([
+        db.listAllListings(), db.listAllBusinesses(), db.listPostedDistributions(),
+      ]);
+      const report = adminSocial.buildSocialReport({ listings, businesses, distributions, pageBaseUrl });
+      adminSocial.refreshStaleAcrossAgents({ db, meta, now: () => new Date(),
+        get graphVersion() { return process.env.META_GRAPH_VERSION || meta.DEFAULT_VERSION; } },
+        distributions, db.getConnection)
+        .catch((err) => console.warn("[admin-social] refresh failed:", err && err.message));
+      res.json(report);
+    } catch (err) {
+      console.error("admin/social failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });

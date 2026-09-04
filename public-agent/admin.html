@@ -112,6 +112,7 @@
     <button id="tabProps" class="on">נכסים</button>
     <button id="tabAgents">סוכנים ופיצ׳רים</button>
     <button id="tabPortfolios">פורטפוליו</button>
+    <button id="tabSocial">רשתות חברתיות</button>
     <button id="tabMessages">הודעות לסוכנים</button>
   </div>
 
@@ -210,6 +211,42 @@
     </div>
   </div>
 
+  <!-- ── SOCIAL: Facebook post engagement across every agent ── -->
+  <div id="paneSocial" class="hidden">
+    <div class="stat-grid" id="socialStats"></div>
+    <div class="toolbar">
+      <input type="search" id="socialSearch" placeholder="חיפוש לפי כתובת, עיר, סוכן…">
+      <select id="socialSort">
+        <option value="">הכי חדש</option>
+        <option value="likes">הכי הרבה לייקים</option>
+        <option value="comments">הכי הרבה תגובות</option>
+        <option value="reach">הכי הרבה חשיפה</option>
+      </select>
+      <span class="who num" id="socialCount"></span>
+    </div>
+    <div class="table-wrap">
+      <table class="admin">
+        <thead>
+          <tr>
+            <th></th>
+            <th>נכס</th>
+            <th>סוכן</th>
+            <th>פורסם</th>
+            <th class="num">❤️</th>
+            <th class="num">💬</th>
+            <th class="num">🔁</th>
+            <th class="num">👁</th>
+            <th class="num">▶</th>
+            <th>נמדד</th>
+            <th>קישורים</th>
+          </tr>
+        </thead>
+        <tbody id="socialRows"></tbody>
+      </table>
+      <div class="empty hidden" id="socialEmpty">עדיין אין נכסים שפורסמו לפייסבוק.</div>
+    </div>
+  </div>
+
   <!-- ── PROPERTIES ── -->
   <div id="paneProps">
   <div class="toolbar">
@@ -257,6 +294,7 @@
 </div>
 
 <script src="/api.js"></script>
+<script src="/admin-social.js"></script>
 <script src="/admin.js"></script>
 <footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
