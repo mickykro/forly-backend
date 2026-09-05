@@ -170,9 +170,12 @@ window.FLY = (function () {
       dlg = document.createElement("dialog");
       dlg.id = "quotaGuardDlg";
       dlg.setAttribute("dir", "rtl");
-      // Explicit centering: the app's `*{margin:0}` reset cancels the browser's
-      // default dialog{margin:auto}, which is what normally centers a modal.
-      dlg.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;" +
+      // Explicit centering. Two things fight the browser's default centering:
+      // the app's `*{margin:0}` reset cancels dialog{margin:auto}, and the UA
+      // sets all four insets to 0 — in an RTL element an over-constrained box
+      // resolves to `right`, so top/left alone still snapped it to the right
+      // edge. right/bottom:auto removes the conflict in both directions.
+      dlg.style.cssText = "position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);margin:0;" +
         "width:min(440px,92vw);max-height:calc(100vh - 32px);overflow:auto;" +
         "border:1px solid rgba(185,138,47,.35);border-radius:18px;padding:0;" +
         "background:var(--paper,#fffdf9);color:var(--ink,#17140f);font:inherit;box-shadow:0 30px 80px rgba(20,17,12,.28)";
