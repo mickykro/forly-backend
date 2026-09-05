@@ -170,7 +170,11 @@ window.FLY = (function () {
       dlg = document.createElement("dialog");
       dlg.id = "quotaGuardDlg";
       dlg.setAttribute("dir", "rtl");
-      dlg.style.cssText = "width:min(440px,92vw);border:1px solid rgba(185,138,47,.35);border-radius:18px;padding:0;" +
+      // Explicit centering: the app's `*{margin:0}` reset cancels the browser's
+      // default dialog{margin:auto}, which is what normally centers a modal.
+      dlg.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;" +
+        "width:min(440px,92vw);max-height:calc(100vh - 32px);overflow:auto;" +
+        "border:1px solid rgba(185,138,47,.35);border-radius:18px;padding:0;" +
         "background:var(--paper,#fffdf9);color:var(--ink,#17140f);font:inherit;box-shadow:0 30px 80px rgba(20,17,12,.28)";
       document.body.appendChild(dlg);
     }

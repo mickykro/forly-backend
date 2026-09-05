@@ -262,7 +262,7 @@
      limit (the pre-existing behaviour keeps applying). -->
 <style>
   /* ── quota dialog ── */
-  #quotaDlg{width:min(620px,94vw);border:1px solid rgba(185,138,47,.3);border-radius:18px;padding:0;direction:rtl;font:inherit;color:var(--ink);background:var(--paper);box-shadow:0 30px 80px rgba(20,17,12,.28)}
+  #quotaDlg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0;width:min(620px,94vw);max-height:calc(100vh - 32px);border:1px solid rgba(185,138,47,.3);border-radius:18px;padding:0;direction:rtl;font:inherit;color:var(--ink);background:var(--paper);box-shadow:0 30px 80px rgba(20,17,12,.28)}
   #quotaDlg::backdrop{background:rgba(20,17,12,.45);backdrop-filter:blur(2px)}
   .qd-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px 22px 14px;border-bottom:1px solid rgba(23,20,15,.08)}
   .qd-head h3{font-family:var(--serif);font-size:1.25rem;margin:0}
