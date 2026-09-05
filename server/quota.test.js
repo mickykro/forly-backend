@@ -77,6 +77,18 @@ assert.strictEqual(blocked.error, "quota_exceeded");
 assert.ok(blocked.message.includes("https://pay.example"));
 assert.ok(q.blockedMessage("carousels", "").length > 0, "message works without a payment link");
 
+// A batch refused while slots remain must report the real arithmetic, not a
+// "blocked" flag: cap 4, used 3, requested 3 → remaining 1, requested 3.
+r = q.applyConsume({ chat_image_edits_cap: 4, chat_image_edits_used: 3 }, "chat_image_edits", 3);
+assert.deepStrictEqual([r.ok, r.remaining, r.requested], [false, 1, 3]);
+const partial = q.blockedResponse("chat_image_edits", "", r);
+assert.deepStrictEqual([partial.cap, partial.used, partial.remaining, partial.requested], [4, 3, 1, 3]);
+assert.ok(partial.message.includes("1") && partial.message.includes("3"), "message names remaining and requested");
+// fully exhausted → remaining 0, and the message says so
+const full = q.blockedResponse("walkthroughs", "", { cap: 4, used: 4, remaining: 0, requested: 1 });
+assert.strictEqual(full.remaining, 0);
+assert.ok(full.message.includes("במלואה"));
+
 // saved request is preserved intact so it can be REPLAYED after a top-up:
 // a normal payload comes back structurally unchanged (object stays object).
 const savedReq = q.trimRequest({ image_url: "https://x/y.jpg", prompt: "brighten" });

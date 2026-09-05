@@ -103,7 +103,7 @@ function applyConsume(doc, kind, amount = 1) {
   const cap = toCap(d[capKey(kind)]);
   const used = Math.max(0, Number(d[usedKey(kind)]) || 0);
   if (cap !== null && used + n > cap) {
-    return { ok: false, doc: d, cap, used, remaining: Math.max(0, cap - used) };
+    return { ok: false, doc: d, cap, used, remaining: Math.max(0, cap - used), requested: n };
   }
   d[usedKey(kind)] = used + n;
   return {
@@ -167,11 +167,28 @@ function trimRequest(req) {
   return { _truncated: true, _bytes: size, _preview: preview + "…" };
 }
 
+// A refusal is either "nothing left" or "a batch that doesn't fit": cap 4,
+// used 3, requested 3 is refused with 1 slot still free. Report the real
+// arithmetic (remaining + requested) so the client, the operator and the n8n
+// branch can all tell those two cases apart — a hardcoded remaining:0 read as
+// "exhausted" when it wasn't.
+function refusalNumbers(info) {
+  const cap = info && info.cap != null ? info.cap : null;
+  const used = info && info.used != null ? info.used : null;
+  const remaining = info && Number.isFinite(info.remaining) ? info.remaining
+    : (cap !== null && used !== null ? Math.max(0, cap - used) : 0);
+  const requested = info && Number.isFinite(info.requested) ? info.requested : 1;
+  return { cap, used, remaining, requested };
+}
+
 /** Client-facing refusal: friendly Hebrew text + payment link. */
-function blockedMessage(kind, paymentUrl) {
+function blockedMessage(kind, paymentUrl, info) {
   const label = LABELS[kind] || kind;
+  const { remaining, requested } = refusalNumbers(info);
   const lines = [
-    `המכסה שלך ל${label} נוצלה במלואה.`,
+    remaining > 0
+      ? `נותרו לך ${remaining} במכסת ${label}, אבל הבקשה הזו דורשת ${requested}.`
+      : `המכסה שלך ל${label} נוצלה במלואה.`,
     paymentUrl ? `לרכישת חבילה נוספת: ${paymentUrl}` : "לרכישת חבילה נוספת דברו איתנו.",
     "לאחר התשלום נעדכן את החשבון והבקשה האחרונה שלך תישמר.",
   ];
@@ -179,15 +196,17 @@ function blockedMessage(kind, paymentUrl) {
 }
 
 function blockedResponse(kind, paymentUrl, info) {
+  const { cap, used, remaining, requested } = refusalNumbers(info);
   return {
     error: "quota_exceeded",
     kind,
     label: LABELS[kind] || kind,
-    cap: info ? info.cap : null,
-    used: info ? info.used : null,
-    remaining: 0,
+    cap,
+    used,
+    remaining,
+    requested,
     payment_url: paymentUrl || null,
-    message: blockedMessage(kind, paymentUrl),
+    message: blockedMessage(kind, paymentUrl, info),
   };
 }
 
