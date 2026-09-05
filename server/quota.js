@@ -265,15 +265,15 @@ function createQuota({ db, sendWhatsApp, adminPhone, paymentUrl, FieldValue } = 
       outcome = r;
       if (r.ok) {
         const patch = { [usedKey(kind)]: r.doc[usedKey(kind)] };
-        // The client just successfully ran this kind again — so any request of
-        // this kind we saved while they were blocked has now been fulfilled
-        // (typically right after the operator topped their bundle up). Clear it
-        // so it isn't shown or replayed twice.
-        const lb = cur.last_blocked;
-        if (lb && lb.kind === kind && !lb.replayed) {
+        // Was this the saved refused request being fulfilled? Explicit when the
+        // caller says replay:true (n8n re-running it after the client's "כן");
+        // otherwise inferred: a same-kind success at least as large as what was
+        // refused. A smaller success — one edit while a 3-image batch is
+        // pending — leaves the batch offer standing.
+        if (shouldClearBlocked(cur.last_blocked, kind, n, opts.replay === true)) {
           patch.last_blocked = FieldValue
             ? FieldValue.delete()
-            : Object.assign({}, lb, { replayed: true, replayed_at: now });
+            : Object.assign({}, cur.last_blocked, { replayed: true, replayed_at: now });
         }
         tx.set(ref(phone), patch, { merge: true });
         return;
@@ -414,10 +414,24 @@ function pendingReplay(doc) {
   };
 }
 
+/**
+ * shouldClearBlocked(lb, kind, amount, replay) → bool
+ * Does a successful consume fulfil the saved refused request? Yes when it's an
+ * explicit replay of the same kind, or (inferred) a same-kind success at least
+ * as large as what was refused. A smaller success — one edit while a 3-image
+ * batch is pending — must NOT clear it, or the batch offer would vanish.
+ */
+function shouldClearBlocked(lb, kind, amount, replay) {
+  if (!lb || lb.replayed || lb.kind !== kind) return false;
+  if (replay) return true;
+  const need = Math.max(1, Math.floor(Number(lb.amount) || 1));
+  return Math.max(1, Math.floor(Number(amount) || 1)) >= need;
+}
+
 module.exports = {
   KINDS, LABELS, TRIAL_CAPS,
   capKey, usedKey, isKind, toCap,
-  trialSeed, summarize, applyConsume, applyCaps, pendingReplay,
+  trialSeed, summarize, applyConsume, applyCaps, pendingReplay, shouldClearBlocked,
   blockedMessage, blockedResponse, trimRequest,
   createQuota,
 };

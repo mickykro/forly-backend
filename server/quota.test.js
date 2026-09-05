@@ -118,4 +118,18 @@ assert.strictEqual(pr.fits, true, "a reset counter also makes it fit");
 pr = q.pendingReplay({ last_blocked: { kind: "chat_image_edits", amount: 3 } });
 assert.deepStrictEqual([pr.fits, pr.remaining], [true, null], "unset cap = unlimited → fits");
 
+// ── shouldClearBlocked: which successes fulfil the saved refused request ──
+const lb3 = { kind: "chat_image_edits", amount: 3 };
+assert.strictEqual(q.shouldClearBlocked(lb3, "chat_image_edits", 1, false), false,
+  "one ordinary edit leaves a pending 3-image batch standing");
+assert.strictEqual(q.shouldClearBlocked(lb3, "chat_image_edits", 3, false), true, "a 3-batch success fulfils it");
+assert.strictEqual(q.shouldClearBlocked(lb3, "chat_image_edits", 5, false), true, "a bigger batch too");
+assert.strictEqual(q.shouldClearBlocked(lb3, "chat_image_edits", 1, true), true, "an explicit replay always clears");
+assert.strictEqual(q.shouldClearBlocked(lb3, "walkthroughs", 5, true), false, "a different kind never clears");
+assert.strictEqual(q.shouldClearBlocked(Object.assign({ replayed: true }, lb3), "chat_image_edits", 3, true), false,
+  "already replayed → nothing to clear");
+assert.strictEqual(q.shouldClearBlocked(null, "chat_image_edits", 1, true), false);
+assert.strictEqual(q.shouldClearBlocked({ kind: "walkthroughs", amount: 1 }, "walkthroughs", 1, false), true,
+  "re-creating the one refused property fulfils a single block");
+
 console.log("quota.test.js OK");

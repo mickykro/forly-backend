@@ -1,7 +1,7 @@
 /*
  * routes/quota.js — quota endpoints.
  *
- *   POST /api/quota/consume  { phone, kind, amount?, request? }   n8n (secret)
+ *   POST /api/quota/consume  { phone, kind, amount?, request?, replay? }   n8n (secret)
  *   GET  /api/quota/status?phone=                                 n8n (secret)
  *   GET  /api/quota/me                                            logged-in agent
  *
@@ -38,8 +38,10 @@ module.exports = function createQuotaRouter({ quota, requireAuth, authSecret, n8
     if (!phone || !isKind(kind)) return res.status(400).json({ error: "invalid_input" });
     try {
       const business = await db.getBusiness(phone).catch(() => null);
+      // replay:true = n8n is re-running the saved refused request after the
+      // client agreed; on success the pending marker is cleared regardless of size.
       const r = await quota.consume(phone, kind, body.amount, {
-        request: body.request, source: "n8n", business,
+        request: body.request, source: "n8n", business, replay: body.replay === true,
       });
       if (!r.ok) return res.status(402).json(r);
       res.json(r);
