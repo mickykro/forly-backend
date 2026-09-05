@@ -312,18 +312,14 @@
     }).join("");
     $("#qbImgs").classList.toggle("hidden", !imgs.length);
     var st = $("#qbStatus");
-    if (b.offered_at) {
-      st.textContent = "✉️ נשלחה ללקוח הצעה לבצע שוב · " + fmtWhen(b.offered_at) + " — ממתינים לתשובה";
-      st.className = "qb-status ok";
-    } else if (fits) {
-      st.textContent = "✅ המכסה הנוכחית מספיקה — אפשר להציע ללקוח לבצע שוב";
+    if (fits) {
+      st.textContent = "✅ המכסה הנוכחית כבר מספיקה לבקשה הזו";
       st.className = "qb-status ok";
     } else {
-      st.textContent = "⛔ עדיין לא נכנס במכסה — נותרו " + (kind.remaining == null ? "∞" : kind.remaining) +
+      st.textContent = "⛔ לא נכנס במכסה — נותרו " + (kind.remaining == null ? "∞" : kind.remaining) +
         ", נדרשים " + amount + ". הגדילו את המכסה (או אפסו את המונה) ושמרו.";
       st.className = "qb-status no";
     }
-    $("#qOffer").checked = !b.offered_at;
     $("#qDismiss").onclick = function () { dismissBlocked(a.phone); };
     card.classList.remove("hidden");
   }
@@ -426,13 +422,11 @@
     dlg.querySelectorAll("[data-reset]").forEach(function (cb) {
       if (cb.checked) reset.push(cb.dataset.reset);
     });
-    var offer = !$("#qBlocked").classList.contains("hidden") && $("#qOffer").checked;
     var btn = $("#qSave");
     btn.disabled = true;
     FLY.req("/api/admin/business/quota", {
       method: "POST",
-      body: { phone: phone, caps: caps, reset_used: reset, plan: $("#qPlan").value, notes: $("#qNotes").value,
-        offer_replay: offer },
+      body: { phone: phone, caps: caps, reset_used: reset, plan: $("#qPlan").value, notes: $("#qNotes").value },
       noRedirect: true,
     }).then(function (d) {
       var a = agents.filter(function (x) { return x.phone === phone; })[0];
@@ -440,12 +434,7 @@
       btn.disabled = false;
       closeQuotaDlg();
       applyAgentFilter();
-      var changed = d.changes && d.changes.length;
-      var r = d.replay || {};
-      if (r.offered) FLY.toast("✅ המכסות עודכנו · נשלחה ללקוח הצעה לבצע שוב");
-      else if (offer && r.reason === "does_not_fit") FLY.toast("המכסות עודכנו · הבקשה עדיין לא נכנסת במכסה, לא נשלחה הצעה");
-      else if (offer && r.reason === "send_failed") FLY.toast("המכסות עודכנו · שליחת ההצעה ללקוח נכשלה");
-      else FLY.toast(changed ? "✅ המכסות עודכנו" : "אין שינוי");
+      FLY.toast(d.changes && d.changes.length ? "✅ המכסות עודכנו" : "אין שינוי");
     }).catch(function (e) {
       btn.disabled = false;
       FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון המכסות");

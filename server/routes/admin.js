@@ -273,10 +273,7 @@ module.exports = function createAdminRouter(ctx) {
 
   // ── quotas: what this client paid for ──
   // GET  /business/quota?phone=          → ledger + recent blocked attempts + history
-  // POST /business/quota { phone, caps:{kind:n|null}, reset_used:[kind], plan, notes,
-  //                        offer_replay?:true }   → set caps; optionally WhatsApp the
-  //                        client asking whether to redo the refused request (only
-  //                        sent when the new caps cover it)
+  // POST /business/quota { phone, caps:{kind:n|null}, reset_used:[kind], plan, notes }
   // POST /business/quota { phone, clear_blocked:true } → dismiss the saved refused
   //                        request (audited; the block stays in quota_events)
   // Kinds are whitelisted inside quota.js; every change lands in quota_history.
@@ -317,19 +314,7 @@ module.exports = function createAdminRouter(ctx) {
       }, req.user.userId);
       console.log(`admin_quota_set agent=${phone} by=${req.user.userId} changes=${JSON.stringify(r.changes)}`);
 
-      // Optionally ask the client whether to redo the refused request. Sent
-      // only when the caps (as just saved) cover it; a send failure never
-      // fails the save — the caps are already committed.
-      let replay = { offered: false, reason: "not_requested" };
-      if (body.offer_replay === true) {
-        replay = await quota.offerReplay(phone, biz).catch((err) => {
-          console.warn(`admin_quota_offer_replay failed agent=${phone}:`, err.message);
-          return { offered: false, reason: "send_failed" };
-        });
-        console.log(`admin_quota_offer_replay agent=${phone} by=${req.user.userId} ${JSON.stringify(replay)}`);
-      }
-      res.json({ ok: true, phone, changes: r.changes, replay,
-        quota: replay.offered ? await quota.getQuota(phone) : r.quota });
+      res.json({ ok: true, phone, changes: r.changes, quota: r.quota });
     } catch (err) {
       console.error("admin/business/quota set failed:", err);
       res.status(500).json({ error: "internal" });
