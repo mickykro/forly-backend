@@ -39,7 +39,9 @@ const LABELS = {
 const TRIAL_CAPS = { walkthroughs: 4, chat_image_edits: 0, chat_msgs: 200, carousels: 0 };
 
 const ADMIN_NOTIFY_GAP_MS = 60 * 60 * 1000;
-const MAX_SAVED_REQUEST_BYTES = 8 * 1024;
+// Big enough to hold a full replayable payload (image URL(s) + prompt for an
+// edit); still far under Firestore's 1 MB per-doc ceiling.
+const MAX_SAVED_REQUEST_BYTES = 32 * 1024;
 
 const capKey = (kind) => `${kind}_cap`;
 const usedKey = (kind) => `${kind}_used`;
@@ -150,13 +152,19 @@ function applyCaps(doc, patch, by, now = new Date()) {
   return { doc: d, changes };
 }
 
-// Bound what we persist of a blocked request: it's for the operator to see what
-// the client wanted, not a full payload archive.
+// Persist a blocked request so it can be REPLAYED after the client tops up:
+// keep the original structure intact (an object stays an object, a string stays
+// a string) rather than stringify-and-truncate, which would corrupt the payload
+// and make it un-replayable. If it's larger than the cap we drop the body and
+// keep a preview + a flag, so we never store a half-JSON blob that can't be run.
 function trimRequest(req) {
   if (req === undefined || req === null) return null;
-  let s;
-  try { s = typeof req === "string" ? req : JSON.stringify(req); } catch { s = String(req); }
-  return s.length > MAX_SAVED_REQUEST_BYTES ? s.slice(0, MAX_SAVED_REQUEST_BYTES) + "…" : s;
+  let size;
+  try { size = Buffer.byteLength(JSON.stringify(req)); } catch { req = String(req); size = req.length; }
+  if (size <= MAX_SAVED_REQUEST_BYTES) return req;           // replayable as-is
+  let preview;
+  try { preview = JSON.stringify(req).slice(0, 1024); } catch { preview = String(req).slice(0, 1024); }
+  return { _truncated: true, _bytes: size, _preview: preview + "…" };
 }
 
 /** Client-facing refusal: friendly Hebrew text + payment link. */
@@ -233,30 +241,43 @@ function createQuota({ db, sendWhatsApp, adminPhone, paymentUrl, FieldValue } = 
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref(phone));
       const cur = snap.exists ? snap.data() : {};
+      const n = Math.max(1, Math.floor(Number(amount) || 1));
       const r = applyConsume(cur, kind, amount);
       outcome = r;
       if (r.ok) {
-        tx.set(ref(phone), { [usedKey(kind)]: r.doc[usedKey(kind)] }, { merge: true });
+        const patch = { [usedKey(kind)]: r.doc[usedKey(kind)] };
+        // The client just successfully ran this kind again — so any request of
+        // this kind we saved while they were blocked has now been fulfilled
+        // (typically right after the operator topped their bundle up). Clear it
+        // so it isn't shown or replayed twice.
+        const lb = cur.last_blocked;
+        if (lb && lb.kind === kind && !lb.replayed) {
+          patch.last_blocked = FieldValue
+            ? FieldValue.delete()
+            : Object.assign({}, lb, { replayed: true, replayed_at: now });
+        }
+        tx.set(ref(phone), patch, { merge: true });
         return;
       }
-      // Blocked: remember what they tried, throttle the operator alert.
+      // Blocked: save EVERYTHING about the request so the client can re-run it
+      // once the operator opens more quota, and throttle the operator alert.
       const lastNotify = cur[`notify_${kind}_at`];
       const lastMs = lastNotify && lastNotify.toMillis ? lastNotify.toMillis() :
         lastNotify ? new Date(lastNotify).getTime() : 0;
       shouldNotify = now.getTime() - lastMs >= ADMIN_NOTIFY_GAP_MS;
+      const blocked = {
+        kind, amount: n, at: now, source: opts.source || null,
+        cap: r.cap, used: r.used,
+        request: trimRequest(opts.request),
+        replayed: false,
+      };
       const patch = {
-        last_blocked: {
-          kind, at: now, source: opts.source || null,
-          request: trimRequest(opts.request),
-        },
+        last_blocked: blocked,
         [`blocked_${kind}_count`]: (FieldValue ? FieldValue.increment(1) : (Number(cur[`blocked_${kind}_count`]) || 0) + 1),
       };
       if (shouldNotify) patch[`notify_${kind}_at`] = now;
       tx.set(ref(phone), patch, { merge: true });
-      tx.set(ref(phone).parent.parent.collection("quota_events").doc(), {
-        kind, at: now, source: opts.source || null,
-        cap: r.cap, used: r.used, request: trimRequest(opts.request),
-      });
+      tx.set(ref(phone).parent.parent.collection("quota_events").doc(), blocked);
     });
 
     if (outcome.ok) {

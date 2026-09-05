@@ -77,8 +77,17 @@ assert.strictEqual(blocked.error, "quota_exceeded");
 assert.ok(blocked.message.includes("https://pay.example"));
 assert.ok(q.blockedMessage("carousels", "").length > 0, "message works without a payment link");
 
-// saved request is bounded
-assert.ok(q.trimRequest("x".repeat(20000)).length < 9000);
+// saved request is preserved intact so it can be REPLAYED after a top-up:
+// a normal payload comes back structurally unchanged (object stays object).
+const savedReq = q.trimRequest({ image_url: "https://x/y.jpg", prompt: "brighten" });
+assert.deepStrictEqual(savedReq, { image_url: "https://x/y.jpg", prompt: "brighten" });
+assert.strictEqual(q.trimRequest("edit please"), "edit please");
 assert.strictEqual(q.trimRequest(undefined), null);
+// only an oversized payload is dropped — and then never as a corrupt half-JSON
+// blob: it becomes a flagged preview, not a truncated string we could try to run.
+const big = q.trimRequest({ blob: "x".repeat(40000) });
+assert.strictEqual(big._truncated, true);
+assert.ok(big._bytes > 32 * 1024);
+assert.ok(typeof big._preview === "string" && big._preview.length <= 1100);
 
 console.log("quota.test.js OK");

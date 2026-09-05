@@ -272,9 +272,13 @@
       rows.appendChild(tr);
     });
     var lb = $("#qBlocked");
-    if (a.quota && a.quota.last_blocked) {
+    if (a.quota && a.quota.last_blocked && !a.quota.last_blocked.replayed) {
       var b = a.quota.last_blocked;
-      lb.textContent = "🚫 ניסיון אחרון שנחסם: " + (b.kind || "") + " — " + (b.request || "");
+      var reqTxt = b.request == null ? "" :
+        (typeof b.request === "string" ? b.request : JSON.stringify(b.request, null, 2));
+      var amt = b.amount && b.amount > 1 ? " ×" + b.amount : "";
+      lb.textContent = "🚫 ניסיון אחרון שנחסם: " + (b.kind || "") + amt +
+        "\nלאחר הגדלת המכסה הלקוח יוכל להריץ שוב את הבקשה הבאה:\n" + reqTxt;
       lb.classList.remove("hidden");
     } else {
       lb.classList.add("hidden");
