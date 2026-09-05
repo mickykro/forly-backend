@@ -89,8 +89,17 @@ server/data
 /deploy.env
 /sa-key.json
 
-# Local git worktrees
-.worktrees/
-
 # Local Claude Code permissions (contains machine-specific allow-list entries)
 .claude/settings.local.json
+
+# Codex local configuration
+.codex/
+
+# Claude Flow runtime data
+.claude-flow/data/
+.claude-flow/logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local

@@ -1,0 +1,56 @@
+{
+  "workflows": {
+    "workflow-1788361733841-kwu9y1": {
+      "workflowId": "workflow-1788361733841-kwu9y1",
+      "name": "Implement docs/superpowers/plans/2026-09-02-agent-portfolios.md task-by-task.",
+      "description": "Implement docs/superpowers/plans/2026-09-02-agent-portfolios.md task-by-task.",
+      "steps": [
+        {
+          "stepId": "step-1",
+          "name": "Execute",
+          "type": "task",
+          "config": {
+            "task": "Implement docs/superpowers/plans/2026-09-02-agent-portfolios.md task-by-task."
+          },
+          "status": "pending"
+        }
+      ],
+      "status": "running",
+      "currentStep": 0,
+      "variables": {
+        "template": "development",
+        "maxAgents": 3,
+        "timeout": 180
+      },
+      "createdAt": "2026-09-02T15:08:53.841Z",
+      "startedAt": "2026-09-02T15:08:53.841Z"
+    },
+    "workflow-1788362444024-rdwfpw": {
+      "workflowId": "workflow-1788362444024-rdwfpw",
+      "name": "Implement docs/superpowers/plans/2026-09-02-agent-portfolios.md task-by-task.",
+      "description": "Implement docs/superpowers/plans/2026-09-02-agent-portfolios.md task-by-task.",
+      "steps": [
+        {
+          "stepId": "step-1",
+          "name": "Execute",
+          "type": "task",
+          "config": {
+            "task": "Implement docs/superpowers/plans/2026-09-02-agent-portfolios.md task-by-task."
+          },
+          "status": "pending"
+        }
+      ],
+      "status": "running",
+      "currentStep": 0,
+      "variables": {
+        "template": "development",
+        "maxAgents": 3,
+        "timeout": 180
+      },
+      "createdAt": "2026-09-02T15:20:44.024Z",
+      "startedAt": "2026-09-02T15:20:44.024Z"
+    }
+  },
+  "templates": {},
+  "version": "3.0.0"
+}

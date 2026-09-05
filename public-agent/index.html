@@ -110,6 +110,7 @@
       <b style="display:block;margin-bottom:2px">דף הנכסים שלך</b>
       <a id="portfolioUrl" href="#" target="_blank" style="color:#2e7d32;font-size:.9rem"></a>
     </div>
+    <a id="portfolioViewBtn" href="#" target="_blank" class="btn" style="background:#fff;color:#2e7d32;font-weight:600;border:1px solid #2e7d32">צפייה</a>
     <a href="/portfolio.html" class="btn" style="background:#2e7d32;color:#fff;font-weight:600;border:none">עריכה</a>
   </div>
   <div id="createPortfolioBanner" class="hidden" style="background:#fff3cd;border:1px solid #ffc107;padding:14px 20px;border-radius:12px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
@@ -598,6 +599,7 @@
           var url = d.profile.portfolio_url;
           $("#portfolioUrl").href = url;
           $("#portfolioUrl").textContent = url.replace(/^https?:\/\//, "");
+          $("#portfolioViewBtn").href = url;
         } else if (d.profile && !d.profile.portfolio_url) {
           $("#createPortfolioBanner").classList.remove("hidden");
         }

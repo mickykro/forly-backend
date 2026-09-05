@@ -25,6 +25,37 @@
 .btn-save { width: 100%; margin-top: 24px; }
 .portfolio-link { display: flex; align-items: center; gap: 12px; background: #e8f5e9; padding: 16px; border-radius: 8px; margin-bottom: 24px; }
 .portfolio-link a { color: #2e7d32; font-weight: 600; }
+.info-banner { background: linear-gradient(90deg, #b98a2f, #d4a84b); color: #fff; padding: 16px 20px; border-radius: 8px; margin-bottom: 24px; }
+.info-banner b { display: block; margin-bottom: 4px; }
+.info-banner span { font-size: .9rem; opacity: .9; }
+.btn-row { display: flex; gap: 12px; justify-content: center; margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+.hidden { display: none !important; }
+.preview-header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.preview-header h2 { margin: 0; flex: 1; }
+.preview-frame { background: #fafafa; border: 1px solid var(--border); border-radius: 12px; padding: 24px; min-height: 400px; }
+.preview-portfolio { font-family: var(--sans); }
+.preview-hero { text-align: center; padding: 30px 20px; background: linear-gradient(135deg, #f8f6f3, #fff); border-radius: 8px; margin-bottom: 24px; }
+.preview-hero h1 { font-family: var(--serif); font-size: 1.6rem; margin: 0 0 12px; }
+.preview-hero .intro { color: #666; margin: 0 0 16px; }
+.preview-hero .agent-info { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; font-size: .9rem; }
+.preview-hero .agent-info b { width: 100%; }
+.preview-section { margin-bottom: 24px; }
+.preview-section h2 { font-family: var(--serif); font-size: 1.2rem; margin: 0 0 12px; padding-bottom: 8px; border-bottom: 2px solid var(--gold); }
+.preview-section p { color: #444; line-height: 1.6; white-space: pre-wrap; }
+.location-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.location-tags .tag { background: #e8f5e9; color: #2e7d32; padding: 6px 14px; border-radius: 20px; font-size: .85rem; }
+.testimonials-grid { display: grid; gap: 16px; }
+.testimonial { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.testimonial p { font-style: italic; margin: 0 0 8px; }
+.testimonial cite { color: #888; font-size: .85rem; }
+/* Portrait upload */
+.portrait-field { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.portrait-preview { width: 150px; height: 200px; background: #f5f5f5; border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.portrait-preview img { width: 100%; height: 100%; object-fit: cover; }
+.portrait-preview .no-portrait, .portrait-preview .uploading { color: #999; font-size: 13px; text-align: center; padding: 8px; }
+.portrait-actions { display: flex; flex-direction: column; gap: 8px; }
+.field-hint { color: #888; font-size: 12px; margin-top: 8px; width: 100%; }
+.preview-portrait { width: 120px; height: 160px; object-fit: cover; border-radius: 8px; margin: 0 auto 16px; display: block; box-shadow: 0 4px 12px rgba(0,0,0,.1); }
 </style>
 </head>
 <body class="agent-page">
@@ -40,6 +71,7 @@
   </div>
 </div>
 
+<script src="/api.js"></script>
 <script src="/portfolio.js"></script>
 </body>
 </html>

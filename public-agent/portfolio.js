@@ -1,33 +1,30 @@
 /**
- * portfolio.js — agent portfolio editor
- * ponytail: vanilla JS, minimal
+ * portfolio.js — agent portfolio editor with form → preview → create flow
  */
 (function() {
   const editor = document.getElementById("editor");
   let data = null;
+  let showingPreview = false;
+  let portraitUrl = null; // uploaded portrait URL
 
-  // Check auth
-  const token = document.cookie.match(/forly_token=([^;]+)/)?.[1];
-  if (!token) {
-    window.location.href = "/";
-    return;
-  }
-
-  fetch("/api/my-portfolio", {
-    headers: { "Authorization": `Bearer ${token}` },
-  })
-    .then((r) => r.ok ? r.json() : Promise.reject())
+  FLY.req("/api/my-portfolio", { noRedirect: true })
     .then((d) => {
       data = d;
       render();
     })
-    .catch(() => {
+    .catch((e) => {
+      if (e.status === 401) {
+        window.location.href = "/?next=" + encodeURIComponent("/portfolio.html");
+        return;
+      }
       editor.innerHTML = "<p>שגיאה בטעינת הנתונים. <a href='/'>חזרה</a></p>";
     });
 
   function render() {
     const { profile, portfolio, pages } = data;
     const hasPortfolio = !!portfolio;
+    const p = portfolio || {}; // use empty object for new portfolios
+    portraitUrl = p.hero?.portrait_url || null;
 
     editor.innerHTML = `
       ${hasPortfolio ? `
@@ -36,88 +33,189 @@
           <a href="${esc(portfolio.url)}" target="_blank">${esc(portfolio.url)}</a>
         </div>
       ` : `
-        <div style="text-align:center;padding:30px 0">
-          <p>עדיין אין לך דף נכסים</p>
-          <button class="btn btn-gold" id="createBtn">יצירת דף נכסים</button>
+        <div class="info-banner">
+          <b>יצירת דף נכסים חדש</b>
+          <span>מלאו את הפרטים, צפו בתצוגה מקדימה ואשרו.</span>
         </div>
       `}
 
-      <h2>פרופיל</h2>
-      <div class="field">
-        <label>שם העסק</label>
-        <input id="business_name" value="${esc(profile.business_name)}">
-      </div>
-      <div class="field">
-        <label>שם מלא</label>
-        <input id="full_name" value="${esc(profile.full_name)}">
-      </div>
-      <div class="field">
-        <label>עיר</label>
-        <input id="city" value="${esc(profile.city)}">
-      </div>
-      <div class="field">
-        <label>מספר רישיון</label>
-        <input id="license_number" value="${esc(profile.license_number)}">
-      </div>
+      <div id="formView">
+        <h2>פרופיל</h2>
+        <div class="field">
+          <label>שם העסק</label>
+          <input id="business_name" value="${esc(profile.business_name)}">
+        </div>
+        <div class="field">
+          <label>שם מלא</label>
+          <input id="full_name" value="${esc(profile.full_name)}">
+        </div>
+        <div class="field">
+          <label>עיר</label>
+          <input id="city" value="${esc(profile.city)}">
+        </div>
+        <div class="field">
+          <label>מספר רישיון</label>
+          <input id="license_number" value="${esc(profile.license_number)}">
+        </div>
 
-      ${hasPortfolio ? `
+        <h2>תמונת פרופיל</h2>
+        <div class="field portrait-field">
+          <div class="portrait-preview" id="portraitPreview">
+            ${p.hero?.portrait_url ? `<img src="${esc(p.hero.portrait_url)}" alt="תמונת פרופיל">` : '<span class="no-portrait">לא הועלתה תמונה</span>'}
+          </div>
+          <div class="portrait-actions">
+            <label class="btn btn-ghost btn-sm">
+              <input type="file" id="portraitInput" accept="image/jpeg,image/png,image/webp" style="display:none">
+              ${p.hero?.portrait_url ? 'החלפת תמונה' : 'העלאת תמונה'}
+            </label>
+            ${p.hero?.portrait_url ? '<button type="button" class="btn btn-ghost btn-sm" id="removePortrait">הסרת תמונה</button>' : ''}
+          </div>
+          <p class="field-hint">תמונה שתופיע בדף הפורטפוליו שלכם. מומלץ תמונה אנכית באיכות גבוהה.</p>
+        </div>
+
         <h2>כותרת הדף</h2>
         <div class="field">
           <label>כותרת ראשית</label>
-          <input id="hero_headline" value="${esc(portfolio.hero?.headline || "")}" maxlength="120">
+          <input id="hero_headline" value="${esc(p.hero?.headline || "")}" maxlength="120" placeholder="לדוגמה: נדל״ן בתל אביב עם ${esc(profile.full_name || "השם שלך")}">
         </div>
         <div class="field">
           <label>תיאור קצר</label>
-          <textarea id="hero_intro" maxlength="500">${esc(portfolio.hero?.intro || "")}</textarea>
+          <textarea id="hero_intro" maxlength="500" placeholder="משפט או שניים שמתארים את השירות שלכם...">${esc(p.hero?.intro || "")}</textarea>
         </div>
 
         <h2>אודות</h2>
         <div class="field">
-          <textarea id="about_body" maxlength="1500" placeholder="ספרו על עצמכם והניסיון שלכם...">${esc(portfolio.about?.body || "")}</textarea>
+          <textarea id="about_body" maxlength="1500" placeholder="ספרו על עצמכם והניסיון שלכם...">${esc(p.about?.body || "")}</textarea>
         </div>
 
         <h2>אזורי פעילות</h2>
         <div class="field">
           <label>כותרת</label>
-          <input id="area_headline" value="${esc(portfolio.area?.headline || "")}" maxlength="120">
+          <input id="area_headline" value="${esc(p.area?.headline || "")}" maxlength="120" placeholder="לדוגמה: אזורי הפעילות שלי">
         </div>
         <div class="field">
           <label>תיאור</label>
-          <textarea id="area_body" maxlength="1500">${esc(portfolio.area?.body || "")}</textarea>
+          <textarea id="area_body" maxlength="1500" placeholder="תארו את האזורים שאתם מתמחים בהם...">${esc(p.area?.body || "")}</textarea>
         </div>
         <div class="field">
           <label>ערים/שכונות (מופרדות בפסיק)</label>
-          <input id="area_locations" value="${esc((portfolio.area?.locations || []).join(", "))}">
+          <input id="area_locations" value="${esc((p.area?.locations || []).join(", "))}" placeholder="תל אביב, רמת גן, גבעתיים">
         </div>
 
         <h2>חוות דעת</h2>
         <div id="testimonials-list">
-          ${(portfolio.testimonials || []).map((t, i) => testimonialCard(t, i)).join("")}
+          ${(p.testimonials || []).map((t, i) => testimonialCard(t, i)).join("")}
         </div>
         <button class="btn btn-ghost btn-sm" id="addTestimonial">+ הוספת חוות דעת</button>
         <p class="legal-warning">פרסום חוות דעת שאינן אמיתיות עלול להוות הפרת חוק ולחשוף אתכם לתביעה.</p>
 
-        <h2>נכסים בדף</h2>
-        <div id="pages-list">
-          ${pages.map((p) => pageRow(p)).join("")}
-        </div>
-      ` : ""}
+        ${pages.length ? `
+          <h2>נכסים בדף</h2>
+          <div id="pages-list">
+            ${pages.map((pg) => pageRow(pg)).join("")}
+          </div>
+        ` : ""}
 
-      ${hasPortfolio ? `
-        <button class="btn btn-gold btn-save" id="saveBtn">שמירה</button>
-      ` : ""}
+        <div class="btn-row">
+          <button class="btn btn-gold" id="previewBtn">תצוגה מקדימה</button>
+        </div>
+      </div>
+
+      <div id="previewView" class="hidden">
+        <div class="preview-header">
+          <button class="btn btn-ghost" id="backToFormBtn">← חזרה לעריכה</button>
+          <h2>תצוגה מקדימה</h2>
+        </div>
+        <div id="previewContent" class="preview-frame"></div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="backToFormBtn2">← חזרה לעריכה</button>
+          <button class="btn btn-gold" id="confirmBtn">${hasPortfolio ? "שמירת שינויים" : "אישור ויצירה"}</button>
+        </div>
+      </div>
+
       <p id="status" style="text-align:center;margin-top:16px;display:none"></p>
     `;
 
-    if (!hasPortfolio) {
-      document.getElementById("createBtn")?.addEventListener("click", createPortfolio);
-    } else {
-      document.getElementById("saveBtn")?.addEventListener("click", savePortfolio);
-      document.getElementById("addTestimonial")?.addEventListener("click", addTestimonial);
-      document.querySelectorAll(".remove-testimonial").forEach((btn) => {
-        btn.addEventListener("click", () => removeTestimonial(btn.dataset.index));
-      });
+    // Bind events
+    document.getElementById("previewBtn").addEventListener("click", showPreview);
+    document.getElementById("backToFormBtn").addEventListener("click", hidePreview);
+    document.getElementById("backToFormBtn2").addEventListener("click", hidePreview);
+    document.getElementById("confirmBtn").addEventListener("click", hasPortfolio ? savePortfolio : createPortfolio);
+    document.getElementById("addTestimonial").addEventListener("click", addTestimonial);
+    document.querySelectorAll(".remove-testimonial").forEach((btn) => {
+      btn.addEventListener("click", () => removeTestimonial(btn.dataset.index));
+    });
+
+    // Portrait upload
+    document.getElementById("portraitInput").addEventListener("change", handlePortraitUpload);
+    const removeBtn = document.getElementById("removePortrait");
+    if (removeBtn) removeBtn.addEventListener("click", removePortrait);
+  }
+
+  async function handlePortraitUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Validate file type and size
+    const validTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!validTypes.includes(file.type)) {
+      alert("יש להעלות קובץ מסוג JPEG, PNG או WebP בלבד.");
+      return;
     }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("גודל הקובץ המקסימלי הוא 10MB.");
+      return;
+    }
+
+    const preview = document.getElementById("portraitPreview");
+    preview.innerHTML = '<span class="uploading">מעלה...</span>';
+
+    try {
+      const urls = await FLY.uploadFiles([file]);
+      if (urls && urls[0]) {
+        portraitUrl = urls[0];
+        updatePortraitPreview();
+      } else {
+        throw new Error("upload_failed");
+      }
+    } catch (err) {
+      preview.innerHTML = '<span class="no-portrait">שגיאה בהעלאה</span>';
+      alert("שגיאה בהעלאת התמונה. נסו שוב.");
+    }
+  }
+
+  function removePortrait() {
+    portraitUrl = null;
+    updatePortraitPreview();
+  }
+
+  function updatePortraitPreview() {
+    const preview = document.getElementById("portraitPreview");
+    const actionsDiv = preview.nextElementSibling;
+
+    if (portraitUrl) {
+      preview.innerHTML = `<img src="${esc(portraitUrl)}" alt="תמונת פרופיל">`;
+      actionsDiv.innerHTML = `
+        <label class="btn btn-ghost btn-sm">
+          <input type="file" id="portraitInput" accept="image/jpeg,image/png,image/webp" style="display:none">
+          החלפת תמונה
+        </label>
+        <button type="button" class="btn btn-ghost btn-sm" id="removePortrait">הסרת תמונה</button>
+      `;
+    } else {
+      preview.innerHTML = '<span class="no-portrait">לא הועלתה תמונה</span>';
+      actionsDiv.innerHTML = `
+        <label class="btn btn-ghost btn-sm">
+          <input type="file" id="portraitInput" accept="image/jpeg,image/png,image/webp" style="display:none">
+          העלאת תמונה
+        </label>
+      `;
+    }
+
+    // Re-bind events
+    document.getElementById("portraitInput").addEventListener("change", handlePortraitUpload);
+    const removeBtn = document.getElementById("removePortrait");
+    if (removeBtn) removeBtn.addEventListener("click", removePortrait);
   }
 
   function testimonialCard(t, i) {
@@ -162,44 +260,14 @@
     if (card) card.remove();
   }
 
-  async function createPortfolio() {
-    const btn = document.getElementById("createBtn");
-    btn.disabled = true;
-    btn.textContent = "יוצר...";
-    try {
-      const r = await fetch("/api/my-portfolio/create", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-        body: "{}",
-      });
-      const d = await r.json();
-      if (d.portfolio_url) {
-        window.location.reload();
-      } else {
-        throw new Error(d.error || "unknown");
-      }
-    } catch (err) {
-      btn.disabled = false;
-      btn.textContent = "יצירת דף נכסים";
-      showStatus("שגיאה ביצירת הדף", "red");
-    }
-  }
-
-  async function savePortfolio() {
-    const btn = document.getElementById("saveBtn");
-    btn.disabled = true;
-    btn.textContent = "שומר...";
-
-    // Collect testimonials
+  function collectFormData() {
     const testimonials = [];
     document.querySelectorAll(".testimonial-card").forEach((card) => {
-      testimonials.push({
-        quote: card.querySelector(".t-quote").value.trim(),
-        attribution: card.querySelector(".t-attribution").value.trim(),
-      });
+      const quote = card.querySelector(".t-quote").value.trim();
+      const attribution = card.querySelector(".t-attribution").value.trim();
+      if (quote || attribution) testimonials.push({ quote, attribution });
     });
 
-    // Collect page visibility
     const properties = [];
     document.querySelectorAll(".page-row").forEach((row, i) => {
       properties.push({
@@ -209,13 +277,13 @@
       });
     });
 
-    const body = {
+    return {
       business_name: val("business_name"),
       full_name: val("full_name"),
       city: val("city"),
       license_number: val("license_number"),
       portfolio: {
-        hero: { headline: val("hero_headline"), intro: val("hero_intro") },
+        hero: { headline: val("hero_headline"), intro: val("hero_intro"), portrait_url: portraitUrl },
         about: { body: val("about_body") },
         area: {
           headline: val("area_headline"),
@@ -226,24 +294,121 @@
         properties,
       },
     };
+  }
+
+  function showPreview() {
+    const formData = collectFormData();
+    const preview = document.getElementById("previewContent");
+
+    // Render preview HTML
+    const locations = formData.portfolio.area.locations;
+    const testimonials = formData.portfolio.testimonials;
+
+    preview.innerHTML = `
+      <div class="preview-portfolio">
+        <div class="preview-hero">
+          ${portraitUrl ? `<img class="preview-portrait" src="${esc(portraitUrl)}" alt="תמונת פרופיל">` : ""}
+          <h1>${esc(formData.portfolio.hero.headline) || esc(formData.business_name) || "דף הנכסים שלי"}</h1>
+          <p class="intro">${esc(formData.portfolio.hero.intro) || ""}</p>
+          <div class="agent-info">
+            <b>${esc(formData.full_name)}</b>
+            ${formData.business_name ? `<span>${esc(formData.business_name)}</span>` : ""}
+            ${formData.city ? `<span>📍 ${esc(formData.city)}</span>` : ""}
+            ${formData.license_number ? `<span>רישיון: ${esc(formData.license_number)}</span>` : ""}
+          </div>
+        </div>
+
+        ${formData.portfolio.about.body ? `
+          <div class="preview-section">
+            <h2>אודות</h2>
+            <p>${esc(formData.portfolio.about.body)}</p>
+          </div>
+        ` : ""}
+
+        ${(formData.portfolio.area.headline || formData.portfolio.area.body || locations.length) ? `
+          <div class="preview-section">
+            <h2>${esc(formData.portfolio.area.headline) || "אזורי פעילות"}</h2>
+            ${formData.portfolio.area.body ? `<p>${esc(formData.portfolio.area.body)}</p>` : ""}
+            ${locations.length ? `<div class="location-tags">${locations.map(l => `<span class="tag">${esc(l)}</span>`).join("")}</div>` : ""}
+          </div>
+        ` : ""}
+
+        ${testimonials.length ? `
+          <div class="preview-section">
+            <h2>מה אומרים עליי</h2>
+            <div class="testimonials-grid">
+              ${testimonials.map(t => `
+                <div class="testimonial">
+                  <p>"${esc(t.quote)}"</p>
+                  <cite>— ${esc(t.attribution)}</cite>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        ` : ""}
+
+        <div class="preview-section">
+          <h2>נכסים</h2>
+          <p style="color:#666;font-style:italic">הנכסים הפעילים שלך יופיעו כאן</p>
+        </div>
+      </div>
+    `;
+
+    document.getElementById("formView").classList.add("hidden");
+    document.getElementById("previewView").classList.remove("hidden");
+    window.scrollTo(0, 0);
+  }
+
+  function hidePreview() {
+    document.getElementById("previewView").classList.add("hidden");
+    document.getElementById("formView").classList.remove("hidden");
+  }
+
+  async function createPortfolio() {
+    const btn = document.getElementById("confirmBtn");
+    btn.disabled = true;
+    btn.textContent = "יוצר...";
+
+    const formData = collectFormData();
 
     try {
-      const r = await fetch("/api/my-portfolio", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const d = await r.json();
+      // First create the portfolio
+      const createRes = await FLY.req("/api/my-portfolio/create", { method: "POST", body: {}, noRedirect: true });
+      if (!createRes.portfolio_url) throw new Error(createRes.error || "create_failed");
+
+      // Then save the form data
+      const saveRes = await FLY.req("/api/my-portfolio", { method: "POST", body: formData, noRedirect: true });
+      if (!saveRes.ok) throw new Error(saveRes.error || "save_failed");
+
+      // Success - redirect to view
+      window.location.href = createRes.portfolio_url;
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "אישור ויצירה";
+      showStatus("שגיאה ביצירת הדף: " + (err.code || err.message), "red");
+    }
+  }
+
+  async function savePortfolio() {
+    const btn = document.getElementById("confirmBtn");
+    btn.disabled = true;
+    btn.textContent = "שומר...";
+
+    const formData = collectFormData();
+
+    try {
+      const d = await FLY.req("/api/my-portfolio", { method: "POST", body: formData, noRedirect: true });
       if (d.ok) {
         showStatus("נשמר בהצלחה!", "green");
+        hidePreview();
       } else {
         throw new Error(d.error || "unknown");
       }
     } catch (err) {
-      showStatus("שגיאה בשמירה: " + err.message, "red");
+      showStatus("שגיאה בשמירה: " + (err.code || err.message), "red");
     } finally {
       btn.disabled = false;
-      btn.textContent = "שמירה";
+      btn.textContent = "שמירת שינויים";
     }
   }
 

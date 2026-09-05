@@ -112,6 +112,7 @@
     <button id="tabProps" class="on">נכסים</button>
     <button id="tabAgents">סוכנים ופיצ׳רים</button>
     <button id="tabMessages">הודעות לסוכנים</button>
+    <button id="tabPortfolios">פורטפוליו</button>
   </div>
 
   <!-- ── AGENT MESSAGES ── -->
@@ -178,6 +179,35 @@
       הפעלת צ׳אט בוט חלה על <b>כל</b> הדפים של הסוכן — כולל דפים ישנים — ומתעדכנת תוך דקה.
       עמודת המוכנות מראה כמה מידע יש לבוט לענות ממנו בכל דף: ירוק = מלא, אדום = דל.
     </p>
+  </div>
+
+  <!-- ── PORTFOLIOS ── -->
+  <div id="panePortfolios" class="hidden">
+    <div class="toolbar">
+      <input type="search" id="portfolioSearch" placeholder="חיפוש פורטפוליו לפי שם או slug…">
+      <select id="portfolioStatusFilter">
+        <option value="">כל הסטטוסים</option>
+        <option value="open">פתוח</option>
+        <option value="closed">סגור</option>
+        <option value="draft">טיוטה</option>
+      </select>
+      <span class="who num" id="portfolioCount"></span>
+    </div>
+    <div class="table-wrap">
+      <table class="admin">
+        <thead>
+          <tr>
+            <th>שם העסק</th>
+            <th>Slug</th>
+            <th>סטטוס</th>
+            <th>טלפון</th>
+            <th>פעולות</th>
+          </tr>
+        </thead>
+        <tbody id="portfolioRows"></tbody>
+      </table>
+      <div class="empty hidden" id="portfolioEmpty">לא נמצאו פורטפוליו תואמים.</div>
+    </div>
   </div>
 
   <!-- ── PROPERTIES ── -->
