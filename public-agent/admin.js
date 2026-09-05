@@ -20,6 +20,8 @@
   var customers = [];   // agent directory for the messaging tab
   var selectedCustomers = {};
   var maxMessageRecipients = 200;
+  var portfolios = [];  // portfolio list, loaded lazily
+  var portfolioStats = {};
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -224,7 +226,221 @@
         (a.portfolio_enabled ? " checked" : "") + "><i></i></label></td>" +
       '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
         (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
+      "<td>" + quotaCellHtml(a) + "</td>" +
       "</tr>";
+  }
+
+  // ── quotas (what the client paid for) ──
+  var QUOTA_KINDS = [
+    { key: "walkthroughs", label: "יצירות נכס" },
+    { key: "chat_image_edits", label: "עריכות תמונה" },
+    { key: "chat_msgs", label: "הודעות צ׳אט" },
+    { key: "carousels", label: "קרוסלות" },
+  ];
+
+  // Compact "used/cap" per kind; "∞" = cap never set (no bundle limit yet), and
+  // a 🚫 when the client has been blocked so the operator sees who to upsell.
+  function quotaCellHtml(a) {
+    var q = a.quota && a.quota.kinds;
+    if (!q) return '<span class="p-addr">—</span>';
+    var parts = QUOTA_KINDS.map(function (k) {
+      var v = q[k.key] || {};
+      var cap = v.cap == null ? "∞" : v.cap;
+      var cls = v.exhausted ? ' class="thin"' : (v.cap == null ? ' class="p-addr"' : "");
+      return "<span" + cls + ' title="' + esc(k.label) + '">' + esc(v.used || 0) + "/" + esc(cap) + "</span>";
+    });
+    var blocked = a.quota.last_blocked ? ' <span title="נחסם: ' + esc(a.quota.last_blocked.kind || "") + '">🚫</span>' : "";
+    return '<div class="rd num" dir="ltr">' + parts.join(" · ") + "</div>" +
+      '<button type="button" class="link" data-quota="' + esc(a.phone) + '">ערוך' + blocked + "</button>";
+  }
+
+  // Firestore Timestamps serialize as {_seconds}; history rows may be ISO or ms.
+  function toMs(v) {
+    if (!v) return 0;
+    if (typeof v === "number") return v;
+    if (v._seconds != null) return v._seconds * 1000;
+    if (v.seconds != null) return v.seconds * 1000;
+    var t = Date.parse(v);
+    return isNaN(t) ? 0 : t;
+  }
+  function fmtWhen(v) {
+    var ms = toMs(v);
+    if (!ms) return "";
+    return new Date(ms).toLocaleString("he-IL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+  function kindLabel(key) {
+    var k = QUOTA_KINDS.filter(function (x) { return x.key === key; })[0];
+    return k ? k.label : (key || "");
+  }
+  function fieldLabel(f) {
+    if (f === "plan") return "תוכנית";
+    if (f === "notes") return "הערות";
+    if (f === "last_blocked") return "התראה על בקשה חסומה";
+    var isCap = /_cap$/.test(f), key = f.replace(/_(cap|used)$/, "");
+    return kindLabel(key) + (isCap ? " · מכסה" : " · נוצל");
+  }
+  function fmtVal(v, field) {
+    if (v == null || v === "") return /_cap$/.test(field) ? "∞" : "—";
+    return String(v);
+  }
+  function closeQuotaDlg() {
+    var dlg = $("#quotaDlg");
+    dlg.close ? dlg.close() : dlg.removeAttribute("open");
+  }
+
+  // The refused-request card: what the client tried, whether the CURRENT caps
+  // would now let it run, and the two operator actions (offer a redo / dismiss).
+  function renderBlockedCard(a, q) {
+    var card = $("#qBlocked");
+    var b = q && q.last_blocked;
+    if (!b || b.replayed) { card.classList.add("hidden"); return; }
+    var kind = (q.kinds && q.kinds[b.kind]) || {};
+    var amount = Math.max(1, Number(b.amount) || 1);
+    var fits = kind.cap == null || (kind.remaining != null && kind.remaining >= amount);
+    var req = b.request, msg = "", imgs = [];
+    if (req && typeof req === "object") {
+      msg = req.message || req.prompt || req.text || "";
+      imgs = Array.isArray(req.images) ? req.images : (req.source_image_url ? [req.source_image_url] : []);
+      if (!msg && !imgs.length) msg = JSON.stringify(req, null, 2);
+    } else if (req != null) {
+      msg = String(req);
+    }
+    $("#qbTitle").textContent = kindLabel(b.kind) + (amount > 1 ? " ×" + amount : "");
+    $("#qbWhen").textContent = fmtWhen(b.at) + (b.source ? " · " + b.source : "");
+    $("#qbMsg").textContent = msg;
+    $("#qbMsg").classList.toggle("hidden", !msg);
+    $("#qbImgs").innerHTML = imgs.map(function (u) {
+      return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" alt="" loading="lazy"></a>';
+    }).join("");
+    $("#qbImgs").classList.toggle("hidden", !imgs.length);
+    var st = $("#qbStatus");
+    if (fits) {
+      st.textContent = "✅ המכסה הנוכחית כבר מספיקה לבקשה הזו";
+      st.className = "qb-status ok";
+    } else {
+      st.textContent = "⛔ לא נכנס במכסה — נותרו " + (kind.remaining == null ? "∞" : kind.remaining) +
+        ", נדרשים " + amount + ". הגדילו את המכסה (או אפסו את המונה) ושמרו.";
+      st.className = "qb-status no";
+    }
+    $("#qDismiss").onclick = function () { dismissBlocked(a.phone); };
+    card.classList.remove("hidden");
+  }
+
+  // Merged timeline from the DB: admin changes (quota_history) + blocks (quota_events).
+  function renderHistory(events, history) {
+    var rows = [];
+    (history || []).forEach(function (h) {
+      (h.changes || []).forEach(function (c) {
+        rows.push({ ms: toMs(h.at), icon: c.field === "last_blocked" ? "🧹" : "✏️",
+          html: esc(fieldLabel(c.field)) + ': <span dir="ltr">' + esc(fmtVal(c.from, c.field)) + " → " + esc(fmtVal(c.to, c.field)) + "</span>",
+          who: h.by ? "ע״י " + h.by : "" });
+      });
+    });
+    (events || []).forEach(function (e) {
+      var amt = Number(e.amount) || 1;
+      rows.push({ ms: toMs(e.at), icon: "🚫",
+        html: "נחסם: " + esc(kindLabel(e.kind)) + (amt > 1 ? " ×" + amt : "") +
+          ' <span dir="ltr" class="num">(' + esc(e.used || 0) + "/" + (e.cap == null ? "∞" : esc(e.cap)) + ")</span>",
+        who: e.source || "" });
+    });
+    rows.sort(function (x, y) { return y.ms - x.ms; });
+    rows = rows.slice(0, 25);
+    $("#qHistory").innerHTML = rows.length ? rows.map(function (r) {
+      return '<li><span class="qh-ic">' + r.icon + '</span><span class="qh-tx">' + r.html + '</span>' +
+        '<span class="qh-meta">' + esc(fmtWhen(r.ms)) + (r.who ? " · " + esc(r.who) : "") + "</span></li>";
+    }).join("") : '<li class="p-addr">אין היסטוריה עדיין</li>';
+  }
+
+  function fillQuotaForm(a, q) {
+    $("#qPlan").value = (q && q.plan) || "";
+    $("#qNotes").value = (q && q.notes) || "";
+    $("#qPlanChip").textContent = (q && q.plan) || "ללא תוכנית";
+    var rows = $("#qRows");
+    rows.innerHTML = "";
+    QUOTA_KINDS.forEach(function (k) {
+      var v = (q && q.kinds && q.kinds[k.key]) || {};
+      var used = Number(v.used) || 0, cap = v.cap;
+      var pct = cap == null ? 0 : (cap === 0 ? 100 : Math.min(100, Math.round(used / cap * 100)));
+      var cls = cap == null ? "none" : (v.exhausted ? "full" : (pct >= 75 ? "warn" : "ok"));
+      var row = document.createElement("div");
+      row.className = "qk-row";
+      row.innerHTML =
+        '<div class="qk-label">' + esc(k.label) + "</div>" +
+        '<div class="qk-bar ' + cls + '"><i style="width:' + pct + '%"></i></div>' +
+        '<div class="qk-nums num" dir="ltr">' + esc(used) + " / " + (cap == null ? "∞" : esc(cap)) +
+          (cap == null ? "" : ' <small dir="rtl">נותרו ' + esc(Math.max(0, cap - used)) + "</small>") + "</div>" +
+        '<input class="qk-cap" type="number" min="0" step="1" inputmode="numeric" data-cap="' + esc(k.key) +
+          '" value="' + (cap == null ? "" : esc(cap)) + '" placeholder="∞" title="ריק = ללא הגבלה">' +
+        '<label class="qk-reset" title="איפוס המונה ל-0"><input type="checkbox" data-reset="' + esc(k.key) + '"> איפוס</label>';
+      rows.appendChild(row);
+    });
+    renderBlockedCard(a, q);
+  }
+
+  // Fresh ledger + audit trail from the server — the row's copy may be stale.
+  function loadQuotaDetails(a) {
+    $("#qHistory").innerHTML = '<li class="p-addr">טוען…</li>';
+    return FLY.req("/api/admin/business/quota?phone=" + encodeURIComponent(a.phone), { noRedirect: true })
+      .then(function (d) {
+        a.quota = d.quota;
+        fillQuotaForm(a, d.quota);
+        renderHistory(d.events, d.history);
+      })
+      .catch(function () { $("#qHistory").innerHTML = '<li class="p-addr">לא ניתן לטעון היסטוריה</li>'; });
+  }
+
+  function openQuotaEditor(phone) {
+    var a = agents.filter(function (x) { return x.phone === phone; })[0];
+    if (!a) return;
+    var dlg = $("#quotaDlg");
+    dlg.dataset.phone = phone;
+    $("#qName").textContent = a.name || phone;
+    $("#qPhone").textContent = phone;
+    $("#qClose").onclick = closeQuotaDlg;
+    fillQuotaForm(a, a.quota || null);
+    if (typeof dlg.showModal === "function") { if (!dlg.open) dlg.showModal(); } else dlg.setAttribute("open", "");
+    loadQuotaDetails(a);
+  }
+
+  function dismissBlocked(phone) {
+    if (!confirm("להסיר את ההתראה על הבקשה שנחסמה?\nהבקשה נשארת בהיסטוריה, אבל לא תוצע ללקוח לביצוע חוזר.")) return;
+    FLY.req("/api/admin/business/quota", { method: "POST", body: { phone: phone, clear_blocked: true }, noRedirect: true })
+      .then(function (d) {
+        var a = agents.filter(function (x) { return x.phone === phone; })[0];
+        if (a) { a.quota = d.quota; loadQuotaDetails(a); }
+        applyAgentFilter();
+        FLY.toast(d.cleared ? "ההתראה הוסרה" : "לא הייתה התראה פעילה");
+      })
+      .catch(function () { FLY.toast("שגיאה בהסרת ההתראה"); });
+  }
+
+  function saveQuotaEditor() {
+    var dlg = $("#quotaDlg");
+    var phone = dlg.dataset.phone;
+    var caps = {}, reset = [];
+    dlg.querySelectorAll("[data-cap]").forEach(function (inp) {
+      caps[inp.dataset.cap] = inp.value === "" ? null : Number(inp.value);
+    });
+    dlg.querySelectorAll("[data-reset]").forEach(function (cb) {
+      if (cb.checked) reset.push(cb.dataset.reset);
+    });
+    var btn = $("#qSave");
+    btn.disabled = true;
+    FLY.req("/api/admin/business/quota", {
+      method: "POST",
+      body: { phone: phone, caps: caps, reset_used: reset, plan: $("#qPlan").value, notes: $("#qNotes").value },
+      noRedirect: true,
+    }).then(function (d) {
+      var a = agents.filter(function (x) { return x.phone === phone; })[0];
+      if (a) a.quota = d.quota;
+      btn.disabled = false;
+      closeQuotaDlg();
+      applyAgentFilter();
+      FLY.toast(d.changes && d.changes.length ? "✅ המכסות עודכנו" : "אין שינוי");
+    }).catch(function (e) {
+      btn.disabled = false;
+      FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון המכסות");
+    });
   }
 
   function applyAgentFilter() {
@@ -240,7 +456,21 @@
     bindAgentActions();
   }
 
+  var quotaDlgBound = false;
+  function bindQuotaDialogOnce() {
+    if (quotaDlgBound) return;
+    var save = $("#qSave"), cancel = $("#qCancel"), dlg = $("#quotaDlg");
+    if (!save || !cancel || !dlg) return;
+    quotaDlgBound = true;
+    save.addEventListener("click", saveQuotaEditor);
+    cancel.addEventListener("click", function () { dlg.close ? dlg.close() : dlg.removeAttribute("open"); });
+  }
+
   function bindAgentActions() {
+    bindQuotaDialogOnce();
+    document.querySelectorAll("[data-quota]").forEach(function (btn) {
+      btn.addEventListener("click", function () { openQuotaEditor(btn.dataset.quota); });
+    });
     // Portfolio + distribution entitlements share one shape: flip a feature
     // flag on the business, keep the local row in step, toast the result.
     // (Distribution arms the WhatsApp publish offer for FUTURE pages.)

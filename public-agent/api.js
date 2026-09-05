@@ -142,8 +142,85 @@ window.FLY = (function () {
         if (p && p.catch) p.catch(function () {});
       });
     });
+    guardCreateLinks();
   });
 
+  // ── quota guard on "new property" links ───────────────────────────────────
+  // Every link to /create.html first asks /api/quota/me about the agent's
+  // walkthroughs bundle: an exhausted bundle gets a popup (used/cap + payment
+  // link) instead of the create form. Fails open on a network error — the
+  // server enforces the cap on submit regardless, this only saves the agent
+  // filling in a form they can't submit.
+  var CREATE_KIND = "walkthroughs";
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function quotaBlockedDialog(q) {
+    var k = (q && q.kinds && q.kinds[CREATE_KIND]) || {};
+    var pay = q && q.payment_url;
+    var dlg = document.getElementById("quotaGuardDlg");
+    if (!dlg) {
+      var st = document.createElement("style");
+      st.textContent = "#quotaGuardDlg::backdrop{background:rgba(20,17,12,.45);backdrop-filter:blur(2px)}";
+      document.head.appendChild(st);
+      dlg = document.createElement("dialog");
+      dlg.id = "quotaGuardDlg";
+      dlg.setAttribute("dir", "rtl");
+      // Explicit centering. Two things fight the browser's default centering:
+      // the app's `*{margin:0}` reset cancels dialog{margin:auto}, and the UA
+      // sets all four insets to 0 — in an RTL element an over-constrained box
+      // resolves to `right`, so top/left alone still snapped it to the right
+      // edge. right/bottom:auto removes the conflict in both directions.
+      dlg.style.cssText = "position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);margin:0;" +
+        "width:min(440px,92vw);max-height:calc(100vh - 32px);overflow:auto;" +
+        "border:1px solid rgba(185,138,47,.35);border-radius:18px;padding:0;" +
+        "background:var(--paper,#fffdf9);color:var(--ink,#17140f);font:inherit;box-shadow:0 30px 80px rgba(20,17,12,.28)";
+      document.body.appendChild(dlg);
+    }
+    dlg.innerHTML =
+      '<div style="padding:26px 26px 22px;text-align:center">' +
+        '<div style="font-size:2.2rem;margin-bottom:6px">🔒</div>' +
+        '<h3 style="font-family:var(--serif,serif);font-size:1.25rem;margin:0 0 8px">המכסה ליצירת נכסים נוצלה</h3>' +
+        '<p style="color:var(--ink-soft,#6b6357);font-weight:300;margin:0;line-height:1.65">' +
+          'השתמשת ב-<b dir="ltr">' + esc(k.used || 0) + " / " + (k.cap == null ? "∞" : esc(k.cap)) + "</b> " +
+          esc(k.label || "יצירות נכס") + " בחבילה שלך.<br>" +
+          (pay ? "לרכישת חבילה נוספת לחצו על הכפתור — אחרי התשלום נעדכן את החשבון."
+               : "לרכישת חבילה נוספת דברו איתנו — אחרי התשלום נעדכן את החשבון.") +
+        "</p>" +
+        '<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:18px">' +
+          (pay ? '<a class="btn btn-gold" target="_blank" rel="noopener" href="' + esc(pay) + '">רכישת חבילה</a>' : "") +
+          '<button type="button" class="btn btn-ghost" data-close>סגירה</button>' +
+        "</div>" +
+      "</div>";
+    dlg.querySelector("[data-close]").onclick = function () { dlg.close ? dlg.close() : dlg.removeAttribute("open"); };
+    if (typeof dlg.showModal === "function") { if (!dlg.open) dlg.showModal(); } else dlg.setAttribute("open", "");
+  }
+
+  function guardCreateLinks(root) {
+    (root || document).querySelectorAll('a[href^="/create.html"]').forEach(function (a) {
+      if (a._quotaGuarded) return;
+      a._quotaGuarded = true;
+      a.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        var href = a.getAttribute("href");
+        a.style.opacity = ".6"; a.style.pointerEvents = "none";
+        req("/api/quota/me").then(function (q) {
+          var k = q && q.kinds && q.kinds[CREATE_KIND];
+          if (k && k.exhausted) quotaBlockedDialog(q);
+          else location.href = href;
+        }).catch(function (e) {
+          if (e && e.message === "unauthenticated") return;   // req() already redirected to login
+          location.href = href;                                 // fail open
+        }).then(function () { a.style.opacity = ""; a.style.pointerEvents = ""; });
+      });
+    });
+  }
+
   return { req: req, toast: toast, uploadFiles: uploadFiles, deleteUpload: deleteUpload, el: el,
-           loaderShow: loaderShow, loaderHide: loaderHide };
+           loaderShow: loaderShow, loaderHide: loaderHide,
+           guardCreateLinks: guardCreateLinks, quotaBlockedDialog: quotaBlockedDialog };
 })();

@@ -113,6 +113,7 @@
     <button id="tabAgents">סוכנים ופיצ׳רים</button>
     <button id="tabPortfolios">פורטפוליו</button>
     <button id="tabMessages">הודעות לסוכנים</button>
+    <button id="tabPortfolios">פורטפוליו</button>
   </div>
 
   <!-- ── AGENT MESSAGES ── -->
@@ -169,6 +170,7 @@
             <th>צ׳אט בוט</th>
             <th>דף נכסים</th>
             <th>הפצה</th>
+            <th title="מה הלקוח שילם עליו: נוצל/מכסה">מכסות</th>
           </tr>
         </thead>
         <tbody id="agentRows"></tbody>
@@ -255,6 +257,97 @@
   </div>
   </div>
 </div>
+
+<!-- Quota editor: what this client paid for. One-time bundles — "used" only
+     counts up until you raise the cap or tick "אפס". Empty cap = no bundle
+     limit (the pre-existing behaviour keeps applying). -->
+<style>
+  /* ── quota dialog ── */
+  #quotaDlg{position:fixed;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);margin:0;width:min(620px,94vw);max-height:calc(100vh - 32px);border:1px solid rgba(185,138,47,.3);border-radius:18px;padding:0;direction:rtl;font:inherit;color:var(--ink);background:var(--paper);box-shadow:0 30px 80px rgba(20,17,12,.28)}
+  #quotaDlg::backdrop{background:rgba(20,17,12,.45);backdrop-filter:blur(2px)}
+  .qd-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px 22px 14px;border-bottom:1px solid rgba(23,20,15,.08)}
+  .qd-head h3{font-family:var(--serif);font-size:1.25rem;margin:0}
+  .qd-sub{display:flex;gap:8px;align-items:center;margin-top:5px;font-size:.8rem;color:var(--ink-soft)}
+  .qd-chip{font-size:.64rem;letter-spacing:.06em;text-transform:uppercase;border:1px solid rgba(185,138,47,.42);color:var(--gold);border-radius:100px;padding:2px 8px}
+  .qd-x{background:none;border:0;font-size:1.4rem;line-height:1;color:var(--ink-soft);cursor:pointer;padding:2px 8px;border-radius:8px}
+  .qd-x:hover{background:var(--gold-faint);color:var(--ink)}
+  .qd-body{padding:14px 22px 18px;max-height:70vh;overflow:auto}
+  .qd-sec{font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);margin:16px 0 8px}
+  .qd-sec:first-child{margin-top:0}
+  /* refused-request card */
+  .qb{border:1px solid rgba(192,57,43,.3);background:rgba(192,57,43,.05);border-radius:12px;padding:12px 14px;margin-bottom:4px}
+  .qb-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+  .qb-top b{font-size:.95rem}
+  .qb-when{font-size:.74rem;color:var(--ink-soft)}
+  .qb-msg{margin-top:8px;font-size:.88rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;background:#fffdf9;border-radius:8px;padding:8px 10px;border:1px solid rgba(23,20,15,.08)}
+  .qb-imgs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .qb-imgs img{width:58px;height:58px;object-fit:cover;border-radius:8px;border:1px solid rgba(23,20,15,.12);display:block;background:var(--dark)}
+  .qb-status{margin-top:8px;font-size:.8rem;line-height:1.45}
+  .qb-status.ok{color:#1d7a43}.qb-status.no{color:var(--red)}
+  .qb-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+  .qb-actions label{font-size:.82rem;display:flex;gap:6px;align-items:center;cursor:pointer}
+  .qb-actions input[type=checkbox]{accent-color:var(--gold)}
+  .qb-dismiss{background:none;border:1px solid rgba(23,20,15,.18);border-radius:8px;padding:6px 12px;font:inherit;font-size:.8rem;cursor:pointer;color:var(--ink)}
+  .qb-dismiss:hover{border-color:var(--red);color:var(--red)}
+  /* per-kind rows */
+  .qk-row{display:grid;grid-template-columns:1.1fr 1.3fr auto 84px auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(23,20,15,.06)}
+  .qk-row:last-child{border-bottom:0}
+  .qk-label{font-weight:600;font-size:.9rem}
+  .qk-bar{height:8px;border-radius:100px;background:rgba(23,20,15,.08);overflow:hidden}
+  .qk-bar i{display:block;height:100%;border-radius:100px;background:var(--gold);transition:width .3s}
+  .qk-bar.ok i{background:#2e9e5b}.qk-bar.full i{background:var(--red)}
+  .qk-bar.none{background:repeating-linear-gradient(90deg,rgba(23,20,15,.09) 0 6px,transparent 6px 12px)}
+  .qk-nums{font-size:.82rem;white-space:nowrap}.qk-nums small{color:var(--ink-soft);font-size:.72rem;margin-inline-start:4px}
+  .qk-cap{width:84px;font:inherit;font-size:.9rem;padding:7px 8px;border:1px solid rgba(23,20,15,.16);border-radius:8px;background:#fffdf9;text-align:center;outline:none;color:var(--ink)}
+  .qk-cap:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-faint)}
+  .qk-reset{font-size:.76rem;color:var(--ink-soft);display:flex;gap:4px;align-items:center;white-space:nowrap;cursor:pointer}
+  .qk-reset input{accent-color:var(--gold)}
+  .qd-grid{display:grid;grid-template-columns:1fr 2fr;gap:12px}
+  .qd-grid .field{margin:0}
+  .qd-grid textarea{resize:vertical;min-height:44px}
+  /* history */
+  .qh{list-style:none;margin:0;padding:0;font-size:.8rem;max-height:190px;overflow:auto;border:1px solid rgba(23,20,15,.08);border-radius:10px;background:#fffdf9}
+  .qh li{display:grid;grid-template-columns:auto 1fr auto;gap:8px;padding:6px 10px;border-bottom:1px solid rgba(23,20,15,.05);align-items:baseline}
+  .qh li:last-child{border-bottom:0}
+  .qh li.p-addr{display:block;text-align:center;padding:12px}
+  .qh-meta{color:var(--ink-soft);font-size:.72rem;white-space:nowrap}
+  .qd-foot{display:flex;gap:8px;justify-content:flex-start;padding:14px 22px 18px;border-top:1px solid rgba(23,20,15,.08);background:rgba(255,253,249,.6)}
+  @media(max-width:560px){.qk-row{grid-template-columns:1fr 1fr}.qk-bar{grid-column:1/-1}.qd-grid{grid-template-columns:1fr}}
+</style>
+<dialog id="quotaDlg">
+  <div class="qd-head">
+    <div>
+      <h3 id="qName">מכסות ללקוח</h3>
+      <div class="qd-sub"><span class="num" dir="ltr" id="qPhone"></span><span class="qd-chip" id="qPlanChip"></span></div>
+    </div>
+    <button type="button" class="qd-x" id="qClose" aria-label="סגירה">×</button>
+  </div>
+  <div class="qd-body">
+    <div id="qBlocked" class="qb hidden">
+      <div class="qb-top"><b>🚫 בקשה שנחסמה: <span id="qbTitle"></span></b><span class="qb-when" id="qbWhen"></span></div>
+      <div class="qb-msg" id="qbMsg"></div>
+      <div class="qb-imgs" id="qbImgs"></div>
+      <div class="qb-status" id="qbStatus"></div>
+      <div class="qb-actions">
+        <span class="qb-when">הבקשה נשמרה במלואה; ביצוע חוזר אוטומטי — בהמשך</span>
+        <button type="button" class="qb-dismiss" id="qDismiss">הסרת ההתראה</button>
+      </div>
+    </div>
+    <div class="qd-sec">מכסות · ריק = ללא הגבלה</div>
+    <div id="qRows"></div>
+    <div class="qd-sec">חבילה</div>
+    <div class="qd-grid">
+      <div class="field"><label for="qPlan">תוכנית</label><input id="qPlan" type="text" maxlength="40" placeholder="basic-10"></div>
+      <div class="field"><label for="qNotes">הערות (מה שולם, מתי)</label><textarea id="qNotes" rows="2" maxlength="500"></textarea></div>
+    </div>
+    <div class="qd-sec">היסטוריה</div>
+    <ul class="qh" id="qHistory"></ul>
+  </div>
+  <div class="qd-foot">
+    <button type="button" id="qSave" class="btn btn-gold">שמירה</button>
+    <button type="button" id="qCancel" class="btn btn-ghost">ביטול</button>
+  </div>
+</dialog>
 
 <script src="/api.js"></script>
 <script src="/admin.js"></script>

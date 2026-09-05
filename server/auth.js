@@ -19,7 +19,10 @@ const express = require("express");
 const OTP_TTL_MS = 5 * 60 * 1000;      // code valid 5 minutes
 const RESEND_COOLDOWN_MS = 60 * 1000;  // 1 resend per minute
 const MAX_ATTEMPTS = 5;                // wrong-code attempts before lockout
+const MAX_SENDS_PER_DAY = 8;           // per-phone daily send cap (anti brute-force via resend)
 const SESSION_TTL_S = 12 * 60 * 60;    // 12 hours
+
+const todayKey = () => new Date().toISOString().slice(0, 10);
 
 // ── phone ──
 // Canonical form lives in utils.js so ownership checks and their tests can
@@ -136,6 +139,14 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
         return res.status(429).json({ ok: false, error: "too_soon", retry_after: wait });
       }
 
+      // Per-phone daily send cap: stops an attacker resetting the 5-attempt
+      // lockout indefinitely by requesting a fresh code each minute.
+      const day = todayKey();
+      const sendsToday = prev && prev.sends_day === day ? (prev.sends_today || 0) : 0;
+      if (sendsToday >= MAX_SENDS_PER_DAY) {
+        return res.status(429).json({ ok: false, error: "daily_limit" });
+      }
+
       const code = String(crypto.randomInt(100000, 1000000)); // 6 digits, CSPRNG
       const now = new Date();
       await saveOtp(phone, {
@@ -144,6 +155,8 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
         created_at: now,
         attempts: 0,
         used: false,
+        sends_today: sendsToday + 1,
+        sends_day: day,
       });
 
       // ponytail: no GreenAPI creds = local dev, WhatsApp send is a no-op —
