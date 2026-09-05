@@ -96,8 +96,9 @@ server/data
 .codex/
 
 # Claude Flow runtime data
-.claude-flow/data/
-.claude-flow/logs/
+# any depth: the claude-flow hooks create these relative to the shell's cwd
+**/.claude-flow/data/
+**/.claude-flow/logs/
 
 # Environment variables
 .env
