@@ -286,14 +286,5 @@ module.exports = function createDashboardRouter(ctx) {
     }
   });
 
-  // ── signup redirect (logged-in → web form with phone) ──
-  router.get("/signup", (req, res) => {
-    const session = verifySession(authSecret, readToken(req));
-    if (session && session.userId) {
-      return res.redirect(`${webSignupBase}?phone=${encodeURIComponent(session.userId)}`);
-    }
-    res.sendFile(path.join(__dirname, "..", "..", "public-agent", "signup.html"));
-  });
-
   return router;
 };

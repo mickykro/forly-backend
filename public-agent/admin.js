@@ -15,6 +15,8 @@
   var stats = {};
   var agents = [];      // agent directory, loaded lazily when the tab is opened
   var agentStats = {};
+  var portfolios = [];  // portfolio list, loaded lazily
+  var portfolioStats = {};
   var customers = [];   // agent directory for the messaging tab
   var selectedCustomers = {};
   var maxMessageRecipients = 200;
@@ -220,10 +222,10 @@
       "<td>" + readinessPills(a.readiness) + "</td>" +
       '<td><label class="switch"><input type="checkbox" data-chatbot="' + esc(a.phone) + '"' +
         (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
-      '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
-        (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
       '<td><label class="switch"><input type="checkbox" data-portfolio-feature="' + esc(a.phone) + '"' +
         (a.portfolio_enabled ? " checked" : "") + "><i></i></label></td>" +
+      '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
+        (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
       "<td>" + quotaCellHtml(a) + "</td>" +
       "</tr>";
   }
@@ -469,48 +471,34 @@
     document.querySelectorAll("[data-quota]").forEach(function (btn) {
       btn.addEventListener("click", function () { openQuotaEditor(btn.dataset.quota); });
     });
-    // Distribution entitlement: arms the page-ready hook (WhatsApp one-tap
-    // publish offer) for every FUTURE page this agent creates.
-    document.querySelectorAll("[data-distribution]").forEach(function (input) {
-      input.addEventListener("change", function () {
-        var phone = input.dataset.distribution;
-        var want = input.checked;
-        input.disabled = true;
-        FLY.req("/api/admin/business/features", {
-          method: "POST",
-          body: { phone: phone, feature: "distribution", enabled: want },
-          noRedirect: true,
-        }).then(function () {
-          var a = agents.filter(function (x) { return x.phone === phone; })[0];
-          if (a) a.distribution_enabled = want;
-          input.disabled = false;
-          FLY.toast(want ? "✅ הפצה הופעלה — נכסים חדשים יקבלו הצעת פרסום בוואטסאפ"
-            : "הפצה כובתה לסוכן");
-        }).catch(function (e) {
-          input.checked = !want;   // the server refused — don't lie about the state
-          input.disabled = false;
-          FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
-        });
-      });
-    });
-    document.querySelectorAll("[data-portfolio-feature]").forEach(function (input) {
-      input.addEventListener("change", function () {
-        var phone = input.dataset.portfolioFeature;
-        var want = input.checked;
-        input.disabled = true;
-        FLY.req("/api/admin/business/features", {
-          method: "POST",
-          body: { phone: phone, feature: "portfolio", enabled: want },
-          noRedirect: true,
-        }).then(function () {
-          var a = agents.filter(function (x) { return x.phone === phone; })[0];
-          if (a) a.portfolio_enabled = want;
-          input.disabled = false;
-          FLY.toast(want ? "✅ דף נכסים הופעל לסוכן" : "דף נכסים כובה");
-        }).catch(function (e) {
-          input.checked = !want;
-          input.disabled = false;
-          FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
+    // Portfolio + distribution entitlements share one shape: flip a feature
+    // flag on the business, keep the local row in step, toast the result.
+    // (Distribution arms the WhatsApp publish offer for FUTURE pages.)
+    [
+      { attr: "portfolioFeature", sel: "[data-portfolio-feature]", feature: "portfolio", key: "portfolio_enabled",
+        on: "✅ דף נכסים הופעל לסוכן", off: "דף נכסים כובה" },
+      { attr: "distribution", sel: "[data-distribution]", feature: "distribution", key: "distribution_enabled",
+        on: "✅ הפצה הופעלה — נכסים חדשים יקבלו הצעת פרסום בוואטסאפ", off: "הפצה כובתה לסוכן" },
+    ].forEach(function (f) {
+      document.querySelectorAll(f.sel).forEach(function (input) {
+        input.addEventListener("change", function () {
+          var phone = input.dataset[f.attr];
+          var want = input.checked;
+          input.disabled = true;
+          FLY.req("/api/admin/business/features", {
+            method: "POST",
+            body: { phone: phone, feature: f.feature, enabled: want },
+            noRedirect: true,
+          }).then(function () {
+            var a = agents.filter(function (x) { return x.phone === phone; })[0];
+            if (a) a[f.key] = want;
+            input.disabled = false;
+            FLY.toast(want ? f.on : f.off);
+          }).catch(function (e) {
+            input.checked = !want;   // the server refused — don't lie about the state
+            input.disabled = false;
+            FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
+          });
         });
       });
     });
@@ -549,73 +537,6 @@
       agentStats = d.stats || {};
       applyAgentFilter();
     });
-  }
-
-  function selectedCustomerCount() {
-    return Object.keys(selectedCustomers).filter(function (phone) { return selectedCustomers[phone]; }).length;
-  }
-
-  function customerRowHtml(customer) {
-    var checked = selectedCustomers[customer.phone] ? " checked" : "";
-    return "<tr>" +
-      '<td><input class="customer-check" type="checkbox" data-customer="' + esc(customer.phone) + '"' + checked + "></td>" +
-      '<td class="agent">' + esc(customer.name) + '</td>' +
-      '<td class="num" dir="ltr">' + esc(customer.phone) + '</td>' +
-      '<td class="num">' + esc(customer.active_pages || 0) + "</td>" +
-      "</tr>";
-  }
-
-  function updateMessageMeta() {
-    var audience = $("#messageAudience").value;
-    var count = audience === "all" ? customers.length : selectedCustomerCount();
-    $("#messageLength").textContent = ($("#customerMessage").value || "").length + " / 1500";
-    $("#messageRecipientCount").textContent = count + (audience === "all" ? " סוכנים יקבלו את ההודעה" : " סוכנים נבחרו");
-    $("#sendCustomerMessage").disabled = count === 0 || count > maxMessageRecipients;
-  }
-
-  function applyCustomerFilter() {
-    var q = ($("#customerSearch").value || "").trim().toLowerCase();
-    var shown = customers.filter(function (customer) {
-      return !q || (customer.name + " " + customer.phone).toLowerCase().indexOf(q) !== -1;
-    });
-    $("#customerRows").innerHTML = shown.map(customerRowHtml).join("");
-    $("#customerEmpty").classList.toggle("hidden", shown.length > 0);
-    $("#customerCount").textContent = shown.length === customers.length ? customers.length + " לקוחות" : shown.length + " מתוך " + customers.length;
-    document.querySelectorAll("[data-customer]").forEach(function (input) {
-      input.addEventListener("change", function () {
-        selectedCustomers[input.dataset.customer] = input.checked;
-        updateMessageMeta();
-      });
-    });
-    updateMessageMeta();
-  }
-
-  function loadCustomers() {
-    return FLY.req("/api/admin/agents", { noRedirect: true }).then(function (d) {
-      customers = d.agents || [];
-      applyCustomerFilter();
-    });
-  }
-
-  function sendCustomerMessage() {
-    var audience = $("#messageAudience").value;
-    var count = audience === "all" ? customers.length : selectedCustomerCount();
-    var message = ($("#customerMessage").value || "").trim();
-    if (!message) return FLY.toast("יש לכתוב הודעה לפני השליחה");
-    if (count > maxMessageRecipients) return FLY.toast("ניתן לשלוח לעד " + maxMessageRecipients + " סוכנים בפעולה אחת");
-    if (!count) return FLY.toast("יש לבחור לפחות סוכן אחד");
-    if (!confirm("לשלוח את ההודעה ל-" + count + " סוכנים?")) return;
-    var button = $("#sendCustomerMessage");
-    button.disabled = true;
-    FLY.req("/api/admin/messages", {
-      method: "POST",
-      body: { audience: audience, phones: Object.keys(selectedCustomers).filter(function (phone) { return selectedCustomers[phone]; }), message: message },
-      noRedirect: true,
-    }).then(function (d) {
-      FLY.toast("✅ ההודעה נשלחה ל-" + d.recipient_count + " סוכנים");
-    }).catch(function (e) {
-      FLY.toast(e.code === "too_many_recipients" ? "יש לצמצם את רשימת הסוכנים" : "שליחת ההודעה נכשלה");
-    }).finally(function () { updateMessageMeta(); });
   }
 
   // ── portfolios view ──
@@ -687,18 +608,84 @@
     });
   }
 
+  function selectedCustomerCount() {
+    return Object.keys(selectedCustomers).filter(function (phone) { return selectedCustomers[phone]; }).length;
+  }
+
+  function customerRowHtml(customer) {
+    var checked = selectedCustomers[customer.phone] ? " checked" : "";
+    return "<tr>" +
+      '<td><input class="customer-check" type="checkbox" data-customer="' + esc(customer.phone) + '"' + checked + "></td>" +
+      '<td class="agent">' + esc(customer.name) + '</td>' +
+      '<td class="num" dir="ltr">' + esc(customer.phone) + '</td>' +
+      '<td class="num">' + esc(customer.active_pages || 0) + "</td>" +
+      "</tr>";
+  }
+
+  function updateMessageMeta() {
+    var audience = $("#messageAudience").value;
+    var count = audience === "all" ? customers.length : selectedCustomerCount();
+    $("#messageLength").textContent = ($("#customerMessage").value || "").length + " / 1500";
+    $("#messageRecipientCount").textContent = count + (audience === "all" ? " סוכנים יקבלו את ההודעה" : " סוכנים נבחרו");
+    $("#sendCustomerMessage").disabled = count === 0 || count > maxMessageRecipients;
+  }
+
+  function applyCustomerFilter() {
+    var q = ($("#customerSearch").value || "").trim().toLowerCase();
+    var shown = customers.filter(function (customer) {
+      return !q || (customer.name + " " + customer.phone).toLowerCase().indexOf(q) !== -1;
+    });
+    $("#customerRows").innerHTML = shown.map(customerRowHtml).join("");
+    $("#customerEmpty").classList.toggle("hidden", shown.length > 0);
+    $("#customerCount").textContent = shown.length === customers.length ? customers.length + " לקוחות" : shown.length + " מתוך " + customers.length;
+    document.querySelectorAll("[data-customer]").forEach(function (input) {
+      input.addEventListener("change", function () {
+        selectedCustomers[input.dataset.customer] = input.checked;
+        updateMessageMeta();
+      });
+    });
+    updateMessageMeta();
+  }
+
+  function loadCustomers() {
+    return FLY.req("/api/admin/agents", { noRedirect: true }).then(function (d) {
+      customers = d.agents || [];
+      applyCustomerFilter();
+    });
+  }
+
+  function sendCustomerMessage() {
+    var audience = $("#messageAudience").value;
+    var count = audience === "all" ? customers.length : selectedCustomerCount();
+    var message = ($("#customerMessage").value || "").trim();
+    if (!message) return FLY.toast("יש לכתוב הודעה לפני השליחה");
+    if (count > maxMessageRecipients) return FLY.toast("ניתן לשלוח לעד " + maxMessageRecipients + " סוכנים בפעולה אחת");
+    if (!count) return FLY.toast("יש לבחור לפחות סוכן אחד");
+    if (!confirm("לשלוח את ההודעה ל-" + count + " סוכנים?")) return;
+    var button = $("#sendCustomerMessage");
+    button.disabled = true;
+    FLY.req("/api/admin/messages", {
+      method: "POST",
+      body: { audience: audience, phones: Object.keys(selectedCustomers).filter(function (phone) { return selectedCustomers[phone]; }), message: message },
+      noRedirect: true,
+    }).then(function (d) {
+      FLY.toast("✅ ההודעה נשלחה ל-" + d.recipient_count + " סוכנים");
+    }).catch(function (e) {
+      FLY.toast(e.code === "too_many_recipients" ? "יש לצמצם את רשימת הסוכנים" : "שליחת ההודעה נכשלה");
+    }).finally(function () { updateMessageMeta(); });
+  }
+
+  var TABS = ["props", "agents", "portfolios", "messages"];
+  var TAB_IDS = { props: "Props", agents: "Agents", portfolios: "Portfolios", messages: "Messages" };
+
   function showTab(which) {
-    $("#tabProps").classList.toggle("on", which === "props");
-    $("#tabAgents").classList.toggle("on", which === "agents");
-    $("#tabMessages").classList.toggle("on", which === "messages");
-    $("#tabPortfolios").classList.toggle("on", which === "portfolios");
-    $("#paneProps").classList.toggle("hidden", which !== "props");
-    $("#paneAgents").classList.toggle("hidden", which !== "agents");
-    $("#paneMessages").classList.toggle("hidden", which !== "messages");
-    $("#panePortfolios").classList.toggle("hidden", which !== "portfolios");
+    TABS.forEach(function (t) {
+      $("#tab" + TAB_IDS[t]).classList.toggle("on", t === which);
+      $("#pane" + TAB_IDS[t]).classList.toggle("hidden", t !== which);
+    });
     if (which === "agents" && !agents.length) loadAgents();
-    if (which === "messages" && !customers.length) loadCustomers();
     if (which === "portfolios" && !portfolios.length) loadPortfolios();
+    if (which === "messages" && !customers.length) loadCustomers();
   }
 
   function fillAgentFilter() {
@@ -750,8 +737,8 @@
       $("#agentSearch").addEventListener("input", applyAgentFilter);
       $("#tabProps").addEventListener("click", function () { showTab("props"); });
       $("#tabAgents").addEventListener("click", function () { showTab("agents"); });
-      $("#tabMessages").addEventListener("click", function () { showTab("messages"); });
       $("#tabPortfolios").addEventListener("click", function () { showTab("portfolios"); });
+      $("#tabMessages").addEventListener("click", function () { showTab("messages"); });
       $("#portfolioSearch").addEventListener("input", applyPortfolioFilter);
       $("#portfolioStatusFilter").addEventListener("change", applyPortfolioFilter);
       $("#agentFilter").addEventListener("change", applyFilters);

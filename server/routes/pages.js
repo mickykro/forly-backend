@@ -794,62 +794,56 @@ module.exports = function createPagesRouter(ctx) {
   router.get("/p/:id", async (req, res) => {
     const id = req.params.id;
     const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
-    try {
-      const d = await db.getPage(id);
-      if (!d) {
-        return res.sendFile(origShell);
-      }
-      // If page has portfolio context, redirect to nested URL
-      if (d.public_slug && d.business_phone) {
+    let d = null;
+    try { d = await db.getPage(id); } catch (e) { /* fall back */ }
+    const pageUrl = `${pageBaseUrl}/p/${id}`;
+    // Group-share attribution (?src=fb_group&s=&g=): record which sharing
+    // session/group sent this visitor. Best-effort and fire-and-forget — the
+    // canonical og:url stays undecorated so Facebook aggregates shares.
+    if (d && req.query.src === "fb_group" && req.query.g) {
+      db.logPortalEvent({
+        type: "group_visit", page_id: id,
+        listing_id: d.listing_id || null, business_phone: d.business_phone || null,
+        share_session: String(req.query.s || "").slice(0, 64),
+        group_token: String(req.query.g).slice(0, 24),
+      }).catch(() => { /* never block a page render on analytics */ });
+    }
+    // Portfolio pages live at /:portfolioSlug/:pageSlug — 301 the legacy URL.
+    if (d && d.public_slug && d.business_phone) {
+      try {
         const business = await db.getBusiness(d.business_phone);
         if (business?.portfolio?.slug) {
-          const nestedUrl = `${pageBaseUrl}/${business.portfolio.slug}/${d.public_slug}`;
-          // Preserve query string except edit token
           const qs = new URLSearchParams(req.query);
           qs.delete("edit_token");
           const qsStr = qs.toString();
-          return res.redirect(301, qsStr ? `${nestedUrl}?${qsStr}` : nestedUrl);
+          const nested = `${pageBaseUrl}/${business.portfolio.slug}/${d.public_slug}`;
+          return res.redirect(301, qsStr ? `${nested}?${qsStr}` : nested);
         }
-      }
-      const pageUrl = `${pageBaseUrl}/p/${id}`;
-      // Group-share attribution (?src=fb_group&s=&g=): record which sharing
-      // session/group sent this visitor. Best-effort and fire-and-forget — the
-      // canonical og:url stays undecorated so Facebook aggregates shares.
-      if (req.query.src === "fb_group" && req.query.g) {
-        db.logPortalEvent({
-          type: "group_visit", page_id: id,
-          listing_id: d.listing_id || null, business_phone: d.business_phone || null,
-          share_session: String(req.query.s || "").slice(0, 64),
-          group_token: String(req.query.g).slice(0, 24),
-        }).catch(() => { /* never block a page render on analytics */ });
-      }
-      const tpl = d.theme && d.theme.template;
-      if (d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
-        // Shell branch: still inject OG tags for active pages so shared links
-        // preview — crawlers don't run the JS that renders this shell.
-        if (d.status === "active") {
-          try {
-            const shell = fs.readFileSync(origShell, "utf8");
-            res.set("Cache-Control", "public, max-age=60");
-            return res.type("html").send(og.inject(shell, d, pageUrl,
-              { appId: process.env.META_APP_ID || null }));
-          } catch (e) { /* fall through to sendFile */ }
-        }
-        return res.sendFile(origShell);
-      }
-      const file = path.join(templatesDir, tpl + ".html");
-      if (!fs.existsSync(file)) return res.sendFile(origShell);
-      let html = fs.readFileSync(file, "utf8");
-      const bot = await resolveChatbot(d);
-      html = og.inject(html, d, pageUrl, { appId: process.env.META_APP_ID || null });
-      const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
-      html = html.replace("</head>", inject + "</head>");
-      res.set("Cache-Control", "public, max-age=60");
-      res.type("html").send(html);
-    } catch (err) {
-      console.error("GET /p/:id failed:", err);
-      res.sendFile(origShell);
+      } catch (e) { /* fall through to the legacy shell */ }
     }
+    const tpl = d && d.theme && d.theme.template;
+    if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
+      // Shell branch: still inject OG tags for active pages so shared links
+      // preview — crawlers don't run the JS that renders this shell.
+      if (d && d.status === "active") {
+        try {
+          const shell = fs.readFileSync(origShell, "utf8");
+          res.set("Cache-Control", "public, max-age=60");
+          return res.type("html").send(og.inject(shell, d, pageUrl,
+            { appId: process.env.META_APP_ID || null }));
+        } catch (e) { /* fall through to sendFile */ }
+      }
+      return res.sendFile(origShell);
+    }
+    const file = path.join(templatesDir, tpl + ".html");
+    if (!fs.existsSync(file)) return res.sendFile(origShell);
+    let html = fs.readFileSync(file, "utf8");
+    const bot = await resolveChatbot(d);
+    html = og.inject(html, d, pageUrl, { appId: process.env.META_APP_ID || null });
+    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
+    html = html.replace("</head>", inject + "</head>");
+    res.set("Cache-Control", "public, max-age=60");
+    res.type("html").send(html);
   });
 
   return router;
