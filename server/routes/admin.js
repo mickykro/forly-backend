@@ -273,7 +273,12 @@ module.exports = function createAdminRouter(ctx) {
 
   // ── quotas: what this client paid for ──
   // GET  /business/quota?phone=          → ledger + recent blocked attempts + history
-  // POST /business/quota { phone, caps:{kind:n|null}, reset_used:[kind], plan, notes }
+  // POST /business/quota { phone, caps:{kind:n|null}, reset_used:[kind], plan, notes,
+  //                        offer_replay?:true }   → set caps; optionally WhatsApp the
+  //                        client asking whether to redo the refused request (only
+  //                        sent when the new caps cover it)
+  // POST /business/quota { phone, clear_blocked:true } → dismiss the saved refused
+  //                        request (audited; the block stays in quota_events)
   // Kinds are whitelisted inside quota.js; every change lands in quota_history.
   router.get("/business/quota", requireAdmin, async (req, res) => {
     const phone = normalizeAuthPhone(String(req.query.phone || ""));
@@ -296,6 +301,14 @@ module.exports = function createAdminRouter(ctx) {
     try {
       const biz = await db.getBusiness(phone);
       if (!biz) return res.status(404).json({ error: "unknown_agent" });
+
+      // Dismiss the alert only — no cap change.
+      if (body.clear_blocked === true) {
+        const c = await quota.clearBlocked(phone, req.user.userId);
+        console.log(`admin_quota_clear_blocked agent=${phone} by=${req.user.userId} cleared=${c.cleared}`);
+        return res.json({ ok: true, phone, cleared: c.cleared, changes: [], quota: c.quota });
+      }
+
       const r = await quota.setCaps(phone, {
         caps: body.caps && typeof body.caps === "object" ? body.caps : {},
         reset_used: Array.isArray(body.reset_used) ? body.reset_used.map(String) : [],
@@ -303,7 +316,20 @@ module.exports = function createAdminRouter(ctx) {
         notes: typeof body.notes === "string" ? body.notes : undefined,
       }, req.user.userId);
       console.log(`admin_quota_set agent=${phone} by=${req.user.userId} changes=${JSON.stringify(r.changes)}`);
-      res.json({ ok: true, phone, changes: r.changes, quota: r.quota });
+
+      // Optionally ask the client whether to redo the refused request. Sent
+      // only when the caps (as just saved) cover it; a send failure never
+      // fails the save — the caps are already committed.
+      let replay = { offered: false, reason: "not_requested" };
+      if (body.offer_replay === true) {
+        replay = await quota.offerReplay(phone, biz).catch((err) => {
+          console.warn(`admin_quota_offer_replay failed agent=${phone}:`, err.message);
+          return { offered: false, reason: "send_failed" };
+        });
+        console.log(`admin_quota_offer_replay agent=${phone} by=${req.user.userId} ${JSON.stringify(replay)}`);
+      }
+      res.json({ ok: true, phone, changes: r.changes, replay,
+        quota: replay.offered ? await quota.getQuota(phone) : r.quota });
     } catch (err) {
       console.error("admin/business/quota set failed:", err);
       res.status(500).json({ error: "internal" });

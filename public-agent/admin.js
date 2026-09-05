@@ -252,39 +252,168 @@
       '<button type="button" class="link" data-quota="' + esc(a.phone) + '">ערוך' + blocked + "</button>";
   }
 
+  // Firestore Timestamps serialize as {_seconds}; history rows may be ISO or ms.
+  function toMs(v) {
+    if (!v) return 0;
+    if (typeof v === "number") return v;
+    if (v._seconds != null) return v._seconds * 1000;
+    if (v.seconds != null) return v.seconds * 1000;
+    var t = Date.parse(v);
+    return isNaN(t) ? 0 : t;
+  }
+  function fmtWhen(v) {
+    var ms = toMs(v);
+    if (!ms) return "";
+    return new Date(ms).toLocaleString("he-IL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+  function kindLabel(key) {
+    var k = QUOTA_KINDS.filter(function (x) { return x.key === key; })[0];
+    return k ? k.label : (key || "");
+  }
+  function fieldLabel(f) {
+    if (f === "plan") return "תוכנית";
+    if (f === "notes") return "הערות";
+    if (f === "last_blocked") return "התראה על בקשה חסומה";
+    var isCap = /_cap$/.test(f), key = f.replace(/_(cap|used)$/, "");
+    return kindLabel(key) + (isCap ? " · מכסה" : " · נוצל");
+  }
+  function fmtVal(v, field) {
+    if (v == null || v === "") return /_cap$/.test(field) ? "∞" : "—";
+    return String(v);
+  }
+  function closeQuotaDlg() {
+    var dlg = $("#quotaDlg");
+    dlg.close ? dlg.close() : dlg.removeAttribute("open");
+  }
+
+  // The refused-request card: what the client tried, whether the CURRENT caps
+  // would now let it run, and the two operator actions (offer a redo / dismiss).
+  function renderBlockedCard(a, q) {
+    var card = $("#qBlocked");
+    var b = q && q.last_blocked;
+    if (!b || b.replayed) { card.classList.add("hidden"); return; }
+    var kind = (q.kinds && q.kinds[b.kind]) || {};
+    var amount = Math.max(1, Number(b.amount) || 1);
+    var fits = kind.cap == null || (kind.remaining != null && kind.remaining >= amount);
+    var req = b.request, msg = "", imgs = [];
+    if (req && typeof req === "object") {
+      msg = req.message || req.prompt || req.text || "";
+      imgs = Array.isArray(req.images) ? req.images : (req.source_image_url ? [req.source_image_url] : []);
+      if (!msg && !imgs.length) msg = JSON.stringify(req, null, 2);
+    } else if (req != null) {
+      msg = String(req);
+    }
+    $("#qbTitle").textContent = kindLabel(b.kind) + (amount > 1 ? " ×" + amount : "");
+    $("#qbWhen").textContent = fmtWhen(b.at) + (b.source ? " · " + b.source : "");
+    $("#qbMsg").textContent = msg;
+    $("#qbMsg").classList.toggle("hidden", !msg);
+    $("#qbImgs").innerHTML = imgs.map(function (u) {
+      return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" alt="" loading="lazy"></a>';
+    }).join("");
+    $("#qbImgs").classList.toggle("hidden", !imgs.length);
+    var st = $("#qbStatus");
+    if (b.offered_at) {
+      st.textContent = "✉️ נשלחה ללקוח הצעה לבצע שוב · " + fmtWhen(b.offered_at) + " — ממתינים לתשובה";
+      st.className = "qb-status ok";
+    } else if (fits) {
+      st.textContent = "✅ המכסה הנוכחית מספיקה — אפשר להציע ללקוח לבצע שוב";
+      st.className = "qb-status ok";
+    } else {
+      st.textContent = "⛔ עדיין לא נכנס במכסה — נותרו " + (kind.remaining == null ? "∞" : kind.remaining) +
+        ", נדרשים " + amount + ". הגדילו את המכסה (או אפסו את המונה) ושמרו.";
+      st.className = "qb-status no";
+    }
+    $("#qOffer").checked = !b.offered_at;
+    $("#qDismiss").onclick = function () { dismissBlocked(a.phone); };
+    card.classList.remove("hidden");
+  }
+
+  // Merged timeline from the DB: admin changes (quota_history) + blocks (quota_events).
+  function renderHistory(events, history) {
+    var rows = [];
+    (history || []).forEach(function (h) {
+      (h.changes || []).forEach(function (c) {
+        rows.push({ ms: toMs(h.at), icon: c.field === "last_blocked" ? "🧹" : "✏️",
+          html: esc(fieldLabel(c.field)) + ': <span dir="ltr">' + esc(fmtVal(c.from, c.field)) + " → " + esc(fmtVal(c.to, c.field)) + "</span>",
+          who: h.by ? "ע״י " + h.by : "" });
+      });
+    });
+    (events || []).forEach(function (e) {
+      var amt = Number(e.amount) || 1;
+      rows.push({ ms: toMs(e.at), icon: "🚫",
+        html: "נחסם: " + esc(kindLabel(e.kind)) + (amt > 1 ? " ×" + amt : "") +
+          ' <span dir="ltr" class="num">(' + esc(e.used || 0) + "/" + (e.cap == null ? "∞" : esc(e.cap)) + ")</span>",
+        who: e.source || "" });
+    });
+    rows.sort(function (x, y) { return y.ms - x.ms; });
+    rows = rows.slice(0, 25);
+    $("#qHistory").innerHTML = rows.length ? rows.map(function (r) {
+      return '<li><span class="qh-ic">' + r.icon + '</span><span class="qh-tx">' + r.html + '</span>' +
+        '<span class="qh-meta">' + esc(fmtWhen(r.ms)) + (r.who ? " · " + esc(r.who) : "") + "</span></li>";
+    }).join("") : '<li class="p-addr">אין היסטוריה עדיין</li>';
+  }
+
+  function fillQuotaForm(a, q) {
+    $("#qPlan").value = (q && q.plan) || "";
+    $("#qNotes").value = (q && q.notes) || "";
+    $("#qPlanChip").textContent = (q && q.plan) || "ללא תוכנית";
+    var rows = $("#qRows");
+    rows.innerHTML = "";
+    QUOTA_KINDS.forEach(function (k) {
+      var v = (q && q.kinds && q.kinds[k.key]) || {};
+      var used = Number(v.used) || 0, cap = v.cap;
+      var pct = cap == null ? 0 : (cap === 0 ? 100 : Math.min(100, Math.round(used / cap * 100)));
+      var cls = cap == null ? "none" : (v.exhausted ? "full" : (pct >= 75 ? "warn" : "ok"));
+      var row = document.createElement("div");
+      row.className = "qk-row";
+      row.innerHTML =
+        '<div class="qk-label">' + esc(k.label) + "</div>" +
+        '<div class="qk-bar ' + cls + '"><i style="width:' + pct + '%"></i></div>' +
+        '<div class="qk-nums num" dir="ltr">' + esc(used) + " / " + (cap == null ? "∞" : esc(cap)) +
+          (cap == null ? "" : ' <small dir="rtl">נותרו ' + esc(Math.max(0, cap - used)) + "</small>") + "</div>" +
+        '<input class="qk-cap" type="number" min="0" step="1" inputmode="numeric" data-cap="' + esc(k.key) +
+          '" value="' + (cap == null ? "" : esc(cap)) + '" placeholder="∞" title="ריק = ללא הגבלה">' +
+        '<label class="qk-reset" title="איפוס המונה ל-0"><input type="checkbox" data-reset="' + esc(k.key) + '"> איפוס</label>';
+      rows.appendChild(row);
+    });
+    renderBlockedCard(a, q);
+  }
+
+  // Fresh ledger + audit trail from the server — the row's copy may be stale.
+  function loadQuotaDetails(a) {
+    $("#qHistory").innerHTML = '<li class="p-addr">טוען…</li>';
+    return FLY.req("/api/admin/business/quota?phone=" + encodeURIComponent(a.phone), { noRedirect: true })
+      .then(function (d) {
+        a.quota = d.quota;
+        fillQuotaForm(a, d.quota);
+        renderHistory(d.events, d.history);
+      })
+      .catch(function () { $("#qHistory").innerHTML = '<li class="p-addr">לא ניתן לטעון היסטוריה</li>'; });
+  }
+
   function openQuotaEditor(phone) {
     var a = agents.filter(function (x) { return x.phone === phone; })[0];
     if (!a) return;
     var dlg = $("#quotaDlg");
-    $("#qName").textContent = a.name + " · " + phone;
-    $("#qPlan").value = (a.quota && a.quota.plan) || "";
-    $("#qNotes").value = (a.quota && a.quota.notes) || "";
-    var rows = $("#qRows");
-    rows.innerHTML = "";
-    QUOTA_KINDS.forEach(function (k) {
-      var v = (a.quota && a.quota.kinds && a.quota.kinds[k.key]) || {};
-      var tr = document.createElement("tr");
-      tr.innerHTML = "<td>" + esc(k.label) + "</td>" +
-        '<td class="num">' + esc(v.used || 0) + "</td>" +
-        '<td><input type="number" min="0" step="1" data-cap="' + esc(k.key) + '" value="' +
-          (v.cap == null ? "" : esc(v.cap)) + '" placeholder="ללא הגבלה"></td>' +
-        '<td><label><input type="checkbox" data-reset="' + esc(k.key) + '"> אפס</label></td>';
-      rows.appendChild(tr);
-    });
-    var lb = $("#qBlocked");
-    if (a.quota && a.quota.last_blocked && !a.quota.last_blocked.replayed) {
-      var b = a.quota.last_blocked;
-      var reqTxt = b.request == null ? "" :
-        (typeof b.request === "string" ? b.request : JSON.stringify(b.request, null, 2));
-      var amt = b.amount && b.amount > 1 ? " ×" + b.amount : "";
-      lb.textContent = "🚫 ניסיון אחרון שנחסם: " + (b.kind || "") + amt +
-        "\nלאחר הגדלת המכסה הלקוח יוכל להריץ שוב את הבקשה הבאה:\n" + reqTxt;
-      lb.classList.remove("hidden");
-    } else {
-      lb.classList.add("hidden");
-    }
     dlg.dataset.phone = phone;
-    if (typeof dlg.showModal === "function") dlg.showModal(); else dlg.setAttribute("open", "");
+    $("#qName").textContent = a.name || phone;
+    $("#qPhone").textContent = phone;
+    $("#qClose").onclick = closeQuotaDlg;
+    fillQuotaForm(a, a.quota || null);
+    if (typeof dlg.showModal === "function") { if (!dlg.open) dlg.showModal(); } else dlg.setAttribute("open", "");
+    loadQuotaDetails(a);
+  }
+
+  function dismissBlocked(phone) {
+    if (!confirm("להסיר את ההתראה על הבקשה שנחסמה?\nהבקשה נשארת בהיסטוריה, אבל לא תוצע ללקוח לביצוע חוזר.")) return;
+    FLY.req("/api/admin/business/quota", { method: "POST", body: { phone: phone, clear_blocked: true }, noRedirect: true })
+      .then(function (d) {
+        var a = agents.filter(function (x) { return x.phone === phone; })[0];
+        if (a) { a.quota = d.quota; loadQuotaDetails(a); }
+        applyAgentFilter();
+        FLY.toast(d.cleared ? "ההתראה הוסרה" : "לא הייתה התראה פעילה");
+      })
+      .catch(function () { FLY.toast("שגיאה בהסרת ההתראה"); });
   }
 
   function saveQuotaEditor() {
@@ -297,19 +426,26 @@
     dlg.querySelectorAll("[data-reset]").forEach(function (cb) {
       if (cb.checked) reset.push(cb.dataset.reset);
     });
+    var offer = !$("#qBlocked").classList.contains("hidden") && $("#qOffer").checked;
     var btn = $("#qSave");
     btn.disabled = true;
     FLY.req("/api/admin/business/quota", {
       method: "POST",
-      body: { phone: phone, caps: caps, reset_used: reset, plan: $("#qPlan").value, notes: $("#qNotes").value },
+      body: { phone: phone, caps: caps, reset_used: reset, plan: $("#qPlan").value, notes: $("#qNotes").value,
+        offer_replay: offer },
       noRedirect: true,
     }).then(function (d) {
       var a = agents.filter(function (x) { return x.phone === phone; })[0];
       if (a) a.quota = d.quota;
       btn.disabled = false;
-      dlg.close ? dlg.close() : dlg.removeAttribute("open");
+      closeQuotaDlg();
       applyAgentFilter();
-      FLY.toast(d.changes && d.changes.length ? "✅ המכסות עודכנו" : "אין שינוי");
+      var changed = d.changes && d.changes.length;
+      var r = d.replay || {};
+      if (r.offered) FLY.toast("✅ המכסות עודכנו · נשלחה ללקוח הצעה לבצע שוב");
+      else if (offer && r.reason === "does_not_fit") FLY.toast("המכסות עודכנו · הבקשה עדיין לא נכנסת במכסה, לא נשלחה הצעה");
+      else if (offer && r.reason === "send_failed") FLY.toast("המכסות עודכנו · שליחת ההצעה ללקוח נכשלה");
+      else FLY.toast(changed ? "✅ המכסות עודכנו" : "אין שינוי");
     }).catch(function (e) {
       btn.disabled = false;
       FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון המכסות");

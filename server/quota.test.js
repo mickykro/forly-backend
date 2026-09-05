@@ -102,4 +102,20 @@ assert.strictEqual(big._truncated, true);
 assert.ok(big._bytes > 32 * 1024);
 assert.ok(typeof big._preview === "string" && big._preview.length <= 1100);
 
+// ── pendingReplay: does the saved refused request fit the CURRENT caps? ──
+assert.strictEqual(q.pendingReplay({}), null, "nothing saved → nothing pending");
+assert.strictEqual(q.pendingReplay({ last_blocked: { kind: "chat_image_edits", amount: 3, replayed: true } }), null,
+  "an already-replayed request is not pending");
+assert.strictEqual(q.pendingReplay({ last_blocked: { kind: "bogus", amount: 1 } }), null);
+let pr = q.pendingReplay({ chat_image_edits_cap: 4, chat_image_edits_used: 3,
+  last_blocked: { kind: "chat_image_edits", amount: 3, request: { message: "x", images: ["a"] } } });
+assert.deepStrictEqual([pr.fits, pr.remaining, pr.amount], [false, 1, 3], "3 needed, 1 left → doesn't fit");
+assert.deepStrictEqual(pr.request, { message: "x", images: ["a"] }, "request comes back intact for replay");
+pr = q.pendingReplay({ chat_image_edits_cap: 7, chat_image_edits_used: 3, last_blocked: { kind: "chat_image_edits", amount: 3 } });
+assert.deepStrictEqual([pr.fits, pr.remaining], [true, 4], "after a top-up to 7 it fits");
+pr = q.pendingReplay({ chat_image_edits_cap: 4, chat_image_edits_used: 0, last_blocked: { kind: "chat_image_edits", amount: 3 } });
+assert.strictEqual(pr.fits, true, "a reset counter also makes it fit");
+pr = q.pendingReplay({ last_blocked: { kind: "chat_image_edits", amount: 3 } });
+assert.deepStrictEqual([pr.fits, pr.remaining], [true, null], "unset cap = unlimited → fits");
+
 console.log("quota.test.js OK");

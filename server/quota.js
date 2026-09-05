@@ -338,13 +338,86 @@ function createQuota({ db, sendWhatsApp, adminPhone, paymentUrl, FieldValue } = 
     return snap.docs.map((d) => d.data());
   }
 
-  return { getQuota, getRaw, consume, setCaps, history, events, summarize: (d) => summarize(d, paymentUrl) };
+  /**
+   * Admin: dismiss the saved refused request (the alert in the panel) without
+   * touching caps. The block itself stays in quota_events; this only clears
+   * the "pending" marker, and the dismissal is audited like any other change.
+   */
+  async function clearBlocked(phone, by) {
+    if (!db || !phone) return { cleared: false, quota: summarize(null, paymentUrl) };
+    const now = new Date();
+    let cleared = false;
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref(phone));
+      const cur = snap.exists ? snap.data() : {};
+      if (!cur.last_blocked) return;
+      cleared = true;
+      tx.set(ref(phone), { last_blocked: FieldValue ? FieldValue.delete() : null }, { merge: true });
+      tx.set(ref(phone).parent.parent.collection("quota_history").doc(), {
+        at: now, by: by || null,
+        changes: [{ field: "last_blocked", from: cur.last_blocked.kind || "?", to: null }],
+      });
+    });
+    return { cleared, quota: await getQuota(phone) };
+  }
+
+  /**
+   * After a top-up: ask the CLIENT on WhatsApp whether to redo the request
+   * that was refused. Sends only when a pending request exists and the caps
+   * now cover it. The redo itself runs in n8n when the client answers "כן":
+   * n8n reads the saved request from GET /api/quota/status and re-submits it;
+   * the consume() that follows clears last_blocked.
+   */
+  async function offerReplay(phone, business) {
+    const raw = await getRaw(phone);
+    const p = pendingReplay(raw);
+    if (!p) return { offered: false, reason: "nothing_pending" };
+    if (!p.fits) return { offered: false, reason: "does_not_fit", remaining: p.remaining, amount: p.amount };
+    if (!sendWhatsApp) return { offered: false, reason: "whatsapp_not_configured" };
+    const name = (business && (business.full_name || business.business_name)) || "";
+    const label = LABELS[p.kind] || p.kind;
+    const msg = [
+      `${name ? name + ", " : ""}המכסה שלך עודכנה ✅`,
+      p.remaining === null ? `אין כרגע הגבלה על ${label}.` : `נותרו לך עכשיו ${p.remaining} ${label}.`,
+      `לבצע שוב את הבקשה שנחסמה (${label}${p.amount > 1 ? " ×" + p.amount : ""})?`,
+      "השב/י *כן* ונריץ אותה עכשיו.",
+    ].join("\n");
+    await sendWhatsApp(phone, msg);
+    const now = new Date();
+    await ref(phone).set({ last_blocked: { ...raw.last_blocked, offered_at: now } }, { merge: true });
+    return { offered: true, kind: p.kind, amount: p.amount };
+  }
+
+  return {
+    getQuota, getRaw, consume, setCaps, clearBlocked, offerReplay, history, events,
+    summarize: (d) => summarize(d, paymentUrl),
+  };
+}
+
+/**
+ * pendingReplay(doc) → null | { kind, amount, remaining, fits, request, at, offered_at, source }
+ * The saved refused request, and whether the CURRENT caps would now let it
+ * run. Pure, so the "does it fit after this top-up" rule is unit-tested.
+ */
+function pendingReplay(doc) {
+  const lb = doc && doc.last_blocked;
+  if (!lb || lb.replayed || !isKind(lb.kind)) return null;
+  const amount = Math.max(1, Math.floor(Number(lb.amount) || 1));
+  const cap = toCap(doc[capKey(lb.kind)]);
+  const used = Math.max(0, Number(doc[usedKey(lb.kind)]) || 0);
+  const remaining = cap === null ? null : Math.max(0, cap - used);
+  return {
+    kind: lb.kind, amount, remaining,
+    fits: cap === null || remaining >= amount,
+    request: lb.request === undefined ? null : lb.request,
+    at: lb.at || null, offered_at: lb.offered_at || null, source: lb.source || null,
+  };
 }
 
 module.exports = {
   KINDS, LABELS, TRIAL_CAPS,
   capKey, usedKey, isKind, toCap,
-  trialSeed, summarize, applyConsume, applyCaps,
+  trialSeed, summarize, applyConsume, applyCaps, pendingReplay,
   blockedMessage, blockedResponse, trimRequest,
   createQuota,
 };
