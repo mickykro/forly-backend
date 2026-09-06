@@ -30,8 +30,6 @@ const PORT = Number.isInteger(cliPort) && cliPort > 0 && cliPort < 65536 ?
 const BASE_URL = (process.env.BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads");
 const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, "");
-const REMOTE_UPLOAD_BASE = (process.env.REMOTE_UPLOAD_BASE || "").replace(/\/+$/, "");
-const UPLOAD_PUBLIC_BASE = REMOTE_UPLOAD_BASE || BASE_URL;
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
 const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
 const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
@@ -46,21 +44,28 @@ const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
 // fall back to an ephemeral random key (never the old public constant) so the
 // app still runs but sessions reset on restart. NADLAN_JWT_SECRET is the
 // canonical env var; FORLY_JWT_SECRET is accepted for back-compat.
-const PLACEHOLDER_SECRETS = new Set(["", "change-me-in-env", "changeme", "secret"]);
-function resolveAuthSecret() {
-  const raw = (process.env.NADLAN_JWT_SECRET || process.env.FORLY_JWT_SECRET || "").trim();
-  if (!PLACEHOLDER_SECRETS.has(raw)) return raw;
+const { resolveAuthSecret, resolveRemoteUploadBase } = require("./upload-relay");
+const authSecretInfo = resolveAuthSecret(process.env,
+  () => require("crypto").randomBytes(32).toString("base64url"));
+if (authSecretInfo.ephemeral) {
   if (process.env.NODE_ENV === "production") {
     console.error("FATAL: NADLAN_JWT_SECRET is missing or set to a placeholder. " +
       "Refusing to start — set a strong, random NADLAN_JWT_SECRET.");
     process.exit(1);
   }
-  const ephemeral = require("crypto").randomBytes(32).toString("base64url");
   console.warn("WARNING: NADLAN_JWT_SECRET not set — using an ephemeral dev key. " +
     "Sessions will not survive a restart. Set NADLAN_JWT_SECRET for stable local auth.");
-  return ephemeral;
 }
-const AUTH_SECRET = resolveAuthSecret();
+const AUTH_SECRET = authSecretInfo.secret;
+// The upload relay forwards the caller's session to REMOTE_UPLOAD_BASE, which
+// only validates when both instances share NADLAN_JWT_SECRET. With an
+// ephemeral dev key every relayed upload would 502, so the relay is disabled.
+const remoteUpload = resolveRemoteUploadBase({
+  raw: process.env.REMOTE_UPLOAD_BASE, secretEphemeral: authSecretInfo.ephemeral,
+});
+if (remoteUpload.reason) console.warn(`WARNING: ${remoteUpload.reason}`);
+const REMOTE_UPLOAD_BASE = remoteUpload.base;
+const UPLOAD_PUBLIC_BASE = REMOTE_UPLOAD_BASE || BASE_URL;
 // Secret for the maintenance/import admin API endpoints (x-admin-secret header).
 // Dedicated var so it isn't the session-signing key; falls back to AUTH_SECRET
 // for back-compat where only that was configured.
