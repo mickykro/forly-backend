@@ -28,7 +28,7 @@ const nowDay = () => new Date().toISOString().slice(0, 10);
 const nowMonth = () => new Date().toISOString().slice(0, 7);
 
 module.exports = function createChatRouter(ctx) {
-  const { apiKeys, ipSalt, greenInstance, greenToken } = ctx;
+  const { apiKeys, ipSalt, greenInstance, greenToken, quota } = ctx;
   const router = express.Router();
 
   const hashIp = (ip) =>
@@ -225,6 +225,18 @@ module.exports = function createChatRouter(ctx) {
       agentName,
       modeBlock: prompt.MODE_BLOCKS.immediate(agentName),
     });
+
+    // Paid bundle (admin-set chat_msgs_cap on the agent's quota ledger). Atomic
+    // check-and-reserve; an unset cap never blocks. The visitor just sees the
+    // bot close politely — the agent (who pays) is what the operator alert and
+    // the saved request are for.
+    if (quota) {
+      const q = await quota.consume(page.business_phone, "chat_msgs", 1, {
+        source: "web_chat", business: biz,
+        request: { page_id: pageId, message: message.slice(0, 300) },
+      }).catch((err) => { console.warn("chat quota consume failed (allowing):", err.message); return { ok: true }; });
+      if (!q.ok) return res.json({ conversation_id: cid, state: "closed", reply: capReply(page) });
+    }
 
     let parsed = null;
     let tokens = { in: 0, out: 0 };

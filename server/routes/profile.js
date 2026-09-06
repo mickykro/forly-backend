@@ -65,9 +65,9 @@ module.exports = function createProfileRouter(ctx) {
       // Starter quota, same shape the retired signupComplete wrote. Best-effort
       // for the same reason as the lead conversion below.
       try {
-        await db.initQuota(phone, {
-          walkthroughs_used: 0, walkthroughs_cap: 4, period_start: now, reset_at: now,
-        });
+        // Trial bundle for every quota kind (see server/quota.js). Same flat
+        // shape as before; walkthroughs stays at 4.
+        await db.initQuota(phone, require("../quota").trialSeed(now));
       } catch (err) {
         console.error("quota init failed (profile still saved):", err.message);
       }

@@ -1224,6 +1224,13 @@
             throw new Error("unauthenticated");
           }
           return r.json().then(function (d) {
+            if (r.status === 402 && d.error === "quota_exceeded") {
+              // Paid bundle used up: the server's message already carries the
+              // friendly text + payment link; keep both for the catch below.
+              var qe = new Error(d.message || "quota_exceeded");
+              qe.quota = d;
+              throw qe;
+            }
             if (!r.ok) throw new Error(d.error || "create failed");
             return d;
           });
@@ -1255,6 +1262,25 @@
       }
     }).catch(function (e) {
       FLY.loaderHide(function () { $("#viewForm").classList.remove("hidden"); }); // form back, error readable
+      if (e.quota) {
+        // Quota exhausted: show the server's message with the payment link as
+        // a real link. Built with DOM APIs (no innerHTML) so nothing is
+        // interpreted as markup.
+        err.textContent = "";
+        String(e.quota.message || "").split("\n").forEach(function (line, i) {
+          if (i) err.appendChild(document.createElement("br"));
+          if (e.quota.payment_url && line.indexOf(e.quota.payment_url) !== -1) {
+            err.appendChild(document.createTextNode(line.replace(e.quota.payment_url, "")));
+            var a = document.createElement("a");
+            a.href = e.quota.payment_url; a.target = "_blank"; a.rel = "noopener";
+            a.textContent = e.quota.payment_url;
+            err.appendChild(a);
+          } else {
+            err.appendChild(document.createTextNode(line));
+          }
+        });
+        return;
+      }
       err.textContent = FT("err_prefix") + e.message;
       err.classList.add("show");
       btn.disabled = false;

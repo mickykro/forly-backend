@@ -28,7 +28,7 @@ const asMillis = (v) => { const d = asDate(v); return d ? d.getTime() : 0; };
 
 module.exports = function createAdminRouter(ctx) {
   const { verifySession, readToken, authSecret, normalizeAuthPhone, pageBaseUrl,
-          uploadDir, adminPhones, sendWhatsApp } = ctx;
+          uploadDir, adminPhones, sendWhatsApp, quota } = ctx;
 
   const router = express.Router();
 
@@ -212,6 +212,14 @@ module.exports = function createAdminRouter(ctx) {
         row.readiness[verdict]++;
       }
 
+      // Quota ledger per agent (what they paid for vs. used). One read each;
+      // best-effort so a ledger hiccup never hides the directory.
+      if (quota) {
+        await Promise.all([...byPhone.values()].map(async (row) => {
+          row.quota = await quota.getQuota(row.phone).catch(() => null);
+        }));
+      }
+
       const agents = [...byPhone.values()]
         .sort((a, b) => (b.active_pages - a.active_pages) || a.name.localeCompare(b.name, "he"));
       res.json({
@@ -259,6 +267,56 @@ module.exports = function createAdminRouter(ctx) {
       res.json({ ok: true, phone, feature, enabled: body.enabled });
     } catch (err) {
       console.error("admin/business/features failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── quotas: what this client paid for ──
+  // GET  /business/quota?phone=          → ledger + recent blocked attempts + history
+  // POST /business/quota { phone, caps:{kind:n|null}, reset_used:[kind], plan, notes }
+  // POST /business/quota { phone, clear_blocked:true } → dismiss the saved refused
+  //                        request (audited; the block stays in quota_events)
+  // Kinds are whitelisted inside quota.js; every change lands in quota_history.
+  router.get("/business/quota", requireAdmin, async (req, res) => {
+    const phone = normalizeAuthPhone(String(req.query.phone || ""));
+    if (!phone || !quota) return res.status(400).json({ error: "invalid_input" });
+    try {
+      const [ledger, events, history] = await Promise.all([
+        quota.getQuota(phone), quota.events(phone, 10), quota.history(phone, 30),
+      ]);
+      res.json({ phone, quota: ledger, events, history });
+    } catch (err) {
+      console.error("admin/business/quota get failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  router.post("/business/quota", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const phone = normalizeAuthPhone(body.phone || "");
+    if (!phone || !quota) return res.status(400).json({ error: "invalid_input" });
+    try {
+      const biz = await db.getBusiness(phone);
+      if (!biz) return res.status(404).json({ error: "unknown_agent" });
+
+      // Dismiss the alert only — no cap change.
+      if (body.clear_blocked === true) {
+        const c = await quota.clearBlocked(phone, req.user.userId);
+        console.log(`admin_quota_clear_blocked agent=${phone} by=${req.user.userId} cleared=${c.cleared}`);
+        return res.json({ ok: true, phone, cleared: c.cleared, changes: [], quota: c.quota });
+      }
+
+      const r = await quota.setCaps(phone, {
+        caps: body.caps && typeof body.caps === "object" ? body.caps : {},
+        reset_used: Array.isArray(body.reset_used) ? body.reset_used.map(String) : [],
+        plan: typeof body.plan === "string" ? body.plan : undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+      }, req.user.userId);
+      console.log(`admin_quota_set agent=${phone} by=${req.user.userId} changes=${JSON.stringify(r.changes)}`);
+
+      res.json({ ok: true, phone, changes: r.changes, quota: r.quota });
+    } catch (err) {
+      console.error("admin/business/quota set failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });

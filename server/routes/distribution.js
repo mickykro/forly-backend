@@ -42,7 +42,8 @@ const card = (title, sub, extraHtml = "", redirectTo = null) =>
 
 module.exports = function createDistributionRouter(ctx) {
   const { requireAuth, verifyActionToken, verifySession, readToken,
-          authSecret, pageBaseUrl, greenInstance, greenToken } = ctx;
+          authSecret, adminApiSecret, pageBaseUrl, greenInstance, greenToken } = ctx;
+  const { constantTimeEqual } = require("../security");
   const deps = jobs.liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret });
   const router = express.Router();
   // The page-picker posts a plain HTML form (no session, no JS required).
@@ -357,7 +358,7 @@ module.exports = function createDistributionRouter(ctx) {
   // group-research workflow posts { groups: [{name,url,city,members}] } here
   // with the x-admin-secret header. Dedupes by URL; entries land active:true.
   router.post("/group-catalog/import", async (req, res) => {
-    if (authSecret === "change-me-in-env" || req.get("x-admin-secret") !== authSecret) {
+    if (!constantTimeEqual(req.get("x-admin-secret"), adminApiSecret)) {
       return res.status(403).json({ error: "forbidden" });
     }
     const items = Array.isArray(req.body && req.body.groups) ? req.body.groups : [];
