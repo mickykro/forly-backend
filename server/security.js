@@ -12,15 +12,16 @@
  */
 
 // ── security headers ──
-// CSP is intentionally limited to frame-ancestors 'none' so it hardens against
+// CSP is intentionally limited to frame-ancestors 'self' so it hardens against
 // clickjacking WITHOUT breaking the app's existing inline scripts (a full
-// script-src policy would need a bigger frontend refactor). X-Frame-Options is
-// kept alongside for older browsers.
+// script-src policy would need a bigger frontend refactor) or the same-origin
+// template-preview iframes on create.html (/tpl/*.html, /previews/*.html).
+// X-Frame-Options is kept alongside for older browsers.
 function securityHeaders(req, res, next) {
   res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+  res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
   // Only advertise HSTS when the connection is actually HTTPS (behind the
   // Cloud Run / hosting proxy), never in plain-http local dev.

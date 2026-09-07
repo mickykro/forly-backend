@@ -7,7 +7,7 @@
 
 const assert = require("assert");
 const { assertPublicHttpUrl, sniffMatchesExt } = require("./utils");
-const { constantTimeEqual, rateLimit } = require("./security");
+const { constantTimeEqual, rateLimit, securityHeaders } = require("./security");
 const { makeAdminGuard } = require("./admin-auth");
 
 (async () => {
@@ -39,6 +39,13 @@ const { makeAdminGuard } = require("./admin-auth");
   assert.ok(!constantTimeEqual("s3cret", "s3creT"));
   assert.ok(!constantTimeEqual("short", "longer-value"));
   assert.ok(!constantTimeEqual("", "x"));
+
+  // ── frame headers: same-origin only, so create.html's /tpl/*.html preview
+  //    iframes still render (DENY / 'none' blanked all four template cards) ──
+  const hdrs = {};
+  securityHeaders({ headers: {} }, { setHeader(k, v) { hdrs[k] = v; } }, () => {});
+  assert.strictEqual(hdrs["X-Frame-Options"], "SAMEORIGIN");
+  assert.strictEqual(hdrs["Content-Security-Policy"], "frame-ancestors 'self'");
 
   // ── rate limiter: allows `max` then 429s ──
   const mw = rateLimit({ windowMs: 60_000, max: 2, keyBy: () => "k" });

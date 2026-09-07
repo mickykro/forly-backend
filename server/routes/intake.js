@@ -36,15 +36,11 @@ module.exports = function createIntakeRouter(ctx) {
   // of an x-demo-key header, which anyone could send.
   const { requireAdmin } = makeAdminGuard({ verifySession, readToken, authSecret, adminPhones });
 
-  // Inter-instance relay secret: when this server fronts a remote file store
+  // Inter-instance relay: when this server fronts a remote file store
   // (REMOTE_UPLOAD_BASE), it forwards the caller's own session so the remote —
-  // running this same code — re-authorizes the write. No new secret needed.
-  const relayHeaders = (req) => {
-    const h = {};
-    if (req.headers.cookie) h.cookie = req.headers.cookie;
-    if (req.headers.authorization) h.authorization = req.headers.authorization;
-    return h;
-  };
+  // running this same code — re-authorizes the write. index.js only enables
+  // the relay when a real shared NADLAN_JWT_SECRET exists (see upload-relay.js).
+  const { relayHeaders, relayUpload } = require("../upload-relay");
 
   // ── upload-urls ──
   // Any authenticated user (agent or admin) may request upload slots; the
@@ -103,21 +99,12 @@ module.exports = function createIntakeRouter(ctx) {
       return res.status(400).json({ error: "content does not match file type" });
     }
     if (remoteUploadBase) {
-      try {
-        const r = await fetch(`${remoteUploadBase}/api/upload/${fname}`, {
-          method: "PUT",
-          headers: {
-            ...relayHeaders(req),
-            "Content-Type": req.headers["content-type"] || "application/octet-stream",
-          },
-          body: req.body,
-          signal: AbortSignal.timeout(120000),
-        });
-        if (!r.ok) return res.status(502).json({ error: `remote upload failed: ${r.status}` });
-        return res.json({ ok: true, remote: true });
-      } catch (err) {
-        return res.status(502).json({ error: `remote upload failed: ${err.message}` });
-      }
+      const out = await relayUpload({
+        fetch, base: remoteUploadBase, fname, req, body: req.body,
+        contentType: req.headers["content-type"],
+      });
+      if (out.status !== 200) console.error("upload relay:", out.body.error);
+      return res.status(out.status).json(out.body);
     }
     fs.writeFileSync(path.join(uploadDir, fname), req.body);
     res.json({ ok: true });
