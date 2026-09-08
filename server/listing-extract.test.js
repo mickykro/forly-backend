@@ -63,12 +63,15 @@ assert.match(SYSTEM, /most scraped listings omit it/);
 // ── parseListing: caps input, wires the stub, maps provider errors ──
 (async () => {
   let seen;
-  const askFn = async (model, system, messages) => {
-    seen = { model, system, messages };
+  const askFn = async (model, system, messages, keys, opts) => {
+    seen = { model, system, messages, opts };
     return { text: '{"address":"הרצל 1","city":"נתניה","price":"1.5M"}', in: 1, out: 1 };
   };
   const out = await parseListing("x".repeat(MAX_INPUT + 1000), { askFn, model: "test-model", keys: {} });
   assert.equal(seen.model, "test-model");
+  // the chat bot's {answered, reply} schema must not be applied to an extraction
+  assert.equal(seen.opts.schema, null);
+  assert.ok(seen.opts.maxOut > 400);
   assert.equal(seen.messages[0].content.length, MAX_INPUT);
   assert.equal(out.fields.address, "הרצל 1");
   assert.equal(out.fields.price, null);          // "1.5M" is not a number; the prompt asks for numbers

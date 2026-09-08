@@ -81,7 +81,10 @@ function parseReply(text) {
 async function parseListing(text, { askFn = ask, model = MODEL, keys = process.env } = {}) {
   const input = condense(text).slice(0, MAX_INPUT);
   let reply;
-  try { reply = await askFn(model, SYSTEM, [{ role: "user", content: input }], keys); }
+  // schema: null — chat-provider defaults to the chat bot's response schema,
+  // which would force the reply into {answered, reply, ...} and yield an object
+  // with none of our keys (i.e. every field null).
+  try { reply = await askFn(model, SYSTEM, [{ role: "user", content: input }], keys, { schema: null, maxOut: 700 }); }
   catch (err) { throw unavailable(err.message); }
   const fields = parseReply(reply && reply.text);
   return { fields, missing: missingOf(fields) };
