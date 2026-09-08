@@ -33,6 +33,7 @@ assert.deepEqual(
   missingOf(coerce({ address: "a", city: "b", price: 1, rooms: 2, size_sqm: 3, floor: 0, deal: "rent", parking: 0, neighborhood: "n" })),
   []);
 assert.ok(REQUIRED.includes("deal") && REQUIRED.includes("neighborhood") && !REQUIRED.includes("elevator"));
+assert.ok(!REQUIRED.includes("address"));   // scraped listings usually omit the street address
 
 // ── parseReply: tolerant of fences and prose around the object ──
 assert.equal(parseReply('```json\n{"city":"חיפה"}\n```').city, "חיפה");
@@ -45,6 +46,10 @@ assert.match(SYSTEM, /null/);
 assert.match(SYSTEM, /Never guess/);
 assert.match(SYSTEM, /מיליון/);
 assert.match(SYSTEM, /"rent"/);
+// scraped "label:value" listing pages (e.g. "סוג עסקה:מכירה", no ל prefix) must still resolve to a deal
+assert.match(SYSTEM, /מכירה/);
+assert.match(SYSTEM, /מ״ר בנוי/);
+assert.match(SYSTEM, /most scraped listings omit it/);
 
 // ── parseListing: caps input, wires the stub, maps provider errors ──
 (async () => {

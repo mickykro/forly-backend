@@ -28,17 +28,22 @@ const SCHEMA = {
   price: num, rooms: num, size_sqm: num, sqm_built: num, sqm_balcony: num, sqm_garden: num,
   floor: int, parking: int, elevator: bool, shabbat_elevator: bool, storage: bool,
 };
-const REQUIRED = ["address", "city", "price", "rooms", "size_sqm", "floor", "deal", "parking", "neighborhood"];
+// Scraped listing pages rarely disclose the exact street address (privacy) —
+// city, price and rooms are what actually block a page from being built.
+const REQUIRED = ["city", "price", "rooms", "size_sqm", "floor", "deal", "parking", "neighborhood"];
 
 const SYSTEM = `You extract real-estate listing facts from text written in Hebrew or English.
+The text may be free-form prose, or a scraped listing page with short "label:value" lines
+(e.g. "מחיר:2,200,000 ₪", "סוג עסקה:מכירה", "שטח:70 מ״ר", "מ״ר בנוי:70", "קומה:2", "חדרים:4").
 Return ONLY a JSON object with exactly these keys: ${Object.keys(SCHEMA).join(", ")}.
 Rules:
 - Use only what the text states explicitly. If a value is not stated, use null. Never guess.
 - Numbers as JSON numbers, never strings. price in ILS: "2.9M" or "2.9 מיליון" → 2900000, "890 אלף" → 890000, "12,000 לחודש" → 12000.
-- deal: "rent" if the text is about renting (להשכרה, שכירות, לחודש), "sale" if about buying (למכירה), else null.
-- rooms may be fractional (3.5). floor is the apartment's floor, not the building height. parking is the number of spots (חניה = 1).
+- deal: "rent" if the text is about renting (להשכרה, שכירות, לחודש), "sale" if about buying or selling (למכירה, מכירה, סוג עסקה: מכירה), else null.
+- size_sqm is the total/main area, from labels like "שטח", "מ״ר", or a bare "70 מ״ר" — "מ״ר בנוי" (built area) goes in sqm_built instead when both are given.
+- rooms may be fractional (3.5). floor is the apartment's floor, not the building height. parking is the number of spots (חניה = 1, "ללא" = 0).
 - elevator, shabbat_elevator, storage: true only if mentioned, otherwise null.
-- address is street and number only; city and neighborhood go in their own keys.
+- address is street and number only, when actually given; most scraped listings omit it — leave it null rather than using the city or neighborhood.
 No prose, no markdown fences.`;
 
 function unavailable(msg) { const e = new Error(msg); e.code = "extract_unavailable"; return e; }

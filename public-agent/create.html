@@ -222,7 +222,7 @@
         </select>
       </div>
       <div class="grid-2">
-        <div class="field"><label data-i18n="lbl_address">כתובת *</label><input id="pAddress" maxlength="180" placeholder="ברודצקי 12, דירה 34" data-i18n-ph="ph_address"></div>
+        <div class="field"><label data-i18n="lbl_address">כתובת</label><input id="pAddress" maxlength="180" placeholder="ברודצקי 12, דירה 34" data-i18n-ph="ph_address"></div>
         <div class="field"><label data-i18n="lbl_city">עיר *</label><input id="pCity" maxlength="80" placeholder="תל אביב" data-i18n-ph="ph_city"></div>
       </div>
       <div class="grid-2">
@@ -643,7 +643,9 @@
   }
   function validateStageOne() {
     clearFieldErrors();
-    var required = [["#pAddress", "fld_address"], ["#pCity", "fld_city"], ["#pPrice", "fld_price"], ["#pRooms", "fld_rooms"], ["#pSqm", "fld_sqm"]];
+    // Address is intentionally not required: scraped listings routinely omit
+    // the exact street address (agent privacy) and still make a good page.
+    var required = [["#pCity", "fld_city"], ["#pPrice", "fld_price"], ["#pRooms", "fld_rooms"], ["#pSqm", "fld_sqm"]];
     if (isDemo) required.unshift(["#agName", "fld_agent_name"], ["#agPhone", "fld_agent_phone"]);
     var firstBad = null;
     required.forEach(function (r) {
