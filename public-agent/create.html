@@ -158,7 +158,6 @@
         <div id="extractPhotoChoice" class="extract-actions hidden">
           <span class="form-hint show" data-i18n="ext_photos_ask">פורלי מצאה מספיק תמונות. להוסיף עוד?</span>
           <button type="button" class="link-btn" id="extractAddPhotos" data-i18n="ext_photos_add">כן, להוסיף תמונות</button>
-          <button type="button" class="btn btn-gold" id="extractToTemplates" data-i18n="ext_photos_to_tpl">לא, המשך לעיצוב ←</button>
         </div>
       </div>
       <div id="manualFields" class="hidden">
@@ -696,7 +695,7 @@
     if (wizardStage === 1 && direction > 1) importTickedPhotos().then(go);
     else go();
   }
-  $("#nextStage1").addEventListener("click", function () { moveWizard(2); });
+  $("#nextStage1").addEventListener("click", function () { moveWizard(canSkipPhotos ? 3 : 2); });
   $("#prevStage2").addEventListener("click", function () { moveWizard(1); });
   $("#nextStage2").addEventListener("click", function () { moveWizard(3); });
   $("#prevStage3").addEventListener("click", function () { moveWizard(2); });
@@ -923,6 +922,7 @@
   // ── paste text / link → Forly fills the form (see extract.js for the pure parts) ──
   var X = window.FlyExtract;
   var importedPhotos = []; // {url, el, skip}
+  var canSkipPhotos = false;   // scrape found more photos than a page needs
   function revealManual() { $("#manualFields").classList.remove("hidden"); }
   function showExtractErr(key) {
     var el = $("#extractErr"); el.textContent = FT(key); el.classList.add("show");
@@ -933,7 +933,7 @@
     list.innerHTML = "";
     if (!selectors.length) {
       card.classList.add("all-set");
-      $("#extractCardTitle").textContent = FT("ext_all_set");
+      $("#extractCardTitle").textContent = FT(canSkipPhotos ? "ext_all_set_design" : "ext_all_set");
       $("#nextStage1").focus();
       return;
     }
@@ -962,7 +962,13 @@
   // the upload step, so ask instead of assuming.
   function syncPhotoChoice() {
     var kept = importedPhotos.filter(function (p) { return !p.skip && !p.done; }).length;
-    $("#extractPhotoChoice").classList.toggle("hidden", kept <= MIN_PHOTOS);
+    canSkipPhotos = kept > MIN_PHOTOS;
+    $("#extractPhotoChoice").classList.toggle("hidden", !canSkipPhotos);
+    // the primary action leads where it actually goes — swap the key too, or the
+    // language switcher would paint the old label back over it
+    var next = $("#nextStage1"), key = canSkipPhotos ? "btn_next_design" : "btn_next_photos";
+    next.setAttribute("data-i18n", key);
+    next.textContent = FT(key);
   }
   // Called when leaving step 1 forward: turns ticked found-photos into
   // regular photo entries (server downloads them), then continues.
@@ -1022,7 +1028,6 @@
   $("#extractManual").addEventListener("click", function () { revealManual(); $("#pAddress").focus(); });
   $("#extractShowAll").addEventListener("click", revealManual);
   $("#extractAddPhotos").addEventListener("click", function () { moveWizard(2); });
-  $("#extractToTemplates").addEventListener("click", function () { moveWizard(3); });
 
   // ── listing type (sale / rent): adapt the price label + quick-pick options ──
   $("#pType").addEventListener("change", function () {
