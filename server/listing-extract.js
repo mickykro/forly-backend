@@ -9,7 +9,21 @@
 const { ask } = require("./chat-provider");
 
 const MODEL = process.env.PROPERTY_PARSE_MODEL || "claude-haiku-4-5-20251001";
-const MAX_INPUT = 4000;
+const MAX_INPUT = 8000;
+
+// Scraped markdown is mostly URLs — a listing gallery's signed image links run
+// 200+ chars each and would eat the whole budget before the "label:value" facts
+// further down the page ever reach the model. Photos are collected separately
+// in listing-sources.js, so none of this is lost.
+function condense(text) {
+  return String(text || "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")       // images
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")    // links → their label
+    .replace(/<[^>\s]+>/g, "")                  // bare autolinks / stray tags
+    .replace(/^[ \t]*[-*|>#]+[ \t]*$/gm, "")    // rules and empty table rows
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 // Coercers: unusable → null.
 const num = (v) => {
@@ -65,7 +79,7 @@ function parseReply(text) {
 }
 
 async function parseListing(text, { askFn = ask, model = MODEL, keys = process.env } = {}) {
-  const input = String(text || "").slice(0, MAX_INPUT);
+  const input = condense(text).slice(0, MAX_INPUT);
   let reply;
   try { reply = await askFn(model, SYSTEM, [{ role: "user", content: input }], keys); }
   catch (err) { throw unavailable(err.message); }
@@ -73,4 +87,4 @@ async function parseListing(text, { askFn = ask, model = MODEL, keys = process.e
   return { fields, missing: missingOf(fields) };
 }
 
-module.exports = { parseListing, REQUIRED, MAX_INPUT, SCHEMA, _test: { coerce, missingOf, parseReply, SYSTEM } };
+module.exports = { parseListing, REQUIRED, MAX_INPUT, SCHEMA, _test: { coerce, missingOf, parseReply, condense, SYSTEM } };

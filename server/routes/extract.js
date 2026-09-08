@@ -81,6 +81,7 @@ module.exports = function createExtractRouter(ctx) {
     try {
       const src = await resolve({ ...input, userId: req.user && req.user.userId });
       const { fields, missing } = await parseListing(src.text);
+      console.log(`[extract] fields ${JSON.stringify(fields)} missing ${missing.join(",")}`);
       res.json({ source: src.source, fields, missing, description: src.description.slice(0, 2000), photos: src.photos });
     } catch (err) { sendError(res, err); }
   });

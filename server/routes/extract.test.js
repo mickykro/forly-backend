@@ -12,7 +12,7 @@ assert.equal(validateBody({}), null);
 assert.equal(validateBody({ text: "a", url: "https://x" }), null);
 assert.equal(validateBody({ text: "   " }), null);
 assert.equal(validateBody({ url: "not a url" }), null);
-assert.equal(validateBody({ text: "x".repeat(9000) }).text.length, 4000);
+assert.equal(validateBody({ text: "x".repeat(20000) }).text.length, require("../listing-extract").MAX_INPUT);
 assert.equal(validateBody(null), null);
 
 // ── error codes → http status ──

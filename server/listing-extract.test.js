@@ -3,7 +3,16 @@
    the form and that `missing` is always computed here, never trusted. */
 const assert = require("assert");
 const { parseListing, REQUIRED, MAX_INPUT, _test } = require("./listing-extract");
-const { coerce, missingOf, parseReply, SYSTEM } = _test;
+const { coerce, missingOf, parseReply, condense, SYSTEM } = _test;
+
+// ── condense: markdown URLs must not crowd the facts out of the input budget ──
+const gallery = ("![](https://x.co/" + "a".repeat(300) + ".jpg)\n").repeat(10) + "מחיר:2,200,000 ₪\nקומה:2";
+assert.ok(gallery.length > 3000);
+assert.ok(condense(gallery).length < 60);              // only the two fact lines survive
+assert.match(condense(gallery), /מחיר:2,200,000/);
+assert.match(condense(gallery), /קומה:2/);
+assert.equal(condense("[מור נדלן](https://mor.co.il/agent/12)"), "מור נדלן");
+assert.equal(condense("a\n\n\n\n---\n\nb"), "a\n\nb");
 
 // ── coerce: every key present, junk becomes null ──
 const all = coerce({
@@ -58,7 +67,7 @@ assert.match(SYSTEM, /most scraped listings omit it/);
     seen = { model, system, messages };
     return { text: '{"address":"הרצל 1","city":"נתניה","price":"1.5M"}', in: 1, out: 1 };
   };
-  const out = await parseListing("x".repeat(5000), { askFn, model: "test-model", keys: {} });
+  const out = await parseListing("x".repeat(MAX_INPUT + 1000), { askFn, model: "test-model", keys: {} });
   assert.equal(seen.model, "test-model");
   assert.equal(seen.messages[0].content.length, MAX_INPUT);
   assert.equal(out.fields.address, "הרצל 1");
