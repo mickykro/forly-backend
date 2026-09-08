@@ -141,8 +141,9 @@ async function fromFirecrawl({ url }, { fetchFn = fetch, firecrawlKey = process.
 async function resolve(input, deps = {}) {
   const kind = sourceFor(input);
   if (kind === "text") { const text = input.text.trim(); return { source: "text", text, description: text, photos: [] }; }
-  if (kind === "facebook") return fromFacebook(input, deps);
-  return fromFirecrawl(input, deps);
+  const result = kind === "facebook" ? await fromFacebook(input, deps) : await fromFirecrawl(input, deps);
+  console.log(`[extract] scraped ${kind} ${input.url} -> ${result.text.length} chars, ${result.photos.length} photos`);
+  return result;
 }
 
 module.exports = { resolve, isPublicUrl, TIMEOUT_MS, _test: { sourceFor, facebookPostId, listingImages, isPrivateIp, attachmentImages } };
