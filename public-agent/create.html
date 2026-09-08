@@ -69,6 +69,15 @@
   .wizard-actions .btn{min-width:158px}
   .wizard-step{display:flex;align-items:center;gap:8px;white-space:nowrap;color:var(--agent-mute,var(--ink-soft));font-family:var(--sans);font-size:.8rem;border:0;background:transparent;padding:0;cursor:pointer}
   .wizard-step:focus-visible{outline:2px solid var(--gold);outline-offset:4px;border-radius:5px}
+  .extract-block{margin:0 0 18px}
+  .extract-block textarea{width:100%;min-height:120px;resize:vertical}
+  .extract-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .link-btn{border:0;background:transparent;color:var(--ink-soft);text-decoration:underline;cursor:pointer;font:inherit;padding:0}
+  .extract-card{border:1px solid var(--gold);border-radius:12px;padding:16px;margin:0 0 18px}
+  .extract-card.all-set{border-color:var(--pa-sage,#5c8a5c)}
+  .extract-photos{margin:0 0 18px}
+  .extract-photos .t.skip img{opacity:.35}
+  #extractBtn[disabled]{opacity:.6;cursor:progress}
   .wizard-step.active{color:var(--ink);font-weight:700}
   .wizard-step i{display:grid;place-items:center;width:26px;height:26px;border:1px solid rgba(23,20,15,.14);border-radius:50%;font-style:normal;font-size:.7rem}
   .wizard-step.active i{background:var(--dark);border-color:var(--dark);color:#fff}
@@ -129,6 +138,25 @@
       <p class="form-err" id="formErr"></p>
       <section class="wizard-panel" data-wizard-panel="1">
       <div class="section-intro"><span class="section-number">01</span><div><h2 data-i18n="panel1_h2">הפרטים שעושים את ההבדל</h2><p data-i18n="panel1_p">כמה עובדות טובות מספיקות כדי להתחיל לספר את סיפור הנכס.</p></div></div>
+      <div id="extractBlock" class="extract-block">
+        <label for="extractInput" data-i18n="ext_title">תארו את הנכס במילים שלכם, או הדביקו קישור</label>
+        <textarea id="extractInput" rows="5" maxlength="4000" data-i18n-ph="ext_ph"></textarea>
+        <div class="extract-actions">
+          <button type="button" class="btn btn-gold" id="extractBtn" data-i18n="ext_btn">תנו לפורלי למלא</button>
+          <button type="button" class="link-btn" id="extractManual" data-i18n="ext_manual">או מלאו את הטופס ידנית</button>
+        </div>
+        <p class="form-err" id="extractErr"></p>
+      </div>
+      <div id="extractCard" class="extract-card hidden">
+        <div class="sec-title" id="extractCardTitle" data-i18n="ext_missing_title">פורלי צריכה עוד כמה פרטים</div>
+        <div id="extractCardList" class="grid-2"></div>
+        <button type="button" class="link-btn" id="extractShowAll" data-i18n="ext_show_all">הצגת כל הפרטים</button>
+      </div>
+      <div id="extractPhotos" class="extract-photos hidden">
+        <div class="sec-title" data-i18n="ext_photos_found">תמונות שנמצאו</div>
+        <div id="extractPhotoGrid" class="thumbs"></div>
+      </div>
+      <div id="manualFields" class="hidden">
       <!-- demo-only agent block: shown when ?key= is present (no login) -->
       <div id="agentBlock" class="hidden">
         <div class="sec-title" data-step="00" data-i18n="sec_agent">פרטי המתווך</div>
@@ -239,6 +267,7 @@
         <textarea id="pDesc" rows="3" maxlength="2000" placeholder="משופצת אדריכלית, מרפסת שמש לים, ממ״ד..." data-i18n-ph="ph_description"></textarea>
         <div class="hint" data-i18n="hint_description">התיאור עוזר ל-AI לכתוב את הדף — ככל שתפרטו, הדף יהיה טוב יותר.</div>
       </div>
+      </div><!-- /manualFields -->
       <div class="wizard-actions form-actions"><span class="stage-note form-hint show" data-i18n="stage1_hint">השלימו כתובת, עיר, מחיר וחדרים כדי להמשיך</span><button type="button" class="btn btn-gold primary-action" id="nextStage1" data-i18n="btn_next_photos">המשך לתמונות ←</button></div>
       </section>
 
@@ -444,6 +473,7 @@
 
 <script src="/api.js"></script>
 <script src="/form-i18n.js"></script>
+<script src="/extract.js"></script>
 <script>
 (function () {
   "use strict";
@@ -645,7 +675,10 @@
       if (wizardStage === 1 && !validateStageOne()) return;
       if (wizardStage === 2 && !validateStageTwo()) return;
     }
-    setWizardStage(Math.max(1, Math.min(3, direction)), true);
+    var go = function () { setWizardStage(Math.max(1, Math.min(3, direction)), true); };
+    // leaving step 1 forward: pull the ticked found-photos in first so step 2 shows them
+    if (wizardStage === 1 && direction > 1) importTickedPhotos().then(go);
+    else go();
   }
   $("#nextStage1").addEventListener("click", function () { moveWizard(2); });
   $("#prevStage2").addEventListener("click", function () { moveWizard(1); });
@@ -870,6 +903,101 @@
       updateLivePreview();
     });
   }
+
+  // ── paste text / link → Forly fills the form (see extract.js for the pure parts) ──
+  var X = window.FlyExtract;
+  var importedPhotos = []; // {url, el, skip}
+  function revealManual() { $("#manualFields").classList.remove("hidden"); }
+  function showExtractErr(key) {
+    var el = $("#extractErr"); el.textContent = FT(key); el.classList.add("show");
+  }
+  function showMissingCard(selectors) {
+    var card = $("#extractCard"), list = $("#extractCardList");
+    card.classList.remove("hidden");
+    list.innerHTML = "";
+    if (!selectors.length) {
+      card.classList.add("all-set");
+      $("#extractCardTitle").textContent = FT("ext_all_set");
+      $("#nextStage1").focus();
+      return;
+    }
+    card.classList.remove("all-set");
+    $("#extractCardTitle").textContent = FT("ext_missing_title");
+    selectors.forEach(function (sel) {
+      var el = $(sel);
+      // the deal toggle is the buttons, not the hidden select
+      var wrap = sel === "#pType" ? document.querySelector(".deal-toggle") : (el && el.closest(".field"));
+      if (wrap) list.appendChild(wrap);
+    });
+  }
+  function addImportedPhoto(url) {
+    if (importedPhotos.length >= 12) return;
+    var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
+    var entry = { url: url, el: t, skip: false };
+    t.querySelector(".x").addEventListener("click", function () {
+      entry.skip = !entry.skip; t.classList.toggle("skip", entry.skip);
+    });
+    $("#extractPhotoGrid").appendChild(t);
+    importedPhotos.push(entry);
+    $("#extractPhotos").classList.remove("hidden");
+  }
+  // Called when leaving step 1 forward: turns ticked found-photos into
+  // regular photo entries (server downloads them), then continues.
+  function importTickedPhotos() {
+    var todo = importedPhotos.filter(function (p) { return !p.skip && !p.done; });
+    return Promise.all(todo.map(function (p) {
+      p.done = true;
+      return fetch("/api/photos/import-url", {
+        method: "POST", credentials: "include",
+        headers: Object.assign({ "content-type": "application/json" }, uploadHeaders),
+        body: JSON.stringify({ url: p.url }),
+      }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+        if (!j || !j.url || photos.length >= 12) { FLY.toast(FT("err_photo_upload")); return; }
+        var t = FLY.el("div", "t", '<img src="' + j.url + '"><button class="x" type="button">✕</button>');
+        var entry = { file: null, el: t, publicUrl: j.url, previewUrl: j.url, removed: false, failed: false, uploadPromise: Promise.resolve(j.url) };
+        t.querySelector(".x").addEventListener("click", function () {
+          entry.removed = true;
+          photos = photos.filter(function (q) { return q.el !== t; });
+          t.remove(); FLY.deleteUpload(j.url, uploadHeaders); updateLivePreview();
+        });
+        $("#thumbs").appendChild(t); photos.push(entry); updateLivePreview();
+      }).catch(function () { FLY.toast(FT("err_photo_upload")); });
+    }));
+  }
+  function runExtract() {
+    var raw = $("#extractInput").value.trim();
+    if (!raw) { $("#extractInput").focus(); return; }
+    var btn = $("#extractBtn");
+    btn.disabled = true; btn.textContent = FT("ext_working");
+    $("#extractErr").classList.remove("show");
+    var body = X.isUrl(raw) ? { url: raw } : { text: raw };
+    fetch("/api/properties/extract", {
+      method: "POST", credentials: "include",
+      headers: Object.assign({ "content-type": "application/json" }, uploadHeaders),
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, ok: r.ok, body: j }; });
+    }).then(function (res) {
+      if (!res.ok) {
+        showExtractErr(X.errorKey(res.status, res.body.error));
+        if (res.status === 422 || res.status === 409) $("#extractInput").focus(); else revealManual();
+        return;
+      }
+      X.fillFields(res.body.fields, $);
+      syncDealButtons(); updatePriceLabel(); renderPriceChips();
+      if (!$("#pDesc").value.trim()) $("#pDesc").value = String(res.body.description || "").slice(0, 2000);
+      (res.body.photos || []).forEach(function (p) { addImportedPhoto(p.url); });
+      showMissingCard(X.missingFor(res.body.missing, $, isDemo));
+      updateLivePreview();
+    }).catch(function () {
+      showExtractErr("ext_err_unavailable"); revealManual();
+    }).then(function () {
+      btn.disabled = false; btn.textContent = FT("ext_btn");
+    });
+  }
+  $("#extractBtn").addEventListener("click", runExtract);
+  $("#extractManual").addEventListener("click", function () { revealManual(); $("#pAddress").focus(); });
+  $("#extractShowAll").addEventListener("click", revealManual);
 
   // ── listing type (sale / rent): adapt the price label + quick-pick options ──
   $("#pType").addEventListener("change", function () {
