@@ -11,6 +11,7 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
+const { storeBuffer } = require("../upload-store");
 const { sanitizeTheme, sanitizeLang } = require("../utils");
 const { sanitizeTags } = require("../tags");
 
@@ -78,22 +79,11 @@ module.exports = function createIntakeRouter(ctx) {
     if (req.body.length > maxMb * 1024 * 1024) {
       return res.status(413).json({ error: "too large" });
     }
-    if (remoteUploadBase) {
-      try {
-        const r = await fetch(`${remoteUploadBase}/api/upload/${fname}`, {
-          method: "PUT",
-          headers: { "Content-Type": req.headers["content-type"] || "application/octet-stream" },
-          body: req.body,
-          signal: AbortSignal.timeout(120000),
-        });
-        if (!r.ok) return res.status(502).json({ error: `remote upload failed: ${r.status}` });
-        return res.json({ ok: true, remote: true });
-      } catch (err) {
-        return res.status(502).json({ error: `remote upload failed: ${err.message}` });
-      }
+    try {
+      res.json(await storeBuffer({ fname, buffer: req.body, contentType: req.headers["content-type"] }, { uploadDir, remoteUploadBase }));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
     }
-    fs.writeFileSync(path.join(uploadDir, fname), req.body);
-    res.json({ ok: true });
   });
 
   // Remove an uploaded file (the form deletes photos the user takes back out).
