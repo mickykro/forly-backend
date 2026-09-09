@@ -30,8 +30,6 @@ const PORT = Number.isInteger(cliPort) && cliPort > 0 && cliPort < 65536 ?
 const BASE_URL = (process.env.BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads");
 const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, "");
-const REMOTE_UPLOAD_BASE = (process.env.REMOTE_UPLOAD_BASE || "").replace(/\/+$/, "");
-const UPLOAD_PUBLIC_BASE = REMOTE_UPLOAD_BASE || BASE_URL;
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
 const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
 const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
@@ -39,7 +37,39 @@ const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
 const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
 const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
-const AUTH_SECRET = process.env.NADLAN_JWT_SECRET || "change-me-in-env";
+
+// Session/action/OTP signing key. Everything that proves identity is signed
+// with this, so a missing or placeholder value means anyone could forge a
+// session. Refuse to boot in production without a real secret; in local dev
+// fall back to an ephemeral random key (never the old public constant) so the
+// app still runs but sessions reset on restart. NADLAN_JWT_SECRET is the
+// canonical env var; FORLY_JWT_SECRET is accepted for back-compat.
+const { resolveAuthSecret, resolveRemoteUploadBase } = require("./upload-relay");
+const authSecretInfo = resolveAuthSecret(process.env,
+  () => require("crypto").randomBytes(32).toString("base64url"));
+if (authSecretInfo.ephemeral) {
+  if (process.env.NODE_ENV === "production") {
+    console.error("FATAL: NADLAN_JWT_SECRET is missing or set to a placeholder. " +
+      "Refusing to start — set a strong, random NADLAN_JWT_SECRET.");
+    process.exit(1);
+  }
+  console.warn("WARNING: NADLAN_JWT_SECRET not set — using an ephemeral dev key. " +
+    "Sessions will not survive a restart. Set NADLAN_JWT_SECRET for stable local auth.");
+}
+const AUTH_SECRET = authSecretInfo.secret;
+// The upload relay forwards the caller's session to REMOTE_UPLOAD_BASE, which
+// only validates when both instances share NADLAN_JWT_SECRET. With an
+// ephemeral dev key every relayed upload would 502, so the relay is disabled.
+const remoteUpload = resolveRemoteUploadBase({
+  raw: process.env.REMOTE_UPLOAD_BASE, secretEphemeral: authSecretInfo.ephemeral,
+});
+if (remoteUpload.reason) console.warn(`WARNING: ${remoteUpload.reason}`);
+const REMOTE_UPLOAD_BASE = remoteUpload.base;
+const UPLOAD_PUBLIC_BASE = REMOTE_UPLOAD_BASE || BASE_URL;
+// Secret for the maintenance/import admin API endpoints (x-admin-secret header).
+// Dedicated var so it isn't the session-signing key; falls back to AUTH_SECRET
+// for back-compat where only that was configured.
+const ADMIN_API_SECRET = (process.env.ADMIN_API_SECRET || "").trim() || AUTH_SECRET;
 // Operator admin panel: comma-separated allowlist of phone numbers permitted to
 // see/manage EVERY agent's properties. Empty ⇒ admin panel denies everyone.
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || "")
@@ -64,8 +94,31 @@ const { sendWhatsApp } = require("./utils");
 // lead for a human to follow up instead of leaving them stuck.
 const SALES_LEAD_PHONE = normalizeAuthPhone(process.env.SALES_LEAD_PHONE || "972548018957");
 
+// ── quotas (what each client paid for; set by hand in the admin panel) ──
+// PAYMENT_LINK_URL: the external payment page shown to a client who hit their
+// cap. N8N_WEBHOOK_SECRET: shared secret n8n sends (x-forly-secret) to
+// /api/quota/consume before an image edit. See server/quota.js.
+const PAYMENT_LINK_URL = (process.env.PAYMENT_LINK_URL || "").trim();
+const N8N_WEBHOOK_SECRET = (process.env.N8N_WEBHOOK_SECRET || "").trim();
+const { createQuota } = require("./quota");
+const quota = createQuota({
+  db: db.db,
+  FieldValue: db.db ? require("firebase-admin").firestore.FieldValue : null,
+  sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  adminPhone: SALES_LEAD_PHONE,
+  paymentUrl: PAYMENT_LINK_URL,
+});
+
 // ── app ──
 const app = express();
+// Behind the Cloud Run / hosting proxy: trust X-Forwarded-* so req.secure and
+// the rate limiter's client-IP keying are accurate.
+app.set("trust proxy", true);
+
+// Security headers on every response (clickjacking, MIME-sniff, referrer, HSTS).
+const { securityHeaders, rateLimit } = require("./security");
+app.use(securityHeaders);
+
 app.use(express.json({ limit: "2mb" }));
 
 // static files
@@ -79,6 +132,11 @@ app.use("/files", express.static(UPLOAD_DIR, { maxAge: "1d", immutable: true }))
 app.use("/tpl", express.static(TEMPLATES_DIR));
 
 // ── auth routes ──
+// Throttle the OTP send/verify endpoints per IP (abuse / enumeration / SMS-cost
+// protection) on top of the per-phone cooldowns enforced inside the router.
+// Scoped to /otp and /verify so it never throttles /me polling or /logout.
+app.use("/api/auth/otp", rateLimit({ windowMs: 60_000, max: 10 }));
+app.use("/api/auth/verify", rateLimit({ windowMs: 60_000, max: 10 }));
 app.use("/api/auth", createAuthRouter({
   db: db.db, mem: db.mem,
   sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
@@ -88,8 +146,15 @@ app.use("/api/auth", createAuthRouter({
 
 // ── intake routes (uploads, property creation) ──
 const createIntakeRouter = require("./routes/intake");
+// ── quota routes (n8n consume/status, agent /me) ──
+const createQuotaRouter = require("./routes/quota");
+app.use("/api/quota", createQuotaRouter({
+  quota, requireAuth, authSecret: AUTH_SECRET, n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone,
+}));
+
 app.use("/api", createIntakeRouter({
   requireAuth, normalizeAuthPhone, signSession,
+  verifySession, readToken, adminPhones: ADMIN_PHONES, quota,
   uploadDir: UPLOAD_DIR,
   uploadPublicBase: UPLOAD_PUBLIC_BASE,
   remoteUploadBase: REMOTE_UPLOAD_BASE,
@@ -133,6 +198,7 @@ app.use("/api/admin", createAdminRouter({
   uploadDir: UPLOAD_DIR,
   adminPhones: ADMIN_PHONES,
   sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  quota,
 }));
 
 // ── distribution routes (Meta OAuth, one-tap confirm, publish, groups) ──
@@ -141,6 +207,7 @@ const distributionJobs = require("./distribution/jobs");
 app.use("/api/distribution", createDistributionRouter({
   requireAuth, verifyActionToken, verifySession, readToken,
   authSecret: AUTH_SECRET,
+  adminApiSecret: ADMIN_API_SECRET,
   pageBaseUrl: PAGE_BASE_URL,
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
@@ -183,10 +250,14 @@ app.use(createChatRouter({
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   },
   ipSalt: process.env.CHATBOT_IP_SALT || AUTH_SECRET,
+  quota,
   // Chat leads WhatsApp the agent directly (the form path relays via n8n).
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
 }));
+
+// Throttle the expensive ffmpeg video-overlay endpoint per IP (resource abuse).
+app.use("/api/video-overlay", rateLimit({ windowMs: 60_000, max: 20 }));
 
 // ── pages routes (builder, serving, leads) ──
 const createPagesRouter = require("./routes/pages");
@@ -200,6 +271,7 @@ app.use(createPagesRouter({
   greenToken: GREENAPI_TOKEN,
   requireAuth, verifyActionToken,
   authSecret: AUTH_SECRET,
+  adminApiSecret: ADMIN_API_SECRET,
   // page/update ownership check (see server/page-auth.js)
   verifySession, readToken, normalizeAuthPhone,
   adminPhones: ADMIN_PHONES,
@@ -213,14 +285,7 @@ app.listen(PORT, () => {
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
   console.log(`  WW1 webhook: ${N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL || "(not set)"}${N8N_DEV_WEBHOOK_URL ? " [DEV]" : ""}`);
   console.log(`  pipeline webhook: ${N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL || "(not set)"}${N8N_DEV_PIPELINE_WEBHOOK_URL ? " [DEV]" : ""}`);
-  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set NADLAN_JWT_SECRET)" : "enabled"}`);
-  // startExpiryScheduler({
-  //   pageBaseUrl: PAGE_BASE_URL,
-  //   authSecret: AUTH_SECRET,
-  //   greenInstance: GREENAPI_INSTANCE,
-  //   greenToken: GREENAPI_TOKEN,
-  // });
-  console.log(`  agent auth:  ${AUTH_SECRET === "change-me-in-env" ? "DISABLED (set FORLY_JWT_SECRET)" : "enabled"}`);
+  console.log("  agent auth:  enabled");
   // Expiry scheduler retired: property pages no longer expire — the public
   // portal (call4li.com) lists every live page until the agent archives it.
   distributionJobs.startSweeper(distributionJobs.liveDeps({

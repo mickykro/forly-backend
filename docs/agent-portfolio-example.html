@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>קרויטורו נכסים | נכסים בכפר סבא</title>
+  <style>
+    @font-face { font-family:Discovery; src:url('assets/Discovery_Fs-Light.woff') format('woff'); font-weight:300 500; font-style:normal; font-display:swap; }
+    @font-face { font-family:Discovery; src:url('assets/Discovery_Fs-Bold.woff') format('woff'); font-weight:600 800; font-style:normal; font-display:swap; }
+    :root { --ink:#3f2819; --paper:#fffcf6; --sand:#f3e4cd; --sage:#98622f; --gold:#c48135; --muted:#846d5b; --line:#eadcc9; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:var(--paper); font-family:Discovery,sans-serif; }
+    a { color:inherit; text-decoration:none; }
+    .wrap { width:min(1160px, calc(100% - 40px)); margin:auto; }
+    .nav { height:76px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(63,40,25,.13); }
+    .brand { display:flex; align-items:center; gap:12px; font-weight:700; font-size:20px; }
+    .brand-mark { width:38px; height:38px; border:1px solid var(--gold); border-radius:50%; display:grid; place-items:center; color:var(--gold); font:700 22px Discovery,sans-serif; }
+    .nav a:not(.brand) { font-size:14px; font-weight:600; color:var(--sage); }
+    .hero { padding:75px 0 56px; background:radial-gradient(circle at 8% 12%, #f5d7a4 0, transparent 28%), linear-gradient(140deg,#fffcf6 56%,#f2dfc1); overflow:hidden; }
+    .hero-grid { display:grid; grid-template-columns:1.15fr .85fr; gap:56px; align-items:center; }
+    .eyebrow { color:var(--sage); font-size:13px; letter-spacing:.08em; font-weight:700; }
+    h1,h2,h3,p { margin:0; }
+    h1 { font:600 clamp(44px,6vw,78px)/.96 Discovery,sans-serif; letter-spacing:-.04em; margin:14px 0 22px; }
+    h1 em { color:var(--gold); font-style:normal; }
+    .intro { max-width:560px; color:#5d4634; line-height:1.8; font-size:18px; }
+    .actions { display:flex; gap:12px; margin-top:28px; }
+    .button { border:0; cursor:pointer; background:var(--ink); color:white; font:600 15px Heebo,sans-serif; padding:13px 24px; }
+    .button.alt { background:transparent; color:var(--ink); border:1px solid var(--ink); }
+    .profile { min-height:545px; position:relative; display:flex; align-items:end; overflow:hidden; background:#ead7bd; box-shadow:18px 18px 0 #e5c996; }
+    .profile::before { content:'כפר סבא'; position:absolute; left:16px; top:15px; z-index:1; color:#fff9ee; font:600 18px Discovery,sans-serif; text-shadow:0 1px 10px rgba(63,40,25,.32); }
+    .portrait { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; object-position:center 22%; filter:saturate(.9) contrast(1.02); }
+    .profile-top { display:flex; gap:17px; align-items:center; border-bottom:1px solid var(--line); padding-bottom:19px; }
+    .profile-copy { z-index:1; width:100%; padding:22px; color:#fffaf0; background:linear-gradient(transparent,rgba(49,28,14,.82) 28%); padding-top:64px; }
+    .profile-logo { width:58px; height:58px; border-radius:50%; object-fit:contain; background:#fffaf0; border:1px solid rgba(255,250,240,.65); padding:6px; }
+    .profile h2 { font:600 26px Discovery,sans-serif; }
+    .profile small { color:#f4dfc3; font-size:14px; }
+    .profile dl { margin:20px 0 0; display:grid; grid-template-columns:1fr 1fr; gap:17px; }
+    .profile dt { color:#e7cda7; font-size:12px; }
+    .profile dd { margin:3px 0 0; font-size:14px; font-weight:600; }
+    .listings { padding:76px 0 90px; }
+    .section-head { display:flex; justify-content:space-between; gap:24px; align-items:end; margin-bottom:29px; }
+    .section-head h2 { font:600 clamp(34px,4vw,50px)/1 Discovery,sans-serif; letter-spacing:-.03em; }
+    .section-head p { color:var(--muted); }
+    .count { color:var(--gold); font-weight:700; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+    .card { background:#fff; border:1px solid var(--line); transition:transform .25s ease,box-shadow .25s ease; }
+    .card:hover { transform:translateY(-5px); box-shadow:0 14px 28px rgba(63,40,25,.12); }
+    .photo { height:245px; position:relative; overflow:hidden; background:#d8d3c8; }
+    .photo img { width:100%; height:100%; object-fit:cover; display:block; transition:transform .5s ease; }
+    .card:hover .photo img { transform:scale(1.04); }
+    .tag { position:absolute; top:12px; right:12px; background:#f8f6ef; padding:5px 10px; font-size:12px; font-weight:700; }
+    .card-body { padding:19px 18px 21px; }
+    .location { color:var(--sage); font-size:13px; font-weight:700; }
+    h3 { font:600 25px Discovery,sans-serif; margin:5px 0 13px; }
+    .meta { border-top:1px solid var(--line); padding-top:12px; color:var(--muted); font-size:13px; display:flex; justify-content:space-between; }
+    .price { margin-top:15px; font-size:19px; font-weight:700; }
+    .more { margin:32px auto 0; display:block; }
+    .about { padding:84px 0; background:var(--sand); }
+    .about-grid { display:grid; grid-template-columns:.9fr 1.1fr; gap:80px; align-items:start; }
+    .about-card { border-top:2px solid var(--gold); padding-top:18px; }
+    .about-card h2 { font:600 clamp(38px,4.5vw,58px)/1 Discovery,sans-serif; letter-spacing:-.04em; }
+    .about-card h2 em { color:var(--gold); font-style:normal; }
+    .about-copy { color:#604634; font-size:17px; line-height:1.9; }
+    .about-copy p + p { margin-top:17px; }
+    .credentials { margin-top:28px; display:grid; grid-template-columns:repeat(3,1fr); border-top:1px solid rgba(63,40,25,.18); }
+    .credential { padding:16px 12px 0 0; border-left:1px solid rgba(63,40,25,.18); }
+    .credential:last-child { border-left:0; }
+    .credential b { display:block; font:600 21px Discovery,sans-serif; }
+    .credential span { color:var(--muted); font-size:12px; }
+    .testimonials { padding:84px 0; }
+    .testimonials-head { max-width:650px; margin-bottom:31px; }
+    .testimonials-head h2 { font:600 clamp(38px,4.5vw,58px)/1 Discovery,sans-serif; letter-spacing:-.04em; margin-top:9px; }
+    .quotes { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+    .quote { min-height:250px; display:flex; flex-direction:column; justify-content:space-between; padding:25px; background:#fff; border:1px solid var(--line); }
+    .quote-mark { color:var(--gold); font:600 60px/.7 Discovery,sans-serif; }
+    .quote p { color:#5d4634; font-size:16px; line-height:1.8; }
+    .quote footer { padding:0; color:var(--sage); font-size:13px; font-weight:700; }
+    .contact { background:var(--ink); color:#fffaf0; padding:72px 0; }
+    .contact-grid { display:grid; grid-template-columns:1fr 1fr; gap:70px; align-items:center; }
+    .contact h2 { font:600 clamp(38px,5vw,62px)/1 Discovery,sans-serif; letter-spacing:-.04em; }
+    .contact h2 em { color:#f0bd73; font-style:normal; }
+    .contact p { color:#eddbc4; line-height:1.8; margin-top:18px; }
+    form { display:grid; gap:10px; }
+    input { font:16px Heebo,sans-serif; border:1px solid #a28161; color:white; background:transparent; padding:14px; outline:0; }
+    input:focus { border-color:#f0bd73; }
+    .contact .button { background:#f0bd73; color:#3f2819; justify-self:start; }
+    footer { padding:26px 0; color:#846d5b; font-size:12px; }
+    .modal { position:fixed; inset:0; background:rgba(43,24,12,.72); display:none; align-items:center; justify-content:center; padding:20px; z-index:4; }
+    .modal.open { display:flex; }
+    .modal-box { width:min(470px,100%); background:var(--paper); padding:32px; position:relative; }
+    .modal-box h2 { font:600 36px Discovery,sans-serif; }
+    .modal-box p { color:var(--muted); margin:8px 0 21px; }
+    .modal-box form input { color:var(--ink); border-color:var(--line); }
+    .close { position:absolute; top:12px; left:14px; border:0; background:none; font-size:24px; cursor:pointer; }
+    @media (max-width:760px) { .wrap { width:min(100% - 28px,1160px); } .nav { height:64px; } .hero { padding:54px 0 48px; } .hero-grid,.contact-grid,.about-grid { grid-template-columns:1fr; gap:40px; } .profile { min-height:470px; margin-top:22px; } .grid,.quotes { grid-template-columns:1fr; } .section-head { display:block; } .section-head p { margin-top:10px; } .photo { height:260px; } .about,.testimonials { padding:60px 0; } }
+  </style>
+</head>
+<body>
+  <header class="wrap nav">
+    <a class="brand" href="#top"><span class="brand-mark">ק</span><span>קרויטורו נכסים</span></a>
+    <a href="#contact">יצירת קשר</a>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div>
+          <p class="eyebrow">נכסים נבחרים למכירה ולהשכרה</p>
+          <h1>מוצאים את המקום<br><em>שמרגיש כמו בית.</em></h1>
+          <p class="intro">קרויטורו נכסים מלווה קונים, מוכרים ומשכירים בכפר סבא והסביבה, עם היכרות מקומית, שקיפות וליווי אישי לכל אורך הדרך.</p>
+          <div class="actions"><a class="button" href="#properties">לנכסים שלנו</a><button class="button alt" data-lead>דברו איתנו</button></div>
+        </div>
+        <aside class="profile">
+          <img class="portrait" src="assets/agent-portrait.jpg" alt="מיקי קרויטורו">
+          <div class="profile-copy">
+          <div class="profile-top">
+            <img class="profile-logo" src="https://forly.srv1173890.hstgr.cloud/files/b3cc15c2-a50e-4667-8956-7a170a43bbaa.png" alt="לוגו קרויטורו נכסים">
+            <div><h2>קרויטורו נכסים</h2><small>מיקי קרויטורו · רישיון תיווך 124567</small></div>
+          </div>
+          <dl><div><dt>אזור התמחות</dt><dd>כפר סבא והשרון</dd></div><div><dt>סוגי נכסים</dt><dd>מכירה והשכרה</dd></div><div><dt>מענה אישי</dt><dd>נחזור אליכם במהירות</dd></div><div><dt>ליווי</dt><dd>עד לקבלת המפתח</dd></div></dl>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="wrap listings" id="properties">
+      <div class="section-head"><div><p class="eyebrow">הנכסים שלנו</p><h2>הזדמנויות שמחכות לכם.</h2></div><p><span class="count">6 נכסים פעילים</span> · מתעדכן בזמן אמת</p></div>
+      <div class="grid">
+        <a class="card" href="#"><div class="photo"><img src="https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=900&q=80" alt="בית פרטי בכפר סבא"><span class="tag">למכירה</span></div><div class="card-body"><p class="location">הדרים, כפר סבא</p><h3>וילת משפחה מוארת</h3><div class="meta"><span>6 חדרים</span><span>260 מ״ר</span><span>2 חניות</span></div><p class="price">₪ 6,850,000</p></div></a>
+        <a class="card" href="#"><div class="photo"><img src="https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?auto=format&fit=crop&w=900&q=80" alt="דירה בכפר סבא"><span class="tag">למכירה</span></div><div class="card-body"><p class="location">הירוקה, כפר סבא</p><h3>דירת 5 חדרים עם מרפסת</h3><div class="meta"><span>5 חדרים</span><span>132 מ״ר</span><span>קומה 8</span></div><p class="price">₪ 3,490,000</p></div></a>
+        <a class="card" href="#"><div class="photo"><img src="https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=80" alt="דירת גן בכפר סבא"><span class="tag">להשכרה</span></div><div class="card-body"><p class="location">מרכז העיר, כפר סבא</p><h3>דירת גן שקטה ומעוצבת</h3><div class="meta"><span>4 חדרים</span><span>118 מ״ר</span><span>גינה 75 מ״ר</span></div><p class="price">₪ 8,900 <small>לחודש</small></p></div></a>
+      </div>
+      <button class="button alt more">לטעינת נכסים נוספים</button>
+    </section>
+
+    <section class="about" id="about">
+      <div class="wrap about-grid">
+        <div class="about-card"><p class="eyebrow">קצת עלינו</p><h2>הדרך הנכונה<br>למצוא <em>בית.</em></h2></div>
+        <div class="about-copy">
+          <p>מיקי קרויטורו מוביל את קרויטורו נכסים מתוך אמונה שעסקת נדל״ן טובה מתחילה בהקשבה. כל לקוח מקבל ליווי אישי, מידע ברור וגישה להזדמנויות המתאימות באמת לצרכים שלו.</p>
+          <p>היכרות מעמיקה עם כפר סבא והשרון מאפשרת לנו לחבר בין אנשים לנכסים בצורה מדויקת, נעימה ושקופה.</p>
+          <div class="credentials"><div class="credential"><b>כפר סבא</b><span>אזור ההתמחות</span></div><div class="credential"><b>124567</b><span>רישיון תיווך</span></div><div class="credential"><b>אישי</b><span>ליווי מתחילתו ועד סופו</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Demonstration content only. Production testimonials must come from verified client submissions. -->
+    <section class="wrap testimonials" id="testimonials">
+      <div class="testimonials-head"><p class="eyebrow">לקוחות מספרים</p><h2>עסקה טובה מתחילה<br>באמון.</h2></div>
+      <div class="quotes">
+        <article class="quote"><span class="quote-mark">״</span><p>הרגשנו שמישהו באמת מבין מה אנחנו מחפשים. התהליך היה מסודר, נעים ומדויק לכל אורך הדרך.</p><footer>משפחת לוי · כפר סבא</footer></article>
+        <article class="quote"><span class="quote-mark">״</span><p>קיבלנו שקיפות מלאה, זמינות יוצאת דופן והכוונה שעזרה לנו לקבל החלטה בביטחון.</p><footer>דנה ואורן · השרון</footer></article>
+        <article class="quote"><span class="quote-mark">״</span><p>מהפגישה הראשונה ועד החתימה, כל פרט טופל במקצועיות וברגישות. ממליצים מכל הלב.</p><footer>משפחת כהן · כפר סבא</footer></article>
+      </div>
+    </section>
+
+    <section class="contact" id="contact"><div class="wrap contact-grid"><div><p class="eyebrow" style="color:#d5b77d">לא מצאתם בדיוק מה שחיפשתם?</p><h2>ספרו לנו מה אתם<br><em>מחפשים.</em></h2><p>השאירו פרטים. מיקי או אחד מחברי הצוות יחזרו אליכם עם הזדמנויות מתאימות, כולל כאלה שעוד לא פורסמו.</p></div><form id="portfolio-form"><input required placeholder="שם מלא"><input required type="tel" placeholder="טלפון נייד"><button class="button">שלחו פרטים</button></form></div></section>
+  </main>
+  <footer class="wrap">קרויטורו נכסים · כל הזכויות שמורות · נבנה באמצעות Forly</footer>
+  <div class="modal" id="modal"><div class="modal-box"><button class="close" aria-label="סגירה">×</button><h2>בואו נדבר.</h2><p>השאירו פרטים ונחזור אליכם באופן אישי.</p><form id="modal-form"><input required placeholder="שם מלא"><input required type="tel" placeholder="טלפון נייד"><button class="button">שלחו פרטים</button></form></div></div>
+  <script>
+    const modal=document.querySelector('#modal');
+    document.querySelectorAll('[data-lead]').forEach(button=>button.addEventListener('click',()=>modal.classList.add('open')));
+    document.querySelector('.close').addEventListener('click',()=>modal.classList.remove('open'));
+    modal.addEventListener('click',event=>{if(event.target===modal)modal.classList.remove('open')});
+    document.querySelectorAll('form').forEach(form=>form.addEventListener('submit',event=>{event.preventDefault();form.innerHTML='<strong>הפרטים התקבלו. נחזור אליכם בקרוב.</strong>'}));
+  </script>
+</body>
+</html>

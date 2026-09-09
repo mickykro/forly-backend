@@ -28,7 +28,7 @@ const asMillis = (v) => { const d = asDate(v); return d ? d.getTime() : 0; };
 
 module.exports = function createAdminRouter(ctx) {
   const { verifySession, readToken, authSecret, normalizeAuthPhone, pageBaseUrl,
-          uploadDir, adminPhones, sendWhatsApp } = ctx;
+          uploadDir, adminPhones, sendWhatsApp, quota } = ctx;
 
   const router = express.Router();
 
@@ -191,6 +191,9 @@ module.exports = function createAdminRouter(ctx) {
           onboarding_state: b.onboarding_state || "",
           is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
           chatbot_enabled: !!(b.features && b.features.chatbot),
+          portfolio_enabled: !!(b.features && b.features.portfolio),
+          portfolio_status: b.portfolio?.status || null,
+          portfolio_url: b.portfolio?.status === "open" ? `/${b.portfolio.slug}` : null,
           distribution_enabled: !!(b.features && b.features.distribution),
           pages: 0, active_pages: 0, views: 0, leads: 0,
           readiness: { rich: 0, ok: 0, thin: 0 },
@@ -207,6 +210,14 @@ module.exports = function createAdminRouter(ctx) {
           p, p.listing_id ? listingById.get(p.listing_id) || null : null
         );
         row.readiness[verdict]++;
+      }
+
+      // Quota ledger per agent (what they paid for vs. used). One read each;
+      // best-effort so a ledger hiccup never hides the directory.
+      if (quota) {
+        await Promise.all([...byPhone.values()].map(async (row) => {
+          row.quota = await quota.getQuota(row.phone).catch(() => null);
+        }));
       }
 
       const agents = [...byPhone.values()]
@@ -232,7 +243,7 @@ module.exports = function createAdminRouter(ctx) {
   // Flipping "distribution" arms the page-ready hook for every future page
   // that agent creates (resolved live, like chatbot). Off by default —
   // pilots first (spec §2 "Rollout").
-  const FEATURES = new Set(["chatbot", "distribution"]);
+  const FEATURES = new Set(["chatbot", "portfolio", "distribution"]);
 
   router.post("/business/features", requireAdmin, async (req, res) => {
     const body = req.body || {};
@@ -256,6 +267,56 @@ module.exports = function createAdminRouter(ctx) {
       res.json({ ok: true, phone, feature, enabled: body.enabled });
     } catch (err) {
       console.error("admin/business/features failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── quotas: what this client paid for ──
+  // GET  /business/quota?phone=          → ledger + recent blocked attempts + history
+  // POST /business/quota { phone, caps:{kind:n|null}, reset_used:[kind], plan, notes }
+  // POST /business/quota { phone, clear_blocked:true } → dismiss the saved refused
+  //                        request (audited; the block stays in quota_events)
+  // Kinds are whitelisted inside quota.js; every change lands in quota_history.
+  router.get("/business/quota", requireAdmin, async (req, res) => {
+    const phone = normalizeAuthPhone(String(req.query.phone || ""));
+    if (!phone || !quota) return res.status(400).json({ error: "invalid_input" });
+    try {
+      const [ledger, events, history] = await Promise.all([
+        quota.getQuota(phone), quota.events(phone, 10), quota.history(phone, 30),
+      ]);
+      res.json({ phone, quota: ledger, events, history });
+    } catch (err) {
+      console.error("admin/business/quota get failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  router.post("/business/quota", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const phone = normalizeAuthPhone(body.phone || "");
+    if (!phone || !quota) return res.status(400).json({ error: "invalid_input" });
+    try {
+      const biz = await db.getBusiness(phone);
+      if (!biz) return res.status(404).json({ error: "unknown_agent" });
+
+      // Dismiss the alert only — no cap change.
+      if (body.clear_blocked === true) {
+        const c = await quota.clearBlocked(phone, req.user.userId);
+        console.log(`admin_quota_clear_blocked agent=${phone} by=${req.user.userId} cleared=${c.cleared}`);
+        return res.json({ ok: true, phone, cleared: c.cleared, changes: [], quota: c.quota });
+      }
+
+      const r = await quota.setCaps(phone, {
+        caps: body.caps && typeof body.caps === "object" ? body.caps : {},
+        reset_used: Array.isArray(body.reset_used) ? body.reset_used.map(String) : [],
+        plan: typeof body.plan === "string" ? body.plan : undefined,
+        notes: typeof body.notes === "string" ? body.notes : undefined,
+      }, req.user.userId);
+      console.log(`admin_quota_set agent=${phone} by=${req.user.userId} changes=${JSON.stringify(r.changes)}`);
+
+      res.json({ ok: true, phone, changes: r.changes, quota: r.quota });
+    } catch (err) {
+      console.error("admin/business/quota set failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });
@@ -390,6 +451,63 @@ module.exports = function createAdminRouter(ctx) {
       res.json({ ok: true });
     } catch (err) {
       console.error("admin/properties/delete failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── list all portfolios ──
+  router.get("/portfolios", requireAdmin, async (req, res) => {
+    try {
+      const businesses = await db.listAllBusinesses();
+      const portfolios = businesses
+        .filter((b) => b.portfolio?.slug)
+        .map((b) => ({
+          phone: b.phone,
+          name: b.business_name || b.full_name || "—",
+          slug: b.portfolio.slug,
+          status: b.portfolio.status,
+          url: b.portfolio.status === "open" ? `/${b.portfolio.slug}` : null,
+          created_at: b.portfolio.created_at || null,
+        }))
+        .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+      res.json({
+        portfolios,
+        stats: {
+          total: portfolios.length,
+          open: portfolios.filter((p) => p.status === "open").length,
+          closed: portfolios.filter((p) => p.status === "closed").length,
+          draft: portfolios.filter((p) => p.status === "draft").length,
+        },
+      });
+    } catch (err) {
+      console.error("admin/portfolios failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── portfolio status (admin-only open/close) ──
+  router.post("/portfolio-status", requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const phone = normalizeAuthPhone(body.phone || body.business_phone || "");
+    const status = String(body.status || "");
+    if (!phone || (status !== "open" && status !== "closed")) {
+      return res.status(400).json({ error: "business_phone and status(open|closed) required" });
+    }
+    try {
+      const biz = await db.getBusiness(phone);
+      if (!biz || !biz.portfolio) return res.status(404).json({ error: "portfolio_not_found" });
+      await db.setBusiness(phone, {
+        "portfolio.status": status,
+        "portfolio.updated_at": new Date(),
+      }, true);
+      console.log(`admin_portfolio_status phone=${phone} status=${status} by=${req.user.userId}`);
+      res.json({
+        ok: true,
+        status,
+        portfolio_url: status === "open" ? `/${biz.portfolio.slug}` : null,
+      });
+    } catch (err) {
+      console.error("admin/portfolio-status failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });

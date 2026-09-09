@@ -4,7 +4,7 @@ import * as crypto from "crypto";
 import type {Request} from "firebase-functions/https";
 import {
   db, normalizePhone, sendWhatsAppMessage,
-  greenApiInstance, greenApiToken, nadlanJwtSecret,
+  greenApiInstance, greenApiToken, nadlanJwtSecret, adminPhone,
 } from "../shared";
 
 const OTP_TTL_MS = 5 * 60 * 1000;
@@ -73,8 +73,28 @@ export function requireAuth(req: Request): string | null {
   return verifySession(match[1], nadlanJwtSecret.value());
 }
 
+/** Admin allowlist (ADMIN_PHONE param, comma-separated). Digit-stripped compare
+ *  so "+972…", "972…" and "050…"-style entries all match the session phone. */
+function normDigits(raw: string): string {
+  const n = normalizePhone(raw);
+  return n || String(raw).replace(/\D/g, "");
+}
+export function isAdminPhone(phone: string | null): boolean {
+  if (!phone) return false;
+  const allow = adminPhone.value().split(",").map((s) => normDigits(s)).filter(Boolean);
+  return allow.includes(normDigits(phone));
+}
+
+/** Authenticated session that is ALSO on the admin allowlist, or null. */
+export function requireAdmin(req: Request): string | null {
+  const phone = requireAuth(req);
+  return isAdminPhone(phone) ? phone : null;
+}
+
 function hashCode(code: string, secret: string): string {
-  return crypto.createHash("sha256").update(code + secret).digest("hex");
+  // HMAC keyed by the secret (not a plain hash of code+secret) so the digest
+  // can't be precomputed without the key. Matches server/auth.js.
+  return crypto.createHmac("sha256", secret).update(code).digest("hex");
 }
 
 function todayKey(): string {
@@ -196,7 +216,10 @@ export const verifyLoginOtp = onRequest(
       res.status(429).json({error: "too_many_attempts"});
       return;
     }
-    if (otp.code_hash !== hashCode(code, nadlanJwtSecret.value())) {
+    const given = Buffer.from(hashCode(code, nadlanJwtSecret.value()));
+    const stored = Buffer.from(String(otp.code_hash));
+    const codeOk = given.length === stored.length && crypto.timingSafeEqual(given, stored);
+    if (!codeOk) {
       await otpRef.update({attempts: otp.attempts + 1});
       res.status(401).json({error: "wrong_code", attempts_left: OTP_MAX_ATTEMPTS - otp.attempts - 1});
       return;

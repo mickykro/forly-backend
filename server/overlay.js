@@ -46,6 +46,7 @@ const zlib = require("zlib");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
 const { roomLabel } = require("./rooms");
+const { assertPublicHttpUrl } = require("./utils");
 
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE = process.env.FFPROBE_PATH || "ffprobe";
@@ -452,7 +453,11 @@ async function detectRoomSegments(clips, tmp, info, rooms) {
 }
 
 async function download(url, dest) {
-  const resp = await fetch(url, { signal: AbortSignal.timeout(120000) });
+  // SSRF guard: client-supplied clip/music URLs must resolve to public
+  // addresses (blocks 169.254.169.254 & internal hosts). Fixed trusted hosts
+  // (fal, etc.) are public and pass unchanged.
+  const safeUrl = await assertPublicHttpUrl(url);
+  const resp = await fetch(safeUrl, { signal: AbortSignal.timeout(120000), redirect: "error" });
   if (!resp.ok) throw new Error(`fetch video ${resp.status}`);
   fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
 }
