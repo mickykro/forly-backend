@@ -3,6 +3,7 @@
 ## Rules
 
 - Do what has been asked; nothing more, nothing less
+- ALWAYS follow the Task Workflow below: brainstorm → plan → user approval → execute
 - NEVER create files unless absolutely necessary — prefer editing existing files
 - NEVER create documentation files unless explicitly requested
 - NEVER save working files or tests to root — use `/src`, `/tests`, `/docs`, `/config`, `/scripts`
@@ -11,6 +12,34 @@
 - NEVER add a `Co-Authored-By` trailer to user commits unless this project's `.claude/settings.json` has `attribution.commit` set (#2078). The Claude Code Bash tool may suggest one in its default commit-message template — ignore it. `Co-Authored-By` is semantic authorship attribution under git/GitHub convention; the tool is the facilitator, not a co-author.
 - Keep files under 500 lines
 - Validate input at system boundaries
+
+## Task Workflow (MANDATORY — Brainstorm → Plan → Approval → Execute)
+
+Every task follows these phases in order. Never skip ahead.
+
+1. **Brainstorm** — start with `/brainstorming`. Explore intent, requirements, constraints,
+   and options before touching anything. No file edits in this phase.
+2. **Plan** — produce a written plan: scope, files to change, approach, risks, test strategy.
+   Use plan mode (`EnterPlanMode` / `ExitPlanMode`) so the plan is presented for review.
+3. **Approval** — STOP and wait for the user's explicit approval of the plan.
+   Silence, a question, or "sounds good, but…" is not approval. If the plan changes
+   materially during execution, stop and get approval again.
+4. **Execute** — only after approval. Implement the approved plan, nothing beyond it.
+   Run tests and verify the build before committing.
+
+### Rules
+
+- NEVER write, edit, or delete files before the plan is approved
+- NEVER run destructive or outward-facing commands (push, deploy, migrations, `rm`) before approval
+- Read-only research (read, grep, glob, search) is always allowed in phases 1–2
+- If the user explicitly says "skip the planning", "just do it", or approves inline,
+  honor it — state which phases are being skipped, then proceed
+
+### Exempt (execute directly)
+
+Trivial, reversible, single-step work: answering a question, reading/explaining code,
+a one-line or typo fix, a config value change, a git status/log query.
+When in doubt, do not treat it as exempt — brainstorm first.
 
 ## Agent Comms (SendMessage-First Coordination)
 
