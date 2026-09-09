@@ -55,11 +55,11 @@ const envKeyFor = (model) => PROVIDERS[providerFor(model)].envKey;
 // snapshot resolves the same way.
 const CLAUDE_NO_SAMPLING = /^claude-(opus-5|sonnet-5|opus-4-8|opus-4-7)/;
 
-function anthropicRequest(model, system, messages, key) {
+function anthropicRequest(model, system, messages, key, opts) {
   const modern = CLAUDE_NO_SAMPLING.test(String(model));
   const body = {
     model,
-    max_tokens: MAX_OUT,
+    max_tokens: opts.maxOut || MAX_OUT,
     system,
     messages,
   };
@@ -71,7 +71,7 @@ function anthropicRequest(model, system, messages, key) {
   // `output_config` carries BOTH the response format and the effort level, so
   // they have to be built together — assigning one over the other drops the
   // schema and silently reverts to prompt-instructed JSON.
-  body.output_config = Object.assign(modern ? { effort: "low" } : {}, {
+  body.output_config = Object.assign(modern ? { effort: "low" } : {}, opts.schema === null ? {} : {
     format: {
       type: "json_schema",
       schema: {
@@ -86,6 +86,7 @@ function anthropicRequest(model, system, messages, key) {
       },
     },
   });
+  if (!Object.keys(body.output_config).length) delete body.output_config;
   return {
     url: "https://api.anthropic.com/v1/messages",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
@@ -93,7 +94,7 @@ function anthropicRequest(model, system, messages, key) {
   };
 }
 
-function geminiRequest(model, system, messages, key) {
+function geminiRequest(model, system, messages, key, opts) {
   const id = String(model).replace(/^models\//, "");
   return {
     url: `https://generativelanguage.googleapis.com/v1beta/models/${id}:generateContent`,
@@ -105,13 +106,18 @@ function geminiRequest(model, system, messages, key) {
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }],
       })),
-      generationConfig: {
+      generationConfig: Object.assign({
         temperature: 0,
-        maxOutputTokens: MAX_OUT,
+        maxOutputTokens: opts.maxOut || MAX_OUT,
         responseMimeType: "application/json",
         // OpenAPI-3.0 subset: uppercase type names, `nullable` instead of a
         // union type, and no additionalProperties. Not the JSON Schema dialect
         // the other two take.
+        // 2.5-series Flash reasons by default and bills for it. There is
+        // nothing to reason about over a fact sheet, and it costs latency in a
+        // chat bubble, so it is switched off explicitly.
+        thinkingConfig: { thinkingBudget: 0 },
+      }, opts.schema === null ? {} : {
         responseSchema: {
           type: "OBJECT",
           properties: {
@@ -121,22 +127,18 @@ function geminiRequest(model, system, messages, key) {
           },
           required: ["answered", "reply"],
         },
-        // 2.5-series Flash reasons by default and bills for it. There is
-        // nothing to reason about over a fact sheet, and it costs latency in a
-        // chat bubble, so it is switched off explicitly.
-        thinkingConfig: { thinkingBudget: 0 },
-      },
+      }),
     },
   };
 }
 
-function openaiRequest(model, system, messages, key) {
+function openaiRequest(model, system, messages, key, opts) {
   // Reasoning-tier ids reject `temperature` and rename the output cap.
   const reasoning = /^(o\d|gpt-5)/.test(String(model));
   const body = {
     model,
     messages: [{ role: "system", content: system }].concat(messages),
-    response_format: {
+    response_format: opts.schema === null ? { type: "json_object" } : {
       type: "json_schema",
       json_schema: {
         name: "grounded_reply",
@@ -154,16 +156,24 @@ function openaiRequest(model, system, messages, key) {
       },
     },
   };
-  if (reasoning) body.max_completion_tokens = MAX_OUT;
-  else { body.max_tokens = MAX_OUT; body.temperature = 0; }
+  const cap = opts.maxOut || MAX_OUT;
+  if (reasoning) body.max_completion_tokens = cap;
+  else { body.max_tokens = cap; body.temperature = 0; }
   return { url: "https://api.openai.com/v1/chat/completions", headers: { authorization: `Bearer ${key}` }, body };
 }
 
 const BUILDERS = { anthropic: anthropicRequest, gemini: geminiRequest, openai: openaiRequest };
 
-/** Pure: the exact HTTP call for this model. Unit-tested. */
-function buildRequest(model, system, messages, key) {
-  return BUILDERS[providerFor(model)](model, system, messages, key || "");
+/**
+ * Pure: the exact HTTP call for this model. Unit-tested.
+ *
+ * `opts.schema === null` drops the chat bot's response schema so a caller that
+ * wants a different JSON shape (listing-extract) is not forced into
+ * {answered, reply, unanswered_question}; its own prompt asks for the shape.
+ * `opts.maxOut` raises the output cap for replies longer than a chat bubble.
+ */
+function buildRequest(model, system, messages, key, opts = {}) {
+  return BUILDERS[providerFor(model)](model, system, messages, key || "", opts);
 }
 
 /** Pure: pull assistant text + token usage out of a vendor response body. */
@@ -195,10 +205,10 @@ function readResponse(model, data) {
   }
 }
 
-async function ask(model, system, messages, keys) {
+async function ask(model, system, messages, keys, opts) {
   const key = (keys || {})[envKeyFor(model)];
   if (!key) throw new Error(`${envKeyFor(model)} is not set (required for model ${model})`);
-  const req = buildRequest(model, system, messages, key);
+  const req = buildRequest(model, system, messages, key, opts);
   const res = await fetch(req.url, {
     method: "POST",
     headers: Object.assign({ "content-type": "application/json" }, req.headers),

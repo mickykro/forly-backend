@@ -168,6 +168,13 @@ app.use("/api", createIntakeRouter({
   pageBaseUrl: PAGE_BASE_URL,
 }));
 
+// ── paste text / link → pre-filled create form ──
+const createExtractRouter = require("./routes/extract");
+app.use("/api", createExtractRouter({
+  requireAuth, authSecret: AUTH_SECRET,
+  uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
+}));
+
 // ── profile onboarding (the 15-field "השלמת פרופיל" form) ──
 const createProfileRouter = require("./routes/profile");
 app.use("/api", createProfileRouter({ requireAuth, authSecret: AUTH_SECRET }));

@@ -11,6 +11,7 @@ const fs = require("fs");
 
 const db = require("../db");
 const pageEdit = require("../edit");
+const { storeBuffer } = require("../upload-store");
 const { sanitizeTheme, sanitizeLang, sniffMatchesExt } = require("../utils");
 const { sanitizeTags } = require("../tags");
 const { makeAdminGuard } = require("../admin-auth");
@@ -40,7 +41,7 @@ module.exports = function createIntakeRouter(ctx) {
   // (REMOTE_UPLOAD_BASE), it forwards the caller's own session so the remote —
   // running this same code — re-authorizes the write. index.js only enables
   // the relay when a real shared NADLAN_JWT_SECRET exists (see upload-relay.js).
-  const { relayHeaders, relayUpload } = require("../upload-relay");
+  const { relayHeaders } = require("../upload-relay");
 
   // ── upload-urls ──
   // Any authenticated user (agent or admin) may request upload slots; the
@@ -98,16 +99,15 @@ module.exports = function createIntakeRouter(ctx) {
     if (!sniffMatchesExt(req.body, ext)) {
       return res.status(400).json({ error: "content does not match file type" });
     }
-    if (remoteUploadBase) {
-      const out = await relayUpload({
-        fetch, base: remoteUploadBase, fname, req, body: req.body,
-        contentType: req.headers["content-type"],
-      });
-      if (out.status !== 200) console.error("upload relay:", out.body.error);
-      return res.status(out.status).json(out.body);
+    try {
+      res.json(await storeBuffer(
+        { fname, buffer: req.body, contentType: req.headers["content-type"] },
+        { uploadDir, remoteUploadBase, req },
+      ));
+    } catch (err) {
+      if (err.status === 502) console.error("upload relay:", err.message);
+      res.status(err.status || 500).json({ error: err.message });
     }
-    fs.writeFileSync(path.join(uploadDir, fname), req.body);
-    res.json({ ok: true });
   });
 
   // Remove an uploaded file (the form deletes photos the user takes back out).
