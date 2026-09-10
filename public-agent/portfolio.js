@@ -399,9 +399,5 @@
   // ponytail: server may still hand back an absolute URL — keep links same-origin
   const rel = (u) => String(u || "").replace(/^https?:\/\/[^/]+/, "");
 
-  function esc(s) {
-    const d = document.createElement("div");
-    d.textContent = s || "";
-    return d.innerHTML;
-  }
+  const esc = FLY.esc;
 })();

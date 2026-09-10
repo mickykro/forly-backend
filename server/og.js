@@ -7,9 +7,7 @@
  * replacement so "$&" in a listing title can't corrupt the document.
  */
 
-const esc = (s) => String(s == null ? "" : s)
-  .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const { escapeHtml: esc } = require("./utils");
 
 function description(page) {
   const p = (page && page.property) || {};

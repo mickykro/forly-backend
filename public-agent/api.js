@@ -221,6 +221,6 @@ window.FLY = (function () {
   }
 
   return { req: req, toast: toast, uploadFiles: uploadFiles, deleteUpload: deleteUpload, el: el,
-           loaderShow: loaderShow, loaderHide: loaderHide,
+           loaderShow: loaderShow, loaderHide: loaderHide, esc: esc,
            guardCreateLinks: guardCreateLinks, quotaBlockedDialog: quotaBlockedDialog };
 })();

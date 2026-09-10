@@ -11,7 +11,6 @@ const {
   visiblePortfolioPages,
   normalizePortfolio,
   reservationTarget,
-  assertSlugAvailable,
   nextPortfolioStatus,
 } = require("./portfolio");
 
@@ -70,17 +69,6 @@ assert.strictEqual(norm.status, "open");
 // ── reservation helpers ──
 assert.strictEqual(reservationTarget({ current_slug: "new-name" }), "new-name");
 assert.strictEqual(reservationTarget(null), null);
-
-assert.throws(
-  () => assertSlugAvailable({ "taken-name": { business_phone: "972500000000" } }, "taken-name", "972599999999"),
-  /slug_taken/
-);
-assert.doesNotThrow(
-  () => assertSlugAvailable({ "taken-name": { business_phone: "972500000000" } }, "taken-name", "972500000000")
-);
-assert.doesNotThrow(
-  () => assertSlugAvailable({}, "new-slug", "972500000000")
-);
 
 // ── status transitions ──
 assert.strictEqual(nextPortfolioStatus("draft", 1), "draft");

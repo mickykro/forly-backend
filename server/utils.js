@@ -10,6 +10,9 @@ const net = require("net");
 
 const pad = (n) => String(n).padStart(2, "0");
 const daysFromNow = (d) => new Date(Date.now() + d * 86400000);
+const escapeHtml = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 // Firestore hands back Timestamps, the in-memory store plain Dates.
 const asMillis = (v) => (v && v.toMillis ? v.toMillis() : v ? new Date(v).getTime() : 0);
 
@@ -217,7 +220,7 @@ async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, ins
 }
 
 module.exports = {
-  pad, daysFromNow, asMillis,
+  pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
   guessImageExt, rehost, sendWhatsApp, sendWhatsAppButtons,
   assertPublicHttpUrl, isPrivateIp, sniffMatchesExt,

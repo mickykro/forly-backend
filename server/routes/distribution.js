@@ -20,10 +20,7 @@ const shareKit = require("../distribution/share-kit");
 const metrics = require("../distribution/metrics");
 const config = require("../distribution/config");
 const businessCache = require("../business-cache");
-
-const esc = (s) => String(s == null ? "" : s)
-  .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const { escapeHtml: esc } = require("../utils");
 
 // Same card shell as routes/pages.js confirmHtml — Hebrew, RTL, self-contained.
 // `redirectTo` auto-forwards after 2s (used to land back on the dashboard
