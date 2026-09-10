@@ -142,7 +142,7 @@ async function resolve(input, deps = {}) {
   const kind = sourceFor(input);
   if (kind === "text") { const text = input.text.trim(); return { source: "text", text, description: text, photos: [] }; }
   const result = kind === "facebook" ? await fromFacebook(input, deps) : await fromFirecrawl(input, deps);
-  console.log(`[extract] scraped ${kind} ${input.url} -> ${result.text} , ${result.photos.length} photos`);
+//  console.log(`[extract] scraped ${kind} ${input.url} -> ${result.text} , ${result.photos.length} photos`);
   return result;
 }
 

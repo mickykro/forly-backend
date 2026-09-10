@@ -134,8 +134,10 @@ module.exports = function createIntakeRouter(ctx) {
   // Validation is separate so the quota is only consumed for a request that
   // would actually create something (a 400 must not burn a paid creation).
   function validateListing(body) {
-    if (!body.address || !body.city || !body.price || !body.rooms) {
-      return { error: "address, city, price, rooms are required", code: 400 };
+    // Address is intentionally not required: scraped listings routinely omit
+    // the exact street address (agent privacy) and still make a good page.
+    if (!body.city || !body.price || !body.rooms) {
+      return { error: "city, price, rooms are required", code: 400 };
     }
     if (!Array.isArray(body.photos_urls) || body.photos_urls.length < 3) {
       return { error: "at least 3 photos required", code: 400 };

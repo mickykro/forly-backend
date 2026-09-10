@@ -790,10 +790,38 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
+  // Shared renderer for both the legacy /p/:id URL and the nested
+  // /:portfolioSlug/:propertySlug URL it 301s to.
+  const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
+  async function renderPropertyPage(res, id, d, pageUrl) {
+    const tpl = d && d.theme && d.theme.template;
+    if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
+      // Shell branch: still inject OG tags for active pages so shared links
+      // preview — crawlers don't run the JS that renders this shell.
+      if (d && d.status === "active") {
+        try {
+          const shell = fs.readFileSync(origShell, "utf8");
+          res.set("Cache-Control", "public, max-age=60");
+          return res.type("html").send(og.inject(shell, d, pageUrl,
+            { appId: process.env.META_APP_ID || null }));
+        } catch (e) { /* fall through to sendFile */ }
+      }
+      return res.sendFile(origShell);
+    }
+    const file = path.join(templatesDir, tpl + ".html");
+    if (!fs.existsSync(file)) return res.sendFile(origShell);
+    let html = fs.readFileSync(file, "utf8");
+    const bot = await resolveChatbot(d);
+    html = og.inject(html, d, pageUrl, { appId: process.env.META_APP_ID || null });
+    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
+    html = html.replace("</head>", inject + "</head>");
+    res.set("Cache-Control", "public, max-age=60");
+    res.type("html").send(html);
+  }
+
   // ── legacy /p/:id redirect to nested URL ──
   router.get("/p/:id", async (req, res) => {
     const id = req.params.id;
-    const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
     let d = null;
     try { d = await db.getPage(id); } catch (e) { /* fall back */ }
     const pageUrl = `${pageBaseUrl}/p/${id}`;
@@ -821,29 +849,29 @@ module.exports = function createPagesRouter(ctx) {
         }
       } catch (e) { /* fall through to the legacy shell */ }
     }
-    const tpl = d && d.theme && d.theme.template;
-    if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
-      // Shell branch: still inject OG tags for active pages so shared links
-      // preview — crawlers don't run the JS that renders this shell.
-      if (d && d.status === "active") {
-        try {
-          const shell = fs.readFileSync(origShell, "utf8");
-          res.set("Cache-Control", "public, max-age=60");
-          return res.type("html").send(og.inject(shell, d, pageUrl,
-            { appId: process.env.META_APP_ID || null }));
-        } catch (e) { /* fall through to sendFile */ }
+    renderPropertyPage(res, id, d, pageUrl);
+  });
+
+  // ── nested property page: /:portfolioSlug/:propertySlug ──
+  router.get("/:portfolioSlug/:propertySlug", async (req, res, next) => {
+    const portfolioSlugParam = req.params.portfolioSlug.toLowerCase();
+    const propSlug = req.params.propertySlug.toLowerCase();
+    if (portfolioSlugParam.includes(".") || propSlug.includes(".")) return next();
+    try {
+      const reservation = await db.getPortfolioSlugReservation(portfolioSlugParam);
+      if (!reservation) return next();
+      if (reservation.current_slug !== portfolioSlugParam) {
+        return res.redirect(301, `${pageBaseUrl}/${reservation.current_slug}/${propSlug}`);
       }
-      return res.sendFile(origShell);
+      const pages = await db.listPagesByPhone(reservation.business_phone, 100);
+      const d = pages.find((p) => p.public_slug === propSlug) || null;
+      if (!d) return next();
+      const pageUrl = `${pageBaseUrl}/${portfolioSlugParam}/${propSlug}`;
+      renderPropertyPage(res, d.page_id, d, pageUrl);
+    } catch (err) {
+      console.error("GET /:portfolioSlug/:propertySlug failed:", err);
+      next();
     }
-    const file = path.join(templatesDir, tpl + ".html");
-    if (!fs.existsSync(file)) return res.sendFile(origShell);
-    let html = fs.readFileSync(file, "utf8");
-    const bot = await resolveChatbot(d);
-    html = og.inject(html, d, pageUrl, { appId: process.env.META_APP_ID || null });
-    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
-    html = html.replace("</head>", inject + "</head>");
-    res.set("Cache-Control", "public, max-age=60");
-    res.type("html").send(html);
   });
 
   return router;

@@ -37,6 +37,18 @@
   #tplFull{display:none;position:fixed;inset:0;z-index:9999;background:#000}
   #tplFull iframe{width:100%;height:100%;border:0}
   #tplFullClose{position:fixed;top:14px;inset-inline-end:14px;z-index:10000;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.55);color:#fff;border-radius:100px;padding:9px 18px;font-size:.9rem;font-weight:600;cursor:pointer;backdrop-filter:blur(6px)}
+  /* video gate modal (before the template step) */
+  .modal-overlay{display:flex;position:fixed;inset:0;z-index:9999;background:rgba(23,20,15,.55);align-items:center;justify-content:center;padding:16px}
+  .modal-overlay.hidden{display:none}
+  .modal-card{width:100%;max-width:420px;background:#fff;border-radius:16px;padding:22px;box-shadow:0 30px 60px -20px rgba(0,0,0,.4)}
+  .modal-card>b{display:block;font-size:1rem;font-weight:700;color:var(--ink,#17140f)}
+  .modal-card .hint{margin-top:6px}
+  .modal-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+  .modal-actions .btn{flex:1;min-width:140px}
+  #videoModalPreview{margin-top:16px}
+  #videoModalPreview video{width:100%;max-height:320px;border-radius:12px;background:#000}
+  #videoModalPreview .link-btn{margin-top:8px}
+  #videoModalContinue{width:100%;margin-top:16px}
   /* language switcher (top corner) */
   .topbar-actions{display:flex;align-items:center;gap:10px}
   .lang-switch{position:relative}
@@ -158,6 +170,7 @@
         <div id="extractPhotoChoice" class="extract-actions hidden">
           <span class="form-hint show" data-i18n="ext_photos_ask">פורלי מצאה מספיק תמונות. להוסיף עוד?</span>
           <button type="button" class="link-btn" id="extractAddPhotos" data-i18n="ext_photos_add">כן, להוסיף תמונות</button>
+          <input id="extractFileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden">
         </div>
       </div>
       <div id="manualFields" class="hidden">
@@ -475,6 +488,23 @@
 <!-- fullscreen template preview overlay -->
 <div id="tplFull"><button type="button" id="tplFullClose" data-i18n="fullscreen_close">✕ סגירה</button><iframe id="tplFullFrame" title="תצוגה מקדימה" data-i18n-aria="iframe_preview"></iframe></div>
 
+<!-- gate before the template step: their own video (skip generation) or ours -->
+<div id="videoModal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <b data-i18n="video_have">יש לכם וידאו מוכן?</b>
+    <p class="hint" data-i18n="hint_video">אין וידאו? מצוין — ניצור סרטון סיור אוטומטית מהתמונות 🎬</p>
+    <div id="videoModalChoice" class="modal-actions">
+      <button type="button" class="btn btn-gold" id="videoModalHave" data-i18n="video_modal_have_btn">יש לי סרטון</button>
+      <button type="button" class="btn btn-ghost" id="videoModalGenerate" data-i18n="video_modal_generate_btn">תייצרו לי אחד</button>
+    </div>
+    <div id="videoModalPreview" class="hidden">
+      <video id="videoModalPlayer" controls playsinline></video>
+      <button type="button" class="link-btn" id="videoModalRemove" data-i18n="btn_remove">הסרה</button>
+    </div>
+    <button type="button" class="btn btn-gold primary-action hidden" id="videoModalContinue" data-i18n="btn_next_design">המשך לעיצוב ←</button>
+  </div>
+</div>
+
 <script src="/api.js"></script>
 <script src="/form-i18n.js"></script>
 <script src="/extract.js"></script>
@@ -689,6 +719,10 @@
       if (target === 3 && wizardStage === 1 && photos.length < MIN_PHOTOS) {
         setWizardStage(2, true); showPhotosErr("err_min_photos"); return;
       }
+      // entering the template step on a link-extracted listing: ask whether they
+      // have their own video first — skips the expensive auto-generated tour.
+      // Manual/pasted-text listings keep the plain inline field on stage 2.
+      if (target === 3 && wizardStage !== 3 && extractedFromUrl) { openVideoModal(); return; }
       setWizardStage(target, true);
     };
     // leaving step 1 forward: pull the ticked found-photos in first so step 2 shows them
@@ -699,6 +733,46 @@
   $("#prevStage2").addEventListener("click", function () { moveWizard(1); });
   $("#nextStage2").addEventListener("click", function () { moveWizard(3); });
   $("#prevStage3").addEventListener("click", function () { moveWizard(2); });
+
+  // ── video gate: own video (skip generation) vs. auto-generate from photos ──
+  function videoModalShowPreview(url) {
+    $("#videoModalPlayer").src = url;
+    $("#videoModalPreview").classList.remove("hidden");
+    $("#videoModalChoice").classList.add("hidden");
+    $("#videoModalContinue").classList.remove("hidden");
+  }
+  function videoModalShowChoice() {
+    $("#videoModalPreview").classList.add("hidden");
+    $("#videoModalChoice").classList.remove("hidden");
+    $("#videoModalContinue").classList.add("hidden");
+  }
+  function openVideoModal() {
+    // #videoInput normally lives on stage 2; reveal that panel behind the modal
+    // (setWizardStage(3, ...) below fixes panel visibility again) so a click on
+    // it reliably opens the picker even while we're still on stage 1.
+    document.querySelector('[data-wizard-panel="2"]').hidden = false;
+    var f = $("#videoInput").files[0];
+    if (f) videoModalShowPreview(URL.createObjectURL(f)); else videoModalShowChoice();
+    $("#videoModal").classList.remove("hidden");
+  }
+  function closeVideoModal() { $("#videoModal").classList.add("hidden"); }
+  $("#videoModalHave").addEventListener("click", function () { $("#videoInput").click(); });
+  $("#videoModalGenerate").addEventListener("click", function () {
+    $("#videoInput").value = "";
+    closeVideoModal();
+    setWizardStage(3, true);
+  });
+  $("#videoInput").addEventListener("change", function () {
+    var f = this.files[0];
+    if (!f) return;
+    if (!/^video\/(mp4|quicktime)$/.test(f.type)) { FLY.toast(FT("err_bad_video")); this.value = ""; return; }
+    videoModalShowPreview(URL.createObjectURL(f));
+  });
+  $("#videoModalRemove").addEventListener("click", function () {
+    $("#videoInput").value = "";
+    videoModalShowChoice();
+  });
+  $("#videoModalContinue").addEventListener("click", function () { closeVideoModal(); setWizardStage(3, true); });
   wizardSteps.forEach(function (step) {
     step.addEventListener("click", function () {
       var requested = Number(step.getAttribute("data-wizard-step"));
@@ -885,7 +959,7 @@
   // photo also deletes the already-uploaded file from storage.
   function addFiles(list) {
     Array.prototype.slice.call(list).forEach(function (f) {
-      if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return;
+      if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { FLY.toast(f.name + FT("err_bad_type")); return; }
       if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + FT("err_too_big")); return; }
       if (photos.length >= 12) { FLY.toast(FT("err_max_photos")); return; }
       var url = URL.createObjectURL(f);
@@ -923,6 +997,7 @@
   var X = window.FlyExtract;
   var importedPhotos = []; // {url, el, skip}
   var canSkipPhotos = false;   // scrape found more photos than a page needs
+  var extractedFromUrl = false;   // link/Facebook scrape, not pasted text or manual entry
   function revealManual() { $("#manualFields").classList.remove("hidden"); }
   function showExtractErr(key) {
     var el = $("#extractErr"); el.textContent = FT(key); el.classList.add("show");
@@ -962,7 +1037,7 @@
   // the upload step, so ask instead of assuming.
   function syncPhotoChoice() {
     var kept = importedPhotos.filter(function (p) { return !p.skip && !p.done; }).length;
-    canSkipPhotos = kept > MIN_PHOTOS;
+    canSkipPhotos = kept >= MIN_PHOTOS;
     $("#extractPhotoChoice").classList.toggle("hidden", !canSkipPhotos);
     // the primary action leads where it actually goes — swap the key too, or the
     // language switcher would paint the old label back over it
@@ -1012,6 +1087,7 @@
         if (res.status === 422 || res.status === 409) $("#extractInput").focus(); else revealManual();
         return;
       }
+      if (res.body.source === "scrape" || res.body.source === "facebook") extractedFromUrl = true;
       X.fillFields(res.body.fields, $);
       syncDealButtons(); updatePriceLabel(); renderPriceChips();
       if (!$("#pDesc").value.trim()) $("#pDesc").value = String(res.body.description || "").slice(0, 2000);
@@ -1027,7 +1103,22 @@
   $("#extractBtn").addEventListener("click", runExtract);
   $("#extractManual").addEventListener("click", function () { revealManual(); $("#pAddress").focus(); });
   $("#extractShowAll").addEventListener("click", revealManual);
-  $("#extractAddPhotos").addEventListener("click", function () { moveWizard(2); });
+  // Picked here (stage 1), not the stage-2 uploader: upload each file, then
+  // drop it straight into the same found-photos grid via addImportedPhoto —
+  // no wizard navigation, one unified list.
+  $("#extractAddPhotos").addEventListener("click", function () { $("#extractFileInput").click(); });
+  $("#extractFileInput").addEventListener("change", function () {
+    var files = Array.prototype.slice.call(this.files);
+    this.value = "";
+    files.forEach(function (f) {
+      if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { FLY.toast(f.name + FT("err_bad_type")); return; }
+      if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + FT("err_too_big")); return; }
+      if (importedPhotos.length >= 12) return;
+      FLY.uploadFiles([f], uploadHeaders).then(function (urls) {
+        if (urls && urls[0]) addImportedPhoto(urls[0]); else FLY.toast(FT("err_photo_upload"));
+      }).catch(function () { FLY.toast(FT("err_photo_upload")); });
+    });
+  });
 
   // ── listing type (sale / rent): adapt the price label + quick-pick options ──
   $("#pType").addEventListener("change", function () {

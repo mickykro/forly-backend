@@ -91,7 +91,7 @@ module.exports = function createExtractRouter(ctx) {
     if (!url) return res.status(400).json({ error: "invalid_input" });
     try {
       const img = await importImage(url);
-      await storeBuffer(img, { uploadDir, remoteUploadBase });
+      await storeBuffer(img, { uploadDir, remoteUploadBase, req });
       res.json({ url: `${uploadPublicBase}/files/${img.fname}` });
     } catch (err) {
       if (err.status) return res.status(err.status).json({ error: err.message });
