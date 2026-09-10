@@ -20,14 +20,8 @@
   var customers = [];   // agent directory for the messaging tab
   var selectedCustomers = {};
   var maxMessageRecipients = 200;
-  var portfolios = [];  // portfolio list, loaded lazily
-  var portfolioStats = {};
 
-  function esc(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
+  var esc = FLY.esc;
 
   function chip(status) {
     return '<span class="chip ' + esc(status) + '">' + (STATUS_LABELS[status] || esc(status)) + "</span>";

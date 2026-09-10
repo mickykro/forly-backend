@@ -117,11 +117,6 @@ function reservationTarget(reservation) {
   return reservation?.current_slug || null;
 }
 
-function assertSlugAvailable(reservations, slug, phone) {
-  const existing = reservations[slug];
-  if (existing && existing.business_phone !== phone) throw new Error("slug_taken");
-}
-
 function nextPortfolioStatus(current, activeCount) {
   if (current === "closed") return "closed"; // only admin can reopen
   if (current === "draft" && activeCount >= 2) return "open";
@@ -135,7 +130,6 @@ module.exports = {
   visiblePortfolioPages,
   normalizePortfolio,
   reservationTarget,
-  assertSlugAvailable,
   nextPortfolioStatus,
   RESERVED_SEGMENTS,
 };
