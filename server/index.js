@@ -168,6 +168,22 @@ app.use("/api", createIntakeRouter({
   pageBaseUrl: PAGE_BASE_URL,
 }));
 
+// ── WhatsApp: agent sends a listing link, Forly builds the page ──
+const createWhatsappRouter = require("./routes/whatsapp");
+app.use("/api/whatsapp", createWhatsappRouter({
+  n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone, signSession, authSecret: AUTH_SECRET, quota,
+  // null when Green API is unset so the response's `replied` is honest and n8n forwards `reply`.
+  sendWhatsApp: GREENAPI_INSTANCE && GREENAPI_TOKEN
+    ? (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+  uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
+  baseUrl: BASE_URL,
+  pipelineDeps: {
+    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+    n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
+    isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL,
+  },
+}));
+
 // ── paste text / link → pre-filled create form ──
 const createExtractRouter = require("./routes/extract");
 app.use("/api", createExtractRouter({

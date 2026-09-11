@@ -102,4 +102,6 @@ module.exports = function createExtractRouter(ctx) {
   return router;
 };
 
+module.exports.importImage = importImage;
+module.exports.DailyLimit = DailyLimit;
 module.exports._test = { validateBody, statusFor, DailyLimit, importImage, IMAGE_TYPES };
