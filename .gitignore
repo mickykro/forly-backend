@@ -104,3 +104,6 @@ server/data
 .env
 .env.local
 .env.*.local
+
+# claude-flow runtime session state
+.claude-flow/
