@@ -104,3 +104,6 @@ server/data
 .env
 .env.local
 .env.*.local
+
+# Agent tooling session logs (claude-flow)
+.claude-flow/
