@@ -89,9 +89,16 @@ function visiblePortfolioPages(pages, searchQuery) {
 
   // Sort by newest first (created_at, fallback to updated_at, then rank)
   return filtered.sort((a, b) => {
-    const aTime = (a.created_at || a.updated_at) ? new Date(a.created_at || a.updated_at).getTime() : 0;
-    const bTime = (b.created_at || b.updated_at) ? new Date(b.created_at || b.updated_at).getTime() : 0;
-    if (bTime !== aTime) return bTime - aTime; // Newest first
+    // Handle Firestore Timestamp objects and Date objects
+    const getTime = (date) => {
+      if (!date) return 0;
+      if (date.toMillis) return date.toMillis(); // Firestore Timestamp
+      if (date.getTime) return date.getTime(); // JS Date
+      return new Date(date).getTime(); // String or other
+    };
+    const aTime = getTime(a.created_at || a.updated_at);
+    const bTime = getTime(b.created_at || b.updated_at);
+    if (aTime !== bTime) return bTime - aTime; // Newest first (higher time = more recent)
     // Fallback to rank for pages with same/missing dates
     return (a.portfolio_rank ?? Infinity) - (b.portfolio_rank ?? Infinity);
   });
