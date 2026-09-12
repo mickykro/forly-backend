@@ -622,13 +622,7 @@ module.exports = function createPagesRouter(ctx) {
     if (business.portfolio.status !== "open") return { error: "not_found", status: 404 };
     const pages = await db.listPagesByPhone(reservation.business_phone, 100);
     const visible = visiblePortfolioPages(pages, searchQuery);
-    // Debug: log first 3 pages to verify sorting
-    console.log("[portfolio] First 3 pages:", visible.slice(0, 3).map(p => ({
-      id: p.page_id?.slice(0, 8),
-      created: p.created_at,
-      updated: p.updated_at,
-      rank: p.portfolio_rank
-    })));
+
     return {
       portfolio: business.portfolio,
       agent: {
