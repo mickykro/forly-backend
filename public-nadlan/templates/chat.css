@@ -105,6 +105,21 @@
 .flychat-lead-f button { flex: 1 1 100%; background: #17140f; color: #fff; border: 0;
   border-radius: 10px; padding: 10px; font-size: .88rem; font-weight: 500; cursor: pointer; }
 .flychat-lead-f button:disabled { opacity: .4; cursor: default; }
+.flychat-lead-f select { flex: 1 1 44%; min-width: 0; font-family: inherit; font-size: .86rem;
+  color: #17140f; background: #fff; border: 1px solid rgba(23, 20, 15, .12);
+  border-radius: 10px; padding: 9px 12px; outline: none; }
+.flychat-lead-f select:focus { border-color: rgba(23, 20, 15, .3); }
+.flychat-lead-f .flychat-lead-wide { flex: 1 1 100%; }
+
+/* other listings of the same agent that fit the budget */
+.flychat-recs { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.flychat-rec { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center;
+  background: #fff; border: 1px solid rgba(23, 20, 15, .12); border-radius: 10px;
+  padding: 8px 10px; color: #17140f; text-decoration: none; font-size: .84rem; }
+.flychat-rec b { font-weight: 600; }
+.flychat-rec span { grid-column: 1; opacity: .7; font-size: .78rem; }
+.flychat-rec em { grid-column: 2; grid-row: 1 / span 2; font-style: normal; font-weight: 600; white-space: nowrap; }
+.flychat-rec:hover { border-color: rgba(23, 20, 15, .3); }
 
 /* composer greyed out once the conversation is closed */
 .flychat-f-off { opacity: .5; }
