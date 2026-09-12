@@ -1,4 +1,4 @@
-# WhatsApp Property Chat Implementation Plan
+# WhatsApp Property Chat Implementation Plan (server)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -9,6 +9,8 @@
 **Tech Stack:** Node 22, Express 4, Firestore (firebase-admin) with the in-memory fallback in `server/db.js`, Green API (`utils.sendWhatsApp` / `utils.sendWhatsAppButtons`), plain-node `assert` tests run by `npm test` in `server/`.
 
 **Spec:** `docs/superpowers/specs/2026-09-12-whatsapp-property-chat-design.md`
+
+**Scope:** server code only. The n8n side is a manual runbook for the workflow owner: `docs/superpowers/plans/2026-09-12-whatsapp-property-chat-n8n.md`. The server does not depend on it: the route is verified in-process (Task 8) before any workflow is touched.
 
 ## Global Constraints
 
@@ -45,34 +47,7 @@
 
 ---
 
-### Task 1: Confirm the Green API payload shape n8n will forward
-
-The server never sees Green API's raw webhook; n8n maps it. This task pins the two field names the mapping depends on so Task 9 is not guesswork.
-
-**Files:** none in the repo (record findings in the spec's "[Unverified]" paragraph).
-
-- [ ] **Step 1: Capture an image message**
-
-In n8n open **Call4li - Main Router** (`sIKcjzYee7viwk1e`) → Executions. Send a photo from a registered agent's phone to the Forly number. Open the newest execution → node `Code - Parse Webhook` → output. Note `fullData.messageData.typeMessage` and the key holding the download URL (expected `fullData.messageData.fileMessageData.downloadUrl`).
-
-- [ ] **Step 2: Capture a button reply**
-
-From any n8n Green API node (e.g. **Send Motion Question** in Business Handler2) send yourself an interactive-buttons message, tap a button, and open the resulting Main Router execution. Note `typeMessage` (expected `buttonsResponseMessage`) and the key holding the tapped text (expected `fullData.messageData.buttonsResponseMessage.selectedButtonText`).
-
-- [ ] **Step 3: Record**
-
-Replace the `[Unverified]` paragraph in `docs/superpowers/specs/2026-09-12-whatsapp-property-chat-design.md` with the confirmed paths. If they differ from the expectations, adjust the expressions in Task 9 Step 2 accordingly (nothing in the server changes).
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add docs/superpowers/specs/2026-09-12-whatsapp-property-chat-design.md
-git commit -m "docs(spec): confirm Green API image and button payload paths"
-```
-
----
-
-### Task 2: Draft storage in db.js
+### Task 1: Draft storage in db.js
 
 **Files:**
 - Modify: `server/db.js` (the `mem` object near line 11, a new section before `module.exports`, and the export list)
@@ -156,7 +131,7 @@ git commit -m "feat(db): property draft helpers for the WhatsApp intake"
 
 ---
 
-### Task 3: property-draft.js — parsers and opener detection
+### Task 2: property-draft.js — parsers and opener detection
 
 **Files:**
 - Create: `server/property-draft.js`
@@ -173,7 +148,7 @@ git commit -m "feat(db): property draft helpers for the WhatsApp intake"
 
 - [ ] **Step 1: Write the failing test**
 
-`server/property-draft.test.js` (first half; Task 4 appends):
+`server/property-draft.test.js` (first half; Task 3 appends):
 
 ```js
 /* property-draft.js — pure helpers behind the WhatsApp property chat. */
@@ -336,7 +311,7 @@ git commit -m "feat(whatsapp): property-draft parsers and opener detection"
 
 ---
 
-### Task 4: property-draft.js — draft state helpers
+### Task 3: property-draft.js — draft state helpers
 
 **Files:**
 - Modify: `server/property-draft.js`
@@ -494,7 +469,7 @@ git commit -m "feat(whatsapp): draft state machine helpers"
 
 ---
 
-### Task 5: whatsapp-replies.js — all Hebrew copy
+### Task 4: whatsapp-replies.js — all Hebrew copy
 
 **Files:**
 - Create: `server/whatsapp-replies.js`
@@ -673,16 +648,16 @@ git commit -m "feat(whatsapp): Hebrew reply copy for the property chat"
 
 ---
 
-### Task 6: handleTurn — openers and the question loop
+### Task 5: handleTurn — openers and the question loop
 
-Rewrites `server/whatsapp-intake.js` from the link-only first cut into the turn handler. Photos, confirm/build, offer, pause/resume come in Tasks 7 and 8; this task makes link / text / keyword openers and the field questions work end to end.
+Rewrites `server/whatsapp-intake.js` from the link-only first cut into the turn handler. Photos, confirm/build, offer, pause/resume come in Tasks 6 and 7; this task makes link / text / keyword openers and the field questions work end to end.
 
 **Files:**
 - Rewrite: `server/whatsapp-intake.js`
 - Rewrite: `server/whatsapp-intake.test.js`
 
 **Interfaces:**
-- Consumes: everything from `property-draft.js` (Tasks 3-4) and `whatsapp-replies.js` (Task 5).
+- Consumes: everything from `property-draft.js` (Tasks 2-3) and `whatsapp-replies.js` (Task 4).
 - Produces:
   ```js
   handleTurn(input, deps) → Promise<Turn>
@@ -912,7 +887,7 @@ async function activeTurn(input, deps, draft, now) {
     const r = answerField(draft, step.field, input.text, cmd);
     return { handled: true, ...r, draft: r.draft ? D.touch(r.draft, now) : undefined };
   }
-  // photos + confirm arrive in Task 7
+  // photos + confirm arrive in Task 6
   return { handled: true, status: step.kind, replies: promptFor(draft).replies };
 }
 
@@ -930,7 +905,7 @@ async function handleTurn(input, deps) {
     return openDraft(phone, kind, input.text, deps, now);
   }
   if (draft.status === "active" && !D.isPaused(draft, now)) return activeTurn(input, deps, draft, now);
-  // offered / resume_prompt / paused / building arrive in Task 8
+  // offered / resume_prompt / paused / building arrive in Task 7
   return notOurs("not_ours");
 }
 
@@ -944,7 +919,7 @@ Expected: `whatsapp-intake.test.js (openers + questions) ok`
 
 - [ ] **Step 5: Commit**
 
-`npm test` must be green (the old route still loads because `routes/whatsapp.js` imports `intake`, which no longer exists — Task 9 rewrites the route; until then, temporarily keep `module.exports.intake = async () => ({ status: "not_ours", reply: null })` at the bottom of `whatsapp-intake.js` so `index.js` boots). Then:
+`npm test` must be green (the old route still loads because `routes/whatsapp.js` imports `intake`, which no longer exists — Task 8 rewrites the route; until then, temporarily keep `module.exports.intake = async () => ({ status: "not_ours", reply: null })` at the bottom of `whatsapp-intake.js` so `index.js` boots). Then:
 
 ```bash
 git add server/whatsapp-intake.js server/whatsapp-intake.test.js
@@ -953,7 +928,7 @@ git commit -m "feat(whatsapp): handleTurn with openers and the question loop"
 
 ---
 
-### Task 7: handleTurn — photos, confirm, build
+### Task 6: handleTurn — photos, confirm, build
 
 **Files:**
 - Modify: `server/whatsapp-intake.js`
@@ -1122,7 +1097,7 @@ git commit -m "feat(whatsapp): photo batches, confirmation and build in handleTu
 
 ---
 
-### Task 8: handleTurn — photo offer, pause / resume, building state
+### Task 7: handleTurn — photo offer, pause / resume, building state
 
 **Files:**
 - Modify: `server/whatsapp-intake.js`
@@ -1292,7 +1267,7 @@ async function handleTurn(input, deps) {
 }
 ```
 
-Remove the temporary `module.exports.intake` stub if it was added in Task 6.
+Remove the temporary `module.exports.intake` stub if it was added in Task 5.
 
 - [ ] **Step 4: Run the test**
 
@@ -1310,7 +1285,7 @@ git commit -m "feat(whatsapp): photo offer, pause/resume and building state"
 
 ---
 
-### Task 9: The route — persist, send, photo timer; page-builder hook; wiring
+### Task 8: The route — persist, send, photo timer; page-builder hook; wiring
 
 **Files:**
 - Rewrite: `server/routes/whatsapp.js`
@@ -1319,7 +1294,7 @@ git commit -m "feat(whatsapp): photo offer, pause/resume and building state"
 - Test: in-process script in the scratchpad (not committed) + `npm test`
 
 **Interfaces:**
-- Consumes: `handleTurn` (Tasks 6-8), `db.getDraft/saveDraft/deleteDraft` (Task 2), `importImage` + `DailyLimit` from `routes/extract.js`, `storeBuffer`, `createListing` from `listing-create.js`, `utils.sendWhatsApp` / `utils.sendWhatsAppButtons`.
+- Consumes: `handleTurn` (Tasks 5-7), `db.getDraft/saveDraft/deleteDraft` (Task 1), `importImage` + `DailyLimit` from `routes/extract.js`, `storeBuffer`, `createListing` from `listing-create.js`, `utils.sendWhatsApp` / `utils.sendWhatsAppButtons`.
 - Produces: `POST /api/whatsapp/intake` per the spec; router ctx `{ n8nSecret, normalizeAuthPhone, signSession, authSecret, quota, sendWhatsApp|null, sendButtons|null, uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, pipelineDeps }`.
 
 - [ ] **Step 1: Rewrite the route**
@@ -1511,66 +1486,11 @@ git commit -m "feat(whatsapp): stateful intake route with replies, photo timer a
 
 ---
 
-### Task 10: n8n — forward every agent message and the edited-photo batch
-
-Production workflow change; do it with the owner present, on the dev copy first if one exists.
-
-**Files:** none in the repo. Workflow **Business Handler2** (`V44w39VTt691WGxK`).
-
-- [ ] **Step 1: Add the intake call at the top**
-
-Between `Extract Chat History1` and `Check Unsupported Media`, insert an **HTTP Request** node named `Forly Property Intake`:
-
-- Method `POST`, URL `https://forly.srv1173890.hstgr.cloud/api/whatsapp/intake` (the same host `Create Property Page` in the Page Builder posts to)
-- Header `x-forly-secret` = the value of `N8N_WEBHOOK_SECRET` on the server (store it as an n8n credential of type Header Auth; do not paste it into the node)
-- Body (JSON):
-  ```
-  {
-    "phone": "={{ $json.phone }}",
-    "message": "={{ $json.customerMessage || $json.webhookData.fullData.messageData.buttonsResponseMessage?.selectedButtonText || '' }}",
-    "message_type": "={{ $json.webhookData.messageType }}",
-    "file_url": "={{ $json.webhookData.fullData.messageData.fileMessageData?.downloadUrl || null }}"
-  }
-  ```
-  (use the paths confirmed in Task 1)
-- Options: timeout `90000`, "Continue on fail" ON so a Forly outage never blocks the rest of the bot.
-
-- [ ] **Step 2: Branch on handled**
-
-Add an **IF** node `Handled by Forly?` with condition `{{ $json.handled }}` is true. True branch → nothing (end). False branch → `Check Unsupported Media` (the node that used to follow `Extract Chat History1`). Because "Continue on fail" returns an error item without `handled`, an outage falls to the false branch and the bot behaves as before.
-
-- [ ] **Step 3: Offer after a bulk edit**
-
-Find the node that ends the multi-image batch path (after `Call Image Gen` / `Extract Image Result` for the `burst` output of `Check Unsupported Media`). After the last edited image is sent, add an **HTTP Request** `Forly Photo Offer`, same URL and header, body:
-
-```
-{ "phone": "={{ $('Set Input Fields1').first().json.phone }}",
-  "event": "photos_edited",
-  "photos": {{ JSON.stringify($input.all().map(i => i.json.result_url)) }} }
-```
-
-Replace `result_url` with the field the image-gen result actually carries (read it off `Extract Image Result`'s output in a recent execution).
-
-- [ ] **Step 4: Verify live**
-
-From a registered agent's phone:
-
-1. "היי" → the AI agent answers as before (n8n execution shows `handled:false`).
-2. A Yad2 link → within ~30 s: "קראתי את המודעה…" and the first question. Answer through to the summary, tap כן, get "אני בונה", and a few minutes later the Page Builder's page link. Confirm the listing shows in the dashboard with `source: whatsapp`.
-3. Three photos → they are edited as before, then the offer appears; tap כן and answer the questions.
-4. Wait 2 h (or set `updated_at` back in Firestore) → "היי" is answered by the AI agent again; a new link asks המשך / חדש.
-
-- [ ] **Step 5: Record**
-
-Comment on issue #43 with what was applied and the execution ids of the four checks. Close the issue when all four pass.
-
----
-
-### Task 11: Close out the repo side
+### Task 9: Close out the repo side
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-12-whatsapp-property-chat-design.md` (status line → implemented)
-- Modify: `server/routes/whatsapp.js` header only if the n8n node names changed in Task 10
+- Modify: `server/routes/whatsapp.js` header only if the n8n node names changed (see the n8n runbook)
 
 - [ ] **Step 1: Full suite and line counts**
 
@@ -1593,8 +1513,8 @@ git push -u origin claude/whatsapp-link-property-page-7wm9xh
 
 ## Self-review
 
-**Spec coverage.** Entry points: link/text/keyword (Task 6), photo offer (Task 8). Ask all 8 + description with skip (Tasks 4, 6). Photo batching with 20 s timer and text ending a batch (Tasks 7, 9). Confirmation before quota (Task 7). 2 h pause with data kept, המשך / חדש, ביטול (Task 8). Ready message stays with the Page Builder (no task; Task 9 only deletes the draft). n8n contract (Tasks 9, 10). Errors: source errors keep the draft open (Task 6), failed photo import skipped (Task 7), Green API down → `reply` in the response (Task 9), unknown sender (Task 6). Extraction cap (Tasks 6, 9). Tests as listed in the spec (Tasks 2-8, in-process route check in Task 9).
+**Spec coverage.** Entry points: link/text/keyword (Task 5), photo offer (Task 7). Ask all 8 + description with skip (Tasks 3, 5). Photo batching with 20 s timer and text ending a batch (Tasks 6, 8). Confirmation before quota (Task 6). 2 h pause with data kept, המשך / חדש, ביטול (Task 7). Ready message stays with the Page Builder (no task; Task 8 only deletes the draft). n8n contract (Task 8 here; the runbook applies it). Errors: source errors keep the draft open (Task 5), failed photo import skipped (Task 6), Green API down → `reply` in the response (Task 8), unknown sender (Task 5). Extraction cap (Tasks 5, 8). Tests as listed in the spec (Tasks 1-7, in-process route check in Task 8).
 
-**Placeholders.** None: every code step carries the code; Task 1 and Task 10 are manual procedures with exact node names and expressions, and the one field name that cannot be known from the repo (`result_url`) says where to read it.
+**Placeholders.** None: every code step carries the code. The manual n8n procedures live in the runbook.
 
-**Type consistency.** `handleTurn` input/output shape is the same in Tasks 6-9. `deps.extractAllowed(phone)` is defined in Task 6 and provided in Task 9. `R.*` names used in Tasks 6-8 all exist in Task 5. `D.*` names used in Tasks 6-8 all exist in Tasks 3-4 (`findUrl, command, openerKind, parseAnswer, isRequired, newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, toListingBody, PAUSE_MS`). `db.getDraft/saveDraft/deleteDraft` match Task 2. `createListing(phone, body, agentOverride, deps)` matches the existing `server/listing-create.js`.
+**Type consistency.** `handleTurn` input/output shape is the same in Tasks 5-8. `deps.extractAllowed(phone)` is defined in Task 5 and provided in Task 8. `R.*` names used in Tasks 5-7 all exist in Task 4. `D.*` names used in Tasks 5-7 all exist in Tasks 2-3 (`findUrl, command, openerKind, parseAnswer, isRequired, newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, toListingBody, PAUSE_MS`). `db.getDraft/saveDraft/deleteDraft` match Task 1. `createListing(phone, body, agentOverride, deps)` matches the existing `server/listing-create.js`.
