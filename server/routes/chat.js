@@ -264,6 +264,39 @@ module.exports = function createChatRouter(ctx) {
     convo.message_count = (convo.message_count || 0) + 1;
     convo.last_at = at;
     if (convo.lead.captured) convo.post_handoff_count = postCount + 1;
+
+    // If lead already captured and this is unanswered, notify agent with new question
+    // without re-showing the form.
+    if (!answered && parsed && convo.lead && convo.lead.captured) {
+      convo.unanswered = (convo.unanswered || [])
+        .concat([parsed.unanswered_question || message]).slice(-10);
+
+      // Auto-notify agent with the new question using existing lead data
+      const title = (page.property && page.property.address) || "";
+      const city = (page.property && page.property.city) || "";
+      const listingType = (page.property && page.property.listing_type) || "sale";
+      const msg = [
+        `🔔 שאלה נוספת מליד "${title}, ${city}"`,
+        `👤 ${convo.lead.name}`,
+        `📞 0${convo.lead.phone.slice(3)}`,
+        ...(convo.lead.qualification ? qualify.qualificationLines(convo.lead.qualification, listingType) : []),
+        `❓ שאלה חדשה:`,
+        `• ${parsed.unanswered_question || message}`,
+        `דברו איתו עכשיו: https://wa.me/${convo.lead.phone}`,
+      ].join("\n");
+      sendWhatsApp(page.business_phone, msg, greenInstance, greenToken)
+        .catch((e) => console.error("chat followup notify failed:", e.message));
+
+      await saveConversation(pageId, cid, convo);
+      await countMessage(pageId, page.business_phone, tokens);
+
+      return res.json({
+        conversation_id: cid,
+        reply,
+        state: "lead_followup",
+      });
+    }
+
     if (!answered && parsed) {
       // Every unanswered question, not just the first — the handoff message lists
       // them all. Capped so a hostile visitor can't grow the doc unbounded.
@@ -353,8 +386,12 @@ module.exports = function createChatRouter(ctx) {
       console.warn("chat listPagesByPhone failed (no recommendations):", err.message);
       return [];
     });
+    // Use request origin for local dev (127.0.0.1:8787), fallback to PAGE_BASE_URL for production
+    const protocol = req.headers["x-forwarded-proto"] || (req.secure ? "https" : "http");
+    const host = req.headers.host || req.headers["x-forwarded-host"];
+    const baseUrl = host ? `${protocol}://${host}` : pageBaseUrl;
     const recommendations = recommend.matchByBudget(siblings, {
-      budget: qual.value.budget, listingType, excludePageId: pageId, baseUrl: pageBaseUrl,
+      budget: qual.value.budget, listingType, excludePageId: pageId, baseUrl,
     });
 
     // Lead saved BEFORE the send — a Green API outage must never lose it.

@@ -62,13 +62,37 @@ function parsePublicPath(path) {
 
 /**
  * Filter pages to those visible in the portfolio dashboard.
- * @param {Array<{ status: string, portfolio_visible?: boolean, portfolio_rank?: number|null }>} pages
- * @returns {Array} - sorted by rank (nulls last, then by newest)
+ * @param {Array<{ status: string, portfolio_visible?: boolean, created_at?: Date }>} pages
+ * @param {string} [searchQuery] - optional search string for city, address, property data
+ * @returns {Array} - sorted by newest first
  */
-function visiblePortfolioPages(pages) {
-  return pages
-    .filter((p) => (p.status === "active" || p.status === "expiring") && p.portfolio_visible !== false)
-    .sort((a, b) => (a.portfolio_rank ?? Infinity) - (b.portfolio_rank ?? Infinity));
+function visiblePortfolioPages(pages, searchQuery) {
+  let filtered = pages.filter((p) => (p.status === "active" || p.status === "expiring") && p.portfolio_visible !== false);
+
+  // Search in city, address, and property data
+  if (searchQuery && typeof searchQuery === "string" && searchQuery.trim()) {
+    const q = searchQuery.trim().toLowerCase();
+    filtered = filtered.filter((p) => {
+      const prop = p.property || {};
+      const searchable = [
+        prop.city || "",
+        prop.address || "",
+        prop.neighborhood || "",
+        prop.title || "",
+        prop.listing_type || "",
+        String(prop.rooms || ""),
+        String(prop.size_sqm || ""),
+      ].join(" ").toLowerCase();
+      return searchable.includes(q);
+    });
+  }
+
+  // Sort by newest first
+  return filtered.sort((a, b) => {
+    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return bTime - aTime; // Newest first
+  });
 }
 
 /**
