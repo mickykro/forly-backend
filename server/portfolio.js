@@ -87,11 +87,13 @@ function visiblePortfolioPages(pages, searchQuery) {
     });
   }
 
-  // Sort by newest first
+  // Sort by newest first (created_at, fallback to updated_at, then rank)
   return filtered.sort((a, b) => {
-    const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-    const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return bTime - aTime; // Newest first
+    const aTime = (a.created_at || a.updated_at) ? new Date(a.created_at || a.updated_at).getTime() : 0;
+    const bTime = (b.created_at || b.updated_at) ? new Date(b.created_at || b.updated_at).getTime() : 0;
+    if (bTime !== aTime) return bTime - aTime; // Newest first
+    // Fallback to rank for pages with same/missing dates
+    return (a.portfolio_rank ?? Infinity) - (b.portfolio_rank ?? Infinity);
   });
 }
 
