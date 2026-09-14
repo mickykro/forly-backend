@@ -30,7 +30,7 @@ const { renderPortfolioDocument, renderSitemap } = require("../portfolio-render"
 // stays functional for legacy reminder links already sent.
 const PAGE_LIFESPAN_DAYS = 36500;
 const LEAD_MAX_PER_HOUR = 3;
-const SERVER_TEMPLATES = new Set(["nocturne", "reel", "atelier", "revue", "loupe", "orbite"]);
+const SERVER_TEMPLATES = new Set(["original", "nocturne", "reel", "atelier", "revue", "loupe", "orbite"]);
 
 const confirmHtml = (title, sub) =>
   `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
@@ -794,7 +794,7 @@ module.exports = function createPagesRouter(ctx) {
   // /:portfolioSlug/:propertySlug URL it 301s to.
   const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
   async function renderPropertyPage(res, id, d, pageUrl) {
-    const tpl = d && d.theme && d.theme.template;
+    const tpl = (d && d.theme && d.theme.template) || "original";
     if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
       // Shell branch: still inject OG tags for active pages so shared links
       // preview — crawlers don't run the JS that renders this shell.
