@@ -34,6 +34,9 @@ const DEFAULTS = {
     // After a lead is captured the bot answers this many more, then closes with
     // a fixed line — it can't promise an agent it can't deliver.
     max_msgs_after_handoff: 5,
+    // Offer the lead form once, proactively, on this answered turn — for the
+    // engaged visitor whose questions the bot could all answer.
+    offer_form_after_msgs: 3,
   },
 };
 

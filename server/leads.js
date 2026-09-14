@@ -16,10 +16,17 @@
 const db = require("./db");
 
 // source: "landing_page" | "chat" | "portfolio". questions: string[] (chat only; [] for form).
+// qualification: { budget, timeline, financing } (chat only). recommended_page_ids: string[] (chat only).
 // Supports both page-based leads and portfolio leads (context.page vs context.business_phone).
-async function submitLead({ page, context, name, phone, source, questions, message, portfolio_url }) {
+async function submitLead({ page, context, name, phone, source, questions, message, portfolio_url, qualification, recommended_page_ids }) {
   if (!phone) throw new Error("phone required");   // reject before any write
   const q = Array.isArray(questions) ? questions.filter(Boolean) : [];
+  const qual = qualification && Number(qualification.budget) > 0 ? {
+    budget: Number(qualification.budget),
+    timeline: qualification.timeline || null,
+    financing: qualification.financing || null,
+  } : null;
+  const recIds = Array.isArray(recommended_page_ids) ? recommended_page_ids.filter(Boolean).map(String) : [];
 
   // Support both old { page } and new { context } patterns
   const p = page || context?.page || null;
@@ -36,6 +43,9 @@ async function submitLead({ page, context, name, phone, source, questions, messa
     // never overwrite "converted" (set when a lead later signs up as an agent)
     ...(existingStatus === "converted" ? {} : { status: existingStatus || "new" }),
     last_activity_at: new Date(),
+    // Only write what this submission knows — a form lead after a chat lead
+    // must not null out the budget the chat captured (merge semantics).
+    ...(qual ? { qualification: qual, recommended_page_ids: recIds } : {}),
   });
 
   await db.addLeadSubmission({
@@ -45,6 +55,8 @@ async function submitLead({ page, context, name, phone, source, questions, messa
     source, questions: q,
     message: message || null,
     portfolio_url: portfolio_url || null,
+    qualification: qual,
+    recommended_page_ids: recIds,
     property_title: (p?.property?.title) || "",
     agent: {
       name: agent.name || "",

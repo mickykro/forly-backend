@@ -254,6 +254,8 @@ app.use(createChatRouter({
   // Chat leads WhatsApp the agent directly (the form path relays via n8n).
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
+  // Recommendation links point at the public page URL.
+  pageBaseUrl: PAGE_BASE_URL,
 }));
 
 // Throttle the expensive ffmpeg video-overlay endpoint per IP (resource abuse).

@@ -610,7 +610,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── portfolio API ──
-  async function loadPublicPortfolio(slug) {
+  async function loadPublicPortfolio(slug, searchQuery) {
     const reservation = await db.getPortfolioSlugReservation(slug);
     if (!reservation) return { error: "not_found", status: 404 };
     // Historical slug redirect
@@ -621,7 +621,8 @@ module.exports = function createPagesRouter(ctx) {
     if (!business || !business.portfolio) return { error: "not_found", status: 404 };
     if (business.portfolio.status !== "open") return { error: "not_found", status: 404 };
     const pages = await db.listPagesByPhone(reservation.business_phone, 100);
-    const visible = visiblePortfolioPages(pages);
+    const visible = visiblePortfolioPages(pages, searchQuery);
+
     return {
       portfolio: business.portfolio,
       agent: {
@@ -654,9 +655,10 @@ module.exports = function createPagesRouter(ctx) {
 
   router.get("/api/portfolio", async (req, res) => {
     const slug = String(req.query.slug || "").toLowerCase().trim();
+    const search = String(req.query.search || "").trim();
     if (!slug) return res.status(400).json({ error: "missing slug" });
     try {
-      const result = await loadPublicPortfolio(slug);
+      const result = await loadPublicPortfolio(slug, search);
       if (result.redirect) {
         return res.redirect(301, `${pageBaseUrl}/${result.redirect}`);
       }
