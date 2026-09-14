@@ -49,6 +49,14 @@ async function main() {
       assert.match(result.html, /data-lead-form/);
       assert.doesNotMatch(result.html, /assets\/tour\.mp4|דיזנגוף 156|8,400,000/);
     }
+    page = {status:'active', theme:{template:'nocturne'}, property:{title:'Night home'}, hero:{video_url:'/night.mp4'}, agent:{name:'Agent'}};
+    const nocturne = await render();
+    assert.match(nocturne.html, /NOCTURNE \/ AFTERLIGHT/);
+    assert.match(nocturne.html, /data-video-manual/);
+    assert.match(nocturne.html, /data-lead-form/);
+    assert.match(nocturne.html, /M-500 18 L0 18 H440 V62 H1000/);
+    assert.match(nocturne.html, /window\.__PAGE__=/);
+    assert.doesNotMatch(nocturne.html, /תצוגת קונספט|assets\/tour\.mp4|דיזנגוף 156|8,400,000/);
     page = {status:'expired',theme:{template:'original'}};
     assert.match((await render()).file, /public-nadlan\/p\/index\.html$/);
     page = null;

@@ -103,9 +103,12 @@
 
   // ── hero video ──
   var vsrc = get("hero.video_url"), poster = get("hero.poster_url");
-  each("[data-video]", document, function (v) {
+  each("[data-video],[data-video-manual]", document, function (v) {
     if (poster) v.poster = poster;
-    if (vsrc) { v.src = vsrc; v.load(); var p = v.play && v.play(); if (p && p.catch) p.catch(function () {}); }
+    if (vsrc) {
+      v.src = vsrc; v.load();
+      if (v.hasAttribute("data-video")) { var p = v.play && v.play(); if (p && p.catch) p.catch(function () {}); }
+    }
   });
 
   // ── editorial photo slots — the single, full-bleed images the magazine-style
