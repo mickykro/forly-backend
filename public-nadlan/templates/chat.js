@@ -228,6 +228,7 @@
     function pushLeadForm(intro) {
       if (leadPending) return;                 // never stack two forms
       leadPending = true;
+      form.classList.add("flychat-f-hidden");  // the lead form replaces the composer, not alongside it
       var w = el("div", "flychat-lead");
       var introEl = el("div", "flychat-lead-intro");
       introEl.textContent = intro || t("lead_intro");
@@ -275,6 +276,7 @@
             if (d && d.ok) {
               w.textContent = t("lead_sent");   // collapse to confirmation
               leadPending = false;              // a later handoff may ask again
+              if (!closed) form.classList.remove("flychat-f-hidden");
               beacon("chat_lead");
               if (d.recommendations && d.recommendations.length) pushRecommendations(d.recommendations);
             } else {

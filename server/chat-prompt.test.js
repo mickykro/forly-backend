@@ -54,13 +54,12 @@ assert.ok(!buildFacts({ property: { price: 2350000, size_sqm: 0 } }, null).inclu
 // it the model had nothing and invented a service pitch instead.
 assert.ok(buildFacts({ agent: { name: "מור", tagline: "מתמחה בהדר" } }, null).includes("מתמחה בהדר"));
 
-// The area section must NOT be titled "the neighbourhood": area.blurb is written
-// about the city/region, and a section labelled that way got used to answer
-// "which neighbourhood?" with a paragraph about the city.
-const areaOnly = buildFacts({ property: {}, area: { blurb: "עיר מרכזית בשרון" } }, null);
-assert.ok(!/^## השכונה$/m.test(areaOnly), "area section must not claim to be the neighbourhood");
-assert.ok(areaOnly.includes("לא שם השכונה"), "and must say so explicitly");
-// The neighbourhood itself stays a property line, and reads as absent when it is.
+// area.blurb is agent-written copy about the neighbourhood — a legitimate
+// answer to "which neighbourhood?" even without the structured field.
+const areaOnly = buildFacts({ property: {}, area: { blurb: "שכונה שקטה בלב השרון" } }, null);
+assert.ok(areaOnly.includes("שכונה שקטה בלב השרון"));
+assert.ok(areaOnly.includes("## השכונה והסביבה"));
+// The structured neighbourhood field still stays a property line, and reads as absent when it is.
 assert.ok(buildFacts({ property: { neighborhood: "הדר" } }, null).includes("שכונה: הדר"));
 assert.ok(!buildFacts({ property: { city: "חיפה" } }, null).includes("שכונה"));
 
