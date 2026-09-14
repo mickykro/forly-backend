@@ -107,3 +107,4 @@ server/data
 
 # claude-flow runtime session state
 .claude-flow/
+.swarm/
