@@ -16,7 +16,7 @@ Forly WhatsApp chat and end up with a property page, with Forly asking only for 
 | Question | Decision |
 |---|---|
 | Where the conversation logic lives | Forly server. n8n forwards every registered-agent message to one endpoint and stops when the server says it handled it. The server keeps a per-agent draft in Firestore and sends every reply itself over Green API. |
-| Entry points | (1) a listing link, (2) free text that looks like a listing, (3) the keyword נכס חדש / דף נכס, (4) after a bulk photo edit in n8n, an offer to build a page from the edited photos. |
+| Entry points | (1) a listing link, (2) free text that looks like a listing, (3) the keyword נכס חדש / דף נכס, (4) photos n8n has just edited: they pile up on a silent draft and Forly offers a page once three have arrived. |
 | Questions | Ask every missing field of the extractor's set (city, price, rooms required; sale/rent, size, floor, parking, neighborhood, description optional) one at a time; דלג skips an optional one. |
 | Photos | Collected until 3+. After photos stop for ~20 s (or any text arrives) the bot says how many it has and offers ממשיכים. |
 | Confirmation | Summary + לבנות? with buttons כן / ביטול before a walkthrough unit is consumed. |
@@ -27,31 +27,40 @@ Forly WhatsApp chat and end up with a property page, with Forly asking only for 
 
 ## n8n contract
 
-Only Business Handler2 (`V44w39VTt691WGxK`) changes; Main Router stays as is. Before `AI Agent - Business1`:
+Only Business Handler2 (`V44w39VTt691WGxK`) changes; Main Router stays as is. Three nodes are added and
+one connection is re-pointed; nothing existing is modified. Exact settings live in the runbook
+`docs/superpowers/plans/2026-09-12-whatsapp-property-chat-n8n.md`.
+
+On the `Format Image Library → Check Unsupported Media` connection, so it gates the whole bot:
 
 ```
-HTTP Request  POST {BASE_URL}/api/whatsapp/intake   header x-forly-secret: {N8N_WEBHOOK_SECRET}   timeout 90 s
-body {
-  "phone":        "<digits>",
-  "message":      "<text or selected button text or ''>",
-  "message_type": "<Green API typeMessage>",
-  "file_url":     "<messageData.fileMessageData.downloadUrl or null>"
-}
-IF {{ $json.handled }} is true → end.  Else → AI Agent as today.
+POST {BASE_URL}/api/whatsapp/intake   header x-forly-secret   timeout 90 s   on error: continue
+body { phone, message, message_type, file_url }
+  phone        ← businessData.phone_number
+  message      ← customerMessage, else the tapped button's text
+  message_type ← rawWebhook.messageData.typeMessage
+  file_url     ← current_image_url (already extracted by Extract Chat History1), else null
+IF handled is true → stop.  Else → a Set node restores the original item → Check Unsupported Media.
 ```
 
-After the bulk image edit finishes (the batch path), one more call:
+After each edited photo, hanging off `Extract Image Result`:
 
 ```
-POST /api/whatsapp/intake  { "phone": "<digits>", "event": "photos_edited", "photos": ["<url>", ...] }
+POST /api/whatsapp/intake  { phone, event: "photos_edited", photos: ["<one url>"] }
 ```
+
+Business Handler2 has no bulk photo edit: `Check Unsupported Media`'s `burst` output dead-ends in a
+"send them one at a time" warning, so photos are edited singly. The server therefore accumulates
+`photos_edited` photos on an `offered` draft and sends the offer only when the third arrives, once.
+The endpoint still accepts several photos in one call, so a future batch path needs no server change.
 
 Response in both cases: `{ handled, status, reply, replied, listing_id }`. `replied:false` means Green
 API is not configured on the server; n8n should then send `reply` itself.
 
-[Unverified] Green API field names for image messages (`fileMessageData.downloadUrl`) and button replies
-(`buttonsResponseMessage.selectedButtonText`) are taken from Green API docs, not from a captured
-payload. Task 1 of the plan confirms them on a real message before anything depends on them.
+[Unverified] Where a tapped button's text lands (`buttonsResponseMessage.selectedButtonText` or
+`interactiveButtonsReply.selectedDisplayText`) is taken from Green API docs, not from a captured
+payload: `Extract Chat History1` does not fold button replies into `customerMessage`. Step A of the
+runbook confirms it on a real tap; only the n8n expression depends on it, never the server.
 
 ## Server design
 
@@ -65,7 +74,8 @@ payload. Task 1 of the plan confirms them on a real message before anything depe
             sqm_garden, floor, parking, elevator, shabbat_elevator, storage, description },
   skipped: ["floor", ...],          // optional fields the agent skipped
   photos: ["https://.../files/<uuid>.jpg", ...],   // Forly-hosted only
-  pending_opener: null | { message, file_url, photos },   // held while asking המשך / חדש
+  pending_opener: null | { text, photos },   // held while asking המשך / חדש
+  offer_sent: false,                        // an `offered` draft asks once, at the third photo
   listing_id: null | string,
   created_at, updated_at
 }
@@ -80,7 +90,8 @@ or `resume_prompt` draft older than 2 h is dropped on read.
 |---|---|---|
 | none | link / listing-like text / keyword | open draft, extract, ask first question → handled |
 | none | photo, other text | handled:false |
-| none | `photos_edited` event | draft `offered` with the photos, send offer (כן / לא) → handled |
+| none | `photos_edited` event | draft `offered` holding the photos; offer (כן / לא) only once ≥ 3 photos → handled |
+| offered | `photos_edited` event | append; offer once when crossing 3 and `offer_sent` is false → handled |
 | offered | כן | activate, next question → handled |
 | offered | לא | delete → handled |
 | offered | anything else | handled:false (draft stays until 2 h) |
@@ -116,6 +127,8 @@ Listing-like text: 40+ characters and at least two of: חדרים, חד׳, מ״�
    (`walkthroughs`, source `whatsapp`) → `createListing` → status `building`, reply "אני בונה".
    Quota blocked → the ledger's message, draft stays at confirm.
 7. The page builder deletes the draft when it sets the listing's `page_id` (routes/pages.js).
+8. `photos_edited` on an active draft adds the photos and repeats the current question; on a paused
+   draft it asks המשך / חדש; otherwise it feeds the silent `offered` draft described above.
 
 ### Replies
 

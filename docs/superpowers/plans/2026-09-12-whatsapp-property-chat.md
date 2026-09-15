@@ -339,6 +339,7 @@ const d = D.newDraft("972501234567", "keyword", t0);
 assert.equal(d.status, "active");
 assert.equal(d.fields.city, null);
 assert.equal(d.fields.description, null);
+assert.equal(d.offer_sent, false);
 assert.ok("elevator" in d.fields, "fields carry every extractor key");
 assert.deepEqual(D.nextStep(d), { kind: "ask", field: "city" });
 
@@ -397,7 +398,7 @@ function emptyFields() {
 function newDraft(phone, source, now = new Date()) {
   return {
     phone, status: "active", source, fields: emptyFields(), skipped: [], photos: [],
-    pending_opener: null, listing_id: null, created_at: now, updated_at: now,
+    pending_opener: null, offer_sent: false, listing_id: null, created_at: now, updated_at: now,
   };
 }
 
@@ -1104,21 +1105,33 @@ git commit -m "feat(whatsapp): photo batches, confirmation and build in handleTu
 - Modify: `server/whatsapp-intake.test.js` (append)
 
 **Interfaces:**
-- Consumes: `input.event === "photos_edited"` with `input.photos: string[]` (URLs from n8n's image gen, not yet Forly-hosted).
-- Produces: drafts in status `offered` / `resume_prompt` with `pending_opener` per the spec.
+- Consumes: `input.event === "photos_edited"` with `input.photos: string[]` (URLs from n8n's image gen, not yet Forly-hosted). Business Handler2 has no bulk edit path, so it sends **one photo per call**; the handler accumulates them on an `offered` draft and offers once, at the third.
+- Produces: drafts in status `offered` / `resume_prompt` with `pending_opener` and `offer_sent` per the spec.
 
 - [ ] **Step 1: Append the failing tests**
 
 Append inside the async block (before the final log):
 
 ```js
-  // ── photos_edited offer ──
+  // ── photos_edited: n8n sends one edited photo per call; offer once at 3 ──
   ({ d, calls } = deps());
-  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg", "https://fal/4.jpg"] }, d);
-  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.photos.length], [true, "offered", "offered", 4]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"] }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.photos.length, t.replies.length],
+    [true, "offer_pending:1", "offered", 1, 0], "the first edited photo is stored silently");
+  t = await turn({ event: "photos_edited", photos: ["https://fal/2.jpg"], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:2", 2, 0]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/3.jpg"], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 3, true]);
   assert.deepEqual(t.replies[0].buttons, ["כן", "לא"]);
-  assert.equal(calls.imported.length, 4, "edited photos are re-hosted on Forly");
+  assert.match(texts(t), /ערכתי 3 תמונות/);
   const offered = t.draft;
+  t = await turn({ event: "photos_edited", photos: ["https://fal/4.jpg"], draft: offered }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:4", 4, 0], "the offer is never repeated");
+  assert.equal(calls.imported.length, 4, "every edited photo is re-hosted on Forly");
+  // a future n8n batch path may send several at once: one call, one offer
+  ({ d } = deps());
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg"] }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 3, true]);
   t = await turn({ text: "בוקר טוב", draft: offered }, d);
   assert.equal(t.handled, false, "an offered draft does not hijack unrelated chat");
   t = await turn({ text: "לא", draft: offered }, d);
@@ -1182,7 +1195,12 @@ Expected: fails at the first `photos_edited` assertion (`t.handled` is `false`).
 In `server/whatsapp-intake.js` add after `build`:
 
 ```js
-// n8n finished a bulk photo edit → offer a page from those photos.
+/*
+ * n8n just finished editing a photo → it may become a property page.
+ * Business Handler2 edits photos one at a time (its burst output only warns),
+ * so this arrives once per photo: pile them on a silent `offered` draft and ask
+ * once, when the third lands. A batch path sending several at once still works.
+ */
 async function photosEdited(input, deps, draft, now) {
   const { phone } = input;
   const hosted = await importAll(input.photos || [], deps.importPhoto);
@@ -1192,10 +1210,20 @@ async function photosEdited(input, deps, draft, now) {
     return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [R.photosSaved(draft.photos.length), ...p.replies] };
   }
   if (draft && draft.status === "active") return resumePrompt(draft, { photos: hosted }, now);
-  const fresh = D.newDraft(phone, "photos", now);
-  fresh.status = "offered";
-  fresh.photos = hosted;
-  return { handled: true, status: "offered", draft: fresh, replies: [R.offer(hosted.length)] };
+  const target = draft && draft.status === "offered" ? draft : offeredDraft(phone, now);
+  target.photos = target.photos.concat(hosted).slice(0, MAX_PHOTOS);
+  D.touch(target, now);
+  if (target.photos.length < D.MIN_PHOTOS || target.offer_sent) {
+    return { handled: true, status: `offer_pending:${target.photos.length}`, draft: target, replies: [] };
+  }
+  target.offer_sent = true;
+  return { handled: true, status: "offered", draft: target, replies: [R.offer(target.photos.length)] };
+}
+
+function offeredDraft(phone, now) {
+  const d = D.newDraft(phone, "photos", now);
+  d.status = "offered";
+  return d;
 }
 
 function resumePrompt(draft, opener, now) {
@@ -1224,9 +1252,12 @@ async function resumeTurn(input, deps, draft, now) {
   if (cmd === "new") {
     const o = draft.pending_opener || {};
     if (o.photos) {
-      const fresh = D.newDraft(draft.phone, "photos", now);
-      fresh.status = "offered";
+      const fresh = offeredDraft(draft.phone, now);
       fresh.photos = o.photos;
+      if (fresh.photos.length < D.MIN_PHOTOS) {
+        return { handled: true, status: `offer_pending:${fresh.photos.length}`, draft: fresh, replies: [] };
+      }
+      fresh.offer_sent = true;
       return { handled: true, status: "offered", draft: fresh, replies: [R.offer(fresh.photos.length)] };
     }
     return openDraft(draft.phone, D.openerKind(o.text), o.text, deps, now);
@@ -1311,8 +1342,10 @@ git commit -m "feat(whatsapp): photo offer, pause/resume and building state"
  *     → 200 { handled, status, reply, replied, listing_id }
  *     → 403 / 503 bad or unconfigured N8N_WEBHOOK_SECRET, 400 invalid_input
  *
- * n8n (Business Handler2) posts EVERY registered-agent message here first and
- * continues to its AI agent only when handled is false. The server keeps the
+ * n8n (Business Handler2, node `Forly Property Intake` on the Format Image
+ * Library → Check Unsupported Media connection) posts EVERY registered-agent
+ * message here first and continues to its AI agent only when handled is false;
+ * node `Forly Photo Offer` posts each edited photo as a photos_edited event. The server keeps the
  * per-agent draft (db.getDraft), runs whatsapp-intake.handleTurn, persists,
  * and sends the replies itself over Green API. `replied:false` means Green API
  * is not configured here — n8n should then send `reply`.
@@ -1513,7 +1546,7 @@ git push -u origin claude/whatsapp-link-property-page-7wm9xh
 
 ## Self-review
 
-**Spec coverage.** Entry points: link/text/keyword (Task 5), photo offer (Task 7). Ask all 8 + description with skip (Tasks 3, 5). Photo batching with 20 s timer and text ending a batch (Tasks 6, 8). Confirmation before quota (Task 6). 2 h pause with data kept, המשך / חדש, ביטול (Task 7). Ready message stays with the Page Builder (no task; Task 8 only deletes the draft). n8n contract (Task 8 here; the runbook applies it). Errors: source errors keep the draft open (Task 5), failed photo import skipped (Task 6), Green API down → `reply` in the response (Task 8), unknown sender (Task 5). Extraction cap (Tasks 5, 8). Tests as listed in the spec (Tasks 1-7, in-process route check in Task 8).
+**Spec coverage.** Entry points: link/text/keyword (Task 5), edited-photo accumulation and the offer at three (Task 7). Ask all 8 + description with skip (Tasks 3, 5). Photo batching with 20 s timer and text ending a batch (Tasks 6, 8). Confirmation before quota (Task 6). 2 h pause with data kept, המשך / חדש, ביטול (Task 7). Ready message stays with the Page Builder (no task; Task 8 only deletes the draft). n8n contract (Task 8 here; the runbook applies it). Errors: source errors keep the draft open (Task 5), failed photo import skipped (Task 6), Green API down → `reply` in the response (Task 8), unknown sender (Task 5). Extraction cap (Tasks 5, 8). Tests as listed in the spec (Tasks 1-7, in-process route check in Task 8).
 
 **Placeholders.** None: every code step carries the code. The manual n8n procedures live in the runbook.
 
