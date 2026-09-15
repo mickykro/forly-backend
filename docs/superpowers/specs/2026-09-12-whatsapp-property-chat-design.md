@@ -27,7 +27,7 @@ Forly WhatsApp chat and end up with a property page, with Forly asking only for 
 
 ## n8n contract
 
-Business Handler2 (`V44w39VTt691WGxK`), before `AI Agent - Business1`:
+Only Business Handler2 (`V44w39VTt691WGxK`) changes; Main Router stays as is. Before `AI Agent - Business1`:
 
 ```
 HTTP Request  POST {BASE_URL}/api/whatsapp/intake   header x-forly-secret: {N8N_WEBHOOK_SECRET}   timeout 90 s

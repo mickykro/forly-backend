@@ -2,6 +2,8 @@
 
 Companion to the server plan `docs/superpowers/plans/2026-09-12-whatsapp-property-chat.md`. Everything here is done by hand in the n8n UI by the workflow owner; no agent executes it. Do it after the server plan is deployed, on a dev copy of Business Handler2 first if one exists.
 
+**Only Business Handler2 (`V44w39VTt691WGxK`) is edited.** Main Router is not touched: it already hands Business Handler2 the whole Green API payload as `webhookData` (its `fullData` field is the raw webhook body), so every path below is read off Business Handler2's own input.
+
 **Server contract** (spec §n8n contract): `POST {BASE_URL}/api/whatsapp/intake`, header `x-forly-secret`, body `{ phone, message, message_type, file_url }` for a message, or `{ phone, event: "photos_edited", photos: [...] }` after a bulk edit. Response `{ handled, status, reply, replied, listing_id }`. n8n stops when `handled` is true.
 
 ---
@@ -14,11 +16,11 @@ The server never sees Green API's raw webhook; n8n maps it. This task pins the t
 
 - [ ] **Step 1: Capture an image message**
 
-In n8n open **Call4li - Main Router** (`sIKcjzYee7viwk1e`) → Executions. Send a photo from a registered agent's phone to the Forly number. Open the newest execution → node `Code - Parse Webhook` → output. Note `fullData.messageData.typeMessage` and the key holding the download URL (expected `fullData.messageData.fileMessageData.downloadUrl`).
+In n8n open **Business Handler2** → Executions. Send a photo from a registered agent's phone to the Forly number. Open the newest execution → node `When called by another workflow` → output → `webhookData`. Note `webhookData.fullData.messageData.typeMessage` and the key holding the download URL (expected `webhookData.fullData.messageData.fileMessageData.downloadUrl`).
 
 - [ ] **Step 2: Capture a button reply**
 
-From any n8n Green API node (e.g. **Send Motion Question** in Business Handler2) send yourself an interactive-buttons message, tap a button, and open the resulting Main Router execution. Note `typeMessage` (expected `buttonsResponseMessage`) and the key holding the tapped text (expected `fullData.messageData.buttonsResponseMessage.selectedButtonText`).
+From any Green API node in Business Handler2 (e.g. **Send Motion Question**) send yourself an interactive-buttons message, tap a button, and open the resulting Business Handler2 execution. Note `typeMessage` (expected `buttonsResponseMessage`) and the key holding the tapped text (expected `webhookData.fullData.messageData.buttonsResponseMessage.selectedButtonText`).
 
 - [ ] **Step 3: Record**
 
