@@ -9,7 +9,7 @@ const all = [
   R.opened("keyword", {}), R.opened("text", { rooms: null, city: null, price: null }),
   ...["city", "price", "rooms", "deal", "size_sqm", "floor", "parking", "neighborhood", "description"].map(R.ask),
   R.invalid("price"), R.required("city"), R.askPhotos(), R.photosProgress(2), R.photosProgress(4), R.photosSaved(1),
-  R.confirm(sum), R.building(sum), R.cancelled(), R.declined(), R.resumePrompt(sum),
+  R.reviewReady("https://a/create.html?whatsapp=1"), R.building(sum), R.cancelled(), R.declined(), R.resumePrompt(sum),
   ...["page_unreadable", "facebook_not_connected", "extract_unavailable", "whatever"].map((c) => R.sourceError(c, "https://a/create.html")),
   R.extractLimit("https://a/create.html"), R.createFailed("https://a/create.html"), R.noLinkHint("https://a/create.html"),
 ];
@@ -22,15 +22,14 @@ for (const r of all) {
   assert.ok(!r.buttons || r.buttons.length <= 3);
 }
 assert.deepEqual(R.offer(4).buttons, ["כן", "לא"]);
-assert.deepEqual(R.confirm(sum).buttons, ["כן", "ביטול"]);
+assert.equal(R.reviewReady("https://a/create.html?whatsapp=1").buttons, undefined, "the link is the only action, no buttons");
+assert.match(R.reviewReady("https://a/create.html?whatsapp=1").text, /https:\/\/a\/create\.html\?whatsapp=1/);
 assert.deepEqual(R.resumePrompt(sum).buttons, ["המשך", "חדש"]);
 assert.deepEqual(R.photosProgress(4).buttons, ["ממשיכים"]);
 assert.equal(R.photosProgress(2).buttons, undefined, "under 3 photos: ask for more, no continue button");
 assert.deepEqual(R.ask("deal").buttons, ["למכירה", "להשכרה"]);
 assert.match(R.ask("floor").text, /דלג/, "optional questions mention skip");
 assert.doesNotMatch(R.ask("city").text, /דלג/, "required questions do not");
-assert.match(R.confirm(sum).text, /1,500,000/);
-assert.match(R.confirm(sum).text, /5 תמונות/);
 assert.match(R.opened("link", { rooms: 3.5, city: "תל אביב", neighborhood: "פלורנטין", price: 2900000 }).text, /3\.5 חד׳ בפלורנטין/);
 assert.equal(R.LABELS.size_sqm, "שטח במ״ר");
 console.log("whatsapp-replies.test.js ok");

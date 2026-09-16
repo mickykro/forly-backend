@@ -19,6 +19,14 @@
  * lost instance just means no progress message, and the agent's next text
  * triggers the same report). The "page is live" message comes later from the
  * n8n Property Page Builder, as for every page.
+ *
+ *   GET  /api/whatsapp/review?t=<signed session>   the "confirm" reply's link
+ *     Signs the agent's browser in (same as OTP login) and redirects to
+ *     create.html?whatsapp=1. No x-forly-secret gate: opened by the agent.
+ *   GET  /api/whatsapp/draft                        forly_session cookie
+ *     → 200 { fields, photos } | 404 no_draft. create.html's prefill reads
+ *     this once signed in via /review; the agent reviews, edits and builds
+ *     the page themselves there — whatsapp-intake.js never builds it.
  */
 const express = require("express");
 const { constantTimeEqual } = require("../security");
@@ -27,17 +35,17 @@ const { handleTurn } = require("../whatsapp-intake");
 const { isPaused, asMillis } = require("../property-draft");
 const { resolve } = require("../listing-sources");
 const { parseListing } = require("../listing-extract");
-const { createListing } = require("../listing-create");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
+const { verifySession, requireAuth } = require("../auth");
 
 const EXTRACT_CAP = 20;          // link/text extractions per agent per day
 const PHOTO_BATCH_MS = 20000;
 const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
-  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, quota, sendWhatsApp, sendButtons,
-    uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, pipelineDeps } = ctx;
+  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, sendButtons,
+    uploadDir, uploadPublicBase, remoteUploadBase, baseUrl } = ctx;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
   const timers = new Map();
@@ -77,11 +85,15 @@ module.exports = function createWhatsappRouter(ctx) {
 
   function depsFor(phone, business) {
     return {
-      business, resolve, parseListing, quota,
+      business, resolve, parseListing,
       importPhoto: importPhotoFor(phone),
-      createListing: (p, body) => createListing(p, body, null, { ...pipelineDeps, source: "whatsapp" }),
       createUrl: `${baseUrl}/create.html`,
       extractAllowed: (p) => limit.take(p),
+      // /review signs the agent straight into create.html (same trust as
+      // importPhotoFor's server-side session above, just handed to their
+      // browser instead) prefilled from their draft; they review, edit and
+      // build the page themselves there — see the /review and /draft routes.
+      reviewLink: (p) => `${baseUrl}/api/whatsapp/review?t=${encodeURIComponent(signSession(authSecret, p))}`,
     };
   }
 
@@ -173,6 +185,31 @@ module.exports = function createWhatsappRouter(ctx) {
       console.error("[whatsapp] intake failed:", err);
       res.status(500).json({ error: "internal" });
     }
+  });
+
+  // A WhatsApp-delivered magic link (see depsFor's reviewLink): signs the
+  // agent's browser in exactly as OTP login does, then sends them to the
+  // prefilled create form. No x-forly-secret gate here — this is opened by
+  // the agent's own browser, not called by n8n.
+  router.get("/review", (req, res) => {
+    const token = typeof req.query.t === "string" ? req.query.t : "";
+    const payload = verifySession(authSecret, token);
+    if (!payload || !payload.userId) return res.status(401).send("הקישור פג תוקף — בקשו קישור חדש מהבוט.");
+    res.cookie("forly_session", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: Math.max(0, payload.exp * 1000 - Date.now()),
+    });
+    res.redirect(`${baseUrl}/create.html?whatsapp=1`);
+  });
+
+  // create.html reads this once signed in via /review, to prefill the form
+  // with whatever the chat has collected so far.
+  router.get("/draft", requireAuth(authSecret), async (req, res) => {
+    const draft = await db.getDraft(req.user.userId);
+    if (!draft) return res.status(404).json({ error: "no_draft" });
+    res.json({ fields: draft.fields, photos: draft.photos });
   });
 
   return router;

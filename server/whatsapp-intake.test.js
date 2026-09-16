@@ -11,17 +11,16 @@ const FIELDS = { city: "תל אביב", price: 2900000, rooms: 3.5, address: nul
 const fail = (code) => { const e = new Error(code); e.code = code; return e; };
 
 function deps(over = {}) {
-  const calls = { created: [], consumed: [], imported: [] };
+  const calls = { imported: [] };
   const d = {
     business: { phone: PHONE },
     resolve: async ({ url }) => ({ source: "scrape", text: "t " + url, description: "desc",
       photos: [1, 2, 3].map((i) => ({ url: `https://c/${i}.jpg` })) }),
     parseListing: async () => ({ fields: { ...FIELDS }, missing: [] }),
     importPhoto: async (u) => { calls.imported.push(u); return "https://files/" + u.split("/").pop(); },
-    quota: { consume: async (phone, kind, n, o) => { calls.consumed.push({ kind, n, source: o.source }); return { ok: true }; } },
-    createListing: async (phone, body) => { calls.created.push({ phone, body }); return { listing_id: "L1" }; },
     createUrl: CREATE,
     extractAllowed: () => true,
+    reviewLink: (phone) => `https://review/${phone}`,
     ...over,
   };
   return { d, calls };
@@ -55,12 +54,13 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.match(texts(t), /קראתי את המודעה: 3\.5 חד׳ בפלורנטין/);
   assert.match(texts(t), /תיאור/);
 
-  // description answered → photos are already 3 → confirm
+  // description answered → photos are already 3 → confirm sends the review link
   let draft = t.draft;
   t = await turn({ text: "דירה מהממת", draft }, d);
   assert.equal(t.draft.fields.description, "דירה מהממת");
   assert.equal(t.status, "confirm");
-  assert.deepEqual(t.replies[t.replies.length - 1].buttons, ["כן", "ביטול"]);
+  assert.equal(t.replies[t.replies.length - 1].buttons, undefined);
+  assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
 
   // ── keyword opener: empty draft, ask city ──
   ({ d } = deps());
@@ -106,7 +106,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.draft.source, "text");
   assert.equal(t.draft.photos.length, 0);
 
-  // ── photos: silent accumulation, timer prompt, continue, confirm, build ──
+  // ── photos: silent accumulation, timer prompt, continue, confirm ──
   ({ d, calls } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
@@ -122,8 +122,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.replies[0].buttons, undefined);
   for (const n of ["b", "c", "d"]) { t = await turn({ fileUrl: `https://green/${n}.jpg`, draft }, d); draft = t.draft; }
   t = await turn({ text: "עוד אחת בדרך", draft }, d);
-  assert.equal(t.status, "photos_progress:4", "any text during photos ends the batch and reports");
-  assert.deepEqual(t.replies[0].buttons, ["ממשיכים"]);
+  assert.equal(t.status, "confirm", "enough photos already: any text sends the review link");
+  assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
   t = await turn({ text: "ממשיכים", draft }, d);
   assert.equal(t.status, "confirm");
   assert.equal(t.draft, undefined, "confirm prompt does not change the draft");
@@ -152,7 +152,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.match(texts(t), /שמרתי 1 תמונות/);
   assert.match(texts(t), /באיזו עיר/);
 
-  // confirm: anything but כן / ביטול repeats the summary (after "ממשיכים")
+  // confirm: any text once ready (re)sends the review link; ביטול still cancels
   ({ d, calls } = deps());
   const ready = D.newDraft(PHONE, "keyword", T0);
   Object.assign(ready.fields, { city: "חיפה", price: 1500000, rooms: 4 });
@@ -160,28 +160,11 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ready.photos = ["p1", "p2", "p3"];
   t = await turn({ text: "ממשיכים", draft: ready }, d);
   assert.equal(t.status, "confirm", "ממשיכים moves to confirm");
+  assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
   t = await turn({ text: "רגע", draft: ready }, d);
-  assert.equal(t.status, "photos_progress:3", "non-command at photo collection shows progress");
+  assert.equal(t.status, "confirm", "any other text once ready re-sends the review link too");
   t = await turn({ text: "ביטול", draft: ready }, d);
   assert.deepEqual([t.status, t.del], ["cancelled", true]);
-  t = await turn({ text: "כן", draft: ready }, d);
-  assert.deepEqual([t.status, t.listing_id, t.draft.status, t.draft.listing_id], ["building", "L1", "building", "L1"]);
-  assert.deepEqual(calls.consumed, [{ kind: "walkthroughs", n: 1, source: "whatsapp" }]);
-  assert.equal(calls.created[0].body.city, "חיפה");
-  assert.deepEqual(calls.created[0].body.photos_urls, ["p1", "p2", "p3"]);
-  assert.match(texts(t), /אני בונה/);
-
-  // quota blocked: ledger message, draft stays at confirm, כן can be retried
-  ({ d, calls } = deps({ quota: { consume: async () => ({ ok: false, message: "נגמרה החבילה" }) } }));
-  t = await turn({ text: "כן", draft: ready }, d);
-  assert.deepEqual([t.status, texts(t), calls.created.length, t.del], ["quota_blocked", "נגמרה החבילה", 0, undefined]);
-  ({ d } = deps({ quota: null }));
-  t = await turn({ text: "כן", draft: ready }, d);
-  assert.equal(t.status, "building", "no quota module (local dev) still builds");
-  ({ d } = deps({ createListing: async () => ({ error: "x", code: 400 }) }));
-  t = await turn({ text: "כן", draft: ready }, d);
-  assert.equal(t.status, "create_failed");
-  assert.equal(t.draft, undefined, "draft unchanged so כן can be retried");
 
   // ── photos_edited: n8n sends one edited photo per call; offer once at 3 ──
   ({ d, calls } = deps());

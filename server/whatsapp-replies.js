@@ -68,7 +68,9 @@ function summaryLines(s) {
   lines.push(`${s.photos} תמונות`);
   return lines.join(" · ");
 }
-function confirm(s) { return { text: `סיכום:\n${summaryLines(s)}\n\nלבנות את דף הנכס?`, buttons: ["כן", "ביטול"] }; }
+function reviewReady(link) {
+  return { text: `כל הפרטים מוכנים ✅\nבדקו, ערכו אם צריך ובנו את דף הנכס כאן:\n${link}` };
+}
 function building(s) { return { text: `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).` }; }
 function cancelled() { return { text: "ביטלתי את הטיוטה. אפשר להתחיל מחדש עם קישור, טקסט או ״נכס חדש״." }; }
 function declined() { return { text: "בסדר, לא בונים דף מהתמונות האלה." }; }
@@ -93,5 +95,5 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved,
-  confirm, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
 };

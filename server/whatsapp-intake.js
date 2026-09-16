@@ -24,12 +24,15 @@ function photoUrlsOf(input) {
   return input.fileUrl ? [input.fileUrl] : null;
 }
 
-// What to say for the step the draft is at.
-function promptFor(draft) {
+// What to say for the step the draft is at. Reaching "confirm" sends a link
+// to create.html, pre-filled from the draft, where the agent reviews the
+// photos, edits anything, and builds the page themselves — see
+// server/routes/whatsapp.js's /review and /draft routes.
+function promptFor(draft, deps) {
   const step = D.nextStep(draft);
   if (step.kind === "ask") return { status: `asked:${step.field}`, replies: [R.ask(step.field)] };
   if (step.kind === "photos") return { status: "photos", replies: [R.askPhotos()] };
-  return { status: "confirm", replies: [R.confirm(D.summary(draft))] };
+  return { status: "confirm", replies: [R.reviewReady(deps.reviewLink(draft.phone))] };
 }
 
 async function importAll(urls, importPhoto) {
@@ -52,38 +55,38 @@ async function openFromSource(phone, kind, text, deps, now) {
   } catch (err) {
     const code = err && err.code ? err.code : "page_unreadable";
     if (!err || !err.code) console.error("[whatsapp-intake] source failed:", err);
-    const p = promptFor(draft);
+    const p = promptFor(draft, deps);
     return { handled: true, status: `source_error:${code}`, draft, replies: [R.sourceError(code, deps.createUrl), ...p.replies] };
   }
   for (const [k, v] of Object.entries(parsed.fields)) if (k in draft.fields && k !== "description" && v !== null) draft.fields[k] = v;
   // ponytail: description left for user to provide in Q&A, not auto-filled from source
   draft.photos = await importAll((src.photos || []).map((p) => p.url), deps.importPhoto);
-  const p = promptFor(draft);
+  const p = promptFor(draft, deps);
   return { handled: true, status: p.status, draft, replies: [R.opened(kind, draft.fields), ...p.replies] };
 }
 
-function openFromKeyword(phone, now) {
+function openFromKeyword(phone, deps, now) {
   const draft = D.newDraft(phone, "keyword", now);
-  const p = promptFor(draft);
+  const p = promptFor(draft, deps);
   return { handled: true, status: p.status, draft, replies: [R.opened("keyword"), ...p.replies] };
 }
 
 async function openDraft(phone, kind, text, deps, now) {
-  return kind === "keyword" ? openFromKeyword(phone, now) : openFromSource(phone, kind, text, deps, now);
+  return kind === "keyword" ? openFromKeyword(phone, deps, now) : openFromSource(phone, kind, text, deps, now);
 }
 
 // One answer to the field currently being asked.
-function answerField(draft, field, text, cmd) {
+function answerField(draft, field, text, cmd, deps) {
   if (cmd === "skip") {
     if (D.isRequired(field)) return { status: `required:${field}`, replies: [R.required(field)], draft };
     draft.skipped.push(field);
-    const p = promptFor(draft);
+    const p = promptFor(draft, deps);
     return { status: p.status, replies: p.replies, draft };
   }
   const value = D.parseAnswer(field, text);
   if (value === null) return { status: `invalid:${field}`, replies: [R.invalid(field)], draft };
   draft.fields[field] = value;
-  const p = promptFor(draft);
+  const p = promptFor(draft, deps);
   return { status: p.status, replies: p.replies, draft };
 }
 
@@ -98,31 +101,11 @@ async function storePhoto(draft, fileUrlOrUrls, deps, now) {
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
 }
 
-function photoTimer(draft) {
+function photoTimer(draft, deps) {
   const n = draft.photos.length;
   if (D.nextStep(draft).kind === "photos") return { handled: true, status: `photos_progress:${n}`, replies: [R.photosProgress(n)] };
-  const p = promptFor(draft);
+  const p = promptFor(draft, deps);
   return { handled: true, status: p.status, replies: [R.photosSaved(n), ...p.replies] };
-}
-
-async function build(draft, deps, now) {
-  const { phone } = draft;
-  const body = D.toListingBody(draft);
-  if (deps.quota) {
-    const q = await deps.quota.consume(phone, "walkthroughs", 1, {
-      source: "whatsapp", business: deps.business,
-      request: { city: body.city, price: body.price, rooms: body.rooms, photos: body.photos_urls.length, source: draft.source },
-    });
-    if (!q.ok) return { handled: true, status: "quota_blocked", replies: [{ text: q.message || R.createFailed(deps.createUrl).text }] };
-  }
-  const result = await deps.createListing(phone, body);
-  if (result.error) {
-    console.error("[whatsapp-intake] create failed:", result.error);
-    return { handled: true, status: "create_failed", replies: [R.createFailed(deps.createUrl)] };
-  }
-  draft.status = "building";
-  draft.listing_id = result.listing_id;
-  return { handled: true, status: "building", listing_id: result.listing_id, draft: D.touch(draft, now), replies: [R.building(D.summary(draft))] };
 }
 
 /*
@@ -136,7 +119,7 @@ async function photosEdited(input, deps, draft, now) {
   const hosted = await importAll(input.photos || [], deps.importPhoto);
   if (draft && draft.status === "active" && !D.isPaused(draft, now)) {
     draft.photos = draft.photos.concat(hosted).slice(0, MAX_PHOTOS);
-    const p = promptFor(draft);
+    const p = promptFor(draft, deps);
     return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [R.photosSaved(draft.photos.length), ...p.replies] };
   }
   if (draft && draft.status === "active") return resumePrompt(draft, { photos: hosted }, now);
@@ -167,7 +150,7 @@ async function offeredTurn(input, deps, draft, now) {
   if (cmd === "no") return { handled: true, status: "declined", del: true, replies: [R.declined()] };
   if (cmd !== "yes") return notOurs("not_ours");
   draft.status = "active";
-  const p = promptFor(draft);
+  const p = promptFor(draft, deps);
   return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
 }
 
@@ -176,7 +159,7 @@ async function resumeTurn(input, deps, draft, now) {
   if (cmd === "resume") {
     draft.status = "active";
     draft.pending_opener = null;
-    const p = promptFor(draft);
+    const p = promptFor(draft, deps);
     return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
   }
   if (cmd === "new") {
@@ -196,28 +179,23 @@ async function resumeTurn(input, deps, draft, now) {
 }
 
 async function activeTurn(input, deps, draft, now) {
-  if (input.event === "photo_timer") return photoTimer(draft);
+  if (input.event === "photo_timer") return photoTimer(draft, deps);
   const photoUrls = photoUrlsOf(input);
   if (photoUrls) return storePhoto(draft, photoUrls, deps, now);
   const cmd = D.command(input.text);
   if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
   const step = D.nextStep(draft);
   if (step.kind === "ask") {
-    const r = answerField(draft, step.field, input.text, cmd);
+    const r = answerField(draft, step.field, input.text, cmd, deps);
     return { handled: true, ...r, draft: r.draft ? D.touch(r.draft, now) : undefined };
   }
-  // All questions answered - photo collection / confirm mode
-  const n = draft.photos.length;
-  // "ממשיכים" with enough photos → show confirm
-  if (cmd === "continue" && n >= D.MIN_PHOTOS) {
-    return { handled: true, status: "confirm", replies: [R.confirm(D.summary(draft))] };
+  if (step.kind === "photos") {
+    return { handled: true, status: `photos_progress:${draft.photos.length}`, replies: [R.photosProgress(draft.photos.length)] };
   }
-  // "כן" with enough photos → build
-  if (cmd === "yes" && n >= D.MIN_PHOTOS) return build(draft, deps, now);
-  // "לא" with enough photos → cancel
-  if (cmd === "no" && n >= D.MIN_PHOTOS) return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
-  // Any other text → show photo progress (includes "continue"/"yes"/"no" with not enough photos)
-  return { handled: true, status: `photos_progress:${n}`, replies: [R.photosProgress(n)] };
+  // Fields and photos are both done: any text (typically "ממשיכים") (re)sends
+  // the review link. Building only happens from that page now, never from chat.
+  const p = promptFor(draft, deps);
+  return { handled: true, status: p.status, replies: p.replies };
 }
 
 async function handleTurn(input, deps) {

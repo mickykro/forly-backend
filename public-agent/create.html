@@ -1613,6 +1613,40 @@
         .catch(function () { /* transient — keep polling until MAX_WAIT_MS */ });
     }, 6000);
   }
+
+  // ── WhatsApp draft prefill ──
+  // The property-chat bot's "confirm" reply links here as
+  // /create.html?whatsapp=1, already signing the browser in via
+  // /api/whatsapp/review. Load the draft's fields and already-hosted
+  // photos into the normal wizard state — same shape runExtract()'s
+  // success branch already builds — and let the agent take it from here.
+  if (/[?&]whatsapp=1(&|$)/.test(location.search)) {
+    fetch("/api/whatsapp/draft", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        X.fillFields(data.fields, $);
+        syncDealButtons(); updatePriceLabel(); renderPriceChips();
+        if (data.fields.description && !$("#pDesc").value.trim()) {
+          $("#pDesc").value = String(data.fields.description).slice(0, 2000);
+        }
+        (data.photos || []).forEach(function (url) {
+          if (photos.length >= 12) return;
+          var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
+          var entry = { file: null, el: t, publicUrl: url, previewUrl: url, removed: false, failed: false, uploadPromise: Promise.resolve(url) };
+          t.querySelector(".x").addEventListener("click", function () {
+            entry.removed = true;
+            photos = photos.filter(function (q) { return q.el !== t; });
+            t.remove(); FLY.deleteUpload(url, uploadHeaders); updateLivePreview();
+          });
+          $("#thumbs").appendChild(t); photos.push(entry);
+        });
+        revealManual();
+        setWizardStage(1, false);
+        updateLivePreview();
+      })
+      .catch(function () { /* no draft, or the link expired — a plain empty form is a fine fallback */ });
+  }
 })();
 </script>
 </body>

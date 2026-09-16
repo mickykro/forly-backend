@@ -81,17 +81,6 @@ assert.equal(D.isExpiredPrompt(d, new Date(t0.getTime() + D.PAUSE_MS + 1)), fals
 const s = D.summary(d);
 assert.deepEqual([s.city, s.price, s.rooms, s.photos], ["חיפה", 1500000, 4, 3]);
 
-d.fields.deal = "rent"; d.fields.size_sqm = 90; d.fields.elevator = true; d.fields.description = "נחמד";
-const body = D.toListingBody(d);
-assert.equal(body.listing_type, "rent");
-assert.equal(body.size_sqm, 90);
-assert.equal(body.elevator, true);
-assert.equal(body.shabbat_elevator, false);
-assert.equal(body.address, "");
-assert.equal(body.description, "נחמד");
-assert.deepEqual(body.photos_urls, ["a", "b", "c"]);
-assert.equal(D.toListingBody({ ...d, fields: { ...d.fields, deal: null } }).listing_type, "sale");
-
 const t1 = new Date(t0.getTime() + 1000);
 assert.equal(D.touch(d, t1).updated_at, t1);
 
