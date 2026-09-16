@@ -16,6 +16,8 @@ assert.equal(D.command("לא"), "no");
 assert.equal(D.command("המשך"), "resume");
 assert.equal(D.command("חדש"), "new");
 assert.equal(D.command("כן בבקשה"), null);
+assert.equal(D.command("להמשיך אותה"), "resume");
+assert.equal(D.command("להמשיך"), "resume");
 
 assert.equal(D.openerKind("https://x.co/1"), "link");
 assert.equal(D.openerKind("נכס חדש"), "keyword");

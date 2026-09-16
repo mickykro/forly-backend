@@ -24,6 +24,7 @@ const express = require("express");
 const { constantTimeEqual } = require("../security");
 const db = require("../db");
 const { handleTurn } = require("../whatsapp-intake");
+const { isPaused, asMillis } = require("../property-draft");
 const { resolve } = require("../listing-sources");
 const { parseListing } = require("../listing-extract");
 const { createListing } = require("../listing-create");
@@ -120,9 +121,10 @@ module.exports = function createWhatsappRouter(ctx) {
     if (!phone || (!text.trim() && !fileUrl && !event)) return res.status(400).json({ error: "invalid_input" });
     try {
       const [business, draft] = await Promise.all([db.getBusiness(phone).catch(() => null), db.getDraft(phone)]);
+      const now = new Date();
       console.log(
         `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrl ? "photo" : JSON.stringify(text)}` +
-        ` | draft before: ${draft ? `${draft.status} (${draft.source})` : "none"}`
+        ` | draft before: ${draft ? `${draft.status} (${draft.source}) updated_at=${new Date(asMillis(draft.updated_at)).toISOString()} silent_for_ms=${now.getTime() - asMillis(draft.updated_at)} paused=${isPaused(draft, now)}` : "none"}`
       );
       const turn = await handleTurn({ phone, text, fileUrl, event, photos, draft }, depsFor(phone, business));
       // A text that ends a photo batch must not be followed by the timer's report too.

@@ -17,6 +17,9 @@ const PAUSE_MS = 2 * 60 * 60 * 1000;
 const KEYWORDS = ["נכס חדש", "דף נכס", "דף חדש"];
 const LISTING_HINTS = ["חדרים", "חד׳", "חד'", "מ״ר", "מ\"ר", "קומה", "למכירה", "להשכרה", "₪", "מחיר", "שכירות"];
 const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "continue", "כן": "yes", "לא": "no", "המשך": "resume", "חדש": "new" };
+// Natural phrasings for the buttons above; button taps always send the exact
+// COMMANDS word, these cover what a person types instead of tapping.
+const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume" };
 
 // First http(s) link in a chat message; trailing punctuation is not part of it.
 const URL_RE = /https?:\/\/[^\s<>"']+/i;
@@ -28,7 +31,7 @@ function findUrl(text) {
 }
 
 const clean = (t) => String(t || "").trim().replace(/[!.?]+$/, "").trim();
-function command(text) { return COMMANDS[clean(text)] || null; }
+function command(text) { const c = clean(text); return COMMANDS[c] || COMMAND_ALIASES[c] || null; }
 function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
 function looksLikeListing(text) {
   const t = String(text || "");
