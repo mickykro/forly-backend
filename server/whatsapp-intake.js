@@ -237,7 +237,4 @@ async function handleTurn(input, deps) {
   return activeTurn(input, deps, draft, now);
 }
 
-// ponytail: temporary stub for routes/whatsapp.js until Task 8 rewrites the route
-async function intake() { return { status: "not_ours", reply: null }; }
-
-module.exports = { handleTurn, intake, _test: { promptFor, answerField } };
+module.exports = { handleTurn, _test: { promptFor, answerField } };

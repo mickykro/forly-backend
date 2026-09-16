@@ -1,47 +1,49 @@
 /*
  * routes/whatsapp.js — the WhatsApp chat as a property-page intake.
  *
- *   POST /api/whatsapp/intake   { phone, message }        n8n (x-forly-secret)
- *     → 200 { ok:true, status, reply, replied, listing_id? }
- *       status: building | no_link | missing_fields | few_photos | quota_blocked |
- *               page_unreadable | facebook_not_connected | extract_unavailable | create_failed
- *     → 404 { error:"unknown_agent" }   sender has no businesses/{phone} doc (nothing sent)
- *     → 403 / 503                        bad or unconfigured N8N_WEBHOOK_SECRET
+ *   POST /api/whatsapp/intake                                n8n (x-forly-secret)
+ *     { phone, message?, message_type?, file_url? }          one inbound message
+ *     { phone, event: "photos_edited", photos: [url, ...] }  after a bulk photo edit
+ *     → 200 { handled, status, reply, replied, listing_id }
+ *     → 403 / 503 bad or unconfigured N8N_WEBHOOK_SECRET, 400 invalid_input
  *
- * The n8n WhatsApp bot forwards an agent's inbound message here when it
- * contains a link (or always — a message without a link answers `no_link`).
- * The server sends the reply itself over Green API and reports `replied`; when
- * Green API is not configured (`replied:false`) n8n should forward `reply`.
- * The "page is live" message comes later from the n8n Property Page Builder
- * (it already WhatsApps every page's agent) — the pipeline takes minutes.
+ * n8n (Business Handler2, node `Forly Property Intake` on the Format Image
+ * Library → Check Unsupported Media connection) posts EVERY registered-agent
+ * message here first and continues to its AI agent only when handled is false;
+ * node `Forly Photo Offer` posts each edited photo as a photos_edited event. The server keeps the
+ * per-agent draft (db.getDraft), runs whatsapp-intake.handleTurn, persists,
+ * and sends the replies itself over Green API. `replied:false` means Green API
+ * is not configured here — n8n should then send `reply`.
  *
- * n8n hook (Business Handler2, before the AI agent): IF customerMessage
- * matches /https?:\/\// → HTTP Request POST {BASE_URL}/api/whatsapp/intake,
- * header x-forly-secret, body { phone, message: customerMessage } → stop.
+ * Photo batches: a stored photo arms a 20 s timer per phone (in-process; a
+ * lost instance just means no progress message, and the agent's next text
+ * triggers the same report). The "page is live" message comes later from the
+ * n8n Property Page Builder, as for every page.
  */
 const express = require("express");
 const { constantTimeEqual } = require("../security");
 const db = require("../db");
-const { intake } = require("../whatsapp-intake");
+const { handleTurn } = require("../whatsapp-intake");
 const { resolve } = require("../listing-sources");
 const { parseListing } = require("../listing-extract");
 const { createListing } = require("../listing-create");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
 
-const DAILY_CAP = 20; // links per agent per day — bounds Firecrawl + LLM spend
+const EXTRACT_CAP = 20;          // link/text extractions per agent per day
+const PHOTO_BATCH_MS = 20000;
+const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
-  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, quota, sendWhatsApp,
+  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, quota, sendWhatsApp, sendButtons,
     uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, pipelineDeps } = ctx;
   const router = express.Router();
-  const limit = new DailyLimit(DAILY_CAP);
+  const limit = new DailyLimit(EXTRACT_CAP);
+  const timers = new Map();
 
   function requireN8n(req, res, next) {
     if (!n8nSecret) return res.status(503).json({ error: "n8n_secret_not_configured" });
-    if (!constantTimeEqual(req.get("x-forly-secret"), n8nSecret)) {
-      return res.status(403).json({ error: "forbidden" });
-    }
+    if (!constantTimeEqual(req.get("x-forly-secret"), n8nSecret)) return res.status(403).json({ error: "forbidden" });
     next();
   }
 
@@ -57,29 +59,73 @@ module.exports = function createWhatsappRouter(ctx) {
     };
   }
 
+  function depsFor(phone, business) {
+    return {
+      business, resolve, parseListing, quota,
+      importPhoto: importPhotoFor(phone),
+      createListing: (p, body) => createListing(p, body, null, { ...pipelineDeps, source: "whatsapp" }),
+      createUrl: `${baseUrl}/create.html`,
+      extractAllowed: (p) => limit.take(p),
+    };
+  }
+
+  async function send(phone, reply) {
+    if (reply.buttons && sendButtons) {
+      try {
+        await sendButtons(phone, { body: reply.text, buttons: reply.buttons.map((b, i) => ({ buttonId: String(i + 1), buttonText: b })) });
+        return;
+      } catch (err) { console.warn("[whatsapp] buttons failed, sending plain:", err.message); }
+    }
+    await sendWhatsApp(phone, reply.text);
+  }
+
+  async function persistAndSend(phone, turn) {
+    if (turn.del) await db.deleteDraft(phone);
+    else if (turn.draft) await db.saveDraft(turn.draft);
+    let replied = false;
+    if (turn.replies.length && sendWhatsApp) {
+      try { for (const r of turn.replies) await send(phone, r); replied = true; }
+      catch (err) { console.warn("[whatsapp] reply failed:", err.message); }
+    }
+    if (turn.armPhotoTimer) armTimer(phone);
+    return replied;
+  }
+
+  function armTimer(phone) {
+    clearTimeout(timers.get(phone));
+    timers.set(phone, setTimeout(async () => {
+      timers.delete(phone);
+      try {
+        const [business, draft] = await Promise.all([db.getBusiness(phone), db.getDraft(phone)]);
+        if (!draft) return;
+        const turn = await handleTurn({ phone, event: "photo_timer", draft }, depsFor(phone, business));
+        if (turn.handled) await persistAndSend(phone, turn);
+      } catch (err) { console.error("[whatsapp] photo timer failed:", err); }
+    }, PHOTO_BATCH_MS));
+  }
+
   router.post("/intake", requireN8n, async (req, res) => {
     const body = req.body || {};
     const phone = normalizeAuthPhone(body.phone || "");
-    const text = String(body.message || body.text || body.url || "").slice(0, 4000);
-    if (!phone || !text.trim()) return res.status(400).json({ error: "invalid_input" });
-    if (!limit.take(phone)) return res.status(429).json({ error: "extract_limit" });
+    const text = String(body.message || "").slice(0, MAX_TEXT);
+    const fileUrl = typeof body.file_url === "string" && body.file_url.trim() ? body.file_url.trim() : null;
+    const event = body.event === "photos_edited" ? "photos_edited" : null;
+    const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string").slice(0, 12) : [];
+    if (!phone || (!text.trim() && !fileUrl && !event)) return res.status(400).json({ error: "invalid_input" });
     try {
-      const out = await intake({ phone, text }, {
-        getBusiness: db.getBusiness, resolve, parseListing, quota,
-        importPhoto: importPhotoFor(phone),
-        createListing: (p, listing) => createListing(p, listing, null, { ...pipelineDeps, source: "whatsapp" }),
-        createUrl: `${baseUrl}/create.html`,
+      const [business, draft] = await Promise.all([db.getBusiness(phone).catch(() => null), db.getDraft(phone)]);
+      const turn = await handleTurn({ phone, text, fileUrl, event, photos, draft }, depsFor(phone, business));
+      // A text that ends a photo batch must not be followed by the timer's report too.
+      if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
+      const replied = turn.handled ? await persistAndSend(phone, turn) : false;
+      console.log(`[whatsapp] ${phone} → ${turn.status}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
+      res.json({
+        handled: turn.handled, status: turn.status,
+        reply: turn.replies.map((r) => r.text).join("\n\n") || null,
+        replied, listing_id: turn.listing_id || null,
       });
-      if (out.status === "unknown_agent") return res.status(404).json({ error: "unknown_agent" });
-      let replied = false;
-      if (out.reply && sendWhatsApp) {
-        try { await sendWhatsApp(phone, out.reply); replied = true; }
-        catch (err) { console.warn("[whatsapp-intake] reply failed:", err.message); }
-      }
-      console.log(`[whatsapp-intake] ${phone} → ${out.status}${out.listing_id ? ` ${out.listing_id}` : ""}`);
-      res.json({ ok: true, status: out.status, reply: out.reply, replied, listing_id: out.listing_id || null });
     } catch (err) {
-      console.error("[whatsapp-intake] failed:", err);
+      console.error("[whatsapp] intake failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });

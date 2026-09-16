@@ -87,7 +87,7 @@ db.init();
 const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
-const { sendWhatsApp } = require("./utils");
+const { sendWhatsApp, sendWhatsAppButtons } = require("./utils");
 // A number that tries to log in but has no businesses/{phone} doc isn't a
 // Forly client yet — self-service signup off the login screen is gone (see
 // the issue this shipped with), so the OTP route forwards them here as a
@@ -175,6 +175,8 @@ app.use("/api/whatsapp", createWhatsappRouter({
   // null when Green API is unset so the response's `replied` is honest and n8n forwards `reply`.
   sendWhatsApp: GREENAPI_INSTANCE && GREENAPI_TOKEN
     ? (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+  sendButtons: GREENAPI_INSTANCE && GREENAPI_TOKEN
+    ? (phone, opts) => sendWhatsAppButtons(phone, opts, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
   baseUrl: BASE_URL,
   pipelineDeps: {
