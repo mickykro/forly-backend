@@ -135,13 +135,11 @@ function buildFacts(page, listing) {
   (area.stats || []).forEach((s) => {
     if (s && s.label) areaLines.push(`- ${s.label}: ${s.value}`);
   });
-  // Deliberately NOT titled "השכונה": area.blurb is written about the city or
-  // region, and a section labelled "the neighbourhood" got answered as though
-  // it were one — "באיזה שכונה?" came back with a paragraph about the city.
-  // The neighbourhood itself is a property field above, and when it is absent
-  // it has to read as absent.
+  // area.blurb is agent-written copy about the neighbourhood itself (see the
+  // templates that render it under "השכונה"), so it's a legitimate answer to
+  // "באיזה שכונה?" even when the structured `neighborhood` field is empty.
   if (areaLines.length) {
-    facts.push("", "## הסביבה, העיר והאזור (מידע כללי — לא שם השכונה)", ...areaLines);
+    facts.push("", "## השכונה והסביבה", ...areaLines);
   }
 
   const cta = pg.cta || {};

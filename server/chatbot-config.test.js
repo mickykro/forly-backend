@@ -109,4 +109,10 @@ const pubOut = r(page(), ON).public;
 assert.equal(pubOut.model, undefined, "public must not carry the model");
 assert.equal(pubOut.limits, undefined, "public must not carry the limits");
 
+// ── proactive lead-form offer: default 3, overridable like every other limit ──
+assert.equal(DEFAULTS.limits.offer_form_after_msgs, 3);
+assert.equal(r(page(), ON).limits.offer_form_after_msgs, 3);
+assert.equal(r({ chatbot: { limits: { offer_form_after_msgs: 5 } } }, ON).limits.offer_form_after_msgs, 5);
+assert.equal(r({ chatbot: { limits: { offer_form_after_msgs: "x" } } }, ON).limits.offer_form_after_msgs, 3, "bad value ⇒ default");
+
 console.log("chatbot-config: all tests passed");
