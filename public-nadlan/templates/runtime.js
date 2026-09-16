@@ -25,6 +25,7 @@
                                 to show it
      data-photo="k"           → <img>.src = gallery.images[k] — a single editorial
                                 photo slot, outside the gallery grid
+       data-photo-match="re"  → prefer the first photo whose caption matches
      data-lead-form           → submit posts /api/property-lead
        [data-lead="name|phone|message"], [data-lead-sent]
      data-count               → animate the number up when scrolled into view
@@ -122,6 +123,16 @@
     var have = Array.isArray(images) ? images.length : 0;
     each("img[data-photo]", document, function (img) {
       var k = Math.max(0, +img.getAttribute("data-photo") || 0);
+      // data-photo-match: prefer the first photo whose caption matches (e.g. an
+      // outdoor shot for the neighbourhood block); falls back to the index.
+      var want = img.getAttribute("data-photo-match");
+      if (want && have) {
+        var rx = new RegExp(want);
+        for (var j = 0; j < have; j++) {
+          var cap = (images[j] && (images[j].caption || images[j].description)) || caps[j] || "";
+          if (rx.test(cap)) { k = j; break; }
+        }
+      }
       var pic = have ? images[k % have] : null;
       if (pic && pic.url) {
         img.src = pic.url;
@@ -236,7 +247,7 @@
   if (/^https?:\/\//.test(logoUrl)) {
     each("[data-logo]", document, function (el) {
       el.innerHTML = '<img src="' + escAttr(logoUrl) + '" alt="' + escAttr(get("agent.brand_name") || get("agent.name") || "") +
-        '" style="height:38px;max-width:150px;object-fit:contain;display:block">';
+        '" style="height:38px;width:auto;max-width:150px;object-fit:contain;display:block">';
     });
     // The avatar slot is dressed for initials: a filled circle, in places with
     // a ring around it. A logo dropped into that was `cover`-cropped to the
@@ -375,7 +386,7 @@
         var im = document.createElement("img");
         im.src = img.url; im.loading = "lazy"; im.decoding = "async";
         im.alt = img.caption || caps[k] || "";
-        im.style.cssText = "width:100%;height:100%;object-fit:cover;display:block";
+        im.style.cssText = "width:100%;height:100%;object-fit:var(--g-fit,cover);display:block";
         tiles[k].insertBefore(im, tiles[k].firstChild);
         tiles[k].classList.add("loaded");
       });
@@ -401,7 +412,7 @@
         }
         vv.addEventListener("seeked", function () {
           var c = document.createElement("canvas"); c.width = vv.videoWidth; c.height = vv.videoHeight;
-          try { c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height); frames[k] = c; tiles[k].insertBefore(c, tiles[k].firstChild); tiles[k].classList.add("loaded"); } catch (e) {}
+          try { c.getContext("2d").drawImage(vv, 0, 0, c.width, c.height); frames[k] = c; c.style.cssText = "width:100%;height:100%;object-fit:var(--g-fit,cover);display:block"; tiles[k].insertBefore(c, tiles[k].firstChild); tiles[k].classList.add("loaded"); } catch (e) {}
           k++; seek();
         });
         seek();
@@ -411,17 +422,29 @@
 
     // lightbox (shared, created once) — holds both an <img> (photo mode) and a
     // <canvas> (video-frame preview mode); openLB shows whichever applies.
+    var ARROW = "position:absolute;top:50%;transform:translateY(-50%);width:48px;height:48px;border:1px solid rgba(255,255,255,.4);background:rgba(20,20,24,.6);color:#fff;font-size:1.6rem;line-height:1;cursor:pointer;z-index:2;";
     var lb = document.getElementById("__lb");
     if (!lb) {
       lb = document.createElement("div"); lb.id = "__lb";
       lb.style.cssText = "position:fixed;inset:0;z-index:100;background:rgba(8,8,10,.95);display:none;align-items:center;justify-content:center;padding:4vw";
       lb.innerHTML = '<img id="__lbi" alt="" style="max-width:100%;max-height:88vh;border-radius:6px;display:none">' +
         '<canvas id="__lbc" style="max-width:100%;max-height:88vh;border-radius:6px;display:none"></canvas>' +
-        '<button id="__lbx" aria-label="סגירה" style="position:absolute;top:22px;inset-inline-end:22px;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:1.1rem;cursor:pointer">✕</button>';
+        '<button id="__lbx" aria-label="סגירה" style="position:absolute;top:22px;inset-inline-end:22px;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-size:1.1rem;cursor:pointer">✕</button>' +
+        '<button id="__lbp" aria-label="התמונה הקודמת" style="' + ARROW + 'inset-inline-end:18px">‹</button>' +
+        '<button id="__lbn" aria-label="התמונה הבאה" style="' + ARROW + 'inset-inline-start:18px">›</button>';
       document.body.appendChild(lb);
       lb.addEventListener("click", function (e) { if (e.target === lb) closeLB(); });
       document.getElementById("__lbx").addEventListener("click", closeLB);
-      document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeLB(); });
+      // the arrows belong to the shared lightbox, but the photo set is per
+      // gallery, so they step through whichever gallery opened it.
+      document.getElementById("__lbp").addEventListener("click", function (e) { e.stopPropagation(); lb.__step(-1); });
+      document.getElementById("__lbn").addEventListener("click", function (e) { e.stopPropagation(); lb.__step(1); });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") return closeLB();
+        if (lb.style.display === "none" || !lb.__step) return;
+        if (e.key === "ArrowLeft") lb.__step(1);
+        if (e.key === "ArrowRight") lb.__step(-1);
+      });
     }
     function openLB(idx) {
       var lbi = document.getElementById("__lbi"), lbc = document.getElementById("__lbc");
@@ -435,6 +458,8 @@
         lbc.width = f.width; lbc.height = f.height; lbc.getContext("2d").drawImage(f, 0, 0);
         lbc.style.display = "block";
       }
+      lb.__step = function (d) { openLB((idx + d + count) % count); };
+      document.getElementById("__lbp").style.display = document.getElementById("__lbn").style.display = count > 1 ? "block" : "none";
       lb.style.display = "flex"; document.body.style.overflow = "hidden";
     }
     function closeLB() { lb.style.display = "none"; document.body.style.overflow = ""; }

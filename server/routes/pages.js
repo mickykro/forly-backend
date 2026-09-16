@@ -30,7 +30,7 @@ const { renderPortfolioDocument, renderSitemap } = require("../portfolio-render"
 // stays functional for legacy reminder links already sent.
 const PAGE_LIFESPAN_DAYS = 36500;
 const LEAD_MAX_PER_HOUR = 3;
-const SERVER_TEMPLATES = new Set(["original", "nocturne", "reel", "atelier", "revue", "loupe", "orbite"]);
+const SERVER_TEMPLATES = new Set(["original", "nocturne", "reel", "movie", "atelier", "revue", "loupe", "orbite"]);
 
 const confirmHtml = (title, sub) =>
   `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
@@ -658,7 +658,7 @@ module.exports = function createPagesRouter(ctx) {
     try {
       const result = await loadPublicPortfolio(slug);
       if (result.redirect) {
-        return res.redirect(301, `${pageBaseUrl}/${result.redirect}`);
+        return res.redirect(301, `/${result.redirect}`);
       }
       if (result.error) return res.status(result.status).json({ error: result.error });
       res.set("Cache-Control", "public, max-age=60");
@@ -680,7 +680,7 @@ module.exports = function createPagesRouter(ctx) {
       const reservation = await db.getPortfolioSlugReservation(portfolioSlugParam);
       if (!reservation) return res.status(404).json({ error: "not_found" });
       if (reservation.current_slug !== portfolioSlugParam) {
-        return res.redirect(301, `${pageBaseUrl}/${reservation.current_slug}/${propSlug}`);
+        return res.redirect(301, `/${reservation.current_slug}/${propSlug}`);
       }
       const business = await db.getBusiness(reservation.business_phone);
       const portfolio = business?.portfolio;
@@ -844,7 +844,9 @@ module.exports = function createPagesRouter(ctx) {
           const qs = new URLSearchParams(req.query);
           qs.delete("edit_token");
           const qsStr = qs.toString();
-          const nested = `${pageBaseUrl}/${business.portfolio.slug}/${d.public_slug}`;
+          // Host-relative so a preview host (tunnel, staging) keeps its own origin;
+          // only the canonical og:url is pinned to pageBaseUrl.
+          const nested = `/${business.portfolio.slug}/${d.public_slug}`;
           return res.redirect(301, qsStr ? `${nested}?${qsStr}` : nested);
         }
       } catch (e) { /* fall through to the legacy shell */ }
@@ -861,7 +863,7 @@ module.exports = function createPagesRouter(ctx) {
       const reservation = await db.getPortfolioSlugReservation(portfolioSlugParam);
       if (!reservation) return next();
       if (reservation.current_slug !== portfolioSlugParam) {
-        return res.redirect(301, `${pageBaseUrl}/${reservation.current_slug}/${propSlug}`);
+        return res.redirect(301, `/${reservation.current_slug}/${propSlug}`);
       }
       const pages = await db.listPagesByPhone(reservation.business_phone, 100);
       const d = pages.find((p) => p.public_slug === propSlug) || null;

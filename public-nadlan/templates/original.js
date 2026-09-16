@@ -13,7 +13,7 @@
   const t = key => key === 'video_play' || key === 'video_pause'
     ? (playerLabels[data.language] || playerLabels.he)[key === 'video_pause' ? 1 : 0]
     : window.I18N.t(data.language || 'he', key);
-  const photos = ((data.gallery || {}).images || []).filter(p => p && p.url);
+  let photos = ((data.gallery || {}).images || []).filter(p => p && p.url);
   const captions = (data.gallery || {}).captions || [];
   const heroVideo = document.querySelector('.hero-video');
   const imageHost = document.querySelector('.hero-image');
@@ -58,51 +58,86 @@
     image.alt = photos[index].caption || captions[index] || property.title || '';
     dialog.querySelector('.gallery-count').textContent = `${index + 1} / ${photos.length}`;
   }
-  photos.forEach((photo, i) => {
-    const figure = document.createElement('figure'); figure.className = 'classic-tile';
-    const button = document.createElement('button'); button.className = 'photo-button'; button.type = 'button';
-    const img = document.createElement('img'); img.src = photo.url; img.loading = 'lazy'; img.decoding = 'async';
-    img.alt = photo.caption || captions[i] || property.title || '';
-    button.setAttribute('aria-label', `${t('gallery_hint_click')} — ${img.alt}`);
-    const zoom = document.createElement('span'); zoom.className = 'zoom-mark'; zoom.textContent = '+'; zoom.setAttribute('aria-hidden', 'true');
-    button.append(img, zoom); figure.append(button);
-    if (photo.caption || captions[i]) {
-      const caption = document.createElement('figcaption'); caption.className = 'photo-caption';
-      caption.textContent = photo.caption || captions[i]; figure.append(caption);
-    }
-    button.onclick = () => { showImage(i); dialog.showModal(); };
-    gallery.append(figure);
-  });
-  if (!photos.length || sections.gallery === false) {
-    document.querySelector('.living').hidden = true;
-    document.querySelectorAll('a[href="#gallery"]').forEach(el => el.hidden = true);
-  }
-  dialog.querySelector('.gallery-close').onclick = () => dialog.close();
-  dialog.querySelector('.gallery-prev').onclick = () => showImage(index - 1);
-  dialog.querySelector('.gallery-next').onclick = () => showImage(index + 1);
-  dialog.querySelectorAll('.gallery-prev,.gallery-next').forEach(el => el.hidden = photos.length < 2);
-  dialog.addEventListener('keydown', e => {
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      e.preventDefault(); showImage(index + (e.key === 'ArrowRight' ? 1 : -1));
-    }
-  });
-  dialog.addEventListener('click', e => { if (e.target === dialog) dialog.close(); });
-  const glimpse = document.querySelector('.glimpse-photo');
-  if (photos.length) { glimpse.src = photos[Math.min(1, photos.length - 1)].url; glimpse.alt = property.title || ''; }
-  else { glimpse.closest('figure').remove(); document.querySelector('.story-glimpse').classList.add('no-photo'); }
-  if (sections.carousel === false) document.querySelector('.facts-section').hidden = true;
-  if (sections.area === false) document.querySelector('.detail-grid > div').hidden = true;
 
-  const tour = document.querySelector('#tour'), play = document.querySelector('#play-tour');
-  play.textContent = t('video_play');
-  if (media.video_url) {
-    tour.src = media.video_url;
-    if (media.poster_url || photos[0]) tour.poster = media.poster_url || photos[0].url;
-    play.onclick = () => tour.paused ? tour.play().catch(() => {}) : tour.pause();
-    tour.addEventListener('play', () => { play.textContent = t('video_pause'); if (heroVideo.isConnected) heroVideo.pause(); });
-    tour.addEventListener('pause', () => play.textContent = t('video_play'));
-    heroVideo.addEventListener('play', () => tour.pause());
-  } else document.querySelector('.film-section').hidden = true;
+  function wireGallery() {
+    photos.forEach((photo, i) => {
+      const figure = document.createElement('figure'); figure.className = 'classic-tile';
+      const button = document.createElement('button'); button.className = 'photo-button'; button.type = 'button';
+      const img = document.createElement('img'); img.src = photo.url; img.loading = 'lazy'; img.decoding = 'async';
+      img.alt = photo.caption || captions[i] || property.title || '';
+      button.setAttribute('aria-label', `${t('gallery_hint_click')} — ${img.alt}`);
+      const zoom = document.createElement('span'); zoom.className = 'zoom-mark'; zoom.textContent = '+'; zoom.setAttribute('aria-hidden', 'true');
+      button.append(img, zoom); figure.append(button);
+      if (photo.caption || captions[i]) {
+        const caption = document.createElement('figcaption'); caption.className = 'photo-caption';
+        caption.textContent = photo.caption || captions[i]; figure.append(caption);
+      }
+      button.onclick = () => { showImage(i); dialog.showModal(); };
+      gallery.append(figure);
+    });
+    if (!photos.length || sections.gallery === false) {
+      document.querySelector('.living').hidden = true;
+      document.querySelectorAll('a[href="#gallery"]').forEach(el => el.hidden = true);
+    }
+    dialog.querySelector('.gallery-close').onclick = () => dialog.close();
+    dialog.querySelector('.gallery-prev').onclick = () => showImage(index - 1);
+    dialog.querySelector('.gallery-next').onclick = () => showImage(index + 1);
+    dialog.querySelectorAll('.gallery-prev,.gallery-next').forEach(el => el.hidden = photos.length < 2);
+    dialog.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault(); showImage(index + (e.key === 'ArrowRight' ? 1 : -1));
+      }
+    });
+    dialog.addEventListener('click', e => { if (e.target === dialog) dialog.close(); });
+    const glimpse = document.querySelector('.glimpse-photo');
+    if (photos.length) { glimpse.src = photos[Math.min(1, photos.length - 1)].url; glimpse.alt = property.title || ''; }
+    else { glimpse.closest('figure').remove(); document.querySelector('.story-glimpse').classList.add('no-photo'); }
+    if (sections.carousel === false) document.querySelector('.facts-section').hidden = true;
+    if (sections.area === false) document.querySelector('.detail-grid > div').hidden = true;
+
+    const tour = document.querySelector('#tour'), play = document.querySelector('#play-tour');
+    play.textContent = t('video_play');
+    if (media.video_url) {
+      tour.src = media.video_url;
+      if (media.poster_url || photos[0]) tour.poster = media.poster_url || photos[0].url;
+      play.onclick = () => tour.paused ? tour.play().catch(() => {}) : tour.pause();
+      tour.addEventListener('play', () => { play.textContent = t('video_pause'); if (heroVideo.isConnected) heroVideo.pause(); });
+      tour.addEventListener('pause', () => play.textContent = t('video_play'));
+      heroVideo.addEventListener('play', () => tour.pause());
+    } else document.querySelector('.film-section').hidden = true;
+  }
+
+  // Real pages always carry gallery.images. Only the demo preview — which ships
+  // captions but no image URLs — falls back to sampling the tour video's frames,
+  // the same trick runtime.js uses for every other template's data-photo slots.
+  if (photos.length || !media.video_url) {
+    wireGallery();
+  } else {
+    const count = captions.length || 6;
+    const vv = document.createElement('video');
+    vv.src = media.video_url; vv.muted = true; vv.playsInline = true; vv.preload = 'auto';
+    vv.setAttribute('aria-hidden', 'true');
+    vv.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+    document.body.appendChild(vv); // detached <video> never decodes on iOS
+    vv.addEventListener('loadedmetadata', () => {
+      let i = 0;
+      const seek = () => {
+        if (i >= count) { vv.remove(); wireGallery(); return; }
+        vv.currentTime = Math.max(0.1, (0.08 + 0.78 * (i / Math.max(1, count - 1))) * vv.duration);
+      };
+      vv.addEventListener('seeked', () => {
+        try {
+          const c = document.createElement('canvas');
+          c.width = vv.videoWidth; c.height = vv.videoHeight;
+          c.getContext('2d').drawImage(vv, 0, 0, c.width, c.height);
+          photos.push({ url: c.toDataURL('image/jpeg', 0.92), caption: captions[i] });
+        } catch (e) {} // tainted canvas (cross-origin video) — leaves this frame out
+        i++; seek();
+      });
+      seek();
+    });
+    vv.load();
+  }
 
   // runtime.js hides the form after a successful POST (or preview submission).
   const form = document.querySelector('[data-lead-form]');
@@ -131,7 +166,7 @@ if(living.hidden || facts.hidden){hero.querySelector('.puzzle-bottom').style.dis
 if(living.hidden || film.hidden){living.querySelector('.puzzle-bottom').style.display='none';film.querySelector('.puzzle-top').style.display='none';}
 let ranges=[],pending=false;
 function measure(){hero.style.transform='';living.style.transform='';const anchor=Math.min(innerHeight*.25,220);ranges=[[hero,facts,living],[living,details,film]].filter(([upper,middle,lower])=>!upper.hidden&&!lower.hidden&&!middle.hidden).map(([upper,middle,lower])=>{const bottom=upper.getBoundingClientRect().bottom+scrollY;const top=lower.getBoundingClientRect().top+scrollY;return {upper,middle,start:bottom-anchor,distance:Math.max(1,top-bottom)}});render()}
-function render(){pending=false;for(const r of ranges){const progress=reduced.matches?0:Math.min(1,Math.max(0,(scrollY-r.start)/r.distance));r.upper.style.transform=`translateY(${progress*r.distance}px)`;r.middle.style.opacity=String(1-Math.max(0,(progress-.25)/.75));r.middle.inert=progress>.98;r.middle.dataset.covered=String(progress>.98);if(r.upper===hero)slidingPath.setAttribute('transform',`translate(${-250*progress} 0)`)}}
+function render(){pending=false;for(const r of ranges){const progress=reduced.matches?0:Math.min(1,Math.max(0,(scrollY-r.start)/r.distance));r.upper.style.transform=`translateY(${progress*r.distance}px)`;r.middle.inert=progress>.98;r.middle.dataset.covered=String(progress>.98);if(r.upper===hero)slidingPath.setAttribute('transform',`translate(${-250*progress} 0)`)}}
 addEventListener('scroll',()=>{if(!pending){pending=true;requestAnimationFrame(render)}},{passive:true});addEventListener('resize',measure);reduced.addEventListener('change',measure);
 const revealTargets=document.querySelectorAll('.living-head,.gallery-composition,.detail-grid,.film-head,.film-stage,.contact-grid');
 if(!reduced.matches){document.documentElement.classList.add('motion-ready');const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){entry.target.classList.add('revealed');observer.unobserve(entry.target)}}),{threshold:.08});revealTargets.forEach(el=>{el.dataset.reveal='';observer.observe(el)})}

@@ -248,13 +248,14 @@ section.block { padding: clamp(60px,9vw,110px) clamp(20px,4.5vw,48px); }
 .area .sec-head p { color: rgba(255,255,255,.7); }
 .area-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: clamp(28px,5vw,60px); align-items: center; position: relative; z-index: 1; }
 .area-copy p { font-weight: 300; font-size: 1rem; color: rgba(255,255,255,.82); margin-bottom: 16px; }
+.area-photo { width: 100%; height: clamp(220px,26vw,340px); object-fit: cover; display: block; border-radius: 18px; border: 1px solid var(--gold-line); margin-bottom: 18px; }
 .area-stats { display: grid; grid-template-columns: repeat(2,1fr); gap: 14px; }
 .astat { background: rgba(255,255,255,.045); border: 1px solid var(--gold-line); border-radius: 18px; padding: 22px 18px; transition: border-color .3s, transform .3s; }
 .astat:hover { border-color: var(--gold-bright); transform: translateY(-3px); }
 .astat b { display: block; font-family: var(--serif); font-weight: 500; font-size: clamp(1.4rem,2.4vw,1.9rem); color: var(--gold-bright); margin-bottom: 2px; }
 .astat span { font-size: .8rem; font-weight: 300; color: rgba(255,255,255,.68); }
 .map-line { margin-top: 24px; display: flex; flex-direction: column; border-inline-start: 1px solid var(--gold-line); }
-.map-line .stop { display: flex; align-items: center; gap: 14px; padding: 9px 0 9px 18px; font-size: .9rem; font-weight: 300; color: rgba(255,255,255,.8); position: relative; }
+.map-line .stop { display: flex; align-items: center; gap: 14px; padding-block: 9px; padding-inline-start: 18px; font-size: .9rem; font-weight: 300; color: rgba(255,255,255,.8); position: relative; }
 .map-line .stop::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--gold-bright); position: absolute; inset-inline-start: -5px; }
 .map-line .stop b { font-weight: 600; color: #fff; }
 .map-line .stop .min { margin-inline-start: auto; font-family: var(--serif); color: var(--gold-bright); font-size: 1rem; white-space: nowrap; }
@@ -482,10 +483,13 @@ footer a { color: rgba(255,255,255,.7); text-decoration: underline; }
           </template>
         </div>
       </div>
-      <div class="area-stats" data-list="area.stats">
-        <template>
-          <div class="astat reveal"><b data-field="value"></b><span data-field="label"></span></div>
-        </template>
+      <div class="area-side reveal">
+        <img class="area-photo" data-photo="1" data-photo-match="מרפסת|חזית|הבניין|גינה|חצר|גג|נוף|בריכה" alt="" loading="lazy" decoding="async">
+        <div class="area-stats" data-list="area.stats">
+          <template>
+            <div class="astat reveal"><b data-field="value"></b><span data-field="label"></span></div>
+          </template>
+        </div>
       </div>
     </div>
   </div>
