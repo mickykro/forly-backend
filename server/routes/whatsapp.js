@@ -84,8 +84,14 @@ module.exports = function createWhatsappRouter(ctx) {
     else if (turn.draft) await db.saveDraft(turn.draft);
     let replied = false;
     if (turn.replies.length && sendWhatsApp) {
-      try { for (const r of turn.replies) await send(phone, r); replied = true; }
-      catch (err) { console.warn("[whatsapp] reply failed:", err.message); }
+      replied = true;
+      for (let i = 0; i < turn.replies.length; i++) {
+        try { await send(phone, turn.replies[i]); }
+        catch (err) {
+          replied = false;
+          console.warn(`[whatsapp] ${phone} reply ${i + 1}/${turn.replies.length} failed (${JSON.stringify(turn.replies[i].text)}):`, err.message);
+        }
+      }
     }
     if (turn.armPhotoTimer) armTimer(phone);
     return replied;
@@ -114,11 +120,20 @@ module.exports = function createWhatsappRouter(ctx) {
     if (!phone || (!text.trim() && !fileUrl && !event)) return res.status(400).json({ error: "invalid_input" });
     try {
       const [business, draft] = await Promise.all([db.getBusiness(phone).catch(() => null), db.getDraft(phone)]);
+      console.log(
+        `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrl ? "photo" : JSON.stringify(text)}` +
+        ` | draft before: ${draft ? `${draft.status} (${draft.source})` : "none"}`
+      );
       const turn = await handleTurn({ phone, text, fileUrl, event, photos, draft }, depsFor(phone, business));
       // A text that ends a photo batch must not be followed by the timer's report too.
       if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
+      console.log(
+        `[whatsapp] ${phone} → handled=${turn.handled} status=${turn.status}` +
+        ` | draft after: ${turn.del ? "deleted" : turn.draft ? turn.draft.status : "unchanged"}` +
+        ` | replies: ${turn.replies.length ? turn.replies.map((r) => JSON.stringify(r.text)).join(" | ") : "(none)"}`
+      );
       const replied = turn.handled ? await persistAndSend(phone, turn) : false;
-      console.log(`[whatsapp] ${phone} → ${turn.status}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
+      console.log(`[whatsapp] ${phone} → ${turn.status} replied=${replied}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
       res.json({
         handled: turn.handled, status: turn.status,
         reply: turn.replies.map((r) => r.text).join("\n\n") || null,
