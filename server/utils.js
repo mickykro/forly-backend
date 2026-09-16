@@ -194,6 +194,7 @@ async function sendWhatsApp(phone, message, instance, token) {
  * Throws on a non-2xx so callers can fall back to a plain text send.
  */
 async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, instance, token) {
+  console.log("[whatsapp] sendWhatsAppButtons", { phone, header, body, footer, buttons });
   if (!instance || !token) return;
   const clean = (buttons || []).slice(0, 3).map((b, i) => ({
     ...b,
@@ -201,14 +202,14 @@ async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, ins
     buttonText: String(b.buttonText || "").slice(0, 25),
   }));
   const resp = await fetch(
-    `https://api.green-api.com/waInstance${instance}/sendInteractiveButtons/${token}`, {
+    `https://7105.api.greenapi.com/waInstance${instance}/sendInteractiveButtons/${token}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chatId: `${phone}@c.us`,
-        header: header || undefined,
+        header: header || " ",
         body: String(body || ""),
-        footer: footer || undefined,
+        footer: footer || " ",
         buttons: clean,
       }),
       signal: AbortSignal.timeout(20000),
