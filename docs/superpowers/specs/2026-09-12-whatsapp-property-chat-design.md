@@ -3,7 +3,7 @@
 **Date:** 2026-09-12
 **Branch:** claude/whatsapp-link-property-page-7wm9xh
 **Issue:** #43
-**Status:** approved design, not yet implemented (the branch holds a link-only first cut this design replaces)
+**Status:** implemented on claude/whatsapp-link-property-page-7wm9xh
 
 ## Problem
 
