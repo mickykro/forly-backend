@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map() };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -495,6 +495,24 @@ async function listPagesByPhone(phone, limit = 100) {
   return [...mem.pages.values()].filter((p) => p.business_phone === phone).slice(0, limit);
 }
 
+// ── property drafts (WhatsApp chat intake, see whatsapp-intake.js) ──
+// One doc per agent phone; saveDraft replaces the whole doc on purpose so a
+// cleared field (skipped, pending_opener: null) never lingers from a merge.
+async function getDraft(phone) {
+  if (db) { const d = await db.collection("property_drafts").doc(phone).get(); return d.exists ? d.data() : null; }
+  return mem.drafts.get(phone) || null;
+}
+
+async function saveDraft(draft) {
+  if (db) await db.collection("property_drafts").doc(draft.phone).set(draft);
+  else mem.drafts.set(draft.phone, draft);
+}
+
+async function deleteDraft(phone) {
+  if (db) await db.collection("property_drafts").doc(phone).delete();
+  else mem.drafts.delete(phone);
+}
+
 module.exports = {
   init,
   get db() { return db; },
@@ -512,4 +530,5 @@ module.exports = {
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
   listShareSessionsByPhone, healGroups, addAdminMessage,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
+  getDraft, saveDraft, deleteDraft,
 };
