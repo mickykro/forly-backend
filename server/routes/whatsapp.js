@@ -138,18 +138,21 @@ module.exports = function createWhatsappRouter(ctx) {
     const phone = normalizeAuthPhone(body.phone || "");
     const text = String(body.message || "").slice(0, MAX_TEXT);
     const fileUrl = typeof body.file_url === "string" && body.file_url.trim() ? body.file_url.trim() : null;
+    // Main Router debounces a burst of photos sent together into one webhook
+    // (file_urls); a single photo still arrives as file_url.
+    const fileUrls = Array.isArray(body.file_urls) ? body.file_urls.filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim()).slice(0, 12) : [];
     const event = body.event === "photos_edited" ? "photos_edited" : null;
     const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string").slice(0, 12) : [];
-    if (!phone || (!text.trim() && !fileUrl && !event)) return res.status(400).json({ error: "invalid_input" });
+    if (!phone || (!text.trim() && !fileUrl && !fileUrls.length && !event)) return res.status(400).json({ error: "invalid_input" });
     try {
       const result = await withLock(phone, async () => {
         const [business, draft] = await Promise.all([db.getBusiness(phone).catch(() => null), db.getDraft(phone)]);
         const now = new Date();
         console.log(
-          `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrl ? "photo" : JSON.stringify(text)}` +
+          `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : JSON.stringify(text)}` +
           ` | draft before: ${draft ? `${draft.status} (${draft.source}) updated_at=${new Date(asMillis(draft.updated_at)).toISOString()} silent_for_ms=${now.getTime() - asMillis(draft.updated_at)} paused=${isPaused(draft, now)}` : "none"}`
         );
-        const turn = await handleTurn({ phone, text, fileUrl, event, photos, draft }, depsFor(phone, business));
+        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, draft }, depsFor(phone, business));
         // A text that ends a photo batch must not be followed by the timer's report too.
         if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
         console.log(

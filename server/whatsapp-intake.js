@@ -16,6 +16,14 @@ const MAX_PHOTOS = 12;
 
 const notOurs = (status) => ({ handled: false, status, replies: [] });
 
+// Multiple photos when n8n's burst debounce bundles them into one webhook
+// (input.fileUrls), else the ordinary single photo (input.fileUrl); null
+// when the turn carries no photo at all.
+function photoUrlsOf(input) {
+  if (Array.isArray(input.fileUrls) && input.fileUrls.length) return input.fileUrls;
+  return input.fileUrl ? [input.fileUrl] : null;
+}
+
 // What to say for the step the draft is at.
 function promptFor(draft) {
   const step = D.nextStep(draft);
@@ -79,12 +87,14 @@ function answerField(draft, field, text, cmd) {
   return { status: p.status, replies: p.replies, draft };
 }
 
-// A photo is stored silently; the route arms a timer and calls back with
+// A photo (or several, when n8n's burst debounce bundles them into one
+// webhook) is stored silently; the route arms a timer and calls back with
 // event:"photo_timer" so the agent gets one progress message per batch.
-async function storePhoto(draft, fileUrl, deps, now) {
-  let hosted = null;
-  try { hosted = await deps.importPhoto(fileUrl); } catch (err) { console.warn("[whatsapp-intake] photo import failed:", err.message); }
-  if (hosted && draft.photos.length < MAX_PHOTOS) draft.photos.push(hosted);
+async function storePhoto(draft, fileUrlOrUrls, deps, now) {
+  const raw = Array.isArray(fileUrlOrUrls) ? fileUrlOrUrls : [fileUrlOrUrls];
+  const urls = [...new Set(raw)]; // a burst can list the same source url twice
+  const hosted = await importAll(urls, deps.importPhoto);
+  for (const h of hosted) { if (draft.photos.length < MAX_PHOTOS) draft.photos.push(h); }
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
 }
 
@@ -187,7 +197,8 @@ async function resumeTurn(input, deps, draft, now) {
 
 async function activeTurn(input, deps, draft, now) {
   if (input.event === "photo_timer") return photoTimer(draft);
-  if (input.fileUrl) return storePhoto(draft, input.fileUrl, deps, now);
+  const photoUrls = photoUrlsOf(input);
+  if (photoUrls) return storePhoto(draft, photoUrls, deps, now);
   const cmd = D.command(input.text);
   if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
   const step = D.nextStep(draft);
@@ -228,7 +239,7 @@ async function handleTurn(input, deps) {
   if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
   if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
   if (draft.status === "building" || D.isPaused(draft, now)) {
-    if (input.event || input.fileUrl) return notOurs("not_ours");
+    if (input.event || photoUrlsOf(input)) return notOurs("not_ours");
     const kind = D.openerKind(input.text);
     if (!kind) return notOurs("not_ours");
     if (draft.status === "building") return openDraft(phone, kind, input.text, deps, now);

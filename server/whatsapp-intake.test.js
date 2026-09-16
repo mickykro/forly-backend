@@ -133,6 +133,16 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ fileUrl: "https://green/bad.jpg", draft: { ...draft, photos: [] } }, d);
   assert.equal(t.draft.photos.length, 0);
 
+  // n8n's burst debounce bundles several photos sent together into one webhook
+  ({ d } = deps());
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
+  for (let i = 0; i < 6; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  t = await turn({ fileUrls: ["https://green/burst1.jpg", "https://green/burst2.jpg", "https://green/burst3.jpg"], draft }, d);
+  assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a bundled burst is stored in one turn");
+  draft = t.draft;
+  assert.deepEqual(draft.photos, ["https://files/burst1.jpg", "https://files/burst2.jpg", "https://files/burst3.jpg"]);
+
   // photo while a question is open: stored, timer prompt says saved + repeats the question
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
