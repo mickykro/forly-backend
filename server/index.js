@@ -29,7 +29,19 @@ const PORT = Number.isInteger(cliPort) && cliPort > 0 && cliPort < 65536 ?
   cliPort : Number(process.env.PORT || 8787);
 const BASE_URL = (process.env.BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads");
-const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, "");
+// Public page links (WhatsApp, Facebook posts, og:url, portal cards) must
+// always carry the branded domain — never the infra hostname a deployment
+// happens to answer on (hstgr.cloud, a cloudflare tunnel, an IP). PAGE_BASE_URL
+// wins when set; otherwise local dev keeps its own BASE_URL and anything else
+// falls back to the canonical domain.
+const PUBLIC_BASE_URL = "https://nadlan.call4li.com";
+const isLocalBase = /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:|$)/.test(BASE_URL);
+// Hosts that must never appear in a link an end buyer can see, even if a
+// deployment's env points at one.
+const INFRA_HOST = /(hstgr\.cloud|trycloudflare\.com|ngrok(-free)?\.(io|app|dev)|loca\.lt|^https?:\/\/\d+\.\d+\.\d+\.\d+)/i;
+const pageBaseCandidate = process.env.PAGE_BASE_URL || (isLocalBase ? BASE_URL : PUBLIC_BASE_URL);
+const PAGE_BASE_URL = (INFRA_HOST.test(pageBaseCandidate) ? PUBLIC_BASE_URL : pageBaseCandidate)
+  .replace(/\/+$/, "");
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
 const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
 const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
