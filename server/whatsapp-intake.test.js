@@ -106,5 +106,72 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.draft.source, "text");
   assert.equal(t.draft.photos.length, 0);
 
-  console.log("whatsapp-intake.test.js (openers + questions) ok");
+  // ── photos: silent accumulation, timer prompt, continue, confirm, build ──
+  ({ d, calls } = deps());
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
+  for (let i = 0; i < 6; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  assert.equal(t.status, "photos");
+  t = await turn({ fileUrl: "https://green/a.jpg", draft }, d);
+  assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a photo is stored silently and arms the timer");
+  draft = t.draft;
+  assert.deepEqual(draft.photos, ["https://files/a.jpg"]);
+  t = await turn({ event: "photo_timer", draft }, d);
+  assert.equal(t.status, "photos_progress:1");
+  assert.match(texts(t), /יש לי 1 תמונות/);
+  assert.equal(t.replies[0].buttons, undefined);
+  for (const n of ["b", "c", "d"]) { t = await turn({ fileUrl: `https://green/${n}.jpg`, draft }, d); draft = t.draft; }
+  t = await turn({ text: "עוד אחת בדרך", draft }, d);
+  assert.equal(t.status, "photos_progress:4", "any text during photos ends the batch and reports");
+  assert.deepEqual(t.replies[0].buttons, ["ממשיכים"]);
+  t = await turn({ text: "ממשיכים", draft }, d);
+  assert.equal(t.status, "confirm");
+  assert.equal(t.draft, undefined, "confirm prompt does not change the draft");
+
+  // failed import is skipped, not counted
+  ({ d } = deps({ importPhoto: async () => { throw new Error("404"); } }));
+  t = await turn({ fileUrl: "https://green/bad.jpg", draft: { ...draft, photos: [] } }, d);
+  assert.equal(t.draft.photos.length, 0);
+
+  // photo while a question is open: stored, timer prompt says saved + repeats the question
+  ({ d } = deps());
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  t = await turn({ fileUrl: "https://green/z.jpg", draft }, d); draft = t.draft;
+  assert.equal(draft.photos.length, 1);
+  t = await turn({ event: "photo_timer", draft }, d);
+  assert.match(texts(t), /שמרתי 1 תמונות/);
+  assert.match(texts(t), /באיזו עיר/);
+
+  // confirm: anything but כן / ביטול repeats the summary (after "ממשיכים")
+  ({ d, calls } = deps());
+  const ready = D.newDraft(PHONE, "keyword", T0);
+  Object.assign(ready.fields, { city: "חיפה", price: 1500000, rooms: 4 });
+  ready.skipped = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description"];
+  ready.photos = ["p1", "p2", "p3"];
+  t = await turn({ text: "ממשיכים", draft: ready }, d);
+  assert.equal(t.status, "confirm", "ממשיכים moves to confirm");
+  t = await turn({ text: "רגע", draft: ready }, d);
+  assert.equal(t.status, "photos_progress:3", "non-command at photo collection shows progress");
+  t = await turn({ text: "ביטול", draft: ready }, d);
+  assert.deepEqual([t.status, t.del], ["cancelled", true]);
+  t = await turn({ text: "כן", draft: ready }, d);
+  assert.deepEqual([t.status, t.listing_id, t.draft.status, t.draft.listing_id], ["building", "L1", "building", "L1"]);
+  assert.deepEqual(calls.consumed, [{ kind: "walkthroughs", n: 1, source: "whatsapp" }]);
+  assert.equal(calls.created[0].body.city, "חיפה");
+  assert.deepEqual(calls.created[0].body.photos_urls, ["p1", "p2", "p3"]);
+  assert.match(texts(t), /אני בונה/);
+
+  // quota blocked: ledger message, draft stays at confirm, כן can be retried
+  ({ d, calls } = deps({ quota: { consume: async () => ({ ok: false, message: "נגמרה החבילה" }) } }));
+  t = await turn({ text: "כן", draft: ready }, d);
+  assert.deepEqual([t.status, texts(t), calls.created.length, t.del], ["quota_blocked", "נגמרה החבילה", 0, undefined]);
+  ({ d } = deps({ quota: null }));
+  t = await turn({ text: "כן", draft: ready }, d);
+  assert.equal(t.status, "building", "no quota module (local dev) still builds");
+  ({ d } = deps({ createListing: async () => ({ error: "x", code: 400 }) }));
+  t = await turn({ text: "כן", draft: ready }, d);
+  assert.equal(t.status, "create_failed");
+  assert.equal(t.draft, undefined, "draft unchanged so כן can be retried");
+
+  console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

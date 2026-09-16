@@ -79,7 +79,45 @@ function answerField(draft, field, text, cmd) {
   return { status: p.status, replies: p.replies, draft };
 }
 
+// A photo is stored silently; the route arms a timer and calls back with
+// event:"photo_timer" so the agent gets one progress message per batch.
+async function storePhoto(draft, fileUrl, deps, now) {
+  let hosted = null;
+  try { hosted = await deps.importPhoto(fileUrl); } catch (err) { console.warn("[whatsapp-intake] photo import failed:", err.message); }
+  if (hosted && draft.photos.length < MAX_PHOTOS) draft.photos.push(hosted);
+  return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
+}
+
+function photoTimer(draft) {
+  const n = draft.photos.length;
+  if (D.nextStep(draft).kind === "photos") return { handled: true, status: `photos_progress:${n}`, replies: [R.photosProgress(n)] };
+  const p = promptFor(draft);
+  return { handled: true, status: p.status, replies: [R.photosSaved(n), ...p.replies] };
+}
+
+async function build(draft, deps, now) {
+  const { phone } = draft;
+  const body = D.toListingBody(draft);
+  if (deps.quota) {
+    const q = await deps.quota.consume(phone, "walkthroughs", 1, {
+      source: "whatsapp", business: deps.business,
+      request: { city: body.city, price: body.price, rooms: body.rooms, photos: body.photos_urls.length, source: draft.source },
+    });
+    if (!q.ok) return { handled: true, status: "quota_blocked", replies: [{ text: q.message || R.createFailed(deps.createUrl).text }] };
+  }
+  const result = await deps.createListing(phone, body);
+  if (result.error) {
+    console.error("[whatsapp-intake] create failed:", result.error);
+    return { handled: true, status: "create_failed", replies: [R.createFailed(deps.createUrl)] };
+  }
+  draft.status = "building";
+  draft.listing_id = result.listing_id;
+  return { handled: true, status: "building", listing_id: result.listing_id, draft: D.touch(draft, now), replies: [R.building(D.summary(draft))] };
+}
+
 async function activeTurn(input, deps, draft, now) {
+  if (input.event === "photo_timer") return photoTimer(draft);
+  if (input.fileUrl) return storePhoto(draft, input.fileUrl, deps, now);
   const cmd = D.command(input.text);
   if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
   const step = D.nextStep(draft);
@@ -87,8 +125,18 @@ async function activeTurn(input, deps, draft, now) {
     const r = answerField(draft, step.field, input.text, cmd);
     return { handled: true, ...r, draft: r.draft ? D.touch(r.draft, now) : undefined };
   }
-  // photos + confirm arrive in Task 6
-  return { handled: true, status: step.kind, replies: promptFor(draft).replies };
+  // All questions answered - photo collection / confirm mode
+  const n = draft.photos.length;
+  // "ממשיכים" with enough photos → show confirm
+  if (cmd === "continue" && n >= D.MIN_PHOTOS) {
+    return { handled: true, status: "confirm", replies: [R.confirm(D.summary(draft))] };
+  }
+  // "כן" with enough photos → build
+  if (cmd === "yes" && n >= D.MIN_PHOTOS) return build(draft, deps, now);
+  // "לא" with enough photos → cancel
+  if (cmd === "no" && n >= D.MIN_PHOTOS) return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
+  // Any other text → show photo progress (includes "continue"/"yes"/"no" with not enough photos)
+  return { handled: true, status: `photos_progress:${n}`, replies: [R.photosProgress(n)] };
 }
 
 async function handleTurn(input, deps) {
