@@ -42,6 +42,21 @@ module.exports = function createWhatsappRouter(ctx) {
   const limit = new DailyLimit(EXTRACT_CAP);
   const timers = new Map();
 
+  // WhatsApp delivers a multi-photo send as separate near-simultaneous webhooks,
+  // so concurrent requests for the same phone would each read the draft before
+  // any of them saves it back — last write wins, earlier photos silently lost.
+  // Serialize everything that reads-then-writes a phone's draft (a message turn,
+  // the photo timer) through this so they can never interleave.
+  const locks = new Map();
+  function withLock(phone, fn) {
+    const prev = (locks.get(phone) || Promise.resolve()).catch(() => {});
+    const run = prev.then(fn);
+    const guard = run.catch(() => {});
+    locks.set(phone, guard);
+    guard.finally(() => { if (locks.get(phone) === guard) locks.delete(phone); });
+    return run;
+  }
+
   function requireN8n(req, res, next) {
     if (!n8nSecret) return res.status(503).json({ error: "n8n_secret_not_configured" });
     if (!constantTimeEqual(req.get("x-forly-secret"), n8nSecret)) return res.status(403).json({ error: "forbidden" });
@@ -108,10 +123,12 @@ module.exports = function createWhatsappRouter(ctx) {
     timers.set(phone, setTimeout(async () => {
       timers.delete(phone);
       try {
-        const [business, draft] = await Promise.all([db.getBusiness(phone), db.getDraft(phone)]);
-        if (!draft) return;
-        const turn = await handleTurn({ phone, event: "photo_timer", draft }, depsFor(phone, business));
-        if (turn.handled) await persistAndSend(phone, turn);
+        await withLock(phone, async () => {
+          const [business, draft] = await Promise.all([db.getBusiness(phone), db.getDraft(phone)]);
+          if (!draft) return;
+          const turn = await handleTurn({ phone, event: "photo_timer", draft }, depsFor(phone, business));
+          if (turn.handled) await persistAndSend(phone, turn);
+        });
       } catch (err) { console.error("[whatsapp] photo timer failed:", err); }
     }, PHOTO_BATCH_MS));
   }
@@ -125,27 +142,30 @@ module.exports = function createWhatsappRouter(ctx) {
     const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string").slice(0, 12) : [];
     if (!phone || (!text.trim() && !fileUrl && !event)) return res.status(400).json({ error: "invalid_input" });
     try {
-      const [business, draft] = await Promise.all([db.getBusiness(phone).catch(() => null), db.getDraft(phone)]);
-      const now = new Date();
-      console.log(
-        `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrl ? "photo" : JSON.stringify(text)}` +
-        ` | draft before: ${draft ? `${draft.status} (${draft.source}) updated_at=${new Date(asMillis(draft.updated_at)).toISOString()} silent_for_ms=${now.getTime() - asMillis(draft.updated_at)} paused=${isPaused(draft, now)}` : "none"}`
-      );
-      const turn = await handleTurn({ phone, text, fileUrl, event, photos, draft }, depsFor(phone, business));
-      // A text that ends a photo batch must not be followed by the timer's report too.
-      if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
-      console.log(
-        `[whatsapp] ${phone} → handled=${turn.handled} status=${turn.status}` +
-        ` | draft after: ${turn.del ? "deleted" : turn.draft ? turn.draft.status : "unchanged"}` +
-        ` | replies: ${turn.replies.length ? turn.replies.map((r) => JSON.stringify(r.text)).join(" | ") : "(none)"}`
-      );
-      const replied = turn.handled ? await persistAndSend(phone, turn) : false;
-      console.log(`[whatsapp] ${phone} → ${turn.status} replied=${replied}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
-      res.json({
-        handled: turn.handled, status: turn.status,
-        reply: turn.replies.map((r) => r.text).join("\n\n") || null,
-        replied, listing_id: turn.listing_id || null,
+      const result = await withLock(phone, async () => {
+        const [business, draft] = await Promise.all([db.getBusiness(phone).catch(() => null), db.getDraft(phone)]);
+        const now = new Date();
+        console.log(
+          `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrl ? "photo" : JSON.stringify(text)}` +
+          ` | draft before: ${draft ? `${draft.status} (${draft.source}) updated_at=${new Date(asMillis(draft.updated_at)).toISOString()} silent_for_ms=${now.getTime() - asMillis(draft.updated_at)} paused=${isPaused(draft, now)}` : "none"}`
+        );
+        const turn = await handleTurn({ phone, text, fileUrl, event, photos, draft }, depsFor(phone, business));
+        // A text that ends a photo batch must not be followed by the timer's report too.
+        if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
+        console.log(
+          `[whatsapp] ${phone} → handled=${turn.handled} status=${turn.status}` +
+          ` | draft after: ${turn.del ? "deleted" : turn.draft ? turn.draft.status : "unchanged"}` +
+          ` | replies: ${turn.replies.length ? turn.replies.map((r) => JSON.stringify(r.text)).join(" | ") : "(none)"}`
+        );
+        const replied = turn.handled ? await persistAndSend(phone, turn) : false;
+        console.log(`[whatsapp] ${phone} → ${turn.status} replied=${replied}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
+        return {
+          handled: turn.handled, status: turn.status,
+          reply: turn.replies.map((r) => r.text).join("\n\n") || null,
+          replied, listing_id: turn.listing_id || null,
+        };
       });
+      res.json(result);
     } catch (err) {
       console.error("[whatsapp] intake failed:", err);
       res.status(500).json({ error: "internal" });
