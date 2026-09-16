@@ -1,116 +1,115 @@
 /*
- * whatsapp-intake.js — an agent drops a listing link in WhatsApp, Forly
- * builds the property page and replies in the same chat.
+ * whatsapp-intake.js — the property chat's turn handler.
  *
- *   link → listing-sources.resolve (Firecrawl / Facebook)
- *        → listing-extract.parseListing (fields)
- *        → photos re-hosted on Forly (importPhoto)
- *        → quota + listing-create.createListing (kicks the n8n page pipeline)
- *        → "building" reply now; the n8n Property Page Builder WhatsApps the
- *          agent the page link when it is live (as it does for every page).
+ * handleTurn(input, deps) takes one inbound event (text, photo, n8n event or
+ * the photo timer) plus the agent's current draft, and returns what to reply,
+ * whether the message was ours at all, and the draft to persist (or delete).
+ * No I/O here except through deps, so whatsapp-intake.test.js drives whole
+ * conversations without Express, Firestore or the network.
  *
- * Pure orchestration with injected deps so whatsapp-intake.test.js runs
- * without Express, Firestore or the network. Every outcome has a stable
- * `status` and a Hebrew `reply` (null when the sender is not a client — we
- * never message strangers).
+ * Spec: docs/superpowers/specs/2026-09-12-whatsapp-property-chat-design.md
  */
-const { MIN_PHOTOS, MAX_PHOTOS } = require("./listing-create");
+const D = require("./property-draft");
+const R = require("./whatsapp-replies");
 
-// First http(s) link in a chat message. Trailing punctuation a phone keyboard
-// adds ("…link.", "(link)") is not part of the URL.
-const URL_RE = /https?:\/\/[^\s<>"']+/i;
-function findUrl(text) {
-  const m = URL_RE.exec(String(text || ""));
-  if (!m) return null;
-  const url = m[0].replace(/[.,;:!?)\]]+$/, "");
-  try { return new URL(url).href; } catch (e) { return null; }
+const MAX_PHOTOS = 12;
+
+const notOurs = (status) => ({ handled: false, status, replies: [] });
+
+// What to say for the step the draft is at.
+function promptFor(draft) {
+  const step = D.nextStep(draft);
+  if (step.kind === "ask") return { status: `asked:${step.field}`, replies: [R.ask(step.field)] };
+  if (step.kind === "photos") return { status: "photos", replies: [R.askPhotos()] };
+  return { status: "confirm", replies: [R.confirm(D.summary(draft))] };
 }
 
-// What the page needs to exist at all (mirrors listing-create.validateListing).
-const NEEDED = { city: "עיר", price: "מחיר", rooms: "מספר חדרים" };
-
-const R = {
-  no_link: (createUrl) =>
-    `לא מצאתי קישור בהודעה. שלחו לי קישור למודעה (יד2, מדלן, פייסבוק או כל אתר) ואבנה ממנו דף נכס.\nאפשר גם למלא ידנית: ${createUrl}`,
-  facebook_not_connected: (createUrl) =>
-    `כדי לקרוא פוסטים מפייסבוק צריך קודם לחבר את עמוד הפייסבוק שלכם בפאנל.\nבינתיים אפשר להדביק את הטקסט של הפוסט כאן, או למלא ידנית: ${createUrl}`,
-  page_unreadable: (createUrl) =>
-    `לא הצלחתי לקרוא את הדף בקישור. אולי המודעה פרטית או הוסרה.\nאפשר להדביק את טקסט המודעה כאן, או למלא ידנית: ${createUrl}`,
-  extract_unavailable: (createUrl) =>
-    `יש לי תקלה זמנית בקריאת מודעות. נסו שוב בעוד כמה דקות, או מלאו ידנית: ${createUrl}`,
-  missing_fields: (labels, createUrl) =>
-    `קראתי את המודעה אבל חסר לי: ${labels.join(", ")}.\nהשלימו את הפרטים כאן ואבנה את הדף: ${createUrl}`,
-  few_photos: (n, createUrl) =>
-    `מצאתי במודעה ${n} תמונות, ולדף נכס צריך לפחות ${MIN_PHOTOS}.\nהעלו את התמונות כאן ואבנה את הדף: ${createUrl}`,
-  create_failed: (createUrl) =>
-    `משהו השתבש ביצירת הדף. נסו שוב, או מלאו ידנית: ${createUrl}`,
-  building: (f) =>
-    `קיבלתי! 🏠 ${f.rooms} חד׳ ב${f.neighborhood || f.city}${f.price ? `, ₪${Number(f.price).toLocaleString("en-US")}` : ""}.\nאני בונה את דף הנכס — אשלח לכם קישור כשהוא מוכן (כמה דקות).`,
-};
-
-function listingBody(fields, src, photos) {
-  return {
-    city: fields.city, price: fields.price, rooms: fields.rooms,
-    address: fields.address || "", neighborhood: fields.neighborhood || "",
-    listing_type: fields.deal || "sale",
-    size_sqm: fields.size_sqm, size_built: fields.sqm_built,
-    size_balcony: fields.sqm_balcony, size_garden: fields.sqm_garden,
-    floor: fields.floor, parking: fields.parking,
-    storage: !!fields.storage, elevator: !!fields.elevator, shabbat_elevator: !!fields.shabbat_elevator,
-    description: String(src.description || src.text || "").slice(0, 2000),
-    photos_urls: photos,
-  };
+async function importAll(urls, importPhoto) {
+  const settled = await Promise.allSettled(urls.slice(0, MAX_PHOTOS).map((u) => importPhoto(u)));
+  return settled.filter((s) => s.status === "fulfilled" && s.value).map((s) => s.value);
 }
 
-/*
- * intake({ phone, text }, deps) → { status, reply, listing_id? }
- * deps: getBusiness(phone), resolve(input), parseListing(text), importPhoto(url) → hosted url,
- *       quota (optional, .consume), createListing(phone, body), createUrl
- */
-async function intake({ phone, text }, deps) {
-  const { getBusiness, resolve, parseListing, importPhoto, quota, createListing, createUrl } = deps;
-  const business = await getBusiness(phone).catch(() => null);
-  if (!business) return { status: "unknown_agent", reply: null };
-
-  const url = findUrl(text);
-  if (!url) return { status: "no_link", reply: R.no_link(createUrl) };
-
+// Link or listing text → fields + photos on a fresh draft. Errors keep the
+// draft open and empty so the agent can paste text or send photos instead.
+async function openFromSource(phone, kind, text, deps, now) {
+  const draft = D.newDraft(phone, kind, now);
+  if (!deps.extractAllowed(phone)) {
+    return { handled: true, status: "extract_limit", replies: [R.extractLimit(deps.createUrl)] };
+  }
+  const input = kind === "link" ? { url: D.findUrl(text), userId: phone } : { text, userId: phone };
   let src, parsed;
   try {
-    src = await resolve({ url, userId: phone });
-    parsed = await parseListing(src.text);
+    src = await deps.resolve(input);
+    parsed = await deps.parseListing(src.text);
   } catch (err) {
-    const code = R[err.code] ? err.code : "page_unreadable";
-    if (!R[err.code]) console.error("[whatsapp-intake]", err);
-    return { status: code, reply: R[code](createUrl) };
+    const code = err && err.code ? err.code : "page_unreadable";
+    if (!err || !err.code) console.error("[whatsapp-intake] source failed:", err);
+    const p = promptFor(draft);
+    return { handled: true, status: `source_error:${code}`, draft, replies: [R.sourceError(code, deps.createUrl), ...p.replies] };
   }
-  const { fields } = parsed;
-  const missing = Object.keys(NEEDED).filter((k) => fields[k] === null || fields[k] === undefined);
-  if (missing.length) {
-    return { status: "missing_fields", missing, reply: R.missing_fields(missing.map((k) => NEEDED[k]), createUrl) };
-  }
-
-  const candidates = (src.photos || []).slice(0, MAX_PHOTOS).map((p) => p.url);
-  const settled = await Promise.allSettled(candidates.map((u) => importPhoto(u)));
-  const photos = settled.filter((s) => s.status === "fulfilled" && s.value).map((s) => s.value);
-  if (photos.length < MIN_PHOTOS) {
-    return { status: "few_photos", photos: photos.length, reply: R.few_photos(photos.length, createUrl) };
-  }
-
-  if (quota) {
-    const q = await quota.consume(phone, "walkthroughs", 1, {
-      source: "whatsapp", business,
-      request: { url, city: fields.city, price: fields.price, rooms: fields.rooms, photos: photos.length },
-    });
-    if (!q.ok) return { status: "quota_blocked", reply: q.message || R.create_failed(createUrl) };
-  }
-
-  const result = await createListing(phone, listingBody(fields, src, photos));
-  if (result.error) {
-    console.error("[whatsapp-intake] create failed:", result.error);
-    return { status: "create_failed", reply: R.create_failed(createUrl) };
-  }
-  return { status: "building", listing_id: result.listing_id, reply: R.building(fields) };
+  for (const [k, v] of Object.entries(parsed.fields)) if (k in draft.fields && k !== "description" && v !== null) draft.fields[k] = v;
+  // ponytail: description left for user to provide in Q&A, not auto-filled from source
+  draft.photos = await importAll((src.photos || []).map((p) => p.url), deps.importPhoto);
+  const p = promptFor(draft);
+  return { handled: true, status: p.status, draft, replies: [R.opened(kind, draft.fields), ...p.replies] };
 }
 
-module.exports = { intake, findUrl, _test: { listingBody, NEEDED, R } };
+function openFromKeyword(phone, now) {
+  const draft = D.newDraft(phone, "keyword", now);
+  const p = promptFor(draft);
+  return { handled: true, status: p.status, draft, replies: [R.opened("keyword"), ...p.replies] };
+}
+
+async function openDraft(phone, kind, text, deps, now) {
+  return kind === "keyword" ? openFromKeyword(phone, now) : openFromSource(phone, kind, text, deps, now);
+}
+
+// One answer to the field currently being asked.
+function answerField(draft, field, text, cmd) {
+  if (cmd === "skip") {
+    if (D.isRequired(field)) return { status: `required:${field}`, replies: [R.required(field)], draft };
+    draft.skipped.push(field);
+    const p = promptFor(draft);
+    return { status: p.status, replies: p.replies, draft };
+  }
+  const value = D.parseAnswer(field, text);
+  if (value === null) return { status: `invalid:${field}`, replies: [R.invalid(field)], draft };
+  draft.fields[field] = value;
+  const p = promptFor(draft);
+  return { status: p.status, replies: p.replies, draft };
+}
+
+async function activeTurn(input, deps, draft, now) {
+  const cmd = D.command(input.text);
+  if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
+  const step = D.nextStep(draft);
+  if (step.kind === "ask") {
+    const r = answerField(draft, step.field, input.text, cmd);
+    return { handled: true, ...r, draft: r.draft ? D.touch(r.draft, now) : undefined };
+  }
+  // photos + confirm arrive in Task 6
+  return { handled: true, status: step.kind, replies: promptFor(draft).replies };
+}
+
+async function handleTurn(input, deps) {
+  const now = input.now || new Date();
+  const { phone } = input;
+  if (!deps.business) return notOurs("unknown_agent");
+  let draft = input.draft || null;
+  let dropped = false;
+  if (draft && D.isExpiredPrompt(draft, now)) { draft = null; dropped = true; }
+
+  if (!draft) {
+    const kind = D.openerKind(input.text);
+    if (!kind) return { ...notOurs("not_ours"), ...(dropped ? { del: true } : {}) };
+    return openDraft(phone, kind, input.text, deps, now);
+  }
+  if (draft.status === "active" && !D.isPaused(draft, now)) return activeTurn(input, deps, draft, now);
+  // offered / resume_prompt / paused / building arrive in Task 7
+  return notOurs("not_ours");
+}
+
+// ponytail: temporary stub for routes/whatsapp.js until Task 8 rewrites the route
+async function intake() { return { status: "not_ours", reply: null }; }
+
+module.exports = { handleTurn, intake, _test: { promptFor, answerField } };
