@@ -173,5 +173,76 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.status, "create_failed");
   assert.equal(t.draft, undefined, "draft unchanged so כן can be retried");
 
+  // ── photos_edited: n8n sends one edited photo per call; offer once at 3 ──
+  ({ d, calls } = deps());
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"] }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.photos.length, t.replies.length],
+    [true, "offer_pending:1", "offered", 1, 0], "the first edited photo is stored silently");
+  t = await turn({ event: "photos_edited", photos: ["https://fal/2.jpg"], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:2", 2, 0]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/3.jpg"], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 3, true]);
+  assert.deepEqual(t.replies[0].buttons, ["כן", "לא"]);
+  assert.match(texts(t), /ערכתי 3 תמונות/);
+  const offered = t.draft;
+  t = await turn({ event: "photos_edited", photos: ["https://fal/4.jpg"], draft: offered }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:4", 4, 0], "the offer is never repeated");
+  assert.equal(calls.imported.length, 4, "every edited photo is re-hosted on Forly");
+  // a future n8n batch path may send several at once: one call, one offer
+  ({ d } = deps());
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg"] }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 3, true]);
+  t = await turn({ text: "בוקר טוב", draft: offered }, d);
+  assert.equal(t.handled, false, "an offered draft does not hijack unrelated chat");
+  t = await turn({ text: "לא", draft: offered }, d);
+  assert.deepEqual([t.status, t.del], ["declined", true]);
+  t = await turn({ text: "כן", draft: offered }, d);
+  assert.deepEqual([t.status, t.draft.status, t.draft.source], ["asked:city", "active", "photos"]);
+  // offer older than 2h is dropped; the message is then judged on its own
+  t = await turn({ text: "בוקר טוב", draft: offered, now: new Date(T0.getTime() + D.PAUSE_MS + 1) }, d);
+  assert.deepEqual([t.handled, t.del], [false, true]);
+
+  // photos_edited while a draft is active: photos are added, current question repeated
+  ({ d } = deps());
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"], draft }, d);
+  assert.equal(t.draft.photos.length, 1);
+  assert.match(texts(t), /שמרתי 1 תמונות/);
+  assert.match(texts(t), /באיזו עיר/);
+
+  // ── pause: silent for 2h → ordinary messages are not ours, openers ask resume/new ──
+  ({ d } = deps());
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  t = await turn({ text: "חיפה", draft }, d); draft = t.draft;
+  const later = new Date(T0.getTime() + D.PAUSE_MS + 1000);
+  t = await turn({ text: "1,500,000", draft, now: later }, d);
+  assert.equal(t.handled, false, "paused draft does not claim plain text");
+  t = await turn({ fileUrl: "https://green/x.jpg", draft, now: later }, d);
+  assert.equal(t.handled, false, "paused draft does not claim photos");
+  t = await turn({ text: "https://www.yad2.co.il/item/new", draft, now: later }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status], [true, "resume_prompt", "resume_prompt"]);
+  assert.deepEqual(t.replies[0].buttons, ["המשך", "חדש"]);
+  assert.equal(t.draft.pending_opener.text, "https://www.yad2.co.il/item/new");
+  const rp = t.draft;
+  t = await turn({ text: "המשך", draft: rp, now: later }, d);
+  assert.deepEqual([t.status, t.draft.status, t.draft.fields.city, t.draft.pending_opener], ["asked:price", "active", "חיפה", null]);
+  t = await turn({ text: "חדש", draft: rp, now: later }, d);
+  assert.deepEqual([t.draft.source, t.draft.fields.city], ["link", "תל אביב"], "new: the pending link is extracted into a fresh draft");
+  t = await turn({ text: "מה?", draft: rp, now: later }, d);
+  assert.equal(t.status, "resume_prompt", "anything else repeats the question");
+  // resume prompt from a photos_edited event
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"], draft, now: later }, d);
+  assert.equal(t.status, "resume_prompt");
+  t = await turn({ text: "חדש", draft: t.draft, now: later }, d);
+  assert.deepEqual([t.draft.status, t.draft.source, t.draft.photos.length], ["offered", "photos", 1]);
+
+  // ── building: only an opener replaces it ──
+  ({ d } = deps());
+  const bld = { ...ready, status: "building", listing_id: "L9" };
+  t = await turn({ text: "תודה", draft: bld }, d);
+  assert.equal(t.handled, false);
+  t = await turn({ text: "נכס חדש", draft: bld }, d);
+  assert.deepEqual([t.handled, t.draft.status, t.draft.listing_id], [true, "active", null]);
+
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

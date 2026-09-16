@@ -115,6 +115,76 @@ async function build(draft, deps, now) {
   return { handled: true, status: "building", listing_id: result.listing_id, draft: D.touch(draft, now), replies: [R.building(D.summary(draft))] };
 }
 
+/*
+ * n8n just finished editing a photo → it may become a property page.
+ * Business Handler2 edits photos one at a time (its burst output only warns),
+ * so this arrives once per photo: pile them on a silent `offered` draft and ask
+ * once, when the third lands. A batch path sending several at once still works.
+ */
+async function photosEdited(input, deps, draft, now) {
+  const { phone } = input;
+  const hosted = await importAll(input.photos || [], deps.importPhoto);
+  if (draft && draft.status === "active" && !D.isPaused(draft, now)) {
+    draft.photos = draft.photos.concat(hosted).slice(0, MAX_PHOTOS);
+    const p = promptFor(draft);
+    return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [R.photosSaved(draft.photos.length), ...p.replies] };
+  }
+  if (draft && draft.status === "active") return resumePrompt(draft, { photos: hosted }, now);
+  const target = draft && draft.status === "offered" ? draft : offeredDraft(phone, now);
+  target.photos = target.photos.concat(hosted).slice(0, MAX_PHOTOS);
+  D.touch(target, now);
+  if (target.photos.length < D.MIN_PHOTOS || target.offer_sent) {
+    return { handled: true, status: `offer_pending:${target.photos.length}`, draft: target, replies: [] };
+  }
+  target.offer_sent = true;
+  return { handled: true, status: "offered", draft: target, replies: [R.offer(target.photos.length)] };
+}
+
+function offeredDraft(phone, now) {
+  const d = D.newDraft(phone, "photos", now);
+  d.status = "offered";
+  return d;
+}
+
+function resumePrompt(draft, opener, now) {
+  draft.status = "resume_prompt";
+  draft.pending_opener = opener;
+  return { handled: true, status: "resume_prompt", draft: D.touch(draft, now), replies: [R.resumePrompt(D.summary(draft))] };
+}
+
+async function offeredTurn(input, deps, draft, now) {
+  const cmd = D.command(input.text);
+  if (cmd === "no") return { handled: true, status: "declined", del: true, replies: [R.declined()] };
+  if (cmd !== "yes") return notOurs("not_ours");
+  draft.status = "active";
+  const p = promptFor(draft);
+  return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+}
+
+async function resumeTurn(input, deps, draft, now) {
+  const cmd = D.command(input.text);
+  if (cmd === "resume") {
+    draft.status = "active";
+    draft.pending_opener = null;
+    const p = promptFor(draft);
+    return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+  }
+  if (cmd === "new") {
+    const o = draft.pending_opener || {};
+    if (o.photos) {
+      const fresh = offeredDraft(draft.phone, now);
+      fresh.photos = o.photos;
+      if (fresh.photos.length < D.MIN_PHOTOS) {
+        return { handled: true, status: `offer_pending:${fresh.photos.length}`, draft: fresh, replies: [] };
+      }
+      fresh.offer_sent = true;
+      return { handled: true, status: "offered", draft: fresh, replies: [R.offer(fresh.photos.length)] };
+    }
+    return openDraft(draft.phone, D.openerKind(o.text), o.text, deps, now);
+  }
+  return { handled: true, status: "resume_prompt", replies: [R.resumePrompt(D.summary(draft))] };
+}
+
 async function activeTurn(input, deps, draft, now) {
   if (input.event === "photo_timer") return photoTimer(draft);
   if (input.fileUrl) return storePhoto(draft, input.fileUrl, deps, now);
@@ -146,15 +216,25 @@ async function handleTurn(input, deps) {
   let draft = input.draft || null;
   let dropped = false;
   if (draft && D.isExpiredPrompt(draft, now)) { draft = null; dropped = true; }
+  const withDrop = (t) => (dropped && !t.draft ? { ...t, del: true } : t);
+
+  if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
 
   if (!draft) {
     const kind = D.openerKind(input.text);
-    if (!kind) return { ...notOurs("not_ours"), ...(dropped ? { del: true } : {}) };
+    if (!kind) return withDrop(notOurs("not_ours"));
     return openDraft(phone, kind, input.text, deps, now);
   }
-  if (draft.status === "active" && !D.isPaused(draft, now)) return activeTurn(input, deps, draft, now);
-  // offered / resume_prompt / paused / building arrive in Task 7
-  return notOurs("not_ours");
+  if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
+  if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
+  if (draft.status === "building" || D.isPaused(draft, now)) {
+    if (input.event || input.fileUrl) return notOurs("not_ours");
+    const kind = D.openerKind(input.text);
+    if (!kind) return notOurs("not_ours");
+    if (draft.status === "building") return openDraft(phone, kind, input.text, deps, now);
+    return resumePrompt(draft, { text: input.text }, now);
+  }
+  return activeTurn(input, deps, draft, now);
 }
 
 // ponytail: temporary stub for routes/whatsapp.js until Task 8 rewrites the route
