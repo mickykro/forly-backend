@@ -73,7 +73,12 @@ module.exports = function createWhatsappRouter(ctx) {
   async function send(phone, reply) {
     if (reply.buttons && sendButtons) {
       try {
-        await sendButtons(phone, { body: reply.text, buttons: reply.buttons.map((b, i) => ({ buttonId: String(i + 1), buttonText: b })) });
+        await sendButtons(phone, {
+          header: "Forly",
+          body: reply.text,
+          footer: "בחרו אפשרות",
+          buttons: reply.buttons.map((b, i) => ({ buttonId: String(i + 1), buttonText: b })),
+        });
         return;
       } catch (err) { console.warn("[whatsapp] buttons failed, sending plain:", err.message); }
     }
