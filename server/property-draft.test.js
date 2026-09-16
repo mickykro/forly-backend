@@ -50,4 +50,47 @@ assert.equal(D.isRequired("city"), true);
 assert.equal(D.isRequired("floor"), false);
 assert.deepEqual(D.ASK_ORDER, ["city", "price", "rooms", "deal", "size_sqm", "floor", "parking", "neighborhood", "description"]);
 
-console.log("property-draft.test.js (parsers) ok");
+// ── draft state ──
+const t0 = new Date("2026-09-12T10:00:00Z");
+const d = D.newDraft("972501234567", "keyword", t0);
+assert.equal(d.status, "active");
+assert.equal(d.fields.city, null);
+assert.equal(d.fields.description, null);
+assert.equal(d.offer_sent, false);
+assert.ok("elevator" in d.fields, "fields carry every extractor key");
+assert.deepEqual(D.nextStep(d), { kind: "ask", field: "city" });
+
+d.fields.city = "חיפה"; d.fields.price = 1500000; d.fields.rooms = 4;
+assert.deepEqual(D.nextStep(d), { kind: "ask", field: "deal" });
+d.skipped.push("deal", "size_sqm", "floor", "parking", "neighborhood", "description");
+assert.deepEqual(D.nextStep(d), { kind: "photos" });
+d.photos.push("a", "b");
+assert.deepEqual(D.nextStep(d), { kind: "photos" });
+d.photos.push("c");
+assert.deepEqual(D.nextStep(d), { kind: "confirm" });
+
+assert.equal(D.isPaused(d, new Date(t0.getTime() + D.PAUSE_MS - 1)), false);
+assert.equal(D.isPaused(d, new Date(t0.getTime() + D.PAUSE_MS + 1)), true);
+assert.equal(D.isPaused({ ...d, status: "building" }, new Date(t0.getTime() + D.PAUSE_MS + 1)), false);
+assert.equal(D.isExpiredPrompt({ ...d, status: "offered" }, new Date(t0.getTime() + D.PAUSE_MS + 1)), true);
+assert.equal(D.isExpiredPrompt({ ...d, status: "offered" }, t0), false);
+assert.equal(D.isExpiredPrompt(d, new Date(t0.getTime() + D.PAUSE_MS + 1)), false);
+
+const s = D.summary(d);
+assert.deepEqual([s.city, s.price, s.rooms, s.photos], ["חיפה", 1500000, 4, 3]);
+
+d.fields.deal = "rent"; d.fields.size_sqm = 90; d.fields.elevator = true; d.fields.description = "נחמד";
+const body = D.toListingBody(d);
+assert.equal(body.listing_type, "rent");
+assert.equal(body.size_sqm, 90);
+assert.equal(body.elevator, true);
+assert.equal(body.shabbat_elevator, false);
+assert.equal(body.address, "");
+assert.equal(body.description, "נחמד");
+assert.deepEqual(body.photos_urls, ["a", "b", "c"]);
+assert.equal(D.toListingBody({ ...d, fields: { ...d.fields, deal: null } }).listing_type, "sale");
+
+const t1 = new Date(t0.getTime() + 1000);
+assert.equal(D.touch(d, t1).updated_at, t1);
+
+console.log("property-draft.test.js ok");

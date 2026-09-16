@@ -73,7 +73,62 @@ const PARSERS = {
 function parseAnswer(field, t) { return PARSERS[field] ? PARSERS[field](t) : null; }
 function isRequired(field) { return REQUIRED.includes(field); }
 
+// ── draft state ──
+function emptyFields() {
+  const f = {};
+  for (const k of Object.keys(SCHEMA)) f[k] = null;
+  f.description = null;
+  return f;
+}
+
+function newDraft(phone, source, now = new Date()) {
+  return {
+    phone, status: "active", source, fields: emptyFields(), skipped: [], photos: [],
+    pending_opener: null, offer_sent: false, listing_id: null, created_at: now, updated_at: now,
+  };
+}
+
+function touch(draft, now = new Date()) { draft.updated_at = now; return draft; }
+
+function nextStep(draft) {
+  for (const f of ASK_ORDER) {
+    if (draft.fields[f] === null && !draft.skipped.includes(f)) return { kind: "ask", field: f };
+  }
+  if (draft.photos.length < MIN_PHOTOS) return { kind: "photos" };
+  return { kind: "confirm" };
+}
+
+const silentFor = (draft, now) => now.getTime() - asMillis(draft.updated_at);
+function isPaused(draft, now = new Date()) { return draft.status === "active" && silentFor(draft, now) > PAUSE_MS; }
+function isExpiredPrompt(draft, now = new Date()) {
+  return (draft.status === "offered" || draft.status === "resume_prompt") && silentFor(draft, now) > PAUSE_MS;
+}
+
+function summary(draft) {
+  const f = draft.fields;
+  return {
+    city: f.city, neighborhood: f.neighborhood, price: f.price, rooms: f.rooms, deal: f.deal,
+    size_sqm: f.size_sqm, floor: f.floor, parking: f.parking, photos: draft.photos.length,
+  };
+}
+
+// Same shape the create form posts (see listing-create.validateListing).
+function toListingBody(draft) {
+  const f = draft.fields;
+  return {
+    city: f.city, price: f.price, rooms: f.rooms,
+    address: f.address || "", neighborhood: f.neighborhood || "",
+    listing_type: f.deal || "sale",
+    size_sqm: f.size_sqm, size_built: f.sqm_built, size_balcony: f.sqm_balcony, size_garden: f.sqm_garden,
+    floor: f.floor, parking: f.parking,
+    storage: !!f.storage, elevator: !!f.elevator, shabbat_elevator: !!f.shabbat_elevator,
+    description: String(f.description || "").slice(0, 2000),
+    photos_urls: draft.photos.slice(),
+  };
+}
+
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA,
   findUrl, command, openerKind, parseAnswer, isRequired, asMillis,
+  newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, toListingBody,
 };
