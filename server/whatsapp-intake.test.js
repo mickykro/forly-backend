@@ -223,11 +223,21 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.draft.source, t.draft.fields.city], ["link", "תל אביב"], "new: the pending link is extracted into a fresh draft");
   t = await turn({ text: "מה?", draft: rp, now: later }, d);
   assert.equal(t.status, "resume_prompt", "anything else repeats the question");
-  // resume prompt from a photos_edited event
+  // resume prompt from a photos_edited event; the rest of the batch (one photo
+  // per call) piles onto the pending opener silently, the paused draft survives
   t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"], draft, now: later }, d);
   assert.equal(t.status, "resume_prompt");
-  t = await turn({ text: "חדש", draft: t.draft, now: later }, d);
-  assert.deepEqual([t.draft.status, t.draft.source, t.draft.photos.length], ["offered", "photos", 1]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/2.jpg"], draft: t.draft, now: later }, d);
+  assert.deepEqual([t.status, t.draft.status, t.draft.fields.city, t.replies.length], ["resume_pending:2", "resume_prompt", "חיפה", 0]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/3.jpg"], draft: t.draft, now: later }, d);
+  assert.deepEqual([t.status, t.draft.pending_opener.photos.length], ["resume_pending:3", 3]);
+  const rpp = t.draft;
+  t = await turn({ text: "חדש", draft: rpp, now: later }, d);
+  assert.deepEqual([t.draft.status, t.draft.source, t.draft.photos.length, t.draft.offer_sent], ["offered", "photos", 3, true], "new: all edited photos become the offer");
+  assert.match(texts(t), /ערכתי 3 תמונות/);
+  t = await turn({ text: "המשך", draft: rpp, now: later }, d);
+  assert.deepEqual([t.status, t.draft.status, t.draft.fields.city, t.draft.photos.length], ["asked:price", "active", "חיפה", 3], "resume: the edited photos join the paused draft");
+  assert.match(texts(t), /שמרתי 3 תמונות/);
 
   // ── building: only an opener replaces it ──
   ({ d } = deps());

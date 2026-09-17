@@ -123,6 +123,14 @@ async function photosEdited(input, deps, draft, now) {
     return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [R.photosSaved(draft.photos.length), ...p.replies] };
   }
   if (draft && draft.status === "active") return resumePrompt(draft, { photos: hosted }, now);
+  // The resume question is already out (photos arrive one per call): keep piling
+  // the batch onto the pending opener instead of starting a rival offered draft
+  // over the paused one, which would silently throw the paused draft away.
+  if (draft && draft.status === "resume_prompt") {
+    const o = draft.pending_opener || {};
+    draft.pending_opener = { ...o, photos: (o.photos || []).concat(hosted).slice(0, MAX_PHOTOS) };
+    return { handled: true, status: `resume_pending:${draft.pending_opener.photos.length}`, draft: D.touch(draft, now), replies: [] };
+  }
   const target = draft && draft.status === "offered" ? draft : offeredDraft(phone, now);
   target.photos = target.photos.concat(hosted).slice(0, MAX_PHOTOS);
   D.touch(target, now);
@@ -157,10 +165,15 @@ async function offeredTurn(input, deps, draft, now) {
 async function resumeTurn(input, deps, draft, now) {
   const cmd = D.command(input.text);
   if (cmd === "resume") {
+    const o = draft.pending_opener || {};
     draft.status = "active";
     draft.pending_opener = null;
+    // Photos edited while paused were sent for this property: they join it.
+    const added = o.photos ? o.photos.filter((u) => !draft.photos.includes(u)) : [];
+    if (added.length) draft.photos = draft.photos.concat(added).slice(0, MAX_PHOTOS);
     const p = promptFor(draft, deps);
-    return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+    const replies = added.length ? [R.photosSaved(draft.photos.length), ...p.replies] : p.replies;
+    return { handled: true, status: p.status, draft: D.touch(draft, now), replies };
   }
   if (cmd === "new") {
     const o = draft.pending_opener || {};

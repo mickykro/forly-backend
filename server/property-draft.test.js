@@ -35,6 +35,8 @@ assert.equal(D.parseAnswer("price", "2.9 מיליון"), 2900000);
 assert.equal(D.parseAnswer("price", "890 אלף"), 890000);
 assert.equal(D.parseAnswer("price", "12,000 לחודש"), 12000);
 assert.equal(D.parseAnswer("price", "לא יודע"), null);
+assert.equal(D.parseAnswer("price", "2.9"), null, "bare shorthand is re-asked, not stored as ₪3");
+assert.equal(D.parseAnswer("price", "3"), null);
 assert.equal(D.parseAnswer("rooms", "3.5"), 3.5);
 assert.equal(D.parseAnswer("rooms", "4 חדרים"), 4);
 assert.equal(D.parseAnswer("rooms", "הרבה"), null);

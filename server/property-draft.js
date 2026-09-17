@@ -58,7 +58,9 @@ function parsePrice(t) {
   const mult = (m[2] || "").toLowerCase();
   if (/^(מיליון|מ'|m)$/.test(mult)) n *= 1e6;
   else if (/^(אלף|k)$/.test(mult)) n *= 1e3;
-  return n > 0 ? Math.round(n) : null;
+  // "2.9" or "3" alone is a shorthand we cannot read (millions? thousands?);
+  // storing it as ₪3 is worse than asking again with the format hint.
+  return n >= 1000 ? Math.round(n) : null;
 }
 function parseDeal(t) {
   const s = String(t || "");
