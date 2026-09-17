@@ -997,6 +997,7 @@
   var X = window.FlyExtract;
   var importedPhotos = []; // {url, el, skip}
   var canSkipPhotos = false;   // scrape found more photos than a page needs
+  var fromWhatsappDraft = false; // prefilled from the WhatsApp chat draft (see the prefill block at the end)
   var extractedFromUrl = false;   // link/Facebook scrape, not pasted text or manual entry
   function revealManual() { $("#manualFields").classList.remove("hidden"); }
   function showExtractErr(key) {
@@ -1457,6 +1458,9 @@
           };
           if (agent2) body.agent2 = agent2;
         }
+        // Tells the server this page comes from the chat draft, so it can
+        // clear the draft once the listing exists (routes/intake.js).
+        if (fromWhatsappDraft) body.whatsapp_draft = true;
         btn.textContent = FT("status_creating");
         $("#vLoaderMsg").textContent = FT("status_creating");
         var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
@@ -1625,6 +1629,7 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
+        fromWhatsappDraft = true;
         X.fillFields(data.fields, $);
         syncDealButtons(); updatePriceLabel(); renderPriceChips();
         if (data.fields.description && !$("#pDesc").value.trim()) {

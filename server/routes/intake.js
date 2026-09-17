@@ -131,8 +131,8 @@ module.exports = function createIntakeRouter(ctx) {
 
   // ── shared listing creation (listing-create.js) ──
   const pipelineDeps = { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl };
-  const createListing = (phone, body, agentOverride) =>
-    createListingShared(phone, body, agentOverride, pipelineDeps);
+  const createListing = (phone, body, agentOverride, extraDeps) =>
+    createListingShared(phone, body, agentOverride, { ...pipelineDeps, ...extraDeps });
 
   // ── demo-create (sets session cookie) ──
   // Admin-only: this signs a session for a client-supplied agent phone, so only
@@ -214,8 +214,13 @@ module.exports = function createIntakeRouter(ctx) {
       });
       if (!q.ok) return res.status(402).json(q);
     }
-    const result = await createListing(phone, body, null);
+    // create.html?whatsapp=1 flags a build from the chat draft. Stamp the
+    // source and clear the draft: otherwise the agent's next message would
+    // keep re-sending the review link for a page that already exists.
+    const fromDraft = body.whatsapp_draft === true;
+    const result = await createListing(phone, body, null, fromDraft ? { source: "whatsapp" } : null);
     if (result.error) return res.status(result.code).json({ error: result.error });
+    if (fromDraft) await db.deleteDraft(phone).catch((err) => console.warn("whatsapp draft cleanup failed:", err.message));
     res.json({ ...result, status: "building" });
   });
 

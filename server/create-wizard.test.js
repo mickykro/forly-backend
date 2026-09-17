@@ -55,6 +55,11 @@ assert.ok(createPage.includes('moveWizard(canSkipPhotos ? 3 : 2)'),
 assert.ok(createPage.includes("target === 3 && wizardStage === 1 && photos.length < MIN_PHOTOS"),
   "jumping from details straight to design must fall back to the photo step when imports came up short");
 assert.ok(createPage.includes('"/api/properties/demo-create"'), "demo creation endpoint must remain available");
+// WhatsApp draft prefill: the build must tell the server it came from the
+// chat draft so the draft is cleared once the listing exists.
+assert.ok(createPage.includes('fetch("/api/whatsapp/draft"'), "whatsapp prefill must read the draft endpoint");
+assert.ok(createPage.includes("fromWhatsappDraft = true;"), "prefill must mark the form as draft-sourced");
+assert.ok(createPage.includes("if (fromWhatsappDraft) body.whatsapp_draft = true;"), "create payload must carry whatsapp_draft");
 assert.ok(createPage.includes('"/api/properties/create"'), "authenticated creation endpoint must remain available");
 assert.ok(createPage.includes("data-wizard-step=\"3\""), "progress rail must expose the final design stage");
 
