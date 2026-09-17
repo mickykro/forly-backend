@@ -65,6 +65,16 @@ module.exports = function createWhatsappRouter(ctx) {
     return run;
   }
 
+  // Diagnostics only — must never be able to throw and fail the request
+  // (an unreadable updated_at would make toISOString() throw a RangeError).
+  function describeAge(draft, now) {
+    try {
+      const ms = asMillis(draft.updated_at);
+      const at = Number.isFinite(ms) ? new Date(ms).toISOString() : `unreadable(${JSON.stringify(draft.updated_at)})`;
+      return `updated_at=${at} silent_for_ms=${now.getTime() - ms} paused=${isPaused(draft, now)}`;
+    } catch (err) { return `age=? (${err.message})`; }
+  }
+
   function requireN8n(req, res, next) {
     if (!n8nSecret) return res.status(503).json({ error: "n8n_secret_not_configured" });
     if (!constantTimeEqual(req.get("x-forly-secret"), n8nSecret)) return res.status(403).json({ error: "forbidden" });
@@ -162,7 +172,7 @@ module.exports = function createWhatsappRouter(ctx) {
         const now = new Date();
         console.log(
           `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : JSON.stringify(text)}` +
-          ` | draft before: ${draft ? `${draft.status} (${draft.source}) updated_at=${new Date(asMillis(draft.updated_at)).toISOString()} silent_for_ms=${now.getTime() - asMillis(draft.updated_at)} paused=${isPaused(draft, now)}` : "none"}`
+          ` | draft before: ${draft ? `${draft.status} (${draft.source}) ${describeAge(draft, now)}` : "none"}`
         );
         const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, draft }, depsFor(phone, business));
         // A text that ends a photo batch must not be followed by the timer's report too.
