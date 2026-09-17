@@ -51,13 +51,14 @@ const int = (t) => { const n = num(t); return n === null ? null : Math.round(n);
 const text = (max) => (t) => { const s = String(t || "").trim(); return s ? s.slice(0, max) : null; };
 
 function parsePrice(t) {
-  const m = /(\d+(?:[.,]\d+)*)\s*(מיליון|מ'|m|אלף|k)?/i.exec(String(t || ""));
+  // "מליון" (no yod) is how most people actually type it.
+  const m = /(\d+(?:[.,]\d+)*)\s*(מיליון|מליון|מיל'|מ'|m|אלף|אלפים|k)?/i.exec(String(t || ""));
   if (!m) return null;
   let n = Number(m[1].replace(/,/g, ""));
   if (!Number.isFinite(n)) return null;
   const mult = (m[2] || "").toLowerCase();
-  if (/^(מיליון|מ'|m)$/.test(mult)) n *= 1e6;
-  else if (/^(אלף|k)$/.test(mult)) n *= 1e3;
+  if (/^(מיליון|מליון|מיל'|מ'|m)$/.test(mult)) n *= 1e6;
+  else if (/^(אלף|אלפים|k)$/.test(mult)) n *= 1e3;
   // "2.9" or "3" alone is a shorthand we cannot read (millions? thousands?);
   // storing it as ₪3 is worse than asking again with the format hint.
   return n >= 1000 ? Math.round(n) : null;
