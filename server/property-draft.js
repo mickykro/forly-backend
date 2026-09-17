@@ -14,7 +14,7 @@ const OPTIONAL = ["deal", "size_sqm", "floor", "parking", "neighborhood", "descr
 const ASK_ORDER = [...REQUIRED, ...OPTIONAL];
 const PAUSE_MS = 2 * 60 * 60 * 1000;
 
-const KEYWORDS = ["נכס חדש", "דף נכס", "דף חדש"];
+const KEYWORDS = ["נכס חדש", "דף נכס", "דף חדש", "דף נכס חדש", "ליצור נכס", "צור נכס", "ליצור דף נכס"];
 const LISTING_HINTS = ["חדרים", "חד׳", "חד'", "מ״ר", "מ\"ר", "קומה", "למכירה", "להשכרה", "₪", "מחיר", "שכירות"];
 const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "continue", "כן": "yes", "לא": "no", "המשך": "resume", "חדש": "new" };
 // Natural phrasings for the buttons above; button taps always send the exact

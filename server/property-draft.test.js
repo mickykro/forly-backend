@@ -21,6 +21,8 @@ assert.equal(D.command("להמשיך"), "resume");
 
 assert.equal(D.openerKind("https://x.co/1"), "link");
 assert.equal(D.openerKind("נכס חדש"), "keyword");
+assert.equal(D.openerKind("ליצור נכס"), "keyword");
+assert.equal(D.openerKind("ליצור נכס!"), "keyword");
 assert.equal(D.openerKind("דף נכס"), "keyword");
 assert.equal(D.openerKind("למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת"), "text");
 assert.equal(D.openerKind("היי מה שלומך"), null);
