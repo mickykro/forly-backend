@@ -15,6 +15,9 @@ const { REVIEW_SCOPES } = require("../auth");
 
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+// The agent's own walkthrough video sent in chat (same cap as the create form's upload).
+const VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mp4" };
+const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
 const DAILY_CAP = 30;
 
 const STATUS = { invalid_input: 400, facebook_not_connected: 409, page_unreadable: 422, extract_limit: 429, extract_unavailable: 503 };
@@ -48,10 +51,13 @@ function sniffImage(b) {
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
   if (b.slice(0, 4).toString("hex") === "89504e47") return "image/png";
   if (b.slice(0, 4).toString() === "RIFF" && b.slice(8, 12).toString() === "WEBP") return "image/webp";
+  if (b.slice(4, 8).toString() === "ftyp") return "video/mp4";
   return null;
 }
 
-async function importImage(url, { fetchFn = fetch, lookup } = {}) {
+// { video: true } accepts an mp4/mov instead of an image.
+async function importImage(url, { fetchFn = fetch, lookup, video = false } = {}) {
+  const TYPES = video ? VIDEO_TYPES : IMAGE_TYPES;
   const fail = (code, msg) => { const e = new Error(msg || code); e.code = code; return e; };
   if (!(await isPublicUrl(url, lookup))) throw fail("invalid_input", "url not allowed");
   let r;
@@ -61,12 +67,12 @@ async function importImage(url, { fetchFn = fetch, lookup } = {}) {
   let ct = String(r.headers.get("content-type") || "").split(";")[0].trim();
   // WhatsApp media (Green API's store) comes back as octet-stream: trust the bytes then.
   const generic = !ct || /^(application|binary)\/octet-stream$/.test(ct);
-  if (!IMAGE_TYPES[ct] && !generic) throw fail("page_unreadable", `not an image: ${ct}`);
+  if (!TYPES[ct] && !generic) throw fail("page_unreadable", `not an image: ${ct}`);
   const buffer = Buffer.from(await r.arrayBuffer());
-  if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) throw fail("page_unreadable", "bad size");
-  if (!IMAGE_TYPES[ct]) ct = sniffImage(buffer);
-  if (!ct) throw fail("page_unreadable", "not an image: octet-stream");
-  return { fname: `${crypto.randomUUID()}.${IMAGE_TYPES[ct]}`, buffer, contentType: ct };
+  if (!buffer.length || buffer.length > (video ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES)) throw fail("page_unreadable", "bad size");
+  if (!TYPES[ct]) ct = sniffImage(buffer);
+  if (!TYPES[ct]) throw fail("page_unreadable", `not an image: ${ct || "octet-stream"}`);
+  return { fname: `${crypto.randomUUID()}.${TYPES[ct]}`, buffer, contentType: ct };
 }
 
 module.exports = function createExtractRouter(ctx) {

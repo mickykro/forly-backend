@@ -116,6 +116,8 @@ function priceOff(fields) {
 }
 
 // ── input ──
+function videoSaved() { return { text: "קיבלתי את הסרטון 🎬 הדף ישתמש בו במקום סרטון שנוצר אוטומטית." }; }
+function videoFailed() { return { text: "לא הצלחתי לשמור את הסרטון (MP4 עד 120MB). אפשר לנסות שוב, או להמשיך בלי — ניצור סרטון מהתמונות." }; }
 function heard(transcript) { return `🎙️ שמעתי: ״${transcript}״`; }
 function voiceFailed() { return { text: "לא הצלחתי לשמוע את ההקלטה 🙉 אפשר לכתוב?" }; }
 function sendAsImage() { return { text: "קיבלתי קובץ ולא תמונה. שלחו את התמונות כתמונות (לא כקובץ/מסמך) 📸" }; }
@@ -152,5 +154,5 @@ module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
-  heard, voiceFailed, sendAsImage, firstLinkOnly, buildFailed, outOfQuota,
+  heard, voiceFailed, sendAsImage, firstLinkOnly, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

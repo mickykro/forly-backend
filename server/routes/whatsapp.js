@@ -111,10 +111,10 @@ module.exports = function createWhatsappRouter(ctx) {
   // Photos are re-hosted on Forly's store. The remote-store relay re-authorizes
   // with the caller's session; there is no browser here, so mint the agent's
   // own session for the hop (same trust as the agent uploading from the form).
-  function importPhotoFor(phone) {
+  function importPhotoFor(phone, opts) {
     const req = { headers: { cookie: `forly_session=${signSession(authSecret, phone)}` } };
     return async (url) => {
-      const img = await importImage(url);
+      const img = await importImage(url, opts);
       await storeBuffer(img, { uploadDir, remoteUploadBase, req });
       return `${uploadPublicBase}/files/${img.fname}`;
     };
@@ -124,6 +124,7 @@ module.exports = function createWhatsappRouter(ctx) {
     return {
       business, resolve, parseListing,
       importPhoto: importPhotoFor(phone),
+      importVideo: importPhotoFor(phone, { video: true }),
       createUrl: `${baseUrl}/create.html`,
       extractAllowed: (p) => limit.take(p),
       // /review signs the agent straight into create.html (same trust as
@@ -231,8 +232,9 @@ module.exports = function createWhatsappRouter(ctx) {
     const event = body.event === "photos_edited" ? "photos_edited" : null;
     const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string").slice(0, 12) : [];
     const audioUrl = typeof body.audio_url === "string" && /^https:\/\//.test(body.audio_url) ? body.audio_url : null;
+    const videoUrl = typeof body.video_url === "string" && /^https:\/\//.test(body.video_url) ? body.video_url : null;
     const messageType = typeof body.message_type === "string" ? body.message_type.slice(0, 40) : "";
-    if (!phone || (!text.trim() && !fileUrl && !fileUrls.length && !event && !audioUrl && messageType !== "documentMessage")) {
+    if (!phone || (!text.trim() && !fileUrl && !fileUrls.length && !event && !audioUrl && !videoUrl && messageType !== "documentMessage")) {
       return res.status(400).json({ error: "invalid_input" });
     }
     try {
@@ -240,10 +242,10 @@ module.exports = function createWhatsappRouter(ctx) {
         const [business, draft] = await Promise.all([db.getBusiness(phone).catch(() => null), db.getDraft(phone)]);
         const now = new Date();
         console.log(
-          `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : audioUrl ? "voice" : messageType === "documentMessage" ? "document" : JSON.stringify(text)}` +
+          `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : audioUrl ? "voice" : videoUrl ? "video" : messageType === "documentMessage" ? "document" : JSON.stringify(text)}` +
           ` | draft before: ${draft ? `${draft.status} (${draft.source}) ${describeAge(draft, now)}` : "none"}`
         );
-        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, messageType, draft }, depsFor(phone, business));
+        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, videoUrl, messageType, draft }, depsFor(phone, business));
         // A text that ends a photo batch must not be followed by the timer's report too.
         if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
         console.log(

@@ -148,6 +148,8 @@ function listingBody(draft) {
     floor: f.floor, parking: f.parking,
     storage: f.storage, elevator: f.elevator, shabbat_elevator: f.shabbat_elevator,
     description: f.description, photos_urls: draft.photos,
+    // The agent's own video replaces the generated walkthrough (createListing → page pipeline).
+    own_video_url: draft.video_url || null,
     theme: f.template ? { template: f.template } : null, language: "he",
   };
 }

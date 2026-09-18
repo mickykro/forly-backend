@@ -147,6 +147,16 @@ async function storePhoto(draft, fileUrlOrUrls, deps, now) {
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
 }
 
+// The agent's own video: re-hosted and used instead of a generated walkthrough.
+async function storeVideo(draft, url, deps, now) {
+  let hosted = null;
+  try { hosted = await deps.importVideo(url); } catch (err) { console.warn("[whatsapp-intake] video import failed:", err.message); }
+  if (!hosted) return { handled: true, status: "video_failed", replies: [R.videoFailed()] };
+  draft.video_url = hosted;
+  const p = promptFor(draft, deps);
+  return { handled: true, status: "video_stored", draft: D.touch(draft, now), replies: [oneBubble([R.videoSaved(), ...p.replies])] };
+}
+
 // One bubble: the photo count and whatever comes next, so photos sent mid-questions
 // never look ignored. Reports (and clears) photos dropped over the 12 cap.
 function photoTimer(draft, deps, now) {
@@ -257,6 +267,7 @@ async function resumeTurn(input, deps, draft, now) {
 
 async function activeTurn(input, deps, draft, now) {
   if (input.event === "photo_timer") return photoTimer(draft, deps, now);
+  if (input.videoUrl) return storeVideo(draft, input.videoUrl, deps, now);
   const photoUrls = photoUrlsOf(input);
   if (photoUrls) return storePhoto(draft, photoUrls, deps, now);
   const cmd = D.command(input.text);

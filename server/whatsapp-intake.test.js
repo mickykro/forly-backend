@@ -377,6 +377,19 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ audioUrl: "https://green/v.ogg" }, d);
   assert.equal(t.handled, false, "no draft: a failed voice note is left to the AI");
 
+  // own video: stored on the draft, sent as own_video_url so nothing is generated
+  ({ d, calls } = deps({ importVideo: async (u) => "https://files/" + u.split("/").pop() }));
+  t = await turn({ videoUrl: "https://green/tour.mp4", draft: ready }, d);
+  assert.deepEqual([t.status, t.draft.video_url], ["video_stored", "https://files/tour.mp4"]);
+  assert.match(texts(t), /קיבלתי את הסרטון/);
+  assert.equal(D.listingBody(t.draft).own_video_url, "https://files/tour.mp4");
+  assert.equal(D.listingBody(ready).own_video_url, null, "no video: the walkthrough is generated as before");
+  ({ d } = deps({ importVideo: async () => { throw new Error("too big"); } }));
+  t = await turn({ videoUrl: "https://green/huge.mp4", draft: ready }, d);
+  assert.equal(t.status, "video_failed");
+  t = await turn({ videoUrl: "https://green/tour.mp4" }, d);
+  assert.equal(t.handled, false, "a video with no draft is not the property chat's");
+
   // #12 the agent's comment next to a link wins; two links → first one, and we say so
   ({ d } = deps({ parseListing: async (txt) => (txt.startsWith("t ") ? { fields: { ...FIELDS }, missing: [] } : extracted({ price: 2500000 })()) }));
   t = await turn({ text: "המחיר ירד ל-2.5 מיליון https://www.yad2.co.il/item/abc https://www.yad2.co.il/item/def" }, d);

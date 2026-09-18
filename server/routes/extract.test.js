@@ -56,5 +56,11 @@ assert.equal(lim.take("a", new Date("2026-09-09T00:00:01Z")), true);
   const wa = await importImage("https://c/x", { fetchFn: fetchOctet(jpg), lookup: async () => [{ address: "1.2.3.4" }] });
   assert.deepEqual([wa.contentType, wa.fname.endsWith(".jpg")], ["image/jpeg", true]);
   await assert.rejects(importImage("https://c/x", { fetchFn: fetchOctet(Buffer.from("%PDF")), lookup: async () => [{ address: "1.2.3.4" }] }), (e) => e.code === "page_unreadable");
+  // videos only when asked for, and never as a "photo"
+  const mp4 = Buffer.concat([Buffer.from("00000018", "hex"), Buffer.from("ftypmp42")]);
+  const vid = await importImage("https://c/v", { fetchFn: fetchOctet(mp4), lookup: async () => [{ address: "1.2.3.4" }], video: true });
+  assert.deepEqual([vid.contentType, vid.fname.endsWith(".mp4")], ["video/mp4", true]);
+  await assert.rejects(importImage("https://c/v", { fetchFn: fetchOctet(mp4), lookup: async () => [{ address: "1.2.3.4" }] }), (e) => e.code === "page_unreadable");
+  await assert.rejects(importImage("https://c/x", { fetchFn: fetchOctet(jpg), lookup: async () => [{ address: "1.2.3.4" }], video: true }), (e) => e.code === "page_unreadable");
   console.log("routes/extract.test.js ok");
 })();
