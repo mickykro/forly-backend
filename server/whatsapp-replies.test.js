@@ -1,13 +1,13 @@
 /* whatsapp-replies.js — every reply is a { text, buttons? } with command-word buttons. */
 const assert = require("assert");
 const R = require("./whatsapp-replies");
-const COMMANDS = new Set(["כן", "לא", "ביטול", "דלג", "ממשיכים", "המשך", "חדש", "למכירה", "להשכרה"]);
+const COMMANDS = new Set(["כן", "לא", "ביטול", "דלג", "ממשיכים", "המשך", "חדש", "למכירה", "להשכרה", "קלאסי", "נוקטורן", "ריל"]);
 
 const sum = { city: "חיפה", neighborhood: null, price: 1500000, rooms: 4, deal: "sale", size_sqm: 90, floor: 3, parking: 1, photos: 5 };
 const all = [
   R.offer(4), R.opened("link", { rooms: 3.5, city: "תל אביב", neighborhood: "פלורנטין", price: 2900000 }),
   R.opened("keyword", {}), R.opened("text", { rooms: null, city: null, price: null }),
-  ...["city", "price", "rooms", "deal", "size_sqm", "floor", "parking", "neighborhood", "description"].map(R.ask),
+  ...["city", "price", "rooms", "deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template"].map(R.ask),
   R.invalid("price"), R.required("city"), R.askPhotos(), R.photosProgress(2), R.photosProgress(4), R.photosSaved(1),
   R.reviewReady("https://a/create.html?whatsapp=1"), R.building(sum), R.cancelled(), R.declined(), R.resumePrompt(sum),
   ...["page_unreadable", "facebook_not_connected", "extract_unavailable", "whatever"].map((c) => R.sourceError(c, "https://a/create.html")),

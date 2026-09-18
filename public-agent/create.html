@@ -1631,6 +1631,10 @@
         if (!data) return;
         fromWhatsappDraft = true;
         X.fillFields(data.fields, $);
+        // The chat's design answer preselects the template card; the agent can still change it.
+        if (data.fields.template && document.querySelector('.tpl-card[data-tpl="' + data.fields.template + '"]')) {
+          selectTemplate(data.fields.template);
+        }
         syncDealButtons(); updatePriceLabel(); renderPriceChips();
         if (data.fields.description && !$("#pDesc").value.trim()) {
           $("#pDesc").value = String(data.fields.description).slice(0, 2000);

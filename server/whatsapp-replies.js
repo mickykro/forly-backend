@@ -8,7 +8,7 @@ const ils = (n) => `₪${Number(n).toLocaleString("en-US")}`;
 
 const LABELS = {
   city: "עיר", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
-  floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור",
+  floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב",
 };
 
 const QUESTIONS = {
@@ -21,6 +21,8 @@ const QUESTIONS = {
   parking: "כמה חניות? (אין = 0)",
   neighborhood: "באיזו שכונה?",
   description: "רוצים להוסיף תיאור קצר לנכס? שלחו טקסט חופשי.",
+  // Numbers and names follow property-draft.js TEMPLATES (create.html's picker order).
+  template: "איזה עיצוב לדף? ענו במספר או בשם:\n1 קלאסי · 2 נוקטורן · 3 ריל · 4 אטלייה · 5 לופה · 6 אורביט",
 };
 const REQUIRED = new Set(["city", "price", "rooms"]);
 
@@ -28,6 +30,7 @@ function ask(field) {
   const optional = !REQUIRED.has(field);
   const r = { text: QUESTIONS[field] + (optional ? "\n(או דלג)" : "") };
   if (field === "deal") r.buttons = ["למכירה", "להשכרה"];
+  if (field === "template") r.buttons = ["קלאסי", "נוקטורן", "ריל"]; // Green API caps buttons at 3; the text lists all six
   return r;
 }
 function invalid(field) { return { text: `לא הצלחתי להבין את ה${LABELS[field]}. ${QUESTIONS[field]}` }; }

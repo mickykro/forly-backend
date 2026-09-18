@@ -60,6 +60,7 @@ assert.ok(createPage.includes('"/api/properties/demo-create"'), "demo creation e
 assert.ok(createPage.includes('fetch("/api/whatsapp/draft"'), "whatsapp prefill must read the draft endpoint");
 assert.ok(createPage.includes("fromWhatsappDraft = true;"), "prefill must mark the form as draft-sourced");
 assert.ok(createPage.includes("if (fromWhatsappDraft) body.whatsapp_draft = true;"), "create payload must carry whatsapp_draft");
+assert.ok(createPage.includes("selectTemplate(data.fields.template);"), "prefill must preselect the design chosen in chat");
 assert.ok(createPage.includes('"/api/properties/create"'), "authenticated creation endpoint must remain available");
 assert.ok(createPage.includes("data-wizard-step=\"3\""), "progress rail must expose the final design stage");
 

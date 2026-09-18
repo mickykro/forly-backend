@@ -10,7 +10,7 @@ const { MIN_PHOTOS } = require("./listing-create");
 const { asMillis } = require("./utils");
 
 const REQUIRED = ["city", "price", "rooms"];
-const OPTIONAL = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description"];
+const OPTIONAL = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template"];
 const ASK_ORDER = [...REQUIRED, ...OPTIONAL];
 const PAUSE_MS = 2 * 60 * 60 * 1000;
 
@@ -20,6 +20,14 @@ const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "
 // Natural phrasings for the buttons above; button taps always send the exact
 // COMMANDS word, these cover what a person types instead of tapping.
 const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume" };
+
+// Page designs, in the order create.html's picker lists them (1-6). The first
+// alias is the Hebrew name shown there; create.html preselects the chosen one.
+const TEMPLATES = {
+  original: ["קלאסי", "classic", "original"], nocturne: ["נוקטורן", "nocturne"], reel: ["ריל", "reel"],
+  atelier: ["אטלייה", "atelier"], loupe: ["לופה", "לופ", "loupe"], orbite: ["אורביט", "orbite"],
+};
+const TEMPLATE_KEYS = Object.keys(TEMPLATES);
 
 // First http(s) link in a chat message; trailing punctuation is not part of it.
 const URL_RE = /https?:\/\/[^\s<>"']+/i;
@@ -69,12 +77,18 @@ function parseDeal(t) {
   if (/למכירה|מכירה/.test(s)) return "sale";
   return null;
 }
+function parseTemplate(t) {
+  const s = clean(t).toLowerCase();
+  const n = /^([1-6])(?:\D|$)/.exec(s);
+  if (n) return TEMPLATE_KEYS[Number(n[1]) - 1];
+  return TEMPLATE_KEYS.find((k) => TEMPLATES[k].includes(s)) || null;
+}
 function parseFloor(t) { return /קרקע/.test(String(t || "")) ? 0 : int(t); }
 function parseParking(t) { return /^(אין|ללא|לא)$/.test(clean(t)) ? 0 : int(t); }
 
 const PARSERS = {
   city: text(60), price: parsePrice, rooms: num, deal: parseDeal, size_sqm: num,
-  floor: parseFloor, parking: parseParking, neighborhood: text(60), description: text(2000),
+  floor: parseFloor, parking: parseParking, neighborhood: text(60), description: text(2000), template: parseTemplate,
 };
 function parseAnswer(field, t) { return PARSERS[field] ? PARSERS[field](t) : null; }
 function isRequired(field) { return REQUIRED.includes(field); }
@@ -84,6 +98,7 @@ function emptyFields() {
   const f = {};
   for (const k of Object.keys(SCHEMA)) f[k] = null;
   f.description = null;
+  f.template = null;
   return f;
 }
 
@@ -119,7 +134,7 @@ function summary(draft) {
 }
 
 module.exports = {
-  REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA,
+  REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
   findUrl, command, openerKind, parseAnswer, isRequired, asMillis,
   newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary,
 };

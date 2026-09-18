@@ -57,7 +57,15 @@ assert.equal(D.parseAnswer("neighborhood", "x".repeat(100)).length, 60);
 assert.equal(D.parseAnswer("description", "y".repeat(3000)).length, 2000);
 assert.equal(D.isRequired("city"), true);
 assert.equal(D.isRequired("floor"), false);
-assert.deepEqual(D.ASK_ORDER, ["city", "price", "rooms", "deal", "size_sqm", "floor", "parking", "neighborhood", "description"]);
+assert.deepEqual(D.ASK_ORDER, ["city", "price", "rooms", "deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template"]);
+assert.deepEqual(D.TEMPLATE_KEYS, ["original", "nocturne", "reel", "atelier", "loupe", "orbite"], "same order as create.html's picker");
+assert.equal(D.parseAnswer("template", "2"), "nocturne");
+assert.equal(D.parseAnswer("template", "2 נוקטורן"), "nocturne");
+assert.equal(D.parseAnswer("template", "קלאסי"), "original");
+assert.equal(D.parseAnswer("template", " Reel "), "reel");
+assert.equal(D.parseAnswer("template", "לופ"), "loupe");
+assert.equal(D.parseAnswer("template", "7"), null);
+assert.equal(D.parseAnswer("template", "מודרני"), null);
 
 // ── draft state ──
 const t0 = new Date("2026-09-12T10:00:00Z");
@@ -71,7 +79,7 @@ assert.deepEqual(D.nextStep(d), { kind: "ask", field: "city" });
 
 d.fields.city = "חיפה"; d.fields.price = 1500000; d.fields.rooms = 4;
 assert.deepEqual(D.nextStep(d), { kind: "ask", field: "deal" });
-d.skipped.push("deal", "size_sqm", "floor", "parking", "neighborhood", "description");
+d.skipped.push("deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template");
 assert.deepEqual(D.nextStep(d), { kind: "photos" });
 d.photos.push("a", "b");
 assert.deepEqual(D.nextStep(d), { kind: "photos" });

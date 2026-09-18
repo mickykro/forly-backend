@@ -58,6 +58,11 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   let draft = t.draft;
   t = await turn({ text: "דירה מהממת", draft }, d);
   assert.equal(t.draft.fields.description, "דירה מהממת");
+  assert.equal(t.status, "asked:template", "design is the last question, after description");
+  assert.deepEqual(t.replies[0].buttons, ["קלאסי", "נוקטורן", "ריל"]);
+  draft = t.draft;
+  t = await turn({ text: "2", draft }, d);
+  assert.deepEqual([t.draft.fields.template, t.status], ["nocturne", "confirm"], "photos already there: the review link follows the design answer");
   assert.equal(t.status, "confirm");
   assert.equal(t.replies[t.replies.length - 1].buttons, undefined);
   assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
@@ -110,7 +115,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d, calls } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
-  for (let i = 0; i < 6; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  for (let i = 0; i < 7; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
   assert.equal(t.status, "photos");
   t = await turn({ fileUrl: "https://green/a.jpg", draft }, d);
   assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a photo is stored silently and arms the timer");
@@ -137,7 +142,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
-  for (let i = 0; i < 6; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  for (let i = 0; i < 7; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
   t = await turn({ fileUrls: ["https://green/burst1.jpg", "https://green/burst2.jpg", "https://green/burst3.jpg"], draft }, d);
   assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a bundled burst is stored in one turn");
   draft = t.draft;
@@ -156,7 +161,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d, calls } = deps());
   const ready = D.newDraft(PHONE, "keyword", T0);
   Object.assign(ready.fields, { city: "חיפה", price: 1500000, rooms: 4 });
-  ready.skipped = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description"];
+  ready.skipped = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template"];
   ready.photos = ["p1", "p2", "p3"];
   t = await turn({ text: "ממשיכים", draft: ready }, d);
   assert.equal(t.status, "confirm", "ממשיכים moves to confirm");
