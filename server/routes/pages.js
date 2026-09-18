@@ -284,9 +284,12 @@ module.exports = function createPagesRouter(ctx) {
       if (!doc.property.tags.length) doc.property.tags = deriveTags(doc.property, listing && listing.description);
       await db.savePage(doc);
       await db.setListingPageId(body.listing_id, pageId);
-      // A listing that came in over WhatsApp: its chat draft is done.
+      // A listing built from chat: its draft is done. Only that draft — the agent
+      // may already be on the next property, whose draft must survive.
       if (listing && listing.source === "whatsapp") {
-        db.deleteDraft(body.business_phone).catch((e) => console.warn("draft cleanup failed:", e && e.message));
+        db.getDraft(body.business_phone)
+          .then((d) => d && d.listing_id === body.listing_id && db.deleteDraft(body.business_phone))
+          .catch((e) => console.warn("draft cleanup failed:", e && e.message));
       }
       // Realtime: the portal shows the listing the moment it exists.
       portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
