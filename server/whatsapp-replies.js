@@ -4,6 +4,7 @@
  * property-draft.command() understands, so a tap and a typed word behave the
  * same. Green API: max 3 buttons, 25 chars each (utils.sendWhatsAppButtons).
  */
+const { MIN_PHOTOS } = require("./property-draft");
 const ils = (n) => `₪${Number(n).toLocaleString("en-US")}`;
 
 const LABELS = {
@@ -52,9 +53,9 @@ function opened(kind, fields) {
 }
 
 function offer(n) { return { text: `ערכתי ${n} תמונות ✨ לבנות מהן דף נכס?`, buttons: ["כן", "לא"] }; }
-function askPhotos() { return { text: "עכשיו התמונות 📸 שלחו לפחות 3 תמונות של הנכס." }; }
+function askPhotos() { return { text: `עכשיו התמונות 📸 שלחו לפחות ${MIN_PHOTOS} תמונות של הנכס.` }; }
 function photosProgress(n) {
-  if (n < 3) return { text: `יש לי ${n} תמונות. צריך לפחות 3 — שלחו עוד.` };
+  if (n < MIN_PHOTOS) return { text: `יש לי ${n} תמונות. צריך לפחות ${MIN_PHOTOS} — שלחו עוד.` };
   return { text: `יש לי ${n} תמונות. עוד תמונות, או ממשיכים?`, buttons: ["ממשיכים"] };
 }
 function photosSaved(n) { return { text: `שמרתי ${n} תמונות לנכס.` }; }

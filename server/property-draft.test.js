@@ -84,6 +84,8 @@ assert.deepEqual(D.nextStep(d), { kind: "photos" });
 d.photos.push("a", "b");
 assert.deepEqual(D.nextStep(d), { kind: "photos" });
 d.photos.push("c");
+assert.deepEqual(D.nextStep(d), { kind: "photos" });
+d.photos.push("d");
 assert.deepEqual(D.nextStep(d), { kind: "confirm" });
 
 assert.equal(D.isPaused(d, new Date(t0.getTime() + D.PAUSE_MS - 1)), false);
@@ -94,7 +96,7 @@ assert.equal(D.isExpiredPrompt({ ...d, status: "offered" }, t0), false);
 assert.equal(D.isExpiredPrompt(d, new Date(t0.getTime() + D.PAUSE_MS + 1)), false);
 
 const s = D.summary(d);
-assert.deepEqual([s.city, s.price, s.rooms, s.photos], ["חיפה", 1500000, 4, 3]);
+assert.deepEqual([s.city, s.price, s.rooms, s.photos], ["חיפה", 1500000, 4, 4]);
 
 const t1 = new Date(t0.getTime() + 1000);
 assert.equal(D.touch(d, t1).updated_at, t1);

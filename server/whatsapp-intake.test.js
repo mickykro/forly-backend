@@ -15,7 +15,7 @@ function deps(over = {}) {
   const d = {
     business: { phone: PHONE },
     resolve: async ({ url }) => ({ source: "scrape", text: "t " + url, description: "desc",
-      photos: [1, 2, 3].map((i) => ({ url: `https://c/${i}.jpg` })) }),
+      photos: [1, 2, 3, 4].map((i) => ({ url: `https://c/${i}.jpg` })) }),
     parseListing: async () => ({ fields: { ...FIELDS }, missing: [] }),
     importPhoto: async (u) => { calls.imported.push(u); return "https://files/" + u.split("/").pop(); },
     createUrl: CREATE,
@@ -49,12 +49,12 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.status, "asked:description", "every extractor field came from the link; only description is empty");
   assert.equal(t.draft.source, "link");
   assert.equal(t.draft.fields.city, "תל אביב");
-  assert.deepEqual(t.draft.photos, ["https://files/1.jpg", "https://files/2.jpg", "https://files/3.jpg"]);
+  assert.deepEqual(t.draft.photos, ["https://files/1.jpg", "https://files/2.jpg", "https://files/3.jpg", "https://files/4.jpg"]);
   assert.equal(t.draft.fields.description, null, "description is asked, not auto-filled");
   assert.match(texts(t), /קראתי את המודעה: 3\.5 חד׳ בפלורנטין/);
   assert.match(texts(t), /תיאור/);
 
-  // description answered → photos are already 3 → confirm sends the review link
+  // description answered → photos are already 4 → confirm sends the review link
   let draft = t.draft;
   t = await turn({ text: "דירה מהממת", draft }, d);
   assert.equal(t.draft.fields.description, "דירה מהממת");
@@ -162,7 +162,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   const ready = D.newDraft(PHONE, "keyword", T0);
   Object.assign(ready.fields, { city: "חיפה", price: 1500000, rooms: 4 });
   ready.skipped = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template"];
-  ready.photos = ["p1", "p2", "p3"];
+  ready.photos = ["p1", "p2", "p3", "p4"];
   t = await turn({ text: "ממשיכים", draft: ready }, d);
   assert.equal(t.status, "confirm", "ממשיכים moves to confirm");
   assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
@@ -171,7 +171,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "ביטול", draft: ready }, d);
   assert.deepEqual([t.status, t.del], ["cancelled", true]);
 
-  // ── photos_edited: n8n sends one edited photo per call; offer once at 3 ──
+  // ── photos_edited: n8n sends one edited photo per call; offer once at 4 ──
   ({ d, calls } = deps());
   t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"] }, d);
   assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.photos.length, t.replies.length],
@@ -179,17 +179,18 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ event: "photos_edited", photos: ["https://fal/2.jpg"], draft: t.draft }, d);
   assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:2", 2, 0]);
   t = await turn({ event: "photos_edited", photos: ["https://fal/3.jpg"], draft: t.draft }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 3, true]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/4.jpg"], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 4, true]);
   assert.deepEqual(t.replies[0].buttons, ["כן", "לא"]);
-  assert.match(texts(t), /ערכתי 3 תמונות/);
+  assert.match(texts(t), /ערכתי 4 תמונות/);
   const offered = t.draft;
-  t = await turn({ event: "photos_edited", photos: ["https://fal/4.jpg"], draft: offered }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:4", 4, 0], "the offer is never repeated");
-  assert.equal(calls.imported.length, 4, "every edited photo is re-hosted on Forly");
+  t = await turn({ event: "photos_edited", photos: ["https://fal/5.jpg"], draft: offered }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:5", 5, 0], "the offer is never repeated");
+  assert.equal(calls.imported.length, 5, "every edited photo is re-hosted on Forly");
   // a future n8n batch path may send several at once: one call, one offer
   ({ d } = deps());
-  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg"] }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 3, true]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg", "https://fal/4.jpg"] }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 4, true]);
   t = await turn({ text: "בוקר טוב", draft: offered }, d);
   assert.equal(t.handled, false, "an offered draft does not hijack unrelated chat");
   t = await turn({ text: "לא", draft: offered }, d);
@@ -235,14 +236,15 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ event: "photos_edited", photos: ["https://fal/2.jpg"], draft: t.draft, now: later }, d);
   assert.deepEqual([t.status, t.draft.status, t.draft.fields.city, t.replies.length], ["resume_pending:2", "resume_prompt", "חיפה", 0]);
   t = await turn({ event: "photos_edited", photos: ["https://fal/3.jpg"], draft: t.draft, now: later }, d);
-  assert.deepEqual([t.status, t.draft.pending_opener.photos.length], ["resume_pending:3", 3]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/4.jpg"], draft: t.draft, now: later }, d);
+  assert.deepEqual([t.status, t.draft.pending_opener.photos.length], ["resume_pending:4", 4]);
   const rpp = t.draft;
   t = await turn({ text: "חדש", draft: rpp, now: later }, d);
-  assert.deepEqual([t.draft.status, t.draft.source, t.draft.photos.length, t.draft.offer_sent], ["offered", "photos", 3, true], "new: all edited photos become the offer");
-  assert.match(texts(t), /ערכתי 3 תמונות/);
+  assert.deepEqual([t.draft.status, t.draft.source, t.draft.photos.length, t.draft.offer_sent], ["offered", "photos", 4, true], "new: all edited photos become the offer");
+  assert.match(texts(t), /ערכתי 4 תמונות/);
   t = await turn({ text: "המשך", draft: rpp, now: later }, d);
-  assert.deepEqual([t.status, t.draft.status, t.draft.fields.city, t.draft.photos.length], ["asked:price", "active", "חיפה", 3], "resume: the edited photos join the paused draft");
-  assert.match(texts(t), /שמרתי 3 תמונות/);
+  assert.deepEqual([t.status, t.draft.status, t.draft.fields.city, t.draft.photos.length], ["asked:price", "active", "חיפה", 4], "resume: the edited photos join the paused draft");
+  assert.match(texts(t), /שמרתי 4 תמונות/);
 
   // ── building: only an opener replaces it ──
   ({ d } = deps());

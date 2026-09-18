@@ -6,12 +6,13 @@
  * answer" lives here so it can be unit-tested without Express or Firestore.
  */
 const { SCHEMA } = require("./listing-extract");
-const { MIN_PHOTOS } = require("./listing-create");
 const { asMillis } = require("./utils");
 
 const REQUIRED = ["city", "price", "rooms"];
 const OPTIONAL = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template"];
 const ASK_ORDER = [...REQUIRED, ...OPTIONAL];
+// create.html won't build a page from fewer than 4, stricter than the API's 3.
+const MIN_PHOTOS = 4;
 const PAUSE_MS = 2 * 60 * 60 * 1000;
 
 const KEYWORDS = ["נכס חדש", "דף נכס", "דף חדש", "דף נכס חדש", "ליצור נכס", "צור נכס", "ליצור דף נכס"];
