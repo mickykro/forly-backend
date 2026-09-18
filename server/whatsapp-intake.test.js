@@ -162,6 +162,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a bundled burst is stored in one turn");
   draft = t.draft;
   assert.deepEqual(draft.photos, ["https://files/burst1.jpg", "https://files/burst2.jpg", "https://files/burst3.jpg"]);
+  t = await turn({ fileUrls: ["https://green/burst1.jpg", "https://green/burst2.jpg", "https://green/burst3.jpg"], draft }, d);
+  assert.equal(t.draft.photos.length, 3, "the same burst delivered twice is stored once");
 
   // photo while a question is open: stored, timer prompt says saved + repeats the question
   ({ d } = deps());

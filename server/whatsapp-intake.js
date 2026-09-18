@@ -111,7 +111,10 @@ function answerField(draft, field, text, cmd, deps) {
 // event:"photo_timer" so the agent gets one progress message per batch.
 async function storePhoto(draft, fileUrlOrUrls, deps, now) {
   const raw = Array.isArray(fileUrlOrUrls) ? fileUrlOrUrls : [fileUrlOrUrls];
-  const urls = [...new Set(raw)]; // a burst can list the same source url twice
+  // n8n can deliver the same burst twice (two debounce winners): skip sources already stored.
+  const seen = draft.photo_sources || [];
+  const urls = [...new Set(raw)].filter((u) => !seen.includes(u));
+  draft.photo_sources = seen.concat(urls);
   const hosted = await importAll(urls, deps.importPhoto);
   for (const h of hosted) { if (draft.photos.length < MAX_PHOTOS) draft.photos.push(h); }
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
