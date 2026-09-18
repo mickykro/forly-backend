@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const CLIP_MS = 5042;   // the real /assets/loading.mp4 cycle
+const CYCLE_MS = 2400;  // target length of one on-screen pass
 const BUDGET_MS = 900;  // LOADER_MIN_MS + fade + slack — well under one cycle
 
 // Minimal fake DOM — just enough of the shape api.js touches.
@@ -82,6 +83,23 @@ const hide = (FLY) => new Promise((resolve) => {
     const ms = await hide(FLY);
     assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms even with playback blocked`);
     assert.equal(box.classes.has("hidden"), true, "loader hides without any media event");
+  }
+
+  // ── the clip is paced to one pass per CYCLE_MS, whatever the source length ──
+  {
+    const { video } = setup(); // paced on wire-up, the clip is already autoplaying
+    const pass = (CLIP_MS / video.playbackRate);
+    assert.ok(Math.abs(pass - CYCLE_MS) < 1, `one pass takes ${Math.round(pass)}ms, expected ${CYCLE_MS}ms`);
+    assert.equal(video.defaultPlaybackRate, video.playbackRate, "survives a source reload");
+  }
+
+  // ── pacing falls back to the known clip length before metadata lands ──
+  {
+    const { FLY, video } = setup();
+    video.duration = NaN; // metadata not in yet
+    FLY.loaderShow();
+    const pass = (CLIP_MS / video.playbackRate);
+    assert.ok(Math.abs(pass - CYCLE_MS) < 1, `unpaced before metadata: one pass takes ${Math.round(pass)}ms`);
   }
 
   // ── while still loading, "ended" keeps the clip looping ──

@@ -98,10 +98,27 @@ window.FLY = (function () {
   // second cycle when the hide landed just after a loop restart. Now the clip is
   // decoration over the real wait: it is cut off wherever it happens to be, with
   // a short crossfade so the cut does not read as a flicker.
-  var LOADER_MIN_MS = 350;   // anti-flicker floor for very fast responses
-  var LOADER_FADE_MS = 160;  // must match the .vloader opacity transition
+  var LOADER_MIN_MS = 350;    // anti-flicker floor for very fast responses
+  var LOADER_FADE_MS = 160;   // must match the .vloader opacity transition
+  // How long one pass of the animation should take. The source clip is 5.04s,
+  // which is longer than most waits, so the cut lands early in the stroke every
+  // time. Speeding it up means a typical wait shows a whole pass instead of the
+  // opening few frames. Tune here, not in the asset.
+  var LOADER_CYCLE_MS = 2400;
+  var CLIP_MS = 5042;         // /assets/loading.mp4, used until metadata lands
 
   function loaderBox() { return document.querySelector(".vloader"); }
+
+  // playbackRate resets whenever the element reloads its source, so pin
+  // defaultPlaybackRate too and re-apply on show.
+  function loaderPace(v) {
+    if (!v) return;
+    var srcMs = (v.duration > 0 && isFinite(v.duration)) ? v.duration * 1000 : CLIP_MS;
+    var rate = srcMs / LOADER_CYCLE_MS;
+    if (rate < 0.25) rate = 0.25;
+    if (rate > 4) rate = 4; // browsers drop audio past ~4x; muted here, but stay sane
+    try { v.defaultPlaybackRate = rate; v.playbackRate = rate; } catch (e) { /* ignore */ }
+  }
 
   function loaderShow(msg) {
     var box = loaderBox();
@@ -117,6 +134,7 @@ window.FLY = (function () {
     var v = box.querySelector("video");
     // currentTime throws if metadata has not loaded yet — the reset is cosmetic.
     if (v) { try { v.currentTime = 0; } catch (e) { /* not seekable yet */ }
+             loaderPace(v);
              var p = v.play(); if (p && p.catch) p.catch(function () {}); }
   }
 
@@ -152,6 +170,8 @@ window.FLY = (function () {
     // Looping is driven here rather than by the `loop` attribute so the clip can
     // be swapped for one that reports "ended"; a hide never waits on it.
     document.querySelectorAll(".vloader video").forEach(function (v) {
+      loaderPace(v); // the clip is already autoplaying: pace it now
+      v.addEventListener("loadedmetadata", function () { loaderPace(v); });
       v.addEventListener("ended", function () {
         var box = v.closest(".vloader");
         if (box && box.classList.contains("hidden")) return;
