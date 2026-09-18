@@ -44,6 +44,19 @@ const { transcribe } = createWhatsappRouter;
   await router.sweepStuckBuilds(now);
   assert.equal(msgs.length, 0, "a failed listing is reported once");
 
+  // ── dev-only test video: production chat listings still get a generated walkthrough ──
+  const { createListing } = require("../listing-create");
+  const hooks = [];
+  const base = { n8nWw1Webhook: "https://n8n/ww1", n8nPipelineWebhook: "https://n8n/pipe", baseUrl: "https://srv", source: "whatsapp",
+    fetchFn: async (url) => { hooks.push(url); return { status: 200 }; } };
+  const listing = { city: "חיפה", price: 1500000, rooms: 4, photos_urls: ["a", "b", "c", "d"] };
+  const prod = await createListing("P9", listing, null, base);
+  const dev = await createListing("P9", listing, null, { ...base, isDevRun: true });
+  await new Promise((r) => setImmediate(r));
+  assert.equal((await db.getListing(prod.listing_id)).own_video_url, null, "production never uses the test video");
+  assert.match((await db.getListing(dev.listing_id)).own_video_url, /^https:\/\/srv\/files\/pages\/.+\/walkthrough\.mp4$/);
+  assert.deepEqual(hooks, ["https://n8n/ww1", "https://n8n/pipe"], "prod generates (WW1), dev reuses the video (page pipeline)");
+
   console.log("routes/whatsapp.test.js ok");
   process.exit(0);
 })().catch((err) => { console.error(err); process.exit(1); });

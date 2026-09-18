@@ -12,9 +12,9 @@ const { sanitizeTheme, sanitizeLang } = require("./utils");
 const { sanitizeTags } = require("./tags");
 
 const MAX_PHOTOS = 12;
-// ponytail: testing only — chat/review listings reuse the last generated walkthrough
-// (served from this server's /files) instead of paying for a new one. Delete to
-// generate again; an agent's own video still wins.
+// ponytail: dev only (N8N_DEV_* webhooks set) — chat/review listings reuse the last
+// generated walkthrough (served from this server's /files) instead of paying for a
+// new one. Production never takes this path. An agent's own video still wins.
 const TEST_VIDEO_PATH = "/files/pages/krvytvrv-nksym-rwwx6/walkthrough.mp4";
 const MIN_PHOTOS = 3;
 
@@ -44,7 +44,9 @@ async function createListing(phone, body, agentOverride, deps) {
     source = "dashboard", fetchFn = fetch } = deps;
   const invalid = validateListing(body);
   if (invalid) return invalid;
-  if (source === "whatsapp" && !body.own_video_url && baseUrl) body = { ...body, own_video_url: baseUrl + TEST_VIDEO_PATH };
+  if ((isDevRun || isDevPipelineRun) && source === "whatsapp" && !body.own_video_url && baseUrl) {
+    body = { ...body, own_video_url: baseUrl + TEST_VIDEO_PATH };
+  }
   const listingId = crypto.randomUUID();
   const listing = {
     listing_id: listingId, business_phone: phone, source,
