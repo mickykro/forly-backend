@@ -34,6 +34,12 @@ assert.equal("made_up" in all, false);
 assert.equal(coerce({ deal: "lease" }).deal, null);
 assert.equal(coerce({ price: "abc" }).price, null);
 assert.equal(coerce(null).city, null);
+// area breakdown must add up to the total or create.html blocks the form
+const mis = coerce({ size_sqm: 110, sqm_built: 110, sqm_balcony: 15 });
+assert.deepEqual([mis.size_sqm, mis.sqm_built, mis.sqm_balcony], [110, null, null]);
+const ok = coerce({ size_sqm: 125, sqm_built: 110, sqm_balcony: 15 });
+assert.deepEqual([ok.size_sqm, ok.sqm_built, ok.sqm_balcony], [125, 110, 15]);
+assert.equal(coerce({ sqm_built: 90, sqm_garden: 40 }).size_sqm, 130);
 assert.equal(coerce({ address: "x".repeat(400) }).address.length, 180);
 
 // ── missingOf: only the agreed required set, only nulls ──
