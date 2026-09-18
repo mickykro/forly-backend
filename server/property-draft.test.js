@@ -59,6 +59,11 @@ assert.equal(D.isRequired("city"), true);
 assert.equal(D.isRequired("floor"), false);
 assert.deepEqual(D.ASK_ORDER, ["city", "price", "rooms", "deal", "size_sqm", "floor", "parking", "neighborhood", "description"], "the design is asked only on the create path");
 assert.deepEqual(D.TEMPLATE_KEYS, ["original", "nocturne", "reel", "atelier", "loupe", "orbite"], "same order as create.html's picker");
+assert.deepEqual(["בכפר סבא", "ברמת גן", "באר שבע", "בבאר שבע", "בני ברק", "חיפה"].map((t) => D.parseAnswer("city", t)),
+  ["כפר סבא", "רמת גן", "באר שבע", "באר שבע", "בני ברק", "חיפה"], "spoken 'in <city>' drops the ב, real ב-cities keep it");
+assert.deepEqual([["size_sqm", "100 ו-10."], ["size_sqm", "מאה ועשר"], ["floor", "קומה אחת"], ["floor", "קומה שנייה"], ["rooms", "שלוש וחצי"],
+  ["floor", "2 מתוך 6"], ["size_sqm", "ועשר מטר"], ["rooms", "40"]].map(([f, t]) => D.parseAnswer(f, t)),
+  [110, 110, 1, 2, 3.5, 2, null, null], "spoken numbers; impossible values are rejected");
 assert.equal(D.parseAnswer("template", "2"), "nocturne");
 assert.equal(D.parseAnswer("template", "2 נוקטורן"), "nocturne");
 assert.equal(D.parseAnswer("template", "קלאסי"), "original");

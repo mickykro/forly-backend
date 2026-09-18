@@ -131,8 +131,17 @@ function parseFloor(t) {
 }
 function parseParking(t) { return /^(אין|ללא|לא)$/.test(clean(t)) ? 0 : int(t); }
 
+// Spoken answers keep the preposition: "בכפר סבא", "בתל אביב". Drop a leading ב unless
+// the city's own name starts with it.
+const B_CITIES = ["באר שבע", "באר יעקב", "בני ברק", "בת ים", "בית שמש", "בית שאן", "ביתר עילית", "בית דגן", "בנימינה", "בית ג'ן", "בועיינה", "בסמת טבעון", "באקה אל-גרבייה"];
+function parseCity(t) {
+  const s = text(60)(t);
+  if (!s || !s.startsWith("ב") || B_CITIES.some((c) => s.startsWith(c))) return s;
+  return s.slice(1).trim() || s;
+}
+
 const PARSERS = {
-  city: text(60), price: parsePrice, rooms: num, deal: parseDeal, size_sqm: num,
+  city: parseCity, price: parsePrice, rooms: num, deal: parseDeal, size_sqm: num,
   floor: parseFloor, parking: parseParking, neighborhood: text(60), description: text(2000), template: parseTemplate,
 };
 // An impossible value is a mishearing or typo ("ועשר מטר" → 10 m²): ask again instead.
