@@ -41,7 +41,8 @@ function findUrl(text) {
   try { return new URL(url).href; } catch (e) { return null; }
 }
 
-const clean = (t) => String(t || "").trim().replace(/[!.?]+$/, "").trim();
+// Emoji and trailing punctuation don't change the meaning: "✅ ליצור!" is "ליצור".
+const clean = (t) => String(t || "").replace(/[\p{Extended_Pictographic}️‍]/gu, "").trim().replace(/[!.?]+$/, "").trim();
 function command(text) { const c = clean(text); return COMMANDS[c] || COMMAND_ALIASES[c] || null; }
 function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
 function looksLikeListing(text) {
@@ -62,13 +63,17 @@ const int = (t) => { const n = num(t); return n === null ? null : Math.round(n);
 const text = (max) => (t) => { const s = String(t || "").trim(); return s ? s.slice(0, max) : null; };
 
 function parsePrice(t) {
-  // "מליון" (no yod) is how most people actually type it.
-  const m = /(\d+(?:[.,]\d+)*)\s*(מיליון|מליון|מיל'|מ'|m|אלף|אלפים|k)?/i.exec(String(t || ""));
+  // Currency marks carry no number: "2,350,000 ש״ח", "₪2.35M".
+  const s = String(t || "").replace(/₪|ש["״']ח|שקלים|שקל|nis/gi, " ");
+  // "2 מיליון ו-350 (אלף)" → 2,350,000. "מליון" (no yod) is how most people type it.
+  const both = /(\d+(?:\.\d+)?)\s*(?:מיליון|מליון|מיל['׳]?|מ['׳])\s*ו-?\s*(\d+)/.exec(s);
+  if (both) return Math.round(Number(both[1]) * 1e6 + Number(both[2]) * 1e3);
+  const m = /(\d+(?:[.,]\d+)*)\s*(מיליון|מליון|מיל['׳]?|מ['׳]|m|אלף|אלפים|k)?/i.exec(s);
   if (!m) return null;
   let n = Number(m[1].replace(/,/g, ""));
   if (!Number.isFinite(n)) return null;
   const mult = (m[2] || "").toLowerCase();
-  if (/^(מיליון|מליון|מיל'|מ'|m)$/.test(mult)) n *= 1e6;
+  if (/^(מיליון|מליון|מיל['׳]?|מ['׳]|m)$/.test(mult)) n *= 1e6;
   else if (/^(אלף|אלפים|k)$/.test(mult)) n *= 1e3;
   // "2.9" or "3" alone is a shorthand we cannot read (millions? thousands?);
   // storing it as ₪3 is worse than asking again with the format hint.
@@ -85,6 +90,11 @@ function parseTemplate(t) {
   const n = /^([1-6])(?:\D|$)/.exec(s);
   if (n) return TEMPLATE_KEYS[Number(n[1]) - 1];
   return TEMPLATE_KEYS.find((k) => TEMPLATES[k].includes(s)) || null;
+}
+// A sale under ₪20,000 or a rent over ₪100,000 is almost always the wrong deal type or a typo.
+function priceLooksOff(f) {
+  if (!f.price || !f.deal) return false;
+  return (f.deal === "sale" && f.price < 20000) || (f.deal === "rent" && f.price > 100000);
 }
 function parseFloor(t) { return /קרקע/.test(String(t || "")) ? 0 : int(t); }
 function parseParking(t) { return /^(אין|ללא|לא)$/.test(clean(t)) ? 0 : int(t); }
@@ -159,5 +169,5 @@ function summary(draft) {
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
   findUrl, command, openerKind, parseAnswer, isRequired, asMillis,
-  newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, listingBody,
+  newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };

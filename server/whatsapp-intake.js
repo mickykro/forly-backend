@@ -11,6 +11,7 @@
  */
 const D = require("./property-draft");
 const R = require("./whatsapp-replies");
+const C = require("./draft-corrections");
 
 const MAX_PHOTOS = 12;
 
@@ -34,7 +35,13 @@ function promptFor(draft, deps) {
   if (step.kind === "photos") return { status: "photos", replies: [R.askPhotos()] };
   if (step.kind === "choose") return { status: "choose", replies: [R.choose()] };
   if (step.kind === "create") return { status: "create", replies: [] }; // handleTurn builds it
-  return { status: "confirm", replies: [R.reviewReady(deps.reviewLink(draft.phone))] };
+  return { status: "confirm", replies: [R.reviewReady(deps.reviewLink(draft.phone), draft.skipped)] };
+}
+
+// Several replies as one WhatsApp bubble; the last one's buttons are kept.
+function oneBubble(replies) {
+  const last = replies[replies.length - 1];
+  return { text: replies.map((r) => r.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}) };
 }
 
 // Build the page straight from the draft (the agent chose "ליצור"). On failure
@@ -45,7 +52,10 @@ async function build(draft, deps, now) {
     console.error("[whatsapp-intake] create failed:", err);
     res = { error: "create_failed", code: 500 };
   }
-  if (res.error) return { handled: true, status: `create_failed:${res.code}`, draft: D.touch(draft, now), replies: [R.createFailed(deps.createUrl)] };
+  if (res.error) {
+    const reply = res.code === 402 ? R.outOfQuota(res.message) : R.createFailed(deps.createUrl);
+    return { handled: true, status: `create_failed:${res.code}`, draft: D.touch(draft, now), replies: [reply] };
+  }
   draft.status = "building";
   draft.listing_id = res.listing_id;
   return { handled: true, status: "building", draft: D.touch(draft, now), replies: [R.building(draft.fields)] };
@@ -76,9 +86,25 @@ async function openFromSource(phone, kind, text, deps, now) {
   }
   for (const [k, v] of Object.entries(parsed.fields)) if (k in draft.fields && k !== "description" && v !== null) draft.fields[k] = v;
   // ponytail: description left for user to provide in Q&A, not auto-filled from source
+  const extra = [];
+  if (kind === "link") {
+    // The agent's own words next to the link are newer than the listing: they win.
+    const comment = String(text).replace(/https?:\/\/\S+/gi, " ").trim();
+    if (C.hintedFields(comment).length) {
+      try { C.apply(draft, pick((await deps.parseListing(comment)).fields)); } catch (err) { /* the link alone still counts */ }
+    }
+    if ((String(text).match(/https?:\/\//gi) || []).length > 1) extra.push(R.firstLinkOnly());
+  }
   draft.photos = await importAll((src.photos || []).map((p) => p.url), deps.importPhoto);
   const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, draft, replies: [R.opened(kind, draft.fields), ...p.replies] };
+  return { handled: true, status: p.status, draft, replies: [R.opened(kind, draft.fields), ...extra, ...p.replies] };
+}
+
+// Non-null extracted values for the fields a draft asks about (description stays the agent's).
+function pick(fields) {
+  const out = {};
+  for (const [k, v] of Object.entries(fields || {})) if (v !== null && k !== "description" && k !== "template") out[k] = v;
+  return out;
 }
 
 function openFromKeyword(phone, deps, now) {
@@ -115,16 +141,26 @@ async function storePhoto(draft, fileUrlOrUrls, deps, now) {
   const seen = draft.photo_sources || [];
   const urls = [...new Set(raw)].filter((u) => !seen.includes(u));
   draft.photo_sources = seen.concat(urls);
-  const hosted = await importAll(urls, deps.importPhoto);
-  for (const h of hosted) { if (draft.photos.length < MAX_PHOTOS) draft.photos.push(h); }
+  const room = Math.max(0, MAX_PHOTOS - draft.photos.length);
+  if (urls.length > room) draft.photos_dropped = (draft.photos_dropped || 0) + urls.length - room;
+  draft.photos.push(...(await importAll(urls.slice(0, room), deps.importPhoto)));
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
 }
 
-function photoTimer(draft, deps) {
+// One bubble: the photo count and whatever comes next, so photos sent mid-questions
+// never look ignored. Reports (and clears) photos dropped over the 12 cap.
+function photoTimer(draft, deps, now) {
   const n = draft.photos.length;
-  if (D.nextStep(draft).kind === "photos") return { handled: true, status: `photos_progress:${n}`, replies: [R.photosProgress(n)] };
+  const dropped = draft.photos_dropped || 0;
+  draft.photos_dropped = 0;
+  const done = dropped ? { draft: D.touch(draft, now) } : {};
+  if (D.nextStep(draft).kind === "photos") {
+    const r = [R.photosProgress(n)];
+    if (dropped) r.unshift(R.photosSaved(n, dropped));
+    return { handled: true, status: `photos_progress:${n}`, ...done, replies: [oneBubble(r)] };
+  }
   const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, replies: [R.photosSaved(n), ...p.replies] };
+  return { handled: true, status: p.status, ...done, replies: [oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
 }
 
 /*
@@ -183,10 +219,13 @@ async function offeredTurn(input, deps, draft, now) {
 
 async function resumeTurn(input, deps, draft, now) {
   const cmd = D.command(input.text);
+  if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
   if (cmd === "resume") {
     const o = draft.pending_opener || {};
     draft.status = "active";
     draft.pending_opener = null;
+    // Photos sent while paused: stored now, the photo timer reports them with the next question.
+    if (o.file_urls) return storePhoto(draft, o.file_urls, deps, now);
     // Photos edited while paused were sent for this property: they join it.
     const added = o.photos ? o.photos.filter((u) => !draft.photos.includes(u)) : [];
     if (added.length) draft.photos = draft.photos.concat(added).slice(0, MAX_PHOTOS);
@@ -205,20 +244,44 @@ async function resumeTurn(input, deps, draft, now) {
       fresh.offer_sent = true;
       return { handled: true, status: "offered", draft: fresh, replies: [R.offer(fresh.photos.length)] };
     }
-    return openDraft(draft.phone, D.openerKind(o.text), o.text, deps, now);
+    // Whatever the paused message was, "חדש" starts a new property from it (or empty).
+    const t = await openDraft(draft.phone, D.openerKind(o.text) || "keyword", o.text, deps, now);
+    if (o.file_urls && t.draft) {
+      const s = await storePhoto(t.draft, o.file_urls, deps, now);
+      return { ...t, draft: s.draft, armPhotoTimer: true };
+    }
+    return t;
   }
   return { handled: true, status: "resume_prompt", replies: [R.resumePrompt(D.summary(draft))] };
 }
 
 async function activeTurn(input, deps, draft, now) {
-  if (input.event === "photo_timer") return photoTimer(draft, deps);
+  if (input.event === "photo_timer") return photoTimer(draft, deps, now);
   const photoUrls = photoUrlsOf(input);
   if (photoUrls) return storePhoto(draft, photoUrls, deps, now);
   const cmd = D.command(input.text);
   if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
+  const slash = C.parseSlash(input.text);
+  if (slash) return slashTurn(draft, slash, deps, now);
+  // A replacement was proposed last turn: כן applies it, anything else keeps the old values.
+  if (draft.pending_changes) {
+    const changes = draft.pending_changes;
+    draft.pending_changes = null;
+    if (cmd === "yes" || cmd === "no") {
+      if (cmd === "yes") C.apply(draft, changes);
+      const p = promptFor(draft, deps);
+      const first = cmd === "yes" ? R.updated(changes) : R.kept();
+      return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble([first, ...withPriceCheck(draft, p.replies)])] };
+    }
+  }
   const step = D.nextStep(draft);
+  if (!cmd && C.needsExtraction(step.field || null, input.text) && deps.extractAllowed(draft.phone)) {
+    const r = await smartAnswer(draft, input.text, deps, now);
+    if (r) return r;
+  }
   if (step.kind === "ask") {
     const r = answerField(draft, step.field, input.text, cmd, deps);
+    if (r.draft && (step.field === "price" || step.field === "deal")) r.replies = withPriceCheck(r.draft, r.replies);
     return { handled: true, ...r, draft: r.draft ? D.touch(r.draft, now) : undefined };
   }
   if (step.kind === "photos") {
@@ -230,10 +293,46 @@ async function activeTurn(input, deps, draft, now) {
     const p = promptFor(draft, deps);
     return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
   }
-  // Fields and photos are both done: any text (typically "ממשיכים") (re)sends
-  // the review link. Building only happens from that page now, never from chat.
+  // Preview was chosen: building happens on the review page, so any text —
+  // "ליצור" included — (re)sends the link.
+  if (cmd === "create") return { handled: true, status: "preview_only", replies: [R.previewOnly(deps.reviewLink(draft.phone))] };
   const p = promptFor(draft, deps);
   return { handled: true, status: p.status, replies: p.replies };
+}
+
+// The price warning goes in front of the next question when price and deal disagree.
+function withPriceCheck(draft, replies) {
+  return D.priceLooksOff(draft.fields) ? [R.priceOff(draft.fields), ...replies] : replies;
+}
+
+// "/מחיר 2.1 מיליון", "/p 2.1m", or "/" alone for the list.
+function slashTurn(draft, slash, deps, now) {
+  if (slash.list) return { handled: true, status: "field_list", replies: [R.fieldList(draft.fields)] };
+  if (slash.unknown) return { handled: true, status: "field_unknown", replies: [R.unknownField(slash.unknown)] };
+  if (!C.setField(draft, slash.field, slash.value)) {
+    return { handled: true, status: `invalid:${slash.field}`, replies: [R.invalid(slash.field)] };
+  }
+  const p = promptFor(draft, deps);
+  const replies = withPriceCheck(draft, [R.updated({ [slash.field]: draft.fields[slash.field] }), ...p.replies]);
+  return { handled: true, status: `corrected:${slash.field}`, draft: D.touch(draft, now), replies: [oneBubble(replies)] };
+}
+
+// A reply that talks about other fields ("רגע, המחיר 2.1 מיליון", "חיפה, 3 חדרים, 1.9 מיליון"):
+// extract it like listing text, fill empty fields, and ask before replacing any.
+// null → nothing usable came out; the caller handles the text the ordinary way.
+async function smartAnswer(draft, text, deps, now) {
+  let parsed;
+  try { parsed = await deps.parseListing(text); } catch (err) { return null; }
+  const { filled, proposed } = C.merge(draft, parsed.fields || {});
+  if (!Object.keys(filled).length && !Object.keys(proposed).length) return null;
+  const replies = Object.keys(filled).length ? [R.updated(filled)] : [];
+  if (Object.keys(proposed).length) {
+    draft.pending_changes = proposed;
+    replies.push(R.confirmChanges(proposed, draft.fields));
+    return { handled: true, status: "confirm_changes", draft: D.touch(draft, now), replies: [oneBubble(replies)] };
+  }
+  const p = promptFor(draft, deps);
+  return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble(withPriceCheck(draft, [...replies, ...p.replies]))] };
 }
 
 async function handleTurn(input, deps) {
@@ -247,6 +346,20 @@ async function handleTurn(input, deps) {
 
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
 
+  // Voice note: transcribe and handle it as the typed message it stands for.
+  if (input.audioUrl && !input.text) {
+    let heard = null;
+    try { heard = await deps.transcribe(input.audioUrl); } catch (err) { console.error("[whatsapp-intake] transcribe failed:", err.message); }
+    if (!heard) {
+      return draft && draft.status === "active" ? { handled: true, status: "voice_failed", replies: [R.voiceFailed()] } : notOurs("not_ours");
+    }
+    const t = await handleTurn({ ...input, audioUrl: null, text: heard }, deps);
+    if (t.handled && t.replies.length) t.replies[0] = { ...t.replies[0], text: `${R.heard(heard)}\n\n${t.replies[0].text}` };
+    return t;
+  }
+  const open = draft && (draft.status === "active" || draft.status === "offered");
+  if (input.messageType === "documentMessage" && open) return { handled: true, status: "document", replies: [R.sendAsImage()] };
+
   if (!draft) {
     const kind = D.openerKind(input.text);
     if (!kind) return withDrop(notOurs("not_ours"));
@@ -254,12 +367,15 @@ async function handleTurn(input, deps) {
   }
   if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
   if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
-  if (draft.status === "building" || D.isPaused(draft, now)) {
-    if (input.event || photoUrlsOf(input)) return notOurs("not_ours");
+  if (draft.status === "building") {
     const kind = D.openerKind(input.text);
-    if (!kind) return notOurs("not_ours");
-    if (draft.status === "building") return openDraft(phone, kind, input.text, deps, now);
-    return resumePrompt(draft, { text: input.text }, now);
+    if (input.event || photoUrlsOf(input) || !kind) return notOurs("not_ours");
+    return openDraft(phone, kind, input.text, deps, now);
+  }
+  // Paused: any message brings the open draft back up (המשך / חדש / ביטול).
+  if (D.isPaused(draft, now)) {
+    if (input.event) return notOurs("not_ours");
+    return resumePrompt(draft, { text: input.text || null, file_urls: photoUrlsOf(input) }, now);
   }
   const t = await activeTurn(input, deps, draft, now);
   return t.status === "create" ? build(t.draft || draft, deps, now) : t;

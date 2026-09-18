@@ -32,13 +32,39 @@ const express = require("express");
 const { constantTimeEqual } = require("../security");
 const db = require("../db");
 const { handleTurn } = require("../whatsapp-intake");
-const { isPaused, asMillis } = require("../property-draft");
+const { isPaused, asMillis, touch } = require("../property-draft");
+const R = require("../whatsapp-replies");
 const { resolve } = require("../listing-sources");
 const { parseListing } = require("../listing-extract");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
 const { validateListing, createListing } = require("../listing-create");
-const { verifySession, requireAuth } = require("../auth");
+const { verifySession, requireAuth, readToken, REVIEW_SCOPES } = require("../auth");
+
+const REVIEW_TTL_S = 7 * 24 * 60 * 60;
+const EXPIRED_PAGE = `<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Forly</title>
+<body style="font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;text-align:center">
+<h1 style="font-size:1.4rem">הקישור פג תוקף</h1>
+<p>כתבו ״תצוגה מקדימה״ בצ׳אט עם פורלי ותקבלו קישור חדש.</p></body></html>`;
+
+const BUILD_TIMEOUT_MS = 20 * 60 * 1000; // a chat listing with no page after this has failed
+const SWEEP_MS = 5 * 60 * 1000;
+
+// Voice note → Hebrew text with fal's Whisper ("wizper"). Notes are short, so the
+// synchronous endpoint is enough (overlay.js uses fal the same way, plain fetch).
+async function transcribe(audioUrl, { fetchFn = fetch, key = process.env.FAL_KEY } = {}) {
+  if (!key) throw new Error("FAL_KEY not set");
+  const r = await fetchFn("https://fal.run/fal-ai/wizper", {
+    method: "POST",
+    headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ audio_url: audioUrl, task: "transcribe", language: "he" }),
+    signal: AbortSignal.timeout(45000),
+  });
+  if (!r.ok) throw new Error(`wizper ${r.status}`);
+  const j = await r.json();
+  return String(j.text || "").trim() || null;
+}
 
 const EXTRACT_CAP = 20;          // link/text extractions per agent per day
 const PHOTO_BATCH_MS = 20000;
@@ -104,15 +130,16 @@ module.exports = function createWhatsappRouter(ctx) {
       // importPhotoFor's server-side session above, just handed to their
       // browser instead) prefilled from their draft; they review, edit and
       // build the page themselves there — see the /review and /draft routes.
-      reviewLink: (p) => `${baseUrl}/api/whatsapp/review?t=${encodeURIComponent(signSession(authSecret, p))}`,
+      reviewLink: (p) => `${baseUrl}/api/whatsapp/review?t=${encodeURIComponent(signSession(authSecret, p, { scope: "review", ttlS: REVIEW_TTL_S }))}`,
       // "ליצור" in chat: same validation and paid quota unit as the form's /properties/create.
+      transcribe,
       createListing: async (body) => {
         const invalid = validateListing(body);
         if (invalid) return invalid;
         if (quota) {
           const q = await quota.consume(phone, "walkthroughs", 1, { source: "whatsapp", business,
             request: { address: body.address, city: body.city, price: body.price, rooms: body.rooms, photos: body.photos_urls.length } });
-          if (!q.ok) return { error: "quota", code: 402 };
+          if (!q.ok) return { error: "quota", code: 402, message: q.message };
         }
         return createListing(phone, body, null, { ...pipelineDeps, source: "whatsapp" });
       },
@@ -167,6 +194,32 @@ module.exports = function createWhatsappRouter(ctx) {
     }, PHOTO_BATCH_MS));
   }
 
+  // A chat listing whose page never arrived: mark it failed and tell the agent.
+  // A draft that built it goes back to the preview/create question, so "ליצור" retries.
+  async function sweepStuckBuilds(now = Date.now()) {
+    const pending = await db.listPendingListings("whatsapp");
+    for (const l of pending) {
+      const age = now - asMillis(l.created_at);
+      if (!(age > BUILD_TIMEOUT_MS)) continue;
+      await db.updateListing(l.listing_id, { status: "failed" });
+      if (age > 24 * 60 * 60 * 1000) continue; // older than a day: close it quietly
+      const phone = l.business_phone;
+      await withLock(phone, async () => {
+        const draft = await db.getDraft(phone);
+        const retry = !!draft && draft.status === "building" && draft.listing_id === l.listing_id;
+        if (retry) {
+          Object.assign(draft, { status: "active", mode: null, listing_id: null });
+          await db.saveDraft(touch(draft));
+        }
+        if (sendWhatsApp) await sendWhatsApp(phone, R.buildFailed(retry).text);
+      });
+      console.warn(`[whatsapp] ${phone} listing ${l.listing_id} build timed out → failed`);
+    }
+  }
+  if (ctx.sweep !== false) {
+    setInterval(() => sweepStuckBuilds().catch((err) => console.error("[whatsapp] build sweep failed:", err.message)), SWEEP_MS).unref();
+  }
+
   router.post("/intake", requireN8n, async (req, res) => {
     const body = req.body || {};
     const phone = normalizeAuthPhone(body.phone || "");
@@ -177,16 +230,20 @@ module.exports = function createWhatsappRouter(ctx) {
     const fileUrls = Array.isArray(body.file_urls) ? body.file_urls.filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim()).slice(0, 12) : [];
     const event = body.event === "photos_edited" ? "photos_edited" : null;
     const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string").slice(0, 12) : [];
-    if (!phone || (!text.trim() && !fileUrl && !fileUrls.length && !event)) return res.status(400).json({ error: "invalid_input" });
+    const audioUrl = typeof body.audio_url === "string" && /^https:\/\//.test(body.audio_url) ? body.audio_url : null;
+    const messageType = typeof body.message_type === "string" ? body.message_type.slice(0, 40) : "";
+    if (!phone || (!text.trim() && !fileUrl && !fileUrls.length && !event && !audioUrl && messageType !== "documentMessage")) {
+      return res.status(400).json({ error: "invalid_input" });
+    }
     try {
       const result = await withLock(phone, async () => {
         const [business, draft] = await Promise.all([db.getBusiness(phone).catch(() => null), db.getDraft(phone)]);
         const now = new Date();
         console.log(
-          `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : JSON.stringify(text)}` +
+          `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : audioUrl ? "voice" : messageType === "documentMessage" ? "document" : JSON.stringify(text)}` +
           ` | draft before: ${draft ? `${draft.status} (${draft.source}) ${describeAge(draft, now)}` : "none"}`
         );
-        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, draft }, depsFor(phone, business));
+        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, messageType, draft }, depsFor(phone, business));
         // A text that ends a photo batch must not be followed by the timer's report too.
         if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
         console.log(
@@ -215,8 +272,11 @@ module.exports = function createWhatsappRouter(ctx) {
   // the agent's own browser, not called by n8n.
   router.get("/review", (req, res) => {
     const token = typeof req.query.t === "string" ? req.query.t : "";
-    const payload = verifySession(authSecret, token);
-    if (!payload || !payload.userId) return res.status(401).send("הקישור פג תוקף — בקשו קישור חדש מהבוט.");
+    const payload = verifySession(authSecret, token, ["review"]);
+    if (!payload || !payload.userId) return res.status(401).type("html").send(EXPIRED_PAGE);
+    // Already logged in as this agent: keep the full session, don't downgrade it to review scope.
+    const current = verifySession(authSecret, readToken(req));
+    if (current && current.userId === payload.userId) return res.redirect(`${baseUrl}/create.html?whatsapp=1`);
     res.cookie("forly_session", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -228,11 +288,13 @@ module.exports = function createWhatsappRouter(ctx) {
 
   // create.html reads this once signed in via /review, to prefill the form
   // with whatever the chat has collected so far.
-  router.get("/draft", requireAuth(authSecret), async (req, res) => {
+  router.get("/draft", requireAuth(authSecret, REVIEW_SCOPES), async (req, res) => {
     const draft = await db.getDraft(req.user.userId);
     if (!draft) return res.status(404).json({ error: "no_draft" });
     res.json({ fields: draft.fields, photos: draft.photos });
   });
 
+  router.sweepStuckBuilds = sweepStuckBuilds; // exposed for tests
   return router;
 };
+module.exports.transcribe = transcribe;

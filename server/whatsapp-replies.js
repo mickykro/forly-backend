@@ -58,7 +58,9 @@ function photosProgress(n) {
   if (n < MIN_PHOTOS) return { text: `יש לי ${n} תמונות. צריך לפחות ${MIN_PHOTOS} — שלחו עוד.` };
   return { text: `יש לי ${n} תמונות. עוד תמונות, או ממשיכים?`, buttons: ["ממשיכים"] };
 }
-function photosSaved(n) { return { text: `שמרתי ${n} תמונות לנכס.` }; }
+function photosSaved(n, dropped = 0) {
+  return { text: `שמרתי ${n} תמונות לנכס.` + (dropped ? ` (${dropped} לא נשמרו — המקסימום הוא 12)` : "") };
+}
 
 function summaryLines(s) {
   const lines = [];
@@ -73,21 +75,65 @@ function summaryLines(s) {
   return lines.join(" · ");
 }
 function choose() {
-  return { text: "כל הפרטים והתמונות אצלי ✅\nלראות תצוגה מקדימה ולערוך לפני היצירה, או ליצור את הדף עכשיו?", buttons: ["תצוגה מקדימה", "ליצור"] };
+  return {
+    text: "כל הפרטים והתמונות אצלי ✅\nלראות תצוגה מקדימה ולערוך לפני היצירה, או ליצור את הדף עכשיו?\n" +
+      "שימו לב: ״ליצור״ בונה את הדף מיד, בלי תצוגה מקדימה.",
+    buttons: ["תצוגה מקדימה", "ליצור"],
+  };
 }
-function reviewReady(link) {
-  return { text: `כל הפרטים מוכנים ✅\nבדקו, ערכו אם צריך ובנו את דף הנכס כאן:\n${link}` };
+function reviewReady(link, skipped = []) {
+  const names = skipped.filter((f) => LABELS[f]).map((f) => LABELS[f]);
+  const note = names.length ? `\nדילגתם על: ${names.join(", ")}. אפשר להשלים בדף, או כאן — למשל /${LABELS[skipped[0]]} …` : "";
+  return { text: `כל הפרטים מוכנים ✅\nבדקו, ערכו אם צריך ובנו את דף הנכס כאן:\n${link}${note}` };
 }
+function previewOnly(link) { return { text: `בחרתם תצוגה מקדימה — היצירה ממשיכה בדף:\n${link}` }; }
+
+// ── corrections ──
+const CODES = { city: "c", price: "p", rooms: "r", deal: "d", size_sqm: "s", floor: "f", parking: "k", neighborhood: "n", description: "t", template: "x" };
+function show(field, v) {
+  if (v === null || v === undefined) return "—";
+  if (field === "price") return ils(v);
+  if (field === "deal") return v === "rent" ? "להשכרה" : "למכירה";
+  if (field === "description") return String(v).slice(0, 40) + (String(v).length > 40 ? "…" : "");
+  return String(v);
+}
+function fieldList(fields) {
+  const lines = Object.keys(CODES).map((f) => `/${LABELS[f]} (/${CODES[f]}): ${show(f, fields[f])}`);
+  return { text: `לתיקון כתבו / ושם השדה, למשל /מחיר 2.1 מיליון\n${lines.join("\n")}` };
+}
+function unknownField(name) { return { text: `לא מכירה את השדה ״${name}״. כתבו / לרשימת השדות.` }; }
+function updated(changes) {
+  return { text: `עדכנתי: ${Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, v)}`).join(", ")} ✅` };
+}
+function confirmChanges(changes, fields) {
+  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, fields[f])} ← ${show(f, v)}`).join("\n");
+  return { text: `להחליף?\n${list}`, buttons: ["כן", "לא"] };
+}
+function kept() { return { text: "בסדר, השארתי כמו שהיה." }; }
+function priceOff(fields) {
+  const as = fields.deal === "sale" ? "מכירה" : "שכירות";
+  return { text: `רגע ⚠️ ${ils(fields.price)} נראה חריג ל${as}. אם זו טעות: /מחיר … או /עסקה …` };
+}
+
+// ── input ──
+function heard(transcript) { return `🎙️ שמעתי: ״${transcript}״`; }
+function voiceFailed() { return { text: "לא הצלחתי לשמוע את ההקלטה 🙉 אפשר לכתוב?" }; }
+function sendAsImage() { return { text: "קיבלתי קובץ ולא תמונה. שלחו את התמונות כתמונות (לא כקובץ/מסמך) 📸" }; }
+function firstLinkOnly() { return { text: "קראתי את הקישור הראשון. את השני שלחו אחרי שנסיים עם הנכס הזה." }; }
+function buildFailed(retry) {
+  return { text: retry ? "בניית הדף נכשלה 😕 כתבו ״ליצור״ כדי לנסות שוב." : "בניית הדף נכשלה 😕 נסו שוב מקישור התצוגה המקדימה, או כתבו ״נכס חדש״." };
+}
+function outOfQuota(message) { return { text: message || "נגמרה המכסה שלך ליצירת דפים. כתבו לנו לחידוש החבילה." }; }
 function building(s) { return { text: `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).` }; }
 function cancelled() { return { text: "ביטלתי את הטיוטה. אפשר להתחיל מחדש עם קישור, טקסט או ״נכס חדש״." }; }
 function declined() { return { text: "בסדר, לא בונים דף מהתמונות האלה." }; }
 function resumePrompt(s) {
-  return { text: `יש לך טיוטה פתוחה: ${summaryLines(s)}.\nלהמשיך אותה או להתחיל נכס חדש?`, buttons: ["המשך", "חדש"] };
+  return { text: `יש לך טיוטה פתוחה: ${summaryLines(s)}.\nלהמשיך אותה, להתחיל נכס חדש, או לבטל?`, buttons: ["המשך", "חדש", "ביטול"] };
 }
 
 const SOURCE_ERRORS = {
   facebook_not_connected: "כדי לקרוא פוסטים מפייסבוק צריך קודם לחבר את עמוד הפייסבוק בפאנל.",
-  page_unreadable: "לא הצלחתי לקרוא את הדף בקישור. אולי המודעה פרטית או הוסרה.",
+  page_unreadable: "את הקישור הזה אי אפשר לקרוא אוטומטית (האתר חוסם, או שהמודעה פרטית או הוסרה).",
   extract_unavailable: "יש לי תקלה זמנית בקריאת מודעות.",
 };
 function sourceError(code, createUrl) {
@@ -103,4 +149,6 @@ function noLinkHint(createUrl) {
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
+  heard, voiceFailed, sendAsImage, firstLinkOnly, buildFailed, outOfQuota,
 };

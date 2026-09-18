@@ -56,6 +56,16 @@ async function listListingsByPhone(phone) {
   return [...mem.listings.values()].filter((l) => l.business_phone === phone);
 }
 
+// Listings from `source` still waiting for their page (equality filters only: no composite index needed).
+async function listPendingListings(source) {
+  if (db) {
+    const snap = await db.collection("listings").where("source", "==", source)
+      .where("status", "==", "active").where("page_id", "==", null).limit(200).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listings.values()].filter((l) => l.source === source && l.status === "active" && !l.page_id);
+}
+
 // ── admin: full-collection reads (no phone filter) ──
 async function listAllListings(limit = 1000) {
   if (db) {
@@ -518,7 +528,7 @@ module.exports = {
   get db() { return db; },
   get mem() { return mem; },
   shortCode,
-  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
+  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listPendingListings, listAllListings,
   savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,

@@ -12,6 +12,7 @@ const fs = require("fs");
 const db = require("../db");
 const pageEdit = require("../edit");
 const { sniffMatchesExt } = require("../utils");
+const { REVIEW_SCOPES } = require("../auth");
 const { validateListing, createListing: createListingShared, MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
 const { makeAdminGuard } = require("../admin-auth");
 
@@ -44,7 +45,8 @@ module.exports = function createIntakeRouter(ctx) {
   // ── upload-urls ──
   // Any authenticated user (agent or admin) may request upload slots; the
   // header bypass is gone.
-  const uploadAuth = requireAuth(authSecret);
+  // The WhatsApp review link (scope "review") lands on create.html, which uploads photos and creates.
+  const uploadAuth = requireAuth(authSecret, REVIEW_SCOPES);
 
   router.post("/upload-urls", uploadAuth, (req, res) => {
     const files = req.body && req.body.files;
@@ -200,7 +202,7 @@ module.exports = function createIntakeRouter(ctx) {
   // ── create (authenticated) ──
   // Paid bundle: one creation consumes one `walkthroughs` unit, atomically, and
   // only after the body validates. Demos (admin-driven) don't consume.
-  router.post("/properties/create", requireAuth(authSecret), async (req, res) => {
+  router.post("/properties/create", requireAuth(authSecret, REVIEW_SCOPES), async (req, res) => {
     const body = req.body || {};
     const phone = req.user.userId;
     const invalid = validateListing(body);

@@ -7,6 +7,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const db = require("../db");
+const { REVIEW_SCOPES } = require("../auth");
 const portalStream = require("../portal-stream");
 const { sendWhatsApp } = require("../utils");
 const { portfolioSlug, normalizePortfolio, visiblePortfolioPages, nextPortfolioStatus } = require("../portfolio");
@@ -48,7 +49,8 @@ module.exports = function createDashboardRouter(ctx) {
   });
 
   // ── profile (for completion check) ──
-  router.get("/profile", requireAuth(authSecret), async (req, res) => {
+  // create.html probes this on load; the WhatsApp review link must pass it.
+  router.get("/profile", requireAuth(authSecret, REVIEW_SCOPES), async (req, res) => {
     const phone = req.user.userId;
     if (!db.db) return res.json({ profile: null, needs_completion: false });
     try {

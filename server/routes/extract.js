@@ -11,6 +11,7 @@ const crypto = require("crypto");
 const { parseListing, MAX_INPUT } = require("../listing-extract");
 const { resolve, isPublicUrl, TIMEOUT_MS } = require("../listing-sources");
 const { storeBuffer } = require("../upload-store");
+const { REVIEW_SCOPES } = require("../auth");
 
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -75,7 +76,7 @@ module.exports = function createExtractRouter(ctx) {
 
   function auth(req, res, next) {
     if ("x-demo-key" in req.headers) return next();
-    return requireAuth(authSecret)(req, res, next);
+    return requireAuth(authSecret, REVIEW_SCOPES)(req, res, next);
   }
   const keyFor = (req) => (req.user && req.user.userId) || `demo:${req.ip}`;
   const sendError = (res, err) => {

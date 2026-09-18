@@ -78,9 +78,12 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([calls.created.theme, calls.created.city, calls.created.photos_urls.length], [{ template: "nocturne" }, "תל אביב", 4]);
   assert.match(texts(t), /אני בונה את דף הנכס/);
   // a failed create keeps the draft so the next message retries
-  ({ d } = deps({ createListing: async () => ({ error: "quota", code: 402 }) }));
+  ({ d } = deps({ createListing: async () => ({ error: "quota", code: 402, message: "המכסה שלך נוצלה. לרכישה: https://pay" }) }));
   t = await turn({ text: "דלג", draft }, d);
   assert.deepEqual([t.status, t.draft.status, t.draft.skipped.includes("template")], ["create_failed:402", "active", true]);
+  assert.match(texts(t), /המכסה שלך נוצלה. לרכישה: https:\/\/pay/, "out of quota says so, with the payment link");
+  ({ d } = deps({ createListing: async () => ({ error: "boom", code: 500 }) }));
+  t = await turn({ text: "דלג", draft }, d);
   assert.match(texts(t), /משהו השתבש/);
 
   // ── keyword opener: empty draft, ask city ──
@@ -113,7 +116,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.handled, true);
   assert.equal(t.status, "source_error:page_unreadable");
   assert.equal(t.draft.fields.city, null);
-  assert.match(texts(t), /לא הצלחתי לקרוא/);
+  assert.match(texts(t), /אי אפשר לקרוא אוטומטית/);
   assert.match(texts(t), /באיזו עיר/);
 
   // ── daily extraction cap ──
@@ -227,18 +230,22 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.match(texts(t), /שמרתי 1 תמונות/);
   assert.match(texts(t), /באיזו עיר/);
 
-  // ── pause: silent for 2h → ordinary messages are not ours, openers ask resume/new ──
+  // ── pause: silent for 2h → any message brings the draft back up (המשך / חדש / ביטול) ──
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   t = await turn({ text: "חיפה", draft }, d); draft = t.draft;
   const later = new Date(T0.getTime() + D.PAUSE_MS + 1000);
   t = await turn({ text: "1,500,000", draft, now: later }, d);
-  assert.equal(t.handled, false, "paused draft does not claim plain text");
+  assert.deepEqual([t.handled, t.status, t.draft.pending_opener.text], [true, "resume_prompt", "1,500,000"], "plain text too");
+  t = await turn({ text: "ביטול", draft: t.draft, now: later }, d);
+  assert.deepEqual([t.status, t.del], ["cancelled", true]);
   t = await turn({ fileUrl: "https://green/x.jpg", draft, now: later }, d);
-  assert.equal(t.handled, false, "paused draft does not claim photos");
+  assert.deepEqual([t.status, t.draft.pending_opener.file_urls], ["resume_prompt", ["https://green/x.jpg"]], "photos too");
+  t = await turn({ text: "המשך", draft: t.draft, now: later }, d);
+  assert.deepEqual([t.status, t.draft.photos, t.armPhotoTimer], ["photo_stored", ["https://files/x.jpg"], true], "resume keeps the paused photos");
   t = await turn({ text: "https://www.yad2.co.il/item/new", draft, now: later }, d);
   assert.deepEqual([t.handled, t.status, t.draft.status], [true, "resume_prompt", "resume_prompt"]);
-  assert.deepEqual(t.replies[0].buttons, ["המשך", "חדש"]);
+  assert.deepEqual(t.replies[0].buttons, ["המשך", "חדש", "ביטול"]);
   assert.equal(t.draft.pending_opener.text, "https://www.yad2.co.il/item/new");
   const rp = t.draft;
   t = await turn({ text: "המשך", draft: rp, now: later }, d);
@@ -271,6 +278,101 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.handled, false);
   t = await turn({ text: "נכס חדש", draft: bld }, d);
   assert.deepEqual([t.handled, t.draft.status, t.draft.listing_id], [true, "active", null]);
+
+  // ── round 2 (docs/superpowers/specs/2026-09-18-whatsapp-chat-round2-design.md) ──
+  const keywordAt = async (d, answers) => {
+    let x = await turn({ text: "נכס חדש" }, d);
+    for (const a of answers) x = await turn({ text: a, draft: x.draft }, d);
+    return x;
+  };
+
+  // #1 slash corrections: Hebrew name or code, bare "/" lists, unknown name, bad value
+  ({ d } = deps());
+  t = await keywordAt(d, ["חיפה", "1.5 מיליון"]);                         // now asked:rooms
+  t = await turn({ text: "/מחיר 2.1 מיליון", draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.fields.price], ["corrected:price", 2100000]);
+  assert.match(texts(t), /עדכנתי: מחיר ₪2,100,000/);
+  assert.match(texts(t), /כמה חדרים/, "the pending question is repeated");
+  t = await turn({ text: "/c רמת גן", draft: t.draft }, d);
+  assert.equal(t.draft.fields.city, "רמת גן");
+  const afterSlash = t.draft;
+  t = await turn({ text: "/", draft: afterSlash }, d);
+  assert.match(texts(t), /\/מחיר \(\/p\): ₪2,100,000/);
+  t = await turn({ text: "/צבע אדום", draft: afterSlash }, d);
+  assert.equal(t.status, "field_unknown");
+  t = await turn({ text: "/מחיר משהו", draft: afterSlash }, d);
+  assert.equal(t.status, "invalid:price");
+  t = await turn({ text: "/שכונה כרמל", draft: { ...afterSlash, skipped: ["neighborhood"] } }, d);
+  assert.deepEqual([t.draft.fields.neighborhood, t.draft.skipped], ["כרמל", []], "a skipped field can be filled later");
+
+  // #1/#2 smart answers: other-field talk goes through the extractor
+  const extracted = (fields) => async () => ({ fields: { ...Object.fromEntries(Object.keys(FIELDS).map((k) => [k, null])), ...fields }, missing: [] });
+  ({ d } = deps({ parseListing: extracted({ city: "חיפה", rooms: 3, price: 1900000 }) }));
+  t = await turn({ text: "נכס חדש" }, d);
+  t = await turn({ text: "חיפה, 3 חדרים, 1.9 מיליון", draft: t.draft }, d);
+  assert.deepEqual([t.draft.fields.city, t.draft.fields.rooms, t.draft.fields.price, t.status], ["חיפה", 3, 1900000, "asked:deal"],
+    "one message fills several empty fields");
+  ({ d } = deps({ parseListing: extracted({ price: 2100000 }) }));
+  t = await keywordAt(d, ["חיפה", "1.95 מיליון", "4", "למכירה", "90", "2"]);   // now asked:parking
+  t = await turn({ text: "רגע, המחיר 2.1 מיליון", draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.fields.price, t.draft.pending_changes], ["confirm_changes", 1950000, { price: 2100000 }],
+    "a different existing value is proposed, not overwritten");
+  assert.deepEqual(t.replies[0].buttons, ["כן", "לא"]);
+  const proposed = t.draft;
+  t = await turn({ text: "כן", draft: proposed }, d);
+  assert.deepEqual([t.draft.fields.price, t.draft.pending_changes, t.status], [2100000, null, "asked:parking"]);
+  t = await turn({ text: "לא", draft: proposed }, d);
+  assert.deepEqual([t.draft.fields.price, t.status], [1950000, "asked:parking"]);
+  assert.match(texts(t), /השארתי כמו שהיה/);
+
+  // #15 price vs deal
+  ({ d } = deps());
+  t = await keywordAt(d, ["חיפה", "5,500", "3", "למכירה"]);
+  assert.match(texts(t), /נראה חריג למכירה/);
+
+  // #16 emoji around a command
+  assert.equal(D.command("✅ ליצור!"), "create");
+
+  // #5 preview is final: "ליצור" re-sends the link
+  ({ d } = deps());
+  t = await turn({ text: "ליצור", draft: ready }, d);
+  assert.equal(t.status, "preview_only");
+  assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
+
+  // #6/#7 photo timer: one bubble with the count and the next question; over-12 reported
+  ({ d } = deps());
+  t = await turn({ text: "נכס חדש" }, d);
+  const twelve = Array.from({ length: 14 }, (_, i) => `https://green/m${i}.jpg`);
+  t = await turn({ fileUrls: twelve, draft: t.draft }, d);
+  assert.deepEqual([t.draft.photos.length, t.draft.photos_dropped], [12, 2]);
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
+  assert.equal(t.replies.length, 1, "one bubble");
+  assert.match(texts(t), /שמרתי 12 תמונות לנכס. \(2 לא נשמרו/);
+  assert.match(texts(t), /באיזו עיר/);
+  assert.equal(t.draft.photos_dropped, 0);
+
+  // #9 documents are refused while a draft is open, ignored otherwise
+  t = await turn({ messageType: "documentMessage", draft: ready }, d);
+  assert.deepEqual([t.status, t.handled], ["document", true]);
+  t = await turn({ messageType: "documentMessage" }, d);
+  assert.equal(t.handled, false);
+
+  // #11 voice: transcribed, then handled like text, with what was heard up front
+  ({ d } = deps({ transcribe: async () => "נכס חדש" }));
+  t = await turn({ audioUrl: "https://green/v.ogg" }, d);
+  assert.deepEqual([t.handled, t.status], [true, "asked:city"]);
+  assert.match(t.replies[0].text, /^🎙️ שמעתי: ״נכס חדש״/);
+  ({ d } = deps({ transcribe: async () => { throw new Error("down"); } }));
+  t = await turn({ audioUrl: "https://green/v.ogg", draft: ready }, d);
+  assert.equal(t.status, "voice_failed");
+  t = await turn({ audioUrl: "https://green/v.ogg" }, d);
+  assert.equal(t.handled, false, "no draft: a failed voice note is left to the AI");
+
+  // #12 the agent's comment next to a link wins; two links → first one, and we say so
+  ({ d } = deps({ parseListing: async (txt) => (txt.startsWith("t ") ? { fields: { ...FIELDS }, missing: [] } : extracted({ price: 2500000 })()) }));
+  t = await turn({ text: "המחיר ירד ל-2.5 מיליון https://www.yad2.co.il/item/abc https://www.yad2.co.il/item/def" }, d);
+  assert.equal(t.draft.fields.price, 2500000);
+  assert.match(texts(t), /קראתי את הקישור הראשון/);
 
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
