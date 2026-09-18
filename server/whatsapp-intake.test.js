@@ -380,7 +380,9 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
 
   // #9 documents are refused while a draft is open, ignored otherwise
   t = await turn({ messageType: "documentMessage", draft: ready }, d);
-  assert.deepEqual([t.status, t.handled], ["document", true]);
+  assert.deepEqual([t.status, t.handled, t.replies.length], ["document", true, 1]);
+  assert.match(texts(t), /לא יודעת לקרוא/);
+  assert.match(texts(t), new RegExp(`https://review/${PHONE}`), "the pending step follows in the same bubble");
   t = await turn({ messageType: "documentMessage" }, d);
   assert.equal(t.handled, false);
 

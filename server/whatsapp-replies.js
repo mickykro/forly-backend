@@ -130,7 +130,7 @@ function videoSaved() { return { text: "קיבלתי את הסרטון 🎬 הד
 function videoFailed() { return { text: "לא הצלחתי לשמור את הסרטון (MP4 עד 120MB). אפשר לנסות שוב, או להמשיך בלי — ניצור סרטון מהתמונות." }; }
 function heard(transcript) { return `🎙️ שמעתי: ״${transcript}״`; }
 function voiceFailed() { return { text: "לא הצלחתי לשמוע את ההקלטה 🙉 אפשר לכתוב?" }; }
-function sendAsImage() { return { text: "קיבלתי קובץ ולא תמונה. שלחו את התמונות כתמונות (לא כקובץ/מסמך) 📸" }; }
+function sendAsImage() { return { text: "קיבלתי קובץ, ואת זה אני לא יודעת לקרוא 📎 תמונות של הנכס שלחו כתמונות (לא כקובץ/מסמך)." }; }
 function firstLinkOnly() { return { text: "קראתי את הקישור הראשון. את השני שלחו אחרי שנסיים עם הנכס הזה." }; }
 function buildFailed(retry, listing = {}) {
   const which = headline(listing);

@@ -377,7 +377,11 @@ async function handleTurn(input, deps) {
     return t;
   }
   const open = draft && (draft.status === "active" || draft.status === "offered");
-  if (input.messageType === "documentMessage" && open) return { handled: true, status: "document", replies: [R.sendAsImage()] };
+  if (input.messageType === "documentMessage" && open) {
+    // Whatever step the draft is at, the question it's waiting on comes right after.
+    const pending = draft.status === "active" ? promptFor(draft, deps).replies : [];
+    return { handled: true, status: "document", replies: [oneBubble([R.sendAsImage(), ...pending])] };
+  }
 
   if (!draft) {
     const kind = D.openerKind(input.text);
