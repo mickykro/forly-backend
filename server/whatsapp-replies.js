@@ -72,6 +72,9 @@ function summaryLines(s) {
   lines.push(`${s.photos} תמונות`);
   return lines.join(" · ");
 }
+function choose() {
+  return { text: "כל הפרטים והתמונות אצלי ✅\nלראות תצוגה מקדימה ולערוך לפני היצירה, או ליצור את הדף עכשיו?", buttons: ["תצוגה מקדימה", "ליצור"] };
+}
 function reviewReady(link) {
   return { text: `כל הפרטים מוכנים ✅\nבדקו, ערכו אם צריך ובנו את דף הנכס כאן:\n${link}` };
 }
@@ -98,6 +101,6 @@ function noLinkHint(createUrl) {
 }
 
 module.exports = {
-  LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved,
+  LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
 };

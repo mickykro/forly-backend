@@ -21,6 +21,7 @@ function deps(over = {}) {
     createUrl: CREATE,
     extractAllowed: () => true,
     reviewLink: (phone) => `https://review/${phone}`,
+    createListing: async (body) => { calls.created = body; return { listing_id: "L1" }; },
     ...over,
   };
   return { d, calls };
@@ -54,18 +55,33 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.match(texts(t), /קראתי את המודעה: 3\.5 חד׳ בפלורנטין/);
   assert.match(texts(t), /תיאור/);
 
-  // description answered → photos are already 4 → confirm sends the review link
+  // description answered → photos are already 4 → preview or create?
   let draft = t.draft;
   t = await turn({ text: "דירה מהממת", draft }, d);
   assert.equal(t.draft.fields.description, "דירה מהממת");
-  assert.equal(t.status, "asked:template", "design is the last question, after description");
+  assert.equal(t.status, "choose", "fields and photos done: preview or create");
+  assert.deepEqual(t.replies[0].buttons, ["תצוגה מקדימה", "ליצור"]);
+  draft = t.draft;
+  t = await turn({ text: "מה?", draft }, d);
+  assert.deepEqual([t.status, t.draft], ["choose", undefined], "anything else repeats the choice");
+  // preview: straight to the review link, no design question (it's picked on the page)
+  t = await turn({ text: "תצוגה מקדימה", draft }, d);
+  assert.deepEqual([t.status, t.draft.mode, t.draft.fields.template], ["confirm", "preview", null]);
+  assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
+  // create: ask the design, then build from chat
+  t = await turn({ text: "ליצור", draft }, d);
+  assert.equal(t.status, "asked:template");
   assert.deepEqual(t.replies[0].buttons, ["קלאסי", "נוקטורן", "ריל"]);
   draft = t.draft;
   t = await turn({ text: "2", draft }, d);
-  assert.deepEqual([t.draft.fields.template, t.status], ["nocturne", "confirm"], "photos already there: the review link follows the design answer");
-  assert.equal(t.status, "confirm");
-  assert.equal(t.replies[t.replies.length - 1].buttons, undefined);
-  assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
+  assert.deepEqual([t.status, t.draft.status, t.draft.listing_id], ["building", "building", "L1"]);
+  assert.deepEqual([calls.created.theme, calls.created.city, calls.created.photos_urls.length], [{ template: "nocturne" }, "תל אביב", 4]);
+  assert.match(texts(t), /אני בונה את דף הנכס/);
+  // a failed create keeps the draft so the next message retries
+  ({ d } = deps({ createListing: async () => ({ error: "quota", code: 402 }) }));
+  t = await turn({ text: "דלג", draft }, d);
+  assert.deepEqual([t.status, t.draft.status, t.draft.skipped.includes("template")], ["create_failed:402", "active", true]);
+  assert.match(texts(t), /משהו השתבש/);
 
   // ── keyword opener: empty draft, ask city ──
   ({ d } = deps());
@@ -115,7 +131,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d, calls } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
-  for (let i = 0; i < 7; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  for (let i = 0; i < 6; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
   assert.equal(t.status, "photos");
   t = await turn({ fileUrl: "https://green/a.jpg", draft }, d);
   assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a photo is stored silently and arms the timer");
@@ -127,11 +143,10 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.replies[0].buttons, undefined);
   for (const n of ["b", "c", "d"]) { t = await turn({ fileUrl: `https://green/${n}.jpg`, draft }, d); draft = t.draft; }
   t = await turn({ text: "עוד אחת בדרך", draft }, d);
-  assert.equal(t.status, "confirm", "enough photos already: any text sends the review link");
-  assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
+  assert.equal(t.status, "choose", "enough photos already: any text asks preview or create");
   t = await turn({ text: "ממשיכים", draft }, d);
-  assert.equal(t.status, "confirm");
-  assert.equal(t.draft, undefined, "confirm prompt does not change the draft");
+  assert.equal(t.status, "choose");
+  assert.equal(t.draft, undefined, "the choice prompt does not change the draft");
 
   // failed import is skipped, not counted
   ({ d } = deps({ importPhoto: async () => { throw new Error("404"); } }));
@@ -142,7 +157,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
-  for (let i = 0; i < 7; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  for (let i = 0; i < 6; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
   t = await turn({ fileUrls: ["https://green/burst1.jpg", "https://green/burst2.jpg", "https://green/burst3.jpg"], draft }, d);
   assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a bundled burst is stored in one turn");
   draft = t.draft;
@@ -161,7 +176,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d, calls } = deps());
   const ready = D.newDraft(PHONE, "keyword", T0);
   Object.assign(ready.fields, { city: "חיפה", price: 1500000, rooms: 4 });
-  ready.skipped = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template"];
+  ready.skipped = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description"];
+  ready.mode = "preview";
   ready.photos = ["p1", "p2", "p3", "p4"];
   t = await turn({ text: "ממשיכים", draft: ready }, d);
   assert.equal(t.status, "confirm", "ממשיכים moves to confirm");

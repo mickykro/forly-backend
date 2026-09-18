@@ -32,7 +32,23 @@ function promptFor(draft, deps) {
   const step = D.nextStep(draft);
   if (step.kind === "ask") return { status: `asked:${step.field}`, replies: [R.ask(step.field)] };
   if (step.kind === "photos") return { status: "photos", replies: [R.askPhotos()] };
+  if (step.kind === "choose") return { status: "choose", replies: [R.choose()] };
+  if (step.kind === "create") return { status: "create", replies: [] }; // handleTurn builds it
   return { status: "confirm", replies: [R.reviewReady(deps.reviewLink(draft.phone))] };
+}
+
+// Build the page straight from the draft (the agent chose "ליצור"). On failure
+// the draft stays as is, so the next message retries.
+async function build(draft, deps, now) {
+  let res;
+  try { res = await deps.createListing(D.listingBody(draft)); } catch (err) {
+    console.error("[whatsapp-intake] create failed:", err);
+    res = { error: "create_failed", code: 500 };
+  }
+  if (res.error) return { handled: true, status: `create_failed:${res.code}`, draft: D.touch(draft, now), replies: [R.createFailed(deps.createUrl)] };
+  draft.status = "building";
+  draft.listing_id = res.listing_id;
+  return { handled: true, status: "building", draft: D.touch(draft, now), replies: [R.building(draft.fields)] };
 }
 
 async function importAll(urls, importPhoto) {
@@ -205,6 +221,12 @@ async function activeTurn(input, deps, draft, now) {
   if (step.kind === "photos") {
     return { handled: true, status: `photos_progress:${draft.photos.length}`, replies: [R.photosProgress(draft.photos.length)] };
   }
+  if (step.kind === "choose") {
+    if (cmd !== "preview" && cmd !== "create") return { handled: true, status: "choose", replies: [R.choose()] };
+    draft.mode = cmd;
+    const p = promptFor(draft, deps);
+    return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+  }
   // Fields and photos are both done: any text (typically "ממשיכים") (re)sends
   // the review link. Building only happens from that page now, never from chat.
   const p = promptFor(draft, deps);
@@ -236,7 +258,8 @@ async function handleTurn(input, deps) {
     if (draft.status === "building") return openDraft(phone, kind, input.text, deps, now);
     return resumePrompt(draft, { text: input.text }, now);
   }
-  return activeTurn(input, deps, draft, now);
+  const t = await activeTurn(input, deps, draft, now);
+  return t.status === "create" ? build(t.draft || draft, deps, now) : t;
 }
 
 module.exports = { handleTurn, _test: { promptFor, answerField } };

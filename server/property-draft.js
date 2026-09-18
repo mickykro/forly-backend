@@ -9,7 +9,7 @@ const { SCHEMA } = require("./listing-extract");
 const { asMillis } = require("./utils");
 
 const REQUIRED = ["city", "price", "rooms"];
-const OPTIONAL = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description", "template"];
+const OPTIONAL = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description"];
 const ASK_ORDER = [...REQUIRED, ...OPTIONAL];
 // create.html won't build a page from fewer than 4, stricter than the API's 3.
 const MIN_PHOTOS = 4;
@@ -17,10 +17,12 @@ const PAUSE_MS = 2 * 60 * 60 * 1000;
 
 const KEYWORDS = ["נכס חדש", "דף נכס", "דף חדש", "דף נכס חדש", "ליצור נכס", "צור נכס", "ליצור דף נכס"];
 const LISTING_HINTS = ["חדרים", "חד׳", "חד'", "מ״ר", "מ\"ר", "קומה", "למכירה", "להשכרה", "₪", "מחיר", "שכירות"];
-const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "continue", "כן": "yes", "לא": "no", "המשך": "resume", "חדש": "new" };
+const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "continue", "כן": "yes", "לא": "no", "המשך": "resume", "חדש": "new",
+  "תצוגה מקדימה": "preview", "ליצור": "create" };
 // Natural phrasings for the buttons above; button taps always send the exact
 // COMMANDS word, these cover what a person types instead of tapping.
-const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume" };
+const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume",
+  "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create" };
 
 // Page designs, in the order create.html's picker lists them (1-6). The first
 // alias is the Hebrew name shown there; create.html preselects the chosen one.
@@ -106,7 +108,7 @@ function emptyFields() {
 function newDraft(phone, source, now = new Date()) {
   return {
     phone, status: "active", source, fields: emptyFields(), skipped: [], photos: [],
-    pending_opener: null, offer_sent: false, listing_id: null, created_at: now, updated_at: now,
+    pending_opener: null, offer_sent: false, listing_id: null, mode: null, created_at: now, updated_at: now,
   };
 }
 
@@ -117,7 +119,27 @@ function nextStep(draft) {
     if (draft.fields[f] === null && !draft.skipped.includes(f)) return { kind: "ask", field: f };
   }
   if (draft.photos.length < MIN_PHOTOS) return { kind: "photos" };
-  return { kind: "confirm" };
+  // Preview → the review link, where the design is picked on the page.
+  // Create → the design is asked here and the page is built from chat.
+  if (!draft.mode) return { kind: "choose" };
+  if (draft.mode !== "create") return { kind: "confirm" };
+  if (draft.fields.template === null && !draft.skipped.includes("template")) return { kind: "ask", field: "template" };
+  return { kind: "create" };
+}
+
+// Draft → the body create.html posts to /properties/create.
+function listingBody(draft) {
+  const f = draft.fields;
+  return {
+    listing_type: f.deal === "rent" ? "rent" : "sale",
+    address: f.address, city: f.city, neighborhood: f.neighborhood,
+    price: f.price, rooms: f.rooms, size_sqm: f.size_sqm,
+    size_built: f.sqm_built, size_balcony: f.sqm_balcony, size_garden: f.sqm_garden,
+    floor: f.floor, parking: f.parking,
+    storage: f.storage, elevator: f.elevator, shabbat_elevator: f.shabbat_elevator,
+    description: f.description, photos_urls: draft.photos,
+    theme: f.template ? { template: f.template } : null, language: "he",
+  };
 }
 
 const silentFor = (draft, now) => now.getTime() - asMillis(draft.updated_at);
@@ -137,5 +159,5 @@ function summary(draft) {
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
   findUrl, command, openerKind, parseAnswer, isRequired, asMillis,
-  newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary,
+  newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, listingBody,
 };

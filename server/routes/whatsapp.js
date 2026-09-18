@@ -37,6 +37,7 @@ const { resolve } = require("../listing-sources");
 const { parseListing } = require("../listing-extract");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
+const { validateListing, createListing } = require("../listing-create");
 const { verifySession, requireAuth } = require("../auth");
 
 const EXTRACT_CAP = 20;          // link/text extractions per agent per day
@@ -45,7 +46,7 @@ const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
   const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, sendButtons,
-    uploadDir, uploadPublicBase, remoteUploadBase, baseUrl } = ctx;
+    uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
   const timers = new Map();
@@ -104,6 +105,17 @@ module.exports = function createWhatsappRouter(ctx) {
       // browser instead) prefilled from their draft; they review, edit and
       // build the page themselves there — see the /review and /draft routes.
       reviewLink: (p) => `${baseUrl}/api/whatsapp/review?t=${encodeURIComponent(signSession(authSecret, p))}`,
+      // "ליצור" in chat: same validation and paid quota unit as the form's /properties/create.
+      createListing: async (body) => {
+        const invalid = validateListing(body);
+        if (invalid) return invalid;
+        if (quota) {
+          const q = await quota.consume(phone, "walkthroughs", 1, { source: "whatsapp", business,
+            request: { address: body.address, city: body.city, price: body.price, rooms: body.rooms, photos: body.photos_urls.length } });
+          if (!q.ok) return { error: "quota", code: 402 };
+        }
+        return createListing(phone, body, null, { ...pipelineDeps, source: "whatsapp" });
+      },
     };
   }
 
