@@ -82,6 +82,8 @@ window.FLY = (function () {
     }).catch(function () { /* best-effort */ });
   }
 
+  var PAGE_START = Date.now();
+
   function el(tag, cls, html) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -90,20 +92,27 @@ window.FLY = (function () {
   }
 
   // ── loader video ──────────────────────────────────────────────────────────
-  // Once it starts it always plays whole cycles: loaderHide() during playback
-  // parks the callback and runs it at the next clean end, so the animation is
-  // never cut off mid-stroke. Looping is driven here rather than by the `loop`
-  // attribute, which would suppress the "ended" event we need.
+  // The loader is off the screen as soon as the work behind it is done. It used
+  // to park the reveal until the clip reached a clean "ended", which charged
+  // every visitor a whole 5s cycle even when the API answered in 200ms — and a
+  // second cycle when the hide landed just after a loop restart. Now the clip is
+  // decoration over the real wait: it is cut off wherever it happens to be, with
+  // a short crossfade so the cut does not read as a flicker.
+  var LOADER_MIN_MS = 350;   // anti-flicker floor for very fast responses
+  var LOADER_FADE_MS = 160;  // must match the .vloader opacity transition
+
   function loaderBox() { return document.querySelector(".vloader"); }
 
   function loaderShow(msg) {
     var box = loaderBox();
     if (!box) return;
-    box._pending = null;
+    clearTimeout(box._t);
+    box._shownAt = Date.now();
     if (msg) {
       var m = box.querySelector(".vloader-msg");
       if (m) m.textContent = msg;
     }
+    box.classList.remove("vloader-out");
     box.classList.remove("hidden");
     var v = box.querySelector("video");
     // currentTime throws if metadata has not loaded yet — the reset is cosmetic.
@@ -114,29 +123,38 @@ window.FLY = (function () {
   // then() runs after the loader is gone — put the "reveal the content" work there.
   function loaderHide(then) {
     var box = loaderBox();
-    var done = function () {
-      if (box) { box.classList.add("hidden"); clearTimeout(box._safety); }
+    // Nothing on screen to wait for.
+    if (!box || box.classList.contains("hidden")) { if (then) then(); return; }
+
+    var finish = function () {
+      box.classList.add("hidden");
+      box.classList.remove("vloader-out");
+      var v = box.querySelector("video");
+      // Stop decoding a clip nobody can see.
+      if (v && v.pause) { try { v.pause(); } catch (e) { /* ignore */ } }
       if (then) then();
     };
-    var v = box && box.querySelector("video");
-    // Nothing on screen to wait for.
-    if (!box || box.classList.contains("hidden") || !v) return done();
-    box._pending = done;
-    // A visible loader counts as started even if playback has not kicked in yet
-    // (autoplay begins async). But blocked autoplay or a codec failure means
-    // "ended" never fires, so never let that strand the page.
-    var wait = (v.duration || 5) * 1000 - (v.currentTime || 0) * 1000 + 400;
-    clearTimeout(box._safety);
-    box._safety = setTimeout(function () {
-      if (box._pending) { var f = box._pending; box._pending = null; f(); }
-    }, Math.max(400, wait));
+
+    var fade = function () {
+      box.classList.add("vloader-out");
+      box._t = setTimeout(finish, LOADER_FADE_MS);
+    };
+
+    // Loaders that are up from first paint have no _shownAt — page start counts.
+    var shownAt = box._shownAt || PAGE_START;
+    var left = LOADER_MIN_MS - (Date.now() - shownAt);
+    clearTimeout(box._t);
+    if (left <= 0) return fade();
+    box._t = setTimeout(fade, left);
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Looping is driven here rather than by the `loop` attribute so the clip can
+    // be swapped for one that reports "ended"; a hide never waits on it.
     document.querySelectorAll(".vloader video").forEach(function (v) {
       v.addEventListener("ended", function () {
         var box = v.closest(".vloader");
-        if (box && box._pending) { var f = box._pending; box._pending = null; return f(); }
+        if (box && box.classList.contains("hidden")) return;
         v.currentTime = 0;
         var p = v.play();
         if (p && p.catch) p.catch(function () {});
