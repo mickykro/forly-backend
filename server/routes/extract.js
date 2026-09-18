@@ -43,6 +43,13 @@ class DailyLimit {
   }
 }
 
+function sniffImage(b) {
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.slice(0, 4).toString("hex") === "89504e47") return "image/png";
+  if (b.slice(0, 4).toString() === "RIFF" && b.slice(8, 12).toString() === "WEBP") return "image/webp";
+  return null;
+}
+
 async function importImage(url, { fetchFn = fetch, lookup } = {}) {
   const fail = (code, msg) => { const e = new Error(msg || code); e.code = code; return e; };
   if (!(await isPublicUrl(url, lookup))) throw fail("invalid_input", "url not allowed");
@@ -50,12 +57,15 @@ async function importImage(url, { fetchFn = fetch, lookup } = {}) {
   try { r = await fetchFn(url, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "follow" }); }
   catch (err) { throw fail("page_unreadable", err.message); }
   if (!r.ok) throw fail("page_unreadable", `fetch ${r.status}`);
-  const ct = String(r.headers.get("content-type") || "").split(";")[0].trim();
-  const ext = IMAGE_TYPES[ct];
-  if (!ext) throw fail("page_unreadable", `not an image: ${ct}`);
+  let ct = String(r.headers.get("content-type") || "").split(";")[0].trim();
+  // WhatsApp media (Green API's store) comes back as octet-stream: trust the bytes then.
+  const generic = !ct || /^(application|binary)\/octet-stream$/.test(ct);
+  if (!IMAGE_TYPES[ct] && !generic) throw fail("page_unreadable", `not an image: ${ct}`);
   const buffer = Buffer.from(await r.arrayBuffer());
   if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) throw fail("page_unreadable", "bad size");
-  return { fname: `${crypto.randomUUID()}.${ext}`, buffer, contentType: ct };
+  if (!IMAGE_TYPES[ct]) ct = sniffImage(buffer);
+  if (!ct) throw fail("page_unreadable", "not an image: octet-stream");
+  return { fname: `${crypto.randomUUID()}.${IMAGE_TYPES[ct]}`, buffer, contentType: ct };
 }
 
 module.exports = function createExtractRouter(ctx) {
