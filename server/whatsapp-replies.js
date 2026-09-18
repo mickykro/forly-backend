@@ -120,8 +120,10 @@ function heard(transcript) { return `🎙️ שמעתי: ״${transcript}״`; }
 function voiceFailed() { return { text: "לא הצלחתי לשמוע את ההקלטה 🙉 אפשר לכתוב?" }; }
 function sendAsImage() { return { text: "קיבלתי קובץ ולא תמונה. שלחו את התמונות כתמונות (לא כקובץ/מסמך) 📸" }; }
 function firstLinkOnly() { return { text: "קראתי את הקישור הראשון. את השני שלחו אחרי שנסיים עם הנכס הזה." }; }
-function buildFailed(retry) {
-  return { text: retry ? "בניית הדף נכשלה 😕 כתבו ״ליצור״ כדי לנסות שוב." : "בניית הדף נכשלה 😕 נסו שוב מקישור התצוגה המקדימה, או כתבו ״נכס חדש״." };
+function buildFailed(retry, listing = {}) {
+  const which = headline(listing);
+  const head = `בניית הדף${which ? ` (${which})` : ""} נכשלה 😕`;
+  return { text: retry ? `${head} כתבו ״ליצור״ כדי לנסות שוב.` : `${head} אפשר לשלוח שוב את הקישור או את טקסט המודעה, או לכתוב ״נכס חדש״.` };
 }
 function outOfQuota(message) { return { text: message || "נגמרה המכסה שלך ליצירת דפים. כתבו לנו לחידוש החבילה." }; }
 function building(s) { return { text: `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).` }; }

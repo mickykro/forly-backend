@@ -29,7 +29,8 @@ const { transcribe } = createWhatsappRouter;
   const now = Date.now();
   const old = new Date(now - 25 * 60 * 1000);
   await db.saveListing({ listing_id: "A", source: "whatsapp", status: "active", page_id: null, business_phone: "P1", created_at: old });
-  await db.saveListing({ listing_id: "B", source: "whatsapp", status: "active", page_id: null, business_phone: "P2", created_at: old });
+  await db.saveListing({ listing_id: "B", source: "whatsapp", status: "active", page_id: null, business_phone: "P2", created_at: old,
+    city: "באר שבע", rooms: 3, price: 1250000 });
   await db.saveListing({ listing_id: "C", source: "whatsapp", status: "active", page_id: null, business_phone: "P3", created_at: new Date(now) });
   await db.saveDraft({ phone: "P1", status: "building", mode: "create", listing_id: "A", fields: {}, skipped: [], photos: [] });
   await router.sweepStuckBuilds(now);
@@ -38,7 +39,7 @@ const { transcribe } = createWhatsappRouter;
   const d1 = await db.getDraft("P1");
   assert.deepEqual([d1.status, d1.mode, d1.listing_id], ["active", null, null], "the draft that built it can retry");
   assert.match(msgs.find(([p]) => p === "P1")[1], /ליצור/);
-  assert.match(msgs.find(([p]) => p === "P2")[1], /נכשלה/);
+  assert.match(msgs.find(([p]) => p === "P2")[1], /בניית הדף \(3 חד׳ בבאר שבע, ₪1,250,000\) נכשלה/, "names the property");
   msgs.length = 0;
   await router.sweepStuckBuilds(now);
   assert.equal(msgs.length, 0, "a failed listing is reported once");

@@ -211,7 +211,7 @@ module.exports = function createWhatsappRouter(ctx) {
           Object.assign(draft, { status: "active", mode: null, listing_id: null });
           await db.saveDraft(touch(draft));
         }
-        if (sendWhatsApp) await sendWhatsApp(phone, R.buildFailed(retry).text);
+        if (sendWhatsApp) await sendWhatsApp(phone, R.buildFailed(retry, l).text);
       });
       console.warn(`[whatsapp] ${phone} listing ${l.listing_id} build timed out → failed`);
     }
