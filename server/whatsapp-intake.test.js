@@ -339,6 +339,24 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await keywordAt(d, ["חיפה", "5,500", "3", "למכירה"]);
   assert.match(texts(t), /נראה חריג למכירה/);
 
+  // spoken numbers, impossible values, and no word-for-word repeat on a second miss
+  ({ d } = deps());
+  t = await keywordAt(d, ["כפר סבא", "2.5 מיליון", "ארבעה חדרים", "למכירה"]);   // asked:size_sqm
+  assert.equal(t.draft.fields.rooms, 4);
+  const atSize = t.draft;
+  t = await turn({ text: "100 ו-10.", draft: atSize }, d);
+  assert.deepEqual([t.draft.fields.size_sqm, t.status], [110, "asked:floor"]);
+  t = await turn({ text: "קומה אחת", draft: t.draft }, d);
+  assert.equal(t.draft.fields.floor, 1);
+  t = await turn({ text: "ועשר מטר", draft: atSize }, d);
+  assert.equal(t.status, "invalid:size_sqm", "10 m² is a mishearing, not an answer");
+  assert.match(texts(t), /לא הצלחתי להבין את השטח/);
+  t = await turn({ text: "מה זה?", draft: t.draft }, d);
+  assert.match(texts(t), /עדיין לא הבנתי 🙏 כתבו רק מספר, למשל 95/);
+  assert.match(texts(t), /דלג/, "optional field: skipping is offered");
+  t = await turn({ text: "95", draft: t.draft }, d);
+  assert.deepEqual([t.draft.fields.size_sqm, t.draft.retry], [95, null]);
+
   // #16 emoji around a command
   assert.equal(D.command("✅ ליצור!"), "create");
 

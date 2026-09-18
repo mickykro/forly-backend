@@ -34,7 +34,17 @@ function ask(field) {
   if (field === "template") r.buttons = ["קלאסי", "נוקטורן", "ריל"]; // Green API caps buttons at 3; the text lists all six
   return r;
 }
-function invalid(field) { return { text: `לא הצלחתי להבין את ה${LABELS[field]}. ${QUESTIONS[field]}` }; }
+// Second miss on the same question: don't repeat it word for word — say what works.
+const EXAMPLES = {
+  price: "כתבו מספר, למשל 2,500,000 או 2.5 מיליון", rooms: "כתבו רק מספר, למשל 4 או 3.5",
+  size_sqm: "כתבו רק מספר, למשל 95", floor: "כתבו רק מספר, למשל 3 (קרקע = 0)",
+  parking: "כתבו רק מספר, למשל 1 (אין = 0)", deal: "כתבו ״למכירה״ או ״להשכרה״",
+};
+function invalid(field, attempt = 1) {
+  if (attempt < 2 || !EXAMPLES[field]) return { text: `לא הצלחתי להבין את ה${LABELS[field]}. ${QUESTIONS[field]}` };
+  const skip = REQUIRED.has(field) ? "" : "\nאו ״דלג״ כדי להמשיך בלי.";
+  return { text: `עדיין לא הבנתי 🙏 ${EXAMPLES[field]}.${skip}` };
+}
 function required(field) { return { text: `${LABELS[field]} הוא שדה חובה לדף. ${QUESTIONS[field]}` }; }
 
 function headline(f) {

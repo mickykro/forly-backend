@@ -58,7 +58,33 @@ function openerKind(text) {
 
 // ── answer parsers (no LLM) ──
 const firstNumber = (t) => { const m = /(\d+(?:[.,]\d+)*)/.exec(String(t || "")); return m ? Number(m[1].replace(/,/g, "")) : null; };
-const num = (t) => { const n = firstNumber(t); return Number.isFinite(n) ? n : null; };
+
+// Spoken numbers (voice notes arrive as words): "מאה ועשר" 110, "100 ו-10" 110,
+// "שלוש וחצי" 3.5, "אחת עשרה" 11. Summed over the first run of number words only,
+// so "קומה שתיים מתוך שש" is 2, not 8.
+const WORD_NUM = {
+  אפס: 0, חצי: 0.5, אחת: 1, אחד: 1, שתיים: 2, שתים: 2, שניים: 2, שתי: 2, שני: 2, שלוש: 3, שלושה: 3,
+  ארבע: 4, ארבעה: 4, חמש: 5, חמישה: 5, שש: 6, שישה: 6, שבע: 7, שבעה: 7, שמונה: 8, תשע: 9, תשעה: 9,
+  עשר: 10, עשרה: 10, עשרים: 20, שלושים: 30, ארבעים: 40, חמישים: 50, שישים: 60, שבעים: 70, שמונים: 80,
+  תשעים: 90, מאה: 100, מאתיים: 200, אלף: 1000, אלפיים: 2000,
+};
+function spokenNumber(t) {
+  const words = String(t || "").replace(/[.,!?״"]/g, " ").split(/[\s-]+/).filter(Boolean);
+  let sum = null, sawWord = false, joined = false;
+  for (const raw of words) {
+    const w = raw !== "ו" && raw.startsWith("ו") ? raw.slice(1) : raw;
+    if (raw === "ו") { if (sum !== null) joined = true; continue; }
+    if (w === "מאות" && sum !== null) { sum = sum * 100; continue; }   // "שלוש מאות"
+    const v = /^\d+(\.\d+)?$/.test(w) ? Number(w) : WORD_NUM[w];
+    if (v === undefined) { if (sum !== null) break; continue; }
+    if (!/^\d/.test(w)) sawWord = true;
+    if (raw !== w && sum !== null) joined = true;
+    sum = (sum || 0) + v;
+  }
+  // Plain digits without words or "ו" keep the old first-number reading ("2 מתוך 6" is 2).
+  return sum !== null && (sawWord || joined) ? sum : null;
+}
+const num = (t) => { const s = spokenNumber(t); if (s !== null) return s; const n = firstNumber(t); return Number.isFinite(n) ? n : null; };
 const int = (t) => { const n = num(t); return n === null ? null : Math.round(n); };
 const text = (max) => (t) => { const s = String(t || "").trim(); return s ? s.slice(0, max) : null; };
 
@@ -96,14 +122,26 @@ function priceLooksOff(f) {
   if (!f.price || !f.deal) return false;
   return (f.deal === "sale" && f.price < 20000) || (f.deal === "rent" && f.price > 100000);
 }
-function parseFloor(t) { return /קרקע/.test(String(t || "")) ? 0 : int(t); }
+const ORDINAL_FLOOR = { ראשונה: 1, ראשון: 1, שנייה: 2, שניה: 2, שלישית: 3, רביעית: 4, חמישית: 5, שישית: 6, שביעית: 7, שמינית: 8, תשיעית: 9, עשירית: 10 };
+function parseFloor(t) {
+  const s = String(t || "");
+  if (/קרקע/.test(s)) return 0;
+  const ord = Object.keys(ORDINAL_FLOOR).find((w) => new RegExp(`(^|\\s)${w}($|[\\s.,!?])`).test(s));
+  return ord ? ORDINAL_FLOOR[ord] : int(t);
+}
 function parseParking(t) { return /^(אין|ללא|לא)$/.test(clean(t)) ? 0 : int(t); }
 
 const PARSERS = {
   city: text(60), price: parsePrice, rooms: num, deal: parseDeal, size_sqm: num,
   floor: parseFloor, parking: parseParking, neighborhood: text(60), description: text(2000), template: parseTemplate,
 };
-function parseAnswer(field, t) { return PARSERS[field] ? PARSERS[field](t) : null; }
+// An impossible value is a mishearing or typo ("ועשר מטר" → 10 m²): ask again instead.
+const RANGES = { rooms: [1, 20], size_sqm: [15, 2000], floor: [-3, 100], parking: [0, 20] };
+function parseAnswer(field, t) {
+  const v = PARSERS[field] ? PARSERS[field](t) : null;
+  const r = RANGES[field];
+  return v !== null && r && (v < r[0] || v > r[1]) ? null : v;
+}
 function isRequired(field) { return REQUIRED.includes(field); }
 
 // ── draft state ──

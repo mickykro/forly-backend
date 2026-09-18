@@ -126,7 +126,12 @@ function answerField(draft, field, text, cmd, deps) {
     return { status: p.status, replies: p.replies, draft };
   }
   const value = D.parseAnswer(field, text);
-  if (value === null) return { status: `invalid:${field}`, replies: [R.invalid(field)], draft };
+  if (value === null) {
+    const attempt = draft.retry && draft.retry.field === field ? draft.retry.n + 1 : 1;
+    draft.retry = { field, n: attempt };
+    return { status: `invalid:${field}`, replies: [R.invalid(field, attempt)], draft };
+  }
+  draft.retry = null;
   draft.fields[field] = value;
   const p = promptFor(draft, deps);
   return { status: p.status, replies: p.replies, draft };
