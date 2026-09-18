@@ -276,7 +276,7 @@ async function activeTurn(input, deps, draft, now) {
   }
   const step = D.nextStep(draft);
   if (!cmd && C.needsExtraction(step.field || null, input.text) && deps.extractAllowed(draft.phone)) {
-    const r = await smartAnswer(draft, input.text, deps, now);
+    const r = await smartAnswer(draft, input.text, deps, now, step.field);
     if (r) return r;
   }
   if (step.kind === "ask") {
@@ -320,9 +320,12 @@ function slashTurn(draft, slash, deps, now) {
 // A reply that talks about other fields ("רגע, המחיר 2.1 מיליון", "חיפה, 3 חדרים, 1.9 מיליון"):
 // extract it like listing text, fill empty fields, and ask before replacing any.
 // null → nothing usable came out; the caller handles the text the ordinary way.
-async function smartAnswer(draft, text, deps, now) {
+async function smartAnswer(draft, text, deps, now, asked) {
+  // A bare place name means nothing to the extractor; "שכונה: הבורסה, …" does. Numeric
+  // questions get no label: "חניות: רגע, המחיר…" makes it invent a parking count.
+  const prompt = asked === "city" || asked === "neighborhood" ? `${R.LABELS[asked]}: ${text}` : text;
   let parsed;
-  try { parsed = await deps.parseListing(text); } catch (err) { return null; }
+  try { parsed = await deps.parseListing(prompt); } catch (err) { return null; }
   const { filled, proposed } = C.merge(draft, parsed.fields || {});
   if (!Object.keys(filled).length && !Object.keys(proposed).length) return null;
   const replies = Object.keys(filled).length ? [R.updated(filled)] : [];

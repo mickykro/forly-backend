@@ -325,6 +325,15 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.draft.fields.price, t.status], [1950000, "asked:parking"]);
   assert.match(texts(t), /השארתי כמו שהיה/);
 
+  // the asked place name survives a reply that also talks about the price
+  let seen;
+  ({ d } = deps({ parseListing: async (txt) => { seen = txt; return extracted({ neighborhood: "הבורסה", price: 2600000 })(); } }));
+  t = await keywordAt(d, ["רמת גן", "2.69 מיליון", "4", "למכירה", "100", "4", "1"]);   // asked:neighborhood
+  t = await turn({ text: "הבורסה, והמחיר ירד ל-2.6 מיליון", draft: t.draft }, d);
+  assert.equal(seen, "שכונה: הבורסה, והמחיר ירד ל-2.6 מיליון", "the question's label gives the extractor context");
+  assert.deepEqual([t.draft.fields.neighborhood, t.draft.pending_changes], ["הבורסה", { price: 2600000 }]);
+  assert.match(texts(t), /עדכנתי: שכונה הבורסה/);
+
   // #15 price vs deal
   ({ d } = deps());
   t = await keywordAt(d, ["חיפה", "5,500", "3", "למכירה"]);
