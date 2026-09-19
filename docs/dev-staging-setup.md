@@ -223,38 +223,53 @@ is what a working deploy looks like. `404` means Traefik has no route yet;
 
 ## Step 6 — Start the dev bridge on the VPS
 
-This is the container Traefik routes `dev.` at.
+This is the container Traefik routes `dev.` at. No password needed.
 
-First pick a password and turn it into an htpasswd line:
-
-```bash
-htpasswd -nbB dev 'choose-a-password-here'
-```
-
-It prints something like:
-
-```
-dev:$2y$05$Ft8N1kQ2mOq...
-```
-
-**Copy that line verbatim.** Do not escape or double the `$` signs — that
-doubling is a docker-compose convention and is wrong here; it produces a hash
-that rejects every password. The script refuses input containing `$$` for
-exactly this reason.
+Fetch the script without disturbing the production checkout, and **run it as a
+file** — pasting its contents into a login shell enables `set -e` there, so the
+first guard that fires disconnects you:
 
 ```bash
 ssh root@31.97.216.242
 cd /root/forly-backend
-
-export DEV_BASIC_AUTH_HTPASSWD='dev:$2y$05$Ft8N1kQ2mOq...'   # single quotes
-bash scripts/vps-dev-bridge.sh
+git fetch origin claude/stable-global-dev-server-222vb4
+git show origin/claude/stable-global-dev-server-222vb4:scripts/vps-dev-bridge.sh \
+  > /root/vps-dev-bridge.sh
+bash /root/vps-dev-bridge.sh
 ```
 
-Single quotes matter — double quotes let your shell mangle the `$` sequences.
+Four lines of the output matter:
 
-Expected output ends with `STATUS: Up ...`, the gateway address from step 2,
-and a note about whether anything is answering through the bridge. It will say
-nothing is — correct at this point, since the tunnel isn't running yet.
+```
+vps-dev-bridge: mode=internal
+vps-dev-bridge: router names free: forlydev-public
+vps-dev-bridge: production baseline forly=400
+vps-dev-bridge: ✓ root-n8n-1 is on root_default — point n8n HTTP nodes at:
+                  http://forly-dev-bridge:8787/api/video-overlay
+vps-dev-bridge: ✓ production unchanged (forly=400)
+```
+
+`mode=internal` means only `/files/**` is published — the one path GreenAPI
+must fetch anonymously to deliver a rendered video. Everything else on `dev.`
+has no public route at all, so Traefik answers 404: n8n reaches the API over
+the docker network instead, and you use `localhost:8787` yourself.
+
+If something off the VPS genuinely needs the API — a phone, a colleague, an
+external webhook — re-run with a password and the whole host is published
+behind basicAuth instead:
+
+```bash
+docker run --rm httpd:alpine htpasswd -nbB dev 'choose-a-password'
+export DEV_BASIC_AUTH_HTPASSWD='dev:$2y$05$...'    # single quotes, verbatim
+bash /root/vps-dev-bridge.sh
+```
+
+Pass the hash exactly as printed. Doubling the `$` signs is a docker-compose
+convention and wrong here — it corrupts the hash so every password is
+rejected. The script refuses input containing `$$` for that reason.
+
+The hostname is not a secret either way: Let's Encrypt publishes every
+certificate to Certificate Transparency logs, which bots scrape.
 
 ---
 
@@ -293,17 +308,21 @@ it is easy to miss.
 > shell `export` beats the file. Handy for one-off overrides, confusing if you
 > forget you did it.
 
-**Now start both halves, in two terminals:**
+**Now start it — one command, both halves:**
 
 ```bash
-# terminal 1 — the tunnel (leave running)
-BRIDGE_GW=<BRIDGE_GW> bash scripts/dev-tunnel.sh
-
-# terminal 2 — the server
-cd server && npm run local
+cd server && npm run dev
 ```
 
-Terminal 2 should print, among other lines:
+That runs the tunnel and the server together and stops the tunnel on ^C, so a
+stale forward never keeps holding port 8788 on the VPS and blocking the next
+reconnect. It defaults `BRIDGE_GW` to `172.18.0.1`; if `root_default` is ever
+recreated with a different gateway, use `BRIDGE_GW=<addr> npm run dev`.
+
+Two terminals still works if you prefer watching them separately:
+`npm run dev:tunnel` in one, `npm run local` in the other.
+
+It should print, among other lines:
 
 ```
 Forly server on https://dev.srv1173890.hstgr.cloud (port 8787)
@@ -318,14 +337,25 @@ match — fix it before building any pages, or you will write dead URLs.
 
 ## Step 8 — Point n8n at it, once
 
-In **WW1 Walkthrough V2** → **Stitch And Overlay Titles**:
+In **WW1 Walkthrough V2** → **Stitch And Overlay Titles**, set the URL to:
 
-- URL → `https://dev.srv1173890.hstgr.cloud/api/video-overlay`
-- Authentication → Basic Auth → user `dev`, and the password from step 6
+```
+http://forly-dev-bridge:8787/api/video-overlay
+```
 
-This is the last time that node needs editing. The hostname is permanent, so
-there is no longer anything to put back when you finish for the day. Use
-`staging.` instead of `dev.` when you want runs to work with your laptop off.
+No credentials. n8n runs on this same VPS, so it resolves that container name
+over the docker network and never touches the public internet — which is why
+no password is involved. The request still goes bridge → gateway → tunnel →
+your laptop, so it hits your live working tree exactly as before.
+
+`http`, not `https`, and no hostname you'd type in a browser. If you used the
+password mode in step 6 instead, use
+`https://dev.srv1173890.hstgr.cloud/api/video-overlay` with Basic Auth.
+
+This is the last time that node needs editing — the address is permanent, so
+there is nothing to put back when you finish for the day. Point it at
+`https://staging.srv1173890.hstgr.cloud/api/video-overlay` when you want runs
+to work with your laptop off.
 
 ---
 
@@ -389,7 +419,7 @@ whole point of the exercise.
 
 ```bash
 # terminal 1
-BRIDGE_GW=<BRIDGE_GW> bash scripts/dev-tunnel.sh
+npm run dev
 # terminal 2
 cd server && npm run local
 ```
