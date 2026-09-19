@@ -1385,13 +1385,9 @@
     }
 
     var videoFile = $("#videoInput").files[0] || null;
-    // Video + photos both supplied: ask whether to still auto-generate a tour
-    // from the photos. Accept → generate the tour AND show their video first in
-    // the gallery; decline → just use their video (no generation).
-    var tourFromPhotos = false;
-    if (videoFile && photos.length >= 4) {
-      tourFromPhotos = window.confirm(FT("confirm_video_and_photos"));
-    }
+    // Video + photos both supplied: the page has one tour video. OK → theirs;
+    // Cancel → generate one from the photos (their video isn't uploaded at all).
+    if (videoFile && photos.length >= 4 && !window.confirm(FT("confirm_video_and_photos"))) videoFile = null;
 
     var btn = this;
     btn.disabled = true;
@@ -1440,10 +1436,7 @@
           shabbat_elevator: $("#pShabbatElevator").checked,
           description: $("#pDesc").value.trim(),
           photos_urls: photoUrls,
-          // Decline → their video replaces generation; accept → generate a tour
-          // and pass their video to sit first in the gallery.
-          own_video_url: tourFromPhotos ? null : videoUrl,
-          gallery_video_url: tourFromPhotos ? videoUrl : null,
+          own_video_url: videoUrl, // their video replaces the generated tour
           theme: theme,
           language: $("#pLang").value,
         };

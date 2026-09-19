@@ -36,6 +36,12 @@
   var DATA = window.__PAGE__ || window.__DEMO__ || {};
   var PAGE_ID = DATA.page_id || (location.pathname.split("/p/")[1] || "").split(/[/?]/)[0];
   var IS_PREVIEW = !window.__PAGE__;
+  // The personal edit link (#edit=…) edits texts in the Classic view of this same
+  // page (the texts are shared by every design); the server serves it for ?view=classic.
+  if (!IS_PREVIEW && /(?:^#|[#&])edit=[0-9a-f]{16,64}/i.test(location.hash)) {
+    location.replace(location.pathname + (location.search ? location.search + "&" : "?") + "view=classic" + location.hash);
+    return;
+  }
   var reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
 
   function get(path) {

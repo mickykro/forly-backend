@@ -321,19 +321,22 @@ module.exports = function createPagesRouter(ctx) {
       });
     }
     if (d.status === "building") return res.status(404).json({ error: "not ready" });
-    // Magic edit link: a valid edit_token flips the payload to editable.
-    // Invalid/missing tokens get the plain public payload — no hint given.
-    const token = typeof req.query.edit_token === "string" ? req.query.edit_token : "";
-    let editable = false;
-    if (token && !pageEdit.editThrottled(id)) {
-      if (pageEdit.editTokenOk(d, token)) editable = true;
-      else pageEdit.noteEditFail(id);
-    }
+    const editable = editableFor(req, id, d);
     res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
     const bot = await resolveChatbot(d);
     res.json({ ...pagePayload(id, d, bot.public), ...(editable ? { editable: true } : {}) });
   }
   router.get("/api/property-page", getPageHandler);
+
+  // Magic edit link: a valid edit_token flips the payload to editable.
+  // Invalid/missing tokens get the plain public payload — no hint given.
+  function editableFor(req, id, d) {
+    const token = typeof req.query.edit_token === "string" ? req.query.edit_token : "";
+    if (!token || pageEdit.editThrottled(id)) return false;
+    if (pageEdit.editTokenOk(d, token)) return true;
+    pageEdit.noteEditFail(id);
+    return false;
+  }
   router.get("/api/page", getPageHandler); // alias for edit.html
 
   // ── POST /api/page/edit-text — save from the in-page edit mode ──
@@ -699,15 +702,17 @@ module.exports = function createPagesRouter(ctx) {
         return res.status(404).json({ error: "not_found" });
       }
       const bot = await resolveChatbot(page);
+      const editable = editableFor(req, page.page_id, page);
       const payload = {
         ...pagePayload(page.page_id, page, bot.public),
         property_url: `/${reservation.current_slug}/${propSlug}`,
+        ...(editable ? { editable: true } : {}),
       };
       // Only include portfolio_url if portfolio is open
       if (portfolio?.status === "open") {
         payload.portfolio_url = `/${portfolio.slug}`;
       }
-      res.set("Cache-Control", "public, max-age=60");
+      res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
       res.json(payload);
     } catch (err) {
       console.error("GET /api/property-by-slug failed:", err);
@@ -800,9 +805,11 @@ module.exports = function createPagesRouter(ctx) {
   // Shared renderer for both the legacy /p/:id URL and the nested
   // /:portfolioSlug/:propertySlug URL it 301s to.
   const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
-  async function renderPropertyPage(res, id, d, pageUrl) {
+  // classic: the personal edit link (#edit=) edits texts in the Classic view, the
+  // only one marked up for in-page editing; the texts are shared by every design.
+  async function renderPropertyPage(res, id, d, pageUrl, { classic = false } = {}) {
     const tpl = d && d.theme && d.theme.template;
-    if (!d || d.status !== "active" || !SERVER_TEMPLATES.has(tpl)) {
+    if (!d || d.status !== "active" || classic || !SERVER_TEMPLATES.has(tpl)) {
       // Shell branch: still inject OG tags for active pages so shared links
       // preview — crawlers don't run the JS that renders this shell.
       if (d && d.status === "active") {
@@ -856,7 +863,7 @@ module.exports = function createPagesRouter(ctx) {
         }
       } catch (e) { /* fall through to the legacy shell */ }
     }
-    renderPropertyPage(res, id, d, pageUrl);
+    renderPropertyPage(res, id, d, pageUrl, { classic: req.query.view === "classic" });
   });
 
   // ── nested property page: /:portfolioSlug/:propertySlug ──
@@ -874,7 +881,7 @@ module.exports = function createPagesRouter(ctx) {
       const d = pages.find((p) => p.public_slug === propSlug) || null;
       if (!d) return next();
       const pageUrl = `${pageBaseUrl}/${portfolioSlugParam}/${propSlug}`;
-      renderPropertyPage(res, d.page_id, d, pageUrl);
+      renderPropertyPage(res, d.page_id, d, pageUrl, { classic: req.query.view === "classic" });
     } catch (err) {
       console.error("GET /:portfolioSlug/:propertySlug failed:", err);
       next();
