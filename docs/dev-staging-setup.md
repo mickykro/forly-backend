@@ -84,8 +84,18 @@ If that prints anything other than `config OK`, fix it (or restore
 `/etc/ssh/sshd_config.bak.*`) and do not reload. Once it passes:
 
 ```bash
-systemctl reload sshd
+# The unit is called `ssh` on Debian/Ubuntu and `sshd` on RHEL/CentOS. Try
+# both rather than guessing — a failed reload leaves the file edited but the
+# running daemon still on the OLD config, which looks like success until the
+# tunnel fails to bind much later.
+for u in ssh sshd; do
+  systemctl reload "$u" 2>/dev/null && { echo "reloaded $u"; break; }
+done
 ```
+
+That must print `reloaded ssh` (or `reloaded sshd`). If it prints nothing, the
+reload did not happen — find the right unit with
+`systemctl list-units --type=service | grep -i ssh` before continuing.
 
 In your *other* session, confirm you can still open a new connection:
 
@@ -407,7 +417,8 @@ Nothing else. The URLs never change.
 # VPS
 docker rm -f forly-dev-bridge
 docker rm -f forly-intake-staging          # optional
-cp /etc/ssh/sshd_config.bak.* /etc/ssh/sshd_config && sshd -t && systemctl reload sshd
+cp /etc/ssh/sshd_config.bak.* /etc/ssh/sshd_config && sshd -t && \
+  for u in ssh sshd; do systemctl reload "$u" 2>/dev/null && break; done
 ```
 
 Production's container, labels and `deploy.env` are never touched by any of
