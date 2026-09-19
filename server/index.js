@@ -130,6 +130,11 @@ app.use(express.static(path.join(__dirname, "..", "public-agent"), revalidate));
 app.use(express.static(path.join(__dirname, "..", "public-nadlan"), revalidate));
 app.use("/files", express.static(UPLOAD_DIR, { maxAge: "1d", immutable: true }));
 app.use("/tpl", express.static(TEMPLATES_DIR));
+// Public help: one page for /instructions and /instructions/<feature>; the page picks the feature from the URL.
+app.get(/^\/instructions(?:\/[a-z-]+)?\/?$/, (req, res) => {
+  res.setHeader("Cache-Control", "no-cache");
+  res.sendFile(path.join(__dirname, "..", "public-agent", "instructions", "index.html"));
+});
 
 // ── auth routes ──
 // Throttle the OTP send/verify endpoints per IP (abuse / enumeration / SMS-cost
