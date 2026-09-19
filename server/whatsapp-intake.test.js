@@ -142,7 +142,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual(draft.photos, ["https://files/a.jpg"]);
   t = await turn({ event: "photo_timer", draft }, d);
   assert.equal(t.status, "photos_progress:1");
-  assert.match(texts(t), /יש לי 1 תמונות/);
+  assert.match(texts(t), /יש לי תמונה אחת/);
   assert.equal(t.replies[0].buttons, undefined);
   for (const n of ["b", "c", "d"]) { t = await turn({ fileUrl: `https://green/${n}.jpg`, draft }, d); draft = t.draft; }
   t = await turn({ text: "עוד אחת בדרך", draft }, d);
@@ -174,7 +174,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ fileUrl: "https://green/z.jpg", draft }, d); draft = t.draft;
   assert.equal(draft.photos.length, 1);
   t = await turn({ event: "photo_timer", draft }, d);
-  assert.match(texts(t), /שמרתי 1 תמונות/);
+  assert.match(texts(t), /שמרתי תמונה אחת/);
   assert.match(texts(t), /באיזו עיר/);
 
   // confirm: any text once ready (re)sends the review link; ביטול still cancels
@@ -227,7 +227,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"], draft }, d);
   assert.equal(t.draft.photos.length, 1);
-  assert.match(texts(t), /שמרתי 1 תמונות/);
+  assert.match(texts(t), /שמרתי תמונה אחת/);
   assert.match(texts(t), /באיזו עיר/);
 
   // ── pause: silent for 2h → any message brings the draft back up (המשך / חדש / ביטול) ──

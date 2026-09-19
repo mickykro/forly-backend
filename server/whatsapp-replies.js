@@ -5,6 +5,8 @@
  * same. Green API: max 3 buttons, 25 chars each (utils.sendWhatsAppButtons).
  */
 const { MIN_PHOTOS } = require("./property-draft");
+// "תמונה אחת" / "4 תמונות" — Hebrew nouns don't stay plural with 1.
+const count = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 const ils = (n) => `₪${Number(n).toLocaleString("en-US")}`;
 
 const LABELS = {
@@ -65,11 +67,11 @@ function opened(kind, fields) {
 function offer(n) { return { text: `ערכתי ${n} תמונות ✨ לבנות מהן דף נכס?`, buttons: ["כן", "לא"] }; }
 function askPhotos() { return { text: `עכשיו התמונות 📸 שלחו לפחות ${MIN_PHOTOS} תמונות של הנכס.` }; }
 function photosProgress(n) {
-  if (n < MIN_PHOTOS) return { text: `יש לי ${n} תמונות. צריך לפחות ${MIN_PHOTOS} — שלחו עוד.` };
+  if (n < MIN_PHOTOS) return { text: `יש לי ${count(n, "תמונה אחת", "תמונות")}. צריך לפחות ${MIN_PHOTOS} — שלחו עוד.` };
   return { text: `יש לי ${n} תמונות. עוד תמונות, או ממשיכים?`, buttons: ["ממשיכים"] };
 }
 function photosSaved(n, dropped = 0) {
-  return { text: `שמרתי ${n} תמונות לנכס.` + (dropped ? ` (${dropped} לא נשמרו — המקסימום הוא 12)` : "") };
+  return { text: `שמרתי ${count(n, "תמונה אחת", "תמונות")} לנכס.` + (dropped ? ` (${dropped} לא נשמרו — המקסימום הוא 12)` : "") };
 }
 
 function summaryLines(s) {
@@ -80,8 +82,8 @@ function summaryLines(s) {
   if (s.deal) lines.push(s.deal === "rent" ? "להשכרה" : "למכירה");
   if (s.size_sqm) lines.push(`${s.size_sqm} מ״ר`);
   if (s.floor !== null && s.floor !== undefined) lines.push(`קומה ${s.floor}`);
-  if (s.parking) lines.push(`${s.parking} חניות`);
-  lines.push(`${s.photos} תמונות`);
+  if (s.parking) lines.push(count(s.parking, "חניה אחת", "חניות"));
+  lines.push(count(s.photos, "תמונה אחת", "תמונות"));
   return lines.join(" · ");
 }
 function choose() {
