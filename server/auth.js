@@ -197,8 +197,9 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
       const match = given.length === stored.length && crypto.timingSafeEqual(given, stored);
 
       if (!match) {
-        await patchOtp(phone, { attempts: (rec.attempts || 0) + 1 });
-        return res.status(401).json({ ok: false, error: "invalid_code" });
+        const attempts = (rec.attempts || 0) + 1;
+        await patchOtp(phone, { attempts });
+        return res.status(401).json({ ok: false, error: "invalid_code", attempts_left: Math.max(0, MAX_ATTEMPTS - attempts) });
       }
 
       await patchOtp(phone, { used: true, used_at: new Date() });

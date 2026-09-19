@@ -130,7 +130,7 @@ module.exports = function createDashboardRouter(ctx) {
       try {
         await sendWhatsApp(phone,
           `ברוכים הבאים לפורלי 🦉\n${fullName}, החשבון של ${businessName} מוכן!\n\n` +
-          `מה עכשיו? נכנסים ל-agent.call4li.com, פותחים נכס ראשון — ` +
+          `מה עכשיו? נכנסים ל-nadlan.call4li.com, פותחים נכס ראשון — ` +
           `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
           greenInstance, greenToken);
       } catch (err) { console.error("welcome send failed (signup still ok):", err.message); }

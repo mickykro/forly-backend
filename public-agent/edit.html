@@ -77,7 +77,8 @@
       <div class="card">
         <div class="sec-title">תבנית העיצוב</div>
         <div class="tpl-pick" id="tplPick">
-          <button type="button" data-tpl="nocturne">נוקטרן</button>
+          <button type="button" data-tpl="original">קלאסי</button>
+          <button type="button" data-tpl="nocturne">נוקטורן</button>
           <button type="button" data-tpl="reel">ריל</button>
           <button type="button" data-tpl="atelier">אטלייה</button>
           <button type="button" data-tpl="revue">מגזין</button>
@@ -366,7 +367,7 @@
       var gallery = d.gallery || {};
       var carousel = d.carousel || {};
       // Template
-      setActiveTpl((d.theme || {}).template || "nocturne");
+      setActiveTpl((d.theme || {}).template || "original");
       // Agent
       $("#fAgentName").value = agent.name || "";
       $("#fAgentBrand").value = agent.brand_name || "";
