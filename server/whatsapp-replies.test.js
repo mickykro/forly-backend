@@ -35,6 +35,8 @@ assert.doesNotMatch(R.reviewReady("L", []).text, /דילגתם/);
 assert.match(R.photosSaved(12, 3).text, /3 לא נשמרו/);
 assert.match(R.confirmChanges({ price: 2100000 }, { price: 1950000 }).text, /₪1,950,000 ← ₪2,100,000/);
 assert.match(R.heard("שלום"), /שמעתי: ״שלום״/);
+assert.match(R.updated({ city: "חיפה", parking: 1 }).text, /עדכנתי: עיר חיפה, חניה אחת ✅/);
+assert.match(R.updated({ parking: 2 }).text, /2 חניות/);
 assert.deepEqual(R.photosProgress(4).buttons, ["ממשיכים"]);
 assert.equal(R.photosProgress(2).buttons, undefined, "under 3 photos: ask for more, no continue button");
 assert.deepEqual(R.ask("deal").buttons, ["למכירה", "להשכרה"]);

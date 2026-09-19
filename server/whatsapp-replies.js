@@ -115,7 +115,9 @@ function fieldList(fields) {
 }
 function unknownField(name) { return { text: `לא מכירה את השדה ״${name}״. כתבו / לרשימת השדות.` }; }
 function updated(changes) {
-  return { text: `עדכנתי: ${Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, v)}`).join(", ")} ✅` };
+  // Parking reads as a phrase ("חניה אחת"), not "חניות 1".
+  const part = ([f, v]) => (f === "parking" && v ? count(v, "חניה אחת", "חניות") : `${LABELS[f]} ${show(f, v)}`);
+  return { text: `עדכנתי: ${Object.entries(changes).map(part).join(", ")} ✅` };
 }
 function confirmChanges(changes, fields) {
   const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, fields[f])} ← ${show(f, v)}`).join("\n");
