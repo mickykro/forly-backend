@@ -96,6 +96,8 @@ async function openFromSource(phone, kind, text, deps, now) {
     if ((String(text).match(/https?:\/\//gi) || []).length > 1) extra.push(R.firstLinkOnly());
   }
   draft.photos = await importAll((src.photos || []).map((p) => p.url), deps.importPhoto);
+  // The listing had photos but none could be kept: say so, or the agent assumes they're in.
+  if ((src.photos || []).length && !draft.photos.length) extra.push(R.listingPhotosFailed());
   const p = promptFor(draft, deps);
   return { handled: true, status: p.status, draft, replies: [R.opened(kind, draft.fields), ...extra, ...p.replies] };
 }

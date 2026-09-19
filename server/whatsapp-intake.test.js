@@ -368,6 +368,12 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "המשך", draft: t.draft }, d);
   assert.equal(t.status, "confirm", "resume: back where the draft was");
 
+  // listing photos that all fail to re-host are reported, not swallowed
+  ({ d } = deps({ importPhoto: async () => { throw new Error("relay 401"); } }));
+  t = await turn({ text: "https://www.yad2.co.il/item/abc" }, d);
+  assert.equal(t.draft.photos.length, 0);
+  assert.match(texts(t), /מצאתי תמונות במודעה אבל לא הצלחתי לשמור אותן/);
+
   // #16 emoji around a command
   assert.equal(D.command("✅ ליצור!"), "create");
 

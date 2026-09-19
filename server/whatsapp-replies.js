@@ -131,6 +131,7 @@ function videoFailed() { return { text: "לא הצלחתי לשמור את הס�
 function heard(transcript) { return `🎙️ שמעתי: ״${transcript}״`; }
 function voiceFailed() { return { text: "לא הצלחתי לשמוע את ההקלטה 🙉 אפשר לכתוב?" }; }
 function sendAsImage() { return { text: "קיבלתי קובץ, ואת זה אני לא יודעת לקרוא 📎 תמונות של הנכס שלחו כתמונות (לא כקובץ/מסמך)." }; }
+function listingPhotosFailed() { return { text: "מצאתי תמונות במודעה אבל לא הצלחתי לשמור אותן 📸 אפשר לשלוח אותן כאן ישירות." }; }
 function firstLinkOnly() { return { text: "קראתי את הקישור הראשון. את השני שלחו אחרי שנסיים עם הנכס הזה." }; }
 function buildFailed(retry, listing = {}) {
   const which = headline(listing);
@@ -164,5 +165,5 @@ module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
-  heard, voiceFailed, sendAsImage, firstLinkOnly, buildFailed, outOfQuota, videoSaved, videoFailed,
+  heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };
