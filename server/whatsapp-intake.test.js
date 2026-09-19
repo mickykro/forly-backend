@@ -357,6 +357,17 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "95", draft: t.draft }, d);
   assert.deepEqual([t.draft.fields.size_sqm, t.draft.retry], [95, null]);
 
+  // a new link or "נכס חדש" while a draft is open asks המשך / חדש / ביטול instead of being ignored
+  ({ d } = deps());
+  t = await turn({ text: "https://www.yad2.co.il/item/other", draft: ready }, d);
+  assert.deepEqual([t.status, t.draft.pending_opener.text], ["resume_prompt", "https://www.yad2.co.il/item/other"]);
+  t = await turn({ text: "חדש", draft: t.draft }, d);
+  assert.deepEqual([t.draft.source, t.draft.fields.city], ["link", "תל אביב"], "new: the link opens a fresh draft");
+  t = await turn({ text: "נכס חדש", draft: ready }, d);
+  assert.equal(t.status, "resume_prompt");
+  t = await turn({ text: "המשך", draft: t.draft }, d);
+  assert.equal(t.status, "confirm", "resume: back where the draft was");
+
   // #16 emoji around a command
   assert.equal(D.command("✅ ליצור!"), "create");
 

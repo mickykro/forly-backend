@@ -400,6 +400,10 @@ async function handleTurn(input, deps) {
     if (input.event) return notOurs("not_ours");
     return resumePrompt(draft, { text: input.text || null, file_urls: photoUrlsOf(input) }, now);
   }
+  // A new link or "נכס חדש" while a draft is open is a different property: ask
+  // instead of ignoring it. (Pasted listing text stays an answer — it fills fields.)
+  const opener = D.openerKind(input.text);
+  if (draft.status === "active" && (opener === "link" || opener === "keyword")) return resumePrompt(draft, { text: input.text }, now);
   const t = await activeTurn(input, deps, draft, now);
   return t.status === "create" ? build(t.draft || draft, deps, now) : t;
 }
