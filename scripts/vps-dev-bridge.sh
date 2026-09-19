@@ -168,12 +168,21 @@ fi
 
 # ── tunnel present? ───────────────────────────────────────────────────────
 echo
-if docker run --rm --network "$NETWORK" alpine/socat -T2 - "TCP:${NAME}:8787" </dev/null >/dev/null 2>&1; then
-  echo "vps-dev-bridge: ✓ something is answering through the bridge"
-else
-  echo "vps-dev-bridge: - nothing behind the bridge yet (start the laptop tunnel)"
-  echo "                  The TLS certificate is unaffected by this."
-fi
+# Must be an END-TO-END probe. Merely opening a TCP connection to the bridge
+# proves nothing: socat's TCP-LISTEN accepts the inbound connection before it
+# dials the upstream, so a bare connect succeeds even with no tunnel at all.
+# Send a real HTTP request and require a real status line back — that can only
+# come from express on the laptop, through the tunnel.
+RESP=$(printf 'GET /nonexistent-probe HTTP/1.0\r\nHost: %s\r\n\r\n' "$DEV_HOST" \
+  | docker run --rm -i --network "$NETWORK" alpine/socat - \
+      "TCP:${NAME}:8787,connect-timeout=5" 2>/dev/null | head -1 || true)
+case "$RESP" in
+  HTTP/*) echo "vps-dev-bridge: ✓ the laptop answered through the tunnel — ${RESP}" ;;
+  *)      echo "vps-dev-bridge: - no answer through the bridge."
+          echo "                  Expected until 'bash scripts/dev-tunnel.sh' runs on the"
+          echo "                  laptop with the dev server up. The TLS certificate is"
+          echo "                  unaffected by this." ;;
+esac
 
 # ── production post-check ─────────────────────────────────────────────────
 echo
