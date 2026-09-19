@@ -42,13 +42,25 @@ const confirmHtml = (title, sub) =>
   `p{color:#5A5348;margin:0}</style></head>` +
   `<body><div class="card"><h1>${title}</h1><p>${sub}</p></div></body></html>`;
 const expiredLinkHtml = () =>
-  confirmHtml("הקישור אינו תקף", "ייתכן שהדף כבר הוארך. ניתן להאריך גם דרך agent.call4li.com");
+  confirmHtml("הקישור אינו תקף", "הקישור כבר נוצל או שאינו תקף. לניהול הנכסים: nadlan.call4li.com");
 
 module.exports = function createPagesRouter(ctx) {
   const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,
           requireAuth, verifyActionToken, authSecret, adminApiSecret,
+          uploadPublicBase, remoteUploadBase, signActionToken,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
   const { constantTimeEqual } = require("../security");
+
+  // Options every rehost() in this router shares. remoteUploadBase sends the
+  // bytes to the always-on instance; signUpload is the credential for that hop,
+  // needed because createPropertyPage is unauthenticated and so has no session
+  // of its own to forward (see upload-relay.js relayHeaders).
+  const { uploadTokenParts } = require("../upload-relay");
+  const rehostOpts = {
+    uploadPublicBase, remoteUploadBase,
+    signUpload: signActionToken ?
+      (fname) => signActionToken(uploadTokenParts(fname), authSecret) : undefined,
+  };
 
   // Admin allowlist, normalized once so "050-…", "+972…" and "972…" all match
   // the canonical form a session carries (same treatment as routes/admin.js).
@@ -152,10 +164,14 @@ module.exports = function createPagesRouter(ctx) {
       const propBool = (k) => !!((body.property && body.property[k]) || (listing && listing[k]));
       if (theme && theme.font_url) {
         const fext = (theme.font_url.split("?")[0].match(/\.(woff2|woff|ttf|otf)$/i) || [, "woff2"])[1].toLowerCase();
-        theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`, uploadDir, baseUrl).catch(() => theme.font_url);
+        theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`, uploadDir, baseUrl, rehostOpts)
+          .then((r) => r.url).catch(() => theme.font_url);
       }
 
-      const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl);
+      // rehost returns { url, fname, localPath }: url is what the page stores
+      // (the relay host when one is configured), localPath is where the bytes
+      // landed here, which the captioning pass below reads back.
+      const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl, rehostOpts);
       const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
       const posterP = rehostFn(body.poster_url || body.photos[0].url, `${base}/poster.jpg`);
       const photoPs = body.photos.slice(0, 12).map((p, i) =>
@@ -163,13 +179,16 @@ module.exports = function createPagesRouter(ctx) {
       const mapP = body.area && body.area.map_image_url ? rehostFn(body.area.map_image_url, `${base}/map.png`) : null;
       const logoP = logoSrc ? rehostFn(logoSrc, `${base}/logo.png`) : null;
 
-      const [videoUrl, posterUrl, ...rest] = await Promise.all([
+      const [video, poster, ...rest] = await Promise.all([
         videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
       ]);
-      const photoUrls = rest.slice(0, photoPs.length);
+      const videoUrl = video.url;
+      const posterUrl = poster.url;
+      const photos = rest.slice(0, photoPs.length);
+      const photoUrls = photos.map((r) => r.url);
       let cursor = photoPs.length;
-      const mapUrl = mapP ? rest[cursor++] : null;
-      const logoUrl = logoP ? rest[cursor++] : null;
+      const mapUrl = mapP ? rest[cursor++].url : null;
+      const logoUrl = logoP ? rest[cursor++].url : null;
 
       // Per-photo captions. An explicit caption wins; failing that, whatever the
       // Vision Tagger said this photo was. The tagger already classifies every
@@ -191,7 +210,10 @@ module.exports = function createPagesRouter(ctx) {
       // `description` wins where n8n sends one; otherwise the photos are looked
       // at here. Best-effort and skipped without ANTHROPIC_API_KEY — the
       // gallery then carries captions alone, as it did before.
-      const localPhotoPath = (i) => path.join(uploadDir, `${base}/photo-${pad(i + 1)}.${guessImageExt(body.photos[i].url)}`);
+      // Read back the copy rehost() just wrote, rather than recomputing a path
+      // from the destination name — the stored name is a flat uuid now, and
+      // with a relay configured the public URL is on another host entirely.
+      const localPhotoPath = (i) => photos[i].localPath;
       const needVision = photoUrls.some((_, i) => {
         const p = body.photos[i] || {};
         return !String(p.description || "").trim() || !captionFor(i);

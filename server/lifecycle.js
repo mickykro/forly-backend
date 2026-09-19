@@ -36,7 +36,7 @@ async function runExpirySweep(ctx) {
       await sendWhatsApp(p.business_phone,
         `⏳ דף הנכס "${(p.property && p.property.title) || ""}" יפוג בעוד ${daysLeft} ימים.\n` +
         `להארכה בחינם (${PAGE_LIFESPAN_DAYS} יום נוספים) בלחיצה אחת:\n${link}\n\n` +
-        `לניהול כל הנכסים: agent.call4li.com`,
+        `לניהול כל הנכסים: nadlan.call4li.com`,
         ctx.greenInstance, ctx.greenToken);
       // Only mark as reminded once the send succeeded, so a WhatsApp outage
       // retries tomorrow instead of silently swallowing the reminder.

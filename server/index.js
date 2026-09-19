@@ -35,13 +35,17 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploa
 // wins when set; otherwise local dev keeps its own BASE_URL and anything else
 // falls back to the canonical domain.
 const PUBLIC_BASE_URL = "https://nadlan.call4li.com";
-const isLocalBase = /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:|$)/.test(BASE_URL);
-// Hosts that must never appear in a link an end buyer can see, even if a
-// deployment's env points at one.
-const INFRA_HOST = /(hstgr\.cloud|trycloudflare\.com|ngrok(-free)?\.(io|app|dev)|loca\.lt|^https?:\/\/\d+\.\d+\.\d+\.\d+)/i;
-const pageBaseCandidate = process.env.PAGE_BASE_URL || (isLocalBase ? BASE_URL : PUBLIC_BASE_URL);
-const PAGE_BASE_URL = (INFRA_HOST.test(pageBaseCandidate) ? PUBLIC_BASE_URL : pageBaseCandidate)
-  .replace(/\/+$/, "");
+// The rule lives in utils.js (resolvePageBaseUrl) so it is unit-testable and so
+// the operator scripts can share the same INFRA_HOST definition. Setting
+// ALLOW_INFRA_PAGE_BASE=1 — dev and staging only — lets a *.hstgr.cloud
+// PAGE_BASE_URL stand instead of being rewritten to the branded domain.
+const { resolvePageBaseUrl } = require("./utils");
+const PAGE_BASE_URL = resolvePageBaseUrl({
+  pageBaseUrl: process.env.PAGE_BASE_URL,
+  baseUrl: BASE_URL,
+  publicBaseUrl: PUBLIC_BASE_URL,
+  allowInfra: process.env.ALLOW_INFRA_PAGE_BASE,
+});
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
 const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
 const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
@@ -74,6 +78,7 @@ const AUTH_SECRET = authSecretInfo.secret;
 // ephemeral dev key every relayed upload would 502, so the relay is disabled.
 const remoteUpload = resolveRemoteUploadBase({
   raw: process.env.REMOTE_UPLOAD_BASE, secretEphemeral: authSecretInfo.ephemeral,
+  selfBase: BASE_URL,
 });
 if (remoteUpload.reason) console.warn(`WARNING: ${remoteUpload.reason}`);
 const REMOTE_UPLOAD_BASE = remoteUpload.base;
@@ -166,7 +171,7 @@ app.use("/api/quota", createQuotaRouter({
 
 app.use("/api", createIntakeRouter({
   requireAuth, normalizeAuthPhone, signSession,
-  verifySession, readToken, adminPhones: ADMIN_PHONES, quota,
+  verifySession, readToken, verifyActionToken, adminPhones: ADMIN_PHONES, quota,
   uploadDir: UPLOAD_DIR,
   uploadPublicBase: UPLOAD_PUBLIC_BASE,
   remoteUploadBase: REMOTE_UPLOAD_BASE,
@@ -278,6 +283,11 @@ const createPagesRouter = require("./routes/pages");
 app.use(createPagesRouter({
   uploadDir: UPLOAD_DIR,
   baseUrl: BASE_URL,
+  // Page media is rehosted through the same relay the intake routes use, so a
+  // page built on a laptop carries URLs that outlive the laptop.
+  uploadPublicBase: UPLOAD_PUBLIC_BASE,
+  remoteUploadBase: REMOTE_UPLOAD_BASE,
+  signActionToken,
   pageBaseUrl: PAGE_BASE_URL,
   templatesDir: TEMPLATES_DIR,
   n8nLeadWebhook: N8N_LEAD_WEBHOOK_URL,
