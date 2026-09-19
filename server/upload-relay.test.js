@@ -9,8 +9,9 @@
  * Run: node server/upload-relay.test.js
  */
 const assert = require("assert");
+const crypto = require("crypto");
 const {
-  resolveAuthSecret, resolveRemoteUploadBase, relayHeaders, relayUpload,
+  resolveAuthSecret, resolveRemoteUploadBase, relayHeaders, relayUpload, uploadTokenParts,
 } = require("./upload-relay");
 
 (async () => {
@@ -36,10 +37,34 @@ const {
   assert.strictEqual(off.base, "", "ephemeral dev key ⇒ relay disabled, uploads stay local");
   assert.match(off.reason, /NADLAN_JWT_SECRET/);
 
+  // ── an instance must never relay to itself ──
+  // Cheap to misconfigure by copying one env file onto another; the result is
+  // an instance making upload requests to itself.
+  const loop = resolveRemoteUploadBase({
+    raw: "https://staging.example.com/", secretEphemeral: false,
+    selfBase: "https://staging.example.com",
+  });
+  assert.strictEqual(loop.base, "", "self-referential relay must be refused");
+  assert.match(loop.reason, /own BASE_URL/);
+  assert.strictEqual(resolveRemoteUploadBase({
+    raw: "https://STAGING.example.com", secretEphemeral: false,
+    selfBase: "https://staging.example.com",
+  }).base, "", "host comparison is case-insensitive");
+  assert.strictEqual(resolveRemoteUploadBase({
+    raw: "https://staging.example.com", secretEphemeral: false,
+    selfBase: "https://dev.example.com",
+  }).base, "https://staging.example.com", "a genuinely remote base still relays");
+
   // ── only credentials are forwarded, nothing else ──
   const req = { headers: { cookie: "forly_session=abc", authorization: "Bearer t", "x-demo-key": "k", host: "h" } };
   assert.deepStrictEqual(relayHeaders(req), { cookie: "forly_session=abc", authorization: "Bearer t" });
   assert.deepStrictEqual(relayHeaders({ headers: {} }), {});
+
+  // The server-to-server case: a relay started by an unauthenticated route has
+  // no cookie, so it signs a token scoped to the one filename it is uploading.
+  assert.deepStrictEqual(
+    relayHeaders({ headers: { "x-upload-token": "tok", "x-demo-key": "k" } }),
+    { "x-upload-token": "tok" }, "upload token forwarded, other headers still dropped");
 
   // ── relayUpload maps remote outcomes ──
   const calls = [];
@@ -66,6 +91,33 @@ const {
 
   out = await relayUpload({ ...args, fetch: async () => { throw new Error("ECONNREFUSED"); } });
   assert.deepStrictEqual(out, { status: 502, body: { error: "remote upload failed: ECONNREFUSED" } });
+
+  // ── an upload token authorizes ONE name, not uploads in general ──
+  // Mirrors auth.js signActionToken/verifyActionToken, replicated here rather
+  // than required so this file still runs with no npm install (auth.js pulls in
+  // express). The property under test is the SCOPE, not the HMAC.
+  const sign = (parts, secret) =>
+    crypto.createHmac("sha256", secret).update(parts.join(":")).digest("base64url");
+  const verify = (parts, token, secret) => {
+    const a = Buffer.from(String(token || ""));
+    const b = Buffer.from(sign(parts, secret));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  };
+
+  const SECRET = "shared-between-instances";
+  const tokenForA = sign(uploadTokenParts("aaaa.jpg"), SECRET);
+
+  assert.ok(verify(uploadTokenParts("aaaa.jpg"), tokenForA, SECRET),
+    "a token must authorize the name it was signed for");
+  assert.ok(!verify(uploadTokenParts("bbbb.jpg"), tokenForA, SECRET),
+    "a token for one file must NOT authorize another — this is the whole point of the scope");
+  assert.ok(!verify(uploadTokenParts("aaaa.jpg"), tokenForA, "a-different-secret"),
+    "a token signed with another secret must be rejected");
+  assert.ok(!verify(uploadTokenParts("aaaa.jpg"), "", SECRET), "empty token rejected");
+  assert.ok(!verify(uploadTokenParts("aaaa.jpg"), undefined, SECRET), "missing token rejected");
+  // A filename is never absent from the parts, so a token can never be generic.
+  assert.deepStrictEqual(uploadTokenParts("x.mp4"), ["upload", "x.mp4"]);
+  assert.notDeepStrictEqual(uploadTokenParts("x.mp4"), uploadTokenParts("y.mp4"));
 
   console.log("upload-relay.test.js OK");
 })().catch((err) => { console.error(err); process.exit(1); });
