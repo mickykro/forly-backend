@@ -31,10 +31,22 @@ die() { echo "vps-dev-bridge: $*" >&2; exit 1; }
 
 # htpasswd line guarding everything except /files/. Generate with:
 #   htpasswd -nbB dev '<password>'
-# and double every $ (docker eats single ones).
+# Pass it through VERBATIM. The $ characters in a bcrypt hash need doubling in
+# a docker-compose.yml, because compose does its own interpolation — but this
+# is `docker run` with the value coming from a quoted shell variable, so the
+# shell expands it once and Docker never looks at it again. Doubling here
+# CORRUPTS the hash and every login silently fails.
 [ -n "${DEV_BASIC_AUTH_HTPASSWD:-}" ] || die "DEV_BASIC_AUTH_HTPASSWD is unset.
   Generate it with:  htpasswd -nbB dev '<password>'
-  then double every \$ before exporting it."
+  and export it exactly as printed — do not escape or double the \$ signs."
+
+case "$DEV_BASIC_AUTH_HTPASSWD" in
+  *'$$'*) die "DEV_BASIC_AUTH_HTPASSWD contains '\$\$'. That doubling is a
+  docker-compose convention and is wrong here — basicAuth would reject every
+  password. Re-export the htpasswd output verbatim." ;;
+  *:*) : ;;
+  *) die "DEV_BASIC_AUTH_HTPASSWD does not look like 'user:hash' output from htpasswd -nbB." ;;
+esac
 
 GW="$(docker network inspect "$NETWORK" -f '{{(index .IPAM.Config 0).Gateway}}')"
 [ -n "$GW" ] || die "could not read the gateway address for network $NETWORK"
