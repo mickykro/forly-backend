@@ -42,7 +42,7 @@ const confirmHtml = (title, sub) =>
   `p{color:#5A5348;margin:0}</style></head>` +
   `<body><div class="card"><h1>${title}</h1><p>${sub}</p></div></body></html>`;
 const expiredLinkHtml = () =>
-  confirmHtml("הקישור אינו תקף", "ייתכן שהדף כבר הוארך. ניתן להאריך גם דרך agent.call4li.com");
+  confirmHtml("הקישור אינו תקף", "הקישור כבר נוצל או שאינו תקף. לניהול הנכסים: nadlan.call4li.com");
 
 module.exports = function createPagesRouter(ctx) {
   const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,

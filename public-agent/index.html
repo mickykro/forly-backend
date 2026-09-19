@@ -245,8 +245,14 @@
         showList(d.agent);
       })
       .catch(function (e) {
-        err.textContent = e.code === "wrong_code" ? "קוד שגוי (" + (e.data.attempts_left || 0) + " נסיונות נותרו)" :
-          e.code === "expired" ? "הקוד פג — שלחו קוד חדש" : "שגיאה באימות";
+        var left = e.data && e.data.attempts_left;
+        err.textContent = {
+          invalid_code: "קוד שגוי" + (left ? " (" + left + " נסיונות נותרו)" : " — שלחו קוד חדש"),
+          code_expired: "הקוד פג — שלחו קוד חדש",
+          too_many_attempts: "יותר מדי נסיונות — שלחו קוד חדש",
+          code_already_used: "הקוד כבר נוצל — שלחו קוד חדש",
+          no_code_requested: "שלחו קוד קודם",
+        }[e.code] || "שגיאה באימות, נסו שוב";
         err.classList.add("show");
         cells.forEach(function (c) { c.value = ""; });
         cells[0].focus();
@@ -291,7 +297,6 @@
       actions.push('<a class="btn btn-gold btn-sm" href="/publish.html?page=' + p.page_id + '">פרסום</a>');
     }
     if (p.page_id && p.page_status !== "building") {
-      actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + p.page_id + '">הארכה +30</button>');
     }
     actions.push('<button class="btn btn-danger btn-sm" data-archive="' + p.listing_id + '">ארכיון</button>');
     return '<div class="prop-card">' +
@@ -556,14 +561,6 @@
   }
 
   function bindActions() {
-    document.querySelectorAll("[data-extend]").forEach(function (b) {
-      b.addEventListener("click", function () {
-        b.disabled = true;
-        FLY.req("/api/page/extend", { method: "POST", body: { page_id: b.dataset.extend } })
-          .then(function () { FLY.toast("✅ הדף הוארך ב-30 יום"); loadList(); })
-          .catch(function () { FLY.toast("שגיאה בהארכה"); b.disabled = false; });
-      });
-    });
     document.querySelectorAll("[data-archive]").forEach(function (b) {
       b.addEventListener("click", function () {
         if (!confirm("להעביר את הנכס לארכיון? הדף יוסתר מהציבור.")) return;
