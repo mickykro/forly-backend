@@ -404,7 +404,7 @@ Nothing else. The URLs never change.
 |---|---|---|
 | `dev.` returns 502 | server or tunnel not running | start both (step 7) |
 | `dev.` returns 404 | bridge container not running | re-run step 6 |
-| Browser warns about the certificate | Traefik tried to issue it while nothing was behind the route | start the tunnel, then `docker restart` the Traefik container so it retries |
+| Browser warns about the certificate | ACME issuance failed or is still in flight. Traefik answers the challenge itself over TLS-ALPN-01 on :443, so this is **not** caused by the tunnel being down | `docker logs root-traefik-1 2>&1 \| grep -i acme` for the real reason — usually a Let's Encrypt rate limit or :443 being unreachable |
 | basicAuth rejects the right password | `$` signs doubled in the htpasswd line | re-run step 6 with the output verbatim |
 | Tunnel exits with "remote port forwarding failed" | stale listener, or another machine holds it | find it with `ssh root@31.97.216.242 "ss -lptn 'sport = :8788'"`, kill the owning `sshd` pid, then restart |
 | Boot warns about `REMOTE_UPLOAD_BASE` | `NADLAN_JWT_SECRET` differs from staging's | copy it from `staging.env` (step 7) |
