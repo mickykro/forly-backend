@@ -27,7 +27,7 @@ const MAX_FONT_MB = 5;
 module.exports = function createIntakeRouter(ctx) {
   const { requireAuth, normalizeAuthPhone, signSession, uploadDir, uploadPublicBase, remoteUploadBase,
     n8nWw1Webhook, n8nPipelineWebhook, authSecret, sessionTtl, pageBaseUrl, isDevRun, isDevPipelineRun,
-    baseUrl, verifySession, readToken, adminPhones, quota } = ctx;
+    baseUrl, verifySession, readToken, verifyActionToken, adminPhones, quota } = ctx;
 
   const router = express.Router();
 
@@ -40,13 +40,24 @@ module.exports = function createIntakeRouter(ctx) {
   // (REMOTE_UPLOAD_BASE), it forwards the caller's own session so the remote —
   // running this same code — re-authorizes the write. index.js only enables
   // the relay when a real shared NADLAN_JWT_SECRET exists (see upload-relay.js).
-  const { relayHeaders, relayUpload } = require("../upload-relay");
+  const { relayHeaders, relayUpload, uploadTokenParts } = require("../upload-relay");
 
   // ── upload-urls ──
   // Any authenticated user (agent or admin) may request upload slots; the
   // header bypass is gone.
   // The WhatsApp review link (scope "review") lands on create.html, which uploads photos and creates.
   const uploadAuth = requireAuth(authSecret, REVIEW_SCOPES);
+
+  // PUT /upload/:fname additionally accepts a server-signed upload token, for
+  // relays started by a route that has no session to forward (rehost() called
+  // from the unauthenticated createPropertyPage). The token is HMAC'd over the
+  // exact filename, so one leaked token grants one upload of one name and
+  // nothing else — it is not a session and confers no other rights. Every
+  // content check below still runs.
+  const uploadTokenOk = (req) => !!verifyActionToken &&
+    verifyActionToken(uploadTokenParts(req.params.fname), req.get("x-upload-token"), authSecret);
+  const uploadAuthOrToken = (req, res, next) =>
+    (uploadTokenOk(req) ? next() : uploadAuth(req, res, next));
 
   router.post("/upload-urls", uploadAuth, (req, res) => {
     const files = req.body && req.body.files;
@@ -78,7 +89,7 @@ module.exports = function createIntakeRouter(ctx) {
   // Authenticated (agent or admin); the remote-store relay forwards the same
   // session so the remote instance re-authorizes rather than trusting the hop.
   const rawBody = express.raw({ type: () => true, limit: `${MAX_VIDEO_MB}mb` });
-  router.put("/upload/:fname", uploadAuth, rawBody, async (req, res) => {
+  router.put("/upload/:fname", uploadAuthOrToken, rawBody, async (req, res) => {
     const fname = req.params.fname;
     const m = /^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.exec(fname);
     if (!m) {

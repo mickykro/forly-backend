@@ -20,6 +20,8 @@ const prompt = require("../chat-prompt");
 const chatProvider = require("../chat-provider");
 const { submitLead } = require("../leads");
 const { normalizePhone, sendWhatsApp, asMillis } = require("../utils");
+const qualify = require("../chat-qualify");
+const recommend = require("../chat-recommend");
 
 const MAX_TURNS_KEPT = 60;     // stored history cap (phase 3 sends this to the agent)
 const MAX_TURNS_SENT = 20;     // how much of it is replayed to the model
@@ -28,7 +30,7 @@ const nowDay = () => new Date().toISOString().slice(0, 10);
 const nowMonth = () => new Date().toISOString().slice(0, 7);
 
 module.exports = function createChatRouter(ctx) {
-  const { apiKeys, ipSalt, greenInstance, greenToken, quota } = ctx;
+  const { apiKeys, ipSalt, greenInstance, greenToken, quota, pageBaseUrl } = ctx;
   const router = express.Router();
 
   const hashIp = (ip) =>
@@ -262,6 +264,39 @@ module.exports = function createChatRouter(ctx) {
     convo.message_count = (convo.message_count || 0) + 1;
     convo.last_at = at;
     if (convo.lead.captured) convo.post_handoff_count = postCount + 1;
+
+    // If lead already captured and this is unanswered, notify agent with new question
+    // without re-showing the form.
+    if (!answered && parsed && convo.lead && convo.lead.captured) {
+      convo.unanswered = (convo.unanswered || [])
+        .concat([parsed.unanswered_question || message]).slice(-10);
+
+      // Auto-notify agent with the new question using existing lead data
+      const title = (page.property && page.property.address) || "";
+      const city = (page.property && page.property.city) || "";
+      const listingType = (page.property && page.property.listing_type) || "sale";
+      const msg = [
+        `🔔 שאלה נוספת מליד "${title}, ${city}"`,
+        `👤 ${convo.lead.name}`,
+        `📞 0${convo.lead.phone.slice(3)}`,
+        ...(convo.lead.qualification ? qualify.qualificationLines(convo.lead.qualification, listingType) : []),
+        `❓ שאלה חדשה:`,
+        `• ${parsed.unanswered_question || message}`,
+        `דברו איתו עכשיו: https://wa.me/${convo.lead.phone}`,
+      ].join("\n");
+      sendWhatsApp(page.business_phone, msg, greenInstance, greenToken)
+        .catch((e) => console.error("chat followup notify failed:", e.message));
+
+      await saveConversation(pageId, cid, convo);
+      await countMessage(pageId, page.business_phone, tokens);
+
+      return res.json({
+        conversation_id: cid,
+        reply,
+        state: "lead_followup",
+      });
+    }
+
     if (!answered && parsed) {
       // Every unanswered question, not just the first — the handoff message lists
       // them all. Capped so a hostile visitor can't grow the doc unbounded.
@@ -272,8 +307,15 @@ module.exports = function createChatRouter(ctx) {
         // the agent has actually been told.
         convo.handoff = { triggered: true, at, question: parsed.unanswered_question || message };
         convo.status = "handoff_pending";
+        convo.form_offered = true;
       }
     }
+
+    // The engaged visitor whose questions the bot could all answer: offer the
+    // form once, on the Nth answered turn. Decided by a pure helper so the
+    // guards (once, no lead yet, no handoff yet) are unit-tested.
+    const offerLead = qualify.shouldOfferForm(convo, lim, answered && !!parsed);
+    if (offerLead) convo.form_offered = true;
 
     await saveConversation(pageId, cid, convo);
     await countMessage(pageId, page.business_phone, tokens);
@@ -281,9 +323,8 @@ module.exports = function createChatRouter(ctx) {
     res.json({
       conversation_id: cid,
       reply,
-      // Phase 3 turns "handoff" into name+phone capture and a WhatsApp to the
-      // agent. For now the widget points the visitor at the existing form.
       state: answered ? "answering" : "handoff",
+      ...(offerLead ? { offer_lead: true } : {}),
     });
   });
 
@@ -298,6 +339,11 @@ module.exports = function createChatRouter(ctx) {
     if (!pageId || !cid) return res.status(400).json({ error: "invalid_input" });
     if (name.length < 2) return res.status(400).json({ error: "invalid_name" });
     if (!prospectPhone) return res.status(400).json({ error: "invalid_phone" });
+
+    // Budget is the one required qualification field; the two selects are
+    // optional and unknown values become null rather than rejecting the lead.
+    const qual = qualify.parseQualification(body);
+    if (!qual.ok) return res.status(400).json({ error: qual.error });
 
     const page = await db.getPage(pageId).catch(() => null);
     if (!page) return res.status(404).json({ error: "not_found" });
@@ -321,7 +367,7 @@ module.exports = function createChatRouter(ctx) {
     const prev = convo.lead;
     if (prev && prev.captured && prev.phone === prospectPhone &&
         Date.now() - asMillis(prev.at) < DEDUPE_MS) {
-      return res.json({ ok: true });
+      return res.json({ ok: true, recommendations: [] });
     }
 
     // Per-IP throttle (same store as /api/chat). The per-convo lead.captured
@@ -332,10 +378,29 @@ module.exports = function createChatRouter(ctx) {
     }
 
     const questions = (convo.unanswered || []).filter(Boolean);
+    const listingType = (page.property && page.property.listing_type) || "sale";
+
+    // Other listings of the same agent that fit the budget. A Firestore hiccup
+    // here must never cost the lead — fall back to no recommendations.
+    const siblings = await db.listPagesByPhone(page.business_phone).catch((err) => {
+      console.warn("chat listPagesByPhone failed (no recommendations):", err.message);
+      return [];
+    });
+    // Use request origin for local dev (127.0.0.1:8787), fallback to PAGE_BASE_URL for production
+    const protocol = req.headers["x-forwarded-proto"] || (req.secure ? "https" : "http");
+    const host = req.headers.host || req.headers["x-forwarded-host"];
+    const baseUrl = host ? `${protocol}://${host}` : pageBaseUrl;
+    const recommendations = recommend.matchByBudget(siblings, {
+      budget: qual.value.budget, listingType, excludePageId: pageId, baseUrl,
+    });
 
     // Lead saved BEFORE the send — a Green API outage must never lose it.
     try {
-      await submitLead({ page, name, phone: prospectPhone, source: "chat", questions });
+      await submitLead({
+        page, name, phone: prospectPhone, source: "chat", questions,
+        qualification: qual.value,
+        recommended_page_ids: recommendations.map((m) => m.page_id),
+      });
     } catch (err) {
       console.error("chat submitLead failed:", err.message);
       return res.status(500).json({ error: "internal" });
@@ -343,20 +408,29 @@ module.exports = function createChatRouter(ctx) {
 
     const title = (page.property && page.property.address) || "";
     const city = (page.property && page.property.city) || "";
-    const msg =
-      `🔔 ליד חדש מדף הנכס "${title}, ${city}"\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
-      (questions.length ? "❓ שאלות שלא נענו:\n" + questions.map((q) => `• ${q}`).join("\n") + "\n" : "") +
-      `דברו איתו עכשיו: https://wa.me/${prospectPhone}`;
+    const msg = [
+      `🔔 ליד חדש מדף הנכס "${title}, ${city}"`,
+      `👤 ${name}`,
+      `📞 0${prospectPhone.slice(3)}`,
+      ...qualify.qualificationLines(qual.value, listingType),
+      ...(questions.length ? ["❓ שאלות שלא נענו:", ...questions.map((q) => `• ${q}`)] : []),
+      ...recommend.recommendationLines(recommendations),
+      `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
+    ].join("\n");
     sendWhatsApp(page.business_phone, msg, greenInstance, greenToken)
       .catch((e) => console.error("chat lead notify failed:", e.message));
 
     const at = new Date();
-    convo.lead = { captured: true, at, name, phone: prospectPhone };
+    convo.lead = {
+      captured: true, at, name, phone: prospectPhone,
+      qualification: qual.value,
+      recommended_page_ids: recommendations.map((m) => m.page_id),
+    };
     convo.status = "lead_captured";
     convo.post_handoff_count = 0;
     await saveConversation(pageId, cid, convo);
 
-    res.json({ ok: true });
+    res.json({ ok: true, recommendations });
   });
 
   return router;

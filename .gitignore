@@ -97,7 +97,7 @@ server/data
 
 # Claude Flow runtime data
 # any depth: the claude-flow hooks create these relative to the shell's cwd
-**/.claude-flow/data/
+**/.claude-flow
 **/.claude-flow/logs/
 
 # Environment variables
@@ -105,5 +105,6 @@ server/data
 .env.local
 .env.*.local
 
-# Agent tooling session logs (claude-flow)
+# claude-flow runtime session state
 .claude-flow/
+.swarm/

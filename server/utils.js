@@ -7,6 +7,8 @@ const path = require("path");
 const fs = require("fs");
 const dns = require("dns").promises;
 const net = require("net");
+const crypto = require("crypto");
+const { relayUpload } = require("./upload-relay");
 
 const pad = (n) => String(n).padStart(2, "0");
 const daysFromNow = (d) => new Date(Date.now() + d * 86400000);
@@ -18,7 +20,7 @@ const asMillis = (v) => (v && v.toMillis ? v.toMillis() : v ? new Date(v).getTim
 
 // ── theme sanitization ──
 const HEX = /^#[0-9a-fA-F]{6}$/;
-const TEMPLATES = { original: 1, nocturne: 1, reel: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1 };
+const TEMPLATES = { original: 1, nocturne: 1, reel: 1, movie: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1 };
 
 function sanitizeTheme(t) {
   if (!t || typeof t !== "object") return null;
@@ -63,6 +65,41 @@ function normalizeAuthPhone(raw) {
   if (/^5\d{8}$/.test(p)) return "972" + p;             // 501234567  → 972501234567
   if (p.length >= 9 && p.length <= 15) return p;        // already international
   return null;
+}
+
+// ── infra hosts ──
+// Hosts that must never appear in a link an end buyer can see, even if a
+// deployment's env points at one. Lives here rather than in index.js so the
+// operator scripts can require it — index.js calls app.listen on require.
+const INFRA_HOST = /(hstgr\.cloud|trycloudflare\.com|ngrok(-free)?\.(io|app|dev)|loca\.lt|^https?:\/\/\d+\.\d+\.\d+\.\d+)/i;
+
+/*
+ * resolvePageBaseUrl({ pageBaseUrl, baseUrl, publicBaseUrl, allowInfra }) → string
+ *
+ * Which host goes into a link an end buyer can see. PAGE_BASE_URL wins when
+ * set; otherwise a local BASE_URL is kept and anything else falls back to the
+ * canonical domain.
+ *
+ * Note the long-standing quirk this preserves: INFRA_HOST also matches a bare
+ * IP, so a BASE_URL of http://127.0.0.1:8787 is rewritten to publicBaseUrl
+ * while http://localhost:8787 is not. Surprising, but it predates this helper
+ * and pages built against either still resolve, so it is pinned by test rather
+ * than changed here.
+ *
+ * An infra host (see INFRA_HOST) is rewritten to publicBaseUrl, because a
+ * buyer-visible link must never carry a tunnel or bare-IP hostname that will
+ * stop resolving. allowInfra opts out of that, and ONLY dev and staging set it
+ * — they genuinely do serve pages from an infra host and their links must come
+ * back to them rather than to production. Unset means the guard is on, so a
+ * deployment that forgets is protected rather than exposed.
+ */
+function resolvePageBaseUrl({ pageBaseUrl, baseUrl, publicBaseUrl, allowInfra }) {
+  const isLocalBase = /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:|$)/
+    .test(baseUrl || "");
+  const candidate = pageBaseUrl || (isLocalBase ? baseUrl : publicBaseUrl);
+  const allow = /^(1|true|yes)$/i.test(String(allowInfra == null ? "" : allowInfra));
+  return String(!allow && INFRA_HOST.test(candidate) ? publicBaseUrl : candidate)
+    .replace(/\/+$/, "");
 }
 
 // ── asset helpers ──
@@ -139,15 +176,64 @@ async function readCapped(resp, maxBytes = MAX_REHOST_BYTES) {
   return buf;
 }
 
-async function rehost(url, destRel, uploadDir, baseUrl) {
+// Content types for the extensions the upload store accepts. The remote
+// re-sniffs the bytes anyway (routes/intake.js), so this only has to be honest
+// enough for the PUT; it is not a trust boundary.
+const EXT_CONTENT_TYPE = {
+  jpg: "image/jpeg", png: "image/png", webp: "image/webp", mp4: "video/mp4",
+  woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf", otf: "font/otf",
+};
+
+/*
+ * rehost(url, destRel, uploadDir, baseUrl, opts) → { url, fname, localPath }
+ *
+ * Downloads a client-supplied URL and republishes it from our own file store.
+ *
+ * The stored name is a FLAT `<uuid>.<ext>`, not the caller's `destRel` path.
+ * destRel now only supplies the extension and keeps call sites readable. Flat
+ * names are what the upload route accepts (`^[0-9a-f-]{36}\.(…)$` in
+ * routes/intake.js), which is what lets the bytes be relayed to another
+ * instance at all.
+ *
+ * opts.remoteUploadBase relays the bytes to an always-on instance and stamps
+ * the returned URL with opts.uploadPublicBase. That is what stops a page built
+ * on a laptop from carrying media URLs that die when the laptop sleeps. The
+ * local copy is written EITHER way: routes/pages.js reads photos back off disk
+ * to caption them, and that path is best-effort, so dropping the local write
+ * would silently degrade captions rather than fail.
+ *
+ * opts.signUpload(fname) supplies the relay credential. It is injected rather
+ * than imported so this module keeps its "no deps on db or express" promise.
+ */
+async function rehost(url, destRel, uploadDir, baseUrl, opts = {}) {
+  const { uploadPublicBase, remoteUploadBase, signUpload, fetchFn = fetch } = opts;
   const safeUrl = await assertPublicHttpUrl(url);
   const resp = await fetch(safeUrl, { signal: AbortSignal.timeout(60000), redirect: "error" });
   if (!resp.ok) throw new Error(`fetch → ${resp.status}`);
   const buf = await readCapped(resp);
-  const full = path.join(uploadDir, destRel);
-  fs.mkdirSync(path.dirname(full), { recursive: true });
-  fs.writeFileSync(full, buf);
-  return `${baseUrl}/files/${destRel}`;
+
+  const ext = String(destRel).split(".").pop().toLowerCase();
+  const fname = `${crypto.randomUUID()}.${ext}`;
+  const localPath = path.join(uploadDir, fname);
+  fs.mkdirSync(path.dirname(localPath), { recursive: true });
+  fs.writeFileSync(localPath, buf);
+
+  if (remoteUploadBase) {
+    const out = await relayUpload({
+      fetch: fetchFn,
+      base: remoteUploadBase,
+      fname,
+      req: { headers: signUpload ? { "x-upload-token": signUpload(fname) } : {} },
+      body: buf,
+      contentType: EXT_CONTENT_TYPE[ext],
+    });
+    // relayUpload never throws; a non-200 means the bytes are NOT on the remote,
+    // so returning a remote URL would be a lie. Fail loudly instead.
+    if (out.status !== 200) throw new Error(`rehost relay: ${out.body.error}`);
+  }
+
+  const publicBase = (remoteUploadBase && uploadPublicBase) || baseUrl;
+  return { url: `${publicBase}/files/${fname}`, fname, localPath };
 }
 
 // ── upload content sniffing ──
@@ -224,5 +310,5 @@ module.exports = {
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
   guessImageExt, rehost, sendWhatsApp, sendWhatsAppButtons,
-  assertPublicHttpUrl, isPrivateIp, sniffMatchesExt,
+  assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
 };

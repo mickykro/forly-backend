@@ -44,5 +44,30 @@ const reset = () => { db.mem.leads.clear(); db.mem.leadSubmissions.length = 0; }
   assert.equal(db.mem.leads.size, 0, "no leads/{phone} on rejection");
   assert.equal(db.mem.leadSubmissions.length, 0, "no lead_submission on rejection");
 
+  // ── qualification + recommendations ride on both docs ──
+  reset();
+  await submitLead({
+    page, name: "יוסי", phone: "972521234567", source: "chat", questions: [],
+    qualification: { budget: 2300000, timeline: "now", financing: null },
+    recommended_page_ids: ["pg2", "pg3"],
+  });
+  assert.deepEqual(db.mem.leadSubmissions[0].qualification, { budget: 2300000, timeline: "now", financing: null });
+  assert.deepEqual(db.mem.leadSubmissions[0].recommended_page_ids, ["pg2", "pg3"]);
+  assert.deepEqual(db.mem.leads.get("972521234567").qualification, { budget: 2300000, timeline: "now", financing: null });
+  assert.deepEqual(db.mem.leads.get("972521234567").recommended_page_ids, ["pg2", "pg3"]);
+
+  // ── a form lead (no qualification) stores null and [] — never undefined ──
+  reset();
+  await submitLead({ page, name: "רות", phone: "972539876543", source: "landing_page", questions: [] });
+  assert.strictEqual(db.mem.leadSubmissions[0].qualification, null);
+  assert.deepEqual(db.mem.leadSubmissions[0].recommended_page_ids, []);
+
+  // ── a later submission without a budget must not wipe an earlier one ──
+  reset();
+  await submitLead({ page, name: "יוסי", phone: "972521234567", source: "chat", questions: [],
+    qualification: { budget: 1000, timeline: null, financing: null }, recommended_page_ids: [] });
+  await submitLead({ page, name: "יוסי", phone: "972521234567", source: "landing_page", questions: [] });
+  assert.equal(db.mem.leads.get("972521234567").qualification.budget, 1000, "summary keeps the known budget");
+
   console.log("leads.test.js ✓");
 })().catch((e) => { console.error(e); process.exit(1); });

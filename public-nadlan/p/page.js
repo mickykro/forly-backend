@@ -82,7 +82,7 @@
   }
   var rgbStr = function (c) { return "rgb(" + c.r + "," + c.g + "," + c.b + ")"; };
 
-  var TEMPLATES = { original: 1, nocturne: 1, reel: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1 };
+  var TEMPLATES = { original: 1, nocturne: 1, reel: 1, movie: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1 };
 
   function applyTheme(theme) {
     if (!theme) return;

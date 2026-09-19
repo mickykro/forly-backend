@@ -29,7 +29,23 @@ const PORT = Number.isInteger(cliPort) && cliPort > 0 && cliPort < 65536 ?
   cliPort : Number(process.env.PORT || 8787);
 const BASE_URL = (process.env.BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads");
-const PAGE_BASE_URL = (process.env.PAGE_BASE_URL || BASE_URL).replace(/\/+$/, "");
+// Public page links (WhatsApp, Facebook posts, og:url, portal cards) must
+// always carry the branded domain — never the infra hostname a deployment
+// happens to answer on (hstgr.cloud, a cloudflare tunnel, an IP). PAGE_BASE_URL
+// wins when set; otherwise local dev keeps its own BASE_URL and anything else
+// falls back to the canonical domain.
+const PUBLIC_BASE_URL = "https://nadlan.call4li.com";
+// The rule lives in utils.js (resolvePageBaseUrl) so it is unit-testable and so
+// the operator scripts can share the same INFRA_HOST definition. Setting
+// ALLOW_INFRA_PAGE_BASE=1 — dev and staging only — lets a *.hstgr.cloud
+// PAGE_BASE_URL stand instead of being rewritten to the branded domain.
+const { resolvePageBaseUrl } = require("./utils");
+const PAGE_BASE_URL = resolvePageBaseUrl({
+  pageBaseUrl: process.env.PAGE_BASE_URL,
+  baseUrl: BASE_URL,
+  publicBaseUrl: PUBLIC_BASE_URL,
+  allowInfra: process.env.ALLOW_INFRA_PAGE_BASE,
+});
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
 const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
 const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
@@ -62,6 +78,7 @@ const AUTH_SECRET = authSecretInfo.secret;
 // ephemeral dev key every relayed upload would 502, so the relay is disabled.
 const remoteUpload = resolveRemoteUploadBase({
   raw: process.env.REMOTE_UPLOAD_BASE, secretEphemeral: authSecretInfo.ephemeral,
+  selfBase: BASE_URL,
 });
 if (remoteUpload.reason) console.warn(`WARNING: ${remoteUpload.reason}`);
 const REMOTE_UPLOAD_BASE = remoteUpload.base;
@@ -159,7 +176,7 @@ app.use("/api/quota", createQuotaRouter({
 
 app.use("/api", createIntakeRouter({
   requireAuth, normalizeAuthPhone, signSession,
-  verifySession, readToken, adminPhones: ADMIN_PHONES, quota,
+  verifySession, readToken, verifyActionToken, adminPhones: ADMIN_PHONES, quota,
   uploadDir: UPLOAD_DIR,
   uploadPublicBase: UPLOAD_PUBLIC_BASE,
   remoteUploadBase: REMOTE_UPLOAD_BASE,
@@ -277,6 +294,8 @@ app.use(createChatRouter({
   // Chat leads WhatsApp the agent directly (the form path relays via n8n).
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
+  // Recommendation links point at the public page URL.
+  pageBaseUrl: PAGE_BASE_URL,
 }));
 
 // Throttle the expensive ffmpeg video-overlay endpoint per IP (resource abuse).
@@ -287,6 +306,11 @@ const createPagesRouter = require("./routes/pages");
 app.use(createPagesRouter({
   uploadDir: UPLOAD_DIR,
   baseUrl: BASE_URL,
+  // Page media is rehosted through the same relay the intake routes use, so a
+  // page built on a laptop carries URLs that outlive the laptop.
+  uploadPublicBase: UPLOAD_PUBLIC_BASE,
+  remoteUploadBase: REMOTE_UPLOAD_BASE,
+  signActionToken,
   pageBaseUrl: PAGE_BASE_URL,
   templatesDir: TEMPLATES_DIR,
   n8nLeadWebhook: N8N_LEAD_WEBHOOK_URL,

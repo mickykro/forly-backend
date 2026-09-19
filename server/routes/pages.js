@@ -30,7 +30,7 @@ const { renderPortfolioDocument, renderSitemap } = require("../portfolio-render"
 // stays functional for legacy reminder links already sent.
 const PAGE_LIFESPAN_DAYS = 36500;
 const LEAD_MAX_PER_HOUR = 3;
-const SERVER_TEMPLATES = new Set(["nocturne", "reel", "atelier", "revue", "loupe", "orbite"]);
+const SERVER_TEMPLATES = new Set(["original", "nocturne", "reel", "movie", "atelier", "revue", "loupe", "orbite"]);
 
 const confirmHtml = (title, sub) =>
   `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">` +
@@ -47,8 +47,20 @@ const expiredLinkHtml = () =>
 module.exports = function createPagesRouter(ctx) {
   const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,
           requireAuth, verifyActionToken, authSecret, adminApiSecret,
+          uploadPublicBase, remoteUploadBase, signActionToken,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
   const { constantTimeEqual } = require("../security");
+
+  // Options every rehost() in this router shares. remoteUploadBase sends the
+  // bytes to the always-on instance; signUpload is the credential for that hop,
+  // needed because createPropertyPage is unauthenticated and so has no session
+  // of its own to forward (see upload-relay.js relayHeaders).
+  const { uploadTokenParts } = require("../upload-relay");
+  const rehostOpts = {
+    uploadPublicBase, remoteUploadBase,
+    signUpload: signActionToken ?
+      (fname) => signActionToken(uploadTokenParts(fname), authSecret) : undefined,
+  };
 
   // Admin allowlist, normalized once so "050-…", "+972…" and "972…" all match
   // the canonical form a session carries (same treatment as routes/admin.js).
@@ -152,10 +164,14 @@ module.exports = function createPagesRouter(ctx) {
       const propBool = (k) => !!((body.property && body.property[k]) || (listing && listing[k]));
       if (theme && theme.font_url) {
         const fext = (theme.font_url.split("?")[0].match(/\.(woff2|woff|ttf|otf)$/i) || [, "woff2"])[1].toLowerCase();
-        theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`, uploadDir, baseUrl).catch(() => theme.font_url);
+        theme.font_url = await rehost(theme.font_url, `${base}/font.${fext}`, uploadDir, baseUrl, rehostOpts)
+          .then((r) => r.url).catch(() => theme.font_url);
       }
 
-      const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl);
+      // rehost returns { url, fname, localPath }: url is what the page stores
+      // (the relay host when one is configured), localPath is where the bytes
+      // landed here, which the captioning pass below reads back.
+      const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl, rehostOpts);
       const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
       const posterP = rehostFn(body.poster_url || body.photos[0].url, `${base}/poster.jpg`);
       const photoPs = body.photos.slice(0, 12).map((p, i) =>
@@ -163,13 +179,16 @@ module.exports = function createPagesRouter(ctx) {
       const mapP = body.area && body.area.map_image_url ? rehostFn(body.area.map_image_url, `${base}/map.png`) : null;
       const logoP = logoSrc ? rehostFn(logoSrc, `${base}/logo.png`) : null;
 
-      const [videoUrl, posterUrl, ...rest] = await Promise.all([
+      const [video, poster, ...rest] = await Promise.all([
         videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
       ]);
-      const photoUrls = rest.slice(0, photoPs.length);
+      const videoUrl = video.url;
+      const posterUrl = poster.url;
+      const photos = rest.slice(0, photoPs.length);
+      const photoUrls = photos.map((r) => r.url);
       let cursor = photoPs.length;
-      const mapUrl = mapP ? rest[cursor++] : null;
-      const logoUrl = logoP ? rest[cursor++] : null;
+      const mapUrl = mapP ? rest[cursor++].url : null;
+      const logoUrl = logoP ? rest[cursor++].url : null;
 
       // Per-photo captions. An explicit caption wins; failing that, whatever the
       // Vision Tagger said this photo was. The tagger already classifies every
@@ -191,7 +210,10 @@ module.exports = function createPagesRouter(ctx) {
       // `description` wins where n8n sends one; otherwise the photos are looked
       // at here. Best-effort and skipped without ANTHROPIC_API_KEY — the
       // gallery then carries captions alone, as it did before.
-      const localPhotoPath = (i) => path.join(uploadDir, `${base}/photo-${pad(i + 1)}.${guessImageExt(body.photos[i].url)}`);
+      // Read back the copy rehost() just wrote, rather than recomputing a path
+      // from the destination name — the stored name is a flat uuid now, and
+      // with a relay configured the public URL is on another host entirely.
+      const localPhotoPath = (i) => photos[i].localPath;
       const needVision = photoUrls.some((_, i) => {
         const p = body.photos[i] || {};
         return !String(p.description || "").trim() || !captionFor(i);
@@ -620,7 +642,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── portfolio API ──
-  async function loadPublicPortfolio(slug) {
+  async function loadPublicPortfolio(slug, searchQuery) {
     const reservation = await db.getPortfolioSlugReservation(slug);
     if (!reservation) return { error: "not_found", status: 404 };
     // Historical slug redirect
@@ -631,7 +653,8 @@ module.exports = function createPagesRouter(ctx) {
     if (!business || !business.portfolio) return { error: "not_found", status: 404 };
     if (business.portfolio.status !== "open") return { error: "not_found", status: 404 };
     const pages = await db.listPagesByPhone(reservation.business_phone, 100);
-    const visible = visiblePortfolioPages(pages);
+    const visible = visiblePortfolioPages(pages, searchQuery);
+
     return {
       portfolio: business.portfolio,
       agent: {
@@ -664,11 +687,12 @@ module.exports = function createPagesRouter(ctx) {
 
   router.get("/api/portfolio", async (req, res) => {
     const slug = String(req.query.slug || "").toLowerCase().trim();
+    const search = String(req.query.search || "").trim();
     if (!slug) return res.status(400).json({ error: "missing slug" });
     try {
-      const result = await loadPublicPortfolio(slug);
+      const result = await loadPublicPortfolio(slug, search);
       if (result.redirect) {
-        return res.redirect(301, `${pageBaseUrl}/${result.redirect}`);
+        return res.redirect(301, `/${result.redirect}`);
       }
       if (result.error) return res.status(result.status).json({ error: result.error });
       res.set("Cache-Control", "public, max-age=60");
@@ -690,7 +714,7 @@ module.exports = function createPagesRouter(ctx) {
       const reservation = await db.getPortfolioSlugReservation(portfolioSlugParam);
       if (!reservation) return res.status(404).json({ error: "not_found" });
       if (reservation.current_slug !== portfolioSlugParam) {
-        return res.redirect(301, `${pageBaseUrl}/${reservation.current_slug}/${propSlug}`);
+        return res.redirect(301, `/${reservation.current_slug}/${propSlug}`);
       }
       const business = await db.getBusiness(reservation.business_phone);
       const portfolio = business?.portfolio;
@@ -808,7 +832,7 @@ module.exports = function createPagesRouter(ctx) {
   // classic: the personal edit link (#edit=) edits texts in the Classic view, the
   // only one marked up for in-page editing; the texts are shared by every design.
   async function renderPropertyPage(res, id, d, pageUrl, { classic = false } = {}) {
-    const tpl = d && d.theme && d.theme.template;
+    const tpl = (d && d.theme && d.theme.template) || "original";
     if (!d || d.status !== "active" || classic || !SERVER_TEMPLATES.has(tpl)) {
       // Shell branch: still inject OG tags for active pages so shared links
       // preview — crawlers don't run the JS that renders this shell.
@@ -858,7 +882,9 @@ module.exports = function createPagesRouter(ctx) {
           const qs = new URLSearchParams(req.query);
           qs.delete("edit_token");
           const qsStr = qs.toString();
-          const nested = `${pageBaseUrl}/${business.portfolio.slug}/${d.public_slug}`;
+          // Host-relative so a preview host (tunnel, staging) keeps its own origin;
+          // only the canonical og:url is pinned to pageBaseUrl.
+          const nested = `/${business.portfolio.slug}/${d.public_slug}`;
           return res.redirect(301, qsStr ? `${nested}?${qsStr}` : nested);
         }
       } catch (e) { /* fall through to the legacy shell */ }
@@ -875,7 +901,7 @@ module.exports = function createPagesRouter(ctx) {
       const reservation = await db.getPortfolioSlugReservation(portfolioSlugParam);
       if (!reservation) return next();
       if (reservation.current_slug !== portfolioSlugParam) {
-        return res.redirect(301, `${pageBaseUrl}/${reservation.current_slug}/${propSlug}`);
+        return res.redirect(301, `/${reservation.current_slug}/${propSlug}`);
       }
       const pages = await db.listPagesByPhone(reservation.business_phone, 100);
       const d = pages.find((p) => p.public_slug === propSlug) || null;
