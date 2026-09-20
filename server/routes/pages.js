@@ -684,10 +684,13 @@ module.exports = function createPagesRouter(ctx) {
       if (reservation.current_slug !== portfolioSlugParam) {
         return res.redirect(301, `/${reservation.current_slug}/${propSlug}`);
       }
-      const business = await businessCache.get(reservation.business_phone);
+      // ponytail: both reads need only the phone from the reservation above,
+      // and nothing between them — so they overlap instead of queueing.
+      const [business, page] = await Promise.all([
+        businessCache.get(reservation.business_phone),
+        db.findPageBySlug(reservation.business_phone, propSlug),
+      ]);
       const portfolio = business?.portfolio;
-      // Find the page by public_slug
-      const page = await db.findPageBySlug(reservation.business_phone, propSlug);
       if (!page) return res.status(404).json({ error: "not_found" });
       if (page.status !== "active" && page.status !== "expiring") {
         return res.status(404).json({ error: "not_found" });
