@@ -684,7 +684,7 @@ module.exports = function createPagesRouter(ctx) {
       if (reservation.current_slug !== portfolioSlugParam) {
         return res.redirect(301, `/${reservation.current_slug}/${propSlug}`);
       }
-      const business = await db.getBusiness(reservation.business_phone);
+      const business = await businessCache.get(reservation.business_phone);
       const portfolio = business?.portfolio;
       // Find the page by public_slug
       const page = await db.findPageBySlug(reservation.business_phone, propSlug);
