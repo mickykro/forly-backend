@@ -10,6 +10,7 @@ const db = require("../db");
 const portalStream = require("../portal-stream");
 const { sendWhatsApp } = require("../utils");
 const { portfolioSlug, normalizePortfolio, visiblePortfolioPages, nextPortfolioStatus } = require("../portfolio");
+const businessCache = require("../business-cache");
 
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
 
@@ -124,6 +125,9 @@ module.exports = function createDashboardRouter(ctx) {
         total_inquiries_reported: 0, total_deals_closed: 0,
         created_at: existing ? existing.created_at : new Date(),
       }, true);
+      // ponytail: the page render path reads this doc through business-cache;
+      // without this the agent's own pages lag their edit by up to the TTL.
+      businessCache.invalidate(phone);
       // Welcome message is best-effort — a WhatsApp outage must not fail signup.
       try {
         await sendWhatsApp(phone,
@@ -212,6 +216,7 @@ module.exports = function createDashboardRouter(ctx) {
         logo_url: body.logo_url ?? business.logo_url,
         portfolio: normalized,
       }, true);
+      businessCache.invalidate(phone);
 
       // Update page visibility/rank if provided
       if (Array.isArray(body.portfolio?.properties)) {
@@ -248,6 +253,7 @@ module.exports = function createDashboardRouter(ctx) {
       if (!business) {
         const now = new Date();
         await db.setBusiness(phone, { phone, created_at: now }, true);
+        businessCache.invalidate(phone);
         business = { phone };
       }
       if (business.portfolio?.slug) {
@@ -273,6 +279,7 @@ module.exports = function createDashboardRouter(ctx) {
           updated_at: now,
         },
       }, true);
+      businessCache.invalidate(phone);
       res.json({
         created: true,
         portfolio_url: `/${slug}`,
