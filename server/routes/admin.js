@@ -500,6 +500,7 @@ module.exports = function createAdminRouter(ctx) {
         "portfolio.status": status,
         "portfolio.updated_at": new Date(),
       }, true);
+      businessCache.invalidate(phone);
       console.log(`admin_portfolio_status phone=${phone} status=${status} by=${req.user.userId}`);
       res.json({
         ok: true,
