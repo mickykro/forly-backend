@@ -687,8 +687,7 @@ module.exports = function createPagesRouter(ctx) {
       const business = await db.getBusiness(reservation.business_phone);
       const portfolio = business?.portfolio;
       // Find the page by public_slug
-      const pages = await db.listPagesByPhone(reservation.business_phone, 100);
-      const page = pages.find((p) => p.public_slug === propSlug);
+      const page = await db.findPageBySlug(reservation.business_phone, propSlug);
       if (!page) return res.status(404).json({ error: "not_found" });
       if (page.status !== "active" && page.status !== "expiring") {
         return res.status(404).json({ error: "not_found" });
