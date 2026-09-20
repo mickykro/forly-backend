@@ -10,6 +10,7 @@ const path = require("path");
 const fs = require("fs");
 
 const db = require("../db");
+const businessCache = require("../business-cache");
 const pageEdit = require("../edit");
 const { sanitizeTheme, sanitizeLang, sniffMatchesExt } = require("../utils");
 const { sanitizeTags } = require("../tags");
@@ -249,6 +250,7 @@ module.exports = function createIntakeRouter(ctx) {
         features: { chatbot: true },
         created_at: now, updated_at: now,
       });
+      businessCache.invalidate(agentPhone);
     }
 
     // auto-login
