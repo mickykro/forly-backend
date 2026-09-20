@@ -190,13 +190,26 @@ Sizing depends on the pending PageSpeed Insights run. Findings so far:
   agent-uploaded video, which is not visible from the repo.
 - 7 of 8 templates autoplay a hero video. `nocturne.html:145` uses
   `preload="auto"`; review whether `metadata` or `none` suffices.
-- **Gallery images are injected without lazy loading**, via
-  `document.createElement("img")` at `runtime.js:282` and `:386`. This is where
-  `loading="lazy"` belongs — not in the static markup.
-- **No `<img>` in any of the 8 templates carries `width`/`height`** (20 images
-  total; 6 have `loading="lazy"`). This is a direct CLS cost, and CLS is 25% of
-  the Lighthouse performance score.
-- A loading skeleton, as requested, belongs here.
+- **Lazy loading is already done — no work here.** An earlier draft of this spec
+  claimed gallery images were injected without it. That was wrong.
+  `runtime.js:387` sets `im.loading = "lazy"; im.decoding = "async"` and
+  `original.js:66` does the same. The one eager `createElement("img")`, at
+  `runtime.js:282`, is the agent logo: a single above-the-fold image that should
+  stay eager.
+- **The CLS claim is withdrawn as unsupported.** An earlier draft called the
+  absence of `width`/`height` attributes "a direct CLS cost". Those attributes
+  matter when an image sizes its own box; here it does not. `.gallery-grid` sets
+  `grid-auto-rows:115px` with explicit per-tile spans and
+  `.gallery-grid img{width:100%;height:100%;object-fit:cover}`; `.room-image img`
+  and `.area-image img` are pinned to `78vh`. Images fill pre-sized boxes.
+  Whether CLS is actually a problem is now an open question for PSI to answer,
+  not an established finding.
+- A loading skeleton was requested. Nothing measured so far shows it is needed;
+  decide once PSI reports actual LCP and whether the page has a blank phase.
+
+Two of the four original Package B findings did not survive checking against the
+code. That is the argument for measuring before implementing, and the reason
+Package B stays gated on PSI rather than being built out now.
 
 ## Package C — Cheap wins
 
