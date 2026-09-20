@@ -100,7 +100,12 @@ The in-memory branch is required: `db.js` runs without Firestore (`db` null) and
 
 **Fixes a latent bug.** The current code only searches the first 100 pages
 returned in arbitrary order, so an agent with more than 100 pages gets a 404 on
-properties outside that window. The scoped query has no such ceiling.
+properties outside that window. The scoped query has no such ceiling. The
+server-rendered route at `/:portfolioSlug/:propertySlug` carried the
+same scan and the same ceiling; it was migrated in a follow-up commit
+after a whole-branch review caught it. The "at most 3 reads" figure below
+describes the `/api/property-by-slug` endpoint alone — a full page view
+also pays the SSR route's own reads.
 
 **Index.** `firestore.indexes.json` currently declares one index, for
 `conversations`. Firestore can serve multiple equality filters via zigzag merge

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Cut the property page read path from up to ~102 Firestore document reads to at most 3. Client-side work is deliberately minimal: two of the four original frontend findings did not survive checking against the code, so the rest waits on real measurements.
+**Goal:** Cut the property page read path from up to ~102 Firestore document reads to at most 3. Client-side work is deliberately minimal: two of the four original frontend findings did not survive checking against the code, so the rest waits on real measurements. The server-rendered route at `/:portfolioSlug/:propertySlug` carried the same scan and was migrated after a whole-branch review; the 3-read figure describes the API endpoint, not a whole page view.
 
 **Architecture:** `GET /api/property-by-slug` currently resolves a page by fetching every page belonging to an agent and filtering in JavaScript, fetches the same business document twice (once bypassing an existing cache), and runs all four steps sequentially. Package A replaces the scan with a scoped two-equality query, routes the duplicate fetch through the existing `business-cache`, and overlaps the two independent reads. Packages B and C reduce client media weight and revalidation round trips.
 
