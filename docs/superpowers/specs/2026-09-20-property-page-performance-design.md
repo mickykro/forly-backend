@@ -232,3 +232,33 @@ Low value but harmless, accepted knowingly:
 3. Whether agents' uploaded hero videos are transcoded anywhere today, or served
    at original upload size. Determines how much of B's video work is client-side
    versus pipeline.
+
+## Deferred findings from the whole-branch review
+
+Real, deliberately not fixed on this branch. Each needs a decision rather than a
+mechanical fix.
+
+1. **`businessCache.get` swallows an error that `db.getBusiness` used to throw.**
+   `business-cache.js` catches a failed fetch and returns the last cached value
+   or `null`. Before A2, a transient Firestore error on the business read reached
+   the handler's `catch` and produced a 500. Now the request returns **200 with
+   `portfolio_url` silently absent**, and `Cache-Control: public, max-age=60`
+   caches that degraded payload for a minute. Whether a quiet degrade beats a
+   loud failure here is a product call, not a code cleanup.
+2. **Two business writers still do not invalidate the cache.**
+   `server/routes/intake.js` (the `demo-save-agent` handler) and
+   `server/routes/profile.js` (two sites). Both are correct *today* — the fields
+   they write are not read through the cache — but that holds only by inspection,
+   and `profile.js` writes a whitelisted field set that someone will extend.
+   Adding `invalidate()` at all three makes the invariant "every `setBusiness`
+   invalidates", which is checkable with a single grep instead of an argument.
+3. **`scripts/backfill-portfolios.js` batch-writes `businesses.portfolio` from a
+   separate process.** An in-process cache cannot be invalidated across processes,
+   so live servers serve stale portfolio state for up to the TTL after a backfill.
+   Acceptable, but undocumented at the call site.
+4. **`server/routes/pages.js` is 885 lines**, against the 500-line guideline in
+   CLAUDE.md. Pre-existing; this branch added three lines net to it.
+
+The first two both trace to the same root: the cache's contract — who must
+invalidate it, and what it does on failure — is enforced by convention rather
+than by the module itself.
