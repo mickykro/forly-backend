@@ -12,19 +12,50 @@ Property pages are reported slow. No baseline existed at the start of this work.
 A static, code-level audit of `public-nadlan/templates/` (all 8 templates) and the
 `server/` read path. Findings below are read off the code and are reproducible.
 
-### What was NOT measured
+### Baseline (measured 2026-09-22)
 
-- **No Core Web Vitals baseline.** A Lighthouse run against
-  `https://dev.srv1173890.hstgr.cloud/krvytvrv-nksym/property-sew` returned
-  `NO_FCP` for every audit — the page never painted, so the report carries zero
-  performance data. The report was produced by the DevTools panel
-  (`channel: "devtools"`), whose known failure mode is a backgrounded tab; a
-  genuinely hanging page produces the same error. The two causes cannot be
-  distinguished from that report.
-- The dev host is unreachable from the agent sandbox (network policy denies
-  CONNECT), so this could not be verified independently.
-- A PageSpeed Insights run is pending. Package B's sizing depends on it.
-  Package A does not.
+A Lighthouse run against a real listing on `http://127.0.0.1:8787` (orbite
+template) produced the first usable numbers. They supersede the static audit
+wherever the two disagree:
+
+| Metric | Value |
+|---|---|
+| Page weight | **38.6 MB** |
+| LCP | **66.3 s** (LCP element: the hero `<video>`) |
+| CLS | **0** |
+| TBT | **0 ms** |
+| Render-blocking | **2,407 ms** (FCP savings 2,400 ms) |
+| Text compression | absent — 61,911 of the document's 92,897 bytes recoverable |
+| Image delivery | ~6,102 KiB recoverable (format + right-sizing) |
+
+Composition: one 25.9 MB hero walkthrough plus ~13.2 MB of images. The
+render-blocking total breaks down as Google Fonts CSS 829 ms, `/tpl/runtime.js`
+756 ms, `/templates/i18n.js` 756 ms, `/tpl/demo.js` 154 ms.
+
+The report's "unused JavaScript — 109 KiB" finding is entirely a Loom browser
+extension (`liecbddmkiiihnedobmlmillhodjkdmb`) present in the profile. It is not
+this application's code and is not actionable.
+
+An earlier run against `https://dev.srv1173890.hstgr.cloud/...` returned `NO_FCP`
+for every audit and carried zero performance data; it was discarded, not used as
+a baseline. The dev host is unreachable from the agent sandbox (network policy
+denies CONNECT), so nothing has been verified against it independently.
+
+### Corrections this baseline forced
+
+- **"Defer non-critical scripts — not render-blocking" was wrong.** That row has
+  been removed from the out-of-scope table. The claim was that scripts at the end
+  of `<body>` cannot block first paint. Lighthouse measures 2,407 ms of
+  render-blocking and three of the four contributors are those scripts: a
+  synchronous `<script src>` blocks the parser wherever it sits, and the browser
+  does not even *discover* an end-of-body script until it has parsed everything
+  above it. Position in the document changes when the block starts, not whether
+  there is one.
+- **The CLS claim holds.** An earlier draft called missing `width`/`height` "a
+  direct CLS cost"; that was withdrawn as unsupported, and the run confirms CLS
+  is exactly 0.
+- **The minification claim holds.** Headroom is 14 KiB CSS + 29 KiB JS, which is
+  as marginal as Package C assumed.
 
 ## Scope
 
@@ -41,7 +72,6 @@ would add complexity with no measurable benefit:
 | Add a load balancer | Single container. This is a hosting decision (Cloud Run autoscaling), not application code. |
 | DB connection pooling | Firestore is a managed HTTP/gRPC service. There is no connection pool to size. |
 | Code splitting | No bundler. Plain `<script>` tags; the largest app file is 32KB. |
-| Defer non-critical scripts | All 4 script tags in every template already sit at end of `<body>` (e.g. `nocturne.html:154-157`, after `</head>` at line 139). Not render-blocking. |
 | Paginate large lists | Every Firestore query in `db.js` already carries a `.limit()`. |
 | Cache API responses | Both public endpoints already set `Cache-Control: public, max-age=60`. |
 
@@ -187,51 +217,127 @@ Up to ~102 reads becomes at most 3, with two of them overlapped.
 
 ## Package B — Frontend media and layout
 
-Sizing depends on the pending PageSpeed Insights run. Findings so far:
+Rewritten 2026-09-22 against the measured baseline. Everything below is
+implemented on this branch except where marked **Not done**.
 
-- **Video dominates asset weight.** `tour.mp4` (5.8MB) and `tour1.mp4` (3.1MB)
-  total 8.9MB against ~680KB for all JS, CSS, HTML and fonts combined. Both are
-  demo assets, referenced only from `demo.js:7`. Real page weight depends on
-  agent-uploaded video, which is not visible from the repo.
-- 7 of 8 templates autoplay a hero video. `nocturne.html:145` uses
-  `preload="auto"`; review whether `metadata` or `none` suffices.
-- **Lazy loading is already done — no work here.** An earlier draft of this spec
-  claimed gallery images were injected without it. That was wrong.
-  `runtime.js:387` sets `im.loading = "lazy"; im.decoding = "async"` and
-  `original.js:66` does the same. The one eager `createElement("img")`, at
-  `runtime.js:282`, is the agent logo: a single above-the-fold image that should
-  stay eager.
-- **The CLS claim is withdrawn as unsupported.** An earlier draft called the
-  absence of `width`/`height` attributes "a direct CLS cost". Those attributes
-  matter when an image sizes its own box; here it does not. `.gallery-grid` sets
-  `grid-auto-rows:115px` with explicit per-tile spans and
-  `.gallery-grid img{width:100%;height:100%;object-fit:cover}`; `.room-image img`
-  and `.area-image img` are pinned to `78vh`. Images fill pre-sized boxes.
-  Whether CLS is actually a problem is now an open question for PSI to answer,
-  not an established finding.
-- A loading skeleton was requested. Nothing measured so far shows it is needed;
-  decide once PSI reports actual LCP and whether the page has a blank phase.
+### B1 — The hero video is the LCP element (25.9 MB, LCP 66.3 s)
 
-Two of the four original Package B findings did not survive checking against the
-code. That is the argument for measuring before implementing, and the reason
-Package B stays gated on PSI rather than being built out now.
+`autoplay muted` makes the browser fetch the whole file regardless of the
+`preload` attribute, so `preload="metadata"` bought nothing. The download was
+both the LCP candidate and the thing starving every image on the page.
+
+`runtime.js` now gives the hero a poster and withholds its `src` until the
+visible page has loaded (`window.load`, with a 4 s timeout so one stalled image
+cannot leave the hero permanently paused). LCP resolves against the poster
+instead. Where the listing has no `hero.poster_url`, the first gallery photo is
+used — a file the page is already fetching.
+
+`data-video-manual` elements (click-to-play, `preload="metadata"`/`"none"`) keep
+their `src` immediately: they cost a few KB and must stay clickable from first
+paint.
+
+Expected effect is on LCP and on bandwidth contention, not on page weight: the
+video is still 25.9 MB, it just stops blocking. Cutting the weight itself needs
+B4.
+
+### B2 — Render-blocking, 2,407 ms
+
+- The three page scripts are now `<link rel="preload" as="script">` in `<head>`.
+  Preload rather than `defer`: five templates (`loupe`, `movie`, `nocturne`,
+  `orbite`, `reel`) have an inline `<script>` *after* the external ones that
+  reads `window.__PAGE__` and `window.I18N`. Deferred scripts run after inline
+  ones, so `defer` would break those five. Preload moves the fetch without
+  moving execution, which is the part that was costing time.
+- The Google Fonts stylesheet (829 ms) is loaded as
+  `rel="preload" as="style" onload="this.rel='stylesheet'"` with a `<noscript>`
+  fallback, in the 6 templates that use it. The families already request
+  `display=swap`; blocking first paint on the stylesheet that says "paint in the
+  fallback" was self-defeating. `nocturne` and `original` self-host `@font-face`
+  woff2 and were untouched.
+
+### B3 — Logo: 849 KB fetched three times, one of them a CORS failure
+
+`sampleLogoBackground` set `crossOrigin = "anonymous"` on its probe image. A
+CORS-mode request is a separate HTTP cache entry from the two plain `<img>`
+fetches, so it was always a third download — and against any host that does not
+send `Access-Control-Allow-Origin` (every host but this one; `/files` is plain
+`express.static` and `cors.json` covers neither these origins nor this header)
+it failed outright and logged a CORS error on every page view.
+
+The opt-in is removed. The probe now shares the cache entry, and the
+cross-origin case lands in the existing tainted-canvas `catch`, which produces
+exactly the "leave the template as authored" outcome the opt-in was meant to
+protect.
+
+**Not done:** the logo is still an 849 KB, 1035x1024 PNG displayed at 57x38 and
+87x58. That is B4's problem.
+
+### B4 — Image delivery, ~6,102 KiB recoverable — **Not done, needs a decision**
+
+Agent uploads are written to disk by `server/index.js` and served verbatim by
+`express.static`. There is no transcode step: no `sharp` dependency, and the one
+piece of media tooling in the tree (`server/photo-vision.js`) shells out to an
+`ffmpeg` binary via `FFMPEG_PATH`.
+
+So right-sizing and WebP/AVIF is a pipeline to build, not a flag to set, and it
+splits into choices that are not mine to make:
+
+1. Transcode on upload (predictable cost, rewrites nothing already stored) or on
+   request with a cache (handles the existing corpus, adds a hot path).
+2. Where it runs — in the container next to `ffmpeg`, or off it.
+3. Whether to backfill everything already uploaded.
+
+Until one of those is chosen, ~13.2 MB of images stays ~13.2 MB.
+
+### B5 — Withdrawn findings, kept for the record
+
+- **Lazy loading was already done.** `runtime.js:387` and `original.js:66` both
+  set `loading="lazy"` and `decoding="async"`. An earlier draft said otherwise.
+- **The CLS claim was withdrawn, and the measurement agrees** — CLS is 0.
+- **A loading skeleton is still unjustified.** TBT is 0 ms and the fix for the
+  blank phase was B1, not a placeholder for it.
+
+### B6 — Correctness findings from the same run
+
+- `<meta name="description" content="">` shipped empty on all 8 templates —
+  every template reserved the tag and nothing ever filled it. `runtime.js` now
+  builds one from the listing.
+- `orbite.html`: `role="button"` on a `<video>` is not an allowed role. Removed;
+  `tabindex` and `aria-label` stay, so it is still focusable and named.
+- `orbite.html`: the two `.peek-hole` buttons failed `label-content-name-mismatch`
+  because their caption span is filled at runtime and then disagrees with the
+  `aria-label`. The caption is decorative overlay text and is now
+  `aria-hidden="true"`.
+- **Not done — colour contrast 2.74 on `#8f3b52` over `#090a0f`.** This is
+  `var(--accent, #8f3b52)`, i.e. an agent-configurable brand colour with a
+  failing default. Changing it is a design decision, and it would not fix the
+  agents who have set their own failing accent. The durable fix is to derive a
+  readable on-dark variant from whatever accent is configured — a product change,
+  not a cleanup.
+- **Not done — a 137 ms forced reflow at `runtime.js:271`**, in the avatar
+  sizing (`el.offsetHeight` read after style writes). TBT is 0 ms, so it is
+  costing nothing measurable today.
 
 ## Package C — Cheap wins
 
-Low value but harmless, accepted knowingly:
-
-- Minify app JS/CSS. Headroom is small: CSS totals 12KB; of 236KB JS, 136KB is
-  vendor (gsap, lenis, ScrollTrigger) and already minified.
-- Confirm gzip/brotli is applied to API responses.
+- **Text compression — done.** The run measured `usesCompression: false` with
+  61,911 of 92,897 document bytes recoverable. `compression` is now mounted in
+  `server/index.js` above the static handlers, with `threshold: 1024`. This is
+  the largest measured win per line changed in the whole spec.
+- **Minify app JS/CSS — not done, still judged not worth a build step.** The run
+  puts the headroom at 14 KiB CSS + 29 KiB JS, against introducing a bundler to a
+  codebase that deliberately has none.
 
 ## Open questions
 
-1. PageSpeed Insights numbers for the dev property page — validates B, and
-   confirms whether the `NO_FCP` was a tooling artifact or a real page failure.
-2. Whether the A1 query requires a composite index (see A1).
-3. Whether agents' uploaded hero videos are transcoded anywhere today, or served
-   at original upload size. Determines how much of B's video work is client-side
-   versus pipeline.
+1. Whether the A1 query requires a composite index (see A1). Still unverified —
+   it needs Firestore credentials and network the agent sandbox denies.
+2. Which image pipeline to build (B4).
+3. Whether the accent-contrast failure is fixed by changing the default or by
+   deriving an on-dark variant (B6).
+4. A re-run of Lighthouse against the same listing, to size what B1, B2 and C
+   actually bought. Every number in this document below "Baseline" is a
+   prediction until that run exists.
 
 ## Deferred findings from the whole-branch review
 
