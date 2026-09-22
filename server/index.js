@@ -6,6 +6,7 @@
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
+const compression = require("compression");
 const auth = require("./auth");
 
 // ── .env loader ──
@@ -132,6 +133,16 @@ const { securityHeaders, rateLimit } = require("./security");
 app.use(securityHeaders);
 
 app.use(express.json({ limit: "2mb" }));
+
+// ponytail: gzip/brotli every text response. A Lighthouse run on a real
+// property page measured 61,911 of the document's 92,897 bytes as recoverable
+// by compression alone — the server was sending HTML, CSS and JSON uncompressed.
+// Mounted above the static handlers so it covers the templates too, and below
+// express.json so it never sees a request body.
+// Images, video and fonts are already compressed formats; compression's own
+// filter skips them, and `threshold` keeps small JSON replies uncompressed
+// where the CPU is not worth the handful of bytes saved.
+app.use(compression({ threshold: 1024 }));
 
 // static files
 // App shell always revalidates; the ETag makes an unchanged file a 304.
