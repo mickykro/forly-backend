@@ -1,0 +1,2295 @@
+# Driver-Backed Listing Import Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Let an agent paste a Yad2, Madlan, or social-media listing URL and have Forly fill the create-wizard fields from it, using a hosted real-Chrome session (driver.dev) where Firecrawl cannot reach — plus an embedded browser inside the Forly dashboard where the agent logs into their own social accounts once.
+
+**Architecture:** Three new server modules. `driver-browser.js` is a thin Driver API client (create / get / stop session, connect over CDP with Patchright, always stop in a `finally`). `listing-driver.js` turns a rendered page into the exact `{source, text, description, photos}` shape `listing-sources.js` already produces for Firecrawl, so `listing-extract.js` (the LLM parser) is untouched. `extract-jobs.js` is a queued-job state machine plus sweeper, mirroring `distribution/jobs.js`, because a browser scrape takes 30–90s and Cloud Run runs many instances. Routing is an explicit host allowlist: social media, Yad2 and Madlan go straight to Driver; everything else tries Firecrawl first and falls back to a Driver job only when Firecrawl errors.
+
+**Tech Stack:** Node >= 20 CommonJS, Express 4, Firebase Admin (Firestore), `patchright` (Playwright-compatible, connect-only), vanilla browser JS in `public-agent/`, plain `node x.test.js` assertion scripts.
+
+## Global Constraints
+
+Every task's requirements implicitly include this section.
+
+- **Node >= 20** (`.nvmrc` is `22`). `server/` is CommonJS — `require`, `module.exports`, no TypeScript.
+- **`patchright` only.** Never `playwright` or `puppeteer`. Never `chromium.launch()`, `launchPersistentContext()`, or `playwright install`. The only browser entry point is `chromium.connectOverCDP(cdpUrl)`.
+- **Reuse the browser's first context and tab:** `browser.contexts()[0] ?? await browser.newContext()`, `context.pages()[0] ?? await context.newPage()`. Extra contexts look like automation.
+- **No broad CDP hooks:** no `page.route`, `context.route`, `page.on('request')`, `page.exposeFunction`, `page.addInitScript`, `context.addInitScript`. No fingerprint patching (`navigator`, user agent, WebGL, canvas, timezone, locale) — set `country` / `timezone` / `language` on the create call instead.
+- **Always stop the session** with `DELETE /v1/browser/session?sessionId=<id>` in a `finally`. `browser.close()` only disconnects; the session keeps running and holds a concurrency slot until `duration` expires.
+- **Driver error policy, exactly:** `402` and `403` → report, never loop. `503` → back off from `Retry-After` with jitter, capped at 5 attempts, then report. `504` and `500` → retry once. `429` → back off, capped at 3 attempts.
+- **`DRIVER_API_KEY` comes from `process.env`** and is never committed, never logged, never returned in an API response.
+- **Never log a `cdpUrl` or a live-view URL.** Anyone holding one can drive that browser. They go only to the authenticated owner of the session.
+- **Base URL** is `https://api.driver.dev`. Ids go in the query string, not the path: `GET|DELETE /v1/browser/session?sessionId=<id>`. Pool ids are the exception (path), and **no pool is created by this plan.**
+- **Tests** are plain assertion scripts run as `node <file>.test.js`, using `require("assert")` and injected fakes — no test framework, no network in unit tests. Every new test file must be appended to the `scripts.test` chain in `server/package.json`.
+- **Keep files under 500 lines** (CLAUDE.md). Split before exceeding.
+- **Commit messages carry no `Co-Authored-By` trailer** — `.claude/settings.json` has no `attribution.commit` key, and CLAUDE.md forbids it in that case.
+- **Branch:** all work lands on `claude/zen-davinci-lu4hoq`.
+- **Hebrew user-facing copy only.** Vendor error text (Driver's, Facebook's) never reaches the agent — map to a stable `code` and a Hebrew string in `public-agent/form-i18n.js`, the pattern `distribution/jobs.js` already follows.
+
+---
+
+## Routing Rules (the amended spec, verbatim)
+
+```
+input is text                         → "text"       (unchanged, synchronous)
+facebook.com page post (/posts/, /videos/, story_fbid, fbid)
+                                      → "facebook"   (unchanged Graph API, synchronous)
+DRIVER_HOSTS (social + yad2 + madlan) → "driver"     (async job)
+anything else                         → "scrape"     (Firecrawl, synchronous)
+                                        └─ on ANY Firecrawl error → "driver" (async job)
+```
+
+`DRIVER_HOSTS` = `yad2.co.il`, `madlan.co.il`, `facebook.com` (group/profile URLs that are not page posts), `instagram.com`, `tiktok.com`, `linkedin.com`, `x.com`, `twitter.com` — matched on registrable domain with an optional subdomain, never a substring.
+
+A Facebook **page post** keeps the existing Graph path because it is faster, free, and already works. A Facebook **group** URL has no Graph equivalent and needs a logged-in browser.
+
+## File Structure
+
+**Server — new**
+
+| File | Responsibility |
+|---|---|
+| `server/driver-browser.js` | Driver REST client + `withPage(opts, fn)`. Session lifecycle, error policy, orphan cleanup. Knows nothing about listings. |
+| `server/driver-browser.test.js` | Error policy, stop-in-finally, orphan matching. Fake `fetch`, fake `connectOverCDP`. |
+| `server/listing-driver.js` | Page → `{source:"driver", text, description, photos}`. Login-wall detection. Knows nothing about HTTP or jobs. |
+| `server/listing-driver.test.js` | Shape parity with `fromFirecrawl`, login-wall codes. Fake `page`. |
+| `server/extract-jobs.js` | Job state machine + sweeper. `queued → running → done \| failed`. Deps-injected. |
+| `server/extract-jobs.test.js` | Transitions, attempt cap, browser-type escalation, concurrency cap. |
+| `server/routes/connections-browser.js` | `start` / `status` / `finish` for the embedded login browser. |
+| `server/routes/connections-browser.test.js` | Ownership, no-cdpUrl-leak, finish verification. |
+| `scripts/driver-extract.local.js` | Live verification against a real Yad2 URL. Not in the test chain. |
+
+**Server — modified**
+
+| File | Change |
+|---|---|
+| `server/listing-sources.js` | `sourceFor()` gains the `driver` branch; `listingImages` / `IMAGE_EXT` / `NOT_LISTING` exported for reuse; `resolve()` routes `driver`. |
+| `server/listing-sources.test.js` | Routing assertions for the new hosts. |
+| `server/db.js` | `saveExtractJob` / `getExtractJob` / `updateExtractJob` / `listQueuedExtractJobs`, and browser-connection fields on the existing connection doc. |
+| `server/routes/extract.js` | 202 + job id, `GET /properties/extract/:job_id`, Firecrawl→Driver fallback, separate driver daily cap. |
+| `server/routes/extract.test.js` | New routing, 202 shape, poll ownership, fallback. |
+| `server/index.js` | Mount `connections-browser`, start the sweeper, run boot orphan cleanup. |
+| `server/package.json` | `patchright` dependency; new test files in the chain. |
+| `server/Dockerfile` | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. |
+
+**Front-end — modified**
+
+| File | Change |
+|---|---|
+| `public-agent/extract.js` | `pollJob()` helper + new error keys. |
+| `public-agent/extract.test.js` | Poll helper tests. |
+| `public-agent/create.html` | Handle 202 → poll → same fill path. |
+| `public-agent/form-i18n.js` | New Hebrew strings. |
+| `public-agent/distribution.html` | Embedded-browser connect modal markup. |
+| `public-agent/distribution.js` | Modal wiring, status polling. |
+| `public-agent/app.css` | Modal styles. |
+
+---
+
+## Phases
+
+- **Tasks 1–9 — Phase 1.** Driver scraping for Yad2/Madlan + Firecrawl fallback. Ships and is useful on its own.
+- **Tasks 10–12 — Phase 2.** Embedded browser connect + social/Facebook-group scraping. Depends on Task 2.
+
+---
+
+### Task 1: Verification spike — Driver reachability, patchright install, viewer framing
+
+No production code. This task answers three questions the rest of the plan branches on. **Do not skip it**; Task 11 has two mutually exclusive implementations and this task picks one.
+
+**Files:**
+- Create: `docs/superpowers/plans/2026-09-22-driver-spike-findings.md`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: a findings document containing the literal line `VIEWER_EMBEDDABLE=yes` or `VIEWER_EMBEDDABLE=no`, read by Task 11.
+
+- [ ] **Step 1: Confirm the API key is present and the account is reachable**
+
+```bash
+test -n "$DRIVER_API_KEY" || { echo "set DRIVER_API_KEY first"; exit 1; }
+curl -sS https://api.driver.dev/v1/account/billing \
+  -H "Authorization: Bearer $DRIVER_API_KEY" | tee /tmp/billing.json
+```
+
+Record `plan.concurrent_browsers` from the output. This is the hard ceiling for `DRIVER_MAX_CONCURRENT` in Task 5.
+
+- [ ] **Step 2: Install patchright and confirm it needs no browser download**
+
+```bash
+cd server && npm install patchright --save
+ls node_modules/patchright/package.json && echo "installed"
+```
+
+Expected: install completes without downloading a Chromium binary. If it tries to download, set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` in the environment and reinstall — we only ever connect over CDP.
+
+- [ ] **Step 3: Create one session, read the viewer's framing headers, stop it**
+
+```bash
+SID=$(curl -sS -X POST https://api.driver.dev/v1/browser/session \
+  -H "Authorization: Bearer $DRIVER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"country":"IL","duration":120,"note":"forly-spike"}' | tee /tmp/sess.json | \
+  node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).sessionId)')
+echo "sessionId=$SID"
+curl -sSI "https://viewer.driver.dev/" | grep -iE "x-frame-options|content-security-policy"
+curl -sS -X DELETE "https://api.driver.dev/v1/browser/session?sessionId=$SID" \
+  -H "Authorization: Bearer $DRIVER_API_KEY"
+curl -sS "https://api.driver.dev/v1/browser/session?sessionId=$SID" \
+  -H "Authorization: Bearer $DRIVER_API_KEY"
+```
+
+Expected: the final GET shows `"status":"completed"` with a `stoppedAt`.
+
+- [ ] **Step 4: Decide embeddability and write the findings file**
+
+Decision rule, applied to the headers from Step 3:
+- No `X-Frame-Options` **and** either no `frame-ancestors` or one that permits the Forly origin → `VIEWER_EMBEDDABLE=yes`.
+- `X-Frame-Options: DENY`/`SAMEORIGIN`, or a `frame-ancestors` that excludes the Forly origin → `VIEWER_EMBEDDABLE=no`.
+
+If the answer is `no`, do **not** attempt to proxy or strip the header — that defeats a deliberate security control and breaks the viewer's websocket. Task 11 Branch B (popup window) is the supported path.
+
+```bash
+cat > docs/superpowers/plans/2026-09-22-driver-spike-findings.md <<'EOF'
+# Driver spike findings (2026-09-22)
+
+VIEWER_EMBEDDABLE=<yes|no>
+
+- plan.concurrent_browsers: <n>
+- viewer response headers: <paste the grep output>
+- patchright install downloaded a browser: <yes|no>
+EOF
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add docs/superpowers/plans/2026-09-22-driver-spike-findings.md server/package.json server/package-lock.json
+git commit -m "chore(driver): add patchright dependency and record spike findings"
+```
+
+---
+
+### Task 2: `driver-browser.js` — the Driver client
+
+**Files:**
+- Create: `server/driver-browser.js`
+- Create: `server/driver-browser.test.js`
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Consumes: `patchright` (`chromium.connectOverCDP`), `process.env.DRIVER_API_KEY`.
+- Produces:
+  - `DriverError` — `class DriverError extends Error { status: number, code?: string, retryAfter?: number }`
+  - `createSession(opts, deps?) -> Promise<Session>` where `Session = { sessionId, status, cdpUrl, note, stoppedAt, bandwidthBytes? }`
+  - `getSession(id, deps?) -> Promise<Session>`
+  - `stopSession(id, deps?) -> Promise<void>` (never throws)
+  - `listSessions(status, deps?) -> Promise<{ sessions: Session[] }>`
+  - `cleanupOrphans(notePrefix, deps?) -> Promise<number>` (count stopped)
+  - `withPage(opts, fn, deps?) -> Promise<T>`, `fn(page, session)`
+  - `_test = { backoffMs }`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/driver-browser.test.js`:
+
+```js
+/* driver-browser.js — session lifecycle and the error policy. No network:
+   fetch and connectOverCDP are stubbed. */
+const assert = require("assert");
+const D = require("./driver-browser");
+
+const ok = (body) => ({ ok: true, status: 200, json: async () => body, headers: { get: () => null } });
+const err = (status, body, retryAfter) => ({
+  ok: false, status, statusText: "e", json: async () => body || {},
+  headers: { get: (h) => (h.toLowerCase() === "retry-after" && retryAfter ? String(retryAfter) : null) },
+});
+
+(async () => {
+  // ── 402 and 403 are reported immediately, never retried ──
+  for (const status of [402, 403]) {
+    let calls = 0;
+    const fetchFn = async () => { calls++; return err(status, { error: "nope", code: "x" }); };
+    await assert.rejects(
+      D.createSession({}, { fetchFn, apiKey: "k", sleep: async () => {} }),
+      (e) => e instanceof D.DriverError && e.status === status,
+    );
+    assert.equal(calls, 1, `${status} must not loop`);
+  }
+
+  // ── 503 backs off, capped at 5 attempts, then reports ──
+  let calls503 = 0; const slept = [];
+  const fetch503 = async () => { calls503++; return err(503, { code: "browser_capacity_unavailable" }, 2); };
+  await assert.rejects(
+    D.createSession({}, { fetchFn: fetch503, apiKey: "k", sleep: async (ms) => slept.push(ms), random: () => 0 }),
+    (e) => e.status === 503,
+  );
+  assert.equal(calls503, 6, "1 initial + 5 retries");
+  assert.deepEqual(slept, [2000, 4000, 6000, 8000, 10000]);
+
+  // ── 504 and 500 retry exactly once, then succeed ──
+  for (const status of [504, 500]) {
+    let n = 0;
+    const fetchFn = async () => (++n === 1 ? err(status, {}) : ok({ sessionId: "s1", status: "active", cdpUrl: "ws://x" }));
+    const s = await D.createSession({}, { fetchFn, apiKey: "k", sleep: async () => {} });
+    assert.equal(s.sessionId, "s1");
+    assert.equal(n, 2);
+  }
+
+  // ── stopSession never throws, so a finally cannot mask the real error ──
+  await D.stopSession("s1", { fetchFn: async () => err(500, {}), apiKey: "k", sleep: async () => {} });
+
+  // ── withPage stops the session even when fn throws ──
+  const stopped = [];
+  const deps = {
+    apiKey: "k", sleep: async () => {}, random: () => 0,
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { stopped.push(url); return ok({ success: true }); }
+      if ((init && init.method) === "POST") return ok({ sessionId: "s2", status: "active", cdpUrl: "ws://y" });
+      return ok({ sessionId: "s2", status: "completed", cdpUrl: null, bandwidthBytes: 10 });
+    },
+    connectOverCDP: async () => ({
+      contexts: () => [{ pages: () => [{ marker: "page" }] }],
+      close: async () => {},
+    }),
+  };
+  await assert.rejects(D.withPage({}, async () => { throw new Error("boom"); }, deps), /boom/);
+  assert.equal(stopped.length, 1);
+  assert.ok(stopped[0].includes("sessionId=s2"));
+
+  // ── withPage reuses the first context and page, and returns fn's value ──
+  const got = await D.withPage({}, async (page) => page.marker, deps);
+  assert.equal(got, "page");
+
+  // ── cleanupOrphans stops only our own notes ──
+  const deleted = [];
+  const cleanupDeps = {
+    apiKey: "k", sleep: async () => {},
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { deleted.push(url); return ok({ success: true }); }
+      if (url.includes("status=active")) return ok({ sessions: [{ sessionId: "a", note: "forly-extract:1" }, { sessionId: "b", note: "someone-else" }] });
+      return ok({ sessions: [{ sessionId: "c", note: "forly-extract:2" }] });
+    },
+  };
+  assert.equal(await D.cleanupOrphans("forly-extract:", cleanupDeps), 2);
+  assert.ok(deleted.some((u) => u.includes("sessionId=a")));
+  assert.ok(deleted.some((u) => u.includes("sessionId=c")));
+  assert.ok(!deleted.some((u) => u.includes("sessionId=b")));
+
+  console.log("driver-browser.test.js ok");
+})();
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node driver-browser.test.js`
+Expected: FAIL with `Cannot find module './driver-browser'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `server/driver-browser.js`:
+
+```js
+/*
+ * driver-browser.js — hosted real-Chrome sessions from driver.dev.
+ *
+ * Three calls: POST to create, connectOverCDP to use, DELETE to stop. The
+ * DELETE is not optional — browser.close() only drops our websocket, and an
+ * unstopped session holds a concurrency slot until its `duration` runs out.
+ *
+ * Retry policy is deliberately asymmetric (docs.driver.dev/docs/sessions/errors):
+ * 402 (no credits) and 403 (over the plan limit) are conditions a PERSON has to
+ * fix, so looping only burns time; 503 is capacity, which time does fix.
+ *
+ * Every function takes `deps` so the tests drive the whole lifecycle with fakes.
+ */
+const API = "https://api.driver.dev";
+
+class DriverError extends Error {
+  constructor(status, message, code, retryAfter) {
+    super(`Driver ${status}: ${message}`);
+    this.status = status;
+    this.code = code;
+    this.retryAfter = retryAfter;
+  }
+}
+
+const sleepReal = (ms) => new Promise((r) => setTimeout(r, ms));
+const backoffMs = (base, attempt, rnd) => base * 1000 * attempt + rnd * 1000;
+
+async function call(method, path, body, deps = {}) {
+  const fetchFn = deps.fetchFn || fetch;
+  const apiKey = deps.apiKey || process.env.DRIVER_API_KEY;
+  if (!apiKey) throw new DriverError(401, "DRIVER_API_KEY is not set");
+  const res = await fetchFn(`${API}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    const ra = Number(res.headers.get("retry-after")) || undefined;
+    throw new DriverError(res.status, e.error || res.statusText, e.code, ra);
+  }
+  return res.json();
+}
+
+async function createSession(opts = {}, deps = {}) {
+  const sleep = deps.sleep || sleepReal;
+  const random = deps.random || Math.random;
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await call("POST", "/v1/browser/session", opts, deps);
+    } catch (e) {
+      if (!(e instanceof DriverError)) throw e;
+      attempt++;
+      if (e.status === 503 && attempt <= 5) { await sleep(backoffMs(e.retryAfter || 2, attempt, random())); continue; }
+      if ((e.status === 504 || e.status === 500) && attempt <= 1) continue;
+      if (e.status === 429 && attempt <= 3) { await sleep(backoffMs(2, attempt, random())); continue; }
+      throw e; // 400, 401, 402, 403, or out of attempts: a person has to act
+    }
+  }
+}
+
+const getSession = (id, deps) => call("GET", `/v1/browser/session?sessionId=${encodeURIComponent(id)}`, null, deps);
+const listSessions = (status, deps) => call("GET", `/v1/browser/sessions?pageSize=50${status ? `&status=${status}` : ""}`, null, deps);
+
+// Idempotent, and never throws: called from a finally, where replacing the
+// error already in flight would hide what actually went wrong.
+async function stopSession(id, deps = {}) {
+  try {
+    const r = await call("DELETE", `/v1/browser/session?sessionId=${encodeURIComponent(id)}`, null, deps);
+    if (!r || r.success !== true) console.error(`driver: stop of ${id} did not succeed`);
+  } catch (e) {
+    console.error(`driver: stop of ${id} failed: ${e.message}`);
+  }
+}
+
+// A crash before the finally leaves a session running until its duration. Every
+// session we create carries a note; at boot we stop the ones that are ours.
+async function cleanupOrphans(notePrefix, deps = {}) {
+  let stopped = 0;
+  for (const status of ["active", "starting"]) {
+    const r = await listSessions(status, deps).catch(() => ({ sessions: [] }));
+    for (const s of (r && r.sessions) || []) {
+      if (!String(s.note || "").startsWith(notePrefix)) continue;
+      await stopSession(s.sessionId, deps);
+      stopped++;
+    }
+  }
+  return stopped;
+}
+
+async function waitForActive(session, deps = {}) {
+  const sleep = deps.sleep || sleepReal;
+  const deadline = Date.now() + (deps.timeoutMs || 60000);
+  let s = session;
+  while (!(s.status === "active" && s.cdpUrl)) {
+    if (s.status === "completed" || s.status === "error") throw new DriverError(500, `session ended: ${s.status}`);
+    if (Date.now() > deadline) throw new DriverError(504, "timed out waiting for the browser");
+    await sleep(1000);
+    s = await getSession(s.sessionId, deps);
+  }
+  return s;
+}
+
+/*
+ * The only way this module hands out a page. Reuses the browser's own context
+ * and tab (a fresh context is itself an automation signal) and guarantees the
+ * DELETE, whatever fn does.
+ */
+async function withPage(opts, fn, deps = {}) {
+  const session = await createSession(opts, deps);
+  try {
+    const active = await waitForActive(session, deps);
+    const connect = deps.connectOverCDP || require("patchright").chromium.connectOverCDP;
+    const browser = await connect(active.cdpUrl);
+    try {
+      const context = browser.contexts()[0] || (await browser.newContext());
+      const page = context.pages()[0] || (await context.newPage());
+      return await fn(page, active);
+    } finally {
+      await browser.close(); // our connection only; the session is still up
+    }
+  } finally {
+    await stopSession(session.sessionId, deps);
+  }
+}
+
+module.exports = {
+  DriverError, createSession, getSession, listSessions, stopSession,
+  cleanupOrphans, waitForActive, withPage, _test: { backoffMs },
+};
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd server && node driver-browser.test.js`
+Expected: PASS, printing `driver-browser.test.js ok`
+
+- [ ] **Step 5: Add to the test chain**
+
+In `server/package.json`, append ` && node driver-browser.test.js` to the end of the `scripts.test` string.
+
+Run: `cd server && npm test`
+Expected: the whole chain passes.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add server/driver-browser.js server/driver-browser.test.js server/package.json
+git commit -m "feat(driver): add hosted-browser session client with stop-in-finally"
+```
+
+---
+
+### Task 3: `listing-driver.js` — a rendered page becomes listing text and photos
+
+**Files:**
+- Create: `server/listing-driver.js`
+- Create: `server/listing-driver.test.js`
+- Modify: `server/listing-sources.js` (export the image filters for reuse)
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Consumes: `driver-browser.withPage`, and from `listing-sources`: `_test.listingImages`, plus new exports `IMAGE_EXT`, `NOT_LISTING`, `MAX_PHOTOS`.
+- Produces:
+  - `fromDriver({ url, profileName, browserType }, deps?) -> Promise<{ source:"driver", text, description, photos }>` where `photos` is `Array<{url: string, source: "driver"}>` — **the same shape `fromFirecrawl` returns**, so `resolve()` callers need no change.
+  - `_test = { pickImages, isLoginWall, readPage }`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/listing-driver.test.js`:
+
+```js
+/* listing-driver.js — a rendered page in, the firecrawl-shaped result out.
+   No browser: withPage and the page object are stubbed. */
+const assert = require("assert");
+const LD = require("./listing-driver");
+const { pickImages, isLoginWall } = LD._test;
+
+// ── image picking: same rules as the markdown path, applied to <img> srcs ──
+assert.deepEqual(
+  pickImages([
+    "https://img.yad2.co.il/Pic/1.jpg",
+    "https://img.yad2.co.il/Pic/1.jpg",          // duplicate
+    "https://cdn.yad2.co.il/assets/logo.png",    // NOT_LISTING
+    "https://img.yad2.co.il/Pic/2.webp",
+    "data:image/png;base64,AAAA",                // not http(s)
+    "https://img.yad2.co.il/Pic/3.svg",          // wrong extension
+  ]),
+  ["https://img.yad2.co.il/Pic/1.jpg", "https://img.yad2.co.il/Pic/2.webp"],
+);
+
+// ── login walls, by landing URL and by page text ──
+assert.equal(isLoginWall("https://www.facebook.com/login/?next=%2Fgroups%2F1", "התחברות"), true);
+assert.equal(isLoginWall("https://www.instagram.com/accounts/login/", "Log in"), true);
+assert.equal(isLoginWall("https://www.yad2.co.il/item/abc", "דירה 4 חדרים"), false);
+
+(async () => {
+  // ── happy path: text + photos, firecrawl-compatible shape ──
+  const page = {
+    goto: async () => {},
+    url: () => "https://www.yad2.co.il/item/abc",
+    innerText: async () => "דירה 4 חדרים\nמחיר:2,200,000 ₪\nקומה:2",
+    imageSrcs: async () => ["https://img.yad2.co.il/Pic/1.jpg"],
+  };
+  const withPage = async (opts, fn) => fn(page, { sessionId: "s1", cdpUrl: "ws://x" });
+  const out = await LD.fromDriver({ url: "https://www.yad2.co.il/item/abc" }, { withPage });
+  assert.equal(out.source, "driver");
+  assert.ok(out.text.includes("2,200,000"));
+  assert.equal(out.description, out.text);
+  assert.deepEqual(out.photos, [{ url: "https://img.yad2.co.il/Pic/1.jpg", source: "driver" }]);
+
+  // ── an empty page is an error, not an empty success ──
+  const blank = { goto: async () => {}, url: () => "https://www.madlan.co.il/x", innerText: async () => "   ", imageSrcs: async () => [] };
+  await assert.rejects(
+    LD.fromDriver({ url: "https://www.madlan.co.il/x" }, { withPage: async (o, fn) => fn(blank, {}) }),
+    (e) => e.code === "page_unreadable",
+  );
+
+  // ── a login wall is its own code, so the route can point at the connect flow ──
+  const wall = {
+    goto: async () => {}, url: () => "https://www.facebook.com/login/?next=x",
+    innerText: async () => "התחברות לפייסבוק", imageSrcs: async () => [],
+  };
+  await assert.rejects(
+    LD.fromDriver({ url: "https://www.facebook.com/groups/1/posts/2", profileName: "facebook-0500000000" },
+      { withPage: async (o, fn) => fn(wall, {}) }),
+    (e) => e.code === "social_login_required",
+  );
+
+  // ── the profile and browser type reach the session options ──
+  let seen = null;
+  await LD.fromDriver(
+    { url: "https://www.facebook.com/groups/1/posts/2", profileName: "facebook-0500000000", browserType: "hosted_stealth" },
+    { withPage: async (opts, fn) => { seen = opts; return fn(page, {}); } },
+  );
+  assert.deepEqual(seen.profile, { name: "facebook-0500000000", persist: true });
+  assert.equal(seen.type, "hosted_stealth");
+  assert.equal(seen.country, "IL");
+  assert.ok(String(seen.note || "").startsWith("forly-extract:"));
+
+  console.log("listing-driver.test.js ok");
+})();
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node listing-driver.test.js`
+Expected: FAIL with `Cannot find module './listing-driver'`
+
+- [ ] **Step 3: Export the shared image filters from `listing-sources.js`**
+
+In `server/listing-sources.js`, change the final export line to also expose the constants (keep everything already exported):
+
+```js
+module.exports = {
+  resolve, isPublicUrl, TIMEOUT_MS, MAX_PHOTOS, IMAGE_EXT, NOT_LISTING,
+  _test: { sourceFor, facebookPostId, listingImages, isPrivateIp, attachmentImages },
+};
+```
+
+- [ ] **Step 4: Write minimal implementation**
+
+Create `server/listing-driver.js`:
+
+```js
+/*
+ * listing-driver.js — the Driver-backed listing source.
+ *
+ * Yad2 and Madlan render their facts with JavaScript and sit behind bot
+ * defences that answer Firecrawl with a challenge page; a Facebook group post
+ * is invisible without a session. All three are readable in a real browser.
+ *
+ * The result is deliberately the SAME shape fromFirecrawl() returns, so
+ * listing-extract.js and every caller stay untouched: the page's innerText
+ * carries the "label:value" lines the Hebrew prompt already knows how to read.
+ */
+const { MAX_PHOTOS, IMAGE_EXT, NOT_LISTING } = require("./listing-sources");
+const driver = require("./driver-browser");
+
+const GOTO_TIMEOUT_MS = 45000;
+
+function fail(code, msg) { const e = new Error(msg || code); e.code = code; return e; }
+
+// Same filters the markdown path uses, applied to <img> srcs instead.
+function pickImages(srcs) {
+  const out = [];
+  for (const raw of srcs || []) {
+    const src = String(raw || "");
+    if (!/^https?:\/\//.test(src)) continue;
+    if (!IMAGE_EXT.test(src) || NOT_LISTING.test(src) || out.includes(src)) continue;
+    out.push(src);
+    if (out.length >= MAX_PHOTOS) break;
+  }
+  return out;
+}
+
+const LOGIN_URL = /\/(login|accounts\/login|checkpoint|signin)(\/|\?|$)/i;
+
+function isLoginWall(landedUrl, text) {
+  if (LOGIN_URL.test(String(landedUrl || ""))) return true;
+  const t = String(text || "");
+  return t.length < 400 && /(log in to continue|יש להתחבר כדי להמשיך)/i.test(t);
+}
+
+async function readPage(page, url) {
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
+  // Auto-waiting, not a fixed sleep: settle on the network going quiet, and
+  // carry on regardless if it never does — a chatty analytics beacon must not
+  // cost us the scrape.
+  if (page.waitForLoadState) await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+  const text = String(await page.innerText("body")).trim();
+  const srcs = page.imageSrcs
+    ? await page.imageSrcs()
+    : await page.$$eval("img", (els) => els.map((e) => e.currentSrc || e.src).filter(Boolean));
+  return { landedUrl: page.url(), text, srcs };
+}
+
+async function fromDriver(input, deps = {}) {
+  const withPage = deps.withPage || driver.withPage;
+  // resolve() hands these through `deps` (extract-jobs sets them per attempt);
+  // a direct caller passes them on the input. Accept both, input wins.
+  const url = input.url;
+  const profileName = input.profileName || deps.profileName || null;
+  const browserType = input.browserType || deps.browserType || null;
+  const opts = {
+    country: "IL",
+    duration: 300,
+    note: `forly-extract:${deps.jobId || "adhoc"}`,
+    type: browserType || "hosted",
+  };
+  if (profileName) opts.profile = { name: profileName, persist: true };
+
+  const { landedUrl, text, srcs } = await withPage(opts, (page) => readPage(page, url));
+  if (isLoginWall(landedUrl, text)) throw fail("social_login_required", "login wall");
+  const photos = pickImages(srcs).map((u) => ({ url: u, source: "driver" }));
+  if (!text && !photos.length) throw fail("page_unreadable", "empty page");
+  if (!text) throw fail("page_unreadable", "no text");
+  return { source: "driver", text, description: text, photos };
+}
+
+module.exports = { fromDriver, _test: { pickImages, isLoginWall, readPage } };
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd server && node listing-driver.test.js && node listing-sources.test.js`
+Expected: both PASS.
+
+- [ ] **Step 6: Add to the test chain and commit**
+
+Append ` && node listing-driver.test.js` to `scripts.test` in `server/package.json`.
+
+```bash
+cd server && npm test
+git add server/listing-driver.js server/listing-driver.test.js server/listing-sources.js server/package.json
+git commit -m "feat(driver): render listing pages into the firecrawl result shape"
+```
+
+---
+
+### Task 4: Routing — which source handles which URL
+
+**Files:**
+- Modify: `server/listing-sources.js:33-36` (`sourceFor`), `server/listing-sources.js:141-148` (`resolve`)
+- Modify: `server/listing-sources.test.js:7-14` (routing block)
+
+**Interfaces:**
+- Consumes: `listing-driver.fromDriver`.
+- Produces: `sourceFor({text, url}) -> "text" | "facebook" | "driver" | "scrape"`; `resolve()` gains a `driver` branch returning the `fromDriver` result. `DRIVER_HOSTS` is exported on `_test` for the tests.
+
+- [ ] **Step 1: Write the failing test**
+
+In `server/listing-sources.test.js`, replace the two existing Yad2/Madlan assertions (currently asserting `"scrape"`) and add the new cases. The routing block becomes:
+
+```js
+// ── routing by host ──
+assert.equal(sourceFor({ text: "3 חדרים" }), "text");
+
+// facebook PAGE posts keep the Graph path: faster, free, already working
+assert.equal(sourceFor({ url: "https://www.facebook.com/golan.nadlan/posts/123" }), "facebook");
+assert.equal(sourceFor({ url: "https://fb.watch/abc" }), "facebook");
+assert.equal(sourceFor({ url: "https://www.facebook.com/permalink.php?story_fbid=555&id=777" }), "facebook");
+
+// groups have no Graph equivalent, and a bare profile is not a post → browser
+assert.equal(sourceFor({ url: "https://www.facebook.com/groups/123/posts/456" }), "driver");
+assert.equal(sourceFor({ url: "https://www.facebook.com/golan.nadlan" }), "driver");
+
+// the rest of the driver allowlist
+assert.equal(sourceFor({ url: "https://www.yad2.co.il/item/abc" }), "driver");
+assert.equal(sourceFor({ url: "https://madlan.co.il/listings/x" }), "driver");
+assert.equal(sourceFor({ url: "https://www.instagram.com/p/abc/" }), "driver");
+assert.equal(sourceFor({ url: "https://www.tiktok.com/@a/video/1" }), "driver");
+assert.equal(sourceFor({ url: "https://www.linkedin.com/posts/abc" }), "driver");
+assert.equal(sourceFor({ url: "https://x.com/a/status/1" }), "driver");
+
+// everything else still goes to firecrawl first
+assert.equal(sourceFor({ url: "https://www.komo.co.il/item/1" }), "scrape");
+assert.equal(sourceFor({ url: "https://example.com/listing" }), "scrape");
+
+// a lookalike host must NOT match the allowlist by substring
+assert.equal(sourceFor({ url: "https://yad2.co.il.evil.com/x" }), "scrape");
+assert.equal(sourceFor({ url: "https://notyad2.co.il/x" }), "scrape");
+
+assert.throws(() => sourceFor({ url: "ftp://x" }), (e) => e.code === "invalid_input");
+assert.throws(() => sourceFor({}), (e) => e.code === "invalid_input");
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node listing-sources.test.js`
+Expected: FAIL on the first Yad2 assertion — `'scrape' == 'driver'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `server/listing-sources.js`, add the constant next to `FB_HOSTS` (around line 20):
+
+```js
+// Sites a plain HTTP scrape cannot read: JS-rendered facts, bot defences, or a
+// login wall. Anchored on the registrable domain — a substring test would let
+// yad2.co.il.evil.com through.
+const DRIVER_HOSTS = /(^|\.)(yad2\.co\.il|madlan\.co\.il|instagram\.com|tiktok\.com|linkedin\.com|x\.com|twitter\.com)$/i;
+```
+
+Replace `sourceFor` (currently lines 33-36) with:
+
+```js
+function sourceFor({ text, url }) {
+  if (typeof text === "string" && text.trim()) return "text";
+  if (!url) throw fail("invalid_input", "text or url required");
+  const u = parseUrl(url);
+  if (FB_HOSTS.test(u.hostname)) {
+    // A group post has no Graph equivalent, and a bare profile URL is not a
+    // post at all — both need a real browser. Page posts keep the Graph path.
+    if (/^\/groups\//i.test(u.pathname)) return "driver";
+    return facebookPostId(url) ? "facebook" : "driver";
+  }
+  if (DRIVER_HOSTS.test(u.hostname)) return "driver";
+  return "scrape";
+}
+```
+
+Replace `resolve` (currently lines 141-148) with:
+
+```js
+async function resolve(input, deps = {}) {
+  const kind = deps.forceSource || sourceFor(input);
+  if (kind === "text") { const text = input.text.trim(); return { source: "text", text, description: text, photos: [] }; }
+  if (kind === "facebook") return fromFacebook(input, deps);
+  if (kind === "driver") return require("./listing-driver").fromDriver(input, deps);
+  return fromFirecrawl(input, deps);
+}
+```
+
+`forceSource` is how the Firecrawl→Driver fallback in Task 6 re-runs the same input through the browser. `listing-driver` is required lazily inside the function because it requires `listing-sources` back for the image filters — a top-level require would be a cycle.
+
+Add `DRIVER_HOSTS` to the `_test` export.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd server && node listing-sources.test.js && node listing-driver.test.js`
+Expected: both PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add server/listing-sources.js server/listing-sources.test.js
+git commit -m "feat(extract): route social, yad2 and madlan URLs to the browser source"
+```
+
+---
+
+### Task 5: Job persistence and the job state machine
+
+**Files:**
+- Modify: `server/db.js:11` (mem store), `server/db.js:498-517` (exports)
+- Create: `server/extract-jobs.js`
+- Create: `server/extract-jobs.test.js`
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Consumes: `db.saveExtractJob/getExtractJob/updateExtractJob/listExtractJobsByStatus`, `listing-sources.resolve`, `listing-extract.parseListing`.
+- Produces:
+  - `create({ phone, url, forceSource, profileName }, deps) -> Promise<Job>` — status `queued`
+  - `runJob(job, deps) -> Promise<Job>`
+  - `sweep(deps) -> Promise<number>` (jobs started)
+  - `startSweeper(deps) -> () => void` (returns a stop function)
+  - `liveDeps() -> deps`
+  - `BROWSER_LADDER = ["hosted", "hosted_stealth", "hosted_privacy"]`, `MAX_ATTEMPTS = 3`
+  - Job shape: `{ id, phone, url, status: "queued"|"running"|"done"|"failed", attempts, force_source, profile_name, created_at, updated_at, result: {source, description, fields, missing, photos} | null, error_code: string | null }`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/extract-jobs.test.js`:
+
+```js
+/* extract-jobs.js — the queued-scrape state machine. No network, no browser:
+   resolve, parseListing and the store are fakes. */
+const assert = require("assert");
+const J = require("./extract-jobs");
+
+function fakeStore() {
+  const jobs = new Map();
+  return {
+    jobs,
+    saveExtractJob: async (j) => { jobs.set(j.id, JSON.parse(JSON.stringify(j))); },
+    getExtractJob: async (id) => jobs.get(id) || null,
+    updateExtractJob: async (id, patch) => { const j = jobs.get(id); if (j) Object.assign(j, patch); },
+    listExtractJobsByStatus: async (s, limit = 10) => [...jobs.values()].filter((j) => j.status === s).slice(0, limit),
+  };
+}
+
+(async () => {
+  // ── create starts queued and never runs inline ──
+  const store = fakeStore();
+  const job = await J.create({ phone: "0500000000", url: "https://www.yad2.co.il/item/a" }, { db: store });
+  assert.equal(job.status, "queued");
+  assert.equal(job.attempts, 0);
+  assert.equal(job.phone, "0500000000");
+  assert.ok(job.id);
+
+  // ── a successful run parses and stores fields, then goes done ──
+  const deps = {
+    db: store,
+    resolve: async () => ({ source: "driver", text: "דירה", description: "דירה", photos: [{ url: "https://i/1.jpg", source: "driver" }] }),
+    parseListing: async () => ({ fields: { city: "חיפה", price: 100 }, missing: ["rooms"] }),
+  };
+  const done = await J.runJob(job, deps);
+  assert.equal(done.status, "done");
+  assert.deepEqual(done.result.fields, { city: "חיפה", price: 100 });
+  assert.deepEqual(done.result.missing, ["rooms"]);
+  assert.deepEqual(done.result.photos, [{ url: "https://i/1.jpg", source: "driver" }]);
+  assert.equal(done.error_code, null);
+
+  // ── a blocked page escalates the browser type on each attempt, then fails ──
+  const store2 = fakeStore();
+  const job2 = await J.create({ phone: "p", url: "https://www.madlan.co.il/x" }, { db: store2 });
+  const types = [];
+  const blockDeps = {
+    db: store2,
+    resolve: async (input, d) => { types.push(d.browserType); const e = new Error("blocked"); e.code = "page_unreadable"; throw e; },
+    parseListing: async () => ({ fields: {}, missing: [] }),
+  };
+  let j2 = job2;
+  for (let i = 0; i < 3; i++) j2 = await J.runJob(await store2.getExtractJob(job2.id), blockDeps);
+  assert.deepEqual(types, J.BROWSER_LADDER);
+  assert.equal(j2.status, "failed");
+  assert.equal(j2.error_code, "page_unreadable");
+  assert.equal(j2.attempts, 3);
+
+  // ── a login wall is terminal on the first attempt: retrying cannot help ──
+  const store3 = fakeStore();
+  const job3 = await J.create({ phone: "p", url: "https://www.facebook.com/groups/1/posts/2" }, { db: store3 });
+  const wallDeps = {
+    db: store3,
+    resolve: async () => { const e = new Error("wall"); e.code = "social_login_required"; throw e; },
+    parseListing: async () => ({ fields: {}, missing: [] }),
+  };
+  const j3 = await J.runJob(job3, wallDeps);
+  assert.equal(j3.status, "failed");
+  assert.equal(j3.error_code, "social_login_required");
+  assert.equal(j3.attempts, 1, "no retry on a login wall");
+
+  // ── 402/403 are terminal too: a person has to act ──
+  const store4 = fakeStore();
+  const job4 = await J.create({ phone: "p", url: "https://www.yad2.co.il/item/b" }, { db: store4 });
+  const brokeDeps = {
+    db: store4,
+    resolve: async () => { const e = new Error("no credits"); e.status = 402; throw e; },
+    parseListing: async () => ({ fields: {}, missing: [] }),
+  };
+  const j4 = await J.runJob(job4, brokeDeps);
+  assert.equal(j4.status, "failed");
+  assert.equal(j4.error_code, "extract_unavailable");
+  assert.equal(j4.attempts, 1);
+
+  // ── sweep starts at most (cap - running) jobs ──
+  const store5 = fakeStore();
+  for (let i = 0; i < 5; i++) await J.create({ phone: "p", url: `https://www.yad2.co.il/item/${i}` }, { db: store5 });
+  await store5.saveExtractJob({ id: "busy", phone: "p", url: "u", status: "running", attempts: 1 });
+  let started = 0;
+  const swept = await J.sweep({
+    db: store5, maxConcurrent: 3,
+    runJob: async () => { started++; },
+    resolve: async () => ({}), parseListing: async () => ({}),
+  });
+  assert.equal(swept, 2, "cap 3 minus 1 already running");
+  assert.equal(started, 2);
+
+  // ── forceSource rides through to resolve, for the firecrawl fallback ──
+  const store6 = fakeStore();
+  const job6 = await J.create({ phone: "p", url: "https://example.com/x", forceSource: "driver" }, { db: store6 });
+  let sawForce = null;
+  await J.runJob(job6, {
+    db: store6,
+    resolve: async (input, d) => { sawForce = d.forceSource; return { source: "driver", text: "t", description: "t", photos: [] }; },
+    parseListing: async () => ({ fields: {}, missing: [] }),
+  });
+  assert.equal(sawForce, "driver");
+
+  console.log("extract-jobs.test.js ok");
+})();
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node extract-jobs.test.js`
+Expected: FAIL with `Cannot find module './extract-jobs'`
+
+- [ ] **Step 3: Add the store to `db.js`**
+
+At `server/db.js:11`, add `extractJobs: new Map()` to the `mem` object literal (alongside `distributions: new Map()`).
+
+Add these functions next to the distribution ones (after `listQueuedDistributions`, around line 315):
+
+```js
+// ── extract jobs (browser-backed listing scrapes) ──
+// Same shape as distributions: doc-per-job, dot-path patches, single-field
+// where so no composite index is needed.
+async function saveExtractJob(j) {
+  if (db) await db.collection("extract_jobs").doc(j.id).set(j);
+  else mem.extractJobs.set(j.id, JSON.parse(JSON.stringify(j)));
+}
+
+async function getExtractJob(id) {
+  if (db) { const d = await db.collection("extract_jobs").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.extractJobs.get(id) || null;
+}
+
+async function updateExtractJob(id, patch) {
+  if (db) { await db.collection("extract_jobs").doc(id).update(patch); return; }
+  const j = mem.extractJobs.get(id);
+  if (j) Object.assign(j, patch);
+}
+
+async function listExtractJobsByStatus(status, limit = 10) {
+  if (db) {
+    const snap = await db.collection("extract_jobs").where("status", "==", status).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.extractJobs.values()].filter((j) => j.status === status).slice(0, limit);
+}
+```
+
+Add `saveExtractJob, getExtractJob, updateExtractJob, listExtractJobsByStatus,` to `module.exports`.
+
+- [ ] **Step 4: Write the state machine**
+
+Create `server/extract-jobs.js`:
+
+```js
+/*
+ * extract-jobs.js — queued browser scrapes.
+ *
+ * A Firecrawl scrape answers inside one HTTP request; a browser scrape takes
+ * 30–90s (session start, render, network idle) and would hold a Cloud Run
+ * request open the whole time. So the route queues a job and the wizard polls.
+ *
+ * The state is in Firestore rather than in process because Cloud Run runs many
+ * instances: the poll that follows a POST usually lands somewhere else.
+ *
+ * Lifecycle: queued → running → done | failed.
+ *
+ * Retry policy mirrors driver-browser.js: only what time or a different
+ * browser type can fix gets another attempt. A login wall and an out-of-credits
+ * account both need a PERSON, so they fail on the first try.
+ */
+const crypto = require("crypto");
+
+const MAX_ATTEMPTS = 3;
+const SWEEP_MS = 5 * 1000;
+// Each rung looks less like automation than the last, and costs more. Start cheap.
+const BROWSER_LADDER = ["hosted", "hosted_stealth", "hosted_privacy"];
+// Terminal on the first attempt — retrying cannot change the answer.
+const TERMINAL_CODES = new Set(["social_login_required", "invalid_input", "extract_unavailable"]);
+
+const nowIso = () => new Date().toISOString();
+
+async function create({ phone, url, forceSource = null, profileName = null }, deps) {
+  const job = {
+    id: crypto.randomUUID(),
+    phone: String(phone),
+    url: String(url),
+    status: "queued",
+    attempts: 0,
+    force_source: forceSource,
+    profile_name: profileName,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+    result: null,
+    error_code: null,
+  };
+  await deps.db.saveExtractJob(job);
+  return job;
+}
+
+// Driver's own HTTP statuses reach us on the error; map them to the stable
+// codes the route already knows, so no vendor text ever reaches an agent.
+function codeFor(err) {
+  if (err.code && err.code !== "unknown") return err.code;
+  if (err.status === 402 || err.status === 403) return "extract_unavailable";
+  if (err.status === 503) return "extract_unavailable";
+  return "page_unreadable";
+}
+
+async function runJob(job, deps) {
+  const attempt = (job.attempts || 0) + 1;
+  const browserType = BROWSER_LADDER[Math.min(attempt, BROWSER_LADDER.length) - 1];
+  await deps.db.updateExtractJob(job.id, { status: "running", attempts: attempt, updated_at: nowIso() });
+
+  try {
+    const source = await deps.resolve(
+      { url: job.url, userId: job.phone },
+      { forceSource: job.force_source || "driver", browserType, profileName: job.profile_name, jobId: job.id },
+    );
+    const parsed = await deps.parseListing(source.text);
+    const patch = {
+      status: "done",
+      error_code: null,
+      updated_at: nowIso(),
+      result: {
+        source: source.source,
+        description: source.description || "",
+        photos: source.photos || [],
+        fields: parsed.fields,
+        missing: parsed.missing,
+      },
+    };
+    await deps.db.updateExtractJob(job.id, patch);
+    return Object.assign({}, job, patch, { attempts: attempt });
+  } catch (err) {
+    const code = codeFor(err);
+    const terminal = TERMINAL_CODES.has(code) || attempt >= MAX_ATTEMPTS;
+    const patch = {
+      status: terminal ? "failed" : "queued",
+      error_code: code,
+      updated_at: nowIso(),
+    };
+    await deps.db.updateExtractJob(job.id, patch);
+    return Object.assign({}, job, patch, { attempts: attempt });
+  }
+}
+
+/*
+ * One pass: start as many queued jobs as the concurrency budget allows.
+ * The running count is read, not held — two instances can briefly overshoot by
+ * one. Driver answers the overshoot with 403, which fails that job cleanly, so
+ * a distributed lock would cost more than it saves.
+ */
+async function sweep(deps) {
+  const cap = deps.maxConcurrent || Number(process.env.DRIVER_MAX_CONCURRENT || 2);
+  const running = await deps.db.listExtractJobsByStatus("running", cap + 1);
+  const budget = cap - running.length;
+  if (budget <= 0) return 0;
+  const queued = await deps.db.listExtractJobsByStatus("queued", budget);
+  const run = deps.runJob || runJob;
+  for (const job of queued) {
+    // Deliberately not awaited: the sweep starts jobs, it does not wait on them.
+    Promise.resolve(run(job, deps)).catch((e) => console.error(`extract job ${job.id} crashed: ${e.message}`));
+  }
+  return queued.length;
+}
+
+function startSweeper(deps) {
+  const every = deps.sweepMs || SWEEP_MS;
+  const t = setInterval(() => { sweep(deps).catch((e) => console.error(`extract sweep failed: ${e.message}`)); }, every);
+  if (t.unref) t.unref();
+  return () => clearInterval(t);
+}
+
+function liveDeps() {
+  return {
+    db: require("./db"),
+    resolve: require("./listing-sources").resolve,
+    parseListing: require("./listing-extract").parseListing,
+  };
+}
+
+module.exports = { create, runJob, sweep, startSweeper, liveDeps, MAX_ATTEMPTS, SWEEP_MS, BROWSER_LADDER };
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd server && node extract-jobs.test.js`
+Expected: PASS, printing `extract-jobs.test.js ok`
+
+- [ ] **Step 6: Add to the test chain and commit**
+
+Append ` && node extract-jobs.test.js` to `scripts.test` in `server/package.json`.
+
+```bash
+cd server && npm test
+git add server/db.js server/extract-jobs.js server/extract-jobs.test.js server/package.json
+git commit -m "feat(extract): queue browser scrapes as jobs with a sweeper"
+```
+
+---
+
+### Task 6: The route — 202, polling, and the Firecrawl fallback
+
+**Files:**
+- Modify: `server/routes/extract.js:17-19` (STATUS map), `server/routes/extract.js` (the POST handler and a new GET)
+- Modify: `server/routes/extract.test.js`
+
+**Interfaces:**
+- Consumes: `extract-jobs.create`, `listing-sources.sourceFor` (via `_test`), `db.getExtractJob`.
+- Produces:
+  - `POST /api/properties/extract` → `200 {source, fields, missing, description, photos}` (text / facebook / firecrawl) **or** `202 {job_id, status:"queued"}` (driver, or firecrawl that errored).
+  - `GET /api/properties/extract/:job_id` → `200 {status, fields?, missing?, description?, photos?, error_code?}`; `404` when the job is missing **or** belongs to another phone.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `server/routes/extract.test.js` (keep the existing cases; this block uses whatever app/request helper that file already defines — reuse it rather than adding a second one):
+
+```js
+// ── a driver-routed URL queues a job instead of answering inline ──
+{
+  const created = [];
+  const app = makeApp({
+    extractJobs: { create: async (input) => { created.push(input); return { id: "job-1", status: "queued" }; } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" });
+  assert.equal(res.status, 202);
+  assert.equal(res.body.job_id, "job-1");
+  assert.equal(res.body.status, "queued");
+  assert.equal(created.length, 1);
+  assert.equal(created[0].url, "https://www.yad2.co.il/item/abc");
+  assert.equal(created[0].forceSource, null, "a driver host needs no forcing");
+}
+
+// ── firecrawl failing falls back to a driver job, not an error ──
+{
+  const created = [];
+  const app = makeApp({
+    resolve: async () => { const e = new Error("challenge page"); e.code = "page_unreadable"; throw e; },
+    extractJobs: { create: async (input) => { created.push(input); return { id: "job-2", status: "queued" }; } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.komo.co.il/item/1" });
+  assert.equal(res.status, 202);
+  assert.equal(res.body.job_id, "job-2");
+  assert.equal(created[0].forceSource, "driver");
+}
+
+// ── but a bad input is still a 400: the browser cannot fix a malformed URL ──
+{
+  const app = makeApp({
+    resolve: async () => { const e = new Error("bad"); e.code = "invalid_input"; throw e; },
+    extractJobs: { create: async () => { throw new Error("must not queue"); } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://example.com/x" });
+  assert.equal(res.status, 400);
+}
+
+// ── polling returns the job, and only to its owner ──
+{
+  const job = { id: "job-3", phone: "0500000000", status: "done", error_code: null,
+    result: { source: "driver", description: "דירה", fields: { city: "חיפה" }, missing: ["rooms"], photos: [] } };
+  const app = makeApp({ db: { getExtractJob: async (id) => (id === "job-3" ? job : null) } });
+  const ok = await get(app, "/api/properties/extract/job-3");
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.status, "done");
+  assert.deepEqual(ok.body.fields, { city: "חיפה" });
+  assert.deepEqual(ok.body.missing, ["rooms"]);
+
+  const missing = await get(app, "/api/properties/extract/nope");
+  assert.equal(missing.status, 404);
+
+  const otherApp = makeApp({
+    phone: "0509999999",
+    db: { getExtractJob: async () => job },
+  });
+  const stolen = await get(otherApp, "/api/properties/extract/job-3");
+  assert.equal(stolen.status, 404, "another agent's job must be indistinguishable from a missing one");
+}
+
+// ── a failed job reports its stable code, never vendor text ──
+{
+  const job = { id: "job-4", phone: "0500000000", status: "failed", error_code: "social_login_required", result: null };
+  const app = makeApp({ db: { getExtractJob: async () => job } });
+  const res = await get(app, "/api/properties/extract/job-4");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, "failed");
+  assert.equal(res.body.error_code, "social_login_required");
+  assert.ok(!("text" in res.body));
+}
+
+// ── the browser cap is separate from, and lower than, the firecrawl cap ──
+{
+  let queued = 0;
+  const app = makeApp({ extractJobs: { create: async () => { queued++; return { id: `j${queued}`, status: "queued" }; } } });
+  for (let i = 0; i < 10; i++) await post(app, "/api/properties/extract", { url: `https://www.yad2.co.il/item/${i}` });
+  const over = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/over" });
+  assert.equal(over.status, 429);
+  assert.equal(over.body.error, "extract_limit");
+  assert.equal(queued, 10, "DRIVER_DAILY_CAP is 10");
+}
+```
+
+If `makeApp`, `post` or `get` do not already exist in that file, add them once at the top, building the router through `createExtractRouter({ requireAuth, authSecret, ... })` the way the file's existing cases do. The `overrides` argument must be able to replace `resolve`, `db`, `extractJobs`, **and `phone`** — `phone` sets what the stubbed `requireAuth` puts in `req.user.userId`, and the ownership case depends on it:
+
+```js
+function makeApp(overrides) {
+  const o = overrides || {};
+  const phone = o.phone || "0500000000";
+  const requireAuth = () => (req, res, next) => { req.user = { userId: phone }; next(); };
+  const app = express();
+  app.use(express.json());
+  app.use("/api", createExtractRouter({ requireAuth, authSecret: "s", resolve: o.resolve, db: o.db, extractJobs: o.extractJobs }));
+  return app;
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node routes/extract.test.js`
+Expected: FAIL — the driver URL returns 200 (or 5xx) instead of 202.
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `server/routes/extract.js`, extend the status map (line 17-19):
+
+```js
+const STATUS = {
+  invalid_input: 400, facebook_not_connected: 409, social_login_required: 409,
+  page_unreadable: 422, extract_limit: 429, extract_unavailable: 503,
+};
+```
+
+Add near `DAILY_CAP`:
+
+```js
+// A browser scrape is a whole Chrome instance plus metered bandwidth, where a
+// firecrawl scrape is one HTTP call. Same abuse surface, very different cost.
+const DRIVER_DAILY_CAP = 10;
+```
+
+Give the router a second `DailyLimit` instance (`const driverLimit = new DailyLimit(DRIVER_DAILY_CAP);`) alongside the existing one. `phone` below is the same per-request identity the handler already uses for the existing cap (`req.user.userId`, or the demo key when there is no session) — reuse that binding, do not introduce a second one, and inject `extractJobs` / `sourceFor` through `ctx` with live defaults:
+
+```js
+const extractJobs = ctx.extractJobs || require("../extract-jobs");
+const jobDeps = ctx.jobDeps || require("../extract-jobs").liveDeps();
+const { sourceFor } = require("../listing-sources")._test;
+```
+
+Replace the body of the POST handler's resolve step with:
+
+```js
+// Driver-routed hosts never try firecrawl: we already know it cannot read them.
+const kind = input.text ? "text" : sourceFor(input);
+
+async function queueDriverJob(forceSource) {
+  if (!driverLimit.take(phone)) { const e = new Error("extract_limit"); e.code = "extract_limit"; throw e; }
+  const job = await extractJobs.create(
+    { phone, url: input.url, forceSource, profileName: profileFor(input.url, phone) },
+    jobDeps,
+  );
+  return { job_id: job.id, status: job.status };
+}
+
+if (kind === "driver") return res.status(202).json(await queueDriverJob(null));
+
+let source;
+try {
+  source = await resolve(Object.assign({}, input, { userId: phone }), deps);
+} catch (err) {
+  // "or if firecrawl returns an error" — a browser is the next thing to try,
+  // but only for a scrape that failed, and only when the input itself was fine.
+  if (kind === "scrape" && err.code !== "invalid_input") {
+    return res.status(202).json(await queueDriverJob("driver"));
+  }
+  throw err;
+}
+```
+
+Add the profile helper next to `importImage`:
+
+```js
+// One persisted browser profile per agent per platform. The agent logs in once
+// through the embedded browser; the cookies live in the profile, never here.
+function profileFor(url, phone) {
+  let host;
+  try { host = new URL(url).hostname; } catch (e) { return null; }
+  const m = host.match(/(facebook\.com|instagram\.com|tiktok\.com|linkedin\.com|x\.com|twitter\.com)$/i);
+  if (!m) return null;
+  const name = m[1].split(".")[0].toLowerCase();
+  // twitter.com and x.com are one account, and connections-browser.js keys it
+  // as "x" — two spellings here would mean two profiles and a login that never
+  // seems to stick.
+  const platform = name === "twitter" ? "x" : name;
+  return `${platform}-${phone}`;
+}
+```
+
+Add the poll route after the POST:
+
+```js
+// Poll target for a queued browser scrape. A job that belongs to someone else
+// answers exactly like one that does not exist — an agent must not be able to
+// probe for other agents' job ids.
+router.get("/properties/extract/:job_id", requireAuth(authSecret), async (req, res) => {
+  const job = await database.getExtractJob(String(req.params.job_id)).catch(() => null);
+  if (!job || job.phone !== req.user.userId) return res.status(404).json({ error: "not_found" });
+  const out = { status: job.status };
+  if (job.status === "done" && job.result) {
+    out.source = job.result.source;
+    out.fields = job.result.fields;
+    out.missing = job.result.missing;
+    out.description = job.result.description;
+    out.photos = job.result.photos;
+  }
+  if (job.status === "failed") out.error_code = job.error_code;
+  return res.json(out);
+});
+```
+
+Bind `const database = ctx.db || require("../db");` at the top of the factory.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `cd server && node routes/extract.test.js`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add server/routes/extract.js server/routes/extract.test.js
+git commit -m "feat(extract): queue driver jobs, poll for results, fall back from firecrawl"
+```
+
+---
+
+### Task 7: Wire it into the running server
+
+**Files:**
+- Modify: `server/index.js:184-190` (extract router mount), plus a new boot block
+- Modify: `server/Dockerfile`
+- Modify: `server/package.json` (already has `patchright` from Task 1)
+
+**Interfaces:**
+- Consumes: `extract-jobs.startSweeper/liveDeps`, `driver-browser.cleanupOrphans`.
+- Produces: a running sweeper and a clean session list at boot. No new exports.
+
+- [ ] **Step 1: Add the boot block to `index.js`**
+
+After the extract router is mounted (around line 190):
+
+```js
+// ── browser-backed extracts ──
+// A crash between "session created" and the finally leaves a browser running
+// until its duration expires, holding a concurrency slot the whole time. Ours
+// all carry a forly-extract: note, so we can tell them from anyone else's.
+if (process.env.DRIVER_API_KEY) {
+  const extractJobs = require("./extract-jobs");
+  const driverBrowser = require("./driver-browser");
+  driverBrowser.cleanupOrphans("forly-extract:")
+    .then((n) => { if (n) console.log(`driver: stopped ${n} orphaned session(s) at boot`); })
+    .catch((e) => console.warn(`driver: orphan cleanup failed: ${e.message}`));
+  extractJobs.startSweeper(extractJobs.liveDeps());
+  console.log("driver: extract sweeper started");
+} else {
+  console.warn("DRIVER_API_KEY not set — yad2/madlan/social URLs will fail to extract");
+}
+```
+
+- [ ] **Step 2: Stop the Dockerfile from fetching a browser**
+
+Add above the `npm install`/`npm ci` line in `server/Dockerfile`:
+
+```dockerfile
+# patchright drives a REMOTE Chrome over CDP — we never launch one locally, so
+# the bundled browser download is pure image weight.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+```
+
+- [ ] **Step 3: Verify the server still boots both ways**
+
+```bash
+cd server && node -e "require('./index.js')" & sleep 3; curl -sS localhost:8787/api/quota >/dev/null && echo "boots without DRIVER_API_KEY"; kill %1
+DRIVER_API_KEY=dummy node -e "require('./extract-jobs').startSweeper(require('./extract-jobs').liveDeps()); setTimeout(()=>{console.log('sweeper survived a tick');process.exit(0)},6000)"
+```
+
+Expected: the first prints the warning line and serves; the second prints `sweeper survived a tick` without an unhandled rejection.
+
+- [ ] **Step 4: Run the whole suite**
+
+Run: `cd server && npm test`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add server/index.js server/Dockerfile
+git commit -m "feat(driver): start the extract sweeper and clean orphaned sessions at boot"
+```
+
+---
+
+### Task 8: Front-end — the wizard handles a queued extract
+
+**Files:**
+- Modify: `public-agent/extract.js:63-69` (`errorKey`) and the export block
+- Modify: `public-agent/extract.test.js`
+- Modify: `public-agent/create.html:1076-1107` (`runExtract`)
+- Modify: `public-agent/form-i18n.js` (new keys, both language maps)
+
+**Interfaces:**
+- Consumes: `POST /api/properties/extract` (200 or 202), `GET /api/properties/extract/:job_id`.
+- Produces: `FlyExtract.pollJob(jobId, opts) -> Promise<{status, fields?, missing?, description?, photos?, error_code?}>`, where `opts = { fetchFn, sleep, timeoutMs, intervalMs, headers }`. `errorKey` gains the `social_login_required` case.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `public-agent/extract.test.js`:
+
+```js
+// ── pollJob: keeps asking until the job settles ──
+(async () => {
+  const states = [{ status: "queued" }, { status: "running" }, { status: "done", fields: { city: "חיפה" }, missing: [], photos: [] }];
+  let n = 0;
+  const slept = [];
+  const out = await X.pollJob("job-1", {
+    fetchFn: async () => ({ ok: true, json: async () => states[Math.min(n++, states.length - 1)] }),
+    sleep: async (ms) => slept.push(ms),
+  });
+  assert.equal(out.status, "done");
+  assert.deepEqual(out.fields, { city: "חיפה" });
+  assert.equal(slept.length, 2, "polled twice before the answer");
+
+  // a failed job comes back as-is, not as a throw — the caller shows its code
+  const failed = await X.pollJob("job-2", {
+    fetchFn: async () => ({ ok: true, json: async () => ({ status: "failed", error_code: "social_login_required" }) }),
+    sleep: async () => {},
+  });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error_code, "social_login_required");
+
+  // a job that never settles gives up rather than polling forever
+  let calls = 0;
+  await assert.rejects(
+    X.pollJob("job-3", {
+      fetchFn: async () => { calls++; return { ok: true, json: async () => ({ status: "running" }) }; },
+      sleep: async () => {},
+      timeoutMs: 0,
+    }),
+    /timeout/,
+  );
+  assert.ok(calls >= 1);
+
+  // an HTTP error on the poll is a plain failure, not a silent hang
+  await assert.rejects(
+    X.pollJob("job-4", { fetchFn: async () => ({ ok: false, status: 404, json: async () => ({}) }), sleep: async () => {} }),
+    /404/,
+  );
+})();
+
+// ── the new error code maps to its own Hebrew string ──
+assert.equal(X.errorKey(409, "social_login_required"), "ext_err_social_login");
+assert.equal(X.errorKey(409, "facebook_not_connected"), "ext_err_fb_connect");
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd public-agent && node extract.test.js`
+Expected: FAIL — `X.pollJob is not a function`
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `public-agent/extract.js`, add before the `api` object:
+
+```js
+  // A browser scrape is queued, not answered inline: POST gives a job id, this
+  // asks for it until it settles. Fixed interval, hard deadline — a job that
+  // never finishes must surface as an error, not as a spinner forever.
+  function pollJob(jobId, opts) {
+    var o = opts || {};
+    var fetchFn = o.fetchFn || (typeof fetch === "function" ? fetch : null);
+    var sleep = o.sleep || function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+    var interval = o.intervalMs == null ? 2000 : o.intervalMs;
+    var deadline = Date.now() + (o.timeoutMs == null ? 120000 : o.timeoutMs);
+    function step() {
+      return fetchFn("/api/properties/extract/" + encodeURIComponent(jobId), {
+        credentials: "include", headers: o.headers || {},
+      }).then(function (r) {
+        if (!r.ok) throw new Error("poll failed: " + r.status);
+        return r.json();
+      }).then(function (j) {
+        if (j.status === "done" || j.status === "failed") return j;
+        if (Date.now() > deadline) throw new Error("poll timeout");
+        return sleep(interval).then(step);
+      });
+    }
+    return step();
+  }
+```
+
+Extend `errorKey`:
+
+```js
+  function errorKey(status, code) {
+    if (code === "social_login_required") return "ext_err_social_login";
+    if (code === "facebook_not_connected") return "ext_err_fb_connect";
+    if (code === "page_unreadable") return "ext_err_unreadable";
+    if (code === "extract_limit") return "ext_err_limit";
+    return "ext_err_unavailable";
+  }
+```
+
+Add `pollJob: pollJob,` to the `api` object.
+
+- [ ] **Step 4: Add the Hebrew strings**
+
+In `public-agent/form-i18n.js`, add to the `"he"` map (and the matching entry in every other language map the file defines, translated):
+
+```
+"ext_working_browser":"פותחים דפדפן וקוראים את המודעה… זה עשוי לקחת עד דקה",
+"ext_err_social_login":"כדי לקרוא את הפוסט צריך שהחשבון שלכם יהיה מחובר — אפשר לחבר אותו בעמוד ההפצה",
+```
+
+- [ ] **Step 5: Handle 202 in the wizard**
+
+In `public-agent/create.html`, inside `runExtract`, replace the `.then(function (res) {` body's opening so a 202 goes through the poll and everything else stays exactly as it is:
+
+```js
+    }).then(function (res) {
+      if (res.status === 202 && res.body.job_id) {
+        btn.textContent = FT("ext_working_browser");
+        return X.pollJob(res.body.job_id, { headers: uploadHeaders }).then(function (j) {
+          if (j.status === "failed") {
+            showExtractErr(X.errorKey(409, j.error_code));
+            revealManual();
+            return null;
+          }
+          return { status: 200, ok: true, body: j };
+        }).catch(function () {
+          showExtractErr("ext_err_unavailable"); revealManual(); return null;
+        });
+      }
+      return res;
+    }).then(function (res) {
+      if (!res) return;
+      if (!res.ok) {
+        showExtractErr(X.errorKey(res.status, res.body.error));
+        if (res.status === 422 || res.status === 409) $("#extractInput").focus(); else revealManual();
+        return;
+      }
+      if (res.body.source === "scrape" || res.body.source === "facebook" || res.body.source === "driver") extractedFromUrl = true;
+      X.fillFields(res.body.fields, $);
+      syncDealButtons(); updatePriceLabel(); renderPriceChips();
+      if (!$("#pDesc").value.trim()) $("#pDesc").value = String(res.body.description || "").slice(0, 2000);
+      (res.body.photos || []).forEach(function (p) { addImportedPhoto(p.url); });
+      showMissingCard(X.missingFor(res.body.missing, $, isDemo));
+      updateLivePreview();
+    }).catch(function () {
+```
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `cd public-agent && node extract.test.js && node loader.test.js`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add public-agent/extract.js public-agent/extract.test.js public-agent/create.html public-agent/form-i18n.js
+git commit -m "feat(wizard): poll queued browser extracts and show their progress"
+```
+
+---
+
+### Task 9: Live verification against a real listing
+
+Unit tests prove the wiring; only a real run proves the scrape. A run that "worked" but read the wrong element is worse than one that failed loudly.
+
+**Files:**
+- Create: `scripts/driver-extract.local.js`
+
+**Interfaces:**
+- Consumes: `server/listing-sources.resolve`, `server/listing-extract.parseListing`, `server/driver-browser.getSession`.
+- Produces: nothing importable. Exits non-zero when the result was not verified.
+
+- [ ] **Step 1: Write the script**
+
+Create `scripts/driver-extract.local.js`:
+
+```js
+/*
+ * scripts/driver-extract.local.js — one real scrape, end to end.
+ *
+ *   DRIVER_API_KEY=… ANTHROPIC_API_KEY=… node scripts/driver-extract.local.js <url>
+ *
+ * Checks what the unit tests cannot: that the page actually renders, that the
+ * fields are the RIGHT fields, and that the session was really stopped.
+ * Exits non-zero on anything unproven — this is meant for CI too.
+ */
+const { resolve } = require("../server/listing-sources");
+const { parseListing } = require("../server/listing-extract");
+const driver = require("../server/driver-browser");
+
+const url = process.argv[2] || "https://www.yad2.co.il/realestate/forsale";
+
+(async () => {
+  if (!process.env.DRIVER_API_KEY) { console.error("set DRIVER_API_KEY"); process.exit(2); }
+
+  const before = await driver.listSessions("active").catch(() => ({ sessions: [] }));
+  console.log(`active sessions before: ${(before.sessions || []).length}`);
+
+  const source = await resolve({ url }, { jobId: "local-verify" });
+  console.log(`source=${source.source} text=${source.text.length} chars photos=${source.photos.length}`);
+  console.log(source.text.slice(0, 400));
+
+  const parsed = await parseListing(source.text);
+  console.log("fields:", JSON.stringify(parsed.fields, null, 2));
+  console.log("missing:", parsed.missing.join(", ") || "(none)");
+
+  // The checks, in order of what would embarrass us most.
+  if (source.text.length < 200) { console.error("FAIL: page text is too short to be a listing"); process.exit(1); }
+  if (!parsed.fields.price && !parsed.fields.rooms) { console.error("FAIL: neither price nor rooms was read"); process.exit(1); }
+
+  const after = await driver.listSessions("active").catch(() => ({ sessions: [] }));
+  const leaked = (after.sessions || []).filter((s) => String(s.note || "").startsWith("forly-extract:"));
+  if (leaked.length) {
+    console.error(`FAIL: ${leaked.length} session(s) still active: ${leaked.map((s) => s.sessionId).join(", ")}`);
+    process.exit(1);
+  }
+  console.log("OK: fields read and no session left running");
+})().catch((e) => { console.error(`FAIL: ${e.code || ""} ${e.message}`); process.exit(1); });
+```
+
+- [ ] **Step 2: Run it against a real Yad2 listing**
+
+Open yad2.co.il, copy a real listing URL (`https://www.yad2.co.il/item/<id>`), then:
+
+```bash
+cd /home/user/forly-backend
+DRIVER_API_KEY=$DRIVER_API_KEY node scripts/driver-extract.local.js "https://www.yad2.co.il/item/<id>"
+```
+
+Expected: `OK: fields read and no session left running`, and the printed `fields` match what the listing page actually shows (check price, rooms, floor by eye — this is the step that catches reading the wrong element).
+
+- [ ] **Step 3: Repeat for Madlan**
+
+```bash
+DRIVER_API_KEY=$DRIVER_API_KEY node scripts/driver-extract.local.js "https://www.madlan.co.il/listings/<id>"
+```
+
+Expected: same. If the page comes back as a challenge or a near-empty body, escalate by hand once — re-run with `type: "hosted_stealth"` by temporarily passing `browserType` in the script's `resolve` call — and record which rung the site needs in the spike findings file.
+
+- [ ] **Step 4: Confirm the session record in the dashboard**
+
+```bash
+curl -sS "https://api.driver.dev/v1/browser/sessions?status=completed&pageSize=5" \
+  -H "Authorization: Bearer $DRIVER_API_KEY"
+```
+
+Expected: the run's session shows `status: "completed"` with a `stoppedAt` and a non-null `bandwidthBytes`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/driver-extract.local.js docs/superpowers/plans/2026-09-22-driver-spike-findings.md
+git commit -m "test(driver): add live listing-extract verification script"
+```
+
+---
+
+## Phase 2 — the embedded browser
+
+### Task 10: Connection endpoints for the embedded browser
+
+**Files:**
+- Create: `server/routes/connections-browser.js`
+- Create: `server/routes/connections-browser.test.js`
+- Modify: `server/driver-browser.js` (add `attachPage`)
+- Modify: `server/driver-browser.test.js` (cover it)
+- Modify: `server/index.js` (mount the router)
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Consumes: `driver-browser.createSession/getSession/stopSession`, new `driver-browser.attachPage(sessionId, fn, deps)`, `listing-driver._test.isLoginWall`, `db.getConnection/setConnection`.
+- Produces:
+  - `POST /api/connections/browser/start` body `{platform}` → `200 {platform, session_id, view_url, expires_in}`
+  - `GET /api/connections/browser/:platform/status` → `200 {state: "none"|"open"|"connected", connected_at?}`
+  - `POST /api/connections/browser/:platform/finish` → `200 {state:"connected"}` or `409 {error:"not_logged_in"}`
+  - `attachPage(sessionId, fn, deps) -> Promise<T>` — connects to an **already running** session and does **not** stop it.
+  - `PLATFORMS` — `{ facebook: {loginUrl, checkUrl}, instagram: {...}, tiktok, linkedin, x }`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/routes/connections-browser.test.js`:
+
+```js
+/* routes/connections-browser.js — the embedded login browser. No network:
+   driver and db are fakes. */
+const assert = require("assert");
+const express = require("express");
+const http = require("http");
+const createRouter = require("./connections-browser");
+
+const PHONE = "0500000000";
+const requireAuth = () => (req, res, next) => { req.user = { userId: PHONE }; next(); };
+
+function makeApp(overrides) {
+  const app = express();
+  app.use(express.json());
+  app.use("/api/connections/browser", createRouter(Object.assign({ requireAuth, authSecret: "s" }, overrides)));
+  return app;
+}
+function call(app, method, path, body) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => {
+      const req = http.request({ port: server.address().port, path, method, headers: { "content-type": "application/json" } }, (res) => {
+        let d = ""; res.on("data", (c) => (d += c));
+        res.on("end", () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(d || "{}") }); });
+      });
+      if (body) req.write(JSON.stringify(body));
+      req.end();
+    });
+  });
+}
+
+(async () => {
+  // ── start: creates a persisted-profile session and hands back the view URL ──
+  let created = null;
+  const conn = {};
+  const app = makeApp({
+    driver: {
+      createSession: async (opts) => { created = opts; return { sessionId: "s1", status: "active", cdpUrl: "wss://node/abc" }; },
+      getSession: async () => ({ sessionId: "s1", status: "active", cdpUrl: "wss://node/abc" }),
+      stopSession: async () => {},
+      attachPage: async () => { throw new Error("not used here"); },
+    },
+    db: { getConnection: async () => conn, setConnection: async (p, patch) => Object.assign(conn, patch) },
+  });
+  const started = await call(app, "POST", "/api/connections/browser/start", { platform: "facebook" });
+  assert.equal(started.status, 200);
+  assert.equal(started.body.session_id, "s1");
+  assert.equal(started.body.view_url, "https://viewer.driver.dev?ws=wss://node/abc");
+  assert.deepEqual(created.profile, { name: `facebook-${PHONE}`, persist: true });
+  assert.equal(created.url, "https://www.facebook.com/login");
+  assert.ok(created.duration <= 900, "a forgotten login browser must not live an hour");
+  assert.ok(String(created.note).startsWith("forly-connect:"));
+
+  // ── an unknown platform is rejected before any session is created ──
+  let touched = false;
+  const badApp = makeApp({
+    driver: { createSession: async () => { touched = true; return {}; } },
+    db: { getConnection: async () => ({}), setConnection: async () => {} },
+  });
+  const bad = await call(badApp, "POST", "/api/connections/browser/start", { platform: "myspace" });
+  assert.equal(bad.status, 400);
+  assert.equal(touched, false);
+
+  // ── status reflects the stored connection, and never leaks a cdpUrl ──
+  const st = await call(app, "GET", "/api/connections/browser/facebook/status");
+  assert.equal(st.status, 200);
+  assert.equal(st.body.state, "open");
+  assert.ok(!JSON.stringify(st.body).includes("wss://"), "no cdpUrl in a status response");
+
+  // ── finish: logged in → connected, and the session is stopped ──
+  const stopped = [];
+  const conn2 = { browser_sessions: { facebook: { session_id: "s2", started_at: new Date().toISOString() } } };
+  const okApp = makeApp({
+    driver: {
+      getSession: async () => ({ sessionId: "s2", status: "active", cdpUrl: "wss://n/2" }),
+      stopSession: async (id) => stopped.push(id),
+      attachPage: async (id, fn) => fn({
+        goto: async () => {}, url: () => "https://www.facebook.com/me", innerText: async () => "הפיד שלי",
+      }),
+    },
+    db: { getConnection: async () => conn2, setConnection: async (p, patch) => Object.assign(conn2, patch) },
+  });
+  const fin = await call(okApp, "POST", "/api/connections/browser/facebook/finish");
+  assert.equal(fin.status, 200);
+  assert.equal(fin.body.state, "connected");
+  assert.deepEqual(stopped, ["s2"]);
+  assert.ok(conn2.facebook_browser_connected_at);
+
+  // ── finish while still on a login wall → 409, and the session still stops ──
+  const stopped2 = [];
+  const conn3 = { browser_sessions: { facebook: { session_id: "s3" } } };
+  const wallApp = makeApp({
+    driver: {
+      getSession: async () => ({ sessionId: "s3", status: "active", cdpUrl: "wss://n/3" }),
+      stopSession: async (id) => stopped2.push(id),
+      attachPage: async (id, fn) => fn({
+        goto: async () => {}, url: () => "https://www.facebook.com/login/?next=%2Fme", innerText: async () => "התחברות",
+      }),
+    },
+    db: { getConnection: async () => conn3, setConnection: async (p, patch) => Object.assign(conn3, patch) },
+  });
+  const notIn = await call(wallApp, "POST", "/api/connections/browser/facebook/finish");
+  assert.equal(notIn.status, 409);
+  assert.equal(notIn.body.error, "not_logged_in");
+  assert.deepEqual(stopped2, ["s3"], "a failed check must not leak the session either");
+  assert.ok(!conn3.facebook_browser_connected_at);
+
+  console.log("routes/connections-browser.test.js ok");
+})();
+```
+
+Append to `server/driver-browser.test.js`, before the final `console.log`:
+
+```js
+  // ── attachPage joins a RUNNING session and must not stop it ──
+  const stops = [];
+  const attachDeps = {
+    apiKey: "k", sleep: async () => {},
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { stops.push(url); return ok({ success: true }); }
+      return ok({ sessionId: "s9", status: "active", cdpUrl: "ws://z" });
+    },
+    connectOverCDP: async () => ({ contexts: () => [{ pages: () => [{ marker: "live" }] }], close: async () => {} }),
+  };
+  assert.equal(await D.attachPage("s9", async (p) => p.marker, attachDeps), "live");
+  assert.equal(stops.length, 0, "attachPage must leave the session running");
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd server && node routes/connections-browser.test.js`
+Expected: FAIL with `Cannot find module './connections-browser'`
+
+- [ ] **Step 3: Add `attachPage` to `driver-browser.js`**
+
+```js
+/*
+ * Join a session that is ALREADY running and leave it running. This is the
+ * embedded-login case: the agent is typing into that browser right now, so the
+ * finally that withPage guarantees would be exactly wrong here.
+ */
+async function attachPage(sessionId, fn, deps = {}) {
+  const session = await waitForActive(await getSession(sessionId, deps), deps);
+  const connect = deps.connectOverCDP || require("patchright").chromium.connectOverCDP;
+  const browser = await connect(session.cdpUrl);
+  try {
+    const context = browser.contexts()[0] || (await browser.newContext());
+    const page = context.pages()[0] || (await context.newPage());
+    return await fn(page, session);
+  } finally {
+    await browser.close(); // our connection only — the agent's session stays up
+  }
+}
+```
+
+Add `attachPage` to `module.exports`.
+
+- [ ] **Step 4: Write the router**
+
+Create `server/routes/connections-browser.js`:
+
+```js
+/*
+ * routes/connections-browser.js — "connect my account", with a real browser.
+ *
+ * Yad2 and Madlan are readable logged-out; a Facebook group post is not. Rather
+ * than ask an agent for their password (which we would then have to hold), we
+ * start a browser with a PERSISTED PROFILE and show it to them inside Forly.
+ * They log in themselves, 2FA and all. The cookies live in the Driver profile;
+ * Forly stores a session id and a timestamp, and never a credential.
+ *
+ * The cdpUrl is the one secret here: anyone holding it drives that browser. It
+ * is returned once, to the authenticated owner, and never stored or logged.
+ */
+const express = require("express");
+const driverLive = require("../driver-browser");
+const dbLive = require("../db");
+const { isLoginWall } = require("../listing-driver")._test;
+
+const SESSION_SECONDS = 900;
+
+const PLATFORMS = {
+  facebook: { loginUrl: "https://www.facebook.com/login", checkUrl: "https://www.facebook.com/me" },
+  instagram: { loginUrl: "https://www.instagram.com/accounts/login/", checkUrl: "https://www.instagram.com/accounts/edit/" },
+  tiktok: { loginUrl: "https://www.tiktok.com/login", checkUrl: "https://www.tiktok.com/setting" },
+  linkedin: { loginUrl: "https://www.linkedin.com/login", checkUrl: "https://www.linkedin.com/feed/" },
+  x: { loginUrl: "https://x.com/login", checkUrl: "https://x.com/home" },
+};
+
+module.exports = function createConnectionsBrowserRouter(ctx) {
+  const { requireAuth, authSecret } = ctx;
+  const driver = ctx.driver || driverLive;
+  const db = ctx.db || dbLive;
+  const router = express.Router();
+
+  const viewUrl = (cdpUrl) => `https://viewer.driver.dev?ws=${cdpUrl}`;
+
+  router.post("/start", requireAuth(authSecret), async (req, res) => {
+    const platform = String((req.body && req.body.platform) || "");
+    const spec = PLATFORMS[platform];
+    if (!spec) return res.status(400).json({ error: "invalid_input" });
+    const phone = req.user.userId;
+
+    let session;
+    try {
+      session = await driver.createSession({
+        country: "IL",
+        duration: SESSION_SECONDS,
+        url: spec.loginUrl,
+        profile: { name: `${platform}-${phone}`, persist: true },
+        note: `forly-connect:${platform}:${phone}`,
+      });
+    } catch (e) {
+      const status = e.status === 402 || e.status === 403 ? 503 : 503;
+      return res.status(status).json({ error: "extract_unavailable" });
+    }
+
+    const conn = (await db.getConnection(phone)) || {};
+    const sessions = Object.assign({}, conn.browser_sessions);
+    sessions[platform] = { session_id: session.sessionId, started_at: new Date().toISOString() };
+    await db.setConnection(phone, { browser_sessions: sessions });
+
+    // view_url carries the cdpUrl: response only, never a log line, never Firestore.
+    return res.json({
+      platform,
+      session_id: session.sessionId,
+      view_url: viewUrl(session.cdpUrl),
+      expires_in: SESSION_SECONDS,
+    });
+  });
+
+  router.get("/:platform/status", requireAuth(authSecret), async (req, res) => {
+    const platform = String(req.params.platform);
+    if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
+    const conn = (await db.getConnection(req.user.userId)) || {};
+    const connectedAt = conn[`${platform}_browser_connected_at`] || null;
+    if (connectedAt) return res.json({ state: "connected", connected_at: connectedAt });
+    const open = conn.browser_sessions && conn.browser_sessions[platform];
+    return res.json({ state: open ? "open" : "none" });
+  });
+
+  router.post("/:platform/finish", requireAuth(authSecret), async (req, res) => {
+    const platform = String(req.params.platform);
+    const spec = PLATFORMS[platform];
+    if (!spec) return res.status(400).json({ error: "invalid_input" });
+    const phone = req.user.userId;
+    const conn = (await db.getConnection(phone)) || {};
+    const open = conn.browser_sessions && conn.browser_sessions[platform];
+    if (!open || !open.session_id) return res.status(409).json({ error: "no_open_session" });
+
+    let loggedIn = false;
+    try {
+      loggedIn = await driver.attachPage(open.session_id, async (page) => {
+        await page.goto(spec.checkUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        return !isLoginWall(page.url(), await page.innerText("body"));
+      });
+    } catch (e) {
+      loggedIn = false;
+    } finally {
+      // Whether the check passed or not, the browser stops here: the profile
+      // already holds whatever cookies the login produced.
+      await driver.stopSession(open.session_id);
+      const sessions = Object.assign({}, conn.browser_sessions);
+      delete sessions[platform];
+      await db.setConnection(phone, { browser_sessions: sessions });
+    }
+
+    if (!loggedIn) return res.status(409).json({ error: "not_logged_in" });
+    await db.setConnection(phone, { [`${platform}_browser_connected_at`]: new Date().toISOString() });
+    return res.json({ state: "connected" });
+  });
+
+  return router;
+};
+
+module.exports.PLATFORMS = PLATFORMS;
+```
+
+- [ ] **Step 5: Mount it**
+
+In `server/index.js`, next to the other router mounts:
+
+```js
+const createConnectionsBrowserRouter = require("./routes/connections-browser");
+app.use("/api/connections/browser", createConnectionsBrowserRouter({ requireAuth, authSecret: AUTH_SECRET }));
+```
+
+- [ ] **Step 6: Run tests to verify they pass**
+
+Run: `cd server && node routes/connections-browser.test.js && node driver-browser.test.js`
+Expected: both PASS.
+
+- [ ] **Step 7: Add to the test chain and commit**
+
+Append ` && node routes/connections-browser.test.js` to `scripts.test`.
+
+```bash
+cd server && npm test
+git add server/routes/connections-browser.js server/routes/connections-browser.test.js server/driver-browser.js server/driver-browser.test.js server/index.js server/package.json
+git commit -m "feat(connections): start a persisted-profile browser for account login"
+```
+
+---
+
+### Task 11: The embedded browser in the dashboard
+
+Task 1 decided which branch to build. Read `docs/superpowers/plans/2026-09-22-driver-spike-findings.md` and implement **Branch A if `VIEWER_EMBEDDABLE=yes`, Branch B if `no`**. Everything outside the viewer element itself — the card, the warning, the "I'm done" button, the status polling — is identical in both.
+
+**Files:**
+- Modify: `public-agent/distribution.html:80-84` (a new card after `connectCard`)
+- Modify: `public-agent/distribution.js`
+- Modify: `public-agent/app.css`
+- Modify: `public-agent/form-i18n.js`
+
+**Interfaces:**
+- Consumes: `POST /api/connections/browser/start`, `GET /api/connections/browser/:platform/status`, `POST /api/connections/browser/:platform/finish`.
+- Produces: no exports. A `#browserConnectCard` section and a `#browserModal` dialog.
+
+- [ ] **Step 1: Add the Hebrew strings**
+
+In `public-agent/form-i18n.js`, add to the `"he"` map (and translate into every other map the file defines):
+
+```
+"conn_browser_title":"חיבור חשבונות לקריאת מודעות",
+"conn_browser_hint":"כדי לקרוא פוסטים מקבוצות פייסבוק ומרשתות חברתיות, צריך שהחשבון שלכם יהיה מחובר. נפתח כאן דפדפן מאובטח — מתחברים בו בעצמכם, בדיוק כמו בדפדפן רגיל.",
+"conn_browser_privacy":"הסיסמה נשארת אצלכם: היא לא עוברת דרך פורלי ולא נשמרת אצלנו.",
+"conn_browser_warning":"לתשומת לבכם: חיבור אוטומטי לחשבון אישי נוגד את תנאי השימוש של הפלטפורמות ועלול להוביל לחסימת החשבון. החיבור נעשה על אחריותכם בלבד.",
+"conn_browser_open":"פתיחת דפדפן מאובטח",
+"conn_browser_opening":"פותחים דפדפן…",
+"conn_browser_done":"סיימתי להתחבר",
+"conn_browser_checking":"בודקים…",
+"conn_browser_connected":"החשבון מחובר ✓",
+"conn_browser_not_logged_in":"נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ונסו שוב",
+"conn_browser_failed":"לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע",
+"conn_browser_popup_blocked":"הדפדפן חסם את החלון — אשרו חלונות קופצים לאתר ונסו שוב",
+"conn_browser_expired":"החלון נסגר. פתחו דפדפן מחדש כדי להתחבר",
+```
+
+- [ ] **Step 2: Add the card markup**
+
+In `public-agent/distribution.html`, immediately after the existing `connectCard` div (line 84):
+
+```html
+  <div class="card dist-card" id="browserConnectCard" hidden>
+    <h2 data-i18n="conn_browser_title">חיבור חשבונות לקריאת מודעות</h2>
+    <p class="muted" data-i18n="conn_browser_hint"></p>
+    <p class="muted" data-i18n="conn_browser_privacy"></p>
+    <p class="warn" data-i18n="conn_browser_warning"></p>
+    <div class="conn-row">
+      <select id="browserPlatform" aria-label="פלטפורמה">
+        <option value="facebook">פייסבוק</option>
+        <option value="instagram">אינסטגרם</option>
+        <option value="tiktok">טיקטוק</option>
+        <option value="linkedin">לינקדאין</option>
+        <option value="x">X</option>
+      </select>
+      <button class="btn btn-gold" id="browserConnectBtn" data-i18n="conn_browser_open"></button>
+      <span class="conn-chip" id="browserConnChip"></span>
+    </div>
+  </div>
+
+  <div class="browser-modal" id="browserModal" hidden role="dialog" aria-modal="true" aria-labelledby="browserModalTitle">
+    <div class="browser-modal-inner">
+      <header>
+        <strong id="browserModalTitle" data-i18n="conn_browser_title"></strong>
+        <button class="btn btn-ghost" id="browserModalClose" aria-label="סגירה">✕</button>
+      </header>
+      <div class="browser-modal-body" id="browserModalBody"></div>
+      <footer>
+        <span class="muted" id="browserModalMsg"></span>
+        <button class="btn btn-gold" id="browserDoneBtn" data-i18n="conn_browser_done"></button>
+      </footer>
+    </div>
+  </div>
+```
+
+- [ ] **Step 3: Add the styles**
+
+Append to `public-agent/app.css`:
+
+```css
+/* Embedded connect browser — a full-bleed dialog, because a real page inside a
+   small box is unusable on a phone. */
+.browser-modal { position: fixed; inset: 0; background: rgba(0,0,0,.72); display: flex; align-items: center; justify-content: center; z-index: 90; }
+.browser-modal[hidden] { display: none; }
+.browser-modal-inner { background: var(--card, #14161c); border-radius: 14px; width: min(1100px, 96vw); height: min(760px, 92vh); display: flex; flex-direction: column; overflow: hidden; }
+.browser-modal-inner > header,
+.browser-modal-inner > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; }
+.browser-modal-body { flex: 1; min-height: 0; background: #fff; }
+.browser-modal-body iframe { width: 100%; height: 100%; border: 0; display: block; }
+.browser-modal-body .popup-note { padding: 32px; text-align: center; color: var(--muted, #9aa0a6); line-height: 1.7; }
+.conn-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.warn { color: #e0b341; }
+@media (max-width: 640px) { .browser-modal-inner { width: 100vw; height: 100vh; border-radius: 0; } }
+```
+
+- [ ] **Step 4 (Branch A — `VIEWER_EMBEDDABLE=yes`): iframe the viewer**
+
+Append to `public-agent/distribution.js`:
+
+```js
+// ── embedded connect browser ──
+// The viewer is a live view of a real Chrome running in Driver's cloud: the
+// agent types their own password into it, and it never touches our server.
+(function () {
+  var modal = $("browserModal"), body = $("browserModalBody"), msg = $("browserModalMsg");
+  var current = null;
+
+  function say(key) { msg.textContent = key ? FT(key) : ""; }
+
+  function openModal(viewUrl) {
+    body.innerHTML = "";
+    var frame = document.createElement("iframe");
+    // No allow-same-origin: the viewer is a foreign origin and has no business
+    // reaching this page's storage.
+    frame.setAttribute("sandbox", "allow-scripts allow-forms allow-popups");
+    frame.setAttribute("referrerpolicy", "no-referrer");
+    frame.src = viewUrl;
+    body.appendChild(frame);
+    modal.hidden = false;
+  }
+
+  function closeModal() { modal.hidden = true; body.innerHTML = ""; current = null; say(""); }
+
+  $("browserConnectBtn").addEventListener("click", function () {
+    var platform = $("browserPlatform").value;
+    var btn = this;
+    btn.disabled = true; btn.textContent = FT("conn_browser_opening");
+    fetch("/api/connections/browser/start", {
+      method: "POST", credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ platform: platform }),
+    }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (j) { current = platform; openModal(j.view_url); })
+      .catch(function () { FLY.toast(FT("conn_browser_failed")); })
+      .then(function () { btn.disabled = false; btn.textContent = FT("conn_browser_open"); });
+  });
+
+  $("browserDoneBtn").addEventListener("click", function () {
+    if (!current) return closeModal();
+    var btn = this;
+    btn.disabled = true; say("conn_browser_checking");
+    fetch("/api/connections/browser/" + current + "/finish", { method: "POST", credentials: "include" })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (res.ok) { FLY.toast(FT("conn_browser_connected")); closeModal(); refreshBrowserChip(); return; }
+        say(res.body.error === "no_open_session" ? "conn_browser_expired" : "conn_browser_not_logged_in");
+      })
+      .catch(function () { say("conn_browser_failed"); })
+      .then(function () { btn.disabled = false; });
+  });
+
+  $("browserModalClose").addEventListener("click", closeModal);
+
+  function refreshBrowserChip() {
+    var platform = $("browserPlatform").value;
+    fetch("/api/connections/browser/" + platform + "/status", { credentials: "include" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { $("browserConnChip").textContent = j.state === "connected" ? FT("conn_browser_connected") : ""; })
+      .catch(function () {});
+  }
+  $("browserPlatform").addEventListener("change", refreshBrowserChip);
+  $("browserConnectCard").hidden = false;
+  refreshBrowserChip();
+})();
+```
+
+- [ ] **Step 4 (Branch B — `VIEWER_EMBEDDABLE=no`): a popup window instead**
+
+Use the exact block above with **only `openModal` replaced**, and nothing else changed:
+
+```js
+  function openModal(viewUrl) {
+    // The viewer refuses to be framed (X-Frame-Options / frame-ancestors), so
+    // it opens in its own window. Stripping that header server-side would mean
+    // proxying their websocket and defeating a deliberate control — not worth
+    // it, and it would break on their next deploy.
+    var win = window.open(viewUrl, "forly-connect", "width=1200,height=820,noopener");
+    body.innerHTML = '<p class="popup-note">' + FT("conn_browser_hint") + "</p>";
+    modal.hidden = false;
+    if (!win) { body.innerHTML = '<p class="popup-note">' + FT("conn_browser_popup_blocked") + "</p>"; }
+  }
+```
+
+and in `closeModal`, nothing changes — the popup is the agent's to close.
+
+- [ ] **Step 5: Verify by hand in the dashboard**
+
+```bash
+cd server && DRIVER_API_KEY=$DRIVER_API_KEY npm run local
+```
+
+Open `http://127.0.0.1:8787/agent/distribution.html`, log in as a test agent, pick Facebook, press "פתיחת דפדפן מאובטח".
+
+Expected: a real Chrome appears (framed or in its own window), showing Facebook's login page. Type a **test account's** credentials — never a real agent's. Press "סיימתי להתחבר". Expected: the chip turns to "החשבון מחובר ✓".
+
+Then press it again with a session where you did **not** log in. Expected: "נראה שעדיין לא התחברתם".
+
+- [ ] **Step 6: Confirm nothing leaked**
+
+```bash
+grep -rn "cdpUrl\|viewer.driver.dev" server/ --include=*.js | grep -v test | grep -vi "never\|only\|carries"
+```
+
+Expected: the only hits are `driver-browser.js` (using it to connect) and `routes/connections-browser.js` (building `view_url` for the response). No `console.log` of either.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add public-agent/distribution.html public-agent/distribution.js public-agent/app.css public-agent/form-i18n.js
+git commit -m "feat(connections): embed the login browser in the dashboard"
+```
+
+---
+
+### Task 12: Prove the connected profile actually reads a group post
+
+The whole of phase 2 rests on one unverified assumption: that Driver's persisted profile keeps Facebook's auth cookies across sessions. The docs say persistent cookies carry over and session-only cookies do not, exactly as in desktop Chrome — whether Facebook's land on the right side of that line is **not** established. This task settles it before anyone depends on it.
+
+**Files:**
+- Create: `scripts/driver-connect-check.local.js`
+- Modify: `docs/superpowers/plans/2026-09-22-driver-spike-findings.md`
+
+**Interfaces:**
+- Consumes: `server/listing-sources.resolve` with a `profileName`.
+- Produces: a recorded answer, `PROFILE_COOKIES_PERSIST=<yes|no|partial>`.
+
+- [ ] **Step 1: Write the check script**
+
+Create `scripts/driver-connect-check.local.js`:
+
+```js
+/*
+ * scripts/driver-connect-check.local.js — does a connected profile still work?
+ *
+ *   DRIVER_API_KEY=… node scripts/driver-connect-check.local.js <profile-name> <group-post-url>
+ *
+ * Run it right after connecting, then again the next day. If the second run
+ * reports social_login_required, the profile is not keeping the login and the
+ * connect flow has to become a recurring prompt rather than a one-time setup.
+ */
+const { fromDriver } = require("../server/listing-driver");
+
+const [profileName, url] = process.argv.slice(2);
+
+(async () => {
+  if (!profileName || !url) { console.error("usage: <profile-name> <group-post-url>"); process.exit(2); }
+  try {
+    const out = await fromDriver({ url, profileName });
+    console.log(`OK: read ${out.text.length} chars and ${out.photos.length} photo(s) as ${profileName}`);
+    console.log(out.text.slice(0, 300));
+    process.exit(0);
+  } catch (e) {
+    if (e.code === "social_login_required") { console.error("NOT LOGGED IN: the profile did not keep the session"); process.exit(1); }
+    console.error(`FAIL: ${e.code || ""} ${e.message}`);
+    process.exit(1);
+  }
+})();
+```
+
+- [ ] **Step 2: Run it immediately after connecting**
+
+Use the test account connected in Task 11, and a post URL from a group that account belongs to.
+
+```bash
+cd /home/user/forly-backend
+DRIVER_API_KEY=$DRIVER_API_KEY node scripts/driver-connect-check.local.js "facebook-<test-phone>" "https://www.facebook.com/groups/<gid>/posts/<pid>"
+```
+
+Expected: `OK: read N chars…`, and the text is the post's actual body. If it says NOT LOGGED IN right after connecting, the profile name in Task 6's `profileFor()` does not match the one Task 10's `/start` created — compare them before looking anywhere else.
+
+- [ ] **Step 3: Run it again after at least 24 hours**
+
+Same command. Record the answer.
+
+- [ ] **Step 4: Write the answer into the findings file**
+
+Append to `docs/superpowers/plans/2026-09-22-driver-spike-findings.md`:
+
+```
+PROFILE_COOKIES_PERSIST=<yes|no|partial>
+
+- checked immediately after connect: <ok|not logged in>
+- checked after 24h: <ok|not logged in>
+- if not yes: the dashboard must show the connection as expired and re-prompt.
+  Add a `browser_connection_checked_at` field and a status check before the
+  first group scrape of each day.
+```
+
+- [ ] **Step 5: Run the whole suite once more and commit**
+
+```bash
+cd server && npm test
+cd .. && git add scripts/driver-connect-check.local.js docs/superpowers/plans/2026-09-22-driver-spike-findings.md
+git commit -m "test(driver): verify a connected profile can read a group post"
+git push -u origin claude/zen-davinci-lu4hoq
+```
+
+---
+
+## Done means
+
+- `cd server && npm test` passes, with all six new test files in the chain.
+- A real Yad2 URL and a real Madlan URL both fill the wizard through the queued path, verified by eye against the live page (Task 9).
+- No Driver session is left `active` after a run (`GET /v1/browser/sessions?status=active` shows none with a `forly-extract:` note).
+- A non-allowlisted URL still goes to Firecrawl, and only falls back to a browser when Firecrawl errors (Task 6 tests).
+- The embedded browser opens in the dashboard, and `finish` refuses to mark an account connected when nobody logged in (Task 11).
+- `PROFILE_COOKIES_PERSIST` has a recorded answer (Task 12).
+
+## Deferred, on purpose
+
+- **Publish-out** (posting a finished Forly page to Facebook / Yad2 / Madlan through a connected profile) — a separate spec, as agreed.
+- **Account-wide bulk sweep** (walking an agent's whole Yad2 office page or Madlan profile) — needs pagination, dedup and a different job shape.
+- **Browser pools.** They would cut the ~20s session start, but they hold warm browsers against an account-wide cap, and the docs say not to create one unasked. Revisit only if start latency becomes the complaint.
+- **`captchaSolver`.** Off by default; it costs credits. Turn it on per-host, with evidence, after the `hosted_privacy` rung has been seen to fail.
