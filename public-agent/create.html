@@ -1002,6 +1002,7 @@
   var X = window.FlyExtract;
   var importedPhotos = []; // {url, el, skip}
   var canSkipPhotos = false;   // scrape found more photos than a page needs
+  var fromWhatsappDraft = false; // prefilled from the WhatsApp chat draft (see the prefill block at the end)
   var extractedFromUrl = false;   // link/Facebook scrape, not pasted text or manual entry
   function revealManual() { $("#manualFields").classList.remove("hidden"); }
   function showExtractErr(key) {
@@ -1389,13 +1390,9 @@
     }
 
     var videoFile = $("#videoInput").files[0] || null;
-    // Video + photos both supplied: ask whether to still auto-generate a tour
-    // from the photos. Accept → generate the tour AND show their video first in
-    // the gallery; decline → just use their video (no generation).
-    var tourFromPhotos = false;
-    if (videoFile && photos.length >= 4) {
-      tourFromPhotos = window.confirm(FT("confirm_video_and_photos"));
-    }
+    // Video + photos both supplied: the page has one tour video. OK → theirs;
+    // Cancel → generate one from the photos (their video isn't uploaded at all).
+    if (videoFile && photos.length >= 4 && !window.confirm(FT("confirm_video_and_photos"))) videoFile = null;
 
     var btn = this;
     btn.disabled = true;
@@ -1444,10 +1441,7 @@
           shabbat_elevator: $("#pShabbatElevator").checked,
           description: $("#pDesc").value.trim(),
           photos_urls: photoUrls,
-          // Decline → their video replaces generation; accept → generate a tour
-          // and pass their video to sit first in the gallery.
-          own_video_url: tourFromPhotos ? null : videoUrl,
-          gallery_video_url: tourFromPhotos ? videoUrl : null,
+          own_video_url: videoUrl, // their video replaces the generated tour
           theme: theme,
           language: $("#pLang").value,
         };
@@ -1462,6 +1456,9 @@
           };
           if (agent2) body.agent2 = agent2;
         }
+        // Tells the server this page comes from the chat draft, so it can
+        // clear the draft once the listing exists (routes/intake.js).
+        if (fromWhatsappDraft) body.whatsapp_draft = true;
         btn.textContent = FT("status_creating");
         $("#vLoaderMsg").textContent = FT("status_creating");
         var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
@@ -1617,6 +1614,45 @@
         })
         .catch(function () { /* transient — keep polling until MAX_WAIT_MS */ });
     }, 6000);
+  }
+
+  // ── WhatsApp draft prefill ──
+  // The property-chat bot's "confirm" reply links here as
+  // /create.html?whatsapp=1, already signing the browser in via
+  // /api/whatsapp/review. Load the draft's fields and already-hosted
+  // photos into the normal wizard state — same shape runExtract()'s
+  // success branch already builds — and let the agent take it from here.
+  if (/[?&]whatsapp=1(&|$)/.test(location.search)) {
+    fetch("/api/whatsapp/draft", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        fromWhatsappDraft = true;
+        X.fillFields(data.fields, $);
+        // The chat's design answer preselects the template card; the agent can still change it.
+        if (data.fields.template && document.querySelector('.tpl-card[data-tpl="' + data.fields.template + '"]')) {
+          selectTemplate(data.fields.template);
+        }
+        syncDealButtons(); updatePriceLabel(); renderPriceChips();
+        if (data.fields.description && !$("#pDesc").value.trim()) {
+          $("#pDesc").value = String(data.fields.description).slice(0, 2000);
+        }
+        (data.photos || []).forEach(function (url) {
+          if (photos.length >= 12) return;
+          var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
+          var entry = { file: null, el: t, publicUrl: url, previewUrl: url, removed: false, failed: false, uploadPromise: Promise.resolve(url) };
+          t.querySelector(".x").addEventListener("click", function () {
+            entry.removed = true;
+            photos = photos.filter(function (q) { return q.el !== t; });
+            t.remove(); FLY.deleteUpload(url, uploadHeaders); updateLivePreview();
+          });
+          $("#thumbs").appendChild(t); photos.push(entry);
+        });
+        revealManual();
+        setWizardStage(1, false);
+        updateLivePreview();
+      })
+      .catch(function () { /* no draft, or the link expired — a plain empty form is a fine fallback */ });
   }
 })();
 </script>

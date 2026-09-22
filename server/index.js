@@ -104,7 +104,7 @@ db.init();
 const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
-const { sendWhatsApp } = require("./utils");
+const { sendWhatsApp, sendWhatsAppButtons } = require("./utils");
 // A number that tries to log in but has no businesses/{phone} doc isn't a
 // Forly client yet — self-service signup off the login screen is gone (see
 // the issue this shipped with), so the OTP route forwards them here as a
@@ -147,6 +147,11 @@ app.use(express.static(path.join(__dirname, "..", "public-agent"), revalidate));
 app.use(express.static(path.join(__dirname, "..", "public-nadlan"), revalidate));
 app.use("/files", express.static(UPLOAD_DIR, { maxAge: "1d", immutable: true }));
 app.use("/tpl", express.static(TEMPLATES_DIR));
+// Public help: one page for /instructions and /instructions/<feature>; the page picks the feature from the URL.
+app.get(/^\/instructions(?:\/[a-z-]+)?\/?$/, (req, res) => {
+  res.setHeader("Cache-Control", "no-cache");
+  res.sendFile(path.join(__dirname, "..", "public-agent", "instructions", "index.html"));
+});
 
 // ── auth routes ──
 // Throttle the OTP send/verify endpoints per IP (abuse / enumeration / SMS-cost
@@ -183,6 +188,24 @@ app.use("/api", createIntakeRouter({
   authSecret: AUTH_SECRET,
   sessionTtl: SESSION_TTL_S,
   pageBaseUrl: PAGE_BASE_URL,
+}));
+
+// ── WhatsApp: agent sends a listing link, Forly builds the page ──
+const createWhatsappRouter = require("./routes/whatsapp");
+app.use("/api/whatsapp", createWhatsappRouter({
+  n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone, signSession, authSecret: AUTH_SECRET, quota,
+  // null when Green API is unset so the response's `replied` is honest and n8n forwards `reply`.
+  sendWhatsApp: GREENAPI_INSTANCE && GREENAPI_TOKEN
+    ? (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+  sendButtons: GREENAPI_INSTANCE && GREENAPI_TOKEN
+    ? (phone, opts) => sendWhatsAppButtons(phone, opts, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+  uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
+  baseUrl: BASE_URL,
+  pipelineDeps: {
+    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+    n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
+    isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL,
+  },
 }));
 
 // ── paste text / link → pre-filled create form ──

@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map() };
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -54,6 +54,16 @@ async function listListingsByPhone(phone) {
     return snap.docs.map((d) => d.data());
   }
   return [...mem.listings.values()].filter((l) => l.business_phone === phone);
+}
+
+// Listings from `source` still waiting for their page (equality filters only: no composite index needed).
+async function listPendingListings(source) {
+  if (db) {
+    const snap = await db.collection("listings").where("source", "==", source)
+      .where("status", "==", "active").where("page_id", "==", null).limit(200).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listings.values()].filter((l) => l.source === source && l.status === "active" && !l.page_id);
 }
 
 // ── admin: full-collection reads (no phone filter) ──
@@ -512,12 +522,30 @@ async function findPageBySlug(phone, publicSlug) {
   ) || null;
 }
 
+// ── property drafts (WhatsApp chat intake, see whatsapp-intake.js) ──
+// One doc per agent phone; saveDraft replaces the whole doc on purpose so a
+// cleared field (skipped, pending_opener: null) never lingers from a merge.
+async function getDraft(phone) {
+  if (db) { const d = await db.collection("property_drafts").doc(phone).get(); return d.exists ? d.data() : null; }
+  return mem.drafts.get(phone) || null;
+}
+
+async function saveDraft(draft) {
+  if (db) await db.collection("property_drafts").doc(draft.phone).set(draft);
+  else mem.drafts.set(draft.phone, draft);
+}
+
+async function deleteDraft(phone) {
+  if (db) await db.collection("property_drafts").doc(phone).delete();
+  else mem.drafts.delete(phone);
+}
+
 module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
   shortCode,
-  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
+  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listPendingListings, listAllListings,
   savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone, findPageBySlug,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
@@ -529,4 +557,5 @@ module.exports = {
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
   listShareSessionsByPhone, healGroups, addAdminMessage,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
+  getDraft, saveDraft, deleteDraft,
 };

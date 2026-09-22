@@ -65,6 +65,13 @@ function unavailable(msg) { const e = new Error(msg); e.code = "extract_unavaila
 function coerce(raw) {
   const fields = {};
   for (const [k, fn] of Object.entries(SCHEMA)) fields[k] = raw && k in raw ? fn(raw[k]) : null;
+  // create.html rejects a breakdown that doesn't add up to the total, so never hand it one.
+  const parts = ["sqm_built", "sqm_balcony", "sqm_garden"];
+  if (parts.some((k) => fields[k] !== null)) {
+    const sum = parts.reduce((t, k) => t + (fields[k] || 0), 0);
+    if (fields.size_sqm === null) fields.size_sqm = sum;
+    else if (sum !== fields.size_sqm) for (const k of parts) fields[k] = null;
+  }
   return fields;
 }
 

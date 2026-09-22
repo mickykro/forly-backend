@@ -562,7 +562,8 @@
   if (!pageId && !portfolioSlug) { setState("notfound"); return; }
   var apiUrl = pageId
     ? "/api/property-page?id=" + encodeURIComponent(pageId) + (editToken ? "&edit_token=" + encodeURIComponent(editToken) : "")
-    : "/api/property-by-slug?portfolio_slug=" + encodeURIComponent(portfolioSlug) + "&property_slug=" + encodeURIComponent(propertySlug);
+    : "/api/property-by-slug?portfolio_slug=" + encodeURIComponent(portfolioSlug) + "&property_slug=" + encodeURIComponent(propertySlug) +
+      (editToken ? "&edit_token=" + encodeURIComponent(editToken) : "");
   fetch(apiUrl)
     .then(function (r) {
       if (r.status === 404) { setState("notfound"); return null; }

@@ -34,14 +34,16 @@ const { decideLoginLead, leadMessage } = require("./login-leads");
 const hashCode = (secret, phone, code) =>
   crypto.createHmac("sha256", secret).update(`${phone}:${code}`).digest("base64url");
 
-function signSession(secret, phone) {
-  const payload = { userId: phone, scope: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL_S };
+// scope "session" is a full login; "review" is the WhatsApp review link, which
+// only the routes that opt in (requireAuth(secret, REVIEW_SCOPES)) accept.
+function signSession(secret, phone, { scope = "session", ttlS = SESSION_TTL_S } = {}) {
+  const payload = { userId: phone, scope, exp: Math.floor(Date.now() / 1000) + ttlS };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const sig = crypto.createHmac("sha256", secret).update(body).digest("base64url");
   return `${body}.${sig}`;
 }
 
-function verifySession(secret, token) {
+function verifySession(secret, token, scopes = ["session"]) {
   if (typeof token !== "string" || !token.includes(".")) return null;
   const [body, sig] = token.split(".");
   const expected = crypto.createHmac("sha256", secret).update(body).digest("base64url");
@@ -52,6 +54,7 @@ function verifySession(secret, token) {
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
     if (!payload.exp || payload.exp * 1000 < Date.now()) return null;
+    if (!scopes.includes(payload.scope || "session")) return null;
     return payload;
   } catch {
     return null;
@@ -316,8 +319,9 @@ module.exports.verifyActionToken = (parts, token, secret) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
-module.exports.requireAuth = (secret) => (req, res, next) => {
-  const session = verifySession(secret, readToken(req));
+module.exports.REVIEW_SCOPES = ["session", "review"];
+module.exports.requireAuth = (secret, scopes) => (req, res, next) => {
+  const session = verifySession(secret, readToken(req), scopes);
   if (!session) return res.status(401).json({ error: "unauthenticated" });
   req.user = session;
   next();
