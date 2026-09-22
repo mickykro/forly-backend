@@ -101,15 +101,67 @@
   // ── document title / meta ──
   var title = get("property.title"), brand = get("agent.brand_name") || get("agent.name");
   if (title) document.title = title + (brand ? " · " + brand : "");
+  // ponytail: every template ships <meta name="description" content=""> for the
+  // runtime to fill; nothing filled it, so every published page went out with an
+  // empty description. Built from the listing rather than the marketing copy so
+  // it says what the property is.
+  (function metaDescription() {
+    var el = document.querySelector('meta[name="description"]');
+    if (!el || el.content) return;
+    var bits = [];
+    var rooms = get("property.rooms"), sqm = get("property.size_sqm");
+    if (rooms) bits.push(rooms + " " + T("rooms"));
+    if (sqm) bits.push(sqm + " " + T("sqm"));
+    var where = get("property.neighborhood") || get("property.city") || get("property.address");
+    if (where) bits.push(where);
+    var lead = String(get("hero.phrase") || title || "").trim();
+    var text = [lead, bits.join(" · ")].filter(Boolean).join(" — ");
+    if (brand) text = text ? text + " · " + brand : brand;
+    if (text) el.setAttribute("content", text.slice(0, 160));
+  })();
+
+  // ponytail: runs fn once the visible page has loaded, so a heavy fetch queued
+  // inside it competes with nothing above the fold. The timeout is a safety net:
+  // a single image that never resolves would otherwise hold `load` open forever
+  // and the hero would sit on its poster and never play.
+  function afterPaint(fn) {
+    var done = false;
+    function go() { if (done) return; done = true; fn(); }
+    if (document.readyState === "complete") { go(); return; }
+    addEventListener("load", go, { once: true });
+    setTimeout(go, 4000);
+  }
 
   // ── hero video ──
+  // ponytail: the autoplaying hero video is by far the heaviest thing on the
+  // page — a Lighthouse run on a real listing measured a 25.9MB walkthrough out
+  // of a 38.6MB page, and because `autoplay muted` makes the browser fetch the
+  // whole file regardless of the `preload` attribute, that download was both the
+  // LCP element and the thing starving every image on the page of bandwidth.
+  // LCP came out at 66.3s.
+  //
+  // So the hero keeps a still frame and only picks up its `src` once the visible
+  // page has finished loading. LCP then resolves against the poster, which is a
+  // photo the page was downloading anyway, and the video arrives afterwards over
+  // bandwidth nothing else is waiting on.
   var vsrc = get("hero.video_url"), poster = get("hero.poster_url");
+  if (!poster) {
+    // No dedicated poster: the first gallery photo is already being fetched for
+    // the page, so using it here costs nothing and leaves no blank hero.
+    var firstPic = (get("gallery.images") || [])[0];
+    if (firstPic && firstPic.url) poster = firstPic.url;
+  }
   each("[data-video],[data-video-manual]", document, function (v) {
     if (poster) v.poster = poster;
-    if (vsrc) {
+    if (!vsrc) return;
+    // data-video-manual is click-to-play at preload="metadata"/"none" — it costs
+    // a few KB, so it keeps its src immediately and stays clickable from the
+    // first paint. Only the autoplaying data-video pulls a whole file down.
+    if (!v.hasAttribute("data-video")) { v.src = vsrc; v.load(); return; }
+    afterPaint(function () {
       v.src = vsrc; v.load();
-      if (v.hasAttribute("data-video")) { var p = v.play && v.play(); if (p && p.catch) p.catch(function () {}); }
-    }
+      var p = v.play && v.play(); if (p && p.catch) p.catch(function () {});
+    });
   });
 
   // ── editorial photo slots — the single, full-bleed images the magazine-style
@@ -201,7 +253,14 @@
 
   function sampleLogoBackground(url) {
     var probe = new Image();
-    probe.crossOrigin = "anonymous";
+    // ponytail: deliberately NO crossOrigin. A CORS-mode request is a separate
+    // HTTP cache entry from the plain <img> fetches above, so setting it made
+    // the browser download the logo a third time — and against a host that
+    // serves no Access-Control-Allow-Origin (which is every host but this one)
+    // that third request failed outright and logged a CORS error on every view.
+    // Without it the probe reuses the image the page already has, and the
+    // cross-origin case lands in the tainted-canvas catch below, which is the
+    // same "leave the template as authored" outcome the opt-in was buying.
     probe.addEventListener("error", function () {});
     probe.addEventListener("load", function () {
       var w = probe.naturalWidth, h = probe.naturalHeight;
