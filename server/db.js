@@ -495,13 +495,30 @@ async function listPagesByPhone(phone, limit = 100) {
   return [...mem.pages.values()].filter((p) => p.business_phone === phone).slice(0, limit);
 }
 
+// ponytail: resolves one page by its public slug without reading the agent's
+// whole catalogue. The slug is only unique within one business, so the phone
+// filter is load-bearing, not an optimisation — dropping it would let one
+// agent's slug resolve to another's page.
+async function findPageBySlug(phone, publicSlug) {
+  if (db) {
+    const snap = await db.collection("property_pages")
+      .where("business_phone", "==", phone)
+      .where("public_slug", "==", publicSlug)
+      .limit(1).get();
+    return snap.empty ? null : snap.docs[0].data();
+  }
+  return [...mem.pages.values()].find(
+    (p) => p.business_phone === phone && p.public_slug === publicSlug
+  ) || null;
+}
+
 module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
   shortCode,
   saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
-  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone, findPageBySlug,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
   getPortfolioSlugReservation, reservePortfolioSlug,

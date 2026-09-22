@@ -173,7 +173,8 @@ module.exports = function createPagesRouter(ctx) {
       // landed here, which the captioning pass below reads back.
       const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl, rehostOpts);
       const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
-      const posterP = rehostFn(body.poster_url || body.photos[0].url, `${base}/poster.jpg`);
+      const posterSrc = body.poster_url || body.photos[0].url;
+      const posterP = rehostFn(posterSrc, `${base}/poster.${guessImageExt(posterSrc)}`);
       const photoPs = body.photos.slice(0, 12).map((p, i) =>
         rehostFn(p.url, `${base}/photo-${pad(i + 1)}.${guessImageExt(p.url)}`));
       const mapP = body.area && body.area.map_image_url ? rehostFn(body.area.map_image_url, `${base}/map.png`) : null;
@@ -706,11 +707,13 @@ module.exports = function createPagesRouter(ctx) {
       if (reservation.current_slug !== portfolioSlugParam) {
         return res.redirect(301, `/${reservation.current_slug}/${propSlug}`);
       }
-      const business = await db.getBusiness(reservation.business_phone);
+      // ponytail: both reads need only the phone from the reservation above,
+      // and nothing between them — so they overlap instead of queueing.
+      const [business, page] = await Promise.all([
+        businessCache.get(reservation.business_phone),
+        db.findPageBySlug(reservation.business_phone, propSlug),
+      ]);
       const portfolio = business?.portfolio;
-      // Find the page by public_slug
-      const pages = await db.listPagesByPhone(reservation.business_phone, 100);
-      const page = pages.find((p) => p.public_slug === propSlug);
       if (!page) return res.status(404).json({ error: "not_found" });
       if (page.status !== "active" && page.status !== "expiring") {
         return res.status(404).json({ error: "not_found" });
@@ -889,8 +892,7 @@ module.exports = function createPagesRouter(ctx) {
       if (reservation.current_slug !== portfolioSlugParam) {
         return res.redirect(301, `/${reservation.current_slug}/${propSlug}`);
       }
-      const pages = await db.listPagesByPhone(reservation.business_phone, 100);
-      const d = pages.find((p) => p.public_slug === propSlug) || null;
+      const d = await db.findPageBySlug(reservation.business_phone, propSlug);
       if (!d) return next();
       const pageUrl = `${pageBaseUrl}/${portfolioSlugParam}/${propSlug}`;
       renderPropertyPage(res, d.page_id, d, pageUrl);
