@@ -5,10 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Forly Nadlan</title>
 <meta name="description" content="">
+<!-- ponytail: the page scripts sit at the end of <body> so they do not hold
+     up parsing, but the browser only *discovers* them there — a Lighthouse
+     run measured 2,407ms of render-blocking on a real listing, of which
+     runtime.js and i18n.js were 756ms each and demo.js 154ms, almost all of
+     it download time that had not started yet. Preloading moves the fetch to
+     the head without moving execution, so the ordering the inline scripts
+     below depend on is unchanged. -->
+<link rel="preload" as="script" href="/tpl/demo.js">
+<link rel="preload" as="script" href="/templates/i18n.js">
+<link rel="preload" as="script" href="/tpl/runtime.js">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;800;900&family=Frank+Ruhl+Libre:wght@500;600&display=swap" rel="stylesheet">
+<!-- ponytail: 829ms of the render-blocking total was this one
+     stylesheet. The families already ask for display=swap, i.e. paint in
+     the fallback and restyle when the webfont lands — so blocking first
+     paint on the CSS that says so is the opposite of what it asks for.
+     Loaded as a preload that promotes itself to a stylesheet on arrival. -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;800;900&family=Frank+Ruhl+Libre:wght@500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;800;900&family=Frank+Ruhl+Libre:wght@500;600&display=swap"></noscript>
 <style>
   :root{--paper:#F7F4EF;--paper-2:#EFEAE1;--ink:#191512;--ink-2:#5B5349;--wine:var(--accent,#8A2942);--wine-2:var(--accent-lite,#A6314F);--wine-ink:#5F1B2D;--stone:#9A9186;--line:#E4DED2;--disp:'Heebo',-apple-system,sans-serif;--sans:'Heebo',-apple-system,sans-serif;--pad:clamp(20px,5vw,72px)}
   *{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth}

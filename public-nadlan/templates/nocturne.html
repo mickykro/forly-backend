@@ -4,6 +4,16 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Forly Nadlan</title>
 <meta name="description" content="">
+<!-- ponytail: the page scripts sit at the end of <body> so they do not hold
+     up parsing, but the browser only *discovers* them there — a Lighthouse
+     run measured 2,407ms of render-blocking on a real listing, of which
+     runtime.js and i18n.js were 756ms each and demo.js 154ms, almost all of
+     it download time that had not started yet. Preloading moves the fetch to
+     the head without moving execution, so the ordering the inline scripts
+     below depend on is unchanged. -->
+<link rel="preload" as="script" href="/tpl/demo.js">
+<link rel="preload" as="script" href="/templates/i18n.js">
+<link rel="preload" as="script" href="/tpl/runtime.js">
 <link rel="icon" type="image/png" href="/favicon.png">
 <style>
 @font-face{font-family:Discovery;src:url(/tpl/assets/atelier/discovery-300.woff2);font-weight:300;font-display:swap}@font-face{font-family:Discovery;src:url(/tpl/assets/atelier/discovery-700.woff2);font-weight:700;font-display:swap}
@@ -142,7 +152,7 @@ header .brand img{height:38px;width:auto;max-width:150px;object-fit:contain}
 <main id="top">
 <section class="hero" aria-labelledby="hero-title">
 <div class="hero-copy"><div class="eyebrow"><span data-bind="property.city">העיר</span> / <span data-bind="property.neighborhood">השכונה</span> / <span data-deal>למכירה</span></div><h1 id="hero-title" data-bind="hero.phrase">בית שנפתח אל העיר.</h1><p><span data-bind="property.address||property.title">הנכס</span> · <span data-bind="property.neighborhood">השכונה</span><br><span data-bind="property.title">בית יוצא דופן במיקום מדויק.</span></p><div class="hero-meta"><strong class="num" data-bind="property.price" data-fmt="price"></strong><small data-price-label>מחיר מבוקש</small></div><dl class="hero-facts"><div><dt>מ״ר בנוי</dt><dd class="num" data-bind="property.size_sqm"></dd></div><div><dt>חדרים</dt><dd class="num" data-bind="property.rooms"></dd></div><div data-show="property.floor"><dt>קומה</dt><dd class="num" data-bind="property.floor"></dd></div><div data-show="property.parking"><dt>חניות</dt><dd class="num" data-bind="property.parking"></dd></div></dl><div class="hero-actions"><a class="action" href="#contact">בואו לראות <span class="arrow" aria-hidden="true">↙</span></a><a class="quiet-link" href="#gallery">מבט מבפנים ↓</a></div></div>
-<figure class="hero-image"><div class="image-cut"><video class="hero-video" data-video autoplay muted loop playsinline preload="auto" aria-label="סרטון הנכס"></video></div><figcaption class="hero-video-caption">מבט בתנועה מתוך הנכס.</figcaption></figure>
+<figure class="hero-image"><div class="image-cut"><video class="hero-video" data-video autoplay muted loop playsinline preload="metadata" aria-label="סרטון הנכס"></video></div><figcaption class="hero-video-caption">מבט בתנועה מתוך הנכס.</figcaption></figure>
 </section>
 <section class="facts-section" aria-label="סיפור הנכס"><div class="story-glimpse"><figure><img data-photo="2" alt="מבט נוסף מתוך הנכס" loading="lazy"></figure><div><p data-bind="texts.why_sub||area.blurb||hero.phrase">בחוץ, העיר ממשיכה. בפנים, קצב אחר.</p><span>עוד רגע מתוך הסיור. גללו להמשך.</span></div><span class="glimpse-arrow" aria-hidden="true">↙</span></div></section>
 <section class="living" id="gallery"><div class="living-head"><p class="muted" data-bind="texts.gallery_sub||hero.phrase">האור נשאר לרגע על הקיר. המבט ממשיך מעבר לחלון.</p></div><div class="gallery-composition"><figure><div class="gallery-big"><button class="photo-button" data-zoom aria-label="הגדלת תמונת הנכס"><img data-photo="0" alt="חלל המגורים" loading="lazy"><span class="zoom-mark" aria-hidden="true">＋</span></button></div><figcaption class="photo-caption" dir="rtl"><span>חלון, אור ומרחב</span><span class="mono">PROPERTY IMAGE</span></figcaption></figure><div class="gallery-side"><figure><button class="photo-button" data-zoom aria-label="הגדלת תמונת הנכס"><img data-photo="1" alt="מבט נוסף בחלל" loading="lazy"><span class="zoom-mark" aria-hidden="true">＋</span></button><figcaption class="photo-caption"><span>החלל הציבורי</span><span class="mono">TOUR STILL</span></figcaption></figure><div class="gallery-note"><p data-bind="texts.gallery_note||hero.phrase">שתי נקודות מבט על מרחב המגורים.</p></div></div></div><div class="thumb-row" data-gallery data-gallery-class="thumb" data-gallery-count="6" aria-label="כל התמונות של הנכס"></div></section>
