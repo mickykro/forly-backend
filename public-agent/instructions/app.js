@@ -230,5 +230,17 @@
     if (e.target.closest(".menu-btn")) { var open = side.classList.toggle("open"); e.target.closest(".menu-btn").setAttribute("aria-expanded", String(open)); }
   });
   window.addEventListener("popstate", function () { route(); });
+
+  // The guide is public, but it is also where the dashboard's "?" leads. Telling
+  // an agent who is already signed in to "enter the system" reads like the guide
+  // logged them out. /api/auth/me answers from the cookie alone and 401s without
+  // touching the database, so the anonymous visit this page is mostly built for
+  // costs nothing. The link itself is unchanged either way.
+  fetch("/api/auth/me", { credentials: "same-origin" }).then(function (r) {
+    if (!r.ok) return;
+    var back = $(".top-actions a.gold");
+    if (back) back.textContent = "חזרה למערכת";
+  }, function () {});
+
   route();
 })();
