@@ -787,6 +787,17 @@
   });
   setWizardStage(1, false);
   if (isDemo) {
+    // Demo creation is admin-only (ADMIN_PHONES). Not logged in → login page,
+    // which returns here via ?next=. Logged in as a non-admin → sign out first
+    // so the login page offers a fresh OTP for an admin phone.
+    var demoLogin = function () {
+      location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
+    };
+    FLY.req("/api/admin/me", { noRedirect: true }).catch(function (e) {
+      if (e.status === 403) {
+        FLY.req("/api/auth/logout", { method: "POST", noRedirect: true }).catch(function () {}).then(demoLogin);
+      } else if (e.status === 401) demoLogin();
+    });
     $("#agentBlock").classList.remove("hidden");
     $("#demoWorkspaceNote").classList.remove("hidden");
     // standalone demo — not for signed-in users: hide the "my properties" nav
@@ -1472,8 +1483,8 @@
           body: JSON.stringify(body),
         }).then(function (r) {
           // Session expired / not logged in on the real path → go log in,
-          // matching FLY.req. (Demo has no login, so let its error surface.)
-          if (r.status === 401 && !isDemo) {
+          // matching FLY.req. Demo is admin-gated, so a non-admin goes there too.
+          if (r.status === 401 || (r.status === 403 && isDemo)) {
             location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
             throw new Error("unauthenticated");
           }
