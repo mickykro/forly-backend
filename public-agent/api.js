@@ -120,10 +120,27 @@ window.FLY = (function () {
     try { v.defaultPlaybackRate = rate; v.playbackRate = rate; } catch (e) { /* ignore */ }
   }
 
-  // Watchdog while the loader is up: some Safari builds leave the clip frozen
-  // on its first frame (autoplay stalls, notably with a non-1 playbackRate).
-  // If currentTime stops moving, drop the pacing and replay; if still stuck,
-  // reload the source. Stops as soon as the loader hides.
+  // Some Safari setups never play the clip (Low Power Mode or a per-site
+  // "never auto-play" setting reject play(); some builds just stall on the
+  // first frame). An animated image is not subject to autoplay rules, so the
+  // loader swaps to /assets/loading.webp — the same clip, pre-paced to one
+  // 2.3s pass — whenever the video will not run.
+  var FALLBACK_SRC = "/assets/loading.webp";
+  function loaderFallback(v) {
+    if (!v || !v.parentNode || !v.replaceWith || typeof document.createElement !== "function") return;
+    var img = document.createElement("img");
+    img.src = FALLBACK_SRC; img.alt = ""; img.setAttribute("aria-hidden", "true");
+    try { v.pause(); } catch (e) { /* ignore */ }
+    v.replaceWith(img);
+  }
+  function loaderPlay(v) {
+    var p = v.play();
+    if (p && p.catch) p.catch(function (e) { if (e && e.name === "NotAllowedError") loaderFallback(v); });
+  }
+
+  // Watchdog while the loader is up: if currentTime stops moving, drop the
+  // pacing and replay, then reload the source, then fall back to the image.
+  // Stops as soon as the loader hides.
   var WATCH_MS = 500;
   function loaderWatch(box, v) {
     if (!box || !v) return;
@@ -132,13 +149,16 @@ window.FLY = (function () {
     box._w = setInterval(function () {
       if (box.classList.contains("hidden") || strikes >= 3) { clearInterval(box._w); return; }
       var t = v.currentTime;
-      if (t !== last) { last = t; strikes = 0; return; }
+      // real movement only: a reload nudges currentTime by a hair, which must
+      // not count as playing (a loop wrap back to 0 does count)
+      if (Math.abs(t - last) > 0.05) { last = t; strikes = 0; return; }
       strikes++;
+      if (strikes === 3) { clearInterval(box._w); loaderFallback(v); return; }
       try {
         if (strikes === 1) { v.defaultPlaybackRate = 1; v.playbackRate = 1; }
-        else if (strikes === 2 && v.load) v.load();
+        else if (v.load) v.load();
       } catch (e) { /* ignore */ }
-      var p = v.play(); if (p && p.catch) p.catch(function () {});
+      loaderPlay(v);
     }, WATCH_MS);
     if (box._w && box._w.unref) box._w.unref(); // node tests: don't hold the process open
   }
@@ -158,7 +178,7 @@ window.FLY = (function () {
     // currentTime throws if metadata has not loaded yet — the reset is cosmetic.
     if (v) { try { v.currentTime = 0; } catch (e) { /* not seekable yet */ }
              loaderPace(v);
-             var p = v.play(); if (p && p.catch) p.catch(function () {});
+             loaderPlay(v);
              loaderWatch(box, v); }
   }
 
@@ -195,8 +215,12 @@ window.FLY = (function () {
     // be swapped for one that reports "ended"; a hide never waits on it.
     document.querySelectorAll(".vloader video").forEach(function (v) {
       loaderPace(v); // the clip is already autoplaying: pace it now
+      v.addEventListener("error", function () { loaderFallback(v); }); // can't decode/load
       var box0 = v.closest(".vloader");
-      if (box0 && !box0.classList.contains("hidden")) loaderWatch(box0, v); // up from first paint
+      if (box0 && !box0.classList.contains("hidden")) { // up from first paint
+        loaderPlay(v); // autoplay fails silently; an explicit play() reports why
+        loaderWatch(box0, v);
+      }
       v.addEventListener("loadedmetadata", function () { loaderPace(v); });
       v.addEventListener("ended", function () {
         var box = v.closest(".vloader");

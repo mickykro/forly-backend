@@ -107,7 +107,7 @@ a{color:inherit}
    to #EBE3DC (sides) — so no single page colour can match it everywhere. Fade the
    outer 8% of the video to transparent instead: the seam dissolves into whatever
    is behind it, and the artwork (well inside that margin) is untouched. */
-.vloader video{width:min(340px,62vw);height:auto;display:block;
+.vloader video,.vloader img{width:min(340px,62vw);height:auto;display:block;
   mask-image:linear-gradient(to right,transparent,#000 8%,#000 92%,transparent),linear-gradient(to bottom,transparent,#000 8%,#000 92%,transparent);
   mask-composite:intersect}
 .vloader .vloader-msg{color:var(--ink-soft);font-size:.95rem;letter-spacing:.02em}

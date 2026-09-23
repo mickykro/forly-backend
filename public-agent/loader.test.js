@@ -155,5 +155,20 @@ const hide = (FLY) => new Promise((resolve) => {
     await hide(FLY);
   }
 
+  // ── play() refused (Low Power Mode / never auto-play) → animated image ──
+  {
+    const { FLY, video } = setup();
+    let swapped = null;
+    global.document.createElement = () => ({ setAttribute() {} });
+    video.parentNode = {};
+    video.replaceWith = (n) => { swapped = n; };
+    video.play = () => Promise.reject(Object.assign(new Error("blocked"), { name: "NotAllowedError" }));
+    FLY.loaderShow();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.ok(swapped, "video replaced when playback is not allowed");
+    assert.equal(swapped.src, "/assets/loading.webp", "with the animated image");
+    await hide(FLY);
+  }
+
   console.log("loader.test.js: all checks passed");
 })();
