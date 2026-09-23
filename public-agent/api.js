@@ -92,19 +92,15 @@ window.FLY = (function () {
   }
 
   // ── loader video ──────────────────────────────────────────────────────────
-  // The loader is off the screen as soon as the work behind it is done. It used
-  // to park the reveal until the clip reached a clean "ended", which charged
-  // every visitor a whole 5s cycle even when the API answered in 200ms — and a
-  // second cycle when the hide landed just after a loop restart. Now the clip is
-  // decoration over the real wait: it is cut off wherever it happens to be, with
-  // a short crossfade so the cut does not read as a flicker.
+  // The loader always finishes the pass it is on — a hide waits for the end of
+  // the current pass (never a whole extra one) and fades out over its last
+  // frames, so the animation is never cut off mid-stroke. To keep that wait
+  // short, one pass is sped up to LOADER_CYCLE_MS (the source clip is 5.04s).
   var LOADER_MIN_MS = 350;    // anti-flicker floor for very fast responses
   var LOADER_FADE_MS = 160;   // must match the .vloader opacity transition
-  // How long one pass of the animation should take. The source clip is 5.04s,
-  // which is longer than most waits, so the cut lands early in the stroke every
-  // time. Speeding it up means a typical wait shows a whole pass instead of the
-  // opening few frames. Tune here, not in the asset.
-  var LOADER_CYCLE_MS = 2300;
+  // How long one pass of the animation takes on screen. Tune here, and
+  // regenerate /assets/loading.webp (the fallback image) at the same pace.
+  var LOADER_CYCLE_MS = 1800;
   var CLIP_MS = 5042;         // /assets/loading.mp4, used until metadata lands
 
   function loaderBox() { return document.querySelector(".vloader"); }
@@ -129,6 +125,7 @@ window.FLY = (function () {
   function loaderFallback(v) {
     if (!v || !v.parentNode || !v.replaceWith || typeof document.createElement !== "function") return;
     var img = document.createElement("img");
+    img._startAt = Date.now(); // its pass restarts from here (see loaderPassLeft)
     img.src = FALLBACK_SRC; img.alt = ""; img.setAttribute("aria-hidden", "true");
     try { v.pause(); } catch (e) { /* ignore */ }
     v.replaceWith(img);
@@ -204,10 +201,24 @@ window.FLY = (function () {
 
     // Loaders that are up from first paint have no _shownAt — page start counts.
     var shownAt = box._shownAt || PAGE_START;
-    var left = LOADER_MIN_MS - (Date.now() - shownAt);
+    var left = Math.max(LOADER_MIN_MS - (Date.now() - shownAt),
+                        loaderPassLeft(box, shownAt) - LOADER_FADE_MS);
     clearTimeout(box._t);
     if (left <= 0) return fade();
     box._t = setTimeout(fade, left);
+  }
+
+  // ms until the pass on screen completes. A playing video reports it exactly;
+  // the fallback image (or a clip that has not started) goes by the clock.
+  function loaderPassLeft(box, shownAt) {
+    var v = box.querySelector("video");
+    if (v && !v.paused && v.currentTime > 0) {
+      var durMs = (v.duration > 0 && isFinite(v.duration)) ? v.duration * 1000 : CLIP_MS;
+      return Math.max(0, (durMs - v.currentTime * 1000) / (v.playbackRate || 1));
+    }
+    var img = box.querySelector("img");
+    var start = (img && img._startAt) || shownAt;
+    return LOADER_CYCLE_MS - ((Date.now() - start) % LOADER_CYCLE_MS);
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -224,7 +235,8 @@ window.FLY = (function () {
       v.addEventListener("loadedmetadata", function () { loaderPace(v); });
       v.addEventListener("ended", function () {
         var box = v.closest(".vloader");
-        if (box && box.classList.contains("hidden")) return;
+        // hidden, or fading out on this very pass: hold the last frame
+        if (box && (box.classList.contains("hidden") || box.classList.contains("vloader-out"))) return;
         v.currentTime = 0;
         var p = v.play();
         if (p && p.catch) p.catch(function () {});

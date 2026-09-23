@@ -1,14 +1,14 @@
-/* Loader state machine: a hide must reveal the page as soon as the work behind
-   the loader is done — never wait out the animation — and must not depend on
-   media events that blocked autoplay would never deliver.
+/* Loader state machine: a hide lets the pass on screen finish (never a whole
+   extra one), so the animation is never cut off, and must not depend on media
+   events that blocked autoplay would never deliver.
    Run: node public-agent/loader.test.js */
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const CLIP_MS = 5042;   // the real /assets/loading.mp4 cycle
-const CYCLE_MS = 2300;  // target length of one on-screen pass
-const BUDGET_MS = 900;  // LOADER_MIN_MS + fade + slack — well under one cycle
+const CYCLE_MS = 1800;  // target length of one on-screen pass
+const BUDGET_MS = CYCLE_MS + 250; // at most the rest of one pass, plus slack
 
 // Minimal fake DOM — just enough of the shape api.js touches.
 function setup() {
@@ -48,13 +48,14 @@ const hide = (FLY) => new Promise((resolve) => {
 });
 
 (async () => {
-  // ── a hide mid-playback does not wait for the cycle to end ──
+  // ── a hide mid-playback waits for the end of that pass, not a new one ──
   {
     const { FLY, box, video } = setup();
     FLY.loaderShow("loading");
-    video.currentTime = 0.2; // barely started: the old code cost ~4.8s here
+    video.currentTime = 3; // 3s into the 5.04s source = past half the pass
+    const expect = (CLIP_MS - 3000) / video.playbackRate;
     const ms = await hide(FLY);
-    assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms, must be under ${BUDGET_MS}ms (clip is ${CLIP_MS}ms)`);
+    assert.ok(Math.abs(ms - expect) < 120, `revealed in ${ms}ms, expected ~${Math.round(expect)}ms (end of the pass)`);
     assert.equal(box.classes.has("hidden"), true, "loader is hidden once the work is done");
     assert.equal(box.classes.has("vloader-out"), false, "the fade class is cleaned up");
     assert.equal(video.paused, true, "the clip stops decoding once hidden");
@@ -64,7 +65,7 @@ const hide = (FLY) => new Promise((resolve) => {
   {
     const { FLY, box } = setup(); // no loaderShow(): markup ships it visible
     const ms = await hide(FLY);
-    assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms, must be under ${BUDGET_MS}ms`);
+    assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms, must be within one pass (${BUDGET_MS}ms)`);
     assert.equal(box.classes.has("hidden"), true, "loader hides");
   }
 
@@ -81,7 +82,7 @@ const hide = (FLY) => new Promise((resolve) => {
     const { FLY, box } = setup(); // "ended" never fires, playback never starts
     FLY.loaderShow();
     const ms = await hide(FLY);
-    assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms even with playback blocked`);
+    assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms (within one pass) even with playback blocked`);
     assert.equal(box.classes.has("hidden"), true, "loader hides without any media event");
   }
 
