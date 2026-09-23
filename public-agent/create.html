@@ -788,15 +788,43 @@
   setWizardStage(1, false);
   if (isDemo) {
     // Demo creation is admin-only (ADMIN_PHONES). Not logged in → login page,
-    // which returns here via ?next=. Logged in as a non-admin → sign out first
-    // so the login page offers a fresh OTP for an admin phone.
+    // which returns here via ?next=. Logged in but not an admin → say so on the
+    // page (with the phone the server sees) instead of bouncing back to login,
+    // which just loops for a phone missing from ADMIN_PHONES.
     var demoLogin = function () {
       location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
     };
+    var demoBlocked = function (msg) {
+      var note = $("#demoWorkspaceNote");
+      note.textContent = "";
+      var box = document.createElement("div");
+      var title = document.createElement("strong");
+      title.textContent = msg;
+      var btn = document.createElement("button");
+      btn.type = "button"; btn.className = "btn"; btn.style.marginTop = "10px";
+      btn.textContent = "התחברות עם מספר מנהל";
+      btn.addEventListener("click", function () {
+        FLY.req("/api/auth/logout", { method: "POST", noRedirect: true }).catch(function () {}).then(demoLogin);
+      });
+      box.appendChild(title); box.appendChild(btn); note.appendChild(box);
+      $("#submitBtn").disabled = true;
+      note.scrollIntoView({ block: "center" });
+    };
     FLY.req("/api/admin/me", { noRedirect: true }).catch(function (e) {
       if (e.status === 403) {
-        FLY.req("/api/auth/logout", { method: "POST", noRedirect: true }).catch(function () {}).then(demoLogin);
-      } else if (e.status === 401) demoLogin();
+        demoBlocked("המספר " + ((e.data && e.data.phone) || "") + " אינו מוגדר כמנהל (ADMIN_PHONES) — אין הרשאה ליצור דמו.");
+      } else if (e.status === 401) {
+        // Guard: a login that doesn't stick (cookie not saved/sent) would
+        // otherwise redirect forever.
+        var k = "forly_demo_login_at", last = 0;
+        try { last = Number(sessionStorage.getItem(k)) || 0; } catch (x) {}
+        if (Date.now() - last < 60000) {
+          demoBlocked("ההתחברות לא נשמרה בדפדפן (session cookie) — נסו שוב או בדפדפן אחר.");
+        } else {
+          try { sessionStorage.setItem(k, String(Date.now())); } catch (x) {}
+          demoLogin();
+        }
+      }
     });
     $("#agentBlock").classList.remove("hidden");
     $("#demoWorkspaceNote").classList.remove("hidden");
