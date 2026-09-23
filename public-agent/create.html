@@ -791,6 +791,12 @@
     });
   });
   setWizardStage(1, false);
+  // Belt and braces for overflow:clip (app.css): these boxes only clip
+  // decoration and must never scroll internally — some Safari builds still
+  // scroll them on focus/scrollIntoView, cutting off the top for good.
+  Array.prototype.forEach.call(document.querySelectorAll(".creation-card, .forly-create"), function (box) {
+    box.addEventListener("scroll", function () { if (box.scrollTop || box.scrollLeft) { box.scrollTop = 0; box.scrollLeft = 0; } });
+  });
   if (isDemo) {
     // Demo creation is admin-only (ADMIN_PHONES). Not logged in → login page,
     // which returns here via ?next=. Logged in but not an admin → say so on the
