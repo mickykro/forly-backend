@@ -1,7 +1,7 @@
 window.FORLY_DOCS = window.FORLY_DOCS || [];
 window.FORLY_DOCS.push({
   slug: "faq",
-  order: 12,
+  order: 13,
   icon: "❓",
   title: "שאלות נפוצות",
   summary: "תשובות קצרות לשאלות שחוזרות על כניסה, יצירה, וואטסאפ, עריכה וחבילות.",

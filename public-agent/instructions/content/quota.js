@@ -1,7 +1,7 @@
 window.FORLY_DOCS = window.FORLY_DOCS || [];
 window.FORLY_DOCS.push({
   slug: "quota",
-  order: 11,
+  order: 12,
   icon: "📦",
   title: "חבילה ומכסות",
   summary: "מה כלול בחבילה, מה קורה כשהיא נגמרת ואיך רוכשים חבילה נוספת.",

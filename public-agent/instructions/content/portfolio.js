@@ -1,7 +1,7 @@
 window.FORLY_DOCS = window.FORLY_DOCS || [];
 window.FORLY_DOCS.push({
   slug: "portfolio",
-  order: 8,
+  order: 9,
   icon: "🏢",
   title: "דף הנכסים",
   summary: "דף אחד עם כל הנכסים שלכם, הפרופיל וחוות דעת, לשיתוף עם לקוחות.",

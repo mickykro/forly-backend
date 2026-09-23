@@ -1,7 +1,7 @@
 window.FORLY_DOCS = window.FORLY_DOCS || [];
 window.FORLY_DOCS.push({
   slug: "dashboard",
-  order: 6,
+  order: 7,
   icon: "🏠",
   title: "הנכסים שלי",
   summary: "המסך הראשי: כל הנכסים, הצפיות, הלידים והפעולות על כל נכס.",

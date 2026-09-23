@@ -1,7 +1,7 @@
 window.FORLY_DOCS = window.FORLY_DOCS || [];
 window.FORLY_DOCS.push({
   slug: "publish",
-  order: 9,
+  order: 10,
   icon: "📣",
   title: "פרסום בפייסבוק",
   summary: "פרסום הנכס בדף העסקי שלכם בפייסבוק ושיתוף מהיר בקבוצות.",

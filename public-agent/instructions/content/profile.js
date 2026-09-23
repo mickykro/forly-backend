@@ -1,7 +1,7 @@
 window.FORLY_DOCS = window.FORLY_DOCS || [];
 window.FORLY_DOCS.push({
   slug: "profile",
-  order: 7,
+  order: 8,
   icon: "👤",
   title: "הפרופיל שלי",
   summary: "השם, הרישיון, הלוגו והצבעים שלכם, שמופיעים בכל דף נכס.",

@@ -1,7 +1,7 @@
 window.FORLY_DOCS = window.FORLY_DOCS || [];
 window.FORLY_DOCS.push({
   slug: "edit",
-  order: 5,
+  order: 6,
   icon: "✏️",
   title: "עריכת דף נכס",
   summary: "משנים טקסטים, תמונות, תבנית ומקטעים בדף שכבר באוויר, עם תצוגה חיה.",

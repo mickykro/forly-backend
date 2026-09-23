@@ -1,7 +1,7 @@
 window.FORLY_DOCS = window.FORLY_DOCS || [];
 window.FORLY_DOCS.push({
   slug: "leads",
-  order: 10,
+  order: 11,
   icon: "🔔",
   title: "לידים וצ׳אט בוט",
   summary: "כל פנייה מהדף מגיעה אליכם מיד בוואטסאפ, וצ׳אט בוט יכול לענות לקונים מסביב לשעון.",
