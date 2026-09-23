@@ -169,7 +169,25 @@ function newDraft(phone, source, now = new Date()) {
   };
 }
 
-function touch(draft, now = new Date()) { draft.updated_at = now; return draft; }
+// ₪2,900,000 a month is not a rental and ₪8,500 is not a sale price, so asking
+// "למכירה או להשכרה?" after such a price is noise. Thresholds match
+// priceLooksOff, which already calls the opposite pairing a typo. A bare "2.9"
+// (someone who meant 2.9 million) is below any real rent, so it infers nothing.
+function inferDeal(f) {
+  if (f.deal !== null || !f.price) return null;
+  if (f.price > 100000) return "sale";
+  if (f.price >= 1000 && f.price < 20000) return "rent";
+  return null;
+}
+
+// Every path that saves a draft calls touch, so the inference lands whether the
+// price arrived as an answer, an extraction, or a /מחיר correction.
+function touch(draft, now = new Date()) {
+  const deal = inferDeal(draft.fields);
+  if (deal) draft.fields.deal = deal;
+  draft.updated_at = now;
+  return draft;
+}
 
 function nextStep(draft) {
   for (const f of ASK_ORDER) {

@@ -113,4 +113,16 @@ assert.deepEqual([s.city, s.price, s.rooms, s.photos], ["חיפה", 1500000, 4, 
 const t1 = new Date(t0.getTime() + 1000);
 assert.equal(D.touch(d, t1).updated_at, t1);
 
+// A price only one deal type can explain answers "למכירה או להשכרה?" by itself.
+const dealOf = (price, deal = null) =>
+  D.touch({ ...d, fields: { ...d.fields, price, deal } }).fields.deal;
+assert.equal(dealOf(2900000), "sale");
+assert.equal(dealOf(8500), "rent");
+assert.equal(dealOf(60000), null, "an ambiguous price still asks");
+assert.equal(dealOf(2.9), null, "a bare 2.9 is nobody's rent");
+assert.equal(dealOf(2900000, "rent"), "rent", "an explicit answer is never overwritten");
+const afterPrice = D.touch({ ...d, skipped: [], fields: { ...d.fields, price: 2900000, deal: null } });
+assert.notDeepEqual(D.nextStep(afterPrice), { kind: "ask", field: "deal" },
+  "deal is not asked once it is inferred");
+
 console.log("property-draft.test.js ok");

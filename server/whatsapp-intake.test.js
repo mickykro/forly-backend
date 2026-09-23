@@ -104,8 +104,13 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.draft.fields.price, 1500000);
   draft = t.draft;
   t = await turn({ text: "4", draft }, d); draft = t.draft;           // rooms
-  t = await turn({ text: "להשכרה", draft }, d); draft = t.draft;     // deal (button text)
+  // ₪1.5M can only be a sale, so the deal question is skipped, not asked.
+  assert.equal(draft.fields.deal, "sale");
+  assert.equal(t.status, "asked:size_sqm");
+  // Someone who really meant rent says so, and gets the price warning.
+  t = await turn({ text: "/עסקה להשכרה", draft }, d); draft = t.draft;
   assert.equal(draft.fields.deal, "rent");
+  assert.match(texts(t), /נראה חריג לשכירות/);
   t = await turn({ text: "דלג", draft }, d); draft = t.draft;         // size_sqm skipped
   assert.deepEqual(draft.skipped, ["size_sqm"]);
   assert.equal(t.status, "asked:floor");
@@ -134,7 +139,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d, calls } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
-  for (let i = 0; i < 6; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  // Skip whatever optional fields remain — deal answers itself from the price.
+  for (let i = 0; i < 8 && t.status.startsWith("asked:"); i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
   assert.equal(t.status, "photos");
   t = await turn({ fileUrl: "https://green/a.jpg", draft }, d);
   assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a photo is stored silently and arms the timer");
@@ -160,7 +166,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
   for (const [f, v] of [["city", "חיפה"], ["price", "1,500,000"], ["rooms", "4"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
-  for (let i = 0; i < 6; i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  for (let i = 0; i < 8 && t.status.startsWith("asked:"); i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
   t = await turn({ fileUrls: ["https://green/burst1.jpg", "https://green/burst2.jpg", "https://green/burst3.jpg"], draft }, d);
   assert.deepEqual([t.handled, t.replies.length, t.armPhotoTimer], [true, 0, true], "a bundled burst is stored in one turn");
   draft = t.draft;
@@ -313,7 +319,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.draft.fields.city, t.draft.fields.rooms, t.draft.fields.price, t.status], ["חיפה", 3, 1900000, "asked:deal"],
     "one message fills several empty fields");
   ({ d } = deps({ parseListing: extracted({ price: 2100000 }) }));
-  t = await keywordAt(d, ["חיפה", "1.95 מיליון", "4", "למכירה", "90", "2"]);   // now asked:parking
+  t = await keywordAt(d, ["חיפה", "1.95 מיליון", "4", "90", "2"]);   // now asked:parking
   t = await turn({ text: "רגע, המחיר 2.1 מיליון", draft: t.draft }, d);
   assert.deepEqual([t.status, t.draft.fields.price, t.draft.pending_changes], ["confirm_changes", 1950000, { price: 2100000 }],
     "a different existing value is proposed, not overwritten");
@@ -328,7 +334,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   // the asked place name survives a reply that also talks about the price
   let seen;
   ({ d } = deps({ parseListing: async (txt) => { seen = txt; return extracted({ neighborhood: "הבורסה", price: 2600000 })(); } }));
-  t = await keywordAt(d, ["רמת גן", "2.69 מיליון", "4", "למכירה", "100", "4", "1"]);   // asked:neighborhood
+  t = await keywordAt(d, ["רמת גן", "2.69 מיליון", "4", "100", "4", "1"]);   // asked:neighborhood
   t = await turn({ text: "הבורסה, והמחיר ירד ל-2.6 מיליון", draft: t.draft }, d);
   assert.equal(seen, "שכונה: הבורסה, והמחיר ירד ל-2.6 מיליון", "the question's label gives the extractor context");
   assert.deepEqual([t.draft.fields.neighborhood, t.draft.pending_changes], ["הבורסה", { price: 2600000 }]);
@@ -336,12 +342,14 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
 
   // #15 price vs deal
   ({ d } = deps());
-  t = await keywordAt(d, ["חיפה", "5,500", "3", "למכירה"]);
-  assert.match(texts(t), /נראה חריג למכירה/);
+  t = await keywordAt(d, ["חיפה", "5,500", "3"]);
+  assert.equal(t.draft.fields.deal, "rent", "₪5,500 is a rent, so the deal is not asked");
+  t = await turn({ text: "/עסקה למכירה", draft: t.draft }, d);
+  assert.match(texts(t), /נראה חריג למכירה/, "insisting on sale at that price still warns");
 
   // spoken numbers, impossible values, and no word-for-word repeat on a second miss
   ({ d } = deps());
-  t = await keywordAt(d, ["כפר סבא", "2.5 מיליון", "ארבעה חדרים", "למכירה"]);   // asked:size_sqm
+  t = await keywordAt(d, ["כפר סבא", "2.5 מיליון", "ארבעה חדרים"]);   // asked:size_sqm
   assert.equal(t.draft.fields.rooms, 4);
   const atSize = t.draft;
   t = await turn({ text: "100 ו-10.", draft: atSize }, d);
