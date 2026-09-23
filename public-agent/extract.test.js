@@ -67,11 +67,19 @@ const fresh = () => dom({
 {
   const d = fresh();
   d.els["#pAddress"].value = "הרצל 1";
+  d.els["#pPrice"].value = "1,000"; d.els["#pRooms"].value = "3"; d.els["#pSqm"].value = "80";
   const sel = X.missingFor(["address", "city", "neighborhood", "deal", "floor"], d.byId, false);
   assert.deepEqual(sel, ["#pType", "#pCity", "#pHood", "#pFloor"]);   // display order, address dropped (filled)
   assert.deepEqual(X.missingFor(["city"], d.byId, true), ["#agName", "#agPhone", "#pCity"]);
   d.els["#agName"].value = "רון";
-  assert.deepEqual(X.missingFor([], d.byId, true), ["#agPhone"]);
+  assert.deepEqual(X.missingFor([], d.byId, true), ["#agPhone", "#pCity"]);   // city is required even unflagged
+}
+
+// ── missingFor: required fields show when empty even if the server didn't flag them ──
+{
+  const d = fresh();
+  d.els["#pCity"].value = "באר שבע"; d.els["#pPrice"].value = "6,000,000";
+  assert.deepEqual(X.missingFor(["parking"], d.byId, false), ["#pRooms", "#pSqm", "#pParking"]);
 }
 
 // ── errorKey ──

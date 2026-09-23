@@ -675,6 +675,8 @@
   // user's own gesture to dismiss the red state, so auto-focus would erase it.
   function revealField(fieldId) {
     var el = $(fieldId);
+    // a field inside the collapsed manual section would get its error unseen
+    if (el && !el.offsetParent) revealManual();
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }
   function showPhotosErr(key) {
