@@ -10,6 +10,18 @@ let db = null;
 let FieldValue = null;
 const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map() };
 
+// A personal `gcloud auth application-default login` file works until Google
+// demands a re-login ("invalid_rapt"), and every Firestore call then fails for
+// hours before anyone notices. Only a service-account key is safe to deploy.
+function warnIfUserCredentials(path) {
+  let type;
+  try { type = JSON.parse(require("fs").readFileSync(path, "utf8")).type; } catch { return; }
+  if (type === "authorized_user") {
+    console.warn(`WARNING ${path} is a personal login (type: authorized_user), not a service account.\n` +
+      "         Firestore will break once Google forces a re-login. Deploy a service-account key.");
+  }
+}
+
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     const admin = require("firebase-admin");
@@ -17,6 +29,7 @@ function init() {
     db = admin.firestore();
     FieldValue = admin.firestore.FieldValue;
     console.log("Firestore enabled (service account credentials found)");
+    warnIfUserCredentials(process.env.GOOGLE_APPLICATION_CREDENTIALS);
     // ponytail: first Firestore RPC sync-loads grpc protos and blocks the event
     // loop for ~30s — burn that at boot, not on the user's first OTP request.
     db.collection("_warmup").doc("_").get()
