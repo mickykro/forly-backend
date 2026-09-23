@@ -87,6 +87,9 @@
   .link-btn{border:0;background:transparent;color:var(--ink-soft);text-decoration:underline;cursor:pointer;font:inherit;padding:0}
   .extract-card{border:1px solid var(--gold);border-radius:12px;padding:16px;margin:0 0 18px}
   .extract-card.all-set{border-color:var(--pa-sage,#5c8a5c)}
+  #extractCardList{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .missing-chip{border:1px solid var(--gold);border-radius:999px;background:transparent;padding:6px 14px;font:inherit;font-size:.85rem;color:inherit;cursor:pointer}
+  .field.needs-fill input,.field.needs-fill select,.deal-toggle.needs-fill{border-color:var(--gold);box-shadow:0 0 0 2px rgba(185,138,47,.18)}
   .extract-photos{margin:0 0 18px}
   .extract-photos .t.skip img{opacity:.35}
   #extractBtn[disabled]{opacity:.6;cursor:progress}
@@ -161,7 +164,7 @@
       </div>
       <div id="extractCard" class="extract-card hidden">
         <div class="sec-title" id="extractCardTitle" data-i18n="ext_missing_title">פורלי צריכה עוד כמה פרטים</div>
-        <div id="extractCardList" class="grid-2"></div>
+        <div id="extractCardList"></div>
         <button type="button" class="link-btn" id="extractShowAll" data-i18n="ext_show_all">הצגת כל הפרטים</button>
       </div>
       <div id="extractPhotos" class="extract-photos hidden">
@@ -1048,22 +1051,25 @@
   function showExtractErr(key) {
     var el = $("#extractErr"); el.textContent = FT(key); el.classList.add("show");
   }
-  // The card borrows form fields by moving them in; a placeholder marks each
-  // one's home so a later run (or a failed one) can put them back instead of
-  // wiping them out of the page.
-  var cardBorrowed = [];
-  function returnCardFields() {
-    cardBorrowed.forEach(function (b) { b.mark.parentNode.insertBefore(b.wrap, b.mark); b.mark.remove(); });
-    cardBorrowed = [];
-  }
+  // After an extract the whole form opens with every field in its own place;
+  // the card only names what is still missing — each name jumps to its field,
+  // which is outlined until it gets a value.
   function hideMissingCard() {
-    returnCardFields();
     $("#extractCard").classList.add("hidden");
+    Array.prototype.forEach.call(document.querySelectorAll(".needs-fill"), function (w) { w.classList.remove("needs-fill"); });
+  }
+  function fieldWrap(sel) {
+    var el = $(sel);
+    // the deal toggle is the buttons, not the hidden select
+    return sel === "#pType" ? document.querySelector(".deal-toggle") : (el && el.closest(".field"));
   }
   function showMissingCard(selectors) {
     var card = $("#extractCard"), list = $("#extractCardList");
-    returnCardFields();
+    hideMissingCard();
+    revealManual();
     card.classList.remove("hidden");
+    list.textContent = "";
+    $("#extractShowAll").classList.add("hidden");
     if (!selectors.length) {
       card.classList.add("all-set");
       $("#extractCardTitle").textContent = FT(canSkipPhotos ? "ext_all_set_design" : "ext_all_set");
@@ -1073,14 +1079,24 @@
     card.classList.remove("all-set");
     $("#extractCardTitle").textContent = FT("ext_missing_title");
     selectors.forEach(function (sel) {
-      var el = $(sel);
-      // the deal toggle is the buttons, not the hidden select
-      var wrap = sel === "#pType" ? document.querySelector(".deal-toggle") : (el && el.closest(".field"));
+      var wrap = fieldWrap(sel);
       if (!wrap) return;
-      var mark = document.createComment("field home");
-      wrap.parentNode.insertBefore(mark, wrap);
-      cardBorrowed.push({ wrap: wrap, mark: mark });
-      list.appendChild(wrap);
+      wrap.classList.add("needs-fill");
+      var lbl = wrap.querySelector("label");
+      var chip = document.createElement("button");
+      chip.type = "button"; chip.className = "missing-chip";
+      chip.textContent = sel === "#pType" ? FT("lbl_deal_type").replace(/\s*\*$/, "")
+        : (lbl ? lbl.textContent.replace(/\s*\*$/, "") : sel);
+      chip.addEventListener("click", function () {
+        wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+        var input = $(sel); if (input && sel !== "#pType") input.focus({ preventScroll: true });
+      });
+      list.appendChild(chip);
+      // outline goes away once the field has a value
+      var input = $(sel);
+      if (input && sel !== "#pType") input.addEventListener("input", function () {
+        if (String(input.value).trim()) wrap.classList.remove("needs-fill");
+      });
     });
   }
   function addImportedPhoto(url) {
