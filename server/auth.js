@@ -17,9 +17,14 @@ const crypto = require("crypto");
 const express = require("express");
 
 const OTP_TTL_MS = 5 * 60 * 1000;      // code valid 5 minutes
-const RESEND_COOLDOWN_MS = 60 * 1000;  // 1 resend per minute
 const MAX_ATTEMPTS = 5;                // wrong-code attempts before lockout
-const MAX_SENDS_PER_DAY = 8;           // per-phone daily send cap (anti brute-force via resend)
+// Sending is never refused outright — only spaced out. Every new code resets
+// the 5-attempt lockout, so the wait grows with the day's sends to keep code
+// guessing slow: 30s, 30s, 1m, 2m, 4m, 8m, then 10m at most.
+const RESEND_MIN_MS = 30 * 1000;
+const RESEND_MAX_MS = 10 * 60 * 1000;
+const resendWaitMs = (sendsToday) =>
+  Math.min(RESEND_MAX_MS, RESEND_MIN_MS * Math.pow(2, Math.max(0, sendsToday - 2)));
 const SESSION_TTL_S = 12 * 60 * 60;    // 12 hours
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -139,20 +144,15 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
         return res.status(404).json({ ok: false, error: "not_a_client" });
       }
 
-      // resend cooldown
+      // resend spacing (see resendWaitMs) — the only limit on sending
       const prev = await getOtp(phone);
-      const prevAt = prev && prev.created_at ? new Date(prev.created_at.toDate ? prev.created_at.toDate() : prev.created_at).getTime() : 0;
-      if (prevAt && Date.now() - prevAt < RESEND_COOLDOWN_MS) {
-        const wait = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - prevAt)) / 1000);
-        return res.status(429).json({ ok: false, error: "too_soon", retry_after: wait });
-      }
-
-      // Per-phone daily send cap: stops an attacker resetting the 5-attempt
-      // lockout indefinitely by requesting a fresh code each minute.
       const day = todayKey();
       const sendsToday = prev && prev.sends_day === day ? (prev.sends_today || 0) : 0;
-      if (sendsToday >= MAX_SENDS_PER_DAY) {
-        return res.status(429).json({ ok: false, error: "daily_limit" });
+      const prevAt = prev && prev.created_at ? new Date(prev.created_at.toDate ? prev.created_at.toDate() : prev.created_at).getTime() : 0;
+      const waitMs = resendWaitMs(sendsToday);
+      if (prevAt && Date.now() - prevAt < waitMs) {
+        const wait = Math.ceil((waitMs - (Date.now() - prevAt)) / 1000);
+        return res.status(429).json({ ok: false, error: "too_soon", retry_after: wait });
       }
 
       const code = String(crypto.randomInt(100000, 1000000)); // 6 digits, CSPRNG
@@ -305,6 +305,7 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
 //   app.get("/api/private", requireAuth(SECRET), (req, res) => { req.user.userId ... });
 module.exports.uidFor = uidFor;
 module.exports.signSession = signSession;
+module.exports.resendWaitMs = resendWaitMs;
 module.exports.verifySession = verifySession;
 module.exports.readToken = readToken;
 
