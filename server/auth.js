@@ -62,6 +62,14 @@ function verifySession(secret, token) {
 const uidFor = (secret, phone) =>
   crypto.createHmac("sha256", secret).update(`uid:${phone}`).digest("base64url");
 
+// Session cookies are Secure everywhere except plain-HTTP localhost: browsers
+// (Safari, or any browser via 127.0.0.1) can drop Secure cookies over http,
+// which broke local login. Behind the prod proxy req.protocol may read "http",
+// but the hostname is the real domain, so the cookie stays Secure there.
+function cookieSecure(req) {
+  return !(req.protocol === "http" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(req.hostname));
+}
+
 function readToken(req) {
   const auth = req.headers.authorization || "";
   if (auth.startsWith("Bearer ")) return auth.slice(7);
@@ -203,7 +211,7 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
       const token = signSession(secret, phone);
       res.cookie("forly_session", token, {
         httpOnly: true,
-        secure: true,
+        secure: cookieSecure(req),
         sameSite: "lax",
         maxAge: SESSION_TTL_S * 1000,
       });
@@ -255,7 +263,7 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
 
     res.cookie("forly_session", signSession(secret, phone), {
       httpOnly: true,
-      secure: true,
+      secure: cookieSecure(req),
       sameSite: "lax",
       maxAge: SESSION_TTL_S * 1000,
     });
