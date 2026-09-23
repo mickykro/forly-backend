@@ -204,7 +204,19 @@
   function toast(msg) { toastEl.textContent = msg; toastEl.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(function () { toastEl.classList.remove("show"); }, 1600); }
   document.addEventListener("click", function (e) {
     var a = e.target.closest("a[data-nav]");
-    if (a && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); history.pushState(null, "", a.getAttribute("href")); route(); main.focus({ preventScroll: true }); return; }
+    if (a && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      // The guide is reached from the dashboard's "?", so Back has to lead out of
+      // it. A link to the page you are already on — the brand, the current topic
+      // in the sidebar, a crumb — must not push a duplicate entry, or Back
+      // re-renders the same view instead of leaving, once per stray click.
+      // /instructions and /instructions/ are the same page (the server redirects
+      // to the slashed form), so a trailing slash is not a move either.
+      var same = function (u) { return u.replace(/\/+$/, "") || "/"; };
+      var href = a.getAttribute("href");
+      if (same(new URL(href, location.href).href) !== same(location.href)) history.pushState(null, "", href);
+      route(); main.focus({ preventScroll: true }); return;
+    }
     var chip = e.target.closest("[data-copy]");
     if (chip) {
       var txt = chip.getAttribute("data-copy");
