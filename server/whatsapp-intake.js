@@ -367,6 +367,11 @@ async function handleTurn(input, deps) {
 
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
 
+  // A turn that rejected the message ("invalid:price") or simply repeated
+  // itself without storing anything ("choose") got nothing out of it.
+  const didNotLand = (t) => !t.handled || t.status.startsWith("invalid:")
+    || t.status === "not_ours" || (t.status === "choose" && !t.draft);
+
   // Voice note: transcribe and handle it as the typed message it stands for.
   if (input.audioUrl && !input.text) {
     let heard = null;
@@ -374,7 +379,16 @@ async function handleTurn(input, deps) {
     if (!heard) {
       return draft && draft.status === "active" ? { handled: true, status: "voice_failed", replies: [R.voiceFailed()] } : notOurs("not_ours");
     }
-    const t = await handleTurn({ ...input, audioUrl: null, text: heard }, deps);
+    const before = draft ? structuredClone(draft) : null;
+    let t = await handleTurn({ ...input, audioUrl: null, text: heard }, deps);
+    // The transcription said nothing the turn could use. Before answering with
+    // an error, see whether it was a mis-heard command: "דליק" for "דלג",
+    // "תצאו גם מקדימה" for "תצוגה מקדימה". Only here, where the alternative is
+    // a failure anyway, is a near match safe to act on.
+    if (didNotLand(t)) {
+      const cmd = D.spokenCommand(heard);
+      if (cmd) t = await handleTurn({ ...input, audioUrl: null, text: D.CANONICAL[cmd], draft: before }, deps);
+    }
     if (t.handled && t.replies.length) t.replies[0] = { ...t.replies[0], text: `${R.heard(heard)}\n\n${t.replies[0].text}` };
     return t;
   }

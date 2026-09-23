@@ -422,6 +422,25 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ audioUrl: "https://green/v.ogg" }, d);
   assert.equal(t.handled, false, "no draft: a failed voice note is left to the AI");
 
+  // #11b a mis-heard command still lands, but only where it cannot cost an answer
+  const spoken = async (heard, draft) =>
+    turn({ audioUrl: "https://green/v.ogg", draft }, deps({ transcribe: async () => heard }).d);
+  const atParking = { ...ready, fields: { ...ready.fields, deal: "sale", parking: null },
+    skipped: ["size_sqm", "floor"], photos: [] };
+  t = await spoken("דליק", atParking);                       // "דלג" mis-heard
+  assert.ok(t.draft.skipped.includes("parking"), "a near-miss skip is taken as דלג");
+  t = await spoken("לא הבנתי כלום", atParking);
+  assert.equal(t.status, "invalid:parking", "unrelated speech is still an invalid answer");
+  t = await spoken("תצאו גם מקדימה", ready);                 // "תצוגה מקדימה" mis-heard
+  assert.equal(t.status, "confirm");
+  assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
+  // "חדרה" is two edits from the command "חדש" and must stay a city
+  t = await spoken("חדרה", null);
+  assert.equal(t.handled, false, "a city name near a command opens nothing on its own");
+  ({ d } = deps({ transcribe: async () => "חדרה" }));
+  t = await turn({ audioUrl: "https://green/v.ogg", draft: (await turn({ text: "נכס חדש" }, d)).draft }, d);
+  assert.deepEqual([t.status, t.draft.fields.city], ["asked:price", "חדרה"], "it answers the city question");
+
   // own video: stored on the draft, sent as own_video_url so nothing is generated
   ({ d, calls } = deps({ importVideo: async (u) => "https://files/" + u.split("/").pop() }));
   t = await turn({ videoUrl: "https://green/tour.mp4", draft: ready }, d);

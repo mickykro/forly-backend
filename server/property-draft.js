@@ -44,6 +44,51 @@ function findUrl(text) {
 // Emoji and trailing punctuation don't change the meaning: "✅ ליצור!" is "ליצור".
 const clean = (t) => String(t || "").replace(/[\p{Extended_Pictographic}️‍]/gu, "").trim().replace(/[!.?]+$/, "").trim();
 function command(text) { const c = clean(text); return COMMANDS[c] || COMMAND_ALIASES[c] || null; }
+
+// Speech-to-text turns "תצוגה מקדימה" into "תצאו גם מקדימה" and "דלג" into
+// "דליק", and an exact match then leaves the agent repeating themselves. Typed
+// text is never run through this — only a transcription, where the wobble is
+// the machine's fault rather than the speaker's.
+//
+// A near match is NOT proof of intent: "חדרה" is two edits from "חדש" and
+// "לוד" from "ליצור". The caller must therefore only consult this after the
+// message has already failed to be anything else, where the alternative is an
+// error message rather than a correct answer.
+// The word a matched command is spelled with, for re-running the turn.
+const CANONICAL = Object.fromEntries(Object.entries(COMMANDS).map(([word, cmd]) => [cmd, word]));
+const PHRASES = () => ({ ...COMMANDS, ...COMMAND_ALIASES });
+function editDistance(a, b) {
+  let prev = [...Array(b.length + 1).keys()];
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+function spokenCommand(text) {
+  const c = clean(text).toLowerCase();
+  if (!c || command(c)) return null;              // already understood; leave it alone
+  const phrases = PHRASES();
+  // A distinctive word survives most mis-hearings: "מקדימה" is still there in
+  // "תצאו גם מקדימה". One-word commands are too short to match this way.
+  for (const [phrase, cmd] of Object.entries(phrases)) {
+    const longest = phrase.split(" ").sort((a, b) => b.length - a.length)[0];
+    if (longest.length >= 6 && c.includes(longest)) return cmd;
+  }
+  // Otherwise allow a two-character slip, but never on a digit (a spoken "1"
+  // must not become "לא") and never on a word too short to slip safely.
+  if (/\d/.test(c) || c.length < 3 || c.length > 12) return null;
+  let best = null;
+  for (const [phrase, cmd] of Object.entries(phrases)) {
+    if (phrase.length < 3) continue;
+    const d = editDistance(c, phrase.toLowerCase());
+    if (d <= 2 && (!best || d < best.d)) best = { cmd, d };
+  }
+  return best ? best.cmd : null;
+}
 function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
 function looksLikeListing(text) {
   const t = String(text || "");
@@ -235,6 +280,6 @@ function summary(draft) {
 
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
-  findUrl, command, openerKind, parseAnswer, isRequired, asMillis,
+  findUrl, command, spokenCommand, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
   newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };
