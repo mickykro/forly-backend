@@ -104,7 +104,7 @@ window.FLY = (function () {
   // which is longer than most waits, so the cut lands early in the stroke every
   // time. Speeding it up means a typical wait shows a whole pass instead of the
   // opening few frames. Tune here, not in the asset.
-  var LOADER_CYCLE_MS = 2400;
+  var LOADER_CYCLE_MS = 2300;
   var CLIP_MS = 5042;         // /assets/loading.mp4, used until metadata lands
 
   function loaderBox() { return document.querySelector(".vloader"); }

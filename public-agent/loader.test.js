@@ -7,7 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const CLIP_MS = 5042;   // the real /assets/loading.mp4 cycle
-const CYCLE_MS = 2400;  // target length of one on-screen pass
+const CYCLE_MS = 2300;  // target length of one on-screen pass
 const BUDGET_MS = 900;  // LOADER_MIN_MS + fade + slack — well under one cycle
 
 // Minimal fake DOM — just enough of the shape api.js touches.
