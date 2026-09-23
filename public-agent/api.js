@@ -82,6 +82,8 @@ window.FLY = (function () {
     }).catch(function () { /* best-effort */ });
   }
 
+  var PAGE_START = Date.now();
+
   function el(tag, cls, html) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -90,53 +92,151 @@ window.FLY = (function () {
   }
 
   // ── loader video ──────────────────────────────────────────────────────────
-  // Once it starts it always plays whole cycles: loaderHide() during playback
-  // parks the callback and runs it at the next clean end, so the animation is
-  // never cut off mid-stroke. Looping is driven here rather than by the `loop`
-  // attribute, which would suppress the "ended" event we need.
+  // The loader always finishes the pass it is on — a hide waits for the end of
+  // the current pass (never a whole extra one) and fades out over its last
+  // frames, so the animation is never cut off mid-stroke. To keep that wait
+  // short, one pass is sped up to LOADER_CYCLE_MS (the source clip is 5.04s).
+  var LOADER_MIN_MS = 350;    // anti-flicker floor for very fast responses
+  var LOADER_FADE_MS = 160;   // must match the .vloader opacity transition
+  // How long one pass of the animation takes on screen. Tune here, and
+  // regenerate /assets/loading.webp (the fallback image) at the same pace.
+  var LOADER_CYCLE_MS = 1800;
+  var CLIP_MS = 5042;         // /assets/loading.mp4, used until metadata lands
+
   function loaderBox() { return document.querySelector(".vloader"); }
+
+  // playbackRate resets whenever the element reloads its source, so pin
+  // defaultPlaybackRate too and re-apply on show.
+  function loaderPace(v) {
+    if (!v) return;
+    var srcMs = (v.duration > 0 && isFinite(v.duration)) ? v.duration * 1000 : CLIP_MS;
+    var rate = srcMs / LOADER_CYCLE_MS;
+    if (rate < 0.25) rate = 0.25;
+    if (rate > 4) rate = 4; // browsers drop audio past ~4x; muted here, but stay sane
+    try { v.defaultPlaybackRate = rate; v.playbackRate = rate; } catch (e) { /* ignore */ }
+  }
+
+  // Some Safari setups never play the clip (Low Power Mode or a per-site
+  // "never auto-play" setting reject play(); some builds just stall on the
+  // first frame). An animated image is not subject to autoplay rules, so the
+  // loader swaps to /assets/loading.webp — the same clip, pre-paced to one
+  // 2.3s pass — whenever the video will not run.
+  var FALLBACK_SRC = "/assets/loading.webp";
+  function loaderFallback(v) {
+    if (!v || !v.parentNode || !v.replaceWith || typeof document.createElement !== "function") return;
+    var img = document.createElement("img");
+    img._startAt = Date.now(); // its pass restarts from here (see loaderPassLeft)
+    img.src = FALLBACK_SRC; img.alt = ""; img.setAttribute("aria-hidden", "true");
+    try { v.pause(); } catch (e) { /* ignore */ }
+    v.replaceWith(img);
+  }
+  function loaderPlay(v) {
+    var p = v.play();
+    if (p && p.catch) p.catch(function (e) { if (e && e.name === "NotAllowedError") loaderFallback(v); });
+  }
+
+  // Watchdog while the loader is up: if currentTime stops moving, drop the
+  // pacing and replay, then reload the source, then fall back to the image.
+  // Stops as soon as the loader hides.
+  var WATCH_MS = 500;
+  function loaderWatch(box, v) {
+    if (!box || !v) return;
+    clearInterval(box._w);
+    var last = -1, strikes = 0;
+    box._w = setInterval(function () {
+      if (box.classList.contains("hidden") || strikes >= 3) { clearInterval(box._w); return; }
+      var t = v.currentTime;
+      // real movement only: a reload nudges currentTime by a hair, which must
+      // not count as playing (a loop wrap back to 0 does count)
+      if (Math.abs(t - last) > 0.05) { last = t; strikes = 0; return; }
+      strikes++;
+      if (strikes === 3) { clearInterval(box._w); loaderFallback(v); return; }
+      try {
+        if (strikes === 1) { v.defaultPlaybackRate = 1; v.playbackRate = 1; }
+        else if (v.load) v.load();
+      } catch (e) { /* ignore */ }
+      loaderPlay(v);
+    }, WATCH_MS);
+    if (box._w && box._w.unref) box._w.unref(); // node tests: don't hold the process open
+  }
 
   function loaderShow(msg) {
     var box = loaderBox();
     if (!box) return;
-    box._pending = null;
+    clearTimeout(box._t);
+    box._shownAt = Date.now();
     if (msg) {
       var m = box.querySelector(".vloader-msg");
       if (m) m.textContent = msg;
     }
+    box.classList.remove("vloader-out");
     box.classList.remove("hidden");
     var v = box.querySelector("video");
     // currentTime throws if metadata has not loaded yet — the reset is cosmetic.
     if (v) { try { v.currentTime = 0; } catch (e) { /* not seekable yet */ }
-             var p = v.play(); if (p && p.catch) p.catch(function () {}); }
+             loaderPace(v);
+             loaderPlay(v);
+             loaderWatch(box, v); }
   }
 
   // then() runs after the loader is gone — put the "reveal the content" work there.
   function loaderHide(then) {
     var box = loaderBox();
-    var done = function () {
-      if (box) { box.classList.add("hidden"); clearTimeout(box._safety); }
+    // Nothing on screen to wait for.
+    if (!box || box.classList.contains("hidden")) { if (then) then(); return; }
+
+    var finish = function () {
+      box.classList.add("hidden");
+      box.classList.remove("vloader-out");
+      var v = box.querySelector("video");
+      // Stop decoding a clip nobody can see.
+      if (v && v.pause) { try { v.pause(); } catch (e) { /* ignore */ } }
       if (then) then();
     };
-    var v = box && box.querySelector("video");
-    // Nothing on screen to wait for.
-    if (!box || box.classList.contains("hidden") || !v) return done();
-    box._pending = done;
-    // A visible loader counts as started even if playback has not kicked in yet
-    // (autoplay begins async). But blocked autoplay or a codec failure means
-    // "ended" never fires, so never let that strand the page.
-    var wait = (v.duration || 5) * 1000 - (v.currentTime || 0) * 1000 + 400;
-    clearTimeout(box._safety);
-    box._safety = setTimeout(function () {
-      if (box._pending) { var f = box._pending; box._pending = null; f(); }
-    }, Math.max(400, wait));
+
+    var fade = function () {
+      box.classList.add("vloader-out");
+      box._t = setTimeout(finish, LOADER_FADE_MS);
+    };
+
+    // Loaders that are up from first paint have no _shownAt — page start counts.
+    var shownAt = box._shownAt || PAGE_START;
+    var left = Math.max(LOADER_MIN_MS - (Date.now() - shownAt),
+                        loaderPassLeft(box, shownAt) - LOADER_FADE_MS);
+    clearTimeout(box._t);
+    if (left <= 0) return fade();
+    box._t = setTimeout(fade, left);
+  }
+
+  // ms until the pass on screen completes. A playing video reports it exactly;
+  // the fallback image (or a clip that has not started) goes by the clock.
+  function loaderPassLeft(box, shownAt) {
+    var v = box.querySelector("video");
+    if (v && !v.paused && v.currentTime > 0) {
+      var durMs = (v.duration > 0 && isFinite(v.duration)) ? v.duration * 1000 : CLIP_MS;
+      return Math.max(0, (durMs - v.currentTime * 1000) / (v.playbackRate || 1));
+    }
+    var img = box.querySelector("img");
+    var start = (img && img._startAt) || shownAt;
+    return LOADER_CYCLE_MS - ((Date.now() - start) % LOADER_CYCLE_MS);
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Looping is driven here rather than by the `loop` attribute so the clip can
+    // be swapped for one that reports "ended"; a hide never waits on it.
     document.querySelectorAll(".vloader video").forEach(function (v) {
+      loaderPace(v); // the clip is already autoplaying: pace it now
+      v.addEventListener("error", function () { loaderFallback(v); }); // can't decode/load
+      var box0 = v.closest(".vloader");
+      if (box0 && !box0.classList.contains("hidden")) { // up from first paint
+        loaderPlay(v); // autoplay fails silently; an explicit play() reports why
+        loaderWatch(box0, v);
+      }
+      v.addEventListener("loadedmetadata", function () { loaderPace(v); });
       v.addEventListener("ended", function () {
         var box = v.closest(".vloader");
-        if (box && box._pending) { var f = box._pending; box._pending = null; return f(); }
+        // hidden, or fading out on this very pass: hold the last frame
+        if (box && (box.classList.contains("hidden") || box.classList.contains("vloader-out"))) return;
         v.currentTime = 0;
         var p = v.play();
         if (p && p.catch) p.catch(function () {});

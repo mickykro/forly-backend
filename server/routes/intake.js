@@ -32,7 +32,7 @@ module.exports = function createIntakeRouter(ctx) {
 
   const router = express.Router();
 
-  // The demo flow mints a session for a client-supplied phone, so it is gated
+  // The demo flow writes data for a client-supplied phone, so it is gated
   // to logged-in operator admins (ADMIN_PHONES) rather than the mere presence
   // of an x-demo-key header, which anyone could send.
   const { requireAdmin } = makeAdminGuard({ verifySession, readToken, authSecret, adminPhones });
@@ -148,9 +148,9 @@ module.exports = function createIntakeRouter(ctx) {
   const createListing = (phone, body, agentOverride, extraDeps) =>
     createListingShared(phone, body, agentOverride, { ...pipelineDeps, ...extraDeps });
 
-  // ── demo-create (sets session cookie) ──
-  // Admin-only: this signs a session for a client-supplied agent phone, so only
-  // a trusted operator on the ADMIN_PHONES allowlist may call it.
+  // ── demo-create ──
+  // Admin-only: this creates a listing + business doc for a client-supplied
+  // agent phone, so only a trusted operator on ADMIN_PHONES may call it.
   router.post("/properties/demo-create", requireAdmin, async (req, res) => {
     const body = req.body || {};
     const agentPhone = normalizeAuthPhone(body.agent && body.agent.phone);
@@ -181,15 +181,9 @@ module.exports = function createIntakeRouter(ctx) {
       businessCache.invalidate(agentPhone);
     }
 
-    // auto-login
-    const token = signSession(authSecret, agentPhone);
-    res.cookie("forly_session", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: sessionTtl * 1000,
-    });
-    res.json({ ...result, status: "building", logged_in: true });
+    // The admin stays logged in as themselves so they can create the next
+    // demo; the agent signs in later with their own phone (OTP).
+    res.json({ ...result, status: "building", logged_in: false });
   });
 
   // ── demo-save-agent (autosave on blur) ──

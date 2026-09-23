@@ -157,7 +157,10 @@ app.get(/^\/instructions(?:\/[a-z-]+)?\/?$/, (req, res) => {
 // Throttle the OTP send/verify endpoints per IP (abuse / enumeration / SMS-cost
 // protection) on top of the per-phone cooldowns enforced inside the router.
 // Scoped to /otp and /verify so it never throttles /me polling or /logout.
-app.use("/api/auth/otp", rateLimit({ windowMs: 60_000, max: 10 }));
+// Sending is loose (the per-phone spacing already bounds it — a real user never
+// gets near 60/min); code verification stays tight against guessing.
+app.post("/api/auth/otp", rateLimit({ windowMs: 60_000, max: 60 }));
+app.use("/api/auth/otp/verify", rateLimit({ windowMs: 60_000, max: 10 }));
 app.use("/api/auth/verify", rateLimit({ windowMs: 60_000, max: 10 }));
 app.use("/api/auth", createAuthRouter({
   db: db.db, mem: db.mem,
