@@ -131,5 +131,29 @@ const hide = (FLY) => new Promise((resolve) => {
     assert.ok(ms < 50, `second hide took ${ms}ms, should be immediate`);
   }
 
+  // ── a clip frozen on its first frame is un-paced and replayed ──
+  {
+    const { FLY, video } = setup();
+    let plays = 0; video.play = () => { plays++; return Promise.resolve(); };
+    FLY.loaderShow();
+    const playsAtShow = plays;
+    await new Promise((r) => setTimeout(r, 1200)); // currentTime never moves
+    assert.equal(video.playbackRate, 1, "falls back to normal speed when stuck");
+    assert.ok(plays > playsAtShow, "retries playback when stuck");
+    await hide(FLY);
+  }
+
+  // ── a clip that is advancing is left alone ──
+  {
+    const { FLY, video } = setup();
+    FLY.loaderShow();
+    const rate = video.playbackRate;
+    const iv = setInterval(() => { video.currentTime += 0.1; }, 50);
+    await new Promise((r) => setTimeout(r, 1200));
+    clearInterval(iv);
+    assert.equal(video.playbackRate, rate, "pacing kept while the clip plays");
+    await hide(FLY);
+  }
+
   console.log("loader.test.js: all checks passed");
 })();

@@ -120,6 +120,29 @@ window.FLY = (function () {
     try { v.defaultPlaybackRate = rate; v.playbackRate = rate; } catch (e) { /* ignore */ }
   }
 
+  // Watchdog while the loader is up: some Safari builds leave the clip frozen
+  // on its first frame (autoplay stalls, notably with a non-1 playbackRate).
+  // If currentTime stops moving, drop the pacing and replay; if still stuck,
+  // reload the source. Stops as soon as the loader hides.
+  var WATCH_MS = 500;
+  function loaderWatch(box, v) {
+    if (!box || !v) return;
+    clearInterval(box._w);
+    var last = -1, strikes = 0;
+    box._w = setInterval(function () {
+      if (box.classList.contains("hidden") || strikes >= 3) { clearInterval(box._w); return; }
+      var t = v.currentTime;
+      if (t !== last) { last = t; strikes = 0; return; }
+      strikes++;
+      try {
+        if (strikes === 1) { v.defaultPlaybackRate = 1; v.playbackRate = 1; }
+        else if (strikes === 2 && v.load) v.load();
+      } catch (e) { /* ignore */ }
+      var p = v.play(); if (p && p.catch) p.catch(function () {});
+    }, WATCH_MS);
+    if (box._w && box._w.unref) box._w.unref(); // node tests: don't hold the process open
+  }
+
   function loaderShow(msg) {
     var box = loaderBox();
     if (!box) return;
@@ -135,7 +158,8 @@ window.FLY = (function () {
     // currentTime throws if metadata has not loaded yet — the reset is cosmetic.
     if (v) { try { v.currentTime = 0; } catch (e) { /* not seekable yet */ }
              loaderPace(v);
-             var p = v.play(); if (p && p.catch) p.catch(function () {}); }
+             var p = v.play(); if (p && p.catch) p.catch(function () {});
+             loaderWatch(box, v); }
   }
 
   // then() runs after the loader is gone — put the "reveal the content" work there.
@@ -171,6 +195,8 @@ window.FLY = (function () {
     // be swapped for one that reports "ended"; a hide never waits on it.
     document.querySelectorAll(".vloader video").forEach(function (v) {
       loaderPace(v); // the clip is already autoplaying: pace it now
+      var box0 = v.closest(".vloader");
+      if (box0 && !box0.classList.contains("hidden")) loaderWatch(box0, v); // up from first paint
       v.addEventListener("loadedmetadata", function () { loaderPace(v); });
       v.addEventListener("ended", function () {
         var box = v.closest(".vloader");
