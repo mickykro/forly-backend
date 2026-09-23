@@ -1048,10 +1048,22 @@
   function showExtractErr(key) {
     var el = $("#extractErr"); el.textContent = FT(key); el.classList.add("show");
   }
+  // The card borrows form fields by moving them in; a placeholder marks each
+  // one's home so a later run (or a failed one) can put them back instead of
+  // wiping them out of the page.
+  var cardBorrowed = [];
+  function returnCardFields() {
+    cardBorrowed.forEach(function (b) { b.mark.parentNode.insertBefore(b.wrap, b.mark); b.mark.remove(); });
+    cardBorrowed = [];
+  }
+  function hideMissingCard() {
+    returnCardFields();
+    $("#extractCard").classList.add("hidden");
+  }
   function showMissingCard(selectors) {
     var card = $("#extractCard"), list = $("#extractCardList");
+    returnCardFields();
     card.classList.remove("hidden");
-    list.innerHTML = "";
     if (!selectors.length) {
       card.classList.add("all-set");
       $("#extractCardTitle").textContent = FT(canSkipPhotos ? "ext_all_set_design" : "ext_all_set");
@@ -1064,7 +1076,11 @@
       var el = $(sel);
       // the deal toggle is the buttons, not the hidden select
       var wrap = sel === "#pType" ? document.querySelector(".deal-toggle") : (el && el.closest(".field"));
-      if (wrap) list.appendChild(wrap);
+      if (!wrap) return;
+      var mark = document.createComment("field home");
+      wrap.parentNode.insertBefore(mark, wrap);
+      cardBorrowed.push({ wrap: wrap, mark: mark });
+      list.appendChild(wrap);
     });
   }
   function addImportedPhoto(url) {
@@ -1129,6 +1145,8 @@
       return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, ok: r.ok, body: j }; });
     }).then(function (res) {
       if (!res.ok) {
+        // a card left over from an earlier run would contradict this error
+        hideMissingCard();
         showExtractErr(X.errorKey(res.status, res.body.error));
         if (res.status === 422 || res.status === 409) $("#extractInput").focus(); else revealManual();
         return;
@@ -1141,6 +1159,7 @@
       showMissingCard(X.missingFor(res.body.missing, $, isDemo));
       updateLivePreview();
     }).catch(function () {
+      hideMissingCard();
       showExtractErr("ext_err_unavailable"); revealManual();
     }).then(function () {
       btn.disabled = false; btn.textContent = FT("ext_btn");
