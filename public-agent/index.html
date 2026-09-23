@@ -182,8 +182,7 @@
         // no self-service signup here any more — a number with no account
         // is routed to sales as a lead server-side (server/auth.js)
         err.textContent = e.code === "not_a_client" ? "עדיין לא לקוחות של פורלי — ניצור איתכם קשר בקרוב 🦉" :
-          e.code === "too_soon" ? "רגע... נסו שוב בעוד דקה" :
-          e.code === "daily_limit" ? "יותר מדי נסיונות היום" :
+          e.code === "too_soon" ? tooSoonMsg(e) :
           e.code === "invalid_phone" ? "מספר לא תקין" : "שגיאה בשליחת הקוד";
         err.classList.add("show");
       })
@@ -266,7 +265,7 @@
         err.classList.add("show");
       })
       .catch(function (e) {
-        err.textContent = e.code === "too_soon" ? "רגע... נסו שוב בעוד דקה" : "שגיאה בשליחת הקוד";
+        err.textContent = e.code === "too_soon" ? tooSoonMsg(e) : "שגיאה בשליחת הקוד";
         err.classList.add("show");
       })
       .finally(function () { setTimeout(function () { btn.disabled = false; }, 1000); });
@@ -311,6 +310,14 @@
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
+  }
+
+  // the server says exactly how long until the next code can be sent
+  function tooSoonMsg(e) {
+    var s = e.data && e.data.retry_after;
+    if (!s) return "רגע... נסו שוב בעוד רגע";
+    return s < 60 ? "אפשר לשלוח קוד חדש בעוד " + s + " שניות"
+      : "אפשר לשלוח קוד חדש בעוד " + Math.ceil(s / 60) + " דקות";
   }
 
   function loadList() {

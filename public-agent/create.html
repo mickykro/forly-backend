@@ -87,6 +87,9 @@
   .link-btn{border:0;background:transparent;color:var(--ink-soft);text-decoration:underline;cursor:pointer;font:inherit;padding:0}
   .extract-card{border:1px solid var(--gold);border-radius:12px;padding:16px;margin:0 0 18px}
   .extract-card.all-set{border-color:var(--pa-sage,#5c8a5c)}
+  #extractCardList{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .missing-chip{border:1px solid var(--gold);border-radius:999px;background:transparent;padding:6px 14px;font:inherit;font-size:.85rem;color:inherit;cursor:pointer}
+  .field.needs-fill input,.field.needs-fill select,.deal-toggle.needs-fill{border-color:var(--gold);box-shadow:0 0 0 2px rgba(185,138,47,.18)}
   .extract-photos{margin:0 0 18px}
   .extract-photos .t.skip img{opacity:.35}
   #extractBtn[disabled]{opacity:.6;cursor:progress}
@@ -98,7 +101,7 @@
   /* ── Approved Forly Workspace preview port ── */
   :root{--pa-paper:#f7f3ec;--pa-ink:#17140f;--pa-soft:#5e574e;--pa-faint:#938b7e;--pa-gold:#b98a2f;--pa-line:rgba(33,28,21,.13);--pa-white:#fffdfa;--pa-sage:#607d70;--pa-ease:cubic-bezier(.23,1,.32,1)}
   body.agent-page.creation-page{background:var(--pa-paper);color:var(--pa-ink)}
-  body.agent-page.creation-page::before{display:none}.creation-page .forly-create{min-height:100vh;overflow:hidden;background:radial-gradient(circle at 94% 0%,rgba(185,138,47,.13),transparent 25rem),linear-gradient(160deg,#faf7f1 0%,var(--pa-paper) 42%,#f0e9dd 100%)}
+  body.agent-page.creation-page::before{display:none}.creation-page .forly-create{min-height:100vh;overflow:hidden;overflow:clip;background:radial-gradient(circle at 94% 0%,rgba(185,138,47,.13),transparent 25rem),linear-gradient(160deg,#faf7f1 0%,var(--pa-paper) 42%,#f0e9dd 100%)}
   .creation-page #createHeader{width:min(1260px,calc(100% - 44px));height:88px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--pa-line);padding:0;background:transparent;box-shadow:none;position:relative;z-index:2}
   .creation-page .forly-brand{display:flex;align-items:center;gap:10px;color:var(--pa-ink);text-decoration:none;font-family:'Frank Ruhl Libre',serif;font-size:1.35rem;font-weight:700;letter-spacing:.05em}.creation-page .forly-brand img{width:35px;height:35px;object-fit:contain}.creation-page .forly-brand small{display:block;margin-top:-1px;color:var(--pa-faint);font-family:'Heebo',sans-serif;font-size:.53rem;font-weight:500;letter-spacing:.02em}.creation-page .header-right{display:flex;align-items:center;gap:9px}.creation-page .lang-btn,.creation-page .my-listings{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--pa-line);border-radius:999px;background:rgba(255,253,250,.58);padding:8px 12px;color:var(--pa-soft);font-size:.75rem}.creation-page .my-listings{border-color:transparent;background:var(--pa-ink);color:#fff;font-weight:600;transition:transform .16s var(--pa-ease),background .16s var(--pa-ease)}.creation-page .my-listings:hover{background:#30291e}.creation-page .my-listings:active,.creation-page .primary-action:active,.creation-page .secondary-action:active{transform:scale(.97)}
   .creation-page .create-hero{width:min(1260px,calc(100% - 44px));margin:0 auto;padding:60px 0 34px;display:flex;align-items:flex-end;justify-content:space-between;gap:42px}.creation-page .eyebrow{display:flex;align-items:center;gap:9px;margin:0;color:var(--pa-gold);font-size:.72rem;font-weight:700;letter-spacing:.08em;white-space:nowrap}.creation-page .eyebrow span:first-child{width:7px;height:7px;border-radius:50%;background:var(--pa-gold);box-shadow:0 0 0 5px rgba(185,138,47,.12)}.creation-page .create-hero h1{margin:13px 0 12px;font-family:'Frank Ruhl Libre',serif;font-size:clamp(2.7rem,5vw,5.25rem);font-weight:600;line-height:.93;letter-spacing:-.07em}.creation-page .create-hero h1 em{color:var(--pa-gold);font-style:normal}.creation-page .create-hero>div>p:not(.eyebrow){max-width:470px;margin:0;color:var(--pa-soft);font-size:1rem;line-height:1.75}.creation-page .hero-note{max-width:260px;display:flex;align-items:flex-start;gap:10px;border-right:1px solid var(--pa-gold);padding:7px 14px 7px 0;color:var(--pa-soft);font-size:.78rem;line-height:1.6}.hero-note-mark{color:var(--pa-gold);font-size:1.15rem}
@@ -161,7 +164,7 @@
       </div>
       <div id="extractCard" class="extract-card hidden">
         <div class="sec-title" id="extractCardTitle" data-i18n="ext_missing_title">פורלי צריכה עוד כמה פרטים</div>
-        <div id="extractCardList" class="grid-2"></div>
+        <div id="extractCardList"></div>
         <button type="button" class="link-btn" id="extractShowAll" data-i18n="ext_show_all">הצגת כל הפרטים</button>
       </div>
       <div id="extractPhotos" class="extract-photos hidden">
@@ -675,6 +678,8 @@
   // user's own gesture to dismiss the red state, so auto-focus would erase it.
   function revealField(fieldId) {
     var el = $(fieldId);
+    // a field inside the collapsed manual section would get its error unseen
+    if (el && !el.offsetParent) revealManual();
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }
   function showPhotosErr(key) {
@@ -786,7 +791,52 @@
     });
   });
   setWizardStage(1, false);
+  // Belt and braces for overflow:clip (app.css): these boxes only clip
+  // decoration and must never scroll internally — some Safari builds still
+  // scroll them on focus/scrollIntoView, cutting off the top for good.
+  Array.prototype.forEach.call(document.querySelectorAll(".creation-card, .forly-create"), function (box) {
+    box.addEventListener("scroll", function () { if (box.scrollTop || box.scrollLeft) { box.scrollTop = 0; box.scrollLeft = 0; } });
+  });
   if (isDemo) {
+    // Demo creation is admin-only (ADMIN_PHONES). Not logged in → login page,
+    // which returns here via ?next=. Logged in but not an admin → say so on the
+    // page (with the phone the server sees) instead of bouncing back to login,
+    // which just loops for a phone missing from ADMIN_PHONES.
+    var demoLogin = function () {
+      location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
+    };
+    var demoBlocked = function (msg) {
+      var note = $("#demoWorkspaceNote");
+      note.textContent = "";
+      var box = document.createElement("div");
+      var title = document.createElement("strong");
+      title.textContent = msg;
+      var btn = document.createElement("button");
+      btn.type = "button"; btn.className = "btn"; btn.style.marginTop = "10px";
+      btn.textContent = "התחברות עם מספר מנהל";
+      btn.addEventListener("click", function () {
+        FLY.req("/api/auth/logout", { method: "POST", noRedirect: true }).catch(function () {}).then(demoLogin);
+      });
+      box.appendChild(title); box.appendChild(btn); note.appendChild(box);
+      $("#submitBtn").disabled = true;
+      note.scrollIntoView({ block: "center" });
+    };
+    FLY.req("/api/admin/me", { noRedirect: true }).catch(function (e) {
+      if (e.status === 403) {
+        demoBlocked("המספר " + ((e.data && e.data.phone) || "") + " אינו מוגדר כמנהל (ADMIN_PHONES) — אין הרשאה ליצור דמו.");
+      } else if (e.status === 401) {
+        // Guard: a login that doesn't stick (cookie not saved/sent) would
+        // otherwise redirect forever.
+        var k = "forly_demo_login_at", last = 0;
+        try { last = Number(sessionStorage.getItem(k)) || 0; } catch (x) {}
+        if (Date.now() - last < 60000) {
+          demoBlocked("ההתחברות לא נשמרה בדפדפן (session cookie) — נסו שוב או בדפדפן אחר.");
+        } else {
+          try { sessionStorage.setItem(k, String(Date.now())); } catch (x) {}
+          demoLogin();
+        }
+      }
+    });
     $("#agentBlock").classList.remove("hidden");
     $("#demoWorkspaceNote").classList.remove("hidden");
     // standalone demo — not for signed-in users: hide the "my properties" nav
@@ -1007,10 +1057,25 @@
   function showExtractErr(key) {
     var el = $("#extractErr"); el.textContent = FT(key); el.classList.add("show");
   }
+  // After an extract the whole form opens with every field in its own place;
+  // the card only names what is still missing — each name jumps to its field,
+  // which is outlined until it gets a value.
+  function hideMissingCard() {
+    $("#extractCard").classList.add("hidden");
+    Array.prototype.forEach.call(document.querySelectorAll(".needs-fill"), function (w) { w.classList.remove("needs-fill"); });
+  }
+  function fieldWrap(sel) {
+    var el = $(sel);
+    // the deal toggle is the buttons, not the hidden select
+    return sel === "#pType" ? document.querySelector(".deal-toggle") : (el && el.closest(".field"));
+  }
   function showMissingCard(selectors) {
     var card = $("#extractCard"), list = $("#extractCardList");
+    hideMissingCard();
+    revealManual();
     card.classList.remove("hidden");
-    list.innerHTML = "";
+    list.textContent = "";
+    $("#extractShowAll").classList.add("hidden");
     if (!selectors.length) {
       card.classList.add("all-set");
       $("#extractCardTitle").textContent = FT(canSkipPhotos ? "ext_all_set_design" : "ext_all_set");
@@ -1020,10 +1085,24 @@
     card.classList.remove("all-set");
     $("#extractCardTitle").textContent = FT("ext_missing_title");
     selectors.forEach(function (sel) {
-      var el = $(sel);
-      // the deal toggle is the buttons, not the hidden select
-      var wrap = sel === "#pType" ? document.querySelector(".deal-toggle") : (el && el.closest(".field"));
-      if (wrap) list.appendChild(wrap);
+      var wrap = fieldWrap(sel);
+      if (!wrap) return;
+      wrap.classList.add("needs-fill");
+      var lbl = wrap.querySelector("label");
+      var chip = document.createElement("button");
+      chip.type = "button"; chip.className = "missing-chip";
+      chip.textContent = sel === "#pType" ? FT("lbl_deal_type").replace(/\s*\*$/, "")
+        : (lbl ? lbl.textContent.replace(/\s*\*$/, "") : sel);
+      chip.addEventListener("click", function () {
+        wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+        var input = $(sel); if (input && sel !== "#pType") input.focus({ preventScroll: true });
+      });
+      list.appendChild(chip);
+      // outline goes away once the field has a value
+      var input = $(sel);
+      if (input && sel !== "#pType") input.addEventListener("input", function () {
+        if (String(input.value).trim()) wrap.classList.remove("needs-fill");
+      });
     });
   }
   function addImportedPhoto(url) {
@@ -1088,8 +1167,14 @@
       return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, ok: r.ok, body: j }; });
     }).then(function (res) {
       if (!res.ok) {
+        // a card left over from an earlier run would contradict this error
+        hideMissingCard();
         showExtractErr(X.errorKey(res.status, res.body.error));
-        if (res.status === 422 || res.status === 409) $("#extractInput").focus(); else revealManual();
+        // the error says "fill in manually", so the fields must be there now —
+        // not only once "next" fails validation. Unreadable/not-connected still
+        // focuses the input, since pasting the text instead is the quick retry.
+        revealManual();
+        if (res.status === 422 || res.status === 409) $("#extractInput").focus();
         return;
       }
       if (res.body.source === "scrape" || res.body.source === "facebook") extractedFromUrl = true;
@@ -1100,6 +1185,7 @@
       showMissingCard(X.missingFor(res.body.missing, $, isDemo));
       updateLivePreview();
     }).catch(function () {
+      hideMissingCard();
       showExtractErr("ext_err_unavailable"); revealManual();
     }).then(function () {
       btn.disabled = false; btn.textContent = FT("ext_btn");
@@ -1472,8 +1558,8 @@
           body: JSON.stringify(body),
         }).then(function (r) {
           // Session expired / not logged in on the real path → go log in,
-          // matching FLY.req. (Demo has no login, so let its error surface.)
-          if (r.status === 401 && !isDemo) {
+          // matching FLY.req. Demo is admin-gated, so a non-admin goes there too.
+          if (r.status === 401 || (r.status === 403 && isDemo)) {
             location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
             throw new Error("unauthenticated");
           }

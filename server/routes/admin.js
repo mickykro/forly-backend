@@ -60,7 +60,8 @@ module.exports = function createAdminRouter(ctx) {
   router.get("/me", (req, res) => {
     const session = verifySession(authSecret, readToken(req));
     if (!session) return res.status(401).json({ error: "unauthenticated" });
-    if (!isAdmin(session)) return res.status(403).json({ error: "not_admin" });
+    // The caller's own phone, so a denied operator can see what to allowlist.
+    if (!isAdmin(session)) return res.status(403).json({ error: "not_admin", phone: session.userId });
     res.json({ ok: true, is_admin: true, phone: session.userId });
   });
 

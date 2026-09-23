@@ -43,14 +43,19 @@
     return changed;
   }
 
-  // Selectors of inputs the card should show: server-missing ∩ still-empty, display order.
+  // Selectors of inputs the card should show: (server-missing ∪ required) ∩ still-empty, display order.
+  // Fields step 1 won't continue without (mirrors validateStageOne in
+  // create.html) — shown whenever empty, even if the server didn't flag them,
+  // or the card hides the very fields blocking "next".
+  var REQUIRED = ["city", "price", "rooms", "size_sqm"];
+
   function missingFor(missing, byId, isDemo) {
     var out = [];
     if (isDemo) ["#agName", "#agPhone"].forEach(function (sel) {
       var el = byId(sel); if (el && isEmpty(el)) out.push(sel);
     });
     ORDER.forEach(function (key) {
-      if ((missing || []).indexOf(key) < 0) return;
+      if ((missing || []).indexOf(key) < 0 && REQUIRED.indexOf(key) < 0) return;
       var el = byId(FIELD_MAP[key]);
       if (!el) return;
       if (key === "deal" || isEmpty(el)) out.push(FIELD_MAP[key]);
