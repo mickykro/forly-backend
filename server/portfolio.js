@@ -15,7 +15,7 @@ function transliterate(str) {
   return String(str || "").split("").map((c) => HE_LATIN[c] || c).join("");
 }
 
-const RESERVED_SEGMENTS = new Set(["api", "p", "portfolio", "legal", "assets", "favicon.ico", "robots.txt", "sitemap.xml"]);
+const RESERVED_SEGMENTS = new Set(["api", "p", "portfolio", "legal", "assets", "instructions", "favicon.ico", "robots.txt", "sitemap.xml"]);
 
 /**
  * Generate a route-safe portfolio slug from a business/agent name.

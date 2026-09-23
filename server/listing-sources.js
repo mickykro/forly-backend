@@ -14,6 +14,9 @@ const meta = require("./distribution/meta");
 const db = require("./db");
 
 const TIMEOUT_MS = 10000;
+// Listing sites that render with JavaScript (mor-nadlan) scrape as "טוען נכס..."
+// without a pause; 3s lets the listing and its photos load.
+const FIRECRAWL_WAIT_MS = 3000;
 const MAX_PHOTOS = 12;
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/scrape";
 const FB_HOSTS = /(^|\.)(facebook\.com|fb\.com|fb\.watch)$/i;
@@ -123,8 +126,8 @@ async function fromFirecrawl({ url }, { fetchFn = fetch, firecrawlKey = process.
     const r = await fetchFn(FIRECRAWL_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${firecrawlKey}` },
-      body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true, waitFor: FIRECRAWL_WAIT_MS }),
+      signal: AbortSignal.timeout(TIMEOUT_MS + FIRECRAWL_WAIT_MS),
     });
     if (!r.ok) throw fail("page_unreadable", `firecrawl ${r.status}`);
     data = (await r.json()).data || {};

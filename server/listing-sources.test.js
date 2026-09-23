@@ -60,6 +60,7 @@ assert.equal(listingImages(Array.from({ length: 30 }, (_, i) => `![](https://c/$
   assert.equal(fcReq.url, "https://api.firecrawl.dev/v1/scrape");
   assert.equal(fcReq.opts.headers.Authorization, "Bearer k");
   assert.equal(JSON.parse(fcReq.opts.body).url, "https://www.yad2.co.il/item/1");
+  assert.equal(JSON.parse(fcReq.opts.body).waitFor, 3000, "JS-rendered listings get time to load");
 
   // ── firecrawl: blocked / empty → page_unreadable; no key → extract_unavailable; private host → invalid_input ──
   const fetchEmpty = async () => ({ ok: true, json: async () => ({ success: true, data: { markdown: "   " } }) });

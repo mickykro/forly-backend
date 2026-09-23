@@ -20,6 +20,7 @@ assert.strictEqual(portfolioSlug("קרויטורו נכסים"), "krvytvrv-nksym
 assert.strictEqual(portfolioSlug("ABC Properties"), "abc-properties");
 assert.strictEqual(portfolioSlug(""), "my-portfolio");
 assert.strictEqual(portfolioSlug("api"), "agent-api"); // reserved
+assert.strictEqual(portfolioSlug("instructions"), "agent-instructions", "the public help pages own /instructions");
 
 // ── property slug ──
 // ponytail: street3 (first 3 non-digit chars) + number + code

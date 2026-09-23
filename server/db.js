@@ -8,7 +8,19 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map() };
+
+// A personal `gcloud auth application-default login` file works until Google
+// demands a re-login ("invalid_rapt"), and every Firestore call then fails for
+// hours before anyone notices. Only a service-account key is safe to deploy.
+function warnIfUserCredentials(path) {
+  let type;
+  try { type = JSON.parse(require("fs").readFileSync(path, "utf8")).type; } catch { return; }
+  if (type === "authorized_user") {
+    console.warn(`WARNING ${path} is a personal login (type: authorized_user), not a service account.\n` +
+      "         Firestore will break once Google forces a re-login. Deploy a service-account key.");
+  }
+}
 
 function init() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
@@ -17,6 +29,7 @@ function init() {
     db = admin.firestore();
     FieldValue = admin.firestore.FieldValue;
     console.log("Firestore enabled (service account credentials found)");
+    warnIfUserCredentials(process.env.GOOGLE_APPLICATION_CREDENTIALS);
     // ponytail: first Firestore RPC sync-loads grpc protos and blocks the event
     // loop for ~30s — burn that at boot, not on the user's first OTP request.
     db.collection("_warmup").doc("_").get()
@@ -54,6 +67,16 @@ async function listListingsByPhone(phone) {
     return snap.docs.map((d) => d.data());
   }
   return [...mem.listings.values()].filter((l) => l.business_phone === phone);
+}
+
+// Listings from `source` still waiting for their page (equality filters only: no composite index needed).
+async function listPendingListings(source) {
+  if (db) {
+    const snap = await db.collection("listings").where("source", "==", source)
+      .where("status", "==", "active").where("page_id", "==", null).limit(200).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listings.values()].filter((l) => l.source === source && l.status === "active" && !l.page_id);
 }
 
 // ── admin: full-collection reads (no phone filter) ──
@@ -495,13 +518,48 @@ async function listPagesByPhone(phone, limit = 100) {
   return [...mem.pages.values()].filter((p) => p.business_phone === phone).slice(0, limit);
 }
 
+// ponytail: resolves one page by its public slug without reading the agent's
+// whole catalogue. The slug is only unique within one business, so the phone
+// filter is load-bearing, not an optimisation — dropping it would let one
+// agent's slug resolve to another's page.
+async function findPageBySlug(phone, publicSlug) {
+  if (db) {
+    const snap = await db.collection("property_pages")
+      .where("business_phone", "==", phone)
+      .where("public_slug", "==", publicSlug)
+      .limit(1).get();
+    return snap.empty ? null : snap.docs[0].data();
+  }
+  return [...mem.pages.values()].find(
+    (p) => p.business_phone === phone && p.public_slug === publicSlug
+  ) || null;
+}
+
+// ── property drafts (WhatsApp chat intake, see whatsapp-intake.js) ──
+// One doc per agent phone; saveDraft replaces the whole doc on purpose so a
+// cleared field (skipped, pending_opener: null) never lingers from a merge.
+async function getDraft(phone) {
+  if (db) { const d = await db.collection("property_drafts").doc(phone).get(); return d.exists ? d.data() : null; }
+  return mem.drafts.get(phone) || null;
+}
+
+async function saveDraft(draft) {
+  if (db) await db.collection("property_drafts").doc(draft.phone).set(draft);
+  else mem.drafts.set(draft.phone, draft);
+}
+
+async function deleteDraft(phone) {
+  if (db) await db.collection("property_drafts").doc(phone).delete();
+  else mem.drafts.delete(phone);
+}
+
 module.exports = {
   init,
   get db() { return db; },
   get mem() { return mem; },
   shortCode,
-  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listAllListings,
-  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone,
+  saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listPendingListings, listAllListings,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone, findPageBySlug,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
   getPortfolioSlugReservation, reservePortfolioSlug,
@@ -512,4 +570,5 @@ module.exports = {
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
   listShareSessionsByPhone, healGroups, addAdminMessage,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
+  getDraft, saveDraft, deleteDraft,
 };

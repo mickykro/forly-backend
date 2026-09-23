@@ -10,12 +10,13 @@ const path = require("path");
 const fs = require("fs");
 
 const db = require("../db");
+const businessCache = require("../business-cache");
 const pageEdit = require("../edit");
-const { sanitizeTheme, sanitizeLang, sniffMatchesExt } = require("../utils");
-const { sanitizeTags } = require("../tags");
+const { sniffMatchesExt } = require("../utils");
+const { REVIEW_SCOPES } = require("../auth");
+const { validateListing, createListing: createListingShared, MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
 const { makeAdminGuard } = require("../admin-auth");
 
-const MAX_UPLOAD_FILES = 12;
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mp4" };
 const FONT_TYPES = { "font/woff2": "woff2", "font/woff": "woff", "font/ttf": "ttf", "font/otf": "otf" };
@@ -25,9 +26,9 @@ const MAX_VIDEO_MB = 120;
 const MAX_FONT_MB = 5;
 
 module.exports = function createIntakeRouter(ctx) {
-  const { requireAuth, normalizeAuthPhone, uploadDir, uploadPublicBase, remoteUploadBase,
-    n8nWw1Webhook, n8nPipelineWebhook, authSecret, pageBaseUrl, isDevRun, isDevPipelineRun,
-    baseUrl, verifySession, readToken, adminPhones, quota } = ctx;
+  const { requireAuth, normalizeAuthPhone, signSession, uploadDir, uploadPublicBase, remoteUploadBase,
+    n8nWw1Webhook, n8nPipelineWebhook, authSecret, sessionTtl, pageBaseUrl, isDevRun, isDevPipelineRun,
+    baseUrl, verifySession, readToken, verifyActionToken, adminPhones, quota } = ctx;
 
   const router = express.Router();
 
@@ -40,12 +41,24 @@ module.exports = function createIntakeRouter(ctx) {
   // (REMOTE_UPLOAD_BASE), it forwards the caller's own session so the remote —
   // running this same code — re-authorizes the write. index.js only enables
   // the relay when a real shared NADLAN_JWT_SECRET exists (see upload-relay.js).
-  const { relayHeaders, relayUpload } = require("../upload-relay");
+  const { relayHeaders, relayUpload, uploadTokenParts } = require("../upload-relay");
 
   // ── upload-urls ──
   // Any authenticated user (agent or admin) may request upload slots; the
   // header bypass is gone.
-  const uploadAuth = requireAuth(authSecret);
+  // The WhatsApp review link (scope "review") lands on create.html, which uploads photos and creates.
+  const uploadAuth = requireAuth(authSecret, REVIEW_SCOPES);
+
+  // PUT /upload/:fname additionally accepts a server-signed upload token, for
+  // relays started by a route that has no session to forward (rehost() called
+  // from the unauthenticated createPropertyPage). The token is HMAC'd over the
+  // exact filename, so one leaked token grants one upload of one name and
+  // nothing else — it is not a session and confers no other rights. Every
+  // content check below still runs.
+  const uploadTokenOk = (req) => !!verifyActionToken &&
+    verifyActionToken(uploadTokenParts(req.params.fname), req.get("x-upload-token"), authSecret);
+  const uploadAuthOrToken = (req, res, next) =>
+    (uploadTokenOk(req) ? next() : uploadAuth(req, res, next));
 
   router.post("/upload-urls", uploadAuth, (req, res) => {
     const files = req.body && req.body.files;
@@ -77,7 +90,7 @@ module.exports = function createIntakeRouter(ctx) {
   // Authenticated (agent or admin); the remote-store relay forwards the same
   // session so the remote instance re-authorizes rather than trusting the hop.
   const rawBody = express.raw({ type: () => true, limit: `${MAX_VIDEO_MB}mb` });
-  router.put("/upload/:fname", uploadAuth, rawBody, async (req, res) => {
+  router.put("/upload/:fname", uploadAuthOrToken, rawBody, async (req, res) => {
     const fname = req.params.fname;
     const m = /^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.exec(fname);
     if (!m) {
@@ -130,94 +143,10 @@ module.exports = function createIntakeRouter(ctx) {
     res.json({ ok: true });
   });
 
-  // ── shared listing creation ──
-  // Validation is separate so the quota is only consumed for a request that
-  // would actually create something (a 400 must not burn a paid creation).
-  function validateListing(body) {
-    // Address is intentionally not required: scraped listings routinely omit
-    // the exact street address (agent privacy) and still make a good page.
-    if (!body.city || !body.price || !body.rooms) {
-      return { error: "city, price, rooms are required", code: 400 };
-    }
-    if (!Array.isArray(body.photos_urls) || body.photos_urls.length < 3) {
-      return { error: "at least 3 photos required", code: 400 };
-    }
-    return null;
-  }
-
-  async function createListing(phone, body, agentOverride) {
-    const invalid = validateListing(body);
-    if (invalid) return invalid;
-    const listingId = crypto.randomUUID();
-    const listing = {
-      listing_id: listingId, business_phone: phone, source: "dashboard",
-      address: String(body.address).slice(0, 120),
-      neighborhood: String(body.neighborhood || "").slice(0, 60),
-      city: String(body.city).slice(0, 60),
-      listing_type: body.listing_type === "rent" ? "rent" : "sale",
-      price: Number(body.price) || 0, rooms: Number(body.rooms) || 0,
-      size_sqm: Number(body.size_sqm) || 0, floor: Number(body.floor) || 0,
-      size_built: Number(body.size_built) || 0,
-      size_balcony: Number(body.size_balcony) || 0,
-      size_garden: Number(body.size_garden) || 0,
-      parking: Number(body.parking) || 0,
-      storage: !!body.storage,
-      elevator: !!body.elevator || !!body.shabbat_elevator,
-      shabbat_elevator: !!body.shabbat_elevator,
-      tags: sanitizeTags(body.tags),
-      description: String(body.description || "").slice(0, 2000),
-      photos_urls: body.photos_urls.slice(0, MAX_UPLOAD_FILES),
-      own_video_url: body.own_video_url || null,
-      status: "active", page_id: null,
-      agent: agentOverride ? {
-        name: String(agentOverride.name || ""),
-        brand_name: String(agentOverride.brand_name || agentOverride.name || ""),
-        logo_url: agentOverride.logo_url || null,
-        tagline: String(agentOverride.tagline || ""),
-        phone: String(agentOverride.phone || phone),
-        phone2: agentOverride.phone2
-          ? String(agentOverride.phone2).replace(/\D/g, "").slice(0, 15) || null
-          : null,
-        license: String(agentOverride.license || ""),
-      } : null,
-      agent2: body.agent2 && body.agent2.name && body.agent2.phone ? {
-        name: String(body.agent2.name).slice(0, 60),
-        phone: String(body.agent2.phone).replace(/\D/g, "").slice(0, 15),
-      } : null,
-      theme: sanitizeTheme(body.theme),
-      language: sanitizeLang(body.language),
-      created_at: new Date(),
-    };
-    await db.saveListing(listing);
-
-    const webhook = listing.own_video_url ? n8nPipelineWebhook : n8nWw1Webhook;
-    const payload = listing.own_video_url ? {
-      listing_id: listingId, business_phone: phone, video_url: listing.own_video_url,
-      language: listing.language, dev: !!isDevPipelineRun, base_url: baseUrl,
-    } : {
-      phone, image_urls: listing.photos_urls, listing_id: listingId, trigger_source: "dashboard",
-      language: listing.language, dev: !!isDevRun, base_url: baseUrl,
-      property_details: {
-        listing_type: listing.listing_type,
-        address: listing.address, neighborhood: listing.neighborhood, city: listing.city,
-        price: listing.price, rooms: listing.rooms, size_sqm: listing.size_sqm,
-        size_built: listing.size_built, size_balcony: listing.size_balcony,
-        size_garden: listing.size_garden,
-        floor: listing.floor, parking: listing.parking,
-        storage: listing.storage, elevator: listing.elevator,
-        shabbat_elevator: listing.shabbat_elevator,
-        description: listing.description,
-      },
-    };
-    if (webhook) {
-      fetch(webhook, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload), signal: AbortSignal.timeout(15000),
-      }).then((r) => console.log(`pipeline webhook → ${r.status}`))
-        .catch((err) => console.error("pipeline webhook failed:", err.message));
-    }
-    return { listing_id: listingId };
-  }
+  // ── shared listing creation (listing-create.js) ──
+  const pipelineDeps = { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl };
+  const createListing = (phone, body, agentOverride, extraDeps) =>
+    createListingShared(phone, body, agentOverride, { ...pipelineDeps, ...extraDeps });
 
   // ── demo-create ──
   // Admin-only: this creates a listing + business doc for a client-supplied
@@ -249,6 +178,7 @@ module.exports = function createIntakeRouter(ctx) {
         features: { chatbot: true },
         created_at: now, updated_at: now,
       });
+      businessCache.invalidate(agentPhone);
     }
 
     // The admin stays logged in as themselves so they can create the next
@@ -279,7 +209,7 @@ module.exports = function createIntakeRouter(ctx) {
   // ── create (authenticated) ──
   // Paid bundle: one creation consumes one `walkthroughs` unit, atomically, and
   // only after the body validates. Demos (admin-driven) don't consume.
-  router.post("/properties/create", requireAuth(authSecret), async (req, res) => {
+  router.post("/properties/create", requireAuth(authSecret, REVIEW_SCOPES), async (req, res) => {
     const body = req.body || {};
     const phone = req.user.userId;
     const invalid = validateListing(body);
@@ -293,8 +223,13 @@ module.exports = function createIntakeRouter(ctx) {
       });
       if (!q.ok) return res.status(402).json(q);
     }
-    const result = await createListing(phone, body, null);
+    // create.html?whatsapp=1 flags a build from the chat draft. Stamp the
+    // source and clear the draft: otherwise the agent's next message would
+    // keep re-sending the review link for a page that already exists.
+    const fromDraft = body.whatsapp_draft === true;
+    const result = await createListing(phone, body, null, fromDraft ? { source: "whatsapp" } : null);
     if (result.error) return res.status(result.code).json({ error: result.error });
+    if (fromDraft) await db.deleteDraft(phone).catch((err) => console.warn("whatsapp draft cleanup failed:", err.message));
     res.json({ ...result, status: "building" });
   });
 

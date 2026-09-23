@@ -1,0 +1,116 @@
+# Always-on staging for the intake/pages server, at
+# https://staging.srv1173890.hstgr.cloud
+#
+# Exists so there is something to point n8n, a demo, or a 3am webhook retry at
+# when the laptop running the dev tunnel is closed. It is also where media
+# created on dev is stored: dev sets REMOTE_UPLOAD_BASE to this host, so the
+# URLs a dev-built page writes into Firestore outlive the dev session.
+#
+# Deliberately separate from deploy-server.yml in every name that Docker or
+# Traefik keys on — container, image, volume, router, concurrency group. A
+# shared name would silently steal production's route, which is the one way
+# this can break prod. The smoke test below asserts it did not.
+#
+# ── One-time setup ────────────────────────────────────────────────────────
+# 1. Create /root/forly-backend/staging.env on the VPS (NOT committed). Copy
+#    deploy.env and change only:
+#      BASE_URL=https://staging.srv1173890.hstgr.cloud
+#      PAGE_BASE_URL=https://staging.srv1173890.hstgr.cloud
+#      ALLOW_INFRA_PAGE_BASE=1
+#    Phase 1 shares the rest with production — same Firestore, same GreenAPI,
+#    same n8n, same NADLAN_JWT_SECRET (the shared secret is what lets dev relay
+#    uploads here at all).
+#
+#    Do NOT set REMOTE_UPLOAD_BASE here. Staging is always on, so the URLs it
+#    stamps are already durable; pointing it at itself is refused at boot
+#    (see resolveRemoteUploadBase in server/upload-relay.js) and pointing it at
+#    production would put staging's test media in prod's volume.
+#
+# 2. No DNS needed: *.srv1173890.hstgr.cloud is a wildcard onto this VPS, and
+#    Traefik issues the certificate on first request.
+# ──────────────────────────────────────────────────────────────────────────
+
+name: Deploy server to staging
+
+on:
+  push:
+    branches: [staging]
+    paths:
+      - 'server/**'
+      - 'public-agent/**'
+      - 'public-nadlan/**'
+      - '.github/workflows/deploy-staging.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Pull branch on VPS, rebuild, restart staging
+        run: |
+          ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" 'bash -seuo pipefail' <<'REMOTE'
+          cd /root/forly-backend
+          test -f staging.env || { echo "FATAL: /root/forly-backend/staging.env missing — see the header of deploy-staging.yml"; exit 1; }
+          # A missing key would be mounted as an empty directory and Firestore
+          # would fail on every call instead of at boot.
+          test -f sa-key.json || { echo "FATAL: /root/forly-backend/sa-key.json missing — copy the service-account key there"; exit 1; }
+          git fetch origin staging
+          git checkout -B staging origin/staging
+          docker build -f server/Dockerfile -t forly-intake-staging .
+          docker rm -f forly-intake-staging 2>/dev/null || true
+          # Own volume: staging must not write into production's forly-uploads.
+          # Router name forlystaging is distinct from production's forly.
+          docker run -d --name forly-intake-staging --restart unless-stopped \
+            --network root_default \
+            --env-file /root/forly-backend/staging.env \
+            -v /root/forly-backend/sa-key.json:/secrets/sa-key.json:ro \
+            -v forly-staging-uploads:/app/server/data/uploads \
+            -l traefik.enable=true \
+            -l 'traefik.http.routers.forlystaging.rule=Host(`staging.srv1173890.hstgr.cloud`)' \
+            -l traefik.http.routers.forlystaging.entrypoints=web,websecure \
+            -l traefik.http.routers.forlystaging.tls=true \
+            -l traefik.http.routers.forlystaging.tls.certresolver=mytlschallenge \
+            -l traefik.http.services.forlystaging.loadbalancer.server.port=8787 \
+            forly-intake-staging
+          sleep 3
+          docker ps --filter name=forly-intake-staging --format 'STATUS: {{.Status}}'
+          # Restoring main keeps an operator who SSHes in from finding the
+          # checkout parked on staging.
+          git checkout -B main origin/main 2>/dev/null || true
+          REMOTE
+
+      - name: Smoke test staging
+        run: |
+          # 400 = request reached the new build and was validated (same probe
+          # deploy-server.yml uses for production).
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST \
+            "https://staging.srv1173890.hstgr.cloud/createPropertyPage" \
+            -H 'Content-Type: application/json' -d '{}' || true)
+          echo "staging createPropertyPage returned $code (expect 400)"
+          test "$code" = "400"
+
+      - name: Assert production is untouched
+        run: |
+          # The failure this guards against: a duplicated Traefik router or
+          # container name hijacking forly.srv1173890.hstgr.cloud. Staging going
+          # green while production 404s is the worst possible outcome here, so
+          # it fails the job rather than being left for someone to notice.
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X POST \
+            "https://forly.srv1173890.hstgr.cloud/createPropertyPage" \
+            -H 'Content-Type: application/json' -d '{}' || true)
+          echo "production createPropertyPage returned $code (expect 400)"
+          test "$code" = "400" || {
+            echo "PRODUCTION REGRESSION: staging deploy appears to have taken over the prod route."
+            exit 1
+          }

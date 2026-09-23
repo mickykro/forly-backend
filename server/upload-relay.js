@@ -24,10 +24,11 @@ function resolveAuthSecret(env, randomSecret) {
   return { secret: randomSecret(), ephemeral: true };
 }
 
-// resolveRemoteUploadBase({ raw, secretEphemeral }) → { base, reason }
-// base is "" (relay off, store locally) when nothing is configured OR the
-// session secret is ephemeral (the remote could never validate our cookie).
-function resolveRemoteUploadBase({ raw, secretEphemeral }) {
+// resolveRemoteUploadBase({ raw, secretEphemeral, selfBase }) → { base, reason }
+// base is "" (relay off, store locally) when nothing is configured, when the
+// session secret is ephemeral (the remote could never validate our cookie), or
+// when the configured remote IS this instance.
+function resolveRemoteUploadBase({ raw, secretEphemeral, selfBase }) {
   const base = String(raw || "").trim().replace(/\/+$/, "");
   if (!base) return { base: "", reason: null };
   if (secretEphemeral) {
@@ -37,14 +38,38 @@ function resolveRemoteUploadBase({ raw, secretEphemeral }) {
         "cannot validate relayed sessions, so uploads are stored locally instead.",
     };
   }
+  // Pointing an instance at itself makes every upload a request to itself,
+  // which either loops or deadlocks the single-threaded event loop under load.
+  // Cheap to misconfigure (copying staging's env onto staging), so refuse it.
+  const self = String(selfBase || "").trim().replace(/\/+$/, "");
+  if (self && base.toLowerCase() === self.toLowerCase()) {
+    return {
+      base: "",
+      reason: `REMOTE_UPLOAD_BASE (${base}) is this instance's own BASE_URL — ` +
+        "an instance cannot relay to itself; uploads are stored locally instead.",
+    };
+  }
   return { base, reason: null };
 }
 
+// The parts an upload token is HMAC'd over. Defined once so the signer
+// (routes/pages.js, rehosting page media) and the verifier (routes/intake.js)
+// cannot drift apart — if they did, every relayed upload would 401 and the
+// cause would look like a secret mismatch rather than a scope mismatch.
+// Including the filename is the point: a token authorizes ONE upload of ONE
+// name, so a leaked one cannot be replayed against anything else.
+const uploadTokenParts = (fname) => ["upload", String(fname || "")];
+
 // Forward only the caller's credentials — never arbitrary headers.
+// x-upload-token is the server-to-server case: a relay started by an
+// UNauthenticated route (createPropertyPage, which n8n calls with no session)
+// has no cookie to forward, so it signs a token bound to the one filename it
+// is uploading. See routes/intake.js for the verifying side.
 function relayHeaders(req) {
   const h = {};
   if (req.headers.cookie) h.cookie = req.headers.cookie;
   if (req.headers.authorization) h.authorization = req.headers.authorization;
+  if (req.headers["x-upload-token"]) h["x-upload-token"] = req.headers["x-upload-token"];
   return h;
 }
 
@@ -71,4 +96,7 @@ async function relayUpload({ fetch, base, fname, req, body, contentType, timeout
   }
 }
 
-module.exports = { PLACEHOLDER_SECRETS, resolveAuthSecret, resolveRemoteUploadBase, relayHeaders, relayUpload };
+module.exports = {
+  PLACEHOLDER_SECRETS, resolveAuthSecret, resolveRemoteUploadBase,
+  relayHeaders, relayUpload, uploadTokenParts,
+};
