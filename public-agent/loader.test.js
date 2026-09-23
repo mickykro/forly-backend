@@ -1,16 +1,22 @@
-/* Loader state machine: a hide during playback must wait for the animation to
-   finish, and must never strand the page if "ended" never arrives.
+/* Loader state machine: a hide must reveal the page as soon as the work behind
+   the loader is done — never wait out the animation — and must not depend on
+   media events that blocked autoplay would never deliver.
    Run: node public-agent/loader.test.js */
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
 
+const CLIP_MS = 5042;   // the real /assets/loading.mp4 cycle
+const CYCLE_MS = 2300;  // target length of one on-screen pass
+const BUDGET_MS = 900;  // LOADER_MIN_MS + fade + slack — well under one cycle
+
 // Minimal fake DOM — just enough of the shape api.js touches.
 function setup() {
   const listeners = {};
   const video = {
-    duration: 5, currentTime: 0,
+    duration: CLIP_MS / 1000, currentTime: 0, paused: false,
     play: () => Promise.resolve(),
+    pause: () => { video.paused = true; },
     addEventListener: (ev, fn) => { (listeners[ev] = listeners[ev] || []).push(fn); },
     closest: () => box,
   };
@@ -36,35 +42,94 @@ function setup() {
   return { FLY: global.window.FLY, box, video, fire: (ev) => (listeners[ev] || []).forEach((f) => f()) };
 }
 
-// ── a hide mid-playback waits for "ended" ──
-{
-  const { FLY, box, fire } = setup();
-  let revealed = false;
-  FLY.loaderHide(() => { revealed = true; });
-  assert.equal(revealed, false, "must not reveal while the animation is still playing");
-  assert.equal(box.classes.has("hidden"), false, "loader stays visible until the animation ends");
-  fire("ended");
-  assert.equal(revealed, true, "reveals once the animation ends");
-  assert.equal(box.classes.has("hidden"), true, "loader hides once the animation ends");
-}
+const hide = (FLY) => new Promise((resolve) => {
+  const t0 = Date.now();
+  FLY.loaderHide(() => resolve(Date.now() - t0));
+});
 
-// ── without a pending hide, "ended" just loops ──
-{
-  const { box, video, fire } = setup();
-  video.currentTime = 4;
-  fire("ended");
-  assert.equal(video.currentTime, 0, "replays from the start");
-  assert.equal(box.classes.has("hidden"), false, "keeps looping while still loading");
-}
+(async () => {
+  // ── a hide mid-playback does not wait for the cycle to end ──
+  {
+    const { FLY, box, video } = setup();
+    FLY.loaderShow("loading");
+    video.currentTime = 0.2; // barely started: the old code cost ~4.8s here
+    const ms = await hide(FLY);
+    assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms, must be under ${BUDGET_MS}ms (clip is ${CLIP_MS}ms)`);
+    assert.equal(box.classes.has("hidden"), true, "loader is hidden once the work is done");
+    assert.equal(box.classes.has("vloader-out"), false, "the fade class is cleaned up");
+    assert.equal(video.paused, true, "the clip stops decoding once hidden");
+  }
 
-// ── blocked autoplay must not strand the page ──
-{
-  const { FLY } = setup(); // autoplay blocked: "ended" never fires
-  let revealed = false;
-  FLY.loaderHide(() => { revealed = true; });
-  assert.equal(revealed, false, "gives playback a chance to start first");
-  setTimeout(() => {
-    assert.equal(revealed, true, "safety timeout reveals the page anyway");
-    console.log("loader.test.js: all checks passed");
-  }, 5500);
-}
+  // ── a loader up from first paint reveals just as fast ──
+  {
+    const { FLY, box } = setup(); // no loaderShow(): markup ships it visible
+    const ms = await hide(FLY);
+    assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms, must be under ${BUDGET_MS}ms`);
+    assert.equal(box.classes.has("hidden"), true, "loader hides");
+  }
+
+  // ── an instant response still shows the loader long enough to not flicker ──
+  {
+    const { FLY } = setup();
+    FLY.loaderShow();
+    const ms = await hide(FLY);
+    assert.ok(ms >= 300, `revealed after ${ms}ms, too fast to read as anything but a flash`);
+  }
+
+  // ── blocked autoplay must not strand the page ──
+  {
+    const { FLY, box } = setup(); // "ended" never fires, playback never starts
+    FLY.loaderShow();
+    const ms = await hide(FLY);
+    assert.ok(ms < BUDGET_MS, `revealed in ${ms}ms even with playback blocked`);
+    assert.equal(box.classes.has("hidden"), true, "loader hides without any media event");
+  }
+
+  // ── the clip is paced to one pass per CYCLE_MS, whatever the source length ──
+  {
+    const { video } = setup(); // paced on wire-up, the clip is already autoplaying
+    const pass = (CLIP_MS / video.playbackRate);
+    assert.ok(Math.abs(pass - CYCLE_MS) < 1, `one pass takes ${Math.round(pass)}ms, expected ${CYCLE_MS}ms`);
+    assert.equal(video.defaultPlaybackRate, video.playbackRate, "survives a source reload");
+  }
+
+  // ── pacing falls back to the known clip length before metadata lands ──
+  {
+    const { FLY, video } = setup();
+    video.duration = NaN; // metadata not in yet
+    FLY.loaderShow();
+    const pass = (CLIP_MS / video.playbackRate);
+    assert.ok(Math.abs(pass - CYCLE_MS) < 1, `unpaced before metadata: one pass takes ${Math.round(pass)}ms`);
+  }
+
+  // ── while still loading, "ended" keeps the clip looping ──
+  {
+    const { FLY, box, video, fire } = setup();
+    FLY.loaderShow();
+    video.currentTime = 4;
+    fire("ended");
+    assert.equal(video.currentTime, 0, "replays from the start");
+    assert.equal(box.classes.has("hidden"), false, "keeps looping while still loading");
+  }
+
+  // ── once hidden, a late "ended" does not restart playback ──
+  {
+    const { FLY, box, video, fire } = setup();
+    FLY.loaderShow();
+    await hide(FLY);
+    video.currentTime = 4;
+    fire("ended");
+    assert.equal(video.currentTime, 4, "no replay behind a hidden loader");
+    assert.equal(box.classes.has("hidden"), true, "stays hidden");
+  }
+
+  // ── hiding an already-hidden loader is a no-op that still reveals ──
+  {
+    const { FLY } = setup();
+    await hide(FLY);
+    const ms = await hide(FLY);
+    assert.ok(ms < 50, `second hide took ${ms}ms, should be immediate`);
+  }
+
+  console.log("loader.test.js: all checks passed");
+})();

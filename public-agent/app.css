@@ -97,7 +97,12 @@ a{color:inherit}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* video loader — sits in the page flow under the topbar, so the header and page
    background stay visible. Put it where the content it replaces would go. */
-.vloader{min-height:58vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:40px 20px}
+.vloader{min-height:58vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:40px 20px;
+  opacity:1;transition:opacity .16s ease}
+/* The hide cuts the clip off wherever it is — this fade keeps that from
+   reading as a flicker. Duration must match LOADER_FADE_MS in api.js. */
+.vloader.vloader-out{opacity:0}
+@media (prefers-reduced-motion:reduce){.vloader{transition:none}}
 /* The clip's backdrop is not flat — it vignettes from #EFE9E2 (top/bottom centre)
    to #EBE3DC (sides) — so no single page colour can match it everywhere. Fade the
    outer 8% of the video to transparent instead: the seam dissolves into whatever
