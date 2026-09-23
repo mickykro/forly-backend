@@ -62,6 +62,9 @@ jobs:
           ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" 'bash -seuo pipefail' <<'REMOTE'
           cd /root/forly-backend
           test -f staging.env || { echo "FATAL: /root/forly-backend/staging.env missing — see the header of deploy-staging.yml"; exit 1; }
+          # A missing key would be mounted as an empty directory and Firestore
+          # would fail on every call instead of at boot.
+          test -f sa-key.json || { echo "FATAL: /root/forly-backend/sa-key.json missing — copy the service-account key there"; exit 1; }
           git fetch origin staging
           git checkout -B staging origin/staging
           docker build -f server/Dockerfile -t forly-intake-staging .
