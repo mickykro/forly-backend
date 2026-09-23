@@ -1148,7 +1148,11 @@
         // a card left over from an earlier run would contradict this error
         hideMissingCard();
         showExtractErr(X.errorKey(res.status, res.body.error));
-        if (res.status === 422 || res.status === 409) $("#extractInput").focus(); else revealManual();
+        // the error says "fill in manually", so the fields must be there now —
+        // not only once "next" fails validation. Unreadable/not-connected still
+        // focuses the input, since pasting the text instead is the quick retry.
+        revealManual();
+        if (res.status === 422 || res.status === 409) $("#extractInput").focus();
         return;
       }
       if (res.body.source === "scrape" || res.body.source === "facebook") extractedFromUrl = true;
