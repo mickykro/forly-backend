@@ -1,10 +1,12 @@
-# Driver-Backed Listing Import Implementation Plan
+# Driver-Backed Listing Import & Group Posting Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let an agent paste a Yad2, Madlan, or social-media listing URL and have Forly fill the create-wizard fields from it, using a hosted real-Chrome session (driver.dev) where Firecrawl cannot reach — plus an embedded browser inside the Forly dashboard where the agent logs into their own social accounts once.
+**Goal:** Let an agent paste a Yad2, Madlan, or social-media listing URL and have Forly fill the create-wizard fields from it, using a hosted real-Chrome session (driver.dev) where Firecrawl cannot reach; connect their own social accounts through a browser embedded in the Forly dashboard; and then post each property to their chosen Facebook groups on a paced schedule — from a background browser they never see — under either per-post approval or a standing permission they can revoke with one tap.
 
-**Architecture:** Three new server modules. `driver-browser.js` is a thin Driver API client (create / get / stop session, connect over CDP with Patchright, always stop in a `finally`). `listing-driver.js` turns a rendered page into the exact `{source, text, description, photos}` shape `listing-sources.js` already produces for Firecrawl, so `listing-extract.js` (the LLM parser) is untouched. `extract-jobs.js` is a queued-job state machine plus sweeper, mirroring `distribution/jobs.js`, because a browser scrape takes 30–90s and Cloud Run runs many instances. Routing is an explicit host allowlist: social media, Yad2 and Madlan go straight to Driver; everything else tries Firecrawl first and falls back to a Driver job only when Firecrawl errors.
+**Architecture:** Import (Phase 1–2) adds three server modules: `driver-browser.js` (Driver API client, always stops in a `finally`), `listing-driver.js` (page → the exact result shape `listing-sources.js` already produces for Firecrawl, so `listing-extract.js` is untouched), and `extract-jobs.js` (queued-job state machine + sweeper, mirroring `distribution/jobs.js`). Posting (Phase 3) adds four more: `posting-safety.js` (pure pacing + signal classification — the anti-ban core, and the most-tested file in the plan), `posting-campaign.js` (campaign state machine + sweeper, one serial browser per agent), `posting-driver.js` (the browser actions, with a dry-run mode that stops before submit), and `routes/posting.js`. Copy variation and tracked URLs are reused from `distribution/share-kit.js`, group selection from `property_groups`, and the catalog's `agent_policy` field becomes a hard gate.
+
+**A decision this plan reverses, on purpose:** `distribution/share-kit.js` records that browser automation to groups "was rejected as a ban risk (spec §1)" in favour of a WhatsApp share kit. The product owner has asked for automated posting anyway. Phase 3 therefore treats "the agent's account must never get blocked or look suspicious" as a first-class requirement with its own module, its own tests, a calibration task, and a kill switch — not a caveat.
 
 **Tech Stack:** Node >= 20 CommonJS, Express 4, Firebase Admin (Firestore), `patchright` (Playwright-compatible, connect-only), vanilla browser JS in `public-agent/`, plain `node x.test.js` assertion scripts.
 
@@ -25,6 +27,12 @@ Every task's requirements implicitly include this section.
 - **Keep files under 500 lines** (CLAUDE.md). Split before exceeding.
 - **Commit messages carry no `Co-Authored-By` trailer** — `.claude/settings.json` has no `attribution.commit` key, and CLAUDE.md forbids it in that case.
 - **Branch:** all work lands on `claude/zen-davinci-lu4hoq`.
+- **Posting is background-only.** A posting session never surfaces a `view_url`; the agent sees a timeline, not a browser. The embedded browser (Task 11) is the escape hatch when Facebook demands a human (checkpoint, identity check), and only then.
+- **One browser per agent at a time.** Posting jobs for the same phone run serially. Never two Facebook sessions on one profile concurrently.
+- **Every pacing number is a tunable, conservative default marked [Unverified].** None was measured against Facebook; Task 18 measures. A number is never hard-coded in a call site — it comes from `posting-safety.DEFAULTS` and can be overridden per account.
+- **Never post to a group whose catalog `agent_policy` is `"forbidden"`.** `"unknown"` posts only when the agent explicitly ticked that group. This is a gate in code, not a UI hint.
+- **Any platform signal halts the whole account, not just the post.** Checkpoint, CAPTCHA, "posting too fast", post removed, group blocked → campaign `halted`, no further posts for that phone until the agent re-confirms after a cooldown.
+- **Never identical copy twice.** Every post goes through `share-kit.buildPostCopy` with a `variantSeed` of `page_id + group_url`; the tracked URL differs per group.
 - **Hebrew user-facing copy only.** Vendor error text (Driver's, Facebook's) never reaches the agent — map to a stable `code` and a Hebrew string in `public-agent/form-i18n.js`, the pattern `distribution/jobs.js` already follows.
 
 ---
@@ -60,6 +68,20 @@ A Facebook **page post** keeps the existing Graph path because it is faster, fre
 | `server/routes/connections-browser.test.js` | Ownership, no-cdpUrl-leak, finish verification. |
 | `scripts/driver-extract.local.js` | Live verification against a real Yad2 URL. Not in the test chain. |
 
+**Server — new (Phase 3)**
+
+| File | Responsibility |
+|---|---|
+| `server/posting-safety.js` | Pure functions: `nextSlot()` (may this account post now, and where), `classifySignal()` (is this page a checkpoint / rate-limit / block), `DEFAULTS`. No I/O. |
+| `server/posting-safety.test.js` | Pacing invariants, warm-up ramp, cooldowns, active hours incl. Shabbat, signal classification. |
+| `server/posting-campaign.js` | Campaign state machine + sweeper. `draft → awaiting_approval → running → paused \| halted \| stopped \| completed`. Per-post `posts[]` ledger. Serial per phone. |
+| `server/posting-campaign.test.js` | Transitions, approval modes, standing-permission expiry, breaker, serial guarantee, idempotent post ids. |
+| `server/posting-driver.js` | Browser actions: open group, compose, paste, submit, verify the post landed. `dryRun` stops before submit. |
+| `server/posting-driver.test.js` | Fake page: happy path, dry run never submits, verification failure is a failure, signals bubble up as codes. |
+| `server/routes/posting.js` | Create campaign, approve / grant standing / revoke, pause, stop, timeline. |
+| `server/routes/posting.test.js` | Ownership, `agent_policy` gate, standing permission bounds, revoke is immediate. |
+| `scripts/posting-calibrate.local.js` | Dry run, then ONE real post to a test group the test account owns; records what actually happened. |
+
 **Server — modified**
 
 | File | Change |
@@ -72,6 +94,8 @@ A Facebook **page post** keeps the existing Graph path because it is faster, fre
 | `server/index.js` | Mount `connections-browser`, start the sweeper, run boot orphan cleanup. |
 | `server/package.json` | `patchright` dependency; new test files in the chain. |
 | `server/Dockerfile` | `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. |
+| `server/db.js` (Phase 3) | `savePostingCampaign` / `getPostingCampaign` / `updatePostingCampaign` / `listPostingCampaignsByStatus` / `listPostingCampaignsByPhone`. |
+| `server/index.js` (Phase 3) | Mount `routes/posting.js`, start the posting sweeper. |
 
 **Front-end — modified**
 
@@ -84,6 +108,9 @@ A Facebook **page post** keeps the existing Graph path because it is faster, fre
 | `public-agent/distribution.html` | Embedded-browser connect modal markup. |
 | `public-agent/distribution.js` | Modal wiring, status polling. |
 | `public-agent/app.css` | Modal styles. |
+| `public-agent/distribution.html` (Phase 3) | Campaign card: groups, mode toggle, schedule preview, timeline, STOP. |
+| `public-agent/distribution.js` (Phase 3) | Campaign wiring, timeline polling, halt banner → embedded browser. |
+| `public-agent/form-i18n.js` (Phase 3) | Campaign strings. |
 
 ---
 
@@ -91,6 +118,7 @@ A Facebook **page post** keeps the existing Graph path because it is faster, fre
 
 - **Tasks 1–9 — Phase 1.** Driver scraping for Yad2/Madlan + Firecrawl fallback. Ships and is useful on its own.
 - **Tasks 10–12 — Phase 2.** Embedded browser connect + social/Facebook-group scraping. Depends on Task 2.
+- **Tasks 13–18 — Phase 3.** Paced background posting to groups under agent approval. Depends on Tasks 2, 10, 11 (a connected profile) and on Task 12's answer: if `PROFILE_COOKIES_PERSIST=no`, Phase 3 cannot start.
 
 ---
 
@@ -2278,6 +2306,1632 @@ git push -u origin claude/zen-davinci-lu4hoq
 
 ---
 
+## Phase 3 — paced background posting to groups
+
+**What "safe" means here, stated once.** No number below was measured against Facebook; the platform publishes no thresholds and changes its heuristics without notice. [Unverified] The defaults are deliberately slower than a busy human agent, and the design leans on things that *are* known to matter: an account that posts at 3am, posts identical text to twelve groups in an hour, or keeps going after a warning gets flagged; one that posts a few varied messages a day during waking hours from a browser it has logged into before mostly does not. Task 18 turns the defaults into measured values. Until then, slower is the only defensible direction.
+
+### Task 13: `posting-safety.js` — pacing and signal classification
+
+The anti-ban core. Pure functions, no I/O, and the most thoroughly tested file in the plan: every invariant the product owner is relying on lives here as an assertion.
+
+**Files:**
+- Create: `server/posting-safety.js`
+- Create: `server/posting-safety.test.js`
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces:
+  - `DEFAULTS` — the pacing config (below).
+  - `nextSlot({ now, account, candidates, pageId, config, rand }) -> { at: Date, group_url: string } | { at: null, reason: string }` where `account = { connected_at: ISO, posts: Array<{at: ISO, group_url, page_id, ok: boolean}> }` and `candidates = Array<{ url, agent_policy: "allowed"|"unknown"|"forbidden", explicit: boolean }>`.
+  - `isActiveTime(date, config) -> boolean`
+  - `classifySignal(landedUrl, text) -> "ok" | "login_required" | "checkpoint" | "captcha" | "rate_limited" | "group_blocked" | "not_member"`
+  - `SIGNAL_HALTS = Set` — the signals that halt the whole account.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/posting-safety.test.js`:
+
+```js
+/* posting-safety.js — every pacing promise, as an assertion. Pure, no I/O. */
+const assert = require("assert");
+const S = require("./posting-safety");
+
+const IL = (iso) => new Date(iso); // ISO strings below carry the +03:00 offset (Asia/Jerusalem, DST)
+const day = (n) => n * 24 * 3600 * 1000;
+const cfg = S.DEFAULTS;
+const noRand = () => 0.5; // jitter midpoint → deterministic
+
+const allowed = (url) => ({ url, agent_policy: "allowed", explicit: true });
+const account = (connectedDaysAgo, posts = []) => ({
+  connected_at: new Date(Date.now() - day(connectedDaysAgo)).toISOString(), posts,
+});
+
+// ── active hours: Israeli waking hours, never Shabbat ──
+assert.equal(S.isActiveTime(IL("2026-09-23T10:00:00+03:00"), cfg), true, "Wed 10:00");
+assert.equal(S.isActiveTime(IL("2026-09-23T03:00:00+03:00"), cfg), false, "Wed 03:00");
+assert.equal(S.isActiveTime(IL("2026-09-23T22:30:00+03:00"), cfg), false, "Wed 22:30");
+assert.equal(S.isActiveTime(IL("2026-09-25T16:00:00+03:00"), cfg), false, "Fri 16:00 — Shabbat");
+assert.equal(S.isActiveTime(IL("2026-09-26T12:00:00+03:00"), cfg), false, "Sat noon — Shabbat");
+assert.equal(S.isActiveTime(IL("2026-09-26T21:00:00+03:00"), cfg), false, "Sat 21:00 — after Shabbat but after hours");
+assert.equal(S.isActiveTime(IL("2026-09-25T11:00:00+03:00"), cfg), true, "Fri 11:00 — before Shabbat");
+
+// ── nextSlot: the very first post of a fresh account may go now, in hours ──
+{
+  const now = IL("2026-09-23T10:00:00+03:00");
+  const slot = S.nextSlot({ now, account: account(0), candidates: [allowed("g1")], pageId: "p1", config: cfg, rand: noRand });
+  assert.equal(slot.group_url, "g1");
+  assert.ok(slot.at.getTime() >= now.getTime());
+}
+
+// ── minimum gap between ANY two posts, with jitter that only ever adds ──
+{
+  const now = IL("2026-09-23T10:00:00+03:00");
+  const lastAt = new Date(now.getTime() - 10 * 60000).toISOString(); // 10 min ago
+  const acct = account(30, [{ at: lastAt, group_url: "g0", page_id: "p0", ok: true }]);
+  const slot = S.nextSlot({ now, account: acct, candidates: [allowed("g1")], pageId: "p1", config: cfg, rand: () => 0 });
+  const gapMin = (slot.at.getTime() - new Date(lastAt).getTime()) / 60000;
+  assert.ok(gapMin >= cfg.min_gap_minutes, `gap ${gapMin} < min ${cfg.min_gap_minutes}`);
+  const slotHi = S.nextSlot({ now, account: acct, candidates: [allowed("g1")], pageId: "p1", config: cfg, rand: () => 1 });
+  assert.ok(slotHi.at.getTime() > slot.at.getTime(), "rand=1 must push later, never earlier");
+}
+
+// ── warm-up: a freshly connected account gets the smallest daily cap ──
+{
+  const now = IL("2026-09-23T15:00:00+03:00");
+  const today = (h) => IL(`2026-09-23T${String(h).padStart(2, "0")}:00:00+03:00`).toISOString();
+  const two = [{ at: today(10), group_url: "a", page_id: "p", ok: true }, { at: today(12), group_url: "b", page_id: "p", ok: true }];
+  const fresh = S.nextSlot({ now, account: account(1, two), candidates: [allowed("g9")], pageId: "p", config: cfg, rand: noRand });
+  assert.equal(fresh.at, null, "day-1 account is capped at 2/day");
+  assert.equal(fresh.reason, "daily_cap");
+  const mature = S.nextSlot({ now, account: account(60, two), candidates: [allowed("g9")], pageId: "p", config: cfg, rand: noRand });
+  assert.ok(mature.at, "a 60-day account may post a third time");
+}
+
+// ── caps count attempts, not successes: a failed post still spent the slot ──
+{
+  const now = IL("2026-09-23T15:00:00+03:00");
+  const posts = [];
+  for (let h = 9; h < 9 + cfg.daily_cap; h++) posts.push({ at: IL(`2026-09-23T${String(h).padStart(2, "0")}:00:00+03:00`).toISOString(), group_url: `g${h}`, page_id: "p", ok: h % 2 === 0 });
+  const slot = S.nextSlot({ now, account: account(60, posts), candidates: [allowed("gz")], pageId: "p", config: cfg, rand: noRand });
+  assert.equal(slot.at, null);
+  assert.equal(slot.reason, "daily_cap");
+}
+
+// ── weekly cap ──
+{
+  const now = IL("2026-09-23T15:00:00+03:00");
+  const posts = [];
+  for (let i = 0; i < cfg.weekly_cap; i++) posts.push({ at: new Date(now.getTime() - day(1) - i * 3600000).toISOString(), group_url: `w${i}`, page_id: "p", ok: true });
+  const slot = S.nextSlot({ now, account: account(60, posts), candidates: [allowed("gz")], pageId: "p", config: cfg, rand: noRand });
+  assert.equal(slot.reason, "weekly_cap");
+}
+
+// ── same group cooldown, and same property→group cooldown, pick the other group ──
+{
+  const now = IL("2026-09-23T15:00:00+03:00");
+  const recent = new Date(now.getTime() - day(2)).toISOString();
+  const acct = account(60, [{ at: recent, group_url: "g1", page_id: "other", ok: true }]);
+  const slot = S.nextSlot({ now, account: acct, candidates: [allowed("g1"), allowed("g2")], pageId: "p", config: cfg, rand: noRand });
+  assert.equal(slot.group_url, "g2", "g1 was posted to 2 days ago");
+  const only = S.nextSlot({ now, account: acct, candidates: [allowed("g1")], pageId: "p", config: cfg, rand: noRand });
+  assert.equal(only.at, null);
+  assert.equal(only.reason, "no_eligible_group");
+  const old = account(60, [{ at: new Date(now.getTime() - day(10)).toISOString(), group_url: "g1", page_id: "p", ok: true }]);
+  const sameProp = S.nextSlot({ now, account: old, candidates: [allowed("g1")], pageId: "p", config: cfg, rand: noRand });
+  assert.equal(sameProp.reason, "no_eligible_group", "same property to same group inside 14 days");
+}
+
+// ── the agent_policy gate is in code, not in the UI ──
+{
+  const now = IL("2026-09-23T15:00:00+03:00");
+  const cands = [
+    { url: "forbidden", agent_policy: "forbidden", explicit: true },
+    { url: "unknown-unticked", agent_policy: "unknown", explicit: false },
+    { url: "unknown-ticked", agent_policy: "unknown", explicit: true },
+  ];
+  const slot = S.nextSlot({ now, account: account(60), candidates: cands, pageId: "p", config: cfg, rand: noRand });
+  assert.equal(slot.group_url, "unknown-ticked");
+  const none = S.nextSlot({ now, account: account(60), candidates: cands.slice(0, 2), pageId: "p", config: cfg, rand: noRand });
+  assert.equal(none.reason, "no_eligible_group");
+}
+
+// ── outside active hours, the slot is the next active window, not now ──
+{
+  const now = IL("2026-09-23T23:30:00+03:00");
+  const slot = S.nextSlot({ now, account: account(60), candidates: [allowed("g1")], pageId: "p", config: cfg, rand: noRand });
+  assert.ok(slot.at.getTime() > now.getTime() + 8 * 3600000, "must wait for the morning");
+  assert.equal(S.isActiveTime(slot.at, cfg), true);
+}
+
+// ── after a signal, nothing for the cooldown, whatever the caps say ──
+{
+  const now = IL("2026-09-23T15:00:00+03:00");
+  const acct = Object.assign(account(60), { halted_at: new Date(now.getTime() - 3600000).toISOString() });
+  const slot = S.nextSlot({ now, account: acct, candidates: [allowed("g1")], pageId: "p", config: cfg, rand: noRand });
+  assert.equal(slot.reason, "signal_cooldown");
+}
+
+// ── signal classification ──
+assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "כתבו משהו…"), "ok");
+assert.equal(S.classifySignal("https://www.facebook.com/login/?next=x", ""), "login_required");
+assert.equal(S.classifySignal("https://www.facebook.com/checkpoint/1501092823525282/", ""), "checkpoint");
+assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "Confirm you're human"), "captcha");
+assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "You're temporarily blocked from posting"), "rate_limited");
+assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "אתם חסומים זמנית"), "rate_limited");
+assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "You can't post in this group"), "group_blocked");
+assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "הצטרפות לקבוצה"), "not_member");
+for (const sig of ["checkpoint", "captcha", "rate_limited", "login_required"]) assert.ok(S.SIGNAL_HALTS.has(sig), `${sig} halts the account`);
+assert.ok(!S.SIGNAL_HALTS.has("not_member"), "not being a member is a per-group skip, not an account halt");
+
+console.log("posting-safety.test.js ok");
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node posting-safety.test.js`
+Expected: FAIL with `Cannot find module './posting-safety'`
+
+- [ ] **Step 3: Write the implementation**
+
+Create `server/posting-safety.js`:
+
+```js
+/*
+ * posting-safety.js — when may this account post, and where.
+ *
+ * Pure functions. Everything that decides whether a post happens lives here,
+ * so the promise "the agent's account never looks like a bot" is a set of unit
+ * tests rather than a hope.
+ *
+ * [Unverified] None of DEFAULTS was measured against Facebook. They are set
+ * well below what an active human agent does by hand; Task 18 calibrates.
+ * A number is never hard-coded at a call site — always read from the config.
+ */
+
+const DEFAULTS = {
+  timezone: "Asia/Jerusalem",
+  active_hours: { start: 9, end: 21 },      // local; end is exclusive
+  shabbat: { start_dow: 5, start_hour: 15, end_dow: 6, end_hour: 20 }, // Fri 15:00 → Sat 20:00
+  min_gap_minutes: 45,                       // between ANY two posts by one account
+  gap_jitter: 0.6,                           // adds up to +60% of the gap, never subtracts
+  daily_cap: 6,
+  weekly_cap: 25,
+  warmup: [{ days: 3, daily_cap: 2 }, { days: 10, daily_cap: 4 }], // then daily_cap
+  group_cooldown_days: 7,                    // this account → same group
+  property_group_cooldown_days: 14,          // same property → same group
+  cooldown_after_signal_hours: 48,
+  max_consecutive_failures: 2,
+};
+
+const MS_MIN = 60000, MS_HOUR = 3600000, MS_DAY = 24 * MS_HOUR;
+
+// Local wall-clock parts without a tz library: Intl handles DST for us.
+function localParts(date, tz) {
+  const f = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false, weekday: "short", hour: "numeric", minute: "numeric" });
+  const p = Object.fromEntries(f.formatToParts(date).map((x) => [x.type, x.value]));
+  const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday);
+  return { dow, hour: Number(p.hour) % 24, minute: Number(p.minute) };
+}
+
+function inShabbat({ dow, hour }, sh) {
+  if (dow === sh.start_dow) return hour >= sh.start_hour;
+  if (dow === sh.end_dow) return hour < sh.end_hour;
+  return false;
+}
+
+function isActiveTime(date, config = DEFAULTS) {
+  const lp = localParts(date, config.timezone);
+  if (config.shabbat && inShabbat(lp, config.shabbat)) return false;
+  return lp.hour >= config.active_hours.start && lp.hour < config.active_hours.end;
+}
+
+// Walk forward in 15-minute steps to the next active minute. Bounded: 8 days
+// covers any Shabbat + hours combination twice over.
+function nextActiveTime(from, config) {
+  let t = new Date(from.getTime());
+  for (let i = 0; i < 8 * 96; i++) {
+    if (isActiveTime(t, config)) return t;
+    t = new Date(t.getTime() + 15 * MS_MIN);
+  }
+  return t;
+}
+
+function dailyCapFor(connectedAt, now, config) {
+  const ageDays = (now.getTime() - new Date(connectedAt).getTime()) / MS_DAY;
+  for (const w of config.warmup) if (ageDays < w.days) return w.daily_cap;
+  return config.daily_cap;
+}
+
+const sameLocalDay = (a, b, tz) => {
+  const f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
+  return f.format(a) === f.format(b);
+};
+
+/*
+ * The decision. Order matters: cheapest, most absolute reasons first, so a
+ * halted account never even reaches the group-picking step.
+ */
+function nextSlot({ now, account, candidates, pageId, config = DEFAULTS, rand = Math.random }) {
+  const posts = (account.posts || []).map((p) => ({ ...p, t: new Date(p.at).getTime() }));
+
+  if (account.halted_at) {
+    const until = new Date(account.halted_at).getTime() + config.cooldown_after_signal_hours * MS_HOUR;
+    if (now.getTime() < until) return { at: null, reason: "signal_cooldown" };
+  }
+
+  const todays = posts.filter((p) => sameLocalDay(new Date(p.t), now, config.timezone)).length;
+  if (todays >= dailyCapFor(account.connected_at, now, config)) return { at: null, reason: "daily_cap" };
+
+  const weeks = posts.filter((p) => now.getTime() - p.t < 7 * MS_DAY).length;
+  if (weeks >= config.weekly_cap) return { at: null, reason: "weekly_cap" };
+
+  const eligible = candidates.filter((c) => {
+    if (c.agent_policy === "forbidden") return false;
+    if (c.agent_policy === "unknown" && !c.explicit) return false;
+    const toGroup = posts.filter((p) => p.group_url === c.url);
+    if (toGroup.some((p) => now.getTime() - p.t < config.group_cooldown_days * MS_DAY)) return false;
+    if (toGroup.some((p) => p.page_id === pageId && now.getTime() - p.t < config.property_group_cooldown_days * MS_DAY)) return false;
+    return true;
+  });
+  if (!eligible.length) return { at: null, reason: "no_eligible_group" };
+
+  // Least-recently-posted group first: spreads the account's activity out
+  // instead of hammering whichever group is first in the list.
+  const lastTo = (url) => Math.max(0, ...posts.filter((p) => p.group_url === url).map((p) => p.t));
+  eligible.sort((a, b) => lastTo(a.url) - lastTo(b.url));
+
+  const lastAny = Math.max(0, ...posts.map((p) => p.t));
+  const gap = config.min_gap_minutes * MS_MIN * (1 + config.gap_jitter * rand());
+  const earliest = new Date(Math.max(now.getTime(), lastAny + gap));
+  return { at: nextActiveTime(earliest, config), group_url: eligible[0].url };
+}
+
+// ── what the page is telling us ──
+const SIGNALS = [
+  ["login_required", /\/(login|checkpoint\/block)(\/|\?|$)/i, null],
+  ["checkpoint", /\/checkpoint\//i, /(confirm your identity|אימות הזהות)/i],
+  ["captcha", null, /(confirm you'?re human|security check|אנחנו רוצים לוודא שאת|בדיקת אבטחה)/i],
+  ["rate_limited", null, /(temporarily blocked|posting too fast|slow down|חסומים זמנית|חסום זמנית|לאט יותר)/i],
+  ["group_blocked", null, /(can'?t post in this group|no longer able to post|לא ניתן לפרסם בקבוצה)/i],
+  ["not_member", null, /(join group|הצטרפות לקבוצה|הצטרפו לקבוצה)/i],
+];
+const SIGNAL_HALTS = new Set(["login_required", "checkpoint", "captcha", "rate_limited"]);
+
+function classifySignal(landedUrl, text) {
+  const u = String(landedUrl || ""), t = String(text || "");
+  for (const [code, urlRe, textRe] of SIGNALS) {
+    if (urlRe && urlRe.test(u)) return code;
+    if (textRe && textRe.test(t)) return code;
+  }
+  return "ok";
+}
+
+module.exports = { DEFAULTS, nextSlot, isActiveTime, nextActiveTime, classifySignal, SIGNAL_HALTS, _test: { localParts, dailyCapFor } };
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd server && node posting-safety.test.js`
+Expected: PASS. If the Shabbat assertions fail, check that `Intl` in your Node has full ICU (`node -p "Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem'}).format(new Date())"` must not throw); Node 20+ ships full ICU by default.
+
+- [ ] **Step 5: Add to the test chain and commit**
+
+Append ` && node posting-safety.test.js` to `scripts.test` in `server/package.json`.
+
+```bash
+cd server && npm test
+git add server/posting-safety.js server/posting-safety.test.js server/package.json
+git commit -m "feat(posting): pure pacing and signal rules for group posting"
+```
+
+---
+
+### Task 14: `posting-campaign.js` — the campaign state machine
+
+**Files:**
+- Create: `server/posting-campaign.js`
+- Create: `server/posting-campaign.test.js`
+- Modify: `server/db.js` (campaign store + posting lock on the connection doc)
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Consumes: `posting-safety.nextSlot/SIGNAL_HALTS/DEFAULTS`, `share-kit.buildPostCopy/trackedUrl`, `db.*PostingCampaign*`, `db.getConnection/setConnection`, `posting-driver.postToGroup` (Task 15, injected as `deps.post`).
+- Produces:
+  - `create({ phone, page, pageUrl, groups, mode, standing }, deps) -> Campaign` — status `awaiting_approval`
+  - `approve(id, { mode, standing }, deps)`, `approvePost(id, postId, deps)`, `pause(id, deps)`, `resume(id, deps)`, `stop(id, deps)`, `acknowledgeHalt(id, deps)`
+  - `tick(campaign, deps, now) -> Campaign` — one scheduling/posting step
+  - `sweep(deps, now) -> number`, `startSweeper(deps)`, `liveDeps()`
+  - Campaign shape:
+    ```
+    { id, phone, page_id, page_url, title, mode: "per_post"|"standing",
+      standing: { granted_at, expires_at, max_posts } | null,
+      groups: [{ url, name, agent_policy, explicit }],
+      status: "awaiting_approval"|"running"|"paused"|"halted"|"stopped"|"completed",
+      halt_reason: string|null, next_at: ISO|null,
+      posts: [{ id, group_url, status: "pending_approval"|"scheduled"|"posting"|"posted"|"failed"|"skipped",
+                scheduled_at, posted_at, post_url, error_code, copy }],
+      consecutive_failures: number, created_at, updated_at }
+    ```
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/posting-campaign.test.js`:
+
+```js
+/* posting-campaign.js — the campaign lifecycle. No browser: post() is a fake. */
+const assert = require("assert");
+const C = require("./posting-campaign");
+
+function fakeDb() {
+  const camps = new Map(), conns = new Map();
+  return {
+    camps, conns,
+    savePostingCampaign: async (c) => { camps.set(c.id, JSON.parse(JSON.stringify(c))); },
+    getPostingCampaign: async (id) => (camps.has(id) ? JSON.parse(JSON.stringify(camps.get(id))) : null),
+    updatePostingCampaign: async (id, patch) => { const c = camps.get(id); if (c) Object.assign(c, JSON.parse(JSON.stringify(patch))); },
+    listPostingCampaignsByStatus: async (st) => [...camps.values()].filter((c) => c.status === st).map((c) => JSON.parse(JSON.stringify(c))),
+    listPostingCampaignsByPhone: async (ph) => [...camps.values()].filter((c) => c.phone === ph),
+    getConnection: async (ph) => conns.get(ph) || null,
+    setConnection: async (ph, patch) => { conns.set(ph, Object.assign(conns.get(ph) || {}, patch)); },
+  };
+}
+const page = { page_id: "pg1", title: "דירה בחיפה", property: { city: "חיפה", price: 2000000, rooms: 4 }, agent: { name: "דנה" } };
+const groups = [
+  { url: "https://www.facebook.com/groups/1", name: "A", agent_policy: "allowed", explicit: true },
+  { url: "https://www.facebook.com/groups/2", name: "B", agent_policy: "allowed", explicit: true },
+];
+const NOW = new Date("2026-09-23T10:00:00+03:00");
+const connected = (db, ph, daysAgo = 60) => db.setConnection(ph, { facebook_browser_connected_at: new Date(NOW.getTime() - daysAgo * 86400000).toISOString() });
+
+(async () => {
+  // ── create: awaiting approval, nothing scheduled ──
+  const db = fakeDb(); await connected(db, "p");
+  const c = await C.create({ phone: "p", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 14, max_posts: 10 } }, { db });
+  assert.equal(c.status, "awaiting_approval");
+  assert.equal(c.posts.length, 0);
+  assert.equal(c.next_at, null);
+
+  // ── approve (standing) → running with a bounded permission ──
+  const a = await C.approve(c.id, { mode: "standing", standing: { days: 14, max_posts: 10 } }, { db, now: NOW });
+  assert.equal(a.status, "running");
+  assert.equal(a.standing.max_posts, 10);
+  assert.ok(new Date(a.standing.expires_at) > NOW);
+
+  // ── tick schedules a post, then posts it when due, with per-group copy and a tracked url ──
+  const posted = [];
+  const deps = { db, now: NOW, rand: () => 0, post: async (args) => { posted.push(args); return { post_url: "https://www.facebook.com/groups/1/posts/999" }; } };
+  let t = await C.tick(a, deps, NOW);
+  assert.equal(t.posts.length, 1);
+  assert.equal(t.posts[0].status, "scheduled");
+  assert.ok(t.posts[0].copy.includes("חיפה"));
+  assert.ok(t.posts[0].copy.includes("s=" + c.id), "tracked url carries the campaign id");
+  const due = new Date(t.posts[0].scheduled_at);
+  t = await C.tick(t, deps, new Date(due.getTime() + 1000));
+  assert.equal(t.posts[0].status, "posted");
+  assert.equal(t.posts[0].post_url, "https://www.facebook.com/groups/1/posts/999");
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].groupUrl, groups[0].url);
+  assert.equal(posted[0].profileName, "facebook-p");
+  assert.equal(posted[0].dryRun, false);
+
+  // ── the next post goes to the OTHER group, after the minimum gap ──
+  t = await C.tick(t, deps, new Date(due.getTime() + 2000));
+  const second = t.posts[1];
+  assert.equal(second.group_url, groups[1].url);
+  assert.ok(new Date(second.scheduled_at).getTime() - due.getTime() >= 45 * 60000);
+
+  // ── serial per phone: a tick while a post is in flight does nothing ──
+  await db.setConnection("p", { posting_lock_until: new Date(Date.now() + 60000).toISOString() });
+  const before = JSON.stringify(t.posts);
+  const blocked = await C.tick(t, deps, new Date(second.scheduled_at));
+  assert.equal(JSON.stringify(blocked.posts), before, "locked phone: no posting");
+  await db.setConnection("p", { posting_lock_until: null });
+
+  // ── per_post mode: the post waits for approval, and is posted only after it ──
+  const db2 = fakeDb(); await connected(db2, "q");
+  const c2 = await C.create({ phone: "q", page, pageUrl: "https://f.ly/pg1", groups, mode: "per_post" }, { db: db2 });
+  const notified = [];
+  const deps2 = { db: db2, now: NOW, rand: () => 0, post: async () => ({ post_url: "u" }), notify: async (ph, msg) => notified.push(msg) };
+  let r2 = await C.approve(c2.id, { mode: "per_post" }, deps2);
+  r2 = await C.tick(r2, deps2, NOW);
+  assert.equal(r2.posts[0].status, "pending_approval");
+  assert.equal(notified.length, 1, "agent was told there is a post to approve");
+  assert.ok(notified[0].includes(r2.posts[0].copy.slice(0, 20)), "the notification shows the exact copy");
+  r2 = await C.tick(r2, deps2, new Date(NOW.getTime() + 3600000));
+  assert.equal(r2.posts[0].status, "pending_approval", "unapproved: still waiting an hour later");
+  r2 = await C.approvePost(c2.id, r2.posts[0].id, deps2);
+  assert.equal(r2.posts[0].status, "scheduled");
+
+  // ── stop: cancels the scheduled post; a later tick posts nothing ──
+  const s = await C.stop(c.id, { db });
+  assert.equal(s.status, "stopped");
+  const after = await C.tick(s, deps, new Date(second.scheduled_at));
+  assert.equal(after.posts.filter((p) => p.status === "posted").length, 1, "still only the first post");
+
+  // ── a halting signal halts the campaign, records why, and marks the account ──
+  const db3 = fakeDb(); await connected(db3, "r");
+  const c3 = await C.create({ phone: "r", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db3 });
+  let r3 = await C.approve(c3.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db3, now: NOW });
+  const deps3 = { db: db3, now: NOW, rand: () => 0, post: async () => { const e = new Error("checkpoint"); e.code = "checkpoint"; throw e; } };
+  r3 = await C.tick(r3, deps3, NOW);
+  r3 = await C.tick(r3, deps3, new Date(new Date(r3.posts[0].scheduled_at).getTime() + 1000));
+  assert.equal(r3.status, "halted");
+  assert.equal(r3.halt_reason, "checkpoint");
+  assert.ok((await db3.getConnection("r")).posting_halted_at, "the ACCOUNT is marked, not just this campaign");
+  // a second campaign on the same account is held by the same halt
+  const c3b = await C.create({ phone: "r", page: { ...page, page_id: "pg2" }, pageUrl: "https://f.ly/pg2", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db3 });
+  let r3b = await C.approve(c3b.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db3, now: NOW });
+  r3b = await C.tick(r3b, deps3, new Date(NOW.getTime() + 3600000));
+  assert.equal(r3b.posts.length, 0, "no scheduling while the account is in signal cooldown");
+
+  // ── not_member is a per-group skip, not a halt ──
+  const db4 = fakeDb(); await connected(db4, "s");
+  const c4 = await C.create({ phone: "s", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db4 });
+  let r4 = await C.approve(c4.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db4, now: NOW });
+  const deps4 = { db: db4, now: NOW, rand: () => 0, post: async () => { const e = new Error("nm"); e.code = "not_member"; throw e; } };
+  r4 = await C.tick(r4, deps4, NOW);
+  r4 = await C.tick(r4, deps4, new Date(new Date(r4.posts[0].scheduled_at).getTime() + 1000));
+  assert.equal(r4.posts[0].status, "skipped");
+  assert.equal(r4.status, "running");
+
+  // ── consecutive failures trip the breaker ──
+  const db5 = fakeDb(); await connected(db5, "t");
+  const c5 = await C.create({ phone: "t", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db5 });
+  let r5 = await C.approve(c5.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db5, now: NOW });
+  const deps5 = { db: db5, now: NOW, rand: () => 0, post: async () => { const e = new Error("x"); e.code = "post_failed"; throw e; } };
+  let clock = NOW.getTime();
+  for (let i = 0; i < 2; i++) {
+    r5 = await C.tick(r5, deps5, new Date(clock));
+    const dueAt = new Date(r5.posts[r5.posts.length - 1].scheduled_at).getTime() + 1000;
+    r5 = await C.tick(r5, deps5, new Date(dueAt));
+    clock = dueAt;
+  }
+  assert.equal(r5.status, "paused");
+  assert.equal(r5.halt_reason, "consecutive_failures");
+
+  // ── standing permission ends: by expiry, and by max_posts ──
+  const db6 = fakeDb(); await connected(db6, "u");
+  const c6 = await C.create({ phone: "u", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 1, max_posts: 1 } }, { db: db6 });
+  let r6 = await C.approve(c6.id, { mode: "standing", standing: { days: 1, max_posts: 1 } }, { db: db6, now: NOW });
+  const deps6 = { db: db6, now: NOW, rand: () => 0, post: async () => ({ post_url: "u" }) };
+  r6 = await C.tick(r6, deps6, NOW);
+  r6 = await C.tick(r6, deps6, new Date(new Date(r6.posts[0].scheduled_at).getTime() + 1000));
+  assert.equal(r6.status, "completed", "max_posts reached");
+  const c7 = await C.create({ phone: "u", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 1, max_posts: 9 } }, { db: db6 });
+  let r7 = await C.approve(c7.id, { mode: "standing", standing: { days: 1, max_posts: 9 } }, { db: db6, now: NOW });
+  r7 = await C.tick(r7, deps6, new Date(NOW.getTime() + 2 * 86400000));
+  assert.equal(r7.status, "completed", "permission expired");
+  assert.equal(r7.posts.length, 0);
+
+  // ── sweep runs due campaigns only ──
+  const db8 = fakeDb(); await connected(db8, "v");
+  const c8 = await C.create({ phone: "v", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db8 });
+  await C.approve(c8.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db8, now: NOW });
+  let ticked = 0;
+  const n = await C.sweep({ db: db8, tick: async () => { ticked++; } }, NOW);
+  assert.equal(n, 1); assert.equal(ticked, 1);
+
+  console.log("posting-campaign.test.js ok");
+})();
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node posting-campaign.test.js`
+Expected: FAIL with `Cannot find module './posting-campaign'`
+
+- [ ] **Step 3: Add the store to `db.js`**
+
+Add `postingCampaigns: new Map()` to the `mem` literal at `server/db.js:11`. Add after the extract-job functions:
+
+```js
+// ── posting campaigns (background group posting) ──
+async function savePostingCampaign(c) {
+  if (db) await db.collection("posting_campaigns").doc(c.id).set(c);
+  else mem.postingCampaigns.set(c.id, JSON.parse(JSON.stringify(c)));
+}
+async function getPostingCampaign(id) {
+  if (db) { const d = await db.collection("posting_campaigns").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.postingCampaigns.get(id) || null;
+}
+async function updatePostingCampaign(id, patch) {
+  if (db) { await db.collection("posting_campaigns").doc(id).update(patch); return; }
+  const c = mem.postingCampaigns.get(id);
+  if (c) Object.assign(c, JSON.parse(JSON.stringify(patch)));
+}
+async function listPostingCampaignsByStatus(status, limit = 50) {
+  if (db) {
+    const snap = await db.collection("posting_campaigns").where("status", "==", status).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.postingCampaigns.values()].filter((c) => c.status === status).slice(0, limit);
+}
+async function listPostingCampaignsByPhone(phone, limit = 100) {
+  if (db) {
+    const snap = await db.collection("posting_campaigns").where("phone", "==", phone).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.postingCampaigns.values()].filter((c) => c.phone === phone).slice(0, limit);
+}
+```
+
+Export all five.
+
+- [ ] **Step 4: Write the state machine**
+
+Create `server/posting-campaign.js`:
+
+```js
+/*
+ * posting-campaign.js — one property, many groups, over days.
+ *
+ * A campaign is the agent's permission plus a ledger of what was done with it.
+ * Two permission shapes:
+ *   per_post  — every single post is shown to the agent (exact copy, exact
+ *               group) and posted only after they approve it;
+ *   standing  — "post until I stop", bounded by an expiry AND a max count, and
+ *               revocable at any moment with stop().
+ *
+ * The scheduling decision is never made here: tick() asks posting-safety.js
+ * and does what it says. This file only moves state and calls the browser.
+ *
+ * Account-level facts (halts, the posting lock, the post ledger used for
+ * pacing) live on the CONNECTION doc, not the campaign — two campaigns for one
+ * agent must share one pace and one halt.
+ */
+const crypto = require("crypto");
+const safety = require("./posting-safety");
+const shareKit = require("./distribution/share-kit");
+
+const SWEEP_MS = 60 * 1000;
+const LOCK_MS = 5 * 60 * 1000;
+const LEDGER_DAYS = 30;
+
+const iso = (d) => new Date(d).toISOString();
+
+async function create({ phone, page, pageUrl, groups, mode, standing }, deps) {
+  const c = {
+    id: crypto.randomUUID(),
+    phone: String(phone),
+    page_id: page.page_id,
+    page_url: String(pageUrl),
+    title: page.title || "",
+    page_snapshot: { property: page.property || {}, agent: page.agent || {} },
+    mode: mode === "per_post" ? "per_post" : "standing",
+    standing: null,
+    groups: (groups || []).slice(0, shareKit.MAX_GROUPS).map((g) => ({
+      url: g.url, name: g.name || "", agent_policy: g.agent_policy || "unknown", explicit: g.explicit === true,
+    })),
+    status: "awaiting_approval",
+    halt_reason: null,
+    next_at: null,
+    posts: [],
+    consecutive_failures: 0,
+    created_at: iso(Date.now()),
+    updated_at: iso(Date.now()),
+  };
+  if (c.mode === "standing" && standing) c.standing = { days: standing.days, max_posts: standing.max_posts, granted_at: null, expires_at: null };
+  await deps.db.savePostingCampaign(c);
+  return c;
+}
+
+async function patch(id, p, deps) {
+  p.updated_at = iso(deps.now || Date.now());
+  await deps.db.updatePostingCampaign(id, p);
+  return deps.db.getPostingCampaign(id);
+}
+
+async function approve(id, { mode, standing }, deps) {
+  const now = deps.now || new Date();
+  const c = await deps.db.getPostingCampaign(id);
+  if (!c || c.status !== "awaiting_approval") return c;
+  const p = { status: "running", mode: mode === "per_post" ? "per_post" : "standing" };
+  if (p.mode === "standing") {
+    const days = Math.min(Math.max(Number(standing && standing.days) || 7, 1), 30);
+    const max = Math.min(Math.max(Number(standing && standing.max_posts) || 10, 1), 100);
+    p.standing = { days, max_posts: max, granted_at: iso(now), expires_at: iso(now.getTime() + days * 86400000) };
+  } else p.standing = null;
+  return patch(id, p, deps);
+}
+
+async function approvePost(id, postId, deps) {
+  const c = await deps.db.getPostingCampaign(id);
+  if (!c) return null;
+  const posts = c.posts.map((p) => (p.id === postId && p.status === "pending_approval" ? { ...p, status: "scheduled" } : p));
+  return patch(id, { posts }, deps);
+}
+
+const pause = (id, deps) => patch(id, { status: "paused", halt_reason: "agent" }, deps);
+const resume = (id, deps) => patch(id, { status: "running", halt_reason: null, consecutive_failures: 0 }, deps);
+
+// Stop is immediate and final: whatever was scheduled is cancelled, and the
+// sweeper never picks a stopped campaign up again.
+async function stop(id, deps) {
+  const c = await deps.db.getPostingCampaign(id);
+  if (!c) return null;
+  const posts = c.posts.map((p) => (p.status === "scheduled" || p.status === "pending_approval" ? { ...p, status: "skipped", error_code: "stopped" } : p));
+  return patch(id, { status: "stopped", posts, next_at: null }, deps);
+}
+
+// The agent has dealt with the checkpoint (through the embedded browser) and
+// says so. The safety cooldown still applies from posting_halted_at.
+async function acknowledgeHalt(id, deps) {
+  const c = await deps.db.getPostingCampaign(id);
+  if (!c || c.status !== "halted") return c;
+  return patch(id, { status: "running", halt_reason: null, consecutive_failures: 0 }, deps);
+}
+
+// ── the account-level view posting-safety needs ──
+async function accountFor(phone, deps, now) {
+  const conn = (await deps.db.getConnection(phone)) || {};
+  const cutoff = now.getTime() - LEDGER_DAYS * 86400000;
+  return {
+    conn,
+    account: {
+      connected_at: conn.facebook_browser_connected_at || iso(now),
+      halted_at: conn.posting_halted_at || null,
+      posts: (conn.posting_ledger || []).filter((p) => new Date(p.at).getTime() > cutoff),
+    },
+  };
+}
+
+async function recordPost(phone, conn, entry, deps, now) {
+  const cutoff = now.getTime() - LEDGER_DAYS * 86400000;
+  const ledger = (conn.posting_ledger || []).filter((p) => new Date(p.at).getTime() > cutoff).concat([entry]);
+  await deps.db.setConnection(phone, { posting_ledger: ledger });
+}
+
+function standingExhausted(c, now) {
+  if (c.mode !== "standing" || !c.standing) return false;
+  if (c.standing.expires_at && now.getTime() > new Date(c.standing.expires_at).getTime()) return true;
+  return c.posts.filter((p) => p.status === "posted").length >= c.standing.max_posts;
+}
+
+/*
+ * One step. Either schedules the next post (asking posting-safety when and
+ * where), or, if a scheduled post is due, posts it. Never both in one tick:
+ * the ledger the next decision needs is written by this one.
+ */
+async function tick(campaign, deps, now = deps.now || new Date()) {
+  let c = await deps.db.getPostingCampaign(campaign.id);
+  if (!c || c.status !== "running") return c;
+  if (standingExhausted(c, now)) return patch(c.id, { status: "completed", next_at: null }, deps);
+
+  const { conn, account } = await accountFor(c.phone, deps, now);
+  if (conn.posting_lock_until && new Date(conn.posting_lock_until).getTime() > now.getTime()) return c;
+
+  const due = c.posts.find((p) => p.status === "scheduled" && new Date(p.scheduled_at).getTime() <= now.getTime());
+  if (due) return postNow(c, due, conn, deps, now);
+
+  if (c.posts.some((p) => p.status === "scheduled" || p.status === "pending_approval")) return c;
+
+  // Nothing in flight: ask when and where the next one may go.
+  const slot = safety.nextSlot({ now, account, candidates: c.groups, pageId: c.page_id, config: deps.config || safety.DEFAULTS, rand: deps.rand });
+  if (!slot.at) {
+    if (slot.reason === "no_eligible_group" && !c.posts.some((p) => p.status === "posted")) return c;
+    return patch(c.id, { next_at: null, halt_reason: null }, deps);
+  }
+  const group = c.groups.find((g) => g.url === slot.group_url);
+  const url = shareKit.trackedUrl(c.page_url, { session: c.id, group: group.url });
+  const copy = shareKit.buildPostCopy({ property: c.page_snapshot.property, agent: c.page_snapshot.agent, title: c.title }, url, { variantSeed: c.page_id + group.url });
+  const post = {
+    id: crypto.randomUUID(), group_url: group.url, group_name: group.name,
+    status: c.mode === "per_post" ? "pending_approval" : "scheduled",
+    scheduled_at: iso(slot.at), posted_at: null, post_url: null, error_code: null, copy,
+  };
+  if (c.mode === "per_post" && deps.notify) {
+    await deps.notify(c.phone, `📣 פוסט מוכן לאישור לקבוצה "${group.name || group.url}":\n──────────\n${copy}\n──────────\nלאישור, היכנסו לעמוד ההפצה בדשבורד.`);
+  }
+  return patch(c.id, { posts: c.posts.concat([post]), next_at: post.scheduled_at }, deps);
+}
+
+async function postNow(c, post, conn, deps, now) {
+  await deps.db.setConnection(c.phone, { posting_lock_until: iso(now.getTime() + LOCK_MS) });
+  let posts = c.posts.map((p) => (p.id === post.id ? { ...p, status: "posting" } : p));
+  await deps.db.updatePostingCampaign(c.id, { posts });
+  let result = null, err = null;
+  try {
+    result = await deps.post({ groupUrl: post.group_url, copy: post.copy, profileName: `facebook-${c.phone}`, dryRun: deps.dryRun === true, campaignId: c.id });
+  } catch (e) { err = e; }
+  finally { await deps.db.setConnection(c.phone, { posting_lock_until: null }); }
+
+  const conn2 = (await deps.db.getConnection(c.phone)) || conn;
+  if (!err) {
+    posts = posts.map((p) => (p.id === post.id ? { ...p, status: "posted", posted_at: iso(now), post_url: result && result.post_url } : p));
+    await recordPost(c.phone, conn2, { at: iso(now), group_url: post.group_url, page_id: c.page_id, ok: true }, deps, now);
+    const next = await patch(c.id, { posts, consecutive_failures: 0, next_at: null }, deps);
+    return standingExhausted(next, now) ? patch(c.id, { status: "completed" }, deps) : next;
+  }
+
+  const code = err.code || "post_failed";
+  await recordPost(c.phone, conn2, { at: iso(now), group_url: post.group_url, page_id: c.page_id, ok: false }, deps, now);
+  if (safety.SIGNAL_HALTS.has(code)) {
+    // The account, not the campaign: every other campaign on this phone is
+    // held by the same cooldown through posting_halted_at.
+    await deps.db.setConnection(c.phone, { posting_halted_at: iso(now), posting_halt_reason: code });
+    posts = posts.map((p) => (p.id === post.id ? { ...p, status: "failed", error_code: code } : p));
+    return patch(c.id, { posts, status: "halted", halt_reason: code, next_at: null }, deps);
+  }
+  const skip = code === "not_member" || code === "group_blocked";
+  posts = posts.map((p) => (p.id === post.id ? { ...p, status: skip ? "skipped" : "failed", error_code: code } : p));
+  const failures = skip ? c.consecutive_failures : c.consecutive_failures + 1;
+  const max = (deps.config || safety.DEFAULTS).max_consecutive_failures;
+  if (failures >= max) return patch(c.id, { posts, consecutive_failures: failures, status: "paused", halt_reason: "consecutive_failures", next_at: null }, deps);
+  return patch(c.id, { posts, consecutive_failures: failures, next_at: null }, deps);
+}
+
+async function sweep(deps, now = new Date()) {
+  const running = await deps.db.listPostingCampaignsByStatus("running");
+  const run = deps.tick || tick;
+  let n = 0;
+  for (const c of running) {
+    n++;
+    await run(c, deps, now).catch((e) => console.error(`posting campaign ${c.id}: ${e.message}`));
+  }
+  return n;
+}
+
+function startSweeper(deps) {
+  const t = setInterval(() => { sweep(deps).catch((e) => console.error(`posting sweep: ${e.message}`)); }, deps.sweepMs || SWEEP_MS);
+  if (t.unref) t.unref();
+  return () => clearInterval(t);
+}
+
+function liveDeps() {
+  return {
+    db: require("./db"),
+    post: require("./posting-driver").postToGroup,
+    notify: (phone, msg) => require("./utils").sendWhatsApp(phone, msg),
+  };
+}
+
+module.exports = { create, approve, approvePost, pause, resume, stop, acknowledgeHalt, tick, sweep, startSweeper, liveDeps, SWEEP_MS };
+```
+
+`sendWhatsApp`'s exact signature is in `server/utils.js`; match it in `liveDeps` rather than assuming `(phone, msg)` — the existing `distribution/jobs.js` shows the call in use.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd server && node posting-campaign.test.js && node distribution/share-kit.test.js`
+Expected: both PASS.
+
+- [ ] **Step 6: Add to the test chain and commit**
+
+Append ` && node posting-campaign.test.js` to `scripts.test`.
+
+```bash
+cd server && npm test
+git add server/db.js server/posting-campaign.js server/posting-campaign.test.js server/package.json
+git commit -m "feat(posting): campaign state machine with per-post and standing approval"
+```
+
+---
+
+### Task 15: `posting-driver.js` — the browser actions
+
+The most brittle file in the plan, on purpose isolated so it is the *only* file that knows what Facebook's composer looks like. Every selector lives in one object at the top. [Unverified] The selectors below are a starting point, not a fact — Task 18's dry run is where they get fixed against the real page.
+
+**Files:**
+- Create: `server/posting-driver.js`
+- Create: `server/posting-driver.test.js`
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Consumes: `driver-browser.withPage`, `posting-safety.classifySignal`.
+- Produces: `postToGroup({ groupUrl, copy, profileName, dryRun, campaignId }, deps) -> Promise<{ post_url: string|null, dry_run: boolean }>`. Throws with `code` ∈ `classifySignal` values (`checkpoint`, `captcha`, `rate_limited`, `login_required`, `group_blocked`, `not_member`) or `composer_not_found` / `post_failed` / `not_verified`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/posting-driver.test.js`:
+
+```js
+/* posting-driver.js — the composer choreography, against a fake page. */
+const assert = require("assert");
+const PD = require("./posting-driver");
+
+function fakePage(script) {
+  // script: { landed, text, composer: bool, feedTexts: [] }
+  const typed = [], clicked = [];
+  let url = script.landed;
+  return {
+    typed, clicked,
+    goto: async (u) => { url = script.landed || u; },
+    url: () => url,
+    innerText: async () => script.text || "כתבו משהו…",
+    locator: (sel) => ({
+      first: () => ({
+        count: async () => (script.composer === false && /composer/.test(sel) ? 0 : 1),
+        click: async () => { clicked.push(sel); },
+        waitFor: async () => { if (script.composer === false && /composer/.test(sel)) throw new Error("timeout"); },
+      }),
+      count: async () => (script.composer === false && /composer/.test(sel) ? 0 : 1),
+    }),
+    keyboard: { type: async (t) => typed.push(t) },
+    waitForLoadState: async () => {},
+    $$eval: async () => script.feedTexts || [],
+  };
+}
+
+(async () => {
+  // ── happy path: navigates, types the copy, submits, verifies our link in the feed ──
+  const page = fakePage({ landed: "https://www.facebook.com/groups/1", feedTexts: ["… https://f.ly/pg1?src=fb_group&s=c1&g=x …"] });
+  const withPage = async (opts, fn) => {
+    assert.deepEqual(opts.profile, { name: "facebook-p", persist: true });
+    assert.ok(String(opts.note).startsWith("forly-post:c1"));
+    assert.ok(!("url" in opts), "no landing url in the session opts — we navigate ourselves");
+    return fn(page, { sessionId: "s" });
+  };
+  const out = await PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "דירה https://f.ly/pg1?src=fb_group&s=c1&g=x", profileName: "facebook-p", dryRun: false, campaignId: "c1" }, { withPage });
+  assert.equal(out.dry_run, false);
+  assert.equal(page.typed.join(""), "דירה https://f.ly/pg1?src=fb_group&s=c1&g=x");
+  assert.ok(page.clicked.some((s) => /submit/.test(s)), "the submit button was clicked");
+
+  // ── dry run does everything except submit ──
+  const page2 = fakePage({ landed: "https://www.facebook.com/groups/1" });
+  const dry = await PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "x", profileName: "facebook-p", dryRun: true, campaignId: "c1" }, { withPage: async (o, fn) => fn(page2, {}) });
+  assert.equal(dry.dry_run, true);
+  assert.equal(page2.typed.join(""), "x", "the copy was typed");
+  assert.ok(!page2.clicked.some((s) => /submit/.test(s)), "but nothing was submitted");
+
+  // ── signals surface as codes, before any typing ──
+  for (const [landed, text, code] of [
+    ["https://www.facebook.com/checkpoint/123/", "", "checkpoint"],
+    ["https://www.facebook.com/login/?next=x", "", "login_required"],
+    ["https://www.facebook.com/groups/1", "You're temporarily blocked", "rate_limited"],
+    ["https://www.facebook.com/groups/1", "הצטרפות לקבוצה", "not_member"],
+  ]) {
+    const pg = fakePage({ landed, text });
+    await assert.rejects(PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "x", profileName: "facebook-p", campaignId: "c" }, { withPage: async (o, fn) => fn(pg, {}) }), (e) => e.code === code);
+    assert.equal(pg.typed.length, 0, `${code}: nothing typed`);
+  }
+
+  // ── no composer means the DOM changed: fail loudly, do not guess ──
+  const pg3 = fakePage({ landed: "https://www.facebook.com/groups/1", composer: false });
+  await assert.rejects(PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "x", profileName: "facebook-p", campaignId: "c" }, { withPage: async (o, fn) => fn(pg3, {}) }), (e) => e.code === "composer_not_found");
+
+  // ── submitted but our link never appeared: not_verified, so the ledger still counts it ──
+  const pg4 = fakePage({ landed: "https://www.facebook.com/groups/1", feedTexts: ["someone else's post"] });
+  await assert.rejects(PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "https://f.ly/pg1?s=c1&g=x", profileName: "facebook-p", campaignId: "c1" }, { withPage: async (o, fn) => fn(pg4, {}) }), (e) => e.code === "not_verified");
+
+  console.log("posting-driver.test.js ok");
+})();
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node posting-driver.test.js`
+Expected: FAIL with `Cannot find module './posting-driver'`
+
+- [ ] **Step 3: Write the implementation**
+
+Create `server/posting-driver.js`:
+
+```js
+/*
+ * posting-driver.js — put one post into one group, from a background browser.
+ *
+ * This is the ONLY file that knows what Facebook's page looks like. When the
+ * composer changes, SELECTORS is what changes. Nothing here retries: a failed
+ * post is a failed post, and the campaign decides what that means.
+ *
+ * Nothing here is hidden from the platform either — no init scripts, no
+ * request routing, no fingerprint tricks. It is a real Chrome with the agent's
+ * own profile, typing at a human pace. That is the whole anti-ban strategy.
+ *
+ * [Unverified] SELECTORS is a starting point. Task 18 fixes it against the
+ * live page before the first real post.
+ */
+const driver = require("./driver-browser");
+const { classifySignal } = require("./posting-safety");
+
+const SELECTORS = {
+  // the "Write something…" box on a group page (he + en)
+  composer: '[role="button"]:has-text("כתבו משהו"), [role="button"]:has-text("Write something"), div[aria-label="כתבו משהו..."], div[aria-label="Write something..."]',
+  // the editable field once the composer dialog is open
+  editor: 'div[role="dialog"] div[contenteditable="true"][role="textbox"]',
+  // the Post button in that dialog
+  submit: 'div[role="dialog"] div[aria-label="פרסום"][role="button"], div[role="dialog"] div[aria-label="Post"][role="button"]',
+  // any feed post's text, for verification
+  feedPostText: 'div[role="feed"] div[data-ad-preview="message"], div[role="feed"] div[dir="auto"]',
+};
+
+const TYPE_DELAY_MS = 40;      // per character: a fast typist, not a paste
+const VERIFY_TIMEOUT_MS = 20000;
+
+function fail(code, msg) { const e = new Error(msg || code); e.code = code; return e; }
+
+async function readSignal(page) {
+  const text = await page.innerText("body").catch(() => "");
+  return classifySignal(page.url(), text);
+}
+
+async function postToGroup({ groupUrl, copy, profileName, dryRun = false, campaignId }, deps = {}) {
+  const withPage = deps.withPage || driver.withPage;
+  const opts = {
+    country: "IL",
+    duration: 600,
+    note: `forly-post:${campaignId || "adhoc"}`,
+    profile: { name: profileName, persist: true },
+  };
+  return withPage(opts, async (page) => {
+    await page.goto(groupUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+
+    const signal = await readSignal(page);
+    if (signal !== "ok") throw fail(signal, `signal on load: ${signal}`);
+
+    const composer = page.locator(SELECTORS.composer).first();
+    if ((await composer.count()) === 0) throw fail("composer_not_found", "no composer on the group page");
+    await composer.click();
+    const editor = page.locator(SELECTORS.editor).first();
+    await editor.waitFor({ timeout: 10000 }).catch(() => { throw fail("composer_not_found", "editor did not open"); });
+    await editor.click();
+    await page.keyboard.type(copy, { delay: TYPE_DELAY_MS });
+    // Let the link preview attach before submitting — a post without its card
+    // looks different from what a person posts.
+    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+
+    if (dryRun) return { post_url: null, dry_run: true };
+
+    await page.locator(SELECTORS.submit).first().click();
+    await page.waitForLoadState("networkidle", { timeout: VERIFY_TIMEOUT_MS }).catch(() => {});
+
+    const after = await readSignal(page);
+    if (after !== "ok") throw fail(after, `signal after submit: ${after}`);
+
+    // Verify by what a person would check: is our post in the feed now?
+    const marker = (copy.match(/https?:\/\/\S+/) || [copy.slice(0, 40)])[0];
+    const texts = await page.$$eval(SELECTORS.feedPostText, (els) => els.map((e) => e.textContent || "")).catch(() => []);
+    if (!texts.some((t) => t.includes(marker))) throw fail("not_verified", "post not found in feed after submit");
+    return { post_url: page.url(), dry_run: false };
+  }, deps);
+}
+
+module.exports = { postToGroup, SELECTORS };
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd server && node posting-driver.test.js`
+Expected: PASS.
+
+- [ ] **Step 5: Add to the test chain and commit**
+
+Append ` && node posting-driver.test.js` to `scripts.test`.
+
+```bash
+cd server && npm test
+git add server/posting-driver.js server/posting-driver.test.js server/package.json
+git commit -m "feat(posting): browser choreography for posting to a group, with dry run"
+```
+
+---
+
+### Task 16: `routes/posting.js` — the campaign API
+
+**Files:**
+- Create: `server/routes/posting.js`
+- Create: `server/routes/posting.test.js`
+- Modify: `server/index.js` (mount + sweeper)
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Consumes: `posting-campaign.*`, `db.getPage/getPropertyGroups/listGroupCatalog/getConnection/listPostingCampaignsByPhone`.
+- Produces:
+  - `POST /api/posting/campaigns` body `{ page_id, group_urls: string[], mode: "per_post"|"standing", standing?: { days, max_posts } }` → `201 {campaign}`; `409 {error:"facebook_not_connected"}`; `400 {error:"invalid_input"}`; `422 {error:"forbidden_group", groups:[…]}`.
+  - `POST /api/posting/campaigns/:id/approve` body `{ mode, standing? }` → `200 {campaign}`
+  - `POST /api/posting/campaigns/:id/posts/:post_id/approve` → `200 {campaign}`
+  - `POST /api/posting/campaigns/:id/pause | resume | stop | acknowledge-halt` → `200 {campaign}`
+  - `GET /api/posting/campaigns?page_id=` → `200 {campaigns:[…]}`
+  - `GET /api/posting/campaigns/:id` → `200 {campaign}`; `404` for another phone's campaign.
+  - Every response is passed through `publicView(campaign)` which strips `page_snapshot` and never contains `cdpUrl`, `view_url` or `wss://`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/routes/posting.test.js`:
+
+```js
+/* routes/posting.js — ownership, the policy gate, and that nothing leaks. */
+const assert = require("assert");
+const express = require("express");
+const http = require("http");
+const createRouter = require("./posting");
+
+const PHONE = "0500000000";
+function makeApp(o = {}) {
+  const phone = o.phone || PHONE;
+  const requireAuth = () => (req, res, next) => { req.user = { userId: phone }; next(); };
+  const app = express(); app.use(express.json());
+  app.use("/api/posting", createRouter({ requireAuth, authSecret: "s", db: o.db, campaigns: o.campaigns, deps: o.deps }));
+  return app;
+}
+function call(app, method, path, body) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => {
+      const req = http.request({ port: server.address().port, path, method, headers: { "content-type": "application/json" } }, (res) => {
+        let d = ""; res.on("data", (c) => (d += c));
+        res.on("end", () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(d || "{}"), raw: d }); });
+      });
+      if (body) req.write(JSON.stringify(body)); req.end();
+    });
+  });
+}
+const catalog = [
+  { url: "https://www.facebook.com/groups/ok", name: "OK", agent_policy: "allowed" },
+  { url: "https://www.facebook.com/groups/no", name: "NO", agent_policy: "forbidden" },
+  { url: "https://www.facebook.com/groups/unk", name: "?", agent_policy: "unknown" },
+];
+const baseDb = (over = {}) => Object.assign({
+  getPage: async (id) => (id === "pg1" ? { page_id: "pg1", business_phone: PHONE, title: "t", property: {}, agent: {} } : null),
+  listGroupCatalog: async () => catalog,
+  getConnection: async () => ({ facebook_browser_connected_at: "2026-09-01T00:00:00Z" }),
+  listPostingCampaignsByPhone: async () => [],
+}, over);
+
+(async () => {
+  // ── create: gate on connection, on ownership of the page, on agent_policy ──
+  let created = null;
+  const campaigns = {
+    create: async (input) => { created = input; return { id: "c1", phone: PHONE, status: "awaiting_approval", posts: [], groups: input.groups, page_snapshot: { secret: 1 } }; },
+  };
+  const app = makeApp({ db: baseDb(), campaigns });
+  const ok = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[0].url, catalog[2].url], mode: "standing", standing: { days: 7, max_posts: 5 } });
+  assert.equal(ok.status, 201);
+  assert.deepEqual(created.groups.map((g) => [g.url, g.agent_policy, g.explicit]), [[catalog[0].url, "allowed", true], [catalog[2].url, "unknown", true]]);
+  assert.ok(!("page_snapshot" in ok.body.campaign), "internal snapshot is not exposed");
+
+  const forbidden = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[1].url], mode: "standing" });
+  assert.equal(forbidden.status, 422);
+  assert.equal(forbidden.body.error, "forbidden_group");
+
+  const notConnected = await call(makeApp({ db: baseDb({ getConnection: async () => ({}) }), campaigns }), "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[0].url], mode: "standing" });
+  assert.equal(notConnected.status, 409);
+  assert.equal(notConnected.body.error, "facebook_not_connected");
+
+  const notMine = await call(makeApp({ phone: "0509999999", db: baseDb(), campaigns }), "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[0].url], mode: "standing" });
+  assert.equal(notMine.status, 404);
+
+  const noGroups = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [], mode: "standing" });
+  assert.equal(noGroups.status, 400);
+
+  // ── standing bounds are clamped server-side, whatever the client sends ──
+  let approved = null;
+  const camp2 = { approve: async (id, a) => { approved = a; return { id, phone: PHONE, status: "running", posts: [] }; } };
+  const db2 = baseDb({ getPostingCampaign: async () => ({ id: "c1", phone: PHONE, status: "awaiting_approval" }) });
+  await call(makeApp({ db: db2, campaigns: camp2 }), "POST", "/api/posting/campaigns/c1/approve", { mode: "standing", standing: { days: 9999, max_posts: 100000 } });
+  assert.equal(approved.standing.days, 30);
+  assert.equal(approved.standing.max_posts, 100);
+
+  // ── stop is owner-only, and another phone's campaign reads as missing ──
+  const db3 = baseDb({ getPostingCampaign: async () => ({ id: "c1", phone: PHONE, status: "running", posts: [] }) });
+  const stopped = await call(makeApp({ db: db3, campaigns: { stop: async (id) => ({ id, phone: PHONE, status: "stopped", posts: [] }) } }), "POST", "/api/posting/campaigns/c1/stop");
+  assert.equal(stopped.status, 200); assert.equal(stopped.body.campaign.status, "stopped");
+  const stolen = await call(makeApp({ phone: "0509999999", db: db3, campaigns: { stop: async () => { throw new Error("must not"); } } }), "POST", "/api/posting/campaigns/c1/stop");
+  assert.equal(stolen.status, 404);
+
+  // ── no browser secret in any response, ever ──
+  const leaky = { id: "c1", phone: PHONE, status: "running", posts: [{ id: "p", copy: "x", status: "posted" }], page_snapshot: {}, view_url: "https://viewer.driver.dev?ws=wss://x", cdpUrl: "wss://x" };
+  const get = await call(makeApp({ db: baseDb({ getPostingCampaign: async () => leaky }) }), "GET", "/api/posting/campaigns/c1");
+  assert.equal(get.status, 200);
+  assert.ok(!get.raw.includes("wss://") && !get.raw.includes("viewer.driver.dev"), "response scrubbed");
+
+  console.log("routes/posting.test.js ok");
+})();
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd server && node routes/posting.test.js`
+Expected: FAIL with `Cannot find module './posting'`
+
+- [ ] **Step 3: Write the router**
+
+Create `server/routes/posting.js`:
+
+```js
+/*
+ * routes/posting.js — an agent's permission to post, and the ledger of what
+ * was done with it.
+ *
+ * Three gates on create, all server-side: the agent's browser profile must be
+ * connected; the page must be theirs; every group must be in the catalog and
+ * not agent_policy:"forbidden". "unknown" groups are allowed only because the
+ * agent listed them by url — that is what `explicit` records.
+ */
+const express = require("express");
+const campaignsLive = require("../posting-campaign");
+const dbLive = require("../db");
+
+const PUBLIC_FIELDS = ["id", "page_id", "page_url", "title", "mode", "standing", "groups", "status", "halt_reason", "next_at", "posts", "consecutive_failures", "created_at", "updated_at"];
+function publicView(c) {
+  if (!c) return null;
+  const out = {};
+  for (const k of PUBLIC_FIELDS) if (k in c) out[k] = c[k];
+  return out;
+}
+const clampStanding = (s) => ({
+  days: Math.min(Math.max(Number(s && s.days) || 7, 1), 30),
+  max_posts: Math.min(Math.max(Number(s && s.max_posts) || 10, 1), 100),
+});
+
+module.exports = function createPostingRouter(ctx) {
+  const { requireAuth, authSecret } = ctx;
+  const db = ctx.db || dbLive;
+  const campaigns = ctx.campaigns || campaignsLive;
+  const deps = ctx.deps || Object.assign(campaignsLive.liveDeps(), { db });
+  const router = express.Router();
+
+  async function owned(req, res) {
+    const c = await db.getPostingCampaign(String(req.params.id)).catch(() => null);
+    if (!c || c.phone !== req.user.userId) { res.status(404).json({ error: "not_found" }); return null; }
+    return c;
+  }
+
+  router.post("/campaigns", requireAuth(authSecret), async (req, res) => {
+    const phone = req.user.userId;
+    const b = req.body || {};
+    const urls = Array.isArray(b.group_urls) ? b.group_urls.map(String).filter(Boolean) : [];
+    if (!b.page_id || !urls.length || !["per_post", "standing"].includes(b.mode)) return res.status(400).json({ error: "invalid_input" });
+
+    const conn = (await db.getConnection(phone)) || {};
+    if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
+    const page = await db.getPage(String(b.page_id)).catch(() => null);
+    if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
+
+    const catalog = await db.listGroupCatalog();
+    const byUrl = new Map(catalog.map((g) => [g.url, g]));
+    const groups = urls.map((u) => { const g = byUrl.get(u) || { url: u, name: "", agent_policy: "unknown" }; return { url: g.url, name: g.name || "", agent_policy: g.agent_policy || "unknown", explicit: true }; });
+    const forbidden = groups.filter((g) => g.agent_policy === "forbidden");
+    if (forbidden.length) return res.status(422).json({ error: "forbidden_group", groups: forbidden.map((g) => g.url) });
+
+    const c = await campaigns.create({ phone, page, pageUrl: page.url || page.page_url || "", groups, mode: b.mode, standing: b.mode === "standing" ? clampStanding(b.standing) : null }, deps);
+    return res.status(201).json({ campaign: publicView(c) });
+  });
+
+  router.post("/campaigns/:id/approve", requireAuth(authSecret), async (req, res) => {
+    if (!(await owned(req, res))) return;
+    const b = req.body || {};
+    const mode = b.mode === "per_post" ? "per_post" : "standing";
+    const c = await campaigns.approve(req.params.id, { mode, standing: mode === "standing" ? clampStanding(b.standing) : null }, deps);
+    return res.json({ campaign: publicView(c) });
+  });
+
+  router.post("/campaigns/:id/posts/:post_id/approve", requireAuth(authSecret), async (req, res) => {
+    if (!(await owned(req, res))) return;
+    return res.json({ campaign: publicView(await campaigns.approvePost(req.params.id, String(req.params.post_id), deps)) });
+  });
+
+  for (const [action, fn] of [["pause", "pause"], ["resume", "resume"], ["stop", "stop"], ["acknowledge-halt", "acknowledgeHalt"]]) {
+    router.post(`/campaigns/:id/${action}`, requireAuth(authSecret), async (req, res) => {
+      if (!(await owned(req, res))) return;
+      return res.json({ campaign: publicView(await campaigns[fn](req.params.id, deps)) });
+    });
+  }
+
+  router.get("/campaigns", requireAuth(authSecret), async (req, res) => {
+    const all = await db.listPostingCampaignsByPhone(req.user.userId);
+    const pageId = req.query.page_id ? String(req.query.page_id) : null;
+    return res.json({ campaigns: all.filter((c) => !pageId || c.page_id === pageId).map(publicView) });
+  });
+
+  router.get("/campaigns/:id", requireAuth(authSecret), async (req, res) => {
+    const c = await owned(req, res);
+    if (c) return res.json({ campaign: publicView(c) });
+  });
+
+  return router;
+};
+module.exports.publicView = publicView;
+```
+
+- [ ] **Step 4: Mount and start the sweeper**
+
+In `server/index.js`, inside the existing `if (process.env.DRIVER_API_KEY)` block from Task 7:
+
+```js
+  const posting = require("./posting-campaign");
+  posting.startSweeper(posting.liveDeps());
+  console.log("driver: posting sweeper started");
+```
+
+and with the other router mounts:
+
+```js
+const createPostingRouter = require("./routes/posting");
+app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET }));
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd server && node routes/posting.test.js`
+Expected: PASS.
+
+- [ ] **Step 6: Add to the test chain and commit**
+
+Append ` && node routes/posting.test.js` to `scripts.test`.
+
+```bash
+cd server && npm test
+git add server/routes/posting.js server/routes/posting.test.js server/index.js server/package.json
+git commit -m "feat(posting): campaign API with ownership and group-policy gates"
+```
+
+---
+
+### Task 17: The campaign card in the dashboard
+
+The agent sees a timeline, never a browser. What they need to understand at a glance: which groups, under which permission, what happens next, and how to stop.
+
+**Files:**
+- Modify: `public-agent/distribution.html` (a new card after `groupsCard`)
+- Modify: `public-agent/distribution.js`
+- Modify: `public-agent/app.css`
+- Modify: `public-agent/form-i18n.js`
+
+**Interfaces:**
+- Consumes: `GET/POST /api/posting/campaigns…`, the page's selected groups already loaded by `distribution.js` (`state.selected_groups` or the equivalent that file keeps), `GET /api/connections/browser/facebook/status`.
+- Produces: `#campaignCard`, `#campaignTimeline`, `#campaignStopBtn`.
+
+- [ ] **Step 1: Add the Hebrew strings**
+
+In `public-agent/form-i18n.js` `"he"` map (and translate into each other map):
+
+```
+"camp_title":"פרסום אוטומטי בקבוצות",
+"camp_intro":"פורלי תפרסם את הנכס בקבוצות שבחרתם, בקצב איטי ומדורג — כמה פוסטים ביום, בשעות היום, לא בשבת — כדי לא לעורר חשד. הפרסום נעשה מדפדפן ברקע; אתם רואים כאן מה קרה ומה מתוכנן.",
+"camp_need_connect":"כדי לפרסם צריך קודם לחבר את חשבון הפייסבוק שלכם למעלה.",
+"camp_mode_label":"איך לאשר?",
+"camp_mode_per_post":"לאשר כל פוסט בנפרד",
+"camp_mode_per_post_hint":"לפני כל פוסט תקבלו הודעת וואטסאפ עם הטקסט המדויק והקבוצה. בלי אישור שלכם — לא מפרסמים.",
+"camp_mode_standing":"לפרסם עד שאעצור",
+"camp_mode_standing_hint":"אישור אחד לכל הקמפיין, בגבולות שתקבעו. אפשר לעצור בכל רגע בלחיצה אחת.",
+"camp_standing_days":"למשך",
+"camp_standing_max":"עד",
+"camp_standing_posts":"פוסטים",
+"camp_days_7":"שבוע","camp_days_14":"שבועיים","camp_days_30":"חודש",
+"camp_groups_n":"קבוצות נבחרות",
+"camp_groups_unknown_warn":"בקבוצות המסומנות ב-? לא ידוע אם מתווכים מורשים לפרסם. אתם בוחרים לכלול אותן.",
+"camp_start":"התחלת פרסום",
+"camp_starting":"מתחילים…",
+"camp_stop":"עצירה",
+"camp_stop_confirm":"לעצור את הפרסום? פוסטים שכבר פורסמו נשארים. אפשר להתחיל קמפיין חדש בכל זמן.",
+"camp_pause":"השהיה","camp_resume":"המשך",
+"camp_next":"הפוסט הבא:",
+"camp_next_none":"אין פוסט מתוכנן כרגע — נמתין לחלון הבא.",
+"camp_waiting_approval":"ממתין לאישור שלכם",
+"camp_approve_post":"אישור ופרסום",
+"camp_status_running":"פעיל","camp_status_paused":"מושהה","camp_status_stopped":"נעצר","camp_status_completed":"הושלם","camp_status_halted":"נעצר — נדרשת התערבות",
+"camp_halt_checkpoint":"פייסבוק ביקשה אימות. פתחו את הדפדפן, השלימו את האימות, ואז לחצו \"טיפלתי\". נחכה יומיים לפני שנמשיך, ליתר ביטחון.",
+"camp_halt_rate_limited":"פייסבוק הגבילה זמנית את הפרסום מהחשבון. נמתין יומיים ונמשיך לאט יותר. לא צריך לעשות כלום.",
+"camp_halt_login_required":"החיבור לפייסבוק פג. חברו את החשבון מחדש למעלה ואז לחצו \"טיפלתי\".",
+"camp_halt_failures":"כמה פוסטים ברצף לא הצליחו. בדקו את הקבוצות ולחצו \"המשך\".",
+"camp_halt_ack":"טיפלתי",
+"camp_post_posted":"פורסם","camp_post_scheduled":"מתוכנן","camp_post_skipped":"דולג","camp_post_failed":"נכשל","camp_post_posting":"מפרסמים עכשיו…",
+"camp_skip_not_member":"אינכם חברים בקבוצה","camp_skip_group_blocked":"הקבוצה לא מאפשרת פרסום",
+"camp_err_forbidden_group":"אחת הקבוצות אוסרת פרסום של מתווכים — הסירו אותה מהבחירה",
+"camp_err_generic":"לא הצלחנו להתחיל את הקמפיין — נסו שוב",
+"camp_consent":"אני מבין/ה שפרסום אוטומטי מחשבון אישי נוגד את תנאי השימוש של פייסבוק ועלול להוביל להגבלת החשבון, ומאשר/ת זאת על אחריותי.",
+```
+
+- [ ] **Step 2: Add the card markup**
+
+In `public-agent/distribution.html`, after the `groupsCard` div:
+
+```html
+  <div class="card dist-card" id="campaignCard" hidden>
+    <h2 data-i18n="camp_title"></h2>
+    <p class="muted" data-i18n="camp_intro"></p>
+    <p class="warn" id="campNeedConnect" data-i18n="camp_need_connect" hidden></p>
+
+    <div id="campSetup">
+      <p class="muted"><span id="campGroupsCount">0</span> <span data-i18n="camp_groups_n"></span></p>
+      <p class="muted small" id="campUnknownWarn" data-i18n="camp_groups_unknown_warn" hidden></p>
+
+      <fieldset class="camp-mode">
+        <legend data-i18n="camp_mode_label"></legend>
+        <label class="camp-opt"><input type="radio" name="campMode" value="per_post" checked>
+          <span><strong data-i18n="camp_mode_per_post"></strong><small data-i18n="camp_mode_per_post_hint"></small></span></label>
+        <label class="camp-opt"><input type="radio" name="campMode" value="standing">
+          <span><strong data-i18n="camp_mode_standing"></strong><small data-i18n="camp_mode_standing_hint"></small></span></label>
+      </fieldset>
+
+      <div class="camp-bounds" id="campBounds" hidden>
+        <label><span data-i18n="camp_standing_days"></span>
+          <select id="campDays"><option value="7" data-i18n="camp_days_7"></option><option value="14" selected data-i18n="camp_days_14"></option><option value="30" data-i18n="camp_days_30"></option></select></label>
+        <label><span data-i18n="camp_standing_max"></span>
+          <select id="campMax"><option>5</option><option selected>10</option><option>20</option><option>40</option></select>
+          <span data-i18n="camp_standing_posts"></span></label>
+      </div>
+
+      <label class="camp-consent"><input type="checkbox" id="campConsent"> <span data-i18n="camp_consent"></span></label>
+      <button class="btn btn-gold" id="campStartBtn" data-i18n="camp_start" disabled></button>
+    </div>
+
+    <div id="campLive" hidden>
+      <div class="camp-head">
+        <span class="conn-chip" id="campStatusChip"></span>
+        <span class="muted" id="campNext"></span>
+        <span class="camp-actions">
+          <button class="btn btn-ghost" id="campPauseBtn" data-i18n="camp_pause"></button>
+          <button class="btn btn-danger" id="campStopBtn" data-i18n="camp_stop"></button>
+        </span>
+      </div>
+      <div class="camp-halt" id="campHalt" hidden>
+        <p id="campHaltMsg"></p>
+        <button class="btn btn-gold" id="campHaltBrowserBtn" data-i18n="conn_browser_open"></button>
+        <button class="btn btn-ghost" id="campHaltAckBtn" data-i18n="camp_halt_ack"></button>
+      </div>
+      <ol class="camp-timeline" id="campaignTimeline"></ol>
+    </div>
+  </div>
+```
+
+- [ ] **Step 3: Add the styles**
+
+Append to `public-agent/app.css`:
+
+```css
+/* Campaign card: one glance = groups, permission, what's next, how to stop. */
+.camp-mode { border: 1px solid var(--line, #2a2d36); border-radius: 12px; padding: 10px 14px; margin: 12px 0; }
+.camp-opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; cursor: pointer; }
+.camp-opt small { display: block; color: var(--muted, #9aa0a6); margin-top: 2px; line-height: 1.5; }
+.camp-bounds { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 12px; }
+.camp-consent { display: flex; gap: 8px; align-items: flex-start; font-size: .9rem; color: var(--muted, #9aa0a6); margin: 12px 0; line-height: 1.5; }
+.camp-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.camp-actions { margin-inline-start: auto; display: flex; gap: 8px; }
+.btn-danger { background: #b3261e; color: #fff; }
+.camp-halt { border: 1px solid #e0b341; border-radius: 12px; padding: 12px 14px; margin: 10px 0; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.camp-halt p { flex: 1 1 100%; margin: 0 0 6px; line-height: 1.6; }
+.camp-timeline { list-style: none; padding: 0; margin: 0; }
+.camp-timeline li { display: grid; grid-template-columns: 90px 1fr auto; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line, #2a2d36); align-items: center; }
+.camp-timeline .when { color: var(--muted, #9aa0a6); font-variant-numeric: tabular-nums; }
+.camp-timeline .st-posted { color: #4caf7d; } .camp-timeline .st-failed { color: #e57373; } .camp-timeline .st-skipped { color: var(--muted, #9aa0a6); }
+.camp-timeline details { grid-column: 1 / -1; } .camp-timeline pre { white-space: pre-wrap; font: inherit; background: rgba(255,255,255,.04); padding: 8px; border-radius: 8px; }
+@media (max-width: 640px) { .camp-timeline li { grid-template-columns: 1fr; } .camp-actions { margin-inline-start: 0; width: 100%; } .camp-actions .btn { flex: 1; } }
+```
+
+- [ ] **Step 4: Wire it**
+
+Append to `public-agent/distribution.js`:
+
+```js
+// ── automatic group posting ──
+(function () {
+  var card = $("campaignCard"); if (!card) return;
+  var current = null, pollTimer = null;
+  var pageId = state.page_id; // the page this distribution view is for
+  var fmt = function (iso) { if (!iso) return ""; var d = new Date(iso); return d.toLocaleString("he-IL", { weekday: "short", hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" }); };
+  var post = function (path, body) {
+    return fetch(path, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); });
+  };
+
+  function selectedGroups() { return (state.selected_groups || []).map(function (g) { return typeof g === "string" ? g : g.url; }); }
+  function refreshSetup() {
+    var urls = selectedGroups();
+    $("campGroupsCount").textContent = urls.length;
+    var unknown = (state.groups || []).some(function (g) { return urls.indexOf(g.url) >= 0 && g.agent_policy === "unknown"; });
+    $("campUnknownWarn").hidden = !unknown;
+    $("campStartBtn").disabled = !(urls.length && $("campConsent").checked && state.fbBrowserConnected);
+    $("campNeedConnect").hidden = !!state.fbBrowserConnected;
+  }
+  document.querySelectorAll('input[name="campMode"]').forEach(function (r) {
+    r.addEventListener("change", function () { $("campBounds").hidden = this.value !== "standing"; });
+  });
+  $("campConsent").addEventListener("change", refreshSetup);
+
+  $("campStartBtn").addEventListener("click", function () {
+    var btn = this; btn.disabled = true; btn.textContent = FT("camp_starting");
+    var mode = document.querySelector('input[name="campMode"]:checked').value;
+    var body = { page_id: pageId, group_urls: selectedGroups(), mode: mode };
+    if (mode === "standing") body.standing = { days: Number($("campDays").value), max_posts: Number($("campMax").value) };
+    post("/api/posting/campaigns", body).then(function (res) {
+      if (!res.ok) { FLY.toast(FT(res.body.error === "forbidden_group" ? "camp_err_forbidden_group" : "camp_err_generic")); return; }
+      return post("/api/posting/campaigns/" + res.body.campaign.id + "/approve", { mode: mode, standing: body.standing });
+    }).then(function (res) { if (res && res.ok) show(res.body.campaign); })
+      .catch(function () { FLY.toast(FT("camp_err_generic")); })
+      .then(function () { btn.textContent = FT("camp_start"); refreshSetup(); });
+  });
+
+  function show(c) {
+    current = c;
+    var live = c && ["running", "paused", "halted"].indexOf(c.status) >= 0;
+    $("campSetup").hidden = !!live; $("campLive").hidden = !live;
+    if (!live) { clearInterval(pollTimer); pollTimer = null; return; }
+    $("campStatusChip").textContent = FT("camp_status_" + c.status);
+    var next = (c.posts || []).filter(function (p) { return p.status === "scheduled" || p.status === "pending_approval"; })[0];
+    $("campNext").textContent = next ? FT("camp_next") + " " + fmt(next.scheduled_at) + " · " + (next.group_name || next.group_url) : FT("camp_next_none");
+    $("campPauseBtn").textContent = FT(c.status === "paused" ? "camp_resume" : "camp_pause");
+    $("campPauseBtn").hidden = c.status === "halted";
+    var halt = $("campHalt"); halt.hidden = c.status !== "halted" && !(c.status === "paused" && c.halt_reason === "consecutive_failures");
+    if (!halt.hidden) {
+      var key = c.halt_reason === "consecutive_failures" ? "camp_halt_failures" : ("camp_halt_" + c.halt_reason);
+      $("campHaltMsg").textContent = FT(key) || FT("camp_halt_failures");
+      $("campHaltBrowserBtn").hidden = !(c.halt_reason === "checkpoint" || c.halt_reason === "login_required");
+    }
+    var ol = $("campaignTimeline"); ol.innerHTML = "";
+    (c.posts || []).slice().reverse().forEach(function (p) {
+      var li = document.createElement("li");
+      var st = p.status === "skipped" ? FT("camp_skip_" + p.error_code) || FT("camp_post_skipped") : FT("camp_post_" + (p.status === "pending_approval" ? "scheduled" : p.status));
+      li.innerHTML = '<span class="when">' + fmt(p.posted_at || p.scheduled_at) + '</span><span>' + (p.group_name || p.group_url) + '</span><span class="st-' + p.status + '">' + st + '</span>';
+      if (p.status === "pending_approval") {
+        var b = document.createElement("button"); b.className = "btn btn-gold"; b.textContent = FT("camp_approve_post");
+        b.addEventListener("click", function () { post("/api/posting/campaigns/" + c.id + "/posts/" + p.id + "/approve").then(function (r) { if (r.ok) show(r.body.campaign); }); });
+        li.appendChild(b);
+      }
+      var d = document.createElement("details"); d.innerHTML = "<summary>" + FT("ext_show_all") + "</summary><pre></pre>"; d.querySelector("pre").textContent = p.copy || "";
+      li.appendChild(d); ol.appendChild(li);
+    });
+    if (!pollTimer) pollTimer = setInterval(reload, 30000);
+  }
+  function reload() {
+    if (!current) return;
+    fetch("/api/posting/campaigns/" + current.id, { credentials: "include" }).then(function (r) { return r.json(); }).then(function (j) { if (j.campaign) show(j.campaign); }).catch(function () {});
+  }
+  $("campPauseBtn").addEventListener("click", function () {
+    post("/api/posting/campaigns/" + current.id + "/" + (current.status === "paused" ? "resume" : "pause")).then(function (r) { if (r.ok) show(r.body.campaign); });
+  });
+  $("campStopBtn").addEventListener("click", function () {
+    if (!confirm(FT("camp_stop_confirm"))) return;
+    post("/api/posting/campaigns/" + current.id + "/stop").then(function (r) { if (r.ok) { show(r.body.campaign); FLY.toast(FT("camp_status_stopped")); } });
+  });
+  $("campHaltAckBtn").addEventListener("click", function () {
+    var path = current.status === "halted" ? "acknowledge-halt" : "resume";
+    post("/api/posting/campaigns/" + current.id + "/" + path).then(function (r) { if (r.ok) show(r.body.campaign); });
+  });
+  // The embedded browser (Task 11) is the fix for a checkpoint: same button, same modal.
+  $("campHaltBrowserBtn").addEventListener("click", function () { $("browserPlatform").value = "facebook"; $("browserConnectBtn").click(); });
+
+  // Boot: is the browser connected, is there a live campaign for this page?
+  fetch("/api/connections/browser/facebook/status", { credentials: "include" }).then(function (r) { return r.json(); })
+    .then(function (j) { state.fbBrowserConnected = j.state === "connected"; refreshSetup(); }).catch(refreshSetup);
+  fetch("/api/posting/campaigns?page_id=" + encodeURIComponent(pageId), { credentials: "include" }).then(function (r) { return r.json(); })
+    .then(function (j) { var live = (j.campaigns || []).filter(function (c) { return ["running", "paused", "halted"].indexOf(c.status) >= 0; })[0]; if (live) show(live); })
+    .catch(function () {});
+  card.hidden = false;
+  refreshSetup();
+})();
+```
+
+`state.page_id`, `state.selected_groups` and `state.groups` are whatever names `distribution.js` already uses for the current page and its group selection — read that file's `state` object and use its real field names; do not add a parallel copy.
+
+- [ ] **Step 5: Verify by hand**
+
+```bash
+cd server && DRIVER_API_KEY=$DRIVER_API_KEY npm run local
+```
+
+Open the distribution page for a test property with the test account connected (Task 11). Walk it as a first-time agent would, and check each of these reads without explanation:
+
+1. Before connecting Facebook: the card shows the "connect first" line and the start button is disabled.
+2. Consent unticked → start disabled. Tick → enabled.
+3. "לאשר כל פוסט בנפרד" is the default. Choosing "לפרסם עד שאעצור" reveals the bounds (duration, max posts).
+4. Start → the card flips to the live view with a status chip, "הפוסט הבא: …", a red STOP.
+5. STOP → confirm → chip reads "נעצר", timeline stays, setup returns.
+6. Simulate a halt (set `status:"halted", halt_reason:"checkpoint"` on the campaign doc): the amber box explains what happened and offers the browser button, which opens Task 11's modal on Facebook.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add public-agent/distribution.html public-agent/distribution.js public-agent/app.css public-agent/form-i18n.js
+git commit -m "feat(posting): campaign card with per-post and standing approval, timeline and stop"
+```
+
+---
+
+### Task 18: Calibration — the first real post, then two days unattended
+
+Everything in Phase 3 up to here is unit-tested against fakes. This task is where the plan's [Unverified] claims become measurements. **Use only a test Facebook account and test groups that account owns.** Never an agent's real account for this.
+
+**Files:**
+- Create: `scripts/posting-calibrate.local.js`
+- Modify: `docs/superpowers/plans/2026-09-22-driver-spike-findings.md`
+
+- [ ] **Step 1: Write the calibration script**
+
+Create `scripts/posting-calibrate.local.js`:
+
+```js
+/*
+ * scripts/posting-calibrate.local.js — the first real posts, watched closely.
+ *
+ *   DRIVER_API_KEY=… node scripts/posting-calibrate.local.js <profile-name> <group-url> [--live]
+ *
+ * Without --live: a DRY RUN — opens the group, opens the composer, types the
+ * copy, stops before submit. Confirms the selectors in posting-driver.js
+ * match the real page. Run this until it passes cleanly.
+ * With --live: ONE real post, then verifies it is in the feed.
+ */
+const { postToGroup, SELECTORS } = require("../server/posting-driver");
+const { buildPostCopy, trackedUrl } = require("../server/distribution/share-kit");
+
+const [profileName, groupUrl] = process.argv.slice(2);
+const live = process.argv.includes("--live");
+
+(async () => {
+  if (!profileName || !groupUrl) { console.error("usage: <profile-name> <group-url> [--live]"); process.exit(2); }
+  const page = { title: "בדיקת מערכת — נא להתעלם", property: { city: "תל אביב", rooms: 3, price: 1 }, agent: { name: "בדיקה" } };
+  const url = trackedUrl("https://forly.example/test", { session: "calib", group: groupUrl });
+  const copy = buildPostCopy(page, url, { variantSeed: "calib" + groupUrl });
+  console.log(`mode=${live ? "LIVE" : "dry run"} selectors=${JSON.stringify(Object.keys(SELECTORS))}`);
+  console.log("copy:\n" + copy + "\n");
+  const t0 = Date.now();
+  try {
+    const out = await postToGroup({ groupUrl, copy, profileName, dryRun: !live, campaignId: "calib" });
+    console.log(`OK in ${((Date.now() - t0) / 1000).toFixed(1)}s:`, out);
+    process.exit(0);
+  } catch (e) {
+    console.error(`FAIL ${e.code || ""}: ${e.message}`);
+    process.exit(1);
+  }
+})();
+```
+
+- [ ] **Step 2: Dry run until the selectors are right**
+
+```bash
+cd /home/user/forly-backend
+DRIVER_API_KEY=$DRIVER_API_KEY node scripts/posting-calibrate.local.js "facebook-<test-phone>" "https://www.facebook.com/groups/<your-test-group>"
+```
+
+Expected: `OK … dry_run: true`. On `composer_not_found`, open the same group in the embedded browser (Task 11), inspect the composer, and fix `SELECTORS` in `server/posting-driver.js` — that is the only file to touch. Repeat until three consecutive dry runs pass.
+
+- [ ] **Step 3: One live post**
+
+```bash
+DRIVER_API_KEY=$DRIVER_API_KEY node scripts/posting-calibrate.local.js "facebook-<test-phone>" "https://www.facebook.com/groups/<your-test-group>" --live
+```
+
+Expected: `OK … dry_run: false`, and the post is visible in the group when you look with a normal browser, with the link card attached. If it reports `not_verified` but the post *is* there, fix `SELECTORS.feedPostText`; a false negative here would make the campaign count a success as a failure and trip the breaker for nothing.
+
+- [ ] **Step 4: Two days unattended**
+
+Create a `standing` campaign from the dashboard for the test property with two test groups, 7 days, 6 posts. Leave it. After 48 hours, pull the ledger and check every invariant the plan promised:
+
+```bash
+cd server && node -e '
+const db = require("./db"); db.init();
+(async () => {
+  const c = (await db.listPostingCampaignsByPhone(process.argv[1]))[0];
+  const posted = c.posts.filter(p => p.status === "posted").map(p => new Date(p.posted_at)).sort((a,b)=>a-b);
+  const S = require("./posting-safety");
+  let ok = true;
+  for (let i = 1; i < posted.length; i++) { const gap = (posted[i]-posted[i-1])/60000; if (gap < S.DEFAULTS.min_gap_minutes) { console.error("GAP VIOLATION", gap); ok = false; } }
+  for (const d of posted) if (!S.isActiveTime(d, S.DEFAULTS)) { console.error("OUTSIDE ACTIVE HOURS", d.toISOString()); ok = false; }
+  console.log(`${posted.length} posts, status=${c.status}, halt=${c.halt_reason}`); process.exit(ok ? 0 : 1);
+})();' "<test-phone>"
+```
+
+Expected: exit 0, no violations, status `running` or `completed`, `halt_reason` null. Also open the test account in a normal browser: no warning banners, no "unusual activity" notice.
+
+- [ ] **Step 5: Record what was measured**
+
+Append to `docs/superpowers/plans/2026-09-22-driver-spike-findings.md`:
+
+```
+## Posting calibration (<date>)
+
+- selectors changed from the plan's defaults: <yes: which | no>
+- dry runs to a clean pass: <n>
+- live post verified in feed: <yes|no>; time to post: <s>
+- 48h standing run: <n> posts, <n> skipped, halt: <none|reason>; account warnings seen: <none|describe>
+- DEFAULTS kept as-is / changed to: <values>
+```
+
+If the 48h run produced any platform signal, **lower** the caps and lengthen the gaps before letting a real agent near this — never the reverse.
+
+- [ ] **Step 6: Commit and push**
+
+```bash
+cd server && npm test
+cd .. && git add scripts/posting-calibrate.local.js docs/superpowers/plans/2026-09-22-driver-spike-findings.md server/posting-driver.js
+git commit -m "test(posting): calibration script and measured pacing defaults"
+git push -u origin claude/zen-davinci-lu4hoq
+```
+
+---
+
 ## Done means
 
 - `cd server && npm test` passes, with all six new test files in the chain.
@@ -2286,10 +3940,14 @@ git push -u origin claude/zen-davinci-lu4hoq
 - A non-allowlisted URL still goes to Firecrawl, and only falls back to a browser when Firecrawl errors (Task 6 tests).
 - The embedded browser opens in the dashboard, and `finish` refuses to mark an account connected when nobody logged in (Task 11).
 - `PROFILE_COOKIES_PERSIST` has a recorded answer (Task 12).
+- A campaign in `standing` mode posts to two test groups across two days without ever violating a `posting-safety` invariant (Task 18's ledger shows every gap ≥ the configured minimum, none outside active hours, none on Shabbat).
+- Pressing STOP on a running campaign cancels the next post before it starts (Task 16 test + Task 17 by hand).
+- A simulated checkpoint page halts the account and surfaces the embedded browser as the fix (Task 15 test + Task 17 by hand).
+- No posting session ever returned a `view_url` (Task 16 test).
 
 ## Deferred, on purpose
 
-- **Publish-out** (posting a finished Forly page to Facebook / Yad2 / Madlan through a connected profile) — a separate spec, as agreed.
+- **Publish-out to Yad2 / Madlan.** Phase 3 posts to Facebook groups only. Yad2 and Madlan are structured listing forms with their own accounts, photo uploads and paid tiers — a separate spec each.
 - **Account-wide bulk sweep** (walking an agent's whole Yad2 office page or Madlan profile) — needs pagination, dedup and a different job shape.
 - **Browser pools.** They would cut the ~20s session start, but they hold warm browsers against an account-wide cap, and the docs say not to create one unasked. Revisit only if start latency becomes the complaint.
 - **`captchaSolver`.** Off by default; it costs credits. Turn it on per-host, with evidence, after the `hosted_privacy` rung has been seen to fail.
