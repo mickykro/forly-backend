@@ -392,6 +392,16 @@ async function handleTurn(input, deps) {
     if (t.handled && t.replies.length) t.replies[0] = { ...t.replies[0], text: `${R.heard(heard)}\n\n${t.replies[0].text}` };
     return t;
   }
+  // "עזרה" is answered wherever the agent is, and changes nothing: an agent who
+  // asks how this works while a draft is open was answered with the resume
+  // prompt before, twice over, and had no way to tell that only three exact
+  // words would get them out. A question must never cost someone their draft,
+  // so this returns no draft and leaves updated_at alone — the pause clock keeps
+  // running exactly as it was.
+  if (D.command(input.text) === "help") {
+    return { handled: true, status: "help", replies: [R.help(deps.guideUrl, !!draft)] };
+  }
+
   const open = draft && (draft.status === "active" || draft.status === "offered");
   if (input.messageType === "documentMessage" && open) {
     // Whatever step the draft is at, the question it's waiting on comes right after.

@@ -18,11 +18,16 @@ const PAUSE_MS = 2 * 60 * 60 * 1000;
 const KEYWORDS = ["נכס חדש", "דף נכס", "דף חדש", "דף נכס חדש", "ליצור נכס", "צור נכס", "ליצור דף נכס"];
 const LISTING_HINTS = ["חדרים", "חד׳", "חד'", "מ״ר", "מ\"ר", "קומה", "למכירה", "להשכרה", "₪", "מחיר", "שכירות"];
 const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "continue", "כן": "yes", "לא": "no", "המשך": "resume", "חדש": "new",
-  "תצוגה מקדימה": "preview", "ליצור": "create" };
+  "תצוגה מקדימה": "preview", "ליצור": "create", "עזרה": "help" };
 // Natural phrasings for the buttons above; button taps always send the exact
 // COMMANDS word, these cover what a person types instead of tapping.
 const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume",
-  "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create" };
+  "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create",
+  // An agent who wants the guide types the question, not a keyword. These are
+  // whole-message matches, so "איך משתמשים" asks for help while "איך משתמשים
+  // בממ״ד הזה" stays a description someone is writing for their listing.
+  "הוראות": "help", "מדריך": "help", "עזרו לי": "help", "איך משתמשים": "help",
+  "איך זה עובד": "help", "איך עובדים": "help", "מה אפשר לעשות": "help" };
 
 // Page designs, in the order create.html's picker lists them (1-6). The first
 // alias is the Hebrew name shown there; create.html preselects the chosen one.

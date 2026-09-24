@@ -18,6 +18,9 @@ assert.equal(D.command("חדש"), "new");
 assert.equal(D.command("כן בבקשה"), null);
 assert.equal(D.command("להמשיך אותה"), "resume");
 assert.equal(D.command("להמשיך"), "resume");
+assert.deepEqual(["עזרה", "הוראות", "מדריך", "איך משתמשים?", "איך זה עובד", "עזרו לי"].map(D.command),
+  ["help", "help", "help", "help", "help", "help"], "the words an agent reaches for when lost");
+assert.equal(D.command("איך משתמשים במעלית שבת"), null, "a help word inside a sentence is not a help request");
 
 assert.equal(D.openerKind("https://x.co/1"), "link");
 assert.equal(D.openerKind("נכס חדש"), "keyword");

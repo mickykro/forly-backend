@@ -21,6 +21,7 @@ function deps(over = {}) {
     createUrl: CREATE,
     extractAllowed: () => true,
     reviewLink: (phone) => `https://review/${phone}`,
+    guideUrl: "https://forly/instructions",
     createListing: async (body) => { calls.created = body; return { listing_id: "L1" }; },
     ...over,
   };
@@ -459,6 +460,27 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "המחיר ירד ל-2.5 מיליון https://www.yad2.co.il/item/abc https://www.yad2.co.il/item/def" }, d);
   assert.equal(t.draft.fields.price, 2500000);
   assert.match(texts(t), /קראתי את הקישור הראשון/);
+
+  // #16 "עזרה" is answered everywhere and costs nothing — the real report was
+  // "הוראות" and then "איך משתמשים?" against a paused draft, twice answered
+  // with the resume prompt.
+  ({ d } = deps());
+  const paused = { ...ready, updated_at: new Date(T0.getTime() - D.PAUSE_MS - 1) };
+  for (const ask of ["עזרה", "הוראות", "איך משתמשים?", "מדריך"]) {
+    t = await turn({ text: ask, draft: paused }, d);
+    assert.equal(t.status, "help", `${ask} asks for help`);
+    assert.match(texts(t), /https:\/\/forly\/instructions/, `${ask} carries the guide link`);
+    assert.match(texts(t), /נכס חדש/, `${ask} carries the basics, not only a link`);
+    assert.equal(t.draft, undefined, `${ask} must not write the draft back`);
+    assert.ok(!t.del, `${ask} must not delete the draft`);
+  }
+  // With no draft at all it still answers, and says nothing about a saved draft.
+  t = await turn({ text: "עזרה", draft: null }, d);
+  assert.equal(t.status, "help");
+  assert.doesNotMatch(texts(t), /הטיוטה הפתוחה/, "there is no draft to reassure anyone about");
+  // A help word is only a help word on its own: this one is an answer.
+  t = await turn({ text: "עזרה לי למצוא חניה ברחוב", draft: { ...ready, fields: { ...ready.fields, parking: null }, skipped: ["size_sqm", "floor"] } }, d);
+  assert.notEqual(t.status, "help", "help words inside a sentence are not a help request");
 
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

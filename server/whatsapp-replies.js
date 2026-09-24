@@ -146,6 +146,24 @@ function outOfQuota(message) { return { text: message || "נגמרה המכסה 
 function building(s) { return { text: `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).` }; }
 function cancelled() { return { text: "ביטלתי את הטיוטה. אפשר להתחיל מחדש עם קישור, טקסט או ״נכס חדש״." }; }
 function declined() { return { text: "בסדר, לא בונים דף מהתמונות האלה." }; }
+// "עזרה" from an agent who is lost. The short version goes in the message —
+// someone stuck in WhatsApp should not have to open a browser to learn the
+// three things that get them moving — and the link carries the rest.
+function help(guideUrl, hasDraft) {
+  return { text: [
+    "ככה יוצרים דף נכס בוואטסאפ 👇",
+    "",
+    "1️⃣ שלחו קישור למודעה (יד2 / מדלן), הדביקו את הטקסט שלה, או כתבו ״נכס חדש״.",
+    "2️⃣ ענו על השאלות — בהקלדה או בהודעה קולית. ״דלג״ מדלג על שאלה.",
+    "3️⃣ שלחו לפחות 4 תמונות.",
+    "4️⃣ בחרו ״תצוגה מקדימה״ כדי לבדוק ולערוך בדף, או ״ליצור״ לבנות מיד.",
+    "",
+    "תמיד אפשר: ״ביטול״ לביטול הטיוטה, או ״/מחיר 2,900,000״ לתיקון פרט.",
+    hasDraft ? "\nהטיוטה הפתוחה שלכם נשמרה — היא מחכה בדיוק איפה שהייתה." : null,
+    `\nהמדריך המלא, כולל שדרוג תמונות: ${guideUrl}`,
+  ].filter((l) => l !== null).join("\n") };
+}
+
 function resumePrompt(s) {
   return { text: `יש לך טיוטה פתוחה: ${summaryLines(s)}.\nלהמשיך אותה, להתחיל נכס חדש, או לבטל?`, buttons: ["המשך", "חדש", "ביטול"] };
 }
@@ -166,6 +184,7 @@ function noLinkHint(createUrl) {
 }
 
 module.exports = {
+  help,
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,

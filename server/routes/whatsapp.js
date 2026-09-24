@@ -72,7 +72,7 @@ const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
   const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, sendButtons,
-    uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
+    uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, pageBaseUrl, quota, pipelineDeps } = ctx;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
   const timers = new Map();
@@ -126,6 +126,8 @@ module.exports = function createWhatsappRouter(ctx) {
       importPhoto: importPhotoFor(phone),
       importVideo: importPhotoFor(phone, { video: true }),
       createUrl: `${baseUrl}/create.html`,
+      // The written guide, on the branded host agents already see their pages on.
+      guideUrl: `${pageBaseUrl || baseUrl}/instructions`,
       extractAllowed: (p) => limit.take(p),
       // /review signs the agent straight into create.html (same trust as
       // importPhotoFor's server-side session above, just handed to their

@@ -203,7 +203,7 @@ app.use("/api/whatsapp", createWhatsappRouter({
   sendButtons: GREENAPI_INSTANCE && GREENAPI_TOKEN
     ? (phone, opts) => sendWhatsAppButtons(phone, opts, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
-  baseUrl: BASE_URL,
+  baseUrl: BASE_URL, pageBaseUrl: PAGE_BASE_URL,
   pipelineDeps: {
     n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
     n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
