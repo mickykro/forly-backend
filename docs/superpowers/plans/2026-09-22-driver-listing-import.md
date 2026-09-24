@@ -8,6 +8,22 @@
 
 **A decision this plan reverses, on purpose:** `distribution/share-kit.js` records that browser automation to groups "was rejected as a ban risk (spec §1)" in favour of a WhatsApp share kit. The product owner has asked for automated posting anyway. Phase 3 therefore treats "the agent's account must never get blocked or look suspicious" as a first-class requirement with its own module, its own tests, a calibration task, and a kill switch — not a caveat.
 
+## Review outcomes (2026-09-24)
+
+Four independent reviews ran on the first complete draft: engineering correctness, blind spots, account-safety + application security, and UX. Every finding was checked against the repository before being accepted. What changed, in one place, so a reader of an earlier draft knows what moved:
+
+**Premise corrected.** The first draft reasoned about Cloud Run with many instances. `.github/workflows/deploy-server.yml` runs **one Docker container on a VPS** (`docker run … --restart unless-stopped`), and `distribution/jobs.js` says so. Every sweeper therefore uses an in-process latch (the `sweeping` pattern already in `jobs.js`) and one in-process Driver semaphore; Firestore holds state so it survives restarts, not to coordinate instances. Stale-state reapers replace distributed locks.
+
+**Blockers fixed in place** (Tasks 4, 6, 10, 13–16): the routing change broke three pre-existing `listing-sources` assertions; the extract-route test used top-level `await` in CommonJS and injected a `resolve` the route never read; the Firecrawl→Driver fallback fired on *any* error (including "no Firecrawl key"), which would send every URL to a paid browser; the posting-driver test matched selector strings by the words "submit"/"composer"; campaigns built `page_url` from a field page docs don't have (they'd crash on every tick); `liveDeps` called `sendWhatsApp` without the Green API credentials it requires (per-post approvals would silently never send); the catalog lookup used a vocabulary (`allowed`/`forbidden`) the seed doesn't have (`explicitly_allowed`/`unknown`) and a function (`mergedCatalog`) that isn't exported; `finish` tried to delete a nested key through a merge-write, which can't; the demo wizard got a 202 it could never poll; `codeFor()` leaked Driver's vendor codes into `error_code`; the `profileFor` regex wasn't left-anchored (`netflix.com` matched `x.com`) *and* attached the customer's logged-in profile on the fallback path.
+
+**Safety design changed** (Tasks 13–15, 19): checkpoint or CAPTCHA now **disables** automation for that account until a Forly operator re-enables it — not a 48h pause; a second halt of any kind in 30 days does the same. Caps roughly halved, gaps doubled, warm-up starts at one post a day for a week and asks two questions about the account first. The schedule is no longer periodic (random daily start, random daily target, one active day in five skipped). Typing cadence is drawn from a distribution with word-boundary pauses; every session dwells on the feed before opening a group. The tracked link moves to the first comment (`share-kit.linkInComment`, which the existing code already offers for exactly this reason) and its group parameter becomes an opaque hash — fixing, in passing, a real bug where `routes/pages.js` truncates `group_token` to 24 characters, which is exactly the length of `https://www.facebook.com`. Signal matching is scoped to dialogs and alerts, never the feed. `pending_approval` (admin-moderated groups, which [Inference] most Israeli real-estate groups are) is a recognised outcome, not a failure.
+
+**Added** (new Tasks 16b, 10b, 14b; Task 1 and 18 rewritten): a global kill switch (`settings/posting.enabled` + `POSTING_ENABLED`), a fleet breaker that flips it when three accounts halt in 24h, and an admin overview; persisted consent (`{consent_at, text_version}`) on both the connection and the campaign, a `DELETE` disconnect route that stops campaigns and deletes the Driver profile, and retention rules; WhatsApp one-tap approve / skip / stop using the existing `signActionToken` + `confirmOffer` pattern, with a WhatsApp line on every state change; the campaign card moves to `publish.html`, where the property and its groups already are; Task 1 now measures egress ASN and per-profile IP stickiness; Task 18 is a 30-day run on an aged test account in real groups with admin permission, not 48 hours on a throwaway.
+
+**Removed as YAGNI** (critic §26): the `awaiting_approval` state and `/approve` route (consent *is* the approval; a campaign is created running), the `explicit` flag (every group in a campaign is explicit by construction), `acknowledgeHalt` as a separate verb (one `paused` state with a `reason`, one `resume`), the browser-type escalation ladder for posting (one rung; the profile's cookies are the point), the `max_posts` bound (the number of groups is the bound the agent actually thinks in), and the five-platform dropdown (Facebook only until a feature needs another).
+
+**Pushed back on:** per-customer landing hostnames (safety A3) — right in principle, an infrastructure project of its own; noted under Deferred with the global per-group cap and the domain-level daily cap as the mitigations that ship. "Browse-only" warm-up sessions for a week (safety A6) — adopted as a *single* browse-only first session after connect (so the "new device" event is not a post), not seven days of paid sessions that post nothing. Jewish holidays (safety A13) — adopted as a ten-line static table, since the cost is nil.
+
 **Tech Stack:** Node >= 20 CommonJS, Express 4, Firebase Admin (Firestore), `patchright` (Playwright-compatible, connect-only), vanilla browser JS in `public-agent/`, plain `node x.test.js` assertion scripts.
 
 ## Global Constraints
@@ -20,7 +36,9 @@ Every task's requirements implicitly include this section.
 - **No broad CDP hooks:** no `page.route`, `context.route`, `page.on('request')`, `page.exposeFunction`, `page.addInitScript`, `context.addInitScript`. No fingerprint patching (`navigator`, user agent, WebGL, canvas, timezone, locale) — set `country` / `timezone` / `language` on the create call instead.
 - **Always stop the session** with `DELETE /v1/browser/session?sessionId=<id>` in a `finally`. `browser.close()` only disconnects; the session keeps running and holds a concurrency slot until `duration` expires.
 - **Driver error policy, exactly:** `402` and `403` → report, never loop. `503` → back off from `Retry-After` with jitter, capped at 5 attempts, then report. `504` and `500` → retry once. `429` → back off, capped at 3 attempts.
-- **`DRIVER_API_KEY` comes from `process.env`** and is never committed, never logged, never returned in an API response.
+- **Single-container deployment.** `deploy-server.yml` runs one Docker container on a VPS. Sweepers use an in-process `sweeping` latch (copy `distribution/jobs.js:651-665`) and one in-process Driver semaphore shared by extract, connect and posting. Firestore holds job and campaign state so a restart loses nothing; every sweeper reaps `running`/`posting` records older than their maximum lifetime at boot and on each pass. A second container is a documented non-goal.
+- **`DRIVER_API_KEY` comes from `process.env`** and is never committed, never logged, never returned in an API response. **It is a master key**: with it alone, anyone can open any customer's persisted profile. One key per environment (prod / staging / local), never shared; docs say `export DRIVER_API_KEY=…` once from a secret store, never inline on a command line. Profile names are `facebook-<env>-<hmac_sha256(phone, PROFILE_KEY).slice(0,20)>`, so the key cannot enumerate customers by phone. Driver session `note`s carry ids, never a phone.
+- **A redacting logger.** `driver-browser.js` exports `redact(msg)` (`/wss?:\/\/\S+/g` and `/ws=\S+/g` → `[cdp]`) and every `console.error` in the new sweepers and routes goes through it; a unit test stubs `console` and asserts nothing logged contains `wss://`, `ws=`, or the fake key.
 - **Never log a `cdpUrl` or a live-view URL.** Anyone holding one can drive that browser. They go only to the authenticated owner of the session.
 - **Base URL** is `https://api.driver.dev`. Ids go in the query string, not the path: `GET|DELETE /v1/browser/session?sessionId=<id>`. Pool ids are the exception (path), and **no pool is created by this plan.**
 - **Tests** are plain assertion scripts run as `node <file>.test.js`, using `require("assert")` and injected fakes — no test framework, no network in unit tests. Every new test file must be appended to the `scripts.test` chain in `server/package.json`.
@@ -28,11 +46,13 @@ Every task's requirements implicitly include this section.
 - **Commit messages carry no `Co-Authored-By` trailer** — `.claude/settings.json` has no `attribution.commit` key, and CLAUDE.md forbids it in that case.
 - **Branch:** all work lands on `claude/zen-davinci-lu4hoq`.
 - **Posting is background-only.** A posting session never surfaces a `view_url`; the agent sees a timeline, not a browser. The embedded browser (Task 11) is the escape hatch when Facebook demands a human (checkpoint, identity check), and only then.
-- **One browser per agent at a time.** Posting jobs for the same phone run serially. Never two Facebook sessions on one profile concurrently.
-- **Every pacing number is a tunable, conservative default marked [Unverified].** None was measured against Facebook; Task 18 measures. A number is never hard-coded in a call site — it comes from `posting-safety.DEFAULTS` and can be overridden per account.
-- **Never post to a group whose catalog `agent_policy` is `"forbidden"`.** `"unknown"` posts only when the agent explicitly ticked that group. This is a gate in code, not a UI hint.
-- **Any platform signal halts the whole account, not just the post.** Checkpoint, CAPTCHA, "posting too fast", post removed, group blocked → campaign `halted`, no further posts for that phone until the agent re-confirms after a cooldown.
-- **Never identical copy twice.** Every post goes through `share-kit.buildPostCopy` with a `variantSeed` of `page_id + group_url`; the tracked URL differs per group.
+- **One browser per profile at a time — across extract, connect and posting.** An in-process per-phone mutex (`profile-lock.js`, Task 5) is acquired by every code path that opens a persisted profile: a Facebook-group extract, the login browser, a post. Two sessions on one profile from two IPs is the hijack pattern; it must be impossible, not unlikely.
+- **Every pacing number is a tunable, conservative default marked [Unverified].** None was measured against Facebook; Task 18 measures over 30 days on an aged account. A number is never hard-coded in a call site — it comes from `posting-safety.DEFAULTS` and can be overridden per account.
+- **Groups are canonicalised and looked up in the merged catalog.** The catalog vocabulary is `explicitly_allowed` / `unknown` (there is no `forbidden`; the operator removes such groups). A URL not in the catalog needs the agent's explicit opt-in on the request. This is a gate in code, not a UI hint.
+- **Checkpoint or CAPTCHA disables automation for that account until a Forly operator re-enables it.** Not a cooldown — a stop. A second halt of any kind within 30 days does the same. `rate_limited` and `feature_blocked` pause the account for 14 days with caps halved and warm-up restarted. Only `login_required` (a benign cookie expiry) clears with the agent reconnecting.
+- **A global kill switch exists and is checked on every sweep**: `settings/posting.enabled` in Firestore AND `POSTING_ENABLED` in env. Either off → no post starts. A fleet breaker flips the Firestore flag off when three accounts halt within 24 hours and messages the operator.
+- **Consent is recorded, not just ticked.** `POST /connections/browser/start` and `POST /posting/campaigns` require `consent: true` and persist `{consent_at, consent_text_version}`; either without it is a 400. There is a `DELETE` that disconnects, stops campaigns, and deletes the Driver profile.
+- **Never identical copy twice, and the link is not in the body.** Every post goes through `share-kit.buildPostCopy` with a `variantSeed` of `page_id + group_url` and `linkInComment: true`; the tracked URL is posted as the first comment, with an opaque 12-character group token. Copy is generated at *scheduling* time from the page as it is then, never frozen at campaign creation.
 - **Hebrew user-facing copy only.** Vendor error text (Driver's, Facebook's) never reaches the agent — map to a stable `code` and a Hebrew string in `public-agent/form-i18n.js`, the pattern `distribution/jobs.js` already follows.
 
 ---
@@ -72,15 +92,17 @@ A Facebook **page post** keeps the existing Graph path because it is faster, fre
 
 | File | Responsibility |
 |---|---|
-| `server/posting-safety.js` | Pure functions: `nextSlot()` (may this account post now, and where), `classifySignal()` (is this page a checkpoint / rate-limit / block), `DEFAULTS`. No I/O. |
+| `server/profile-lock.js` | In-process per-phone mutex + Driver semaphore shared by extract, connect and posting. |
+| `server/posting-safety.js` | Pure functions: `nextSlot()` (may this account post now, and where), `classifySignal()` (scoped to dialogs/alerts), `DEFAULTS`, holidays. No I/O. |
 | `server/posting-safety.test.js` | Pacing invariants, warm-up ramp, cooldowns, active hours incl. Shabbat, signal classification. |
-| `server/posting-campaign.js` | Campaign state machine + sweeper. `draft → awaiting_approval → running → paused \| halted \| stopped \| completed`. Per-post `posts[]` ledger. Serial per phone. |
+| `server/posting-campaign.js` | Campaign state machine + sweeper. `running → paused(reason) \| stopped \| completed`. Account-level `disabled`/`penalty` on the connection doc. Kill switch + fleet breaker in `sweep`. |
 | `server/posting-campaign.test.js` | Transitions, approval modes, standing-permission expiry, breaker, serial guarantee, idempotent post ids. |
 | `server/posting-driver.js` | Browser actions: open group, compose, paste, submit, verify the post landed. `dryRun` stops before submit. |
 | `server/posting-driver.test.js` | Fake page: happy path, dry run never submits, verification failure is a failure, signals bubble up as codes. |
-| `server/routes/posting.js` | Create campaign, approve / grant standing / revoke, pause, stop, timeline. |
+| `server/routes/posting.js` | Create campaign (consent required, canonicalised group gate), pause, resume, stop, timeline; `GET /act` for signed WhatsApp one-tap approve / skip / stop. |
 | `server/routes/posting.test.js` | Ownership, `agent_policy` gate, standing permission bounds, revoke is immediate. |
-| `scripts/posting-calibrate.local.js` | Dry run, then ONE real post to a test group the test account owns; records what actually happened. |
+| `server/routes/admin-posting.js` | Operator overview, kill switch, per-account re-enable. |
+| `scripts/posting-calibrate.local.js` | Dry run, then ONE real post; then the 30-day observation checklist. |
 
 **Server — modified**
 
@@ -88,7 +110,7 @@ A Facebook **page post** keeps the existing Graph path because it is faster, fre
 |---|---|
 | `server/listing-sources.js` | `sourceFor()` gains the `driver` branch; `listingImages` / `IMAGE_EXT` / `NOT_LISTING` exported for reuse; `resolve()` routes `driver`. |
 | `server/listing-sources.test.js` | Routing assertions for the new hosts. |
-| `server/db.js` | `saveExtractJob` / `getExtractJob` / `updateExtractJob` / `listQueuedExtractJobs`, and browser-connection fields on the existing connection doc. |
+| `server/db.js` | `saveExtractJob` / `getExtractJob` / `updateExtractJob` / `listExtractJobsByStatus`, and browser-connection fields on the existing connection doc. |
 | `server/routes/extract.js` | 202 + job id, `GET /properties/extract/:job_id`, Firecrawl→Driver fallback, separate driver daily cap. |
 | `server/routes/extract.test.js` | New routing, 202 shape, poll ownership, fallback. |
 | `server/index.js` | Mount `connections-browser`, start the sweeper, run boot orphan cleanup. |
@@ -105,12 +127,11 @@ A Facebook **page post** keeps the existing Graph path because it is faster, fre
 | `public-agent/extract.test.js` | Poll helper tests. |
 | `public-agent/create.html` | Handle 202 → poll → same fill path. |
 | `public-agent/form-i18n.js` | New Hebrew strings. |
-| `public-agent/distribution.html` | Embedded-browser connect modal markup. |
-| `public-agent/distribution.js` | Modal wiring, status polling. |
+| `public-agent/distribution.html` | Embedded-browser connect card + modal (Facebook only). Inline Hebrew; the page loads only `distribution.js`. |
+| `public-agent/distribution.js` | Modal wiring, status polling, disconnect. |
 | `public-agent/app.css` | Modal styles. |
-| `public-agent/distribution.html` (Phase 3) | Campaign card: groups, mode toggle, schedule preview, timeline, STOP. |
-| `public-agent/distribution.js` (Phase 3) | Campaign wiring, timeline polling, halt banner → embedded browser. |
-| `public-agent/form-i18n.js` (Phase 3) | Campaign strings. |
+| `public-agent/publish.html` (Phase 3) | Campaign card under "שיתוף ידני בקבוצות": computed plan, mode, consent, timeline, STOP. Inline Hebrew + the page's local `toast()` — `publish.html` does not load `form-i18n.js`. |
+| `public-agent/publish.js` (Phase 3) | Campaign wiring, timeline polling, halt banner → embedded browser. |
 
 ---
 
@@ -118,7 +139,21 @@ A Facebook **page post** keeps the existing Graph path because it is faster, fre
 
 - **Tasks 1–9 — Phase 1.** Driver scraping for Yad2/Madlan + Firecrawl fallback. Ships and is useful on its own.
 - **Tasks 10–12 — Phase 2.** Embedded browser connect + social/Facebook-group scraping. Depends on Task 2.
-- **Tasks 13–18 — Phase 3.** Paced background posting to groups under agent approval. Depends on Tasks 2, 10, 11 (a connected profile) and on Task 12's answer: if `PROFILE_COOKIES_PERSIST=no`, Phase 3 cannot start.
+- **Tasks 13–20 — Phase 3.** Paced background posting to groups under agent approval. Depends on Tasks 2, 10, 11 (a connected profile) and on Task 12's answer: `no` → Phase 3 cannot start; `partial` → per-post mode only, with a login pre-flight before each post; `yes` → both modes.
+
+## Human gates
+
+A coding agent cannot complete these; each stops and hands off, and says what artefact it needs back. Faking the findings file is the failure mode to avoid.
+
+| Gate | Task | Needs a person for | Artefact |
+|---|---|---|---|
+| G1 | 1 | `DRIVER_API_KEY` in the environment; reading Driver's billing page | `2026-09-22-driver-spike-findings.md` with `VIEWER_EMBEDDABLE`, `EGRESS_ASN`, `IP_STICKY_PER_PROFILE` |
+| G2 | 9 | Checking parsed fields *by eye* against a live Yad2/Madlan page | Console output pasted into the findings file |
+| G3 | 11 | Typing a **test** account's password and 2FA code into the embedded browser | "connected" chip observed; screenshot |
+| G4 | 12 | Waiting 24h between two runs | `PROFILE_COOKIES_PERSIST` recorded |
+| G5 | 18 | An **aged** test Facebook account (older than 6 months, with prior manual posting history), 2–3 real public groups whose admins have agreed in writing, and 30 calendar days of daily `facebook.com/accountquality` checks | The calibration table in the findings file, dated daily |
+
+Who owns the test account and the group admins' permission is decided before Task 10 starts; the plan does not assume they exist.
 
 ---
 
@@ -155,12 +190,13 @@ Expected: install completes without downloading a Chromium binary. If it tries t
 - [ ] **Step 3: Create one session, read the viewer's framing headers, stop it**
 
 ```bash
+# The response carries a cdpUrl: keep it in a shell variable, never in a file.
 SID=$(curl -sS -X POST https://api.driver.dev/v1/browser/session \
   -H "Authorization: Bearer $DRIVER_API_KEY" -H "Content-Type: application/json" \
-  -d '{"country":"IL","duration":120,"note":"forly-spike"}' | tee /tmp/sess.json | \
+  -d '{"country":"IL","duration":180,"note":"forly-spike"}' | \
   node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).sessionId)')
 echo "sessionId=$SID"
-curl -sSI "https://viewer.driver.dev/" | grep -iE "x-frame-options|content-security-policy"
+curl -sSI "https://viewer.driver.dev/" | grep -iE "x-frame-options|content-security-policy|referrer-policy"
 curl -sS -X DELETE "https://api.driver.dev/v1/browser/session?sessionId=$SID" \
   -H "Authorization: Bearer $DRIVER_API_KEY"
 curl -sS "https://api.driver.dev/v1/browser/session?sessionId=$SID" \
@@ -168,6 +204,25 @@ curl -sS "https://api.driver.dev/v1/browser/session?sessionId=$SID" \
 ```
 
 Expected: the final GET shows `"status":"completed"` with a `stoppedAt`.
+
+- [ ] **Step 3b: Measure what the posting design depends on — egress ASN and IP stickiness**
+
+Two sessions on one persisted profile, each reading its own public IP. Whether the IP is the same, and whether it is a datacenter or residential ASN, decides how the posting flow behaves ([Inference] a login from one IP followed by posts from a different datacenter IP each time is itself a signal).
+
+```bash
+cd server && node -e '
+const D = require("./driver-browser");
+(async () => {
+  const ips = [];
+  for (let i = 0; i < 2; i++) {
+    ips.push(await D.withPage({ country: "IL", duration: 120, profile: { name: "forly-spike-profile", persist: true }, note: "forly-spike" },
+      async (page) => { await page.goto("https://ipinfo.io/json"); return JSON.parse(await page.innerText("body")); }));
+  }
+  console.log(JSON.stringify(ips.map((x) => ({ ip: x.ip, org: x.org, city: x.city })), null, 2));
+})();'
+```
+
+Record `EGRESS_ASN=<org string>` and `IP_STICKY_PER_PROFILE=<yes|no>`. If the ASN is a hosting provider, note it: Task 15 then uses `type: "hosted_privacy"` for posting sessions, and Task 18's first question to Driver is whether a profile can be pinned to a dedicated IP (`proxyUrl: "dedicated://…"` exists on the create call).
 
 - [ ] **Step 4: Decide embeddability and write the findings file**
 
@@ -182,10 +237,13 @@ cat > docs/superpowers/plans/2026-09-22-driver-spike-findings.md <<'EOF'
 # Driver spike findings (2026-09-22)
 
 VIEWER_EMBEDDABLE=<yes|no>
+EGRESS_ASN=<org string from ipinfo>
+IP_STICKY_PER_PROFILE=<yes|no>
 
 - plan.concurrent_browsers: <n>
-- viewer response headers: <paste the grep output>
+- viewer response headers (incl. referrer-policy): <paste the grep output>
 - patchright install downloaded a browser: <yes|no>
+- Driver supports a per-profile dedicated IP: <yes|no|asked, awaiting answer>
 EOF
 ```
 
@@ -699,7 +757,7 @@ assert.equal(sourceFor({ text: "3 חדרים" }), "text");
 
 // facebook PAGE posts keep the Graph path: faster, free, already working
 assert.equal(sourceFor({ url: "https://www.facebook.com/golan.nadlan/posts/123" }), "facebook");
-assert.equal(sourceFor({ url: "https://fb.watch/abc" }), "facebook");
+assert.equal(sourceFor({ url: "https://fb.watch/abc" }), "facebook"); // fb.watch is always a video post
 assert.equal(sourceFor({ url: "https://www.facebook.com/permalink.php?story_fbid=555&id=777" }), "facebook");
 
 // groups have no Graph equivalent, and a bare profile is not a post → browser
@@ -753,6 +811,7 @@ function sourceFor({ text, url }) {
     // A group post has no Graph equivalent, and a bare profile URL is not a
     // post at all — both need a real browser. Page posts keep the Graph path.
     if (/^\/groups\//i.test(u.pathname)) return "driver";
+    if (/(^|\.)fb\.watch$/i.test(u.hostname)) return "facebook"; // always a video post
     return facebookPostId(url) ? "facebook" : "driver";
   }
   if (DRIVER_HOSTS.test(u.hostname)) return "driver";
@@ -772,7 +831,12 @@ async function resolve(input, deps = {}) {
 }
 ```
 
-`forceSource` is how the Firecrawl→Driver fallback in Task 6 re-runs the same input through the browser. `listing-driver` is required lazily inside the function because it requires `listing-sources` back for the image filters — a top-level require would be a cycle.
+`forceSource` is how the Firecrawl→Driver fallback in Task 6 re-runs the same input through the browser.
+
+Three assertions already in `listing-sources.test.js` break with this routing and must be updated in the same step, or `npm test` fails at Step 4:
+- the Firecrawl happy path `S.resolve({ url: "https://www.yad2.co.il/item/1" }, { fetchFn, firecrawlKey })` → change the host to `https://www.komo.co.il/item/1` (a non-allowlisted host);
+- `S.resolve({ url: "https://www.facebook.com/golan", userId })` expecting `page_unreadable` → a bare profile now routes to `driver`; change the expectation to `S.resolve(…, { withPage: async () => { throw Object.assign(new Error("x"), { code: "page_unreadable" }); } })` rejecting with `page_unreadable`, which exercises the driver branch with a stub;
+- any remaining `yad2`/`madlan` → `"scrape"` assertion is replaced by the block above. `listing-driver` is required lazily inside the function because it requires `listing-sources` back for the image filters — a top-level require would be a cycle.
 
 Add `DRIVER_HOSTS` to the `_test` export.
 
@@ -881,18 +945,36 @@ function fakeStore() {
   assert.equal(j3.error_code, "social_login_required");
   assert.equal(j3.attempts, 1, "no retry on a login wall");
 
-  // ── 402/403 are terminal too: a person has to act ──
+  // ── 402/403 are terminal too, and the VENDOR code never becomes ours ──
   const store4 = fakeStore();
   const job4 = await J.create({ phone: "p", url: "https://www.yad2.co.il/item/b" }, { db: store4 });
   const brokeDeps = {
     db: store4,
-    resolve: async () => { const e = new Error("no credits"); e.status = 402; throw e; },
+    resolve: async () => { const e = new Error("no credits"); e.status = 402; e.code = "insufficient_credits"; throw e; },
     parseListing: async () => ({ fields: {}, missing: [] }),
   };
   const j4 = await J.runJob(job4, brokeDeps);
   assert.equal(j4.status, "failed");
-  assert.equal(j4.error_code, "extract_unavailable");
+  assert.equal(j4.error_code, "extract_unavailable", "vendor code must not leak");
   assert.equal(j4.attempts, 1);
+
+  // ── a job stuck in "running" (crash before catch) is reaped, so the queue never wedges ──
+  const store7 = fakeStore();
+  await store7.saveExtractJob({ id: "stuck", phone: "p", url: "u", status: "running", attempts: 1, updated_at: new Date(Date.now() - 10 * 60000).toISOString() });
+  await store7.saveExtractJob({ id: "dead", phone: "p", url: "u", status: "running", attempts: 3, updated_at: new Date(Date.now() - 10 * 60000).toISOString() });
+  await J.reapStale({ db: store7 }, new Date());
+  assert.equal((await store7.getExtractJob("stuck")).status, "queued");
+  assert.equal((await store7.getExtractJob("dead")).status, "failed");
+
+  // ── a job that needs a profile takes the per-phone lock, and yields while it is held ──
+  const store8 = fakeStore();
+  const locks = require("./profile-lock");
+  const release = locks.acquire("p");
+  const job8 = await J.create({ phone: "p", url: "https://www.facebook.com/groups/1/posts/2", profileName: "facebook-x" }, { db: store8 });
+  const held = await J.runJob(job8, { db: store8, resolve: async () => { throw new Error("must not run while locked"); }, parseListing: async () => ({}) });
+  assert.equal(held.status, "queued", "not attempted, not counted");
+  assert.equal(held.attempts, 0);
+  release();
 
   // ── sweep starts at most (cap - running) jobs ──
   const store5 = fakeStore();
@@ -1016,14 +1098,41 @@ async function create({ phone, url, forceSource = null, profileName = null }, de
 
 // Driver's own HTTP statuses reach us on the error; map them to the stable
 // codes the route already knows, so no vendor text ever reaches an agent.
+// DriverError carries the VENDOR body's `code` (e.g. "insufficient_credits"),
+// so the status check must come first or that string leaks into error_code.
+const OURS = new Set(["page_unreadable", "social_login_required", "invalid_input", "extract_unavailable"]);
 function codeFor(err) {
-  if (err.code && err.code !== "unknown") return err.code;
-  if (err.status === 402 || err.status === 403) return "extract_unavailable";
-  if (err.status === 503) return "extract_unavailable";
-  return "page_unreadable";
+  if (typeof err.status === "number") {
+    if (err.status === 402 || err.status === 403 || err.status === 503 || err.status === 401) return "extract_unavailable";
+    return "page_unreadable";
+  }
+  return OURS.has(err.code) ? err.code : "page_unreadable";
+}
+
+// Anything left "running" past its maximum lifetime died with the process.
+// Without this, DRIVER_MAX_CONCURRENT such ghosts wedge the queue for good.
+const STALE_MS = 5 * 60 * 1000;
+async function reapStale(deps, now = new Date()) {
+  const running = await deps.db.listExtractJobsByStatus("running", 50);
+  for (const j of running) {
+    if (now.getTime() - new Date(j.updated_at || 0).getTime() < STALE_MS) continue;
+    const dead = (j.attempts || 0) >= MAX_ATTEMPTS;
+    await deps.db.updateExtractJob(j.id, { status: dead ? "failed" : "queued", error_code: dead ? "page_unreadable" : j.error_code || null, updated_at: nowIso() });
+  }
 }
 
 async function runJob(job, deps) {
+  // A persisted profile is one browser at a time, across extract, connect and
+  // posting — the same lock every one of them takes (profile-lock.js).
+  const locks = deps.locks || require("./profile-lock");
+  const release = job.profile_name ? locks.tryAcquire(job.phone) : () => {};
+  if (job.profile_name && !release) return job; // someone else has the profile open; next sweep
+  try {
+    return await runJobLocked(job, deps);
+  } finally { release(); }
+}
+
+async function runJobLocked(job, deps) {
   const attempt = (job.attempts || 0) + 1;
   const browserType = BROWSER_LADDER[Math.min(attempt, BROWSER_LADDER.length) - 1];
   await deps.db.updateExtractJob(job.id, { status: "running", attempts: attempt, updated_at: nowIso() });
@@ -1062,12 +1171,18 @@ async function runJob(job, deps) {
 }
 
 /*
- * One pass: start as many queued jobs as the concurrency budget allows.
- * The running count is read, not held — two instances can briefly overshoot by
- * one. Driver answers the overshoot with 403, which fails that job cleanly, so
- * a distributed lock would cost more than it saves.
+ * One pass: start as many queued jobs as the concurrency budget allows. The
+ * budget is the Driver plan's concurrent_browsers minus what posting and the
+ * login browser are using — one process, so profile-lock.js knows exactly.
  */
+let sweeping = false; // in-process latch: one container, overlapping sweeps are the only race
 async function sweep(deps) {
+  if (sweeping) return 0;
+  sweeping = true;
+  try { return await sweepOnce(deps); } finally { sweeping = false; }
+}
+async function sweepOnce(deps) {
+  await reapStale(deps);
   const cap = deps.maxConcurrent || Number(process.env.DRIVER_MAX_CONCURRENT || 2);
   const running = await deps.db.listExtractJobsByStatus("running", cap + 1);
   const budget = cap - running.length;
@@ -1096,8 +1211,47 @@ function liveDeps() {
   };
 }
 
-module.exports = { create, runJob, sweep, startSweeper, liveDeps, MAX_ATTEMPTS, SWEEP_MS, BROWSER_LADDER };
+module.exports = { create, runJob, reapStale, sweep, startSweeper, liveDeps, MAX_ATTEMPTS, SWEEP_MS, BROWSER_LADDER };
 ```
+
+- [ ] **Step 4b: Write `profile-lock.js` — the one lock every profile user takes**
+
+Create `server/profile-lock.js`:
+
+```js
+/*
+ * profile-lock.js — one browser per persisted profile, one process.
+ *
+ * Extract (a Facebook group URL), the login browser, and posting all open the
+ * SAME Driver profile for a phone. Two of them at once means one cookie set
+ * live from two IPs — the pattern that gets an account checkpointed. This is
+ * the single place that rule is enforced. Single-container deployment, so an
+ * in-process map is exact; a second container is a documented non-goal.
+ *
+ * Also the Driver concurrency budget: every session, of any kind, counts.
+ */
+const held = new Map();          // phone → expiresAt
+const MAX_HOLD_MS = 20 * 60 * 1000; // longer than any session we create
+let sessions = 0;
+
+function tryAcquire(phone) {
+  const now = Date.now();
+  const until = held.get(phone);
+  if (until && until > now) return null;
+  held.set(phone, now + MAX_HOLD_MS);
+  return () => { if (held.get(phone)) held.delete(phone); };
+}
+function acquire(phone) { const r = tryAcquire(phone); if (!r) throw new Error(`profile ${phone} is busy`); return r; }
+function isHeld(phone) { const u = held.get(phone); return !!u && u > Date.now(); }
+
+const budget = () => Number(process.env.DRIVER_MAX_CONCURRENT || 2);
+function trySession() { if (sessions >= budget()) return null; sessions++; return () => { sessions = Math.max(0, sessions - 1); }; }
+function activeSessions() { return sessions; }
+
+module.exports = { tryAcquire, acquire, isHeld, trySession, activeSessions, _test: { held, reset: () => { held.clear(); sessions = 0; } } };
+```
+
+`driver-browser.withPage` and `attachPage` (Task 10) call `trySession()` before creating/joining and release in their `finally`; when it returns `null` they throw `DriverError(429, "local concurrency budget")`, which the sweepers treat as "try next pass", not as a failure.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -1110,8 +1264,8 @@ Append ` && node extract-jobs.test.js` to `scripts.test` in `server/package.json
 
 ```bash
 cd server && npm test
-git add server/db.js server/extract-jobs.js server/extract-jobs.test.js server/package.json
-git commit -m "feat(extract): queue browser scrapes as jobs with a sweeper"
+git add server/db.js server/extract-jobs.js server/extract-jobs.test.js server/profile-lock.js server/package.json
+git commit -m "feat(extract): queue browser scrapes as jobs with a sweeper and a profile lock"
 ```
 
 ---
@@ -1130,9 +1284,35 @@ git commit -m "feat(extract): queue browser scrapes as jobs with a sweeper"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `server/routes/extract.test.js` (keep the existing cases; this block uses whatever app/request helper that file already defines — reuse it rather than adding a second one):
+Append to `server/routes/extract.test.js`. The existing file never builds an Express app (it tests `importImage`/`validateBody` directly), so add the helpers once. The file is CommonJS: every block below lives inside one `(async () => { … })()` — a bare `{ await … }` at top level is a `SyntaxError`.
 
 ```js
+const express = require("express");
+const http = require("http");
+const createExtractRouter = require("./extract");
+
+function makeApp(o = {}) {
+  const phone = o.phone || "0500000000";
+  const requireAuth = () => (req, res, next) => { req.user = { userId: phone }; next(); };
+  const app = express(); app.use(express.json());
+  app.use("/api", createExtractRouter({ requireAuth, authSecret: "s", resolve: o.resolve, db: o.db, extractJobs: o.extractJobs, driverEnabled: o.driverEnabled !== false }));
+  return app;
+}
+function call(app, method, path, body, headers) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => {
+      const req = http.request({ port: server.address().port, path, method, headers: Object.assign({ "content-type": "application/json" }, headers || {}) }, (res) => {
+        let d = ""; res.on("data", (c) => (d += c));
+        res.on("end", () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(d || "{}") }); });
+      });
+      if (body) req.write(JSON.stringify(body)); req.end();
+    });
+  });
+}
+const post = (app, path, body, headers) => call(app, "POST", path, body, headers);
+const get = (app, path) => call(app, "GET", path);
+
+(async () => {
 // ── a driver-routed URL queues a job instead of answering inline ──
 {
   const created = [];
@@ -1148,7 +1328,7 @@ Append to `server/routes/extract.test.js` (keep the existing cases; this block u
   assert.equal(created[0].forceSource, null, "a driver host needs no forcing");
 }
 
-// ── firecrawl failing falls back to a driver job, not an error ──
+// ── firecrawl failing to READ falls back to a driver job, not an error ──
 {
   const created = [];
   const app = makeApp({
@@ -1159,6 +1339,32 @@ Append to `server/routes/extract.test.js` (keep the existing cases; this block u
   assert.equal(res.status, 202);
   assert.equal(res.body.job_id, "job-2");
   assert.equal(created[0].forceSource, "driver");
+  assert.equal(created[0].profileName, null, "a fallback scrape NEVER gets a customer's logged-in profile");
+}
+
+// ── but firecrawl being UNCONFIGURED is not a reason to spend a browser ──
+{
+  const app = makeApp({
+    resolve: async () => { const e = new Error("no key"); e.code = "extract_unavailable"; throw e; },
+    extractJobs: { create: async () => { throw new Error("must not queue"); } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.komo.co.il/item/1" });
+  assert.equal(res.status, 503);
+}
+
+// ── demo callers never reach a browser: they get told to sign in ──
+{
+  const app = makeApp({ extractJobs: { create: async () => { throw new Error("must not queue"); } } });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" }, { "x-demo-key": "demo" });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, "login_required_for_browser");
+}
+
+// ── and with Driver not configured, the answer is an honest 503, not a job that never runs ──
+{
+  const app = makeApp({ driverEnabled: false, extractJobs: { create: async () => { throw new Error("must not queue"); } } });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" });
+  assert.equal(res.status, 503);
 }
 
 // ── but a bad input is still a 400: the browser cannot fix a malformed URL ──
@@ -1214,6 +1420,18 @@ Append to `server/routes/extract.test.js` (keep the existing cases; this block u
   assert.equal(over.body.error, "extract_limit");
   assert.equal(queued, 10, "DRIVER_DAILY_CAP is 10");
 }
+
+// ── profileFor: anchored, and twitter is x ──
+{
+  const { profileFor } = createExtractRouter._test;
+  assert.equal(profileFor("https://www.facebook.com/groups/1", "05x", "k"), profileFor("https://facebook.com/groups/2", "05x", "k"));
+  assert.ok(/^facebook-[a-z]+-[0-9a-f]{20}$/.test(profileFor("https://www.facebook.com/groups/1", "05x", "k")), "hmac, not the phone");
+  assert.equal(profileFor("https://twitter.com/a/status/1", "05x", "k"), profileFor("https://x.com/a/status/1", "05x", "k"));
+  assert.equal(profileFor("https://netflix.com/x", "05x", "k"), null, "not left-anchored → netflix matched x.com");
+  assert.equal(profileFor("https://evilfacebook.com/x", "05x", "k"), null);
+  assert.equal(profileFor("https://www.yad2.co.il/item/1", "05x", "k"), null, "no profile for non-social hosts");
+}
+})();
 ```
 
 If `makeApp`, `post` or `get` do not already exist in that file, add them once at the top, building the router through `createExtractRouter({ requireAuth, authSecret, ... })` the way the file's existing cases do. The `overrides` argument must be able to replace `resolve`, `db`, `extractJobs`, **and `phone`** — `phone` sets what the stubbed `requireAuth` puts in `req.user.userId`, and the ownership case depends on it:
@@ -1254,62 +1472,78 @@ Add near `DAILY_CAP`:
 const DRIVER_DAILY_CAP = 10;
 ```
 
-Give the router a second `DailyLimit` instance (`const driverLimit = new DailyLimit(DRIVER_DAILY_CAP);`) alongside the existing one. `phone` below is the same per-request identity the handler already uses for the existing cap (`req.user.userId`, or the demo key when there is no session) — reuse that binding, do not introduce a second one, and inject `extractJobs` / `sourceFor` through `ctx` with live defaults:
+Give the router a second `DailyLimit` instance (`const driverLimit = new DailyLimit(DRIVER_DAILY_CAP);`) alongside the existing one. `resolve` is currently a top-level import in this file — make it injectable, and inject the rest, at the top of the factory:
 
 ```js
+const resolve = ctx.resolve || require("../listing-sources").resolve;
+const database = ctx.db || require("../db");
 const extractJobs = ctx.extractJobs || require("../extract-jobs");
 const jobDeps = ctx.jobDeps || require("../extract-jobs").liveDeps();
+const driverEnabled = ctx.driverEnabled !== undefined ? ctx.driverEnabled : !!process.env.DRIVER_API_KEY;
 const { sourceFor } = require("../listing-sources")._test;
 ```
 
-Replace the body of the POST handler's resolve step with:
+The block below goes **inside the existing `try { … } catch (err) { sendError(res, err) }`** of the POST handler, replacing its resolve step — Express 4 does not catch async rejections, so `sourceFor` throwing `invalid_input` or `queueDriverJob` throwing `extract_limit` outside the `try` would hang the request. `phone` is the handler's existing `keyFor(req)` binding.
 
 ```js
 // Driver-routed hosts never try firecrawl: we already know it cannot read them.
 const kind = input.text ? "text" : sourceFor(input);
 
-async function queueDriverJob(forceSource) {
-  if (!driverLimit.take(phone)) { const e = new Error("extract_limit"); e.code = "extract_limit"; throw e; }
+async function queueDriverJob(forceSource, withProfile) {
+  if (!driverEnabled) throw fail("extract_unavailable", "DRIVER_API_KEY is not set");
+  // A browser session is a paid resource and, for social hosts, opens the
+  // customer's own logged-in profile. Demo callers get neither.
+  if (!req.user) throw fail("login_required_for_browser");
+  if (!driverLimit.take(phone)) throw fail("extract_limit");
   const job = await extractJobs.create(
-    { phone, url: input.url, forceSource, profileName: profileFor(input.url, phone) },
+    { phone, url: input.url, forceSource, profileName: withProfile ? profileFor(input.url, phone, profileKey) : null },
     jobDeps,
   );
   return { job_id: job.id, status: job.status };
 }
 
-if (kind === "driver") return res.status(202).json(await queueDriverJob(null));
+if (kind === "driver") return res.status(202).json(await queueDriverJob(null, true));
 
 let source;
 try {
   source = await resolve(Object.assign({}, input, { userId: phone }), deps);
 } catch (err) {
-  // "or if firecrawl returns an error" — a browser is the next thing to try,
-  // but only for a scrape that failed, and only when the input itself was fine.
-  if (kind === "scrape" && err.code !== "invalid_input") {
-    return res.status(202).json(await queueDriverJob("driver"));
+  // "or if firecrawl returns an error": a browser is the next thing to try —
+  // but only when firecrawl actually failed to READ the page. A missing key
+  // (extract_unavailable) or a bad URL (invalid_input) is not that. And the
+  // fallback never carries a profile: an arbitrary URL must not be opened in
+  // a browser that holds the customer's Facebook cookies.
+  if (kind === "scrape" && err.code === "page_unreadable") {
+    return res.status(202).json(await queueDriverJob("driver", false));
   }
   throw err;
 }
 ```
 
-Add the profile helper next to `importImage`:
+Add `login_required_for_browser: 409` to `STATUS`, and `const fail = (code, msg) => { const e = new Error(msg || code); e.code = code; return e; };` if the file does not already have one at module scope.
+
+Add the profile helper next to `importImage`, and export it on `module.exports._test = { profileFor }`:
 
 ```js
 // One persisted browser profile per agent per platform. The agent logs in once
 // through the embedded browser; the cookies live in the profile, never here.
-function profileFor(url, phone) {
+// The name is an HMAC of the phone: the Driver key alone must not be able to
+// enumerate customers. connections-browser.js builds the same name.
+const crypto = require("crypto");
+const SOCIAL = /(^|\.)(facebook\.com|instagram\.com|tiktok\.com|linkedin\.com|x\.com|twitter\.com)$/i;
+function profileFor(url, phone, key = process.env.PROFILE_KEY, env = process.env.FORLY_ENV || "prod") {
   let host;
   try { host = new URL(url).hostname; } catch (e) { return null; }
-  const m = host.match(/(facebook\.com|instagram\.com|tiktok\.com|linkedin\.com|x\.com|twitter\.com)$/i);
+  const m = host.match(SOCIAL);
   if (!m) return null;
-  const name = m[1].split(".")[0].toLowerCase();
-  // twitter.com and x.com are one account, and connections-browser.js keys it
-  // as "x" — two spellings here would mean two profiles and a login that never
-  // seems to stick.
-  const platform = name === "twitter" ? "x" : name;
-  return `${platform}-${phone}`;
+  const name = m[2].split(".")[0].toLowerCase();
+  const platform = name === "twitter" ? "x" : name; // one account, one profile
+  const tag = crypto.createHmac("sha256", String(key || "dev")).update(String(phone)).digest("hex").slice(0, 20);
+  return `${platform}-${env}-${tag}`;
 }
 ```
+
+Move this function into `server/profile-name.js` (exporting `profileFor(url, phone)` and `profileName(platform, phone)`) so `routes/connections-browser.js` (Task 10) and `posting-campaign.js` (Task 14) build the identical string from the same code. `PROFILE_KEY` is a new secret (`openssl rand -hex 32`), separate from `META_TOKEN_KEY`.
 
 Add the poll route after the POST:
 
@@ -1495,7 +1729,10 @@ In `public-agent/extract.js`, add before the `api` object:
     var fetchFn = o.fetchFn || (typeof fetch === "function" ? fetch : null);
     var sleep = o.sleep || function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
     var interval = o.intervalMs == null ? 2000 : o.intervalMs;
-    var deadline = Date.now() + (o.timeoutMs == null ? 120000 : o.timeoutMs);
+    // Long enough for a queued job to wait for a slot and run every attempt:
+    // cap-2 queue + 3 × (60s start + 45s goto + LLM). Giving up earlier discards
+    // a result Driver has already been paid for.
+    var deadline = Date.now() + (o.timeoutMs == null ? 300000 : o.timeoutMs);
     function step() {
       return fetchFn("/api/properties/extract/" + encodeURIComponent(jobId), {
         credentials: "include", headers: o.headers || {},
@@ -1531,8 +1768,11 @@ Add `pollJob: pollJob,` to the `api` object.
 In `public-agent/form-i18n.js`, add to the `"he"` map (and the matching entry in every other language map the file defines, translated):
 
 ```
-"ext_working_browser":"פותחים דפדפן וקוראים את המודעה… זה עשוי לקחת עד דקה",
-"ext_err_social_login":"כדי לקרוא את הפוסט צריך שהחשבון שלכם יהיה מחובר — אפשר לחבר אותו בעמוד ההפצה",
+"ext_stage_open":"פותחים את הדף…",
+"ext_stage_read":"קוראים את המודעה…",
+"ext_stage_photos":"מחפשים תמונות…",
+"ext_stage_slow":"לוקח קצת יותר מהרגיל — עוד רגע. בינתיים אפשר להדביק את הטקסט למטה.",
+"ext_err_social_login":"כדי לקרוא פוסט מקבוצה פורלי צריכה להיות מחוברת לחשבון הפייסבוק שלכם. הכי מהיר: הדביקו כאן את טקסט הפוסט.",
 ```
 
 - [ ] **Step 5: Handle 202 in the wizard**
@@ -1542,8 +1782,14 @@ In `public-agent/create.html`, inside `runExtract`, replace the `.then(function 
 ```js
     }).then(function (res) {
       if (res.status === 202 && res.body.job_id) {
-        btn.textContent = FT("ext_working_browser");
+        // The button keeps the short "working" label (a sentence in a gold
+        // button wraps on a phone); a muted line under it advances so 60–90s
+        // reads as progress, and the manual path stays one tap away.
+        var stage = $("#extractStage"); // a muted <p> under the button, added next to #extractErr
+        var stages = [[0, "ext_stage_open"], [15000, "ext_stage_read"], [35000, "ext_stage_photos"], [60000, "ext_stage_slow"]];
+        var timers = stages.map(function (st) { return setTimeout(function () { stage.textContent = FT(st[1]); }, st[0]); });
         return X.pollJob(res.body.job_id, { headers: uploadHeaders }).then(function (j) {
+          timers.forEach(clearTimeout); stage.textContent = "";
           if (j.status === "failed") {
             showExtractErr(X.errorKey(409, j.error_code));
             revealManual();
@@ -1697,7 +1943,8 @@ git commit -m "test(driver): add live listing-extract verification script"
 **Interfaces:**
 - Consumes: `driver-browser.createSession/getSession/stopSession`, new `driver-browser.attachPage(sessionId, fn, deps)`, `listing-driver._test.isLoginWall`, `db.getConnection/setConnection`.
 - Produces:
-  - `POST /api/connections/browser/start` body `{platform}` → `200 {platform, session_id, view_url, expires_in}`
+  - `POST /api/connections/browser/start` body `{platform, consent: true}` → `200 {platform, session_id, view_url, expires_in}`; `400 {error:"consent_required"}` without `consent: true`. Persists `browser_consent_at` and `browser_consent_version` on the connection doc.
+  - `DELETE /api/connections/browser/:platform` → stops every running campaign for the phone, clears `<platform>_browser_connected_at`, deletes the Driver profile (`DELETE /v1/browser/profiles/<name>` — confirm the exact endpoint in Task 1; if Driver has none, the profile is overwritten by a fresh empty session with `persist:true`), and records `disconnected_at`. `200 {state:"none"}`.
   - `GET /api/connections/browser/:platform/status` → `200 {state: "none"|"open"|"connected", connected_at?}`
   - `POST /api/connections/browser/:platform/finish` → `200 {state:"connected"}` or `409 {error:"not_logged_in"}`
   - `attachPage(sessionId, fn, deps) -> Promise<T>` — connects to an **already running** session and does **not** stop it.
@@ -1750,13 +1997,18 @@ function call(app, method, path, body) {
     },
     db: { getConnection: async () => conn, setConnection: async (p, patch) => Object.assign(conn, patch) },
   });
-  const started = await call(app, "POST", "/api/connections/browser/start", { platform: "facebook" });
+  const noConsent = await call(app, "POST", "/api/connections/browser/start", { platform: "facebook" });
+  assert.equal(noConsent.status, 400);
+  assert.equal(noConsent.body.error, "consent_required");
+  const started = await call(app, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
   assert.equal(started.status, 200);
+  assert.ok(conn.browser_consent_at, "consent is persisted, not just ticked");
   assert.equal(started.body.session_id, "s1");
-  assert.equal(started.body.view_url, "https://viewer.driver.dev?ws=wss://node/abc");
-  assert.deepEqual(created.profile, { name: `facebook-${PHONE}`, persist: true });
+  assert.equal(started.body.view_url, "https://viewer.driver.dev?ws=" + encodeURIComponent("wss://node/abc"));
+  assert.equal(created.profile.name, require("../profile-name").profileName("facebook", PHONE));
+  assert.equal(created.profile.persist, true);
   assert.equal(created.url, "https://www.facebook.com/login");
-  assert.ok(created.duration <= 900, "a forgotten login browser must not live an hour");
+  assert.ok(created.duration <= 1500, "long enough for SMS 2FA, not an hour");
   assert.ok(String(created.note).startsWith("forly-connect:"));
 
   // ── an unknown platform is rejected before any session is created ──
@@ -1765,7 +2017,7 @@ function call(app, method, path, body) {
     driver: { createSession: async () => { touched = true; return {}; } },
     db: { getConnection: async () => ({}), setConnection: async () => {} },
   });
-  const bad = await call(badApp, "POST", "/api/connections/browser/start", { platform: "myspace" });
+  const bad = await call(badApp, "POST", "/api/connections/browser/start", { platform: "myspace", consent: true });
   assert.equal(bad.status, 400);
   assert.equal(touched, false);
 
@@ -1777,7 +2029,7 @@ function call(app, method, path, body) {
 
   // ── finish: logged in → connected, and the session is stopped ──
   const stopped = [];
-  const conn2 = { browser_sessions: { facebook: { session_id: "s2", started_at: new Date().toISOString() } } };
+  const conn2 = { browser_session_facebook: { session_id: "s2", started_at: new Date().toISOString() } };
   const okApp = makeApp({
     driver: {
       getSession: async () => ({ sessionId: "s2", status: "active", cdpUrl: "wss://n/2" }),
@@ -1794,9 +2046,11 @@ function call(app, method, path, body) {
   assert.deepEqual(stopped, ["s2"]);
   assert.ok(conn2.facebook_browser_connected_at);
 
-  // ── finish while still on a login wall → 409, and the session still stops ──
+  // ── finish while still on a login wall → 409, and the session is KEPT: the agent
+  //    is probably waiting for an SMS code; killing it forces a second login from a
+  //    second IP within minutes ──
   const stopped2 = [];
-  const conn3 = { browser_sessions: { facebook: { session_id: "s3" } } };
+  const conn3 = { browser_session_facebook: { session_id: "s3" } };
   const wallApp = makeApp({
     driver: {
       getSession: async () => ({ sessionId: "s3", status: "active", cdpUrl: "wss://n/3" }),
@@ -1810,8 +2064,28 @@ function call(app, method, path, body) {
   const notIn = await call(wallApp, "POST", "/api/connections/browser/facebook/finish");
   assert.equal(notIn.status, 409);
   assert.equal(notIn.body.error, "not_logged_in");
-  assert.deepEqual(stopped2, ["s3"], "a failed check must not leak the session either");
+  assert.deepEqual(stopped2, [], "session kept alive for another try");
+  assert.ok(conn3.browser_session_facebook, "still recorded as open");
   assert.ok(!conn3.facebook_browser_connected_at);
+
+  // ── disconnect: stops campaigns, clears the connection, deletes the profile ──
+  const deleted = [];
+  const conn4 = { facebook_browser_connected_at: "2026-09-01T00:00:00Z" };
+  const stoppedCampaigns = [];
+  const discApp = makeApp({
+    driver: { deleteProfile: async (name) => deleted.push(name), stopSession: async () => {} },
+    db: {
+      getConnection: async () => conn4, setConnection: async (p, patch) => Object.assign(conn4, patch),
+      listPostingCampaignsByPhone: async () => [{ id: "c1", status: "running" }, { id: "c2", status: "completed" }],
+    },
+    campaigns: { stop: async (id) => stoppedCampaigns.push(id) },
+  });
+  const disc = await call(discApp, "DELETE", "/api/connections/browser/facebook");
+  assert.equal(disc.status, 200);
+  assert.deepEqual(stoppedCampaigns, ["c1"], "only the live campaign is stopped");
+  assert.equal(deleted.length, 1);
+  assert.equal(conn4.facebook_browser_connected_at, null);
+  assert.ok(conn4.facebook_browser_disconnected_at);
 
   console.log("routes/connections-browser.test.js ok");
 })();
@@ -1885,14 +2159,14 @@ const driverLive = require("../driver-browser");
 const dbLive = require("../db");
 const { isLoginWall } = require("../listing-driver")._test;
 
-const SESSION_SECONDS = 900;
+const SESSION_SECONDS = 1500; // SMS 2FA on a phone that is also showing the modal takes a while
+const CONSENT_VERSION = "2026-09-24";
+const { profileName } = require("../profile-name");
 
+// Facebook only: it is the one platform a feature posts to. Add a platform
+// here when a feature needs it, not before.
 const PLATFORMS = {
   facebook: { loginUrl: "https://www.facebook.com/login", checkUrl: "https://www.facebook.com/me" },
-  instagram: { loginUrl: "https://www.instagram.com/accounts/login/", checkUrl: "https://www.instagram.com/accounts/edit/" },
-  tiktok: { loginUrl: "https://www.tiktok.com/login", checkUrl: "https://www.tiktok.com/setting" },
-  linkedin: { loginUrl: "https://www.linkedin.com/login", checkUrl: "https://www.linkedin.com/feed/" },
-  x: { loginUrl: "https://x.com/login", checkUrl: "https://x.com/home" },
 };
 
 module.exports = function createConnectionsBrowserRouter(ctx) {
@@ -1901,12 +2175,14 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
   const db = ctx.db || dbLive;
   const router = express.Router();
 
-  const viewUrl = (cdpUrl) => `https://viewer.driver.dev?ws=${cdpUrl}`;
+  const viewUrl = (cdpUrl) => `https://viewer.driver.dev?ws=${encodeURIComponent(cdpUrl)}`;
+  const campaigns = ctx.campaigns || require("../posting-campaign");
 
   router.post("/start", requireAuth(authSecret), async (req, res) => {
     const platform = String((req.body && req.body.platform) || "");
     const spec = PLATFORMS[platform];
     if (!spec) return res.status(400).json({ error: "invalid_input" });
+    if (!(req.body && req.body.consent === true)) return res.status(400).json({ error: "consent_required" });
     const phone = req.user.userId;
 
     let session;
@@ -1915,18 +2191,21 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         country: "IL",
         duration: SESSION_SECONDS,
         url: spec.loginUrl,
-        profile: { name: `${platform}-${phone}`, persist: true },
-        note: `forly-connect:${platform}:${phone}`,
+        profile: { name: profileName(platform, phone), persist: true },
+        note: `forly-connect:${platform}`, // never the phone
       });
     } catch (e) {
       const status = e.status === 402 || e.status === 403 ? 503 : 503;
       return res.status(status).json({ error: "extract_unavailable" });
     }
 
-    const conn = (await db.getConnection(phone)) || {};
-    const sessions = Object.assign({}, conn.browser_sessions);
-    sessions[platform] = { session_id: session.sessionId, started_at: new Date().toISOString() };
-    await db.setConnection(phone, { browser_sessions: sessions });
+    // Top-level keys, not a nested map: setConnection is a merge write, and a
+    // merge cannot delete a nested key — finish/disconnect need to clear this.
+    await db.setConnection(phone, {
+      [`browser_session_${platform}`]: { session_id: session.sessionId, started_at: new Date().toISOString() },
+      browser_consent_at: new Date().toISOString(),
+      browser_consent_version: CONSENT_VERSION,
+    });
 
     // view_url carries the cdpUrl: response only, never a log line, never Firestore.
     return res.json({
@@ -1943,7 +2222,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     const conn = (await db.getConnection(req.user.userId)) || {};
     const connectedAt = conn[`${platform}_browser_connected_at`] || null;
     if (connectedAt) return res.json({ state: "connected", connected_at: connectedAt });
-    const open = conn.browser_sessions && conn.browser_sessions[platform];
+    const open = conn[`browser_session_${platform}`];
     return res.json({ state: open ? "open" : "none" });
   });
 
@@ -1953,29 +2232,61 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     if (!spec) return res.status(400).json({ error: "invalid_input" });
     const phone = req.user.userId;
     const conn = (await db.getConnection(phone)) || {};
-    const open = conn.browser_sessions && conn.browser_sessions[platform];
+    const open = conn[`browser_session_${platform}`];
     if (!open || !open.session_id) return res.status(409).json({ error: "no_open_session" });
 
-    let loggedIn = false;
+    let loggedIn = false, label = null;
     try {
-      loggedIn = await driver.attachPage(open.session_id, async (page) => {
+      ({ loggedIn, label } = await driver.attachPage(open.session_id, async (page) => {
         await page.goto(spec.checkUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-        return !isLoginWall(page.url(), await page.innerText("body"));
-      });
+        const text = await page.innerText("body");
+        if (isLoginWall(page.url(), text)) return { loggedIn: false, label: null };
+        // The profile's display name, so the campaign card can say "posting as …"
+        // and an agent with two accounts can see which one they connected.
+        const title = await page.title().catch(() => "");
+        return { loggedIn: true, label: String(title || "").split("|")[0].trim().slice(0, 60) || null };
+      }));
     } catch (e) {
-      loggedIn = false;
-    } finally {
-      // Whether the check passed or not, the browser stops here: the profile
-      // already holds whatever cookies the login produced.
-      await driver.stopSession(open.session_id);
-      const sessions = Object.assign({}, conn.browser_sessions);
-      delete sessions[platform];
-      await db.setConnection(phone, { browser_sessions: sessions });
+      // A session that already ended reads as expired, not as "not logged in".
+      return res.status(409).json({ error: "session_expired" });
     }
 
+    // Not logged in yet: KEEP the session. The agent is most likely waiting for
+    // an SMS code; stopping here forces a second login from a second IP.
     if (!loggedIn) return res.status(409).json({ error: "not_logged_in" });
-    await db.setConnection(phone, { [`${platform}_browser_connected_at`]: new Date().toISOString() });
-    return res.json({ state: "connected" });
+
+    await driver.stopSession(open.session_id);
+    const first = conn[`${platform}_browser_first_connected_at`] || new Date().toISOString();
+    await db.setConnection(phone, {
+      [`${platform}_browser_connected_at`]: new Date().toISOString(),
+      [`${platform}_browser_first_connected_at`]: first, // warm-up counts from here, not from every reconnect
+      [`${platform}_identity_label`]: label,
+      [`browser_session_${platform}`]: null,
+    });
+    return res.json({ state: "connected", identity_label: label });
+  });
+
+  // The way out. Stops what is running, forgets the login, deletes the profile
+  // at Driver. Required by the privacy law the plan's intro names, and by
+  // common decency: the agent must be able to take back what they handed over.
+  router.delete("/:platform", requireAuth(authSecret), async (req, res) => {
+    const platform = String(req.params.platform);
+    if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
+    const phone = req.user.userId;
+    const conn = (await db.getConnection(phone)) || {};
+    for (const c of await db.listPostingCampaignsByPhone(phone)) {
+      if (["running", "paused"].includes(c.status)) await campaigns.stop(c.id, { db });
+    }
+    const open = conn[`browser_session_${platform}`];
+    if (open && open.session_id) await driver.stopSession(open.session_id);
+    await driver.deleteProfile(profileName(platform, phone));
+    await db.setConnection(phone, {
+      [`${platform}_browser_connected_at`]: null,
+      [`${platform}_browser_disconnected_at`]: new Date().toISOString(),
+      [`${platform}_identity_label`]: null,
+      [`browser_session_${platform}`]: null,
+    });
+    return res.json({ state: "none" });
   });
 
   return router;
@@ -1983,6 +2294,8 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
 module.exports.PLATFORMS = PLATFORMS;
 ```
+
+`attachPage` and `withPage` in `driver-browser.js` must also acquire `profile-lock.tryAcquire(phone)` when `opts.profile` is set — pass `phone` in `deps` — and release in their `finally`; `/start` answers `409 {error:"profile_busy"}` when a post or extract currently holds the profile. Add `deleteProfile(name, deps)` to `driver-browser.js` (`DELETE /v1/browser/profiles/<name>`; adjust to what Task 1 finds) — like `stopSession`, it logs rather than throws.
 
 - [ ] **Step 5: Mount it**
 
@@ -2024,173 +2337,157 @@ Task 1 decided which branch to build. Read `docs/superpowers/plans/2026-09-22-dr
 - Consumes: `POST /api/connections/browser/start`, `GET /api/connections/browser/:platform/status`, `POST /api/connections/browser/:platform/finish`.
 - Produces: no exports. A `#browserConnectCard` section and a `#browserModal` dialog.
 
-- [ ] **Step 1: Add the Hebrew strings**
+- [ ] **Step 1: Add the card markup**
 
-In `public-agent/form-i18n.js`, add to the `"he"` map (and translate into every other map the file defines):
-
-```
-"conn_browser_title":"חיבור חשבונות לקריאת מודעות",
-"conn_browser_hint":"כדי לקרוא פוסטים מקבוצות פייסבוק ומרשתות חברתיות, צריך שהחשבון שלכם יהיה מחובר. נפתח כאן דפדפן מאובטח — מתחברים בו בעצמכם, בדיוק כמו בדפדפן רגיל.",
-"conn_browser_privacy":"הסיסמה נשארת אצלכם: היא לא עוברת דרך פורלי ולא נשמרת אצלנו.",
-"conn_browser_warning":"לתשומת לבכם: חיבור אוטומטי לחשבון אישי נוגד את תנאי השימוש של הפלטפורמות ועלול להוביל לחסימת החשבון. החיבור נעשה על אחריותכם בלבד.",
-"conn_browser_open":"פתיחת דפדפן מאובטח",
-"conn_browser_opening":"פותחים דפדפן…",
-"conn_browser_done":"סיימתי להתחבר",
-"conn_browser_checking":"בודקים…",
-"conn_browser_connected":"החשבון מחובר ✓",
-"conn_browser_not_logged_in":"נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ונסו שוב",
-"conn_browser_failed":"לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע",
-"conn_browser_popup_blocked":"הדפדפן חסם את החלון — אשרו חלונות קופצים לאתר ונסו שוב",
-"conn_browser_expired":"החלון נסגר. פתחו דפדפן מחדש כדי להתחבר",
-```
-
-- [ ] **Step 2: Add the card markup**
+`distribution.html` loads only `distribution.js` — no `form-i18n.js`, no `FT`, no `FLY`. Strings are inline Hebrew, as everything else on that page is, and the page's own `toast()` is used. The card is Facebook-only and named by what it is, so it cannot be confused with the Page-OAuth card above it (rename that card's heading to **"הדף העסקי בפייסבוק"** in the same change).
 
 In `public-agent/distribution.html`, immediately after the existing `connectCard` div (line 84):
 
 ```html
   <div class="card dist-card" id="browserConnectCard" hidden>
-    <h2 data-i18n="conn_browser_title">חיבור חשבונות לקריאת מודעות</h2>
-    <p class="muted" data-i18n="conn_browser_hint"></p>
-    <p class="muted" data-i18n="conn_browser_privacy"></p>
-    <p class="warn" data-i18n="conn_browser_warning"></p>
+    <h2>החשבון האישי בפייסבוק <span class="conn-chip" id="browserConnChip"></span></h2>
+    <p class="muted">כדי לקרוא פוסטים מקבוצות ולפרסם בהן, פורלי צריכה להיות מחוברת לחשבון האישי שלכם — לא רק לדף העסקי. מתחברים כאן פעם אחת, כמו בדפדפן רגיל.</p>
+    <p class="muted">הסיסמה נשארת אצלכם: היא לא עוברת דרך פורלי ולא נשמרת אצלנו.</p>
+    <p class="muted small">פרסום אוטומטי בקבוצות נעשה על אחריותכם — נסביר בדיוק לפני שמתחילים.</p>
+    <label class="consent-line"><input type="checkbox" id="browserConsent"> <span>הבנתי, ואני רוצה לחבר את החשבון</span></label>
     <div class="conn-row">
-      <select id="browserPlatform" aria-label="פלטפורמה">
-        <option value="facebook">פייסבוק</option>
-        <option value="instagram">אינסטגרם</option>
-        <option value="tiktok">טיקטוק</option>
-        <option value="linkedin">לינקדאין</option>
-        <option value="x">X</option>
-      </select>
-      <button class="btn btn-gold" id="browserConnectBtn" data-i18n="conn_browser_open"></button>
-      <span class="conn-chip" id="browserConnChip"></span>
+      <button class="btn btn-gold" id="browserConnectBtn">חיבור החשבון האישי בפייסבוק</button>
+      <button class="btn btn-danger" id="browserDisconnectBtn" hidden>ניתוק החשבון</button>
+      <span class="muted small" id="browserIdentity"></span>
     </div>
   </div>
 
   <div class="browser-modal" id="browserModal" hidden role="dialog" aria-modal="true" aria-labelledby="browserModalTitle">
     <div class="browser-modal-inner">
       <header>
-        <strong id="browserModalTitle" data-i18n="conn_browser_title"></strong>
+        <div>
+          <strong id="browserModalTitle">התחברות לפייסבוק</strong>
+          <div class="muted small">זה פייסבוק האמיתי. מתחברים כרגיל — פורלי לא רואה את הסיסמה ולא שומרת אותה.</div>
+        </div>
         <button class="btn btn-ghost" id="browserModalClose" aria-label="סגירה">✕</button>
       </header>
       <div class="browser-modal-body" id="browserModalBody"></div>
       <footer>
-        <span class="muted" id="browserModalMsg"></span>
-        <button class="btn btn-gold" id="browserDoneBtn" data-i18n="conn_browser_done"></button>
+        <span class="muted small" id="browserModalMsg">קיבלתם קוד בסמס? אפשר לצאת לרגע ולחזור — החלון מחכה לכם כמה דקות.</span>
+        <button class="btn btn-gold" id="browserDoneBtn">סיימתי להתחבר</button>
       </footer>
     </div>
   </div>
 ```
 
-- [ ] **Step 3: Add the styles**
+- [ ] **Step 2: Add the styles**
 
-Append to `public-agent/app.css`:
+Forly is cream and gold (`--bg:#F7F3EC`, `--gold`, `--dark`, `--red`); there are no `--card`/`--muted`/`--line` tokens, and `.btn-danger` already exists as an outline button — do not redefine it. Append to `public-agent/app.css`:
 
 ```css
 /* Embedded connect browser — a full-bleed dialog, because a real page inside a
-   small box is unusable on a phone. */
-.browser-modal { position: fixed; inset: 0; background: rgba(0,0,0,.72); display: flex; align-items: center; justify-content: center; z-index: 90; }
+   small box is unusable on a phone. dvh, not vh: iOS Safari's bottom bar. */
+.browser-modal { position: fixed; inset: 0; background: rgba(20,17,12,.72); display: flex; align-items: center; justify-content: center; z-index: 90; }
 .browser-modal[hidden] { display: none; }
-.browser-modal-inner { background: var(--card, #14161c); border-radius: 14px; width: min(1100px, 96vw); height: min(760px, 92vh); display: flex; flex-direction: column; overflow: hidden; }
-.browser-modal-inner > header,
-.browser-modal-inner > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; }
+.browser-modal-inner { background: var(--bg); border-radius: var(--radius); width: min(1100px, 96vw); height: min(760px, 92dvh); display: flex; flex-direction: column; overflow: hidden; }
+.browser-modal-inner > header, .browser-modal-inner > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; }
+.browser-modal-inner > footer { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 .browser-modal-body { flex: 1; min-height: 0; background: #fff; }
 .browser-modal-body iframe { width: 100%; height: 100%; border: 0; display: block; }
-.browser-modal-body .popup-note { padding: 32px; text-align: center; color: var(--muted, #9aa0a6); line-height: 1.7; }
+.browser-modal-body .popup-note { padding: 32px; text-align: center; color: var(--ink-soft, #6b655c); line-height: 1.7; }
 .conn-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.warn { color: #e0b341; }
-@media (max-width: 640px) { .browser-modal-inner { width: 100vw; height: 100vh; border-radius: 0; } }
+.consent-line { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; line-height: 1.5; }
+@media (max-width: 640px) { .browser-modal-inner { width: 100vw; height: 100dvh; border-radius: 0; } }
 ```
 
-- [ ] **Step 4 (Branch A — `VIEWER_EMBEDDABLE=yes`): iframe the viewer**
+- [ ] **Step 3 (Branch A — `VIEWER_EMBEDDABLE=yes`): iframe the viewer**
 
-Append to `public-agent/distribution.js`:
+Append to `public-agent/distribution.js` (inside the file's IIFE, after the existing connect-card code, using its `$`, `api` and `toast`):
 
 ```js
-// ── embedded connect browser ──
-// The viewer is a live view of a real Chrome running in Driver's cloud: the
-// agent types their own password into it, and it never touches our server.
-(function () {
-  var modal = $("browserModal"), body = $("browserModalBody"), msg = $("browserModalMsg");
-  var current = null;
+  // ── the personal-account browser ──
+  // The viewer is a live view of a real Chrome in Driver's cloud: the agent
+  // types their own password into it, and it never touches our server.
+  const bModal = $("browserModal"), bBody = $("browserModalBody"), bMsg = $("browserModalMsg");
+  let bOpen = false;
 
-  function say(key) { msg.textContent = key ? FT(key) : ""; }
-
-  function openModal(viewUrl) {
-    body.innerHTML = "";
-    var frame = document.createElement("iframe");
-    // No allow-same-origin: the viewer is a foreign origin and has no business
-    // reaching this page's storage.
-    frame.setAttribute("sandbox", "allow-scripts allow-forms allow-popups");
+  function openBrowser(viewUrl) {
+    bBody.innerHTML = "";
+    const frame = document.createElement("iframe");
+    // No allow-same-origin: a foreign origin with no business in this page's storage.
+    frame.setAttribute("sandbox", "allow-scripts allow-popups");
     frame.setAttribute("referrerpolicy", "no-referrer");
     frame.src = viewUrl;
-    body.appendChild(frame);
-    modal.hidden = false;
+    bBody.appendChild(frame);
+    bModal.hidden = false; bOpen = true;
+  }
+  function closeBrowser() { bModal.hidden = true; bBody.innerHTML = ""; bOpen = false; }
+
+  async function refreshBrowserChip() {
+    try {
+      const j = await api("/api/connections/browser/facebook/status");
+      const on = j.state === "connected";
+      $("browserConnChip").textContent = on ? "מחובר" : "";
+      $("browserIdentity").textContent = on && j.identity_label ? `מחובר בתור ${j.identity_label}` : "";
+      $("browserDisconnectBtn").hidden = !on;
+      $("browserConnectBtn").textContent = on ? "חיבור מחדש" : "חיבור החשבון האישי בפייסבוק";
+    } catch (e) { /* card stays in its default state */ }
   }
 
-  function closeModal() { modal.hidden = true; body.innerHTML = ""; current = null; say(""); }
-
-  $("browserConnectBtn").addEventListener("click", function () {
-    var platform = $("browserPlatform").value;
-    var btn = this;
-    btn.disabled = true; btn.textContent = FT("conn_browser_opening");
-    fetch("/api/connections/browser/start", {
-      method: "POST", credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ platform: platform }),
-    }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
-      .then(function (j) { current = platform; openModal(j.view_url); })
-      .catch(function () { FLY.toast(FT("conn_browser_failed")); })
-      .then(function () { btn.disabled = false; btn.textContent = FT("conn_browser_open"); });
+  $("browserConnectBtn").addEventListener("click", async function () {
+    if (!$("browserConsent").checked) { toast("סמנו את האישור שמעל הכפתור"); return; }
+    const btn = this; btn.disabled = true; btn.textContent = "פותחים דפדפן…";
+    try {
+      const j = await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform: "facebook", consent: true }) });
+      openBrowser(j.view_url);
+    } catch (e) {
+      toast(e && e.code === "profile_busy" ? "פורלי מפרסמת כרגע מהחשבון — נסו שוב בעוד כמה דקות" : "לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע");
+    } finally { btn.disabled = false; refreshBrowserChip(); }
   });
 
-  $("browserDoneBtn").addEventListener("click", function () {
-    if (!current) return closeModal();
-    var btn = this;
-    btn.disabled = true; say("conn_browser_checking");
-    fetch("/api/connections/browser/" + current + "/finish", { method: "POST", credentials: "include" })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
-      .then(function (res) {
-        if (res.ok) { FLY.toast(FT("conn_browser_connected")); closeModal(); refreshBrowserChip(); return; }
-        say(res.body.error === "no_open_session" ? "conn_browser_expired" : "conn_browser_not_logged_in");
-      })
-      .catch(function () { say("conn_browser_failed"); })
-      .then(function () { btn.disabled = false; });
+  $("browserDoneBtn").addEventListener("click", async function () {
+    const btn = this; btn.disabled = true; bMsg.textContent = "בודקים…";
+    try {
+      const j = await api("/api/connections/browser/facebook/finish", { method: "POST" });
+      toast(j.identity_label ? `החשבון מחובר ✓ (${j.identity_label})` : "החשבון מחובר ✓");
+      closeBrowser(); refreshBrowserChip();
+    } catch (e) {
+      bMsg.textContent = e && e.code === "session_expired"
+        ? "עבר יותר מדי זמן והחלון נסגר. פתחו אותו שוב ונסו להתחבר."
+        : "נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ואז לחצו שוב.";
+    } finally { btn.disabled = false; }
   });
 
-  $("browserModalClose").addEventListener("click", closeModal);
+  $("browserModalClose").addEventListener("click", closeBrowser);
+  $("browserDisconnectBtn").addEventListener("click", async function () {
+    if (!confirm("לנתק את החשבון? פורלי תפסיק לפרסם ותמחק את ההתחברות השמורה.")) return;
+    try { await api("/api/connections/browser/facebook", { method: "DELETE" }); toast("החשבון נותק"); }
+    catch (e) { toast("לא הצלחנו לנתק — נסו שוב"); }
+    refreshBrowserChip();
+  });
 
-  function refreshBrowserChip() {
-    var platform = $("browserPlatform").value;
-    fetch("/api/connections/browser/" + platform + "/status", { credentials: "include" })
-      .then(function (r) { return r.json(); })
-      .then(function (j) { $("browserConnChip").textContent = j.state === "connected" ? FT("conn_browser_connected") : ""; })
-      .catch(function () {});
-  }
-  $("browserPlatform").addEventListener("change", refreshBrowserChip);
+  // If the agent leaves for the SMS and comes back, the modal is still here;
+  // only when they close it explicitly is the session's fate decided by /finish.
   $("browserConnectCard").hidden = false;
   refreshBrowserChip();
-})();
 ```
 
-- [ ] **Step 4 (Branch B — `VIEWER_EMBEDDABLE=no`): a popup window instead**
+`api()` in `distribution.js` throws on non-2xx; make sure the thrown error carries `code` from the JSON body (`e.code = j.error`) — if the file's helper doesn't already, add that one line to it.
 
-Use the exact block above with **only `openModal` replaced**, and nothing else changed:
+- [ ] **Step 3 (Branch B — `VIEWER_EMBEDDABLE=no`): a popup window instead**
+
+Use the exact block above with **only `openBrowser` replaced**:
 
 ```js
-  function openModal(viewUrl) {
+  function openBrowser(viewUrl) {
     // The viewer refuses to be framed (X-Frame-Options / frame-ancestors), so
     // it opens in its own window. Stripping that header server-side would mean
-    // proxying their websocket and defeating a deliberate control — not worth
-    // it, and it would break on their next deploy.
-    var win = window.open(viewUrl, "forly-connect", "width=1200,height=820,noopener");
-    body.innerHTML = '<p class="popup-note">' + FT("conn_browser_hint") + "</p>";
-    modal.hidden = false;
-    if (!win) { body.innerHTML = '<p class="popup-note">' + FT("conn_browser_popup_blocked") + "</p>"; }
+    // proxying their websocket and defeating a deliberate control.
+    const win = window.open(viewUrl, "forly-connect", "width=1200,height=820,noopener");
+    bBody.innerHTML = '<p class="popup-note">ההתחברות נפתחה בחלון נפרד. כשסיימתם, חזרו לכאן ולחצו "סיימתי להתחבר".</p>';
+    if (!win) bBody.innerHTML = '<p class="popup-note">הדפדפן חסם את החלון — אשרו חלונות קופצים לאתר ונסו שוב.</p>';
+    bModal.hidden = false; bOpen = true;
   }
 ```
 
-and in `closeModal`, nothing changes — the popup is the agent's to close.
+- [ ] **Step 4: Content-Security-Policy for the frame**
+
+`security.js` sets no `script-src` today. Add, for `distribution.html` only, `frame-src https://viewer.driver.dev` (Branch A) — the smallest CSP that stops a stray script from framing anything else, without touching the rest of the site's policy. Where `security.js` builds its headers, add the directive when `req.path` ends with `/distribution.html`.
 
 - [ ] **Step 5: Verify by hand in the dashboard**
 
@@ -2215,7 +2512,7 @@ Expected: the only hits are `driver-browser.js` (using it to connect) and `route
 - [ ] **Step 7: Commit**
 
 ```bash
-git add public-agent/distribution.html public-agent/distribution.js public-agent/app.css public-agent/form-i18n.js
+git add public-agent/distribution.html public-agent/distribution.js public-agent/app.css server/security.js
 git commit -m "feat(connections): embed the login browser in the dashboard"
 ```
 
@@ -2308,9 +2605,11 @@ git push -u origin claude/zen-davinci-lu4hoq
 
 ## Phase 3 — paced background posting to groups
 
-**What "safe" means here, stated once.** No number below was measured against Facebook; the platform publishes no thresholds and changes its heuristics without notice. [Unverified] The defaults are deliberately slower than a busy human agent, and the design leans on things that *are* known to matter: an account that posts at 3am, posts identical text to twelve groups in an hour, or keeps going after a warning gets flagged; one that posts a few varied messages a day during waking hours from a browser it has logged into before mostly does not. Task 18 turns the defaults into measured values. Until then, slower is the only defensible direction.
+**What "safe" means here, stated once.** No number below was measured against Facebook; the platform publishes no thresholds and changes its heuristics without notice. [Unverified] The defaults are deliberately slower than a busy human agent, and the design leans on things that *are* known to matter: an account that posts at 3am, posts identical text to twelve groups in an hour, opens a group URL cold and drops a link and vanishes, or keeps going after a warning, gets flagged; one that posts a few varied messages a day during waking hours, from a browser it has logged into before, after scrolling its feed, mostly does not. Task 20 turns the defaults into measured values over 30 days. Until then, slower is the only defensible direction, and any change to a default after a signal goes **down**.
 
-### Task 13: `posting-safety.js` — pacing and signal classification
+**What the agent sees.** A timeline, never a browser. The embedded browser (Task 11) is the escape hatch when Facebook demands a human, and only then.
+
+### Task 13: `posting-safety.js` — pacing, schedule shape, and signal classification
 
 The anti-ban core. Pure functions, no I/O, and the most thoroughly tested file in the plan: every invariant the product owner is relying on lives here as an assertion.
 
@@ -2323,146 +2622,136 @@ The anti-ban core. Pure functions, no I/O, and the most thoroughly tested file i
 - Consumes: nothing.
 - Produces:
   - `DEFAULTS` — the pacing config (below).
-  - `nextSlot({ now, account, candidates, pageId, config, rand }) -> { at: Date, group_url: string } | { at: null, reason: string }` where `account = { connected_at: ISO, posts: Array<{at: ISO, group_url, page_id, ok: boolean}> }` and `candidates = Array<{ url, agent_policy: "allowed"|"unknown"|"forbidden", explicit: boolean }>`.
-  - `isActiveTime(date, config) -> boolean`
-  - `classifySignal(landedUrl, text) -> "ok" | "login_required" | "checkpoint" | "captcha" | "rate_limited" | "group_blocked" | "not_member"`
-  - `SIGNAL_HALTS = Set` — the signals that halt the whole account.
+  - `nextSlot({ now, account, candidates, pageId, config, rand }) -> { at: Date, group_url } | { at: null, reason }` where `account = { first_connected_at, halts: [{at, code}], disabled_until_admin: bool, penalty_until: ISO|null, account_aged: bool|null, posted_manually: bool|null, posts: Array<{at, group_url, page_id, ok: boolean|null}> }` (`ok: null` = a reservation from another campaign, not yet posted) and `candidates = Array<{ url, agent_policy: "explicitly_allowed"|"unknown" }>`. Reasons: `disabled`, `penalty`, `signal_cooldown`, `day_skipped`, `daily_cap`, `weekly_cap`, `no_eligible_group`.
+  - `isActiveTime(date, config) -> boolean` (hours, Shabbat, holidays)
+  - `dayPlan(localDate, config, rand) -> { start_offset_min, target }` — the per-day randomness, derived from a seed so a day's plan is stable across ticks.
+  - `classifySignal({ landedUrl, dialogText, alertText }) -> "ok" | "login_required" | "checkpoint" | "captcha" | "rate_limited" | "feature_blocked" | "restricted" | "group_blocked" | "not_member" | "pending_approval"`
+  - `SIGNAL_DISABLES = Set(checkpoint, captcha, restricted)`, `SIGNAL_PENALISES = Set(rate_limited, feature_blocked)`, `SIGNAL_SKIPS = Set(group_blocked, not_member, pending_approval)`.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `server/posting-safety.test.js`:
 
 ```js
-/* posting-safety.js — every pacing promise, as an assertion. Pure, no I/O. */
+/* posting-safety.js — every pacing promise, as an assertion. Pure, no I/O.
+   All times derive from NOW, never from Date.now(): a test that ages with the
+   calendar is a test that fails in November. */
 const assert = require("assert");
 const S = require("./posting-safety");
 
-const IL = (iso) => new Date(iso); // ISO strings below carry the +03:00 offset (Asia/Jerusalem, DST)
+const NOW = new Date("2026-09-23T10:00:00+03:00"); // Wed
+const IL = (iso) => new Date(iso);
 const day = (n) => n * 24 * 3600 * 1000;
 const cfg = S.DEFAULTS;
-const noRand = () => 0.5; // jitter midpoint → deterministic
+const noRand = () => 0.5;
+const ok = (url) => ({ url, agent_policy: "explicitly_allowed" });
+const account = (o = {}) => Object.assign({
+  first_connected_at: new Date(NOW.getTime() - day(90)).toISOString(),
+  halts: [], disabled_until_admin: false, penalty_until: null,
+  account_aged: true, posted_manually: true, posts: [],
+}, o);
+const at = (d) => new Date(NOW.getTime() - d).toISOString();
 
-const allowed = (url) => ({ url, agent_policy: "allowed", explicit: true });
-const account = (connectedDaysAgo, posts = []) => ({
-  connected_at: new Date(Date.now() - day(connectedDaysAgo)).toISOString(), posts,
-});
-
-// ── active hours: Israeli waking hours, never Shabbat ──
+// ── active hours: Israeli waking hours, never Shabbat, never a listed holiday ──
 assert.equal(S.isActiveTime(IL("2026-09-23T10:00:00+03:00"), cfg), true, "Wed 10:00");
 assert.equal(S.isActiveTime(IL("2026-09-23T03:00:00+03:00"), cfg), false, "Wed 03:00");
-assert.equal(S.isActiveTime(IL("2026-09-23T22:30:00+03:00"), cfg), false, "Wed 22:30");
 assert.equal(S.isActiveTime(IL("2026-09-25T16:00:00+03:00"), cfg), false, "Fri 16:00 — Shabbat");
 assert.equal(S.isActiveTime(IL("2026-09-26T12:00:00+03:00"), cfg), false, "Sat noon — Shabbat");
-assert.equal(S.isActiveTime(IL("2026-09-26T21:00:00+03:00"), cfg), false, "Sat 21:00 — after Shabbat but after hours");
 assert.equal(S.isActiveTime(IL("2026-09-25T11:00:00+03:00"), cfg), true, "Fri 11:00 — before Shabbat");
+assert.equal(S.isActiveTime(IL("2026-09-21T11:00:00+03:00"), cfg), false, "Yom Kippur 2026 — listed holiday");
 
-// ── nextSlot: the very first post of a fresh account may go now, in hours ──
+// ── the schedule is not periodic: each day has its own start and its own target ──
 {
-  const now = IL("2026-09-23T10:00:00+03:00");
-  const slot = S.nextSlot({ now, account: account(0), candidates: [allowed("g1")], pageId: "p1", config: cfg, rand: noRand });
-  assert.equal(slot.group_url, "g1");
-  assert.ok(slot.at.getTime() >= now.getTime());
+  const a = S.dayPlan("2026-09-23", cfg, Math.random), b = S.dayPlan("2026-09-24", cfg, Math.random);
+  assert.ok(a.start_offset_min >= 0 && a.start_offset_min <= cfg.day_start_jitter_min);
+  assert.ok(a.target >= 0 && a.target <= cfg.daily_cap);
+  assert.deepEqual(S.dayPlan("2026-09-23", cfg, Math.random), a, "a day's plan is stable across ticks");
+  let skipped = 0;
+  for (let i = 1; i <= 200; i++) if (S.dayPlan(`2026-10-${String((i % 28) + 1).padStart(2, "0")}-${i}`, cfg, Math.random).target === 0) skipped++;
+  assert.ok(skipped > 20 && skipped < 80, `about one day in five is skipped, got ${skipped}/200`);
 }
 
-// ── minimum gap between ANY two posts, with jitter that only ever adds ──
+// ── disabled and penalised accounts never get a slot, whatever the caps say ──
+assert.equal(S.nextSlot({ now: NOW, account: account({ disabled_until_admin: true }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "disabled");
+assert.equal(S.nextSlot({ now: NOW, account: account({ halts: [{ at: at(day(3)), code: "rate_limited" }, { at: at(day(20)), code: "rate_limited" }] }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "disabled", "two halts in 30 days = disabled");
+assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)) }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "penalty");
+
+// ── warm-up: a freshly connected account, or one that answered "no", posts once a day ──
 {
-  const now = IL("2026-09-23T10:00:00+03:00");
-  const lastAt = new Date(now.getTime() - 10 * 60000).toISOString(); // 10 min ago
-  const acct = account(30, [{ at: lastAt, group_url: "g0", page_id: "p0", ok: true }]);
-  const slot = S.nextSlot({ now, account: acct, candidates: [allowed("g1")], pageId: "p1", config: cfg, rand: () => 0 });
-  const gapMin = (slot.at.getTime() - new Date(lastAt).getTime()) / 60000;
-  assert.ok(gapMin >= cfg.min_gap_minutes, `gap ${gapMin} < min ${cfg.min_gap_minutes}`);
-  const slotHi = S.nextSlot({ now, account: acct, candidates: [allowed("g1")], pageId: "p1", config: cfg, rand: () => 1 });
-  assert.ok(slotHi.at.getTime() > slot.at.getTime(), "rand=1 must push later, never earlier");
+  const one = [{ at: at(3600000), group_url: "a", page_id: "p", ok: true }];
+  const fresh = account({ first_connected_at: at(day(2)), posts: one });
+  assert.equal(S.nextSlot({ now: NOW, account: fresh, candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "daily_cap", "week 1: one a day");
+  const young = account({ account_aged: false, posts: one });
+  assert.equal(S.nextSlot({ now: NOW, account: young, candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "daily_cap", "a young Facebook account is treated like a fresh connection");
+  const mature = account({ posts: one });
+  const m = S.nextSlot({ now: NOW, account: mature, candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand });
+  assert.ok(m.at || m.reason === "day_skipped", "a mature account may post again today (unless today is a skipped day)");
 }
 
-// ── warm-up: a freshly connected account gets the smallest daily cap ──
+// ── minimum gap, jitter only adds, and reservations from other campaigns count ──
 {
-  const now = IL("2026-09-23T15:00:00+03:00");
-  const today = (h) => IL(`2026-09-23T${String(h).padStart(2, "0")}:00:00+03:00`).toISOString();
-  const two = [{ at: today(10), group_url: "a", page_id: "p", ok: true }, { at: today(12), group_url: "b", page_id: "p", ok: true }];
-  const fresh = S.nextSlot({ now, account: account(1, two), candidates: [allowed("g9")], pageId: "p", config: cfg, rand: noRand });
-  assert.equal(fresh.at, null, "day-1 account is capped at 2/day");
-  assert.equal(fresh.reason, "daily_cap");
-  const mature = S.nextSlot({ now, account: account(60, two), candidates: [allowed("g9")], pageId: "p", config: cfg, rand: noRand });
-  assert.ok(mature.at, "a 60-day account may post a third time");
+  const acct = account({ posts: [{ at: at(10 * 60000), group_url: "g0", page_id: "p0", ok: true }] });
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0, day_start_jitter_min: 0 });
+  const slot = S.nextSlot({ now: NOW, account: acct, candidates: [ok("g1")], pageId: "p1", config: cfgNoSkip, rand: () => 0 });
+  assert.ok((slot.at.getTime() - new Date(acct.posts[0].at).getTime()) / 60000 >= cfg.min_gap_minutes);
+  const later = S.nextSlot({ now: NOW, account: acct, candidates: [ok("g1")], pageId: "p1", config: cfgNoSkip, rand: () => 1 });
+  assert.ok(later.at.getTime() > slot.at.getTime(), "rand=1 pushes later, never earlier");
+  const reserved = account({ posts: [{ at: at(-5 * 60000), group_url: "g0", page_id: "p0", ok: null }] }); // another campaign, 5 min from now
+  const r = S.nextSlot({ now: NOW, account: reserved, candidates: [ok("g1")], pageId: "p1", config: cfgNoSkip, rand: () => 0 });
+  assert.ok((r.at.getTime() - (NOW.getTime() + 5 * 60000)) / 60000 >= cfg.min_gap_minutes, "paced against the reservation");
 }
 
-// ── caps count attempts, not successes: a failed post still spent the slot ──
+// ── caps count attempts and reservations, not successes ──
 {
-  const now = IL("2026-09-23T15:00:00+03:00");
   const posts = [];
-  for (let h = 9; h < 9 + cfg.daily_cap; h++) posts.push({ at: IL(`2026-09-23T${String(h).padStart(2, "0")}:00:00+03:00`).toISOString(), group_url: `g${h}`, page_id: "p", ok: h % 2 === 0 });
-  const slot = S.nextSlot({ now, account: account(60, posts), candidates: [allowed("gz")], pageId: "p", config: cfg, rand: noRand });
-  assert.equal(slot.at, null);
-  assert.equal(slot.reason, "daily_cap");
+  for (let i = 0; i < cfg.daily_cap; i++) posts.push({ at: at(3600000 * (i + 1)), group_url: `g${i}`, page_id: "p", ok: i % 2 === 0 });
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
+  assert.equal(S.nextSlot({ now: NOW, account: account({ posts }), candidates: [ok("z")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "daily_cap");
+  const week = [];
+  for (let i = 0; i < cfg.weekly_cap; i++) week.push({ at: at(day(1) + i * 3600000), group_url: `w${i}`, page_id: "p", ok: true });
+  assert.equal(S.nextSlot({ now: NOW, account: account({ posts: week }), candidates: [ok("z")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "weekly_cap");
 }
 
-// ── weekly cap ──
+// ── group cooldowns pick the other group; unknown-policy groups are eligible (the agent listed them) ──
 {
-  const now = IL("2026-09-23T15:00:00+03:00");
-  const posts = [];
-  for (let i = 0; i < cfg.weekly_cap; i++) posts.push({ at: new Date(now.getTime() - day(1) - i * 3600000).toISOString(), group_url: `w${i}`, page_id: "p", ok: true });
-  const slot = S.nextSlot({ now, account: account(60, posts), candidates: [allowed("gz")], pageId: "p", config: cfg, rand: noRand });
-  assert.equal(slot.reason, "weekly_cap");
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
+  const acct = account({ posts: [{ at: at(day(2)), group_url: "g1", page_id: "other", ok: true }] });
+  assert.equal(S.nextSlot({ now: NOW, account: acct, candidates: [ok("g1"), { url: "g2", agent_policy: "unknown" }], pageId: "p", config: cfgNoSkip, rand: noRand }).group_url, "g2");
+  assert.equal(S.nextSlot({ now: NOW, account: acct, candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "no_eligible_group");
+  const old = account({ posts: [{ at: at(day(10)), group_url: "g1", page_id: "p", ok: true }] });
+  assert.equal(S.nextSlot({ now: NOW, account: old, candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "no_eligible_group", "same property → same group inside 14 days");
 }
 
-// ── same group cooldown, and same property→group cooldown, pick the other group ──
+// ── outside active hours, the slot is inside the next window ──
 {
-  const now = IL("2026-09-23T15:00:00+03:00");
-  const recent = new Date(now.getTime() - day(2)).toISOString();
-  const acct = account(60, [{ at: recent, group_url: "g1", page_id: "other", ok: true }]);
-  const slot = S.nextSlot({ now, account: acct, candidates: [allowed("g1"), allowed("g2")], pageId: "p", config: cfg, rand: noRand });
-  assert.equal(slot.group_url, "g2", "g1 was posted to 2 days ago");
-  const only = S.nextSlot({ now, account: acct, candidates: [allowed("g1")], pageId: "p", config: cfg, rand: noRand });
-  assert.equal(only.at, null);
-  assert.equal(only.reason, "no_eligible_group");
-  const old = account(60, [{ at: new Date(now.getTime() - day(10)).toISOString(), group_url: "g1", page_id: "p", ok: true }]);
-  const sameProp = S.nextSlot({ now, account: old, candidates: [allowed("g1")], pageId: "p", config: cfg, rand: noRand });
-  assert.equal(sameProp.reason, "no_eligible_group", "same property to same group inside 14 days");
-}
-
-// ── the agent_policy gate is in code, not in the UI ──
-{
-  const now = IL("2026-09-23T15:00:00+03:00");
-  const cands = [
-    { url: "forbidden", agent_policy: "forbidden", explicit: true },
-    { url: "unknown-unticked", agent_policy: "unknown", explicit: false },
-    { url: "unknown-ticked", agent_policy: "unknown", explicit: true },
-  ];
-  const slot = S.nextSlot({ now, account: account(60), candidates: cands, pageId: "p", config: cfg, rand: noRand });
-  assert.equal(slot.group_url, "unknown-ticked");
-  const none = S.nextSlot({ now, account: account(60), candidates: cands.slice(0, 2), pageId: "p", config: cfg, rand: noRand });
-  assert.equal(none.reason, "no_eligible_group");
-}
-
-// ── outside active hours, the slot is the next active window, not now ──
-{
-  const now = IL("2026-09-23T23:30:00+03:00");
-  const slot = S.nextSlot({ now, account: account(60), candidates: [allowed("g1")], pageId: "p", config: cfg, rand: noRand });
-  assert.ok(slot.at.getTime() > now.getTime() + 8 * 3600000, "must wait for the morning");
+  const night = IL("2026-09-23T23:30:00+03:00");
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
+  const slot = S.nextSlot({ now: night, account: account(), candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand });
   assert.equal(S.isActiveTime(slot.at, cfg), true);
+  assert.ok(slot.at.getTime() > night.getTime() + 8 * 3600000);
 }
 
-// ── after a signal, nothing for the cooldown, whatever the caps say ──
-{
-  const now = IL("2026-09-23T15:00:00+03:00");
-  const acct = Object.assign(account(60), { halted_at: new Date(now.getTime() - 3600000).toISOString() });
-  const slot = S.nextSlot({ now, account: acct, candidates: [allowed("g1")], pageId: "p", config: cfg, rand: noRand });
-  assert.equal(slot.reason, "signal_cooldown");
-}
-
-// ── signal classification ──
-assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "כתבו משהו…"), "ok");
-assert.equal(S.classifySignal("https://www.facebook.com/login/?next=x", ""), "login_required");
-assert.equal(S.classifySignal("https://www.facebook.com/checkpoint/1501092823525282/", ""), "checkpoint");
-assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "Confirm you're human"), "captcha");
-assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "You're temporarily blocked from posting"), "rate_limited");
-assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "אתם חסומים זמנית"), "rate_limited");
-assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "You can't post in this group"), "group_blocked");
-assert.equal(S.classifySignal("https://www.facebook.com/groups/1", "הצטרפות לקבוצה"), "not_member");
-for (const sig of ["checkpoint", "captcha", "rate_limited", "login_required"]) assert.ok(S.SIGNAL_HALTS.has(sig), `${sig} halts the account`);
-assert.ok(!S.SIGNAL_HALTS.has("not_member"), "not being a member is a per-group skip, not an account halt");
+// ── signals: scoped input, and the outcomes that matter are all there ──
+const sig = (o) => S.classifySignal(Object.assign({ landedUrl: "https://www.facebook.com/groups/1", dialogText: "", alertText: "" }, o));
+assert.equal(sig({}), "ok");
+assert.equal(sig({ landedUrl: "https://www.facebook.com/login/?next=x" }), "login_required");
+assert.equal(sig({ landedUrl: "https://www.facebook.com/checkpoint/1501092823525282/" }), "checkpoint");
+assert.equal(sig({ landedUrl: "https://www.facebook.com/checkpoint/block/" }), "restricted", "a disabled account is not a cookie expiry");
+assert.equal(sig({ dialogText: "Confirm you're human" }), "captcha");
+assert.equal(sig({ alertText: "You're temporarily blocked from posting" }), "rate_limited");
+assert.equal(sig({ alertText: "אתם חסומים זמנית" }), "rate_limited");
+assert.equal(sig({ dialogText: "You can't use this feature right now" }), "feature_blocked");
+assert.equal(sig({ dialogText: "לא ניתן להשתמש בתכונה זו כרגע" }), "feature_blocked");
+assert.equal(sig({ alertText: "Your post is pending approval" }), "pending_approval");
+assert.equal(sig({ alertText: "הפוסט שלך ממתין לאישור" }), "pending_approval");
+assert.equal(sig({ dialogText: "You can't post in this group" }), "group_blocked");
+assert.equal(sig({ dialogText: "Join group to post" }), "not_member");
+// what the feed says is NOT a signal: another member's post must never halt an account
+assert.equal(S.classifySignal({ landedUrl: "https://www.facebook.com/groups/1", dialogText: "", alertText: "", feedText: "אתם חסומים זמנית security check join group" }), "ok");
+for (const x of ["checkpoint", "captcha", "restricted"]) assert.ok(S.SIGNAL_DISABLES.has(x));
+for (const x of ["rate_limited", "feature_blocked"]) assert.ok(S.SIGNAL_PENALISES.has(x));
+for (const x of ["group_blocked", "not_member", "pending_approval"]) assert.ok(S.SIGNAL_SKIPS.has(x));
+assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("login_required"), "a cookie expiry is a reconnect, not a punishment");
 
 console.log("posting-safety.test.js ok");
 ```
@@ -2484,136 +2773,167 @@ Create `server/posting-safety.js`:
  * so the promise "the agent's account never looks like a bot" is a set of unit
  * tests rather than a hope.
  *
- * [Unverified] None of DEFAULTS was measured against Facebook. They are set
- * well below what an active human agent does by hand; Task 18 calibrates.
- * A number is never hard-coded at a call site — always read from the config.
+ * [Unverified] None of DEFAULTS was measured against Facebook. They sit well
+ * below what an active human agent does by hand; Task 20 calibrates over 30
+ * days. After any signal, a default only ever moves DOWN.
+ *
+ * Three ideas carry the design:
+ *  - shape, not just rate: a real person does not start at 09:00 sharp every
+ *    day and post the same count; dayPlan() gives each day its own start,
+ *    its own target, and a one-in-five chance of nothing at all;
+ *  - the account's history matters more than ours: two questions at connect
+ *    time (is the Facebook account older than six months? has it posted in
+ *    these groups by hand?) double the warm-up when the answer is no;
+ *  - a checkpoint is a stop, not a pause: automation for that account ends
+ *    until a person at Forly turns it back on.
  */
 
 const DEFAULTS = {
   timezone: "Asia/Jerusalem",
-  active_hours: { start: 9, end: 21 },      // local; end is exclusive
-  shabbat: { start_dow: 5, start_hour: 15, end_dow: 6, end_hour: 20 }, // Fri 15:00 → Sat 20:00
-  min_gap_minutes: 45,                       // between ANY two posts by one account
-  gap_jitter: 0.6,                           // adds up to +60% of the gap, never subtracts
-  daily_cap: 6,
-  weekly_cap: 25,
-  warmup: [{ days: 3, daily_cap: 2 }, { days: 10, daily_cap: 4 }], // then daily_cap
-  group_cooldown_days: 7,                    // this account → same group
-  property_group_cooldown_days: 14,          // same property → same group
-  cooldown_after_signal_hours: 48,
+  active_hours: { start: 9, end: 21 },
+  shabbat: { start_dow: 5, start_hour: 15, end_dow: 6, end_hour: 20 },
+  // Yom Kippur, Rosh Hashana, Pesach (first/last), Shavuot, Sukkot (first), Simchat Torah — 5787 & 5788.
+  holidays: ["2026-09-12", "2026-09-13", "2026-09-21", "2026-09-26", "2026-10-03", "2027-04-22", "2027-04-28", "2027-06-11",
+             "2027-10-02", "2027-10-03", "2027-10-11", "2027-10-16", "2027-10-23"],
+  min_gap_minutes: 120,
+  gap_jitter: 0.8,                  // adds up to +80% of the gap, never subtracts
+  long_break_probability: 0.25,     // sometimes the gap is 3–5 hours, like a person with a job
+  daily_cap: 3,
+  weekly_cap: 12,
+  day_start_jitter_min: 150,        // the first post of a day lands 0–150 min after active_hours.start
+  skip_day_probability: 0.2,        // one active day in five, nothing at all
+  warmup: [{ days: 7, daily_cap: 1 }, { days: 21, daily_cap: 2 }],
+  warmup_multiplier_if_unsure: 2,   // account_aged === false or posted_manually === false
+  group_cooldown_days: 7,
+  property_group_cooldown_days: 14,
+  penalty_days: 14,                 // after rate_limited / feature_blocked
+  penalty_cap_divisor: 2,
+  halts_window_days: 30,
+  halts_to_disable: 2,
   max_consecutive_failures: 2,
 };
 
 const MS_MIN = 60000, MS_HOUR = 3600000, MS_DAY = 24 * MS_HOUR;
 
-// Local wall-clock parts without a tz library: Intl handles DST for us.
 function localParts(date, tz) {
   const f = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false, weekday: "short", hour: "numeric", minute: "numeric" });
   const p = Object.fromEntries(f.formatToParts(date).map((x) => [x.type, x.value]));
-  const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday);
-  return { dow, hour: Number(p.hour) % 24, minute: Number(p.minute) };
+  return { dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday), hour: Number(p.hour) % 24, minute: Number(p.minute) };
 }
+const localDate = (date, tz) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 
 function inShabbat({ dow, hour }, sh) {
   if (dow === sh.start_dow) return hour >= sh.start_hour;
   if (dow === sh.end_dow) return hour < sh.end_hour;
   return false;
 }
-
 function isActiveTime(date, config = DEFAULTS) {
   const lp = localParts(date, config.timezone);
   if (config.shabbat && inShabbat(lp, config.shabbat)) return false;
+  if ((config.holidays || []).includes(localDate(date, config.timezone))) return false;
   return lp.hour >= config.active_hours.start && lp.hour < config.active_hours.end;
 }
-
-// Walk forward in 15-minute steps to the next active minute. Bounded: 8 days
-// covers any Shabbat + hours combination twice over.
 function nextActiveTime(from, config) {
   let t = new Date(from.getTime());
-  for (let i = 0; i < 8 * 96; i++) {
-    if (isActiveTime(t, config)) return t;
-    t = new Date(t.getTime() + 15 * MS_MIN);
-  }
+  for (let i = 0; i < 10 * 96; i++) { if (isActiveTime(t, config)) return t; t = new Date(t.getTime() + 15 * MS_MIN); }
   return t;
 }
 
-function dailyCapFor(connectedAt, now, config) {
-  const ageDays = (now.getTime() - new Date(connectedAt).getTime()) / MS_DAY;
-  for (const w of config.warmup) if (ageDays < w.days) return w.daily_cap;
-  return config.daily_cap;
+// A stable per-day random source, so every tick that day agrees on the plan.
+function seeded(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return () => { h = (Math.imul(h, 1664525) + 1013904223) >>> 0; return h / 4294967296; };
+}
+function dayPlan(localDay, config = DEFAULTS, _rand) {
+  const r = seeded(String(localDay));
+  if (r() < config.skip_day_probability) return { start_offset_min: 0, target: 0 };
+  return { start_offset_min: Math.floor(r() * config.day_start_jitter_min), target: 1 + Math.floor(r() * config.daily_cap) };
 }
 
-const sameLocalDay = (a, b, tz) => {
-  const f = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" });
-  return f.format(a) === f.format(b);
-};
+function dailyCapFor(account, now, config) {
+  const ageDays = (now.getTime() - new Date(account.first_connected_at).getTime()) / MS_DAY;
+  const mult = (account.account_aged === false || account.posted_manually === false) ? config.warmup_multiplier_if_unsure : 1;
+  for (const w of config.warmup) if (ageDays < w.days * mult) return w.daily_cap;
+  const base = config.daily_cap;
+  return account.penalty_until && now.getTime() < new Date(account.penalty_until).getTime() ? Math.max(1, Math.floor(base / config.penalty_cap_divisor)) : base;
+}
 
-/*
- * The decision. Order matters: cheapest, most absolute reasons first, so a
- * halted account never even reaches the group-picking step.
- */
 function nextSlot({ now, account, candidates, pageId, config = DEFAULTS, rand = Math.random }) {
-  const posts = (account.posts || []).map((p) => ({ ...p, t: new Date(p.at).getTime() }));
-
-  if (account.halted_at) {
-    const until = new Date(account.halted_at).getTime() + config.cooldown_after_signal_hours * MS_HOUR;
-    if (now.getTime() < until) return { at: null, reason: "signal_cooldown" };
+  if (account.disabled_until_admin) return { at: null, reason: "disabled" };
+  const recentHalts = (account.halts || []).filter((h) => now.getTime() - new Date(h.at).getTime() < config.halts_window_days * MS_DAY);
+  if (recentHalts.length >= config.halts_to_disable) return { at: null, reason: "disabled" };
+  if (account.penalty_until && now.getTime() < new Date(account.penalty_until).getTime() && recentHalts.some((h) => now.getTime() - new Date(h.at).getTime() < MS_DAY)) {
+    return { at: null, reason: "penalty" }; // the first day after a penalising signal: nothing
   }
 
-  const todays = posts.filter((p) => sameLocalDay(new Date(p.t), now, config.timezone)).length;
-  if (todays >= dailyCapFor(account.connected_at, now, config)) return { at: null, reason: "daily_cap" };
+  const posts = (account.posts || []).map((p) => ({ ...p, t: new Date(p.at).getTime() }));
+  const today = localDate(now, config.timezone);
+  const plan = dayPlan(today, config, rand);
+  if (plan.target === 0) return { at: null, reason: "day_skipped" };
 
-  const weeks = posts.filter((p) => now.getTime() - p.t < 7 * MS_DAY).length;
-  if (weeks >= config.weekly_cap) return { at: null, reason: "weekly_cap" };
+  const todays = posts.filter((p) => localDate(new Date(p.t), config.timezone) === today).length;
+  if (todays >= Math.min(plan.target, dailyCapFor(account, now, config))) return { at: null, reason: "daily_cap" };
+  if (posts.filter((p) => now.getTime() - p.t < 7 * MS_DAY).length >= config.weekly_cap) return { at: null, reason: "weekly_cap" };
 
   const eligible = candidates.filter((c) => {
-    if (c.agent_policy === "forbidden") return false;
-    if (c.agent_policy === "unknown" && !c.explicit) return false;
     const toGroup = posts.filter((p) => p.group_url === c.url);
     if (toGroup.some((p) => now.getTime() - p.t < config.group_cooldown_days * MS_DAY)) return false;
     if (toGroup.some((p) => p.page_id === pageId && now.getTime() - p.t < config.property_group_cooldown_days * MS_DAY)) return false;
     return true;
   });
   if (!eligible.length) return { at: null, reason: "no_eligible_group" };
-
-  // Least-recently-posted group first: spreads the account's activity out
-  // instead of hammering whichever group is first in the list.
   const lastTo = (url) => Math.max(0, ...posts.filter((p) => p.group_url === url).map((p) => p.t));
   eligible.sort((a, b) => lastTo(a.url) - lastTo(b.url));
 
+  // Earliest: after the last post OR reservation by the gap (with jitter, and
+  // sometimes a long break), and never before today's randomised start.
   const lastAny = Math.max(0, ...posts.map((p) => p.t));
-  const gap = config.min_gap_minutes * MS_MIN * (1 + config.gap_jitter * rand());
-  const earliest = new Date(Math.max(now.getTime(), lastAny + gap));
+  const longBreak = rand() < config.long_break_probability;
+  const gapMin = longBreak ? 180 + rand() * 120 : config.min_gap_minutes * (1 + config.gap_jitter * rand());
+  const dayStart = new Date(now.getTime()); dayStart.setUTCHours(0, 0, 0, 0);
+  const lp = localParts(now, config.timezone);
+  const startToday = new Date(now.getTime() - (lp.hour * 60 + lp.minute) * MS_MIN + (config.active_hours.start * 60 + plan.start_offset_min) * MS_MIN);
+  const earliest = new Date(Math.max(now.getTime(), lastAny + gapMin * MS_MIN, startToday.getTime()));
   return { at: nextActiveTime(earliest, config), group_url: eligible[0].url };
 }
 
-// ── what the page is telling us ──
-const SIGNALS = [
-  ["login_required", /\/(login|checkpoint\/block)(\/|\?|$)/i, null],
-  ["checkpoint", /\/checkpoint\//i, /(confirm your identity|אימות הזהות)/i],
-  ["captcha", null, /(confirm you'?re human|security check|אנחנו רוצים לוודא שאת|בדיקת אבטחה)/i],
-  ["rate_limited", null, /(temporarily blocked|posting too fast|slow down|חסומים זמנית|חסום זמנית|לאט יותר)/i],
-  ["group_blocked", null, /(can'?t post in this group|no longer able to post|לא ניתן לפרסם בקבוצה)/i],
-  ["not_member", null, /(join group|הצטרפות לקבוצה|הצטרפו לקבוצה)/i],
+// ── what the page is telling us — from the DIALOG and ALERT regions only ──
+// The feed is other people's text. A member who writes "אתם חסומים זמנית" in a
+// post must not halt every Forly agent who lands there.
+const URL_SIGNALS = [
+  ["restricted", /\/checkpoint\/block/i],
+  ["checkpoint", /\/checkpoint\//i],
+  ["login_required", /\/(login|recover)(\/|\?|$)/i],
 ];
-const SIGNAL_HALTS = new Set(["login_required", "checkpoint", "captcha", "rate_limited"]);
+const TEXT_SIGNALS = [
+  ["captcha", /(confirm you'?re human|security check|בדיקת אבטחה|לוודא שאת)/i],
+  ["feature_blocked", /(can'?t use this feature|we limit how often|לא ניתן להשתמש בתכונה|אנחנו מגבילים)/i],
+  ["rate_limited", /(temporarily blocked|posting too fast|slow down|חסומים זמנית|חסום זמנית|לאט יותר)/i],
+  ["restricted", /(account (is )?restricted|החשבון שלך מוגבל)/i],
+  ["pending_approval", /(pending approval|will be reviewed|ממתין לאישור|ייבדק על ידי מנהל)/i],
+  ["group_blocked", /(can'?t post in this group|no longer able to post|לא ניתן לפרסם בקבוצה)/i],
+  ["not_member", /(join group to post|הצטרפו לקבוצה כדי לפרסם|הצטרפות לקבוצה)/i],
+];
+const SIGNAL_DISABLES = new Set(["checkpoint", "captcha", "restricted"]);
+const SIGNAL_PENALISES = new Set(["rate_limited", "feature_blocked"]);
+const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval"]);
 
-function classifySignal(landedUrl, text) {
-  const u = String(landedUrl || ""), t = String(text || "");
-  for (const [code, urlRe, textRe] of SIGNALS) {
-    if (urlRe && urlRe.test(u)) return code;
-    if (textRe && textRe.test(t)) return code;
-  }
+function classifySignal({ landedUrl, dialogText, alertText }) {
+  const u = String(landedUrl || "");
+  for (const [code, re] of URL_SIGNALS) if (re.test(u)) return code;
+  const t = `${dialogText || ""}\n${alertText || ""}`;
+  for (const [code, re] of TEXT_SIGNALS) if (re.test(t)) return code;
   return "ok";
 }
 
-module.exports = { DEFAULTS, nextSlot, isActiveTime, nextActiveTime, classifySignal, SIGNAL_HALTS, _test: { localParts, dailyCapFor } };
+module.exports = { DEFAULTS, nextSlot, isActiveTime, nextActiveTime, dayPlan, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS, _test: { localParts, dailyCapFor } };
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd server && node posting-safety.test.js`
-Expected: PASS. If the Shabbat assertions fail, check that `Intl` in your Node has full ICU (`node -p "Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem'}).format(new Date())"` must not throw); Node 20+ ships full ICU by default.
+Expected: PASS. Node 20+ ships full ICU; if the Shabbat assertions fail, check `node -p "Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jerusalem'}).format(new Date())"` does not throw.
 
 - [ ] **Step 5: Add to the test chain and commit**
 
@@ -2622,7 +2942,7 @@ Append ` && node posting-safety.test.js` to `scripts.test` in `server/package.js
 ```bash
 cd server && npm test
 git add server/posting-safety.js server/posting-safety.test.js server/package.json
-git commit -m "feat(posting): pure pacing and signal rules for group posting"
+git commit -m "feat(posting): pacing, schedule shape and scoped signal rules"
 ```
 
 ---
@@ -2632,185 +2952,270 @@ git commit -m "feat(posting): pure pacing and signal rules for group posting"
 **Files:**
 - Create: `server/posting-campaign.js`
 - Create: `server/posting-campaign.test.js`
-- Modify: `server/db.js` (campaign store + posting lock on the connection doc)
+- Modify: `server/db.js` (campaign store; `listPostActionsByPhone`)
 - Modify: `server/package.json` (test chain)
 
 **Interfaces:**
-- Consumes: `posting-safety.nextSlot/SIGNAL_HALTS/DEFAULTS`, `share-kit.buildPostCopy/trackedUrl`, `db.*PostingCampaign*`, `db.getConnection/setConnection`, `posting-driver.postToGroup` (Task 15, injected as `deps.post`).
+- Consumes: `posting-safety.*`, `share-kit.buildPostCopy/trackedUrl`, `profile-lock`, `profile-name.profileName`, `db.*PostingCampaign*`, `db.getPage`, `db.getConnection/setConnection`, `db.addPostAction/listPostActionsByPhone`, `posting-driver.postToGroup` (Task 15, as `deps.post`), `deps.notify(phone, text)` (Task 17 supplies the signed-link messages).
 - Produces:
-  - `create({ phone, page, pageUrl, groups, mode, standing }, deps) -> Campaign` — status `awaiting_approval`
-  - `approve(id, { mode, standing }, deps)`, `approvePost(id, postId, deps)`, `pause(id, deps)`, `resume(id, deps)`, `stop(id, deps)`, `acknowledgeHalt(id, deps)`
-  - `tick(campaign, deps, now) -> Campaign` — one scheduling/posting step
-  - `sweep(deps, now) -> number`, `startSweeper(deps)`, `liveDeps()`
+  - `create({ phone, page, groups, mode, days, repeat, consent }, deps) -> Campaign` — status `running` (consent is the approval)
+  - `pause(id, reason, deps)`, `resume(id, deps)`, `stop(id, deps)`, `approvePost(id, postId, deps)`, `skipPost(id, postId, deps)`
+  - `tick(campaign, deps, now)`, `sweep(deps, now)`, `startSweeper(deps)`, `liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret })`
   - Campaign shape:
     ```
-    { id, phone, page_id, page_url, title, mode: "per_post"|"standing",
-      standing: { granted_at, expires_at, max_posts } | null,
-      groups: [{ url, name, agent_policy, explicit }],
-      status: "awaiting_approval"|"running"|"paused"|"halted"|"stopped"|"completed",
-      halt_reason: string|null, next_at: ISO|null,
-      posts: [{ id, group_url, status: "pending_approval"|"scheduled"|"posting"|"posted"|"failed"|"skipped",
-                scheduled_at, posted_at, post_url, error_code, copy }],
-      consecutive_failures: number, created_at, updated_at }
+    { id, phone, page_id, mode: "per_post"|"standing", repeat: boolean,
+      expires_at: ISO, consent_at: ISO, consent_version: string,
+      groups: [{ url, slug, name, agent_policy }],
+      status: "running"|"paused"|"stopped"|"completed",
+      pause_reason: "agent"|"consecutive_failures"|"infrastructure"|"internal"|"account"|null,
+      posts: [{ id, group_url, group_slug, group_token, status: "pending_approval"|"scheduled"|"posting"|"posted"|"failed"|"skipped",
+                scheduled_at, posting_started_at, posted_at, post_url, error_code, copy, copy_hash }],
+      consecutive_failures, tick_errors, created_at, updated_at }
     ```
+  - On the connection doc: `posting_ledger` (30 days, `{at, group_slug, page_id, ok}`), `posting_halts` (`[{at, code}]`), `posting_disabled_until_admin`, `posting_penalty_until`, `posting_account_aged`, `posting_posted_manually`.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `server/posting-campaign.test.js`:
 
 ```js
-/* posting-campaign.js — the campaign lifecycle. No browser: post() is a fake. */
+/* posting-campaign.js — the campaign lifecycle. No browser: post() is a fake.
+   Every time derives from NOW. */
 const assert = require("assert");
 const C = require("./posting-campaign");
+const locks = require("./profile-lock");
+
+const NOW = new Date("2026-09-23T10:00:00+03:00");
+const day = (n) => n * 86400000;
+const cfg = Object.assign({}, require("./posting-safety").DEFAULTS, { skip_day_probability: 0, day_start_jitter_min: 0, long_break_probability: 0 });
 
 function fakeDb() {
-  const camps = new Map(), conns = new Map();
+  const camps = new Map(), conns = new Map(), pages = new Map(), actions = [], settings = { "posting": { enabled: true } };
+  const clone = (x) => JSON.parse(JSON.stringify(x));
   return {
-    camps, conns,
-    savePostingCampaign: async (c) => { camps.set(c.id, JSON.parse(JSON.stringify(c))); },
-    getPostingCampaign: async (id) => (camps.has(id) ? JSON.parse(JSON.stringify(camps.get(id))) : null),
-    updatePostingCampaign: async (id, patch) => { const c = camps.get(id); if (c) Object.assign(c, JSON.parse(JSON.stringify(patch))); },
-    listPostingCampaignsByStatus: async (st) => [...camps.values()].filter((c) => c.status === st).map((c) => JSON.parse(JSON.stringify(c))),
-    listPostingCampaignsByPhone: async (ph) => [...camps.values()].filter((c) => c.phone === ph),
-    getConnection: async (ph) => conns.get(ph) || null,
-    setConnection: async (ph, patch) => { conns.set(ph, Object.assign(conns.get(ph) || {}, patch)); },
+    camps, conns, pages, actions, settings,
+    savePostingCampaign: async (c) => { camps.set(c.id, clone(c)); },
+    getPostingCampaign: async (id) => (camps.has(id) ? clone(camps.get(id)) : null),
+    updatePostingCampaign: async (id, patch) => { const c = camps.get(id); if (c) Object.assign(c, clone(patch)); },
+    listPostingCampaignsByStatus: async (st) => [...camps.values()].filter((c) => c.status === st).map(clone),
+    listPostingCampaignsByPhone: async (ph) => [...camps.values()].filter((c) => c.phone === ph).map(clone),
+    getConnection: async (ph) => (conns.has(ph) ? clone(conns.get(ph)) : null),
+    setConnection: async (ph, patch) => { conns.set(ph, Object.assign(conns.get(ph) || {}, clone(patch))); },
+    getPage: async (id) => pages.get(id) || null,
+    addPostAction: async (a) => { actions.push(a); },
+    listPostActionsByPhone: async () => [],
+    getSetting: async (k) => settings[k] || null,
+    setSetting: async (k, v) => { settings[k] = v; },
   };
 }
-const page = { page_id: "pg1", title: "דירה בחיפה", property: { city: "חיפה", price: 2000000, rooms: 4 }, agent: { name: "דנה" } };
+const page = (id = "pg1") => ({ page_id: id, status: "active", business_phone: "p", property: { title: "דירה בחיפה", city: "חיפה", price: 2000000, rooms: 4 }, agent: { name: "דנה", phone: "0500000000" } });
 const groups = [
-  { url: "https://www.facebook.com/groups/1", name: "A", agent_policy: "allowed", explicit: true },
-  { url: "https://www.facebook.com/groups/2", name: "B", agent_policy: "allowed", explicit: true },
+  { url: "https://www.facebook.com/groups/111", slug: "111", name: "A", agent_policy: "explicitly_allowed" },
+  { url: "https://www.facebook.com/groups/222", slug: "222", name: "B", agent_policy: "explicitly_allowed" },
 ];
-const NOW = new Date("2026-09-23T10:00:00+03:00");
-const connected = (db, ph, daysAgo = 60) => db.setConnection(ph, { facebook_browser_connected_at: new Date(NOW.getTime() - daysAgo * 86400000).toISOString() });
+async function setup(phone = "p", pageId = "pg1") {
+  const db = fakeDb();
+  db.pages.set(pageId, page(pageId));
+  await db.setConnection(phone, { facebook_browser_connected_at: new Date(NOW.getTime() - day(90)).toISOString(), facebook_browser_first_connected_at: new Date(NOW.getTime() - day(90)).toISOString(), posting_account_aged: true, posting_posted_manually: true });
+  const notes = [];
+  const deps = { db, config: cfg, rand: () => 0, pageBaseUrl: "https://f.ly", post: async () => ({ post_url: "https://www.facebook.com/groups/111/posts/999" }), notify: async (ph, msg) => notes.push(msg) };
+  return { db, deps, notes };
+}
+const base = (o = {}) => Object.assign({ phone: "p", page: page(), groups, mode: "standing", days: 14, repeat: false, consent: { at: NOW.toISOString(), version: "2026-09-24" } }, o);
+const dueOf = (c, i = 0) => new Date(new Date(c.posts[i].scheduled_at).getTime() + 1000);
 
 (async () => {
-  // ── create: awaiting approval, nothing scheduled ──
-  const db = fakeDb(); await connected(db, "p");
-  const c = await C.create({ phone: "p", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 14, max_posts: 10 } }, { db });
-  assert.equal(c.status, "awaiting_approval");
+  locks._test.reset();
+
+  // ── create: running at once (consent is the approval); nothing scheduled yet ──
+  const { db, deps, notes } = await setup();
+  const c = await C.create(base(), deps);
+  assert.equal(c.status, "running");
   assert.equal(c.posts.length, 0);
-  assert.equal(c.next_at, null);
+  assert.ok(c.consent_at && c.expires_at);
+  assert.equal(c.groups[0].slug, "111");
 
-  // ── approve (standing) → running with a bounded permission ──
-  const a = await C.approve(c.id, { mode: "standing", standing: { days: 14, max_posts: 10 } }, { db, now: NOW });
-  assert.equal(a.status, "running");
-  assert.equal(a.standing.max_posts, 10);
-  assert.ok(new Date(a.standing.expires_at) > NOW);
-
-  // ── tick schedules a post, then posts it when due, with per-group copy and a tracked url ──
-  const posted = [];
-  const deps = { db, now: NOW, rand: () => 0, post: async (args) => { posted.push(args); return { post_url: "https://www.facebook.com/groups/1/posts/999" }; } };
-  let t = await C.tick(a, deps, NOW);
+  // ── tick schedules one post with copy built NOW from the page, link in the comment, opaque group token ──
+  let t = await C.tick(c, deps, NOW);
   assert.equal(t.posts.length, 1);
   assert.equal(t.posts[0].status, "scheduled");
   assert.ok(t.posts[0].copy.includes("חיפה"));
-  assert.ok(t.posts[0].copy.includes("s=" + c.id), "tracked url carries the campaign id");
-  const due = new Date(t.posts[0].scheduled_at);
-  t = await C.tick(t, deps, new Date(due.getTime() + 1000));
+  assert.ok(!/https?:\/\//.test(t.posts[0].copy), "no link in the body");
+  assert.ok(/^[0-9a-f]{12}$/.test(t.posts[0].group_token));
+  assert.ok(t.posts[0].comment.includes(`g=${t.posts[0].group_token}`) && t.posts[0].comment.includes("s=" + c.id));
+
+  // ── when due, it posts; the ledger and post_actions record it; the copy is replaced by a hash ──
+  t = await C.tick(t, deps, dueOf(t));
   assert.equal(t.posts[0].status, "posted");
-  assert.equal(t.posts[0].post_url, "https://www.facebook.com/groups/1/posts/999");
-  assert.equal(posted.length, 1);
-  assert.equal(posted[0].groupUrl, groups[0].url);
-  assert.equal(posted[0].profileName, "facebook-p");
-  assert.equal(posted[0].dryRun, false);
+  assert.equal(t.posts[0].post_url, "https://www.facebook.com/groups/111/posts/999");
+  assert.equal(t.posts[0].copy, undefined, "copy no longer stored once posted");
+  assert.ok(t.posts[0].copy_hash);
+  const conn = await db.getConnection("p");
+  assert.equal(conn.posting_ledger.length, 1);
+  assert.equal(conn.posting_ledger[0].group_slug, "111");
+  assert.equal(db.actions.length, 1);
+  assert.equal(db.actions[0].source, "campaign");
 
-  // ── the next post goes to the OTHER group, after the minimum gap ──
-  t = await C.tick(t, deps, new Date(due.getTime() + 2000));
-  const second = t.posts[1];
-  assert.equal(second.group_url, groups[1].url);
-  assert.ok(new Date(second.scheduled_at).getTime() - due.getTime() >= 45 * 60000);
+  // ── the price changed: the next post's copy reflects it ──
+  db.pages.get("pg1").property.price = 1900000;
+  t = await C.tick(t, deps, new Date(dueOf(t).getTime() + 1000));
+  assert.ok(t.posts[1].copy.includes("1,900,000"));
+  assert.equal(t.posts[1].group_url, groups[1].url, "least-recently-posted group");
+  assert.ok(new Date(t.posts[1].scheduled_at).getTime() - dueOf(t).getTime() >= cfg.min_gap_minutes * 60000);
 
-  // ── serial per phone: a tick while a post is in flight does nothing ──
-  await db.setConnection("p", { posting_lock_until: new Date(Date.now() + 60000).toISOString() });
-  const before = JSON.stringify(t.posts);
-  const blocked = await C.tick(t, deps, new Date(second.scheduled_at));
-  assert.equal(JSON.stringify(blocked.posts), before, "locked phone: no posting");
-  await db.setConnection("p", { posting_lock_until: null });
+  // ── the page is archived mid-campaign: stop, say why ──
+  db.pages.get("pg1").status = "archived";
+  const gone = await C.tick(t, deps, dueOf(t, 1));
+  assert.equal(gone.status, "stopped");
+  assert.equal(gone.pause_reason, "page_gone");
+  assert.equal(gone.posts[1].status, "skipped");
+  db.pages.get("pg1").status = "active";
 
-  // ── per_post mode: the post waits for approval, and is posted only after it ──
-  const db2 = fakeDb(); await connected(db2, "q");
-  const c2 = await C.create({ phone: "q", page, pageUrl: "https://f.ly/pg1", groups, mode: "per_post" }, { db: db2 });
-  const notified = [];
-  const deps2 = { db: db2, now: NOW, rand: () => 0, post: async () => ({ post_url: "u" }), notify: async (ph, msg) => notified.push(msg) };
-  let r2 = await C.approve(c2.id, { mode: "per_post" }, deps2);
-  r2 = await C.tick(r2, deps2, NOW);
-  assert.equal(r2.posts[0].status, "pending_approval");
-  assert.equal(notified.length, 1, "agent was told there is a post to approve");
-  assert.ok(notified[0].includes(r2.posts[0].copy.slice(0, 20)), "the notification shows the exact copy");
-  r2 = await C.tick(r2, deps2, new Date(NOW.getTime() + 3600000));
-  assert.equal(r2.posts[0].status, "pending_approval", "unapproved: still waiting an hour later");
-  r2 = await C.approvePost(c2.id, r2.posts[0].id, deps2);
-  assert.equal(r2.posts[0].status, "scheduled");
-
-  // ── stop: cancels the scheduled post; a later tick posts nothing ──
-  const s = await C.stop(c.id, { db });
-  assert.equal(s.status, "stopped");
-  const after = await C.tick(s, deps, new Date(second.scheduled_at));
-  assert.equal(after.posts.filter((p) => p.status === "posted").length, 1, "still only the first post");
-
-  // ── a halting signal halts the campaign, records why, and marks the account ──
-  const db3 = fakeDb(); await connected(db3, "r");
-  const c3 = await C.create({ phone: "r", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db3 });
-  let r3 = await C.approve(c3.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db3, now: NOW });
-  const deps3 = { db: db3, now: NOW, rand: () => 0, post: async () => { const e = new Error("checkpoint"); e.code = "checkpoint"; throw e; } };
-  r3 = await C.tick(r3, deps3, NOW);
-  r3 = await C.tick(r3, deps3, new Date(new Date(r3.posts[0].scheduled_at).getTime() + 1000));
-  assert.equal(r3.status, "halted");
-  assert.equal(r3.halt_reason, "checkpoint");
-  assert.ok((await db3.getConnection("r")).posting_halted_at, "the ACCOUNT is marked, not just this campaign");
-  // a second campaign on the same account is held by the same halt
-  const c3b = await C.create({ phone: "r", page: { ...page, page_id: "pg2" }, pageUrl: "https://f.ly/pg2", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db3 });
-  let r3b = await C.approve(c3b.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db3, now: NOW });
-  r3b = await C.tick(r3b, deps3, new Date(NOW.getTime() + 3600000));
-  assert.equal(r3b.posts.length, 0, "no scheduling while the account is in signal cooldown");
-
-  // ── not_member is a per-group skip, not a halt ──
-  const db4 = fakeDb(); await connected(db4, "s");
-  const c4 = await C.create({ phone: "s", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db4 });
-  let r4 = await C.approve(c4.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db4, now: NOW });
-  const deps4 = { db: db4, now: NOW, rand: () => 0, post: async () => { const e = new Error("nm"); e.code = "not_member"; throw e; } };
-  r4 = await C.tick(r4, deps4, NOW);
-  r4 = await C.tick(r4, deps4, new Date(new Date(r4.posts[0].scheduled_at).getTime() + 1000));
-  assert.equal(r4.posts[0].status, "skipped");
-  assert.equal(r4.status, "running");
-
-  // ── consecutive failures trip the breaker ──
-  const db5 = fakeDb(); await connected(db5, "t");
-  const c5 = await C.create({ phone: "t", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db5 });
-  let r5 = await C.approve(c5.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db5, now: NOW });
-  const deps5 = { db: db5, now: NOW, rand: () => 0, post: async () => { const e = new Error("x"); e.code = "post_failed"; throw e; } };
-  let clock = NOW.getTime();
-  for (let i = 0; i < 2; i++) {
-    r5 = await C.tick(r5, deps5, new Date(clock));
-    const dueAt = new Date(r5.posts[r5.posts.length - 1].scheduled_at).getTime() + 1000;
-    r5 = await C.tick(r5, deps5, new Date(dueAt));
-    clock = dueAt;
+  // ── one pass over the groups completes a non-repeating campaign ──
+  {
+    const { db: d2, deps: p2 } = await setup("q");
+    let c2 = await C.create(base({ phone: "q" }), p2);
+    let clock = NOW;
+    for (let i = 0; i < 2; i++) { c2 = await C.tick(c2, p2, clock); clock = dueOf(c2, i); c2 = await C.tick(c2, p2, clock); }
+    c2 = await C.tick(c2, p2, new Date(clock.getTime() + day(1)));
+    assert.equal(c2.status, "completed", "every group posted once; repeat=false");
   }
-  assert.equal(r5.status, "paused");
-  assert.equal(r5.halt_reason, "consecutive_failures");
 
-  // ── standing permission ends: by expiry, and by max_posts ──
-  const db6 = fakeDb(); await connected(db6, "u");
-  const c6 = await C.create({ phone: "u", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 1, max_posts: 1 } }, { db: db6 });
-  let r6 = await C.approve(c6.id, { mode: "standing", standing: { days: 1, max_posts: 1 } }, { db: db6, now: NOW });
-  const deps6 = { db: db6, now: NOW, rand: () => 0, post: async () => ({ post_url: "u" }) };
-  r6 = await C.tick(r6, deps6, NOW);
-  r6 = await C.tick(r6, deps6, new Date(new Date(r6.posts[0].scheduled_at).getTime() + 1000));
-  assert.equal(r6.status, "completed", "max_posts reached");
-  const c7 = await C.create({ phone: "u", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 1, max_posts: 9 } }, { db: db6 });
-  let r7 = await C.approve(c7.id, { mode: "standing", standing: { days: 1, max_posts: 9 } }, { db: db6, now: NOW });
-  r7 = await C.tick(r7, deps6, new Date(NOW.getTime() + 2 * 86400000));
-  assert.equal(r7.status, "completed", "permission expired");
-  assert.equal(r7.posts.length, 0);
+  // ── per_post: waits for approval; approval re-times the post to a safe slot ──
+  {
+    const { deps: p3, notes: n3 } = await setup("r");
+    let c3 = await C.create(base({ phone: "r", mode: "per_post" }), p3);
+    c3 = await C.tick(c3, p3, NOW);
+    assert.equal(c3.posts[0].status, "pending_approval");
+    assert.equal(n3.length, 1, "agent told, with the exact copy");
+    assert.ok(n3[0].includes(c3.posts[0].copy.slice(0, 20)));
+    c3 = await C.tick(c3, p3, new Date(NOW.getTime() + 3600000));
+    assert.equal(c3.posts[0].status, "pending_approval", "unapproved, still waiting");
+    const night = new Date("2026-09-23T23:40:00+03:00");
+    c3 = await C.approvePost(c3.id, c3.posts[0].id, Object.assign({}, p3, { now: night }));
+    assert.equal(c3.posts[0].status, "scheduled");
+    assert.ok(new Date(c3.posts[0].scheduled_at) > night, "approved at night → posts in the morning, not now");
+  }
 
-  // ── sweep runs due campaigns only ──
-  const db8 = fakeDb(); await connected(db8, "v");
-  const c8 = await C.create({ phone: "v", page, pageUrl: "https://f.ly/pg1", groups, mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db8 });
-  await C.approve(c8.id, { mode: "standing", standing: { days: 7, max_posts: 5 } }, { db: db8, now: NOW });
-  let ticked = 0;
-  const n = await C.sweep({ db: db8, tick: async () => { ticked++; } }, NOW);
-  assert.equal(n, 1); assert.equal(ticked, 1);
+  // ── stop cancels what is scheduled; a later tick posts nothing ──
+  const s = await C.stop(c.id, deps);
+  assert.equal(s.status, "stopped");
+  assert.equal(await C.tick(s, deps, new Date(NOW.getTime() + day(1))).then((x) => x.posts.filter((p) => p.status === "posted").length), 1);
+
+  // ── a checkpoint DISABLES the account until an operator re-enables it, and every campaign on it stops ──
+  {
+    const { db: d4, deps: p4, notes: n4 } = await setup("s");
+    let c4 = await C.create(base({ phone: "s" }), p4);
+    const c4b = await C.create(base({ phone: "s", page: page("pg2") }), p4); d4.pages.set("pg2", page("pg2"));
+    c4 = await C.tick(c4, p4, NOW);
+    c4 = await C.tick(c4, Object.assign({}, p4, { post: async () => { throw Object.assign(new Error("cp"), { code: "checkpoint" }); } }), dueOf(c4));
+    assert.equal(c4.status, "paused"); assert.equal(c4.pause_reason, "account");
+    const conn4 = await d4.getConnection("s");
+    assert.equal(conn4.posting_disabled_until_admin, true);
+    assert.deepEqual(conn4.posting_halts.map((h) => h.code), ["checkpoint"]);
+    assert.equal((await d4.getPostingCampaign(c4b.id)).status, "paused", "the other campaign on the account is paused too");
+    assert.ok(n4.some((m) => /פייסבוק/.test(m)), "the agent hears about it on WhatsApp");
+    const r = await C.resume(c4.id, p4);
+    assert.equal(r.status, "paused", "the agent cannot resume a disabled account");
+  }
+
+  // ── rate_limited: a penalty, campaigns keep running slower, one more halt → disabled ──
+  {
+    const { db: d5, deps: p5 } = await setup("t");
+    let c5 = await C.create(base({ phone: "t" }), p5);
+    c5 = await C.tick(c5, p5, NOW);
+    c5 = await C.tick(c5, Object.assign({}, p5, { post: async () => { throw Object.assign(new Error("rl"), { code: "rate_limited" }); } }), dueOf(c5));
+    const conn5 = await d5.getConnection("t");
+    assert.ok(conn5.posting_penalty_until && !conn5.posting_disabled_until_admin);
+    assert.equal(c5.status, "running");
+  }
+
+  // ── not_member / pending_approval are per-group outcomes: spent slot, no breaker ──
+  {
+    const { deps: p6 } = await setup("u");
+    let c6 = await C.create(base({ phone: "u" }), p6);
+    c6 = await C.tick(c6, p6, NOW);
+    c6 = await C.tick(c6, Object.assign({}, p6, { post: async () => { throw Object.assign(new Error("pa"), { code: "pending_approval" }); } }), dueOf(c6));
+    assert.equal(c6.posts[0].status, "posted"); assert.equal(c6.posts[0].error_code, "pending_approval");
+    assert.equal(c6.consecutive_failures, 0);
+  }
+
+  // ── an infrastructure failure (Driver 503) is not the agent's failure: no ledger, no breaker, retry later ──
+  {
+    const { db: d7, deps: p7 } = await setup("v");
+    let c7 = await C.create(base({ phone: "v" }), p7);
+    c7 = await C.tick(c7, p7, NOW);
+    c7 = await C.tick(c7, Object.assign({}, p7, { post: async () => { throw Object.assign(new Error("cap"), { status: 503 }); } }), dueOf(c7));
+    assert.equal(c7.posts[0].status, "scheduled", "rescheduled, not failed");
+    assert.equal(((await d7.getConnection("v")).posting_ledger || []).length, 0);
+    assert.equal(c7.pause_reason, "infrastructure");
+    assert.equal(c7.status, "running");
+  }
+
+  // ── consecutive real failures trip the breaker ──
+  {
+    const { deps: p8 } = await setup("w");
+    let c8 = await C.create(base({ phone: "w" }), p8);
+    const bad = Object.assign({}, p8, { post: async () => { throw Object.assign(new Error("x"), { code: "post_failed" }); } });
+    let clock = NOW;
+    for (let i = 0; i < 2; i++) { c8 = await C.tick(c8, bad, clock); clock = dueOf(c8, i); c8 = await C.tick(c8, bad, clock); }
+    assert.equal(c8.status, "paused"); assert.equal(c8.pause_reason, "consecutive_failures");
+  }
+
+  // ── a post stuck in "posting" is reaped into the ledger before anything new is scheduled ──
+  {
+    const { db: d9, deps: p9 } = await setup("x");
+    let c9 = await C.create(base({ phone: "x" }), p9);
+    c9 = await C.tick(c9, p9, NOW);
+    await d9.updatePostingCampaign(c9.id, { posts: [Object.assign(c9.posts[0], { status: "posting", posting_started_at: new Date(NOW.getTime() - 20 * 60000).toISOString() })] });
+    c9 = await C.tick(c9, p9, new Date(NOW.getTime() + 60000));
+    assert.equal(c9.posts[0].status, "failed"); assert.equal(c9.posts[0].error_code, "not_verified");
+    assert.equal((await d9.getConnection("x")).posting_ledger.length, 1, "counted as spent");
+  }
+
+  // ── the profile lock is respected: nothing posts while an extract or login holds it ──
+  {
+    const { deps: p10 } = await setup("y");
+    let c10 = await C.create(base({ phone: "y" }), p10);
+    c10 = await C.tick(c10, p10, NOW);
+    const release = locks.acquire("y");
+    const held = await C.tick(c10, Object.assign({}, p10, { post: async () => { throw new Error("must not post while locked"); } }), dueOf(c10));
+    assert.equal(held.posts[0].status, "scheduled");
+    release();
+  }
+
+  // ── two campaigns on one account: the second paces against the first's reservation ──
+  {
+    const { db: d11, deps: p11 } = await setup("z");
+    d11.pages.set("pg2", page("pg2"));
+    let a = await C.create(base({ phone: "z" }), p11);
+    let b = await C.create(base({ phone: "z", page: page("pg2") }), p11);
+    a = await C.tick(a, p11, NOW); b = await C.tick(b, p11, NOW);
+    const gap = Math.abs(new Date(b.posts[0].scheduled_at) - new Date(a.posts[0].scheduled_at)) / 60000;
+    assert.ok(gap >= cfg.min_gap_minutes, `two campaigns scheduled ${gap} min apart`);
+  }
+
+  // ── the kill switch: nothing happens while it is off ──
+  {
+    const { db: d12, deps: p12 } = await setup("k");
+    let c12 = await C.create(base({ phone: "k" }), p12);
+    await d12.setSetting("posting", { enabled: false });
+    assert.equal(await C.sweep(p12, NOW), 0);
+    assert.equal((await d12.getPostingCampaign(c12.id)).posts.length, 0);
+    await d12.setSetting("posting", { enabled: true });
+    assert.equal(await C.sweep(p12, NOW), 1);
+  }
+
+  // ── the fleet breaker: three accounts disabled in 24h → the switch goes off, the operator is told ──
+  {
+    const { db: d13, deps: p13 } = await setup("f");
+    const ops = [];
+    const at = new Date(NOW.getTime() - 3600000).toISOString();
+    for (const ph of ["f1", "f2", "f3"]) await d13.setConnection(ph, { posting_halts: [{ at, code: "checkpoint" }] });
+    await C.sweep(Object.assign({}, p13, { notifyOperator: async (m) => ops.push(m), listRecentlyHaltedPhones: async () => ["f1", "f2", "f3"] }), NOW);
+    assert.equal((await d13.getSetting("posting")).enabled, false);
+    assert.equal(ops.length, 1);
+  }
 
   console.log("posting-campaign.test.js ok");
 })();
@@ -2823,7 +3228,7 @@ Expected: FAIL with `Cannot find module './posting-campaign'`
 
 - [ ] **Step 3: Add the store to `db.js`**
 
-Add `postingCampaigns: new Map()` to the `mem` literal at `server/db.js:11`. Add after the extract-job functions:
+Add `postingCampaigns: new Map(), settings: new Map()` to the `mem` literal. Add after the extract-job functions:
 
 ```js
 // ── posting campaigns (background group posting) ──
@@ -2841,22 +3246,31 @@ async function updatePostingCampaign(id, patch) {
   if (c) Object.assign(c, JSON.parse(JSON.stringify(patch)));
 }
 async function listPostingCampaignsByStatus(status, limit = 50) {
-  if (db) {
-    const snap = await db.collection("posting_campaigns").where("status", "==", status).limit(limit).get();
-    return snap.docs.map((d) => d.data());
-  }
+  if (db) { const snap = await db.collection("posting_campaigns").where("status", "==", status).limit(limit).get(); return snap.docs.map((d) => d.data()); }
   return [...mem.postingCampaigns.values()].filter((c) => c.status === status).slice(0, limit);
 }
 async function listPostingCampaignsByPhone(phone, limit = 100) {
-  if (db) {
-    const snap = await db.collection("posting_campaigns").where("phone", "==", phone).limit(limit).get();
-    return snap.docs.map((d) => d.data());
-  }
+  if (db) { const snap = await db.collection("posting_campaigns").where("phone", "==", phone).limit(limit).get(); return snap.docs.map((d) => d.data()); }
   return [...mem.postingCampaigns.values()].filter((c) => c.phone === phone).slice(0, limit);
+}
+// Manual share-kit posts live in post_actions (routes/distribution.js share-session/mark);
+// the pacer must see them or it will post to a group the agent hit by hand an hour ago.
+async function listPostActionsByPhone(phone, sinceMs) {
+  if (db) { const snap = await db.collection("post_actions").where("phone", "==", phone).limit(200).get(); return snap.docs.map((d) => d.data()).filter((a) => !sinceMs || new Date(a.at.toDate ? a.at.toDate() : a.at).getTime() > sinceMs); }
+  return mem.postActions.filter((a) => a.phone === phone && (!sinceMs || new Date(a.at).getTime() > sinceMs));
+}
+// ── operator settings (the kill switch lives here so it can be flipped without a deploy) ──
+async function getSetting(key) {
+  if (db) { const d = await db.collection("settings").doc(key).get(); return d.exists ? d.data() : null; }
+  return mem.settings.get(key) || null;
+}
+async function setSetting(key, value) {
+  if (db) await db.collection("settings").doc(key).set(value, { merge: true });
+  else mem.settings.set(key, Object.assign(mem.settings.get(key) || {}, value));
 }
 ```
 
-Export all five.
+Export all eight. Check whether `addPostAction` rows carry `phone`; if `share-session/mark` writes only `session_id`, add `phone` there in the same change.
 
 - [ ] **Step 4: Write the state machine**
 
@@ -2864,232 +3278,334 @@ Create `server/posting-campaign.js`:
 
 ```js
 /*
- * posting-campaign.js — one property, many groups, over days.
+ * posting-campaign.js — one property, its groups, over days.
  *
- * A campaign is the agent's permission plus a ledger of what was done with it.
- * Two permission shapes:
- *   per_post  — every single post is shown to the agent (exact copy, exact
- *               group) and posted only after they approve it;
- *   standing  — "post until I stop", bounded by an expiry AND a max count, and
- *               revocable at any moment with stop().
+ * A campaign is the agent's recorded consent plus a ledger of what was done
+ * with it. Two shapes:
+ *   per_post  — every post is shown to the agent (exact copy, exact group,
+ *               proposed time) and posted only after a one-tap approval;
+ *   standing  — one approval covers one pass over the groups (repeat: false)
+ *               or repeated passes until expires_at (repeat: true), and STOP
+ *               works at any moment.
  *
- * The scheduling decision is never made here: tick() asks posting-safety.js
- * and does what it says. This file only moves state and calls the browser.
+ * The scheduling decision is never made here: tick() asks posting-safety.js.
+ * Nothing that opens the agent's browser happens without profile-lock.js.
  *
- * Account-level facts (halts, the posting lock, the post ledger used for
- * pacing) live on the CONNECTION doc, not the campaign — two campaigns for one
- * agent must share one pace and one halt.
+ * Account-level facts — halts, penalties, the disabled flag, the ledger — live
+ * on the CONNECTION doc: every campaign for one agent shares one pace, one
+ * halt history, and one kill.
  */
 const crypto = require("crypto");
 const safety = require("./posting-safety");
 const shareKit = require("./distribution/share-kit");
+const locks = require("./profile-lock");
+const { profileName } = require("./profile-name");
+const { redact } = require("./driver-browser");
 
 const SWEEP_MS = 60 * 1000;
-const LOCK_MS = 5 * 60 * 1000;
+const POSTING_MAX_MS = 15 * 60 * 1000;
 const LEDGER_DAYS = 30;
+const MAX_TICK_ERRORS = 3;
+const FLEET_BREAKER_HALTS = 3;
 
 const iso = (d) => new Date(d).toISOString();
+const sha = (s) => crypto.createHash("sha1").update(String(s)).digest("hex");
+const groupSlug = (url) => (String(url).match(/\/groups\/([^/?#]+)/) || [])[1] || sha(url).slice(0, 16);
+const groupToken = (url) => sha(url).slice(0, 12); // opaque in the outbound link; never the group URL
 
-async function create({ phone, page, pageUrl, groups, mode, standing }, deps) {
+async function create({ phone, page, groups, mode, days, repeat, consent }, deps) {
+  if (!consent || !consent.at) throw Object.assign(new Error("consent required"), { code: "consent_required" });
+  const now = deps.now || new Date();
   const c = {
     id: crypto.randomUUID(),
     phone: String(phone),
     page_id: page.page_id,
-    page_url: String(pageUrl),
-    title: page.title || "",
-    page_snapshot: { property: page.property || {}, agent: page.agent || {} },
     mode: mode === "per_post" ? "per_post" : "standing",
-    standing: null,
-    groups: (groups || []).slice(0, shareKit.MAX_GROUPS).map((g) => ({
-      url: g.url, name: g.name || "", agent_policy: g.agent_policy || "unknown", explicit: g.explicit === true,
-    })),
-    status: "awaiting_approval",
-    halt_reason: null,
-    next_at: null,
-    posts: [],
-    consecutive_failures: 0,
-    created_at: iso(Date.now()),
-    updated_at: iso(Date.now()),
+    repeat: repeat === true,
+    expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 14, 1), 30) * 86400000),
+    consent_at: consent.at, consent_version: consent.version || null,
+    groups: (groups || []).slice(0, shareKit.MAX_GROUPS).map((g) => ({ url: g.url, slug: groupSlug(g.url), name: g.name || "", agent_policy: g.agent_policy || "unknown" })),
+    status: "running", pause_reason: null,
+    posts: [], consecutive_failures: 0, tick_errors: 0,
+    created_at: iso(now), updated_at: iso(now),
   };
-  if (c.mode === "standing" && standing) c.standing = { days: standing.days, max_posts: standing.max_posts, granted_at: null, expires_at: null };
   await deps.db.savePostingCampaign(c);
   return c;
 }
 
-async function patch(id, p, deps) {
-  p.updated_at = iso(deps.now || Date.now());
-  await deps.db.updatePostingCampaign(id, p);
-  return deps.db.getPostingCampaign(id);
+async function patch(id, p, deps) { p.updated_at = iso(deps.now || Date.now()); await deps.db.updatePostingCampaign(id, p); return deps.db.getPostingCampaign(id); }
+
+async function pause(id, reason, deps) { return patch(id, { status: "paused", pause_reason: reason }, deps); }
+
+async function resume(id, deps) {
+  const c = await deps.db.getPostingCampaign(id);
+  if (!c || c.status !== "paused") return c;
+  const conn = (await deps.db.getConnection(c.phone)) || {};
+  if (conn.posting_disabled_until_admin) return c; // the agent cannot lift an operator-level stop
+  return patch(id, { status: "running", pause_reason: null, consecutive_failures: 0, tick_errors: 0 }, deps);
 }
 
-async function approve(id, { mode, standing }, deps) {
+async function stop(id, deps, reason = "agent") {
+  const c = await deps.db.getPostingCampaign(id);
+  if (!c) return null;
+  const posts = c.posts.map((p) => (["scheduled", "pending_approval"].includes(p.status) ? { ...p, status: "skipped", error_code: "stopped", copy: undefined } : p));
+  const out = await patch(id, { status: "stopped", pause_reason: reason, posts }, deps);
+  if (deps.notify) await deps.notify(c.phone, deps.messages ? deps.messages.stopped(out) : "הפרסום נעצר. מה שכבר פורסם נשאר.");
+  return out;
+}
+
+// Approval is also a re-timing: the agent may tap at 23:40, and the slot the
+// post was proposed for is long gone. Ask posting-safety again.
+async function approvePost(id, postId, deps) {
   const now = deps.now || new Date();
   const c = await deps.db.getPostingCampaign(id);
-  if (!c || c.status !== "awaiting_approval") return c;
-  const p = { status: "running", mode: mode === "per_post" ? "per_post" : "standing" };
-  if (p.mode === "standing") {
-    const days = Math.min(Math.max(Number(standing && standing.days) || 7, 1), 30);
-    const max = Math.min(Math.max(Number(standing && standing.max_posts) || 10, 1), 100);
-    p.standing = { days, max_posts: max, granted_at: iso(now), expires_at: iso(now.getTime() + days * 86400000) };
-  } else p.standing = null;
-  return patch(id, p, deps);
-}
-
-async function approvePost(id, postId, deps) {
-  const c = await deps.db.getPostingCampaign(id);
   if (!c) return null;
-  const posts = c.posts.map((p) => (p.id === postId && p.status === "pending_approval" ? { ...p, status: "scheduled" } : p));
+  const { account } = await accountFor(c, deps, now);
+  const post = c.posts.find((p) => p.id === postId && p.status === "pending_approval");
+  if (!post) return c;
+  const slot = safety.nextSlot({ now, account, candidates: c.groups.filter((g) => g.url === post.group_url), pageId: c.page_id, config: deps.config, rand: deps.rand });
+  const at = slot.at || safety.nextActiveTime(new Date(now.getTime() + 3600000), deps.config || safety.DEFAULTS);
+  const posts = c.posts.map((p) => (p.id === postId ? { ...p, status: "scheduled", scheduled_at: iso(at) } : p));
   return patch(id, { posts }, deps);
 }
-
-const pause = (id, deps) => patch(id, { status: "paused", halt_reason: "agent" }, deps);
-const resume = (id, deps) => patch(id, { status: "running", halt_reason: null, consecutive_failures: 0 }, deps);
-
-// Stop is immediate and final: whatever was scheduled is cancelled, and the
-// sweeper never picks a stopped campaign up again.
-async function stop(id, deps) {
+async function skipPost(id, postId, deps) {
   const c = await deps.db.getPostingCampaign(id);
   if (!c) return null;
-  const posts = c.posts.map((p) => (p.status === "scheduled" || p.status === "pending_approval" ? { ...p, status: "skipped", error_code: "stopped" } : p));
-  return patch(id, { status: "stopped", posts, next_at: null }, deps);
+  return patch(id, { posts: c.posts.map((p) => (p.id === postId && p.status === "pending_approval" ? { ...p, status: "skipped", error_code: "agent", copy: undefined } : p)) }, deps);
 }
 
-// The agent has dealt with the checkpoint (through the embedded browser) and
-// says so. The safety cooldown still applies from posting_halted_at.
-async function acknowledgeHalt(id, deps) {
-  const c = await deps.db.getPostingCampaign(id);
-  if (!c || c.status !== "halted") return c;
-  return patch(id, { status: "running", halt_reason: null, consecutive_failures: 0 }, deps);
-}
-
-// ── the account-level view posting-safety needs ──
-async function accountFor(phone, deps, now) {
-  const conn = (await deps.db.getConnection(phone)) || {};
+// ── the account as posting-safety sees it: this campaign's siblings' reservations,
+//    manual share-kit posts, and the halt history ──
+async function accountFor(c, deps, now) {
+  const conn = (await deps.db.getConnection(c.phone)) || {};
   const cutoff = now.getTime() - LEDGER_DAYS * 86400000;
+  const ledger = (conn.posting_ledger || []).filter((p) => new Date(p.at).getTime() > cutoff);
+  const manual = (await deps.db.listPostActionsByPhone(c.phone, cutoff)).filter((a) => a.target === "facebook_group" && a.group_url)
+    .map((a) => ({ at: iso(a.at.toDate ? a.at.toDate() : a.at), group_slug: groupSlug(a.group_url), page_id: a.page_id || null, ok: true }));
+  const siblings = (await deps.db.listPostingCampaignsByPhone(c.phone)).filter((s) => s.id !== c.id && s.status === "running");
+  const reserved = siblings.flatMap((s) => s.posts.filter((p) => ["scheduled", "pending_approval", "posting"].includes(p.status)).map((p) => ({ at: p.scheduled_at, group_slug: p.group_slug, page_id: s.page_id, ok: null })));
+  const posts = ledger.concat(manual, reserved).map((p) => ({ ...p, group_url: c.groups.find((g) => g.slug === p.group_slug) ? c.groups.find((g) => g.slug === p.group_slug).url : p.group_slug }));
   return {
     conn,
     account: {
-      connected_at: conn.facebook_browser_connected_at || iso(now),
-      halted_at: conn.posting_halted_at || null,
-      posts: (conn.posting_ledger || []).filter((p) => new Date(p.at).getTime() > cutoff),
+      first_connected_at: conn.facebook_browser_first_connected_at || conn.facebook_browser_connected_at || iso(now),
+      halts: conn.posting_halts || [],
+      disabled_until_admin: conn.posting_disabled_until_admin === true,
+      penalty_until: conn.posting_penalty_until || null,
+      account_aged: conn.posting_account_aged === undefined ? null : conn.posting_account_aged,
+      posted_manually: conn.posting_posted_manually === undefined ? null : conn.posting_posted_manually,
+      posts,
     },
   };
 }
 
-async function recordPost(phone, conn, entry, deps, now) {
+async function recordPost(c, entry, deps, now) {
+  const conn = (await deps.db.getConnection(c.phone)) || {};
   const cutoff = now.getTime() - LEDGER_DAYS * 86400000;
   const ledger = (conn.posting_ledger || []).filter((p) => new Date(p.at).getTime() > cutoff).concat([entry]);
-  await deps.db.setConnection(phone, { posting_ledger: ledger });
+  await deps.db.setConnection(c.phone, { posting_ledger: ledger });
+  await deps.db.addPostAction({ phone: c.phone, page_id: c.page_id, target: "facebook_group", group_url: c.groups.find((g) => g.slug === entry.group_slug)?.url || null, source: "campaign", campaign_id: c.id, ok: entry.ok, at: entry.at });
 }
 
-function standingExhausted(c, now) {
-  if (c.mode !== "standing" || !c.standing) return false;
-  if (c.standing.expires_at && now.getTime() > new Date(c.standing.expires_at).getTime()) return true;
-  return c.posts.filter((p) => p.status === "posted").length >= c.standing.max_posts;
+function allGroupsDone(c) {
+  const terminal = new Set(c.posts.filter((p) => ["posted", "skipped", "failed"].includes(p.status)).map((p) => p.group_slug));
+  return c.groups.every((g) => terminal.has(g.slug));
 }
 
 /*
- * One step. Either schedules the next post (asking posting-safety when and
- * where), or, if a scheduled post is due, posts it. Never both in one tick:
- * the ledger the next decision needs is written by this one.
+ * One step. In order: reap anything stuck, re-read reality, post what is due,
+ * else schedule the next one. Never two of those in a tick: the ledger the
+ * next decision needs is written by this one.
  */
 async function tick(campaign, deps, now = deps.now || new Date()) {
   let c = await deps.db.getPostingCampaign(campaign.id);
   if (!c || c.status !== "running") return c;
-  if (standingExhausted(c, now)) return patch(c.id, { status: "completed", next_at: null }, deps);
-
-  const { conn, account } = await accountFor(c.phone, deps, now);
-  if (conn.posting_lock_until && new Date(conn.posting_lock_until).getTime() > now.getTime()) return c;
-
-  const due = c.posts.find((p) => p.status === "scheduled" && new Date(p.scheduled_at).getTime() <= now.getTime());
-  if (due) return postNow(c, due, conn, deps, now);
-
-  if (c.posts.some((p) => p.status === "scheduled" || p.status === "pending_approval")) return c;
-
-  // Nothing in flight: ask when and where the next one may go.
-  const slot = safety.nextSlot({ now, account, candidates: c.groups, pageId: c.page_id, config: deps.config || safety.DEFAULTS, rand: deps.rand });
-  if (!slot.at) {
-    if (slot.reason === "no_eligible_group" && !c.posts.some((p) => p.status === "posted")) return c;
-    return patch(c.id, { next_at: null, halt_reason: null }, deps);
+  try {
+    return await tickInner(c, deps, now);
+  } catch (e) {
+    console.error(redact(`posting campaign ${c.id} tick: ${e.message}`));
+    const n = (c.tick_errors || 0) + 1;
+    return patch(c.id, n >= MAX_TICK_ERRORS ? { status: "paused", pause_reason: "internal", tick_errors: n } : { tick_errors: n }, deps);
   }
-  const group = c.groups.find((g) => g.url === slot.group_url);
-  const url = shareKit.trackedUrl(c.page_url, { session: c.id, group: group.url });
-  const copy = shareKit.buildPostCopy({ property: c.page_snapshot.property, agent: c.page_snapshot.agent, title: c.title }, url, { variantSeed: c.page_id + group.url });
-  const post = {
-    id: crypto.randomUUID(), group_url: group.url, group_name: group.name,
-    status: c.mode === "per_post" ? "pending_approval" : "scheduled",
-    scheduled_at: iso(slot.at), posted_at: null, post_url: null, error_code: null, copy,
-  };
-  if (c.mode === "per_post" && deps.notify) {
-    await deps.notify(c.phone, `📣 פוסט מוכן לאישור לקבוצה "${group.name || group.url}":\n──────────\n${copy}\n──────────\nלאישור, היכנסו לעמוד ההפצה בדשבורד.`);
-  }
-  return patch(c.id, { posts: c.posts.concat([post]), next_at: post.scheduled_at }, deps);
 }
 
-async function postNow(c, post, conn, deps, now) {
-  await deps.db.setConnection(c.phone, { posting_lock_until: iso(now.getTime() + LOCK_MS) });
-  let posts = c.posts.map((p) => (p.id === post.id ? { ...p, status: "posting" } : p));
+async function tickInner(c, deps, now) {
+  const config = deps.config || safety.DEFAULTS;
+
+  // A post left "posting" past its lifetime died with the process. It is a spent
+  // slot (Facebook may well have it) — count it, then move on.
+  const stuck = c.posts.find((p) => p.status === "posting" && now.getTime() - new Date(p.posting_started_at || 0).getTime() > POSTING_MAX_MS);
+  if (stuck) {
+    await recordPost(c, { at: iso(now), group_slug: stuck.group_slug, page_id: c.page_id, ok: false }, deps, now);
+    return patch(c.id, { posts: c.posts.map((p) => (p.id === stuck.id ? { ...p, status: "failed", error_code: "not_verified", copy: undefined } : p)) }, deps);
+  }
+  if (c.posts.some((p) => p.status === "posting")) return c; // in flight right now
+
+  if (now.getTime() > new Date(c.expires_at).getTime()) return patch(c.id, { status: "completed", pause_reason: "expired" }, deps);
+  if (!c.repeat && c.posts.length && allGroupsDone(c) && !c.posts.some((p) => ["scheduled", "pending_approval"].includes(p.status))) {
+    return patch(c.id, { status: "completed", pause_reason: null }, deps);
+  }
+
+  // Re-read reality: the page may be gone or changed; the catalog may have
+  // changed its mind about a group.
+  const page = await deps.db.getPage(c.page_id);
+  if (!page || !["active", "expiring"].includes(page.status || "active")) {
+    return stop(c.id, deps, "page_gone");
+  }
+
+  const { conn, account } = await accountFor(c, deps, now);
+  if (account.disabled_until_admin) return patch(c.id, { status: "paused", pause_reason: "account" }, deps);
+
+  const due = c.posts.find((p) => p.status === "scheduled" && new Date(p.scheduled_at).getTime() <= now.getTime());
+  if (due) {
+    // Safety is re-checked at the moment of posting, not just at scheduling:
+    // the agent may have approved late, or a sibling campaign posted since.
+    const lastAny = Math.max(0, ...account.posts.filter((p) => p.ok !== null).map((p) => new Date(p.at).getTime()));
+    if (!safety.isActiveTime(now, config) || now.getTime() - lastAny < config.min_gap_minutes * 60000) {
+      const at = safety.nextActiveTime(new Date(Math.max(now.getTime(), lastAny + config.min_gap_minutes * 60000)), config);
+      return patch(c.id, { posts: c.posts.map((p) => (p.id === due.id ? { ...p, scheduled_at: iso(at) } : p)) }, deps);
+    }
+    return postNow(c, due, page, deps, now);
+  }
+  if (c.posts.some((p) => ["scheduled", "pending_approval"].includes(p.status))) return c;
+
+  const slot = safety.nextSlot({ now, account, candidates: c.groups, pageId: c.page_id, config, rand: deps.rand });
+  if (!slot.at) return patch(c.id, { wait_reason: slot.reason }, deps);
+  const group = c.groups.find((g) => g.url === slot.group_url);
+  const token = groupToken(group.url);
+  const pageUrl = `${deps.pageBaseUrl}/p/${c.page_id}`;
+  const url = shareKit.trackedUrl(pageUrl, { session: c.id, group: token });
+  // Copy is built from the page AS IT IS NOW, never frozen at create time — a
+  // price cut yesterday must not be advertised at the old price today.
+  const copy = shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {}, title: (page.property || {}).title }, url, { variantSeed: c.page_id + group.url, linkInComment: true });
+  const post = {
+    id: crypto.randomUUID(), group_url: group.url, group_slug: group.slug, group_name: group.name, group_token: token,
+    status: c.mode === "per_post" ? "pending_approval" : "scheduled",
+    scheduled_at: iso(slot.at), posting_started_at: null, posted_at: null, post_url: null, error_code: null,
+    copy, comment: url,
+  };
+  const next = await patch(c.id, { posts: c.posts.concat([post]), wait_reason: null }, deps);
+  if (c.mode === "per_post" && deps.notify) await deps.notify(c.phone, deps.messages ? deps.messages.approve(next, post) : `📣 פוסט מוכן לאישור לקבוצה "${group.name || group.url}":\n──────────\n${copy}\n──────────`);
+  return next;
+}
+
+async function postNow(c, post, page, deps, now) {
+  const release = locks.tryAcquire(c.phone);
+  if (!release) return c; // an extract or the login browser has the profile; next sweep
+  let posts = c.posts.map((p) => (p.id === post.id ? { ...p, status: "posting", posting_started_at: iso(now) } : p));
   await deps.db.updatePostingCampaign(c.id, { posts });
   let result = null, err = null;
   try {
-    result = await deps.post({ groupUrl: post.group_url, copy: post.copy, profileName: `facebook-${c.phone}`, dryRun: deps.dryRun === true, campaignId: c.id });
+    result = await deps.post({ groupUrl: post.group_url, copy: post.copy, comment: post.comment, profileName: profileName("facebook", c.phone), dryRun: deps.dryRun === true, campaignId: c.id, phone: c.phone });
   } catch (e) { err = e; }
-  finally { await deps.db.setConnection(c.phone, { posting_lock_until: null }); }
 
-  const conn2 = (await deps.db.getConnection(c.phone)) || conn;
-  if (!err) {
-    posts = posts.map((p) => (p.id === post.id ? { ...p, status: "posted", posted_at: iso(now), post_url: result && result.post_url } : p));
-    await recordPost(c.phone, conn2, { at: iso(now), group_url: post.group_url, page_id: c.page_id, ok: true }, deps, now);
-    const next = await patch(c.id, { posts, consecutive_failures: 0, next_at: null }, deps);
-    return standingExhausted(next, now) ? patch(c.id, { status: "completed" }, deps) : next;
-  }
+  try {
+    if (!err || (err.code && safety.SIGNAL_SKIPS.has(err.code) && err.code === "pending_approval")) {
+      // Posted, or sitting in an admin queue: either way the slot is spent and the
+      // group is on cooldown. The copy is replaced by its hash now that it is out.
+      await recordPost(c, { at: iso(now), group_slug: post.group_slug, page_id: c.page_id, ok: true }, deps, now);
+      posts = posts.map((p) => (p.id === post.id ? { ...p, status: "posted", posted_at: iso(now), post_url: result ? result.post_url : null, error_code: err ? err.code : null, copy: undefined, copy_hash: sha(p.copy) } : p));
+      const next = await patch(c.id, { posts, consecutive_failures: 0, pause_reason: null }, deps);
+      if (deps.notify && deps.messages) await deps.notify(c.phone, deps.messages.posted(next, next.posts.find((p) => p.id === post.id)));
+      return next;
+    }
 
-  const code = err.code || "post_failed";
-  await recordPost(c.phone, conn2, { at: iso(now), group_url: post.group_url, page_id: c.page_id, ok: false }, deps, now);
-  if (safety.SIGNAL_HALTS.has(code)) {
-    // The account, not the campaign: every other campaign on this phone is
-    // held by the same cooldown through posting_halted_at.
-    await deps.db.setConnection(c.phone, { posting_halted_at: iso(now), posting_halt_reason: code });
-    posts = posts.map((p) => (p.id === post.id ? { ...p, status: "failed", error_code: code } : p));
-    return patch(c.id, { posts, status: "halted", halt_reason: code, next_at: null }, deps);
-  }
-  const skip = code === "not_member" || code === "group_blocked";
-  posts = posts.map((p) => (p.id === post.id ? { ...p, status: skip ? "skipped" : "failed", error_code: code } : p));
-  const failures = skip ? c.consecutive_failures : c.consecutive_failures + 1;
-  const max = (deps.config || safety.DEFAULTS).max_consecutive_failures;
-  if (failures >= max) return patch(c.id, { posts, consecutive_failures: failures, status: "paused", halt_reason: "consecutive_failures", next_at: null }, deps);
-  return patch(c.id, { posts, consecutive_failures: failures, next_at: null }, deps);
+    // Driver's problem, not the agent's: no ledger entry, no breaker, try in half an hour.
+    if (typeof err.status === "number" || !err.code) {
+      posts = posts.map((p) => (p.id === post.id ? { ...p, status: "scheduled", scheduled_at: iso(now.getTime() + 30 * 60000), posting_started_at: null } : p));
+      return patch(c.id, { posts, pause_reason: "infrastructure" }, deps);
+    }
+
+    const code = err.code;
+    await recordPost(c, { at: iso(now), group_slug: post.group_slug, page_id: c.page_id, ok: false }, deps, now);
+
+    if (safety.SIGNAL_DISABLES.has(code) || safety.SIGNAL_PENALISES.has(code) || code === "login_required") {
+      return await haltAccount(c, post, posts, code, deps, now);
+    }
+    const skip = safety.SIGNAL_SKIPS.has(code);
+    posts = posts.map((p) => (p.id === post.id ? { ...p, status: skip ? "skipped" : "failed", error_code: code, copy: undefined } : p));
+    const failures = skip ? 0 : c.consecutive_failures + 1;
+    const max = (deps.config || safety.DEFAULTS).max_consecutive_failures;
+    const next = await patch(c.id, failures >= max ? { posts, consecutive_failures: failures, status: "paused", pause_reason: "consecutive_failures" } : { posts, consecutive_failures: failures }, deps);
+    if (failures >= max && deps.notify && deps.messages) await deps.notify(c.phone, deps.messages.paused(next));
+    return next;
+  } finally { release(); }
 }
 
+// The ACCOUNT halts, not the campaign. A checkpoint ends automation until an
+// operator turns it back on; rate limiting is a two-week penalty; a cookie
+// expiry just needs the agent to reconnect.
+async function haltAccount(c, post, posts, code, deps, now) {
+  const conn = (await deps.db.getConnection(c.phone)) || {};
+  const config = deps.config || safety.DEFAULTS;
+  const halts = (conn.posting_halts || []).concat([{ at: iso(now), code }]);
+  const patchConn = { posting_halts: halts, posting_last_halt_code: code };
+  const disable = safety.SIGNAL_DISABLES.has(code) || halts.filter((h) => now.getTime() - new Date(h.at).getTime() < config.halts_window_days * 86400000).length >= config.halts_to_disable;
+  if (disable) patchConn.posting_disabled_until_admin = true;
+  else if (safety.SIGNAL_PENALISES.has(code)) { patchConn.posting_penalty_until = iso(now.getTime() + config.penalty_days * 86400000); patchConn.facebook_browser_first_connected_at = iso(now); }
+  if (code === "login_required") patchConn.facebook_browser_connected_at = null;
+  await deps.db.setConnection(c.phone, patchConn);
+
+  posts = posts.map((p) => (p.id === post.id ? { ...p, status: "failed", error_code: code, copy: undefined } : p));
+  const reason = disable || code === "login_required" ? "account" : null;
+  const me = await patch(c.id, reason ? { posts, status: "paused", pause_reason: reason } : { posts }, deps);
+  if (reason) for (const s of await deps.db.listPostingCampaignsByPhone(c.phone)) if (s.id !== c.id && s.status === "running") await patch(s.id, { status: "paused", pause_reason: "account" }, deps);
+  if (deps.notify) await deps.notify(c.phone, deps.messages ? deps.messages.halted(me, code) : `⚠️ פייסבוק עצרה את הפרסום (${code}).`);
+  if (disable && deps.notifyOperator) await deps.notifyOperator(`posting: account disabled (${code}) for a customer; campaign ${c.id}`);
+  return me;
+}
+
+// ── the sweeper: kill switch, fleet breaker, then every running campaign ──
+let sweeping = false;
 async function sweep(deps, now = new Date()) {
-  const running = await deps.db.listPostingCampaignsByStatus("running");
-  const run = deps.tick || tick;
-  let n = 0;
-  for (const c of running) {
-    n++;
-    await run(c, deps, now).catch((e) => console.error(`posting campaign ${c.id}: ${e.message}`));
-  }
-  return n;
+  if (sweeping) return 0;
+  sweeping = true;
+  try {
+    if (process.env.POSTING_ENABLED === "0") return 0;
+    const setting = (await deps.db.getSetting("posting")) || { enabled: true };
+    if (setting.enabled === false) return 0;
+
+    // Fleet breaker: several accounts halting at once means Facebook changed
+    // something, not that several agents did. Stop everyone before the next slot.
+    const halted = deps.listRecentlyHaltedPhones ? await deps.listRecentlyHaltedPhones(now) : [];
+    if (halted.length >= FLEET_BREAKER_HALTS) {
+      await deps.db.setSetting("posting", { enabled: false, disabled_at: iso(now), disabled_reason: `fleet_breaker:${halted.length}` });
+      if (deps.notifyOperator) await deps.notifyOperator(`posting: FLEET BREAKER tripped — ${halted.length} accounts halted in 24h; posting is OFF`);
+      return 0;
+    }
+
+    const running = await deps.db.listPostingCampaignsByStatus("running");
+    const run = deps.tick || tick;
+    let n = 0;
+    for (const c of running) { n++; await run(c, deps, now).catch((e) => console.error(redact(`posting campaign ${c.id}: ${e.message}`))); }
+    return n;
+  } finally { sweeping = false; }
 }
 
 function startSweeper(deps) {
-  const t = setInterval(() => { sweep(deps).catch((e) => console.error(`posting sweep: ${e.message}`)); }, deps.sweepMs || SWEEP_MS);
+  const t = setInterval(() => { sweep(deps).catch((e) => console.error(redact(`posting sweep: ${e.message}`))); }, deps.sweepMs || SWEEP_MS);
   if (t.unref) t.unref();
   return () => clearInterval(t);
 }
 
-function liveDeps() {
+function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, operatorPhone }) {
+  const db = require("./db");
+  const { sendWhatsApp } = require("./utils");
+  const messages = require("./posting-messages").build({ pageBaseUrl, authSecret });
   return {
-    db: require("./db"),
+    db, pageBaseUrl,
     post: require("./posting-driver").postToGroup,
-    notify: (phone, msg) => require("./utils").sendWhatsApp(phone, msg),
+    notify: (phone, msg) => sendWhatsApp(phone, msg, greenInstance, greenToken),
+    notifyOperator: operatorPhone ? (msg) => sendWhatsApp(operatorPhone, msg, greenInstance, greenToken) : null,
+    listRecentlyHaltedPhones: (now) => db.listPhonesHaltedSince(now.getTime() - 86400000),
+    messages,
   };
 }
 
-module.exports = { create, approve, approvePost, pause, resume, stop, acknowledgeHalt, tick, sweep, startSweeper, liveDeps, SWEEP_MS };
+module.exports = { create, pause, resume, stop, approvePost, skipPost, tick, sweep, startSweeper, liveDeps, SWEEP_MS, _test: { groupSlug, groupToken, allGroupsDone } };
 ```
 
-`sendWhatsApp`'s exact signature is in `server/utils.js`; match it in `liveDeps` rather than assuming `(phone, msg)` — the existing `distribution/jobs.js` shows the call in use.
+`db.listPhonesHaltedSince(ms)` is a query over connections where `posting_last_halt_at > since` — add `posting_last_halt_at` to the `patchConn` in `haltAccount` and the query to `db.js` (single-field where, no composite index). `posting-messages.js` is written in Task 17; until then `deps.messages` is undefined and the inline fallbacks above apply.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -3103,14 +3619,16 @@ Append ` && node posting-campaign.test.js` to `scripts.test`.
 ```bash
 cd server && npm test
 git add server/db.js server/posting-campaign.js server/posting-campaign.test.js server/package.json
-git commit -m "feat(posting): campaign state machine with per-post and standing approval"
+git commit -m "feat(posting): campaign state machine with account-level halts and a kill switch"
 ```
 
 ---
 
 ### Task 15: `posting-driver.js` — the browser actions
 
-The most brittle file in the plan, on purpose isolated so it is the *only* file that knows what Facebook's composer looks like. Every selector lives in one object at the top. [Unverified] The selectors below are a starting point, not a fact — Task 18's dry run is where they get fixed against the real page.
+The most brittle file in the plan, on purpose isolated so it is the *only* file that knows what Facebook's composer looks like. Every selector lives in one object at the top. [Unverified] The selectors below are a starting point; Task 20's dry run is where they get fixed against the real page.
+
+What this file does that the first draft did not: it **behaves like a person before it posts**. Land on the home feed, scroll for a while, then go to the group, scroll once, then write — with a typing cadence drawn from a distribution, pauses at word boundaries, and a beat before pressing Post. The link goes in a comment, not the body. Verification is by the post's own words and captures the permalink.
 
 **Files:**
 - Create: `server/posting-driver.js`
@@ -3118,81 +3636,99 @@ The most brittle file in the plan, on purpose isolated so it is the *only* file 
 - Modify: `server/package.json` (test chain)
 
 **Interfaces:**
-- Consumes: `driver-browser.withPage`, `posting-safety.classifySignal`.
-- Produces: `postToGroup({ groupUrl, copy, profileName, dryRun, campaignId }, deps) -> Promise<{ post_url: string|null, dry_run: boolean }>`. Throws with `code` ∈ `classifySignal` values (`checkpoint`, `captcha`, `rate_limited`, `login_required`, `group_blocked`, `not_member`) or `composer_not_found` / `post_failed` / `not_verified`.
+- Consumes: `driver-browser.withPage`, `posting-safety.classifySignal`, `profile-lock` (via `withPage`'s `phone` dep).
+- Produces: `postToGroup({ groupUrl, copy, comment, profileName, dryRun, campaignId, phone }, deps) -> Promise<{ post_url: string|null, dry_run: boolean }>`. Throws with `code` ∈ `classifySignal` values or `composer_not_found` / `post_failed` / `not_verified`; Driver errors keep their `status`.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `server/posting-driver.test.js`:
 
 ```js
-/* posting-driver.js — the composer choreography, against a fake page. */
+/* posting-driver.js — the composer choreography, against a fake page.
+   The fake matches on the EXPORTED selectors, not on words in them. */
 const assert = require("assert");
 const PD = require("./posting-driver");
+const S = PD.SELECTORS;
 
-function fakePage(script) {
-  // script: { landed, text, composer: bool, feedTexts: [] }
-  const typed = [], clicked = [];
-  let url = script.landed;
+function fakePage(script = {}) {
+  const typed = [], clicked = [], visited = [], scrolls = [];
+  let url = script.landed || "https://www.facebook.com/groups/1";
+  const regionText = (sel) => (sel === S.dialog ? script.dialogText || "" : sel === S.alert ? script.alertText || "" : script.bodyText || "כתבו משהו…");
   return {
-    typed, clicked,
-    goto: async (u) => { url = script.landed || u; },
+    typed, clicked, visited, scrolls,
+    goto: async (u) => { visited.push(u); url = script.landed || u; },
     url: () => url,
-    innerText: async () => script.text || "כתבו משהו…",
-    locator: (sel) => ({
-      first: () => ({
-        count: async () => (script.composer === false && /composer/.test(sel) ? 0 : 1),
-        click: async () => { clicked.push(sel); },
-        waitFor: async () => { if (script.composer === false && /composer/.test(sel)) throw new Error("timeout"); },
-      }),
-      count: async () => (script.composer === false && /composer/.test(sel) ? 0 : 1),
-    }),
-    keyboard: { type: async (t) => typed.push(t) },
+    title: async () => "Group | Facebook",
+    innerText: async (sel) => regionText(sel),
+    locator: (sel) => {
+      const present = !(script.missing || []).includes(sel);
+      const node = { count: async () => (present ? 1 : 0), click: async () => { clicked.push(sel); }, waitFor: async () => { if (!present) throw new Error("timeout"); }, innerText: async () => regionText(sel), getAttribute: async () => script.permalink || null };
+      return Object.assign(node, { first: () => node, nth: () => node });
+    },
+    keyboard: { type: async (t) => typed.push(t), press: async () => {} },
+    mouse: { wheel: async (x, y) => scrolls.push(y), move: async () => {} },
     waitForLoadState: async () => {},
-    $$eval: async () => script.feedTexts || [],
+    waitForTimeout: async () => {},
+    $$eval: async (sel) => (sel === S.feedPost ? (script.feedPosts || []) : []),
   };
 }
+const args = (o = {}) => Object.assign({ groupUrl: "https://www.facebook.com/groups/1", copy: "🏠 דירה בחיפה 4 חדרים", comment: "https://f.ly/p/pg1?src=fb_group&s=c1&g=abcdef123456", profileName: "facebook-prod-x", dryRun: false, campaignId: "c1", phone: "p" }, o);
+const withPageOf = (page, onOpts) => async (opts, fn) => { if (onOpts) onOpts(opts); return fn(page, { sessionId: "s" }); };
 
 (async () => {
-  // ── happy path: navigates, types the copy, submits, verifies our link in the feed ──
-  const page = fakePage({ landed: "https://www.facebook.com/groups/1", feedTexts: ["… https://f.ly/pg1?src=fb_group&s=c1&g=x …"] });
-  const withPage = async (opts, fn) => {
-    assert.deepEqual(opts.profile, { name: "facebook-p", persist: true });
-    assert.ok(String(opts.note).startsWith("forly-post:c1"));
-    assert.ok(!("url" in opts), "no landing url in the session opts — we navigate ourselves");
-    return fn(page, { sessionId: "s" });
-  };
-  const out = await PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "דירה https://f.ly/pg1?src=fb_group&s=c1&g=x", profileName: "facebook-p", dryRun: false, campaignId: "c1" }, { withPage });
+  // ── happy path: feed first, scroll, then the group; type the copy (in chunks); post; comment the link; verify by text; return the permalink ──
+  const page = fakePage({ feedPosts: [{ text: "🏠 דירה בחיפה 4 חדרים …", href: "https://www.facebook.com/groups/1/posts/999" }] });
+  let seen = null;
+  const out = await PD.postToGroup(args(), { withPage: withPageOf(page, (o) => { seen = o; }), typingDelay: () => 0, dwell: () => 0 });
+  assert.deepEqual(seen.profile, { name: "facebook-prod-x", persist: true });
+  assert.ok(String(seen.note).startsWith("forly-post:c1") && !seen.note.includes("p:"), "note carries the campaign id, never the phone");
+  assert.ok(!("url" in seen));
+  assert.equal(page.visited[0], "https://www.facebook.com/", "the feed comes first");
+  assert.equal(page.visited[1], "https://www.facebook.com/groups/1");
+  assert.ok(page.scrolls.length >= 3, "scrolled the feed like a person");
+  assert.equal(page.typed.join(""), "🏠 דירה בחיפה 4 חדרים");
+  assert.ok(page.typed.length > 1, "typed in word-sized chunks with pauses, not one insertText");
+  assert.ok(page.clicked.includes(S.submit));
+  assert.ok(page.typed.some((t) => t.includes("f.ly")) && page.clicked.includes(S.commentSubmit), "the link went into a comment");
+  assert.equal(out.post_url, "https://www.facebook.com/groups/1/posts/999");
   assert.equal(out.dry_run, false);
-  assert.equal(page.typed.join(""), "דירה https://f.ly/pg1?src=fb_group&s=c1&g=x");
-  assert.ok(page.clicked.some((s) => /submit/.test(s)), "the submit button was clicked");
 
-  // ── dry run does everything except submit ──
-  const page2 = fakePage({ landed: "https://www.facebook.com/groups/1" });
-  const dry = await PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "x", profileName: "facebook-p", dryRun: true, campaignId: "c1" }, { withPage: async (o, fn) => fn(page2, {}) });
+  // ── dry run does everything except submit (and therefore no comment either) ──
+  const page2 = fakePage();
+  const dry = await PD.postToGroup(args({ dryRun: true }), { withPage: withPageOf(page2), typingDelay: () => 0, dwell: () => 0 });
   assert.equal(dry.dry_run, true);
-  assert.equal(page2.typed.join(""), "x", "the copy was typed");
-  assert.ok(!page2.clicked.some((s) => /submit/.test(s)), "but nothing was submitted");
+  assert.equal(page2.typed.join(""), "🏠 דירה בחיפה 4 חדרים");
+  assert.ok(!page2.clicked.includes(S.submit) && !page2.clicked.includes(S.commentSubmit));
 
-  // ── signals surface as codes, before any typing ──
-  for (const [landed, text, code] of [
-    ["https://www.facebook.com/checkpoint/123/", "", "checkpoint"],
-    ["https://www.facebook.com/login/?next=x", "", "login_required"],
-    ["https://www.facebook.com/groups/1", "You're temporarily blocked", "rate_limited"],
-    ["https://www.facebook.com/groups/1", "הצטרפות לקבוצה", "not_member"],
+  // ── a URL that is not a Facebook group is refused before any navigation ──
+  await assert.rejects(PD.postToGroup(args({ groupUrl: "https://evil.example/x" }), { withPage: async () => { throw new Error("must not open"); } }), (e) => e.code === "invalid_input");
+
+  // ── signals come from the URL, the dialog and the alert — never the feed ──
+  for (const [script, code] of [
+    [{ landed: "https://www.facebook.com/checkpoint/123/" }, "checkpoint"],
+    [{ landed: "https://www.facebook.com/login/?next=x" }, "login_required"],
+    [{ alertText: "You're temporarily blocked" }, "rate_limited"],
+    [{ dialogText: "You can't use this feature right now" }, "feature_blocked"],
   ]) {
-    const pg = fakePage({ landed, text });
-    await assert.rejects(PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "x", profileName: "facebook-p", campaignId: "c" }, { withPage: async (o, fn) => fn(pg, {}) }), (e) => e.code === code);
+    const pg = fakePage(script);
+    await assert.rejects(PD.postToGroup(args(), { withPage: withPageOf(pg), typingDelay: () => 0, dwell: () => 0 }), (e) => e.code === code);
     assert.equal(pg.typed.length, 0, `${code}: nothing typed`);
   }
+  const feedOnly = fakePage({ bodyText: "אתם חסומים זמנית security check", feedPosts: [{ text: "🏠 דירה בחיפה 4 חדרים", href: "https://www.facebook.com/groups/1/posts/1" }] });
+  await PD.postToGroup(args(), { withPage: withPageOf(feedOnly), typingDelay: () => 0, dwell: () => 0 }); // does not throw
 
-  // ── no composer means the DOM changed: fail loudly, do not guess ──
-  const pg3 = fakePage({ landed: "https://www.facebook.com/groups/1", composer: false });
-  await assert.rejects(PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "x", profileName: "facebook-p", campaignId: "c" }, { withPage: async (o, fn) => fn(pg3, {}) }), (e) => e.code === "composer_not_found");
+  // ── no composer: fail loudly with the code the calibration script looks for ──
+  const pg3 = fakePage({ missing: [S.composer] });
+  await assert.rejects(PD.postToGroup(args(), { withPage: withPageOf(pg3), typingDelay: () => 0, dwell: () => 0 }), (e) => e.code === "composer_not_found");
 
-  // ── submitted but our link never appeared: not_verified, so the ledger still counts it ──
-  const pg4 = fakePage({ landed: "https://www.facebook.com/groups/1", feedTexts: ["someone else's post"] });
-  await assert.rejects(PD.postToGroup({ groupUrl: "https://www.facebook.com/groups/1", copy: "https://f.ly/pg1?s=c1&g=x", profileName: "facebook-p", campaignId: "c1" }, { withPage: async (o, fn) => fn(pg4, {}) }), (e) => e.code === "not_verified");
+  // ── submitted, but an admin-approval alert appeared: pending_approval, not a failure ──
+  const pg4 = fakePage({ feedPosts: [] });
+  pg4.innerText = async (sel) => (sel === S.alert && pg4.clicked.includes(S.submit) ? "הפוסט שלך ממתין לאישור" : "");
+  await assert.rejects(PD.postToGroup(args(), { withPage: withPageOf(pg4), typingDelay: () => 0, dwell: () => 0 }), (e) => e.code === "pending_approval");
+
+  // ── submitted, nothing in the feed, no alert: not_verified ──
+  const pg5 = fakePage({ feedPosts: [{ text: "someone else", href: "x" }] });
+  await assert.rejects(PD.postToGroup(args(), { withPage: withPageOf(pg5), typingDelay: () => 0, dwell: () => 0 }), (e) => e.code === "not_verified");
 
   console.log("posting-driver.test.js ok");
 })();
@@ -3209,57 +3745,98 @@ Create `server/posting-driver.js`:
 
 ```js
 /*
- * posting-driver.js — put one post into one group, from a background browser.
+ * posting-driver.js — put one post into one group, from a background browser,
+ * the way a person would.
  *
  * This is the ONLY file that knows what Facebook's page looks like. When the
  * composer changes, SELECTORS is what changes. Nothing here retries: a failed
  * post is a failed post, and the campaign decides what that means.
  *
- * Nothing here is hidden from the platform either — no init scripts, no
- * request routing, no fingerprint tricks. It is a real Chrome with the agent's
- * own profile, typing at a human pace. That is the whole anti-ban strategy.
+ * Nothing here is hidden from the platform — no init scripts, no request
+ * routing, no fingerprint tricks. It is a real Chrome with the agent's own
+ * profile. What makes it look human is what it DOES: it opens the feed and
+ * reads for a while, then the group, then writes at a human cadence, pauses,
+ * posts, and puts the link in a comment like the share kit already advises.
  *
- * [Unverified] SELECTORS is a starting point. Task 18 fixes it against the
- * live page before the first real post.
+ * [Unverified] SELECTORS is a starting point. Task 20 fixes it against the live
+ * page before the first real post.
  */
 const driver = require("./driver-browser");
 const { classifySignal } = require("./posting-safety");
 
 const SELECTORS = {
-  // the "Write something…" box on a group page (he + en)
-  composer: '[role="button"]:has-text("כתבו משהו"), [role="button"]:has-text("Write something"), div[aria-label="כתבו משהו..."], div[aria-label="Write something..."]',
-  // the editable field once the composer dialog is open
+  composer: 'div[role="main"] [role="button"]:has-text("כתבו משהו"), div[role="main"] [role="button"]:has-text("Write something"), div[aria-label="כתבו משהו..."], div[aria-label="Write something..."]',
   editor: 'div[role="dialog"] div[contenteditable="true"][role="textbox"]',
-  // the Post button in that dialog
   submit: 'div[role="dialog"] div[aria-label="פרסום"][role="button"], div[role="dialog"] div[aria-label="Post"][role="button"]',
-  // any feed post's text, for verification
-  feedPostText: 'div[role="feed"] div[data-ad-preview="message"], div[role="feed"] div[dir="auto"]',
+  dialog: 'div[role="dialog"]',
+  alert: '[role="alert"], [role="status"]',
+  feedPost: 'div[role="feed"] > div',
+  feedPostText: 'div[data-ad-preview="message"], div[dir="auto"]',
+  feedPostLink: 'a[href*="/posts/"]',
+  commentBox: 'div[aria-label="כתיבת תגובה…"], div[aria-label="Write a comment…"], div[aria-label^="Write a comment"], div[aria-label^="כתיבת תגובה"]',
+  commentSubmit: 'div[aria-label="תגובה"][role="button"], div[aria-label="Comment"][role="button"]',
 };
 
-const TYPE_DELAY_MS = 40;      // per character: a fast typist, not a paste
-const VERIFY_TIMEOUT_MS = 20000;
-
+const GROUP_URL = /^https:\/\/www\.facebook\.com\/groups\/[A-Za-z0-9._-]+\/?$/;
 function fail(code, msg) { const e = new Error(msg || code); e.code = code; return e; }
 
+// Human-ish numbers. Lognormal-ish per-character delay with word-boundary
+// pauses; a dwell measured in tens of seconds, not milliseconds.
+const rnd = (a, b) => a + Math.random() * (b - a);
+const defaultTypingDelay = () => Math.round(Math.exp(rnd(3.9, 5.1)));    // ~50–165 ms
+const defaultDwell = (a, b) => Math.round(rnd(a, b) * 1000);
+
 async function readSignal(page) {
-  const text = await page.innerText("body").catch(() => "");
-  return classifySignal(page.url(), text);
+  const dialogText = await page.locator(SELECTORS.dialog).first().innerText().catch(() => "");
+  const alertText = await page.locator(SELECTORS.alert).first().innerText().catch(() => "");
+  return classifySignal({ landedUrl: page.url(), dialogText, alertText });
 }
 
-async function postToGroup({ groupUrl, copy, profileName, dryRun = false, campaignId }, deps = {}) {
+async function humanType(page, text, typingDelay) {
+  // Word-sized chunks with a per-character delay, and a longer pause at some
+  // word boundaries. Never one insertText of the whole message.
+  const words = String(text).split(/(\s+)/);
+  for (const w of words) {
+    if (!w) continue;
+    await page.keyboard.type(w, { delay: typingDelay() });
+    if (/\s/.test(w) && Math.random() < 0.06) await page.waitForTimeout(rnd(400, 1500));
+  }
+}
+
+async function browse(page, dwell) {
+  // Read the feed for a while before doing anything. Yes, this costs bandwidth.
+  await page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+  const scrolls = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < scrolls; i++) {
+    await page.mouse.wheel(0, Math.round(rnd(300, 900)));
+    await page.waitForTimeout(dwell(4, 12));
+  }
+}
+
+async function postToGroup({ groupUrl, copy, comment, profileName, dryRun = false, campaignId, phone }, deps = {}) {
+  if (!GROUP_URL.test(String(groupUrl || ""))) throw fail("invalid_input", "not a facebook group url");
   const withPage = deps.withPage || driver.withPage;
+  const typingDelay = deps.typingDelay || defaultTypingDelay;
+  const dwell = deps.dwell || defaultDwell;
   const opts = {
     country: "IL",
-    duration: 600,
+    duration: 900,
+    type: deps.browserType || process.env.POSTING_BROWSER_TYPE || "hosted",
     note: `forly-post:${campaignId || "adhoc"}`,
     profile: { name: profileName, persist: true },
   };
   return withPage(opts, async (page) => {
+    await browse(page, dwell);
+    let signal = await readSignal(page);
+    if (signal !== "ok") throw fail(signal, `signal on feed: ${signal}`);
+
     await page.goto(groupUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
     await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-
-    const signal = await readSignal(page);
-    if (signal !== "ok") throw fail(signal, `signal on load: ${signal}`);
+    await page.mouse.wheel(0, Math.round(rnd(200, 600)));
+    await page.waitForTimeout(dwell(3, 8));
+    signal = await readSignal(page);
+    if (signal !== "ok") throw fail(signal, `signal on group: ${signal}`);
 
     const composer = page.locator(SELECTORS.composer).first();
     if ((await composer.count()) === 0) throw fail("composer_not_found", "no composer on the group page");
@@ -3267,29 +3844,48 @@ async function postToGroup({ groupUrl, copy, profileName, dryRun = false, campai
     const editor = page.locator(SELECTORS.editor).first();
     await editor.waitFor({ timeout: 10000 }).catch(() => { throw fail("composer_not_found", "editor did not open"); });
     await editor.click();
-    await page.keyboard.type(copy, { delay: TYPE_DELAY_MS });
-    // Let the link preview attach before submitting — a post without its card
-    // looks different from what a person posts.
-    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+    await humanType(page, copy, typingDelay);
+    await page.waitForTimeout(dwell(5, 20)); // re-read before posting, like anyone would
 
     if (dryRun) return { post_url: null, dry_run: true };
 
     await page.locator(SELECTORS.submit).first().click();
-    await page.waitForLoadState("networkidle", { timeout: VERIFY_TIMEOUT_MS }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(dwell(2, 5));
 
     const after = await readSignal(page);
     if (after !== "ok") throw fail(after, `signal after submit: ${after}`);
 
-    // Verify by what a person would check: is our post in the feed now?
-    const marker = (copy.match(/https?:\/\/\S+/) || [copy.slice(0, 40)])[0];
-    const texts = await page.$$eval(SELECTORS.feedPostText, (els) => els.map((e) => e.textContent || "")).catch(() => []);
-    if (!texts.some((t) => t.includes(marker))) throw fail("not_verified", "post not found in feed after submit");
-    return { post_url: page.url(), dry_run: false };
-  }, deps);
+    // Verify by what a person would check: our words, in the feed, now.
+    const marker = String(copy).split("\n").find((l) => l.trim().length > 12) || String(copy).slice(0, 40);
+    const posts = await page.$$eval(SELECTORS.feedPost, (els, sels) => els.slice(0, 6).map((el) => ({
+      text: Array.from(el.querySelectorAll(sels.text)).map((t) => t.textContent || "").join(" "),
+      href: (el.querySelector(sels.link) || {}).href || null,
+    })), { text: SELECTORS.feedPostText, link: SELECTORS.feedPostLink }).catch(() => []);
+    const mine = posts.find((p) => p.text.includes(marker.trim()));
+    if (!mine) throw fail("not_verified", "post not found in feed after submit");
+
+    // The link, as a first comment — where the share kit already tells agents
+    // to put it, and where it does not colour the post itself.
+    if (comment) {
+      await page.waitForTimeout(dwell(8, 25));
+      const box = page.locator(SELECTORS.commentBox).first();
+      if ((await box.count()) > 0) {
+        await box.click();
+        await humanType(page, comment, typingDelay);
+        await page.waitForTimeout(dwell(1, 3));
+        await page.locator(SELECTORS.commentSubmit).first().click().catch(() => page.keyboard.press("Enter"));
+        await page.waitForTimeout(dwell(2, 4));
+      }
+    }
+    return { post_url: mine.href || page.url(), dry_run: false };
+  }, Object.assign({ phone }, deps));
 }
 
 module.exports = { postToGroup, SELECTORS };
 ```
+
+If Task 1 recorded a datacenter `EGRESS_ASN`, set `POSTING_BROWSER_TYPE=hosted_privacy` in the environment; the code above reads it.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -3303,7 +3899,7 @@ Append ` && node posting-driver.test.js` to `scripts.test`.
 ```bash
 cd server && npm test
 git add server/posting-driver.js server/posting-driver.test.js server/package.json
-git commit -m "feat(posting): browser choreography for posting to a group, with dry run"
+git commit -m "feat(posting): human-paced browser choreography with link-in-comment and dry run"
 ```
 
 ---
@@ -3313,37 +3909,37 @@ git commit -m "feat(posting): browser choreography for posting to a group, with 
 **Files:**
 - Create: `server/routes/posting.js`
 - Create: `server/routes/posting.test.js`
-- Modify: `server/index.js` (mount + sweeper)
+- Modify: `server/routes/distribution.js` (export `mergedCatalog`)
+- Modify: `server/index.js` (mount + sweeper with credentials)
 - Modify: `server/package.json` (test chain)
 
 **Interfaces:**
-- Consumes: `posting-campaign.*`, `db.getPage/getPropertyGroups/listGroupCatalog/getConnection/listPostingCampaignsByPhone`.
+- Consumes: `posting-campaign.*`, `share-kit.sanitizeGroups`, `routes/distribution.mergedCatalog`, `db.getPage/getConnection/setConnection/listPostingCampaignsByPhone`.
 - Produces:
-  - `POST /api/posting/campaigns` body `{ page_id, group_urls: string[], mode: "per_post"|"standing", standing?: { days, max_posts } }` → `201 {campaign}`; `409 {error:"facebook_not_connected"}`; `400 {error:"invalid_input"}`; `422 {error:"forbidden_group", groups:[…]}`.
-  - `POST /api/posting/campaigns/:id/approve` body `{ mode, standing? }` → `200 {campaign}`
-  - `POST /api/posting/campaigns/:id/posts/:post_id/approve` → `200 {campaign}`
-  - `POST /api/posting/campaigns/:id/pause | resume | stop | acknowledge-halt` → `200 {campaign}`
-  - `GET /api/posting/campaigns?page_id=` → `200 {campaigns:[…]}`
-  - `GET /api/posting/campaigns/:id` → `200 {campaign}`; `404` for another phone's campaign.
-  - Every response is passed through `publicView(campaign)` which strips `page_snapshot` and never contains `cdpUrl`, `view_url` or `wss://`.
+  - `POST /api/posting/campaigns` body `{ page_id, group_urls: string[], mode: "per_post"|"standing", days?: number, repeat?: boolean, consent: true, account_aged?: boolean, posted_manually?: boolean }` → `201 {campaign}`; `400 consent_required | invalid_input`; `409 facebook_not_connected | too_many_campaigns`; `422 {error:"unknown_group", groups:[…]}` when a URL is not in the catalog and the request did not set `include_unknown: true`.
+  - `POST /api/posting/campaigns/:id/pause | resume | stop`, `POST /api/posting/campaigns/:id/posts/:post_id/approve | skip` → `200 {campaign}`
+  - `GET /api/posting/campaigns?page_id=` → `200 {campaigns:[…]}`; `GET /api/posting/campaigns/:id` → `200 {campaign}`; `404` for another phone's.
+  - `GET /api/posting/act?c=&p=&a=approve|skip|stop&t=` — the signed WhatsApp one-tap link (Task 17 builds the links; this handles them, mirroring `routes/distribution.js` `/confirm`).
+  - `publicView(campaign)` strips `page_snapshot`, `copy_hash`, and anything matching `wss://` / `viewer.driver.dev`.
 
 - [ ] **Step 1: Write the failing test**
 
 Create `server/routes/posting.test.js`:
 
 ```js
-/* routes/posting.js — ownership, the policy gate, and that nothing leaks. */
+/* routes/posting.js — ownership, the policy gate, consent, and that nothing leaks. */
 const assert = require("assert");
 const express = require("express");
 const http = require("http");
 const createRouter = require("./posting");
+const { signActionToken } = require("../auth");
 
 const PHONE = "0500000000";
 function makeApp(o = {}) {
   const phone = o.phone || PHONE;
   const requireAuth = () => (req, res, next) => { req.user = { userId: phone }; next(); };
   const app = express(); app.use(express.json());
-  app.use("/api/posting", createRouter({ requireAuth, authSecret: "s", db: o.db, campaigns: o.campaigns, deps: o.deps }));
+  app.use("/api/posting", createRouter({ requireAuth, authSecret: "s", pageBaseUrl: "https://f.ly", db: o.db, campaigns: o.campaigns, catalog: o.catalog || (async () => catalog), deps: o.deps || {} }));
   return app;
 }
 function call(app, method, path, body) {
@@ -3351,70 +3947,78 @@ function call(app, method, path, body) {
     const server = app.listen(0, () => {
       const req = http.request({ port: server.address().port, path, method, headers: { "content-type": "application/json" } }, (res) => {
         let d = ""; res.on("data", (c) => (d += c));
-        res.on("end", () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(d || "{}"), raw: d }); });
+        res.on("end", () => { server.close(); resolve({ status: res.statusCode, body: d.startsWith("{") ? JSON.parse(d) : {}, raw: d }); });
       });
       if (body) req.write(JSON.stringify(body)); req.end();
     });
   });
 }
 const catalog = [
-  { url: "https://www.facebook.com/groups/ok", name: "OK", agent_policy: "allowed" },
-  { url: "https://www.facebook.com/groups/no", name: "NO", agent_policy: "forbidden" },
-  { url: "https://www.facebook.com/groups/unk", name: "?", agent_policy: "unknown" },
+  { url: "https://www.facebook.com/groups/111", name: "OK", agent_policy: "explicitly_allowed" },
+  { url: "https://www.facebook.com/groups/222", name: "?", agent_policy: "unknown" },
 ];
 const baseDb = (over = {}) => Object.assign({
-  getPage: async (id) => (id === "pg1" ? { page_id: "pg1", business_phone: PHONE, title: "t", property: {}, agent: {} } : null),
-  listGroupCatalog: async () => catalog,
+  getPage: async (id) => (id === "pg1" ? { page_id: "pg1", business_phone: PHONE, status: "active", property: { title: "t" }, agent: {} } : null),
   getConnection: async () => ({ facebook_browser_connected_at: "2026-09-01T00:00:00Z" }),
+  setConnection: async () => {},
   listPostingCampaignsByPhone: async () => [],
 }, over);
+const consented = (b) => Object.assign({ consent: true, account_aged: true, posted_manually: true }, b);
 
 (async () => {
-  // ── create: gate on connection, on ownership of the page, on agent_policy ──
   let created = null;
-  const campaigns = {
-    create: async (input) => { created = input; return { id: "c1", phone: PHONE, status: "awaiting_approval", posts: [], groups: input.groups, page_snapshot: { secret: 1 } }; },
-  };
+  const campaigns = { create: async (input) => { created = input; return { id: "c1", phone: PHONE, status: "running", posts: [], groups: input.groups }; } };
   const app = makeApp({ db: baseDb(), campaigns });
-  const ok = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[0].url, catalog[2].url], mode: "standing", standing: { days: 7, max_posts: 5 } });
+
+  // ── consent is required, and recorded with a version ──
+  const noConsent = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[0].url], mode: "standing" });
+  assert.equal(noConsent.status, 400); assert.equal(noConsent.body.error, "consent_required");
+
+  // ── URLs are canonicalised before the catalog lookup: a trailing slash must not dodge the policy ──
+  const ok = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg1", group_urls: ["https://www.facebook.com/groups/111/?ref=share"], mode: "standing", days: 14 }));
   assert.equal(ok.status, 201);
-  assert.deepEqual(created.groups.map((g) => [g.url, g.agent_policy, g.explicit]), [[catalog[0].url, "allowed", true], [catalog[2].url, "unknown", true]]);
-  assert.ok(!("page_snapshot" in ok.body.campaign), "internal snapshot is not exposed");
+  assert.equal(created.groups[0].url, catalog[0].url);
+  assert.equal(created.groups[0].agent_policy, "explicitly_allowed");
+  assert.equal(created.consent.version, createRouter.CONSENT_VERSION);
+  assert.ok(!("page_snapshot" in ok.body.campaign));
 
-  const forbidden = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[1].url], mode: "standing" });
-  assert.equal(forbidden.status, 422);
-  assert.equal(forbidden.body.error, "forbidden_group");
+  // ── a group outside the catalog needs an explicit opt-in ──
+  const unknown = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg1", group_urls: ["https://www.facebook.com/groups/999"], mode: "standing" }));
+  assert.equal(unknown.status, 422); assert.equal(unknown.body.error, "unknown_group");
+  const optIn = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg1", group_urls: ["https://www.facebook.com/groups/999"], mode: "standing", include_unknown: true }));
+  assert.equal(optIn.status, 201); assert.equal(created.groups[0].agent_policy, "unknown");
 
-  const notConnected = await call(makeApp({ db: baseDb({ getConnection: async () => ({}) }), campaigns }), "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[0].url], mode: "standing" });
-  assert.equal(notConnected.status, 409);
-  assert.equal(notConnected.body.error, "facebook_not_connected");
+  // ── the account's two questions are persisted for the pacer ──
+  let connPatch = null;
+  await call(makeApp({ db: baseDb({ setConnection: async (p, patch) => { connPatch = patch; } }), campaigns }), "POST", "/api/posting/campaigns", consented({ page_id: "pg1", group_urls: [catalog[0].url], mode: "standing", account_aged: false }));
+  assert.equal(connPatch.posting_account_aged, false);
 
-  const notMine = await call(makeApp({ phone: "0509999999", db: baseDb(), campaigns }), "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [catalog[0].url], mode: "standing" });
-  assert.equal(notMine.status, 404);
+  // ── gates: connection, ownership, group count, campaign count ──
+  assert.equal((await call(makeApp({ db: baseDb({ getConnection: async () => ({}) }), campaigns }), "POST", "/api/posting/campaigns", consented({ page_id: "pg1", group_urls: [catalog[0].url], mode: "standing" }))).status, 409);
+  assert.equal((await call(makeApp({ phone: "0509999999", db: baseDb(), campaigns }), "POST", "/api/posting/campaigns", consented({ page_id: "pg1", group_urls: [catalog[0].url], mode: "standing" }))).status, 404);
+  assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg1", group_urls: [], mode: "standing" }))).status, 400);
+  const busy = makeApp({ db: baseDb({ listPostingCampaignsByPhone: async () => [{ status: "running" }, { status: "running" }, { status: "paused" }] }), campaigns });
+  assert.equal((await call(busy, "POST", "/api/posting/campaigns", consented({ page_id: "pg1", group_urls: [catalog[0].url], mode: "standing" }))).body.error, "too_many_campaigns");
 
-  const noGroups = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_urls: [], mode: "standing" });
-  assert.equal(noGroups.status, 400);
-
-  // ── standing bounds are clamped server-side, whatever the client sends ──
-  let approved = null;
-  const camp2 = { approve: async (id, a) => { approved = a; return { id, phone: PHONE, status: "running", posts: [] }; } };
-  const db2 = baseDb({ getPostingCampaign: async () => ({ id: "c1", phone: PHONE, status: "awaiting_approval" }) });
-  await call(makeApp({ db: db2, campaigns: camp2 }), "POST", "/api/posting/campaigns/c1/approve", { mode: "standing", standing: { days: 9999, max_posts: 100000 } });
-  assert.equal(approved.standing.days, 30);
-  assert.equal(approved.standing.max_posts, 100);
-
-  // ── stop is owner-only, and another phone's campaign reads as missing ──
+  // ── stop is owner-only; another phone's campaign reads as missing ──
   const db3 = baseDb({ getPostingCampaign: async () => ({ id: "c1", phone: PHONE, status: "running", posts: [] }) });
-  const stopped = await call(makeApp({ db: db3, campaigns: { stop: async (id) => ({ id, phone: PHONE, status: "stopped", posts: [] }) } }), "POST", "/api/posting/campaigns/c1/stop");
-  assert.equal(stopped.status, 200); assert.equal(stopped.body.campaign.status, "stopped");
-  const stolen = await call(makeApp({ phone: "0509999999", db: db3, campaigns: { stop: async () => { throw new Error("must not"); } } }), "POST", "/api/posting/campaigns/c1/stop");
-  assert.equal(stolen.status, 404);
+  assert.equal((await call(makeApp({ db: db3, campaigns: { stop: async (id) => ({ id, phone: PHONE, status: "stopped", posts: [] }) } }), "POST", "/api/posting/campaigns/c1/stop")).body.campaign.status, "stopped");
+  assert.equal((await call(makeApp({ phone: "0509999999", db: db3, campaigns: { stop: async () => { throw new Error("must not"); } } }), "POST", "/api/posting/campaigns/c1/stop")).status, 404);
+
+  // ── the signed one-tap link: right token acts, wrong token does not, and it renders a page, not JSON ──
+  let approved = null;
+  const actApp = makeApp({ db: db3, campaigns: { approvePost: async (id, pid) => { approved = [id, pid]; return { id, phone: PHONE, status: "running", posts: [{ id: pid, status: "scheduled", scheduled_at: "2026-09-24T11:00:00+03:00", group_name: "OK" }] }; } } });
+  const good = await call(actApp, "GET", `/api/posting/act?c=c1&p=p1&a=approve&t=${signActionToken(["c1", "p1", "approve"], "s")}`);
+  assert.equal(good.status, 200); assert.ok(good.raw.includes("אושר"));
+  assert.deepEqual(approved, ["c1", "p1"]);
+  const bad = await call(actApp, "GET", `/api/posting/act?c=c1&p=p1&a=stop&t=${signActionToken(["c1", "p1", "approve"], "s")}`);
+  assert.equal(bad.status, 403);
 
   // ── no browser secret in any response, ever ──
-  const leaky = { id: "c1", phone: PHONE, status: "running", posts: [{ id: "p", copy: "x", status: "posted" }], page_snapshot: {}, view_url: "https://viewer.driver.dev?ws=wss://x", cdpUrl: "wss://x" };
+  const leaky = { id: "c1", phone: PHONE, status: "running", posts: [{ id: "p", status: "posted", copy_hash: "h" }], view_url: "https://viewer.driver.dev?ws=wss://x", cdpUrl: "wss://x" };
   const get = await call(makeApp({ db: baseDb({ getPostingCampaign: async () => leaky }) }), "GET", "/api/posting/campaigns/c1");
   assert.equal(get.status, 200);
-  assert.ok(!get.raw.includes("wss://") && !get.raw.includes("viewer.driver.dev"), "response scrubbed");
+  assert.ok(!get.raw.includes("wss://") && !get.raw.includes("viewer.driver.dev") && !get.raw.includes("copy_hash"));
 
   console.log("routes/posting.test.js ok");
 })();
@@ -3425,41 +4029,53 @@ const baseDb = (over = {}) => Object.assign({
 Run: `cd server && node routes/posting.test.js`
 Expected: FAIL with `Cannot find module './posting'`
 
-- [ ] **Step 3: Write the router**
+- [ ] **Step 3: Export `mergedCatalog` from `routes/distribution.js`**
+
+`mergedCatalog(want)` is a closure inside the router factory (line 293). Lift it to module scope (it uses `db.listGroupCatalog` and `GROUP_SEED`, both already module-level) and add `module.exports.mergedCatalog = mergedCatalog;`. `group-catalog-seed.test.js` and `session-groups.test.js` must still pass.
+
+- [ ] **Step 4: Write the router**
 
 Create `server/routes/posting.js`:
 
 ```js
 /*
- * routes/posting.js — an agent's permission to post, and the ledger of what
- * was done with it.
+ * routes/posting.js — an agent's recorded permission to post, and the ledger
+ * of what was done with it.
  *
- * Three gates on create, all server-side: the agent's browser profile must be
- * connected; the page must be theirs; every group must be in the catalog and
- * not agent_policy:"forbidden". "unknown" groups are allowed only because the
- * agent listed them by url — that is what `explicit` records.
+ * Four gates on create, all server-side: consent; the browser profile is
+ * connected; the page is theirs; every group is canonicalised and looked up in
+ * the merged catalog, and an unknown group needs an explicit opt-in. There is
+ * no "forbidden" policy in the catalog — the operator removes such groups.
  */
 const express = require("express");
 const campaignsLive = require("../posting-campaign");
 const dbLive = require("../db");
+const shareKit = require("../distribution/share-kit");
+const { verifyActionToken } = require("../auth");
 
-const PUBLIC_FIELDS = ["id", "page_id", "page_url", "title", "mode", "standing", "groups", "status", "halt_reason", "next_at", "posts", "consecutive_failures", "created_at", "updated_at"];
+const CONSENT_VERSION = "2026-09-24";
+const MAX_ACTIVE_CAMPAIGNS = 3;
+const PUBLIC_FIELDS = ["id", "page_id", "mode", "repeat", "expires_at", "groups", "status", "pause_reason", "wait_reason", "posts", "consecutive_failures", "created_at", "updated_at"];
+const POST_FIELDS = ["id", "group_url", "group_name", "status", "scheduled_at", "posted_at", "post_url", "error_code", "copy"];
+const SECRET = /wss?:\/\/|viewer\.driver\.dev/;
+
 function publicView(c) {
   if (!c) return null;
   const out = {};
   for (const k of PUBLIC_FIELDS) if (k in c) out[k] = c[k];
-  return out;
+  out.posts = (c.posts || []).map((p) => { const q = {}; for (const k of POST_FIELDS) if (k in p) q[k] = p[k]; return q; });
+  const json = JSON.stringify(out);
+  return SECRET.test(json) ? JSON.parse(json.replace(/wss?:\/\/[^"\s]+/g, "[cdp]").replace(/https:\/\/viewer\.driver\.dev[^"\s]*/g, "[view]")) : out;
 }
-const clampStanding = (s) => ({
-  days: Math.min(Math.max(Number(s && s.days) || 7, 1), 30),
-  max_posts: Math.min(Math.max(Number(s && s.max_posts) || 10, 1), 100),
-});
+
+const card = (title, body) => `<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:Heebo,sans-serif;background:#F7F3EC;padding:24px;max-width:480px;margin:auto"><h2>${title}</h2><p style="line-height:1.7">${body}</p></body></html>`;
 
 module.exports = function createPostingRouter(ctx) {
-  const { requireAuth, authSecret } = ctx;
+  const { requireAuth, authSecret, pageBaseUrl } = ctx;
   const db = ctx.db || dbLive;
   const campaigns = ctx.campaigns || campaignsLive;
-  const deps = ctx.deps || Object.assign(campaignsLive.liveDeps(), { db });
+  const catalog = ctx.catalog || ((want) => require("./distribution").mergedCatalog(want));
+  const deps = Object.assign({ db, pageBaseUrl }, ctx.deps || {});
   const router = express.Router();
 
   async function owned(req, res) {
@@ -3471,50 +4087,72 @@ module.exports = function createPostingRouter(ctx) {
   router.post("/campaigns", requireAuth(authSecret), async (req, res) => {
     const phone = req.user.userId;
     const b = req.body || {};
-    const urls = Array.isArray(b.group_urls) ? b.group_urls.map(String).filter(Boolean) : [];
+    if (b.consent !== true) return res.status(400).json({ error: "consent_required" });
+    const urls = shareKit.sanitizeGroups(Array.isArray(b.group_urls) ? b.group_urls.map((u) => ({ url: String(u) })) : []).map((g) => g.url);
     if (!b.page_id || !urls.length || !["per_post", "standing"].includes(b.mode)) return res.status(400).json({ error: "invalid_input" });
 
     const conn = (await db.getConnection(phone)) || {};
     if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
     const page = await db.getPage(String(b.page_id)).catch(() => null);
     if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
+    const live = (await db.listPostingCampaignsByPhone(phone)).filter((c) => ["running", "paused"].includes(c.status));
+    if (live.length >= MAX_ACTIVE_CAMPAIGNS) return res.status(409).json({ error: "too_many_campaigns" });
 
-    const catalog = await db.listGroupCatalog();
-    const byUrl = new Map(catalog.map((g) => [g.url, g]));
-    const groups = urls.map((u) => { const g = byUrl.get(u) || { url: u, name: "", agent_policy: "unknown" }; return { url: g.url, name: g.name || "", agent_policy: g.agent_policy || "unknown", explicit: true }; });
-    const forbidden = groups.filter((g) => g.agent_policy === "forbidden");
-    if (forbidden.length) return res.status(422).json({ error: "forbidden_group", groups: forbidden.map((g) => g.url) });
+    const known = new Map((await catalog((page.property || {}).deal || "sale")).map((g) => [g.url, g]));
+    const groups = urls.map((u) => { const g = known.get(u); return g ? { url: g.url, name: g.name || "", agent_policy: g.agent_policy || "unknown" } : { url: u, name: "", agent_policy: "unknown", unknown: true }; });
+    const unknown = groups.filter((g) => g.unknown);
+    if (unknown.length && b.include_unknown !== true) return res.status(422).json({ error: "unknown_group", groups: unknown.map((g) => g.url) });
 
-    const c = await campaigns.create({ phone, page, pageUrl: page.url || page.page_url || "", groups, mode: b.mode, standing: b.mode === "standing" ? clampStanding(b.standing) : null }, deps);
+    // The two questions the pacer's warm-up depends on. Unanswered = unsure = slower.
+    await db.setConnection(phone, {
+      posting_account_aged: b.account_aged === true ? true : b.account_aged === false ? false : conn.posting_account_aged ?? null,
+      posting_posted_manually: b.posted_manually === true ? true : b.posted_manually === false ? false : conn.posting_posted_manually ?? null,
+    });
+
+    const c = await campaigns.create({
+      phone, page, groups: groups.map(({ url, name, agent_policy }) => ({ url, name, agent_policy })),
+      mode: b.mode, days: b.days, repeat: b.repeat === true,
+      consent: { at: new Date().toISOString(), version: CONSENT_VERSION, ip: req.ip },
+    }, deps);
     return res.status(201).json({ campaign: publicView(c) });
   });
 
-  router.post("/campaigns/:id/approve", requireAuth(authSecret), async (req, res) => {
-    if (!(await owned(req, res))) return;
-    const b = req.body || {};
-    const mode = b.mode === "per_post" ? "per_post" : "standing";
-    const c = await campaigns.approve(req.params.id, { mode, standing: mode === "standing" ? clampStanding(b.standing) : null }, deps);
-    return res.json({ campaign: publicView(c) });
-  });
-
+  for (const [action, fn] of [["pause", (id) => campaigns.pause(id, "agent", deps)], ["resume", (id) => campaigns.resume(id, deps)], ["stop", (id) => campaigns.stop(id, deps)]]) {
+    router.post(`/campaigns/:id/${action}`, requireAuth(authSecret), async (req, res) => {
+      if (!(await owned(req, res))) return;
+      return res.json({ campaign: publicView(await fn(req.params.id)) });
+    });
+  }
   router.post("/campaigns/:id/posts/:post_id/approve", requireAuth(authSecret), async (req, res) => {
     if (!(await owned(req, res))) return;
     return res.json({ campaign: publicView(await campaigns.approvePost(req.params.id, String(req.params.post_id), deps)) });
   });
+  router.post("/campaigns/:id/posts/:post_id/skip", requireAuth(authSecret), async (req, res) => {
+    if (!(await owned(req, res))) return;
+    return res.json({ campaign: publicView(await campaigns.skipPost(req.params.id, String(req.params.post_id), deps)) });
+  });
 
-  for (const [action, fn] of [["pause", "pause"], ["resume", "resume"], ["stop", "stop"], ["acknowledge-halt", "acknowledgeHalt"]]) {
-    router.post(`/campaigns/:id/${action}`, requireAuth(authSecret), async (req, res) => {
-      if (!(await owned(req, res))) return;
-      return res.json({ campaign: publicView(await campaigns[fn](req.params.id, deps)) });
-    });
-  }
+  // The WhatsApp one-tap. Same shape as routes/distribution.js /confirm: a
+  // signed token over [campaign, post, action], an HTML card back, no login
+  // needed — the token IS the proof the link came from us to this phone.
+  router.get("/act", async (req, res) => {
+    const c = String(req.query.c || ""), p = String(req.query.p || ""), a = String(req.query.a || ""), t = String(req.query.t || "");
+    if (!["approve", "skip", "stop"].includes(a) || !verifyActionToken([c, p, a], t, authSecret)) return res.status(403).send(card("הקישור לא תקין", "ייתכן שפג תוקפו. אפשר לאשר או לעצור גם מעמוד הנכס בדשבורד."));
+    const camp = await db.getPostingCampaign(c).catch(() => null);
+    if (!camp) return res.status(404).send(card("לא נמצא", "הקמפיין הזה כבר לא קיים."));
+    if (a === "stop") { await campaigns.stop(c, deps); return res.send(card("✋ הפרסום נעצר", "מה שכבר פורסם נשאר בקבוצות. אפשר להתחיל שוב מתי שתרצו, מעמוד הנכס.")); }
+    if (a === "skip") { await campaigns.skipPost(c, p, deps); return res.send(card("⏭ דילגנו על הקבוצה הזו", "נמשיך לקבוצה הבאה בתור.")); }
+    const out = await campaigns.approvePost(c, p, deps);
+    const post = (out.posts || []).find((x) => x.id === p) || {};
+    const when = post.scheduled_at ? new Date(post.scheduled_at).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+    return res.send(card("✅ אושר!", `הפוסט יעלה לקבוצה "${post.group_name || ""}" ב-${when}. נעדכן בוואטסאפ כשזה קורה.`));
+  });
 
   router.get("/campaigns", requireAuth(authSecret), async (req, res) => {
     const all = await db.listPostingCampaignsByPhone(req.user.userId);
     const pageId = req.query.page_id ? String(req.query.page_id) : null;
     return res.json({ campaigns: all.filter((c) => !pageId || c.page_id === pageId).map(publicView) });
   });
-
   router.get("/campaigns/:id", requireAuth(authSecret), async (req, res) => {
     const c = await owned(req, res);
     if (c) return res.json({ campaign: publicView(c) });
@@ -3523,15 +4161,18 @@ module.exports = function createPostingRouter(ctx) {
   return router;
 };
 module.exports.publicView = publicView;
+module.exports.CONSENT_VERSION = CONSENT_VERSION;
 ```
 
-- [ ] **Step 4: Mount and start the sweeper**
+`verifyActionToken(parts, token, secret)` — confirm the argument order against `server/auth.js` before writing the call; `routes/distribution.js` `/confirm` shows it in use.
 
-In `server/index.js`, inside the existing `if (process.env.DRIVER_API_KEY)` block from Task 7:
+- [ ] **Step 5: Mount and start the sweeper with real credentials**
+
+In `server/index.js`, inside the `if (process.env.DRIVER_API_KEY)` block from Task 7, **with the Green API credentials `distribution/jobs.liveDeps` already receives** — without them `sendWhatsApp` returns silently and per-post approval never reaches anyone:
 
 ```js
   const posting = require("./posting-campaign");
-  posting.startSweeper(posting.liveDeps());
+  posting.startSweeper(posting.liveDeps({ greenInstance: GREEN_INSTANCE, greenToken: GREEN_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET, operatorPhone: process.env.POSTING_OPERATOR_PHONE }));
   console.log("driver: posting sweeper started");
 ```
 
@@ -3539,290 +4180,494 @@ and with the other router mounts:
 
 ```js
 const createPostingRouter = require("./routes/posting");
-app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET }));
+app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET, pageBaseUrl: PAGE_BASE_URL,
+  deps: require("./posting-campaign").liveDeps({ greenInstance: GREEN_INSTANCE, greenToken: GREEN_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET }) }));
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+Use the exact variable names `index.js` already has for the Green instance/token and page base URL (see the `createDistributionRouter` call around line 219).
 
-Run: `cd server && node routes/posting.test.js`
-Expected: PASS.
+- [ ] **Step 6: Run tests, add to the chain, commit**
 
-- [ ] **Step 6: Add to the test chain and commit**
-
-Append ` && node routes/posting.test.js` to `scripts.test`.
+Run: `cd server && node routes/posting.test.js && node distribution/group-catalog-seed.test.js && node distribution/session-groups.test.js`
+Expected: all PASS. Append ` && node routes/posting.test.js` to `scripts.test`.
 
 ```bash
 cd server && npm test
-git add server/routes/posting.js server/routes/posting.test.js server/index.js server/package.json
-git commit -m "feat(posting): campaign API with ownership and group-policy gates"
+git add server/routes/posting.js server/routes/posting.test.js server/routes/distribution.js server/index.js server/package.json
+git commit -m "feat(posting): campaign API with consent, canonical group gate and one-tap links"
 ```
 
 ---
 
-### Task 17: The campaign card in the dashboard
+### Task 17: `posting-messages.js` — every state change reaches the agent's phone
 
-The agent sees a timeline, never a browser. What they need to understand at a glance: which groups, under which permission, what happens next, and how to stop.
+The agent is mid-showing when the checkpoint fires. The dashboard polls only while open. The existing product's idiom is a WhatsApp line with a signed one-tap link (`distribution/jobs.js` `M.confirmOffer` + `BTN`), and per-post approval — the default mode — must be one tap, not "open the dashboard, find the page, find the card, find the row".
 
 **Files:**
-- Modify: `public-agent/distribution.html` (a new card after `groupsCard`)
-- Modify: `public-agent/distribution.js`
-- Modify: `public-agent/app.css`
-- Modify: `public-agent/form-i18n.js`
+- Create: `server/posting-messages.js`
+- Create: `server/posting-messages.test.js`
+- Modify: `server/package.json` (test chain)
 
 **Interfaces:**
-- Consumes: `GET/POST /api/posting/campaigns…`, the page's selected groups already loaded by `distribution.js` (`state.selected_groups` or the equivalent that file keeps), `GET /api/connections/browser/facebook/status`.
-- Produces: `#campaignCard`, `#campaignTimeline`, `#campaignStopBtn`.
+- Consumes: `auth.signActionToken`.
+- Produces: `build({ pageBaseUrl, authSecret }) -> { approve(campaign, post), posted(campaign, post), paused(campaign), halted(campaign, code), stopped(campaign), completed(campaign) }` — each returns a Hebrew string.
 
-- [ ] **Step 1: Add the Hebrew strings**
+- [ ] **Step 1: Write the failing test**
 
-In `public-agent/form-i18n.js` `"he"` map (and translate into each other map):
+Create `server/posting-messages.test.js`:
 
-```
-"camp_title":"פרסום אוטומטי בקבוצות",
-"camp_intro":"פורלי תפרסם את הנכס בקבוצות שבחרתם, בקצב איטי ומדורג — כמה פוסטים ביום, בשעות היום, לא בשבת — כדי לא לעורר חשד. הפרסום נעשה מדפדפן ברקע; אתם רואים כאן מה קרה ומה מתוכנן.",
-"camp_need_connect":"כדי לפרסם צריך קודם לחבר את חשבון הפייסבוק שלכם למעלה.",
-"camp_mode_label":"איך לאשר?",
-"camp_mode_per_post":"לאשר כל פוסט בנפרד",
-"camp_mode_per_post_hint":"לפני כל פוסט תקבלו הודעת וואטסאפ עם הטקסט המדויק והקבוצה. בלי אישור שלכם — לא מפרסמים.",
-"camp_mode_standing":"לפרסם עד שאעצור",
-"camp_mode_standing_hint":"אישור אחד לכל הקמפיין, בגבולות שתקבעו. אפשר לעצור בכל רגע בלחיצה אחת.",
-"camp_standing_days":"למשך",
-"camp_standing_max":"עד",
-"camp_standing_posts":"פוסטים",
-"camp_days_7":"שבוע","camp_days_14":"שבועיים","camp_days_30":"חודש",
-"camp_groups_n":"קבוצות נבחרות",
-"camp_groups_unknown_warn":"בקבוצות המסומנות ב-? לא ידוע אם מתווכים מורשים לפרסם. אתם בוחרים לכלול אותן.",
-"camp_start":"התחלת פרסום",
-"camp_starting":"מתחילים…",
-"camp_stop":"עצירה",
-"camp_stop_confirm":"לעצור את הפרסום? פוסטים שכבר פורסמו נשארים. אפשר להתחיל קמפיין חדש בכל זמן.",
-"camp_pause":"השהיה","camp_resume":"המשך",
-"camp_next":"הפוסט הבא:",
-"camp_next_none":"אין פוסט מתוכנן כרגע — נמתין לחלון הבא.",
-"camp_waiting_approval":"ממתין לאישור שלכם",
-"camp_approve_post":"אישור ופרסום",
-"camp_status_running":"פעיל","camp_status_paused":"מושהה","camp_status_stopped":"נעצר","camp_status_completed":"הושלם","camp_status_halted":"נעצר — נדרשת התערבות",
-"camp_halt_checkpoint":"פייסבוק ביקשה אימות. פתחו את הדפדפן, השלימו את האימות, ואז לחצו \"טיפלתי\". נחכה יומיים לפני שנמשיך, ליתר ביטחון.",
-"camp_halt_rate_limited":"פייסבוק הגבילה זמנית את הפרסום מהחשבון. נמתין יומיים ונמשיך לאט יותר. לא צריך לעשות כלום.",
-"camp_halt_login_required":"החיבור לפייסבוק פג. חברו את החשבון מחדש למעלה ואז לחצו \"טיפלתי\".",
-"camp_halt_failures":"כמה פוסטים ברצף לא הצליחו. בדקו את הקבוצות ולחצו \"המשך\".",
-"camp_halt_ack":"טיפלתי",
-"camp_post_posted":"פורסם","camp_post_scheduled":"מתוכנן","camp_post_skipped":"דולג","camp_post_failed":"נכשל","camp_post_posting":"מפרסמים עכשיו…",
-"camp_skip_not_member":"אינכם חברים בקבוצה","camp_skip_group_blocked":"הקבוצה לא מאפשרת פרסום",
-"camp_err_forbidden_group":"אחת הקבוצות אוסרת פרסום של מתווכים — הסירו אותה מהבחירה",
-"camp_err_generic":"לא הצלחנו להתחיל את הקמפיין — נסו שוב",
-"camp_consent":"אני מבין/ה שפרסום אוטומטי מחשבון אישי נוגד את תנאי השימוש של פייסבוק ועלול להוביל להגבלת החשבון, ומאשר/ת זאת על אחריותי.",
+```js
+/* posting-messages.js — the WhatsApp lines. Every one is Hebrew, in Forly's
+   voice (plural imperatives, Forly as "she"), and the ones that need a tap
+   carry a signed link. Vendor codes never appear. */
+const assert = require("assert");
+const { verifyActionToken } = require("./auth");
+const M = require("./posting-messages").build({ pageBaseUrl: "https://f.ly", authSecret: "s" });
+const camp = { id: "c1", groups: [{ url: "g", name: "דירות בחיפה" }] };
+const post = { id: "p1", group_name: "דירות בחיפה", scheduled_at: "2026-09-24T11:00:00+03:00", copy: "🏠 דירה 4 חדרים בחיפה\nמחיר 1,900,000 ₪" };
+
+const approve = M.approve(camp, post);
+assert.ok(approve.includes("דירות בחיפה") && approve.includes("4 חדרים"), "group and the exact copy");
+for (const a of ["approve", "skip", "stop"]) {
+  const m = approve.match(new RegExp(`https://f\\.ly/api/posting/act\\?c=c1&p=p1&a=${a}&t=([^\\s]+)`));
+  assert.ok(m, `${a} link present`);
+  assert.ok(verifyActionToken(["c1", "p1", a], m[1], "s"), `${a} link is signed`);
+}
+assert.ok(approve.includes("לא מפרסמים בלי האישור שלכם"));
+assert.ok(!/undefined|null/.test(approve));
+
+assert.ok(M.posted(camp, Object.assign({}, post, { post_url: "https://www.facebook.com/groups/1/posts/9" })).includes("posts/9"));
+assert.ok(M.halted(camp, "checkpoint").includes("פייסבוק") && !M.halted(camp, "checkpoint").includes("checkpoint"), "no vendor code");
+assert.ok(M.halted(camp, "login_required").includes("לחבר"));
+assert.ok(M.halted(camp, "rate_limited").includes("להאט"));
+assert.ok(M.paused(camp).match(/act\?c=c1&p=-&a=stop/), "even a pause message offers stop");
+assert.ok(M.stopped(camp).includes("נשאר"));
+assert.ok(M.completed(camp).includes("סיימה"));
+console.log("posting-messages.test.js ok");
 ```
 
-- [ ] **Step 2: Add the card markup**
+- [ ] **Step 2: Run test to verify it fails**
 
-In `public-agent/distribution.html`, after the `groupsCard` div:
+Run: `cd server && node posting-messages.test.js`
+Expected: FAIL with `Cannot find module './posting-messages'`
+
+- [ ] **Step 3: Write the messages**
+
+Create `server/posting-messages.js`:
+
+```js
+/*
+ * posting-messages.js — the WhatsApp side of a campaign.
+ *
+ * Same rules as distribution/jobs.js's M: user-facing Hebrew only, vendor
+ * error text NEVER, and the approval shows the EXACT copy that will go out
+ * under the agent's name. Links are signed with the existing action-token
+ * scheme, so a tap needs no login — the token is the proof.
+ */
+const { signActionToken } = require("./auth");
+const FENCE = "──────────";
+const when = (iso) => (iso ? new Date(iso).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+
+function build({ pageBaseUrl, authSecret }) {
+  const link = (c, p, a) => `${pageBaseUrl}/api/posting/act?c=${encodeURIComponent(c)}&p=${encodeURIComponent(p)}&a=${a}&t=${signActionToken([c, p, a], authSecret)}`;
+  const HALT = {
+    checkpoint: "פייסבוק רוצה לוודא שזה אתם — זה קורה, והחשבון שלכם בסדר. פורלי הפסיקה לפרסם מהחשבון עד שנבדוק יחד. נחזור אליכם.",
+    captcha: "פייסבוק ביקשה אימות — זה קורה, והחשבון שלכם בסדר. פורלי הפסיקה לפרסם מהחשבון עד שנבדוק יחד. נחזור אליכם.",
+    restricted: "פייסבוק הגבילה את החשבון. פורלי הפסיקה לפרסם ממנו. כדאי להיכנס לפייסבוק ולבדוק את ההודעות שם — ונחזור אליכם.",
+    rate_limited: "פייסבוק ביקשה להאט. לא צריך לעשות כלום — פורלי תחכה שבועיים ותמשיך לאט יותר.",
+    feature_blocked: "פייסבוק חסמה זמנית את הפרסום מהחשבון. לא צריך לעשות כלום — פורלי תחכה שבועיים ותמשיך לאט יותר.",
+    login_required: "החיבור לחשבון הפייסבוק האישי שלכם פג — זה קורה מדי פעם. כדי להמשיך, צריך לחבר אותו מחדש בעמוד ההפצה.",
+  };
+  return {
+    approve: (c, p) =>
+      `📣 פוסט מוכן לקבוצה "${p.group_name || ""}"\nיעלה ב-${when(p.scheduled_at)} — אחרי האישור שלכם.\n${FENCE}\n${p.copy}\n${FENCE}\n\n` +
+      `✅ לאישור: ${link(c.id, p.id, "approve")}\n⏭ לדילוג על הקבוצה הזו: ${link(c.id, p.id, "skip")}\n✋ לעצירת כל הפרסום: ${link(c.id, p.id, "stop")}\n\nלא מפרסמים בלי האישור שלכם.`,
+    posted: (c, p) => `✅ הפוסט עלה לקבוצה "${p.group_name || ""}".${p.post_url ? `\n${p.post_url}` : ""}\n\nלעצירת הפרסום: ${link(c.id, "-", "stop")}`,
+    paused: (c) => `⏸ שני פוסטים ברצף לא עלו, אז פורלי עצרה לבדוק. בדקו שאתם עדיין חברים בקבוצות, ואז אפשר להמשיך מעמוד הנכס.\nלעצירה מוחלטת: ${link(c.id, "-", "stop")}`,
+    halted: (c, code) => `⚠️ ${HALT[code] || HALT.checkpoint}`,
+    stopped: () => `✋ הפרסום נעצר. מה שכבר פורסם נשאר בקבוצות. אפשר להתחיל שוב מתי שתרצו, מעמוד הנכס.`,
+    completed: (c) => `🎉 פורלי סיימה לפרסם את הנכס בכל הקבוצות שבחרתם. אפשר להפעיל שוב אחרי שבועיים, מעמוד הנכס.`,
+  };
+}
+module.exports = { build };
+```
+
+- [ ] **Step 4: Run, chain, commit**
+
+Run: `cd server && node posting-messages.test.js`
+Expected: PASS. Append ` && node posting-messages.test.js` to `scripts.test`.
+
+```bash
+cd server && npm test
+git add server/posting-messages.js server/posting-messages.test.js server/package.json
+git commit -m "feat(posting): WhatsApp messages with signed one-tap approve, skip and stop"
+```
+
+---
+
+### Task 18: Operator controls and retention
+
+The agent can stop their campaign. Forly must be able to stop **everyone's**, see the fleet, and turn a disabled account back on — and must not keep what it no longer needs.
+
+**Files:**
+- Create: `server/routes/admin-posting.js`
+- Create: `server/routes/admin-posting.test.js`
+- Modify: `server/db.js` (`listPhonesHaltedSince`, `listPostingCampaignsSince`)
+- Modify: `server/index.js` (mount under the existing admin router's `requireAdmin`)
+- Modify: `server/package.json` (test chain)
+
+**Interfaces:**
+- Produces (all behind `requireAdmin` from `routes/admin.js`):
+  - `GET /api/admin/posting/overview` → `{ enabled, disabled_reason, campaigns: {running, paused, stopped, completed}, halts_24h: [{phone_tail, code, at}], accounts_disabled: n }`
+  - `POST /api/admin/posting/switch` body `{enabled: boolean, reason?}` → the kill switch.
+  - `POST /api/admin/posting/accounts/:phone/reenable` → clears `posting_disabled_until_admin`, records `posting_reenabled_at` and the admin's id, resets warm-up (`facebook_browser_first_connected_at = now`).
+
+- [ ] **Step 1: Write the failing test**
+
+Create `server/routes/admin-posting.test.js`:
+
+```js
+const assert = require("assert");
+const express = require("express");
+const http = require("http");
+const createRouter = require("./admin-posting");
+
+const requireAdmin = (req, res, next) => { req.admin = { id: "ops" }; next(); };
+function makeApp(db) { const app = express(); app.use(express.json()); app.use("/api/admin/posting", createRouter({ requireAdmin, db })); return app; }
+function call(app, method, path, body) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => {
+      const req = http.request({ port: server.address().port, path, method, headers: { "content-type": "application/json" } }, (res) => {
+        let d = ""; res.on("data", (c) => (d += c)); res.on("end", () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(d || "{}") }); });
+      });
+      if (body) req.write(JSON.stringify(body)); req.end();
+    });
+  });
+}
+(async () => {
+  const settings = { posting: { enabled: true } }; const conns = { "0500000000": { posting_disabled_until_admin: true, posting_halts: [{ at: new Date().toISOString(), code: "checkpoint" }] } };
+  const db = {
+    getSetting: async (k) => settings[k], setSetting: async (k, v) => { settings[k] = Object.assign(settings[k] || {}, v); },
+    listPostingCampaignsSince: async () => [{ status: "running" }, { status: "running" }, { status: "paused" }],
+    listPhonesHaltedSince: async () => ["0500000000"],
+    getConnection: async (p) => conns[p], setConnection: async (p, patch) => Object.assign(conns[p], patch),
+  };
+  const app = makeApp(db);
+  const ov = await call(app, "GET", "/api/admin/posting/overview");
+  assert.equal(ov.body.enabled, true); assert.equal(ov.body.campaigns.running, 2);
+  assert.equal(ov.body.halts_24h[0].phone_tail, "0000", "never the full phone in an overview");
+  assert.equal(ov.body.halts_24h[0].code, "checkpoint");
+
+  await call(app, "POST", "/api/admin/posting/switch", { enabled: false, reason: "dom change" });
+  assert.equal(settings.posting.enabled, false); assert.equal(settings.posting.disabled_reason, "dom change");
+
+  const re = await call(app, "POST", "/api/admin/posting/accounts/0500000000/reenable");
+  assert.equal(re.status, 200);
+  assert.equal(conns["0500000000"].posting_disabled_until_admin, false);
+  assert.equal(conns["0500000000"].posting_reenabled_by, "ops");
+  assert.ok(conns["0500000000"].facebook_browser_first_connected_at, "warm-up restarts");
+  console.log("routes/admin-posting.test.js ok");
+})();
+```
+
+- [ ] **Step 2: Write the router**
+
+Create `server/routes/admin-posting.js`:
+
+```js
+/*
+ * routes/admin-posting.js — the operator's three levers: see the fleet, stop
+ * the fleet, and turn one account back on after a checkpoint.
+ */
+const express = require("express");
+const dbLive = require("../db");
+const tail = (p) => String(p || "").slice(-4);
+
+module.exports = function createAdminPostingRouter({ requireAdmin, db = dbLive }) {
+  const router = express.Router();
+  router.get("/overview", requireAdmin, async (req, res) => {
+    const since = Date.now() - 86400000;
+    const setting = (await db.getSetting("posting")) || { enabled: true };
+    const camps = await db.listPostingCampaignsSince(since - 29 * 86400000);
+    const counts = {};
+    for (const c of camps) counts[c.status] = (counts[c.status] || 0) + 1;
+    const halted = [];
+    let disabled = 0;
+    for (const phone of await db.listPhonesHaltedSince(since)) {
+      const conn = (await db.getConnection(phone)) || {};
+      if (conn.posting_disabled_until_admin) disabled++;
+      for (const h of (conn.posting_halts || []).filter((h) => new Date(h.at).getTime() > since)) halted.push({ phone_tail: tail(phone), code: h.code, at: h.at });
+    }
+    return res.json({ enabled: setting.enabled !== false, disabled_reason: setting.disabled_reason || null, campaigns: counts, halts_24h: halted, accounts_disabled: disabled });
+  });
+  router.post("/switch", requireAdmin, async (req, res) => {
+    const enabled = !!(req.body && req.body.enabled);
+    await db.setSetting("posting", { enabled, disabled_reason: enabled ? null : String((req.body && req.body.reason) || "operator"), changed_by: req.admin && req.admin.id, changed_at: new Date().toISOString() });
+    return res.json({ enabled });
+  });
+  router.post("/accounts/:phone/reenable", requireAdmin, async (req, res) => {
+    const phone = String(req.params.phone);
+    if (!(await db.getConnection(phone))) return res.status(404).json({ error: "not_found" });
+    await db.setConnection(phone, { posting_disabled_until_admin: false, posting_reenabled_at: new Date().toISOString(), posting_reenabled_by: req.admin && req.admin.id, facebook_browser_first_connected_at: new Date().toISOString() });
+    return res.json({ ok: true });
+  });
+  return router;
+};
+```
+
+Add to `db.js`: `listPhonesHaltedSince(ms)` (connections where `posting_last_halt_at > since`; store that field as an ISO string in `haltAccount`) and `listPostingCampaignsSince(ms)` (campaigns where `updated_at > since`). Mount in `index.js` with the same `requireAdmin` the admin router uses: `app.use("/api/admin/posting", createAdminPostingRouter({ requireAdmin }))`.
+
+- [ ] **Step 3: Retention**
+
+In `posting-campaign.js`, `patch()` sets `expire_at = updated_at + 30 days` whenever the status becomes `stopped` or `completed`; in `extract-jobs.js`, `create()` sets `expire_at = created_at + 7 days`. Configure a Firestore TTL policy on `expire_at` for both collections (console or `gcloud firestore fields ttls update`), and document the command in the findings file. The ledger already keeps 30 days; `copy` is already dropped once posted. Nothing stores the agent's phone in a Driver `note`.
+
+- [ ] **Step 4: Run, chain, commit**
+
+Run: `cd server && node routes/admin-posting.test.js`
+Expected: PASS. Append ` && node routes/admin-posting.test.js` to `scripts.test`.
+
+```bash
+cd server && npm test
+git add server/routes/admin-posting.js server/routes/admin-posting.test.js server/db.js server/index.js server/posting-campaign.js server/extract-jobs.js server/package.json
+git commit -m "feat(posting): operator overview, kill switch, account re-enable, retention"
+```
+
+---
+
+### Task 19: The campaign card, on the property's publish page
+
+The card lives on `publish.html` — the per-property page that already has "שיתוף ידני בקבוצות", `session.page_id`, and `session.groups`. `distribution.html` is account-level and has none of those. `publish.html` loads only `publish.js` (no `form-i18n.js`): strings are inline Hebrew and the page's own `toast()` is used, as the rest of that file does.
+
+**Files:**
+- Modify: `public-agent/publish.html` (a card directly under the "שיתוף ידני בקבוצות" heading)
+- Modify: `public-agent/publish.js`
+- Modify: `public-agent/app.css`
+
+- [ ] **Step 1: The card markup**
+
+In `public-agent/publish.html`, under the manual-share section:
 
 ```html
-  <div class="card dist-card" id="campaignCard" hidden>
-    <h2 data-i18n="camp_title"></h2>
-    <p class="muted" data-i18n="camp_intro"></p>
-    <p class="warn" id="campNeedConnect" data-i18n="camp_need_connect" hidden></p>
+  <section class="card" id="campaignCard" hidden>
+    <h2>או: פורלי תפרסם בשבילכם <span class="conn-chip" id="campStatusChip"></span></h2>
+    <p class="muted">פורלי תפרסם את הנכס בקבוצות שבחרתם, לאט ובזהירות — כמה פוסטים ביום, בשעות היום, לא בשבת — כמו שמתווך אמיתי מפרסם. כאן רואים מה כבר עלה ומה הבא בתור, ואפשר לעצור בכל רגע.</p>
+
+    <div id="campNeedConnect" class="rules" hidden>
+      לפרסום בקבוצות צריך קודם לחבר את החשבון האישי שלכם בפייסבוק.
+      <a class="btn btn-gold" href="distribution.html#browserConnectCard">חיבור החשבון</a>
+    </div>
 
     <div id="campSetup">
-      <p class="muted"><span id="campGroupsCount">0</span> <span data-i18n="camp_groups_n"></span></p>
-      <p class="muted small" id="campUnknownWarn" data-i18n="camp_groups_unknown_warn" hidden></p>
+      <p class="muted" id="campIdentity"></p>
+      <div id="campGroupChips" class="chips"></div>
+      <p class="muted small" id="campUnknownWarn" hidden>בחלק מהקבוצות לא ברור אם מתווכים מורשים לפרסם — כדאי להציץ בכללים שלהן לפני שמתחילים.</p>
 
       <fieldset class="camp-mode">
-        <legend data-i18n="camp_mode_label"></legend>
+        <legend>מתי פורלי מפרסמת?</legend>
         <label class="camp-opt"><input type="radio" name="campMode" value="per_post" checked>
-          <span><strong data-i18n="camp_mode_per_post"></strong><small data-i18n="camp_mode_per_post_hint"></small></span></label>
+          <span><strong>רק אחרי אישור שלכם, פוסט-פוסט</strong><small>לפני כל פוסט תקבלו וואטסאפ עם הטקסט והקבוצה. אישור בלחיצה אחת — בלי אישור לא מפרסמים.</small></span></label>
         <label class="camp-opt"><input type="radio" name="campMode" value="standing">
-          <span><strong data-i18n="camp_mode_standing"></strong><small data-i18n="camp_mode_standing_hint"></small></span></label>
+          <span><strong>לבד, עד שתעצרו</strong><small>מאשרים פעם אחת, פורלי מפרסמת בקצב שלה, ואפשר לעצור בכל רגע בלחיצה.</small></span></label>
+        <p class="muted small" id="campPlan"></p>
+
+        <div class="camp-questions">
+          <label><input type="checkbox" id="campAged" checked> חשבון הפייסבוק שלי בן יותר מחצי שנה</label>
+          <label><input type="checkbox" id="campManual" checked> כבר פרסמתי בקבוצות האלה בעצמי</label>
+          <p class="muted small">אם אחד מאלה לא נכון, פורלי תתחיל לאט במיוחד.</p>
+        </div>
+
+        <label class="camp-consent" id="campConsentRow"><input type="checkbox" id="campConsent">
+          <span>הבנתי שפייסבוק לא אוהבת פרסום אוטומטי מחשבון אישי ולפעמים מגבילה חשבונות בגלל זה. פורלי מפרסמת לאט ובזהירות כדי להקטין את הסיכון, ואני רוצה להמשיך.</span></label>
+        <p class="muted small" id="campConsentDone" hidden>מפרסמים על אחריותכם · פורלי מפרסמת לאט ובזהירות</p>
+        <button class="btn btn-gold" id="campStartBtn">התחלת פרסום</button>
       </fieldset>
-
-      <div class="camp-bounds" id="campBounds" hidden>
-        <label><span data-i18n="camp_standing_days"></span>
-          <select id="campDays"><option value="7" data-i18n="camp_days_7"></option><option value="14" selected data-i18n="camp_days_14"></option><option value="30" data-i18n="camp_days_30"></option></select></label>
-        <label><span data-i18n="camp_standing_max"></span>
-          <select id="campMax"><option>5</option><option selected>10</option><option>20</option><option>40</option></select>
-          <span data-i18n="camp_standing_posts"></span></label>
-      </div>
-
-      <label class="camp-consent"><input type="checkbox" id="campConsent"> <span data-i18n="camp_consent"></span></label>
-      <button class="btn btn-gold" id="campStartBtn" data-i18n="camp_start" disabled></button>
     </div>
 
     <div id="campLive" hidden>
       <div class="camp-head">
-        <span class="conn-chip" id="campStatusChip"></span>
         <span class="muted" id="campNext"></span>
-        <span class="camp-actions">
-          <button class="btn btn-ghost" id="campPauseBtn" data-i18n="camp_pause"></button>
-          <button class="btn btn-danger" id="campStopBtn" data-i18n="camp_stop"></button>
-        </span>
+        <span class="camp-actions"><button class="btn btn-danger" id="campStopBtn">עצירה</button></span>
       </div>
-      <div class="camp-halt" id="campHalt" hidden>
+      <p class="muted small"><a href="#" id="campPauseLink">השהיה זמנית</a></p>
+      <div class="camp-halt rules" id="campHalt" hidden>
         <p id="campHaltMsg"></p>
-        <button class="btn btn-gold" id="campHaltBrowserBtn" data-i18n="conn_browser_open"></button>
-        <button class="btn btn-ghost" id="campHaltAckBtn" data-i18n="camp_halt_ack"></button>
+        <a class="btn btn-gold" id="campHaltBrowserBtn" href="distribution.html#browserConnectCard" hidden>חיבור החשבון מחדש</a>
+        <button class="btn btn-ghost" id="campResumeBtn" hidden>להמשיך</button>
       </div>
-      <ol class="camp-timeline" id="campaignTimeline"></ol>
+      <p class="muted" id="campSummary"></p>
+      <ol class="camp-timeline" id="campTimeline"></ol>
     </div>
-  </div>
+    <details id="campLast" hidden><summary class="muted">הקמפיין האחרון</summary><ol class="camp-timeline" id="campLastTimeline"></ol></details>
+  </section>
 ```
 
-- [ ] **Step 3: Add the styles**
+- [ ] **Step 2: Styles**
 
-Append to `public-agent/app.css`:
+Append to `public-agent/app.css` (cream/gold tokens; `.btn-danger` and `.rules` already exist):
 
 ```css
-/* Campaign card: one glance = groups, permission, what's next, how to stop. */
-.camp-mode { border: 1px solid var(--line, #2a2d36); border-radius: 12px; padding: 10px 14px; margin: 12px 0; }
+.camp-mode { border: 1px solid rgba(23,20,15,.1); border-radius: var(--radius); padding: 12px 16px; margin: 12px 0; }
 .camp-opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; cursor: pointer; }
-.camp-opt small { display: block; color: var(--muted, #9aa0a6); margin-top: 2px; line-height: 1.5; }
-.camp-bounds { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 12px; }
-.camp-consent { display: flex; gap: 8px; align-items: flex-start; font-size: .9rem; color: var(--muted, #9aa0a6); margin: 12px 0; line-height: 1.5; }
-.camp-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
-.camp-actions { margin-inline-start: auto; display: flex; gap: 8px; }
-.btn-danger { background: #b3261e; color: #fff; }
-.camp-halt { border: 1px solid #e0b341; border-radius: 12px; padding: 12px 14px; margin: 10px 0; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-.camp-halt p { flex: 1 1 100%; margin: 0 0 6px; line-height: 1.6; }
+.camp-opt small { display: block; color: var(--ink-soft, #6b655c); margin-top: 2px; line-height: 1.5; }
+.camp-questions { margin: 10px 0; display: grid; gap: 6px; }
+.camp-consent { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0; line-height: 1.55; color: var(--dark); }
+.camp-head { position: sticky; top: 0; background: var(--bg); display: flex; align-items: center; gap: 12px; padding: 8px 0; z-index: 2; }
+.camp-actions { margin-inline-start: auto; }
 .camp-timeline { list-style: none; padding: 0; margin: 0; }
-.camp-timeline li { display: grid; grid-template-columns: 90px 1fr auto; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line, #2a2d36); align-items: center; }
-.camp-timeline .when { color: var(--muted, #9aa0a6); font-variant-numeric: tabular-nums; }
-.camp-timeline .st-posted { color: #4caf7d; } .camp-timeline .st-failed { color: #e57373; } .camp-timeline .st-skipped { color: var(--muted, #9aa0a6); }
-.camp-timeline details { grid-column: 1 / -1; } .camp-timeline pre { white-space: pre-wrap; font: inherit; background: rgba(255,255,255,.04); padding: 8px; border-radius: 8px; }
-@media (max-width: 640px) { .camp-timeline li { grid-template-columns: 1fr; } .camp-actions { margin-inline-start: 0; width: 100%; } .camp-actions .btn { flex: 1; } }
+.camp-timeline li { padding: 10px 0; border-bottom: 1px solid rgba(23,20,15,.07); }
+.camp-timeline .l1 { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.camp-timeline .l2 { color: var(--ink-soft, #6b655c); font-size: .9rem; margin-top: 2px; }
+.camp-timeline .st-posted { color: #157A3F; } .camp-timeline .st-failed { color: var(--red); } .camp-timeline .st-skipped { color: var(--ink-soft, #6b655c); }
+.camp-timeline pre { white-space: pre-wrap; font: inherit; background: rgba(23,20,15,.04); padding: 8px; border-radius: 8px; margin: 6px 0 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chips .chip { border: 1px solid rgba(23,20,15,.12); border-radius: 999px; padding: 3px 10px; font-size: .9rem; }
 ```
 
-- [ ] **Step 4: Wire it**
+- [ ] **Step 3: Wire it**
 
-Append to `public-agent/distribution.js`:
+Append inside `publish.js`'s IIFE, after the share-kit code, using its `$`, `api`, `toast` and `session`:
 
 ```js
-// ── automatic group posting ──
-(function () {
-  var card = $("campaignCard"); if (!card) return;
-  var current = null, pollTimer = null;
-  var pageId = state.page_id; // the page this distribution view is for
-  var fmt = function (iso) { if (!iso) return ""; var d = new Date(iso); return d.toLocaleString("he-IL", { weekday: "short", hour: "2-digit", minute: "2-digit", day: "numeric", month: "numeric" }); };
-  var post = function (path, body) {
-    return fetch(path, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); });
+  // ── automatic group posting ──
+  let campaign = null, campTimer = null, consentGiven = false;
+  const fmt = (iso) => (iso ? new Date(iso).toLocaleString("he-IL", { weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "");
+  const HALT_TEXT = {
+    account_checkpoint: "פייסבוק רוצה לוודא שזה אתם — זה קורה, והחשבון שלכם בסדר. פורלי הפסיקה לפרסם מהחשבון עד שנבדוק יחד; נחזור אליכם.",
+    account_login_required: "החיבור לחשבון הפייסבוק האישי שלכם פג — זה קורה מדי פעם. חברו אותו מחדש ואז לחצו \"להמשיך\".",
+    account_rate_limited: "פייסבוק ביקשה להאט. לא צריך לעשות כלום — פורלי תחכה שבועיים ותמשיך לאט יותר.",
+    consecutive_failures: "שני פוסטים ברצף לא עלו. בדקו שאתם עדיין חברים בקבוצות האלה, ואז לחצו \"להמשיך\".",
+    infrastructure: "תקלה זמנית אצלנו — פורלי תנסה שוב בעוד חצי שעה. לא צריך לעשות כלום.",
+    agent: "הפרסום מושהה. לחצו \"להמשיך\" כשתרצו.",
   };
+  const groupsPicked = () => (session.groups || []).map((g) => ({ url: g.url, name: g.name || g.url, agent_policy: g.agent_policy || "unknown" }));
 
-  function selectedGroups() { return (state.selected_groups || []).map(function (g) { return typeof g === "string" ? g : g.url; }); }
-  function refreshSetup() {
-    var urls = selectedGroups();
-    $("campGroupsCount").textContent = urls.length;
-    var unknown = (state.groups || []).some(function (g) { return urls.indexOf(g.url) >= 0 && g.agent_policy === "unknown"; });
-    $("campUnknownWarn").hidden = !unknown;
-    $("campStartBtn").disabled = !(urls.length && $("campConsent").checked && state.fbBrowserConnected);
-    $("campNeedConnect").hidden = !!state.fbBrowserConnected;
+  function renderSetup() {
+    const gs = groupsPicked();
+    $("campGroupChips").innerHTML = gs.map((g) => `<span class="chip">${g.name}${g.agent_policy === "unknown" ? " · בדקו את כללי הקבוצה" : ""}</span>`).join("");
+    $("campUnknownWarn").hidden = !gs.some((g) => g.agent_policy === "unknown");
+    const standing = document.querySelector('input[name="campMode"]:checked').value === "standing";
+    $("campPlan").textContent = standing
+      ? `פורלי תפרסם פעם אחת בכל אחת מ-${gs.length} הקבוצות, בימים הקרובים, ואז תעצור לבד. ההרשאה תקפה לשבועיים.`
+      : `לפני כל אחד מ-${gs.length} הפוסטים תקבלו וואטסאפ לאישור.`;
+    $("campConsentRow").hidden = consentGiven; $("campConsentDone").hidden = !consentGiven;
   }
-  document.querySelectorAll('input[name="campMode"]').forEach(function (r) {
-    r.addEventListener("change", function () { $("campBounds").hidden = this.value !== "standing"; });
-  });
-  $("campConsent").addEventListener("change", refreshSetup);
+  document.querySelectorAll('input[name="campMode"]').forEach((r) => r.addEventListener("change", renderSetup));
 
-  $("campStartBtn").addEventListener("click", function () {
-    var btn = this; btn.disabled = true; btn.textContent = FT("camp_starting");
-    var mode = document.querySelector('input[name="campMode"]:checked').value;
-    var body = { page_id: pageId, group_urls: selectedGroups(), mode: mode };
-    if (mode === "standing") body.standing = { days: Number($("campDays").value), max_posts: Number($("campMax").value) };
-    post("/api/posting/campaigns", body).then(function (res) {
-      if (!res.ok) { FLY.toast(FT(res.body.error === "forbidden_group" ? "camp_err_forbidden_group" : "camp_err_generic")); return; }
-      return post("/api/posting/campaigns/" + res.body.campaign.id + "/approve", { mode: mode, standing: body.standing });
-    }).then(function (res) { if (res && res.ok) show(res.body.campaign); })
-      .catch(function () { FLY.toast(FT("camp_err_generic")); })
-      .then(function () { btn.textContent = FT("camp_start"); refreshSetup(); });
+  $("campStartBtn").addEventListener("click", async function () {
+    const gs = groupsPicked();
+    if (!gs.length) return toast("בחרו לפחות קבוצה אחת");
+    if (!consentGiven && !$("campConsent").checked) return toast("סמנו את האישור שמעל הכפתור");
+    const mode = document.querySelector('input[name="campMode"]:checked').value;
+    const btn = this; btn.disabled = true; btn.textContent = "מתחילים…";
+    try {
+      const j = await api("/api/posting/campaigns", { method: "POST", body: JSON.stringify({
+        page_id: session.page_id, group_urls: gs.map((g) => g.url), mode, days: 14, repeat: false, consent: true, include_unknown: true,
+        account_aged: $("campAged").checked, posted_manually: $("campManual").checked,
+      }) });
+      consentGiven = true; show(j.campaign); toast("התחלנו ✓");
+    } catch (e) {
+      toast(e && e.code === "facebook_not_connected" ? "קודם חברו את החשבון האישי בפייסבוק" : e && e.code === "too_many_campaigns" ? "יש כבר שלושה קמפיינים פעילים — עצרו אחד קודם" : "לא הצלחנו להתחיל — נסו שוב");
+    } finally { btn.disabled = false; btn.textContent = "התחלת פרסום"; }
   });
+
+  function row(p) {
+    const st = { posted: "פורסם", scheduled: "מתוכנן", pending_approval: "ממתין לאישור שלכם", posting: "מפרסמים עכשיו…", failed: "נכשל", skipped: p.error_code === "not_member" ? "אינכם חברים בקבוצה" : p.error_code === "group_blocked" ? "הקבוצה לא מאפשרת פרסום" : "דולג" }[p.status] || p.status;
+    const li = document.createElement("li");
+    li.innerHTML = `<div class="l1"><span>${p.group_name || p.group_url}</span><span class="st-${p.status}">${st}${p.error_code === "pending_approval" ? " (ממתין לאישור מנהל הקבוצה)" : ""}</span></div>` +
+      `<div class="l2">${fmt(p.posted_at || p.scheduled_at)}${p.post_url ? ` · <a href="${p.post_url}" target="_blank" rel="noopener">לפוסט ↗</a>` : ""}</div>`;
+    if (p.status === "pending_approval") {
+      const b = document.createElement("button"); b.className = "btn btn-gold"; b.textContent = "אישור ופרסום";
+      b.addEventListener("click", async () => { try { show((await api(`/api/posting/campaigns/${campaign.id}/posts/${p.id}/approve`, { method: "POST" })).campaign); } catch (e) { toast("לא הצלחנו לאשר — נסו שוב"); } });
+      li.appendChild(b);
+    }
+    if (p.copy) { const d = document.createElement("details"); d.innerHTML = "<summary>מה יפורסם</summary><pre></pre>"; d.querySelector("pre").textContent = p.copy; li.appendChild(d); }
+    return li;
+  }
 
   function show(c) {
-    current = c;
-    var live = c && ["running", "paused", "halted"].indexOf(c.status) >= 0;
+    campaign = c;
+    const live = c && ["running", "paused"].includes(c.status);
     $("campSetup").hidden = !!live; $("campLive").hidden = !live;
-    if (!live) { clearInterval(pollTimer); pollTimer = null; return; }
-    $("campStatusChip").textContent = FT("camp_status_" + c.status);
-    var next = (c.posts || []).filter(function (p) { return p.status === "scheduled" || p.status === "pending_approval"; })[0];
-    $("campNext").textContent = next ? FT("camp_next") + " " + fmt(next.scheduled_at) + " · " + (next.group_name || next.group_url) : FT("camp_next_none");
-    $("campPauseBtn").textContent = FT(c.status === "paused" ? "camp_resume" : "camp_pause");
-    $("campPauseBtn").hidden = c.status === "halted";
-    var halt = $("campHalt"); halt.hidden = c.status !== "halted" && !(c.status === "paused" && c.halt_reason === "consecutive_failures");
-    if (!halt.hidden) {
-      var key = c.halt_reason === "consecutive_failures" ? "camp_halt_failures" : ("camp_halt_" + c.halt_reason);
-      $("campHaltMsg").textContent = FT(key) || FT("camp_halt_failures");
-      $("campHaltBrowserBtn").hidden = !(c.halt_reason === "checkpoint" || c.halt_reason === "login_required");
+    $("campStatusChip").textContent = c ? ({ running: "פעיל", paused: c.pause_reason === "account" ? "נעצר — נדרשת התערבות" : "מושהה", stopped: "נעצר", completed: `הושלם — ${(c.posts || []).filter((p) => p.status === "posted").length} פוסטים עלו` })[c.status] || "" : "";
+    if (!live) {
+      clearInterval(campTimer); campTimer = null;
+      if (c && c.posts && c.posts.length) { $("campLast").hidden = false; const ol = $("campLastTimeline"); ol.innerHTML = ""; c.posts.slice().reverse().forEach((p) => ol.appendChild(row(p))); }
+      renderSetup(); return;
     }
-    var ol = $("campaignTimeline"); ol.innerHTML = "";
-    (c.posts || []).slice().reverse().forEach(function (p) {
-      var li = document.createElement("li");
-      var st = p.status === "skipped" ? FT("camp_skip_" + p.error_code) || FT("camp_post_skipped") : FT("camp_post_" + (p.status === "pending_approval" ? "scheduled" : p.status));
-      li.innerHTML = '<span class="when">' + fmt(p.posted_at || p.scheduled_at) + '</span><span>' + (p.group_name || p.group_url) + '</span><span class="st-' + p.status + '">' + st + '</span>';
-      if (p.status === "pending_approval") {
-        var b = document.createElement("button"); b.className = "btn btn-gold"; b.textContent = FT("camp_approve_post");
-        b.addEventListener("click", function () { post("/api/posting/campaigns/" + c.id + "/posts/" + p.id + "/approve").then(function (r) { if (r.ok) show(r.body.campaign); }); });
-        li.appendChild(b);
-      }
-      var d = document.createElement("details"); d.innerHTML = "<summary>" + FT("ext_show_all") + "</summary><pre></pre>"; d.querySelector("pre").textContent = p.copy || "";
-      li.appendChild(d); ol.appendChild(li);
-    });
-    if (!pollTimer) pollTimer = setInterval(reload, 30000);
+    const pending = (c.posts || []).filter((p) => p.status === "pending_approval");
+    const next = pending[0] || (c.posts || []).filter((p) => p.status === "scheduled").sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))[0];
+    $("campNext").textContent = next ? `הפוסט הבא: ${fmt(next.scheduled_at)} · ${next.group_name || next.group_url}` : c.wait_reason === "day_skipped" ? "היום פורלי נחה — ממשיכים מחר." : "אין פוסט מתוכנן כרגע — נמתין לחלון הבא.";
+    const halt = $("campHalt");
+    const haltKey = c.status === "paused" ? (c.pause_reason === "account" ? `account_${(c.last_halt_code || "checkpoint")}` : c.pause_reason) : null;
+    halt.hidden = !haltKey;
+    if (haltKey) {
+      $("campHaltMsg").textContent = HALT_TEXT[haltKey] || HALT_TEXT.consecutive_failures;
+      $("campHaltBrowserBtn").hidden = haltKey !== "account_login_required";
+      $("campResumeBtn").hidden = haltKey.startsWith("account_") && haltKey !== "account_login_required";
+    }
+    $("campPauseLink").parentElement.hidden = !!haltKey;
+    const posted = (c.posts || []).filter((p) => p.status === "posted").length, sched = (c.posts || []).filter((p) => ["scheduled", "pending_approval"].includes(p.status)).length;
+    $("campSummary").textContent = `${posted} פורסמו · ${sched} מתוכנן`;
+    const ol = $("campTimeline"); ol.innerHTML = "";
+    pending.forEach((p) => ol.appendChild(row(p)));
+    (c.posts || []).filter((p) => p.status !== "pending_approval").slice().reverse().forEach((p) => ol.appendChild(row(p)));
+    if (!campTimer) campTimer = setInterval(reload, 30000);
   }
-  function reload() {
-    if (!current) return;
-    fetch("/api/posting/campaigns/" + current.id, { credentials: "include" }).then(function (r) { return r.json(); }).then(function (j) { if (j.campaign) show(j.campaign); }).catch(function () {});
-  }
-  $("campPauseBtn").addEventListener("click", function () {
-    post("/api/posting/campaigns/" + current.id + "/" + (current.status === "paused" ? "resume" : "pause")).then(function (r) { if (r.ok) show(r.body.campaign); });
-  });
-  $("campStopBtn").addEventListener("click", function () {
-    if (!confirm(FT("camp_stop_confirm"))) return;
-    post("/api/posting/campaigns/" + current.id + "/stop").then(function (r) { if (r.ok) { show(r.body.campaign); FLY.toast(FT("camp_status_stopped")); } });
-  });
-  $("campHaltAckBtn").addEventListener("click", function () {
-    var path = current.status === "halted" ? "acknowledge-halt" : "resume";
-    post("/api/posting/campaigns/" + current.id + "/" + path).then(function (r) { if (r.ok) show(r.body.campaign); });
-  });
-  // The embedded browser (Task 11) is the fix for a checkpoint: same button, same modal.
-  $("campHaltBrowserBtn").addEventListener("click", function () { $("browserPlatform").value = "facebook"; $("browserConnectBtn").click(); });
+  async function reload() { if (!campaign) return; try { show((await api(`/api/posting/campaigns/${campaign.id}`)).campaign); } catch (e) {} }
+  const act = (path) => async () => { try { show((await api(`/api/posting/campaigns/${campaign.id}/${path}`, { method: "POST" })).campaign); } catch (e) { toast("לא הצלחנו — נסו שוב"); } };
+  $("campStopBtn").addEventListener("click", () => { if (confirm("לעצור את הפרסום? מה שכבר עלה נשאר בקבוצות. אפשר להתחיל שוב מתי שתרצו.")) act("stop")().then(() => toast("הפרסום נעצר. מה שכבר פורסם נשאר.")); });
+  $("campPauseLink").addEventListener("click", (e) => { e.preventDefault(); act(campaign.status === "paused" ? "resume" : "pause")(); });
+  $("campResumeBtn").addEventListener("click", act("resume"));
 
-  // Boot: is the browser connected, is there a live campaign for this page?
-  fetch("/api/connections/browser/facebook/status", { credentials: "include" }).then(function (r) { return r.json(); })
-    .then(function (j) { state.fbBrowserConnected = j.state === "connected"; refreshSetup(); }).catch(refreshSetup);
-  fetch("/api/posting/campaigns?page_id=" + encodeURIComponent(pageId), { credentials: "include" }).then(function (r) { return r.json(); })
-    .then(function (j) { var live = (j.campaigns || []).filter(function (c) { return ["running", "paused", "halted"].indexOf(c.status) >= 0; })[0]; if (live) show(live); })
-    .catch(function () {});
-  card.hidden = false;
-  refreshSetup();
-})();
+  // Boot: is the personal account connected, is there a campaign for this page?
+  (async () => {
+    try {
+      const st = await api("/api/connections/browser/facebook/status");
+      const on = st.state === "connected";
+      $("campNeedConnect").hidden = on; $("campSetup").hidden = !on;
+      $("campIdentity").textContent = on && st.identity_label ? `מפרסמים בתור ${st.identity_label}` : "";
+      const j = await api(`/api/posting/campaigns?page_id=${encodeURIComponent(session.page_id)}`);
+      consentGiven = (j.campaigns || []).length > 0;
+      const live = (j.campaigns || []).find((c) => ["running", "paused"].includes(c.status)) || (j.campaigns || []).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))[0];
+      show(live || null);
+    } catch (e) { renderSetup(); }
+    $("campaignCard").hidden = false;
+  })();
 ```
 
-`state.page_id`, `state.selected_groups` and `state.groups` are whatever names `distribution.js` already uses for the current page and its group selection — read that file's `state` object and use its real field names; do not add a parallel copy.
+`publicView` in Task 16 must include `last_halt_code` (set it in `haltAccount` on the campaign patch) and `wait_reason` — add both to `PUBLIC_FIELDS`. `api()` in `publish.js` must attach `e.code` from the JSON body on non-2xx, as in Task 11.
 
-- [ ] **Step 5: Verify by hand**
+- [ ] **Step 4: Walk it by hand, as a first-time agent on a phone**
 
 ```bash
-cd server && DRIVER_API_KEY=$DRIVER_API_KEY npm run local
+cd server && DRIVER_API_KEY=… npm run local   # export the key once beforehand; never inline it
 ```
 
-Open the distribution page for a test property with the test account connected (Task 11). Walk it as a first-time agent would, and check each of these reads without explanation:
+Open `publish.html` for a test property. Without being told anything, each of these must read at a glance, with the next action on screen:
 
-1. Before connecting Facebook: the card shows the "connect first" line and the start button is disabled.
-2. Consent unticked → start disabled. Tick → enabled.
-3. "לאשר כל פוסט בנפרד" is the default. Choosing "לפרסם עד שאעצור" reveals the bounds (duration, max posts).
-4. Start → the card flips to the live view with a status chip, "הפוסט הבא: …", a red STOP.
-5. STOP → confirm → chip reads "נעצר", timeline stays, setup returns.
-6. Simulate a halt (set `status:"halted", halt_reason:"checkpoint"` on the campaign doc): the amber box explains what happened and offers the browser button, which opens Task 11's modal on Facebook.
+1. Not connected → the card says so with a button that goes to the connect card.
+2. Connected → "מפרסמים בתור <name>", the group chips, the default "רק אחרי אישור שלכם" and its one-line plan.
+3. Start without consent → toast names the checkbox. Tick → start → the live view: chip "פעיל", "הפוסט הבא: …", red "עצירה".
+4. A `pending_approval` row is first, with "אישור ופרסום"; the WhatsApp message arrived with three links; tapping approve shows the "✅ אושר!" card and the row flips to "מתוכנן".
+5. STOP → confirm → the timeline stays under "הקמפיין האחרון".
+6. Simulate `pause_reason:"account", last_halt_code:"checkpoint"` on the doc: the amber box explains it is Facebook, the account is fine, and that Forly will be in touch — no resume button.
+7. Simulate `account_login_required`: the box offers "חיבור החשבון מחדש".
+8. On a 375px viewport: the head with STOP stays sticky; rows are two lines.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add public-agent/distribution.html public-agent/distribution.js public-agent/app.css public-agent/form-i18n.js
-git commit -m "feat(posting): campaign card with per-post and standing approval, timeline and stop"
+git add public-agent/publish.html public-agent/publish.js public-agent/app.css
+git commit -m "feat(posting): campaign card on the property's publish page"
 ```
 
 ---
 
-### Task 18: Calibration — the first real post, then two days unattended
+### Task 20: Calibration — selectors, one live post, then thirty days
 
-Everything in Phase 3 up to here is unit-tested against fakes. This task is where the plan's [Unverified] claims become measurements. **Use only a test Facebook account and test groups that account owns.** Never an agent's real account for this.
+Everything in Phase 3 up to here is unit-tested against fakes. This task is where the plan's [Unverified] claims become measurements — and it is honest about what a short test can and cannot prove. **48 hours on a throwaway account in groups the tester owns proves the selectors work and nothing else**: it exercises no group admin, no member reports, no admin-approval queue, no domain reputation, no account age. The evidence that matters takes an aged account, real groups, and a month.
+
+**Use only the test account and groups from Human gate G5.** Never an agent's real account for this.
 
 **Files:**
 - Create: `scripts/posting-calibrate.local.js`
@@ -3836,12 +4681,13 @@ Create `scripts/posting-calibrate.local.js`:
 /*
  * scripts/posting-calibrate.local.js — the first real posts, watched closely.
  *
- *   DRIVER_API_KEY=… node scripts/posting-calibrate.local.js <profile-name> <group-url> [--live]
+ *   export DRIVER_API_KEY=…   (once, from the secret store — never inline)
+ *   node scripts/posting-calibrate.local.js <profile-name> <group-url> [--live]
  *
- * Without --live: a DRY RUN — opens the group, opens the composer, types the
- * copy, stops before submit. Confirms the selectors in posting-driver.js
- * match the real page. Run this until it passes cleanly.
- * With --live: ONE real post, then verifies it is in the feed.
+ * Without --live: a DRY RUN — feed, scroll, group, composer, types the copy,
+ * stops before submit. Confirms SELECTORS in posting-driver.js match the real
+ * page. Run until it passes three times in a row.
+ * With --live: ONE real post plus the link comment, then verifies the feed.
  */
 const { postToGroup, SELECTORS } = require("../server/posting-driver");
 const { buildPostCopy, trackedUrl } = require("../server/distribution/share-kit");
@@ -3851,18 +4697,17 @@ const live = process.argv.includes("--live");
 
 (async () => {
   if (!profileName || !groupUrl) { console.error("usage: <profile-name> <group-url> [--live]"); process.exit(2); }
-  const page = { title: "בדיקת מערכת — נא להתעלם", property: { city: "תל אביב", rooms: 3, price: 1 }, agent: { name: "בדיקה" } };
-  const url = trackedUrl("https://forly.example/test", { session: "calib", group: groupUrl });
-  const copy = buildPostCopy(page, url, { variantSeed: "calib" + groupUrl });
-  console.log(`mode=${live ? "LIVE" : "dry run"} selectors=${JSON.stringify(Object.keys(SELECTORS))}`);
-  console.log("copy:\n" + copy + "\n");
+  const page = { property: { title: "בדיקת מערכת — נא להתעלם", city: "תל אביב", rooms: 3, price: 1 }, agent: { name: "בדיקה" } };
+  const url = trackedUrl("https://forly.example/p/test", { session: "calib", group: "abcdef123456" });
+  const copy = buildPostCopy(page, url, { variantSeed: "calib" + groupUrl, linkInComment: true });
+  console.log(`mode=${live ? "LIVE" : "dry run"} selectors=${Object.keys(SELECTORS).join(",")}\ncopy:\n${copy}\ncomment: ${url}\n`);
   const t0 = Date.now();
   try {
-    const out = await postToGroup({ groupUrl, copy, profileName, dryRun: !live, campaignId: "calib" });
-    console.log(`OK in ${((Date.now() - t0) / 1000).toFixed(1)}s:`, out);
+    const out = await postToGroup({ groupUrl, copy, comment: url, profileName, dryRun: !live, campaignId: "calib", phone: "calib" });
+    console.log(`OK in ${((Date.now() - t0) / 1000).toFixed(0)}s:`, out);
     process.exit(0);
   } catch (e) {
-    console.error(`FAIL ${e.code || ""}: ${e.message}`);
+    console.error(`FAIL ${e.code || e.status || ""}: ${e.message}`);
     process.exit(1);
   }
 })();
@@ -3871,62 +4716,66 @@ const live = process.argv.includes("--live");
 - [ ] **Step 2: Dry run until the selectors are right**
 
 ```bash
-cd /home/user/forly-backend
-DRIVER_API_KEY=$DRIVER_API_KEY node scripts/posting-calibrate.local.js "facebook-<test-phone>" "https://www.facebook.com/groups/<your-test-group>"
+node scripts/posting-calibrate.local.js "<profile from profile-name.profileName('facebook', <test-phone>)>" "https://www.facebook.com/groups/<test-group>"
 ```
 
-Expected: `OK … dry_run: true`. On `composer_not_found`, open the same group in the embedded browser (Task 11), inspect the composer, and fix `SELECTORS` in `server/posting-driver.js` — that is the only file to touch. Repeat until three consecutive dry runs pass.
+Expected: `OK … dry_run: true`, taking 60–150 s (the dwell is deliberate). On `composer_not_found`, open the same group in the embedded browser (Task 11), inspect, and fix `SELECTORS` in `server/posting-driver.js` — the only file to touch. Three clean passes in a row before Step 3.
 
 - [ ] **Step 3: One live post**
 
-```bash
-DRIVER_API_KEY=$DRIVER_API_KEY node scripts/posting-calibrate.local.js "facebook-<test-phone>" "https://www.facebook.com/groups/<your-test-group>" --live
-```
+Same command with `--live`. Expected: `OK … dry_run: false`, the post is visible in the group in a normal browser **with the link as the first comment**, and `post_url` is the post's permalink, not the group URL. If it reports `not_verified` while the post *is* there, fix `SELECTORS.feedPost*` — a false negative makes the campaign count a success as a failure.
 
-Expected: `OK … dry_run: false`, and the post is visible in the group when you look with a normal browser, with the link card attached. If it reports `not_verified` but the post *is* there, fix `SELECTORS.feedPostText`; a false negative here would make the campaign count a success as a failure and trip the breaker for nothing.
+- [ ] **Step 4: Thirty days**
 
-- [ ] **Step 4: Two days unattended**
-
-Create a `standing` campaign from the dashboard for the test property with two test groups, 7 days, 6 posts. Leave it. After 48 hours, pull the ledger and check every invariant the plan promised:
+From the dashboard, on the aged test account (G5), start one `standing` campaign per test property (two properties, the same 2–3 real groups, admins' written permission on file), `repeat: true`, 30 days. Then, **daily**:
 
 ```bash
 cd server && node -e '
 const db = require("./db"); db.init();
+const S = require("./posting-safety");
 (async () => {
-  const c = (await db.listPostingCampaignsByPhone(process.argv[1]))[0];
-  const posted = c.posts.filter(p => p.status === "posted").map(p => new Date(p.posted_at)).sort((a,b)=>a-b);
-  const S = require("./posting-safety");
+  const phone = process.argv[1];
+  const conn = await db.getConnection(phone);
+  const ledger = (conn.posting_ledger || []).map(p => new Date(p.at)).sort((a,b)=>a-b);
   let ok = true;
-  for (let i = 1; i < posted.length; i++) { const gap = (posted[i]-posted[i-1])/60000; if (gap < S.DEFAULTS.min_gap_minutes) { console.error("GAP VIOLATION", gap); ok = false; } }
-  for (const d of posted) if (!S.isActiveTime(d, S.DEFAULTS)) { console.error("OUTSIDE ACTIVE HOURS", d.toISOString()); ok = false; }
-  console.log(`${posted.length} posts, status=${c.status}, halt=${c.halt_reason}`); process.exit(ok ? 0 : 1);
+  for (let i = 1; i < ledger.length; i++) { const gap = (ledger[i]-ledger[i-1])/60000; if (gap < S.DEFAULTS.min_gap_minutes) { console.error("GAP VIOLATION", gap.toFixed(0), "min"); ok = false; } }
+  for (const d of ledger) if (!S.isActiveTime(d, S.DEFAULTS)) { console.error("OUTSIDE ACTIVE HOURS", d.toISOString()); ok = false; }
+  const byDay = {}; for (const d of ledger) { const k = d.toISOString().slice(0,10); byDay[k] = (byDay[k]||0)+1; }
+  console.log(`posts=${ledger.length} days=${Object.keys(byDay).length} max/day=${Math.max(0,...Object.values(byDay))} halts=${JSON.stringify(conn.posting_halts||[])} disabled=${!!conn.posting_disabled_until_admin} penalty=${conn.posting_penalty_until||"-"}`);
+  process.exit(ok ? 0 : 1);
 })();' "<test-phone>"
 ```
 
-Expected: exit 0, no violations, status `running` or `completed`, `halt_reason` null. Also open the test account in a normal browser: no warning banners, no "unusual activity" notice.
+and, in a normal browser logged into the test account, open `https://www.facebook.com/accountquality` and note anything there. Record a line per day in the findings file:
 
-- [ ] **Step 5: Record what was measured**
+```
+| day | posts | max/day | gaps ok | halts | accountquality | admin removed | notes |
+```
+
+- [ ] **Step 5: Decide, and only ever downward**
+
+At day 30, with the table in front of you: if there was **no** halt, no `accountquality` entry, and no admin removal, the DEFAULTS stand. If there was **any** of those, lower `daily_cap`/`weekly_cap` and raise `min_gap_minutes` before any real agent is offered Phase 3 — and note that a sample of one account proves little either way; the fleet breaker (Task 18) is what actually protects customers.
 
 Append to `docs/superpowers/plans/2026-09-22-driver-spike-findings.md`:
 
 ```
-## Posting calibration (<date>)
+## Posting calibration (<dates>)
 
 - selectors changed from the plan's defaults: <yes: which | no>
 - dry runs to a clean pass: <n>
-- live post verified in feed: <yes|no>; time to post: <s>
-- 48h standing run: <n> posts, <n> skipped, halt: <none|reason>; account warnings seen: <none|describe>
-- DEFAULTS kept as-is / changed to: <values>
+- live post verified in feed with link comment: <yes|no>; time to post: <s>
+- EGRESS_ASN / POSTING_BROWSER_TYPE used: <…>
+- 30-day table: (above)
+- DEFAULTS kept as-is / lowered to: <values>
+- go / no-go for real agents: <…, signed by …>
 ```
-
-If the 48h run produced any platform signal, **lower** the caps and lengthen the gaps before letting a real agent near this — never the reverse.
 
 - [ ] **Step 6: Commit and push**
 
 ```bash
 cd server && npm test
 cd .. && git add scripts/posting-calibrate.local.js docs/superpowers/plans/2026-09-22-driver-spike-findings.md server/posting-driver.js
-git commit -m "test(posting): calibration script and measured pacing defaults"
+git commit -m "test(posting): calibration script and the thirty-day observation record"
 git push -u origin claude/zen-davinci-lu4hoq
 ```
 
@@ -3940,14 +4789,19 @@ git push -u origin claude/zen-davinci-lu4hoq
 - A non-allowlisted URL still goes to Firecrawl, and only falls back to a browser when Firecrawl errors (Task 6 tests).
 - The embedded browser opens in the dashboard, and `finish` refuses to mark an account connected when nobody logged in (Task 11).
 - `PROFILE_COOKIES_PERSIST` has a recorded answer (Task 12).
-- A campaign in `standing` mode posts to two test groups across two days without ever violating a `posting-safety` invariant (Task 18's ledger shows every gap ≥ the configured minimum, none outside active hours, none on Shabbat).
-- Pressing STOP on a running campaign cancels the next post before it starts (Task 16 test + Task 17 by hand).
-- A simulated checkpoint page halts the account and surfaces the embedded browser as the fix (Task 15 test + Task 17 by hand).
-- No posting session ever returned a `view_url` (Task 16 test).
+- Thirty days of the calibration table (Task 20) with no gap or active-hours violation, and a signed go / no-go.
+- Pressing STOP cancels the next post before it starts (Task 14 test, Task 19 by hand); the WhatsApp stop link does the same without a login (Task 16 test).
+- Per-post approval works from the WhatsApp link, and an approval at 23:40 posts the next morning, not at 23:41 (Task 14 test).
+- A simulated checkpoint disables the account, pauses every campaign on it, and the card says so without offering resume; only an operator can re-enable (Tasks 14, 18, 19).
+- Flipping the kill switch stops every campaign before its next slot; three halted accounts in 24h flip it automatically and message the operator (Task 14 test).
+- Consent is recorded with a version on both the connection and the campaign, and `DELETE /api/connections/browser/facebook` stops campaigns and deletes the profile (Tasks 10, 16).
+- No response from any new route ever contains `wss://` or `viewer.driver.dev`, and no log line does either (Tasks 2, 10, 16 tests).
+- A first-time agent on a phone walks Task 19 step 4 and Task 11 step 5 without being told anything; each state's next action is on screen.
 
 ## Deferred, on purpose
 
 - **Publish-out to Yad2 / Madlan.** Phase 3 posts to Facebook groups only. Yad2 and Madlan are structured listing forms with their own accounts, photo uploads and paid tiers — a separate spec each.
 - **Account-wide bulk sweep** (walking an agent's whole Yad2 office page or Madlan profile) — needs pagination, dedup and a different job shape.
+- **Per-customer landing hostnames.** Every post's comment links one Forly domain, so domain reputation is shared across customers (safety review A3). Right, and an infrastructure project of its own (`PAGE_BASE_URL` per business, certificates, OG). What ships instead: the link in a comment, an opaque group token, and — to add in Task 14 before real agents — a global per-group daily cap across accounts (`group_activity/{slug}.posts_today`, cap 3) so ten Forly agents cannot hit one group in one day.
 - **Browser pools.** They would cut the ~20s session start, but they hold warm browsers against an account-wide cap, and the docs say not to create one unasked. Revisit only if start latency becomes the complaint.
 - **`captchaSolver`.** Off by default; it costs credits. Turn it on per-host, with evidence, after the `hosted_privacy` rung has been seen to fail.
