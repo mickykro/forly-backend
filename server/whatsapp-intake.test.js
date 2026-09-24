@@ -482,5 +482,31 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "עזרה לי למצוא חניה ברחוב", draft: { ...ready, fields: { ...ready.fields, parking: null }, skipped: ["size_sqm", "floor"] } }, d);
   assert.notEqual(t.status, "help", "help words inside a sentence are not a help request");
 
+  // #17 the resume prompt takes the words its own question uses, and when it
+  // still cannot tell, it says so instead of re-asking identically.
+  ({ d } = deps());
+  // updated_at stays at T0: a resume_prompt older than PAUSE_MS is dropped as
+  // expired before any of this runs, which would prove nothing.
+  const atPrompt = { ...ready, status: "resume_prompt", updated_at: T0, pending_opener: { text: null } };
+  for (const [answer, want] of [["להתחיל נכס חדש", "new"], ["נכס חדש", "new"], ["לבטל", "cancel"],
+    ["בטל", "cancel"], ["כן", "resume"], ["להמשיך", "resume"]]) {
+    t = await turn({ text: answer, draft: atPrompt }, d);
+    if (want === "cancel") assert.ok(t.del, `${answer} cancels`);
+    else assert.ok(t.draft && t.status !== "resume_prompt", `${answer} is understood as ${want}`);
+  }
+  t = await turn({ text: "מה קורה פה", draft: atPrompt }, d);
+  assert.equal(t.status, "resume_prompt");
+  assert.match(texts(t), /לא הבנתי/, "an answer it cannot read says so");
+  assert.match(texts(t), /״המשך״.*״חדש״.*״ביטול״/s, "and names the three that work");
+
+  // A mis-heard spoken answer to the prompt now gets the same fuzzy retry the
+  // question paths got; before this it was excluded from didNotLand.
+  const heard = (text) => deps({ transcribe: async () => text }).d;
+  t = await turn({ audioUrl: "https://green/v.ogg", draft: atPrompt }, heard("המשיך"));
+  assert.ok(t.draft && t.status !== "resume_prompt", "a near-miss spoken המשך resumes");
+  t = await turn({ audioUrl: "https://green/v.ogg", draft: atPrompt }, heard("שלום מה נשמע"));
+  assert.equal(t.status, "resume_prompt", "unrelated speech still gets the prompt");
+  assert.match(texts(t), /לא הבנתי/);
+
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

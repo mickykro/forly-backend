@@ -235,7 +235,9 @@ async function offeredTurn(input, deps, draft, now) {
 }
 
 async function resumeTurn(input, deps, draft, now) {
-  const cmd = D.command(input.text);
+  // "כן" to "להמשיך אותה, להתחיל נכס חדש, או לבטל?" means the first one. It is
+  // read that way only here — elsewhere כן is its own answer.
+  const cmd = D.command(input.text) === "yes" ? "resume" : D.command(input.text);
   if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
   if (cmd === "resume") {
     const o = draft.pending_opener || {};
@@ -269,7 +271,7 @@ async function resumeTurn(input, deps, draft, now) {
     }
     return t;
   }
-  return { handled: true, status: "resume_prompt", replies: [R.resumePrompt(D.summary(draft))] };
+  return { handled: true, status: "resume_prompt", replies: [R.resumeUnclear(D.summary(draft))] };
 }
 
 async function activeTurn(input, deps, draft, now) {
@@ -368,9 +370,10 @@ async function handleTurn(input, deps) {
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
 
   // A turn that rejected the message ("invalid:price") or simply repeated
-  // itself without storing anything ("choose") got nothing out of it.
+  // itself without storing anything ("choose", and the resume prompt's own
+  // fallback — which returns no draft, unlike the reply that raises it).
   const didNotLand = (t) => !t.handled || t.status.startsWith("invalid:")
-    || t.status === "not_ours" || (t.status === "choose" && !t.draft);
+    || t.status === "not_ours" || ((t.status === "choose" || t.status === "resume_prompt") && !t.draft);
 
   // Voice note: transcribe and handle it as the typed message it stands for.
   if (input.audioUrl && !input.text) {

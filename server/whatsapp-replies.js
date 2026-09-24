@@ -167,6 +167,13 @@ function help(guideUrl, hasDraft) {
 function resumePrompt(s) {
   return { text: `יש לך טיוטה פתוחה: ${summaryLines(s)}.\nלהמשיך אותה, להתחיל נכס חדש, או לבטל?`, buttons: ["המשך", "חדש", "ביטול"] };
 }
+// Re-sending the question verbatim reads as if the agent said nothing, and
+// hides the fact that only three answers get them out — which is exactly how
+// someone ends up sending the same thing twice. Name them.
+function resumeUnclear(s) {
+  return { text: `לא הבנתי. הטיוטה הפתוחה: ${summaryLines(s)}.\nענו ״המשך״ להמשיך אותה, ״חדש״ לנכס חדש, או ״ביטול״ למחוק אותה.`,
+    buttons: ["המשך", "חדש", "ביטול"] };
+}
 
 const SOURCE_ERRORS = {
   facebook_not_connected: "כדי לקרוא פוסטים מפייסבוק צריך קודם לחבר את עמוד הפייסבוק בפאנל.",
@@ -184,7 +191,7 @@ function noLinkHint(createUrl) {
 }
 
 module.exports = {
-  help,
+  help, resumeUnclear,
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,

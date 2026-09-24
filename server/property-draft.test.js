@@ -21,6 +21,9 @@ assert.equal(D.command("להמשיך"), "resume");
 assert.deepEqual(["עזרה", "הוראות", "מדריך", "איך משתמשים?", "איך זה עובד", "עזרו לי"].map(D.command),
   ["help", "help", "help", "help", "help", "help"], "the words an agent reaches for when lost");
 assert.equal(D.command("איך משתמשים במעלית שבת"), null, "a help word inside a sentence is not a help request");
+assert.deepEqual(["נכס חדש", "להתחיל נכס חדש", "להתחיל חדש"].map(D.command), ["new", "new", "new"],
+  "the longer forms the resume prompt's own question suggests");
+assert.deepEqual(["לבטל", "בטל", "לבטל את הטיוטה"].map(D.command), ["cancel", "cancel", "cancel"]);
 
 assert.equal(D.openerKind("https://x.co/1"), "link");
 assert.equal(D.openerKind("נכס חדש"), "keyword");

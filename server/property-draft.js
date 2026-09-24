@@ -27,7 +27,12 @@ const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "re
   // whole-message matches, so "איך משתמשים" asks for help while "איך משתמשים
   // בממ״ד הזה" stays a description someone is writing for their listing.
   "הוראות": "help", "מדריך": "help", "עזרו לי": "help", "איך משתמשים": "help",
-  "איך זה עובד": "help", "איך עובדים": "help", "מה אפשר לעשות": "help" };
+  "איך זה עובד": "help", "איך עובדים": "help", "מה אפשר לעשות": "help",
+  // The resume prompt asks "להמשיך אותה, להתחיל נכס חדש, או לבטל?" and used to
+  // accept only המשך / חדש / ביטול — not the longer forms its own question
+  // puts in the agent's mouth.
+  "נכס חדש": "new", "להתחיל נכס חדש": "new", "להתחיל חדש": "new",
+  "לבטל": "cancel", "בטל": "cancel", "לבטל את הטיוטה": "cancel" };
 
 // Page designs, in the order create.html's picker lists them (1-6). The first
 // alias is the Hebrew name shown there; create.html preselects the chosen one.
