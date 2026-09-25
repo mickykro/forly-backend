@@ -70,7 +70,9 @@ async function setup(phone = "972500000001", o = {}) {
   }, o.conn || {}));
   const notes = [], ops = [];
   const deps = {
-    config: o.config || cfg, rand: () => 0, env: {}, pageBaseUrl: "https://f.ly", driver: fakeDriver,
+    // Posting is off unless switched on (I5), and runs only in prod or with
+    // POSTING_SWEEPER=1 (C1): the fixtures run as a switched-on production.
+    config: o.config || cfg, rand: () => 0, env: { POSTING_ENABLED: "1", FORLY_ENV: "prod" }, pageBaseUrl: "https://f.ly", driver: fakeDriver,
     clock: () => clk.t, post: o.post || fakePost(),
     notify: async (ph, m) => { notes.push(m); }, notifyOperator: async (m) => { ops.push(m); },
   };

@@ -33,6 +33,7 @@
  *   export FORLY_ENV=local
  *   export CALIBRATE_ACCOUNT_CONFIRMED=1
  *   export CALIBRATE_TEST_PHONES=9725xxxxxxxx
+ *   export POSTING_ENABLED=1             (the env kill switch: posting is off without it)
  *
  *   # dry run (group) — stops before the Post click, three clean passes
  *   node scripts/posting-calibrate.local.js \
@@ -219,8 +220,10 @@ async function main() {
     facebook_pages: kind === "page" ? [{ id: String(args.pageId), url: targetUrl, name: args.pageName || null }] : undefined,
   };
   // A fake db: only what posting-guard.assertAllowed reads. The real guard
-  // logic runs unmodified — this just keeps it off the real connections store.
-  const fakeDb = { getSetting: async () => null, getConnection: async () => conn };
+  // logic runs unmodified — this just keeps it off the real connections store
+  // and the real settings doc. The guard is off unless switched on (the env's
+  // POSTING_ENABLED=1, and a settings/posting doc with enabled: true).
+  const fakeDb = { getSetting: async (k) => (k === "posting" ? { enabled: true } : null), getConnection: async () => conn };
 
   const stepLogger = makeStepLogger(copy);
   const deps = { conn, db: fakeDb, attempts: attemptsWithLogging(stepLogger), withPage: withPageAndProbe(stepLogger) };

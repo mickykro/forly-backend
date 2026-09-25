@@ -260,8 +260,16 @@ if (driverBoot.enabled) {
     greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
     operatorPhone: process.env.POSTING_OPERATOR_PHONE,
   });
-  postingSweeper.startSweeper(postingDeps);
-  console.log("driver: posting sweeper started");
+  // Staging shares production's Firestore and GreenAPI: the sweeper runs only
+  // in prod, or on a local box that opts in with POSTING_SWEEPER=1 — never on
+  // staging (posting-guard.postingEnvAllowed). The mutating /api/posting and
+  // /api/admin/posting routes answer 503 by the same rule.
+  if (require("./posting-guard").postingEnvAllowed(process.env)) {
+    postingSweeper.startSweeper(postingDeps);
+    console.log("driver: posting sweeper started");
+  } else {
+    console.warn("driver: posting sweeper NOT started (FORLY_ENV is not prod and POSTING_SWEEPER is not 1, or this is staging)");
+  }
   // The campaign card's API (consent, campaigns, one-tap links), same deps as the sweeper.
   const createPostingRouter = require("./routes/posting");
   app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET, pageBaseUrl: PAGE_BASE_URL, deps: postingDeps }));

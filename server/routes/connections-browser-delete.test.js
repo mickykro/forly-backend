@@ -4,6 +4,9 @@
    network: driver, db and locks are fakes (or the real profile-lifecycle
    module, where a fake would just duplicate its own tests). */
 process.env.FORLY_ENV = "local";
+// Posting is off unless switched on (I5): the connect flow asks the real
+// guard, so these run with the env switch on and settings/posting enabled.
+process.env.POSTING_ENABLED = "1";
 const assert = require("assert");
 const express = require("express");
 const http = require("http");
@@ -49,7 +52,7 @@ function fakeDb(conn = {}) {
     pending,
     getConnection: async () => conn,
     setConnection: async (p, patch) => Object.assign(conn, patch),
-    getSetting: async () => null,
+    getSetting: async (k) => (k === "posting" ? { enabled: true } : null),
     cancelOpenAttempts: async () => {},
     savePendingDelete: async ({ phone, platform, since, attempts, last_error, gen }) => {
       const id = idFor(platform, phone, gen);

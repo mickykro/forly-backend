@@ -2,6 +2,9 @@
    driver, db, locks, guard and lifecycle are fakes (or the real modules,
    where a fake would just duplicate their own tests). */
 process.env.FORLY_ENV = "local";
+// Posting is off unless switched on (I5): the connect flow asks the real
+// guard, so these run with the env switch on and settings/posting enabled.
+process.env.POSTING_ENABLED = "1";
 const assert = require("assert");
 const express = require("express");
 const http = require("http");
@@ -46,7 +49,7 @@ function fakeDb(conn = {}) {
     pending,
     getConnection: async () => conn,
     setConnection: async (p, patch) => Object.assign(conn, patch),
-    getSetting: async () => null,
+    getSetting: async (k) => (k === "posting" ? { enabled: true } : null),
     cancelOpenAttempts: async () => {},
     savePendingDelete: async ({ phone, platform, since, attempts, last_error, gen }) => {
       const id = idFor(platform, phone, gen);
@@ -110,6 +113,17 @@ function fakeGuard(reason) {
   assert.equal(created.url, "https://www.facebook.com/login");
   assert.ok(created.duration <= 1500, "long enough for SMS 2FA, not an hour");
   assert.ok(String(created.note).startsWith("forly-connect:"));
+
+  // ── posting switched off by default (I5): no settings/posting doc → the real guard refuses a session ──
+  {
+    let made = false;
+    const offDb = Object.assign(fakeDb({}), { getSetting: async () => null });
+    const off = makeApp({ driver: { createSession: async () => { made = true; return { sessionId: "sz", status: "active", cdpUrl: "wss://n/z" }; } }, db: offDb, locks: fakeLocks() });
+    const r = await call(off, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
+    assert.equal(r.status, 409);
+    assert.deepEqual(r.body, { error: "posting_disabled", reason: "global_off" });
+    assert.equal(made, false, "no session is opened while posting is off");
+  }
 
   // ── yad2 and madlan: same flow, own profile names, own check URLs ──
   for (const platform of ["yad2", "madlan"]) {

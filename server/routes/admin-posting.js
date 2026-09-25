@@ -23,6 +23,7 @@ const express = require("express");
 const { normalizeAuthPhone } = require("../utils");
 const { hmacHex } = require("../posting-tx");
 const { redact } = require("../driver-browser");
+const { postingEnvAllowed } = require("../posting-guard");
 
 const MS_DAY = 86400000;
 const PLATFORMS = ["facebook", "yad2", "madlan"];
@@ -107,8 +108,10 @@ function switchView(s, env) {
   for (const p of PLATFORMS) platforms[p] = !(s.platforms && s.platforms[p] === false);
   const lc = s.last_change || null;
   return {
-    enabled: s.enabled !== false, disabled_reason: s.enabled === false ? s.disabled_reason || null : null,
-    version: s.version || 0, enabled_at: s.enabled_at || null, env_forced_off: env.POSTING_ENABLED === "0",
+    // Off unless switched on (I5): a missing doc or enabled !== true is off,
+    // and so is an env without POSTING_ENABLED=1 (as posting-guard reads them).
+    enabled: s.enabled === true, disabled_reason: s.enabled === false ? s.disabled_reason || null : null,
+    version: s.version || 0, enabled_at: s.enabled_at || null, env_forced_off: env.POSTING_ENABLED !== "1",
     platforms, visible_interactions_enabled: s.visible_interactions_enabled !== false,
     changed_by_tail: s.changed_by || null, changed_at: s.changed_at || null, reason: s.reason || null,
     last_change: lc && { what: lc.what, enabled: lc.enabled, by_tail: lc.by_tail, reason: lc.reason, at: lc.at },
@@ -129,6 +132,10 @@ module.exports = function createAdminPostingRouter({
     if (!res.headersSent) res.status(500).json({ error: "internal" });
   });
   router.use((req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
+  // C1: staging shares production's Firestore — no posting mutation outside
+  // prod (or a local box with POSTING_SWEEPER=1). Reads stay.
+  router.use((req, res, next) => (req.method === "GET" || req.method === "HEAD" || postingEnvAllowed(env) ? next()
+    : res.status(503).json({ error: "posting_unavailable_in_env" })));
 
   async function audit(req, action, { phone, reason, detail } = {}) {
     try {
@@ -193,7 +200,7 @@ module.exports = function createAdminPostingRouter({
       .sort((x, y) => (x.at < y.at ? 1 : -1));
     const audit = await section("audit", () => store.listAuditEvents({ sinceMs: now.getTime() - 30 * MS_DAY, limit: 20 }), []);
     // Without the switch doc nothing about the switches is known: null, never a default "on".
-    const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, k === "env_forced_off" ? env.POSTING_ENABLED === "0" : null]));
+    const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, k === "env_forced_off" ? env.POSTING_ENABLED !== "1" : null]));
     res.json(Object.assign(sw, {
       campaigns, halts_24h, halts_by_class,
       // Counted over the disabled list; unknown (never a partial count) when
@@ -245,9 +252,10 @@ module.exports = function createAdminPostingRouter({
     }));
   }
   // Turning the fleet on stamps enabled_at: the fleet breaker counts halts only after it.
+  // The first "on" creates the doc (a missing doc is version 0, and off).
   switchRoute("/switch", () => "global", (cur, on, m) => Object.assign(
     { enabled: on, disabled_reason: on ? null : m.reason, reason: m.reason, changed_by: m.by, changed_at: m.at },
-    on && cur.enabled === false ? { enabled_at: m.at } : {},
+    on && cur.enabled !== true ? { enabled_at: m.at } : {},
     on ? {} : { disabled_at: m.at },
   ));
   switchRoute("/switch/platform", (b) => (PLATFORMS.includes(b.platform) ? `platform:${b.platform}` : null),

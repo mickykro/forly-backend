@@ -223,7 +223,7 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.ok(!stored.some((m) => m.group_id === "slug:haifa.homes" || m.group_id === "777"));
     assert.ok(stored.some((m) => m.group_id === "111"), "the others were synced");
     // The weekly sweep's sync (same runSync, its own deps) does not re-add it either.
-    await sync.runSync({ phone: PH }, { db, env: {}, withPage: async (o, fn) => fn(page), lockHeld: true });
+    await sync.runSync({ phone: PH }, { db, env: env.deps.env, withPage: async (o, fn) => fn(page), lockHeld: true });
     const s1 = await call(env.app, "GET", "/api/posting/settings");
     assert.ok(!s1.body.member_groups.some((g) => g.group_id === "777" || g.group_id === "slug:haifa.homes"));
     assert.deepEqual(s1.body.hidden_group_ids, ["777"]);

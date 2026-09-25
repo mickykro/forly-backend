@@ -29,6 +29,15 @@
 #    same n8n, same NADLAN_JWT_SECRET (the shared secret is what lets dev relay
 #    uploads here at all).
 #
+#    Automated Facebook posting NEVER runs here, whatever staging.env says:
+#    with FORLY_ENV=staging the posting sweeper is not started, and every
+#    mutating /api/posting and /api/admin/posting route answers
+#    503 posting_unavailable_in_env (read-only GETs still work). Staging
+#    shares production's Firestore and GreenAPI, so a staging sweeper would
+#    post from, and message, production's agents. POSTING_SWEEPER=1 does not
+#    override this on staging (server/posting-guard.js postingEnvAllowed).
+#    Do not copy POSTING_* settings into staging.env expecting them to act.
+#
 #    Do NOT set REMOTE_UPLOAD_BASE here. Staging is always on, so the URLs it
 #    stamps are already durable; pointing it at itself is refused at boot
 #    (see resolveRemoteUploadBase in server/upload-relay.js) and pointing it at

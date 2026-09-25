@@ -31,7 +31,7 @@ const lifecycle = {
   revoke: async (a) => { revokes.push(a); await db.setConnection(a.phone, { facebook_profile_state: "revoked" }); return { advice: null }; },
   quarantine: async (phone, platform, cls) => { quarantines.push({ phone, cls }); },
 };
-const env = {};
+const env = { FORLY_ENV: "prod", POSTING_ENABLED: "1" };
 const app = express();
 app.use(express.json());
 app.use("/api/admin/posting", createRouter({ requireAdmin, requireStepUp, db, store, lifecycle, env, deps: { driver: {} } }));
@@ -87,6 +87,41 @@ const noFullPhone = (raw, what) => {
     for (const path of ["/switch/platform", "/switch/visible", `/accounts/${P.captcha}/reenable`, `/accounts/${P.compromised}/revoke-profile`]) {
       assert.equal((await post(path, { reason: "x" }, as(ADMIN, false))).status, 401, path);
     }
+
+    // ── a missing switch doc (I5): off at version 0; the first "on" creates it ──
+    {
+      assert.equal(await db.getSetting("posting"), null);
+      const ov0 = await overview();
+      assert.equal(ov0.body.enabled, false, "no doc is off, never on"); assert.equal(ov0.body.version, 0); assert.equal(ov0.body.env_forced_off, false);
+      const first = await post("/switch", { enabled: true, reason: "launch", version: 0 });
+      assert.equal(first.status, 200, first.raw); assert.equal(first.body.enabled, true); assert.equal(first.body.version, 1);
+      const made = await db.getSetting("posting");
+      assert.equal(made.enabled, true); assert.ok(made.enabled_at, "the first on stamps enabled_at");
+      db.mem.settings.delete("posting");
+      // enabled must be strictly true
+      db.mem.settings.set("posting", { enabled: "true", version: 4 });
+      assert.equal((await overview()).body.enabled, false);
+      db.mem.settings.delete("posting");
+    }
+    // ── the env: POSTING_ENABLED other than "1" is forced off; outside prod every POST is 503 (C1), GETs stay ──
+    for (const [e, allowed] of [[{ FORLY_ENV: "staging", POSTING_SWEEPER: "1", POSTING_ENABLED: "1" }, false], [{ FORLY_ENV: "local" }, false], [{ FORLY_ENV: "local", POSTING_SWEEPER: "1" }, true]]) {
+      const appE = express();
+      appE.use(express.json());
+      appE.use("/p", createRouter({ requireAdmin, requireStepUp, db, store, lifecycle, env: e, deps: { driver: {} } }));
+      const sE = await new Promise((r) => { const sv = appE.listen(0, () => r(sv)); });
+      try {
+        const g = await call(sE, "GET", "/p/overview", as(ADMIN, false));
+        assert.equal(g.status, 200); assert.equal(g.body.env_forced_off, e.POSTING_ENABLED !== "1");
+        // Allowed: reaches the route (a stale version → 409, nothing written). Refused: 503 before anything.
+        const paths = allowed ? ["/switch"] : ["/switch", "/switch/platform", "/switch/visible", `/accounts/${P.captcha}/reenable`, `/accounts/${P.compromised}/revoke-profile`];
+        for (const path of paths) {
+          const r = await call(sE, "POST", `/p${path}`, as(ADMIN), { enabled: true, reason: "x", version: 99 });
+          if (allowed) assert.equal(r.status, 409, path);
+          else assert.deepEqual([r.status, r.body], [503, { error: "posting_unavailable_in_env" }], `${JSON.stringify(e)} ${path}`);
+        }
+      } finally { sE.close(); }
+    }
+    assert.equal(await db.getSetting("posting"), null, "nothing was written by a refused POST");
 
     // ── global switch: validated, compare-and-set, audited ──
     assert.equal((await post("/switch", { enabled: "no", reason: "x", version: 0 })).status, 400);
@@ -260,7 +295,7 @@ const noFullPhone = (raw, what) => {
     // ── every mutation wrote an audit event, tails only, kept a year ──
     const events = await store.listAuditEvents({ limit: 100 });
     const actions = events.map((e) => e.action).sort();
-    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible"]);
+    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible"]);
     for (const e of events) {
       assert.ok(/^\d{4}$/.test(e.operator_tail), JSON.stringify(e));
       assert.ok(e.target_phone_tail === null || /^\d{4}$/.test(e.target_phone_tail));
@@ -276,7 +311,7 @@ const noFullPhone = (raw, what) => {
     const scRow = ov.body.halts_by_class.suspected_compromise.find((a) => a.phone_tail === "0011");
     assert.equal(scRow.needs_agent_confirmation, true); assert.equal(scRow.reconnected_after_halt, false);
     assert.equal((await call(server, "GET", "/api/admin/posting/overview", as(OWNER, false))).body.is_owner, true);
-    assert.equal(ov.body.recent_audit.length, 13);
+    assert.equal(ov.body.recent_audit.length, 14);
 
     // ── the overview degrades: a failing section is named in warnings, the rest loads, 200 ──
     {

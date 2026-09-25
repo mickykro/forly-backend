@@ -17,6 +17,7 @@ const express = require("express");
 const A = require("../posting-account");
 const S_ = require("./posting-shared");
 const { escapeHtml: esc } = require("../utils");
+const { postingEnvAllowed } = require("../posting-guard");
 
 const { CONSENT_VERSION, publicView, wrap, allowed, card } = S_;
 const MAX_ACTIVE_CAMPAIGNS = 3;
@@ -71,6 +72,11 @@ module.exports = function createPostingRouter(ctx) {
   const { db, store, campaigns, deps, authSecret } = S;
   const auth = ctx.requireAuth(authSecret);
   const router = express.Router();
+  // C1: staging shares production's Firestore — nothing here changes a
+  // campaign, a permission or a membership outside prod (or a local box with
+  // POSTING_SWEEPER=1). Read-only GETs stay.
+  router.use((req, res, next) => (req.method === "GET" || req.method === "HEAD" || postingEnvAllowed(ctx.env || deps.env || process.env) ? next()
+    : res.status(503).json({ error: "posting_unavailable_in_env" })));
 
   async function owned(req, res) {
     const id = String(req.params.id || "");

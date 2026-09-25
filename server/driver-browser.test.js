@@ -337,9 +337,18 @@ async function quiet(fn) {
   assert.deepEqual(B({}), { fatal: null, enabled: false, missing: [], devView: false }, "unset FORLY_ENV still boots");
   assert.ok(B({ FORLY_ENV: "production" }).fatal);
   assert.ok(B({ FORLY_ENV: "" }).fatal);
-  assert.ok(B({ NODE_ENV: "production" }).fatal, "production needs FORLY_ENV=prod");
-  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "staging" }).fatal);
+  // I12: production without FORLY_ENV boots when Driver could not be on anyway (no key, no FORLY_ENV) — Driver stays off
+  assert.deepEqual(B({ NODE_ENV: "production" }), { fatal: null, enabled: false, missing: [], devView: false }, "no Driver key, no FORLY_ENV: boots, Driver off");
+  assert.deepEqual(B({ NODE_ENV: "production", PROFILE_KEY: "p" }), { fatal: null, enabled: false, missing: [], devView: false });
+  assert.ok(B({ NODE_ENV: "production", DRIVER_API_KEY: "k" }).fatal, "a Driver key in production needs FORLY_ENV=prod");
+  assert.ok(B({ NODE_ENV: "production", DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).fatal);
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "staging" }).fatal, "a FORLY_ENV other than prod in production");
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "local" }).fatal);
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "staging", DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).fatal);
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "production" }).fatal, "an invalid FORLY_ENV stays fatal");
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "" }).fatal);
   assert.equal(B({ NODE_ENV: "production", FORLY_ENV: "prod" }).fatal, null);
+  assert.deepEqual(B({ NODE_ENV: "production", FORLY_ENV: "prod", DRIVER_API_KEY: "k", PROFILE_KEY: "p" }), { fatal: null, enabled: true, missing: [], devView: false });
   assert.ok(B({ DRIVER_DEV_VIEW: "1" }).fatal, "the viewer needs FORLY_ENV=local");
   assert.ok(B({ DRIVER_DEV_VIEW: "1", FORLY_ENV: "staging" }).fatal);
   assert.ok(B({ DRIVER_DEV_VIEW: "1", FORLY_ENV: "local", NODE_ENV: "production" }).fatal);

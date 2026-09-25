@@ -36,15 +36,34 @@
 #                                       # second disabling halt in 30 days); comma-separated; unset →
 #                                       # those re-enables are refused
 #      FORLY_ENV=prod                   # prod|staging|local; any other value refuses to boot, and
-#                                       # NODE_ENV=production without FORLY_ENV=prod refuses too
+#                                       # NODE_ENV=production with DRIVER_API_KEY or FORLY_ENV set but
+#                                       # FORLY_ENV not prod refuses too (unset + no Driver key boots,
+#                                       # Driver off). Automated posting runs ONLY with FORLY_ENV=prod.
 #      PROFILE_KEY=...                  # openssl rand -hex 32; keys the Driver browser-profile names.
 #                                       # Driver features stay OFF unless DRIVER_API_KEY, PROFILE_KEY
 #                                       # and FORLY_ENV are all set. Never rotate it casually: a new
 #                                       # key orphans every agent's connected browser profile.
+#      DRIVER_MAX_CONCURRENT=2          # Driver browser sessions this container opens at once, of any
+#                                       # kind (extract, connect, post, dwell, re-check, sync); default 2.
+#                                       # Keep it at or under the Driver plan's concurrency limit.
+#      POSTING_ENABLED=1                # the env kill switch for automated posting: it must be exactly
+#                                       # "1", anything else (unset included) keeps posting OFF. It is
+#                                       # also OFF until an operator turns the admin switch on (the
+#                                       # settings/posting doc is created by that first "on").
+#                                       # Connecting a browser account (/api/connections/browser/start)
+#                                       # asks the same switches, so it is refused while posting is off.
+#      POSTING_SWEEPER=                 # leave unset in prod (FORLY_ENV=prod already runs the posting
+#                                       # sweeper). "1" opts a LOCAL box in to the sweeper and the
+#                                       # mutating posting routes; it never does on staging.
+#      POSTING_OPERATOR_PHONE=972...    # one WhatsApp number that gets operator alerts: the fleet
+#                                       # breaker, R3 mismatches, profile deletes failing for 7+ days.
+#                                       # Unset → those alerts are only logged.
 #      POSTING_PROXY_HOPS=1             # reverse proxies in front of the container that APPEND to
 #                                       # X-Forwarded-For (default 1). Campaign-link visit counting
 #                                       # (posting-attribution.js) keys its rate limit on the entry
 #                                       # at len - hops, never the client-controlled leftmost one.
+#      POSTING_BROWSER_TYPE=hosted      # the Driver browser type the posting and re-check sessions
+#                                       # ask for (default "hosted"); change only after calibration.
 #    and place the Firebase service-account key at /root/forly-backend/sa-key.json
 #    NOTE: use the SAME NADLAN_JWT_SECRET the Cloud Functions used, so existing
 #    agent session cookies keep working after the cutover to this server.

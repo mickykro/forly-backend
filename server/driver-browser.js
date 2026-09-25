@@ -45,13 +45,17 @@ function driverMissing(env) {
 const driverEnabled = (env = process.env) => !!env.DRIVER_API_KEY && driverMissing(env).length === 0;
 
 // index.js's boot decision, as a pure function: `fatal` → refuse to start.
-// An unset FORLY_ENV still boots (profileName refuses when called); a wrong
-// one does not. The dev viewer exists only on a local, non-production box.
+// An unset FORLY_ENV still boots (profileName refuses when called; Driver
+// stays off); a wrong one does not. NODE_ENV=production without
+// FORLY_ENV=prod is fatal only when Driver could be on — DRIVER_API_KEY or a
+// FORLY_ENV is set (I12): a production box with neither simply runs without
+// Driver. The dev viewer exists only on a local, non-production box.
 function bootCheck(env = process.env) {
   const out = { fatal: null, enabled: false, missing: [], devView: false };
   const fatal = (msg) => Object.assign(out, { fatal: msg });
   if (env.FORLY_ENV !== undefined && !ENVS.includes(env.FORLY_ENV)) return fatal(`FORLY_ENV must be prod|staging|local (got "${env.FORLY_ENV}")`);
-  if (env.NODE_ENV === "production" && env.FORLY_ENV !== "prod") return fatal("NODE_ENV=production requires FORLY_ENV=prod");
+  const driverWanted = !!env.DRIVER_API_KEY || env.FORLY_ENV !== undefined;
+  if (env.NODE_ENV === "production" && env.FORLY_ENV !== "prod" && driverWanted) return fatal("NODE_ENV=production requires FORLY_ENV=prod");
   if (env.DRIVER_DEV_VIEW === "1") {
     if (env.FORLY_ENV !== "local" || env.NODE_ENV === "production") {
       return fatal("DRIVER_DEV_VIEW=1 is allowed only with FORLY_ENV=local and NODE_ENV not production — unset it");

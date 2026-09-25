@@ -214,5 +214,32 @@ const { db, store } = K;
     assert.equal(createRouter.publicView(null), null);
   }
 
+  // ── C1: outside prod (without POSTING_SWEEPER=1, never on staging) every mutation is 503; reads stay ──
+  {
+    const env = await setup();
+    const c = await pendingCampaign(env);
+    const before = JSON.stringify(await store.getPostingCampaign(c.id));
+    const perm = JSON.stringify((await db.getConnection(PH)).posting_permission);
+    for (const e of [{ FORLY_ENV: "staging", POSTING_ENABLED: "1", POSTING_SWEEPER: "1" }, { FORLY_ENV: "local", POSTING_ENABLED: "1" }]) {
+      const app = R.makeApp({ deps: Object.assign({}, env.deps, { env: e }) });
+      const writes = [
+        ["POST", "/api/posting/campaigns", consented()], ["POST", `/api/posting/campaigns/${c.id}/pause`], ["POST", `/api/posting/campaigns/${c.id}/stop`],
+        ["POST", `/api/posting/campaigns/${c.id}/resume`], ["POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`], ["POST", `/api/posting/campaigns/${c.id}/posts/p1/skip`],
+        ["PUT", "/api/posting/settings", { enabled: false }], ["POST", "/api/posting/groups/resync"], ["DELETE", "/api/posting/groups/111"],
+        ["POST", "/api/posting/groups/111/unhide"], ["POST", "/api/posting/act?c=x"],
+      ];
+      for (const [m, path, body] of writes) {
+        const r = await call(app, m, path, body);
+        assert.deepEqual([r.status, r.body], [503, { error: "posting_unavailable_in_env" }], `${e.FORLY_ENV} ${m} ${path}`);
+      }
+      assert.equal((await call(app, "GET", `/api/posting/campaigns/${c.id}`)).status, 200);
+      assert.equal((await call(app, "GET", "/api/posting/settings")).status, 200);
+    }
+    assert.equal(JSON.stringify(await store.getPostingCampaign(c.id)), before, "nothing changed");
+    assert.equal(JSON.stringify((await db.getConnection(PH)).posting_permission), perm);
+    const local = R.makeApp({ deps: Object.assign({}, env.deps, { env: { FORLY_ENV: "local", POSTING_ENABLED: "1", POSTING_SWEEPER: "1" } }) });
+    assert.equal((await call(local, "POST", `/api/posting/campaigns/${c.id}/pause`)).status, 200, "a local box with POSTING_SWEEPER=1 may");
+  }
+
   console.log("routes/posting.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

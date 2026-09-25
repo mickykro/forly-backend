@@ -21,22 +21,32 @@ function deny(reason) {
   throw e;
 }
 
+// Which environment may run automated posting at all (C1): staging shares
+// production's Firestore and GreenAPI, so it never may. Production does; a
+// local box only with POSTING_SWEEPER=1. index.js starts the sweeper on it,
+// and the mutating /api/posting and /api/admin/posting routes answer 503
+// posting_unavailable_in_env without it. Pure.
+function postingEnvAllowed(env = {}) {
+  if (!env || env.FORLY_ENV === "staging") return false;
+  return env.FORLY_ENV === "prod" || env.POSTING_SWEEPER === "1";
+}
+
 // The fleet-level half: the env switch, the global switch and the platform
 // switch — no account involved. The sweeper asks this before anything else
 // (after reaping); assertAllowed() asks it first, in the same order.
-// → the settings/posting doc (or null).
+// Off unless switched on (I5): the env must say POSTING_ENABLED=1, and the
+// settings/posting doc must exist with enabled === true — a missing doc, or
+// any other value, is global_off. → the settings/posting doc.
 async function assertFleetAllowed({ platform } = {}, deps = {}) {
   const db = deps.db || dbLive;
   const env = deps.env || process.env;
 
-  if (env.POSTING_ENABLED === "0") deny("env_off");
+  if (env.POSTING_ENABLED !== "1") deny("env_off");
 
   const settings = await db.getSetting("posting");
-  if (settings) {
-    if (settings.enabled === false) deny("global_off");
-    if (platform && settings.platforms && settings.platforms[platform] === false) deny("platform_off");
-  }
-  return settings || null;
+  if (!settings || settings.enabled !== true) deny("global_off");
+  if (platform && settings.platforms && settings.platforms[platform] === false) deny("platform_off");
+  return settings;
 }
 
 // action ∈ "reserve" | "session" | "navigate" | "post" | "like" | "story" | "dwell" | "retry"
@@ -44,7 +54,7 @@ async function assertAllowed({ phone, platform, action }, deps = {}) {
   const db = deps.db || dbLive;
 
   const settings = await assertFleetAllowed({ platform }, deps);
-  if (settings && VISIBLE_ACTIONS.has(action) && settings.visible_interactions_enabled === false) deny("visible_off");
+  if (VISIBLE_ACTIONS.has(action) && settings.visible_interactions_enabled === false) deny("visible_off");
 
   const nowMs = deps.now instanceof Date ? deps.now.getTime() : Date.now();
   const conn = (await db.getConnection(phone)) || {};
@@ -69,4 +79,4 @@ async function assertAllowed({ phone, platform, action }, deps = {}) {
   return true;
 }
 
-module.exports = { assertAllowed, assertFleetAllowed };
+module.exports = { assertAllowed, assertFleetAllowed, postingEnvAllowed };
