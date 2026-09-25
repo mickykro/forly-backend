@@ -45,7 +45,9 @@ const isCounting = (a) => countingStates.includes(a.state) || (a.state === "veri
 // Fields `detail` may never overwrite: they are the attempt's identity and bookkeeping.
 const PROTECTED = new Set(["key", "state", "history", "lease_until", "reserved_at", "finished_at", "updated_at", "released", "failed_after_submit",
   "phone", "page_id", "campaign_id", "post_id", "target_type", "target_id", "target_url", "publisher", "platform", "date",
-  "budget_key", "activity_key", "dedup_key", "fingerprint", "copy_hash", "confirm_membership"]);
+  "budget_key", "activity_key", "dedup_key", "fingerprint", "copy_hash", "confirm_membership",
+  "click_id", "click_issued_at", "click_expires_at"]);
+const CLICK_TTL_MS = 30 * 86400000; // R4: a click id resolves for 30 days
 
 const HEX = /^[0-9a-f]{1,64}$/;
 
@@ -91,6 +93,9 @@ async function reserveAttempt(input = {}) {
   const fp = cleanFingerprint(input.fingerprint);
   const campaign_id = optString(input.campaign_id, "campaign_id"), post_id = optString(input.post_id, "post_id");
   const target_url = optString(input.target_url, "target_url"), copy_hash = optString(input.copy_hash, "copy_hash");
+  // R4: the campaign link's ?c= id, issued per attempt (16 random bytes, hex).
+  const click_id = input.click_id === undefined || input.click_id === null ? null : input.click_id;
+  if (click_id !== null && (typeof click_id !== "string" || !/^[0-9a-f]{32}$/.test(click_id))) throw fail("invalid_input", "click_id must be 32 hex characters");
   const dailyCap = capOf(input.limits, "daily_cap");
   const groupCap = target_type === "group" ? capOf(input.limits, "group_global_daily_cap") : null;
   const now = toDate(input.now);
@@ -119,6 +124,7 @@ async function reserveAttempt(input = {}) {
       reserved_at: at, updated_at: at, date, phone, page_id,
       campaign_id, post_id, target_type, target_id, target_url, publisher,
       copy_hash, confirm_membership: input.confirm_membership === true,
+      click_id, click_issued_at: click_id ? at : null, click_expires_at: click_id ? new Date(now.getTime() + CLICK_TTL_MS).toISOString() : null,
       fingerprint: fpEntry, budget_key: bKey, activity_key: aKey, dedup_key: dKey,
       history: [{ state: "reserved", at }],
     };

@@ -18,8 +18,11 @@ function deny(reason) {
   throw e;
 }
 
-// action ∈ "reserve" | "session" | "navigate" | "post" | "like" | "story" | "dwell" | "retry"
-async function assertAllowed({ phone, platform, action }, deps = {}) {
+// The fleet-level half: the env switch, the global switch and the platform
+// switch — no account involved. The sweeper asks this before anything else
+// (after reaping); assertAllowed() asks it first, in the same order.
+// → the settings/posting doc (or null).
+async function assertFleetAllowed({ platform } = {}, deps = {}) {
   const db = deps.db || dbLive;
   const env = deps.env || process.env;
 
@@ -28,9 +31,17 @@ async function assertAllowed({ phone, platform, action }, deps = {}) {
   const settings = await db.getSetting("posting");
   if (settings) {
     if (settings.enabled === false) deny("global_off");
-    if (settings.platforms && settings.platforms[platform] === false) deny("platform_off");
-    if (VISIBLE_ACTIONS.has(action) && settings.visible_interactions_enabled === false) deny("visible_off");
+    if (platform && settings.platforms && settings.platforms[platform] === false) deny("platform_off");
   }
+  return settings || null;
+}
+
+// action ∈ "reserve" | "session" | "navigate" | "post" | "like" | "story" | "dwell" | "retry"
+async function assertAllowed({ phone, platform, action }, deps = {}) {
+  const db = deps.db || dbLive;
+
+  const settings = await assertFleetAllowed({ platform }, deps);
+  if (settings && VISIBLE_ACTIONS.has(action) && settings.visible_interactions_enabled === false) deny("visible_off");
 
   const conn = (await db.getConnection(phone)) || {};
   if (conn.posting_disabled_until_admin === true) deny("account_disabled");
@@ -49,4 +60,4 @@ async function assertAllowed({ phone, platform, action }, deps = {}) {
   return true;
 }
 
-module.exports = { assertAllowed };
+module.exports = { assertAllowed, assertFleetAllowed };

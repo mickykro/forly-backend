@@ -334,6 +334,6 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 
 module.exports = {
   DEFAULTS, CALENDAR_OK, nextSlot, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
-  wantsBrowseSession, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
+  wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },
 };
