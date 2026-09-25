@@ -151,7 +151,10 @@ function planSeed(phone, key = process.env.PROFILE_KEY) {
 
 // The group_activity/{group_id}|{date} doc id (Task 16 writes it, R7: the
 // Jerusalem calendar date, never the UTC date).
-function activityKey(group_id, date) { return `${group_id}|${localDate(date, DEFAULTS.timezone)}`; }
+function activityKey(group_id, date) { return `${group_id}|${jerusalemDate(date)}`; }
+// The Asia/Jerusalem calendar date (YYYY-MM-DD) of an instant — the one key
+// every daily bucket uses (R7). Accepts a Date, an ISO string or epoch ms.
+function jerusalemDate(date) { return localDate(new Date(date), DEFAULTS.timezone); }
 
 // settings/posting may override a small, explicit allowlist of DEFAULTS
 // without a deploy. Anything else in `settings` — and any non-positive-
@@ -330,7 +333,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 }
 
 module.exports = {
-  DEFAULTS, CALENDAR_OK, nextSlot, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, configFrom, fingerprint,
+  DEFAULTS, CALENDAR_OK, nextSlot, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
   wantsBrowseSession, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },
 };

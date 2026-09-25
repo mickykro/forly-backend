@@ -288,11 +288,11 @@ async function setConnection(phone, patch) {
   mem.connections.set(phone, deepMerge(mem.connections.get(phone) || {}, sealed));
 }
 
-// Stub: `posting_attempts` doesn't exist yet (Task 16 adds it and fills this
-// in). profile-lifecycle.js's revoke() calls it so a revoked/quarantined
+// posting_attempts live in posting-store.js (lazy require: no load cycle).
+// profile-lifecycle.js's revoke()/quarantine() call it so a revoked/quarantined
 // profile's reserved/session_started/composer_ready attempts stop instead of
 // running against a profile that assertOwnership now refuses.
-async function cancelOpenAttempts(phone, platform) {}
+const cancelOpenAttempts = (...a) => require("./posting-store").cancelOpenAttempts(...a);
 
 // ── operator settings (compare-and-set) ──
 // One doc per key (e.g. "posting"), read by posting-guard.js on every
