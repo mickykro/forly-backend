@@ -20,11 +20,15 @@
  *   session_failure    the session did not open, or a login wall / checkpoint / captcha … was shown
  *   selector_failure   the page loaded but nothing on it could be read
  *   unknown            the destination could not be proven
- * Only confirmed_removed feeds a penalty; every other state but visible adds
- * one to settings/posting_health.recheck_anomalies[state] and nothing else.
+ * Only confirmed_removed feeds the removal penalty; every other state but
+ * visible adds one to settings/posting_health.recheck_anomalies[state]. A
+ * halting signal on either page (checkpoint, captcha, restricted, rate limit,
+ * feature block, login wall) also ends the session there and halts the
+ * account (haltAccount, idempotent), as reconcileOne does.
  * A non-final state is looked at again (6 h later; a first absence 24 h
  * later), at most MAX_TRIES sessions and never past a week after posting.
  */
+const safety = require("./posting-safety");
 const { redact } = require("./driver-browser");
 const { profileName } = require("./profile-name");
 const A = require("./posting-account");
@@ -40,6 +44,9 @@ const DEFER_MS = 24 * MS_HOUR; // an account that may not be looked at now
 const GIVE_UP_MS = 7 * MS_DAY;
 const FINAL = new Set(["visible", "confirmed_removed"]);
 const GROUP_CLOSED = new Set(["not_member", "group_blocked"]);
+const HALTING = new Set([...safety.SIGNAL_DISABLES, ...safety.SIGNAL_PENALISES, "login_required"]);
+// The halting signal an observation saw, on the post or on the group page, or null.
+const haltingOf = (o) => [o && o.r && o.r.signal, o && o.gSignal].find((s) => HALTING.has(s)) || null;
 const code = (e) => (e && (e.code || e.name)) || "error";
 
 // The account may not be looked at: disabled, owner review, penalised, or waiting for a reconnect.
@@ -57,7 +64,8 @@ function permalinkInGroup(postUrl, ids) {
 
 // In the session, after a clean "not found": is the group itself reachable?
 // → accessible | access_denied | session_failure | unknown | posting_disabled
-async function groupState(page, a, ids, pageDeps) {
+// (a non-ok signal is left on `seen.signal`).
+async function groupState(page, a, ids, pageDeps, seen = {}) {
   const P = require("./posting-driver-proof");
   try { await pageDeps.guard.assertAllowed({ phone: pageDeps.phone, platform: "facebook", action: "navigate" }, pageDeps); } // R2
   catch (e) { if (e && e.code === "posting_disabled") return "posting_disabled"; throw e; }
@@ -66,6 +74,7 @@ async function groupState(page, a, ids, pageDeps) {
   await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
   if (!loaded) return "session_failure";
   const sig = await P.readSignal(page, "");
+  if (sig !== "ok") seen.signal = sig;
   if (GROUP_CLOSED.has(sig)) return "access_denied";
   if (sig !== "ok") return "session_failure";
   const id = await P.readTargetId(page, "group");
@@ -138,7 +147,8 @@ async function visit(phone, due, conn, deps, x) {
         const r = await recheck(page, a.post_url, pageDeps);
         const ids = idsOf.get(a.key);
         const obs = { a, r, inGroup: permalinkInGroup(a.post_url, ids) };
-        if (r && r.state === "not_found" && a.state !== "submitted_for_approval" && obs.inGroup) obs.g = await groupState(page, a, ids, pageDeps);
+        if (r && r.state === "not_found" && a.state !== "submitted_for_approval" && obs.inGroup) obs.g = await groupState(page, a, ids, pageDeps, obs.gs = {});
+        obs.gSignal = obs.gs && obs.gs.signal;
         out.push(obs);
         // The kill switch, or a page that is not the group's (a login wall, a checkpoint…): stop here.
         if (!r || obs.g === "posting_disabled" || obs.g === "session_failure" || (r.signal && !GROUP_CLOSED.has(r.signal) && r.signal !== "pending_approval")) break;
@@ -187,9 +197,15 @@ async function recheckOne(deps = {}, now) {
       await x.store.recordRecheck(a.key, patch, now);
     }
     await noteAnomalies(x, anomalies, now).catch((e) => console.error(redact(`posting recheck health: ${code(e)}`)));
+    // A halting page halts the account (R5), as a post or a reconcile would. The session already stopped there.
+    const obs = seen.find(haltingOf);
+    if (obs) {
+      try { await H.haltAccount(phone, haltingOf(obs), deps, { campaignId: obs.a.campaign_id }); } // stamped with the clock now
+      catch (e) { console.error(redact(`posting recheck halt ${tail(phone)}: ${code(e)}`)); }
+    }
     return "rechecked";
   }
   return byPhone.size ? "skipped" : "none";
 }
 
-module.exports = { recheckOne, MAX_POSTS, SESSION_S, MAX_TRIES, _test: { classify, patchFor, accountSkipped, permalinkInGroup, groupState } };
+module.exports = { recheckOne, MAX_POSTS, SESSION_S, MAX_TRIES, _test: { classify, patchFor, accountSkipped, permalinkInGroup, groupState, haltingOf, HALTING } };

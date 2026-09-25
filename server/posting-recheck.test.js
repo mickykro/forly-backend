@@ -30,7 +30,8 @@ async function posted(id, at = NOW, end = "verified_posted") {
 
 // deps for recheckOne: a fake Driver session over a fake page, a recording
 // recheckPost, and a spy on the real guard.
-function harness(deps, { results = {}, page = {}, openThrows = null } = {}) {
+function harness(deps, { results = {}, page = {}, openThrows = null, real = false } = {}) {
+  const realRecheck = require("./social-dwell").recheckPost;
   const ev = [], seen = [], opened = [];
   const guard = {
     assertFleetAllowed: guardLive.assertFleetAllowed,
@@ -43,6 +44,7 @@ function harness(deps, { results = {}, page = {}, openThrows = null } = {}) {
     recheckPost: async (p, url, rd) => {
       seen.push({ url, deps: rd });
       ev.push("recheck");
+      if (real) return realRecheck(p, url, rd);
       const id = (url.match(/groups\/(\d+)\//) || [])[1];
       const r = typeof results[id] === "function" ? results[id]() : results[id];
       return r || { state: "visible", reactions: 5, comments: 1 };
@@ -115,17 +117,45 @@ function harness(deps, { results = {}, page = {}, openThrows = null } = {}) {
     assert.deepEqual(await health(), { access_denied: 2, selector_failure: 1 });
     assert.equal(((await conn()).posting_halts || []).length, 0, "nothing but an anomaly");
 
-    // a login wall / checkpoint mid-session: session_failure, the session stops there, no halt
+    // a checkpoint URL mid-session (the real recheckPost): session_failure, the
+    // session stops there, and the account halts with `checkpoint` (R5)
     const { deps: d2 } = await setup();
     const b1 = await posted("111"), b2 = await posted("222");
-    const h2 = harness(d2, { results: { 111: { state: "unknown", reactions: null, comments: null, signal: "checkpoint" } } });
+    const h2 = harness(d2, { real: true, page: { redirect: () => "https://www.facebook.com/checkpoint/1501092823525282/" } });
     await R.recheckOne(h2.d, new Date(NOW.getTime() + 25 * HOUR));
     assert.equal((await store.getAttempt(b1.key)).visibility, "session_failure");
-    assert.equal(h2.seen.length, 1, "no further navigation on a checkpoint page");
+    assert.equal(h2.seen.length, 1, "no further post visited after a checkpoint");
+    assert.equal(h2.pg.st.visited.length, 1, "one navigation, then the session stops");
     const c2 = await store.getAttempt(b2.key);
     assert.equal(c2.visibility, undefined); assert.equal(c2.recheck_tries, undefined, "not visited: no try used");
     assert.ok(c2.recheck_due_at > iso(NOW.getTime() + 25 * HOUR));
-    assert.equal(((await conn()).posting_halts || []).length, 0);
+    const k2 = await conn();
+    assert.deepEqual((k2.posting_halts || []).map((h) => h.code), ["checkpoint"], "haltAccount called with checkpoint");
+    assert.equal(k2.posting_disabled_until_admin, true);
+    assert.equal((await health()).session_failure, 1, "the anomaly is recorded too");
+    // seen again later: idempotent (the disabled account is not even opened)
+    const h2b = harness(d2, { real: true, page: { redirect: () => "https://www.facebook.com/checkpoint/1/" } });
+    await R.recheckOne(h2b.d, new Date(NOW.getTime() + 40 * HOUR));
+    assert.equal(h2b.opened.length, 0);
+    assert.equal(((await conn()).posting_halts || []).length, 1);
+
+    // a login wall on the GROUP page after a clean "not found": login_required, no removal
+    const { deps: d6 } = await setup();
+    const l1 = await posted("111"); await posted("222");
+    const h6 = harness(d6, { results: { 111: { state: "not_found", reactions: null, comments: null } }, page: { redirect: (u) => (/\/posts\//.test(u) ? u : "https://www.facebook.com/login/?next=x") } });
+    await R.recheckOne(h6.d, new Date(NOW.getTime() + 25 * HOUR));
+    const l = await store.getAttempt(l1.key);
+    assert.equal(l.visibility, "session_failure"); assert.equal(l.first_absent_at, undefined);
+    assert.equal(h6.seen.length, 1, "the session stops at the login wall");
+    const k6 = await conn();
+    assert.deepEqual((k6.posting_halts || []).map((h) => h.code), ["login_required"]);
+    assert.equal(k6.facebook_needs_reconnect, true);
+    // a rate-limit signal on the post: a penalty
+    const { deps: d7 } = await setup();
+    await posted("111");
+    const h7 = harness(d7, { results: { 111: { state: "unknown", reactions: null, comments: null, signal: "rate_limited" } } });
+    await R.recheckOne(h7.d, new Date(NOW.getTime() + 25 * HOUR));
+    assert.ok((await conn()).posting_penalty_until, "rate_limited → penalty");
 
     // not found, but the group shows Join: access_denied, never a first absence
     const { deps: d3 } = await setup();
