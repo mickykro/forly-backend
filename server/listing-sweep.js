@@ -92,7 +92,9 @@ async function sweep({ platform, phone }, deps) {
       duration: 300, note: `forly-sweep:${platform}`, type: "hosted", country: "IL",
       profile: { name: profileName(platform, phone), persist: true },
     };
-    const { landedUrl, text, ads } = await withPage(opts, (page) => readMyAds(page, url));
+    // We hold the lock (above); withPage still asserts the name is this
+    // phone's, and refuses a revoked or quarantined connection.
+    const { landedUrl, text, ads } = await withPage(opts, (page) => readMyAds(page, url), { phone, platform, lockHeld: true, conn });
     if (isLoginWall(landedUrl, text)) throw fail("social_login_required", "login wall");
 
     const listings = await db.listListingsByPhone(phone);

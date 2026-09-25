@@ -10,8 +10,60 @@
  * fix, so looping only burns time; 503 is capacity, which time does fix.
  *
  * Every function takes `deps` so the tests drive the whole lifecycle with fakes.
+ *
+ * A session's cdpUrl is full remote control of a browser that may hold an
+ * agent's logged-in cookies. It never leaves this module except through
+ * consumeViewerGrant() (one operator, one use, five minutes), and nothing
+ * logged here carries it, a viewer URL, or a profile name — see redact().
  */
+const crypto = require("crypto");
+const profileLock = require("./profile-lock");
+const profileNames = require("./profile-name");
+
 const API = "https://api.driver.dev";
+
+const PROFILE_RE = /(facebook|yad2|madlan|instagram|tiktok|linkedin|x)-(prod|staging|local)-[0-9a-f]{20}(-r\d+)?/g;
+function redact(msg) {
+  return String(msg)
+    .replace(PROFILE_RE, "[profile]")
+    .replace(/wss?:\/\/\S+/g, "[cdp]")
+    .replace(/ws=\S+/g, "ws=[cdp]");
+}
+const shortId = (id) => `…${String(id || "").slice(-6)}`;
+const logError = (msg) => console.error(redact(msg));
+
+// Driver features need all three: the API key, the key that makes profile
+// names unguessable, and an environment to keep prod and staging profiles
+// apart. index.js and routes/extract.js both ask here, so they cannot disagree.
+const ENVS = ["prod", "staging", "local"];
+function driverMissing(env) {
+  const missing = [];
+  if (!env.PROFILE_KEY) missing.push("PROFILE_KEY");
+  if (!ENVS.includes(env.FORLY_ENV)) missing.push("FORLY_ENV");
+  return missing;
+}
+const driverEnabled = (env = process.env) => !!env.DRIVER_API_KEY && driverMissing(env).length === 0;
+
+// index.js's boot decision, as a pure function: `fatal` → refuse to start.
+// An unset FORLY_ENV still boots (profileName refuses when called); a wrong
+// one does not. The dev viewer exists only on a local, non-production box.
+function bootCheck(env = process.env) {
+  const out = { fatal: null, enabled: false, missing: [], devView: false };
+  const fatal = (msg) => Object.assign(out, { fatal: msg });
+  if (env.FORLY_ENV !== undefined && !ENVS.includes(env.FORLY_ENV)) return fatal(`FORLY_ENV must be prod|staging|local (got "${env.FORLY_ENV}")`);
+  if (env.NODE_ENV === "production" && env.FORLY_ENV !== "prod") return fatal("NODE_ENV=production requires FORLY_ENV=prod");
+  if (env.DRIVER_DEV_VIEW === "1") {
+    if (env.FORLY_ENV !== "local" || env.NODE_ENV === "production") {
+      return fatal("DRIVER_DEV_VIEW=1 is allowed only with FORLY_ENV=local and NODE_ENV not production — unset it");
+    }
+    out.devView = true;
+  }
+  if (env.DRIVER_API_KEY) {
+    out.missing = driverMissing(env);
+    out.enabled = out.missing.length === 0;
+  }
+  return out;
+}
 
 class DriverError extends Error {
   constructor(status, message, code, retryAfter) {
@@ -48,12 +100,71 @@ async function call(method, path, body, deps = {}) {
 const SESSION_DEFAULTS = { country: "IL", timezone: "Asia/Jerusalem", language: "he-IL" };
 const proxyDefault = () => (process.env.DRIVER_PROXY_URL ? { proxyUrl: process.env.DRIVER_PROXY_URL } : {});
 
-// Dev-only: a list of live sessions with their viewer URLs, so a developer can
-// watch every browser the server opens. Never on in production (index.js
-// refuses to boot with the flag under NODE_ENV=production).
+// Dev-only: a registry of live sessions, so a developer can watch every
+// browser the server opens (routes/dev-driver.js). Never on in production
+// (index.js refuses to boot with the flag outside FORLY_ENV=local). The list
+// carries no cdpUrl — watching one takes a viewer grant.
 let devView = process.env.DRIVER_DEV_VIEW === "1";
 const live = new Map();
-const liveSessions = () => (devView ? [...live.values()] : []);
+const platformOfNote = (note) => {
+  const m = String(note || "").match(/^forly-[a-z]+:(.+)$/);
+  return m ? m[1] : null;
+};
+const liveSessions = () => (devView ? [...live.values()].map((s) => ({
+  sessionId: s.sessionId, note: s.note, platform: platformOfNote(s.note), startedAt: s.startedAt, viewer_available: true,
+})) : []);
+
+// Viewer grants: an operator asks for one (step-up protected), then spends it
+// on a redirect. Five minutes, one use, bound to the operator who minted it.
+const GRANT_TTL_MS = 5 * 60 * 1000;
+const grants = new Map();
+let nowFn = () => Date.now();
+function mintViewerGrant(sessionId, { operator, mode = "view" } = {}) {
+  if (!live.has(sessionId) || !operator) return null;
+  const now = nowFn();
+  for (const [k, g] of grants) if (g.expiresAt <= now) grants.delete(k);
+  const id = crypto.randomBytes(16).toString("hex");
+  const expiresAt = now + GRANT_TTL_MS;
+  grants.set(id, { sessionId, operator, mode, expiresAt });
+  return { id, expiresAt };
+}
+// The one place the cdpUrl is read back out.
+function consumeViewerGrant(id, operator) {
+  const g = grants.get(id);
+  grants.delete(id);
+  if (!g || g.expiresAt <= nowFn() || g.operator !== operator) return null;
+  const s = live.get(g.sessionId);
+  if (!s || !s.cdpUrl) return null;
+  return `https://viewer.driver.dev?ws=${encodeURIComponent(s.cdpUrl)}`;
+}
+
+/*
+ * Everything a page-handing call must hold before it opens a browser. With a
+ * profile: the caller says whose (deps.phone + deps.platform), the name must be
+ * that phone's current one (withPage only — attachPage has no opts.profile),
+ * and the profile lock is taken here unless the caller already holds it
+ * (deps.lockHeld). Always: one slot of the local concurrency budget. Returns
+ * one release for both.
+ */
+function claim(usesProfile, profileNameToCheck, deps) {
+  const locks = deps.locks || profileLock;
+  const names = deps.names || profileNames;
+  let releaseProfile = () => {};
+  if (usesProfile) {
+    if (!deps.phone || !deps.platform) {
+      const e = new Error("a profile needs deps.phone and deps.platform"); e.code = "invalid_input"; throw e;
+    }
+    if (profileNameToCheck !== undefined) names.assertOwnership(profileNameToCheck, deps.phone, deps.platform, deps.conn || null);
+    if (deps.lockHeld !== true) {
+      const r = locks.tryAcquire(deps.phone, deps.platform);
+      if (!r) { const e = new Error("profile is busy"); e.code = "profile_busy"; throw e; }
+      releaseProfile = r;
+    }
+  }
+  const releaseSession = locks.trySession();
+  if (!releaseSession) { releaseProfile(); throw new DriverError(429, "local concurrency budget"); }
+  return () => { releaseSession(); releaseProfile(); };
+}
 
 async function createSession(opts = {}, deps = {}) {
   const sleep = deps.sleep || sleepReal;
@@ -85,9 +196,9 @@ async function stopSession(id, deps = {}) {
   live.delete(id);
   try {
     const r = await call("DELETE", `/v1/browser/session?sessionId=${encodeURIComponent(id)}`, null, deps);
-    if (!r || r.success !== true) console.error(`driver: stop of ${id} did not succeed`);
+    if (!r || r.success !== true) logError(`driver: stop of ${shortId(id)} did not succeed`);
   } catch (e) {
-    console.error(`driver: stop of ${id} failed: ${e.message}`);
+    logError(`driver: stop of ${shortId(id)} failed: ${e.message}`);
   }
 }
 
@@ -122,11 +233,15 @@ async function waitForActive(session, deps = {}) {
 /*
  * The only way this module hands out a page. Reuses the browser's own context
  * and tab (a fresh context is itself an automation signal) and guarantees the
- * DELETE, whatever fn does.
+ * DELETE, whatever fn does. With opts.profile, deps must say whose profile it
+ * is (phone, platform, optional conn) — see claim().
  */
 async function withPage(opts, fn, deps = {}) {
-  const session = await createSession(opts, deps);
+  const profile = opts && opts.profile;
+  const release = claim(!!profile, profile ? profile.name : undefined, deps);
+  let session = null;
   try {
+    session = await createSession(opts, deps);
     const active = await waitForActive(session, deps);
     const connect = deps.connectOverCDP || require("patchright").chromium.connectOverCDP;
     const browser = await connect(active.cdpUrl);
@@ -138,25 +253,32 @@ async function withPage(opts, fn, deps = {}) {
       await browser.close(); // our connection only; the session is still up
     }
   } finally {
-    await stopSession(session.sessionId, deps);
+    if (session) await stopSession(session.sessionId, deps);
+    release();
   }
 }
 
 /*
  * Join a session that is ALREADY running and leave it running. This is the
  * embedded-login case: the agent is typing into that browser right now, so the
- * finally that withPage guarantees would be exactly wrong here.
+ * finally that withPage guarantees would be exactly wrong here. With
+ * deps.phone the profile lock is taken for the attach (unless deps.lockHeld).
  */
 async function attachPage(sessionId, fn, deps = {}) {
-  const session = await waitForActive(await getSession(sessionId, deps), deps);
-  const connect = deps.connectOverCDP || require("patchright").chromium.connectOverCDP;
-  const browser = await connect(session.cdpUrl);
+  const release = claim(!!deps.phone, undefined, deps);
   try {
-    const context = browser.contexts()[0] || (await browser.newContext());
-    const page = context.pages()[0] || (await context.newPage());
-    return await fn(page, session);
+    const session = await waitForActive(await getSession(sessionId, deps), deps);
+    const connect = deps.connectOverCDP || require("patchright").chromium.connectOverCDP;
+    const browser = await connect(session.cdpUrl);
+    try {
+      const context = browser.contexts()[0] || (await browser.newContext());
+      const page = context.pages()[0] || (await context.newPage());
+      return await fn(page, session);
+    } finally {
+      await browser.close(); // our connection only — the agent's session stays up
+    }
   } finally {
-    await browser.close(); // our connection only — the agent's session stays up
+    release();
   }
 }
 
@@ -173,12 +295,12 @@ async function deleteProfile(name, deps = {}) {
   try {
     const r = await call("DELETE", `/v1/browser/profiles/${encodeURIComponent(name)}`, null, deps);
     if (r && r.success === false) {
-      console.error(`driver: delete of ${platform} profile did not succeed`);
+      logError(`driver: delete of ${platform} profile did not succeed`);
       return { ok: false, error: "did not succeed" };
     }
     return { ok: true };
   } catch (e) {
-    console.error(`driver: delete of ${platform} profile failed: ${e.message}`);
+    logError(`driver: delete of ${platform} profile failed: ${e.message}`);
     return { ok: false, error: e.message };
   }
 }
@@ -186,5 +308,10 @@ async function deleteProfile(name, deps = {}) {
 module.exports = {
   DriverError, createSession, getSession, listSessions, stopSession,
   cleanupOrphans, waitForActive, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
-  _test: { backoffMs, setDevView: (v) => { devView = v; live.clear(); } },
+  redact, driverEnabled, bootCheck, mintViewerGrant, consumeViewerGrant,
+  _test: {
+    backoffMs,
+    setDevView: (v) => { devView = v; live.clear(); grants.clear(); },
+    setNow: (fn) => { nowFn = fn || (() => Date.now()); },
+  },
 };

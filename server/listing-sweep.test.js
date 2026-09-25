@@ -33,13 +33,20 @@ const PLATFORMS = { yad2: { checkUrl: "https://www.yad2.co.il/my-ads" } };
     { url: "https://www.yad2.co.il/item/dup-page", title: "רוטשילד 1", price: 5000 }, // dup page (fingerprint)
     { url: "https://www.yad2.co.il/item/fresh-one", title: "דירה 3 חדרים", price: 7000 }, // new
   ];
-  const withPage = async (opts, fn) => {
+  let sweepDeps = null;
+  const withPage = async (opts, fn, d) => {
     assert.equal(opts.profile.name, profileName("yad2", "0500000000"));
+    sweepDeps = d;
     return fn({ goto: async () => {}, url: () => "https://www.yad2.co.il/my-ads", innerText: async () => "המודעות שלי", myAds: async () => ads });
   };
 
   const result = await sweep.sweep({ platform: "yad2", phone: "0500000000" }, { db, extractJobs, withPage, platforms: PLATFORMS });
   assert.deepEqual(result, { found: 3, queued: 1, skipped: 2 });
+  // the sweep holds the profile lock itself; withPage must know whose profile it is
+  assert.equal(sweepDeps.phone, "0500000000");
+  assert.equal(sweepDeps.platform, "yad2");
+  assert.equal(sweepDeps.lockHeld, true);
+  assert.ok(sweepDeps.conn && sweepDeps.conn.yad2_browser_connected_at, "the connection rides along for the revoked/quarantined check");
   assert.equal(created.length, 1, "only the new ad gets a real extract job");
   assert.equal(created[0].url, "https://www.yad2.co.il/item/fresh-one");
   assert.equal(created[0].forceSource, "driver");

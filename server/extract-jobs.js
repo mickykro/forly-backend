@@ -92,7 +92,11 @@ async function runJobLocked(job, deps) {
   try {
     const source = await deps.resolve(
       { url: job.url, userId: job.phone },
-      { forceSource: job.force_source || "driver", browserType, profileName: job.profile_name, jobId: job.id },
+      {
+        forceSource: job.force_source || "driver", browserType, profileName: job.profile_name, jobId: job.id,
+        // runJob already holds (phone, "facebook") when there is a profile.
+        phone: job.phone, platform: "facebook", lockHeld: !!job.profile_name,
+      },
     );
     const parsed = await deps.parseListing(source.text);
     const patch = {
@@ -151,7 +155,8 @@ async function sweepOnce(deps) {
   const run = deps.runJob || runJob;
   for (const job of queued) {
     // Deliberately not awaited: the sweep starts jobs, it does not wait on them.
-    Promise.resolve(run(job, deps)).catch((e) => console.error(`extract job ${job.id} crashed: ${e.message}`));
+    // Driver error text is vendor text: it goes through the same redaction.
+    Promise.resolve(run(job, deps)).catch((e) => console.error(`extract job ${job.id} crashed: ${require("./driver-browser").redact(e.message)}`));
   }
   return queued.length;
 }

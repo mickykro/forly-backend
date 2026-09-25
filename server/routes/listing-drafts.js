@@ -40,7 +40,7 @@ module.exports = function createListingDraftsRouter(ctx) {
       try {
         const r = await sweep({ platform, phone }, Object.assign({ db }, sweepDeps));
         found += r.found; queued += r.queued; skipped += r.skipped;
-      } catch (e) { console.warn(`listing-sweep ${platform} failed: ${e.message}`); }
+      } catch (e) { console.warn(`listing-sweep ${platform} failed: ${require("../driver-browser").redact(e.message)}`); }
     }
     res.json({ found, queued, skipped });
   });

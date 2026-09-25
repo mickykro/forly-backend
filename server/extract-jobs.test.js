@@ -115,13 +115,28 @@ function fakeStore() {
   // ── forceSource rides through to resolve, for the firecrawl fallback ──
   const store6 = fakeStore();
   const job6 = await J.create({ phone: "p", url: "https://example.com/x", forceSource: "driver" }, { db: store6 });
-  let sawForce = null;
+  let sawForce = null, d6 = null;
   await J.runJob(job6, {
     db: store6,
-    resolve: async (input, d) => { sawForce = d.forceSource; return { source: "driver", text: "t", description: "t", photos: [] }; },
+    resolve: async (input, d) => { sawForce = d.forceSource; d6 = d; return { source: "driver", text: "t", description: "t", photos: [] }; },
     parseListing: async () => ({ fields: {}, missing: [] }),
   });
   assert.equal(sawForce, "driver");
+
+  // ── a profile job holds the lock itself, and says so to withPage (via resolve) ──
+  const store9 = fakeStore();
+  const job9 = await J.create({ phone: "p9", url: "https://www.facebook.com/groups/1/posts/2", profileName: "facebook-x" }, { db: store9 });
+  let d9 = null;
+  await J.runJob(job9, {
+    db: store9,
+    resolve: async (input, d) => { d9 = d; assert.ok(require("./profile-lock").isHeld("p9", "facebook")); return { source: "driver", text: "t", description: "t", photos: [] }; },
+    parseListing: async () => ({ fields: {}, missing: [] }),
+  });
+  assert.equal(d9.lockHeld, true);
+  assert.equal(d9.phone, "p9");
+  assert.equal(d9.platform, "facebook");
+  // …and a public-page job holds nothing and claims nothing
+  assert.equal(d6.lockHeld, false);
 
   console.log("extract-jobs.test.js ok");
 })();

@@ -68,7 +68,10 @@ async function fromDriver(input, deps = {}) {
   };
   if (profileName) opts.profile = { name: profileName, persist: true };
 
-  const { landedUrl, text, srcs } = await withPage(opts, (page) => readPage(page, url));
+  // Whose profile it is, so withPage can assert ownership and take (or, with
+  // lockHeld, trust the caller's) profile lock. Ignored when there is no profile.
+  const owner = { phone: deps.phone, platform: deps.platform, lockHeld: deps.lockHeld };
+  const { landedUrl, text, srcs } = await withPage(opts, (page) => readPage(page, url), owner);
   if (isLoginWall(landedUrl, text)) throw fail("social_login_required", "login wall");
   const photos = pickImages(srcs).map((u) => ({ url: u, source: "driver" }));
   if (!text && !photos.length) throw fail("page_unreadable", "empty page");

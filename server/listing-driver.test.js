@@ -66,5 +66,13 @@ assert.equal(isLoginWall("https://www.yad2.co.il/item/abc", "דירה 4 חדרי
   assert.equal(seen.country, "IL");
   assert.ok(String(seen.note || "").startsWith("forly-extract:"));
 
+  // ── whose profile it is rides through to withPage, so it can assert ownership ──
+  let third = null;
+  await LD.fromDriver(
+    { url: "https://www.facebook.com/groups/1/posts/2", profileName: "facebook-0500000000" },
+    { withPage: async (opts, fn, d) => { third = d; return fn(page, {}); }, phone: "0500000000", platform: "facebook", lockHeld: true, forceSource: "driver" },
+  );
+  assert.deepEqual(third, { phone: "0500000000", platform: "facebook", lockHeld: true });
+
   console.log("listing-driver.test.js ok");
 })();
