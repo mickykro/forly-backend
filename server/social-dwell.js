@@ -421,4 +421,4 @@ async function recheckPost(page, postUrl, deps = {}) {
   return { state: "visible", reactions, comments };
 }
 
-module.exports = { dwell, browseSession, recheckPost, readSignal, INTERACTION, SELECTORS, COMPETITOR_PATTERNS };
+module.exports = { dwell, browseSession, recheckPost, INTERACTION, SELECTORS, COMPETITOR_PATTERNS };

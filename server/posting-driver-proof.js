@@ -15,6 +15,12 @@
  */
 const { sha } = require("./posting-campaign");
 const SD = require("./social-dwell");
+const { classifySignal } = require("./posting-signals");
+
+// The composer's root: the dialog that holds the editor. The editor is found
+// INSIDE it (SELECTORS.editor below), and signal reads exclude exactly this
+// element, so the two can never disagree about which dialog is ours.
+const COMPOSER_ROOT = 'div[role="dialog"]:has(div[contenteditable="true"][role="textbox"])'; // [Unverified]
 
 const SELECTORS = {
   identity: 'div[role="banner"] a[href$="/me/"] span, div[role="banner"] [aria-label="Your profile"], div[role="banner"] [aria-label="הפרופיל שלך"]', // [Unverified]
@@ -23,7 +29,8 @@ const SELECTORS = {
   targetUrlMeta: 'meta[property="og:url"]', // [Unverified]
   joinGroup: 'div[role="main"] div[aria-label="Join group"][role="button"], div[role="main"] div[aria-label="הצטרפות לקבוצה"][role="button"]', // [Unverified]
   composer: 'div[role="main"] [role="button"]:has-text("כתבו משהו"), div[role="main"] [role="button"]:has-text("Write something"), div[role="main"] [role="button"]:has-text("What\'s on your mind")', // [Unverified]
-  editor: 'div[role="dialog"] div[contenteditable="true"][role="textbox"]', // [Unverified]
+  composerRoot: COMPOSER_ROOT,
+  editor: `${COMPOSER_ROOT} div[contenteditable="true"][role="textbox"]`, // [Unverified]
   composerTarget: 'div[role="dialog"] a[href*="/groups/"][role="link"]', // [Unverified] the dialog names the group
   composerAuthor: 'div[role="dialog"] h2 ~ div strong, div[role="dialog"] [role="heading"] ~ div strong', // [Unverified] who it posts as
   submit: 'div[role="dialog"] div[aria-label="פרסום"][role="button"], div[role="dialog"] div[aria-label="Post"][role="button"]', // [Unverified]
@@ -121,6 +128,27 @@ function findOwnPost(posts, { kind, ids, author, copy }) {
   return null;
 }
 
+// The text of every `sel` region that is NOT the composer (not its root,
+// not inside it, not wrapping it), each with the exact copy stripped after
+// normalisation — so the post's own words can never read as a signal.
+async function regionTexts(page, sel, copy) {
+  const texts = await page.$$eval(sel, (els, root) => els
+    .filter((el) => !(el.matches(root) || el.closest(root) || el.querySelector(root)))
+    .map((el) => el.innerText || el.textContent || ""), COMPOSER_ROOT).catch(() => []);
+  const c = norm(copy);
+  return (Array.isArray(texts) ? texts : []).map((t) => (c ? norm(t).split(c).join(" ") : norm(t))).join("\n");
+}
+// classifySignal over the landed URL, the non-composer dialogs and alerts,
+// and a captcha frame. Used for every read the driver makes.
+async function readSignal(page, copy) {
+  const dialogText = await regionTexts(page, SELECTORS.dialog, copy);
+  const alertText = await regionTexts(page, SELECTORS.alert, copy);
+  const hasCaptchaFrame = (await countOf(page, SELECTORS.captchaFrame)) > 0;
+  let landedUrl = "";
+  try { landedUrl = page.url(); } catch { landedUrl = ""; }
+  return classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame });
+}
+
 async function readFeedPosts(page) {
   return page.$$eval(SELECTORS.feedPost, (els, s) => els.slice(0, 15).map((el) => {
     const link = el.querySelector(s.link), msg = el.querySelector(s.text), au = el.querySelector(s.author);
@@ -198,6 +226,6 @@ async function proveIdentityAndDestination(page, attempt, conn, opts = {}) {
 
 module.exports = {
   SELECTORS, norm, fingerprint, sha,
-  textOf, attrOf, countOf, readTargetId, readFeedPosts, urlSegment, permalinkOf, findOwnPost, isCutOf,
+  textOf, attrOf, countOf, readSignal, readTargetId, readFeedPosts, urlSegment, permalinkOf, findOwnPost, isCutOf,
   expectedTarget, proveIdentityAndDestination,
 };

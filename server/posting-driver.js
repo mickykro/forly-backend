@@ -68,7 +68,7 @@ function context(kind, args, deps) {
   const guardFn = guardOf(deps, phone);
   const rand = deps.rand || Math.random;
   const x = {
-    kind, attempt, phone, rand, deps, extra: {}, submitted: false,
+    kind, attempt, phone, rand, deps, extra: {}, submitted: false, copy: args.copy,
     conn: deps.conn || {},
     // R1. `illegal_transition` → a Stop that unwinds everything (no click after it).
     async step(to, detail) {
@@ -137,7 +137,7 @@ async function humanType(page, text, x) {
 // Pre-submit: every halting signal ends the attempt as verified_failed with
 // that code (this releases its reservation, 16a) and is reported.
 async function preSubmitSignal(page, x, known) {
-  const sig = known || (await social.readSignal(page));
+  const sig = known || (await P.readSignal(page, x.copy));
   if (HALTING.has(sig)) return x.end("verified_failed", { error_code: sig }, { signal: sig });
   if (sig === "not_member") return x.end("verified_failed", { error_code: sig }, { membership: "left" });
   if (sig === "group_blocked") return x.end("verified_failed", { error_code: sig });
@@ -160,7 +160,7 @@ async function drive(page, x, want, args) {
 
   // 2. the destination: signals, membership, its canonical id
   if (!(await nav(page, x, attempt.target_url))) return x.end("verified_failed", { error_code: "navigation_failed" });
-  const landed = await social.readSignal(page);
+  const landed = await P.readSignal(page, x.copy);
   done = await preSubmitSignal(page, x, landed);
   if (done) return done;
   x.pendingBefore = landed === "pending_approval"; // an old banner never reads as ours
@@ -222,7 +222,7 @@ async function checkPermalink(page, x, found, copy) {
   if (!(await x.allows("navigate"))) return "unread";
   const ok = await page.goto(found.permalink, { waitUntil: "domcontentloaded", timeout: 30000 }).then(() => true, () => false);
   await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-  if (!ok || (await social.readSignal(page)) !== "ok") return "unread";
+  if (!ok || (await P.readSignal(page, copy)) !== "ok") return "unread";
   const id = await P.readTargetId(page, x.kind);
   const text = await P.textOf(page, S.postMessage);
   const author = await P.textOf(page, S.postAuthor);
@@ -251,7 +251,7 @@ async function verify(page, x, copy, comment, clickError) {
   for (let round = 0; round < VERIFY_ROUNDS; round++) {
     await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
     await x.wait(page, 2, 5);
-    const sig = await social.readSignal(page);
+    const sig = await P.readSignal(page, copy); // never the composer, never the copy's own words
     // The post may or may not have gone out: reconciliation decides, never a second click.
     if (HALTING.has(sig)) return x.end("outcome_unknown", { error_code: sig }, { signal: sig });
     if (sig === "group_blocked" || sig === "not_member") return x.end("verified_failed", { error_code: sig }, sig === "not_member" ? { membership: "left" } : {});
@@ -334,7 +334,7 @@ async function reconcile(attempt, deps = {}) {
       if (!(await x.allows("navigate"))) return stay("posting_disabled");
       const loaded = await page.goto(attempt.target_url, { waitUntil: "domcontentloaded", timeout: 45000 }).then(() => true, () => false);
       await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-      const sig = await social.readSignal(page);
+      const sig = await P.readSignal(page, copy);
       if (!loaded || sig !== "ok") return stay(loaded ? sig : "navigation_failed", sig !== "ok" ? { signal: sig } : {});
       const id = await P.readTargetId(page, kind);
       if (!id || (want.id && id !== want.id)) return stay("destination_mismatch");

@@ -67,7 +67,20 @@ function fakePage(o = {}) {
     mouse: { wheel: async () => {}, move: async () => {} },
     waitForLoadState: async () => {},
     waitForTimeout: async () => {},
-    $$eval: async (sel) => (sel === S.feedPost ? v(feed) : []),
+    // Dialog/alert regions run the driver's own in-page filter over fake
+    // elements: { text, composer (the root), inComposer, wrapsComposer }.
+    $$eval: async (sel, fn, arg) => {
+      if (sel === S.feedPost) return v(feed);
+      if (sel !== S.dialog && sel !== S.alert) return [];
+      const regions = (o.regions && o.regions[sel] !== undefined ? v(o.regions[sel]) : [{ text: v(texts[sel]) }]).filter((r) => r && r.text);
+      const R = S.composerRoot;
+      return fn(regions.map((r) => ({
+        innerText: r.text, textContent: r.text,
+        matches: (q) => q === R && !!r.composer,
+        closest: (q) => (q === R && (r.composer || r.inComposer) ? {} : null),
+        querySelector: (q) => (q === R && r.wrapsComposer ? {} : null),
+      })), arg);
+    },
   };
 }
 
@@ -285,6 +298,29 @@ function harness(o = {}) {
     assert.equal(out.state, "verified_posted");
     assert.equal(out.comment_error_code, "comment_box_not_found");
     assert.equal(h.transitions[4].d.comment_error_code, "comment_box_not_found");
+  }
+
+  // ── after the click the composer is still open, and the copy itself reads like
+  // Facebook's own restriction/block sentences: never a signal ──
+  {
+    const COPY2 = "דירה בחיפה. You're restricted from posting in groups? לא אצלנו! נחסמת באופן זמני? גם לא. You're temporarily blocked from posting — no.";
+    const a = attemptOf({ copy_hash: sha(COPY2) });
+    const composerOpen = (s) => [{ text: `Create post\n${s.editor}\nPost`, composer: true }, { text: `Preview: ${COPY2}` }];
+    const h = harness({ page: {
+      texts: { [S.postMessage]: COPY2 },
+      regions: { [S.dialog]: composerOpen, [S.alert]: (s) => [{ text: s.editor, inComposer: true }, { text: `${COPY2} ` , wrapsComposer: true }] },
+      feed: (s) => (s.submitted ? [{ href: PERMA, author: NAME, text: COPY2 }] : []),
+    } });
+    const out = await PD.postToGroup(argsOf({ attempt: a, copy: COPY2 }), h.deps);
+    assert.ok(["verified_posted", "outcome_unknown"].includes(out.state), out.state);
+    assert.equal(out.signal, undefined, "the copy never produced a signal");
+    assert.ok(!["restricted", "rate_limited", "checkpoint", "captcha", "feature_blocked", "login_required"].includes(out.error_code));
+    assert.equal(out.state, "verified_posted");
+    assert.equal(h.submits(), 1);
+    // …while a real sentence in a dialog that is not the composer still counts
+    const h2 = harness({ page: { regions: { [S.dialog]: (s) => (s.submitted ? [{ text: s.editor, composer: true }, { text: "Your account is restricted" }] : [{ text: s.editor, composer: true }]) } } });
+    const out2 = await PD.postToGroup(argsOf(), h2.deps);
+    assert.deepEqual([out2.state, out2.signal], ["outcome_unknown", "restricted"]);
   }
 
   // ── dry run: everything up to and including the proof and typing; no click ──

@@ -318,5 +318,64 @@ const PH = "972500000001";
     assert.equal((await store.getPostingCampaign(c.id)).pause_reason, "permission");
   }
 
+  // ── the driver's first-hand findings reach the connection and the campaign (Task 18) ──
+  const walk = (end, detail, extra) => { const fn = async (args, d) => {
+    fn.calls.push(args);
+    const k = args.attempt.key;
+    await d.attempts.transition(k, "session_started");
+    if (end === "verified_posted") for (const s of ["composer_ready", "submit_started", "verification_pending"]) await d.attempts.transition(k, s);
+    await d.attempts.transition(k, end, detail);
+    return Object.assign({ state: end }, detail.error_code ? { error_code: detail.error_code } : {}, extra);
+  }; fn.calls = []; return fn; };
+  {
+    // "Join group" was showing: the entry is `left`, the campaign group off, the planner moves on
+    const { deps, at } = await setup(PH, { post: walk("verified_failed", { error_code: "not_member" }, { membership: "left" }) });
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, at(NOW));
+    c = await S.tick(c, deps, at(dueOf(c)));
+    const m = (await db.getConnection(PH)).facebook_groups_member;
+    assert.equal(m.find((e) => e.group_id === "111").membership_state, "left");
+    assert.equal(m.find((e) => e.group_id === "222").membership_state, "member");
+    assert.equal(c.groups.find((g) => g.group_id === "111").is_member, false);
+    assert.equal(c.groups.find((g) => g.group_id === "222").is_member, true);
+    c = await S.tick(c, deps, at(new Date(NOW.getTime() + DAY)));
+    assert.equal(c.posts[c.posts.length - 1].group_id, "222", "the left group is never chosen again");
+  }
+  {
+    // a vanity slug resolved to its numeric id: the connection and the campaign both follow
+    const slugUrl = G("haifa.rent");
+    const { deps, at } = await setup(PH, {
+      post: walk("verified_posted", { post_url: `${slugUrl}/posts/1` }, { resolved_group_id: "12345" }),
+      conn: { facebook_groups_member: [member("slug:haifa.rent", { canonical_url: slugUrl, slug: "haifa.rent", id_verified: false })] },
+    });
+    let c = await C.create(base({ groups: [{ url: slugUrl, agent_policy: "explicitly_allowed" }] }), deps);
+    assert.equal(c.groups[0].group_id, "slug:haifa.rent");
+    c = await S.tick(c, deps, at(NOW));
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal(c.posts[0].status, "posted");
+    const m = (await db.getConnection(PH)).facebook_groups_member;
+    assert.deepEqual(m.map((e) => [e.group_id, e.id_verified]), [["12345", true]]);
+    assert.equal(c.groups[0].group_id, "12345");
+    assert.equal(c.posts[0].group_id, "12345");
+  }
+  {
+    // a failed connection write never escapes the tick, and its log line is redacted
+    const lines = [];
+    const orig = console.error;
+    console.error = (...a) => lines.push(a.join(" "));
+    try {
+      const { deps, at } = await setup(PH, { post: walk("verified_failed", { error_code: "not_member" }, { membership: "left" }) });
+      deps.store = Object.assign({}, store, { mutateConnection: async () => { throw Object.assign(new Error("down"), { code: "unavailable" }); } });
+      let c = await C.create(base(), deps);
+      c = await S.tick(c, deps, at(NOW));
+      c = await S.tick(c, deps, at(dueOf(c)));
+      assert.equal(c.posts[0].status, "failed");
+      assert.equal(c.groups.find((g) => g.group_id === "111").is_member, false, "the campaign half still applied");
+      assert.equal((await db.getConnection(PH)).facebook_groups_member.find((e) => e.group_id === "111").membership_state, "member");
+    } finally { console.error = orig; }
+    assert.ok(lines.some((l) => /membership update .*unavailable/.test(l)));
+    assert.ok(!lines.join("\n").includes(PH), "no full phone in the log");
+  }
+
   console.log("posting-campaign.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

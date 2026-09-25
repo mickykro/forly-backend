@@ -300,7 +300,42 @@ async function runAttempt(attempt, st, deps, now) {
   try { result = await Promise.race([running, timeout]); } catch (e) { err = e; } finally { clearTimeout(timer); }
   if (timedOut && st.lock) st.lock.defer(running);
   if (result && result.noop === true) return "no_driver";
-  return settle(attempt.key, result, err, st, deps, x, now);
+  const state = await settle(attempt.key, result, err, st, deps, x, now);
+  await applyFindings(result, st, x, now);
+  return state;
+}
+
+// What the driver saw first-hand on a group's own page (Task 18): "Join
+// group" showing (membership "left"), or a vanity slug's real numeric id.
+// The connection's membership list and the campaign's group follow it, so
+// the planner stops choosing a group the account left. Never throws.
+async function applyFindings(result, st, x, now) {
+  const { c, post } = st;
+  const gid = post.group_id;
+  if (!result || typeof result !== "object" || post.target === "page" || !gid) return;
+  const rid = String(result.resolved_group_id || "");
+  const numeric = /^slug:/.test(gid) && /^\d+$/.test(rid) ? rid : null;
+  const left = result.membership === "left";
+  if (!left && !numeric) return;
+  const id = numeric || gid;
+  const note = (what, e) => console.error(redact(`posting ${what} ${tail(c.phone)}: ${code(e)}`));
+  try {
+    const { resolveGroupId } = require("./facebook-groups-sync");
+    await x.store.mutateConnection(c.phone, (conn) => {
+      let list = Array.isArray(conn.facebook_groups_member) ? conn.facebook_groups_member : [];
+      if (numeric) list = resolveGroupId({ facebook_groups_member: list }, gid, numeric);
+      if (left) list = list.map((e) => (e && e.group_id === id ? { ...e, membership_state: "left", observed_at: iso(now) } : e));
+      return { facebook_groups_member: list };
+    });
+  } catch (e) { note("membership update", e); }
+  try {
+    await mutate(x, c.id, (cur) => {
+      const seen = new Set();
+      const groups = (cur.groups || []).map((g) => (g.group_id === gid ? { ...g, group_id: id, ...(left ? { is_member: false } : {}) } : g))
+        .filter((g) => !seen.has(g.group_id) && seen.add(g.group_id));
+      return numeric ? { groups, posts: cur.posts.map((p) => (p.group_id === gid ? { ...p, group_id: id } : p)) } : { groups };
+    });
+  } catch (e) { note("campaign group update", e); }
 }
 
 // Closes the attempt if the driver left it open, mirrors it onto the post,
@@ -437,5 +472,5 @@ async function tick(campaign, deps = {}, now) {
 
 module.exports = {
   tick, tickAccount, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
-  _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn },
+  _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn, applyFindings },
 };
