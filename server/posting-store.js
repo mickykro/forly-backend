@@ -2,19 +2,19 @@
  * posting-store.js — storage for automated Facebook group posting (Task 16a):
  * campaigns, durable attempts (posting-attempts.js, re-exported), the
  * cross-account per-group activity, the manual-post and connection reads the
- * pacer needs, and browse (dwell) sessions.
+ * pacer needs, browse (dwell) sessions, and the operator audit (audit_events).
  *
  * db.js is over its size cap, so this lives on its own. The Firestore handle
  * is read from require("./db").db at call time; null means the in-memory
- * store, whose Maps live here (posting_campaigns, dwell_sessions) and in
+ * store, whose Maps live here (posting_campaigns, dwell_sessions, audit_events) and in
  * posting-attempts.js. `_test.reset()` clears all of them. No log lines.
  */
 const crypto = require("crypto");
 const attempts = require("./posting-attempts");
 const { firestore, runTx, fail, hmacHex, toDate, toIso, assertId, isPlainObject, stripUndefined, deepMerge } = require("./posting-tx");
 
-const CAMP = "posting_campaigns", DWELL = "dwell_sessions";
-const maps = { [CAMP]: new Map(), [DWELL]: new Map() };
+const CAMP = "posting_campaigns", DWELL = "dwell_sessions", AUDIT = "audit_events";
+const maps = { [CAMP]: new Map(), [DWELL]: new Map(), [AUDIT]: new Map() };
 const MS_DAY = 86400000;
 const PLATFORM = /^[a-z][a-z0-9_]{0,31}$/;
 
@@ -94,6 +94,18 @@ async function listCampaignsWhere(field, value, limit) {
 const listPostingCampaignsByStatus = (status, limit = 50) => listCampaignsWhere("status", status, limit);
 const listPostingCampaignsByPhone = (phone, limit = 100) => listCampaignsWhere("phone", phone, limit);
 
+// The admin overview's counts (Task 21): an aggregate count on Firestore, so
+// stopped/completed campaigns are never read one by one.
+async function countPostingCampaignsByStatus(status) {
+  const fdb = firestore();
+  if (fdb) {
+    const q = fdb.collection(CAMP).where("status", "==", status);
+    if (typeof q.count === "function") return (await q.count().get()).data().count;
+    return (await q.get()).docs.length;
+  }
+  return [...maps[CAMP].values()].filter((c) => c.status === status).length;
+}
+
 // ── connections (businesses/{phone}/connections/facebook): transactional read-modify-write ──
 // db.setConnection is a blind merge; two halts landing at once would each
 // append to the posting_halts they read and one entry would be lost. Here fn
@@ -164,6 +176,66 @@ function listConnectedPhones(platform = "facebook") {
 function listPhonesHaltedSince(iso) {
   const since = toIso(iso);
   return phonesWhere("posting_last_halt_at", ">=", since, (v) => typeof v === "string" && v >= since);
+}
+
+// Every account an operator must look at: disabled until an admin re-enables
+// it, or waiting for an owner-level review (Task 21's overview).
+async function listDisabledPhones() {
+  const isTrue = (v) => v === true;
+  const a = await phonesWhere("posting_disabled_until_admin", "==", true, isTrue);
+  const b = await phonesWhere("posting_owner_review_required", "==", true, isTrue);
+  return [...new Set(a.concat(b))];
+}
+
+// ── operator audit (audit_events/{id}, Task 21) ──
+// Tails only: a field that could hold a phone is refused unless it is at
+// most 4 characters, and any 7+ digit run in the free-text reason is cut to
+// its last 4. Kept a year (expire_at, a Date → a Timestamp for the TTL policy).
+const AUDIT_RETENTION_DAYS = 365;
+const TAIL_RE = /^\d{0,4}$/;
+const maskDigits = (s) => String(s).replace(/\d{7,}/g, (m) => `…${m.slice(-4)}`);
+function cleanDetail(d) {
+  if (d === undefined || d === null) return null;
+  if (!isPlainObject(d) || Object.keys(d).length > 8) throw fail("invalid_input", "detail must be a small object");
+  const out = {};
+  for (const [k, v] of Object.entries(d)) {
+    if (!/^[a-z][a-z0-9_]{0,31}$/.test(k)) throw fail("invalid_input", "invalid detail key");
+    if (v === null || typeof v === "boolean" || Number.isFinite(v)) out[k] = v;
+    else if (typeof v === "string") out[k] = maskDigits(v).slice(0, 60);
+    else throw fail("invalid_input", "detail values must be primitives");
+  }
+  return out;
+}
+
+async function addAuditEvent(e, now = new Date()) {
+  if (!isPlainObject(e)) throw fail("invalid_input", "audit event must be an object");
+  if (typeof e.action !== "string" || !/^[a-z][a-z0-9_]{0,47}$/.test(e.action)) throw fail("invalid_input", "invalid action");
+  for (const k of ["operator_tail", "target_phone_tail"]) {
+    if (e[k] !== undefined && e[k] !== null && !(typeof e[k] === "string" && TAIL_RE.test(e[k]))) throw fail("invalid_input", `${k} must be at most 4 digits`);
+  }
+  const at = toDate(now);
+  const id = crypto.randomBytes(12).toString("hex");
+  const doc = {
+    id, at: at.toISOString(), operator_tail: e.operator_tail || null, action: e.action,
+    target_phone_tail: e.target_phone_tail || null, reason: e.reason ? maskDigits(e.reason).slice(0, 200) : null,
+    detail: cleanDetail(e.detail),
+    expire_at: new Date(at.getTime() + AUDIT_RETENTION_DAYS * MS_DAY),
+  };
+  const fdb = firestore();
+  if (fdb) await fdb.collection(AUDIT).doc(id).set(doc);
+  else maps[AUDIT].set(id, clone(doc));
+  return id;
+}
+
+// Newest first, since sinceMs; `at` is an ISO string on both paths.
+async function listAuditEvents({ sinceMs, limit = 20 } = {}) {
+  const since = toIso(sinceMs || Date.now() - 30 * MS_DAY);
+  const fdb = firestore();
+  const rows = fdb
+    ? (await fdb.collection(AUDIT).where("at", ">=", since).get()).docs.map((d) => d.data())
+    : [...maps[AUDIT].values()].filter((d) => d.at >= since).map(clone);
+  return rows.map((d) => ({ ...d, expire_at: d.expire_at ? toIso(d.expire_at) : null }))
+    .sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0)).slice(0, limit);
 }
 
 // ── dwell (browse) sessions (dwell_sessions/{id}) ──
@@ -253,7 +325,9 @@ async function listRecentLikedPostIds(phone, sinceMs) {
 module.exports = {
   // campaigns
   campaignId, createPostingCampaignIfAbsent, getPostingCampaign, updatePostingCampaign, mutatePostingCampaign,
-  listPostingCampaignsByStatus, listPostingCampaignsByPhone,
+  listPostingCampaignsByStatus, listPostingCampaignsByPhone, countPostingCampaignsByStatus,
+  // operator views and audit (Task 21)
+  listDisabledPhones, addAuditEvent, listAuditEvents,
   // attempts (R1) and group activity — posting-attempts.js
   LEASE_MS: attempts.LEASE_MS, EDGES: attempts.EDGES, countingStates: attempts.countingStates, isCounting: attempts.isCounting,
   attemptKey: attempts.attemptKey, reserveAttempt: attempts.reserveAttempt, transition: attempts.transition, annotateAttempt: attempts.annotate,

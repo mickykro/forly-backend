@@ -259,11 +259,23 @@ function nextDayStart(now, config, rand) {
 // Every read-modify-write of a campaign: one store transaction
 // (mutatePostingCampaign), so concurrent writers never lose each other's
 // change to `posts`. `fn` must be pure — it may run more than once.
+// Retention (Task 21), in this one place: a campaign that BECOMES stopped or
+// completed gets expire_at = updated_at + 30 days (a Date, so Firestore's TTL
+// policy on expire_at deletes it); any other status (a restart) clears it.
+const ENDED = new Set(["stopped", "completed"]);
+const CAMPAIGN_RETENTION_DAYS = 30;
 async function mutate(x, id, fn) {
-  const at = iso(x.clock());
+  const now = x.clock();
+  const at = iso(now);
   return x.store.mutatePostingCampaign(id, (cur) => {
     const patch = fn(cur);
-    return patch ? Object.assign({}, patch, { updated_at: at }) : null;
+    if (!patch) return null;
+    const out = Object.assign({}, patch, { updated_at: at });
+    if (typeof patch.status === "string") {
+      if (!ENDED.has(patch.status)) out.expire_at = null;
+      else if (!ENDED.has(cur.status) || !cur.expire_at) out.expire_at = new Date(now.getTime() + CAMPAIGN_RETENTION_DAYS * MS_DAY);
+    }
+    return out;
   });
 }
 

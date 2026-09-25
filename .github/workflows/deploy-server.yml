@@ -32,6 +32,9 @@
 #      GREENAPI_TOKEN=...
 #      NADLAN_JWT_SECRET=...            # required for agent login/dashboard (openssl rand -hex 32)
 #      ADMIN_PHONES=972542045280,...    # allowlist for the /admin.html console (comma-separated)
+#      POSTING_OWNER_PHONES=972...,...  # owner-level re-enable of automated posting (restricted, or a
+#                                       # second disabling halt in 30 days); comma-separated; unset →
+#                                       # those re-enables are refused
 #      FORLY_ENV=prod                   # prod|staging|local; any other value refuses to boot, and
 #                                       # NODE_ENV=production without FORLY_ENV=prod refuses too
 #      PROFILE_KEY=...                  # openssl rand -hex 32; keys the Driver browser-profile names.

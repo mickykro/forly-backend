@@ -234,6 +234,12 @@ app.use("/api", createExtractRouter({
 // session we create carries a forly-<kind>: note, so we can tell ours from
 // anyone else's. Driver is on only with DRIVER_API_KEY, PROFILE_KEY and a
 // valid FORLY_ENV (driverBrowser.driverEnabled — routes/extract.js asks too).
+// The operator-admin guards: an ADMIN_PHONES session, plus a fresh OTP
+// step-up for the actions that change live posting or hand out control.
+const { makeAdminGuard, makeStepUpGuard } = require("./admin-auth");
+const { requireAdmin } = makeAdminGuard({ verifySession, readToken, authSecret: AUTH_SECRET, adminPhones: ADMIN_PHONES });
+const { requireStepUp } = makeStepUpGuard({ verifySession, authSecret: AUTH_SECRET });
+
 if (driverBoot.enabled) {
   const extractJobs = require("./extract-jobs");
   const ORPHAN_NOTES = ["forly-extract:", "forly-connect:", "forly-sweep:", "forly-post:", "forly-dwell:", "forly-recheck:", "forly-sync:"];
@@ -259,6 +265,10 @@ if (driverBoot.enabled) {
   // The campaign card's API (consent, campaigns, one-tap links), same deps as the sweeper.
   const createPostingRouter = require("./routes/posting");
   app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET, pageBaseUrl: PAGE_BASE_URL, deps: postingDeps }));
+  // The operator's levers (kill switches, fleet overview, per-class re-enable,
+  // profile revoke); every change needs a fresh OTP step-up and is audited.
+  // Owner-only re-enables read POSTING_OWNER_PHONES (unset → refused).
+  app.use("/api/admin/posting", require("./routes/admin-posting")({ requireAdmin, requireStepUp, deps: postingDeps }));
 
   // ── the agent's own Yad2/Madlan listings, read and offered as draft pages ──
   const createListingDraftsRouter = require("./routes/listing-drafts");
@@ -273,9 +283,6 @@ if (driverBoot.enabled) {
 // ── dev-only: watch the browsers this server opens (routes/dev-driver.js) ──
 // bootCheck already refused to start with the flag outside FORLY_ENV=local.
 if (driverBoot.devView) {
-  const { makeAdminGuard, makeStepUpGuard } = require("./admin-auth");
-  const { requireAdmin } = makeAdminGuard({ verifySession, readToken, authSecret: AUTH_SECRET, adminPhones: ADMIN_PHONES });
-  const { requireStepUp } = makeStepUpGuard({ verifySession, authSecret: AUTH_SECRET });
   app.use("/api/dev/driver", require("./routes/dev-driver")({ requireAdmin, requireStepUp }));
   console.warn("DRIVER_DEV_VIEW=1: dev browser viewer at /dev-driver.html");
 }

@@ -17,6 +17,7 @@
 const crypto = require("crypto");
 
 const MAX_ATTEMPTS = 3;
+const JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const SWEEP_MS = 5 * 1000;
 // Each rung looks less like automation than the last, and costs more. Start cheap.
 const BROWSER_LADDER = ["hosted", "hosted_stealth", "hosted_privacy"];
@@ -29,6 +30,7 @@ const nowIso = () => new Date().toISOString();
 // written to the draft on `done` instead of being polled by a wizard — see
 // runJobLocked below.
 async function create({ phone, url, forceSource = null, profileName = null, draftId = null }, deps) {
+  const created = new Date();
   const job = {
     id: crypto.randomUUID(),
     phone: String(phone),
@@ -38,10 +40,13 @@ async function create({ phone, url, forceSource = null, profileName = null, draf
     force_source: forceSource,
     profile_name: profileName,
     draft_id: draftId,
-    created_at: nowIso(),
-    updated_at: nowIso(),
+    created_at: created.toISOString(),
+    updated_at: created.toISOString(),
     result: null,
     error_code: null,
+    // Retention (Task 21): Firestore's TTL policy on expire_at deletes the job
+    // 7 days after it was created. A Date, so it is stored as a Timestamp.
+    expire_at: new Date(created.getTime() + JOB_RETENTION_MS),
   };
   await deps.db.saveExtractJob(job);
   return job;
