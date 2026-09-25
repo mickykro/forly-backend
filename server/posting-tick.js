@@ -205,12 +205,12 @@ async function runDue(c, post, st, deps, x, now) {
     click_id: crypto.randomBytes(16).toString("hex"), // R4: ?c= on this attempt's link
     limits: A.limitsFor(account, now, config, target.target), now,
   });
-  if (r.ok) return startAttempt(r.attempt, { c, post, copy, target, conn }, deps, x, now);
+  if (r.ok) return startAttempt(r.attempt, { c, post, copy, target, conn, lock: st.lock }, deps, x, now);
 
   if (r.reason === "already_reserved" && r.attempt) {
     const a = r.attempt;
     const ours = a.campaign_id === c.id && a.post_id === post.id;
-    if (ours && a.state === "reserved" && a.copy_hash === sha(copy)) return startAttempt(a, { c, post, copy, target, conn }, deps, x, now);
+    if (ours && a.state === "reserved" && a.copy_hash === sha(copy)) return startAttempt(a, { c, post, copy, target, conn, lock: st.lock }, deps, x, now);
     if (ours && a.state !== "cancelled" && !a.released) {
       // An orphan of ours past `reserved`: adopt it; the reaper and the mirror finish it.
       await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "posting", attempt_key: a.key, posting_started_at: a.reserved_at } : p)) }));
@@ -261,6 +261,19 @@ async function runAttempt(attempt, st, deps, now) {
   catch (e) { if (!e || e.code !== "posting_disabled") throw e; return settle(attempt.key, null, e, st, deps, x, now); }
   const fn = post.target === "page" ? deps.postToPage || deps.post : deps.post;
   if (typeof fn !== "function") return "no_driver"; // stays reserved → the reaper cancels it → retried later
+  // Last look before the driver: a STOP (or anything else) may have landed
+  // since startAttempt committed `posting`. The driver runs only for an
+  // attempt still `reserved` in a campaign still `running`. (Task 18 writes
+  // session_started before opening a browser, which closes what is left.)
+  const current = await x.store.getAttempt(attempt.key);
+  const camp = await x.store.getPostingCampaign(c.id);
+  if (!current || current.state !== "reserved" || !camp || camp.status !== "running") {
+    if (current && current.state === "reserved") {
+      await x.store.transition(attempt.key, "cancelled", { error_code: "stopped" }, x.clock())
+        .catch((e) => { if (!e || e.code !== "illegal_transition") A.noteCancelFailure(1); });
+    }
+    return settle(attempt.key, null, null, st, deps, x, now);
+  }
   const args = {
     attempt, copy, comment: `${deps.pageBaseUrl || ""}/p/${c.page_id}?c=${attempt.click_id}`,
     profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0),
@@ -277,9 +290,15 @@ async function runAttempt(attempt, st, deps, now) {
   // forever: past POST_TIMEOUT_MS it is settled like an infrastructure error —
   // cancelled before submit, outcome_unknown after — and any late transition
   // the driver still tries is refused by the attempt's edges.
-  let result = null, err = null, timer = null;
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("driver timeout"), { status: 504 })), deps.postTimeoutMs || POST_TIMEOUT_MS); });
-  try { result = await Promise.race([fn(args, postDeps), timeout]); } catch (e) { err = e; } finally { clearTimeout(timer); }
+  // The profile lock, however, is NOT given back at the timeout: the driver
+  // may still hold the browser. It is released when the driver's promise
+  // finally settles (st.lock.defer), with profile-lock's MAX_HOLD_MS expiry as
+  // the backstop; meanwhile the phone's ticks see profile_busy.
+  let result = null, err = null, timer = null, timedOut = false;
+  const running = Promise.resolve().then(() => fn(args, postDeps));
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; reject(Object.assign(new Error("driver timeout"), { status: 504 })); }, deps.postTimeoutMs || POST_TIMEOUT_MS); });
+  try { result = await Promise.race([running, timeout]); } catch (e) { err = e; } finally { clearTimeout(timer); }
+  if (timedOut && st.lock) st.lock.defer(running);
   if (result && result.noop === true) return "no_driver";
   return settle(attempt.key, result, err, st, deps, x, now);
 }
@@ -361,7 +380,7 @@ async function planNext(phone, st, deps, x, now) {
 }
 
 // ── one account ──
-async function tickLocked(phone, deps, x, now) {
+async function tickLocked(phone, deps, x, now, lock) {
   const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(phone)) || {};
   const campaigns = await housekeep(phone, conn, deps, x, now, config);
@@ -376,7 +395,7 @@ async function tickLocked(phone, deps, x, now) {
   else {
     const due = running.flatMap((c) => c.posts.filter((p) => p.status === "scheduled" && ms(p.scheduled_at) <= now.getTime()).map((p) => ({ c, p })))
       .sort((a, b) => ms(a.p.scheduled_at) - ms(b.p.scheduled_at))[0];
-    const st = { phone, conn, config, campaigns };
+    const st = { phone, conn, config, campaigns, lock };
     outcome = due ? await runDue(due.c, due.p, st, deps, x, now) : await planNext(phone, st, deps, x, now);
   }
   for (const c of running) if (c.tick_errors) await mutate(x, c.id, () => ({ tick_errors: 0 }));
@@ -387,8 +406,11 @@ async function tickAccount(phone, deps = {}, now) {
   const x = ctxOf(deps);
   now = now || nowOf(deps, x);
   const release = x.locks.tryAcquire(phone, "facebook");
-  if (!release) return "profile_busy"; // an extract or the login browser has the profile: next sweep
-  try { return await tickLocked(phone, deps, x, now); }
+  if (!release) return "profile_busy"; // an extract, the login browser or a hung post has the profile: next sweep
+  // A timed-out driver call defers the release until its promise settles.
+  let pending = null;
+  const lock = { defer: (p) => { pending = p; } };
+  try { return await tickLocked(phone, deps, x, now, lock); }
   catch (e) {
     console.error(redact(`posting tick ${tail(phone)}: ${code(e)}`));
     try {
@@ -398,7 +420,10 @@ async function tickAccount(phone, deps = {}, now) {
       }
     } catch { /* the next sweep tries again */ }
     return "error";
-  } finally { release(); }
+  } finally {
+    if (pending) pending.then(release, release);
+    else release();
+  }
 }
 
 // tick(campaign) — one step for the campaign's whole account; → the campaign as it is now.

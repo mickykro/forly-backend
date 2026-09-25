@@ -169,14 +169,19 @@ async function stop(id, deps = {}, reason = "agent") {
   const out = await mutate(x, id, (cur) => {
     was = cur.status; // the committed run's view (the last run wins)
     return {
-      status: "stopped", pause_reason: cur.status === "stopped" ? cur.pause_reason : reason,
+      // A campaign already stopped keeps its reason — unless that reason is one
+      // enrollment may undo (page_gone, expired): the agent's STOP then wins.
+      status: "stopped", pause_reason: cur.status === "stopped" && !ENROLL_RESTARTABLE.has(cur.pause_reason) ? cur.pause_reason : reason,
       posts: cur.posts.map((p) => (["scheduled", "pending_approval"].includes(p.status) ? { ...p, status: "skipped", error_code: "stopped", copy: undefined } : p)),
     };
   });
   if (!out) return null;
   const keys = new Set(out.posts.filter((p) => p.status === "posting" && p.attempt_key).map((p) => p.attempt_key));
-  for (const a of await x.store.listOpenAttemptsByCampaign(id)) keys.add(a.key);
   let failed = 0;
+  // A failed listing is a cancel failure, not an abort: the committed doc's
+  // attempts are still cancelled, the posts mirrored and the agent told.
+  try { for (const a of await x.store.listOpenAttemptsByCampaign(id)) keys.add(a.key); }
+  catch { failed++; }
   for (const k of keys) {
     try { await x.store.transition(k, "cancelled", { error_code: "stopped" }, x.clock()); }
     catch (e) { if (!e || !["illegal_transition", "not_found"].includes(e.code)) failed++; }
