@@ -67,6 +67,77 @@
     </section>
 
     <h2 style="font-family:var(--serif);font-size:1.1rem;margin:20px 0 5px">שיתוף ידני בקבוצות</h2>
+
+    <!-- Task 23: automatic group posting. Filled by publish-campaign.js; hidden until the API answers. -->
+    <section class="card camp" id="campaignCard" hidden>
+      <h2>פורלי תפרסם בשבילכם <span class="camp-chip" id="campStatusChip" hidden></span></h2>
+      <p class="camp-muted">פורלי תפרסם את הנכס בקבוצות שבחרתם, לאט ובזהירות — כמה פוסטים ביום, בשעות היום, לא בשבת — כמו שמתווך אמיתי מפרסם. כאן רואים מה כבר עלה ומה הבא בתור, ואפשר לעצור בכל רגע.</p>
+
+      <div class="camp-halt" id="campHalt" hidden>
+        <p id="campHaltMsg"></p>
+        <a class="btn btn-gold btn-sm" id="campHaltBrowserBtn" href="distribution.html#browserConnectCard" hidden>חיבור החשבון מחדש</a>
+        <button type="button" class="btn btn-ghost btn-sm" id="campResumeBtn" hidden>להמשיך</button>
+      </div>
+
+      <div id="campNeedConnect" class="rules" hidden>
+        <p>לפרסום בקבוצות צריך קודם לחבר את החשבון האישי שלכם בפייסבוק.</p>
+        <a class="btn btn-gold btn-sm" href="distribution.html#browserConnectCard">חיבור החשבון</a>
+      </div>
+
+      <div id="campSetup" hidden>
+        <p class="camp-est" id="campFirstPost"></p>
+        <p class="camp-muted camp-small" id="campFirstWeek"></p>
+
+        <h3>הקבוצות שלכם <button type="button" class="btn btn-ghost btn-sm" id="campResync">רענון</button></h3>
+        <p class="camp-muted camp-small">פורלי מפרסמת רק בקבוצות שאתם חברים בהן. סמנו את אלה שמתאימות לנכס.</p>
+        <div id="campMemberGroups" class="camp-groups"></div>
+        <button type="button" class="camp-link" id="campUnhide" hidden></button>
+        <p class="camp-warn" id="campUnknownWarn" hidden>בחלק מהקבוצות שסימנתם לא ברור אם מתווכים מורשים לפרסם — כדאי להציץ בכללים שלהן לפני שמתחילים.</p>
+
+        <h3>קבוצות פופולריות באזור שלכם</h3>
+        <p class="camp-muted camp-small">עוד לא חברים? הצטרפו בעצמכם, ואחרי רענון הן יופיעו למעלה.</p>
+        <div id="campSuggestedGroups" class="camp-groups"></div>
+
+        <label class="camp-consent"><input type="checkbox" id="campAutoEnroll"> <span><strong>לפרסם אוטומטית כל נכס חדש</strong><small>בקבוצות שסימנתם כאן ובדף העסקי, באותם תנאים. אפשר לכבות בכל רגע.</small></span></label>
+        <label class="camp-consent"><input type="checkbox" id="campVisible"> <span><strong>לייקים וסטוריז</strong><small>פורלי גם תסמן לייק פה ושם ותצפה בסטוריז — זה נראה לחברים שלכם. בלי זה היא רק גוללת וקוראת.</small></span></label>
+        <p class="camp-muted camp-small" id="campPageTarget"></p>
+
+        <fieldset class="camp-mode">
+          <legend>מתי פורלי מפרסמת?</legend>
+          <label class="camp-opt"><input type="radio" name="campMode" value="per_post" checked>
+            <span><strong>רק אחרי אישור שלכם, פוסט-פוסט</strong><small>לפני כל פוסט תקבלו וואטסאפ עם הטקסט והקבוצה. אישור בלחיצה אחת — בלי אישור לא מפרסמים.</small></span></label>
+          <label class="camp-opt"><input type="radio" name="campMode" value="standing">
+            <span><strong>לבד, עד שתעצרו</strong><small>מאשרים פעם אחת, פורלי מפרסמת בקצב שלה, ואפשר לעצור בכל רגע בלחיצה.</small></span></label>
+          <p class="camp-muted camp-small" id="campPlan"></p>
+
+          <div class="camp-questions">
+            <label><input type="checkbox" id="campAged" checked> חשבון הפייסבוק שלי בן יותר מחצי שנה</label>
+            <label><input type="checkbox" id="campManual" checked> כבר פרסמתי בקבוצות האלה בעצמי</label>
+            <p class="camp-muted camp-small">אם אחד מאלה לא נכון, פורלי תתחיל לאט במיוחד — החימום יהיה ארוך פי שניים.</p>
+          </div>
+
+          <p class="camp-warn" id="campConsentOld" hidden>נוסח האישור התעדכן מאז שאישרתם — קראו אותו וסמנו שוב.</p>
+          <label class="camp-consent" id="campConsentRow"><input type="checkbox" id="campConsent">
+            <span><span id="campConsentText">הבנתי שפייסבוק לא אוהבת פרסום אוטומטי מחשבון אישי ולפעמים מגבילה חשבונות בגלל זה. פורלי מפרסמת לאט ובזהירות כדי להקטין את הסיכון, ואני רוצה להמשיך.</span><small>נוסח האישור: <bdi id="campConsentVer"></bdi></small></span></label>
+          <p class="camp-muted camp-small" id="campConsentDone" hidden>✓ אישרתם · מפרסמים על אחריותכם · פורלי מפרסמת לאט ובזהירות</p>
+          <p class="camp-warn" id="campSetupNote" hidden></p>
+          <button type="button" class="btn btn-gold" id="campStartBtn">התחלת פרסום</button>
+        </fieldset>
+      </div>
+
+      <div id="campLive" hidden>
+        <div class="camp-head">
+          <span id="campNext"></span>
+          <button type="button" class="btn btn-danger btn-sm" id="campStopBtn">עצירה</button>
+        </div>
+        <p class="camp-small"><a href="#" id="campPauseLink">השהיה זמנית</a></p>
+        <p class="camp-muted" id="campSummary"></p>
+        <p class="camp-muted camp-small" id="campAutoLine" hidden>נכסים חדשים מתפרסמים אוטומטית באותם תנאים · <a href="#" id="campAutoOff">כיבוי</a></p>
+        <ol class="camp-timeline" id="campTimeline"></ol>
+        <p class="camp-muted camp-small" id="campReach"></p>
+      </div>
+      <details id="campLast" hidden><summary class="camp-muted" id="campLastSummary">הקמפיין האחרון</summary><ol class="camp-timeline" id="campLastTimeline"></ol></details>
+    </section>
     <p class="sub">הטקסט והקישורים מוכנים עבור הנכס שבחרתם. פייסבוק נשארת בשליטתכם.</p>
     <div class="progress"><i id="bar"></i></div>
     <p class="pcount" id="pcount"></p>
@@ -127,6 +198,7 @@
   <button class="btn btn-ghost" id="facebookConnectCancel" type="button" style="width:100%;margin-top:8px">עכשיו לא</button>
 </dialog>
 <div id="msg" role="status"></div>
+<script src="publish-campaign.js"></script>
 <script src="publish.js"></script>
 </body>
 </html>
