@@ -143,6 +143,38 @@ function call(app, method, path, body) {
   assert.equal(notIn.body.error, "not_logged_in");
   assert.deepEqual(stopped2, [], "session kept alive for another try");
   assert.ok(conn3.browser_session_facebook, "still recorded as open");
+
+  // ── the local browser budget is full → 503 driver_busy, NOT "session expired"
+  //    (which sends the agent to open a second browser on the same profile) ──
+  const { DriverError } = require("../driver-browser");
+  const stoppedBusy = [];
+  const connBusy = { browser_session_facebook: { session_id: "s4" } };
+  const busyApp = makeApp({
+    driver: {
+      getSession: async () => ({ sessionId: "s4", status: "active", cdpUrl: "wss://n/4" }),
+      stopSession: async (id) => stoppedBusy.push(id),
+      attachPage: async () => { throw new DriverError(429, "local concurrency budget"); },
+    },
+    db: { getConnection: async () => connBusy, setConnection: async (p, patch) => Object.assign(connBusy, patch) },
+  });
+  const busy = await call(busyApp, "POST", "/api/connections/browser/facebook/finish");
+  assert.equal(busy.status, 503);
+  assert.deepEqual(busy.body, { error: "driver_busy", retry: true });
+  assert.deepEqual(stoppedBusy, [], "the agent's login browser is kept");
+  assert.ok(connBusy.browser_session_facebook, "still recorded as open");
+
+  // ── a session Driver no longer knows is still session_expired ──
+  const goneApp = makeApp({
+    driver: {
+      getSession: async () => { throw new DriverError(404, "not found"); },
+      stopSession: async () => {},
+      attachPage: async () => { throw new DriverError(404, "session not found"); },
+    },
+    db: { getConnection: async () => ({ browser_session_facebook: { session_id: "s5" } }), setConnection: async () => {} },
+  });
+  const gone = await call(goneApp, "POST", "/api/connections/browser/facebook/finish");
+  assert.equal(gone.status, 409);
+  assert.equal(gone.body.error, "session_expired");
   assert.ok(!conn3.facebook_browser_connected_at);
 
   // ── disconnect: clears the connection and deletes the profile

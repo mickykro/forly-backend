@@ -283,9 +283,14 @@
       toast(j.identity_label ? `החשבון מחובר ✓ (${j.identity_label})` : "החשבון מחובר ✓");
       closeBrowser(); refreshBrowserChip(currentPlatform);
     } catch (e) {
-      bMsg.textContent = e && e.code === "session_expired"
-        ? "עבר יותר מדי זמן והחלון נסגר. פתחו אותו שוב ונסו להתחבר."
-        : "נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ואז לחצו שוב.";
+      // driver_busy: our browser budget is full, the login window is fine —
+      // keep it open and just retry; never send the agent to reopen it.
+      const code = e && e.code;
+      bMsg.textContent = code === "driver_busy"
+        ? "הדפדפן עסוק כרגע, נסו שוב בעוד דקה"
+        : code === "session_expired"
+          ? "עבר יותר מדי זמן והחלון נסגר. פתחו אותו שוב ונסו להתחבר."
+          : "נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ואז לחצו שוב.";
     } finally { btn.disabled = false; }
   });
 

@@ -116,6 +116,12 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         return { loggedIn: true, label, pages };
       }));
     } catch (e) {
+      // Our own browser budget is full (driver-browser claim()): the agent's
+      // login browser is fine, so say "busy, retry" — "expired" would send
+      // them to open a second browser on the same profile.
+      if (e instanceof driverLive.DriverError && e.status === 429) {
+        return res.status(503).json({ error: "driver_busy", retry: true });
+      }
       // A session that already ended reads as expired, not as "not logged in".
       return res.status(409).json({ error: "session_expired" });
     }
