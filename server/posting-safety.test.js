@@ -10,6 +10,7 @@ const IL = (iso) => new Date(iso);
 const day = (n) => n * 24 * 3600 * 1000;
 const cfg = S.DEFAULTS;
 const noRand = () => 0.5;
+const jerusalemDate = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: cfg.timezone }).format(d);
 const ok = (url, group_id = url) => ({ url, group_id, agent_policy: "explicitly_allowed" });
 const account = (o = {}) => Object.assign({
   first_connected_at: new Date(NOW.getTime() - day(90)).toISOString(),
@@ -18,13 +19,22 @@ const account = (o = {}) => Object.assign({
 }, o);
 const at = (d) => new Date(NOW.getTime() - d).toISOString();
 
-// ── active hours: Israeli waking hours, never Shabbat, never a listed holiday ──
+// ── active hours: Israeli waking hours, never Shabbat, never a yom tov day ──
 assert.equal(S.isActiveTime(IL("2026-09-23T10:00:00+03:00"), cfg), true, "Wed 10:00");
 assert.equal(S.isActiveTime(IL("2026-09-23T03:00:00+03:00"), cfg), false, "Wed 03:00");
-assert.equal(S.isActiveTime(IL("2026-09-25T16:00:00+03:00"), cfg), false, "Fri 16:00 — Shabbat");
+assert.equal(S.isActiveTime(IL("2026-09-25T16:00:00+03:00"), cfg), false, "Fri 16:00 — Erev Shabbat");
 assert.equal(S.isActiveTime(IL("2026-09-26T12:00:00+03:00"), cfg), false, "Sat noon — Shabbat");
-assert.equal(S.isActiveTime(IL("2026-09-25T11:00:00+03:00"), cfg), true, "Fri 11:00 — before Shabbat");
-assert.equal(S.isActiveTime(IL("2026-09-21T11:00:00+03:00"), cfg), false, "Yom Kippur 2026 — listed holiday");
+assert.equal(S.isActiveTime(IL("2026-09-25T11:00:00+03:00"), cfg), true, "Fri 11:00 — before Erev Shabbat");
+assert.equal(S.isActiveTime(IL("2026-09-21T11:00:00+03:00"), cfg), false, "Yom Kippur 2026 — computed from the Hebrew calendar");
+
+// ── holidays: computed from the Hebrew calendar, not a hand-kept list ──
+assert.equal(S.isActiveTime(IL("2027-10-02T11:00:00+03:00"), cfg), false, "Rosh Hashana 5788 (Tishri 1)");
+assert.equal(S.isActiveTime(IL("2028-04-11T11:00:00+03:00"), cfg), false, "Pesach 5788 (Nisan 15) — a Tuesday, not conflated with Shabbat");
+assert.equal(S.isActiveTime(IL("2026-09-20T16:00:00+03:00"), cfg), false, "Erev Yom Kippur 16:00 — the eve is inactive from 15:00");
+assert.equal(S.isActiveTime(IL("2026-09-20T10:00:00+03:00"), cfg), true, "Erev Yom Kippur 10:00 — still an ordinary morning");
+assert.equal(S.isActiveTime(IL("2026-09-26T20:30:00+03:00"), cfg), false, "a Saturday evening is fully inactive — no fixed Shabbat-end hour to get wrong");
+assert.equal(S._test.isYomTov(IL("2028-04-11T11:00:00+03:00"), cfg.timezone), true);
+assert.equal(S._test.isHolidayEve(IL("2026-09-20T10:00:00+03:00"), cfg), true);
 
 // ── the schedule is not periodic: each day has its own start and its own target ──
 {
@@ -37,9 +47,29 @@ assert.equal(S.isActiveTime(IL("2026-09-21T11:00:00+03:00"), cfg), false, "Yom K
   assert.ok(skipped > 20 && skipped < 80, `about one day in five is skipped, got ${skipped}/200`);
 }
 
+// ── per-account seeding: the shape of the schedule is per-phone, not shared ──
+{
+  assert.deepEqual(S.dayPlan("2026-11-03", cfg, Math.random, "seedA"), S.dayPlan("2026-11-03", cfg, Math.random, "seedA"), "same seed and date → the same plan");
+  let differ = 0;
+  for (let i = 0; i < 30; i++) {
+    const d = `2026-11-${String((i % 28) + 1).padStart(2, "0")}`;
+    const a = S.dayPlan(d, cfg, Math.random, "seedA"), b = S.dayPlan(d, cfg, Math.random, "seedB");
+    if (a.target !== b.target || a.start_offset_min !== b.start_offset_min) differ++;
+  }
+  assert.ok(differ > 5, `different seeds give a different skip/offset pattern across 30 days, got ${differ}/30`);
+  assert.deepEqual(S.dayPlan("2026-09-23", cfg, Math.random, ""), S.dayPlan("2026-09-23", cfg, Math.random), "an empty seed keeps today's (unseeded) behaviour");
+
+  const ps1 = S.planSeed("+972500000000", "key-a"), ps2 = S.planSeed("+972500000000", "key-a");
+  assert.equal(ps1, ps2, "same phone + same key → same seed");
+  assert.notEqual(ps1, S.planSeed("+972500000001", "key-a"), "different phone → different seed");
+  assert.notEqual(ps1, S.planSeed("+972500000000", "key-b"), "different key → different seed");
+  assert.throws(() => S.planSeed("+972500000000", ""), /PROFILE_KEY/, "throws without a key");
+}
+
 // ── disabled and penalised accounts never get a slot, whatever the caps say ──
 assert.equal(S.nextSlot({ now: NOW, account: account({ disabled_until_admin: true }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "disabled");
 assert.equal(S.nextSlot({ now: NOW, account: account({ halts: [{ at: at(day(3)), code: "rate_limited" }, { at: at(day(20)), code: "rate_limited" }] }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "disabled", "two halts in 30 days = disabled");
+assert.notEqual(S.nextSlot({ now: NOW, account: account({ halts: [{ at: at(day(3)), code: "login_required" }, { at: at(day(20)), code: "login_required" }] }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "disabled", "login_required is a reconnect, not a punishment — two of them do not disable");
 assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)), halts: [{ at: at(2 * 3600000), code: "rate_limited" }] }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "penalty", "day one after a penalising signal: nothing");
 
 // ── past day one, a live penalty halves the cap — it does not stop posting (R5) ──
@@ -55,12 +85,33 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(r.reason, "daily_cap", "a post that the full cap would allow is refused at the halved cap, not blocked outright as 'penalty'");
 }
 
+// ── a live penalty halves a warm-up cap too, and the weekly cap — never below 1 ──
+{
+  const stage3 = account({ first_connected_at: at(day(15)), penalty_until: at(-day(5)), halts: [{ at: at(day(3)), code: "rate_limited" }] });
+  assert.equal(S._test.warmupStage(stage3, NOW, cfg).daily_post_cap, 2, "sanity: warm-up stage 3's own cap is 2");
+  assert.equal(S._test.dailyCapFor(stage3, NOW, cfg), 1, "a live penalty halves the warm-up cap too — floor(2/2)");
+  assert.equal(S._test.weeklyCapFor(stage3, NOW, cfg), Math.max(1, Math.floor(cfg.weekly_cap / cfg.penalty_cap_divisor)), "a live penalty halves the weekly cap too");
+  assert.equal(S._test.weeklyCapFor(account(), NOW, cfg), cfg.weekly_cap, "no penalty → the weekly cap is untouched");
+}
+
 // ── DST: a Jerusalem calendar day is a calendar day, whatever the clock did ──
 {
   const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
   const springForward = IL("2026-03-27T10:00:00+03:00"); // first day after the 2026 DST change
   const acct = account({ first_connected_at: IL("2026-03-24T23:30:00+02:00").toISOString() });
   assert.equal(S._test.warmupStage(acct, springForward, cfgNoSkip).start_day, 4, "day 4 by calendar, not by 72 hours");
+}
+
+// ── first_connected_at that is missing, invalid or in the future never throws, and is day 1 ──
+{
+  const missing = account({ first_connected_at: undefined });
+  const invalid = account({ first_connected_at: "not-a-date" });
+  const future = account({ first_connected_at: new Date(NOW.getTime() + day(1)).toISOString() });
+  for (const [label, a] of [["missing", missing], ["invalid", invalid], ["future", future]]) {
+    assert.doesNotThrow(() => S.nextSlot({ now: NOW, account: a, candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }), label);
+    assert.equal(S.wantsBrowseSession(a, NOW, cfg), true, `${label} first_connected_at → treated as day 1 (browse-only)`);
+    assert.equal(S._test.dayNumber(a, NOW, cfg), 1, label);
+  }
 }
 
 // ── activityKey: the group_activity/{group_id}|{date} doc id, Jerusalem date always ──
@@ -70,7 +121,7 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(S.activityKey("slug:foo", IL("2026-09-23T10:00:00+03:00")), "slug:foo|2026-09-23");
 }
 
-// ── configFrom: settings/posting may override the global per-group cap, nothing else, and only with a positive integer ──
+// ── configFrom: settings/posting may override the global per-group cap, nothing else, only with a positive integer, and never mutates DEFAULTS ──
 {
   assert.equal(S.configFrom({}).group_global_daily_cap, cfg.group_global_daily_cap);
   assert.equal(S.configFrom(null).group_global_daily_cap, cfg.group_global_daily_cap, "handles a missing settings doc");
@@ -79,6 +130,11 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(S.configFrom({ group_global_daily_cap: -3 }).group_global_daily_cap, cfg.group_global_daily_cap, "negative ignored");
   assert.equal(S.configFrom({ group_global_daily_cap: 2.5 }).group_global_daily_cap, cfg.group_global_daily_cap, "non-integer ignored");
   assert.equal(S.configFrom({ group_global_daily_cap: 7, daily_cap: 99 }).daily_cap, cfg.daily_cap, "only the allowlisted key is settings-driven");
+  const c = S.configFrom({});
+  c.active_hours.start = 0;
+  c.warmup.length = 0;
+  assert.equal(cfg.active_hours.start, 9, "configFrom deep-copies — mutating the result never touches DEFAULTS");
+  assert.equal(cfg.warmup.length, 3, "nested arrays are copied too");
 }
 
 // ── warm-up: a freshly connected account, or one that answered "no", posts once a day ──
@@ -123,6 +179,44 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(S.nextSlot({ now: NOW, account: account({ posts: week }), candidates: [ok("z")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "weekly_cap");
 }
 
+// ── the daily cap is re-checked for whatever day the slot actually lands on ──
+{
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
+
+  // 20:30, nothing posted today — but another campaign already reserved all
+  // three of tomorrow's slots. The gap/jitter math would naturally push the
+  // next post into tomorrow; tomorrow's own cap must still be honoured.
+  const reservedTomorrow = [
+    { at: "2026-09-24T10:00:00+03:00", group_id: "r0", group_url: "r0", page_id: "x", ok: null },
+    { at: "2026-09-24T13:00:00+03:00", group_id: "r1", group_url: "r1", page_id: "x", ok: null },
+    { at: "2026-09-24T18:00:00+03:00", group_id: "r2", group_url: "r2", page_id: "x", ok: null },
+  ];
+  const night = IL("2026-09-23T20:30:00+03:00");
+  const r = S.nextSlot({ now: night, account: account({ posts: reservedTomorrow }), candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand });
+  assert.ok(r.at, "a slot is still found");
+  assert.notEqual(jerusalemDate(r.at), "2026-09-24", "tomorrow already took its 3 reservations — no 4th slot lands there");
+
+  // An overnight `now` (today's window long closed): the slot lands on the
+  // day it rolls onto, at THAT day's own start jitter — not a bare 09:00,
+  // and not contaminated by today's own (irrelevant) offset.
+  const lateNight = IL("2026-09-23T23:30:00+03:00");
+  const overnight = S.nextSlot({ now: lateNight, account: account(), candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand });
+  assert.equal(S.isActiveTime(overnight.at, cfg), true);
+  assert.ok(overnight.at.getTime() > lateNight.getTime() + 8 * 3600000);
+  const landedDate = jerusalemDate(overnight.at);
+  const expectedPlan = S.dayPlan(landedDate, cfgNoSkip);
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: cfg.timezone, hour12: false, hour: "numeric", minute: "numeric" }).formatToParts(overnight.at);
+  const hour = Number(parts.find((x) => x.type === "hour").value) % 24, minute = Number(parts.find((x) => x.type === "minute").value);
+  assert.equal(hour * 60 + minute, cfg.active_hours.start * 60 + expectedPlan.start_offset_min, "lands exactly at the landing day's own start jitter");
+
+  // A slot never lands on a skip day, whatever day the search starts from.
+  for (let i = 0; i < 30; i++) {
+    const now = new Date(NOW.getTime() + i * day(1));
+    const res = S.nextSlot({ now, account: account(), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand });
+    if (res.at) assert.notEqual(S.dayPlan(jerusalemDate(res.at), cfg).target, 0, `slot landed on a skip day (search started ${jerusalemDate(now)})`);
+  }
+}
+
 // ── warm-up day 2: a browse-only day — no slot, but a browse session is wanted ──
 {
   const fresh = account({ first_connected_at: at(day(1)) });
@@ -162,6 +256,21 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
     S.fingerprint({ city: "תל אביב", rooms: 4, price: 2_010_000, size_sqm: 91, street: "רוטשילד 1" }, "k").strong,
     "city normalised before hashing; strong ignores street");
 
+  // street/project case and whitespace are normalised before hashing
+  const streetA = S.fingerprint({ city: "חיפה", rooms: 3, price: 900000, street: "Main St." }, "k");
+  const streetB = S.fingerprint({ city: "חיפה", rooms: 3, price: 900000, street: "  MAIN   st.  " }, "k");
+  assert.equal(streetA.exact, streetB.exact, "street is case- and whitespace-normalised before hashing");
+
+  // degenerate listings: missing price/sqm never produce a false match
+  const noPriceNoSqm1 = S.fingerprint({ city: "חיפה", rooms: 3 }, "k");
+  const noPriceNoSqm2 = S.fingerprint({ city: "חיפה", rooms: 3 }, "k");
+  assert.equal(noPriceNoSqm1.strong, null, "no sqm and no price → no strong tier");
+  assert.equal(noPriceNoSqm1.weak, null, "no price → no weak tier");
+  assert.deepEqual(noPriceNoSqm1, noPriceNoSqm2, "still deterministic");
+  const noSqmOnly = S.fingerprint({ city: "חיפה", rooms: 3, price: 900000 }, "k");
+  assert.equal(noSqmOnly.strong, null, "sqm alone missing → no strong tier");
+  assert.ok(noSqmOnly.weak, "price present → weak tier still exists");
+
   const savedKey = process.env.PROFILE_KEY;
   delete process.env.PROFILE_KEY;
   assert.throws(() => S.fingerprint({ city: "חיפה" }), /PROFILE_KEY/, "throws when PROFILE_KEY is missing and no key arg given");
@@ -188,6 +297,7 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
     g3: { posts_today: 0, fingerprints: [{ exact: fpStrongOnly.exact, strong: fpStrongOnly.strong, weak: fpStrongOnly.weak, at: at(day(2)) }] },
     g4: { posts_today: 0, fingerprints: [{ exact: fpWeakOnly.exact, strong: fpWeakOnly.strong, weak: fpWeakOnly.weak, at: at(day(2)) }] },
     g5: { posts_today: 0, fingerprints: [] },
+    g6: { posts_today: 0, fingerprints: [{ exact: null, strong: null, weak: null, at: at(day(2)) }] }, // another degenerate (no price/sqm) listing
   };
 
   const full = S.nextSlot({ now: NOW, account: account(), candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand, groupActivity: activity });
@@ -208,6 +318,12 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   const mixed = S.nextSlot({ now: NOW, account: account(), candidates: [ok("g3"), ok("g5")], pageId: "p", fingerprint: fpBase, config: cfgNoSkip, rand: noRand, groupActivity: activity });
   assert.equal(mixed.group_url, "g5", "the strong duplicate is skipped in favour of a clean group");
   assert.deepEqual(mixed.duplicate_review, ["g3"], "but still flagged for operator review even though another group was chosen");
+
+  // a degenerate (null-tier) query fingerprint never matches anything, even
+  // against a stored degenerate entry — a null tier is skipped, not a wildcard
+  const degenFp = S.fingerprint({ city: "חיפה", rooms: 3 }, process.env.PROFILE_KEY);
+  const degenResult = S.nextSlot({ now: NOW, account: account(), candidates: [ok("g6")], pageId: "p", fingerprint: degenFp, config: cfgNoSkip, rand: noRand, groupActivity: activity });
+  assert.ok(degenResult.at, "no price/sqm on either side → no false duplicate");
 }
 
 // ── group cooldowns pick the other group; unknown-policy groups are eligible (the agent listed them) ──
@@ -222,30 +338,48 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(S.nextSlot({ now: NOW, account: legacy, candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "no_eligible_group", "falls back to group_url when a post has no group_id");
 }
 
-// ── outside active hours, the slot is inside the next window ──
-{
-  const night = IL("2026-09-23T23:30:00+03:00");
-  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
-  const slot = S.nextSlot({ now: night, account: account(), candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand });
-  assert.equal(S.isActiveTime(slot.at, cfg), true);
-  assert.ok(slot.at.getTime() > night.getTime() + 8 * 3600000);
-}
-
 // ── signals: scoped input, and the outcomes that matter are all there ──
 const sig = (o) => S.classifySignal(Object.assign({ landedUrl: "https://www.facebook.com/groups/1", dialogText: "", alertText: "" }, o));
-assert.equal(sig({}), "ok");
-assert.equal(sig({ landedUrl: "https://www.facebook.com/login/?next=x" }), "login_required");
-assert.equal(sig({ landedUrl: "https://www.facebook.com/checkpoint/1501092823525282/" }), "checkpoint");
-assert.equal(sig({ landedUrl: "https://www.facebook.com/checkpoint/block/" }), "restricted", "a disabled account is not a cookie expiry");
-assert.equal(sig({ dialogText: "Confirm you're human" }), "captcha");
-assert.equal(sig({ alertText: "You're temporarily blocked from posting" }), "rate_limited");
-assert.equal(sig({ alertText: "אתם חסומים זמנית" }), "rate_limited");
-assert.equal(sig({ dialogText: "You can't use this feature right now" }), "feature_blocked");
-assert.equal(sig({ dialogText: "לא ניתן להשתמש בתכונה זו כרגע" }), "feature_blocked");
-assert.equal(sig({ alertText: "Your post is pending approval" }), "pending_approval");
-assert.equal(sig({ alertText: "הפוסט שלך ממתין לאישור" }), "pending_approval");
-assert.equal(sig({ dialogText: "You can't post in this group" }), "group_blocked");
-assert.equal(sig({ dialogText: "Join group to post" }), "not_member");
+
+const POSITIVES = [
+  ["login.php?next=", { landedUrl: "https://www.facebook.com/login.php?next=%2Fgroups%2F1" }, "login_required"],
+  ["login/?next=", { landedUrl: "https://www.facebook.com/login/?next=x" }, "login_required"],
+  ["recover path", { landedUrl: "https://www.facebook.com/recover/initiate/" }, "login_required"],
+  ["checkpoint path", { landedUrl: "https://www.facebook.com/checkpoint/1501092823525282/" }, "checkpoint"],
+  ["checkpoint/block path", { landedUrl: "https://www.facebook.com/checkpoint/block/" }, "restricted"],
+  ["captcha, exact sentence", { dialogText: "Confirm you're human" }, "captcha"],
+  ["captcha, curly apostrophe", { dialogText: "Confirm you’re human" }, "captcha"],
+  ["captcha, structural (hasCaptchaFrame)", { hasCaptchaFrame: true }, "captcha"],
+  ["feature_blocked, straight apostrophe", { dialogText: "You can't use this feature right now" }, "feature_blocked"],
+  ["feature_blocked, curly apostrophe", { dialogText: "You can’t use this feature right now" }, "feature_blocked"],
+  ["feature_blocked, hebrew", { dialogText: "לא ניתן להשתמש בתכונה זו כרגע" }, "feature_blocked"],
+  ["rate_limited, english", { alertText: "You're temporarily blocked from posting" }, "rate_limited"],
+  ["rate_limited, curly apostrophe", { alertText: "You’re temporarily blocked from posting" }, "rate_limited"],
+  ["rate_limited, hebrew (חסומים זמנית)", { alertText: "אתם חסומים זמנית" }, "rate_limited"],
+  ["rate_limited, hebrew (נחסמת באופן זמני)", { alertText: "נחסמת באופן זמני" }, "rate_limited"],
+  ["rate_limited, hebrew (חסימה זמנית)", { alertText: "חסימה זמנית" }, "rate_limited"],
+  ["rate_limited, hebrew feminine (חסומה זמנית)", { alertText: "חסומה זמנית" }, "rate_limited"],
+  ["restricted, account is restricted", { alertText: "Your account is restricted" }, "restricted"],
+  ["restricted, groups-until phrasing, straight apostrophe", { alertText: "You're restricted from posting in groups until 9:00 PM" }, "restricted"],
+  ["restricted, groups-until phrasing, curly apostrophe", { alertText: "You’re restricted from posting in groups until 9:00 PM" }, "restricted"],
+  ["restricted, hebrew", { alertText: "החשבון שלך מוגבל" }, "restricted"],
+  ["pending_approval, english", { alertText: "Your post is pending approval" }, "pending_approval"],
+  ["pending_approval, hebrew", { alertText: "הפוסט שלך ממתין לאישור" }, "pending_approval"],
+  ["group_blocked, straight apostrophe", { dialogText: "You can't post in this group" }, "group_blocked"],
+  ["group_blocked, curly apostrophe", { dialogText: "You can’t post in this group" }, "group_blocked"],
+  ["not_member", { dialogText: "Join group to post" }, "not_member"],
+];
+for (const [label, input, expected] of POSITIVES) assert.equal(sig(input), expected, label);
+
+const NEGATIVES = [
+  ["group-rules dialog (לוודא שאת is over-broad)", { dialogText: "מנהלי הקבוצה רוצים לוודא שאתם מכירים את הכללים" }],
+  ["group-rules dialog (security check is over-broad)", { dialogText: "every post passes a security check" }],
+  ["group-rules dialog (bare slow down is over-broad)", { dialogText: "Slow down — one post per day" }],
+  ["a login-named group, not a login wall", { landedUrl: "https://www.facebook.com/groups/login/" }],
+  ["a generic mention of verification is not a captcha", { dialogText: "Please complete verification to continue" }],
+];
+for (const [label, input] of NEGATIVES) assert.equal(sig(input), "ok", label);
+
 // what the feed says is NOT a signal: another member's post must never halt an account
 assert.equal(S.classifySignal({ landedUrl: "https://www.facebook.com/groups/1", dialogText: "", alertText: "", feedText: "אתם חסומים זמנית security check join group" }), "ok");
 for (const x of ["checkpoint", "captcha", "restricted"]) assert.ok(S.SIGNAL_DISABLES.has(x));

@@ -21,7 +21,9 @@
  *
  * Time is Jerusalem time throughout (R7): every daily bucket, cap and
  * warm-up day is keyed by the Asia/Jerusalem calendar date via Intl, never
- * 24h arithmetic, so DST transitions never shift a bucket.
+ * 24h arithmetic, so DST transitions never shift a bucket. Israel's yom tov
+ * days and their eves are computed from the Hebrew calendar (also via Intl),
+ * not hand-maintained — see isYomTov()/isHolidayEve() below.
  *
  * Reservations are the caller's job (Task 16, R1): account.posts already
  * includes reserved/submit_started/outcome_unknown attempts as `ok: null`,
@@ -33,14 +35,11 @@
  */
 const crypto = require("crypto");
 const { normalizeCity } = require("./distribution/city-normalize");
+const { classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS } = require("./posting-signals");
 
 const DEFAULTS = {
   timezone: "Asia/Jerusalem",
   active_hours: { start: 9, end: 21 },
-  shabbat: { start_dow: 5, start_hour: 15, end_dow: 6, end_hour: 20 },
-  // Yom Kippur, Rosh Hashana, Pesach (first/last), Shavuot, Sukkot (first), Simchat Torah — 5787 & 5788.
-  holidays: ["2026-09-12", "2026-09-13", "2026-09-21", "2026-09-26", "2026-10-03", "2027-04-22", "2027-04-28", "2027-06-11",
-             "2027-10-02", "2027-10-03", "2027-10-11", "2027-10-16", "2027-10-23"],
   min_gap_minutes: 120,
   gap_jitter: 0.8,                  // adds up to +80% of the gap, never subtracts
   long_break_probability: 0.25,     // sometimes the gap is 3–5 hours, like a person with a job
@@ -76,16 +75,40 @@ function localParts(date, tz) {
   return { dow: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday), hour: Number(p.hour) % 24, minute: Number(p.minute) };
 }
 const localDate = (date, tz) => new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-
-function inShabbat({ dow, hour }, sh) {
-  if (dow === sh.start_dow) return hour >= sh.start_hour;
-  if (dow === sh.end_dow) return hour < sh.end_hour;
-  return false;
+// The Jerusalem calendar date that follows `dateStr`, as a string — anchored
+// at UTC noon so the arithmetic never lands near a Jerusalem DST boundary.
+function nextLocalDateStr(dateStr, tz) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return localDate(new Date(Date.UTC(y, m - 1, d, 12) + MS_DAY), tz);
 }
+
+// ── Israel's yom tov days, computed from the Hebrew calendar (R7) ──
+// Tishri 1/2 (Rosh Hashana), 10 (Yom Kippur), 15 (Sukkot I), 22 (Shmini
+// Atzeret/Simchat Torah); Nisan 15/21 (Pesach I/last day); Sivan 6 (Shavuot).
+// Computed, not a hand-maintained list, so it never goes stale.
+const BLOCKED_HEBREW_DAYS = { Tishri: new Set([1, 2, 10, 15, 22]), Nisan: new Set([15, 21]), Sivan: new Set([6]) };
+const EVE_INACTIVE_HOUR = 15; // Erev Shabbat / Erev Yom Tov: inactive from here
+function hebrewParts(date, tz) {
+  const f = new Intl.DateTimeFormat("en-u-ca-hebrew", { timeZone: tz, day: "numeric", month: "long" });
+  const p = Object.fromEntries(f.formatToParts(date).map((x) => [x.type, x.value]));
+  return { month: p.month, day: Number(p.day) };
+}
+function isYomTov(date, tz) {
+  const { month, day } = hebrewParts(date, tz);
+  const days = BLOCKED_HEBREW_DAYS[month];
+  return !!(days && days.has(day));
+}
+function isHolidayEve(date, config) {
+  const tomorrowStr = nextLocalDateStr(localDate(date, config.timezone), config.timezone);
+  const [y, m, d] = tomorrowStr.split("-").map(Number);
+  return isYomTov(new Date(Date.UTC(y, m - 1, d, 12)), config.timezone);
+}
+
 function isActiveTime(date, config = DEFAULTS) {
   const lp = localParts(date, config.timezone);
-  if (config.shabbat && inShabbat(lp, config.shabbat)) return false;
-  if ((config.holidays || []).includes(localDate(date, config.timezone))) return false;
+  if (lp.dow === 6) return false; // Saturday: Shabbat, fully inactive all day (no fixed end-hour to get wrong)
+  if (isYomTov(date, config.timezone)) return false;
+  if ((lp.dow === 5 || isHolidayEve(date, config)) && lp.hour >= EVE_INACTIVE_HOUR) return false; // Erev Shabbat / Erev Yom Tov
   return lp.hour >= config.active_hours.start && lp.hour < config.active_hours.end;
 }
 function nextActiveTime(from, config) {
@@ -100,10 +123,19 @@ function seeded(str) {
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   return () => { h = (Math.imul(h, 1664525) + 1013904223) >>> 0; return h / 4294967296; };
 }
-function dayPlan(localDay, config = DEFAULTS, _rand) {
-  const r = seeded(String(localDay));
+// `seed` (Task 16: account.plan_seed, from planSeed()) makes the plan
+// per-account, so two accounts don't all skip and start on the same days —
+// an empty seed reproduces the original, account-agnostic plan exactly.
+function dayPlan(localDay, config = DEFAULTS, _rand, seed = "") {
+  const r = seeded(seed ? `${localDay}|${seed}` : String(localDay));
   if (r() < config.skip_day_probability) return { start_offset_min: 0, target: 0 };
   return { start_offset_min: Math.floor(r() * config.day_start_jitter_min), target: 1 + Math.floor(r() * config.daily_cap) };
+}
+// Task 16 sets account.plan_seed = planSeed(phone): an HMAC, not the phone
+// itself, so the seed carries no PII into the schedule it shapes.
+function planSeed(phone, key = process.env.PROFILE_KEY) {
+  if (!key) throw new Error("planSeed: PROFILE_KEY required");
+  return crypto.createHmac("sha256", key).update(String(phone || "")).digest("hex").slice(0, 24);
 }
 
 // The group_activity/{group_id}|{date} doc id (Task 16 writes it, R7: the
@@ -113,8 +145,10 @@ function activityKey(group_id, date) { return `${group_id}|${localDate(date, DEF
 // settings/posting may override a small, explicit allowlist of DEFAULTS
 // without a deploy. Anything else in `settings` — and any non-positive-
 // integer override — is ignored, so nextSlot stays pure and predictable.
+// A deep copy: a caller mutating the returned config (e.g. config.active_hours)
+// must never corrupt the shared DEFAULTS object other callers read.
 function configFrom(settings) {
-  const out = Object.assign({}, DEFAULTS);
+  const out = structuredClone(DEFAULTS);
   const v = settings && settings.group_global_daily_cap;
   if (Number.isInteger(v) && v > 0) out.group_global_daily_cap = v;
   return out;
@@ -124,36 +158,55 @@ function configFrom(settings) {
 // a logarithmic bucket, so the bucket width scales with price — a flat NIS
 // divisor would lump most rents (e.g. 4,500 and 6,500) into one or two
 // buckets, while a sale price ten times higher would barely move a bucket.
-const priceBucket = (price, pct) => { const p = Number(price) || 0; return p > 0 ? Math.round(Math.log(p) / Math.log(1 + pct)) : ""; };
-const sqmBucket = (sqm) => (sqm === undefined || sqm === null || sqm === "" || !Number.isFinite(Number(sqm)) ? "" : Math.floor(Number(sqm) / 5));
+const priceBucket = (price, pct) => { const p = Number(price) || 0; return p > 0 ? Math.round(Math.log(p) / Math.log(1 + pct)) : null; };
+const hasNumber = (v) => v !== undefined && v !== null && v !== "" && Number.isFinite(Number(v)) && Number(v) > 0;
+const sqmBucket = (sqm) => Math.floor(Number(sqm) / 5);
+const normalizeText = (s) => String(s || "").trim().replace(/\s+/g, " ").toLowerCase();
 
 // Same listing, whoever posted it — three tiers of confidence, each an HMAC
 // so the global index (group_activity.fingerprints) stores no readable
-// attribute, only tokens keyed by PROFILE_KEY.
-//  - exact:  street/project known → city|street_or_project|rooms|floor|sqm|price2;
+// attribute, only tokens keyed by PROFILE_KEY. A tier is `null` when its
+// inputs are missing — a listing with no price is never a false "match" —
+// and nextSlot skips a null tier rather than treating it as a wildcard.
+//  - exact:  street/project known → city|street_or_project|rooms|floor|sqm|price2
+//            (street/project case- and whitespace-normalised first);
 //            else an imported listing's own source id; else null (no exact tier).
 //  - strong: city|rooms|sqm±5|price2 — a near-duplicate: skip AND flag for review.
+//            null when size_sqm or price is missing.
 //  - weak:   city|rooms|price5 — plausibly the same listing: not a block, just ranked last.
+//            null when price is missing.
 function fingerprint(prop = {}, key = process.env.PROFILE_KEY) {
   if (!key) throw new Error("fingerprint: PROFILE_KEY required");
   const p = prop || {};
   const city = normalizeCity(p.city);
   const rooms = p.rooms ?? "";
-  const price2 = priceBucket(p.price, 0.02);
-  const price5 = priceBucket(p.price, 0.05);
-  const streetOrProject = p.street || p.project || null;
+  const hasPrice = hasNumber(p.price);
+  const hasSqm = hasNumber(p.size_sqm);
+  const price2 = hasPrice ? priceBucket(p.price, 0.02) : null;
+  const price5 = hasPrice ? priceBucket(p.price, 0.05) : null;
+  const streetOrProject = normalizeText(p.street || p.project) || null;
   let exactMaterial = null;
-  if (streetOrProject) exactMaterial = `${city}|${streetOrProject}|${rooms}|${p.floor ?? ""}|${p.size_sqm ?? ""}|${price2}`;
+  if (streetOrProject) exactMaterial = `${city}|${streetOrProject}|${rooms}|${p.floor ?? ""}|${p.size_sqm ?? ""}|${price2 ?? ""}`;
   else if (p.source_url || p.source_id) exactMaterial = `src|${p.source_url || p.source_id}`;
-  const strongMaterial = `${city}|${rooms}|${sqmBucket(p.size_sqm)}|${price2}`;
-  const weakMaterial = `${city}|${rooms}|${price5}`;
+  const strongMaterial = (hasSqm && hasPrice) ? `${city}|${rooms}|${sqmBucket(p.size_sqm)}|${price2}` : null;
+  const weakMaterial = hasPrice ? `${city}|${rooms}|${price5}` : null;
   const hmac = (material) => crypto.createHmac("sha256", key).update(material).digest("hex").slice(0, 24);
-  return { exact: exactMaterial ? hmac(exactMaterial) : null, strong: hmac(strongMaterial), weak: hmac(weakMaterial) };
+  return {
+    exact: exactMaterial ? hmac(exactMaterial) : null,
+    strong: strongMaterial ? hmac(strongMaterial) : null,
+    weak: weakMaterial ? hmac(weakMaterial) : null,
+  };
 }
 
-// Calendar days in Asia/Jerusalem, not 24-hour spans: day 1 is the connect day.
+// Calendar days in Asia/Jerusalem, not 24-hour spans: day 1 is the connect
+// day. A missing, invalid or future first_connected_at is treated as day 1
+// (the safest, most restrictive — browse-only) rather than throwing or
+// silently granting a mature account's full cap.
 function dayNumber(account, now, config) {
-  const d0 = localDate(new Date(account.first_connected_at), config.timezone), d1 = localDate(now, config.timezone);
+  const raw = account && account.first_connected_at;
+  const d0date = raw ? new Date(raw) : null;
+  if (!d0date || Number.isNaN(d0date.getTime()) || d0date.getTime() > now.getTime()) return 1;
+  const d0 = localDate(d0date, config.timezone), d1 = localDate(now, config.timezone);
   return Math.round((Date.UTC(...d1.split("-").map(Number).map((x, i) => (i === 1 ? x - 1 : x))) - Date.UTC(...d0.split("-").map(Number).map((x, i) => (i === 1 ? x - 1 : x)))) / MS_DAY) + 1;
 }
 function warmupStage(account, now, config) {
@@ -163,35 +216,43 @@ function warmupStage(account, now, config) {
 }
 const wantsBrowseSession = (account, now, config) => { const w = warmupStage(account, now, config); return !!(w && w.daily_post_cap === 0 && w.daily_browse_cap > 0); };
 
+function isPenalised(account, now) {
+  return !!(account.penalty_until && now.getTime() < new Date(account.penalty_until).getTime());
+}
+// R5: a live penalty halves whatever cap otherwise applies — including a
+// warm-up stage's cap, not just the base daily_cap — never below 1.
 function dailyCapFor(account, now, config) {
   const w = warmupStage(account, now, config);
-  if (w) return w.daily_post_cap;
-  const base = config.daily_cap;
-  return account.penalty_until && now.getTime() < new Date(account.penalty_until).getTime() ? Math.max(1, Math.floor(base / config.penalty_cap_divisor)) : base;
+  const base = w ? w.daily_post_cap : config.daily_cap;
+  return isPenalised(account, now) ? Math.max(1, Math.floor(base / config.penalty_cap_divisor)) : base;
+}
+function weeklyCapFor(account, now, config) {
+  return isPenalised(account, now) ? Math.max(1, Math.floor(config.weekly_cap / config.penalty_cap_divisor)) : config.weekly_cap;
 }
 
 function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, groupActivity = {}, config = DEFAULTS, rand = Math.random }) {
   if (account.disabled_until_admin) return { at: null, reason: "disabled" };
-  const recentHalts = (account.halts || []).filter((h) => now.getTime() - new Date(h.at).getTime() < config.halts_window_days * MS_DAY);
+  // Only a halt that actually disables or penalises (R5) counts toward the
+  // 2-in-30-days disable rule or the day-one penalty block below — a
+  // reconnect-only halt like login_required is not a punishment (R5).
+  const recentHalts = (account.halts || []).filter((h) => (SIGNAL_DISABLES.has(h.code) || SIGNAL_PENALISES.has(h.code)) && now.getTime() - new Date(h.at).getTime() < config.halts_window_days * MS_DAY);
   if (recentHalts.length >= config.halts_to_disable) return { at: null, reason: "disabled" };
   // R5: feature_blocked / rate_limited is a 14-day penalty with caps halved,
   // not a hard stop — except day one, which posts nothing at all. "Day one"
   // is a penalising halt (rate_limited / feature_blocked) under 24h old;
-  // for the rest of penalty_until, dailyCapFor halves the daily cap instead.
+  // for the rest of penalty_until, dailyCapFor/weeklyCapFor halve the caps.
   const freshPenalisingHalt = recentHalts.some((h) => SIGNAL_PENALISES.has(h.code) && now.getTime() - new Date(h.at).getTime() < MS_DAY);
-  if (account.penalty_until && now.getTime() < new Date(account.penalty_until).getTime() && freshPenalisingHalt) {
-    return { at: null, reason: "penalty" };
-  }
+  if (isPenalised(account, now) && freshPenalisingHalt) return { at: null, reason: "penalty" };
 
   if (wantsBrowseSession(account, now, config)) return { at: null, reason: "browse_only" };
   const posts = (account.posts || []).map((p) => ({ ...p, t: new Date(p.at).getTime() }));
-  const today = localDate(now, config.timezone);
-  const plan = dayPlan(today, config, rand);
-  if (plan.target === 0) return { at: null, reason: "day_skipped" };
+  const countOnDate = (dateStr) => posts.filter((p) => localDate(new Date(p.t), config.timezone) === dateStr).length;
 
-  const todays = posts.filter((p) => localDate(new Date(p.t), config.timezone) === today).length;
-  if (todays >= Math.min(plan.target, dailyCapFor(account, now, config))) return { at: null, reason: "daily_cap" };
-  if (posts.filter((p) => now.getTime() - p.t < 7 * MS_DAY).length >= config.weekly_cap) return { at: null, reason: "weekly_cap" };
+  const today = localDate(now, config.timezone);
+  const todayPlan = dayPlan(today, config, rand, account.plan_seed);
+  if (todayPlan.target === 0) return { at: null, reason: "day_skipped" };
+  if (countOnDate(today) >= Math.min(todayPlan.target, dailyCapFor(account, now, config))) return { at: null, reason: "daily_cap" };
+  if (posts.filter((p) => now.getTime() - p.t < 7 * MS_DAY).length >= weeklyCapFor(account, now, config)) return { at: null, reason: "weekly_cap" };
 
   // Posts are matched to a candidate group by group_id; only a post written
   // before group_id existed falls back to matching by group_url.
@@ -208,6 +269,8 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
     const ga = groupActivity[c.group_id] || {};
     if ((ga.posts_today || 0) >= config.group_global_daily_cap) return false;
     const fps = ga.fingerprints || [];
+    // A null tier (missing inputs) never matches anything — it is skipped,
+    // not treated as a wildcard.
     if (fp && fp.exact && fps.some((f) => f.exact === fp.exact && within(f.at))) return false; // exact: silent skip
     if (fp && fp.strong && fps.some((f) => f.strong === fp.strong && within(f.at))) { duplicateReview.push(c.group_id); return false; } // strong: skip + flag
     if (fp && fp.weak && fps.some((f) => f.weak === fp.weak && within(f.at))) weakDup.add(c.group_id); // weak: rank last, not a block
@@ -218,52 +281,45 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
   }
   const lastTo = (c) => Math.max(0, ...postsFor(c).map((p) => p.t));
   eligible.sort((a, b) => (Number(weakDup.has(a.group_id)) - Number(weakDup.has(b.group_id))) || (lastTo(a) - lastTo(b)));
+  const winner = eligible[0];
 
   // Earliest: after the last post OR reservation by the gap (with jitter, and
-  // sometimes a long break), and never before today's randomised start.
+  // sometimes a long break, never earlier than `now`).
   const lastAny = Math.max(0, ...posts.map((p) => p.t));
   const longBreak = rand() < config.long_break_probability;
   const gapMin = longBreak ? 180 + rand() * 120 : config.min_gap_minutes * (1 + config.gap_jitter * rand());
-  const lp = localParts(now, config.timezone);
-  const startToday = new Date(now.getTime() - (lp.hour * 60 + lp.minute) * MS_MIN + (config.active_hours.start * 60 + plan.start_offset_min) * MS_MIN);
-  const earliest = new Date(Math.max(now.getTime(), lastAny + gapMin * MS_MIN, startToday.getTime()));
-  const winner = eligible[0];
-  const result = { at: nextActiveTime(earliest, config), group_id: winner.group_id, group_url: winner.url };
-  if (duplicateReview.length) result.duplicate_review = duplicateReview.slice();
-  return result;
-}
+  let cursor = new Date(Math.max(now.getTime(), lastAny + gapMin * MS_MIN));
 
-// ── what the page is telling us — from the DIALOG and ALERT regions only ──
-// The feed is other people's text. A member who writes "אתם חסומים זמנית" in a
-// post must not halt every Forly agent who lands there.
-const URL_SIGNALS = [
-  ["restricted", /\/checkpoint\/block/i],
-  ["checkpoint", /\/checkpoint\//i],
-  ["login_required", /\/(login|recover)(\/|\?|$)/i],
-];
-const TEXT_SIGNALS = [
-  ["captcha", /(confirm you'?re human|security check|בדיקת אבטחה|לוודא שאת)/i],
-  ["feature_blocked", /(can'?t use this feature|we limit how often|לא ניתן להשתמש בתכונה|אנחנו מגבילים)/i],
-  ["rate_limited", /(temporarily blocked|posting too fast|slow down|חסומים זמנית|חסום זמנית|לאט יותר)/i],
-  ["restricted", /(account (is )?restricted|החשבון שלך מוגבל)/i],
-  ["pending_approval", /(pending approval|will be reviewed|ממתין לאישור|ייבדק על ידי מנהל)/i],
-  ["group_blocked", /(can'?t post in this group|no longer able to post|לא ניתן לפרסם בקבוצה)/i],
-  ["not_member", /(join group to post|הצטרפו לקבוצה כדי לפרסם|הצטרפות לקבוצה)/i],
-];
-const SIGNAL_DISABLES = new Set(["checkpoint", "captcha", "restricted"]);
-const SIGNAL_PENALISES = new Set(["rate_limited", "feature_blocked"]);
-const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval"]);
-
-function classifySignal({ landedUrl, dialogText, alertText }) {
-  const u = String(landedUrl || "");
-  for (const [code, re] of URL_SIGNALS) if (re.test(u)) return code;
-  const t = `${dialogText || ""}\n${alertText || ""}`;
-  for (const [code, re] of TEXT_SIGNALS) if (re.test(t)) return code;
-  return "ok";
+  // The day the slot lands on is never taken on faith: a big gap, or another
+  // campaign's reservations already claiming a future date, can push `at`
+  // onto a day whose own plan or cap was never checked. Each candidate day
+  // is re-validated — its own skip flag, its own start jitter, its own cap
+  // (attempts AND ok:null reservations already on that Jerusalem date) —
+  // advancing to the next day on any failure, for up to two weeks out.
+  for (let daysTried = 0; daysTried < 14; daysTried++) {
+    const lp = localParts(cursor, config.timezone);
+    const dateStr = localDate(cursor, config.timezone);
+    const midnight = new Date(cursor.getTime() - (lp.hour * 60 + lp.minute) * MS_MIN);
+    const plan = dayPlan(dateStr, config, rand, account.plan_seed);
+    const dayStart = new Date(midnight.getTime() + (config.active_hours.start * 60 + plan.start_offset_min) * MS_MIN);
+    if (plan.target > 0) {
+      const candidate = nextActiveTime(new Date(Math.max(cursor.getTime(), dayStart.getTime())), config);
+      if (localDate(candidate, config.timezone) === dateStr) {
+        const capForDay = Math.min(plan.target, dailyCapFor(account, candidate, config));
+        if (countOnDate(dateStr) < capForDay) {
+          const result = { at: candidate, group_id: winner.group_id, group_url: winner.url };
+          if (duplicateReview.length) result.duplicate_review = duplicateReview.slice();
+          return result;
+        }
+      }
+    }
+    cursor = new Date(midnight.getTime() + MS_DAY); // try the next calendar day, from its own start — never carry today's jitter into it
+  }
+  return { at: null, reason: "no_slot_in_horizon" };
 }
 
 module.exports = {
-  DEFAULTS, nextSlot, isActiveTime, nextActiveTime, dayPlan, activityKey, configFrom, fingerprint,
+  DEFAULTS, nextSlot, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, configFrom, fingerprint,
   wantsBrowseSession, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
-  _test: { localParts, dailyCapFor, warmupStage },
+  _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },
 };
