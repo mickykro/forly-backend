@@ -68,6 +68,9 @@ async function createListing(phone, body, agentOverride, deps) {
     photos_urls: body.photos_urls.slice(0, MAX_PHOTOS),
     own_video_url: body.own_video_url || null,
     status: "active", page_id: null,
+    // Set when create.html?draft=<id> submits — lets the page-creation
+    // handler (routes/pages.js) mark the listing-sweep draft "created".
+    listing_draft_id: body.listing_draft_id ? String(body.listing_draft_id).slice(0, 200) : null,
     agent: agentOverride ? {
       name: String(agentOverride.name || ""),
       brand_name: String(agentOverride.brand_name || agentOverride.name || ""),

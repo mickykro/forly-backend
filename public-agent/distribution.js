@@ -200,11 +200,39 @@
     }
   })();
 
-  // ── the personal-account browser ──
-  // The viewer is a live view of a real Chrome in Driver's cloud: the agent
-  // types their own password into it, and it never touches our server.
+  // ── the personal-account browser: facebook posts, yad2/madlan are read-only
+  //    (Phase 4 — connect + dwell + read one's own listings as drafts).
+  //    Same flow for all three; only the copy under each row differs. ──
   const bModal = $("browserModal"), bBody = $("browserModalBody"), bMsg = $("browserModalMsg");
-  let bOpen = false;
+  let bOpen = false, currentPlatform = null;
+
+  const PLATFORM_ROWS = [
+    { key: "facebook", label: "פייסבוק", copy: [
+      "חיבור אחד לפייסבוק — פורלי תפרסם גם בדף העסקי וגם בקבוצות מאותו חשבון, ותקרא פוסטים מקבוצות. מתחברים כאן פעם אחת, כמו בדפדפן רגיל.",
+      "בשלושת הימים הראשונים פורלי רק מסתובבת בפייסבוק מהחשבון שלכם — גוללת, צופה, מסמנת לייק פה ושם — בלי לפרסם. אחר כך פוסט אחד ביום, ובהדרגה יותר. ככה פייסבוק רואה פעילות רגילה ולא רובוט, וזה מה ששומר על החשבון שלכם.",
+    ], small: "פרסום אוטומטי בקבוצות נעשה על אחריותכם — נסביר בדיוק לפני שמתחילים." },
+    { key: "yad2", label: "יד2", copy: [
+      "מתחברים ליד2 כדי שפורלי תוכל לקרוא את המודעות שלכם באתר ולהציע אותן כדף נכס מוכן — פורלי לא מפרסמת דרך החשבון הזה.",
+    ] },
+    { key: "madlan", label: "מדלן", copy: [
+      "מתחברים למדלן כדי שפורלי תוכל לקרוא את המודעות שלכם באתר ולהציע אותן כדף נכס מוכן — פורלי לא מפרסמת דרך החשבון הזה.",
+    ] },
+  ];
+
+  function rowHtml(p) {
+    return `<div class="conn-platform-row" data-platform="${p.key}">
+      <h3>${p.label} <span class="conn-chip" id="browserConnChip_${p.key}"></span></h3>
+      ${p.copy.map((t) => `<p class="muted">${t}</p>`).join("")}
+      ${p.small ? `<p class="muted small">${p.small}</p>` : ""}
+      <label class="consent-line"><input type="checkbox" id="browserConsent_${p.key}"> <span>הבנתי, ואני רוצה לחבר את החשבון</span></label>
+      <div class="conn-row">
+        <button class="btn btn-gold" id="browserConnectBtn_${p.key}">חיבור החשבון</button>
+        <button class="btn btn-danger" id="browserDisconnectBtn_${p.key}" hidden>ניתוק החשבון</button>
+        <span class="muted small" id="browserIdentity_${p.key}"></span>
+      </div>
+    </div>`;
+  }
+  $("browserRows").innerHTML = PLATFORM_ROWS.map(rowHtml).join("");
 
   function openBrowser(viewUrl) {
     // The viewer refuses to be framed (X-Frame-Options / frame-ancestors), so
@@ -217,34 +245,43 @@
   }
   function closeBrowser() { bModal.hidden = true; bBody.innerHTML = ""; bOpen = false; }
 
-  async function refreshBrowserChip() {
+  async function refreshBrowserChip(platform) {
     try {
-      const j = await api("/api/connections/browser/facebook/status");
+      const j = await api(`/api/connections/browser/${platform}/status`);
       const on = j.state === "connected";
-      $("browserConnChip").textContent = on ? "מחובר" : "";
-      $("browserIdentity").textContent = on && j.identity_label ? `מחובר בתור ${j.identity_label}` : "";
-      $("browserDisconnectBtn").hidden = !on;
-      $("browserConnectBtn").textContent = on ? "חיבור מחדש" : "חיבור החשבון האישי בפייסבוק";
-    } catch (e) { /* card stays in its default state */ }
+      $(`browserConnChip_${platform}`).textContent = on ? "מחובר" : "";
+      $(`browserIdentity_${platform}`).textContent = on && j.identity_label ? `מחובר בתור ${j.identity_label}` : "";
+      $(`browserDisconnectBtn_${platform}`).hidden = !on;
+      $(`browserConnectBtn_${platform}`).textContent = on ? "חיבור מחדש" : "חיבור החשבון";
+    } catch (e) { /* row stays in its default state */ }
   }
 
-  $("browserConnectBtn").addEventListener("click", async function () {
-    if (!$("browserConsent").checked) { toast("סמנו את האישור שמעל הכפתור"); return; }
-    const btn = this; btn.disabled = true; btn.textContent = "פותחים דפדפן…";
-    try {
-      const j = await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform: "facebook", consent: true }) });
-      openBrowser(j.view_url);
-    } catch (e) {
-      toast(e && e.code === "profile_busy" ? "פורלי מפרסמת כרגע מהחשבון — נסו שוב בעוד כמה דקות" : "לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע");
-    } finally { btn.disabled = false; refreshBrowserChip(); }
+  PLATFORM_ROWS.forEach(({ key: platform }) => {
+    $(`browserConnectBtn_${platform}`).addEventListener("click", async function () {
+      if (!$(`browserConsent_${platform}`).checked) { toast("סמנו את האישור שמעל הכפתור"); return; }
+      const btn = this; btn.disabled = true; btn.textContent = "פותחים דפדפן…";
+      currentPlatform = platform;
+      try {
+        const j = await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform, consent: true }) });
+        openBrowser(j.view_url);
+      } catch (e) {
+        toast(e && e.code === "profile_busy" ? "פורלי כבר משתמשת בחשבון הזה — נסו שוב בעוד כמה דקות" : "לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע");
+      } finally { btn.disabled = false; refreshBrowserChip(platform); }
+    });
+    $(`browserDisconnectBtn_${platform}`).addEventListener("click", async function () {
+      if (!confirm("לנתק את החשבון? פורלי תפסיק להשתמש בו ותמחק את ההתחברות השמורה.")) return;
+      try { await api(`/api/connections/browser/${platform}`, { method: "DELETE" }); toast("החשבון נותק"); }
+      catch (e) { toast("לא הצלחנו לנתק — נסו שוב"); }
+      refreshBrowserChip(platform);
+    });
   });
 
   $("browserDoneBtn").addEventListener("click", async function () {
     const btn = this; btn.disabled = true; bMsg.textContent = "בודקים…";
     try {
-      const j = await api("/api/connections/browser/facebook/finish", { method: "POST" });
+      const j = await api(`/api/connections/browser/${currentPlatform}/finish`, { method: "POST" });
       toast(j.identity_label ? `החשבון מחובר ✓ (${j.identity_label})` : "החשבון מחובר ✓");
-      closeBrowser(); refreshBrowserChip();
+      closeBrowser(); refreshBrowserChip(currentPlatform);
     } catch (e) {
       bMsg.textContent = e && e.code === "session_expired"
         ? "עבר יותר מדי זמן והחלון נסגר. פתחו אותו שוב ונסו להתחבר."
@@ -253,15 +290,9 @@
   });
 
   $("browserModalClose").addEventListener("click", closeBrowser);
-  $("browserDisconnectBtn").addEventListener("click", async function () {
-    if (!confirm("לנתק את החשבון? פורלי תפסיק לפרסם ותמחק את ההתחברות השמורה.")) return;
-    try { await api("/api/connections/browser/facebook", { method: "DELETE" }); toast("החשבון נותק"); }
-    catch (e) { toast("לא הצלחנו לנתק — נסו שוב"); }
-    refreshBrowserChip();
-  });
 
   // If the agent leaves for the SMS and comes back, the modal is still here;
   // only when they close it explicitly is the session's fate decided by /finish.
   $("browserConnectCard").hidden = false;
-  refreshBrowserChip();
+  PLATFORM_ROWS.forEach(({ key }) => refreshBrowserChip(key));
 })();

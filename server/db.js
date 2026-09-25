@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map(), extractJobs: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map(), extractJobs: new Map(), listingDrafts: new Map() };
 
 // A personal `gcloud auth application-default login` file works until Google
 // demands a re-login ("invalid_rapt"), and every Firestore call then fails for
@@ -359,6 +359,32 @@ async function listExtractJobsByStatus(status, limit = 10) {
   return [...mem.extractJobs.values()].filter((j) => j.status === status).slice(0, limit);
 }
 
+// ── listing drafts (Yad2/Madlan sweep results, awaiting the agent's review) ──
+// Same shape as extract jobs: doc-per-draft, dot-path patches.
+async function saveListingDraft(d) {
+  if (db) await db.collection("listing_drafts").doc(d.id).set(d);
+  else mem.listingDrafts.set(d.id, JSON.parse(JSON.stringify(d)));
+}
+
+async function getListingDraft(id) {
+  if (db) { const d = await db.collection("listing_drafts").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.listingDrafts.get(id) || null;
+}
+
+async function updateListingDraft(id, patch) {
+  if (db) { await db.collection("listing_drafts").doc(id).update(patch); return; }
+  const d = mem.listingDrafts.get(id);
+  if (d) Object.assign(d, patch);
+}
+
+async function listListingDraftsByPhone(phone, limit = 50) {
+  if (db) {
+    const snap = await db.collection("listing_drafts").where("phone", "==", String(phone)).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listingDrafts.values()].filter((d) => d.phone === String(phone)).slice(0, limit);
+}
+
 // ── distribution: curated group catalog ──
 // Operator-maintained list of recommended Facebook groups shown in the
 // dashboard. Agent suggestions land here with active:false until curated.
@@ -599,4 +625,5 @@ module.exports = {
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
   getDraft, saveDraft, deleteDraft,
   saveExtractJob, getExtractJob, updateExtractJob, listExtractJobsByStatus,
+  saveListingDraft, getListingDraft, updateListingDraft, listListingDraftsByPhone,
 };

@@ -54,6 +54,39 @@ function call(app, method, path, body) {
   assert.ok(created.duration <= 1500, "long enough for SMS 2FA, not an hour");
   assert.ok(String(created.note).startsWith("forly-connect:"));
 
+  // ── yad2 and madlan: same flow, own profile names, own check URLs ──
+  for (const platform of ["yad2", "madlan"]) {
+    let created2 = null;
+    const appP = makeApp({
+      driver: { createSession: async (o) => { created2 = o; return { sessionId: "sx", status: "active", cdpUrl: "wss://n/x" }; } },
+      db: { getConnection: async () => ({}), setConnection: async () => {} },
+    });
+    const r = await call(appP, "POST", "/api/connections/browser/start", { platform, consent: true });
+    assert.equal(r.status, 200);
+    assert.equal(created2.profile.name, require("../profile-name").profileName(platform, PHONE));
+    assert.ok(created2.url.includes(platform === "yad2" ? "yad2.co.il" : "madlan.co.il"));
+  }
+
+  // ── finish for a read-only platform skips Pages discovery entirely ──
+  {
+    let wentToPages = false;
+    const connY = { browser_session_yad2: { session_id: "sy" } };
+    const yadApp = makeApp({
+      driver: {
+        stopSession: async () => {},
+        attachPage: async (id, fn) => fn({
+          goto: async (url) => { if (String(url).includes("facebook.com")) wentToPages = true; },
+          url: () => "https://www.yad2.co.il/my-ads", innerText: async () => "המודעות שלי",
+        }),
+      },
+      db: { getConnection: async () => connY, setConnection: async (p, patch) => Object.assign(connY, patch) },
+    });
+    const fin = await call(yadApp, "POST", "/api/connections/browser/yad2/finish");
+    assert.equal(fin.status, 200);
+    assert.deepEqual(fin.body.pages, []);
+    assert.equal(wentToPages, false, "Pages discovery is Facebook-only");
+  }
+
   // ── an unknown platform is rejected before any session is created ──
   let touched = false;
   const badApp = makeApp({

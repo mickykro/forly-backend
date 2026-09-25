@@ -314,6 +314,12 @@ module.exports = function createPagesRouter(ctx) {
           .then((d) => d && d.listing_id === body.listing_id && db.deleteDraft(body.business_phone))
           .catch((e) => console.warn("draft cleanup failed:", e && e.message));
       }
+      // A listing built from create.html?draft=<id> (Yad2/Madlan sweep): mark
+      // that draft created, carrying the page_id, so it drops off the list.
+      if (listing && listing.listing_draft_id) {
+        db.updateListingDraft(listing.listing_draft_id, { status: "created", page_id: pageId, updated_at: new Date().toISOString() })
+          .catch((e) => console.warn("listing-draft mark-created failed:", e && e.message));
+      }
       // Realtime: the portal shows the listing the moment it exists.
       portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
         portalStream.toCard(doc, pageBaseUrl));

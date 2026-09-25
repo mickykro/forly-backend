@@ -25,6 +25,9 @@
   .dist-card.locked{opacity:.45;pointer-events:none}
   .conn-chip{display:inline-flex;font-size:.72rem;font-weight:600;border-radius:100px;
     padding:3px 11px;margin-inline-start:8px}
+  .conn-platform-row h3{font-family:var(--serif);font-weight:600;font-size:1rem;margin-bottom:6px}
+  .conn-platform-row + .conn-platform-row{border-top:1px solid rgba(23,20,15,.07);
+    margin-top:16px;padding-top:16px}
   .conn-chip.ok{background:rgba(31,175,90,.12);color:#157A3F}
   .conn-chip.warn{background:rgba(192,57,43,.1);color:var(--red)}
   .prop-row{display:flex;align-items:center;gap:12px;padding:10px 0;
@@ -84,17 +87,9 @@
   </div>
 
   <div class="card dist-card" id="browserConnectCard" hidden>
-    <h2>החשבון האישי בפייסבוק <span class="conn-chip" id="browserConnChip"></span></h2>
-    <p class="muted">חיבור אחד לפייסבוק — פורלי תפרסם גם בדף העסקי וגם בקבוצות מאותו חשבון, ותקרא פוסטים מקבוצות. מתחברים כאן פעם אחת, כמו בדפדפן רגיל.</p>
-    <p class="muted">בשלושת הימים הראשונים פורלי רק מסתובבת בפייסבוק מהחשבון שלכם — גוללת, צופה, מסמנת לייק פה ושם — בלי לפרסם. אחר כך פוסט אחד ביום, ובהדרגה יותר. ככה פייסבוק רואה פעילות רגילה ולא רובוט, וזה מה ששומר על החשבון שלכם.</p>
-    <p class="muted">הסיסמה נשארת אצלכם: היא לא עוברת דרך פורלי ולא נשמרת אצלנו.</p>
-    <p class="muted small">פרסום אוטומטי בקבוצות נעשה על אחריותכם — נסביר בדיוק לפני שמתחילים.</p>
-    <label class="consent-line"><input type="checkbox" id="browserConsent"> <span>הבנתי, ואני רוצה לחבר את החשבון</span></label>
-    <div class="conn-row">
-      <button class="btn btn-gold" id="browserConnectBtn">חיבור החשבון האישי בפייסבוק</button>
-      <button class="btn btn-danger" id="browserDisconnectBtn" hidden>ניתוק החשבון</button>
-      <span class="muted small" id="browserIdentity"></span>
-    </div>
+    <h2>חשבונות מחוברים</h2>
+    <p class="muted">מתחברים פעם אחת לכל חשבון, ממש כמו בדפדפן רגיל. הסיסמה נשארת אצלכם: היא לא עוברת דרך פורלי ולא נשמרת אצלנו.</p>
+    <div id="browserRows"></div>
   </div>
 
   <div class="browser-modal" id="browserModal" hidden role="dialog" aria-modal="true" aria-labelledby="browserModalTitle">

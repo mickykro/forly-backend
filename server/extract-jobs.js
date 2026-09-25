@@ -25,7 +25,10 @@ const TERMINAL_CODES = new Set(["social_login_required", "invalid_input", "extra
 
 const nowIso = () => new Date().toISOString();
 
-async function create({ phone, url, forceSource = null, profileName = null }, deps) {
+// draftId: set only by listing-sweep.js (Phase 4). A drafted job's result is
+// written to the draft on `done` instead of being polled by a wizard — see
+// runJobLocked below.
+async function create({ phone, url, forceSource = null, profileName = null, draftId = null }, deps) {
   const job = {
     id: crypto.randomUUID(),
     phone: String(phone),
@@ -34,6 +37,7 @@ async function create({ phone, url, forceSource = null, profileName = null }, de
     attempts: 0,
     force_source: forceSource,
     profile_name: profileName,
+    draft_id: draftId,
     created_at: nowIso(),
     updated_at: nowIso(),
     result: null,
@@ -103,6 +107,10 @@ async function runJobLocked(job, deps) {
       },
     };
     await deps.db.updateExtractJob(job.id, patch);
+    if (job.draft_id) {
+      await deps.db.updateListingDraft(job.draft_id, { status: "ready", extract: patch.result, updated_at: nowIso() })
+        .catch((e) => console.warn(`draft ${job.draft_id} extract writeback failed: ${e.message}`));
+    }
     return Object.assign({}, job, patch, { attempts: attempt });
   } catch (err) {
     const code = codeFor(err);
@@ -113,6 +121,10 @@ async function runJobLocked(job, deps) {
       updated_at: nowIso(),
     };
     await deps.db.updateExtractJob(job.id, patch);
+    if (job.draft_id && terminal) {
+      await deps.db.updateListingDraft(job.draft_id, { status: "extract_failed", error_code: code, updated_at: nowIso() })
+        .catch((e) => console.warn(`draft ${job.draft_id} extract-failure writeback failed: ${e.message}`));
+    }
     return Object.assign({}, job, patch, { attempts: attempt });
   }
 }

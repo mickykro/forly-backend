@@ -233,6 +233,10 @@ if (process.env.DRIVER_API_KEY) {
 
   const createConnectionsBrowserRouter = require("./routes/connections-browser");
   app.use("/api/connections/browser", createConnectionsBrowserRouter({ requireAuth, authSecret: AUTH_SECRET }));
+
+  // ── the agent's own Yad2/Madlan listings, read and offered as draft pages ──
+  const createListingDraftsRouter = require("./routes/listing-drafts");
+  app.use("/api", createListingDraftsRouter({ requireAuth, authSecret: AUTH_SECRET }));
 } else {
   console.warn("DRIVER_API_KEY not set — yad2/madlan/social URLs will fail to extract");
 }

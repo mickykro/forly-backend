@@ -19,10 +19,12 @@ const SESSION_SECONDS = 1500; // SMS 2FA on a phone that is also showing the mod
 const CONSENT_VERSION = "2026-09-24";
 const { profileName } = require("../profile-name");
 
-// Facebook only: it is the one platform a feature posts to. Add a platform
-// here when a feature needs it, not before.
+// Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
+// read — see listing-sweep.js). Add a platform here when a feature needs it.
 const PLATFORMS = {
   facebook: { loginUrl: "https://www.facebook.com/login", checkUrl: "https://www.facebook.com/me" },
+  yad2: { loginUrl: process.env.YAD2_LOGIN || "https://www.yad2.co.il/auth/login", checkUrl: process.env.YAD2_MY_ADS || "https://www.yad2.co.il/my-ads" },
+  madlan: { loginUrl: process.env.MADLAN_LOGIN || "https://www.madlan.co.il/login", checkUrl: process.env.MADLAN_MY_LISTINGS || "https://www.madlan.co.il/my" },
 };
 
 module.exports = function createConnectionsBrowserRouter(ctx) {
@@ -103,11 +105,14 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         const label = String(title || "").split("|")[0].trim().slice(0, 60) || null;
         // The Pages this account manages — the browser publisher (Phase 3) posts
         // to the first one; the agent can pick another on the campaign card.
+        // Yad2/Madlan have no equivalent (read-only connect, Phase 4).
         let pages = [];
-        try {
-          await page.goto(process.env.FB_PAGES_PAGE || "https://www.facebook.com/pages/?category=your_pages", { waitUntil: "domcontentloaded", timeout: 30000 });
-          pages = await page.$$eval('a[href*="facebook.com/"][role="link"]', (els) => els.map((a) => ({ url: a.href.split("?")[0], name: (a.textContent || "").trim() })).filter((x) => x.name && /facebook\.com\/[^/]+\/?$/.test(x.url)).slice(0, 10));
-        } catch (e) { pages = []; }
+        if (platform === "facebook") {
+          try {
+            await page.goto(process.env.FB_PAGES_PAGE || "https://www.facebook.com/pages/?category=your_pages", { waitUntil: "domcontentloaded", timeout: 30000 });
+            pages = await page.$$eval('a[href*="facebook.com/"][role="link"]', (els) => els.map((a) => ({ url: a.href.split("?")[0], name: (a.textContent || "").trim() })).filter((x) => x.name && /facebook\.com\/[^/]+\/?$/.test(x.url)).slice(0, 10));
+          } catch (e) { pages = []; }
+        }
         return { loggedIn: true, label, pages };
       }));
     } catch (e) {
