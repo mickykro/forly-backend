@@ -141,7 +141,7 @@ async function reconcileOne(deps, x, now) {
     // halts the account exactly as it would after a post (R5). Never throws.
     const cls = H.classOf(result && result.signal);
     if (cls) {
-      try { await H.haltAccount(a.phone, cls, deps, { campaignId: c.id, now }); }
+      try { await H.haltAccount(a.phone, cls, deps, { campaignId: c.id }); } // stamped with the clock now, not the sweep's start
       catch (e) { console.error(redact(`posting reconcile halt …${a.key.slice(-6)}: ${code(e)}`)); }
     }
     if (result && result.noop === true) {

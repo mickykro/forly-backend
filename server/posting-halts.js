@@ -3,7 +3,10 @@
  *
  * The ACCOUNT halts, not the campaign. Every halt is appended to the
  * connection's posting_halts ({at, code}) with posting_last_halt_at, which
- * the fleet breaker (posting-sweeper.js) queries.
+ * the fleet breaker (posting-sweeper.js) queries. A disabling halt also
+ * writes posting_disabled_at / posting_disabled_class, and a penalising one
+ * posting_penalty_at / posting_penalty_class: which halt the current disable
+ * or penalty belongs to (the duplicate check reads them).
  *
  *   captcha / checkpoint   disabled until an operator re-enables; profile quarantined
  *   restricted             disabled indefinitely (owner-level decision)
@@ -71,11 +74,20 @@ const MESSAGES = {
   removed: () => "ℹ️ מנהלי אחת הקבוצות הסירו פוסט. לא נפרסם בקבוצה הזו בחודש הקרוב.",
 };
 
-// Is the effect of an earlier `cls` halt still on the connection? (For the
-// duplicate check only; the guard and the scheduler read the same fields.)
-function inForce(conn, cls, groupId, now) {
-  if (DISABLING.has(cls) || cls === "suspected_compromise") return conn.posting_disabled_until_admin === true;
-  if (PENALISING.has(cls)) return ms(conn.posting_penalty_until) > now.getTime();
+// Is the effect of the earlier halt `h` (of class `cls`) still on the
+// connection? (For the duplicate check only; the guard and the scheduler read
+// the same fields.) Fix round 5: the shared flag or penalty alone is not
+// enough — it must still be h's own. posting_disabled_until_admin is set by
+// every disabling class, so the disable must carry h's class and date from h
+// or earlier (a later halt of another class re-set it: h itself was lifted);
+// the penalty must carry h's class and have been set by h or later.
+function inForce(conn, cls, h, groupId, now) {
+  if (DISABLING.has(cls) || cls === "suspected_compromise") {
+    return conn.posting_disabled_until_admin === true && conn.posting_disabled_class === cls && ms(conn.posting_disabled_at) <= ms(h.at);
+  }
+  if (PENALISING.has(cls)) {
+    return ms(conn.posting_penalty_until) > now.getTime() && conn.posting_penalty_class === cls && ms(conn.posting_penalty_at) >= ms(h.at);
+  }
   if (cls === "confirmed_removed") {
     const pen = ((conn.posting_group_penalties || {})[String(groupId)]) || null;
     return !!pen && ms(pen.until) > now.getTime();
@@ -95,7 +107,7 @@ function clearedSince(conn, cls, h) {
 }
 
 /*
- * haltAccount(phone, cls, deps, { campaignId, group_id, now })
+ * haltAccount(phone, cls, deps, { campaignId, group_id })
  * → { cls, disabled, owner_review, penalty_until, reconnect, paused, campaign_paused }
  */
 async function haltAccount(phone, cls, deps = {}, opts = {}) {
@@ -103,6 +115,8 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
   if (cls === "confirmed_removed" && !opts.group_id) throw fail("invalid_input", "confirmed_removed needs group_id");
   phone = String(phone);
   const x = ctxOf(deps);
+  // The clock as the halt runs (fix round 5): callers never pass a sweep's or
+  // tick's start time. opts.now is only for tests that call this directly.
   const now = opts.now instanceof Date ? opts.now : nowOf(deps, x);
   const at = iso(now);
   const config = await configOf(deps, x);
@@ -126,7 +140,7 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
     // per-campaign count and is never folded.
     if (cls !== "selector_failure" && prior.some((h) => h.code === cls && now.getTime() - ms(h.at) < MS_DAY
       && (cls !== "confirmed_removed" || String(h.group_id) === String(opts.group_id))
-      && inForce(conn, cls, opts.group_id, now) && !clearedSince(conn, cls, h))) {
+      && inForce(conn, cls, h, opts.group_id, now) && !clearedSince(conn, cls, h))) {
       decided = {
         duplicate: true, owner_review: conn.posting_owner_review_required === true, penalty_until: conn.posting_penalty_until || null,
         disabled: DISABLING.has(cls) || cls === "suspected_compromise", reconnect: cls === "login_required",
@@ -143,16 +157,18 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
         v.owner_review = true;
       }
     }
-    if (PENALISING.has(cls)) v.penalty_until = patch.posting_penalty_until = iso(now.getTime() + config.penalty_days * MS_DAY);
+    const penalise = () => {
+      v.penalty_until = patch.posting_penalty_until = iso(now.getTime() + config.penalty_days * MS_DAY);
+      Object.assign(patch, { posting_penalty_at: at, posting_penalty_class: cls });
+    };
+    if (PENALISING.has(cls)) penalise();
     if (cls === "login_required") {
       Object.assign(patch, { facebook_needs_reconnect: true, facebook_needs_reconnect_at: at });
       v.reconnect = true;
     }
     if (cls === "confirmed_removed") {
       patch.posting_group_penalties = { [String(opts.group_id)]: { code: cls, at, until: iso(now.getTime() + GROUP_PENALTY_DAYS * MS_DAY) } };
-      if (prior.some((h) => h.code === "confirmed_removed" && within(h, REMOVALS_WINDOW_DAYS))) {
-        v.penalty_until = patch.posting_penalty_until = iso(now.getTime() + config.penalty_days * MS_DAY);
-      }
+      if (prior.some((h) => h.code === "confirmed_removed" && within(h, REMOVALS_WINDOW_DAYS))) penalise();
     }
     decided = v;
     return patch;

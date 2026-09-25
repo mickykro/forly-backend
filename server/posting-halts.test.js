@@ -1,0 +1,148 @@
+/* posting-halts.js, fix round 5 — a halt is a duplicate only while the
+   CURRENT disable or penalty is that halt's own (the shared flag is set by
+   every disabling class), and every halt is stamped with the clock as it
+   runs, never a sweep's or a tick's start. posting-sweeper.test.js holds the
+   rest of the halt tests; it is at its line budget. */
+const assert = require("assert");
+const K = require("./posting-testkit");
+const C = require("./posting-campaign");
+const S = require("./posting-sweeper");
+const H = require("./posting-halts");
+
+const { db, store, NOW, MIN, HOUR, iso, base, dueOf, setup, fakePost } = K;
+const PH = "972500000001";
+const at = (h) => new Date(NOW.getTime() + h * HOUR);
+const conn = async () => (await db.getConnection(PH)) || {};
+const with_ = (deps, o) => Object.assign({}, deps, o);
+
+(async () => {
+  // ── the r4halt sequence: checkpoint → flag cleared (with or without a timestamp) → restricted → checkpoint ──
+  for (const withTs of [false, true]) {
+    const { deps, notes, ops } = await setup();
+    const c = await C.create(base(), deps);
+    await H.haltAccount(PH, "checkpoint", deps, { campaignId: c.id, now: at(0) });
+    let k = await conn();
+    assert.equal(k.posting_disabled_class, "checkpoint");
+    assert.equal(k.posting_disabled_at, iso(at(0)));
+    assert.equal(k.facebook_profile_state, "quarantined");
+    await db.setConnection(PH, Object.assign({ posting_disabled_until_admin: false, facebook_profile_state: "active" }, withTs ? { posting_reenabled_at: iso(at(1)) } : {}));
+    assert.equal((await C.resume(c.id, deps)).status, "running");
+    let r = await H.haltAccount(PH, "restricted", deps, { campaignId: c.id, now: at(2) });
+    assert.ok(!r.duplicate, "restricted is a new halt");
+    k = await conn();
+    assert.equal(k.posting_disabled_class, "restricted", "the disable now belongs to the restricted halt");
+    assert.equal(k.posting_disabled_at, iso(at(2)));
+    await db.setConnection(PH, { facebook_profile_state: "active" }); // restricted does not quarantine; make the next one visible
+    const n0 = notes.length, o0 = ops.length;
+    r = await H.haltAccount(PH, "checkpoint", deps, { campaignId: c.id, now: at(3) });
+    assert.ok(!r.duplicate, `withTs=${withTs}: the checkpoint is a new halt, not folded into the restricted disable`);
+    assert.equal(r.disabled, true);
+    assert.equal(r.owner_review, true, "a third disabling halt within 30 days");
+    k = await conn();
+    assert.deepEqual(k.posting_halts.map((h) => h.code), ["checkpoint", "restricted", "checkpoint"]);
+    assert.equal(k.posting_disabled_class, "checkpoint");
+    assert.equal(k.posting_disabled_at, iso(at(3)));
+    assert.equal(k.facebook_profile_state, "quarantined", "the profile is quarantined again");
+    assert.ok(notes.length > n0, "the agent is told");
+    assert.ok(ops.length > o0, "the operator is told");
+    // while that checkpoint's disable stands, another checkpoint is the same halt
+    const n1 = notes.length;
+    r = await H.haltAccount(PH, "checkpoint", deps, { now: at(4) });
+    assert.equal(r.duplicate, true);
+    assert.equal(notes.length, n1);
+    assert.equal((await conn()).posting_halts.length, 3);
+  }
+
+  // ── a disable re-set by another class (never cleared) no longer belongs to the earlier halt ──
+  {
+    const { deps } = await setup();
+    await H.haltAccount(PH, "checkpoint", deps, { now: at(0) });
+    await H.haltAccount(PH, "restricted", deps, { now: at(1) });
+    const r = await H.haltAccount(PH, "checkpoint", deps, { now: at(2) });
+    assert.ok(!r.duplicate);
+    assert.equal((await conn()).posting_disabled_class, "checkpoint");
+  }
+
+  // ── a disable with no class or date (written before these fields existed) is never folded into ──
+  {
+    const { deps } = await setup();
+    await db.setConnection(PH, { posting_disabled_until_admin: true, posting_halts: [{ at: iso(at(0)), code: "captcha" }] });
+    const r = await H.haltAccount(PH, "captcha", deps, { now: at(1) });
+    assert.ok(!r.duplicate, "fail-safe: a halt that cannot be tied to the current disable is new");
+    assert.equal((await conn()).posting_disabled_class, "captcha");
+  }
+
+  // ── the same rule for penalties: the penalty must be the halt's own, set by it or later ──
+  {
+    const { deps, notes } = await setup();
+    let r = await H.haltAccount(PH, "rate_limited", deps, { now: at(0) });
+    let k = await conn();
+    assert.equal(k.posting_penalty_class, "rate_limited");
+    assert.equal(k.posting_penalty_at, iso(at(0)));
+    r = await H.haltAccount(PH, "rate_limited", deps, { now: at(1) });
+    assert.equal(r.duplicate, true, "its own penalty still runs: the same halt");
+    // the operator lifts the penalty; a feature_blocked sets a new one
+    await db.setConnection(PH, { posting_penalty_until: null });
+    r = await H.haltAccount(PH, "feature_blocked", deps, { now: at(2) });
+    assert.ok(!r.duplicate);
+    k = await conn();
+    assert.equal(k.posting_penalty_class, "feature_blocked");
+    const n0 = notes.length;
+    r = await H.haltAccount(PH, "rate_limited", deps, { now: at(3) });
+    assert.ok(!r.duplicate, "the running penalty is feature_blocked's, not the earlier rate_limited's");
+    assert.ok(r.penalty_until);
+    k = await conn();
+    assert.equal(k.posting_penalty_class, "rate_limited");
+    assert.equal(k.posting_penalty_at, iso(at(3)));
+    assert.equal(k.posting_halts.filter((h) => h.code === "rate_limited").length, 2);
+    assert.ok(notes.length > n0, "the agent is told");
+    // a second removal in 7 days penalises the account: that penalty is confirmed_removed's
+    await setup();
+    await H.haltAccount(PH, "confirmed_removed", deps, { group_id: "111", now: at(0) });
+    r = await H.haltAccount(PH, "confirmed_removed", deps, { group_id: "222", now: at(1) });
+    assert.ok(r.penalty_until);
+    assert.equal((await conn()).posting_penalty_class, "confirmed_removed");
+    // a penalty with no class (written before these fields existed) is never folded into
+    await setup();
+    await db.setConnection(PH, { posting_penalty_until: iso(at(24 * 14)), posting_halts: [{ at: iso(at(0)), code: "rate_limited" }] });
+    assert.ok(!(await H.haltAccount(PH, "rate_limited", deps, { now: at(1) })).duplicate);
+  }
+
+  // ── every halt is stamped with the clock as it runs, not the tick's start: the post took minutes ──
+  {
+    const { deps, at: setAt, clk } = await setup();
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, setAt(NOW));
+    const due = dueOf(c);
+    const inner = fakePost("verified_failed:checkpoint");
+    const slow = async (args, d) => { clk.t = new Date(clk.t.getTime() + 7 * MIN); return inner(args, d); };
+    c = await S.tick(c, with_(deps, { post: slow }), setAt(due));
+    const k = await conn();
+    const stamp = iso(due.getTime() + 7 * MIN);
+    assert.deepEqual(k.posting_halts.map((h) => [h.code, h.at]), [["checkpoint", stamp]]);
+    assert.equal(k.posting_disabled_at, stamp);
+    assert.equal(k.posting_last_halt_at, stamp);
+  }
+
+  // ── … and not the sweep's start: the reconcile session took minutes ──
+  {
+    const { deps, at: setAt, clk } = await setup();
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, setAt(NOW));
+    const crash = async (args, d) => { for (const s of ["session_started", "composer_ready", "submit_started"]) await d.attempts.transition(args.attempt.key, s); return { noop: true }; };
+    c = await S.tick(c, with_(deps, { post: crash }), setAt(dueOf(c)));
+    const later = new Date(dueOf(c).getTime() + 25 * MIN);
+    await S.sweep(deps, setAt(later));
+    assert.equal((await store.getAttempt(c.posts[0].attempt_key)).state, "outcome_unknown");
+    const start = new Date(later.getTime() + MIN);
+    const reconcile = async () => { clk.t = new Date(clk.t.getTime() + 5 * MIN); return { state: "outcome_unknown", error_code: "restricted", signal: "restricted" }; };
+    await S.sweep(with_(deps, { reconcile }), setAt(start));
+    const k = await conn();
+    const stamp = iso(start.getTime() + 5 * MIN);
+    assert.deepEqual(k.posting_halts.map((h) => [h.code, h.at]), [["restricted", stamp]]);
+    assert.equal(k.posting_disabled_at, stamp);
+    assert.equal(k.posting_last_halt_at, stamp);
+  }
+
+  console.log("posting-halts.test.js ok");
+})().catch((e) => { console.error(e); process.exit(1); });

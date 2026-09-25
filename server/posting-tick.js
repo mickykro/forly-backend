@@ -350,7 +350,8 @@ async function settle(key, result, err, st, deps, x, now) {
     }
     return patch;
   });
-  if (cls) await H.haltAccount(phone, cls, deps, Object.assign({ campaignId: c.id, now }, cls === "confirmed_removed" ? { group_id: post.group_id } : {}));
+  // no `now`: the halt is stamped with the clock as it runs, not the tick's start (the post took minutes)
+  if (cls) await H.haltAccount(phone, cls, deps, Object.assign({ campaignId: c.id }, cls === "confirmed_removed" ? { group_id: post.group_id } : {}));
   const mine = next && next.posts.find((p) => p.id === post.id);
   if (ok && mine) await say(deps, phone, "posted", null, next, mine);
   if (failed && next && next.status === "paused" && next.pause_reason === "consecutive_failures") {
@@ -369,7 +370,7 @@ async function browse(phone, conn, deps, x, now) {
   if (r && r.noop === true) return;
   await x.db.setConnection(phone, { last_browse_at: iso(now) });
   const cls = H.classOf(r && r.signal);
-  if (cls) await H.haltAccount(phone, cls, deps, { now });
+  if (cls) await H.haltAccount(phone, cls, deps); // stamped with the clock as it runs
 }
 
 async function planNext(phone, st, deps, x, now) {
