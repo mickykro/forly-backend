@@ -94,6 +94,17 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
   let decided = null;
   const decide = (conn) => {
     const prior = (conn.posting_halts || []).filter((h) => h && now.getTime() - ms(h.at) < HALT_KEEP_DAYS * MS_DAY);
+    // Idempotent (fix round 3): the same account-level class (the same group,
+    // for a removal) already recorded in the last 24 h is not a new halt —
+    // nothing is appended and no penalty or block restarts. A selector
+    // failure is a per-campaign count and is never folded.
+    if (cls !== "selector_failure" && prior.some((h) => h.code === cls && now.getTime() - ms(h.at) < MS_DAY && (cls !== "confirmed_removed" || String(h.group_id) === String(opts.group_id)))) {
+      decided = {
+        duplicate: true, owner_review: conn.posting_owner_review_required === true, penalty_until: conn.posting_penalty_until || null,
+        disabled: DISABLING.has(cls) || cls === "suspected_compromise", reconnect: cls === "login_required",
+      };
+      return null;
+    }
     const patch = { posting_halts: prior.concat([entry]), posting_last_halt_at: at, posting_last_halt_code: cls };
     const v = { disabled: false, owner_review: false, penalty_until: null, reconnect: false };
     if (DISABLING.has(cls) || cls === "suspected_compromise") {
@@ -120,6 +131,8 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
   };
   await x.store.mutateConnection(phone, decide);
   Object.assign(out, decided);
+
+  if (out.duplicate) return out; // already halted for this within the day: already stopped and told
 
   // R2: the account stops now — its open attempts and every running campaign.
   if (out.disabled || out.reconnect) {

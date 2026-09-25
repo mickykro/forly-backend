@@ -58,35 +58,56 @@ const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval"]
 // hasCaptchaFrame is optional, structural evidence the driver (Task 18) can
 // supply when it actually saw a captcha iframe — a stronger signal than any
 // text on the page.
-// ownText + alertElements (optional, Task 18): the text WE typed, and the
-// normalised text of every element inside the alert/status regions. A match
-// in an ALERT is ignored only when the smallest element holding it is, as a
-// whole, a piece of our own copy (a toast showing a cut of the post) of at
-// least MIN_ECHO characters — "הכביש חסום זמנית" in our copy never hides "אתה
-// חסום זמנית מפרסום", and a short bolded fragment never hides its sentence.
-// Dialog text is never excused. Structural evidence (the URL, a captcha
-// frame) is not text and always counts.
+// Our own words, echoed back (Task 18). `regions` (optional): the text of
+// each dialog / alert / status region SEPARATELY (the driver has already
+// removed any editable content). From each region, every maximal substring
+// of at least MIN_ECHO characters that also occurs in `ownText` (the copy we
+// typed) is removed — a toast, preview or card repeating a piece of our post
+// — and only what REMAINS of that region is classified. A region never
+// excuses another; a short phrase we happen to share ("הכביש חסום זמנית" vs
+// "אתה חסום זמנית מפרסום", a real 16-character "נחסמת באופן זמני") is never
+// removed. Structural evidence (the URL, a captcha frame) always counts.
 const MIN_ECHO = 20;
-const cutOf = (s) => s.replace(/\s*(…|\.\.\.)\s*$/, "").trim();
-function echoOfOwn(match, elements, own) {
-  if (!own || !elements.length) return false;
-  const m = match.toLowerCase();
-  const holder = elements.filter((e) => e.toLowerCase().includes(m)).sort((a, b) => a.length - b.length)[0];
-  const h = holder ? cutOf(holder) : "";
-  return h.length >= MIN_ECHO && own.toLowerCase().includes(h.toLowerCase());
+function stripEcho(text, own, min = MIN_ECHO) {
+  const t = norm(text), o = norm(own);
+  if (!t || o.length < min) return t;
+  const lt = t.toLowerCase(), lo = o.toLowerCase();
+  if (lt.length !== t.length || lo.length !== o.length) return t; // never mis-index (rare case-folding)
+  // O(n·m) longest common suffix at every (i, j); mark each maximal run >= min.
+  const cut = new Uint8Array(t.length);
+  let prev = new Uint16Array(o.length + 1), cur = new Uint16Array(o.length + 1);
+  for (let i = 1; i <= t.length; i++) {
+    let best = 0;
+    for (let j = 1; j <= o.length; j++) {
+      cur[j] = lt[i - 1] === lo[j - 1] ? Math.min(prev[j - 1] + 1, 65535) : 0;
+      if (cur[j] > best) best = cur[j];
+    }
+    if (best >= min) cut.fill(1, i - best, i);
+    [prev, cur] = [cur, prev];
+  }
+  let out = "";
+  for (let i = 0; i < t.length; i++) out += cut[i] ? " " : t[i];
+  return norm(out);
 }
 
-function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, ownText, alertElements } = {}) {
-  const path = pathOf(landedUrl);
-  for (const [code, re] of URL_SIGNALS) if (re.test(path)) return code;
-
-  const dialog = norm(dialogText), alert = norm(alertText), own = norm(ownText);
-  if (hasCaptchaFrame || CAPTCHA_EXACT.test(dialog) || CAPTCHA_EXACT.test(alert)) return "captcha";
-
-  const elements = (Array.isArray(alertElements) ? alertElements : []).map(norm).filter(Boolean);
-  const inAlert = (re) => [...alert.matchAll(new RegExp(re.source, `${re.flags}g`))].some((m) => !echoOfOwn(m[0], elements, own));
-  for (const [code, re] of TEXT_SIGNALS) if (re.test(dialog) || inAlert(re)) return code;
+function classifyText(dialog, alert) {
+  if (CAPTCHA_EXACT.test(dialog) || CAPTCHA_EXACT.test(alert)) return "captcha";
+  const t = `${dialog}\n${alert}`;
+  for (const [code, re] of TEXT_SIGNALS) if (re.test(t)) return code;
   return "ok";
 }
 
-module.exports = { classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS };
+function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, ownText, regions } = {}) {
+  const path = pathOf(landedUrl);
+  for (const [code, re] of URL_SIGNALS) if (re.test(path)) return code;
+  if (hasCaptchaFrame) return "captcha";
+  if (!Array.isArray(regions)) return classifyText(norm(dialogText), norm(alertText));
+  // Each region on its own, echo-stripped; the first code in TEXT_SIGNALS
+  // order that any region shows wins (the same priority as above).
+  const rest = regions.map((r) => stripEcho(r, ownText)).filter(Boolean);
+  if (rest.some((r) => CAPTCHA_EXACT.test(r))) return "captcha";
+  for (const [code, re] of TEXT_SIGNALS) if (rest.some((r) => re.test(r))) return code;
+  return "ok";
+}
+
+module.exports = { classifySignal, stripEcho, MIN_ECHO, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS };

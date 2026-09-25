@@ -136,40 +136,32 @@ function findOwnPost(posts, { kind, ids, author, copy }) {
   return null;
 }
 
-// Every `sel` region, CLONED with each [contenteditable] subtree removed
-// (what we typed) and a space appended to every element so words never run
-// together: its text, and the text of each element in it (the region
-// itself first). The composer's chrome — an inline "You can't post in this
-// group", a restriction dialog wrapping the composer — is still read.
-async function regionReads(page, sel) {
+// The text of every `sel` region, each CLONED with every [contenteditable]
+// subtree removed (what we typed) and a space appended to every element so
+// words never run together. The composer's chrome — an inline "You can't
+// post in this group", a restriction dialog wrapping the composer — is
+// still read.
+async function regionTexts(page, sel) {
   const out = await page.$$eval(sel, (els) => els.map((el) => {
     const c = el.cloneNode(true);
     c.querySelectorAll("[contenteditable]").forEach((n) => n.remove());
-    const all = [...c.querySelectorAll("*")];
-    all.forEach((n) => n.append(" "));
-    return { text: c.textContent || "", elements: [c, ...all].slice(0, 300).map((n) => n.textContent || "") };
+    c.querySelectorAll("*").forEach((n) => n.append(" "));
+    return c.textContent || "";
   })).catch(() => []);
-  return Array.isArray(out) ? out : [];
+  return Array.isArray(out) ? out.map(String) : [];
 }
-// classifySignal over the landed URL, the dialogs and alerts (editable
-// content removed, the exact copy stripped), and a captcha frame. An alert
-// match whose smallest holding element is wholly a cut of our copy is an
-// echo of our own post, not a signal (classifySignal's alertElements);
-// dialogs get no such excuse.
+// classifySignal over the landed URL, a captcha frame, and every dialog and
+// alert/status region SEPARATELY: from each, the exact copy and every run of
+// >= 20 characters it shares with the copy are removed (an echo of our own
+// post), and only what remains of that region is classified.
 async function readSignal(page, copy) {
   const own = norm(copy);
-  const strip = (t) => (own ? norm(t).split(own).join(" ") : norm(t));
-  const dialogs = await regionReads(page, SELECTORS.dialog);
-  const alerts = await regionReads(page, SELECTORS.alert);
+  const regions = [...(await regionTexts(page, SELECTORS.dialog)), ...(await regionTexts(page, SELECTORS.alert))]
+    .map((t) => (own ? norm(t).split(own).join(" ") : norm(t)));
   const hasCaptchaFrame = (await countOf(page, SELECTORS.captchaFrame)) > 0;
   let landedUrl = "";
   try { landedUrl = page.url(); } catch { landedUrl = ""; }
-  return classifySignal({
-    landedUrl, hasCaptchaFrame, ownText: copy,
-    dialogText: dialogs.map((r) => strip(r.text)).join("\n"),
-    alertText: alerts.map((r) => strip(r.text)).join("\n"),
-    alertElements: alerts.flatMap((r) => (Array.isArray(r.elements) ? r.elements : [])),
-  });
+  return classifySignal({ landedUrl, hasCaptchaFrame, ownText: copy, regions });
 }
 
 async function readFeedPosts(page) {

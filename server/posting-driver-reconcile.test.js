@@ -86,6 +86,20 @@ const PAGE_NAME = F.PAGE_NAME;
     assert.equal(h.opened.length, 0, `${state}: no session`);
   }
 
+  // ── fix round 3: the per-region echo strip, directly ──
+  {
+    const { stripEcho, classifySignal } = require("./posting-signals");
+    const copy = "דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות, חניה בשפע";
+    assert.equal(stripEcho("Posted: הכביש חסום זמנית בגלל עבודות…", copy), "Posted: …", "a >= 20-char run shared with the copy is removed");
+    assert.equal(stripEcho("אתה חסום זמנית מפרסום בקבוצות", copy), "אתה חסום זמנית מפרסום בקבוצות", "a short shared phrase is not");
+    const echo = "הכביש חסום זמנית בגלל עבודות", real = "אתה חסום זמנית מפרסום בקבוצות עד מחר";
+    assert.equal(classifySignal({ regions: [echo, real], ownText: copy }), "rate_limited", "one region never excuses another");
+    assert.equal(classifySignal({ regions: [echo], ownText: copy }), "ok");
+    assert.equal(classifySignal({ regions: ["הפוסט שלך ממתין לאישור מנהל הקבוצה"], ownText: "הנכס ממתין לאישור טאבו, כניסה מיידית" }), "pending_approval");
+    assert.equal(classifySignal({ regions: [echo], ownText: copy, landedUrl: "https://www.facebook.com/checkpoint/1/" }), "checkpoint", "the URL always counts");
+    assert.equal(classifySignal({ dialogText: "You can't use this feature right now" }), "feature_blocked", "the old string form is unchanged");
+  }
+
   // ── the proof, directly: pure over the page reads ──
   {
     const page = fakePage({ texts: { [S.editor]: COPY } });

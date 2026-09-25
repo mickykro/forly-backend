@@ -47,6 +47,27 @@ async function readDoc(col, id) {
   return maps[col].has(id) ? structuredClone(maps[col].get(id)) : null;
 }
 const groupIdsFor = (id) => foldGroupIds(readDoc, assertId(id, "group_id"));
+// Many docs of one collection in one round: Firestore getAll, or the maps.
+async function readDocs(col, ids) {
+  if (!ids.length) return [];
+  const fdb = firestore();
+  if (fdb) return (await fdb.getAll(...ids.map((id) => fdb.collection(col).doc(id)))).map((d) => (d.exists ? d.data() : null));
+  return ids.map((id) => (maps[col].has(id) ? structuredClone(maps[col].get(id)) : null));
+}
+// foldGroupIds for many ids at once: two batched registry reads (the ids,
+// then any canonical ids they point to) instead of two awaits per id.
+async function foldManyGroupIds(keys) {
+  const uniq = [...new Set(keys)];
+  const first = await readDocs(GAL, uniq);
+  const docOf = new Map(uniq.map((k, i) => [k, first[i]]));
+  const canonOf = new Map(uniq.map((k) => { const d = docOf.get(k); return [k, d && typeof d.group_id === "string" && d.group_id ? d.group_id : k]; }));
+  const need = [...new Set(canonOf.values())].filter((c) => !docOf.has(c));
+  (await readDocs(GAL, need)).forEach((d, i) => docOf.set(need[i], d));
+  return (k) => {
+    const cd = docOf.get(canonOf.get(k));
+    return [...new Set([k, canonOf.get(k), ...(cd && Array.isArray(cd.aliases) ? cd.aliases.map(String) : [])])];
+  };
+}
 
 // Records that `aliasId` (a vanity "slug:…" id) is `groupId`. Idempotent.
 async function recordGroupAlias(aliasId, groupId, nowIn) {
@@ -372,18 +393,11 @@ async function getGroupActivityFor(group_ids, nowIn, windowDays = safety.DEFAULT
   windowDays = windowDays === undefined || windowDays === null ? safety.DEFAULTS.fingerprint_window_days : windowDays;
   if (!Number.isInteger(windowDays) || windowDays < 1) throw fail("invalid_input", "windowDays must be a positive integer");
   const dates = lastDates(safety.jerusalemDate(toDate(nowIn)), windowDays);
-  const groupsOf = [];
-  for (const g of ids) {
-    const given = Array.isArray(aliases && aliases[g]) ? aliases[g].map((a) => assertId(a, "alias")) : [];
-    const folded = [];
-    for (const k of [g, ...given]) folded.push(...(await foldGroupIds(readDoc, k)));
-    groupsOf.push([...new Set([g, ...given, ...folded])]);
-  }
+  const givenOf = ids.map((g) => (Array.isArray(aliases && aliases[g]) ? aliases[g].map((a) => assertId(a, "alias")) : []));
+  const fold = await foldManyGroupIds(ids.flatMap((g, i) => [g, ...givenOf[i]]));
+  const groupsOf = ids.map((g, i) => [...new Set([g, ...givenOf[i], ...[g, ...givenOf[i]].flatMap(fold)])]);
   const docIds = groupsOf.flat().flatMap((g) => dates.map((dt) => `${g}|${dt}`));
-  const fdb = firestore();
-  let docs;
-  if (fdb && docIds.length) docs = (await fdb.getAll(...docIds.map((id) => fdb.collection(ACT).doc(id)))).map((s) => (s.exists ? s.data() : null));
-  else docs = docIds.map((id) => (maps[ACT].has(id) ? structuredClone(maps[ACT].get(id)) : null));
+  const docs = await readDocs(ACT, docIds); // one batch for every bucket
   const out = {};
   let at = 0;
   ids.forEach((g, gi) => {

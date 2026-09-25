@@ -26,6 +26,8 @@ function findChromium() {
 const EN = "Great flat. You're restricted from posting in groups? No! You're temporarily blocked from posting — joke";
 const HE = "דירה בחיפה 4 חדרים. נחסמת באופן זמני? לא! החשבון שלך מוגבל — בדיחה";
 const PLAIN = "דירה בחיפה 4 חדרים, מרפסת וחניה";
+const R3 = "דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות, חניה בשפע";
+const R3P = "דירה חדשה מקבלן. היתר הבנייה ממתין לאישור הוועדה, כניסה מיידית";
 const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". ").map((s) => `<p>${s}</p>`).join("")}</div>`;
 
 (async () => {
@@ -47,6 +49,10 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
       ["composer wrapping an inner dialog/alert with the copy", EN, `<div role="dialog">${editor(EN)}<div role="dialog"><span role="alert">${EN}</span></div></div>`],
       ["a toast that IS a cut of the copy (Minor 10)", HE, `<div role="status">${HE.slice(0, 40)}…</div>`],
       ["a toast holding a cut of the copy in its own element", HE, `<div role="status">Posted: <span>${HE.slice(0, 40)}…</span></div>`],
+      ["'Posted: <cut of the copy>' as plain text (round-1 Minor 10)", HE, `<div role="status">Posted: ${HE.slice(0, 40)}…</div>`],
+      ["a link-preview card in the composer repeating our listing text", R3P, `<div role="dialog">${editor(R3P)}<a><div>f.ly</div><div>היתר הבנייה ממתין לאישור</div></a></div>`],
+      // deferred (Task 24): a copy containing Facebook's exact sentence hides that sentence
+      ["a dialog repeating a whole sentence of our copy", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">You're temporarily blocked from posting</div>`],
       ["a toast with the copy, emoji as <img alt>", `🏠 ${HE}`, `<div role="status"><img alt="🏠">${HE}</div>`],
       ["after submit: the editor gone, a preview of the copy remains", HE, `<div role="dialog"><div>${HE}</div></div>`],
     ]) assert.equal(await sig(html, copy), "ok", label);
@@ -57,8 +63,11 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
       ["a restriction dialog wrapping the composer", PLAIN, `<div role="dialog"><div>Your account is restricted</div><div role="dialog">${editor(PLAIN)}</div></div>`, "restricted"],
       ["a real block dialog beside the composer", PLAIN, `<div role="dialog">${editor(PLAIN)}</div><div role="dialog">You're temporarily blocked from posting</div>`, "rate_limited"],
       ["the same pattern, a phrase NOT in the copy", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">Your account is restricted</div>`, "restricted"],
-      // fix round 2 B: a dialog is never excused, even when our copy holds the same phrase
-      ["a real dialog whose phrase is also in our copy", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">You're temporarily blocked from posting</div>`, "rate_limited"],
+      // fix round 3: echo toasts are stripped PER REGION — one never excuses another
+      ["an echo toast next to the real alert", R3, `<div role="status">הכביש חסום זמנית בגלל עבודות</div><div role="alert">אתה חסום זמנית מפרסום בקבוצות עד מחר</div>`, "rate_limited"],
+      ["span-wrapped echo toast and alert", R3, `<div role="status">פורסם: <span>הכביש חסום זמנית בגלל עבודות…</span></div><div role="alert"><span>אתה חסום זמנית מפרסום בקבוצות עד מחר</span></div>`, "rate_limited"],
+      ["a real 16-character alert whose words are in our copy", "דירה יפה. נחסמת באופן זמני? לא אצלנו", `<div role="alert">נחסמת באופן זמני</div>`, "rate_limited"],
+      ["a real pending alert beside an echo of our pending-sounding copy", "דירה חדשה מקבלן. היתר הבנייה ממתין לאישור הוועדה, כניסה מיידית", `<div role="status"><span>היתר הבנייה ממתין לאישור הוועדה</span></div><div role="status"><span>הפוסט שלך ממתין לאישור מנהל</span></div>`, "pending_approval"],
       ["ordinary copy sharing a short phrase (HE, rate_limited)", "דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות", `<div role="alert">אתה חסום זמנית מפרסום בקבוצות</div>`, "rate_limited"],
       ["ordinary copy sharing a short phrase (HE, pending)", "הנכס ממתין לאישור טאבו, כניסה מיידית", `<div role="status">הפוסט שלך ממתין לאישור מנהל הקבוצה</div>`, "pending_approval"],
       ["a short bolded fragment that is also in our copy", "הכביש חסום זמנית בגלל עבודות", `<div role="alert">אתה <b>חסום זמנית</b> מפרסום</div>`, "rate_limited"],

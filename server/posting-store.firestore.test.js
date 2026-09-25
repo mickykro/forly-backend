@@ -174,6 +174,10 @@ const doc = (p) => fake.docs.get(p);
   assert.equal(ga["111"].posts_today, 1, "b (posted) still counts; a was released");
   assert.equal(ga["111"].fingerprints.length, 1);
   assert.deepEqual(ga["999"], { posts_today: 0, fingerprints: [] });
+  // the group_aliases registry folds through the same batched reads (Task 18)
+  await S.recordGroupAlias("slug:haifa.rent", "111", NOW);
+  assert.equal(doc("group_aliases/slug:haifa.rent").group_id, "111");
+  assert.equal((await S.getGroupActivityFor(["slug:haifa.rent"], NOW))["slug:haifa.rent"].posts_today, 1, "the slug sees 111's bucket");
 
   // ── campaigns: create-if-absent, update never creates, undefined stripped ──
   const first = await S.createPostingCampaignIfAbsent({ phone: "972500000001", page_id: "pg1", status: "running", posts: [{ id: "p", copy: undefined }] });

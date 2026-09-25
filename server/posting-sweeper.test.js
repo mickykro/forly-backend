@@ -246,6 +246,38 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     assert.equal((await store.getAttempt(c.posts[0].attempt_key)).state, "outcome_unknown", "and nothing was submitted or transitioned");
   }
 
+  // ── fix round 3: halts are idempotent — the tick's rate_limited, then reconcile's, is ONE halt ──
+  {
+    const { deps, at, notes } = await setup();
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, at(NOW));
+    // after the click the page said "temporarily blocked": outcome_unknown, halt reported
+    const blocked = async (args, d) => {
+      for (const s of ["session_started", "composer_ready", "submit_started", "verification_pending"]) await d.attempts.transition(args.attempt.key, s);
+      await d.attempts.transition(args.attempt.key, "outcome_unknown", { error_code: "rate_limited" });
+      return { state: "outcome_unknown", error_code: "rate_limited", signal: "rate_limited" };
+    };
+    c = await S.tick(c, with_(deps, { post: blocked }), at(dueOf(c)));
+    const first = await db.getConnection(PH);
+    assert.equal((first.posting_halts || []).filter((h) => h.code === "rate_limited").length, 1);
+    const penaltyUntil = first.posting_penalty_until;
+    const told = notes.length;
+    assert.ok(told >= 1);
+    let ran = 0;
+    const reconcile = async () => { ran++; return { state: "outcome_unknown", error_code: "rate_limited", signal: "rate_limited" }; };
+    await S.sweep(with_(deps, { reconcile }), at(new Date(dueOf(c).getTime() + 2 * HOUR)));
+    assert.equal(ran, 1, "the reconcile session did run and report rate_limited");
+    const after = await db.getConnection(PH);
+    assert.equal((after.posting_halts || []).filter((h) => h.code === "rate_limited").length, 1, "one halt entry");
+    assert.equal(after.posting_penalty_until, penaltyUntil, "the penalty does not restart");
+    assert.equal(notes.length, told, "one message");
+    // a day later it is a new halt again
+    const H = require("./posting-halts");
+    const r = await H.haltAccount(PH, "rate_limited", deps, { now: new Date(dueOf(c).getTime() + 25 * HOUR) });
+    assert.equal(r.cls, "rate_limited");
+    assert.equal(((await db.getConnection(PH)).posting_halts || []).filter((h) => h.code === "rate_limited").length, 2);
+  }
+
   // ── the profile lock is respected: nothing posts while an extract or login holds it ──
   {
     const { deps, at } = await setup();
