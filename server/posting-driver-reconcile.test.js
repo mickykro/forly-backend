@@ -102,7 +102,7 @@ const PAGE_NAME = F.PAGE_NAME;
     assert.equal(classifySignal({ regions: ["הפוסט שלך ממתין לאישור מנהל הקבוצה"], ownText: "הנכס ממתין לאישור טאבו, כניסה מיידית" }), "pending_approval");
     assert.equal(classifySignal({ regions: [echo], ownText: copy, landedUrl: "https://www.facebook.com/checkpoint/1/" }), "checkpoint", "the URL always counts");
     assert.equal(classifySignal({ regions: [echo], ownText: copy, hasCaptchaFrame: true }), "captcha", "a captcha frame always counts");
-    assert.equal(classifySignal({ regions: ["Confirm you're human"], ownText: "Confirm you're human, then read on: 3 rooms" }), "ok", "the exact captcha sentence, echoed from the copy");
+    assert.equal(classifySignal({ regions: ["Confirm you're human"], ownText: "Confirm you're human, then read on: 3 rooms" }), "captcha", "fix round 5: the exact captcha sentence is a whole region, no room for context: never excused");
     assert.equal(classifySignal({ regions: ["Confirm you're human"], ownText: "3 rooms" }), "captcha");
     assert.equal(classifySignal({ dialogText: "You can't use this feature right now" }), "feature_blocked", "the old string form is unchanged");
 
@@ -114,6 +114,22 @@ const PAGE_NAME = F.PAGE_NAME;
     const heCopy = "דירה למכירה. נחסמת באופנוע בדרך לדירה? יש חניה";
     assert.equal(classifySignal({ regions: [heAlert], ownText: heCopy }), "rate_limited", "HE bisect: the 23-char shared run cuts 'באופן זמני'");
     assert.equal(classifySignal({ regions: [`Posted: ${enCopy.slice(0, 50)}… ${enAlert}`], ownText: enCopy }), "rate_limited", "echo toast and a real alert in one region");
+
+    // fix round 5: the phrase alone never excuses itself — ECHO_CONTEXT more characters of the copy must be echoed around it
+    for (const [label, region, own, want] of [
+      ["EN: the copy holds the phrase alone", "You're temporarily blocked from posting in this group", "x You're temporarily blocked from posting y", "rate_limited"],
+      ["EN: the copy is exactly the phrase", "Your account is restricted", "Your account is restricted", "restricted"],
+      ["HE: the copy holds the phrase alone", "לא ניתן לפרסם בקבוצה הזו כרגע", "דירה. לא ניתן לפרסם בקבוצה! יש חניה", "group_blocked"],
+      ["9 characters of context (25 in all) are not enough", "Hi. xxxx posting too fast yyy!", "axxxx posting too fast yyyb", "rate_limited"],
+      ["10 characters of context (26 in all) are enough", "Hi. xxxx posting too fast yyyy!", "axxxx posting too fast yyyyb", "ok"],
+      ["a long phrase needs its own length + 10", "Toast: we limit how often you can do this. 3 rooms, sea view", "Honestly, we limit how often you can do this. 3 rooms, sea view!", "ok"],
+      ["the whole copy echoed", "Posted: x You're temporarily blocked from posting y", "x You're temporarily blocked from posting y", "rate_limited"],
+    ]) assert.equal(classifySignal({ regions: [region], ownText: own }), want, label);
+    // accepted edge (fail-safe): an echo whose phrase sits within 10 characters of the copy's end reads as the signal
+    assert.equal(classifySignal({ regions: ["Posted: Nice! posting too fast"], ownText: "Nice! posting too fast" }), "rate_limited");
+    // fix round 5: whitespace is collapsed before the raw cut
+    assert.equal(classifySignal({ regions: [" ".repeat(9000) + "posting too fast"], ownText: "x" }), "rate_limited", "9000 spaces, then an alert");
+    assert.equal(classifySignal({ regions: ["\n\t ".repeat(5000) + "Your account is restricted"], ownText: "x" }), "restricted");
 
     // bounded: a megabyte comment-thread dialog, and a long copy, classify fast
     const thread = "Nice flat! temporarily blocked from post office? ".repeat(21000); // ~1M characters

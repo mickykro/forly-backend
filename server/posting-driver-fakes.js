@@ -63,28 +63,19 @@ function fakePage(o = {}) {
     mouse: { wheel: async () => {}, move: async () => {} },
     waitForLoadState: async () => {},
     waitForTimeout: async () => {},
-    // Dialog/alert regions run the driver's own in-page function over a
-    // minimal fake DOM: a region is { text (its chrome), editable (the text
-    // inside its [contenteditable]) }; the clone drops the editable subtree.
-    $$eval: async (sel, fn, arg) => {
-      if (sel === S.feedPost) return v(feed);
-      if (sel !== S.dialog && sel !== S.alert) return [];
-      const regions = (o.regions && o.regions[sel] !== undefined ? v(o.regions[sel]) : [{ text: v(texts[sel]) }]).filter((r) => r && (r.text || r.editable));
-      return fn(regions.map(fakeRegion), arg);
-    },
-  };
-}
-
-// A region: { text (its chrome), editable (the text inside its
-// [contenteditable]), children (texts of elements inside the chrome) }.
-function fakeRegion(r) {
-  return {
-    cloneNode: () => {
-      const c = { text: r.text || "", editable: r.editable || "" };
-      const kids = (r.children || []).map((t) => ({ textContent: t, append: () => {} }));
-      c.querySelectorAll = (q) => (q === "[contenteditable]" ? (c.editable ? [{ remove: () => { c.editable = ""; } }] : []) : q === "*" ? kids : []);
-      Object.defineProperty(c, "textContent", { get: () => `${c.text} ${c.editable}` });
-      return c;
+    $$eval: async (sel) => (sel === S.feedPost ? v(feed) : []),
+    // The driver's one in-page read (readInPage): the dialog/alert regions'
+    // texts and the captcha-frame count. A region is { text (its chrome),
+    // editable (the text inside its [contenteditable], never read) }; the
+    // real walk is covered in Chromium (posting-driver-dom.test.js).
+    evaluate: async (fn, arg) => {
+      const { sels, cap, countSel } = arg || {};
+      const regionsOf = (sel) => {
+        if (sel !== S.dialog && sel !== S.alert) return [];
+        const rs = (o.regions && o.regions[sel] !== undefined ? v(o.regions[sel]) : [{ text: v(texts[sel]) }]).filter((r) => r && (r.text || r.editable));
+        return rs.map((r) => String(r.text || "").replace(/\s+/g, " ").trim().slice(0, cap));
+      };
+      return { regions: (sels || []).map(regionsOf), count: countSel ? v(counts[countSel]) || 0 : 0 };
     },
   };
 }

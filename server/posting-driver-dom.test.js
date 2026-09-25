@@ -51,8 +51,6 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
       ["a toast holding a cut of the copy in its own element", HE, `<div role="status">Posted: <span>${HE.slice(0, 40)}…</span></div>`],
       ["'Posted: <cut of the copy>' as plain text (round-1 Minor 10)", HE, `<div role="status">Posted: ${HE.slice(0, 40)}…</div>`],
       ["a link-preview card in the composer repeating our listing text", R3P, `<div role="dialog">${editor(R3P)}<a><div>f.ly</div><div>היתר הבנייה ממתין לאישור</div></a></div>`],
-      // deferred (Task 24): a copy containing Facebook's exact sentence hides that sentence
-      ["a dialog repeating a whole sentence of our copy", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">You're temporarily blocked from posting</div>`],
       ["a toast with the copy, emoji as <img alt>", `🏠 ${HE}`, `<div role="status"><img alt="🏠">${HE}</div>`],
       ["after submit: the editor gone, a preview of the copy remains", HE, `<div role="dialog"><div>${HE}</div></div>`],
     ]) assert.equal(await sig(html, copy), "ok", label);
@@ -75,6 +73,13 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
       ["EN bisect: the copy shares '…temporarily blocked from post…'", "Quiet street, never temporarily blocked from post office traffic. 3 rooms", `<div role="alert">You're temporarily blocked from posting in this group</div>`, "rate_limited"],
       ["HE bisect: the copy shares 'דירה למכירה. נחסמת באופ…'", "דירה למכירה. נחסמת באופנוע בדרך לדירה? יש חניה", `<div role="alert"><span>דירה למכירה.</span> נחסמת באופן זמני מפרסום</div>`, "rate_limited"],
       ["an echo toast beside a real alert in ONE region", R3, `<div role="alert"><span>פורסם: הכביש חסום זמנית בגלל עבודות…</span> <span>אתה חסום זמנית מפרסום בקבוצות</span></div>`, "rate_limited"],
+      // fix round 5: the phrase alone never excuses itself; 10 more characters of the copy must be echoed around it
+      ["a real block dialog beside the composer, the copy holding the phrase", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">You're temporarily blocked from posting</div>`, "rate_limited"],
+      ["EN: the copy holds the phrase alone", "x You're temporarily blocked from posting y", `<div role="alert">You're temporarily blocked from posting in this group</div>`, "rate_limited"],
+      ["EN: the copy is exactly the phrase", "Your account is restricted", `<div role="dialog">Your account is restricted</div>`, "restricted"],
+      ["HE: the copy holds the phrase alone", "דירה. לא ניתן לפרסם בקבוצה! יש חניה", `<div role="alert">לא ניתן לפרסם בקבוצה</div>`, "group_blocked"],
+      ["an alert after 9000 blank characters", PLAIN, `<div role="alert"><pre>${" ".repeat(9000)}</pre>posting too fast</div>`, "rate_limited"],
+      ["an alert inside an open shadow root", PLAIN, `<div id="h"></div><script>document.getElementById("h").attachShadow({ mode: "open" }).innerHTML = '<div role="alert">Your account is restricted</div>';</script>`, "restricted"],
       ["a captcha frame is structural, whatever the copy says", "Confirm you're human", `<div role="dialog">${editor("Confirm you're human")}</div><iframe title="captcha"></iframe>`, "captcha"],
     ]) assert.equal(await sig(html, copy), want, label);
 
@@ -84,6 +89,22 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
     const [big] = await P.regionTexts(page, S.dialog);
     assert.ok(big.length <= 8000, "no more than RAW_CAP crosses into Node");
     assert.equal(await P.readSignal(page, PLAIN), "rate_limited");
+
+    // ── fix round 5: a 200k-element dialog is read in under a second, its leading alert still found ──
+    await page.setContent(`<div role="dialog"><div>You're temporarily blocked from posting</div><div id="t"></div></div>`);
+    await page.evaluate(() => {
+      const t = document.getElementById("t");
+      for (let i = 0; i < 50000; i++) { const d = document.createElement("div"); d.innerHTML = `<span>c${i}</span><a>x</a><b>y</b>`; t.appendChild(d); }
+    });
+    assert.ok(await page.evaluate(() => document.querySelectorAll('div[role="dialog"] *').length) >= 200000);
+    let t0 = Date.now();
+    const [huge] = await P.regionTexts(page, S.dialog);
+    assert.ok(Date.now() - t0 < 1000, `the dialog read took ${Date.now() - t0} ms`);
+    assert.equal(huge.length, 8000);
+    assert.ok(huge.startsWith("You're temporarily blocked from posting c0 x y c1"), "the leading alert, then the thread, in order");
+    t0 = Date.now();
+    assert.equal(await P.readSignal(page, PLAIN), "rate_limited");
+    assert.ok(Date.now() - t0 < 1000, `readSignal took ${Date.now() - t0} ms`);
 
     // ── fix round 2 A: only INNERMOST composer roots count ──
     for (const [label, html, n] of [

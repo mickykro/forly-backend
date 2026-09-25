@@ -136,30 +136,73 @@ function findOwnPost(posts, { kind, ids, author, copy }) {
   return null;
 }
 
-// The text of every `sel` region, each CLONED with every [contenteditable]
-// subtree removed (what we typed) and a space appended to every element so
-// words never run together. The composer's chrome — an inline "You can't
-// post in this group", a restriction dialog wrapping the composer — is
-// still read. Whitespace is collapsed and each region cut to RAW_CAP in the
-// page, so a megabyte comment thread never crosses into Node whole
-// (classifySignal cuts it further, to REGION_CAP).
+// The text of every `sel` region: every text node in document order, with
+// each [contenteditable] subtree skipped (what we typed) and a space after
+// every element so words never run together. The composer's chrome — an
+// inline "You can't post in this group", a restriction dialog wrapping the
+// composer — is still read.
+//
+// Fix round 5 (page-side cost): one page.evaluate with the browser's own
+// querySelectorAll (Playwright's selector engine walks the whole DOM per
+// query: seconds on a 200k-element thread), searching open shadow roots too
+// as that engine does, and a TreeWalker instead of a clone. Whitespace is
+// collapsed as the walk goes and it stops once RAW_CAP characters are held,
+// so a huge comment thread costs no more than its first few thousand
+// characters (classifySignal cuts further, to REGION_CAP). The output is the
+// same as the round-4 collapse(clone-and-append).trim().slice(0, RAW_CAP).
+// → { regions: [texts of sels[0]'s regions, …], count: matches of countSel }
 const RAW_CAP = 2 * REGION_CAP;
+function readInPage({ sels, cap, countSel }) {
+  const scopes = [document];
+  for (let i = 0; i < scopes.length; i++) {
+    const w = document.createTreeWalker(scopes[i], NodeFilter.SHOW_ELEMENT);
+    for (let el = w.nextNode(); el; el = w.nextNode()) if (el.shadowRoot) scopes.push(el.shadowRoot);
+  }
+  const all = (sel) => scopes.flatMap((sc) => Array.from(sc.querySelectorAll(sel)));
+  const skip = { acceptNode: (n) => (n.nodeType === 1 && n.hasAttribute("contenteditable") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) };
+  const textOfRegion = (root) => {
+    let t = "";
+    const add = (s) => {
+      const c = s.replace(/\s+/g, " ");
+      t += t === "" || t.endsWith(" ") ? c.replace(/^ /, "") : c;
+    };
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, skip);
+    let n = w.firstChild();
+    while (n && t.length <= cap) {
+      if (n.nodeType === 3) add(n.data);
+      const down = n.nodeType === 1 ? w.firstChild() : null;
+      if (down) { n = down; continue; }
+      if (n.nodeType === 1) add(" "); // leaving an element with no children read
+      for (n = w.nextSibling(); !n; n = w.nextSibling()) {
+        if (!w.parentNode() || w.currentNode === root) { n = null; break; }
+        add(" "); // leaving the parent element
+      }
+    }
+    return (t.length > cap ? t : t.trim()).slice(0, cap);
+  };
+  return { regions: sels.map((sel) => all(sel).map(textOfRegion)), count: countSel ? all(countSel).length : 0 };
+}
+async function readPage(page, sels, countSel) {
+  let out = null;
+  try { out = await page.evaluate(readInPage, { sels, cap: RAW_CAP, countSel: countSel || null }); } catch { out = null; }
+  const regions = sels.map((_, i) => {
+    const r = out && Array.isArray(out.regions) && out.regions[i];
+    return Array.isArray(r) ? r.map((x) => String(x).slice(0, RAW_CAP)) : [];
+  });
+  return { regions, count: out && Number.isInteger(out.count) ? out.count : 0 };
+}
 async function regionTexts(page, sel) {
-  const out = await page.$$eval(sel, (els, cap) => els.map((el) => {
-    const c = el.cloneNode(true);
-    c.querySelectorAll("[contenteditable]").forEach((n) => n.remove());
-    c.querySelectorAll("*").forEach((n) => n.append(" "));
-    return (c.textContent || "").replace(/\s+/g, " ").trim().slice(0, cap);
-  }), RAW_CAP).catch(() => []);
-  return Array.isArray(out) ? out.map((t) => String(t).slice(0, RAW_CAP)) : [];
+  return (await readPage(page, [sel])).regions[0];
 }
 // classifySignal over the landed URL, a captcha frame, and every dialog and
 // alert/status region SEPARATELY, on its unstripped text: a phrase match is
-// excused only when it sits wholly inside a run of >= 20 characters of that
-// region that also occurs in the copy (an echo of our own post).
+// excused only when it sits wholly inside a run of that region, at least 10
+// characters longer than the phrase (and >= 20), that also occurs in the
+// copy (an echo of our own post). One page read for all of it.
 async function readSignal(page, copy) {
-  const regions = [...(await regionTexts(page, SELECTORS.dialog)), ...(await regionTexts(page, SELECTORS.alert))].map(norm);
-  const hasCaptchaFrame = (await countOf(page, SELECTORS.captchaFrame)) > 0;
+  const r = await readPage(page, [SELECTORS.dialog, SELECTORS.alert], SELECTORS.captchaFrame);
+  const regions = r.regions.flat().map(norm);
+  const hasCaptchaFrame = r.count > 0;
   let landedUrl = "";
   try { landedUrl = page.url(); } catch { landedUrl = ""; }
   return classifySignal({ landedUrl, hasCaptchaFrame, ownText: norm(copy), regions });

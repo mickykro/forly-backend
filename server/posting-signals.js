@@ -64,42 +64,61 @@ const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval"]
 // supply when it actually saw a captcha iframe — a stronger signal than any
 // text on the page.
 //
-// Our own words, echoed back (Task 18, fix round 4). `regions` (optional):
+// Our own words, echoed back (Task 18, fix rounds 4-5). `regions` (optional):
 // the text of each dialog / alert / status region SEPARATELY (the driver has
 // already removed any editable content). Detection runs on each region's
 // UNSTRIPPED text, one phrase match at a time, every occurrence. A match
 // [s,e) is excused only when it lies wholly inside ONE contiguous piece of
-// that same region, region[a,b) with a <= s, e <= b and b - a >= MIN_ECHO,
-// that also occurs in the copy — a toast, preview or card repeating a piece
-// of our post. So a run shared with the copy that only cuts into Facebook's
-// sentence ("…temporarily blocked from post…" beside "You're temporarily
-// blocked from posting in this group") never hides it; a short phrase we
-// happen to share ("הכביש חסום זמנית" vs "אתה חסום זמנית מפרסום", a real
-// 16-character "נחסמת באופן זמני") is never excused; a region never excuses
-// another. The URL and a captcha frame are never excused.
+// that same region, region[a,b) with a <= s, e <= b and
+// b - a >= max(MIN_ECHO, (e - s) + ECHO_CONTEXT), that also occurs in the
+// copy — a toast, preview or card repeating a piece of our post, with at
+// least ECHO_CONTEXT characters of the copy's own words around the phrase.
+// So the phrase alone is never enough, however long (a copy saying
+// "You're temporarily blocked from posting" never hides Facebook's "You're
+// temporarily blocked from posting in this group"); a run shared with the
+// copy that only cuts into Facebook's sentence never hides it; a short
+// phrase we happen to share ("הכביש חסום זמנית" vs "אתה חסום זמנית מפרסום")
+// is never excused; a region never excuses another. The URL and a captcha
+// frame are never excused; the exact captcha sentence is a whole region, so
+// it has no room for context and is never excused either.
+//
+// Accepted (fail-safe): an echo whose phrase sits within ECHO_CONTEXT
+// characters of the copy's start or end, with nothing of the copy beyond it
+// in the toast, reads as a signal: a false halt, never a hidden one.
 //
 // Bounded: each region is cut to REGION_CAP characters and the copy to
 // OWN_CAP before any matching (Facebook's system alerts are short; a
 // comment-thread dialog can be megabytes), and the echo check only looks
 // around actual matches.
-const MIN_ECHO = 20, REGION_CAP = 4000, OWN_CAP = 5000;
-const capped = (s, n) => norm(String(s || "").slice(0, n * 2)).slice(0, n);
+const MIN_ECHO = 20, ECHO_CONTEXT = 10, REGION_CAP = 4000, OWN_CAP = 5000;
+// Whitespace is collapsed BEFORE the raw slice (fix round 5), so a region
+// that opens with thousands of blank characters still has its text read. The
+// raw input is consumed in chunks until 2n collapsed characters are held, so
+// the work stays bounded however long the input.
+function capped(s, n) {
+  const raw = String(s || ""), step = 4 * n;
+  let t = "";
+  for (let i = 0; i < raw.length && t.length < 2 * n; i += step) t = (t + raw.slice(i, i + step)).replace(/\s+/g, " ").trimStart();
+  return norm(t.slice(0, 2 * n)).slice(0, n);
+}
 
-// Does t[s,e) sit inside a run of >= MIN_ECHO characters of t that also
-// occurs in o? (t and o already normalised; compared case-insensitively.)
+// Does t[s,e) sit inside a run of t that also occurs in o and is at least
+// max(MIN_ECHO, (e - s) + ECHO_CONTEXT) long? (t and o already normalised;
+// compared case-insensitively.)
 function echoed(t, o, s, e) {
   const lt = t.toLowerCase(), lo = o.toLowerCase();
   // never mis-index when case-folding changes a length: compare exactly (a rare
   // character only makes the excuse harder to earn, never easier)
   const [T, O] = lt.length === t.length && lo.length === o.length ? [lt, lo] : [t, o];
-  const len = e - s, sub = T.slice(s, e);
-  if (!len || len > O.length) return false;
+  const len = e - s, sub = T.slice(s, e), need = Math.max(MIN_ECHO, len + ECHO_CONTEXT);
+  if (!len || need > O.length || need > T.length) return false;
   for (let p = O.indexOf(sub); p !== -1; p = O.indexOf(sub, p + 1)) {
-    if (len >= MIN_ECHO) return true;
+    // extend left, then right, while region and copy agree: a run of `need`
+    // exists around this occurrence iff the two extents together reach it
     let l = 0, r = 0;
-    while (len + l < MIN_ECHO && s - l > 0 && p - l > 0 && T[s - l - 1] === O[p - l - 1]) l++;
-    while (len + l + r < MIN_ECHO && e + r < T.length && p + len + r < O.length && T[e + r] === O[p + len + r]) r++;
-    if (len + l + r >= MIN_ECHO) return true;
+    while (len + l < need && s - l > 0 && p - l > 0 && T[s - l - 1] === O[p - l - 1]) l++;
+    while (len + l + r < need && e + r < T.length && p + len + r < O.length && T[e + r] === O[p + len + r]) r++;
+    if (len + l + r >= need) return true;
   }
   return false;
 }
@@ -137,4 +156,4 @@ function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, own
   return "ok";
 }
 
-module.exports = { classifySignal, echoed, MIN_ECHO, REGION_CAP, OWN_CAP, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS };
+module.exports = { classifySignal, echoed, capped, MIN_ECHO, ECHO_CONTEXT, REGION_CAP, OWN_CAP, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS };
