@@ -185,11 +185,14 @@ function readInPage({ sels, cap, countSel }) {
 async function readPage(page, sels, countSel) {
   let out = null;
   try { out = await page.evaluate(readInPage, { sels, cap: RAW_CAP, countSel: countSel || null }); } catch { out = null; }
+  // A read that threw (navigation mid-read, a selector querySelectorAll rejects)
+  // is NOT an empty page: callers must treat it as "unreadable", never "ok".
+  const failed = !out || !Array.isArray(out.regions);
   const regions = sels.map((_, i) => {
     const r = out && Array.isArray(out.regions) && out.regions[i];
     return Array.isArray(r) ? r.map((x) => String(x).slice(0, RAW_CAP)) : [];
   });
-  return { regions, count: out && Number.isInteger(out.count) ? out.count : 0 };
+  return { regions, count: out && Number.isInteger(out.count) ? out.count : 0, failed };
 }
 async function regionTexts(page, sel) {
   return (await readPage(page, [sel])).regions[0];
@@ -205,7 +208,9 @@ async function readSignal(page, copy) {
   const hasCaptchaFrame = r.count > 0;
   let landedUrl = "";
   try { landedUrl = page.url(); } catch { landedUrl = ""; }
-  return classifySignal({ landedUrl, hasCaptchaFrame, ownText: norm(copy), regions });
+  const sig = classifySignal({ landedUrl, hasCaptchaFrame, ownText: norm(copy), regions });
+  // The URL alone can still prove a halt; otherwise a failed read fails closed.
+  return r.failed && sig === "ok" ? "unreadable" : sig;
 }
 
 async function readFeedPosts(page) {

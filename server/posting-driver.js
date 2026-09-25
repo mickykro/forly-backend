@@ -176,6 +176,7 @@ async function preSubmitSignal(page, x, known) {
   if (HALTING.has(sig)) return x.end("verified_failed", { error_code: sig }, { signal: sig });
   if (sig === "not_member") return x.end("verified_failed", { error_code: sig }, { membership: "left" });
   if (sig === "group_blocked") return x.end("verified_failed", { error_code: sig });
+  if (sig === "unreadable") return x.end("verified_failed", { error_code: "markers_missing" }); // fail closed, pre-submit
   return null;
 }
 
@@ -296,6 +297,7 @@ async function verify(page, x, copy, comment, clickError) {
     await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
     await x.wait(page, 2, 5);
     const sig = await P.readSignal(page, copy); // never the composer, never the copy's own words
+    if (sig === "unreadable") continue; // a failed read proves nothing: read again, never assume "ok"
     // The post may or may not have gone out: reconciliation decides, never a second click.
     if (HALTING.has(sig)) return x.end("outcome_unknown", { error_code: sig }, { signal: sig });
     if (sig === "group_blocked" || sig === "not_member") return x.end("verified_failed", { error_code: sig }, sig === "not_member" ? { membership: "left" } : {});
