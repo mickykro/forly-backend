@@ -72,7 +72,7 @@ function call(app, method, path, body) {
   });
 }
 
-const consented = (b) => Object.assign({ consent: true, page_id: "pg1", group_ids: ["111"], mode: "standing" }, b);
+const consented = (b) => Object.assign({ consent: true, consent_version: createRouter.CONSENT_VERSION, page_id: "pg1", group_ids: ["111"], mode: "standing" }, b);
 const globalOff = () => K.db.mem.settings.set("posting", { enabled: false, version: 2 });
 const globalOn = () => K.db.mem.settings.set("posting", { enabled: true, version: 3 });
 

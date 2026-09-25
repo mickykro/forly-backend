@@ -40,7 +40,7 @@ function normalizeGroups(groups, ctx) {
     const group_id = String(g.group_id || (m && m.group_id) || A.groupIdFromUrl(url));
     if (seen.has(group_id) || /[/|]/.test(group_id)) continue;
     seen.add(group_id);
-    const cat = ctx.catalog.get(url);
+    const cat = A.catalogEntriesFor(ctx.catalog, { group_id, url }, ctx.conn)[0] || null;
     const base = {
       group_id, url, name: String(g.name || (m && m.name) || (cat && cat.name) || "").slice(0, 120),
       agent_policy: g.agent_policy || (cat && cat.agent_policy) || "unknown",

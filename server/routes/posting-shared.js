@@ -144,17 +144,16 @@ function memberGate(conn, ids) {
   return notMember.length ? { notMember } : { entries };
 }
 
-// A catalog entry for a membership entry: by canonical URL, else by id
-// (numeric, or the "slug:" id a vanity catalog URL maps to), aliases included.
+// The catalog entries for a membership entry — posting-account's helper, so
+// the route and the planner match a group to the catalog the same way: by
+// every id and alias (numeric, or the "slug:" id a vanity catalog URL maps
+// to), then by canonical URL. lookup(m) → the first entry or null;
+// lookup.all(m) → every matching entry.
 function catalogLookup(list) {
-  const byUrl = new Map(), byId = new Map();
-  for (const g of Array.isArray(list) ? list : []) {
-    if (!g || !g.url) continue;
-    byUrl.set(g.url, g);
-    const id = A.groupIdFromUrl(g.url);
-    if (id) byId.set(id, g);
-  }
-  return (m) => byUrl.get(m.canonical_url) || byUrl.get(m.url) || idsOf(m).map((id) => byId.get(id)).find(Boolean) || null;
+  const all = (m) => A.catalogEntriesFor(list, { group_id: m.group_id, aliases: m.aliases, url: m.canonical_url || m.url }, null);
+  const lookup = (m) => all(m)[0] || null;
+  lookup.all = all;
+  return lookup;
 }
 
 // What the card may show of a membership entry: never its URL; its name only

@@ -22,6 +22,8 @@ const { db, store } = K;
     }
     const stale = await call(app, "POST", "/api/posting/campaigns", consented({ consent_version: "2020-01-v0" }));
     assert.equal(stale.status, 409); assert.equal(stale.body.consent_version, createRouter.CONSENT_VERSION);
+    const missing = await call(app, "POST", "/api/posting/campaigns", consented({ consent_version: undefined }));
+    assert.equal(missing.status, 409); assert.equal(missing.body.error, "consent_outdated"); assert.equal(missing.body.consent_version, createRouter.CONSENT_VERSION);
   }
 
   // ── the member gate: ids the account is not a member of (or left) → 422 with those ids ──
@@ -76,6 +78,28 @@ const { db, store } = K;
     const before = JSON.stringify((await db.getConnection(PH)).posting_permission);
     await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2" }));
     assert.equal(JSON.stringify((await db.getConnection(PH)).posting_permission), before);
+  }
+
+  // ── the catalog refuses at creation, matched by id and alias (the real mergedCatalog):
+  //    a no_agents group, and a rent-only group for a sale page, even when the catalog
+  //    lists the numeric URL and the member entry carries the vanity one ──
+  {
+    const env = await setup();
+    const app = R.makeApp({ deps: env.deps, catalog: (w) => require("./distribution").mergedCatalog(db, w) });
+    await db.addGroupCatalogEntry({ url: G(777), name: "rent only", city: "חיפה", agent_policy: "no_agents", listing_types: ["rent"], active: true });
+    await db.addGroupCatalogEntry({ url: G(111), name: "rent", city: "חיפה", agent_policy: "explicitly_allowed", listing_types: ["rent"], active: true });
+    await db.addGroupCatalogEntry({ url: G(222), name: "no agents", city: "חיפה", agent_policy: "no_agents", listing_types: [], active: true });
+    for (const id of ["777", "slug:haifa.homes"]) {
+      const r = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: [id], targets: ["groups"] }));
+      assert.equal(r.status, 422, id); assert.equal(r.body.error, "group_disallowed"); assert.deepEqual(r.body.group_ids, ["777"]);
+    }
+    const dis = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: ["222"] }));
+    assert.equal(dis.status, 422); assert.equal(dis.body.error, "group_disallowed"); assert.deepEqual(dis.body.group_ids, ["222"]);
+    const rent = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: ["111"] }));
+    assert.equal(rent.status, 422); assert.equal(rent.body.error, "listing_type_not_allowed"); assert.deepEqual(rent.body.group_ids, ["111"]);
+    assert.equal((await store.listPostingCampaignsByPhone(PH)).length, 0, "nothing created");
+    await db.savePage(K.page("pgR", PH, { property: { title: "t", city: "חיפה", listing_type: "rent" } }));
+    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pgR", group_ids: ["111"] }))).status, 201, "a rent page may use it");
   }
 
   // ── gates: not connected, someone else's page, too many campaigns ──

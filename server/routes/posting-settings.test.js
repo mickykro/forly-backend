@@ -8,7 +8,7 @@ const { DriverError } = require("../driver-browser");
 const { K, PH, G, setup, call, globalOff, globalOn, createRouter } = R;
 const { db, store } = K;
 const put = (app, b) => call(app, "PUT", "/api/posting/settings", b);
-const enable = (b) => Object.assign({ enabled: true, consent: true, default_group_ids: ["111"] }, b);
+const enable = (b) => Object.assign({ enabled: true, consent: true, consent_version: createRouter.CONSENT_VERSION, default_group_ids: ["111"] }, b);
 
 (async () => {
   // ── PUT: consent required; default groups must be member groups; the structured permission ──
@@ -34,6 +34,8 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, default_grou
     const perm2 = (await db.getConnection(PH)).posting_permission;
     assert.equal(perm2.granted_at, perm.granted_at); assert.deepEqual(perm2.default_group_ids, ["222"]); assert.equal(perm2.auto_mode, "per_post");
     assert.equal((await put(app, enable({ consent_version: "old" }))).body.error, "consent_outdated");
+    const missing = await put(app, enable({ consent_version: undefined }));
+    assert.equal(missing.status, 409); assert.equal(missing.body.error, "consent_outdated"); assert.equal(missing.body.consent_version, createRouter.CONSENT_VERSION);
   }
 
   // ── two Pages: a page target needs the confirmed Page; the card picks it by its handle ──

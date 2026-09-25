@@ -95,22 +95,63 @@ function groupIdsOf(g, conn) {
   return [...ids];
 }
 
+// Every catalog entry that describes group `g`: looked up by each id the
+// group is known by (its own, its aliases, its membership entry's — a vanity
+// slug resolved to a numeric id, Task 18), then by URL (g.url and the
+// membership's canonical URL). The catalog may list a group under either
+// URL, so a URL-only lookup could miss a disallowed or rent-only entry.
+// `catalog` is catalogIndex()'s Map or routes/distribution.mergedCatalog()'s
+// array; routes/posting-shared.js uses the same helper.
+const CATALOG_IX = new WeakMap();
+function catalogIx(catalog) {
+  let ix = catalog && typeof catalog === "object" ? CATALOG_IX.get(catalog) : null;
+  if (ix) return ix;
+  ix = { byUrl: new Map(), byId: new Map() };
+  const entries = catalog instanceof Map ? [...catalog.values()] : Array.isArray(catalog) ? catalog : [];
+  for (const e of entries) {
+    if (!e || !e.url) continue;
+    ix.byUrl.set(e.url, e);
+    const id = groupIdFromUrl(e.url);
+    if (id && !ix.byId.has(id)) ix.byId.set(id, e);
+  }
+  if (catalog && typeof catalog === "object") CATALOG_IX.set(catalog, ix);
+  return ix;
+}
+function catalogEntriesFor(catalog, g, conn) {
+  const ix = catalogIx(catalog);
+  const out = [];
+  const add = (e) => { if (e && !out.includes(e)) out.push(e); };
+  for (const id of g.group_id ? groupIdsOf(g, conn) : []) add(ix.byId.get(String(id)));
+  const m = g.group_id || g.url ? memberOf(conn, g) : null;
+  for (const u of [g.url, m && m.canonical_url, m && m.url]) if (u) add(ix.byUrl.get(u));
+  return out;
+}
+const policyDisallowed = (e) => !!e && (e.active === false || DISALLOWED_POLICY.has(e.agent_policy));
+const typeExcluded = (e, listingType) => !!listingType && Array.isArray(e.listing_types) && e.listing_types.length > 0 && !e.listing_types.includes(listingType);
+
+// Groups the agent removed from their list (facebook_groups_hidden, Task 19):
+// never members here, whatever the membership list says.
+function isHidden(conn, g) {
+  const hidden = require("./facebook-groups-sync").hiddenIds(conn);
+  return hidden.size > 0 && groupIdsOf(g, conn).some((id) => hidden.has(String(id)));
+}
+
 // The four booleans a group needs, all true, to be planned (adapt notes):
-// a member (state "member", not stale/left); not disallowed by the catalog;
-// the catalog's listing types admit this page's type; and no live
-// confirmed_removed penalty on the group. A result the driver reported on
-// this campaign's own group (not_member / group_blocked) keeps it off.
+// a member (state "member", not stale/left, not hidden); no matching catalog
+// entry disallows it; every matching entry's listing types admit this page's
+// type; and no live confirmed_removed penalty on the group. A result the
+// driver reported on this campaign's own group (not_member / group_blocked)
+// keeps it off. Catalog entries are matched by id and alias, then URL.
 function eligibility(g, { conn, catalog, listingType, now }) {
   if (g.target === "page") return { is_member: true, catalog_policy: true, listing_type_allowed: true, posting_currently_available: true };
   const m = memberOf(conn, g);
-  const cat = catalog.get(g.url) || null;
-  const types = cat && Array.isArray(cat.listing_types) ? cat.listing_types : [];
+  const cats = catalogEntriesFor(catalog, g, conn);
   const pens = (conn && conn.posting_group_penalties) || {};
   const pen = groupIdsOf(g, conn).map((id) => pens[id]).filter(Boolean).sort((a, b) => ms(b.until) - ms(a.until))[0];
   return {
-    is_member: !!m && m.membership_state === "member" && g.blocked_code !== "not_member",
-    catalog_policy: !(cat && (cat.active === false || DISALLOWED_POLICY.has(cat.agent_policy))),
-    listing_type_allowed: !listingType || !types.length || types.includes(listingType),
+    is_member: !!m && m.membership_state === "member" && g.blocked_code !== "not_member" && !isHidden(conn, g),
+    catalog_policy: !cats.some(policyDisallowed) && !DISALLOWED_POLICY.has(g.agent_policy),
+    listing_type_allowed: !cats.some((e) => typeExcluded(e, listingType)),
     posting_currently_available: !(pen && ms(pen.until) > now.getTime()) && g.blocked_code !== "group_blocked",
   };
 }
@@ -290,6 +331,7 @@ module.exports = {
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
   MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
-  groupIdFromUrl, catalogIndex, memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,
+  groupIdFromUrl, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY,
+  memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,
   pageTarget, targetsFor, accountView, currentPosts, limitsFor, nextDayStart,
 };

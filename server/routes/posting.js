@@ -85,7 +85,8 @@ module.exports = function createPostingRouter(ctx) {
     if (b.consent !== true) return res.status(400).json({ error: "consent_required" });
     const v = validCreate(b);
     if (!v) return res.status(400).json({ error: "invalid_input" });
-    if (b.consent_version !== undefined && b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
+    // The consent is to the text the card showed: it must be this version.
+    if (b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
     if (!(await allowed(S, phone, res, PERMISSION_CURED))) return;
 
     const conn = (await db.getConnection(phone)) || {};
@@ -105,6 +106,12 @@ module.exports = function createPostingRouter(ctx) {
     const lookup = S_.catalogLookup(await S.catalog(listingType || "sale"));
     const unknown = gate.entries.filter((m) => !lookup(m)).map((m) => m.group_id);
     if (unknown.length && b.include_unknown !== true) return res.status(422).json({ error: "unknown_group", group_ids: unknown });
+    // A group the catalog forbids to agents, or whose listing types exclude
+    // this page's, is refused here rather than kept and never planned.
+    const disallowed = gate.entries.filter((m) => lookup.all(m).some(A.policyDisallowed)).map((m) => m.group_id);
+    if (disallowed.length) return res.status(422).json({ error: "group_disallowed", group_ids: disallowed });
+    const wrongType = gate.entries.filter((m) => lookup.all(m).some((e) => A.typeExcluded(e, listingType))).map((m) => m.group_id);
+    if (wrongType.length) return res.status(422).json({ error: "listing_type_not_allowed", group_ids: wrongType });
     // posting-campaign.create() derives the four eligibility booleans itself
     // (is_member, catalog_policy, listing_type_allowed,
     // posting_currently_available) from these fields, the connection and the raw catalog.

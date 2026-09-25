@@ -114,7 +114,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const badVis = b.allows_visible_interactions !== undefined && typeof b.allows_visible_interactions !== "boolean";
     const badPage = b.page_id !== undefined && b.page_id !== null && (typeof b.page_id !== "string" || b.page_id.length > 64);
     if (g.error || t.error || badMode || badVis || badPage) return res.status(400).json({ error: "invalid_input" });
-    if (b.consent_version !== undefined && b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
+    if (b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
     if (!(await allowed(S, phone, res, PERMISSION_CURED))) return;
 
     const conn = (await db.getConnection(phone)) || {};
@@ -220,6 +220,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
     return res.json({ removed: true, member_groups: await publicMembers(saved || {}), hidden_group_ids: hiddenList(saved || {}).map((h) => h.ids[0]) });
   }));
 
+  // Guard exception (accepted): unhide leads to no post by itself — the group
+  // must still be synced as a member and chosen for a campaign, both gated.
   // The only way back: the agent picks the removed group again on the card.
   // It reappears at the next sync (if the account is still a member).
   router.post("/groups/:group_id/unhide", auth, wrap("groups.unhide", async (req, res) => {
