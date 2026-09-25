@@ -19,8 +19,10 @@ function fakeDb(conns = {}) {
     getConnection: async (phone) => conns[phone] || null,
     setConnection: async (phone, patch) => { conns[phone] = Object.assign(conns[phone] || {}, patch); },
     cancelOpenAttempts: async () => {},
-    savePendingDelete: async ({ phone, platform, since, attempts, last_error }) => {
-      pending.set(`${platform}:${phone}`, { phone, platform, since, attempts, last_error });
+    savePendingDelete: async ({ phone, platform, since, attempts, last_error, gen }) => {
+      const rec = { phone, platform, since, attempts, last_error };
+      if (gen !== undefined) rec.gen = gen;
+      pending.set(`${platform}:${phone}`, rec);
     },
     listPendingDeletes: async () => [...pending.values()],
     clearPendingDelete: async (phone, platform) => { pending.delete(`${platform}:${phone}`); },
@@ -52,6 +54,8 @@ function fakeDb(conns = {}) {
   assert.equal(conn.facebook_pages, null);
   assert.equal(conn.facebook_groups_member, null);
   assert.ok(conn.facebook_profile_deleted_at);
+  assert.equal(conn.facebook_identity_label, null, "the account holder's display name must not outlive revoke()");
+  assert.ok(conn.facebook_browser_disconnected_at, "revoke() records when access was taken back");
   assert.ok(result.advice, "revoke says what the agent should still do at the platform");
   assert.throws(() => assertOwnership(profileName("facebook", "05x"), "05x", "facebook", conn), (e) => e.code === "profile_ownership", "a revoked profile is refused even with the right name");
   assert.deepEqual(await db1.listPendingDeletes(), [], "a successful delete leaves no pending row");
@@ -104,6 +108,7 @@ function fakeDb(conns = {}) {
   assert.equal(conn3.facebook_browser_connected_at, null);
   assert.equal(deleted3[0], profileName("facebook", "05x"));
   assert.ok(conn3.facebook_profile_deleted_at);
+  assert.equal(conn3.facebook_identity_label, null, "quarantine() clears the identity label too — the next connect re-reads it");
   assert.throws(() => assertOwnership(profileName("facebook", "05x"), "05x", "facebook", conn3), (e) => e.code === "profile_ownership");
 
   // ── quarantine refuses an unrecognized halt class ──
@@ -148,6 +153,43 @@ function fakeDb(conns = {}) {
     const row = db5.pending.get("facebook:d");
     assert.equal(row.attempts, 4, "attempts increments, since is preserved across retries");
     assert.equal(row.since, oldSince);
+  }
+
+  // ── retryDeletes: a gen-tracked row whose gen still matches the
+  //    connection's current gen works exactly like before — deletes that
+  //    profile, records success on the connection, clears the pending row ──
+  {
+    const conns = { e: { facebook_profile_state: "revoked", facebook_profile_gen: 0 } };
+    const db6 = fakeDb(conns);
+    db6.pending.set("facebook:e", { phone: "e", platform: "facebook", since: new Date().toISOString(), attempts: 1, last_error: "503", gen: 0 });
+    const attempted = [];
+    const results = await L.retryDeletes({ db: db6, driver: { deleteProfile: async (n) => { attempted.push(n); return { ok: true }; } } });
+    assert.deepEqual(attempted, [profileName("facebook", "e", 0)]);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ok, true);
+    assert.ok(conns.e.facebook_profile_deleted_at, "gen matches current: the connection is marked deleted");
+    assert.deepEqual(await db6.listPendingDeletes(), []);
+  }
+
+  // ── retryDeletes: reconnecting after a failed delete bumps the connection's
+  //    gen (routes/connections-browser.js's /start) while the OLD gen's
+  //    delete is still pending. The retry must delete the OLD generation's
+  //    profile — never the new, live one — and must NOT stamp the
+  //    connection's deleted_at/delete_error, which now describe the live
+  //    profile, not the orphaned one this retry is cleaning up ──
+  {
+    const conns = { f: { facebook_profile_state: "active", facebook_profile_gen: 1 } }; // reconnected to gen1
+    const db7 = fakeDb(conns);
+    db7.pending.set("facebook:f", { phone: "f", platform: "facebook", since: new Date().toISOString(), attempts: 1, last_error: "503", gen: 0 }); // gen0's delete never finished
+    const attempted = [];
+    const results = await L.retryDeletes({ db: db7, driver: { deleteProfile: async (n) => { attempted.push(n); return { ok: true }; } } });
+    assert.deepEqual(attempted, [profileName("facebook", "f", 0)], "deletes the OLD (gen0) profile, never the live gen1 one");
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ok, true);
+    assert.equal(results[0].staleGen, true);
+    assert.equal(conns.f.facebook_profile_deleted_at, undefined, "the live gen1 connection must not be marked deleted by an old generation's cleanup");
+    assert.equal(conns.f.facebook_profile_delete_error, undefined);
+    assert.deepEqual(await db7.listPendingDeletes(), [], "the gen0 pending row is still cleared once its own delete succeeds");
   }
 
   console.log("profile-lifecycle.test.js ok");

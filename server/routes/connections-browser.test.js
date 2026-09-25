@@ -56,6 +56,7 @@ function fakeLocks({ maxSessions = Infinity } = {}) {
     tryAcquire: () => { if (held) return null; held = true; return () => { held = false; }; },
     trySession: () => { if (sessions >= maxSessions) return null; sessions++; return () => { sessions--; }; },
     _isHeld: () => held,
+    _sessions: () => sessions,
   };
 }
 
@@ -246,6 +247,83 @@ function fakeGuard(reason) {
     assert.equal(connQ.facebook_profile_state, "active");
   }
 
+  // ── reconnect after a successful DELETE must not leave the OLD generation's
+  //    delete bookkeeping on the connection: a later failed delete for the
+  //    NEW generation must still get its own pending-delete row and retry,
+  //    not be mistaken for "already deleted" because a stale
+  //    <platform>_profile_deleted_at from gen0 was still sitting there ──
+  {
+    const conn = {};
+    const db = fakeDb(conn);
+    let created = null;
+    const reconnectRealApp = makeApp({
+      driver: {
+        createSession: async (opts) => { created = opts; return { sessionId: "sR" + Math.random(), status: "active", cdpUrl: "wss://n/r" }; },
+        stopSession: async () => {},
+        deleteProfile: async () => ({ ok: true }),
+      },
+      db,
+      locks: fakeLocks(),
+    });
+    const first = await call(reconnectRealApp, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true }); // gen0
+    assert.equal(first.status, 200);
+    const disc = await call(reconnectRealApp, "DELETE", "/api/connections/browser/facebook"); // gen0 delete succeeds
+    assert.equal(disc.status, 200);
+    assert.ok(conn.facebook_profile_deleted_at, "gen0's delete is recorded as done");
+    assert.ok(conn.facebook_profile_revoked_at);
+
+    const reconnect = await call(reconnectRealApp, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true }); // gen1
+    assert.equal(reconnect.status, 200);
+    assert.equal(created.profile.name, profileName("facebook", PHONE, 1));
+    assert.equal(conn.facebook_profile_gen, 1);
+    assert.equal(conn.facebook_profile_state, "active");
+    assert.equal(conn.facebook_profile_deleted_at, null, "the OLD generation's deleted_at must not survive onto the new generation");
+    assert.equal(conn.facebook_profile_delete_error, null);
+    assert.equal(conn.facebook_profile_revoked_at, null);
+    assert.equal(conn.facebook_profile_revoke_reason, null);
+    assert.equal(conn.facebook_profile_quarantined_at, null);
+    assert.equal(conn.facebook_profile_quarantine_class, null);
+  }
+
+  // ── /start release paths: on a guard refusal, the profile lock and the
+  //    session budget are both returned, not leaked ──
+  {
+    const locks = fakeLocks({ maxSessions: 1 });
+    let touchedRefusal = false;
+    const refusalApp = makeApp({
+      driver: { createSession: async () => { touchedRefusal = true; return {}; } },
+      db: fakeDb({}),
+      locks,
+      guard: fakeGuard("global_off"),
+    });
+    const r = await call(refusalApp, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
+    assert.equal(r.status, 409);
+    assert.equal(touchedRefusal, false);
+    assert.equal(locks._isHeld(), false, "the profile lock is released after a guard refusal");
+    assert.equal(locks._sessions(), 0, "the session budget slot is returned after a guard refusal");
+  }
+
+  // ── /start release paths: when createSession throws, the response is 503,
+  //    the lock and budget are released, and the gen is NOT bumped ──
+  {
+    const locks = fakeLocks({ maxSessions: 1 });
+    const connFail = { facebook_profile_state: "quarantined", facebook_profile_gen: 0 };
+    const dbFail = fakeDb(connFail);
+    const failApp = makeApp({
+      driver: { createSession: async () => { throw new Error("driver down"); }, stopSession: async () => {} },
+      db: dbFail,
+      locks,
+      guard: fakeGuard("profile_revoked"), // let the reconnect path through, so the gen-bump path runs too
+    });
+    const r = await call(failApp, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
+    assert.equal(r.status, 503);
+    assert.equal(r.body.error, "extract_unavailable");
+    assert.equal(locks._isHeld(), false, "the profile lock is released when createSession throws");
+    assert.equal(locks._sessions(), 0, "the session budget slot is returned when createSession throws");
+    assert.equal(connFail.facebook_profile_gen, 0, "a failed createSession must not persist the gen bump");
+    assert.notEqual(connFail.facebook_profile_state, "active", "a failed createSession must not persist the reconnect");
+  }
+
   // ── /start stops an already-open login session before starting a new one,
   //    so the same profile is never driven from two browsers at once ──
   {
@@ -343,7 +421,10 @@ function fakeGuard(reason) {
   //    clears Facebook-only state; the route relays revoke's advice string ──
   {
     const deleted = [];
-    const conn4 = { facebook_browser_connected_at: "2026-09-01T00:00:00Z", facebook_pages: [{}], posting_permission: { enabled: true } };
+    const conn4 = {
+      facebook_browser_connected_at: "2026-09-01T00:00:00Z", facebook_pages: [{}], posting_permission: { enabled: true },
+      facebook_identity_label: "Dana Cohen",
+    };
     const discApp = makeApp({
       driver: { deleteProfile: async (name) => { deleted.push(name); return { ok: true }; }, stopSession: async () => {} },
       db: fakeDb(conn4),
@@ -358,6 +439,8 @@ function fakeGuard(reason) {
     assert.equal(conn4.facebook_profile_state, "revoked");
     assert.equal(conn4.posting_permission, null);
     assert.equal(conn4.facebook_pages, null);
+    assert.equal(conn4.facebook_identity_label, null, "the account holder's display name must not survive disconnect");
+    assert.ok(conn4.facebook_browser_disconnected_at, "disconnect is recorded");
   }
 
   // ── disconnect also stops running/paused posting campaigns, through the

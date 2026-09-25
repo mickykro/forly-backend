@@ -62,6 +62,18 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       gen += 1;
       statePatch[`${platform}_profile_gen`] = gen;
       statePatch[`${platform}_profile_state`] = "active";
+      // The old generation's delete/revoke/quarantine bookkeeping belongs to
+      // a profile this connection no longer points at. Left in place, a
+      // stale `_profile_deleted_at` would make retryDeletes() (which reads
+      // the CURRENT connection) believe a still-pending delete already
+      // succeeded — profile-lifecycle.js's attemptDelete() is the one place
+      // that still cares about it once it's gen-tracked on the pending row.
+      statePatch[`${platform}_profile_deleted_at`] = null;
+      statePatch[`${platform}_profile_delete_error`] = null;
+      statePatch[`${platform}_profile_revoked_at`] = null;
+      statePatch[`${platform}_profile_revoke_reason`] = null;
+      statePatch[`${platform}_profile_quarantined_at`] = null;
+      statePatch[`${platform}_profile_quarantine_class`] = null;
     }
 
     // Never open a second login browser on this profile while one is recorded.

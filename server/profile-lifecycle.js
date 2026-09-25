@@ -27,32 +27,48 @@ async function stopOpenSession(platform, conn, deps) {
   if (open && open.session_id) await deps.driver.stopSession(open.session_id);
 }
 
-// Deletes the profile at Driver. Never throws — returns { ok: true, patch }
-// with `<platform>_profile_deleted_at` set, or { ok: false, error, patch }
-// with `<platform>_profile_delete_error` set, so the caller can persist the
-// connection patch AND decide whether to file/clear a profile_deletes row.
-async function deleteAndRecord(phone, platform, conn, deps) {
-  const name = profileName(platform, phone, conn[`${platform}_profile_gen`] || 0);
+// Deletes the named Driver profile. Never throws — returns { ok: true } or
+// { ok: false, error }. Pure: no db access, no opinion on what a caller
+// should do with the result — see attemptDelete for that.
+async function deleteDriverProfile(name, deps) {
   try {
     const r = await deps.driver.deleteProfile(name);
     if (r && r.ok === false) throw new Error(r.error || "delete failed");
-    return { ok: true, patch: { [`${platform}_profile_deleted_at`]: nowIso(), [`${platform}_profile_delete_error`]: null } };
+    return { ok: true };
   } catch (e) {
-    const error = e.message || String(e);
-    return { ok: false, error, patch: { [`${platform}_profile_delete_error`]: error } };
+    return { ok: false, error: e.message || String(e) };
   }
 }
 
-// Runs a delete attempt and files/clears the pending-delete row that
-// retryDeletes() later drains. `since`/`attempts` carry over an existing
-// retry's own history when passed in; a first attempt (revoke/quarantine)
-// omits them and starts a fresh row.
-async function attemptDelete(phone, platform, conn, deps, { since, attempts = 0 } = {}) {
-  const del = await deleteAndRecord(phone, platform, conn, deps);
-  await deps.db.setConnection(phone, del.patch);
-  if (del.ok) await deps.db.clearPendingDelete(phone, platform);
-  else await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts: attempts + 1, last_error: del.error });
-  return del;
+// Runs a delete attempt for `opts.gen` (default: the connection's CURRENT
+// gen) and files/clears the pending-delete row that retryDeletes() later
+// drains. `since`/`attempts` carry over an existing retry's own history when
+// passed in; a first attempt (revoke/quarantine) omits them and starts a
+// fresh row.
+//
+// `staleGen` (gen !== the connection's current gen): true only when
+// retryDeletes() is finishing off an OLD generation's delete after a
+// reconnect already moved the connection on to a new one. In that case the
+// connection's own `<platform>_profile_deleted_at` / `_delete_error` must
+// NOT be touched — those fields describe the live (new-generation) profile,
+// which this delete has nothing to do with. Only the pending-delete row
+// itself (keyed by phone+platform, carrying its own gen) is updated.
+async function attemptDelete(phone, platform, conn, deps, opts = {}) {
+  const { since, attempts = 0 } = opts;
+  const currentGen = conn[`${platform}_profile_gen`] || 0;
+  const gen = opts.gen !== undefined ? opts.gen : currentGen;
+  const staleGen = gen !== currentGen;
+  const name = profileName(platform, phone, gen);
+  const del = await deleteDriverProfile(name, deps);
+
+  if (del.ok) {
+    if (!staleGen) await deps.db.setConnection(phone, { [`${platform}_profile_deleted_at`]: nowIso(), [`${platform}_profile_delete_error`]: null });
+    await deps.db.clearPendingDelete(phone, platform);
+  } else {
+    if (!staleGen) await deps.db.setConnection(phone, { [`${platform}_profile_delete_error`]: del.error });
+    await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts: attempts + 1, last_error: del.error, gen });
+  }
+  return { ok: del.ok, error: del.error, gen, staleGen };
 }
 
 // Stops the platform's open session, cancels the phone's open posting
@@ -71,6 +87,8 @@ async function revoke({ phone, platform, reason }, deps) {
       [`${platform}_profile_revoked_at`]: nowIso(),
       [`${platform}_profile_revoke_reason`]: reason || null,
       [`${platform}_browser_connected_at`]: null,
+      [`${platform}_browser_disconnected_at`]: nowIso(),
+      [`${platform}_identity_label`]: null, // the account holder's display name must not outlive their consent
       [`browser_session_${platform}`]: null,
     },
     platform === "facebook" ? { facebook_pages: null, facebook_groups_member: null, posting_permission: null } : {},
@@ -105,6 +123,7 @@ async function quarantine(phone, platform, cls, deps) {
     [`${platform}_profile_quarantined_at`]: nowIso(),
     [`${platform}_profile_quarantine_class`]: cls,
     [`${platform}_browser_connected_at`]: null,
+    [`${platform}_identity_label`]: null, // the next connect re-reads this; must not carry the halted profile's identity
     [`browser_session_${platform}`]: null,
   };
   // Same intentional split as revoke(): the state write lands first so the
@@ -127,11 +146,29 @@ async function retryDeletes(deps) {
   for (const row of pending || []) {
     const { phone, platform, since, attempts } = row;
     const conn = (await deps.db.getConnection(phone)) || {};
-    if (!["revoked", "quarantined"].includes(conn[`${platform}_profile_state`])) continue; // reconnected past it
-    if (conn[`${platform}_profile_deleted_at`]) continue; // already succeeded elsewhere
-    const del = await attemptDelete(phone, platform, conn, deps, { since, attempts });
+
+    // A legacy row (saved before per-generation tracking existed, so it has
+    // no `gen`) keeps the old behaviour: it always refers to whatever the
+    // connection's CURRENT generation is, so it is safe to skip once that
+    // connection has moved past revoked/quarantined (reconnected) or already
+    // shows a successful delete.
+    if (row.gen === undefined) {
+      if (!["revoked", "quarantined"].includes(conn[`${platform}_profile_state`])) continue; // reconnected past it
+      if (conn[`${platform}_profile_deleted_at`]) continue; // already succeeded elsewhere
+      const del = await attemptDelete(phone, platform, conn, deps, { since, attempts });
+      const ageMs = since ? Date.now() - new Date(since).getTime() : 0;
+      results.push({ phone, platform, ok: del.ok, staleGen: del.staleGen, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
+      continue;
+    }
+
+    // A gen-tracked row is retried for THAT generation's profile no matter
+    // what the connection looks like now — reconnecting after a failed
+    // delete must not orphan the old generation's cookies at Driver, and
+    // must not let this retry touch the NEW generation's deleted_at/error
+    // (attemptDelete's staleGen check handles that half).
+    const del = await attemptDelete(phone, platform, conn, deps, { since, attempts, gen: row.gen });
     const ageMs = since ? Date.now() - new Date(since).getTime() : 0;
-    results.push({ phone, platform, ok: del.ok, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
+    results.push({ phone, platform, ok: del.ok, staleGen: del.staleGen, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
   }
   return results;
 }
