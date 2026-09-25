@@ -106,6 +106,29 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     const members = (await db.getConnection(PH)).facebook_groups_member.filter((m) => m.canonical_url);
     for (const m of members) assert.ok(!s.body.member_groups.some((g) => JSON.stringify(g).includes(m.canonical_url)), "no member group URL");
   }
+  // ── GET: the halt classes behind the flags (Task 23's boxes), codes only ──
+  {
+    const H = K.NOW.getTime() - 3600e3;
+    const env = await setup({ conn: {
+      posting_disabled_until_admin: true, posting_disabled_class: "suspected_compromise",
+      posting_penalty_until: K.iso(K.NOW.getTime() + 13 * K.DAY), posting_penalty_class: "rate_limited",
+      posting_halts: [{ at: K.iso(H), code: "rate_limited" }, { at: K.iso(H), code: "suspected_compromise" }],
+    } });
+    const h = (await call(env.app, "GET", "/api/posting/settings")).body.halt_state;
+    assert.equal(h.disabled_class, "suspected_compromise"); assert.equal(h.penalty_class, "rate_limited");
+    assert.equal(h.penalty_blocks_posts, true, "day one of a penalty stops posts (posting-guard)"); assert.equal(h.posting_off, null);
+    globalOff();
+    assert.equal((await call(env.app, "GET", "/api/posting/settings")).body.halt_state.posting_off, "global_off");
+    globalOn();
+    // Day two: the penalty only slows; an unknown stored class is never echoed; no disable → no class.
+    const env2 = await setup({ conn: {
+      posting_disabled_until_admin: false, posting_disabled_class: "checkpoint",
+      posting_penalty_until: K.iso(K.NOW.getTime() + 12 * K.DAY), posting_penalty_class: "Facebook said: slow down",
+      posting_halts: [{ at: K.iso(K.NOW.getTime() - 2 * K.DAY), code: "feature_blocked" }],
+    } });
+    const h2 = (await call(env2.app, "GET", "/api/posting/settings")).body.halt_state;
+    assert.equal(h2.disabled_class, null); assert.equal(h2.penalty_class, null); assert.equal(h2.penalty_blocks_posts, false);
+  }
   {
     // A running campaign: the estimate is the planner's slot.
     const env = await setup();

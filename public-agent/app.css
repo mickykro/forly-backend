@@ -209,7 +209,7 @@ body.agent-page::before{content:"";position:fixed;inset:0;z-index:-1;pointer-eve
 .camp-halt{border-radius:12px;padding:12px;margin:10px 0;font-size:.88rem;line-height:1.6;background:rgba(217,177,92,.18);border:1px solid rgba(185,138,47,.35)}
 .camp-halt p{margin-bottom:8px}
 .camp-halt .btn{margin-inline-end:6px}
-.camp-halt-owner,.camp-halt-team{background:rgba(192,57,43,.07);border-color:rgba(192,57,43,.3)}
+.camp-halt-owner,.camp-halt-team,.camp-halt-checkpoint,.camp-halt-restricted,.camp-halt-suspected_compromise{background:rgba(192,57,43,.07);border-color:rgba(192,57,43,.3)}
 .camp-halt-off,.camp-halt-penalty{background:rgba(23,20,15,.05);border-color:rgba(23,20,15,.14)}
 .camp-head{position:sticky;top:0;z-index:5;background:var(--paper);display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(23,20,15,.07);font-size:.9rem}
 .camp-head .btn{margin-inline-start:auto;flex-shrink:0}
@@ -225,3 +225,4 @@ body.agent-page::before{content:"";position:fixed;inset:0;z-index:-1;pointer-eve
 .camp-timeline summary{font-size:.78rem;cursor:pointer;color:var(--ink-soft);margin-top:4px}
 .camp-row-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
 .camp details summary{cursor:pointer}
+.camp-page-pick{display:block;font-size:.84rem;margin:-4px 0 10px;padding-inline-start:26px}

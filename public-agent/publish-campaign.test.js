@@ -62,7 +62,7 @@ t("halt boxes: one class per account state, strongest first", () => {
   const running = { status: "running" };
   assert.strictEqual(U.haltInfo({ owner_review_required: true, disabled_until_admin: true }, running).cls, "owner");
   const team = U.haltInfo({ disabled_until_admin: true, needs_reconnect: true }, running);
-  assert.strictEqual(team.cls, "team"); assert.ok(team.verify && !team.resume);
+  assert.strictEqual(team.cls, "team"); assert.ok(!team.verify && !team.reconnect && !team.resume, "unknown class: no action offered");
   const rc = U.haltInfo({ needs_reconnect: true }, { status: "paused", pause_reason: "account" });
   assert.strictEqual(rc.cls, "reconnect"); assert.ok(rc.reconnect && !rc.resume);
   assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "account" }).resume, "a lifted halt lets the agent resume");
@@ -75,6 +75,36 @@ t("halt boxes: one class per account state, strongest first", () => {
   // Worded like posting-messages.js.
   assert.match(U.HALT.reconnect, /החיבור לחשבון הפייסבוק פג/);
   assert.match(U.HALT.consecutive_failures, /שני פוסטים ברצף לא עלו/);
+});
+
+t("halt boxes: the disabled class picks the text and the one action", () => {
+  const box = (cls) => U.haltInfo({ disabled_until_admin: true, disabled_class: cls }, { status: "paused", pause_reason: "account" });
+  for (const cls of ["captcha", "checkpoint"]) {
+    const b = box(cls);
+    assert.strictEqual(b.cls, "checkpoint"); assert.ok(b.verify && !b.reconnect && !b.resume);
+    assert.match(b.text, /תשלימו את האימות בפורלי/); assert.match(b.text, /הצוות שלנו יפעיל אותו מחדש/);
+  }
+  const r = box("restricted");
+  assert.strictEqual(r.cls, "restricted"); assert.ok(!r.verify && !r.reconnect && !r.resume, "restricted: nothing for the agent to do");
+  assert.match(r.text, /הצוות שלנו כבר בודק ויחזור אליכם/);
+  const sc = box("suspected_compromise");
+  assert.strictEqual(sc.cls, "suspected_compromise"); assert.ok(sc.reconnect && !sc.verify && !sc.resume);
+  assert.match(sc.text, /חברו את החשבון מחדש/); assert.match(sc.text, /יחד איתכם/);
+  assert.strictEqual(box("something_else").cls, "team");
+  assert.strictEqual(U.haltInfo({ owner_review_required: true, disabled_until_admin: true, disabled_class: "checkpoint" }, null).cls, "owner");
+  assert.match(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z", penalty_class: "feature_blocked" }, null).text, /חסמה זמנית/);
+  assert.match(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z", penalty_class: null }, null).text, /ביקשה להאט/);
+  assert.strictEqual(U.haltInfo({ posting_off: "global_off" }, null).cls, "off");
+});
+
+t("approve is hidden while nothing may post; otherwise shown", () => {
+  for (const h of [{ disabled_until_admin: true }, { owner_review_required: true }, { needs_reconnect: true }, { penalty_blocks_posts: true }, { posting_off: "env_off" }]) {
+    assert.strictEqual(U.approveBlocked(h, { status: "running" }), true, JSON.stringify(h));
+  }
+  assert.strictEqual(U.approveBlocked({}, { status: "running", wait_reason: "posting_disabled:global_off" }), true);
+  assert.strictEqual(U.approveBlocked({ penalty_until: "2026-10-09T00:00:00Z", penalty_blocks_posts: false }, { status: "running" }), false, "a penalty after day one only slows");
+  assert.strictEqual(U.approveBlocked({}, { status: "paused", pause_reason: "agent" }), false);
+  assert.strictEqual(U.approveBlocked(null, null), false);
 });
 
 t("default picks: saved defaults first, at most five, never an unusable group", () => {

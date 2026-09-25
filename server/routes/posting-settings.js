@@ -15,12 +15,18 @@ const A = require("../posting-account");
 const safety = require("../posting-safety");
 const { sameArea } = require("../distribution/city-normalize");
 const { DriverError } = require("../driver-browser");
+const { SIGNAL_PENALISES } = require("../posting-signals");
 const S_ = require("./posting-shared");
 
 const { CONSENT_VERSION, wrap, allowed } = S_;
 const RESYNC_MIN_MS = 10 * 60 * 1000;
 const MAX_SUGGESTED = 10;
 const PERMISSION_CURED = ["no_permission", "permission_scope"]; // an enabling PUT grants it
+// The classes behind the halt flags, as posting-halts.js records them — so
+// the card (Task 23) can say what the agent must do. Codes only, never
+// Facebook's own text; a value outside these sets is shown as null.
+const DISABLE_CLASSES = new Set(["captcha", "checkpoint", "restricted", "suspected_compromise"]);
+const PENALTY_CLASSES = new Set(["rate_limited", "feature_blocked", "confirmed_removed"]);
 
 module.exports = function mountPostingSettings(router, S, auth) {
   const { db, store, campaigns, deps } = S;
@@ -48,6 +54,24 @@ module.exports = function mountPostingSettings(router, S, auth) {
     } catch (e) {
       return { at: null, reason: "unavailable" };
     }
+  }
+
+  // haltState plus: the in-force disable's class (the strongest, as
+  // posting-halts keeps it), the penalty's class, whether the penalty stops
+  // posts right now (posting-guard: only while its newest penalising halt is
+  // under 24 h old), and the fleet switch's reason when posting is off for all.
+  async function haltView(conn, now) {
+    const h = S_.haltState(conn, now);
+    h.disabled_class = h.disabled_until_admin && DISABLE_CLASSES.has(conn.posting_disabled_class) ? conn.posting_disabled_class : null;
+    h.penalty_class = h.penalty_until && PENALTY_CLASSES.has(conn.posting_penalty_class) ? conn.posting_penalty_class : null;
+    const lastPenalising = Math.max(0, ...(conn.posting_halts || []).filter((x) => x && SIGNAL_PENALISES.has(x.code)).map((x) => A.ms(x.at)).filter(Number.isFinite));
+    h.penalty_blocks_posts = !!h.penalty_until && now.getTime() - lastPenalising < A.MS_DAY;
+    h.posting_off = null;
+    if (typeof S.guard.assertFleetAllowed === "function") {
+      try { await S.guard.assertFleetAllowed({ platform: "facebook" }, { db, env: deps.env || process.env }); }
+      catch (e) { if (!e || e.code !== "posting_disabled") throw e; h.posting_off = e.reason || "global_off"; }
+    }
+    return h;
   }
 
   router.get("/settings", auth, wrap("settings.get", async (req, res) => {
@@ -87,7 +111,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
       first_post_estimate: est.at, first_post_wait_reason: est.reason,
       groups_synced_at: conn.facebook_groups_synced_at || null,
       connected: !!conn.facebook_browser_connected_at,
-      halt_state: S_.haltState(conn, now),
+      halt_state: await haltView(conn, now),
     });
   }));
 

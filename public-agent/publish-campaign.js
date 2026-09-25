@@ -95,7 +95,10 @@
   // Halt boxes, one per class, worded like posting-messages.js's WhatsApp texts.
   const HALT = {
     owner: "⚠️ פייסבוק הגבילה את החשבון. הפרסום מושהה עד שהצוות שלנו יבדוק את זה יחד איתכם — נחזור אליכם. בינתיים לא צריך לעשות כלום.",
-    team: "⚠️ פייסבוק עצרה את הפרסום מהחשבון, בדרך כלל כדי לוודא שזה אתם. הפרסום מושהה, והצוות שלנו יפעיל אותו מחדש אחרי בדיקה. אם פייסבוק ביקשה לוודא שזה אתם, השלימו את האימות בפורלי.",
+    checkpoint: "⚠️ פייסבוק ביקשה לוודא שזה אתם. הפרסום מושהה עד שתשלימו את האימות בפורלי, ואז הצוות שלנו יפעיל אותו מחדש.",
+    restricted: "⚠️ פייסבוק הגבילה את החשבון. הפרסום מושהה — הצוות שלנו כבר בודק ויחזור אליכם. לא צריך לעשות כלום.",
+    suspected_compromise: "⚠️ פייסבוק זיהתה פעילות חריגה בחשבון. חברו את החשבון מחדש, ואז הצוות שלנו יבדוק את זה יחד איתכם לפני שהפרסום יחזור.",
+    team: "⚠️ פייסבוק עצרה את הפרסום מהחשבון. הפרסום מושהה עד שהצוות שלנו יבדוק — נחזור אליכם.",
     reconnect: "🔑 החיבור לחשבון הפייסבוק פג. כדי שהפרסום ימשיך, צריך לחבר אותו מחדש מעמוד ההפצה, ואז ללחוץ \"להמשיך\".",
     consecutive_failures: "⏸ שני פוסטים ברצף לא עלו, אז פורלי עצרה לבדוק. בדקו שאתם עדיין חברים בקבוצות, ואז אפשר להמשיך.",
     internal: "⏸ משהו אצלנו לא עבד כמו שצריך, אז פורלי עצרה את הפרסום של הנכס הזה. הצוות שלנו בודק; אפשר לנסות להמשיך.",
@@ -103,21 +106,42 @@
     agent: "⏸ הפרסום מושהה. לחצו \"להמשיך\" כשתרצו.",
     account: "החשבון חזר לפעולה. לחצו \"להמשיך\" כדי שפורלי תחזור לפרסם.",
   };
-  const penaltyText = (until) => `🐢 פייסבוק ביקשה להאט. פורלי כבר האטה את קצב הפרסום אוטומטית — נחזור לקצב הרגיל בערך ב-${when(until) || "עוד שבועיים"}. לא צריך לעשות כלום.`;
+  // halt_state.disabled_class (routes/posting-settings.js) → the box. An
+  // action is offered only where the agent's reconnect is the next step.
+  const DISABLED_BOX = {
+    captcha: { cls: "checkpoint", verify: true }, checkpoint: { cls: "checkpoint", verify: true },
+    restricted: { cls: "restricted" }, suspected_compromise: { cls: "suspected_compromise", reconnect: true },
+  };
+  const PENALTY_LEAD = {
+    rate_limited: "🐢 פייסבוק ביקשה להאט.", feature_blocked: "🐢 פייסבוק חסמה זמנית את הפרסום.",
+    confirmed_removed: "🐢 מנהלי קבוצות הסירו כמה פוסטים לאחרונה.",
+  };
+  const penaltyText = (until, cls) => `${PENALTY_LEAD[cls] || PENALTY_LEAD.rate_limited} פורלי כבר האטה את קצב הפרסום אוטומטית — נחזור לקצב הרגיל בערך ב${when(until) || "עוד שבועיים"}. לא צריך לעשות כלום.`;
   // → { cls, text, reconnect?, verify?, resume?, reconsent? } or null. The account's halt state first, then this campaign's pause.
   function haltInfo(h, c) {
     h = h || {};
     if (h.owner_review_required) return { cls: "owner", text: HALT.owner };
-    if (h.disabled_until_admin) return { cls: "team", text: HALT.team, verify: true };
+    if (h.disabled_until_admin) {
+      const box = DISABLED_BOX[h.disabled_class] || { cls: "team" };
+      return Object.assign({ text: HALT[box.cls] }, box);
+    }
     if (h.needs_reconnect) return { cls: "reconnect", text: HALT.reconnect, reconnect: true };
+    if (h.posting_off) return { cls: "off", text: disabledText(h.posting_off) };
     if (c && c.status === "paused") {
       const r = c.pause_reason;
       if (r === "permission") return { cls: "paused", text: HALT.permission, reconsent: true };
       return { cls: "paused", text: HALT[r] || HALT.agent, resume: true };
     }
     if (c && c.status === "running" && /^posting_disabled:/.test(c.wait_reason || "")) return { cls: "off", text: waitText(c.wait_reason) };
-    if (h.penalty_until) return { cls: "penalty", text: penaltyText(h.penalty_until) };
+    if (h.penalty_until) return { cls: "penalty", text: penaltyText(h.penalty_until, h.penalty_class) };
     return null;
+  }
+  // Approving is pointless while nothing may post: a disabled account, day one
+  // of a penalty, a pending reconnect, or posting switched off. Skip and STOP stay.
+  function approveBlocked(h, c) {
+    h = h || {};
+    return !!(h.disabled_until_admin || h.owner_review_required || h.needs_reconnect || h.penalty_blocks_posts || h.posting_off
+      || (c && /^posting_disabled:/.test(c.wait_reason || "")));
   }
 
   const SKIPPED = {
@@ -173,7 +197,7 @@
   }
 
   const CampaignUI = {
-    esc, fmt, fbUrl, errorText, disabledText, waitText, estimateText, haltInfo, statusText, metricsText, usable, groupNote,
+    esc, fmt, fbUrl, errorText, disabledText, waitText, estimateText, haltInfo, approveBlocked, statusText, metricsText, usable, groupNote,
     defaultPicks, planText, chipText, splitPasses, FIRST_WEEK, REACH_NOTE, HALT, ERRORS,
   };
   if (typeof module === "object" && module.exports) { module.exports = CampaignUI; return; }
@@ -197,7 +221,9 @@
     const pages = () => (settings && settings.pages) || [];
     const mode = () => (document.querySelector('input[name="campMode"]:checked') || {}).value || "per_post";
     const live = (c) => !!c && (c.status === "running" || c.status === "paused");
-    const withPage = () => pages().length > 0 && (pages().length === 1 || !["", "none"].includes(($("campPageSelect") || {}).value || ""));
+    // The Page is opt-in (never a default): the Graph "פרסום בדף הפייסבוק" above is outside the campaign's duplicate checks.
+    const pageOn = () => pages().length > 0 && !!($("campPageOn") || {}).checked;
+    const withPage = () => pageOn() && (pages().length === 1 || !!($("campPageSelect") || {}).value);
 
     async function loadSettings() {
       settings = await api(`/api/posting/settings?page_id=${encodeURIComponent(pageId)}`);
@@ -211,12 +237,14 @@
 
     function renderPages(chosen) {
       const ps = pages(), box = $("campPageTarget");
-      if (ps.length > 1) {
-        box.innerHTML = `<label>הדף העסקי לפרסום: <select id="campPageSelect"><option value="">בחרו דף…</option>` +
-          ps.map((p) => `<option value="${U.esc(p.id)}"${p.id === chosen ? " selected" : ""}>${U.esc(p.name)}</option>`).join("") +
-          `<option value="none">בלי הדף העסקי</option></select></label>`;
-        $("campPageSelect").addEventListener("change", renderSetup);
-      } else box.textContent = ps.length === 1 ? `וגם בדף העסקי: ${ps[0].name}` : "";
+      box.innerHTML = !ps.length ? "" : `<label class="camp-consent"><input type="checkbox" id="campPageOn"> <span><strong>גם בדף העסקי</strong>` +
+        (ps.length === 1 ? `<small>${U.esc(ps[0].name)} · אם כבר פרסמתם בדף מלמעלה, אל תסמנו — שלא יעלה פעמיים.</small>`
+          : `<small>אם כבר פרסמתם בדף מלמעלה, אל תסמנו — שלא יעלה פעמיים.</small>`) + `</span></label>` +
+        (ps.length > 1 ? `<label class="camp-page-pick" hidden>באיזה דף: <select id="campPageSelect"><option value="">בחרו דף…</option>` +
+          ps.map((p) => `<option value="${U.esc(p.id)}"${p.id === chosen ? " selected" : ""}>${U.esc(p.name)}</option>`).join("") + `</select></label>` : "");
+      if (!ps.length) return;
+      $("campPageOn").addEventListener("change", () => { const l = box.querySelector(".camp-page-pick"); if (l) l.hidden = !$("campPageOn").checked; renderSetup(); });
+      if ($("campPageSelect")) $("campPageSelect").addEventListener("change", renderSetup);
     }
 
     function renderSetup() {
@@ -264,7 +292,11 @@
           const el = document.createElement("button"); el.type = "button"; el.className = `btn btn-sm ${cls}`; el.textContent = label;
           el.addEventListener("click", () => act(`posts/${encodeURIComponent(p.id)}/${path}`, el)); return el;
         };
-        bar.append(b("אישור ופרסום", "btn-gold", "approve"), b("דילוג", "btn-ghost", "skip"));
+        // No approve while nothing may post (halted, penalty day one, reconnect, switched off); skip always.
+        if (U.approveBlocked(settings && settings.halt_state, c)) {
+          const note = document.createElement("span"); note.className = "camp-muted camp-small"; note.textContent = "האישור יתאפשר כשהפרסום יחזור.";
+          bar.append(b("דילוג", "btn-ghost", "skip"), note);
+        } else bar.append(b("אישור ופרסום", "btn-gold", "approve"), b("דילוג", "btn-ghost", "skip"));
         li.appendChild(bar);
       }
       return li;
@@ -342,18 +374,18 @@
     // under the consent just given; auto-enroll off keeps the permission but
     // with no default groups and groups-only targets, so no new listing enrolls.
     function settingsBody(ids, auto, targets) {
-      const sel = $("campPageSelect"), b = {
+      const sel = pageOn() && $("campPageSelect"), b = {
         enabled: true, consent: true, consent_version: settings.consent_version, auto_mode: mode(),
         default_group_ids: auto ? ids : [], targets: auto ? targets : ["groups"], allows_visible_interactions: $("campVisible").checked,
       };
-      if (sel && sel.value && sel.value !== "none") b.page_id = sel.value;
+      if (sel && sel.value) b.page_id = sel.value;
       return b;
     }
 
     async function start(btn) {
       const ids = members().filter((g) => U.usable(g) && picked.has(String(g.group_id))).map((g) => String(g.group_id));
       if (!ids.length) return say("בחרו לפחות קבוצה אחת");
-      if (pages().length > 1 && !($("campPageSelect") || {}).value) return say("בחרו באיזה דף עסקי לפרסם (או \"בלי הדף העסקי\")");
+      if (pageOn() && !withPage()) return say("בחרו באיזה דף עסקי לפרסם, או בטלו את \"גם בדף העסקי\"");
       if (!consentGiven && !$("campConsent").checked) return say("סמנו את האישור שמעל הכפתור");
       const targets = withPage() ? ["page", "groups"] : ["groups"];
       const unknown = members().some((g) => ids.includes(String(g.group_id)) && g.agent_policy === "unknown");
