@@ -14,6 +14,9 @@ const express = require("express");
 const driverLive = require("../driver-browser");
 const dbLive = require("../db");
 const { isLoginWall } = require("../listing-driver")._test;
+const locksLive = require("../profile-lock");
+const guardLive = require("../posting-guard");
+const lifecycleLive = require("../profile-lifecycle");
 
 const SESSION_SECONDS = 1500; // SMS 2FA on a phone that is also showing the modal takes a while
 const CONSENT_VERSION = "2026-09-24";
@@ -31,9 +34,66 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
   const { requireAuth, authSecret } = ctx;
   const driver = ctx.driver || driverLive;
   const db = ctx.db || dbLive;
+  const locks = ctx.locks || locksLive;
+  const guard = ctx.guard || guardLive;
+  const lifecycle = ctx.lifecycle || lifecycleLive;
   const router = express.Router();
 
   const viewUrl = (cdpUrl) => `https://viewer.driver.dev?ws=${encodeURIComponent(cdpUrl)}`;
+
+  // The request body of /start, past validation and lock acquisition. Never
+  // touches `res` — returns {status, body} so the route can release the
+  // profile lock and session budget BEFORE the response goes out.
+  async function startFlow(phone, platform, spec) {
+    try {
+      await guard.assertAllowed({ phone, platform, action: "session" }, { db });
+    } catch (e) {
+      if (e.code !== "posting_disabled") throw e;
+      // Reconnecting is how a revoked profile is replaced — let it through;
+      // every other reason (global/platform off, account disabled/penalized) refuses.
+      if (e.reason !== "profile_revoked") return { status: 409, body: { error: "posting_disabled", reason: e.reason } };
+    }
+
+    const conn = (await db.getConnection(phone)) || {};
+    const state = conn[`${platform}_profile_state`];
+    let gen = conn[`${platform}_profile_gen`] || 0;
+    const statePatch = {};
+    if (state === "revoked" || state === "quarantined") {
+      gen += 1;
+      statePatch[`${platform}_profile_gen`] = gen;
+      statePatch[`${platform}_profile_state`] = "active";
+    }
+
+    // Never open a second login browser on this profile while one is recorded.
+    const existing = conn[`browser_session_${platform}`];
+    if (existing && existing.session_id) await driver.stopSession(existing.session_id);
+
+    let session;
+    try {
+      session = await driver.createSession({
+        duration: SESSION_SECONDS,
+        url: spec.loginUrl,
+        profile: { name: profileName(platform, phone, gen), persist: true },
+        note: `forly-connect:${platform}`, // never the phone
+      });
+    } catch (e) {
+      return { status: 503, body: { error: "extract_unavailable" } };
+    }
+
+    // Top-level keys, not a nested map: setConnection is a merge write, and a
+    // merge cannot delete a nested key — finish/disconnect need to clear this.
+    await db.setConnection(phone, Object.assign({
+      [`browser_session_${platform}`]: { session_id: session.sessionId, started_at: new Date().toISOString() },
+      browser_consent_at: new Date().toISOString(),
+      browser_consent_version: CONSENT_VERSION,
+    }, statePatch));
+
+    // view_url carries the cdpUrl: response only, never a log line, never Firestore.
+    return {
+      status: 200,
+      body: { platform, session_id: session.sessionId, view_url: viewUrl(session.cdpUrl), expires_in: SESSION_SECONDS },
+    };
+  }
 
   router.post("/start", requireAuth(authSecret), async (req, res) => {
     const platform = String((req.body && req.body.platform) || "");
@@ -42,33 +102,22 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     if (!(req.body && req.body.consent === true)) return res.status(400).json({ error: "consent_required" });
     const phone = req.user.userId;
 
-    let session;
+    // Held only for the duration of this request: the embedded login session
+    // itself is long-lived, but its purpose here is to refuse to open a login
+    // browser while a post/extract/sweep is using the profile right now.
+    const releaseProfile = locks.tryAcquire(phone, platform);
+    if (!releaseProfile) return res.status(409).json({ error: "profile_busy" });
+    const releaseSession = locks.trySession();
+    if (!releaseSession) { releaseProfile(); return res.status(503).json({ error: "driver_busy", retry: true }); }
+
+    let result;
     try {
-      session = await driver.createSession({
-        duration: SESSION_SECONDS,
-        url: spec.loginUrl,
-        profile: { name: profileName(platform, phone), persist: true },
-        note: `forly-connect:${platform}`, // never the phone
-      });
-    } catch (e) {
-      return res.status(503).json({ error: "extract_unavailable" });
+      result = await startFlow(phone, platform, spec);
+    } finally {
+      releaseSession();
+      releaseProfile();
     }
-
-    // Top-level keys, not a nested map: setConnection is a merge write, and a
-    // merge cannot delete a nested key — finish/disconnect need to clear this.
-    await db.setConnection(phone, {
-      [`browser_session_${platform}`]: { session_id: session.sessionId, started_at: new Date().toISOString() },
-      browser_consent_at: new Date().toISOString(),
-      browser_consent_version: CONSENT_VERSION,
-    });
-
-    // view_url carries the cdpUrl: response only, never a log line, never Firestore.
-    return res.json({
-      platform,
-      session_id: session.sessionId,
-      view_url: viewUrl(session.cdpUrl),
-      expires_in: SESSION_SECONDS,
-    });
+    return res.status(result.status).json(result.body);
   });
 
   router.get("/:platform/status", requireAuth(authSecret), async (req, res) => {
@@ -76,7 +125,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
     const conn = (await db.getConnection(req.user.userId)) || {};
     const connectedAt = conn[`${platform}_browser_connected_at`] || null;
-    if (connectedAt) return res.json({ state: "connected", connected_at: connectedAt });
+    if (connectedAt) {
+      return res.json({ state: "connected", connected_at: connectedAt, identity_label: conn[`${platform}_identity_label`] || null });
+    }
     const open = conn[`browser_session_${platform}`];
     return res.json({ state: open ? "open" : "none" });
   });
@@ -149,18 +200,21 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     const platform = String(req.params.platform);
     if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
     const phone = req.user.userId;
-    const conn = (await db.getConnection(phone)) || {};
-    // ponytail: campaign-stop loop skipped — posting-campaign.js is Phase 3, out of scope. Add when Phase 3 lands.
-    const open = conn[`browser_session_${platform}`];
-    if (open && open.session_id) await driver.stopSession(open.session_id);
-    await driver.deleteProfile(profileName(platform, phone));
-    await db.setConnection(phone, {
-      [`${platform}_browser_connected_at`]: null,
-      [`${platform}_browser_disconnected_at`]: new Date().toISOString(),
-      [`${platform}_identity_label`]: null,
-      [`browser_session_${platform}`]: null,
-    });
-    return res.json({ state: "none" });
+
+    // revoke() stops the open session, cancels open posting attempts, deletes
+    // the Driver profile, and clears pages/groups/posting_permission.
+    const { advice } = await lifecycle.revoke({ phone, platform, reason: "agent" }, { db, driver });
+
+    // ctx.campaigns is provided by Task 16 (posting-campaign.js); until then
+    // this is a no-op, and db.listPostingCampaignsByPhone may not exist yet.
+    if (ctx.campaigns && typeof db.listPostingCampaignsByPhone === "function") {
+      const campaigns = (await db.listPostingCampaignsByPhone(phone)) || [];
+      for (const c of campaigns) {
+        if (c.status === "running" || c.status === "paused") await ctx.campaigns.stop(c.id, { db });
+      }
+    }
+
+    return res.json({ state: "none", advice });
   });
 
   return router;
