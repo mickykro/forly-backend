@@ -178,6 +178,54 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, default_grou
     assert.equal(e.is_member, false);
   }
 
+  // ── a deleted group stays deleted: a sync that still sees it on Facebook
+  //    (the route's resync, or the weekly sweep's runSync) does not bring it back ──
+  {
+    const sync = require("../facebook-groups-sync");
+    const scrape = [["111", "דירות להשכרה"], ["222", "נדלן קריות"], ["haifa.homes", "דירות בחיפה"], ["999", "משהו"]]
+      .map(([slug, text]) => ({ href: `https://www.facebook.com/groups/${slug}/?ref=x`, text }));
+    const page = { goto: async () => {}, waitForLoadState: async () => {}, waitForTimeout: async () => {}, mouse: { wheel: async () => {} }, $$eval: async () => scrape };
+    const env = await setup({ groupsSync: sync, deps: { withPage: async (opts, fn) => fn(page) } });
+    const del = await call(env.app, "DELETE", "/api/posting/groups/777");
+    assert.equal(del.status, 200); assert.deepEqual(del.body.hidden_group_ids, ["777"]);
+    const hidden = (await db.getConnection(PH)).facebook_groups_hidden;
+    assert.deepEqual(hidden[0].ids.sort(), ["777", "slug:haifa.homes"]);
+    assert.ok(!JSON.stringify(hidden).includes("בחיפה"), "ids only, never a name");
+    const rs = await call(env.app, "POST", "/api/posting/groups/resync");
+    assert.equal(rs.status, 200, JSON.stringify(rs.body));
+    assert.ok(!rs.body.member_groups.some((g) => g.group_id === "777" || g.group_id === "slug:haifa.homes"), "not re-added by the resync");
+    const stored = (await db.getConnection(PH)).facebook_groups_member;
+    assert.ok(!stored.some((m) => m.group_id === "slug:haifa.homes" || m.group_id === "777"));
+    assert.ok(stored.some((m) => m.group_id === "111"), "the others were synced");
+    // The weekly sweep's sync (same runSync, its own deps) does not re-add it either.
+    await sync.runSync({ phone: PH }, { db, env: {}, withPage: async (o, fn) => fn(page), lockHeld: true });
+    const s1 = await call(env.app, "GET", "/api/posting/settings");
+    assert.ok(!s1.body.member_groups.some((g) => g.group_id === "777" || g.group_id === "slug:haifa.homes"));
+    assert.deepEqual(s1.body.hidden_group_ids, ["777"]);
+    // The member gate ignores it even if a stale write put it back in the list.
+    await db.setConnection(PH, { facebook_groups_member: stored.concat([K.member("777", { aliases: ["slug:haifa.homes"] })]) });
+    const cr = await call(env.app, "POST", "/api/posting/campaigns", R.consented({ group_ids: ["111", "slug:haifa.homes"] }));
+    assert.equal(cr.status, 422); assert.deepEqual(cr.body.group_ids, ["slug:haifa.homes"]);
+    assert.equal((await put(env.app, enable({ default_group_ids: ["777"] }))).status, 422);
+    assert.ok(!(await call(env.app, "GET", "/api/posting/settings")).body.member_groups.some((g) => g.group_id === "777"));
+    // Unhide: only on the agent's explicit choice; the next sync brings it back.
+    await db.setConnection(PH, { facebook_groups_member: stored });
+    assert.equal((await call(env.app, "POST", "/api/posting/groups/nope/unhide")).status, 400);
+    assert.equal((await call(env.app, "POST", "/api/posting/groups/111/unhide")).status, 404);
+    const un = await call(env.app, "POST", "/api/posting/groups/slug:haifa.homes/unhide");
+    assert.equal(un.status, 200); assert.deepEqual(un.body.hidden_group_ids, []);
+    env.clk.t = new Date(K.NOW.getTime() + 11 * K.MIN);
+    const back = await call(env.app, "POST", "/api/posting/groups/resync");
+    assert.ok(back.body.member_groups.some((g) => g.group_id === "slug:haifa.homes"), "back after an explicit unhide");
+    // Suggestions skip a hidden catalog group.
+    const bizDb = Object.assign(Object.create(db), { getBusiness: async () => ({ activity_areas: ["חיפה"] }) });
+    const env2 = await setup({ deps: { db: bizDb }, conn: { facebook_groups_hidden: [{ ids: ["333"], hidden_at: K.iso(K.NOW) }] } });
+    assert.ok(!(await call(env2.app, "GET", "/api/posting/settings")).body.suggested_groups.some((g) => g.group_id === "333"));
+    // mergeMembership itself: a hidden id is neither observed nor carried.
+    const merged = sync.mergeMembership([K.member("5"), K.member("6")], [{ slug: "5", url: G(5), name: "x" }, { slug: "7", url: G(7), name: "y" }], { hidden: new Set(["5", "6", "7"]), catalog: [] });
+    assert.deepEqual(merged, []);
+  }
+
   // ── routes/distribution.js mergedCatalog, lifted to module scope ──
   {
     K.reset();

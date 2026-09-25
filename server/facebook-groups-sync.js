@@ -98,9 +98,12 @@ function ageMs(now, iso) {
  * Task 18) entry whose `observed_at` is more than 30 days old is dropped.
  * The privacy decision is recomputed for every OBSERVED entry from the
  * current catalog/keyword list every time, never inherited from storage.
+ * `opts.hidden` (hiddenIds(conn)): groups the agent removed from the list
+ * (DELETE /api/posting/groups/:id) — never re-added, observed or carried.
  */
 function mergeMembership(prev, scraped, opts = {}) {
   const now = opts.now instanceof Date ? opts.now : new Date();
+  const hidden = opts.hidden instanceof Set ? opts.hidden : new Set((Array.isArray(opts.hidden) ? opts.hidden : []).map(String));
   const nowIso = now.toISOString();
   const selected = Array.isArray(opts.selected) ? opts.selected : [];
   const { urls: catalogUrls, ids: catalogIds } = catalogMatchers(opts.catalog);
@@ -117,6 +120,7 @@ function mergeMembership(prev, scraped, opts = {}) {
     const slug = item && item.slug;
     if (!slug) continue;
     const group_id = aliasTo.get(groupIdOf(slug)) || groupIdOf(slug);
+    if (hidden.has(groupIdOf(slug)) || hidden.has(group_id)) continue; // the agent removed it
     if (seen.has(group_id)) continue; // dedup within one scrape, by group_id
     seen.add(group_id);
     const idVerified = isNumeric(group_id);
@@ -139,6 +143,7 @@ function mergeMembership(prev, scraped, opts = {}) {
 
   for (const [group_id, prevEntry] of prevMap) {
     if (seen.has(group_id)) continue; // fresh data for this one already pushed above
+    if ([group_id, ...(prevEntry.aliases || [])].some((id) => hidden.has(String(id)))) continue;
     if (ageMs(now, prevEntry.observed_at) > STALE_DROP_MS) continue; // dropped
     const carried = prevEntry.membership_state === "left"
       ? Object.assign({}, prevEntry)
@@ -231,11 +236,23 @@ async function runSync({ phone }, deps = {}) {
     pageDeps,
   );
   const catalog = await db.listGroupCatalog(500);
-  const merged = mergeMembership(conn.facebook_groups_member || [], scraped, { now: new Date(), catalog, selected: [] });
+  // Re-read after the scrape (minutes): a group removed meanwhile stays removed.
+  const fresh = (await db.getConnection(phone)) || {};
+  const merged = mergeMembership(fresh.facebook_groups_member || [], scraped, { now: new Date(), catalog, selected: [], hidden: hiddenIds(fresh) });
   await db.setConnection(phone, { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() });
   return merged.length;
 }
 
+// Every id the agent removed from their list: facebook_groups_hidden holds
+// { ids: [group_id, ...aliases], hidden_at } entries — ids only, never names.
+function hiddenIds(conn) {
+  const out = new Set();
+  for (const h of Array.isArray(conn && conn.facebook_groups_hidden) ? conn.facebook_groups_hidden : []) {
+    for (const id of (h && Array.isArray(h.ids) ? h.ids : [])) if (id) out.add(String(id));
+  }
+  return out;
+}
+
 const isStale = (conn, now) => !conn.facebook_groups_synced_at || now.getTime() - new Date(conn.facebook_groups_synced_at).getTime() > STALE_MS;
 
-module.exports = { syncMembership, mergeMembership, resolveGroupId, runSync, isStale, SELECTORS, GROUPS_URL };
+module.exports = { syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, SELECTORS, GROUPS_URL };

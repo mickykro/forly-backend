@@ -1,7 +1,9 @@
-/* routes/posting.js GET /act — the signed WhatsApp one-tap link, and
+/* routes/posting.js /act — the signed WhatsApp one-tap link, and
    actionLink() that Task 20 builds it with: the signature covers the
    campaign, the post, the action and the expiry; a tampered, expired or
-   mismatched link is a 403 page; the phone is the campaign's own. */
+   mismatched link is a 403 page on GET and POST; the phone is the
+   campaign's own. A GET only asks (link previews fetch URLs); the page's
+   button POSTs to the same URL, which acts. */
 const assert = require("assert");
 const { signActionToken } = require("../auth");
 const R = require("./posting-routes-kit");
@@ -27,12 +29,31 @@ const linkFor = (campaignId, postId, action, now = K.NOW) => pathOf(createRouter
     assert.equal(typeof createRouter.CONSENT_VERSION, "string");
   }
 
-  // ── a valid stop link stops the campaign — with no login, and whatever the switches say ──
+  // ── GET only asks: nothing changes, and the page's one button POSTs to the same link ──
+  {
+    const env = await setup();
+    const c = await pendingCampaign(env);
+    const before = JSON.stringify(await store.getPostingCampaign(c.id));
+    for (const [a, q] of [["stop", "לעצור את הקמפיין?"], ["skip", "לדלג על הפוסט?"], ["approve", "לאשר את הפרסום?"]]) {
+      const path = linkFor(c.id, a === "stop" ? "" : "p1", a);
+      const r = await call(env.app, "GET", path);
+      assert.equal(r.status, 200, a); assert.ok(r.headers["content-type"].startsWith("text/html"));
+      assert.ok(r.raw.includes(q), a);
+      assert.equal(r.headers["cache-control"], "no-store"); assert.equal(r.headers["referrer-policy"], "no-referrer"); assert.equal(r.headers["x-robots-tag"], "noindex");
+      const forms = r.raw.match(/<form method="post" action="([^"]+)">/g) || [];
+      assert.equal(forms.length, 1, a); assert.equal((r.raw.match(/<button/g) || []).length, 1, a);
+      const action = forms[0].match(/action="([^"]+)"/)[1].replace(/&amp;/g, "&");
+      assert.equal(action, path, "the button posts to the same link");
+    }
+    assert.equal(JSON.stringify(await store.getPostingCampaign(c.id)), before, "a GET changes nothing");
+  }
+
+  // ── POST a valid stop link: stopped — with no login, and whatever the switches say ──
   {
     const env = await setup();
     const c = await pendingCampaign(env);
     globalOff();
-    const r = await call(R.makeApp({ deps: env.deps, phone: "nobody" }), "GET", linkFor(c.id, "", "stop", env.clk.t));
+    const r = await call(R.makeApp({ deps: env.deps, phone: "nobody" }), "POST", linkFor(c.id, "", "stop", env.clk.t));
     assert.equal(r.status, 200);
     assert.ok(r.raw.includes("הפרסום נעצר")); assert.ok(r.headers["content-type"].startsWith("text/html"));
     assert.equal(r.headers["cache-control"], "no-store");
@@ -57,13 +78,18 @@ const linkFor = (campaignId, postId, action, now = K.NOW) => pathOf(createRouter
       legacy_three_parts: `/api/posting/act?c=${c.id}&p=p1&a=approve&t=${signActionToken([c.id, "p1", "approve"], AUTH)}`,
     };
     for (const [name, path] of Object.entries(cases)) {
-      const r = await call(env.app, "GET", path);
-      assert.equal(r.status, 403, name); assert.ok(r.raw.includes("<html"), name); assert.ok(r.raw.includes("אינו תקף"), name);
+      for (const m of ["GET", "POST"]) {
+        const r = await call(env.app, m, path);
+        assert.equal(r.status, 403, `${m} ${name}`); assert.ok(r.raw.includes("<html"), name); assert.ok(r.raw.includes("אינו תקף"), name);
+        assert.ok(!r.raw.includes("<form"), "no button on a refused link");
+      }
     }
     // Expired: the same genuine link, 72 hours and a second later.
     env.clk.t = new Date(K.NOW.getTime() + 72 * K.HOUR + 1000);
-    const exp = await call(env.app, "GET", pathOf(good.toString()));
-    assert.equal(exp.status, 403); assert.ok(exp.raw.includes("פג תוקף"));
+    for (const m of ["GET", "POST"]) {
+      const exp = await call(env.app, m, pathOf(good.toString()));
+      assert.equal(exp.status, 403, m); assert.ok(exp.raw.includes("פג תוקף"));
+    }
     const cur = await store.getPostingCampaign(c.id);
     assert.equal(cur.status, "running"); assert.equal(cur.posts[0].status, "pending_approval");
   }
@@ -73,18 +99,18 @@ const linkFor = (campaignId, postId, action, now = K.NOW) => pathOf(createRouter
     const env = await setup();
     const c = await pendingCampaign(env);
     globalOff();
-    const off = await call(env.app, "GET", linkFor(c.id, "p1", "approve"));
+    const off = await call(env.app, "POST", linkFor(c.id, "p1", "approve"));
     assert.equal(off.status, 409); assert.ok(off.raw.includes("כבוי"));
     assert.equal((await store.getPostingCampaign(c.id)).posts[0].status, "pending_approval");
     globalOn();
-    const ok = await call(env.app, "GET", linkFor(c.id, "p1", "approve"));
+    const ok = await call(env.app, "POST", linkFor(c.id, "p1", "approve"));
     assert.equal(ok.status, 200); assert.ok(ok.raw.includes("אושר")); assert.ok(ok.raw.includes("דירות בחיפה"));
     const p = (await store.getPostingCampaign(c.id)).posts[0];
     assert.equal(p.status, "scheduled"); assert.ok(p.approved_at);
-    const twice = await call(env.app, "GET", linkFor(c.id, "p1", "approve"));
+    const twice = await call(env.app, "POST", linkFor(c.id, "p1", "approve"));
     assert.equal(twice.status, 200); assert.ok(twice.raw.includes("כבר לא ממתין"));
-    assert.equal((await call(env.app, "GET", linkFor(c.id, "p9", "approve"))).status, 404);
-    assert.equal((await call(env.app, "GET", linkFor("f".repeat(32), "p1", "stop"))).status, 404);
+    assert.equal((await call(env.app, "POST", linkFor(c.id, "p9", "approve"))).status, 404);
+    assert.equal((await call(env.app, "POST", linkFor("f".repeat(32), "p1", "stop"))).status, 404);
   }
 
   // ── skip: works with posting off; a name is escaped into the page ──
@@ -92,14 +118,14 @@ const linkFor = (campaignId, postId, action, now = K.NOW) => pathOf(createRouter
     const env = await setup();
     const c = await pendingCampaign(env, { group_name: "<script>x</script>" });
     globalOff();
-    const r = await call(env.app, "GET", linkFor(c.id, "p1", "skip"));
+    const r = await call(env.app, "POST", linkFor(c.id, "p1", "skip"));
     assert.equal(r.status, 200); assert.ok(r.raw.includes("דילגנו"));
     assert.equal((await store.getPostingCampaign(c.id)).posts[0].status, "skipped");
     globalOn();
-    const again = await call(env.app, "GET", linkFor(c.id, "p1", "skip"));
+    const again = await call(env.app, "POST", linkFor(c.id, "p1", "skip"));
     assert.equal(again.status, 200); assert.ok(again.raw.includes("כבר לא ממתין"));
     const c2 = await pendingCampaign(await setup(), { group_name: "<b>x</b>" });
-    const html = await call(env.app, "GET", linkFor(c2.id, "p1", "approve"));
+    const html = await call(env.app, "POST", linkFor(c2.id, "p1", "approve"));
     assert.ok(!html.raw.includes("<b>x</b>") && html.raw.includes("&lt;b&gt;"), "escaped");
   }
 

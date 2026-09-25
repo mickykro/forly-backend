@@ -85,11 +85,11 @@ function readActionLink(q, authSecret, nowMs) {
   return { c, p, a };
 }
 
-const card = (title, body) => `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">` +
+const card = (title, body, extraHtml = "") => `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">` +
   `<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">` +
   `<title>${esc(title)}</title></head><body style="font-family:Heebo,-apple-system,'Segoe UI',sans-serif;` +
   `background:#F7F3EC;color:#17140F;padding:24px;max-width:480px;margin:auto;text-align:center">` +
-  `<h2>${esc(title)}</h2><p style="line-height:1.7;color:#5A5348">${esc(body)}</p></body></html>`;
+  `<h2>${esc(title)}</h2><p style="line-height:1.7;color:#5A5348">${esc(body)}</p>${extraHtml}</body></html>`;
 
 // ── the kill switch (R2) ──
 // → true when allowed; otherwise answers 409 and → false. `tolerate` lists
@@ -107,11 +107,18 @@ async function allowed(S, phone, res, tolerate = []) {
 }
 
 // ── membership (Task 14 entries, keyed by group_id with aliases) ──
-const memberList = (conn) => (Array.isArray(conn && conn.facebook_groups_member) ? conn.facebook_groups_member.filter((m) => m && m.group_id) : []);
+// A group the agent removed (facebook_groups_hidden) is never a member here,
+// whatever a sync or an older write left in the list.
+const hiddenIds = (conn) => require("../facebook-groups-sync").hiddenIds(conn);
+const idsOf = (m) => [m.group_id, ...(Array.isArray(m.aliases) ? m.aliases : [])].map(String);
+function memberList(conn) {
+  const hidden = hiddenIds(conn);
+  const list = Array.isArray(conn && conn.facebook_groups_member) ? conn.facebook_groups_member : [];
+  return list.filter((m) => m && m.group_id && !idsOf(m).some((id) => hidden.has(id)));
+}
 const findMember = (conn, id) => A.memberOf(conn, { group_id: String(id) });
 const isMember = (m) => !!m && m.membership_state === "member";
 const memberUrl = (m) => m.canonical_url || m.url || `https://www.facebook.com/groups/${String(m.group_id).replace(/^slug:/, "")}`;
-const idsOf = (m) => [m.group_id, ...(Array.isArray(m.aliases) ? m.aliases : [])].map(String);
 
 // A list of ids from a request body → { ids } (validated strings) or { error }.
 function parseGroupIds(v, { required = false } = {}) {
@@ -126,9 +133,10 @@ function parseGroupIds(v, { required = false } = {}) {
 // → { entries } (canonical entries, one per group) or { notMember: [ids as sent] }.
 function memberGate(conn, ids) {
   const entries = [], notMember = [], seen = new Set();
+  const hidden = hiddenIds(conn);
   for (const id of ids) {
     const m = findMember(conn, id);
-    if (!isMember(m)) { notMember.push(id); continue; }
+    if (!isMember(m) || hidden.has(id) || idsOf(m).some((x) => hidden.has(x))) { notMember.push(id); continue; }
     if (seen.has(m.group_id)) continue;
     seen.add(m.group_id);
     entries.push(m);
@@ -213,7 +221,7 @@ const wrap = (name, fn) => (req, res, next) => Promise.resolve(fn(req, res, next
 module.exports = {
   CONSENT_VERSION, PRIVATE_NAME, ACTIONS, ACT_TTL_S, TARGETS, MAX_GROUP_IDS, GROUP_ID_RE, ID_RE,
   publicView, scrub, actionLink, readActionLink, card, allowed,
-  memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, catalogLookup, publicMember,
+  hiddenIds, memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, catalogLookup, publicMember,
   pagesOf, pageKey, storedPageId, pageByStored, pageByKey, pageConfirmed, parseTargets,
   needsReconnect, haltState, publicPermission, wrap,
 };

@@ -16,6 +16,7 @@
 const express = require("express");
 const A = require("../posting-account");
 const S_ = require("./posting-shared");
+const { escapeHtml: esc } = require("../utils");
 
 const { CONSENT_VERSION, publicView, wrap, allowed, card } = S_;
 const MAX_ACTIVE_CAMPAIGNS = 3;
@@ -193,23 +194,52 @@ module.exports = function createPostingRouter(ctx) {
     return res.json({ campaign: publicView(await campaigns.skipPost(c.id, postId, deps)) });
   }));
 
-  // The WhatsApp one-tap, like routes/distribution.js /confirm: no login, the
-  // signed token over [campaign, post, action, expiry] is the proof. The phone
-  // is the campaign's own, never read from the link. A small Hebrew page back.
-  router.get("/act", wrap("act", async (req, res) => {
-    res.set("Cache-Control", "no-store");
-    const send = (status, title, body) => res.status(status).type("html").send(card(title, body));
+  // The WhatsApp one-tap. No login: the signed token over [campaign, post,
+  // action, expiry] is the proof, and the phone is the campaign's own, never
+  // the link's. A GET only verifies and asks — link previews and scanners
+  // fetch URLs — and the page's one button POSTs to the same URL, which
+  // verifies again and acts. Small Hebrew pages, never cached or indexed.
+  const ASK = {
+    approve: ["לאשר את הפרסום?", "אישור"],
+    skip: ["לדלג על הפוסט?", "דילוג"],
+    stop: ["לעצור את הקמפיין?", "עצירה"],
+  };
+  const qs = (link) => new URLSearchParams({ c: link.c, p: link.p, a: link.a, e: link.e, t: link.t }).toString();
+  const where = (p) => (p.target === "page" ? "לדף העסקי" : `לקבוצה "${p.group_name || S_.PRIVATE_NAME}"`);
+
+  // → { link, camp, post, send } after the checks both methods share, or null when answered.
+  async function readAct(req, res) {
+    res.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex" });
+    const send = (status, title, body, extra) => res.status(status).type("html").send(card(title, body, extra));
     const link = S_.readActionLink(req.query || {}, authSecret, S.clock().getTime());
-    if (link.error === "expired") return send(403, "פג תוקף הקישור", "אפשר לאשר, לדלג או לעצור מכרטיס הפרסום בדשבורד.");
-    if (link.error) return send(403, "הקישור אינו תקף", "אפשר לאשר, לדלג או לעצור מכרטיס הפרסום בדשבורד.");
+    if (link.error === "expired") { send(403, "פג תוקף הקישור", "אפשר לאשר, לדלג או לעצור מכרטיס הפרסום בדשבורד."); return null; }
+    if (link.error) { send(403, "הקישור אינו תקף", "אפשר לאשר, לדלג או לעצור מכרטיס הפרסום בדשבורד."); return null; }
     const camp = await store.getPostingCampaign(link.c);
-    if (!camp) return send(404, "לא נמצא", "הקמפיין הזה כבר לא קיים.");
+    if (!camp) { send(404, "לא נמצא", "הקמפיין הזה כבר לא קיים."); return null; }
+    const post = link.a === "stop" ? null : (camp.posts || []).find((p) => p && p.id === link.p);
+    if (link.a !== "stop" && !post) { send(404, "לא נמצא", "הפוסט הזה כבר לא קיים בקמפיין."); return null; }
+    return { link: Object.assign(link, { e: String(req.query.e), t: String(req.query.t) }), camp, post, send };
+  }
+
+  router.get("/act", wrap("act.ask", async (req, res) => {
+    const r = await readAct(req, res);
+    if (!r) return;
+    const [question, button] = ASK[r.link.a];
+    const action = `${req.baseUrl}/act?${qs(r.link)}`;
+    const form = `<form method="post" action="${esc(action)}"><button type="submit" style="background:#B98A2F;color:#fff;border:0;` +
+      `border-radius:12px;padding:12px 18px;font-size:1rem;width:100%;cursor:pointer">${esc(button)}</button></form>`;
+    const body = r.post ? `פוסט ${where(r.post)}.` : "מה שכבר פורסם יישאר בקבוצות.";
+    return r.send(200, question, body, form);
+  }));
+
+  router.post("/act", wrap("act", async (req, res) => {
+    const r = await readAct(req, res);
+    if (!r) return;
+    const { link, camp, post, send } = r;
     if (link.a === "stop") {
       await campaigns.stop(camp.id, deps);
       return send(200, "✋ הפרסום נעצר", "מה שכבר פורסם נשאר בקבוצות. אפשר להתחיל שוב מתי שתרצו, מעמוד הנכס.");
     }
-    const post = (camp.posts || []).find((p) => p && p.id === link.p);
-    if (!post) return send(404, "לא נמצא", "הפוסט הזה כבר לא קיים בקמפיין.");
     if (link.a === "skip") {
       if (!["pending_approval", "scheduled"].includes(post.status)) return send(200, "הפוסט כבר לא ממתין", "אין מה לדלג עליו.");
       await campaigns.skipPost(camp.id, post.id, deps);
@@ -225,8 +255,7 @@ module.exports = function createPostingRouter(ctx) {
     const out = await campaigns.approvePost(camp.id, post.id, deps);
     const p = ((out && out.posts) || []).find((x) => x && x.id === post.id) || {};
     const when = p.scheduled_at ? new Date(p.scheduled_at).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-    const where = p.target === "page" ? "לדף העסקי" : `לקבוצה "${p.group_name || S_.PRIVATE_NAME}"`;
-    return send(200, "✅ אושר!", `הפוסט יעלה ${where}${when ? ` ב-${when}` : ""}. נעדכן בוואטסאפ כשזה קורה.`);
+    return send(200, "✅ אושר!", `הפוסט יעלה ${where(p)}${when ? ` ב-${when}` : ""}. נעדכן בוואטסאפ כשזה קורה.`);
   }));
 
   require("./posting-settings")(router, S, auth);

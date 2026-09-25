@@ -183,7 +183,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
           try {
             const scraped = await groupsSync.syncMembership(page);
             const merged = groupsSync.mergeMembership(conn.facebook_groups_member || [], scraped, {
-              now: new Date(), catalog: await db.listGroupCatalog(500), selected: [],
+              now: new Date(), catalog: await db.listGroupCatalog(500), selected: [], hidden: groupsSync.hiddenIds(conn),
             });
             groups = { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() };
           } catch (e) {

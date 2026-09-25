@@ -6,7 +6,8 @@
  *   GET    /settings            permission, member/suggested groups, Pages, halt state
  *   PUT    /settings            the structured posting_permission; enabled:false revokes
  *   POST   /groups/resync       re-read "Your groups" (at most once per 10 minutes)
- *   DELETE /groups/:group_id    forget one membership entry (privacy, Task 14)
+ *   DELETE /groups/:group_id    forget one membership entry, and keep it forgotten
+ *   POST   /groups/:group_id/unhide   the agent selects a removed group again
  *
  * PUT with enabled:false always works — it is how an agent switches off.
  */
@@ -23,6 +24,9 @@ const PERMISSION_CURED = ["no_permission", "permission_scope"]; // an enabling P
 
 module.exports = function mountPostingSettings(router, S, auth) {
   const { db, store, campaigns, deps } = S;
+
+  const hiddenList = (conn) => (Array.isArray(conn.facebook_groups_hidden) ? conn.facebook_groups_hidden : [])
+    .filter((h) => h && Array.isArray(h.ids) && h.ids.length);
 
   async function publicMembers(conn, lookup) {
     const defaults = new Set(((conn.posting_permission || {}).default_group_ids || []).map(String));
@@ -64,8 +68,9 @@ module.exports = function mountPostingSettings(router, S, auth) {
       if (city) areas.push(String(city));
     }
     const memberCats = new Set(members.filter((m) => m.membership_state !== "left").map(lookup).filter(Boolean));
+    const hidden = S_.hiddenIds(conn);
     const suggested = areas.length ? all
-      .filter((g) => g && g.url && g.city && !memberCats.has(g) && areas.some((a) => sameArea(a, g.city)))
+      .filter((g) => g && g.url && g.city && !memberCats.has(g) && !hidden.has(A.groupIdFromUrl(g.url)) && areas.some((a) => sameArea(a, g.city)))
       .sort((a, b) => (b.members || 0) - (a.members || 0)).slice(0, MAX_SUGGESTED)
       .map((g) => ({ group_id: A.groupIdFromUrl(g.url), url: g.url, name: g.name || null, city: g.city, members: g.members || null, agent_policy: g.agent_policy || "unknown" }))
       : [];
@@ -75,6 +80,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
       consent_version: CONSENT_VERSION,
       permission: S_.publicPermission(conn),
       member_groups: await publicMembers(conn, lookup),
+      hidden_group_ids: hiddenList(conn).map((h) => h.ids[0]),
       suggested_groups: suggested,
       pages: S_.pagesOf(conn).map((p) => ({ id: S_.pageKey(p), name: p.name || "דף ללא שם" })),
       page_publisher: conn.page_publisher || "browser",
@@ -180,13 +186,16 @@ module.exports = function mountPostingSettings(router, S, auth) {
     return res.json({ member_groups: await publicMembers(after), groups_synced_at: after.facebook_groups_synced_at || null });
   }));
 
-  // Forgets one membership entry (every id it is known by) and drops it from
-  // the default groups. A campaign's copy of the group stops being planned:
-  // its is_member is re-derived from this list at every plan.
+  // Forgets one membership entry (every id it is known by), drops it from the
+  // default groups, and records its ids in facebook_groups_hidden (ids only,
+  // never a name) so no sync — this route's or the weekly sweep's — brings it
+  // back. A campaign's copy of the group stops being planned: its is_member is
+  // re-derived from the member list at every plan.
   router.delete("/groups/:group_id", auth, wrap("groups.delete", async (req, res) => {
     const phone = req.user.userId;
     const id = String(req.params.group_id || "");
     if (!S_.GROUP_ID_RE.test(id)) return res.status(400).json({ error: "invalid_input" });
+    const at = A.iso(S.clock());
     let removed = false;
     const saved = await store.mutateConnection(phone, (cur) => {
       const m = S_.findMember(cur, id);
@@ -194,7 +203,13 @@ module.exports = function mountPostingSettings(router, S, auth) {
       if (!m) return null;
       const ids = new Set([id, ...S_.idsOf(m)]);
       const same = (e) => S_.idsOf(e).some((x) => ids.has(x));
-      const patch = { facebook_groups_member: S_.memberList(cur).filter((e) => !same(e)) };
+      const list = Array.isArray(cur.facebook_groups_member) ? cur.facebook_groups_member.filter((e) => e && e.group_id) : [];
+      for (const e of list) if (same(e)) for (const x of S_.idsOf(e)) ids.add(x);
+      const hidden = hiddenList(cur).filter((h) => !h.ids.some((x) => ids.has(String(x))));
+      const patch = {
+        facebook_groups_member: list.filter((e) => !same(e)),
+        facebook_groups_hidden: hidden.concat([{ ids: [m.group_id, ...[...ids].filter((x) => x !== m.group_id)], hidden_at: at }]),
+      };
       const perm = cur.posting_permission;
       if (perm && Array.isArray(perm.default_group_ids)) {
         patch.posting_permission = { default_group_ids: perm.default_group_ids.map(String).filter((x) => !ids.has(x)) };
@@ -202,6 +217,23 @@ module.exports = function mountPostingSettings(router, S, auth) {
       return patch;
     });
     if (!removed) return res.status(404).json({ error: "not_found" });
-    return res.json({ removed: true, member_groups: await publicMembers(saved || {}) });
+    return res.json({ removed: true, member_groups: await publicMembers(saved || {}), hidden_group_ids: hiddenList(saved || {}).map((h) => h.ids[0]) });
+  }));
+
+  // The only way back: the agent picks the removed group again on the card.
+  // It reappears at the next sync (if the account is still a member).
+  router.post("/groups/:group_id/unhide", auth, wrap("groups.unhide", async (req, res) => {
+    const phone = req.user.userId;
+    const id = String(req.params.group_id || "");
+    if (!S_.GROUP_ID_RE.test(id)) return res.status(400).json({ error: "invalid_input" });
+    let found = false;
+    const saved = await store.mutateConnection(phone, (cur) => {
+      const list = hiddenList(cur);
+      const keep = list.filter((h) => !h.ids.map(String).includes(id));
+      found = keep.length !== list.length;
+      return found ? { facebook_groups_hidden: keep } : null;
+    });
+    if (!found) return res.status(404).json({ error: "not_found" });
+    return res.json({ unhidden: true, hidden_group_ids: hiddenList(saved || {}).map((h) => h.ids[0]) });
   }));
 };
