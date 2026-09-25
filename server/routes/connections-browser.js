@@ -26,6 +26,7 @@ const SESSION_SECONDS = locksLive.LOGIN_SESSION_S;
 const CONSENT_VERSION = "2026-09-24";
 // Disabling halt classes R5 resolves with a reconnect (see startFlow).
 const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
+const FLEET_REASONS = new Set(["env_off", "global_off", "platform_off", "visible_off"]);
 const { profileName } = require("../profile-name");
 
 // Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
@@ -113,30 +114,47 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     if (!res.headersSent) res.status(500).json({ error: "internal" });
   });
 
+  // Why /start must refuse, or null. Connecting only opens a login browser
+  // for the agent; it never posts, likes or dwells. So the fleet-level
+  // POSTING switches (env, global, per-platform, visible) do not block it —
+  // posting is off by default, and connecting (also used by the Yad2/Madlan
+  // import) must keep working. The guard stops at its first failing check and
+  // the fleet checks come first, so when one of those fired, the account-level
+  // checks are re-run with the fleet switches read as on.
+  // Account level: reconnecting is how a revoked profile is replaced, so
+  // profile_revoked is let through. A disabled account may reconnect too when
+  // R5 resolves its halt that way: a captcha/checkpoint (the agent completes
+  // the check in the embedded browser) or a suspected compromise (a new
+  // profile), and only while its profile is quarantined or revoked.
+  // `restricted` needs an owner review, not a reconnect. The disable stays
+  // until the operator or owner lifts it (routes/admin-posting.js); until
+  // then it still stops every post, like, story and dwell.
+  async function connectRefusal(phone, platform) {
+    const check = async (deps) => {
+      try { await guard.assertAllowed({ phone, platform, action: "session" }, deps); return null; }
+      catch (e) { if (e.code !== "posting_disabled") throw e; return e.reason; }
+    };
+    let reason = await check({ db });
+    if (reason && FLEET_REASONS.has(reason)) {
+      const fleetOn = Object.assign(Object.create(db), {
+        getSetting: async (k) => (k === "posting" ? { enabled: true, platforms: {}, visible_interactions_enabled: true } : db.getSetting(k)),
+      });
+      reason = await check({ db: fleetOn, env: Object.assign({}, process.env, { POSTING_ENABLED: "1" }) });
+    }
+    if (!reason || reason === "profile_revoked") return null;
+    if (reason === "account_disabled" && platform === "facebook") {
+      const c = (await db.getConnection(phone)) || {};
+      if (RECONNECT_CLASSES.has(c.posting_disabled_class) && ["revoked", "quarantined"].includes(c.facebook_profile_state)) return null;
+    }
+    return { status: 409, body: { error: "posting_disabled", reason } };
+  }
+
   // The request body of /start, past validation and lock acquisition. Never
   // touches `res` — returns {status, body} so the route can release the
   // profile lock and session budget BEFORE the response goes out.
   async function startFlow(phone, platform, spec) {
-    try {
-      await guard.assertAllowed({ phone, platform, action: "session" }, { db });
-    } catch (e) {
-      if (e.code !== "posting_disabled") throw e;
-      // Reconnecting is how a revoked profile is replaced — let it through;
-      // every other reason (global/platform off, account disabled/penalized) refuses.
-      // A disabled account may reconnect too when R5 resolves its halt that
-      // way: a captcha/checkpoint (the agent completes the check in the
-      // embedded browser) or a suspected compromise (a new profile), and
-      // only while its profile is quarantined or revoked. `restricted` needs
-      // an owner review, not a reconnect. The disable stays until the
-      // operator or owner lifts it (routes/admin-posting.js); until then it
-      // still stops every post, like, story and dwell.
-      let reconnectable = false;
-      if (e.reason === "account_disabled" && platform === "facebook") {
-        const c = (await db.getConnection(phone)) || {};
-        reconnectable = RECONNECT_CLASSES.has(c.posting_disabled_class) && ["revoked", "quarantined"].includes(c.facebook_profile_state);
-      }
-      if (e.reason !== "profile_revoked" && !reconnectable) return { status: 409, body: { error: "posting_disabled", reason: e.reason } };
-    }
+    const refusal = await connectRefusal(phone, platform);
+    if (refusal) return refusal;
 
     const conn = (await db.getConnection(phone)) || {};
     const state = conn[`${platform}_profile_state`];

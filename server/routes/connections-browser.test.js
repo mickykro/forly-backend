@@ -114,15 +114,26 @@ function fakeGuard(reason) {
   assert.ok(created.duration <= 1500, "long enough for SMS 2FA, not an hour");
   assert.ok(String(created.note).startsWith("forly-connect:"));
 
-  // ── posting switched off by default (I5): no settings/posting doc → the real guard refuses a session ──
+  // ── posting switched off by default (I5) does NOT block connecting: a login
+  //    browser never posts, and Yad2/Madlan import needs connect ──
   {
     let made = false;
     const offDb = Object.assign(fakeDb({}), { getSetting: async () => null });
     const off = makeApp({ driver: { createSession: async () => { made = true; return { sessionId: "sz", status: "active", cdpUrl: "wss://n/z" }; } }, db: offDb, locks: fakeLocks() });
     const r = await call(off, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
+    assert.equal(r.status, 200, "connect works while posting is off");
+    assert.equal(made, true);
+  }
+  // ── ...but account-level refusals still apply while posting is off (the
+  //    guard's fleet checks come first, so they are re-run with the fleet on) ──
+  {
+    let made = false;
+    const offDb = Object.assign(fakeDb({ posting_disabled_until_admin: true, posting_disabled_class: "restricted" }), { getSetting: async () => null });
+    const off = makeApp({ driver: { createSession: async () => { made = true; return { sessionId: "sz", status: "active", cdpUrl: "wss://n/z" }; } }, db: offDb, locks: fakeLocks() });
+    const r = await call(off, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
     assert.equal(r.status, 409);
-    assert.deepEqual(r.body, { error: "posting_disabled", reason: "global_off" });
-    assert.equal(made, false, "no session is opened while posting is off");
+    assert.deepEqual(r.body, { error: "posting_disabled", reason: "account_disabled" });
+    assert.equal(made, false);
   }
 
   // ── yad2 and madlan: same flow, own profile names, own check URLs ──
@@ -238,19 +249,19 @@ function fakeGuard(reason) {
     assert.equal(locks._isHeld(), false, "the profile lock is released when the budget refuses");
   }
 
-  // ── posting_disabled (e.g. global_off) refuses /start before a session is
-  //    ever created, unless the reason is profile_revoked (reconnect path) ──
+  // ── an account-level posting_disabled (e.g. account_disabled) refuses /start
+  //    before a session is ever created, unless it is a reconnect path ──
   {
     let touchedGuard = false;
     const guardApp = makeApp({
       driver: { createSession: async () => { touchedGuard = true; return {}; } },
       db: fakeDb({}),
       locks: fakeLocks(),
-      guard: fakeGuard("global_off"),
+      guard: fakeGuard("account_disabled"),
     });
     const r = await call(guardApp, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
     assert.equal(r.status, 409);
-    assert.deepEqual(r.body, { error: "posting_disabled", reason: "global_off" });
+    assert.deepEqual(r.body, { error: "posting_disabled", reason: "account_disabled" });
     assert.equal(touchedGuard, false);
   }
 
@@ -316,7 +327,7 @@ function fakeGuard(reason) {
       driver: { createSession: async () => { touchedRefusal = true; return {}; } },
       db: fakeDb({}),
       locks,
-      guard: fakeGuard("global_off"),
+      guard: fakeGuard("account_disabled"),
     });
     const r = await call(refusalApp, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
     assert.equal(r.status, 409);
