@@ -21,6 +21,8 @@ const groupsSync = require("../facebook-groups-sync");
 
 const SESSION_SECONDS = 1500; // SMS 2FA on a phone that is also showing the modal takes a while
 const CONSENT_VERSION = "2026-09-24";
+// Disabling halt classes R5 resolves with a reconnect (see startFlow).
+const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
 const { profileName } = require("../profile-name");
 
 // Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
@@ -52,16 +54,19 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       if (e.code !== "posting_disabled") throw e;
       // Reconnecting is how a revoked profile is replaced — let it through;
       // every other reason (global/platform off, account disabled/penalized) refuses.
-      // One disabled account may reconnect too: a suspected compromise, whose
-      // profile was revoked. R5 lifts it only after a reconnect with a new
-      // profile (routes/admin-posting.js, owner only); the disable itself
+      // A disabled account may reconnect too when R5 resolves its halt that
+      // way: a captcha/checkpoint (the agent completes the check in the
+      // embedded browser) or a suspected compromise (a new profile), and
+      // only while its profile is quarantined or revoked. `restricted` needs
+      // an owner review, not a reconnect. The disable stays until the
+      // operator or owner lifts it (routes/admin-posting.js); until then it
       // still stops every post, like, story and dwell.
-      let compromised = false;
+      let reconnectable = false;
       if (e.reason === "account_disabled" && platform === "facebook") {
         const c = (await db.getConnection(phone)) || {};
-        compromised = c.posting_disabled_class === "suspected_compromise" && ["revoked", "quarantined"].includes(c.facebook_profile_state);
+        reconnectable = RECONNECT_CLASSES.has(c.posting_disabled_class) && ["revoked", "quarantined"].includes(c.facebook_profile_state);
       }
-      if (e.reason !== "profile_revoked" && !compromised) return { status: 409, body: { error: "posting_disabled", reason: e.reason } };
+      if (e.reason !== "profile_revoked" && !reconnectable) return { status: 409, body: { error: "posting_disabled", reason: e.reason } };
     }
 
     const conn = (await db.getConnection(phone)) || {};

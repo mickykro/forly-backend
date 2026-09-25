@@ -260,8 +260,9 @@ function fakeGuard(reason) {
     assert.equal(connQ.facebook_profile_state, "active");
   }
 
-  // ── a disabled account reconnects only when it is a suspected compromise
-  //    whose profile was revoked (Task 21: the owner lifts it after that) ──
+  // ── a disabled account reconnects only when R5 resolves its halt that way:
+  //    captcha/checkpoint/suspected_compromise with a quarantined or revoked
+  //    profile (Task 21); the disable stays until the admin route lifts it ──
   {
     const start = async (conn) => {
       let created = false;
@@ -278,8 +279,18 @@ function fakeGuard(reason) {
     assert.equal(comp.posting_disabled_until_admin, true, "the reconnect does not lift the disable");
     const again = await start({ posting_disabled_until_admin: true, posting_disabled_class: "suspected_compromise", facebook_profile_state: "active" });
     assert.equal(again.r.status, 409, "an un-revoked profile is not a reconnect"); assert.equal(again.created, false);
-    const cap = await start({ posting_disabled_until_admin: true, posting_disabled_class: "captcha", facebook_profile_state: "quarantined" });
-    assert.deepEqual(cap.r.body, { error: "posting_disabled", reason: "account_disabled" }); assert.equal(cap.created, false);
+    for (const cls of ["captcha", "checkpoint"]) {
+      const conn = { posting_disabled_until_admin: true, posting_disabled_class: cls, facebook_profile_state: "quarantined", facebook_profile_gen: 0 };
+      const q = await start(conn);
+      assert.equal(q.r.status, 200, cls); assert.ok(q.created, cls);
+      assert.equal(conn.facebook_profile_gen, 1, cls); assert.equal(conn.facebook_profile_state, "active", cls);
+      assert.equal(conn.posting_disabled_until_admin, true, `${cls}: the account is still disabled after the reconnect`);
+    }
+    const res = await start({ posting_disabled_until_admin: true, posting_disabled_class: "restricted", facebook_profile_state: "quarantined" });
+    assert.equal(res.r.status, 409); assert.deepEqual(res.r.body, { error: "posting_disabled", reason: "account_disabled" }, "restricted needs owner review, not a reconnect");
+    assert.equal(res.created, false);
+    const pen = await start({ posting_disabled_until_admin: true, posting_disabled_class: "captcha", facebook_profile_state: "active" });
+    assert.equal(pen.r.status, 409, "a captcha account whose profile is not quarantined does not reconnect"); assert.equal(pen.created, false);
   }
 
   // ── /start release paths: on a guard refusal, the profile lock and the
