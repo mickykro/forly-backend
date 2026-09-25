@@ -5165,7 +5165,7 @@ module.exports = function createPostingRouter(ctx) {
     const all = await catalog(null);
     const suggested = all.filter((g) => !memberUrls.has(g.url) && areas.some((a) => sameArea(a, g.city))).sort((a, b) => (b.members || 0) - (a.members || 0)).slice(0, 20);
     return res.json({
-      auto_enroll: conn.posting_auto_enroll === true, default_groups: conn.posting_default_groups || [], auto_mode: conn.posting_auto_mode || "standing",
+      permission: conn.posting_permission || { enabled: false }, first_post_estimate: await deps.firstPostEstimate?.(phone),
       member_groups: memberGroups.map((m) => Object.assign({ agent_policy: "unknown" }, all.find((g) => g.url === m.url) || {}, m)),
       suggested_groups: suggested.map(({ url, name, city, members, agent_policy }) => ({ url, name, city, members, agent_policy })),
       pages: conn.facebook_pages || [], page_publisher: conn.page_publisher || "browser",
@@ -5177,11 +5177,21 @@ module.exports = function createPostingRouter(ctx) {
     if (b.consent !== true) return res.status(400).json({ error: "consent_required" });
     const conn = (await db.getConnection(phone)) || {};
     const memberUrls = new Set((conn.facebook_groups_member || []).map((g) => g.url));
-    const defaults = shareKit.sanitizeGroups((b.default_groups || []).map((u) => ({ url: String(u) }))).map((g) => g.url);
-    const bad = defaults.filter((u) => !memberUrls.has(u));
+    const memberIds = new Set((conn.facebook_groups_member || []).filter((g) => g.membership_state !== "left").map((g) => g.group_id));
+    const ids = (Array.isArray(b.default_group_ids) ? b.default_group_ids : []).map(String);
+    const bad = ids.filter((id) => !memberIds.has(id));
     if (bad.length) return res.status(422).json({ error: "not_member", groups: bad });
-    await db.setConnection(phone, { posting_auto_enroll: b.auto_enroll === true, posting_default_groups: defaults, posting_auto_mode: b.auto_mode === "per_post" ? "per_post" : "standing", posting_consent_at: conn.posting_consent_at || new Date().toISOString(), posting_consent_version: CONSENT_VERSION });
-    return res.json({ ok: true });
+    const prev = conn.posting_permission || {};
+    const perm = {
+      enabled: b.enabled === true, consent_version: CONSENT_VERSION, granted_at: prev.granted_at || new Date().toISOString(),
+      platforms: ["facebook"], targets: Array.isArray(b.targets) ? b.targets.filter((t) => ["page", "groups"].includes(t)) : (prev.targets || ["page", "groups"]),
+      default_group_ids: ids, page_id: b.page_id ? String(b.page_id) : prev.page_id || null,
+      auto_mode: b.auto_mode === "per_post" ? "per_post" : "standing",
+      allows_dwell: true, allows_visible_interactions: b.allows_visible_interactions === true,
+    };
+    await db.setConnection(phone, { posting_permission: perm });
+    if (prev.enabled && !perm.enabled) await campaigns.revokePermission(phone, deps); // R2: immediate, before responding
+    return res.json({ ok: true, permission: perm });
   });
   router.post("/groups/resync", requireAuth(authSecret), async (req, res) => {
     const phone = req.user.userId;
