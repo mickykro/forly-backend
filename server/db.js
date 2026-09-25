@@ -288,6 +288,12 @@ async function setConnection(phone, patch) {
   mem.connections.set(phone, deepMerge(mem.connections.get(phone) || {}, sealed));
 }
 
+// Stub: `posting_attempts` doesn't exist yet (Task 16 adds it and fills this
+// in). profile-lifecycle.js's revoke() calls it so a revoked/quarantined
+// profile's reserved/session_started/composer_ready attempts stop instead of
+// running against a profile that assertOwnership now refuses.
+async function cancelOpenAttempts(phone, platform) {}
+
 // ── distribution: publish jobs ──
 async function saveDistribution(d) {
   if (db) await db.collection("distributions").doc(d.id).set(d);
@@ -616,7 +622,7 @@ module.exports = {
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
   getPortfolioSlugReservation, reservePortfolioSlug,
-  getConnection, setConnection,
+  getConnection, setConnection, cancelOpenAttempts,
   saveDistribution, getDistribution, updateDistribution,
   listDistributionsByPage, listQueuedDistributions, addPostAction,
   listGroupCatalog, addGroupCatalogEntry,

@@ -74,9 +74,10 @@ async function reapStale(deps, now = new Date()) {
 
 async function runJob(job, deps) {
   // A persisted profile is one browser at a time, across extract, connect and
-  // posting — the same lock every one of them takes (profile-lock.js).
+  // posting — the same lock every one of them takes (profile-lock.js). An
+  // extract job only ever carries a profile for a Facebook group read.
   const locks = deps.locks || require("./profile-lock");
-  const release = job.profile_name ? locks.tryAcquire(job.phone) : () => {};
+  const release = job.profile_name ? locks.tryAcquire(job.phone, "facebook") : () => {};
   if (job.profile_name && !release) return job; // someone else has the profile open; next sweep
   try {
     return await runJobLocked(job, deps);

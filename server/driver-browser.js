@@ -160,15 +160,26 @@ async function attachPage(sessionId, fn, deps = {}) {
   }
 }
 
-// Deletes a persisted profile at Driver — used on disconnect, so the cookies
-// do not outlive the agent's consent. Like stopSession, never throws: called
-// from a route handler that has already committed to answering 200.
+// Deletes a persisted profile at Driver — used on disconnect and by
+// profile-lifecycle.js's revoke()/retryDeletes(), so the cookies do not
+// outlive the agent's consent. Like stopSession, never throws (called from a
+// route handler that has already committed to answering 200); instead it
+// returns { ok: true } or { ok: false, error } so a caller that DOES need to
+// know (revoke() records `<platform>_profile_delete_error` for the sweeper to
+// retry) can. Never logs the profile name — only the platform, which is its
+// first "-"-separated segment.
 async function deleteProfile(name, deps = {}) {
+  const platform = String(name || "").split("-")[0] || "unknown";
   try {
     const r = await call("DELETE", `/v1/browser/profiles/${encodeURIComponent(name)}`, null, deps);
-    if (r && r.success === false) console.error(`driver: delete of profile ${name} did not succeed`);
+    if (r && r.success === false) {
+      console.error(`driver: delete of ${platform} profile did not succeed`);
+      return { ok: false, error: "did not succeed" };
+    }
+    return { ok: true };
   } catch (e) {
-    console.error(`driver: delete of profile ${name} failed: ${e.message}`);
+    console.error(`driver: delete of ${platform} profile failed: ${e.message}`);
+    return { ok: false, error: e.message };
   }
 }
 

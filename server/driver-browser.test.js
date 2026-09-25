@@ -110,5 +110,12 @@ const err = (status, body, retryAfter) => ({
   assert.equal(await D.attachPage("s9", async (p) => p.marker, attachDeps), "live");
   assert.equal(stops.length, 0, "attachPage must leave the session running");
 
+  // ── deleteProfile never throws, and reports ok/error so revoke() can record it ──
+  const okDel = await D.deleteProfile("facebook-local-aaaa", { apiKey: "k", fetchFn: async () => ok({ success: true }) });
+  assert.deepEqual(okDel, { ok: true });
+  const failDel = await D.deleteProfile("facebook-local-aaaa", { apiKey: "k", fetchFn: async () => err(503, { error: "busy" }) });
+  assert.equal(failDel.ok, false);
+  assert.ok(failDel.error);
+
   console.log("driver-browser.test.js ok");
 })();

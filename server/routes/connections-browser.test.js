@@ -1,5 +1,6 @@
 /* routes/connections-browser.js — the embedded login browser. No network:
    driver and db are fakes. */
+process.env.FORLY_ENV = "local";
 const assert = require("assert");
 const express = require("express");
 const http = require("http");

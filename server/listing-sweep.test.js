@@ -1,5 +1,6 @@
 /* listing-sweep.test.js — the my-ads → draft flow. No network, no browser:
    withPage, the store, and the extract-jobs queue are fakes. */
+process.env.FORLY_ENV = "local";
 const assert = require("assert");
 const sweep = require("./listing-sweep");
 const { profileName } = require("./profile-name");
@@ -86,7 +87,7 @@ const PLATFORMS = { yad2: { checkUrl: "https://www.yad2.co.il/my-ads" } };
 
   // ── the profile lock is held elsewhere: sweep yields instead of running twice ──
   const locks = require("./profile-lock");
-  const release = locks.acquire("locked-phone");
+  const release = locks.acquire("locked-phone", "yad2");
   const held = await sweep.sweep({ platform: "yad2", phone: "locked-phone" }, {
     db: fakeDb(), extractJobs, platforms: PLATFORMS,
     withPage: async () => { throw new Error("must not run while locked"); },

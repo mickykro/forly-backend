@@ -1,6 +1,7 @@
 /* routes/extract.js — request validation, error → status mapping, the daily
    cap and the image import guard. Express is not exercised; the handlers'
    pure parts are. */
+process.env.FORLY_ENV = "local";
 const assert = require("assert");
 const { _test } = require("./extract");
 const { validateBody, statusFor, DailyLimit, importImage, IMAGE_TYPES } = _test;
@@ -202,12 +203,12 @@ const get = (app, path) => call(app, "GET", path);
 // ── profileFor: anchored, and twitter is x ──
 {
   const { profileFor } = createExtractRouter._test;
-  assert.equal(profileFor("https://www.facebook.com/groups/1", "05x", "k"), profileFor("https://facebook.com/groups/2", "05x", "k"));
-  assert.ok(/^facebook-[a-z]+-[0-9a-f]{20}$/.test(profileFor("https://www.facebook.com/groups/1", "05x", "k")), "hmac, not the phone");
-  assert.equal(profileFor("https://twitter.com/a/status/1", "05x", "k"), profileFor("https://x.com/a/status/1", "05x", "k"));
-  assert.equal(profileFor("https://netflix.com/x", "05x", "k"), null, "not left-anchored → netflix matched x.com");
-  assert.equal(profileFor("https://evilfacebook.com/x", "05x", "k"), null);
-  assert.equal(profileFor("https://www.yad2.co.il/item/1", "05x", "k"), null, "no profile for non-social hosts");
+  assert.equal(profileFor("https://www.facebook.com/groups/1", "05x"), profileFor("https://facebook.com/groups/2", "05x"));
+  assert.ok(/^facebook-[a-z]+-[0-9a-f]{20}$/.test(profileFor("https://www.facebook.com/groups/1", "05x")), "hmac, not the phone");
+  assert.equal(profileFor("https://twitter.com/a/status/1", "05x"), profileFor("https://x.com/a/status/1", "05x"));
+  assert.equal(profileFor("https://netflix.com/x", "05x"), null, "not left-anchored → netflix matched x.com");
+  assert.equal(profileFor("https://evilfacebook.com/x", "05x"), null);
+  assert.equal(profileFor("https://www.yad2.co.il/item/1", "05x"), null, "no profile for non-social hosts");
 }
 console.log("routes/extract.test.js ok");
 })();

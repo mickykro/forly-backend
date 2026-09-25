@@ -82,7 +82,7 @@ async function sweep({ platform, phone }, deps) {
   const conn = (await db.getConnection(phone)) || {};
   if (!conn[`${platform}_browser_connected_at`]) throw fail("invalid_input", "not connected");
 
-  const release = locks.tryAcquire(phone);
+  const release = locks.tryAcquire(phone, platform);
   if (!release) return { found: 0, queued: 0, skipped: 0 }; // profile busy elsewhere; next sweep
 
   try {

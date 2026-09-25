@@ -1,5 +1,6 @@
 /* extract-jobs.js — the queued-scrape state machine. No network, no browser:
    resolve, parseListing and the store are fakes. */
+process.env.FORLY_ENV = "local";
 const assert = require("assert");
 const J = require("./extract-jobs");
 
