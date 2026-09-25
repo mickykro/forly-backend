@@ -140,5 +140,57 @@ function fullFacebookPage(groupLinks, o = {}) {
     }
   }
 
+  // ── I8 + I4: finish reads the identity label from the banner marker R3 compares
+  //    (else the title, without "(3) "), and each Page's numeric id from its own
+  //    metadata; Facebook's navigation links are never Pages ──
+  {
+    const P = require("../posting-driver-proof");
+    const links = [
+      { href: "https://www.facebook.com/marketplace/?ref=bookmarks", name: "Marketplace" },
+      { href: "https://www.facebook.com/watch/", name: "Watch" },
+      { href: "https://www.facebook.com/gaming/", name: "Gaming" },
+      { href: "https://www.facebook.com/groups/feed/", name: "Groups" },
+      { href: "https://www.facebook.com/dana.nadlan?__tn__=x", name: "דנה נדל״ן" },
+      { href: "https://www.facebook.com/dana.nadlan", name: "דנה נדל״ן" },
+      { href: "https://www.facebook.com/profile.php?id=61550000000077&sk=about", name: "Dana Rentals" },
+      { href: "https://www.facebook.com/noid.page", name: "No Id Page" },
+    ];
+    const meta = { "https://www.facebook.com/dana.nadlan": "fb://page/61550000000001" }; // noid.page's metadata says nothing
+    const page = (o = {}) => {
+      let at = "https://www.facebook.com/me";
+      return Object.assign(fullFacebookPage([]), {
+        goto: async (u) => { at = u; }, url: () => at,
+        title: async () => "(3) Dana  Cohen | Facebook",
+        $$eval: async (sel) => (sel.includes("/groups/") ? [{ href: "https://www.facebook.com/groups/111/", text: "דירות" }] : links),
+        locator: (sel) => ({ first: () => ({
+          innerText: async () => { if (sel === P.SELECTORS.identity && o.banner) return o.banner; throw new Error("none"); },
+          getAttribute: async (name) => (sel === P.SELECTORS.targetIdMeta && name === "content" ? meta[at] || null : null),
+        }) }),
+      });
+    };
+    for (const [banner, want] of [["Dana\u00a0 Cohen ", "Dana Cohen"], [null, "Dana Cohen"]]) {
+      const conn = { browser_session_facebook: { session_id: "s4" } };
+      const app = makeApp({
+        driver: { stopSession: async () => {}, attachPage: async (id, fn) => fn(page({ banner })) },
+        db: { getConnection: async () => conn, setConnection: async (p, patch) => Object.assign(conn, patch), listGroupCatalog: async () => [] },
+      });
+      const fin = await call(app, "POST", "/api/connections/browser/facebook/finish");
+      assert.equal(fin.status, 200);
+      assert.equal(conn.facebook_identity_label, want, banner ? "the banner marker, normalised as R3 compares" : "the title without the unread counter");
+      assert.equal(conn.facebook_identity_label, P.norm(banner || "Dana Cohen"));
+      assert.deepEqual(conn.facebook_pages, [
+        { url: "https://www.facebook.com/dana.nadlan", name: "דנה נדל״ן", id: "61550000000001" },
+        { url: "https://www.facebook.com/profile.php?id=61550000000077", name: "Dana Rentals", id: "61550000000077" },
+        { url: "https://www.facebook.com/noid.page", name: "No Id Page" },
+      ], "nav links dropped, profile.php keeps its id, a Page id from its own metadata");
+      // the driver's own R3 check accepts what finish stored (for the single-Page case it would post to)
+      const A = require("../posting-account");
+      const one = Object.assign({}, conn, { facebook_pages: [conn.facebook_pages[1]], posting_permission: {} });
+      const t = A.pageTarget(one);
+      assert.deepEqual(P.expectedTarget({ target_type: "page", target_id: t.target_id, target_url: t.url }, one).ok, true);
+      assert.equal(A.pageTarget(Object.assign({}, conn, { facebook_pages: [conn.facebook_pages[2]] })), null, "no id → no target");
+    }
+  }
+
   console.log("routes/connections-browser-groups.test.js ok");
 })();

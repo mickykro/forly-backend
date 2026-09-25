@@ -6,12 +6,13 @@
  *      and record what could not be reaped (settings/posting_health);
  *   2. the fleet-level kill switch (R2: env + global + platform) — off means
  *      nothing else happens;
- *   3. the fleet breaker: enough accounts disabled within the hour means
+ *   3. the fleet breaker: enough accounts disabled within the window means
  *      Facebook changed something, not that several agents did — the global
  *      switch goes off (compare-and-set) and the operator is told;
  *   4. at most one stale group-membership sync (Task 14);
  *   5. at most one reconciliation of an outcome_unknown attempt (never a
- *      second submit: the reconcile session only looks);
+ *      second submit: the reconcile session only looks; bounded tries,
+ *      posting-reconcile.js);
  *   5b. at most one 24 h re-check session (posting-recheck.js, Task 22);
  *   6. one tick (posting-tick.js) per phone with a running campaign.
  * No step's failure aborts the sweep.
@@ -23,15 +24,15 @@ const T = require("./posting-tick");
 const H = require("./posting-halts");
 const R = require("./posting-recheck");
 
-const { iso, tail, fail, ms, ctxOf, nowOf, mutate, tellOperator, MS_HOUR } = A;
+const { iso, tail, ms, ctxOf, tellOperator, MS_HOUR } = A;
 const SWEEP_MS = 60 * 1000;
-const FLEET_WINDOW_MS = MS_HOUR;
+// The fleet breaker's window: settings/posting.fleet_breaker_window_h (I6), default 24 h.
+const FLEET_WINDOW_DEFAULT_H = 24;
+const fleetWindowH = (setting) => { const h = Number(setting && setting.fleet_breaker_window_h); return Number.isFinite(h) && h > 0 && h <= 24 * 30 ? h : FLEET_WINDOW_DEFAULT_H; };
 const FLEET_BREAKER_DEFAULT = 3;
 const SYNC_RETRY_MS = 6 * MS_HOUR;
 const code = (e) => (e && (e.code || e.name)) || "error";
 const { loginOpen } = require("./profile-lock");
-// The agent's consent is in force (posting_permission.enabled === true).
-const consented = (conn) => !!(conn && conn.posting_permission && conn.posting_permission.enabled === true);
 
 // 1. → the failures ({ key, error_code }) the reaper could not move.
 async function reap(x, now) {
@@ -59,12 +60,14 @@ async function writeHealth(x, now, reapFailures) {
 }
 
 // 3. → true when the breaker is (now) tripped. Halts count from the later of
-// "an hour ago" and settings/posting.enabled_at (the last re-enable, set by
-// the operator UI, Task 21) — halts from before a re-enable were already
-// judged. OFF is reported only once it is true: after our compare-and-set
-// write succeeded, or when the switch is already seen off.
+// "the window ago" (fleet_breaker_window_h, default 24 h) and
+// settings/posting.enabled_at (the last re-enable, set by the operator UI,
+// Task 21) — halts from before a re-enable were already judged. OFF is
+// reported only once it is true: after our compare-and-set write succeeded,
+// or when the switch is already seen off.
 async function fleetBreaker(setting, deps, x, now) {
-  const sinceMs = Math.max(now.getTime() - FLEET_WINDOW_MS, ms(setting.enabled_at) || 0);
+  const windowH = fleetWindowH(setting);
+  const sinceMs = Math.max(now.getTime() - windowH * MS_HOUR, ms(setting.enabled_at) || 0);
   const since = iso(sinceMs);
   const phones = await x.store.listPhonesHaltedSince(since);
   let n = 0;
@@ -89,7 +92,7 @@ async function fleetBreaker(setting, deps, x, now) {
     return true;
   }
   console.error(`posting: FLEET BREAKER tripped — ${n} accounts disabled within the window; posting is OFF`);
-  await tellOperator(deps, `posting: FLEET BREAKER — ${n} accounts disabled within an hour; posting is OFF until an operator turns it back on`);
+  await tellOperator(deps, `posting: FLEET BREAKER — ${n} accounts disabled within ${windowH} h; posting is OFF until an operator turns it back on`);
   return true;
 }
 
@@ -116,63 +119,9 @@ async function syncOneStale(deps, x, now) {
   return false;
 }
 
-// 5. outcome_unknown → one reconciliation session, marked on the post BEFORE
-// it runs so a crash can never run it twice; after that, operator review.
-async function reconcileOne(deps, x, now) {
-  if (typeof deps.reconcile !== "function") return false;
-  for (const a of await x.store.listAttemptsByState("outcome_unknown", 50)) {
-    if (!a.campaign_id || !a.post_id) continue;
-    const c = await x.store.getPostingCampaign(a.campaign_id);
-    const post = c && (c.posts || []).find((p) => p.id === a.post_id);
-    if (!post || post.reconcile_at) continue;
-    try { await x.guard.assertAllowed({ phone: a.phone, platform: "facebook", action: "retry" }, A.guardDeps(deps, x)); }
-    catch (e) { if (e && e.code === "posting_disabled") continue; throw e; }
-    const pre = (await x.db.getConnection(a.phone)) || {};
-    // I10: the agent withdrew consent — their profile is not opened again,
-    // not even to look. The attempt stays outcome_unknown for operator review.
-    if (!consented(pre)) {
-      await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id ? { ...p, reconcile_at: iso(now) } : p)) }));
-      await x.store.annotateAttempt(a.key, { reconcile_note: "consent_revoked" }, x.clock()).catch(() => {});
-      continue;
-    }
-    if (loginOpen(pre, "facebook", now.getTime())) continue; // the agent is logging in: a later sweep
-    const release = x.locks.tryAcquire(a.phone, "facebook");
-    if (!release) continue;
-    let result = null;
-    try {
-      await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id ? { ...p, reconcile_at: iso(now) } : p)) }));
-      const conn = (await x.db.getConnection(a.phone)) || {};
-      result = await deps.reconcile(a, {
-        attempts: {
-          transition: (k, state, detail) => (k === a.key ? x.store.transition(k, state, detail, x.clock()) : Promise.reject(fail("invalid_input", "foreign attempt"))),
-          annotate: (k, detail) => (k === a.key ? x.store.annotateAttempt(k, detail, x.clock()) : Promise.reject(fail("invalid_input", "foreign attempt"))),
-        },
-        guard: (action) => x.guard.assertAllowed({ phone: a.phone, platform: "facebook", action }, A.guardDeps(deps, x)),
-        lockHeld: true, phone: a.phone, platform: "facebook", conn, copy: post.copy || null,
-      });
-    } catch (e) { console.error(redact(`posting reconcile …${a.key.slice(-6)}: ${code(e)}`)); }
-    finally { release(); }
-    // A halting signal the reconcile session saw (a checkpoint, a login wall…)
-    // halts the account exactly as it would after a post (R5). Never throws.
-    const cls = H.classOf(result && result.signal);
-    if (cls) {
-      try { await H.haltAccount(a.phone, cls, deps, { campaignId: c.id }); } // stamped with the clock now, not the sweep's start
-      catch (e) { console.error(redact(`posting reconcile halt …${a.key.slice(-6)}: ${code(e)}`)); }
-    }
-    if (result && result.noop === true) {
-      // No reconciler installed yet: it has not really run, so it may run later.
-      await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id ? { ...p, reconcile_at: null } : p)) }));
-      return false;
-    }
-    const fresh = await x.store.getAttempt(a.key);
-    if (fresh && fresh.state !== "outcome_unknown") {
-      const mctx = T.mirrorCtx(now, safety.DEFAULTS, x.rand);
-      await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => T.mirrorPost(p, fresh, { ...mctx, running: cur.status === "running" })) }));
-    }
-    return true;
-  }
-  return false;
-}
+// 5. outcome_unknown → reconciliation: bounded tries, oldest due first
+// (posting-reconcile.js, I7). Never a second submit.
+const reconcileOne = (deps, x, now) => require("./posting-reconcile").reconcileOne(deps, x, now);
 
 // 1b. Profile deletes that failed, or were deferred because the profile was
 // in use (profile-lifecycle, I9): every row once per Jerusalem day

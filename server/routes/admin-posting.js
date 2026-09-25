@@ -9,6 +9,8 @@
  *   POST /switch/visible   { enabled, reason, version }            visible_interactions_enabled
  *   POST /accounts/:account/reenable       { reason, agent_confirmed }  per halt class (R5)
  *   POST /accounts/:account/revoke-profile { reason }                   suspected compromise
+ *   POST /attempts/:key/resolve     { outcome: posted|not_posted, reason }  an outcome_unknown attempt (I7)
+ *   POST /campaigns/:id/resume      { reason }                          a campaign paused `internal` (R5)
  *
  * Every POST needs a fresh step-up (an OTP login in the last 10 minutes) and
  * writes an audit_events row. Switches are compare-and-set on
@@ -122,6 +124,7 @@ module.exports = function createAdminPostingRouter({
   requireAdmin, requireStepUp, db = require("../db"), store = require("../posting-store"),
   halts = require("../posting-halts"), lifecycle = require("../profile-lifecycle"),
   deps = {}, env = process.env, clock = () => new Date(),
+  reconcile = require("../posting-reconcile"), campaigns = require("../posting-campaign"),
 }) {
   if (typeof requireAdmin !== "function" || typeof requireStepUp !== "function") throw new Error("admin-posting: requireAdmin and requireStepUp required");
   const router = express.Router();
@@ -199,6 +202,10 @@ module.exports = function createAdminPostingRouter({
     const halts_24h = accounts.flatMap((a) => a.halts_24h.map((h) => ({ phone_tail: a.phone_tail, ref: a.ref, code: h.code, at: h.at })))
       .sort((x, y) => (x.at < y.at ? 1 : -1));
     const audit = await section("audit", () => store.listAuditEvents({ sinceMs: now.getTime() - 30 * MS_DAY, limit: 20 }), []);
+    // I7: attempts whose outcome is unknown — how many, the oldest, and the 20 oldest to resolve.
+    const unknown = await section("unknown_attempts", () => reconcile.unknownSummary(store, now), null);
+    // R5: campaigns paused `internal` (selector failures, tick errors) — the team resumes them.
+    const internal = await section("internal_paused", async () => (await store.listPostingCampaignsByStatus("paused", 500)).filter((c) => c.pause_reason === "internal"), null);
     // Without the switch doc nothing about the switches is known: null, never a default "on".
     const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, k === "env_forced_off" ? env.POSTING_ENABLED !== "1" : null]));
     res.json(Object.assign(sw, {
@@ -217,6 +224,17 @@ module.exports = function createAdminPostingRouter({
         cancel_failures_count: health.cancel_failures_count || 0,
       },
       recent_audit: audit.map((e) => ({ at: e.at, action: e.action, operator_tail: e.operator_tail, target_phone_tail: e.target_phone_tail, reason: e.reason, detail: e.detail })),
+      outcome_unknown: unknown && {
+        count: unknown.count, count_capped: unknown.count_capped, oldest_at: unknown.oldest_at, oldest_age_h: unknown.oldest_age_h,
+        oldest: unknown.oldest_items.map(({ a, since }) => ({
+          key: a.key, phone_tail: tail(a.phone), ref: refOf(a.phone), target_type: a.target_type || null, since,
+          reconcile_tries: a.reconcile_tries || 0, next_reconcile_at: a.next_reconcile_at || null, note: a.reconcile_note || null,
+        })),
+      },
+      internal_paused: internal && internal.slice(0, 50).map((c) => ({
+        id: c.id, phone_tail: tail(c.phone), ref: refOf(c.phone), updated_at: c.updated_at || null,
+        selector_failures: c.selector_failures || 0, tick_errors: c.tick_errors || 0,
+      })),
       warnings,
     }));
   }));
@@ -326,6 +344,39 @@ module.exports = function createAdminPostingRouter({
     const audited = await audit(req, "revoke_profile", { phone, reason, detail: { class: "suspected_compromise", halted: !already } });
     console.log(`posting admin: account …${tail(phone)} profile revoked (suspected_compromise) by …${opTail(req)}`);
     res.json({ ok: true, audited, phone_tail: tail(phone) });
+  }));
+
+  // ── an outcome_unknown attempt: the operator's verdict (I7) ──
+  // Moves it to verified_posted / verified_failed only; nothing is ever submitted.
+  router.post("/attempts/:key/resolve", ...guard, wrap(async (req, res) => {
+    const key = String(req.params.key || "");
+    if (!/^[0-9a-f]{16,64}$/.test(key)) return res.status(400).json({ error: "invalid_input", field: "key" });
+    const b = req.body || {};
+    if (!["posted", "not_posted"].includes(b.outcome)) return res.status(400).json({ error: "invalid_input", field: "outcome" });
+    const reason = cleanReason(b.reason);
+    if (!reason) return res.status(400).json({ error: "reason_required" });
+    const out = await reconcile.resolveUnknown(key, b.outcome, { by: opTail(req), reason }, Object.assign({}, deps, { db, store }));
+    if (!out.ok) return res.status(out.status).json(Object.assign({ error: out.error }, out.state ? { state: out.state } : {}));
+    const a = out.attempt;
+    const audited = await audit(req, "resolve_attempt", { phone: a.phone, reason, detail: { key_tail: key.slice(-6), outcome: b.outcome, state: a.state } });
+    console.log(`posting admin: attempt …${key.slice(-6)} resolved ${b.outcome} by …${opTail(req)}`);
+    res.json({ ok: true, audited, state: a.state, phone_tail: tail(a.phone) });
+  }));
+
+  // ── a campaign paused `internal`: resumed by the team once it is fixed (R5) ──
+  router.post("/campaigns/:id/resume", ...guard, wrap(async (req, res) => {
+    const id = String(req.params.id || "");
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) return res.status(400).json({ error: "invalid_input", field: "id" });
+    const reason = cleanReason((req.body || {}).reason);
+    if (!reason) return res.status(400).json({ error: "reason_required" });
+    const c = await store.getPostingCampaign(id);
+    if (!c) return res.status(404).json({ error: "not_found" });
+    if (c.status !== "paused" || c.pause_reason !== "internal") return res.status(409).json({ error: "not_internal_pause", status: c.status });
+    const out = await campaigns.resume(id, Object.assign({}, deps, { db, store }));
+    if (!out || out.status !== "running") return res.status(409).json({ error: "not_resumable" }); // the account is halted
+    const audited = await audit(req, "resume_campaign", { phone: c.phone, reason, detail: { campaign_tail: id.slice(-6) } });
+    console.log(`posting admin: campaign …${id.slice(-6)} resumed by …${opTail(req)}`);
+    res.json({ ok: true, audited, status: out.status, phone_tail: tail(c.phone) });
   }));
 
   return router;

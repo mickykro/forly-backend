@@ -166,18 +166,23 @@ function needsMembershipCheck(conn, g, now) {
 
 // The agent's own Page, when the browser may post to it: the one the agent
 // confirmed (posting_permission.page_id), or the only one discovered (R3).
+// Only with the Page's numeric id, read from its own metadata at connect
+// (I4): R3 proves the destination against that id, so a Page without one
+// could never pass — it is not a target at all.
+const numericPageId = (p) => !!p && /^\d+$/.test(String(p.id || ""));
 function pageTarget(conn) {
   if (!conn || (conn.page_publisher || "browser") !== "browser") return null;
   const pages = Array.isArray(conn.facebook_pages) ? conn.facebook_pages.filter((p) => p && p.url) : [];
   const chosen = (conn.posting_permission || {}).page_id;
   const p = chosen ? pages.find((x) => x.id === chosen || x.url === chosen) : pages.length === 1 ? pages[0] : null;
-  if (!p) return null;
-  let vanity = null;
-  try { vanity = new URL(p.url).pathname.split("/").filter(Boolean)[0] || null; } catch { vanity = null; }
-  const target_id = String(p.id || vanity || "").replace(/[/|]/g, "");
-  if (!target_id) return null;
+  if (!numericPageId(p)) return null;
+  const target_id = String(p.id);
   return { target: "page", target_id, group_id: `page:${target_id}`, url: p.url, name: p.name || "" };
 }
+// Could the card offer a Page at all: the browser publishes Pages, and at
+// least one discovered Page has its numeric id.
+const pageTargetAvailable = (conn) => !!conn && (conn.page_publisher || "browser") === "browser"
+  && Array.isArray(conn.facebook_pages) && conn.facebook_pages.some((p) => p && p.url && numericPageId(p));
 
 function targetsFor(conn, requested) {
   const want = Array.isArray(requested) && requested.length ? requested : ["page", "groups"];
@@ -345,5 +350,5 @@ module.exports = {
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
   groupIdFromUrl, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY,
   memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,
-  pageTarget, targetsFor, accountView, currentPosts, limitsFor, nextDayStart,
+  pageTarget, pageTargetAvailable, numericPageId, targetsFor, accountView, currentPosts, limitsFor, nextDayStart,
 };

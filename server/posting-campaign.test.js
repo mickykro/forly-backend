@@ -262,7 +262,7 @@ const PH = "972500000001";
 
   // ── page target: with one Page and page_publisher "browser", the Page goes first ──
   {
-    const { deps, at } = await setup(PH, { conn: { facebook_pages: [{ url: "https://www.facebook.com/dana.nadlan", name: "Dana" }], page_publisher: "browser" } });
+    const { deps, at } = await setup(PH, { conn: { facebook_pages: [{ id: "61550000000001", url: "https://www.facebook.com/dana.nadlan", name: "Dana" }], page_publisher: "browser" } });
     let c = await C.create(base(), deps);
     assert.deepEqual(c.targets, ["page", "groups"]);
     c = await S.tick(c, deps, at(NOW));
@@ -280,6 +280,11 @@ const PH = "972500000001";
     await db.setConnection(PH, { page_publisher: "browser", facebook_pages: [{ url: "https://www.facebook.com/a1" }, { url: "https://www.facebook.com/b2" }] });
     await db.savePage(page("pg3"));
     assert.deepEqual((await C.create(base({ page: page("pg3") }), deps)).targets, ["groups"]);
+    // I4: a Page whose numeric id connect could not read is never a target (R3 could not prove it)
+    await db.setConnection(PH, { facebook_pages: [{ url: "https://www.facebook.com/dana.nadlan", name: "Dana" }] });
+    await db.savePage(page("pg4"));
+    assert.deepEqual((await C.create(base({ page: page("pg4") }), deps)).targets, ["groups"]);
+    assert.equal(require("./posting-account").pageTarget(await db.getConnection(PH)), null);
   }
 
   // ── an ineligible group (any of the four booleans false) is never planned ──

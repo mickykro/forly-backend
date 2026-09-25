@@ -36,6 +36,66 @@ const PLATFORMS = {
   madlan: { loginUrl: process.env.MADLAN_LOGIN || "https://www.madlan.co.il/login", checkUrl: process.env.MADLAN_MY_LISTINGS || "https://www.madlan.co.il/my" },
 };
 
+// ── /finish helpers (Facebook) ──
+// The navigation links Facebook's "your Pages" screen also carries — never a Page.
+const NAV_SEGMENTS = new Set(["marketplace", "watch", "groups", "gaming", "games", "events", "friends", "pages", "bookmarks", "messages",
+  "notifications", "reel", "reels", "stories", "saved", "memories", "fundraisers", "ads", "adsmanager", "business", "help", "settings",
+  "privacy", "policies", "policy", "login", "logout", "home.php", "me", "search", "hashtag", "photo", "photo.php", "photos", "permalink.php",
+  "story.php", "jobs", "live", "news", "feeds", "onthisday", "offers", "weather", "lite", "dating", "videos", "people", "places",
+  "latest", "find-friends", "your_pages", "business_help", "legal", "terms", "careers", "about", "l.php", "sharer", "sharer.php", "profile.php"]);
+const SEG = /^[A-Za-z0-9._-]{2,80}$/;
+// Scraped links → the agent's Pages: { url, name, id? }, at most 10, one per
+// Page. profile.php?id=<n> keeps its query (it IS the Page's address) and
+// that n is the numeric id; a one-segment vanity URL has none yet.
+function pageLinks(links) {
+  const out = new Map();
+  for (const l of Array.isArray(links) ? links : []) {
+    let u;
+    try { u = new URL(String(l && l.href)); } catch { continue; }
+    const name = String((l && l.name) || "").trim().slice(0, 120);
+    if (!name || u.protocol !== "https:" || !/^(www\.|m\.|web\.)?facebook\.com$/i.test(u.hostname)) continue;
+    const parts = u.pathname.split("/").filter(Boolean);
+    const pid = u.searchParams.get("id");
+    let page = null;
+    if (parts.length === 1 && parts[0] === "profile.php" && /^\d{5,25}$/.test(pid || "")) page = { url: `https://www.facebook.com/profile.php?id=${pid}`, name, id: pid };
+    else if (parts.length === 1 && SEG.test(parts[0]) && !NAV_SEGMENTS.has(parts[0].toLowerCase())) page = { url: `https://www.facebook.com/${parts[0]}`, name };
+    if (page && !out.has(page.url)) out.set(page.url, page);
+  }
+  return [...out.values()].slice(0, 10);
+}
+// Each Page's numeric id from its own metadata (posting-driver-proof.readTargetId,
+// the same read R3 makes before a Page post). [Unverified] selector. A Page whose
+// page does not say is kept without an id — shown, never a campaign target.
+async function withPageIds(page, pages) {
+  const P = require("../posting-driver-proof");
+  const out = [];
+  for (const p of pages) {
+    if (p.id) { out.push(p); continue; }
+    let id = null;
+    try {
+      await page.goto(p.url, { waitUntil: "domcontentloaded", timeout: 20000 });
+      id = await P.readTargetId(page, "page");
+    } catch (e) { id = null; }
+    out.push(/^\d{5,25}$/.test(String(id || "")) ? Object.assign({}, p, { id: String(id) }) : p);
+  }
+  return out;
+}
+// The tab title without an unread counter "(3) " and the " | Facebook" suffix, normalised.
+async function titleLabel(page) {
+  let title = "";
+  // try/catch, not page.title().catch(): a page fake without .title throws synchronously.
+  try { title = await page.title(); } catch (e) { /* no title */ }
+  const P = require("../posting-driver-proof");
+  return P.norm(String(title || "").replace(/^\(\d+\+?\)\s*/, "").split("|")[0]).slice(0, 120) || null;
+}
+// The banner identity marker R3 compares against, else the title.
+async function identityLabel(page) {
+  const P = require("../posting-driver-proof");
+  let header = "";
+  try { header = await P.textOf(page, P.SELECTORS.identity); } catch (e) { header = ""; }
+  return (header && header.length <= 120 ? header : null) || (await titleLabel(page));
+}
+
 module.exports = function createConnectionsBrowserRouter(ctx) {
   const { requireAuth, authSecret } = ctx;
   const driver = ctx.driver || driverLive;
@@ -184,21 +244,21 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         const text = await page.innerText("body");
         if (isLoginWall(page.url(), text)) return { loggedIn: false, label: null };
         // The profile's display name, so the campaign card can say "posting as …"
-        // and an agent with two accounts can see which one they connected.
-        // try/catch, not page.title().catch(): a page fake without .title at
-        // all (as in this file's own test) throws synchronously, not a rejection.
-        let title = "";
-        try { title = await page.title(); } catch (e) { /* label stays null */ }
-        const label = String(title || "").split("|")[0].trim().slice(0, 60) || null;
-        // The Pages this account manages — the browser publisher (Phase 3) posts
-        // to the first one; the agent can pick another on the campaign card.
-        // Yad2/Madlan have no equivalent (read-only connect, Phase 4).
+        // — and the identity R3 proves before every post (I8): read from the
+        // same banner marker the driver's proof reads, normalised the same way,
+        // so the two can match exactly. Fallback: the tab title, without a
+        // "(3) " unread counter and the " | Facebook" suffix.
+        const label = platform === "facebook" ? await identityLabel(page) : await titleLabel(page);
+        // The Pages this account manages, each with its numeric id when its own
+        // page says it (I4) — R3 proves a Page post against that id, so a Page
+        // without one is never a target. Yad2/Madlan have no equivalent.
         let pages = [];
         let groups = {};
         if (platform === "facebook") {
           try {
             await page.goto(process.env.FB_PAGES_PAGE || "https://www.facebook.com/pages/?category=your_pages", { waitUntil: "domcontentloaded", timeout: 30000 });
-            pages = await page.$$eval('a[href*="facebook.com/"][role="link"]', (els) => els.map((a) => ({ url: a.href.split("?")[0], name: (a.textContent || "").trim() })).filter((x) => x.name && /facebook\.com\/[^/]+\/?$/.test(x.url)).slice(0, 10));
+            const links = await page.$$eval('a[href*="facebook.com/"][role="link"]', (els) => els.map((a) => ({ href: a.href, name: (a.textContent || "").trim() })));
+            pages = await withPageIds(page, pageLinks(links));
           } catch (e) { pages = []; }
           // Which groups this account is actually a member of (Task 14): the
           // campaign gate later posts only there. A scrape failure must not
@@ -279,3 +339,4 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 };
 
 module.exports.PLATFORMS = PLATFORMS;
+module.exports._test = { pageLinks, withPageIds, titleLabel, identityLabel };

@@ -175,7 +175,7 @@ function publicMember(m, cat, defaults) {
   };
 }
 
-// ── the agent's Facebook Pages ──
+// ── the agent's Facebook Pages (a Page is a campaign target only with its numeric id, I4) ──
 const pagesOf = (conn) => (Array.isArray(conn && conn.facebook_pages) ? conn.facebook_pages.filter((p) => p && p.url) : []);
 // The card's handle for a Page: its id, or a hash of its URL (no URL leaves).
 const pageKey = (p) => (p.id ? String(p.id) : `u:${crypto.createHash("sha256").update(String(p.url)).digest("hex").slice(0, 16)}`);

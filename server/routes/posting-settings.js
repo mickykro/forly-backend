@@ -106,7 +106,9 @@ module.exports = function mountPostingSettings(router, S, auth) {
       member_groups: await publicMembers(conn, lookup),
       hidden_group_ids: hiddenList(conn).map((h) => h.ids[0]),
       suggested_groups: suggested,
-      pages: S_.pagesOf(conn).map((p) => ({ id: S_.pageKey(p), name: p.name || "דף ללא שם" })),
+      // available: this Page's numeric id is known, so it can be a campaign target (I4).
+      pages: S_.pagesOf(conn).map((p) => ({ id: S_.pageKey(p), name: p.name || "דף ללא שם", available: A.numericPageId(p) })),
+      page_target_available: A.pageTargetAvailable(conn),
       page_publisher: conn.page_publisher || "browser",
       first_post_estimate: est.at, first_post_wait_reason: est.reason,
       groups_synced_at: conn.facebook_groups_synced_at || null,
@@ -153,6 +155,10 @@ module.exports = function mountPostingSettings(router, S, auth) {
     }
     const targets = t.targets || (Array.isArray(prev.targets) && prev.targets.length ? prev.targets : S_.TARGETS);
     if (targets.includes("page") && !S_.pageConfirmed(conn, pageId)) return res.status(409).json({ error: "page_not_confirmed" });
+    // A Page asked for by name must be one the browser can prove (its numeric id, I4).
+    if (t.targets && t.targets.includes("page") && !A.pageTarget(Object.assign({}, conn, { posting_permission: Object.assign({}, prev, { page_id: pageId }) }))) {
+      return res.status(409).json({ error: "page_target_unavailable" });
+    }
 
     // granted_at is when THIS consent (this text version) was given.
     const renewed = prev.enabled === true && prev.consent_version === CONSENT_VERSION && prev.granted_at;

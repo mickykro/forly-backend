@@ -22,6 +22,10 @@
   // Only an https facebook.com URL may become a link: never a viewer, a wss:// or anything else.
   const fbUrl = (u) => (typeof u === "string" && /^https:\/\/(?:www\.|m\.|web\.)?facebook\.com\/[^\s"'<>\\]*$/i.test(u) && !/wss?:|viewer/i.test(u) ? u : null);
   const DISALLOWED = new Set(["forbidden", "disallowed", "not_allowed", "no_agents"]);
+  // The Pages the card may offer (I4): none until the server says a Page
+  // target is available (its numeric id was read at connect), and only those.
+  const cardPages = (settings) => (settings && settings.page_target_available === true && Array.isArray(settings.pages)
+    ? settings.pages.filter((p) => p && p.available === true) : []);
 
   const OFF_FOR_ALL = "הפרסום האוטומטי כבוי כרגע אצלנו, לכל החשבונות. נחזור בקרוב — לא צריך לעשות כלום. אפשר תמיד לעצור.";
   const DISABLED = {
@@ -52,6 +56,8 @@
     too_many_campaigns: "כבר יש שלושה נכסים בפרסום אוטומטי — עצרו אחד מהם קודם.",
     not_paused: "הפרסום כבר לא מושהה.",
     not_resumable: "אי אפשר להמשיך כרגע — החשבון עדיין ממתין לבדיקה.",
+    needs_developer: "הצוות שלנו מתקן תקלה אצלנו ויחזיר את הפרסום בעצמו — לא צריך לעשות כלום.",
+    page_target_unavailable: "עוד אי אפשר לפרסם אוטומטית בדף העסקי — חברו מחדש את החשבון כדי שנזהה את הדף.",
     not_found: "לא מצאנו את זה — רעננו את העמוד.", post_not_found: "הפוסט הזה כבר לא קיים — רעננו את העמוד.",
     invalid_input: "משהו בבחירה לא תקין — בדקו ונסו שוב.",
   };
@@ -101,7 +107,7 @@
     team: "⚠️ פייסבוק עצרה את הפרסום מהחשבון. הפרסום מושהה עד שהצוות שלנו יבדוק — נחזור אליכם.",
     reconnect: "🔑 החיבור לחשבון הפייסבוק פג. כדי שהפרסום ימשיך, צריך לחבר אותו מחדש מעמוד ההפצה, ואז ללחוץ \"להמשיך\".",
     consecutive_failures: "⏸ שני פוסטים ברצף לא עלו, אז פורלי עצרה לבדוק. בדקו שאתם עדיין חברים בקבוצות, ואז אפשר להמשיך.",
-    internal: "⏸ משהו אצלנו לא עבד כמו שצריך, אז פורלי עצרה את הפרסום של הנכס הזה. הצוות שלנו בודק; אפשר לנסות להמשיך.",
+    internal: "⏸ משהו אצלנו לא עבד כמו שצריך, אז פורלי עצרה את הפרסום של הנכס הזה. הצוות שלנו כבר מתקן את זה ויחזיר את הפרסום — לא צריך לעשות כלום.",
     permission: "⏸ הפרסום מושהה כי ההרשאה לפורלי לפרסם בשמכם בוטלה. כדי להמשיך צריך לאשר מחדש.",
     agent: "⏸ הפרסום מושהה. לחצו \"להמשיך\" כשתרצו.",
     account: "החשבון חזר לפעולה. לחצו \"להמשיך\" כדי שפורלי תחזור לפרסם.",
@@ -130,6 +136,7 @@
     if (c && c.status === "paused") {
       const r = c.pause_reason;
       if (r === "permission") return { cls: "paused", text: HALT.permission, reconsent: true };
+      if (r === "internal") return { cls: "paused", text: HALT.internal }; // R5: the team resumes it, not the agent
       return { cls: "paused", text: HALT[r] || HALT.agent, resume: true };
     }
     if (c && c.status === "running" && /^posting_disabled:/.test(c.wait_reason || "")) return { cls: "off", text: waitText(c.wait_reason) };
@@ -197,7 +204,7 @@
   }
 
   const CampaignUI = {
-    esc, fmt, fbUrl, errorText, disabledText, waitText, estimateText, haltInfo, approveBlocked, statusText, metricsText, usable, groupNote,
+    esc, fmt, fbUrl, cardPages, errorText, disabledText, waitText, estimateText, haltInfo, approveBlocked, statusText, metricsText, usable, groupNote,
     defaultPicks, planText, chipText, splitPasses, FIRST_WEEK, REACH_NOTE, HALT, ERRORS,
   };
   if (typeof module === "object" && module.exports) { module.exports = CampaignUI; return; }
@@ -218,7 +225,7 @@
     const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
     let settings = null, campaign = null, picked = new Set(), consentGiven = false, timer = null;
     const members = () => (settings && settings.member_groups) || [];
-    const pages = () => (settings && settings.pages) || [];
+    const pages = () => U.cardPages(settings);
     const mode = () => (document.querySelector('input[name="campMode"]:checked') || {}).value || "per_post";
     const live = (c) => !!c && (c.status === "running" || c.status === "paused");
     // The Page is opt-in (never a default): the Graph "פרסום בדף הפייסבוק" above is outside the campaign's duplicate checks.

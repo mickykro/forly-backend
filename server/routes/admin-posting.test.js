@@ -113,7 +113,8 @@ const noFullPhone = (raw, what) => {
         const g = await call(sE, "GET", "/p/overview", as(ADMIN, false));
         assert.equal(g.status, 200); assert.equal(g.body.env_forced_off, e.POSTING_ENABLED !== "1");
         // Allowed: reaches the route (a stale version → 409, nothing written). Refused: 503 before anything.
-        const paths = allowed ? ["/switch"] : ["/switch", "/switch/platform", "/switch/visible", `/accounts/${P.captcha}/reenable`, `/accounts/${P.compromised}/revoke-profile`];
+        const paths = allowed ? ["/switch"] : ["/switch", "/switch/platform", "/switch/visible", `/accounts/${P.captcha}/reenable`, `/accounts/${P.compromised}/revoke-profile`,
+          `/attempts/${"a".repeat(32)}/resolve`, "/campaigns/abc/resume"];
         for (const path of paths) {
           const r = await call(sE, "POST", `/p${path}`, as(ADMIN), { enabled: true, reason: "x", version: 99 });
           if (allowed) assert.equal(r.status, 409, path);
@@ -375,6 +376,68 @@ const noFullPhone = (raw, what) => {
     assert.equal(done.expire_at.getTime() - Date.parse(done.updated_at), 30 * DAY);
     const job = await require("../extract-jobs").create({ phone: P.fine, url: "https://www.yad2.co.il/item/a" }, { db: { saveExtractJob: async () => {} } });
     assert.equal(job.expire_at.getTime() - Date.parse(job.created_at), 7 * DAY, "extract jobs: created_at + 7 d");
+
+    // ── I7: outcome_unknown in the overview, and the operator's verdict (step-up, audited, never a submit) ──
+    {
+      const t0 = new Date(Date.now() - 5 * 3600e3);
+      const unknownAttempt = async (ph, pg) => {
+        const r = await store.reserveAttempt({ phone: ph, page_id: pg, target_type: "group", target_id: "321", target_url: "https://www.facebook.com/groups/321", publisher: "browser",
+          campaign_id: "cz", post_id: "p1", now: t0, limits: { daily_cap: 9, group_global_daily_cap: 9 } });
+        for (const st of ["session_started", "composer_ready", "submit_started", "outcome_unknown"]) await store.transition(r.attempt.key, st, {}, t0);
+        return r.attempt.key;
+      };
+      const k1 = await unknownAttempt(P.fine, "pgu1");
+      const k2 = await unknownAttempt(P.penalty, "pgu2");
+      let ov2 = await overview();
+      noFullPhone(ov2.raw.replace(/"key":"[0-9a-f]+"/g, ""), "overview with unknown attempts");
+      assert.equal(ov2.body.outcome_unknown.count, 2); assert.equal(ov2.body.outcome_unknown.oldest_age_h, 5);
+      assert.deepEqual(ov2.body.outcome_unknown.oldest.map((x) => x.key).sort(), [k1, k2].sort());
+      assert.equal(ov2.body.outcome_unknown.oldest[0].reconcile_tries, 0);
+      const resolve = (key, body, h) => post(`/attempts/${key}/resolve`, body, h);
+      assert.equal((await resolve(k1, { outcome: "posted", reason: "x" }, as(ADMIN, false))).status, 401, "step-up");
+      assert.equal((await resolve("zz", { outcome: "posted", reason: "x" })).body.field, "key");
+      assert.equal((await resolve(k1, { outcome: "maybe", reason: "x" })).body.field, "outcome");
+      assert.equal((await resolve(k1, { outcome: "posted" })).body.error, "reason_required");
+      assert.equal((await resolve("f".repeat(64), { outcome: "posted", reason: "x" })).status, 404);
+      const r1 = await resolve(k1, { outcome: "posted", reason: "found it in the group, call 0521234567" });
+      assert.equal(r1.status, 200, r1.raw); assert.equal(r1.body.state, "verified_posted"); assert.equal(r1.body.audited, true);
+      const a1 = await store.getAttempt(k1);
+      assert.equal(a1.state, "verified_posted"); assert.equal(a1.resolved_by_tail, "0001"); assert.ok(!a1.resolution_reason.includes("0521234567"));
+      const again = await resolve(k1, { outcome: "not_posted", reason: "x" });
+      assert.equal(again.status, 409); assert.equal(again.body.error, "not_outcome_unknown");
+      assert.equal((await resolve(k2, { outcome: "not_posted", reason: "not in the group" })).body.state, "verified_failed");
+      assert.equal((await store.getAttempt(k2)).error_code, "operator_not_posted");
+      assert.equal((await overview()).body.outcome_unknown.count, 0);
+      const ev = await store.listAuditEvents({ sinceMs: Date.now() - 60e3, limit: 50 });
+      assert.equal(ev.filter((e) => e.action === "resolve_attempt").length, 2);
+      noFullPhone(JSON.stringify(ev), "resolve audit");
+    }
+
+    // ── R5: a campaign paused `internal` is listed and resumed by the team (step-up, audited) ──
+    {
+      const halted = (await store.createPostingCampaignIfAbsent({ phone: P.fine, page_id: "pgh", status: "paused", pause_reason: "internal", posts: [], updated_at: new Date().toISOString() })).campaign.id;
+      const blocked = await post(`/campaigns/${halted}/resume`, { reason: "fixed" });
+      assert.equal(blocked.status, 409); assert.equal(blocked.body.error, "not_resumable", "a halted account stays paused");
+      await store.mutatePostingCampaign(halted, () => ({ status: "stopped", pause_reason: "agent" }));
+      const ph = "972521110020";
+      await db.setConnection(ph, { facebook_browser_connected_at: new Date().toISOString() });
+      const made = await store.createPostingCampaignIfAbsent({ phone: ph, page_id: "pgi", status: "paused", pause_reason: "internal", posts: [], selector_failures: 3, updated_at: new Date().toISOString() });
+      const id = made.campaign.id;
+      const ov3 = await overview();
+      assert.deepEqual(ov3.body.internal_paused.map((c) => [c.id, c.phone_tail, c.selector_failures]), [[id, "0020", 3]]);
+      noFullPhone(ov3.raw.replace(/"id":"[0-9a-f]+"/g, ""), "overview with internal pauses");
+      assert.equal((await post(`/campaigns/${id}/resume`, { reason: "x" }, as(ADMIN, false))).status, 401);
+      assert.equal((await post(`/campaigns/${id}/resume`, {})).body.error, "reason_required");
+      assert.equal((await post("/campaigns/nope/resume", { reason: "x" })).status, 404);
+      const ok = await post(`/campaigns/${id}/resume`, { reason: "selectors recalibrated" });
+      assert.equal(ok.status, 200, ok.raw); assert.equal(ok.body.status, "running");
+      assert.equal((await store.getPostingCampaign(id)).status, "running");
+      const not = await post(`/campaigns/${id}/resume`, { reason: "again" });
+      assert.equal(not.status, 409); assert.equal(not.body.error, "not_internal_pause");
+      assert.deepEqual((await overview()).body.internal_paused, []);
+      const ev = await store.listAuditEvents({ sinceMs: Date.now() - 60e3, limit: 50 });
+      assert.equal(ev.filter((e) => e.action === "resume_campaign").length, 1);
+    }
 
     console.log("routes/admin-posting.test.js ok");
   } finally {

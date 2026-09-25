@@ -40,6 +40,7 @@ const OPS = {
   "<": (a, b) => sameType(a, b) && ms(a) < ms(b),
   ">": (a, b) => sameType(a, b) && ms(a) > ms(b),
   ">=": (a, b) => sameType(a, b) && ms(a) >= ms(b),
+  "<=": (a, b) => sameType(a, b) && ms(a) <= ms(b),
   in: (a, b) => b.includes(a),
 };
 const tick = () => new Promise((r) => setImmediate(r));
@@ -53,13 +54,16 @@ function fakeFirestore() {
   const snap = (path) => ({ id: path.split("/").pop(), ref: docRef(path), exists: docs.has(path), data: () => (docs.has(path) ? copy(docs.get(path)) : undefined) });
   const write = (path, d, o = {}) => { assertNoUndefined(d); const c = copy(d); docs.set(path, o.merge && docs.has(path) ? merge(docs.get(path), c) : c); bump(path); };
   const remove = (path) => { docs.delete(path); bump(path); };
-  function query(match, desc, filters = [], lim = 0) {
+  // orderBy: one field, ascending; like Firestore, the order is applied BEFORE the limit.
+  function query(match, desc, filters = [], lim = 0, order = null) {
     return {
-      where: (f, op, v) => { if (!OPS[op]) throw new Error(`op ${op}`); return query(match, desc, filters.concat([[f, op, v]]), lim); },
-      limit: (n) => query(match, desc, filters, n),
+      where: (f, op, v) => { if (!OPS[op]) throw new Error(`op ${op}`); return query(match, desc, filters.concat([[f, op, v]]), lim, order); },
+      limit: (n) => query(match, desc, filters, n, order),
+      orderBy: (f) => { if (!filters.every(([g, op]) => op === "==" || op === "in" || g === f)) throw new Error("a range filter on another field needs that field ordered first"); return query(match, desc, filters, lim, f); },
       async get() {
         stats.queries.push({ on: desc, filters: filters.map(([f, op]) => `${f} ${op}`) });
         let hits = [...docs.keys()].filter(match).filter((p) => filters.every(([f, op, v]) => OPS[op](docs.get(p)[f], v)));
+        if (order) hits.sort((x, y) => (docs.get(x)[order] < docs.get(y)[order] ? -1 : docs.get(x)[order] > docs.get(y)[order] ? 1 : 0));
         if (lim) hits = hits.slice(0, lim);
         return { docs: hits.map(snap) };
       },
@@ -289,6 +293,33 @@ const doc = (p) => fake.docs.get(p);
     const same = await S.mutateConnection(ph, () => null);
     assert.equal(same.posting_owner_review_required, true);
     await assert.rejects(S.mutateConnection("a/b", () => ({})), code("invalid_input"));
+  }
+
+  // ── I7: outcome_unknown enters the reconcile queue; the due list is ordered by
+  //    next_reconcile_at (oldest first) BEFORE the limit, so a long queue never
+  //    starves its oldest; a terminal state leaves the queue ──
+  {
+    const keys = [];
+    for (let i = 0; i < 4; i++) {
+      const r = await S.reserveAttempt(res({ phone: `97250000070${i}`, page_id: `rc${i}`, target_id: `90${i}`, limits: { daily_cap: 9, group_global_daily_cap: 9 } }));
+      for (const st of ["session_started", "composer_ready", "submit_started"]) await S.transition(r.attempt.key, st, {}, NOW);
+      // the later ones became unknown EARLIER: id order is not due order
+      const u = await S.transition(r.attempt.key, "outcome_unknown", { error_code: "lease_expired" }, new Date(NOW.getTime() + (10 - i) * MIN));
+      assert.equal(u.reconcile_tries, 0); assert.equal(u.next_reconcile_at, new Date(NOW.getTime() + (10 - i) * MIN).toISOString());
+      keys.push(r.attempt.key);
+    }
+    const due = await S.listReconcileDue(new Date(NOW.getTime() + DAY), 2);
+    assert.deepEqual(due.map((a) => a.key), [keys[3], keys[2]], "oldest due first, then limited");
+    assert.ok(fake.stats.queries.some((q) => q.on === "posting_attempts" && q.filters.join() === "next_reconcile_at <="));
+    await S.recordReconcile(keys[3], { reconcile_tries: 1, next_reconcile_at: new Date(NOW.getTime() + 2 * DAY).toISOString() }, NOW);
+    assert.deepEqual((await S.listReconcileDue(new Date(NOW.getTime() + DAY), 2)).map((a) => a.key), [keys[2], keys[1]]);
+    await S.recordReconcile(keys[2], { next_reconcile_at: null }, NOW); // parked for the operator: null never matches a range
+    const done = await S.transition(keys[1], "verified_posted", {}, NOW);
+    assert.equal(done.next_reconcile_at, null, "a terminal state leaves the queue");
+    assert.deepEqual((await S.listReconcileDue(new Date(NOW.getTime() + DAY), 10)).map((a) => a.key), [keys[0]]);
+    await assert.rejects(S.recordReconcile(keys[1], { next_reconcile_at: null }, NOW), code("illegal_transition"), "only an outcome_unknown attempt is rescheduled");
+    await assert.rejects(S.recordReconcile(keys[0], { reconcile_note: "x" }, NOW), code("invalid_input"));
+    await assert.rejects(S.transition(keys[0], "verified_failed", { next_reconcile_at: null }, NOW), code("invalid_input"), "the driver cannot move its own schedule");
   }
 
   console.log("posting-store.firestore.test.js ok");

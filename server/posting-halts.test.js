@@ -195,5 +195,31 @@ const with_ = (deps, o) => Object.assign({}, deps, o);
     assert.equal((await db.getSetting("posting")).enabled, true);
   }
 
+  // ── I6: the fleet breaker's window is settings/posting.fleet_breaker_window_h, default 24 h ──
+  {
+    const t = iso(NOW.getTime() - 5 * HOUR); // three disabling halts five hours ago
+    const halted = async () => { for (const ph of ["9725051", "9725052", "9725053"]) await db.setConnection(ph, { posting_halts: [{ at: t, code: "captcha" }], posting_last_halt_at: t }); };
+    let w = await setup();
+    await halted();
+    assert.equal(await S.sweep(w.deps, w.at(NOW)), 0, "within the default 24 h: tripped");
+    assert.equal((await db.getSetting("posting")).disabled_reason, "fleet_breaker");
+    assert.ok(w.ops.some((m) => /FLEET BREAKER — 3 accounts disabled within 24 h/.test(m)));
+    w = await setup();
+    await db.setSetting("posting", { fleet_breaker_window_h: 4 });
+    await halted();
+    await S.sweep(w.deps, w.at(NOW));
+    assert.equal((await db.getSetting("posting")).enabled, true, "a 4 h window does not reach back five hours");
+    w = await setup();
+    await db.setSetting("posting", { fleet_breaker_window_h: 6 });
+    await halted();
+    await S.sweep(w.deps, w.at(NOW));
+    assert.equal((await db.getSetting("posting")).enabled, false, "a 6 h window does");
+    w = await setup();
+    await db.setSetting("posting", { fleet_breaker_window_h: "junk" });
+    await halted();
+    await S.sweep(w.deps, w.at(NOW));
+    assert.equal((await db.getSetting("posting")).enabled, false, "an invalid window falls back to 24 h");
+  }
+
   console.log("posting-halts.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

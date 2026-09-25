@@ -103,6 +103,8 @@ module.exports = function createPostingRouter(ctx) {
     if (others.length >= MAX_ACTIVE_CAMPAIGNS) return res.status(409).json({ error: "too_many_campaigns" });
     const wanted = v.targets || S_.TARGETS;
     if (wanted.includes("page") && !S_.pageConfirmed(conn)) return res.status(409).json({ error: "page_not_confirmed" });
+    // Until connect has read the Page's numeric id, R3 could never prove it: refused (I4).
+    if (v.targets && v.targets.includes("page") && !A.pageTarget(conn)) return res.status(409).json({ error: "page_target_unavailable" });
 
     // The hard gate: only groups this account belongs to. The catalog adds
     // names and policy; membership comes from the account (Task 14).
@@ -181,6 +183,9 @@ module.exports = function createPostingRouter(ctx) {
     if (!(await allowed(S, c.phone, res))) return;
     if (c.status === "running") return res.json({ campaign: publicView(c) });
     if (c.status !== "paused") return res.status(409).json({ error: "not_paused", status: c.status });
+    // R5: an internal pause (selector failures, tick errors) is lifted by the
+    // team once it is fixed (the admin overview), never by the agent.
+    if (c.pause_reason === "internal") return res.status(409).json({ error: "needs_developer" });
     // posting-campaign.resume() leaves a campaign paused while the account
     // waits for a reconnect (a login_required halt) or an operator.
     if (S_.needsReconnect((await db.getConnection(c.phone)) || {})) return res.status(409).json({ error: "needs_reconnect" });

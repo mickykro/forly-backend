@@ -128,8 +128,22 @@ const { db, store } = K;
     assert.equal(r.status, 409); assert.equal(r.body.error, "page_not_confirmed");
     assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ targets: ["groups"] }))).status, 201, "groups only needs no Page");
     await db.setConnection(PH, { posting_permission: { page_id: pages[1].url } });
+    // I4: without the Page's numeric id the page target is refused
+    const noId = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2", targets: ["page", "groups"] }));
+    assert.equal(noId.status, 409); assert.equal(noId.body.error, "page_target_unavailable");
+    await db.setConnection(PH, { facebook_pages: [pages[0], Object.assign({ id: "61550000000002" }, pages[1])] });
     const ok = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2", targets: ["page", "groups"] }));
     assert.equal(ok.status, 201); assert.deepEqual(ok.body.campaign.targets, ["page", "groups"]);
+  }
+
+  // ── R5: an internal pause is the team's to lift — the agent's resume is refused ──
+  {
+    const env = await setup();
+    const c = await pendingCampaign(env);
+    await store.mutatePostingCampaign(c.id, () => ({ status: "paused", pause_reason: "internal" }));
+    const r = await call(env.app, "POST", `/api/posting/campaigns/${c.id}/resume`);
+    assert.equal(r.status, 409); assert.equal(r.body.error, "needs_developer");
+    assert.equal((await store.getPostingCampaign(c.id)).status, "paused");
   }
 
   // ── the kill switch: create/resume/approve refused; stop, pause and skip always work ──

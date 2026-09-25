@@ -104,11 +104,14 @@ const isCounting = (a) => countingStates.includes(a.state) || (a.state === "veri
 // The 24 h re-check's own fields (Task 22): written only by recordRecheck.
 const RECHECK_FIELDS = ["recheck_due_at", "recheck_tries", "recheck_attempted_at", "visibility", "reactions", "comments", "checked_at", "first_absent_at"];
 const RECHECK_MS = 24 * 3600000;
+// outcome_unknown's reconciliation schedule (I7): written only by recordReconcile
+// (the sweeper), and set/cleared by the transitions into and out of it.
+const RECONCILE_FIELDS = ["reconcile_tries", "next_reconcile_at", "reconcile_attempted_at"];
 // Fields `detail` may never overwrite: they are the attempt's identity and bookkeeping.
 const PROTECTED = new Set(["key", "state", "history", "lease_until", "reserved_at", "finished_at", "updated_at", "released", "failed_after_submit",
   "phone", "page_id", "campaign_id", "post_id", "target_type", "target_id", "target_url", "publisher", "platform", "date",
   "budget_key", "activity_key", "dedup_key", "fingerprint", "copy_hash", "confirm_membership",
-  "click_id", "click_issued_at", "click_expires_at", ...RECHECK_FIELDS]);
+  "click_id", "click_issued_at", "click_expires_at", ...RECHECK_FIELDS, ...RECONCILE_FIELDS]);
 const CLICK_TTL_MS = 30 * 86400000; // R4: a click id resolves for 30 days
 
 const HEX = /^[0-9a-f]{1,64}$/;
@@ -257,8 +260,9 @@ async function applyTransition(key, to, detail, nowIn, guard) {
 
     const next = { ...extra, state: to, updated_at: at, history: (a.history || []).concat([{ state: to, at }]) };
     if (TERMINAL.has(to)) { next.finished_at = at; next.lease_until = null; }
-    else if (to === "outcome_unknown") next.lease_until = null; // parked for reconciliation, never reaped again
+    else if (to === "outcome_unknown") Object.assign(next, { lease_until: null, reconcile_tries: 0, next_reconcile_at: at }); // parked for reconciliation, never reaped again
     else next.lease_until = new Date(now.getTime() + LEASE_MS).toISOString();
+    if (TERMINAL.has(to) && a.next_reconcile_at) next.next_reconcile_at = null; // out of the reconcile queue
     if (to === "verified_failed" && !PRE_SUBMIT.has(a.state)) next.failed_after_submit = true;
     // A group post is looked at again a day later (Task 22, posting-recheck.js).
     if ((to === "verified_posted" || to === "submitted_for_approval") && a.target_type === "group") next.recheck_due_at = new Date(now.getTime() + RECHECK_MS).toISOString();
@@ -299,15 +303,18 @@ async function annotate(key, detail, nowIn) {
   });
 }
 
-async function queryAttempts(where, memFilter, limit) {
+// `orderBy`: one field, ascending (the memory path sorts the same way).
+async function queryAttempts(where, memFilter, limit, orderBy) {
   const fdb = firestore();
   if (fdb) {
     let q = fdb.collection(ATT);
     for (const [f, op, v] of where) q = q.where(f, op, v);
+    if (orderBy) q = q.orderBy(orderBy);
     if (limit) q = q.limit(limit);
     return (await q.get()).docs.map((d) => d.data());
   }
   const out = [...maps[ATT].values()].filter(memFilter).map((a) => structuredClone(a));
+  if (orderBy) out.sort((x, y) => (x[orderBy] < y[orderBy] ? -1 : x[orderBy] > y[orderBy] ? 1 : 0));
   return limit ? out.slice(0, limit) : out;
 }
 
@@ -430,24 +437,37 @@ const isoOrNull = (v) => v === null || (typeof v === "string" && !Number.isNaN(D
 const countOrNull = (v) => v === null || (Number.isInteger(v) && v >= 0 && v < 1e9);
 const RECHECK_CHECK = { visibility: (v) => VISIBILITY.has(v), reactions: countOrNull, comments: countOrNull, recheck_tries: (v) => Number.isInteger(v) && v >= 0 && v < 100,
   recheck_due_at: isoOrNull, recheck_attempted_at: isoOrNull, checked_at: isoOrNull, first_absent_at: isoOrNull };
-// Aggregates only — never who reacted. → the merged attempt.
-async function recordRecheck(key, patch, nowIn) {
-  if (!isPlainObject(patch) || !Object.keys(patch).length) throw fail("invalid_input", "recheck patch required");
-  const bad = Object.keys(patch).filter((k) => !RECHECK_CHECK[k] || !RECHECK_CHECK[k](patch[k]));
-  if (bad.length) throw fail("invalid_input", `recheck: ${bad.join(", ")}`);
+// A writer for one group of fields, each checked. → the merged attempt.
+// `onlyState`: the attempt must (still) be in that state, inside the transaction.
+const recordFields = (name, CHECK, onlyState) => async (key, patch, nowIn) => {
+  if (!isPlainObject(patch) || !Object.keys(patch).length) throw fail("invalid_input", `${name} patch required`);
+  const bad = Object.keys(patch).filter((k) => !CHECK[k] || !CHECK[k](patch[k]));
+  if (bad.length) throw fail("invalid_input", `${name}: ${bad.join(", ")}`);
   const at = toDate(nowIn).toISOString();
   return runTx(maps, async (tx) => {
     const a = await tx.get(ATT, key);
     if (!a) throw fail("not_found", "attempt not found");
+    if (onlyState && a.state !== onlyState) throw fail("illegal_transition", `${name}: attempt is ${a.state}`);
     tx.set(ATT, key, { ...patch, updated_at: at }, { merge: true });
     return Object.assign({}, a, patch, { updated_at: at });
   });
-}
+};
+// Aggregates only — never who reacted.
+const recordRecheck = recordFields("recheck", RECHECK_CHECK);
+const recordReconcile = recordFields("reconcile", { reconcile_tries: RECHECK_CHECK.recheck_tries, next_reconcile_at: isoOrNull, reconcile_attempted_at: isoOrNull }, "outcome_unknown");
 // Attempts whose re-check is due (single-field range: no composite index).
 const listRecheckDue = (nowIn, limit = 50) => {
   const iso = toDate(nowIn).toISOString();
   const due = (a) => typeof a.recheck_due_at === "string" && a.recheck_due_at < iso;
   return queryAttempts([["recheck_due_at", "<", iso]], due, limit).then((rows) => rows.filter(due));
+};
+// outcome_unknown attempts whose next reconciliation is due, the longest
+// waiting first — so the first 50 by id can never starve the rest (I7).
+// Single-field range + order on the same field: no composite index.
+const listReconcileDue = (nowIn, limit = 50) => {
+  const iso = toDate(nowIn).toISOString();
+  const due = (a) => typeof a.next_reconcile_at === "string" && a.next_reconcile_at <= iso && a.state === "outcome_unknown";
+  return queryAttempts([["next_reconcile_at", "<=", iso]], due, limit, "next_reconcile_at").then((rows) => rows.filter(due));
 };
 // R4: a click id's doc, or null. Write-once, so a plain read is enough.
 async function getClick(click_id) {
@@ -463,6 +483,6 @@ module.exports = {
   LEASE_MS, EDGES, countingStates, isCounting,
   attemptKey, reserveAttempt, transition, annotate, recordGroupAlias, groupIdsFor, reapExpired, cancelOpenAttempts,
   getAttempt, listAttemptsByPhone, listAttemptsByState, listOpenAttemptsByCampaign, getGroupActivityFor,
-  recordRecheck, listRecheckDue, getClick, VISIBILITY,
+  recordRecheck, listRecheckDue, recordReconcile, listReconcileDue, getClick, VISIBILITY,
   _test: { reset, maps, dedupKey, lastDates },
 };

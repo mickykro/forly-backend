@@ -67,6 +67,11 @@ t("halt boxes: one class per account state, strongest first", () => {
   assert.strictEqual(rc.cls, "reconnect"); assert.ok(rc.reconnect && !rc.resume);
   assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "account" }).resume, "a lifted halt lets the agent resume");
   assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "consecutive_failures" }).resume);
+  // R5: an internal (selector_failure) pause is the team's to lift — no resume, and the box says the team is fixing it
+  const internal = U.haltInfo({}, { status: "paused", pause_reason: "internal" });
+  assert.ok(!internal.resume && !internal.reconsent && !internal.reconnect, "no action for the agent");
+  assert.ok(/מתקן/.test(internal.text) && !/אפשר לנסות להמשיך/.test(internal.text));
+  assert.ok(/מתקן/.test(U.errorText({ code: "needs_developer" })));
   assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "permission" }).reconsent);
   assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:global_off" }).cls, "off");
   assert.strictEqual(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z" }, running).cls, "penalty");
@@ -141,6 +146,15 @@ t("a restarted campaign's earlier posts are history", () => {
   assert.deepStrictEqual(current.map((p) => p.id), ["c"]);
   assert.deepStrictEqual(earlier.map((p) => p.id), ["a", "b"]);
   assert.strictEqual(U.splitPasses({ posts: [{ id: "x" }] }).current.length, 1);
+});
+
+t("the Page option is hidden until the server can target a Page (I4)", () => {
+  const pages = [{ id: "u:abc", name: "No id", available: false }, { id: "61550000000000", name: "Dana", available: true }];
+  assert.deepStrictEqual(U.cardPages({ pages, page_target_available: false }), [], "no numeric Page id yet: no Page option");
+  assert.deepStrictEqual(U.cardPages({ pages }), []);
+  assert.deepStrictEqual(U.cardPages({ pages, page_target_available: true }).map((p) => p.name), ["Dana"], "only the Pages with an id");
+  assert.deepStrictEqual(U.cardPages(null), []);
+  assert.ok(/חברו מחדש/.test(U.errorText({ code: "page_target_unavailable" })));
 });
 
 console.log(`publish-campaign.test.js: ${n} passed`);

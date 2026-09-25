@@ -24,11 +24,12 @@
   var PLATFORM_LABELS = { facebook: "פייסבוק", yad2: "יד2", madlan: "מדלן" };
   var AUDIT_LABELS = {
     switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
-    reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל",
+    reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל", resolve_attempt: "הכרעה בפוסט לא ידוע", resume_campaign: "המשך קמפיין",
   };
   var SECTION_LABELS = {
     switch: "המתגים", health: "הבריאות", campaigns: "ספירת הקמפיינים", accounts_disabled: "החשבונות המושבתים",
     halts_recent: "העצירות האחרונות", accounts: "פרטי החשבונות", audit: "יומן הפעולות",
+    unknown_attempts: "הפוסטים בתוצאה לא ידועה", internal_paused: "הקמפיינים שנעצרו בתקלה",
   };
   var ERRORS = {
     version_conflict: "המתג שונה בינתיים — המצב נטען מחדש",
@@ -37,6 +38,8 @@
     agent_confirmation_required: "נדרש אישור שהסוכן וידא את תקינות החשבון",
     reconnect_required: "הסוכן צריך להתחבר מחדש עם פרופיל חדש לפני הפעלה מחדש",
     not_disabled: "החשבון כבר פעיל", reason_required: "חובה לכתוב סיבה", not_found: "החשבון לא נמצא",
+    not_outcome_unknown: "הפוסט כבר לא בתוצאה לא ידועה — המצב נטען מחדש", not_internal_pause: "הקמפיין כבר לא עצור בגלל תקלה",
+    not_resumable: "החשבון עצמו עצור — קודם צריך להפעיל אותו מחדש", posting_unavailable_in_env: "בסביבה הזו אין פרסום אוטומטי",
   };
 
   function fmt(v) {
@@ -171,6 +174,9 @@
     $("#postingHalted").innerHTML = html.join("");
     $("#postingHaltedEmpty").classList.toggle("hidden", html.length > 0);
 
+    renderUnknown(d.outcome_unknown);
+    renderInternal(d.internal_paused);
+
     var h = d.posting_health;
     $("#postingHealth").textContent = !h ? "לא נטען." : "סריקה אחרונה: " + fmt(h.last_sweep_at) + " · ניסיונות שלא שוחררו: " + (h.reap_failures_count || 0) +
       " · ביטולים שנכשלו: " + (h.cancel_failures_count || 0) + (d.owner_configured ? "" : " · POSTING_OWNER_PHONES לא מוגדר");
@@ -178,6 +184,47 @@
       return "<li>" + esc(fmt(e.at)) + " · " + esc(AUDIT_LABELS[e.action] || e.action) + " · …" + esc(e.operator_tail || "?") +
         (e.target_phone_tail ? ' → <span dir="ltr">…' + esc(e.target_phone_tail) + "</span>" : "") + (e.reason ? " · " + esc(e.reason) : "") + "</li>";
     }).join("") || '<li class="p-addr">אין פעולות ב-30 הימים האחרונים.</li>';
+  }
+
+  // I7: outcome_unknown attempts — the verdict is the operator's, after checking the group by hand.
+  function renderUnknown(u) {
+    $("#postingUnknownSummary").textContent = !u ? "לא נטען." : u.count ? (u.count_capped ? u.count + "+" : u.count) +
+      " פוסטים ממתינים · הוותיק ביותר: " + (u.oldest_age_h == null ? "—" : u.oldest_age_h + " שעות") +
+      " · כל פוסט נבדק עד 3 פעמים; אחרי זה — בדקו בקבוצה וסמנו. שום דבר לא מתפרסם מכאן." : "אין פוסטים בתוצאה לא ידועה.";
+    $("#postingUnknown").innerHTML = ((u && u.oldest) || []).map(function (x) {
+      var btn = function (o, l) { return '<button type="button" class="btn btn-ghost btn-sm" data-resolve="' + o + '" data-key="' + esc(x.key) + '">' + l + "</button>"; };
+      return '<tr><td class="num" dir="ltr">…' + esc(x.phone_tail) + '</td><td class="p-addr num">' + esc(fmt(x.since)) + "</td><td>" + esc(x.reconcile_tries) +
+        (x.next_reconcile_at ? " · הבאה " + esc(fmt(x.next_reconcile_at)) : " · לבדיקה ידנית") + "</td><td>" + esc(x.note || "—") + "</td><td>" +
+        btn("posted", "עלה") + " " + btn("not_posted", "לא עלה") + "</td></tr>";
+    }).join("");
+  }
+  // R5: campaigns paused `internal` — resumed from here once the fix is in.
+  function renderInternal(list) {
+    $("#postingInternal").innerHTML = (list || []).map(function (c) {
+      return '<tr><td class="num" dir="ltr">…' + esc(c.phone_tail) + '</td><td class="p-addr num">' + esc(fmt(c.updated_at)) + "</td><td>" +
+        esc((c.selector_failures || 0) + " ממשק · " + (c.tick_errors || 0) + " פנימיות") + '</td><td><button type="button" class="btn btn-ghost btn-sm" data-resume="' +
+        esc(c.id) + '">המשך</button></td></tr>';
+    }).join("");
+    $("#postingInternalEmpty").classList.toggle("hidden", !!(list && list.length));
+  }
+  function resolveOne(btn) {
+    var posted = btn.dataset.resolve === "posted";
+    if (!window.confirm(posted ? "בדקתם בקבוצה והפוסט שם? הוא יסומן כפורסם." : "בדקתם בקבוצה והפוסט לא שם? הוא יסומן כלא פורסם (ולא יפורסם שוב).")) return;
+    var reason = askReason("מה בדקתם?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/attempts/" + encodeURIComponent(btn.dataset.key) + "/resolve", { outcome: btn.dataset.resolve, reason: reason })
+      .then(function (d) { saved(d, "✅ נשמר"); return load(); })
+      .catch(function (e) { btn.disabled = false; handleError(e, "הפעולה נכשלה"); if (e && e.code === "not_outcome_unknown") load(); });
+  }
+  function resumeOne(btn) {
+    if (!window.confirm("התקלה תוקנה? הקמפיין ימשיך לפרסם.")) return;
+    var reason = askReason("מה תוקן?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/campaigns/" + encodeURIComponent(btn.dataset.resume) + "/resume", { reason: reason })
+      .then(function (d) { saved(d, "✅ הקמפיין ממשיך"); return load(); })
+      .catch(function (e) { btn.disabled = false; handleError(e, "הפעולה נכשלה"); });
   }
 
   function act(btn) {
@@ -235,5 +282,13 @@
   $("#postingHalted").addEventListener("click", function (ev) {
     var btn = ev.target.closest("[data-posting-act]");
     if (btn) act(btn);
+  });
+  $("#postingUnknown").addEventListener("click", function (ev) {
+    var btn = ev.target.closest("[data-resolve]");
+    if (btn) resolveOne(btn);
+  });
+  $("#postingInternal").addEventListener("click", function (ev) {
+    var btn = ev.target.closest("[data-resume]");
+    if (btn) resumeOne(btn);
   });
 })();

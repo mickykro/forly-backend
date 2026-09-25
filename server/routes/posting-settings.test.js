@@ -49,9 +49,17 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal(s.body.pages.length, 2); assert.equal(s.body.pages[1].id, "12345");
     assert.ok(/^u:[0-9a-f]{16}$/.test(s.body.pages[0].id)); assert.ok(!s.raw.includes("agentone"), "no Page URL in the response");
     assert.equal((await put(app, enable({ page_id: "nope" }))).body.error, "unknown_page");
-    const ok = await put(app, enable({ page_id: s.body.pages[0].id, targets: ["page", "groups"] }));
-    assert.equal(ok.status, 200); assert.equal(ok.body.permission.page_id, s.body.pages[0].id);
-    assert.equal((await db.getConnection(PH)).posting_permission.page_id, pages[0].url, "stored as posting-account.pageTarget() reads it");
+    // I4: a Page is a target only with its numeric id, and the card says which ones are
+    assert.equal(s.body.page_target_available, true);
+    assert.deepEqual(s.body.pages.map((p) => p.available), [false, true]);
+    const noId = await put(app, enable({ page_id: s.body.pages[0].id, targets: ["page", "groups"] }));
+    assert.equal(noId.status, 409); assert.equal(noId.body.error, "page_target_unavailable");
+    assert.equal((await put(app, enable({ page_id: s.body.pages[0].id, targets: ["groups"] }))).status, 200, "choosing it for later is fine");
+    const ok = await put(app, enable({ page_id: s.body.pages[1].id, targets: ["page", "groups"] }));
+    assert.equal(ok.status, 200); assert.equal(ok.body.permission.page_id, s.body.pages[1].id);
+    assert.equal((await db.getConnection(PH)).posting_permission.page_id, "12345", "stored as posting-account.pageTarget() reads it");
+    await db.setConnection(PH, { facebook_pages: [{ url: "https://www.facebook.com/agentone", name: "One" }] });
+    assert.equal((await call(app, "GET", "/api/posting/settings")).body.page_target_available, false, "no numeric id: no Page option");
   }
 
   // ── enabled:false: works with posting switched off, and before the response
