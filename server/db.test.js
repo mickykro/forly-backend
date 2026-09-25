@@ -67,5 +67,30 @@ const page = (id, phone, slug) => ({
   await db.clearPendingDelete("0500000000", "yad2");
   assert.equal((await db.listPendingDeletes()).length, 1);
 
+  // ── operator settings: compare-and-set ──
+  assert.strictEqual(await db.getSetting("posting"), null, "no doc yet");
+  let saved = await db.setSetting("posting", { enabled: true }, { expectVersion: 0 });
+  assert.equal(saved.enabled, true);
+  assert.equal(saved.version, 1);
+  assert.ok(saved.updated_at);
+
+  saved = await db.setSetting("posting", { enabled: false }, { expectVersion: 1 });
+  assert.equal(saved.enabled, false);
+  assert.equal(saved.version, 2, "version increments on every write");
+
+  await assert.rejects(
+    () => db.setSetting("posting", { enabled: true }, { expectVersion: 1 }),
+    (e) => e.code === "version_conflict",
+    "a stale expectVersion is refused",
+  );
+  const afterConflict = await db.getSetting("posting");
+  assert.equal(afterConflict.enabled, false, "a rejected CAS write must not land");
+  assert.equal(afterConflict.version, 2);
+
+  // ── no expectVersion: always writes, still bumps version ──
+  saved = await db.setSetting("posting", { platforms: { facebook: true } }, undefined);
+  assert.equal(saved.version, 3);
+  assert.equal(saved.enabled, false, "prior fields survive a partial-value write");
+
   console.log("db.test.js OK");
 })().catch((err) => { console.error(err); process.exit(1); });

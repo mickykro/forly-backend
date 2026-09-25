@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map(), extractJobs: new Map(), listingDrafts: new Map(), profileDeletes: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map(), extractJobs: new Map(), listingDrafts: new Map(), profileDeletes: new Map(), settings: new Map() };
 
 // A personal `gcloud auth application-default login` file works until Google
 // demands a re-login ("invalid_rapt"), and every Firestore call then fails for
@@ -293,6 +293,39 @@ async function setConnection(phone, patch) {
 // profile's reserved/session_started/composer_ready attempts stop instead of
 // running against a profile that assertOwnership now refuses.
 async function cancelOpenAttempts(phone, platform) {}
+
+// ── operator settings (compare-and-set) ──
+// One doc per key (e.g. "posting"), read by posting-guard.js on every
+// assertAllowed() call — nothing is cached there, so a flipped switch here is
+// seen at once. expectVersion lets an operator UI refuse to clobber a
+// concurrent edit; a missing doc counts as version 0.
+async function getSetting(key) {
+  if (db) { const d = await db.collection("settings").doc(key).get(); return d.exists ? d.data() : null; }
+  return mem.settings.get(key) || null;
+}
+
+function versionConflict() {
+  const e = new Error("stale settings version"); e.code = "version_conflict"; return e;
+}
+
+async function setSetting(key, value, { expectVersion } = {}) {
+  if (db) {
+    return db.runTransaction(async (tx) => {
+      const ref = db.collection("settings").doc(key);
+      const snap = await tx.get(ref);
+      const current = snap.exists ? snap.data() : {};
+      if (expectVersion !== undefined && (current.version || 0) !== expectVersion) throw versionConflict();
+      const next = Object.assign({}, current, value, { version: (current.version || 0) + 1, updated_at: new Date().toISOString() });
+      tx.set(ref, next);
+      return next;
+    });
+  }
+  const current = mem.settings.get(key) || {};
+  if (expectVersion !== undefined && (current.version || 0) !== expectVersion) throw versionConflict();
+  const next = Object.assign({}, current, value, { version: (current.version || 0) + 1, updated_at: new Date().toISOString() });
+  mem.settings.set(key, next);
+  return next;
+}
 
 // ── profile deletes (pending Driver profile deletions) ──
 // profile-lifecycle.js's revoke()/quarantine() write a row here when the
@@ -651,6 +684,7 @@ module.exports = {
   getLead, saveLead, addLeadSubmission, logPortalEvent,
   getPortfolioSlugReservation, reservePortfolioSlug,
   getConnection, setConnection, cancelOpenAttempts,
+  getSetting, setSetting,
   savePendingDelete, listPendingDeletes, clearPendingDelete,
   saveDistribution, getDistribution, updateDistribution,
   listDistributionsByPage, listQueuedDistributions, addPostAction,
