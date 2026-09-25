@@ -432,5 +432,50 @@ function cycleRand(seq) { let i = 0; return () => seq[i++ % seq.length]; }
     assert.deepEqual(await SD.recheckPost(captcha, "https://www.facebook.com/groups/1/posts/9"), { state: "unknown", reactions: null, comments: null, signal: "captcha" });
   }
 
+  // ── fix round 2, item 1: recheckPost's own navigation is guarded when the
+  // caller passes deps.phone; denied -> zero gotos, no read attempted ──
+  {
+    const page = fakePage();
+    const out = await SD.recheckPost(page, "https://www.facebook.com/groups/1/posts/9", { phone: "p", platform: "facebook", guard: denyOn("navigate") });
+    assert.deepEqual(out, { state: "unknown", reactions: null, comments: null, signal: "posting_disabled" });
+    assert.equal(page.visited.length, 0, "no goto at all");
+  }
+  // without deps.phone, the navigation is unguarded — unchanged behaviour
+  // (Task 22's session wrapper is what must supply it)
+  {
+    const page = fakePage();
+    page.innerText = async (sel) => (sel === S.reactionCount ? "5" : sel === S.commentCount ? "0" : "");
+    const out = await SD.recheckPost(page, "https://www.facebook.com/groups/1/posts/9", { guard: denyOn("navigate") });
+    assert.equal(page.visited.length, 1, "navigated anyway — no phone means no guard");
+    assert.equal(out.state, "visible");
+  }
+
+  // ── fix round 2, item 2: the goBack fallback is itself a guarded
+  // navigation — denied ends the routine early, with the log so far. A
+  // guard that allows the open_post goto but denies the next "navigate"
+  // call (the goBack fallback) exercises exactly that. ──
+  {
+    const feed = [{ href: "https://www.facebook.com/x/posts/100031", author: "A", hasVideo: false, group: null, sponsored: false, reactions: 40, text: "" }];
+    const page = fakePage({ feed });
+    page.goBack = async () => { throw new Error("no history"); };
+    let navigateCalls = 0;
+    const guard = {
+      assertAllowed: async ({ action }) => {
+        if (action !== "navigate") return true;
+        navigateCalls++;
+        // dwell() is called directly here (page already on facebook.com, so
+        // its own leading navigate check is skipped): the open_post goto is
+        // the 1st "navigate" call, the goBack fallback the 2nd — allow the
+        // first, deny the second.
+        if (navigateCalls > 1) { const e = new Error("no"); e.code = "posting_disabled"; e.reason = "test"; throw e; }
+      },
+    };
+    const rand = () => 0.01;
+    const log = await SD.dwell(page, { allowVisible: false }, Object.assign({ rand, guard }, fastWait));
+    assert.ok(log.some((l) => l.action === "open_post"));
+    assert.equal(page.visited.filter((u) => u === "https://www.facebook.com/").length, 0, "the fallback goto to facebook.com never ran — denied");
+    assert.ok(!log.some((l) => l.action === "story"), "the routine ended at the denied fallback, before the story step");
+  }
+
   console.log("social-dwell.test.js ok");
 })();

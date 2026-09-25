@@ -273,7 +273,14 @@ async function dwell(page, opts = {}, deps = {}) {
         }
       }
     }
-    await page.goBack().catch(() => page.goto("https://www.facebook.com/"));
+    try {
+      await page.goBack();
+    } catch {
+      // Fix round 2: the fallback is itself a navigation (R2). Denied ->
+      // the routine ends here, with whatever was already logged.
+      if (!(await checkGuard("navigate", deps))) return log;
+      await page.goto("https://www.facebook.com/");
+    }
     await wait(secs(r, [2, 5]));
   }
 
@@ -378,7 +385,19 @@ async function browseSession({ phone, profileName, note } = {}, deps = {}) {
 // Visit one of the agent's own posts (Task 22): is it still there, and how
 // did it do? `state` (not a boolean) lets the caller tell a confirmed removal
 // apart from a flaky load or a login wall.
-async function recheckPost(page, postUrl) {
+//
+// Fix round 2: `deps` is optional and, when it carries `deps.phone`, guards
+// the navigation (R2) before it happens — denied means zero gotos and
+// state:"unknown". Task 22's own session wrapper (this function is called on
+// an already-open page, not through browseSession) MUST pass `deps` — at
+// least `{ phone, platform: "facebook" }` — for this navigation to be
+// guarded at all; called with no `deps` (as an ad-hoc read, or from a caller
+// that predates this), the navigation runs unguarded, exactly as it always
+// did. See task-17-report.md's "Fix round 2" section.
+async function recheckPost(page, postUrl, deps = {}) {
+  if (deps.phone && !(await checkGuard("navigate", deps))) {
+    return { state: "unknown", reactions: null, comments: null, signal: "posting_disabled" };
+  }
   await page.goto(postUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
   await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
   // The same signal read dwell() uses (dialog/alert text, hasCaptchaFrame,
