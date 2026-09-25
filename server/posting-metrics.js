@@ -19,17 +19,19 @@ async function forCampaign(c, deps = {}) {
   const posts = (c && Array.isArray(c.posts) ? c.posts : []).filter((p) => p && p.id && p.attempt_key && SHOWN.has(p.status));
   if (!posts.length) return {};
   const store = deps.store || require("./posting-store");
-  const visits = await attribution.countGroupVisits(c.id);
-  const leads = await attribution.countLeadsByAttribution(c.id);
+  const [visits, leads, attempts] = await Promise.all([
+    attribution.countGroupVisits(c.id), attribution.countLeadsByAttribution(c.id),
+    Promise.all(posts.map((p) => store.getAttempt(p.attempt_key))), // concurrent, never one round trip per post in turn
+  ]);
   const out = {};
-  for (const p of posts) {
-    const a = (await store.getAttempt(p.attempt_key)) || {};
+  posts.forEach((p, i) => {
+    const a = attempts[i] || {};
     out[p.id] = {
       visits: visits[p.attempt_key] || 0, leads: leads[p.attempt_key] || 0,
       reactions: count(a.reactions), comments: count(a.comments),
       visibility: typeof a.visibility === "string" ? a.visibility : null, checked_at: a.checked_at || null,
     };
-  }
+  });
   return out;
 }
 

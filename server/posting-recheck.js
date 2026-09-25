@@ -184,25 +184,27 @@ async function recheckOne(deps = {}, now) {
     if (!release) continue; // a post or an extract has the profile: a later sweep
     let seen;
     try { seen = await visit(phone, batch, conn, deps, x); } finally { release(); }
+    // A halting page halts the account (R5) FIRST, as reconcileOne does: no
+    // failed write below can skip it. The session already stopped there.
+    const halting = seen.find(haltingOf);
+    if (halting) {
+      try { await H.haltAccount(phone, haltingOf(halting), deps, { campaignId: halting.a.campaign_id }); } // stamped with the clock now
+      catch (e) { console.error(redact(`posting recheck halt ${tail(phone)}: ${code(e)}`)); }
+    }
     const byKey = new Map(seen.map((o) => [o.a.key, o]));
     const anomalies = {};
     for (const a of batch) {
-      const obs = byKey.get(a.key) || null;
-      const patch = patchFor(a, obs, now);
-      if (patch.visibility === "confirmed_removed") {
-        // The penalty first: if it fails, the post stays due and is confirmed again.
-        try { await H.haltAccount(phone, "confirmed_removed", deps, { campaignId: a.campaign_id, group_id: a.target_id }); }
-        catch (e) { console.error(redact(`posting recheck halt …${a.key.slice(-6)}: ${code(e)}`)); continue; }
-      } else if (patch.visibility && patch.visibility !== "visible") anomalies[patch.visibility] = (anomalies[patch.visibility] || 0) + 1;
-      await x.store.recordRecheck(a.key, patch, now);
+      try {
+        const patch = patchFor(a, byKey.get(a.key) || null, now);
+        if (patch.visibility === "confirmed_removed") {
+          // The penalty first: if it fails, the post stays due and is confirmed again.
+          try { await H.haltAccount(phone, "confirmed_removed", deps, { campaignId: a.campaign_id, group_id: a.target_id }); }
+          catch (e) { console.error(redact(`posting recheck halt …${a.key.slice(-6)}: ${code(e)}`)); continue; }
+        } else if (patch.visibility && patch.visibility !== "visible") anomalies[patch.visibility] = (anomalies[patch.visibility] || 0) + 1;
+        await x.store.recordRecheck(a.key, patch, now);
+      } catch (e) { console.error(redact(`posting recheck record …${a.key.slice(-6)}: ${code(e)}`)); } // the next one is still recorded
     }
     await noteAnomalies(x, anomalies, now).catch((e) => console.error(redact(`posting recheck health: ${code(e)}`)));
-    // A halting page halts the account (R5), as a post or a reconcile would. The session already stopped there.
-    const obs = seen.find(haltingOf);
-    if (obs) {
-      try { await H.haltAccount(phone, haltingOf(obs), deps, { campaignId: obs.a.campaign_id }); } // stamped with the clock now
-      catch (e) { console.error(redact(`posting recheck halt ${tail(phone)}: ${code(e)}`)); }
-    }
     return "rechecked";
   }
   return byPhone.size ? "skipped" : "none";

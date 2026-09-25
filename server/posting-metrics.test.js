@@ -45,6 +45,11 @@ async function attempt(id, click) {
     p2: { visits: 1, leads: 0, reactions: null, comments: null, visibility: null, checked_at: null },
   });
   assert.deepEqual(await M.forCampaign({ id: "x", posts: [] }, env.deps), {});
+  // attempts are read concurrently, not one round trip after another
+  let inFlight = 0, peak = 0;
+  const slow = { getAttempt: async (k) => { inFlight++; peak = Math.max(peak, inFlight); await new Promise((r) => setTimeout(r, 5)); inFlight--; return store.getAttempt(k); } };
+  assert.deepEqual(await M.forCampaign(c, { store: slow }), m);
+  assert.equal(peak, 2, "both attempts in flight at once");
 
   // ── publicView: metrics for this campaign's posts only, whitelisted fields ──
   const leaky = Object.assign({}, m, { p1: Object.assign({}, m.p1, { attempt_key: a1.key, click_id: a1.click_id }), ghost: { visits: 9 } });

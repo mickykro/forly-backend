@@ -139,6 +139,23 @@ function harness(deps, { results = {}, page = {}, openThrows = null, real = fals
     assert.equal(h2b.opened.length, 0);
     assert.equal(((await conn()).posting_halts || []).length, 1);
 
+    // fix round 1: the halt comes before the writes — a failing recordRecheck still halts,
+    // and the next sweep opens no session
+    {
+      const { deps: d8 } = await setup();
+      const f1 = await posted("111");
+      const h8 = harness(d8, { results: { 111: { state: "unknown", reactions: null, comments: null, signal: "checkpoint" } } });
+      const real = store.recordRecheck;
+      store.recordRecheck = async (k, patch, n) => { if (patch.visibility) throw Object.assign(new Error("unavailable"), { code: "unavailable" }); return real(k, patch, n); };
+      try { assert.equal(await R.recheckOne(h8.d, new Date(NOW.getTime() + 25 * HOUR)), "rechecked"); }
+      finally { store.recordRecheck = real; }
+      const k8 = await conn();
+      assert.deepEqual((k8.posting_halts || []).map((h) => h.code), ["checkpoint"], "halted although the write failed");
+      assert.equal((await store.getAttempt(f1.key)).visibility, undefined, "the write did fail");
+      assert.equal(await R.recheckOne(h8.d, new Date(NOW.getTime() + 25 * HOUR + 60000)), "skipped");
+      assert.equal(h8.opened.length, 1, "no session on the halted account");
+    }
+
     // a login wall on the GROUP page after a clean "not found": login_required, no removal
     const { deps: d6 } = await setup();
     const l1 = await posted("111"); await posted("222");
