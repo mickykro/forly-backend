@@ -71,11 +71,33 @@ async function denies(opts, deps, reason) {
     "account_disabled",
   );
 
-  // ── account_penalty: posting_penalty_until in the future, action === post only ──
+  // ── account_penalty (R5): only day one of a penalty stops a post — while the
+  //    newest penalising halt is under 24 h old; after that the caps are halved
+  //    (posting-safety), and the guard lets the post through ──
   const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const T0 = new Date("2026-09-23T10:00:00Z");
+  const halted = (hoursAgo, code = "rate_limited") => ({
+    posting_penalty_until: new Date(T0.getTime() + 14 * 86400000).toISOString(),
+    posting_halts: [{ at: new Date(T0.getTime() - hoursAgo * 3600000).toISOString(), code }],
+    posting_permission: GRANTED,
+  });
   await denies(
     { phone: PHONE, platform: PLATFORM, action: "post" },
-    { db: fakeDb({ conn: { posting_penalty_until: future, posting_permission: GRANTED } }), env: {} },
+    { db: fakeDb({ conn: halted(2) }), env: {}, now: T0 },
+    "account_penalty",
+  );
+  assert.strictEqual(
+    await assertAllowed({ phone: PHONE, platform: PLATFORM, action: "post" }, { db: fakeDb({ conn: halted(72) }), env: {}, now: T0 }),
+    true,
+    "3 days into the penalty a post is allowed (caps are halved elsewhere)",
+  );
+  // the newest PENALISING halt counts — a later login_required does not restart day one
+  const mixed = halted(72);
+  mixed.posting_halts.push({ at: new Date(T0.getTime() - 3600000).toISOString(), code: "login_required" });
+  assert.strictEqual(await assertAllowed({ phone: PHONE, platform: PLATFORM, action: "post" }, { db: fakeDb({ conn: mixed }), env: {}, now: T0 }), true);
+  await denies(
+    { phone: PHONE, platform: PLATFORM, action: "post" },
+    { db: fakeDb({ conn: halted(23, "feature_blocked") }), env: {}, now: T0 },
     "account_penalty",
   );
   // a penalty in the future does not block dwell/navigate/session/retry

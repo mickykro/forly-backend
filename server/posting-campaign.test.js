@@ -78,6 +78,43 @@ const PH = "972500000001";
     assert.equal(c.status, "completed", "every group posted once; repeat=false");
   }
 
+  // ── restart (controller ruling 4): create on a completed/stopped campaign
+  //    reactivates it with the new terms; history stays; only future posts ──
+  {
+    const { deps, at } = await setup();
+    let c = await C.create(base(), deps);
+    for (let d = 0; d < 2; d++) {
+      c = await S.tick(c, deps, at(new Date(NOW.getTime() + d * DAY)));
+      c = await S.tick(c, deps, at(dueOf(c, d)));
+    }
+    c = await S.tick(c, deps, at(new Date(dueOf(c, 1).getTime() + MIN)));
+    assert.equal(c.status, "completed");
+    at(new Date(NOW.getTime() + 3 * DAY));
+    const r = await C.create(base({ mode: "per_post", days: 30, consent: { at: iso(NOW.getTime() + 3 * DAY), version: "2026-10-01" }, groups: [{ url: G(222) }] }), deps);
+    assert.equal(r.id, c.id);
+    assert.equal(r.status, "running");
+    assert.equal(r.mode, "per_post");
+    assert.equal(r.consent_version, "2026-10-01");
+    assert.equal(r.pause_reason, null);
+    assert.deepEqual(r.groups.map((g) => g.group_id), ["222"]);
+    assert.equal(r.expires_at, iso(NOW.getTime() + 33 * DAY));
+    assert.equal(r.posts.length, 2, "the posted history is kept");
+    assert.ok(r.posts.every((p) => p.status === "posted"));
+    // the group was posted 2 days ago: the property→group cooldown holds the next post back
+    let t = await S.tick(r, deps, at(new Date(NOW.getTime() + 3 * DAY)));
+    assert.equal(t.posts.length, 2);
+    assert.equal(t.wait_reason, "no_eligible_group");
+    t = await S.tick(t, deps, at(new Date(NOW.getTime() + 16 * DAY)));
+    assert.equal(t.posts.length, 3, "after the cooldown, a new post for the new pass");
+    assert.equal(t.posts[2].group_id, "222");
+    assert.equal(t.posts[2].status, "pending_approval", "per the new mode");
+    // running (and paused) campaigns are returned unchanged: still idempotent
+    assert.equal((await C.create(base({ mode: "standing" }), deps)).mode, "per_post");
+    // a stopped campaign restarts too
+    await C.stop(c.id, deps);
+    assert.equal((await C.create(base(), deps)).status, "running");
+  }
+
   // ── the page is archived mid-campaign: stop, say why, skip what was open ──
   {
     const { deps, at, notes } = await setup();

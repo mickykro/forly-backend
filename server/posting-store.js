@@ -64,6 +64,28 @@ async function updatePostingCampaign(id, patch) {
   });
 }
 
+// Read-modify-write in ONE transaction: fn(campaign) → a patch, or null for
+// "no change". Every read-modify-write of a campaign (its `posts` above all,
+// which a patch replaces as a whole) goes through here, so two writers
+// — an approval and a tick — can never lose each other's change. `fn` must be
+// PURE: Firestore re-runs it when the transaction retries.
+// → the merged campaign; the current one when fn returns null; null if missing.
+async function mutatePostingCampaign(id, fn) {
+  if (typeof id !== "string" || !id || id.includes("/")) throw fail("invalid_input", "campaign id required");
+  if (typeof fn !== "function") throw fail("invalid_input", "fn required");
+  return runTx(maps, async (tx) => {
+    const cur = await tx.get(CAMP, id);
+    if (!cur) return null;
+    const patch = fn(clone(cur));
+    if (patch === null || patch === undefined) return cur;
+    if (!isPlainObject(patch)) throw fail("invalid_input", "patch must be an object");
+    for (const k of ["id", "phone", "page_id"]) if (k in patch && patch[k] !== undefined && patch[k] !== cur[k]) throw fail("invalid_input", `patch may not change ${k}`);
+    const clean = stripUndefined(patch);
+    tx.set(CAMP, id, clean, { merge: true });
+    return deepMerge(cur, clean);
+  });
+}
+
 async function listCampaignsWhere(field, value, limit) {
   const fdb = firestore();
   if (fdb) return (await fdb.collection(CAMP).where(field, "==", value).limit(limit).get()).docs.map((d) => d.data());
@@ -168,7 +190,7 @@ async function listDwellSessionsByPhone(phone, sinceMs) {
 
 module.exports = {
   // campaigns
-  campaignId, createPostingCampaignIfAbsent, getPostingCampaign, updatePostingCampaign,
+  campaignId, createPostingCampaignIfAbsent, getPostingCampaign, updatePostingCampaign, mutatePostingCampaign,
   listPostingCampaignsByStatus, listPostingCampaignsByPhone,
   // attempts (R1) and group activity — posting-attempts.js
   LEASE_MS: attempts.LEASE_MS, EDGES: attempts.EDGES, countingStates: attempts.countingStates, isCounting: attempts.isCounting,

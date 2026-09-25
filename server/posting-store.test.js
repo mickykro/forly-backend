@@ -358,6 +358,33 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.equal((await S.listDwellSessionsByPhone("972500000001", NOW.getTime() + 1)).length, 0);
   }
 
+  // ── the property→target dedup expires after limits.dedup_days (controller ruling 2) ──
+  {
+    S._test.reset();
+    const lim = { daily_cap: 9, group_global_daily_cap: 9, dedup_days: 14 };
+    const a = (await S.reserveAttempt(res({ limits: lim }))).attempt;
+    await walk(a.key, ["session_started", "composer_ready", "submit_started", "verification_pending", "verified_posted"]);
+    const dd = S._test.maps.posting_dedup.get(S._test.dedupKey("pg1", "group", "111"));
+    assert.equal(dd.expires_at, new Date(NOW.getTime() + 14 * DAY).toISOString());
+    const d10 = new Date(NOW.getTime() + 10 * DAY);
+    assert.equal((await S.reserveAttempt(res({ limits: lim, now: d10 }))).reason, "duplicate", "10 days later: still within the cooldown");
+    const d15 = new Date(NOW.getTime() + 15 * DAY);
+    const again = await S.reserveAttempt(res({ limits: lim, now: d15 }));
+    assert.equal(again.ok, true, "15 days later: the expired dedup is treated as absent");
+    const dd2 = S._test.maps.posting_dedup.get(S._test.dedupKey("pg1", "group", "111"));
+    assert.deepEqual(dd2, { key: again.attempt.key, at: d15.toISOString(), expires_at: new Date(d15.getTime() + 14 * DAY).toISOString() }, "overwritten, not merged");
+    // release semantics unchanged: the old attempt no longer owns the doc, so nothing it does removes it
+    assert.equal((await S.getAttempt(a.key)).state, "verified_posted");
+    await S.transition(again.attempt.key, "cancelled", {}, d15);
+    assert.equal(S._test.maps.posting_dedup.has(S._test.dedupKey("pg1", "group", "111")), false, "the owning attempt's release still deletes it");
+    // no dedup_days → never expires (fail closed); a bad value is refused
+    S._test.reset();
+    const p = (await S.reserveAttempt(res())).attempt;
+    await walk(p.key, ["session_started", "composer_ready", "submit_started", "verification_pending", "verified_posted"]);
+    assert.equal((await S.reserveAttempt(res({ now: new Date(NOW.getTime() + 400 * DAY) }))).reason, "duplicate");
+    await assert.rejects(S.reserveAttempt(res({ limits: { daily_cap: 3, group_global_daily_cap: 3, dedup_days: 0 } })), code("invalid_input"));
+  }
+
   // ── no log lines at all in these modules ──
   for (const f of ["posting-store.js", "posting-attempts.js", "posting-tx.js"]) {
     const src = fs.readFileSync(path.join(__dirname, f), "utf8");

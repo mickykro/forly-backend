@@ -7,6 +7,9 @@
  * flipped a second ago.
  */
 const dbLive = require("./db");
+const { SIGNAL_PENALISES } = require("./posting-signals");
+
+const DAY_MS = 86400000;
 
 const VISIBLE_ACTIONS = new Set(["like", "story"]);
 const PERMISSIONED_ACTIONS = new Set(["post", "like", "story", "reserve"]);
@@ -43,10 +46,14 @@ async function assertAllowed({ phone, platform, action }, deps = {}) {
   const settings = await assertFleetAllowed({ platform }, deps);
   if (settings && VISIBLE_ACTIONS.has(action) && settings.visible_interactions_enabled === false) deny("visible_off");
 
+  const nowMs = deps.now instanceof Date ? deps.now.getTime() : Date.now();
   const conn = (await db.getConnection(phone)) || {};
   if (conn.posting_disabled_until_admin === true) deny("account_disabled");
-  if (action === "post" && conn.posting_penalty_until && new Date(conn.posting_penalty_until).getTime() > Date.now()) {
-    deny("account_penalty");
+  // R5: a penalty halves the caps (posting-safety); it stops posting only on
+  // day one — while the newest penalising halt is under 24 h old.
+  if (action === "post" && conn.posting_penalty_until && new Date(conn.posting_penalty_until).getTime() > nowMs) {
+    const lastPenalising = Math.max(0, ...(conn.posting_halts || []).filter((h) => h && SIGNAL_PENALISES.has(h.code)).map((h) => new Date(h.at).getTime()).filter(Number.isFinite));
+    if (nowMs - lastPenalising < DAY_MS) deny("account_penalty");
   }
   if (["revoked", "quarantined"].includes(conn[`${platform}_profile_state`])) deny("profile_revoked");
 

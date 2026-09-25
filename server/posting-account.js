@@ -171,9 +171,23 @@ async function accountView(phone, conn, deps, now, opts = {}) {
   };
 }
 
-// The reservation's hard ceilings for the landing day (16a: required).
-function limitsFor(account, at, config) {
-  return { daily_cap: safety.dailyCapFor(account, at, config), group_global_daily_cap: config.group_global_daily_cap };
+// The posts of the campaign's current pass: after a restart (create on a
+// stopped/completed campaign) older posts are history, not "used" targets.
+function currentPosts(c) {
+  const since = ms(c.restarted_at);
+  const posts = c.posts || [];
+  return Number.isFinite(since) ? posts.filter((p) => OPEN_POST.has(p.status) || ms(p.created_at) >= since) : posts;
+}
+
+// The reservation's hard ceilings for the landing day (16a: required), and
+// how long the property→target dedup holds: the property→group cooldown for
+// a group, 30 days for the Page.
+const PAGE_DEDUP_DAYS = 30;
+function limitsFor(account, at, config, targetType = "group") {
+  return {
+    daily_cap: safety.dailyCapFor(account, at, config), group_global_daily_cap: config.group_global_daily_cap,
+    dedup_days: targetType === "page" ? PAGE_DEDUP_DAYS : config.property_group_cooldown_days,
+  };
 }
 
 // The start of the next Jerusalem calendar day's active window, with the
@@ -186,15 +200,15 @@ function nextDayStart(now, config, rand) {
   return safety.nextActiveTime(new Date(first.getTime() + Math.floor(rand() * (config.day_start_jitter_min || 0)) * MS_MIN), config);
 }
 
-// Re-read, apply, write: the window between the read and the transactional
-// merge is kept as small as the store allows (posts is replaced as a whole).
+// Every read-modify-write of a campaign: one store transaction
+// (mutatePostingCampaign), so concurrent writers never lose each other's
+// change to `posts`. `fn` must be pure — it may run more than once.
 async function mutate(x, id, fn) {
-  const cur = await x.store.getPostingCampaign(id);
-  if (!cur) return null;
-  const patch = fn(cur);
-  if (!patch) return cur;
-  patch.updated_at = iso(x.clock());
-  return x.store.updatePostingCampaign(id, patch);
+  const at = iso(x.clock());
+  return x.store.mutatePostingCampaign(id, (cur) => {
+    const patch = fn(cur);
+    return patch ? Object.assign({}, patch, { updated_at: at }) : null;
+  });
 }
 
 // deps.messages (Task 20) supplies the signed-link texts; until then these
@@ -223,5 +237,5 @@ module.exports = {
   MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
   groupIdFromUrl, catalogIndex, memberOf, eligibility, isEligible, needsMembershipCheck,
-  pageTarget, targetsFor, accountView, limitsFor, nextDayStart,
+  pageTarget, targetsFor, accountView, currentPosts, limitsFor, nextDayStart,
 };

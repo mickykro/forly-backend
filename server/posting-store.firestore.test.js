@@ -228,5 +228,33 @@ const doc = (p) => fake.docs.get(p);
     assert.equal(doc("posting_budget/972500000078|2026-09-23").count, 1);
   }
 
+  // ── an approval racing a tick update of another post: both changes survive
+  //    (mutatePostingCampaign re-runs the loser against the winner's write) ──
+  {
+    const c = (await S.createPostingCampaignIfAbsent({ phone: "972500000090", page_id: "racepg", status: "running", posts: [{ id: "p1", status: "pending_approval" }, { id: "p2", status: "scheduled" }] })).campaign;
+    const retriesBefore = fake.stats.txRetries;
+    let approveRuns = 0;
+    const setPost = (cur, id, patch) => ({ posts: cur.posts.map((p) => (p.id === id ? Object.assign({}, p, patch) : p)) });
+    await Promise.all([
+      S.mutatePostingCampaign(c.id, (cur) => { approveRuns++; return setPost(cur, "p1", { status: "scheduled", approved_at: NOW.toISOString() }); }),
+      S.mutatePostingCampaign(c.id, (cur) => setPost(cur, "p2", { status: "posting", attempt_key: "k2" })),
+    ]);
+    const after = await S.getPostingCampaign(c.id);
+    assert.deepEqual(after.posts.map((p) => [p.id, p.status]), [["p1", "scheduled"], ["p2", "posting"]], "both changes kept");
+    assert.ok(fake.stats.txRetries > retriesBefore && approveRuns >= 1, "the two really raced; the loser was re-run on fresh data");
+    assert.equal(await S.mutatePostingCampaign(c.id, () => null).then((x) => x.id), c.id, "null → no write, the current campaign");
+    assert.equal(await S.mutatePostingCampaign("nope", () => ({ status: "x" })), null);
+    await assert.rejects(S.mutatePostingCampaign(c.id, () => ({ phone: "other" })), code("invalid_input"));
+  }
+
+  // ── an expired dedup is overwritten on the Firestore path too ──
+  {
+    const lim = { daily_cap: 9, group_global_daily_cap: 9, dedup_days: 14 };
+    const r1 = await S.reserveAttempt(res({ phone: "972500000091", page_id: "dd1", target_id: "801", limits: lim }));
+    assert.equal(r1.ok, true);
+    assert.equal((await S.reserveAttempt(res({ phone: "972500000091", page_id: "dd1", target_id: "801", limits: lim, now: new Date(NOW.getTime() + 10 * DAY) }))).reason, "duplicate");
+    assert.equal((await S.reserveAttempt(res({ phone: "972500000091", page_id: "dd1", target_id: "801", limits: lim, now: new Date(NOW.getTime() + 15 * DAY) }))).ok, true);
+  }
+
   console.log("posting-store.firestore.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

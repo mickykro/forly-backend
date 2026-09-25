@@ -24,6 +24,7 @@ const { redact } = require("./driver-browser");
 const A = require("./posting-account");
 
 const { iso, fail, ms, ctxOf, nowOf, configOf, mutate, say, MS_DAY, OPEN_POST, ACTIVE_PAGE } = A;
+const ENDED = new Set(["stopped", "completed"]);
 const ACCOUNT_REASONS = new Set(["disabled", "penalty", "browse_only", "day_skipped", "daily_cap", "weekly_cap"]);
 const IMPORT_SOURCES = new Set(["yad2", "madlan", "import", "imported", "listing_sweep"]);
 const sha = (s) => crypto.createHash("sha256").update(String(s)).digest("hex").slice(0, 32);
@@ -68,8 +69,18 @@ async function create({ phone, page, groups, mode, days, repeat, consent, target
     posts: [], consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
     created_at: iso(now), updated_at: iso(now),
   };
-  const { campaign } = await x.store.createPostingCampaignIfAbsent(c);
-  return campaign;
+  const { created, campaign } = await x.store.createPostingCampaignIfAbsent(c);
+  if (created || !ENDED.has(campaign.status)) return campaign; // running/paused: unchanged (idempotent)
+  // Restart: a stopped or completed campaign takes the new consent and terms.
+  // Its posts stay as history; restarted_at marks where the new pass begins,
+  // so only future posts are planned (the cooldowns and the expiring dedup
+  // still see the old ones through their attempts).
+  const fresh = {
+    status: "running", pause_reason: null, wait_reason: null, restarted_at: c.created_at,
+    mode: c.mode, repeat: c.repeat, expires_at: c.expires_at, consent_at: c.consent_at, consent_version: c.consent_version,
+    groups: c.groups, targets: c.targets, consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
+  };
+  return mutate(x, campaign.id, (cur) => (ENDED.has(cur.status) ? fresh : null));
 }
 
 // A page whose listing was imported from Yad2/Madlan and NOT turned into a
@@ -209,11 +220,15 @@ function scoreOf(c, page, now) {
   return (dropped ? 4 : 0) + (fresh ? 3 : 0) + (page.boost ? 2 : 0) + (posted ? 0 : 1);
 }
 
-// Targets this campaign may still post to: the Page first (once), then every
-// eligible group it has not already used. A repeating campaign may retry a
-// skipped group; a single pass never does.
+// Targets this campaign may still post to: the Page first, then every eligible
+// group it has not already used. A single pass uses each target once. A
+// repeating campaign may return to a group once nothing is open there — the
+// property→group cooldown (nextSlot) and the expiring dedup (R1) set when —
+// and to the Page after 30 days.
 function candidatesFor(c, ctx) {
-  const used = new Set((c.posts || []).filter((p) => !c.repeat || p.status !== "skipped").map((p) => p.group_id));
+  const posts = A.currentPosts(c);
+  const recentPage = (p) => p.target === "page" && p.status !== "skipped" && ctx.now.getTime() - ms(p.scheduled_at) < 30 * MS_DAY;
+  const used = new Set(posts.filter((p) => !c.repeat || OPEN_POST.has(p.status) || recentPage(p)).map((p) => p.group_id));
   const targets = c.targets || ["groups"];
   const out = [];
   const pt = targets.includes("page") ? A.pageTarget(ctx.conn) : null;

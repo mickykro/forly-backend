@@ -130,7 +130,8 @@ async function reconcileOne(deps, x, now) {
     }
     const fresh = await x.store.getAttempt(a.key);
     if (fresh && fresh.state !== "outcome_unknown") {
-      await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => T.mirrorPost(p, fresh, { running: cur.status === "running", now, config: safety.DEFAULTS, rand: x.rand })) }));
+      const mctx = T.mirrorCtx(now, safety.DEFAULTS, x.rand);
+      await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => T.mirrorPost(p, fresh, { ...mctx, running: cur.status === "running" })) }));
     }
     return true;
   }
@@ -198,7 +199,7 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, operator
     db, store: require("./posting-store"), pageBaseUrl,
     post: optionalCall("./posting-driver", "postToGroup"),
     postToPage: optionalCall("./posting-driver", "postToPage"),
-    reconcile: optionalCall("./posting-driver", "reconcile"),
+    reconcile: optionalCall("./posting-driver", "reconcile"), // Task 18 must export posting-driver.reconcile(attempt, deps)
     dwell: optionalCall("./social-dwell", "browseSession"),
     groupsSync: require("./facebook-groups-sync"),
     notify: (phone, text) => sendWhatsApp(phone, text, greenInstance, greenToken),

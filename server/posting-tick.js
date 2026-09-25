@@ -39,12 +39,15 @@ const sha = C._test.sha;
 const code = (e) => (e && (e.code || e.name)) || "error";
 
 // ── post ⇐ attempt ──
+// Pure (it runs inside a campaign transaction that may retry): ctx.retryAt,
+// the retry day for a nobody's-decision cancel, is computed by the caller.
+const mirrorCtx = (now, config, rand) => ({ now, retryAt: A.nextDayStart(now, config, rand) });
 function mirrorPost(p, a, ctx) {
   const status = a && A.POST_STATUS_OF[a.state];
   if (!status || p.attempt_key !== a.key || !["posting", "unknown"].includes(p.status) || status === p.status) return p;
   if (status === "skipped" && RETRY_CANCELS.has(a.error_code) && ctx.running && (p.retries || 0) < MAX_RETRIES) {
     return {
-      ...p, status: "scheduled", scheduled_at: iso(A.nextDayStart(ctx.now, ctx.config, ctx.rand)), attempt_key: null,
+      ...p, status: "scheduled", scheduled_at: iso(ctx.retryAt), attempt_key: null,
       prior_attempt_keys: (p.prior_attempt_keys || []).concat([a.key]), retries: (p.retries || 0) + 1,
       posting_started_at: null, last_error_code: a.error_code,
     };
@@ -78,7 +81,7 @@ async function mirrorCampaign(c, x, ctx) {
 // Every group has a post that is no longer open, or can never be planned.
 function allDone(c, conn) {
   if ((c.posts || []).some((p) => OPEN_POST.has(p.status))) return false;
-  const used = new Set((c.posts || []).map((p) => p.group_id));
+  const used = new Set(A.currentPosts(c).map((p) => p.group_id));
   const pt = (c.targets || []).includes("page") ? A.pageTarget(conn) : null;
   if (pt && !used.has(pt.group_id)) return false;
   if (!(c.targets || ["groups"]).includes("groups")) return true;
@@ -91,7 +94,7 @@ async function housekeep(phone, conn, deps, x, now, config) {
   const out = [];
   let catalog = null;
   for (let c of await x.store.listPostingCampaignsByPhone(phone)) {
-    c = (await mirrorCampaign(c, x, { now, config, rand: x.rand })) || c;
+    c = (await mirrorCampaign(c, x, mirrorCtx(now, config, x.rand))) || c;
     if (c.status === "running") {
       const page = await x.db.getPage(c.page_id);
       if (!page || !ACTIVE_PAGE.has(page.status || "active")) { out.push((await C.stop(c.id, deps, "page_gone")) || c); continue; }
@@ -194,7 +197,7 @@ async function runDue(c, post, st, deps, x, now) {
     fingerprint: fp, campaign_id: c.id, post_id: post.id, copy_hash: sha(copy),
     confirm_membership: A.needsMembershipCheck(conn, target, now),
     click_id: crypto.randomBytes(16).toString("hex"), // R4: ?c= on this attempt's link
-    limits: A.limitsFor(account, now, config), now,
+    limits: A.limitsFor(account, now, config, target.target), now,
   });
   if (r.ok) return startAttempt(r.attempt, { c, post, copy, target, conn }, deps, x, now);
 
@@ -300,8 +303,9 @@ async function settle(key, result, err, st, deps, x, now) {
     failed = !safety.SIGNAL_SKIPS.has(errCode);
   }
   const max = config.max_consecutive_failures;
+  const mctx = mirrorCtx(now, config, x.rand);
   const next = await mutate(x, c.id, (cur) => {
-    const patch = { posts: cur.posts.map((p) => mirrorPost(p, a, { running: cur.status === "running", now, config, rand: x.rand })) };
+    const patch = { posts: cur.posts.map((p) => mirrorPost(p, a, { ...mctx, running: cur.status === "running" })) };
     if (ok) Object.assign(patch, { consecutive_failures: 0, selector_failures: 0, wait_reason: null });
     if (a.state === "cancelled" && a.error_code === "infrastructure") patch.wait_reason = "infrastructure";
     if (a.state === "verified_failed" && BLOCKS_GROUP.has(errCode)) {
@@ -399,6 +403,6 @@ async function tick(campaign, deps = {}, now) {
 }
 
 module.exports = {
-  tick, tickAccount, runAttempt, settle, mirrorPost, MAX_RETRIES,
+  tick, tickAccount, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES,
   _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn },
 };

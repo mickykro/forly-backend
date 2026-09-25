@@ -15,7 +15,9 @@
  *   posting_attempts/{key}            the attempt
  *   posting_budget/{phone}|{date}     { phone, date, count }
  *   group_activity/{group_id}|{date}  { group_id, date, posts, fingerprints: [{exact,strong,weak,at}] }
- *   posting_dedup/{hmac(page|type|target)}  { key, at }
+ *   posting_dedup/{hmac(page|type|target)}  { key, at, expires_at }
+ *     — expires after limits.dedup_days (the property→group cooldown, or 30 d
+ *       for the Page); an expired doc counts as absent and is overwritten.
  * Every {date} is the Asia/Jerusalem calendar date (R7, posting-safety).
  * Times are ISO strings, so `lease_until < now` is a plain range query.
  */
@@ -98,6 +100,10 @@ async function reserveAttempt(input = {}) {
   if (click_id !== null && (typeof click_id !== "string" || !/^[0-9a-f]{32}$/.test(click_id))) throw fail("invalid_input", "click_id must be 32 hex characters");
   const dailyCap = capOf(input.limits, "daily_cap");
   const groupCap = target_type === "group" ? capOf(input.limits, "group_global_daily_cap") : null;
+  // How long the property→target dedup holds. Absent → it never expires (the
+  // fail-closed default); present → a positive number of days.
+  const dedupDays = input.limits && input.limits.dedup_days !== undefined ? input.limits.dedup_days : null;
+  if (dedupDays !== null && (!Number.isFinite(dedupDays) || dedupDays <= 0)) throw fail("invalid_input", "limits.dedup_days must be a positive number");
   const now = toDate(input.now);
   const at = now.toISOString();
   const date = safety.jerusalemDate(now);
@@ -116,7 +122,8 @@ async function reserveAttempt(input = {}) {
     if (existing) return { ok: false, reason: "already_reserved", attempt: existing };
     if (((budget && budget.count) || 0) >= dailyCap) return { ok: false, reason: "daily_cap" };
     if (aKey && ((bucket && bucket.posts) || 0) >= groupCap) return { ok: false, reason: "group_cap" };
-    if (dedup && !dedup.released) return { ok: false, reason: "duplicate" };
+    const dedupLive = dedup && !dedup.released && !(typeof dedup.expires_at === "string" && dedup.expires_at <= at);
+    if (dedupLive) return { ok: false, reason: "duplicate" };
 
     const fpEntry = aKey && fp ? { ...fp, at } : null;
     const attempt = {
@@ -134,7 +141,8 @@ async function reserveAttempt(input = {}) {
       const fps = ((bucket && bucket.fingerprints) || []).concat(fpEntry ? [fpEntry] : []);
       tx.set(ACT, aKey, { group_id: target_id, date, posts: ((bucket && bucket.posts) || 0) + 1, fingerprints: fps }, { merge: true });
     }
-    tx.set(DED, dKey, { key, at });
+    // A full overwrite: an expired doc for this page→target is replaced, not merged.
+    tx.set(DED, dKey, { key, at, expires_at: dedupDays === null ? null : new Date(now.getTime() + dedupDays * 86400000).toISOString() });
     return { ok: true, attempt };
   });
 }
