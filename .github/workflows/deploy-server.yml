@@ -32,6 +32,12 @@
 #      GREENAPI_TOKEN=...
 #      NADLAN_JWT_SECRET=...            # required for agent login/dashboard (openssl rand -hex 32)
 #      ADMIN_PHONES=972542045280,...    # allowlist for the /admin.html console (comma-separated)
+#      FORLY_ENV=prod                   # prod|staging|local; any other value refuses to boot, and
+#                                       # NODE_ENV=production without FORLY_ENV=prod refuses too
+#      PROFILE_KEY=...                  # openssl rand -hex 32; keys the Driver browser-profile names.
+#                                       # Driver features stay OFF unless DRIVER_API_KEY, PROFILE_KEY
+#                                       # and FORLY_ENV are all set. Never rotate it casually: a new
+#                                       # key orphans every agent's connected browser profile.
 #    and place the Firebase service-account key at /root/forly-backend/sa-key.json
 #    NOTE: use the SAME NADLAN_JWT_SECRET the Cloud Functions used, so existing
 #    agent session cookies keep working after the cutover to this server.

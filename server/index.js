@@ -22,6 +22,16 @@ const auth = require("./auth");
   console.log(`Loaded config from ${envPath}`);
 })();
 
+// ── environment guards, before anything touches Driver ──
+// A wrong FORLY_ENV would mix prod and staging browser profiles; the dev
+// viewer must never exist off a local box. See driver-browser.js bootCheck.
+const driverBrowser = require("./driver-browser");
+const driverBoot = driverBrowser.bootCheck();
+if (driverBoot.fatal) {
+  console.error(`FATAL: ${driverBoot.fatal}. Refusing to start.`);
+  process.exit(1);
+}
+
 // ── config ──
 // Port precedence: CLI arg (e.g. `npm run local 3111`) → PORT env → default.
 const cliPort = Number(process.argv[2]);
@@ -220,14 +230,18 @@ app.use("/api", createExtractRouter({
 
 // ── browser-backed extracts ──
 // A crash between "session created" and the finally leaves a browser running
-// until its duration expires, holding a concurrency slot the whole time. Ours
-// all carry a forly-extract: note, so we can tell them from anyone else's.
-if (process.env.DRIVER_API_KEY) {
+// until its duration expires, holding a concurrency slot the whole time. Every
+// session we create carries a forly-<kind>: note, so we can tell ours from
+// anyone else's. Driver is on only with DRIVER_API_KEY, PROFILE_KEY and a
+// valid FORLY_ENV (driverBrowser.driverEnabled — routes/extract.js asks too).
+if (driverBoot.enabled) {
   const extractJobs = require("./extract-jobs");
-  const driverBrowser = require("./driver-browser");
-  driverBrowser.cleanupOrphans("forly-extract:")
-    .then((n) => { if (n) console.log(`driver: stopped ${n} orphaned session(s) at boot`); })
-    .catch((e) => console.warn(`driver: orphan cleanup failed: ${e.message}`));
+  const ORPHAN_NOTES = ["forly-extract:", "forly-connect:", "forly-sweep:", "forly-post:", "forly-dwell:", "forly-recheck:", "forly-sync:"];
+  (async () => {
+    let n = 0;
+    for (const prefix of ORPHAN_NOTES) n += await driverBrowser.cleanupOrphans(prefix);
+    if (n) console.log(`driver: stopped ${n} orphaned session(s) at boot`);
+  })().catch((e) => console.warn(`driver: orphan cleanup failed: ${driverBrowser.redact(e.message)}`));
   extractJobs.startSweeper(extractJobs.liveDeps());
   console.log("driver: extract sweeper started");
 
@@ -237,8 +251,21 @@ if (process.env.DRIVER_API_KEY) {
   // ── the agent's own Yad2/Madlan listings, read and offered as draft pages ──
   const createListingDraftsRouter = require("./routes/listing-drafts");
   app.use("/api", createListingDraftsRouter({ requireAuth, authSecret: AUTH_SECRET }));
+} else if (process.env.DRIVER_API_KEY) {
+  console.error(`DRIVER DISABLED: DRIVER_API_KEY is set but ${driverBoot.missing.join(" and ")} ` +
+    `${driverBoot.missing.length > 1 ? "are" : "is"} missing or invalid — no extract sweeper, no connect or drafts routes.`);
 } else {
   console.warn("DRIVER_API_KEY not set — yad2/madlan/social URLs will fail to extract");
+}
+
+// ── dev-only: watch the browsers this server opens (routes/dev-driver.js) ──
+// bootCheck already refused to start with the flag outside FORLY_ENV=local.
+if (driverBoot.devView) {
+  const { makeAdminGuard, makeStepUpGuard } = require("./admin-auth");
+  const { requireAdmin } = makeAdminGuard({ verifySession, readToken, authSecret: AUTH_SECRET, adminPhones: ADMIN_PHONES });
+  const { requireStepUp } = makeStepUpGuard({ verifySession, authSecret: AUTH_SECRET });
+  app.use("/api/dev/driver", require("./routes/dev-driver")({ requireAdmin, requireStepUp }));
+  console.warn("DRIVER_DEV_VIEW=1: dev browser viewer at /dev-driver.html");
 }
 
 // ── profile onboarding (the 15-field "השלמת פרופיל" form) ──

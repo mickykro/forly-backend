@@ -146,6 +146,27 @@ const get = (app, path) => call(app, "GET", path);
   assert.equal(res.status, 503);
 }
 
+// ── the default "enabled" decision is driver-browser's: a key alone is not enough ──
+{
+  const saved = { k: process.env.DRIVER_API_KEY, p: process.env.PROFILE_KEY, e: process.env.FORLY_ENV };
+  Object.assign(process.env, { DRIVER_API_KEY: "k", FORLY_ENV: "local" });
+  delete process.env.PROFILE_KEY;
+  const requireAuth = () => (req, res, next) => { req.user = { userId: "0500000000" }; next(); };
+  const mk = () => {
+    const app = express(); app.use(express.json());
+    app.use("/api", createExtractRouter({ requireAuth, authSecret: "s", db: {}, extractJobs: { create: async () => ({ id: "j", status: "queued" }) } }));
+    return app;
+  };
+  const off = await post(mk(), "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" });
+  assert.equal(off.status, 503, "DRIVER_API_KEY without PROFILE_KEY is not enabled");
+  process.env.PROFILE_KEY = "p";
+  const on = await post(mk(), "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" });
+  assert.equal(on.status, 202, "all three set → enabled");
+  for (const [k, v] of [["DRIVER_API_KEY", saved.k], ["PROFILE_KEY", saved.p], ["FORLY_ENV", saved.e]]) {
+    if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+}
+
 // ── but a bad input is still a 400: the browser cannot fix a malformed URL ──
 {
   const app = makeApp({

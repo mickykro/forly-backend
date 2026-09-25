@@ -32,4 +32,28 @@ function makeAdminGuard({ verifySession, readToken, authSecret, adminPhones }) {
   return { allow, isAdmin, requireAdmin };
 }
 
-module.exports = { makeAdminGuard };
+// Step-up: for the few admin actions that hand out live control (the dev
+// browser viewer), a 30-day session is not enough — the admin must have
+// completed an OTP login in the last 10 minutes. That login sets a
+// "stepup"-scoped token (auth.js verifyHandler) in the forly_stepup cookie;
+// scripts may send it as x-stepup-token instead. Mount AFTER requireAdmin: it
+// must belong to the same person as the admin session (req.user).
+function readStepUpToken(req) {
+  const header = req.headers["x-stepup-token"];
+  if (header) return String(header);
+  const cookie = req.headers.cookie || "";
+  const m = cookie.match(/(?:^|;\s*)forly_stepup=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function makeStepUpGuard({ verifySession, authSecret }) {
+  function requireStepUp(req, res, next) {
+    const stepup = verifySession(authSecret, readStepUpToken(req), ["stepup"]);
+    const userId = req.user && req.user.userId;
+    if (!stepup || !userId || stepup.userId !== userId) return res.status(401).json({ error: "stepup_required" });
+    next();
+  }
+  return { requireStepUp };
+}
+
+module.exports = { makeAdminGuard, makeStepUpGuard };

@@ -28,7 +28,24 @@ function securityHeaders(req, res, next) {
   if (req.secure || req.headers["x-forwarded-proto"] === "https") {
     res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
   }
+  const reqPath = String(req.path || "");
+  // The dev browser viewer (routes/dev-driver.js): nothing under it may sit in
+  // a cache, and its page does not exist unless the flag is on.
+  if (reqPath.startsWith("/api/dev/")) res.setHeader("Cache-Control", "no-store");
+  if (isDevDriverPage(reqPath) && process.env.DRIVER_DEV_VIEW !== "1") {
+    return res.status(404).type("text/plain").send("Not Found");
+  }
   next();
+}
+
+// Matched the way express.static would resolve it (decoded, normalized, and
+// case-folded for case-insensitive dev filesystems), so /dev%2Ddriver.html or
+// //DEV-DRIVER.html cannot walk around the check.
+function isDevDriverPage(reqPath) {
+  let decoded;
+  try { decoded = decodeURIComponent(reqPath); } catch (e) { decoded = reqPath; }
+  const posix = require("path").posix;
+  return posix.basename(posix.normalize(decoded)).toLowerCase() === "dev-driver.html";
 }
 
 // ── in-memory rate limiter ──

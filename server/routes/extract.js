@@ -92,7 +92,8 @@ module.exports = function createExtractRouter(ctx) {
   const database = ctx.db || require("../db");
   const extractJobs = ctx.extractJobs || require("../extract-jobs");
   const jobDeps = ctx.jobDeps || require("../extract-jobs").liveDeps();
-  const driverEnabled = ctx.driverEnabled !== undefined ? ctx.driverEnabled : !!process.env.DRIVER_API_KEY;
+  // The same decision index.js makes at boot: key, PROFILE_KEY and FORLY_ENV.
+  const driverEnabled = ctx.driverEnabled !== undefined ? ctx.driverEnabled : require("../driver-browser").driverEnabled();
   const { sourceFor } = require("../listing-sources")._test;
   const router = express.Router();
   const limit = new DailyLimit(DAILY_CAP);
@@ -119,7 +120,7 @@ module.exports = function createExtractRouter(ctx) {
       const kind = input.text ? "text" : sourceFor(input);
 
       async function queueDriverJob(forceSource, withProfile) {
-        if (!driverEnabled) throw fail("extract_unavailable", "DRIVER_API_KEY is not set");
+        if (!driverEnabled) throw fail("extract_unavailable", "Driver is not configured");
         // A browser session is a paid resource and, for social hosts, opens the
         // customer's own logged-in profile. Demo callers get neither.
         if (!req.user) throw fail("login_required_for_browser");

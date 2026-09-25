@@ -41,6 +41,8 @@ const hashCode = (secret, phone, code) =>
 
 // scope "session" is a full login; "review" is the WhatsApp review link, which
 // only the routes that opt in (requireAuth(secret, REVIEW_SCOPES)) accept.
+const STEPUP_TTL_S = 600;
+
 function signSession(secret, phone, { scope = "session", ttlS = SESSION_TTL_S } = {}) {
   const payload = { userId: phone, scope, exp: Math.floor(Date.now() / 1000) + ttlS };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -219,7 +221,15 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
         sameSite: "lax",
         maxAge: SESSION_TTL_S * 1000,
       });
-      return res.json({ ok: true, token, userId: phone, expires_in: SESSION_TTL_S });
+      // A fresh OTP login IS the step-up (admin-auth.js makeStepUpGuard): a
+      // short-lived, separately-scoped token that no session route accepts.
+      res.cookie("forly_stepup", signSession(secret, phone, { scope: "stepup", ttlS: STEPUP_TTL_S }), {
+        httpOnly: true,
+        secure: cookieSecure(req),
+        sameSite: "lax",
+        maxAge: STEPUP_TTL_S * 1000,
+      });
+      return res.json({ ok: true, token, userId: phone, expires_in: SESSION_TTL_S, stepup_expires_in: STEPUP_TTL_S });
     } catch (err) {
       console.error("auth/otp/verify failed:", err);
       return res.status(500).json({ ok: false, error: "otp_verify_failed" });
@@ -298,6 +308,7 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
   // ── POST /api/auth/logout ──
   router.post("/logout", (req, res) => {
     res.clearCookie("forly_session");
+    res.clearCookie("forly_stepup");
     return res.json({ ok: true });
   });
 
