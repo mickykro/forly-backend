@@ -199,4 +199,69 @@
       history.replaceState(null, "", location.pathname + location.hash);
     }
   })();
+
+  // ── the personal-account browser ──
+  // The viewer is a live view of a real Chrome in Driver's cloud: the agent
+  // types their own password into it, and it never touches our server.
+  const bModal = $("browserModal"), bBody = $("browserModalBody"), bMsg = $("browserModalMsg");
+  let bOpen = false;
+
+  function openBrowser(viewUrl) {
+    // The viewer refuses to be framed (X-Frame-Options / frame-ancestors), so
+    // it opens in its own window. Stripping that header server-side would mean
+    // proxying their websocket and defeating a deliberate control.
+    const win = window.open(viewUrl, "forly-connect", "width=1200,height=820,noopener");
+    bBody.innerHTML = '<p class="popup-note">ההתחברות נפתחה בחלון נפרד. כשסיימתם, חזרו לכאן ולחצו "סיימתי להתחבר".</p>';
+    if (!win) bBody.innerHTML = '<p class="popup-note">הדפדפן חסם את החלון — אשרו חלונות קופצים לאתר ונסו שוב.</p>';
+    bModal.hidden = false; bOpen = true;
+  }
+  function closeBrowser() { bModal.hidden = true; bBody.innerHTML = ""; bOpen = false; }
+
+  async function refreshBrowserChip() {
+    try {
+      const j = await api("/api/connections/browser/facebook/status");
+      const on = j.state === "connected";
+      $("browserConnChip").textContent = on ? "מחובר" : "";
+      $("browserIdentity").textContent = on && j.identity_label ? `מחובר בתור ${j.identity_label}` : "";
+      $("browserDisconnectBtn").hidden = !on;
+      $("browserConnectBtn").textContent = on ? "חיבור מחדש" : "חיבור החשבון האישי בפייסבוק";
+    } catch (e) { /* card stays in its default state */ }
+  }
+
+  $("browserConnectBtn").addEventListener("click", async function () {
+    if (!$("browserConsent").checked) { toast("סמנו את האישור שמעל הכפתור"); return; }
+    const btn = this; btn.disabled = true; btn.textContent = "פותחים דפדפן…";
+    try {
+      const j = await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform: "facebook", consent: true }) });
+      openBrowser(j.view_url);
+    } catch (e) {
+      toast(e && e.code === "profile_busy" ? "פורלי מפרסמת כרגע מהחשבון — נסו שוב בעוד כמה דקות" : "לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע");
+    } finally { btn.disabled = false; refreshBrowserChip(); }
+  });
+
+  $("browserDoneBtn").addEventListener("click", async function () {
+    const btn = this; btn.disabled = true; bMsg.textContent = "בודקים…";
+    try {
+      const j = await api("/api/connections/browser/facebook/finish", { method: "POST" });
+      toast(j.identity_label ? `החשבון מחובר ✓ (${j.identity_label})` : "החשבון מחובר ✓");
+      closeBrowser(); refreshBrowserChip();
+    } catch (e) {
+      bMsg.textContent = e && e.code === "session_expired"
+        ? "עבר יותר מדי זמן והחלון נסגר. פתחו אותו שוב ונסו להתחבר."
+        : "נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ואז לחצו שוב.";
+    } finally { btn.disabled = false; }
+  });
+
+  $("browserModalClose").addEventListener("click", closeBrowser);
+  $("browserDisconnectBtn").addEventListener("click", async function () {
+    if (!confirm("לנתק את החשבון? פורלי תפסיק לפרסם ותמחק את ההתחברות השמורה.")) return;
+    try { await api("/api/connections/browser/facebook", { method: "DELETE" }); toast("החשבון נותק"); }
+    catch (e) { toast("לא הצלחנו לנתק — נסו שוב"); }
+    refreshBrowserChip();
+  });
+
+  // If the agent leaves for the SMS and comes back, the modal is still here;
+  // only when they close it explicitly is the session's fate decided by /finish.
+  $("browserConnectCard").hidden = false;
+  refreshBrowserChip();
 })();

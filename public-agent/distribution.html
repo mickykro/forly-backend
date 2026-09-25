@@ -78,9 +78,40 @@
   </div>
 
   <div class="card dist-card" id="connectCard" hidden>
-    <h2>חיבור פייסבוק <span class="conn-chip" id="connChip"></span></h2>
+    <h2>הדף העסקי בפייסבוק <span class="conn-chip" id="connChip"></span></h2>
     <p class="muted" id="connText"></p>
     <button class="btn btn-gold" id="connectBtn">חיבור חשבון פייסבוק</button>
+  </div>
+
+  <div class="card dist-card" id="browserConnectCard" hidden>
+    <h2>החשבון האישי בפייסבוק <span class="conn-chip" id="browserConnChip"></span></h2>
+    <p class="muted">חיבור אחד לפייסבוק — פורלי תפרסם גם בדף העסקי וגם בקבוצות מאותו חשבון, ותקרא פוסטים מקבוצות. מתחברים כאן פעם אחת, כמו בדפדפן רגיל.</p>
+    <p class="muted">בשלושת הימים הראשונים פורלי רק מסתובבת בפייסבוק מהחשבון שלכם — גוללת, צופה, מסמנת לייק פה ושם — בלי לפרסם. אחר כך פוסט אחד ביום, ובהדרגה יותר. ככה פייסבוק רואה פעילות רגילה ולא רובוט, וזה מה ששומר על החשבון שלכם.</p>
+    <p class="muted">הסיסמה נשארת אצלכם: היא לא עוברת דרך פורלי ולא נשמרת אצלנו.</p>
+    <p class="muted small">פרסום אוטומטי בקבוצות נעשה על אחריותכם — נסביר בדיוק לפני שמתחילים.</p>
+    <label class="consent-line"><input type="checkbox" id="browserConsent"> <span>הבנתי, ואני רוצה לחבר את החשבון</span></label>
+    <div class="conn-row">
+      <button class="btn btn-gold" id="browserConnectBtn">חיבור החשבון האישי בפייסבוק</button>
+      <button class="btn btn-danger" id="browserDisconnectBtn" hidden>ניתוק החשבון</button>
+      <span class="muted small" id="browserIdentity"></span>
+    </div>
+  </div>
+
+  <div class="browser-modal" id="browserModal" hidden role="dialog" aria-modal="true" aria-labelledby="browserModalTitle">
+    <div class="browser-modal-inner">
+      <header>
+        <div>
+          <strong id="browserModalTitle">התחברות לפייסבוק</strong>
+          <div class="muted small">זה פייסבוק האמיתי. מתחברים כרגיל — פורלי לא רואה את הסיסמה ולא שומרת אותה.</div>
+        </div>
+        <button class="btn btn-ghost" id="browserModalClose" aria-label="סגירה">✕</button>
+      </header>
+      <div class="browser-modal-body" id="browserModalBody"></div>
+      <footer>
+        <span class="muted small" id="browserModalMsg">קיבלתם קוד בסמס? אפשר לצאת לרגע ולחזור — החלון מחכה לכם כמה דקות.</span>
+        <button class="btn btn-gold" id="browserDoneBtn">סיימתי להתחבר</button>
+      </footer>
+    </div>
   </div>
 
   <div class="card dist-card" id="groupsCard" hidden>

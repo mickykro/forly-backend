@@ -230,6 +230,9 @@ if (process.env.DRIVER_API_KEY) {
     .catch((e) => console.warn(`driver: orphan cleanup failed: ${e.message}`));
   extractJobs.startSweeper(extractJobs.liveDeps());
   console.log("driver: extract sweeper started");
+
+  const createConnectionsBrowserRouter = require("./routes/connections-browser");
+  app.use("/api/connections/browser", createConnectionsBrowserRouter({ requireAuth, authSecret: AUTH_SECRET }));
 } else {
   console.warn("DRIVER_API_KEY not set — yad2/madlan/social URLs will fail to extract");
 }

@@ -142,8 +142,38 @@ async function withPage(opts, fn, deps = {}) {
   }
 }
 
+/*
+ * Join a session that is ALREADY running and leave it running. This is the
+ * embedded-login case: the agent is typing into that browser right now, so the
+ * finally that withPage guarantees would be exactly wrong here.
+ */
+async function attachPage(sessionId, fn, deps = {}) {
+  const session = await waitForActive(await getSession(sessionId, deps), deps);
+  const connect = deps.connectOverCDP || require("patchright").chromium.connectOverCDP;
+  const browser = await connect(session.cdpUrl);
+  try {
+    const context = browser.contexts()[0] || (await browser.newContext());
+    const page = context.pages()[0] || (await context.newPage());
+    return await fn(page, session);
+  } finally {
+    await browser.close(); // our connection only — the agent's session stays up
+  }
+}
+
+// Deletes a persisted profile at Driver — used on disconnect, so the cookies
+// do not outlive the agent's consent. Like stopSession, never throws: called
+// from a route handler that has already committed to answering 200.
+async function deleteProfile(name, deps = {}) {
+  try {
+    const r = await call("DELETE", `/v1/browser/profiles/${encodeURIComponent(name)}`, null, deps);
+    if (r && r.success === false) console.error(`driver: delete of profile ${name} did not succeed`);
+  } catch (e) {
+    console.error(`driver: delete of profile ${name} failed: ${e.message}`);
+  }
+}
+
 module.exports = {
   DriverError, createSession, getSession, listSessions, stopSession,
-  cleanupOrphans, waitForActive, withPage, liveSessions, SESSION_DEFAULTS,
+  cleanupOrphans, waitForActive, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
   _test: { backoffMs, setDevView: (v) => { devView = v; live.clear(); } },
 };

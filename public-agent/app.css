@@ -162,4 +162,18 @@ body.agent-page::before{content:"";position:fixed;inset:0;z-index:-1;pointer-eve
 .edit-studio .page-head{padding-bottom:20px;border-bottom:1px solid var(--agent-line)}.edit-studio .edit-panel{padding:6px}.edit-studio .preview-frame{box-shadow:var(--agent-shadow)}.edit-studio .tpl-pick button{background:var(--agent-paper);border-radius:9px}.edit-studio .save-bar{z-index:3;box-shadow:0 -10px 32px rgba(32,23,13,.07)}
 .admin-page .stat{position:relative;overflow:hidden;border-radius:14px;box-shadow:var(--agent-shadow)}.admin-page .stat::after{content:"";position:absolute;inset:auto -10px -16px auto;width:55px;height:55px;border-radius:50%;border:1px solid rgba(185,138,47,.28)}.admin-page .table-wrap{box-shadow:var(--agent-shadow)}.admin-page .tabs button{font-weight:600}.admin-page .toolbar{padding:12px;background:rgba(255,253,249,.72);border:1px solid var(--agent-line);border-radius:13px}
 .legal-page{background:radial-gradient(circle at 90% 0,rgba(217,177,92,.18),transparent 24rem),#f7f3ec}.legal-page .legal-brand{display:flex;align-items:center;justify-content:space-between;padding:18px clamp(20px,5vw,64px);background:var(--dark);color:#fff;border-bottom:1px solid rgba(217,177,92,.28)}.legal-page .legal-brand b{font-family:var(--serif);letter-spacing:.2em}.legal-page .legal-brand span{font-size:.62rem;letter-spacing:.18em;color:var(--gold-bright)}.legal-page .wrap{max-width:800px;margin:0 auto;padding:clamp(38px,8vw,92px) 24px}.legal-page .legal-paper{background:rgba(255,253,249,.9);border:1px solid rgba(185,138,47,.25);box-shadow:var(--agent-shadow);padding:clamp(26px,5vw,58px);border-radius:18px}.legal-page h1{font-size:clamp(2rem,5vw,3rem);letter-spacing:-.03em}.legal-page h2{color:var(--ink);border-top:1px solid var(--agent-line);padding-top:22px}.legal-page .back{color:var(--gold);font-weight:600}
+
+/* Embedded connect browser — a full-bleed dialog, because a real page inside a
+   small box is unusable on a phone. dvh, not vh: iOS Safari's bottom bar. */
+.browser-modal { position: fixed; inset: 0; background: rgba(20,17,12,.72); display: flex; align-items: center; justify-content: center; z-index: 90; }
+.browser-modal[hidden] { display: none; }
+.browser-modal-inner { background: var(--bg); border-radius: var(--radius); width: min(1100px, 96vw); height: min(760px, 92dvh); display: flex; flex-direction: column; overflow: hidden; }
+.browser-modal-inner > header, .browser-modal-inner > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; }
+.browser-modal-inner > footer { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+.browser-modal-body { flex: 1; min-height: 0; background: #fff; }
+.browser-modal-body iframe { width: 100%; height: 100%; border: 0; display: block; }
+.browser-modal-body .popup-note { padding: 32px; text-align: center; color: var(--ink-soft, #6b655c); line-height: 1.7; }
+.conn-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.consent-line { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; line-height: 1.5; }
+@media (max-width: 640px) { .browser-modal-inner { width: 100vw; height: 100dvh; border-radius: 0; } }
 @media(max-width:760px){.agent-hero{grid-template-columns:1fr}.agent-hero .agent-aside{display:none}.dashboard-page .auth-wrap::before,.signup-page .auth-wrap::before{display:none}.agent-topbar{min-height:68px}.agent-topbar .brand b{font-size:1.1rem}.agent-progress{gap:11px}.agent-progress span{font-size:.72rem}.agent-progress span:not(.active){opacity:.7}.creation-page .container{padding-inline:14px}.agent-page .card{padding:20px}.legal-page .legal-paper{padding:25px 20px}}

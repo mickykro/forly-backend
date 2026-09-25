@@ -97,5 +97,18 @@ const err = (status, body, retryAfter) => ({
   assert.ok(deleted.some((u) => u.includes("sessionId=c")));
   assert.ok(!deleted.some((u) => u.includes("sessionId=b")));
 
+  // ── attachPage joins a RUNNING session and must not stop it ──
+  const stops = [];
+  const attachDeps = {
+    apiKey: "k", sleep: async () => {},
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { stops.push(url); return ok({ success: true }); }
+      return ok({ sessionId: "s9", status: "active", cdpUrl: "ws://z" });
+    },
+    connectOverCDP: async () => ({ contexts: () => [{ pages: () => [{ marker: "live" }] }], close: async () => {} }),
+  };
+  assert.equal(await D.attachPage("s9", async (p) => p.marker, attachDeps), "live");
+  assert.equal(stops.length, 0, "attachPage must leave the session running");
+
   console.log("driver-browser.test.js ok");
 })();

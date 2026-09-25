@@ -82,24 +82,9 @@ async function importImage(url, { fetchFn = fetch, lookup, video = false } = {})
   return { fname: `${crypto.randomUUID()}.${TYPES[ct]}`, buffer, contentType: ct };
 }
 
-// One persisted browser profile per agent per platform. The agent logs in once
-// through the embedded browser; the cookies live in the profile, never here.
-// The name is an HMAC of the phone: the Driver key alone must not be able to
-// enumerate customers.
-// ponytail: kept inline rather than split into server/profile-name.js — its
-// only other planned callers (routes/connections-browser.js, posting-campaign.js)
-// are out of scope here. Extract when one of those lands.
-const SOCIAL = /(^|\.)(facebook\.com|instagram\.com|tiktok\.com|linkedin\.com|x\.com|twitter\.com)$/i;
-function profileFor(url, phone, key = process.env.PROFILE_KEY, env = process.env.FORLY_ENV || "prod") {
-  let host;
-  try { host = new URL(url).hostname; } catch (e) { return null; }
-  const m = host.match(SOCIAL);
-  if (!m) return null;
-  const name = m[2].split(".")[0].toLowerCase();
-  const platform = name === "twitter" ? "x" : name; // one account, one profile
-  const tag = crypto.createHmac("sha256", String(key || "dev")).update(String(phone)).digest("hex").slice(0, 20);
-  return `${platform}-${env}-${tag}`;
-}
+// One persisted browser profile per agent per platform, shared with
+// routes/connections-browser.js (the login browser) — see profile-name.js.
+const profileFor = require("../profile-name").profileName;
 
 module.exports = function createExtractRouter(ctx) {
   const { requireAuth, authSecret, uploadDir, uploadPublicBase, remoteUploadBase } = ctx;
