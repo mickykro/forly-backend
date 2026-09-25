@@ -27,6 +27,20 @@ async function stopOpenSession(platform, conn, deps) {
   if (open && open.session_id) await deps.driver.stopSession(open.session_id);
 }
 
+// Cancels the phone's open posting attempts for the platform. Called AFTER
+// the revoked/quarantined state write, so assertOwnership already refuses the
+// profile. A failure is recorded as `<platform>_cancel_error`, never thrown:
+// revoke/quarantine must still finish, and the posting reaper cancels any
+// pre-submit attempt anyway when its 20-minute lease runs out.
+async function cancelAttempts(phone, platform, conn, deps) {
+  try {
+    await deps.db.cancelOpenAttempts(phone, platform);
+  } catch (e) {
+    const patch = { [`${platform}_cancel_error`]: String((e && (e.code || e.message)) || "cancel_failed").slice(0, 200) };
+    try { await deps.db.setConnection(phone, patch); Object.assign(conn, patch); } catch { /* the reaper is the backstop */ }
+  }
+}
+
 // Deletes the named Driver profile. Never throws — returns { ok: true } or
 // { ok: false, error }. Pure: no db access, no opinion on what a caller
 // should do with the result — see attemptDelete for that.
@@ -81,15 +95,14 @@ async function attemptDelete(phone, platform, conn, deps, opts = {}) {
   return { ok: del.ok, error: del.error, gen, staleGen };
 }
 
-// Stops the platform's open session, cancels the phone's open posting
-// attempts for that platform, marks the profile revoked (assertOwnership
-// refuses it from this point on, whatever name is passed), deletes it at
+// Stops the platform's open session, marks the profile revoked
+// (assertOwnership refuses it from this point on, whatever name is passed),
+// then cancels the phone's open posting attempts for that platform, deletes it at
 // Driver, and — for Facebook — clears the Pages/groups/posting state that
 // only made sense while the account was connected.
 async function revoke({ phone, platform, reason }, deps) {
   const conn = (await deps.db.getConnection(phone)) || {};
   await stopOpenSession(platform, conn, deps);
-  await deps.db.cancelOpenAttempts(phone, platform);
 
   const statePatch = Object.assign(
     {
@@ -100,6 +113,7 @@ async function revoke({ phone, platform, reason }, deps) {
       [`${platform}_browser_disconnected_at`]: nowIso(),
       [`${platform}_identity_label`]: null, // the account holder's display name must not outlive their consent
       [`browser_session_${platform}`]: null,
+      [`${platform}_cancel_error`]: null,
     },
     platform === "facebook" ? { facebook_pages: null, facebook_groups_member: null, posting_permission: null } : {},
   );
@@ -110,6 +124,7 @@ async function revoke({ phone, platform, reason }, deps) {
   // recoverable — retryDeletes() will still find and finish the delete.
   await deps.db.setConnection(phone, statePatch);
   Object.assign(conn, statePatch);
+  await cancelAttempts(phone, platform, conn, deps);
 
   await attemptDelete(phone, platform, conn, deps);
 
@@ -126,7 +141,6 @@ async function quarantine(phone, platform, cls, deps) {
   if (!HALT_CLASSES.has(cls)) { const e = new Error(`unknown halt class: ${cls}`); e.code = "invalid_input"; throw e; }
   const conn = (await deps.db.getConnection(phone)) || {};
   await stopOpenSession(platform, conn, deps);
-  await deps.db.cancelOpenAttempts(phone, platform);
 
   const statePatch = {
     [`${platform}_profile_state`]: "quarantined",
@@ -135,12 +149,14 @@ async function quarantine(phone, platform, cls, deps) {
     [`${platform}_browser_connected_at`]: null,
     [`${platform}_identity_label`]: null, // the next connect re-reads this; must not carry the halted profile's identity
     [`browser_session_${platform}`]: null,
+    [`${platform}_cancel_error`]: null,
   };
   // Same intentional split as revoke(): the state write lands first so the
   // profile is refused at once, and the pending-delete row attemptDelete()
   // files on failure makes a crash between the two writes recoverable.
   await deps.db.setConnection(phone, statePatch);
   Object.assign(conn, statePatch);
+  await cancelAttempts(phone, platform, conn, deps);
 
   await attemptDelete(phone, platform, conn, deps);
 }

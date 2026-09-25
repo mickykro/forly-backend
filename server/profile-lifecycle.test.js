@@ -117,6 +117,30 @@ function fakeDb(conns = {}) {
   assert.equal(conn3.facebook_identity_label, null, "quarantine() clears the identity label too — the next connect re-reads it");
   assert.throws(() => assertOwnership(profileName("facebook", "05x"), "05x", "facebook", conn3), (e) => e.code === "profile_ownership");
 
+  // ── the refused state is written BEFORE attempts are cancelled, and a
+  //    throwing cancelOpenAttempts is recorded, never fails revoke/quarantine ──
+  for (const run of [
+    (deps) => L.revoke({ phone: "05z", platform: "facebook", reason: "agent" }, deps),
+    (deps) => L.quarantine("05z", "facebook", "captcha", deps),
+  ]) {
+    const c = { facebook_browser_connected_at: "2026-09-10", facebook_cancel_error: "old" };
+    const d = fakeDb({ "05z": c });
+    const stateAtCancel = [];
+    d.cancelOpenAttempts = async () => { stateAtCancel.push(c.facebook_profile_state); throw Object.assign(new Error("firestore down"), { code: "unavailable" }); };
+    const deleted = [];
+    await run({ db: d, driver: { stopSession: async () => {}, deleteProfile: async (n) => deleted.push(n) } });
+    assert.equal(stateAtCancel.length, 1);
+    assert.ok(["revoked", "quarantined"].includes(stateAtCancel[0]), "assertOwnership already refuses the profile when attempts are cancelled");
+    assert.equal(c.facebook_cancel_error, "unavailable");
+    assert.equal(deleted.length, 1, "the Driver delete still runs");
+    assert.ok(c.facebook_profile_deleted_at);
+  }
+  {
+    const c = { facebook_browser_connected_at: "2026-09-10", facebook_cancel_error: "old" };
+    await L.revoke({ phone: "05z", platform: "facebook" }, { db: fakeDb({ "05z": c }), driver: { stopSession: async () => {}, deleteProfile: async () => {} } });
+    assert.equal(c.facebook_cancel_error, null, "a successful cancel clears an old error");
+  }
+
   // ── quarantine refuses an unrecognized halt class ──
   await assert.rejects(
     () => L.quarantine("05x", "facebook", "bored", { db: fakeDb(), driver: {} }),
