@@ -2,35 +2,57 @@
    enforces what real Firestore does and the memory path might hide: reads
    before writes in a transaction, no `undefined` values, range filters that
    only match values of the same type (null never matches `<`), merge
-   semantics, collection-group queries. No network. */
+   semantics (an empty map replaces), Timestamps instead of Dates on read,
+   optimistic transaction isolation with retries, collection-group queries.
+   No network. */
 process.env.PROFILE_KEY = "test-profile-key-16a";
 process.env.FORLY_ENV = "local";
 const assert = require("assert");
 const dbModule = require("./db");
 const S = require("./posting-store");
 
-const isObj = (v) => Object.prototype.toString.call(v) === "[object Object]";
+// Firestore hands back Timestamps, never Dates.
+class Timestamp {
+  constructor(ms) { this._ms = ms; }
+  toDate() { return new Date(this._ms); }
+  toMillis() { return this._ms; }
+}
+const isObj = (v) => v !== null && typeof v === "object" && [Object.prototype, null].includes(Object.getPrototypeOf(v));
+const isTime = (v) => v instanceof Date || v instanceof Timestamp;
 function assertNoUndefined(v, p = "") {
   if (v === undefined) throw new Error(`Cannot use "undefined" as a Firestore value (${p})`);
   if (Array.isArray(v)) v.forEach((x, i) => assertNoUndefined(x, `${p}[${i}]`));
   else if (isObj(v)) for (const [k, x] of Object.entries(v)) assertNoUndefined(x, `${p}.${k}`);
 }
-const merge = (a, b) => { const o = { ...a }; for (const [k, v] of Object.entries(b)) o[k] = isObj(v) && isObj(o[k]) ? merge(o[k], v) : v; return o; };
-const val = (v) => (v instanceof Date ? v.getTime() : v);
-const sameType = (a, b) => a !== null && a !== undefined && (a instanceof Date) === (b instanceof Date) && typeof a === typeof b;
+// Deep copy; every Date (and Timestamp) comes out as a fresh Timestamp.
+function copy(v) {
+  if (isTime(v)) return new Timestamp(v instanceof Date ? v.getTime() : v.toMillis());
+  if (Array.isArray(v)) return v.map(copy);
+  if (isObj(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, copy(x)]));
+  return v;
+}
+// merge:true — the mask names leaf fields; an explicitly empty map is itself a leaf and replaces.
+const merge = (a, b) => { const o = { ...a }; for (const [k, v] of Object.entries(b)) o[k] = isObj(v) && Object.keys(v).length && isObj(o[k]) ? merge(o[k], v) : v; return o; };
+const ms = (v) => (v instanceof Date ? v.getTime() : v instanceof Timestamp ? v.toMillis() : v);
+const sameType = (a, b) => a !== null && a !== undefined && isTime(a) === isTime(b) && typeof a === typeof b;
 const OPS = {
-  "==": (a, b) => a === b || (a instanceof Date && b instanceof Date && a.getTime() === b.getTime()),
-  "<": (a, b) => sameType(a, b) && val(a) < val(b),
-  ">": (a, b) => sameType(a, b) && val(a) > val(b),
-  ">=": (a, b) => sameType(a, b) && val(a) >= val(b),
+  "==": (a, b) => (isTime(a) && isTime(b) ? ms(a) === ms(b) : a === b),
+  "<": (a, b) => sameType(a, b) && ms(a) < ms(b),
+  ">": (a, b) => sameType(a, b) && ms(a) > ms(b),
+  ">=": (a, b) => sameType(a, b) && ms(a) >= ms(b),
   in: (a, b) => b.includes(a),
 };
+const tick = () => new Promise((r) => setImmediate(r));
 
 function fakeFirestore() {
   const docs = new Map();
-  const stats = { txReads: 0, queries: [] };
-  const snap = (path) => ({ id: path.split("/").pop(), ref: docRef(path), exists: docs.has(path), data: () => (docs.has(path) ? structuredClone(docs.get(path)) : undefined) });
-  const write = (path, d, o = {}) => { assertNoUndefined(d); const c = structuredClone(d); docs.set(path, o.merge && docs.has(path) ? merge(docs.get(path), c) : c); };
+  const versions = new Map(); // path -> write count; a missing doc is version 0 until written
+  const version = (p) => versions.get(p) || 0;
+  const bump = (p) => versions.set(p, version(p) + 1);
+  const stats = { txRuns: 0, txRetries: 0, queries: [] };
+  const snap = (path) => ({ id: path.split("/").pop(), ref: docRef(path), exists: docs.has(path), data: () => (docs.has(path) ? copy(docs.get(path)) : undefined) });
+  const write = (path, d, o = {}) => { assertNoUndefined(d); const c = copy(d); docs.set(path, o.merge && docs.has(path) ? merge(docs.get(path), c) : c); bump(path); };
+  const remove = (path) => { docs.delete(path); bump(path); };
   function query(match, desc, filters = [], lim = 0) {
     return {
       where: (f, op, v) => { if (!OPS[op]) throw new Error(`op ${op}`); return query(match, desc, filters.concat([[f, op, v]]), lim); },
@@ -54,7 +76,7 @@ function fakeFirestore() {
     return {
       path, id: path.split("/").pop(), get parent() { return colRef(parentOf(path)); },
       collection: (c) => colRef(`${path}/${c}`),
-      async get() { return snap(path); }, async set(d, o) { write(path, d, o); }, async delete() { docs.delete(path); },
+      async get() { return snap(path); }, async set(d, o) { write(path, d, o); }, async delete() { remove(path); },
     };
   }
   return {
@@ -62,16 +84,29 @@ function fakeFirestore() {
     collection: colRef,
     collectionGroup: (name) => query((p) => parentOf(p).split("/").pop() === name && parentOf(p).includes("/"), `group:${name}`),
     async getAll(...refs) { return refs.map((r) => snap(r.path)); },
+    // Optimistic isolation: every doc read (missing ones too) is recorded with
+    // its version; if any changed before commit, nothing is written and `fn`
+    // re-runs — up to 5 times, then ABORTED, like the real SDK.
     async runTransaction(fn) {
-      const buf = []; let wrote = false;
-      const t = {
-        async get(ref) { if (wrote) throw new Error("Firestore transactions require all reads to be executed before all writes."); stats.txReads++; return snap(ref.path); },
-        set(ref, d, o) { wrote = true; assertNoUndefined(d); buf.push(() => write(ref.path, d, o)); return t; },
-        delete(ref) { wrote = true; buf.push(() => docs.delete(ref.path)); return t; },
-      };
-      const out = await fn(t);
-      for (const w of buf) w();
-      return out;
+      for (let run = 0; run < 5; run++) {
+        stats.txRuns++;
+        const reads = new Map(); const buf = []; let wrote = false;
+        const t = {
+          async get(ref) {
+            if (wrote) throw new Error("Firestore transactions require all reads to be executed before all writes.");
+            const s = snap(ref.path);
+            if (!reads.has(ref.path)) reads.set(ref.path, version(ref.path));
+            await tick(); // let a concurrent transaction interleave here
+            return s;
+          },
+          set(ref, d, o) { wrote = true; assertNoUndefined(d); buf.push(() => write(ref.path, d, o)); return t; },
+          delete(ref) { wrote = true; buf.push(() => remove(ref.path)); return t; },
+        };
+        const out = await fn(t);
+        if ([...reads].every(([p, v]) => version(p) === v)) { for (const w of buf) w(); return out; }
+        stats.txRetries++;
+      }
+      throw Object.assign(new Error("10 ABORTED: Too much contention on these documents."), { code: 10 });
     },
   };
 }
@@ -95,7 +130,12 @@ const doc = (p) => fake.docs.get(p);
   assert.equal(doc("group_activity/111|2026-09-23").posts, 1);
   assert.deepEqual(doc("group_activity/111|2026-09-23").fingerprints, [{ exact: "a1b2", strong: "c3d4", weak: null, at: NOW.toISOString() }]);
   assert.equal(doc(`posting_dedup/${S._test.dedupKey("pg1", "group", "111")}`).key, a.key);
-  assert.deepEqual(await S.reserveAttempt(res()), { ok: false, reason: "already_reserved" });
+  {
+    const again = await S.reserveAttempt(res());
+    assert.equal(again.reason, "already_reserved");
+    assert.equal(again.attempt.key, a.key);
+    assert.equal(again.attempt.state, "reserved");
+  }
   assert.deepEqual(await S.reserveAttempt(res({ page_id: "pg1", campaign_id: "c2", now: new Date(NOW.getTime() + DAY) })), { ok: false, reason: "duplicate" });
 
   // ── cancel releases on Firestore too; lease_until null is never reaped ──
@@ -143,6 +183,8 @@ const doc = (p) => fake.docs.get(p);
   assert.equal((await S.updatePostingCampaign(first.campaign.id, { status: "paused", meta: { a: 1 } })).status, "paused");
   assert.deepEqual((await S.updatePostingCampaign(first.campaign.id, { meta: { b: 2 } })).meta, { a: 1, b: 2 });
   assert.deepEqual(doc(`posting_campaigns/${first.campaign.id}`).meta, { a: 1, b: 2 });
+  assert.deepEqual((await S.updatePostingCampaign(first.campaign.id, { meta: {} })).meta, {});
+  assert.deepEqual(doc(`posting_campaigns/${first.campaign.id}`).meta, {}, "an empty map replaces, on Firestore as in memory");
   assert.equal(await S.updatePostingCampaign("nope", { status: "running" }), null);
   assert.equal(doc("posting_campaigns/nope"), undefined);
   assert.equal((await S.listPostingCampaignsByStatus("paused")).length, 1);
@@ -160,8 +202,31 @@ const doc = (p) => fake.docs.get(p);
 
   // ── dwell sessions: expire_at is a Date (a TTL-able Timestamp) ──
   const id = await S.saveDwellSession({ phone: "972500000001", platform: "facebook", at: NOW, actions_summary: { scrolls: 3 }, likes: 0 });
-  assert.ok(doc(`dwell_sessions/${id}`).expire_at instanceof Date);
-  assert.equal((await S.listDwellSessionsByPhone("972500000001", NOW.getTime() - 1)).length, 1);
+  assert.ok(doc(`dwell_sessions/${id}`).expire_at instanceof Timestamp);
+  {
+    const listed = await S.listDwellSessionsByPhone("972500000001", NOW.getTime() - 1);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].expire_at, new Date(NOW.getTime() + 90 * DAY).toISOString(), "a Timestamp comes back as ISO");
+    assert.equal(listed[0].at, NOW.toISOString());
+  }
+
+  // ── two concurrent reservations for one remaining budget slot: exactly one wins ──
+  {
+    const retriesBefore = fake.stats.txRetries;
+    const lim = { daily_cap: 1, group_global_daily_cap: 5 };
+    const both = await Promise.all([
+      S.reserveAttempt(res({ phone: "972500000077", page_id: "race1", target_id: "701", limits: lim })),
+      S.reserveAttempt(res({ phone: "972500000077", page_id: "race2", target_id: "702", limits: lim })),
+    ]);
+    assert.equal(both.filter((r) => r.ok).length, 1);
+    assert.deepEqual(both.filter((r) => !r.ok).map((r) => r.reason), ["daily_cap"]);
+    assert.equal(doc("posting_budget/972500000077|2026-09-23").count, 1);
+    assert.ok(fake.stats.txRetries > retriesBefore, "the loser really raced and was re-run");
+    // Same key twice at once: one reservation, one already_reserved.
+    const same = await Promise.all([S.reserveAttempt(res({ phone: "972500000078", page_id: "race3" })), S.reserveAttempt(res({ phone: "972500000078", page_id: "race3" }))]);
+    assert.deepEqual(same.map((r) => r.reason || "ok").sort(), ["already_reserved", "ok"]);
+    assert.equal(doc("posting_budget/972500000078|2026-09-23").count, 1);
+  }
 
   console.log("posting-store.firestore.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -32,13 +32,21 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.equal(a.attempt.state, "reserved");
     assert.equal(a.attempt.key, S.attemptKey({ phone: "972500000001", page_id: "pg1", target_type: "group", target_id: "111", date: NOW }));
     assert.ok(/^[0-9a-f]{32}$/.test(a.attempt.key));
+    assert.deepEqual(await S.getAttempt(a.attempt.key), a.attempt);
     assert.equal(a.attempt.lease_until, new Date(NOW.getTime() + 20 * MIN).toISOString());
     assert.deepEqual(a.attempt.history.map((h) => h.state), ["reserved"]);
-    assert.deepEqual(await S.reserveAttempt(res()), { ok: false, reason: "already_reserved" });
+    // An orphan (e.g. a commit whose outcome the caller never saw) comes back
+    // whole, so the caller can resume, reconcile or cancel it.
+    await S.transition(a.attempt.key, "session_started", {}, NOW);
+    const again = await S.reserveAttempt(res());
+    assert.equal(again.ok, false);
+    assert.equal(again.reason, "already_reserved");
+    assert.deepEqual(again.attempt, await S.getAttempt(a.attempt.key));
+    assert.equal(again.attempt.state, "session_started");
+    assert.equal(S._test.maps.posting_budget.get("972500000001|2026-09-23").count, 1, "a refused reservation reserves nothing");
     assert.notEqual(S.attemptKey({ phone: "972500000001", page_id: "pg1", target_type: "group", target_id: "111", date: new Date(NOW.getTime() + DAY) }), a.attempt.key);
     // The same Jerusalem day at another hour is the same key.
     assert.equal(S.attemptKey({ phone: "972500000001", page_id: "pg1", target_type: "group", target_id: "111", date: T("2026-09-23T20:00:00Z") }), a.attempt.key);
-    assert.deepEqual(await S.getAttempt(a.attempt.key), a.attempt);
   }
 
   // ── daily cap per phone ──
@@ -82,7 +90,9 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.equal(S._test.maps.posting_budget.get(`972500000001|2026-09-23`).count, 0);
     // The same key is still taken (the attempt doc stays as the record), but
     // budget, bucket and dedup are free: another group, and another page to this group, succeed.
-    assert.deepEqual(await S.reserveAttempt(res({ limits: one })), { ok: false, reason: "already_reserved" });
+    const taken = await S.reserveAttempt(res({ limits: one }));
+    assert.equal(taken.reason, "already_reserved");
+    assert.equal(taken.attempt.state, "cancelled");
     assert.equal((await S.reserveAttempt(res({ limits: one, page_id: "pg2" }))).ok, true);
 
     // verified_failed from a pre-submit state also releases.
@@ -162,6 +172,30 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     // outcome_unknown is parked: never reaped again, never back to submit.
     assert.deepEqual((await S.reapExpired(new Date(NOW.getTime() + 2 * DAY))).map((x) => x.key), [fresh.key]);
     assert.deepEqual((await S.listAttemptsByState("outcome_unknown")).map((a) => a.key).sort(), [sub.key, vp.key].sort());
+  }
+
+  // ── one malformed attempt never blocks the reaper or cancelOpenAttempts ──
+  {
+    S._test.reset();
+    const big = { daily_cap: 9, group_global_daily_cap: 9 };
+    const v1 = (await S.reserveAttempt(res({ target_id: "1", limits: big }))).attempt;
+    const v2 = (await S.reserveAttempt(res({ target_id: "2", limits: big }))).attempt;
+    const badKey = "f".repeat(32);
+    const bad = Object.assign(structuredClone(S._test.maps.posting_attempts.get(v1.key)), { key: badKey });
+    delete bad.budget_key;
+    // Inserted first, so it is met before the two valid ones.
+    const all = [[badKey, bad], ...S._test.maps.posting_attempts];
+    S._test.maps.posting_attempts.clear();
+    for (const [k, v] of all) S._test.maps.posting_attempts.set(k, v);
+    const reaped = await S.reapExpired(new Date(NOW.getTime() + 21 * MIN));
+    assert.deepEqual(reaped.map((x) => x.key).sort(), [v1.key, v2.key].sort());
+    assert.deepEqual(reaped.failures, [{ key: badKey, error_code: "corrupt_attempt" }]);
+    assert.equal((await S.getAttempt(badKey)).state, "reserved", "the malformed doc is left as it is");
+
+    const v3 = (await S.reserveAttempt(res({ target_id: "3", limits: big }))).attempt;
+    await assert.rejects(S.cancelOpenAttempts("972500000001", "facebook"), (e) =>
+      e.code === "cancel_incomplete" && e.cancelled === 1 && e.failures.length === 1 && e.failures[0].key === badKey);
+    assert.equal((await S.getAttempt(v3.key)).state, "cancelled", "the valid attempt is cancelled despite the bad one");
   }
 
   // ── cancelOpenAttempts cancels only pre-submit states, only this phone ──
@@ -267,6 +301,13 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.equal(await S.updatePostingCampaign("missing", { status: "running" }), null);
     assert.equal(await S.getPostingCampaign("missing"), null, "update never creates a campaign");
     await assert.rejects(S.updatePostingCampaign(id, { phone: "x" }), code("invalid_input"));
+    // Maps merge, but an explicitly empty map replaces (Firestore's merge mask).
+    assert.deepEqual((await S.updatePostingCampaign(id, { meta: { a: 1, n: { x: 1 } } })).meta, { a: 1, n: { x: 1 } });
+    assert.deepEqual((await S.updatePostingCampaign(id, { meta: { b: 2, n: { y: 2 } } })).meta, { a: 1, b: 2, n: { x: 1, y: 2 } });
+    assert.deepEqual((await S.updatePostingCampaign(id, { meta: { n: {} } })).meta, { a: 1, b: 2, n: {} });
+    assert.deepEqual((await S.updatePostingCampaign(id, { meta: {} })).meta, {});
+    assert.deepEqual((await S.getPostingCampaign(id)).meta, {});
+    await S.updatePostingCampaign(id, { meta: null });
     await S.createPostingCampaignIfAbsent({ phone: "972500000002", page_id: "pg1", status: "running" });
     assert.equal((await S.listPostingCampaignsByStatus("running")).length, 1);
     assert.equal((await S.listPostingCampaignsByStatus("paused")).length, 1);
@@ -274,6 +315,7 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     // Returned objects are copies: mutating one never changes the store.
     (await S.getPostingCampaign(id)).status = "hacked";
     assert.equal((await S.getPostingCampaign(id)).status, "paused");
+    assert.equal((await S.getPostingCampaign(id)).meta, null);
   }
 
   // ── manual posts, connections, halts ──
@@ -309,7 +351,10 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.deepEqual(Object.keys(d).sort(), ["actions_summary", "at", "expire_at", "halt_related", "id", "likes", "phone", "platform"]);
     assert.equal(d.expire_at.getTime(), NOW.getTime() + 90 * DAY);
     assert.equal(S._test.maps.dwell_sessions.get(idH).expire_at.getTime(), NOW.getTime() + 365 * DAY);
-    assert.equal((await S.listDwellSessionsByPhone("972500000001", NOW.getTime() - DAY)).length, 2);
+    const listed = await S.listDwellSessionsByPhone("972500000001", NOW.getTime() - DAY);
+    assert.equal(listed.length, 2);
+    assert.deepEqual(listed.map((x) => x.at), [at, at]);
+    assert.deepEqual(listed.map((x) => x.expire_at).sort(), [new Date(NOW.getTime() + 90 * DAY).toISOString(), new Date(NOW.getTime() + 365 * DAY).toISOString()].sort());
     assert.equal((await S.listDwellSessionsByPhone("972500000001", NOW.getTime() + 1)).length, 0);
   }
 

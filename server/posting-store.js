@@ -162,6 +162,7 @@ async function listDwellSessionsByPhone(phone, sinceMs) {
     if (since) q = q.where("at", ">=", since);
     rows = (await q.get()).docs.map((d) => d.data());
   } else rows = [...maps[DWELL].values()].filter((d) => d.phone === phone && (!since || d.at >= since)).map(clone);
+  rows = rows.map((d) => ({ ...d, at: d.at ? toIso(d.at) : null, expire_at: d.expire_at ? toIso(d.expire_at) : null }));
   return rows.sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0));
 }
 

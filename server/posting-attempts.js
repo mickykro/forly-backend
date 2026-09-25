@@ -106,7 +106,9 @@ async function reserveAttempt(input = {}) {
     const budget = await tx.get(BUD, bKey);
     const bucket = aKey ? await tx.get(ACT, aKey) : null;
     const dedup = await tx.get(DED, dKey);
-    if (existing) return { ok: false, reason: "already_reserved" };
+    // The existing attempt comes back so the caller can resume, reconcile or
+    // cancel an orphan left by a commit whose outcome it never saw.
+    if (existing) return { ok: false, reason: "already_reserved", attempt: existing };
     if (((budget && budget.count) || 0) >= dailyCap) return { ok: false, reason: "daily_cap" };
     if (aKey && ((bucket && bucket.posts) || 0) >= groupCap) return { ok: false, reason: "group_cap" };
     if (dedup && !dedup.released) return { ok: false, reason: "duplicate" };
@@ -151,6 +153,7 @@ async function applyTransition(key, to, detail, nowIn, guard) {
     if (guard && !guard(a)) return null;
     if (!(EDGES[a.state] || []).includes(to)) throw fail("illegal_transition", `${a.state} -> ${to}`);
     const release = to === "cancelled" || (to === "verified_failed" && PRE_SUBMIT.has(a.state));
+    if (release && (typeof a.budget_key !== "string" || typeof a.dedup_key !== "string")) throw fail("corrupt_attempt", "attempt has no reservation keys");
     const budget = release ? await tx.get(BUD, a.budget_key) : null;
     const bucket = release && a.activity_key ? await tx.get(ACT, a.activity_key) : null;
     const dedup = release ? await tx.get(DED, a.dedup_key) : null;
@@ -192,33 +195,50 @@ async function queryAttempts(where, memFilter, limit) {
   return limit ? out.slice(0, limit) : out;
 }
 
+// Runs `applyTransition` for one listed attempt; a failure is collected as
+// { key, error_code } instead of thrown, so one malformed doc never blocks
+// the rest of the sweep.
+async function tryTransition(failures, key, ...args) {
+  try { return await applyTransition(key, ...args); }
+  catch (e) { failures.push({ key, error_code: (e && e.code) || "error" }); return null; }
+}
+
 // → [{ key, from, to }]: expired leases. Pre-submit → cancelled (released);
 // submit_started / verification_pending → outcome_unknown (never retried).
+// The array also carries `.failures`: [{ key, error_code }] for attempts that
+// could not be moved (left as they are; the next sweep tries again).
 async function reapExpired(nowIn) {
   const now = toDate(nowIn);
   const iso = now.toISOString();
   const expired = (a) => typeof a.lease_until === "string" && a.lease_until < iso && (PRE_SUBMIT.has(a.state) || IN_FLIGHT.has(a.state));
   const found = (await queryAttempts([["lease_until", "<", iso]], expired, 200)).filter(expired);
   const out = [];
+  const failures = [];
   for (const a of found) {
     const to = PRE_SUBMIT.has(a.state) ? "cancelled" : "outcome_unknown";
-    const done = await applyTransition(a.key, to, { error_code: "lease_expired" }, now, (cur) => cur.state === a.state && expired(cur));
+    const done = await tryTransition(failures, a.key, to, { error_code: "lease_expired" }, now, (cur) => cur.state === a.state && expired(cur));
     if (done) out.push({ key: a.key, from: a.state, to });
   }
+  Object.defineProperty(out, "failures", { value: failures, enumerable: false });
   return out;
 }
 
 // Revoke/quarantine (profile-lifecycle): cancel what has not reached the
 // Post click; leave submit_started+ for reconciliation. → count cancelled.
+// Every open attempt is tried; if any failed, it then throws `cancel_incomplete`
+// with `.cancelled` (count) and `.failures` ([{ key, error_code }]) — the
+// reaper cancels those on lease expiry.
 async function cancelOpenAttempts(phone, platform, nowIn) {
   if (platform && platform !== "facebook") return 0; // every attempt is a Facebook attempt today
   assertId(phone, "phone");
   const open = await queryAttempts([["phone", "==", phone], ["state", "in", [...PRE_SUBMIT]]], (a) => a.phone === phone && PRE_SUBMIT.has(a.state));
   let n = 0;
+  const failures = [];
   for (const a of open) {
-    const done = await applyTransition(a.key, "cancelled", { error_code: "revoked" }, nowIn, (cur) => cur.phone === phone && PRE_SUBMIT.has(cur.state));
+    const done = await tryTransition(failures, a.key, "cancelled", { error_code: "revoked" }, nowIn, (cur) => cur.phone === phone && PRE_SUBMIT.has(cur.state));
     if (done) n++;
   }
+  if (failures.length) throw Object.assign(fail("cancel_incomplete", `${failures.length} attempt(s) not cancelled`), { cancelled: n, failures });
   return n;
 }
 

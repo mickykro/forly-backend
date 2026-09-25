@@ -22,7 +22,9 @@ const firestore = () => require("./db").db;
 
 function fail(code, message) { const e = new Error(message || code); e.code = code; return e; }
 
-const isPlainObject = (v) => Object.prototype.toString.call(v) === "[object Object]";
+// A map, not a class instance: a Firestore Timestamp read back and written
+// again must stay a Timestamp, never be merged into or rebuilt as a map.
+const isPlainObject = (v) => v !== null && typeof v === "object" && [Object.prototype, null].includes(Object.getPrototypeOf(v));
 
 // Firestore refuses `undefined`; drop it on both paths so memory matches.
 function stripUndefined(v) {
@@ -33,11 +35,13 @@ function stripUndefined(v) {
   return out;
 }
 
-// set(..., { merge: true }) semantics: nested maps merge, anything else replaces.
+// set(..., { merge: true }) semantics: non-empty nested maps merge, anything
+// else replaces. An explicitly empty map replaces too: Firestore's merge mask
+// names the field itself, so `{ meta: {} }` leaves `meta` empty.
 function deepMerge(target, patch) {
   const out = { ...target };
   for (const [k, v] of Object.entries(patch)) {
-    out[k] = isPlainObject(v) && isPlainObject(out[k]) ? deepMerge(out[k], v) : v;
+    out[k] = isPlainObject(v) && Object.keys(v).length && isPlainObject(out[k]) ? deepMerge(out[k], v) : v;
   }
   return out;
 }
