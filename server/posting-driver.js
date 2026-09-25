@@ -207,7 +207,7 @@ async function drive(page, x, want, args) {
   const id = await P.readTargetId(page, kind);
   if (!want.id) {
     if (!id) return x.end("verified_failed", { error_code: "destination_mismatch" }); // unresolved slug: fail closed
-    x.extra.resolved_group_id = id;
+    x.resolvedId = id; // reported only once the R3 proof has passed (fix round 2 C)
     want.id = id;
     want.ids = [...new Set([id, ...want.ids])];
   } else if (id !== want.id) return x.end("verified_failed", { error_code: "destination_mismatch" });
@@ -221,19 +221,22 @@ async function drive(page, x, want, args) {
   await composer.click();
   const editor = page.locator(S.editor).first();
   if (!(await editor.waitFor({ timeout: 10000 }).then(() => true, () => false))) return x.end("verified_failed", { error_code: "composer_not_found" });
+  // What the page says comes first (fix round 2): a restriction dialog that
+  // opened around the composer is `restricted`, not a composer problem.
+  done = await preSubmitSignal(page, x);
+  if (done) return done;
   const roots = await P.countOf(page, S.composerRoot);
   if (roots !== 1) return x.end("verified_failed", { error_code: roots < 1 ? "composer_not_found" : "destination_mismatch" });
   await x.step("composer_ready");
-  done = await preSubmitSignal(page, x);
-  if (done) return done;
   await editor.click();
   try { await humanType(page, editor, copy, x); }
   catch (e) { if (e && e.code === "composer_focus_lost") return x.end("verified_failed", { error_code: e.code }); throw e; }
   await x.wait(page, 5, 20); // re-read before posting, like anyone would
 
   // 4. R3 — prove who, where and what, immediately before Post
-  const proof = await P.proveIdentityAndDestination(page, attempt, x.conn, { copy, resolvedGroupId: x.extra.resolved_group_id });
+  const proof = await P.proveIdentityAndDestination(page, attempt, x.conn, { copy, resolvedGroupId: x.resolvedId });
   if (!proof.ok) return x.end("verified_failed", { error_code: proof.code }, proof.code === "not_member" ? { membership: "left" } : {});
+  if (x.resolvedId) x.extra.resolved_group_id = x.resolvedId; // the proof matched this id to the target
   x.author = kind === "group" ? P.norm(x.conn.facebook_identity_label) : await P.textOf(page, S.targetName);
 
   if (args.dryRun === true) {

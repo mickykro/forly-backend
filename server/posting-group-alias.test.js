@@ -62,6 +62,32 @@ async function runDays(deps, at, days, campaigns) {
       assert.deepEqual(cur.groups[0].aliases, [SLUG], "the campaign group keeps the slug as an alias");
       const m = (await db.getConnection(PH)).facebook_groups_member;
       assert.deepEqual(m.map((e) => [e.group_id, e.aliases]), [["12345", [SLUG]]], "so does the membership entry");
+      // fix round 2 D: and the global registry, which every account's caps read
+      assert.deepEqual((await store.groupIdsFor(SLUG)).sort(), ["12345", SLUG].sort());
+      assert.deepEqual((await store.groupIdsFor("12345")).sort(), ["12345", SLUG].sort());
+    }
+
+    // ── fix round 2 D: the registry is global — another account reserving under the slug shares the cap ──
+    {
+      const limits = { daily_cap: 5, group_global_daily_cap: 1, dedup_days: 14 };
+      const reserve = (phone, target_id, now = NOW, page_id = "pg1") => store.reserveAttempt({ phone, page_id, target_type: "group", target_id, publisher: "browser", limits, now });
+      // control: without the registry, account 2's slug reservation would slip past account 1's numeric one
+      K.reset();
+      assert.ok((await reserve(PH, "12345")).ok);
+      assert.ok((await reserve("972500000002", SLUG, NOW, "pg2")).ok, "(the reviewer's overshoot)");
+      // with it: account 1 resolved the slug, reserved under the numeric id; account 2 knows only the slug
+      K.reset();
+      await store.recordGroupAlias(SLUG, "12345", NOW);
+      assert.ok((await reserve(PH, "12345")).ok);
+      assert.deepEqual(await reserve("972500000002", SLUG, NOW, "pg2"), { ok: false, reason: "group_cap" }, "the global cap of 1 holds across ids");
+      // the property→group dedup folds through it too
+      assert.deepEqual(await reserve(PH, SLUG, new Date(NOW.getTime() + DAY)), { ok: false, reason: "duplicate" });
+      // and group activity, from either id
+      assert.equal((await store.getGroupActivityFor([SLUG], NOW))[SLUG].posts_today, 1);
+      K.reset();
+      await store.recordGroupAlias(SLUG, "12345", NOW);
+      assert.ok((await reserve("972500000002", SLUG, NOW, "pg2")).ok);
+      assert.equal((await store.getGroupActivityFor(["12345"], NOW))["12345"].posts_today, 1, "the numeric id sees the slug's bucket");
     }
 
     // ── a different listing to the same group within 7 days is refused, whichever id its campaign holds ──

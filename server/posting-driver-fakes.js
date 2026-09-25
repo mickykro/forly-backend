@@ -75,11 +75,14 @@ function fakePage(o = {}) {
   };
 }
 
+// A region: { text (its chrome), editable (the text inside its
+// [contenteditable]), children (texts of elements inside the chrome) }.
 function fakeRegion(r) {
   return {
     cloneNode: () => {
       const c = { text: r.text || "", editable: r.editable || "" };
-      c.querySelectorAll = (q) => (q === "[contenteditable]" ? (c.editable ? [{ remove: () => { c.editable = ""; } }] : []) : q === "*" ? [{ append: () => {} }] : []);
+      const kids = (r.children || []).map((t) => ({ textContent: t, append: () => {} }));
+      c.querySelectorAll = (q) => (q === "[contenteditable]" ? (c.editable ? [{ remove: () => { c.editable = ""; } }] : []) : q === "*" ? kids : []);
       Object.defineProperty(c, "textContent", { get: () => `${c.text} ${c.editable}` });
       return c;
     },

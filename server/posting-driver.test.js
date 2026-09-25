@@ -199,6 +199,17 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     const out = await PD.postToGroup(argsOf({ attempt: a, groupUrl: slugUrl }), h.deps);
     assert.equal(out.state, "verified_posted");
     assert.equal(out.resolved_group_id, "111");
+    // fix round 2 C: the slug URL landed on ANOTHER group (id 555, other name) → the proof fails,
+    // and no resolved_group_id is reported (it would merge two groups)
+    const hm = harness({ conn: { facebook_groups_member: [{ group_id: "slug:haifa.rent", name: GROUP_NAME }] },
+      page: { attrs: { [S.targetIdMeta]: "fb://group/555" }, texts: { [S.targetName]: "Other group" } } });
+    const mis = await PD.postToGroup(argsOf({ attempt: a, groupUrl: slugUrl }), hm.deps);
+    assert.deepEqual([mis.state, mis.error_code, mis.resolved_group_id], ["verified_failed", "destination_mismatch", undefined]);
+    assert.equal(hm.submits(), 0);
+    // fix round 2 E: the membership entry is found through its alias
+    const P = require("./posting-driver-proof");
+    const aliased = connOf({ facebook_groups_member: [{ group_id: "12345", aliases: ["slug:haifa.rent"], name: GROUP_NAME }] });
+    assert.equal(P.expectedTarget(a, aliased).name, P.norm(GROUP_NAME));
     const h2 = harness({ page: { attrs: { [S.targetIdMeta]: "" } } });
     const out2 = await PD.postToGroup(argsOf({ attempt: a, groupUrl: slugUrl }), h2.deps);
     assert.deepEqual([out2.state, out2.error_code], ["verified_failed", "destination_mismatch"]);
@@ -284,8 +295,12 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
       texts: { [S.postMessage]: COPY2 },
       regions: {
         [S.dialog]: (s) => [{ text: "Create post Post", editable: s.editor }, { text: `Preview: ${COPY2}` }],
-        // a toast with a CUT of the copy (Minor 10) and an alert holding the whole copy
-        [S.alert]: (s) => (s.submitted ? [{ text: `Posted: ${COPY2.slice(0, 60)}…` }, { text: COPY2 }] : []),
+        // a toast that IS a cut of the copy, one that holds a cut in a span, and the whole copy
+        [S.alert]: (s) => (s.submitted ? [
+          { text: `${COPY2.slice(0, 60)}…` },
+          { text: `Posted: ${COPY2.slice(0, 60)}…`, children: [`${COPY2.slice(0, 60)}…`] },
+          { text: COPY2 },
+        ] : []),
       },
       feed: (s) => (s.submitted ? [{ href: PERMA, author: NAME, text: COPY2 }] : []),
     } });
@@ -303,6 +318,36 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     const out = await PD.postToGroup(argsOf(), h.deps);
     assert.deepEqual([out.state, out.error_code], ["verified_failed", code], label);
     assert.equal(h.submits(), 0, label);
+  }
+  {
+    // fix round 2 A: the restriction dialog wraps the composer and the root count reads 2 —
+    // the signal is read FIRST, so it is `restricted`, not destination_mismatch
+    const h = harness({ page: {
+      counts: { [S.composerRoot]: (s) => (s.clicks.includes(S.composer) ? 2 : 1) },
+      regions: { [S.dialog]: (s) => (s.clicks.includes(S.composer) ? [{ text: "Your account is restricted", editable: s.editor }, { text: "Create post", editable: s.editor }] : []) },
+    } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.error_code, out.signal], ["verified_failed", "restricted", "restricted"]);
+    assert.equal(h.submits(), 0);
+  }
+  {
+    // a nested Create-post layer with no signal (one innermost root) posts normally
+    const h = harness({ page: { regions: { [S.dialog]: (s) => [{ text: "layer", editable: s.editor }, { text: "Create post", editable: s.editor }] } } });
+    assert.equal((await PD.postToGroup(argsOf(), h.deps)).state, "verified_posted");
+    assert.equal(h.submits(), 1);
+  }
+  {
+    // fix round 2 B: an ordinary copy sharing a short phrase never hides a real alert
+    for (const [copy, alert, code] of [
+      ["דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות, חניה בשפע", "אתה חסום זמנית מפרסום בקבוצות", "rate_limited"],
+      ["דירה חדשה מקבלן, הנכס ממתין לאישור טאבו, כניסה מיידית", "הפוסט שלך ממתין לאישור מנהל הקבוצה", "pending_approval"],
+    ]) {
+      const a = attemptOf({ copy_hash: sha(copy) });
+      const h = harness({ page: { texts: { [S.postMessage]: copy }, feed: [], regions: { [S.alert]: (s) => (s.submitted ? [{ text: alert }] : []) } } });
+      const out = await PD.postToGroup(argsOf({ attempt: a, copy }), h.deps);
+      assert.equal(out.state, code === "pending_approval" ? "submitted_for_approval" : "outcome_unknown", code);
+      if (code === "rate_limited") assert.equal(out.signal, "rate_limited");
+    }
   }
   {
     // after the click, the same restriction wrapping a still-open composer → reported

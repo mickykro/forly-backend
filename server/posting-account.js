@@ -263,6 +263,10 @@ async function applyFindings(result, { c, post }, x, now) {
       return { facebook_groups_member: list };
     });
   } catch (e) { note("membership update", e); }
+  // Right after the resolving write: the registry every account's caps read.
+  if (numeric && typeof x.store.recordGroupAlias === "function") {
+    try { await x.store.recordGroupAlias(gid, numeric, now); } catch (e) { note("group alias", e); }
+  }
   try {
     await mutate(x, c.id, (cur) => {
       const seen = new Set();

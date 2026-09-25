@@ -25,8 +25,42 @@ const safety = require("./posting-safety");
 const { firestore, runTx, fail, hmacHex, toDate, toIso, assertId, isPlainObject, stripUndefined } = require("./posting-tx");
 
 const LEASE_MS = 20 * 60000;
-const ATT = "posting_attempts", BUD = "posting_budget", ACT = "group_activity", DED = "posting_dedup";
-const maps = { [ATT]: new Map(), [BUD]: new Map(), [ACT]: new Map(), [DED]: new Map() };
+const ATT = "posting_attempts", BUD = "posting_budget", ACT = "group_activity", DED = "posting_dedup", GAL = "group_aliases";
+const maps = { [ATT]: new Map(), [BUD]: new Map(), [ACT]: new Map(), [DED]: new Map(), [GAL]: new Map() };
+
+// group_aliases (Task 18 fix round 2): one group, several ids, for EVERY
+// account. group_aliases/{slug id} → { group_id, at } and
+// group_aliases/{group_id} → { group_id, aliases: [slug ids], at }. Every id
+// a reservation or an activity read starts from is folded through it, so a
+// slug one account resolved still shares its caps with every other account.
+// `get(col, id)` is a transaction read or a plain one. → [id, …the others].
+async function foldGroupIds(get, id) {
+  const d = await get(GAL, id);
+  const canon = d && typeof d.group_id === "string" && d.group_id ? d.group_id : id;
+  const cd = canon === id ? d : await get(GAL, canon);
+  const others = cd && Array.isArray(cd.aliases) ? cd.aliases.map(String) : [];
+  return [...new Set([id, canon, ...others])];
+}
+async function readDoc(col, id) {
+  const fdb = firestore();
+  if (fdb) { const d = await fdb.collection(col).doc(id).get(); return d.exists ? d.data() : null; }
+  return maps[col].has(id) ? structuredClone(maps[col].get(id)) : null;
+}
+const groupIdsFor = (id) => foldGroupIds(readDoc, assertId(id, "group_id"));
+
+// Records that `aliasId` (a vanity "slug:…" id) is `groupId`. Idempotent.
+async function recordGroupAlias(aliasId, groupId, nowIn) {
+  const alias = assertId(aliasId, "alias"), gid = assertId(groupId, "group_id");
+  if (alias === gid) return null;
+  const at = toDate(nowIn).toISOString();
+  return runTx(maps, async (tx) => {
+    const g = await tx.get(GAL, gid);
+    const aliases = [...new Set([...((g && g.aliases) || []), alias])];
+    tx.set(GAL, alias, { group_id: gid, at });
+    tx.set(GAL, gid, { group_id: gid, aliases, at }, { merge: true });
+    return { group_id: gid, aliases };
+  });
+}
 
 const EDGES = {
   reserved: ["session_started", "cancelled"],
@@ -117,14 +151,18 @@ async function reserveAttempt(input = {}) {
   const bKey = budgetKey(phone, date);
   const aKey = target_type === "group" ? safety.activityKey(target_id, now) : null;
   const dKey = dedupKey(page_id, target_type, target_id);
-  const aliasActKeys = target_type === "group" ? target_aliases.map((a) => safety.activityKey(a, now)) : [];
-  const aliasDedupKeys = target_aliases.map((a) => dedupKey(page_id, target_type, a));
 
   return runTx(maps, async (tx) => {
     const existing = await tx.get(ATT, key);
     const budget = await tx.get(BUD, bKey);
     const bucket = aKey ? await tx.get(ACT, aKey) : null;
     const dedup = await tx.get(DED, dKey);
+    // Every other id of this target: the caller's aliases and the global
+    // registry's (read in this transaction), folded before any key is used.
+    const registry = target_type === "group" ? await foldGroupIds((c, id) => tx.get(c, id), target_id) : [target_id];
+    const otherIds = [...new Set([...target_aliases, ...registry])].filter((a) => a !== target_id);
+    const aliasActKeys = target_type === "group" ? otherIds.map((a) => safety.activityKey(a, now)) : [];
+    const aliasDedupKeys = otherIds.map((a) => dedupKey(page_id, target_type, a));
     const aliasBuckets = [];
     for (const k of aliasActKeys) aliasBuckets.push(await tx.get(ACT, k));
     const aliasDedups = [];
@@ -326,15 +364,21 @@ function lastDates(today, n) {
 }
 
 // → { [group_id]: { posts_today, fingerprints } } — nextSlot's groupActivity input.
-// `aliases` ({ [group_id]: [other ids] }, Task 18): every alias's buckets are
-// read too and folded into its group's entry.
+// `aliases` ({ [group_id]: [other ids] }, Task 18) and the global
+// group_aliases registry: every other id's buckets are read too and folded
+// into its group's entry.
 async function getGroupActivityFor(group_ids, nowIn, windowDays = safety.DEFAULTS.fingerprint_window_days, aliases = {}) {
   const ids = (group_ids || []).map((g) => assertId(g, "group_id"));
   windowDays = windowDays === undefined || windowDays === null ? safety.DEFAULTS.fingerprint_window_days : windowDays;
   if (!Number.isInteger(windowDays) || windowDays < 1) throw fail("invalid_input", "windowDays must be a positive integer");
   const dates = lastDates(safety.jerusalemDate(toDate(nowIn)), windowDays);
-  const keysOf = (g) => [g, ...(Array.isArray(aliases && aliases[g]) ? aliases[g].map((a) => assertId(a, "alias")) : [])].filter((k, i, all) => all.indexOf(k) === i);
-  const groupsOf = ids.map((g) => keysOf(g));
+  const groupsOf = [];
+  for (const g of ids) {
+    const given = Array.isArray(aliases && aliases[g]) ? aliases[g].map((a) => assertId(a, "alias")) : [];
+    const folded = [];
+    for (const k of [g, ...given]) folded.push(...(await foldGroupIds(readDoc, k)));
+    groupsOf.push([...new Set([g, ...given, ...folded])]);
+  }
   const docIds = groupsOf.flat().flatMap((g) => dates.map((dt) => `${g}|${dt}`));
   const fdb = firestore();
   let docs;
@@ -357,7 +401,7 @@ function reset() { for (const m of Object.values(maps)) m.clear(); }
 
 module.exports = {
   LEASE_MS, EDGES, countingStates, isCounting,
-  attemptKey, reserveAttempt, transition, annotate, reapExpired, cancelOpenAttempts,
+  attemptKey, reserveAttempt, transition, annotate, recordGroupAlias, groupIdsFor, reapExpired, cancelOpenAttempts,
   getAttempt, listAttemptsByPhone, listAttemptsByState, listOpenAttemptsByCampaign, getGroupActivityFor,
   _test: { reset, maps, dedupKey, lastDates },
 };

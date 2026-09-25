@@ -137,6 +137,13 @@ async function reconcileOne(deps, x, now) {
       });
     } catch (e) { console.error(redact(`posting reconcile …${a.key.slice(-6)}: ${code(e)}`)); }
     finally { release(); }
+    // A halting signal the reconcile session saw (a checkpoint, a login wall…)
+    // halts the account exactly as it would after a post (R5). Never throws.
+    const cls = H.classOf(result && result.signal);
+    if (cls) {
+      try { await H.haltAccount(a.phone, cls, deps, { campaignId: c.id, now }); }
+      catch (e) { console.error(redact(`posting reconcile halt …${a.key.slice(-6)}: ${code(e)}`)); }
+    }
     if (result && result.noop === true) {
       // No reconciler installed yet: it has not really run, so it may run later.
       await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id ? { ...p, reconcile_at: null } : p)) }));

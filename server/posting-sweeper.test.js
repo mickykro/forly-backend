@@ -227,6 +227,25 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     assert.equal((await store.getPostingCampaign(c.id)).posts[0].status, "posted");
   }
 
+  // ── fix round 2 G: a halting signal seen by the reconcile session halts the account ──
+  {
+    const { deps, at } = await setup();
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, at(NOW));
+    const crash = async (args, d) => { for (const s of ["session_started", "composer_ready", "submit_started"]) await d.attempts.transition(args.attempt.key, s); return { noop: true }; };
+    c = await S.tick(c, with_(deps, { post: crash }), at(dueOf(c)));
+    const later = new Date(dueOf(c).getTime() + 25 * MIN);
+    await S.sweep(deps, at(later));
+    let annotated = null;
+    const reconcile = async (a, d) => { annotated = typeof d.attempts.annotate; return { state: "outcome_unknown", error_code: "checkpoint", signal: "checkpoint" }; };
+    await S.sweep(with_(deps, { reconcile }), at(new Date(later.getTime() + MIN)));
+    const conn = await db.getConnection(PH);
+    assert.equal(conn.posting_disabled_until_admin, true, "checkpoint → the account is disabled, as after a post");
+    assert.ok((conn.posting_halts || []).some((h) => h.code === "checkpoint"));
+    assert.equal(annotated, "function", "the reconcile deps can annotate the attempt");
+    assert.equal((await store.getAttempt(c.posts[0].attempt_key)).state, "outcome_unknown", "and nothing was submitted or transitioned");
+  }
+
   // ── the profile lock is respected: nothing posts while an extract or login holds it ──
   {
     const { deps, at } = await setup();

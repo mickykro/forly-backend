@@ -58,23 +58,34 @@ const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval"]
 // hasCaptchaFrame is optional, structural evidence the driver (Task 18) can
 // supply when it actually saw a captcha iframe — a stronger signal than any
 // text on the page.
-// ownText (optional, Task 18): the text WE typed. A signal phrase found on
-// the page that also appears in it is ignored — the post's own words, or a
-// cut of them in a toast, are never a signal; the same pattern matched by a
-// phrase that is NOT in our text still is. Structural evidence (the URL, a
-// captcha frame) is not text and always counts.
-function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, ownText } = {}) {
+// ownText + alertElements (optional, Task 18): the text WE typed, and the
+// normalised text of every element inside the alert/status regions. A match
+// in an ALERT is ignored only when the smallest element holding it is, as a
+// whole, a piece of our own copy (a toast showing a cut of the post) of at
+// least MIN_ECHO characters — "הכביש חסום זמנית" in our copy never hides "אתה
+// חסום זמנית מפרסום", and a short bolded fragment never hides its sentence.
+// Dialog text is never excused. Structural evidence (the URL, a captcha
+// frame) is not text and always counts.
+const MIN_ECHO = 20;
+const cutOf = (s) => s.replace(/\s*(…|\.\.\.)\s*$/, "").trim();
+function echoOfOwn(match, elements, own) {
+  if (!own || !elements.length) return false;
+  const m = match.toLowerCase();
+  const holder = elements.filter((e) => e.toLowerCase().includes(m)).sort((a, b) => a.length - b.length)[0];
+  const h = holder ? cutOf(holder) : "";
+  return h.length >= MIN_ECHO && own.toLowerCase().includes(h.toLowerCase());
+}
+
+function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, ownText, alertElements } = {}) {
   const path = pathOf(landedUrl);
   for (const [code, re] of URL_SIGNALS) if (re.test(path)) return code;
 
   const dialog = norm(dialogText), alert = norm(alertText), own = norm(ownText);
-  if (hasCaptchaFrame) return "captcha";
-  if ((CAPTCHA_EXACT.test(dialog) || CAPTCHA_EXACT.test(alert)) && !(own && own.toLowerCase().includes("confirm you're human"))) return "captcha";
+  if (hasCaptchaFrame || CAPTCHA_EXACT.test(dialog) || CAPTCHA_EXACT.test(alert)) return "captcha";
 
-  const t = `${dialog}\n${alert}`;
-  const lowOwn = own.toLowerCase();
-  const foreign = (re) => [...t.matchAll(new RegExp(re.source, `${re.flags}g`))].some((m) => !lowOwn || !lowOwn.includes(m[0].toLowerCase()));
-  for (const [code, re] of TEXT_SIGNALS) if (re.test(t) && foreign(re)) return code;
+  const elements = (Array.isArray(alertElements) ? alertElements : []).map(norm).filter(Boolean);
+  const inAlert = (re) => [...alert.matchAll(new RegExp(re.source, `${re.flags}g`))].some((m) => !echoOfOwn(m[0], elements, own));
+  for (const [code, re] of TEXT_SIGNALS) if (re.test(dialog) || inAlert(re)) return code;
   return "ok";
 }
 

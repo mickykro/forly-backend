@@ -257,6 +257,7 @@ module.exports = {
   // attempts (R1) and group activity — posting-attempts.js
   LEASE_MS: attempts.LEASE_MS, EDGES: attempts.EDGES, countingStates: attempts.countingStates, isCounting: attempts.isCounting,
   attemptKey: attempts.attemptKey, reserveAttempt: attempts.reserveAttempt, transition: attempts.transition, annotateAttempt: attempts.annotate,
+  recordGroupAlias: attempts.recordGroupAlias, groupIdsFor: attempts.groupIdsFor,
   reapExpired: attempts.reapExpired, cancelOpenAttempts: attempts.cancelOpenAttempts,
   getAttempt: attempts.getAttempt, listAttemptsByPhone: attempts.listAttemptsByPhone, listAttemptsByState: attempts.listAttemptsByState,
   getGroupActivityFor: attempts.getGroupActivityFor,

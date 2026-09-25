@@ -17,10 +17,12 @@ const { sha } = require("./posting-campaign");
 const SD = require("./social-dwell");
 const { classifySignal } = require("./posting-signals");
 
-// The composer's root: the dialog that holds the editor. The editor is found
-// INSIDE it (SELECTORS.editor below), and signal reads exclude exactly this
-// element, so the two can never disagree about which dialog is ours.
-const COMPOSER_ROOT = 'div[role="dialog"]:has(div[contenteditable="true"][role="textbox"])'; // [Unverified]
+// The composer's root: the INNERMOST dialog that holds the editor — one that
+// contains no other such dialog (fix round 2). A modal layer or a
+// restriction dialog wrapping the composer is therefore not a second root.
+// The editor, Post, target and author are all found inside it.
+const EDITOR = 'div[contenteditable="true"][role="textbox"]';
+const COMPOSER_ROOT = `div[role="dialog"]:has(${EDITOR}):not(:has(div[role="dialog"] ${EDITOR}))`; // [Unverified]
 
 const SELECTORS = {
   identity: 'div[role="banner"] a[href$="/me/"] span, div[role="banner"] [aria-label="Your profile"], div[role="banner"] [aria-label="הפרופיל שלך"]', // [Unverified]
@@ -30,7 +32,7 @@ const SELECTORS = {
   joinGroup: 'div[role="main"] div[aria-label="Join group"][role="button"], div[role="main"] div[aria-label="הצטרפות לקבוצה"][role="button"]', // [Unverified]
   composer: 'div[role="main"] [role="button"]:has-text("כתבו משהו"), div[role="main"] [role="button"]:has-text("Write something"), div[role="main"] [role="button"]:has-text("What\'s on your mind")', // [Unverified]
   composerRoot: COMPOSER_ROOT,
-  editor: `${COMPOSER_ROOT} div[contenteditable="true"][role="textbox"]`, // [Unverified]
+  editor: `${COMPOSER_ROOT} ${EDITOR}`, // [Unverified]
   // Scoped to the composer root (fix round 1, M5): nothing outside our own
   // composer can be read as its target or author, or clicked as its Post.
   composerTarget: `${COMPOSER_ROOT} a[href*="/groups/"][role="link"]`, // [Unverified] the dialog names the group
@@ -134,33 +136,40 @@ function findOwnPost(posts, { kind, ids, author, copy }) {
   return null;
 }
 
-// The text of every `sel` region with its editable content removed: each
-// region is CLONED, every [contenteditable] subtree dropped from the clone
-// (what we typed), a space appended to every element so words never run
-// together, and its text taken. The composer's chrome — an inline "You
-// can't post in this group", a restriction dialog wrapping the composer —
-// is still read. Then the exact copy is stripped after normalisation.
-async function regionTexts(page, sel, copy) {
-  const texts = await page.$$eval(sel, (els) => els.map((el) => {
+// Every `sel` region, CLONED with each [contenteditable] subtree removed
+// (what we typed) and a space appended to every element so words never run
+// together: its text, and the text of each element in it (the region
+// itself first). The composer's chrome — an inline "You can't post in this
+// group", a restriction dialog wrapping the composer — is still read.
+async function regionReads(page, sel) {
+  const out = await page.$$eval(sel, (els) => els.map((el) => {
     const c = el.cloneNode(true);
     c.querySelectorAll("[contenteditable]").forEach((n) => n.remove());
-    c.querySelectorAll("*").forEach((n) => n.append(" "));
-    return c.textContent || "";
+    const all = [...c.querySelectorAll("*")];
+    all.forEach((n) => n.append(" "));
+    return { text: c.textContent || "", elements: [c, ...all].slice(0, 300).map((n) => n.textContent || "") };
   })).catch(() => []);
-  const own = norm(copy);
-  return (Array.isArray(texts) ? texts : []).map((t) => (own ? norm(t).split(own).join(" ") : norm(t))).join("\n");
+  return Array.isArray(out) ? out : [];
 }
 // classifySignal over the landed URL, the dialogs and alerts (editable
-// content removed, copy stripped), and a captcha frame. A text pattern that
-// also matches the copy is ignored (classifySignal's ownText): a cut of our
-// own words in a toast is never a signal; the URL and a frame always are.
+// content removed, the exact copy stripped), and a captcha frame. An alert
+// match whose smallest holding element is wholly a cut of our copy is an
+// echo of our own post, not a signal (classifySignal's alertElements);
+// dialogs get no such excuse.
 async function readSignal(page, copy) {
-  const dialogText = await regionTexts(page, SELECTORS.dialog, copy);
-  const alertText = await regionTexts(page, SELECTORS.alert, copy);
+  const own = norm(copy);
+  const strip = (t) => (own ? norm(t).split(own).join(" ") : norm(t));
+  const dialogs = await regionReads(page, SELECTORS.dialog);
+  const alerts = await regionReads(page, SELECTORS.alert);
   const hasCaptchaFrame = (await countOf(page, SELECTORS.captchaFrame)) > 0;
   let landedUrl = "";
   try { landedUrl = page.url(); } catch { landedUrl = ""; }
-  return classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, ownText: copy });
+  return classifySignal({
+    landedUrl, hasCaptchaFrame, ownText: copy,
+    dialogText: dialogs.map((r) => strip(r.text)).join("\n"),
+    alertText: alerts.map((r) => strip(r.text)).join("\n"),
+    alertElements: alerts.flatMap((r) => (Array.isArray(r.elements) ? r.elements : [])),
+  });
 }
 
 async function readFeedPosts(page) {
@@ -200,7 +209,9 @@ function expectedTarget(attempt, conn) {
   if (attempt.target_type !== "group") return { ok: false, code: "destination_mismatch" };
   const out = expectedGroup(attempt);
   if (!out.ok) return out;
-  const entry = ((conn && conn.facebook_groups_member) || []).find((e) => e && e.group_id === attempt.target_id);
+  // The membership entry by id OR alias (a resolved slug, fix round 2 E).
+  const tid = String(attempt.target_id);
+  const entry = ((conn && conn.facebook_groups_member) || []).find((e) => e && (e.group_id === tid || (Array.isArray(e.aliases) && e.aliases.map(String).includes(tid))));
   return Object.assign(out, { name: entry && entry.name ? norm(entry.name) : null });
 }
 

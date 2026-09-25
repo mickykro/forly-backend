@@ -32,7 +32,9 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
   const exe = findChromium();
   if (!exe) { console.log("posting-driver-dom.test.js skipped (no Chromium binary)"); return; }
   const { chromium } = require("patchright");
-  const browser = await chromium.launch({ executablePath: exe, headless: true, args: ["--no-sandbox"] });
+  let browser;
+  try { browser = await chromium.launch({ executablePath: exe, headless: true, args: ["--no-sandbox"] }); }
+  catch { console.log("posting-driver-dom.test.js skipped (launch failed)"); return; }
   try {
     const page = await browser.newPage();
     const sig = async (html, copy) => { await page.setContent(`<html><body>${html}</body></html>`); return P.readSignal(page, copy); };
@@ -43,9 +45,9 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
       ["HE copy in the composer", HE, `<div role="dialog">${editor(HE)}</div>`],
       ["composer inside a dialog, copy echoed in a status", HE, `<div role="dialog"><h2>Create post</h2><div role="dialog">${editor(HE)}<div role="status">${HE}</div></div></div>`],
       ["composer wrapping an inner dialog/alert with the copy", EN, `<div role="dialog">${editor(EN)}<div role="dialog"><span role="alert">${EN}</span></div></div>`],
-      ["a toast with a CUT of the copy (Minor 10)", HE, `<div role="status">Posted: ${HE.slice(0, 40)}…</div>`],
+      ["a toast that IS a cut of the copy (Minor 10)", HE, `<div role="status">${HE.slice(0, 40)}…</div>`],
+      ["a toast holding a cut of the copy in its own element", HE, `<div role="status">Posted: <span>${HE.slice(0, 40)}…</span></div>`],
       ["a toast with the copy, emoji as <img alt>", `🏠 ${HE}`, `<div role="status"><img alt="🏠">${HE}</div>`],
-      ["a sibling dialog whose phrase is in our own copy", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">You're temporarily blocked from posting</div>`],
       ["after submit: the editor gone, a preview of the copy remains", HE, `<div role="dialog"><div>${HE}</div></div>`],
     ]) assert.equal(await sig(html, copy), "ok", label);
 
@@ -55,8 +57,23 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
       ["a restriction dialog wrapping the composer", PLAIN, `<div role="dialog"><div>Your account is restricted</div><div role="dialog">${editor(PLAIN)}</div></div>`, "restricted"],
       ["a real block dialog beside the composer", PLAIN, `<div role="dialog">${editor(PLAIN)}</div><div role="dialog">You're temporarily blocked from posting</div>`, "rate_limited"],
       ["the same pattern, a phrase NOT in the copy", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">Your account is restricted</div>`, "restricted"],
+      // fix round 2 B: a dialog is never excused, even when our copy holds the same phrase
+      ["a real dialog whose phrase is also in our copy", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">You're temporarily blocked from posting</div>`, "rate_limited"],
+      ["ordinary copy sharing a short phrase (HE, rate_limited)", "דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות", `<div role="alert">אתה חסום זמנית מפרסום בקבוצות</div>`, "rate_limited"],
+      ["ordinary copy sharing a short phrase (HE, pending)", "הנכס ממתין לאישור טאבו, כניסה מיידית", `<div role="status">הפוסט שלך ממתין לאישור מנהל הקבוצה</div>`, "pending_approval"],
+      ["a short bolded fragment that is also in our copy", "הכביש חסום זמנית בגלל עבודות", `<div role="alert">אתה <b>חסום זמנית</b> מפרסום</div>`, "rate_limited"],
       ["a captcha frame is structural, whatever the copy says", "Confirm you're human", `<div role="dialog">${editor("Confirm you're human")}</div><iframe title="captcha"></iframe>`, "captcha"],
     ]) assert.equal(await sig(html, copy), want, label);
+
+    // ── fix round 2 A: only INNERMOST composer roots count ──
+    for (const [label, html, n] of [
+      ["a restriction dialog wrapping the composer", `<div role="dialog"><div>Your account is restricted</div><div role="dialog">${editor(PLAIN)}</div></div>`, 1],
+      ["a nested Create-post layer", `<div role="dialog" aria-label="layer"><div role="dialog" aria-label="Create post"><h2>Create post</h2>${editor(PLAIN)}</div></div>`, 1],
+    ]) {
+      await page.setContent(html);
+      assert.equal(await P.countOf(page, S.composerRoot), n, label);
+      assert.equal(await P.textOf(page, S.editor), P.norm(PLAIN), label);
+    }
 
     // ── M5: the composer root, and what is scoped to it ──
     await page.setContent(`<div role="dialog">${editor("stale draft")}</div><div role="dialog">${editor(PLAIN)}</div>`);
