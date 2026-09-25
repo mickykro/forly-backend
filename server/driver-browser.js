@@ -316,6 +316,13 @@ async function deleteProfile(name, deps = {}) {
     }
     return { ok: true };
   } catch (e) {
+    // A delete can succeed at Driver while its response is lost (timeout,
+    // dropped connection, …); every retry after that sees a 404, because the
+    // profile really is already gone. That is success, not failure — logged
+    // as an error and retried forever, it would escalate a delete that
+    // already happened. Nothing worth logging: a 404 here is expected, not
+    // noteworthy.
+    if (e instanceof DriverError && e.status === 404) return { ok: true, already_gone: true };
     logError(`driver: delete of ${platform} profile failed: ${e.message}`);
     return { ok: false, error: e.message };
   }

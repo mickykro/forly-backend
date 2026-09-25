@@ -169,6 +169,12 @@ async function quiet(fn) {
   assert.equal(failDel.ok, false);
   assert.ok(failDel.error);
 
+  // ── a 404 (already deleted — e.g. a prior delete succeeded but its
+  //    response was lost) is success, not a failure to retry forever ──
+  const goneDel = await D.deleteProfile("facebook-local-aaaa", { apiKey: "k", fetchFn: async () => err(404, { error: "not found" }) });
+  assert.equal(goneDel.ok, true);
+  assert.equal(goneDel.already_gone, true);
+
   // ── redact masks cdp urls, viewer params and profile names ──
   const PROFILE = "facebook-prod-0123456789abcdef0123";
   const red = D.redact(`a wss://node/abc b ws://x/y c https://viewer.driver.dev?ws=wss%3A%2F%2Fn d ${PROFILE}-r2 e yad2-local-0123456789abcdef0123`);

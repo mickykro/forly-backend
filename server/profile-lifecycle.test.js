@@ -248,5 +248,23 @@ function fakeDb(conns = {}) {
     assert.ok(conns.g.facebook_profile_deleted_at, "deleted_at is set");
   }
 
+  // ── round-3 fix: a delete that 404s (already gone — driver-browser.js's
+  //    deleteProfile reports { ok: true, already_gone: true } for that case)
+  //    must be treated as SUCCESS, not filed as yet another failure. A prior
+  //    delete can succeed at Driver while its response is lost, so every
+  //    retry after that would otherwise see a 404, get recorded as a
+  //    failure next to a deleted_at that's already set, and retry forever ──
+  {
+    const conns = { h: { facebook_profile_state: "revoked", facebook_profile_gen: 0 } };
+    const db9 = fakeDb(conns);
+    await db9.savePendingDelete({ phone: "h", platform: "facebook", since: new Date().toISOString(), attempts: 2, last_error: "503", gen: 0 });
+    const results = await L.retryDeletes({ db: db9, driver: { deleteProfile: async () => ({ ok: true, already_gone: true }) } });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ok, true);
+    assert.ok(conns.h.facebook_profile_deleted_at, "already-gone counts as deleted");
+    assert.equal(conns.h.facebook_profile_delete_error, null, "no error recorded next to deleted_at");
+    assert.deepEqual(await db9.listPendingDeletes(), [], "the pending row is cleared, not retried forever");
+  }
+
   console.log("profile-lifecycle.test.js ok");
 })();
