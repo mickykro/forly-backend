@@ -246,7 +246,15 @@ if (driverBoot.enabled) {
   console.log("driver: extract sweeper started");
 
   const createConnectionsBrowserRouter = require("./routes/connections-browser");
-  app.use("/api/connections/browser", createConnectionsBrowserRouter({ requireAuth, authSecret: AUTH_SECRET }));
+  app.use("/api/connections/browser", createConnectionsBrowserRouter({ requireAuth, authSecret: AUTH_SECRET, campaigns: require("./posting-campaign") }));
+
+  // ── automated group posting: the campaign sweeper (posting-sweeper.js) ──
+  const postingSweeper = require("./posting-sweeper");
+  postingSweeper.startSweeper(postingSweeper.liveDeps({
+    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
+    operatorPhone: process.env.POSTING_OPERATOR_PHONE,
+  }));
+  console.log("driver: posting sweeper started");
 
   // ── the agent's own Yad2/Madlan listings, read and offered as draft pages ──
   const createListingDraftsRouter = require("./routes/listing-drafts");

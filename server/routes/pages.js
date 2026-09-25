@@ -50,6 +50,12 @@ module.exports = function createPagesRouter(ctx) {
           uploadPublicBase, remoteUploadBase, signActionToken,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
   const { constantTimeEqual } = require("../security");
+  // Automated posting (Task 16): a page that becomes active joins a campaign
+  // when its account opted in. Fire-and-forget — enrollment never fails or
+  // delays the page; its own failure is stored as posting_enroll_error.
+  const enrollPosting = (page) => {
+    Promise.resolve().then(() => require("../posting-campaign").enrollNewPage(page, ctx.postingDeps || {})).catch(() => null);
+  };
 
   // Options every rehost() in this router shares. remoteUploadBase sends the
   // bytes to the always-on instance; signUpload is the credential for that hop,
@@ -327,6 +333,7 @@ module.exports = function createPagesRouter(ctx) {
       // creation (spec §4). Entitlement + duplicate checks live in maybeOffer.
       distributionJobs.maybeOffer(distDeps, doc)
         .catch((e) => console.warn("distribution offer failed:", e && e.message));
+      enrollPosting(doc);
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
@@ -499,6 +506,8 @@ module.exports = function createPagesRouter(ctx) {
       extension_count: (page.extension_count || 0) + 1,
       reminder_sent_at: null, updated_at: new Date(),
     });
+    // An expired page coming back is a page becoming active again.
+    if (page.status !== "active" && page.status !== "expiring") enrollPosting({ ...page, status: "active" });
     return expiresAt;
   }
 

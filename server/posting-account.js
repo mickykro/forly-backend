@@ -1,0 +1,227 @@
+/*
+ * posting-account.js — the account as the campaign state machine sees it.
+ *
+ * Shared by posting-campaign.js (create, planner) and posting-sweeper.js
+ * (reserve, run, settle): dependency defaults, the group eligibility rules,
+ * the curated catalog, the Page target, and `accountView()` — the account
+ * object posting-safety.nextSlot() paces against, built from durable
+ * attempts (R1), the agent's manual share-kit posts and every open campaign
+ * post on the phone. Writes go through mutate() (campaigns) only; the
+ * notification helpers log a redacted line when a send fails.
+ */
+const safety = require("./posting-safety");
+const shareKit = require("./distribution/share-kit");
+const { redact } = require("./driver-browser");
+
+const MS_MIN = 60000, MS_HOUR = 3600000, MS_DAY = 86400000;
+const LOOKBACK_DAYS = 30;
+const MEMBERSHIP_FRESH_MS = 48 * MS_HOUR; // older → the driver re-confirms membership (review §21)
+const ACTIVE_PAGE = new Set(["active", "expiring"]);
+const OPEN_POST = new Set(["pending_approval", "scheduled", "posting"]);
+// Attempt state → campaign post status (the post mirrors its attempt).
+const POST_STATUS_OF = {
+  verified_posted: "posted", submitted_for_approval: "pending_group_approval",
+  verified_failed: "failed", outcome_unknown: "unknown", cancelled: "skipped",
+};
+const ELIGIBILITY = ["is_member", "catalog_policy", "listing_type_allowed", "posting_currently_available"];
+const DISALLOWED_POLICY = new Set(["forbidden", "disallowed", "not_allowed", "no_agents"]);
+
+const iso = (d) => new Date(d).toISOString();
+const tail = (s) => `…${String(s || "").slice(-4)}`;
+const fail = (code, msg) => Object.assign(new Error(msg || code), { code });
+// A Firestore Timestamp, a Date, an ISO string or epoch ms → ms (NaN if none).
+const ms = (v) => (v && typeof v.toDate === "function" ? v.toDate().getTime() : v === undefined || v === null ? NaN : new Date(v).getTime());
+
+// One place for every default, so tests inject fakes and production gets the
+// real modules. `deps.db` is db.js (connections, pages, settings); `deps.store`
+// is posting-store.js (campaigns, attempts).
+function ctxOf(deps = {}) {
+  return {
+    db: deps.db || require("./db"),
+    store: deps.store || require("./posting-store"),
+    guard: deps.guard || require("./posting-guard"),
+    locks: deps.locks || require("./profile-lock"),
+    clock: typeof deps.clock === "function" ? deps.clock : () => new Date(),
+    rand: typeof deps.rand === "function" ? deps.rand : Math.random,
+  };
+}
+const nowOf = (deps, x) => (deps && deps.now instanceof Date ? deps.now : x.clock());
+const guardDeps = (deps, x) => ({ db: x.db, env: deps.env || process.env });
+
+async function configOf(deps, x) {
+  if (deps.config) return deps.config;
+  return safety.configFrom(await x.db.getSetting("posting"));
+}
+
+// facebook.com/groups/<slug> → the Task 14 group_id: the numeric id, or
+// "slug:<slug>" until the driver resolves it.
+function groupIdFromUrl(url) {
+  const slug = (String(url || "").match(/\/groups\/([^/?#]+)/) || [])[1];
+  if (!slug) return null;
+  return /^\d+$/.test(slug) ? slug : `slug:${slug}`;
+}
+
+// The curated catalog as routes/distribution.js mergedCatalog() builds it:
+// the bundled seed, Firestore entries merged on top by canonical URL. Kept
+// raw (active flag included) so an operator-disabled group reads as disallowed.
+let SEED = null;
+async function catalogIndex(db) {
+  if (!SEED) SEED = require("./distribution/group-seed.json").map((g) => ({ ...g, url: shareKit.sanitizeGroups([g.url])[0] })).filter((g) => g.url);
+  const byUrl = new Map(SEED.map((g) => [g.url, { ...g }]));
+  const extra = typeof db.listGroupCatalog === "function" ? await db.listGroupCatalog(500) : [];
+  for (const g of extra || []) {
+    const url = g && g.url && shareKit.sanitizeGroups([g.url])[0];
+    if (url) byUrl.set(url, { ...(byUrl.get(url) || {}), ...g, url });
+  }
+  return byUrl;
+}
+
+function memberOf(conn, g) {
+  const list = Array.isArray(conn && conn.facebook_groups_member) ? conn.facebook_groups_member : [];
+  return list.find((m) => m && ((g.group_id && m.group_id === g.group_id) || (g.url && (m.canonical_url === g.url || m.url === g.url)))) || null;
+}
+
+// The four booleans a group needs, all true, to be planned (adapt notes):
+// a member (state "member", not stale/left); not disallowed by the catalog;
+// the catalog's listing types admit this page's type; and no live
+// confirmed_removed penalty on the group. A result the driver reported on
+// this campaign's own group (not_member / group_blocked) keeps it off.
+function eligibility(g, { conn, catalog, listingType, now }) {
+  if (g.target === "page") return { is_member: true, catalog_policy: true, listing_type_allowed: true, posting_currently_available: true };
+  const m = memberOf(conn, g);
+  const cat = catalog.get(g.url) || null;
+  const types = cat && Array.isArray(cat.listing_types) ? cat.listing_types : [];
+  const pen = ((conn && conn.posting_group_penalties) || {})[g.group_id];
+  return {
+    is_member: !!m && m.membership_state === "member" && g.blocked_code !== "not_member",
+    catalog_policy: !(cat && (cat.active === false || DISALLOWED_POLICY.has(cat.agent_policy))),
+    listing_type_allowed: !listingType || !types.length || types.includes(listingType),
+    posting_currently_available: !(pen && ms(pen.until) > now.getTime()) && g.blocked_code !== "group_blocked",
+  };
+}
+const isEligible = (g) => ELIGIBILITY.every((k) => g[k] === true);
+
+function needsMembershipCheck(conn, g, now) {
+  if (g.target === "page") return false;
+  const m = memberOf(conn, g);
+  const at = m ? ms(m.last_confirmed_at) : NaN;
+  return !Number.isFinite(at) || now.getTime() - at > MEMBERSHIP_FRESH_MS;
+}
+
+// The agent's own Page, when the browser may post to it: the one the agent
+// confirmed (posting_permission.page_id), or the only one discovered (R3).
+function pageTarget(conn) {
+  if (!conn || (conn.page_publisher || "browser") !== "browser") return null;
+  const pages = Array.isArray(conn.facebook_pages) ? conn.facebook_pages.filter((p) => p && p.url) : [];
+  const chosen = (conn.posting_permission || {}).page_id;
+  const p = chosen ? pages.find((x) => x.id === chosen || x.url === chosen) : pages.length === 1 ? pages[0] : null;
+  if (!p) return null;
+  let vanity = null;
+  try { vanity = new URL(p.url).pathname.split("/").filter(Boolean)[0] || null; } catch { vanity = null; }
+  const target_id = String(p.id || vanity || "").replace(/[/|]/g, "");
+  if (!target_id) return null;
+  return { target: "page", target_id, group_id: `page:${target_id}`, url: p.url, name: p.name || "" };
+}
+
+function targetsFor(conn, requested) {
+  const want = Array.isArray(requested) && requested.length ? requested : ["page", "groups"];
+  const hasPage = !!pageTarget(conn);
+  return ["page", "groups"].filter((t) => want.includes(t) && (t === "groups" || hasPage));
+}
+
+/*
+ * The account posting-safety paces against. `posts` is every attempt in a
+ * counting state (ok: null until terminal), the agent's manual share-kit
+ * posts (post_url is the group URL), and every open campaign post that has
+ * no attempt yet (its scheduled_at is a reservation of the slot). `exclude`
+ * drops one campaign post — the one being re-timed or re-checked.
+ */
+async function accountView(phone, conn, deps, now, opts = {}) {
+  const x = ctxOf(deps);
+  const since = now.getTime() - LOOKBACK_DAYS * MS_DAY;
+  const attempts = (await x.store.listAttemptsByPhone(phone, since)).filter((a) => x.store.isCounting(a));
+  const keys = new Set(attempts.map((a) => a.key));
+  const posts = attempts.map((a) => ({
+    at: a.reserved_at, group_id: a.target_type === "page" ? `page:${a.target_id}` : a.target_id, group_url: a.target_url || null,
+    page_id: a.page_id, ok: a.state === "verified_posted" || a.state === "submitted_for_approval" ? true : a.state === "verified_failed" ? false : null,
+    attempt_key: a.key, post_id: a.post_id || null,
+  })).filter((p) => !opts.exclude || p.post_id !== opts.exclude);
+  for (const a of await x.store.listPostActionsByPhone(phone, since)) {
+    if (a.target !== "facebook_group" || a.source === "campaign" || !a.post_url || !a.at) continue;
+    const url = shareKit.sanitizeGroups([a.post_url])[0] || a.post_url;
+    posts.push({ at: a.at, group_id: groupIdFromUrl(url), group_url: url, page_id: a.page_id || null, ok: true });
+  }
+  const campaigns = opts.campaigns || (await x.store.listPostingCampaignsByPhone(phone));
+  for (const c of campaigns) {
+    if (c.status !== "running") continue;
+    for (const p of c.posts || []) {
+      if (!OPEN_POST.has(p.status) || p.id === opts.exclude || (p.attempt_key && keys.has(p.attempt_key)) || !p.scheduled_at) continue;
+      posts.push({ at: p.scheduled_at, group_id: p.group_id, group_url: p.group_url, page_id: c.page_id, ok: null });
+    }
+  }
+  return {
+    first_connected_at: conn.facebook_browser_first_connected_at || conn.facebook_browser_connected_at || null,
+    halts: conn.posting_halts || [],
+    disabled_until_admin: conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true,
+    penalty_until: conn.posting_penalty_until || null,
+    account_aged: conn.posting_account_aged === undefined ? null : conn.posting_account_aged,
+    posted_manually: conn.posting_posted_manually === undefined ? null : conn.posting_posted_manually,
+    plan_seed: safety.planSeed(phone),
+    posts,
+  };
+}
+
+// The reservation's hard ceilings for the landing day (16a: required).
+function limitsFor(account, at, config) {
+  return { daily_cap: safety.dailyCapFor(account, at, config), group_global_daily_cap: config.group_global_daily_cap };
+}
+
+// The start of the next Jerusalem calendar day's active window, with the
+// day's own start jitter — a post pushed to "tomorrow" never lands at 09:00:00 sharp.
+function nextDayStart(now, config, rand) {
+  const today = safety.jerusalemDate(now);
+  let t = new Date(now.getTime());
+  for (let i = 0; i < 4 * 30 && safety.jerusalemDate(t) === today; i++) t = new Date(t.getTime() + 15 * MS_MIN);
+  const first = safety.nextActiveTime(t, config);
+  return safety.nextActiveTime(new Date(first.getTime() + Math.floor(rand() * (config.day_start_jitter_min || 0)) * MS_MIN), config);
+}
+
+// Re-read, apply, write: the window between the read and the transactional
+// merge is kept as small as the store allows (posts is replaced as a whole).
+async function mutate(x, id, fn) {
+  const cur = await x.store.getPostingCampaign(id);
+  if (!cur) return null;
+  const patch = fn(cur);
+  if (!patch) return cur;
+  patch.updated_at = iso(x.clock());
+  return x.store.updatePostingCampaign(id, patch);
+}
+
+// deps.messages (Task 20) supplies the signed-link texts; until then these
+// Hebrew fallbacks go out. A failed notification never changes state.
+async function say(deps, phone, kind, fallback, ...args) {
+  if (typeof deps.notify !== "function") return;
+  const text = deps.messages && typeof deps.messages[kind] === "function" ? deps.messages[kind](...args) : fallback;
+  if (!text) return;
+  try { await deps.notify(phone, text); } catch (e) { console.error(redact(`posting notify ${kind} ${tail(phone)} failed: ${(e && e.code) || "error"}`)); }
+}
+
+// The operator's channel (POSTING_OPERATOR_PHONE); never throws.
+async function tellOperator(deps, text) {
+  if (typeof deps.notifyOperator !== "function") return;
+  try { await deps.notifyOperator(text); } catch (e) { console.error(redact(`posting operator notify failed: ${(e && e.code) || "error"}`)); }
+}
+
+// Cancels that could not be written (cancel_incomplete, a failed transition)
+// are counted here and drained by the sweep into settings/posting_health.
+let cancelFailures = 0;
+const noteCancelFailure = (n = 1) => { cancelFailures += n; };
+const drainCancelFailures = () => { const n = cancelFailures; cancelFailures = 0; return n; };
+
+module.exports = {
+  noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
+  MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, POST_STATUS_OF, ELIGIBILITY,
+  iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
+  groupIdFromUrl, catalogIndex, memberOf, eligibility, isEligible, needsMembershipCheck,
+  pageTarget, targetsFor, accountView, limitsFor, nextDayStart,
+};

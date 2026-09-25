@@ -293,6 +293,9 @@ async function setConnection(phone, patch) {
 // profile's reserved/session_started/composer_ready attempts stop instead of
 // running against a profile that assertOwnership now refuses.
 const cancelOpenAttempts = (...a) => require("./posting-store").cancelOpenAttempts(...a);
+// Campaigns live in posting-store.js too; routes/connections-browser.js's
+// DELETE (which holds only db.js) lists the phone's campaigns through here.
+const listPostingCampaignsByPhone = (...a) => require("./posting-store").listPostingCampaignsByPhone(...a);
 
 // ── operator settings (compare-and-set) ──
 // One doc per key (e.g. "posting"), read by posting-guard.js on every
@@ -698,7 +701,7 @@ module.exports = {
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
   getPortfolioSlugReservation, reservePortfolioSlug,
-  getConnection, setConnection, cancelOpenAttempts,
+  getConnection, setConnection, cancelOpenAttempts, listPostingCampaignsByPhone,
   getSetting, setSetting,
   savePendingDelete, listPendingDeletes, clearPendingDelete,
   saveDistribution, getDistribution, updateDistribution,
