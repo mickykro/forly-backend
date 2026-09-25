@@ -3470,7 +3470,7 @@ git commit -m "feat(posting): pacing, schedule shape and scoped signal rules"
 - Consumes: `posting-safety.*`, `share-kit.buildPostCopy/trackedUrl`, `profile-lock`, `profile-name.profileName`, `db.*PostingCampaign*`, `db.getPage`, `db.getConnection/setConnection`, `db.addPostAction/listPostActionsByPhone`, `posting-driver.postToGroup` (Task 18, as `deps.post`), `deps.notify(phone, text)` (Task 20 supplies the signed-link messages).
 - Produces:
   - `create({ phone, page, groups, mode, days, repeat, consent, targets }, deps) -> Campaign` — status `running` (consent is the approval); `targets` defaults to `["page","groups"]` when the account has a Page and `page_publisher !== "graph"`, else `["groups"]`.
-  - `enrollNewPage(page, deps) -> Campaign|null` — called from `routes/pages.js` when a page becomes `active`; creates a campaign when the account has `posting_auto_enroll` and a connected profile, using `posting_default_groups ∩ facebook_groups_member`.
+  - `enrollNewPage(page, deps) -> Campaign|null` — called from `routes/pages.js` when a page becomes `active`; creates a campaign when `posting_permission.enabled` and a connected profile, using `posting_permission.default_group_ids ∩ facebook_groups_member` (member state, not `left`).
   - `planAccount(phone, deps, now) -> { campaignId, groupUrl, target } | null` — the account planner: scores every eligible (campaign, group) pair across the account's running campaigns and picks one for the next slot.
   - `pause(id, reason, deps)`, `resume(id, deps)`, `stop(id, deps)`, `approvePost(id, postId, deps)`, `skipPost(id, postId, deps)`
   - `tick(campaign, deps, now)`, `sweep(deps, now)`, `startSweeper(deps)`, `liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret })`
@@ -4913,7 +4913,7 @@ git commit -m "feat(posting): human-paced browser choreography with link-in-comm
 - Consumes: `posting-campaign.*`, `share-kit.sanitizeGroups`, `routes/distribution.mergedCatalog`, `db.getPage/getConnection/setConnection/listPostingCampaignsByPhone`.
 - Produces:
   - `POST /api/posting/campaigns` body `{ page_id, group_urls: string[], mode: "per_post"|"standing", days?: number, repeat?: boolean, consent: true, account_aged?: boolean, posted_manually?: boolean, targets?: ["page","groups"] }` → `201 {campaign}`; `400 consent_required | invalid_input`; `409 facebook_not_connected | too_many_campaigns`; `422 {error:"not_member", groups:[…]}` when a URL is not in `facebook_groups_member` (the hard gate — the catalog is consulted for names and policy only); `422 {error:"unknown_group", …}` for a member group outside the catalog without `include_unknown: true`.
-  - `PUT /api/posting/settings` body `{ auto_enroll: boolean, default_groups: string[], auto_mode?: "per_post"|"standing", consent: true }` → the account-level standing permission for new listings (`posting_auto_enroll`, `posting_default_groups`, `posting_auto_mode`, `posting_consent_at/version`). `default_groups` must be member groups. `GET /api/posting/settings` returns them plus `member_groups`, `suggested_groups` (catalog in the agent's area, not a member — from `activity_areas` and the page's city via `city-normalize.sameArea`), `pages`, `page_publisher`.
+  - `PUT /api/posting/settings` body `{ enabled: boolean, default_group_ids: string[], auto_mode?: "per_post"|"standing", allows_visible_interactions?: boolean, page_id?: string, consent: true }` → writes the structured `posting_permission` (Task 16). `default_group_ids` must be member groups. `GET /api/posting/settings` returns them plus `member_groups`, `suggested_groups` (catalog in the agent's area, not a member — from `activity_areas` and the page's city via `city-normalize.sameArea`), `pages`, `page_publisher`.
   - `POST /api/posting/groups/resync` → runs `facebook-groups-sync.runSync` for the phone (behind the profile lock; `409 profile_busy` if held) → `200 {member_groups}`.
   - `POST /api/posting/campaigns/:id/pause | resume | stop`, `POST /api/posting/campaigns/:id/posts/:post_id/approve | skip` → `200 {campaign}`
   - `GET /api/posting/campaigns?page_id=` → `200 {campaigns:[…]}`; `GET /api/posting/campaigns/:id` → `200 {campaign}`; `404` for another phone's.
@@ -5027,11 +5027,12 @@ const consented = (b) => Object.assign({ consent: true, account_aged: true, post
   // ── settings: the standing permission for new listings, default groups must be member groups ──
   let saved = null;
   const setApp = makeApp({ db: baseDb({ setConnection: async (p, patch) => { saved = patch; } }), campaigns });
-  const bad = await call(setApp, "PUT", "/api/posting/settings", { auto_enroll: true, default_groups: ["https://www.facebook.com/groups/333"], consent: true });
+  const bad = await call(setApp, "PUT", "/api/posting/settings", { enabled: true, default_group_ids: ["333"], consent: true });
   assert.equal(bad.status, 422);
-  const good = await call(setApp, "PUT", "/api/posting/settings", { auto_enroll: true, default_groups: [catalog[0].url], auto_mode: "per_post", consent: true });
+  const good = await call(setApp, "PUT", "/api/posting/settings", { enabled: true, default_group_ids: ["111"], auto_mode: "per_post", allows_visible_interactions: false, consent: true });
   assert.equal(good.status, 200);
-  assert.equal(saved.posting_auto_enroll, true); assert.deepEqual(saved.posting_default_groups, [catalog[0].url]); assert.equal(saved.posting_auto_mode, "per_post"); assert.ok(saved.posting_consent_at);
+  const perm = saved.posting_permission;
+  assert.equal(perm.enabled, true); assert.deepEqual(perm.default_group_ids, ["111"]); assert.equal(perm.auto_mode, "per_post"); assert.equal(perm.allows_visible_interactions, false); assert.ok(perm.granted_at && perm.consent_version);
   const getS = await call(setApp, "GET", "/api/posting/settings");
   assert.equal(getS.body.member_groups.length, 3);
   assert.ok(getS.body.suggested_groups.every((g) => !member.some((m) => m.url === g.url)), "suggestions exclude member groups");
