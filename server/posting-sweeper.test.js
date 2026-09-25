@@ -168,12 +168,24 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     c = await S.tick(c, deps, at(NOW));
     const flip = { assertAllowed: async (o, d) => { if (o.action === "session") await db.setSetting("posting", { enabled: false }); return guardLive.assertAllowed(o, d); }, assertFleetAllowed: guardLive.assertFleetAllowed };
     c = await S.tick(c, with_(deps, { guard: flip }), at(dueOf(c)));
-    const a = await store.getAttempt(c.posts[0].attempt_key);
+    const a = await store.getAttempt(c.posts[0].prior_attempt_keys[0]);
     assert.equal(a.state, "cancelled");
     assert.equal(a.error_code, "posting_disabled");
     assert.equal(a.reason, "global_off");
-    assert.equal(c.posts[0].status, "skipped");
     assert.equal(deps.post.calls.length, 0, "no session was opened");
+    // a kill-switch cancel never drops the group: the post waits for a later slot, and uses no retry
+    assert.equal(c.posts[0].status, "scheduled");
+    assert.equal(c.posts[0].retries, 0);
+    assert.equal(K.safety.jerusalemDate(c.posts[0].scheduled_at), "2026-09-24");
+    // however often it flips
+    for (let i = 1; i <= 4; i++) {
+      await db.setSetting("posting", { enabled: true });
+      c = await S.tick(c, with_(deps, { guard: flip }), at(dueOf(c)));
+      assert.equal(c.posts[0].status, "scheduled", `flip ${i}: still scheduled`);
+    }
+    await db.setSetting("posting", { enabled: true });
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal(c.posts[0].status, "posted", "once the switch stays on, it goes out");
   }
 
   // ── the guard at the Post click (inside the driver) before submit → cancelled, never posted ──
@@ -183,7 +195,8 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     c = await S.tick(c, deps, at(NOW));
     const post = async (args, d) => { await d.attempts.transition(args.attempt.key, "session_started"); await d.attempts.transition(args.attempt.key, "composer_ready"); await db.setSetting("posting", { platforms: { facebook: false } }); await d.guard("post"); };
     c = await S.tick(c, with_(deps, { post }), at(dueOf(c)));
-    assert.equal((await store.getAttempt(c.posts[0].attempt_key)).state, "cancelled");
+    assert.equal((await store.getAttempt(c.posts[0].prior_attempt_keys[0])).state, "cancelled");
+    assert.equal(c.posts[0].status, "scheduled", "the platform switch flipped: retried later, not dropped");
   }
 
   // ── crash after submit_started → reaper → outcome_unknown → never re-submitted; reconciled once ──
@@ -333,6 +346,71 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     const after = await store.getPostingCampaign(e.id);
     assert.equal(after.status, "paused");
     assert.equal(after.pause_reason, "internal");
+  }
+
+  // ── STOP racing a reservation (fix round 1): stop lands after reserveAttempt
+  //    but before startAttempt's commit → the attempt is cancelled, never run ──
+  {
+    const { deps, at } = await setup();
+    const A = require("./posting-account");
+    A.drainCancelFailures();
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, at(NOW));
+    const racing = Object.assign({}, store, { reserveAttempt: async (input) => { const r = await store.reserveAttempt(input); await C.stop(c.id, deps); return r; } });
+    c = await S.tick(c, with_(deps, { store: racing }), at(dueOf(c)));
+    const [a] = await store.listAttemptsByPhone(PH);
+    assert.equal(a.state, "cancelled", "no attempt past composer_ready");
+    assert.equal(a.error_code, "stopped");
+    assert.equal(deps.post.calls.length, 0, "zero driver calls");
+    assert.equal(c.status, "stopped");
+    assert.equal(c.posts[0].status, "skipped");
+    assert.equal(A.drainCancelFailures(), 0, "the tick's own cancel of an already-cancelled attempt is not a failure");
+  }
+  // …and the reviewer's case: STOP read the campaign before startAttempt committed, and lands during the post
+  {
+    const { deps, at } = await setup();
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, at(NOW));
+    const stale = await store.getPostingCampaign(c.id);
+    const inner = fakePost();
+    const post = async (args, d) => {
+      const staleStore = Object.assign({}, store, { getPostingCampaign: async () => structuredClone(stale) });
+      await C.stop(c.id, with_(deps, { store: staleStore }));
+      return inner(args, d);
+    };
+    c = await S.tick(c, with_(deps, { post }), at(dueOf(c)));
+    const a = await store.getAttempt(c.posts[0].attempt_key);
+    assert.equal(a.state, "cancelled", "the stop cancelled the committed posting post's attempt");
+    assert.deepEqual(a.history.map((h) => h.state), ["reserved", "cancelled"], "nothing past reserved");
+    assert.equal(c.status, "stopped");
+    assert.equal(c.posts[0].status, "skipped", "no post stays posting");
+    // schedulePost never appends to a campaign stopped after its read
+    const staleRunning = Object.assign({}, store, { getPostingCampaign: async () => Object.assign(structuredClone(stale), { status: "running", posts: [] }) });
+    const r = await C.schedulePost({ campaignId: c.id, target: "group", group_id: "222", at: NOW }, with_(deps, { store: staleRunning }), NOW);
+    assert.equal(r.status, "stopped");
+    assert.equal((await store.getPostingCampaign(c.id)).posts.length, 1);
+  }
+
+  // ── the post timeout stays clearly below the profile lock's hold ──
+  assert.ok(require("./posting-tick").POST_TIMEOUT_MS < locks.MAX_HOLD_MS, "a hung driver call is settled while the lock is still ours");
+
+  // ── fleet breaker: halts before the last re-enable do not count; OFF only when it is OFF ──
+  {
+    const { deps, at, ops } = await setup();
+    await C.create(base(), deps);
+    const t = iso(NOW.getTime() - 30 * MIN);
+    for (const ph of ["9725031", "9725032", "9725033"]) await db.setConnection(ph, { posting_halts: [{ at: t, code: "checkpoint" }], posting_last_halt_at: t });
+    await db.setSetting("posting", { enabled: true, enabled_at: iso(NOW.getTime() - 10 * MIN) });
+    assert.equal(await S.sweep(deps, at(NOW)), 1, "re-enabled after those halts: the breaker stays closed");
+    assert.equal((await db.getSetting("posting")).enabled, true);
+    await db.setSetting("posting", { enabled_at: iso(NOW.getTime() - 2 * HOUR) });
+    const conflicting = Object.assign({}, db, { setSetting: async (k, v, o) => { if (k === "posting" && o && o.expectVersion !== undefined) throw Object.assign(new Error("stale"), { code: "version_conflict" }); return db.setSetting(k, v, o); } });
+    assert.equal(await S.sweep(with_(deps, { db: conflicting }), at(NOW)), 0, "the condition holds: no account is ticked");
+    assert.equal((await db.getSetting("posting")).enabled, true);
+    assert.equal(ops.filter((m) => /FLEET BREAKER/.test(m)).length, 0, "never reported OFF while it is not");
+    await S.sweep(deps, at(NOW));
+    assert.equal((await db.getSetting("posting")).enabled, false);
+    assert.equal(ops.filter((m) => /FLEET BREAKER/.test(m)).length, 1);
   }
 
   // ── liveDeps never requires a module that does not exist yet ──

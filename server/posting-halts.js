@@ -84,33 +84,42 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
   const at = iso(now);
   const config = await configOf(deps, x);
   const out = { cls, disabled: false, owner_review: false, penalty_until: null, reconnect: false, paused: 0, campaign_paused: false };
-
-  const conn = (await x.db.getConnection(phone)) || {};
-  const prior = (conn.posting_halts || []).filter((h) => h && now.getTime() - ms(h.at) < HALT_KEEP_DAYS * MS_DAY);
   const entry = opts.group_id ? { at, code: cls, group_id: String(opts.group_id) } : { at, code: cls };
-  const patch = { posting_halts: prior.concat([entry]), posting_last_halt_at: at, posting_last_halt_code: cls };
   const within = (h, days) => now.getTime() - ms(h.at) < days * MS_DAY;
 
-  if (DISABLING.has(cls) || cls === "suspected_compromise") {
-    Object.assign(patch, { posting_disabled_until_admin: true, posting_disabled_at: at, posting_disabled_class: cls });
-    out.disabled = true;
-    if (DISABLING.has(cls) && prior.some((h) => DISABLING.has(h.code) && within(h, OWNER_REVIEW_WINDOW_DAYS))) {
-      patch.posting_owner_review_required = true;
-      out.owner_review = true;
+  // One transaction on the connection: the halt is appended to the history
+  // it was judged against, so two halts landing at once never lose an entry
+  // or both miss the owner review. `decide` is pure (Firestore may re-run it);
+  // `decided` keeps the committed run's verdict.
+  let decided = null;
+  const decide = (conn) => {
+    const prior = (conn.posting_halts || []).filter((h) => h && now.getTime() - ms(h.at) < HALT_KEEP_DAYS * MS_DAY);
+    const patch = { posting_halts: prior.concat([entry]), posting_last_halt_at: at, posting_last_halt_code: cls };
+    const v = { disabled: false, owner_review: false, penalty_until: null, reconnect: false };
+    if (DISABLING.has(cls) || cls === "suspected_compromise") {
+      Object.assign(patch, { posting_disabled_until_admin: true, posting_disabled_at: at, posting_disabled_class: cls });
+      v.disabled = true;
+      if (DISABLING.has(cls) && prior.some((h) => DISABLING.has(h.code) && within(h, OWNER_REVIEW_WINDOW_DAYS))) {
+        patch.posting_owner_review_required = true;
+        v.owner_review = true;
+      }
     }
-  }
-  if (PENALISING.has(cls)) out.penalty_until = patch.posting_penalty_until = iso(now.getTime() + config.penalty_days * MS_DAY);
-  if (cls === "login_required") {
-    Object.assign(patch, { facebook_needs_reconnect: true, facebook_needs_reconnect_at: at });
-    out.reconnect = true;
-  }
-  if (cls === "confirmed_removed") {
-    patch.posting_group_penalties = { [String(opts.group_id)]: { code: cls, at, until: iso(now.getTime() + GROUP_PENALTY_DAYS * MS_DAY) } };
-    if (prior.some((h) => h.code === "confirmed_removed" && within(h, REMOVALS_WINDOW_DAYS))) {
-      out.penalty_until = patch.posting_penalty_until = iso(now.getTime() + config.penalty_days * MS_DAY);
+    if (PENALISING.has(cls)) v.penalty_until = patch.posting_penalty_until = iso(now.getTime() + config.penalty_days * MS_DAY);
+    if (cls === "login_required") {
+      Object.assign(patch, { facebook_needs_reconnect: true, facebook_needs_reconnect_at: at });
+      v.reconnect = true;
     }
-  }
-  await x.db.setConnection(phone, patch);
+    if (cls === "confirmed_removed") {
+      patch.posting_group_penalties = { [String(opts.group_id)]: { code: cls, at, until: iso(now.getTime() + GROUP_PENALTY_DAYS * MS_DAY) } };
+      if (prior.some((h) => h.code === "confirmed_removed" && within(h, REMOVALS_WINDOW_DAYS))) {
+        v.penalty_until = patch.posting_penalty_until = iso(now.getTime() + config.penalty_days * MS_DAY);
+      }
+    }
+    decided = v;
+    return patch;
+  };
+  await x.store.mutateConnection(phone, decide);
+  Object.assign(out, decided);
 
   // R2: the account stops now — its open attempts and every running campaign.
   if (out.disabled || out.reconnect) {

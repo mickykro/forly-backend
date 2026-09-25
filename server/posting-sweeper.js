@@ -53,27 +53,38 @@ async function writeHealth(x, now, reapFailures) {
   await x.db.setSetting("posting_health", { last_sweep_at: at, reap_failures, cancel_failures_count: (prev.cancel_failures_count || 0) + cancelled });
 }
 
-// 3. → true when the breaker is (now) tripped.
+// 3. → true when the breaker is (now) tripped. Halts count from the later of
+// "an hour ago" and settings/posting.enabled_at (the last re-enable, set by
+// the operator UI, Task 21) — halts from before a re-enable were already
+// judged. OFF is reported only once it is true: after our compare-and-set
+// write succeeded, or when the switch is already seen off.
 async function fleetBreaker(setting, deps, x, now) {
-  const since = iso(now.getTime() - FLEET_WINDOW_MS);
+  const sinceMs = Math.max(now.getTime() - FLEET_WINDOW_MS, ms(setting.enabled_at) || 0);
+  const since = iso(sinceMs);
   const phones = await x.store.listPhonesHaltedSince(since);
   let n = 0;
   for (const phone of phones) {
     const conn = (await x.db.getConnection(phone)) || {};
-    if ((conn.posting_halts || []).some((h) => h && safety.SIGNAL_DISABLES.has(h.code) && ms(h.at) >= ms(since))) n++;
+    if ((conn.posting_halts || []).some((h) => h && safety.SIGNAL_DISABLES.has(h.code) && ms(h.at) >= sinceMs)) n++;
   }
   const t = Number(setting.fleet_breaker_threshold);
   const threshold = Number.isInteger(t) && t > 0 ? t : FLEET_BREAKER_DEFAULT;
   if (n < threshold) return false;
-  for (let i = 0; i < 3; i++) {
+  let off = false;
+  for (let i = 0; i < 3 && !off; i++) {
     const cur = (await x.db.getSetting("posting")) || {};
-    if (cur.enabled === false) break;
+    if (cur.enabled === false) { off = true; break; }
     try {
       await x.db.setSetting("posting", { enabled: false, disabled_reason: "fleet_breaker", disabled_at: iso(now) }, { expectVersion: cur.version || 0 });
-      break;
+      off = true;
     } catch (e) { if (!e || e.code !== "version_conflict") throw e; }
   }
-  console.error(`posting: FLEET BREAKER tripped — ${n} accounts disabled within the hour; posting is OFF`);
+  if (!off) {
+    // Not OFF, so not reported as OFF — but no account is ticked this sweep either.
+    console.error(`posting: fleet breaker condition met (${n} accounts) but the switch could not be written; skipping this sweep`);
+    return true;
+  }
+  console.error(`posting: FLEET BREAKER tripped — ${n} accounts disabled within the window; posting is OFF`);
   await tellOperator(deps, `posting: FLEET BREAKER — ${n} accounts disabled within an hour; posting is OFF until an operator turns it back on`);
   return true;
 }

@@ -25,6 +25,7 @@ const A = require("./posting-account");
 
 const { iso, fail, ms, ctxOf, nowOf, configOf, mutate, say, MS_DAY, OPEN_POST, ACTIVE_PAGE } = A;
 const ENDED = new Set(["stopped", "completed"]);
+const ENROLL_RESTARTABLE = new Set(["page_gone", "expired"]);
 const ACCOUNT_REASONS = new Set(["disabled", "penalty", "browse_only", "day_skipped", "daily_cap", "weekly_cap"]);
 const IMPORT_SOURCES = new Set(["yad2", "madlan", "import", "imported", "listing_sweep"]);
 const sha = (s) => crypto.createHash("sha256").update(String(s)).digest("hex").slice(0, 32);
@@ -49,7 +50,11 @@ function normalizeGroups(groups, ctx) {
   return out;
 }
 
-async function create({ phone, page, groups, mode, days, repeat, consent, targets } = {}, deps = {}) {
+// opts.restartWhen(cur) → bool: which ended campaigns this call may restart.
+// Default (Task 19's route, an explicit agent create): any stopped/completed
+// one. enrollNewPage passes a narrower rule (see there). Evaluated inside the
+// campaign transaction, so a STOP landing meanwhile is never overridden.
+async function create({ phone, page, groups, mode, days, repeat, consent, targets } = {}, deps = {}, opts = {}) {
   const x = ctxOf(deps);
   if (!consent || !consent.at) throw fail("consent_required", "consent required");
   if (!page || !page.page_id || !phone) throw fail("invalid_input", "phone and page required");
@@ -70,7 +75,8 @@ async function create({ phone, page, groups, mode, days, repeat, consent, target
     created_at: iso(now), updated_at: iso(now),
   };
   const { created, campaign } = await x.store.createPostingCampaignIfAbsent(c);
-  if (created || !ENDED.has(campaign.status)) return campaign; // running/paused: unchanged (idempotent)
+  const may = (cur) => ENDED.has(cur.status) && (!opts.restartWhen || opts.restartWhen(cur));
+  if (created || !may(campaign)) return campaign; // running/paused (or not restartable here): unchanged
   // Restart: a stopped or completed campaign takes the new consent and terms.
   // Its posts stay as history; restarted_at marks where the new pass begins,
   // so only future posts are planned (the cooldowns and the expiring dedup
@@ -80,7 +86,7 @@ async function create({ phone, page, groups, mode, days, repeat, consent, target
     mode: c.mode, repeat: c.repeat, expires_at: c.expires_at, consent_at: c.consent_at, consent_version: c.consent_version,
     groups: c.groups, targets: c.targets, consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
   };
-  return mutate(x, campaign.id, (cur) => (ENDED.has(cur.status) ? fresh : null));
+  return mutate(x, campaign.id, (cur) => (may(cur) ? fresh : null));
 }
 
 // A page whose listing was imported from Yad2/Madlan and NOT turned into a
@@ -110,10 +116,13 @@ async function enrollNewPage(page, deps = {}) {
       .map((id) => ({ group_id: id, url: member.get(id).canonical_url || member.get(id).url, name: member.get(id).name || "" }));
     const targets = A.targetsFor(conn, perm.targets);
     if (!groups.length && !targets.includes("page")) return null;
+    // Creates only when no campaign exists; reactivates only one that ended by
+    // itself (page_gone, expired) — never one the agent, a revoked permission
+    // or an operator stopped, and never a finished pass.
     const c = await create({
       phone, page, groups, mode: perm.auto_mode === "per_post" ? "per_post" : "standing", days: 14, repeat: false,
       targets: perm.targets, consent: { at: perm.granted_at, version: perm.consent_version },
-    }, deps);
+    }, deps, { restartWhen: (cur) => ENROLL_RESTARTABLE.has(cur.pause_reason) });
     if (page.posting_enroll_error && typeof x.db.updatePage === "function") await x.db.updatePage(page.page_id, { posting_enroll_error: null });
     return c;
   } catch (e) {
@@ -146,23 +155,46 @@ async function resume(id, deps = {}) {
   return mutate(x, id, (cur) => (cur.status === "paused" ? { status: "running", pause_reason: null, consecutive_failures: 0, tick_errors: 0, selector_failures: 0 } : null));
 }
 
-// Cancels this campaign's attempts that have not reached the Post click (an
-// in-flight one is left for reconciliation, R1), then skips what is open.
+// STOP commits first, in the campaign transaction — so a tick about to move a
+// post to `posting` sees `stopped` and cancels its own reservation. Then it
+// cancels every attempt that has not reached the Post click: those of the
+// committed doc's `posting` posts, and any pre-submit attempt for this
+// campaign found in the attempts store (one reserved a moment before the
+// campaign doc recorded it). An in-flight attempt is left for reconciliation
+// (R1). Cancelled posts are mirrored to `skipped`.
 // Signature matches routes/connections-browser.js: stop(id, { db }).
 async function stop(id, deps = {}, reason = "agent") {
   const x = ctxOf(deps);
-  const c = await x.store.getPostingCampaign(id);
-  if (!c) return null;
-  for (const p of (c.posts || []).filter((q) => q.status === "posting" && q.attempt_key)) {
-    try { await x.store.transition(p.attempt_key, "cancelled", { error_code: "stopped" }, x.clock()); }
-    catch (e) { if (!e || e.code !== "illegal_transition") A.noteCancelFailure(1); }
+  let was = null;
+  const out = await mutate(x, id, (cur) => {
+    was = cur.status; // the committed run's view (the last run wins)
+    return {
+      status: "stopped", pause_reason: cur.status === "stopped" ? cur.pause_reason : reason,
+      posts: cur.posts.map((p) => (["scheduled", "pending_approval"].includes(p.status) ? { ...p, status: "skipped", error_code: "stopped", copy: undefined } : p)),
+    };
+  });
+  if (!out) return null;
+  const keys = new Set(out.posts.filter((p) => p.status === "posting" && p.attempt_key).map((p) => p.attempt_key));
+  for (const a of await x.store.listOpenAttemptsByCampaign(id)) keys.add(a.key);
+  let failed = 0;
+  for (const k of keys) {
+    try { await x.store.transition(k, "cancelled", { error_code: "stopped" }, x.clock()); }
+    catch (e) { if (!e || !["illegal_transition", "not_found"].includes(e.code)) failed++; }
   }
-  const out = await mutate(x, id, (cur) => ({
-    status: "stopped", pause_reason: reason,
-    posts: cur.posts.map((p) => (["scheduled", "pending_approval"].includes(p.status) ? { ...p, status: "skipped", error_code: "stopped", copy: undefined } : p)),
-  }));
-  await say(deps, c.phone, "stopped", "הפרסום נעצר. מה שכבר פורסם נשאר.", out);
-  return out;
+  if (failed) {
+    A.noteCancelFailure(failed);
+    console.error(redact(`posting stop …${String(id).slice(-6)}: ${failed} attempt cancel(s) failed`));
+  }
+  const cancelled = new Set();
+  for (const k of keys) { const a = await x.store.getAttempt(k); if (a && a.state === "cancelled") cancelled.add(k); }
+  const final = cancelled.size
+    ? await mutate(x, id, (cur) => {
+      const posts = cur.posts.map((p) => (p.status === "posting" && cancelled.has(p.attempt_key) ? { ...p, status: "skipped", error_code: "stopped", copy: undefined } : p));
+      return posts.some((p, i) => p !== cur.posts[i]) ? { posts } : null;
+    })
+    : out;
+  if (was !== "stopped") await say(deps, out.phone, "stopped", "הפרסום נעצר. מה שכבר פורסם נשאר.", final);
+  return final;
 }
 
 // Approval is also a re-timing: the agent may tap at 23:40, and the slot the
@@ -202,6 +234,7 @@ async function revokePermission(phone, deps = {}) {
     if (!e || e.code !== "cancel_incomplete") throw e;
     cancelled = e.cancelled || 0;
     A.noteCancelFailure((e.failures || []).length || 1);
+    console.error(redact(`posting revoke ${A.tail(phone)}: ${(e.failures || []).length || 1} attempt cancel(s) failed`));
   }
   let paused = 0;
   for (const c of await x.store.listPostingCampaignsByPhone(String(phone))) {
@@ -311,15 +344,20 @@ async function schedulePost(decision, deps = {}, now) {
   const target = decision.target === "page" ? A.pageTarget(conn) : c.groups.find((g) => g.group_id === decision.group_id);
   if (!target) return c;
   const copy = buildCopy(page, c, target);
-  const post = {
+  const base = {
     id: crypto.randomUUID(), target: decision.target === "page" ? "page" : "group",
     group_id: target.group_id, group_url: target.url, group_name: target.name || "",
-    status: c.mode === "per_post" ? "pending_approval" : "scheduled",
     scheduled_at: iso(decision.at), created_at: iso(now), approved_at: null, posting_started_at: null, posted_at: null,
     post_url: null, error_code: null, attempt_key: null, retries: 0, copy, copy_hash: sha(copy),
   };
-  const next = await mutate(x, c.id, (cur) => ({ posts: cur.posts.concat([post]), wait_reason: null, duplicate_review: decision.duplicate_review || null }));
-  if (post.status === "pending_approval") {
+  // Appended only while the campaign is still running (a STOP may have landed
+  // since the read above); the mode is the committed one.
+  const next = await mutate(x, c.id, (cur) => (cur.status !== "running" ? null : {
+    posts: cur.posts.concat([{ ...base, status: cur.mode === "per_post" ? "pending_approval" : "scheduled" }]),
+    wait_reason: null, duplicate_review: decision.duplicate_review || null,
+  }));
+  const post = next && next.posts.find((p) => p.id === base.id);
+  if (post && post.status === "pending_approval") {
     await say(deps, c.phone, "approve", `📣 פוסט מוכן לאישור ל${post.target === "page" ? "דף העסקי" : `קבוצה "${post.group_name || post.group_url}"`}:\n──────────\n${copy}\n──────────`, next, post);
   }
   return next;

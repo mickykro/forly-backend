@@ -272,6 +272,14 @@ async function listAttemptsByPhone(phone, sinceMs) {
   return rows.sort((x, y) => (x.reserved_at < y.reserved_at ? -1 : x.reserved_at > y.reserved_at ? 1 : 0));
 }
 
+// A campaign's attempts that have not reached the Post click — stop() cancels
+// these, including one reserved a moment before the campaign's own doc
+// recorded it. Index: posting_attempts(campaign_id, state).
+async function listOpenAttemptsByCampaign(campaign_id) {
+  if (typeof campaign_id !== "string" || !campaign_id || campaign_id.length > 200) throw fail("invalid_input", "campaign_id required");
+  return queryAttempts([["campaign_id", "==", campaign_id], ["state", "in", [...PRE_SUBMIT]]], (a) => a.campaign_id === campaign_id && PRE_SUBMIT.has(a.state));
+}
+
 async function listAttemptsByState(state, limit = 50) {
   return queryAttempts([["state", "==", state]], (a) => a.state === state, limit);
 }
@@ -310,6 +318,6 @@ function reset() { for (const m of Object.values(maps)) m.clear(); }
 module.exports = {
   LEASE_MS, EDGES, countingStates, isCounting,
   attemptKey, reserveAttempt, transition, reapExpired, cancelOpenAttempts,
-  getAttempt, listAttemptsByPhone, listAttemptsByState, getGroupActivityFor,
+  getAttempt, listAttemptsByPhone, listAttemptsByState, listOpenAttemptsByCampaign, getGroupActivityFor,
   _test: { reset, maps, dedupKey, lastDates },
 };

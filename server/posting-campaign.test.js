@@ -115,6 +115,34 @@ const PH = "972500000001";
     assert.equal((await C.create(base(), deps)).status, "running");
   }
 
+  // ── enrollment never restarts a campaign the agent (or anyone) stopped (fix round 1) ──
+  {
+    const { deps } = await setup();
+    const c = await C.enrollNewPage(page(), deps);
+    assert.equal(c.status, "running");
+    const s1 = await C.stop(c.id, deps);
+    assert.equal(s1.pause_reason, "agent");
+    const again = await C.enrollNewPage(page(), deps); // pages.js: re-created page, or an extension
+    assert.equal(again.status, "stopped", "the agent's STOP stands");
+    assert.equal(again.restarted_at, undefined);
+    for (const reason of ["permission", "account", "internal"]) {
+      await store.updatePostingCampaign(c.id, { status: "stopped", pause_reason: reason });
+      assert.equal((await C.enrollNewPage(page(), deps)).status, "stopped", `${reason}: not restarted by enrollment`);
+    }
+    await store.updatePostingCampaign(c.id, { status: "completed", pause_reason: null });
+    assert.equal((await C.enrollNewPage(page(), deps)).status, "completed", "a finished pass is not restarted by enrollment");
+    // it may reactivate one that ended by itself
+    for (const reason of ["page_gone", "expired"]) {
+      await store.updatePostingCampaign(c.id, { status: reason === "expired" ? "completed" : "stopped", pause_reason: reason });
+      const r = await C.enrollNewPage(page(), deps);
+      assert.equal(r.status, "running", `${reason}: reactivated`);
+      assert.equal(r.pause_reason, null);
+    }
+    // a direct create (Task 19's route: the agent asks) still restarts an agent-stopped campaign
+    await C.stop(c.id, deps);
+    assert.equal((await C.create(base(), deps)).status, "running");
+  }
+
   // ── the page is archived mid-campaign: stop, say why, skip what was open ──
   {
     const { deps, at, notes } = await setup();

@@ -26,13 +26,18 @@ const { iso, tail, fail, ms, ctxOf, nowOf, configOf, mutate, say, tellOperator, 
 const MAX_TICK_ERRORS = 3;
 const MAX_RETRIES = 3; // refusals / infrastructure cancels before a post is skipped
 const BROWSE_EVERY_MS = 20 * MS_HOUR;
-const POST_TIMEOUT_MS = 25 * MS_MIN; // longer than the attempt lease (20 min): the reaper sees it first
+// Clearly below profile-lock's MAX_HOLD_MS (20 min): the profile lock must
+// still be ours when a hung driver call is settled (asserted in the tests).
+const POST_TIMEOUT_MS = 15 * MS_MIN;
 const PRE_SUBMIT = new Set(["reserved", "session_started", "composer_ready"]);
 const IN_FLIGHT = new Set(["submit_started", "verification_pending"]);
-// A cancel that was nobody's decision (the lease ran out, Driver failed, no
-// driver installed yet): the Post was never clicked, so the post is retried
-// on a later day (today's attempt key stays taken, 16a).
-const RETRY_CANCELS = new Set(["lease_expired", "infrastructure", "driver_unavailable"]);
+// A cancel that was nobody's decision about THIS post (the lease ran out,
+// Driver failed, no driver installed yet, the kill switch flipped): the Post
+// was never clicked, so the post is retried on a later day (today's attempt
+// key stays taken, 16a). A kill-switch cancel never uses up a retry, so a
+// brief flip can never drop a group for good.
+const RETRY_CANCELS = new Set(["lease_expired", "infrastructure", "driver_unavailable", "posting_disabled"]);
+const FREE_RETRY = new Set(["posting_disabled"]);
 const MISMATCH = new Set(["identity_mismatch", "destination_mismatch", "copy_mismatch"]);
 const BLOCKS_GROUP = new Set(["not_member", "group_blocked"]);
 const sha = C._test.sha;
@@ -45,10 +50,11 @@ const mirrorCtx = (now, config, rand) => ({ now, retryAt: A.nextDayStart(now, co
 function mirrorPost(p, a, ctx) {
   const status = a && A.POST_STATUS_OF[a.state];
   if (!status || p.attempt_key !== a.key || !["posting", "unknown"].includes(p.status) || status === p.status) return p;
-  if (status === "skipped" && RETRY_CANCELS.has(a.error_code) && ctx.running && (p.retries || 0) < MAX_RETRIES) {
+  const free = FREE_RETRY.has(a.error_code);
+  if (status === "skipped" && RETRY_CANCELS.has(a.error_code) && ctx.running && (free || (p.retries || 0) < MAX_RETRIES)) {
     return {
       ...p, status: "scheduled", scheduled_at: iso(ctx.retryAt), attempt_key: null,
-      prior_attempt_keys: (p.prior_attempt_keys || []).concat([a.key]), retries: (p.retries || 0) + 1,
+      prior_attempt_keys: (p.prior_attempt_keys || []).concat([a.key]), retries: (p.retries || 0) + (free ? 0 : 1),
       posting_started_at: null, last_error_code: a.error_code,
     };
   }
@@ -227,7 +233,9 @@ async function startAttempt(attempt, st, deps, x, now) {
   const p = next && next.posts.find((q) => q.id === post.id);
   if (!p || p.status !== "posting" || p.attempt_key !== attempt.key) {
     // Stopped or skipped between the read and the reservation: release it.
-    await x.store.transition(attempt.key, "cancelled", { error_code: "stopped" }, x.clock()).catch(() => A.noteCancelFailure(1));
+    // Already cancelled (by that STOP) is not a failure.
+    await x.store.transition(attempt.key, "cancelled", { error_code: "stopped" }, x.clock())
+      .catch((e) => { if (!e || e.code !== "illegal_transition") A.noteCancelFailure(1); });
     return "stopped";
   }
   return runAttempt(attempt, { ...st, c: next, post: p }, deps, now);
@@ -403,6 +411,6 @@ async function tick(campaign, deps = {}, now) {
 }
 
 module.exports = {
-  tick, tickAccount, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES,
+  tick, tickAccount, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
   _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn },
 };

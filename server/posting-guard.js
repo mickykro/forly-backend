@@ -48,7 +48,9 @@ async function assertAllowed({ phone, platform, action }, deps = {}) {
 
   const nowMs = deps.now instanceof Date ? deps.now.getTime() : Date.now();
   const conn = (await db.getConnection(phone)) || {};
-  if (conn.posting_disabled_until_admin === true) deny("account_disabled");
+  // An owner-level review (R5: a second disabling halt in 30 days) is a
+  // disabled account too, whatever the standard re-enable flag says.
+  if (conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true) deny("account_disabled");
   // R5: a penalty halves the caps (posting-safety); it stops posting only on
   // day one — while the newest penalising halt is under 24 h old.
   if (action === "post" && conn.posting_penalty_until && new Date(conn.posting_penalty_until).getTime() > nowMs) {

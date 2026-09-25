@@ -50,4 +50,4 @@ const budget = () => Number(process.env.DRIVER_MAX_CONCURRENT || 2);
 function trySession() { if (sessions >= budget()) return null; sessions++; return () => { sessions = Math.max(0, sessions - 1); }; }
 function activeSessions() { return sessions; }
 
-module.exports = { tryAcquire, acquire, isHeld, trySession, activeSessions, _test: { held, reset: () => { held.clear(); sessions = 0; } } };
+module.exports = { tryAcquire, acquire, isHeld, trySession, activeSessions, MAX_HOLD_MS, _test: { held, reset: () => { held.clear(); sessions = 0; } } };

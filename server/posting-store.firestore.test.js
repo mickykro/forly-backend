@@ -256,5 +256,27 @@ const doc = (p) => fake.docs.get(p);
     assert.equal((await S.reserveAttempt(res({ phone: "972500000091", page_id: "dd1", target_id: "801", limits: lim, now: new Date(NOW.getTime() + 15 * DAY) }))).ok, true);
   }
 
+  // ── mutateConnection: two halts landing at once both survive; the later one sees
+  //    the earlier and asks for the owner review (fix round 1) ──
+  {
+    const H = require("./posting-halts");
+    const ph = "972500000095";
+    await fake.collection(`businesses/${ph}/connections`).doc("facebook").set({ facebook_browser_connected_at: NOW.toISOString(), posting_halts: [] });
+    const retriesBefore = fake.stats.txRetries;
+    const outs = await Promise.all([
+      H.haltAccount(ph, "restricted", { config: require("./posting-safety").DEFAULTS, env: {} }, { now: NOW }),
+      H.haltAccount(ph, "captcha", { config: require("./posting-safety").DEFAULTS, env: {}, lifecycle: { quarantine: async () => {} } }, { now: NOW }),
+    ]);
+    const conn = doc(`businesses/${ph}/connections/facebook`);
+    assert.deepEqual(conn.posting_halts.map((h) => h.code).sort(), ["captcha", "restricted"], "no halt entry lost");
+    assert.equal(conn.posting_owner_review_required, true);
+    assert.equal(outs.filter((o) => o.owner_review).length, 1, "exactly the later halt saw the earlier one");
+    assert.ok(fake.stats.txRetries > retriesBefore, "they really raced");
+    // null → no write; the connection comes back opened
+    const same = await S.mutateConnection(ph, () => null);
+    assert.equal(same.posting_owner_review_required, true);
+    await assert.rejects(S.mutateConnection("a/b", () => ({})), code("invalid_input"));
+  }
+
   console.log("posting-store.firestore.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

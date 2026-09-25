@@ -94,6 +94,37 @@ async function listCampaignsWhere(field, value, limit) {
 const listPostingCampaignsByStatus = (status, limit = 50) => listCampaignsWhere("status", status, limit);
 const listPostingCampaignsByPhone = (phone, limit = 100) => listCampaignsWhere("phone", phone, limit);
 
+// ── connections (businesses/{phone}/connections/facebook): transactional read-modify-write ──
+// db.setConnection is a blind merge; two halts landing at once would each
+// append to the posting_halts they read and one entry would be lost. Here fn
+// sees the current (opened) connection inside the transaction and returns a
+// patch (or null); the patch is sealed (token-vault) and merged. `fn` must be
+// PURE: Firestore re-runs it on contention. → the merged, opened connection.
+async function mutateConnection(phone, fn) {
+  assertId(phone, "phone");
+  if (typeof fn !== "function") throw fail("invalid_input", "fn required");
+  const vault = require("./distribution/token-vault");
+  const key = vault.keyFrom(process.env);
+  const col = `businesses/${phone}/connections`;
+  const conns = memDb().connections;
+  // The memory store keeps connections by phone; this adapter presents that
+  // one entry as the "facebook" doc of the phone's connections collection.
+  const memMaps = { [col]: {
+    get: (id) => (id === "facebook" ? conns.get(phone) : undefined),
+    has: (id) => id === "facebook" && conns.has(phone),
+    set: (id, v) => { if (id === "facebook") conns.set(phone, v); },
+  } };
+  return runTx(memMaps, async (tx) => {
+    const cur = (await tx.get(col, "facebook")) || {};
+    const patch = fn(vault.openConnection(clone(cur), key));
+    if (patch === null || patch === undefined) return vault.openConnection(cur, key);
+    if (!isPlainObject(patch)) throw fail("invalid_input", "patch must be an object");
+    const sealed = stripUndefined(vault.sealConnection(patch, key));
+    tx.set(col, "facebook", sealed, { merge: true });
+    return vault.openConnection(deepMerge(cur, sealed), key);
+  });
+}
+
 // ── manual share-kit posts (post_actions, append-only audit) ──
 // The pacer must see what the agent posted by hand. The writers
 // (routes/distribution.js share-session/mark, distribution/jobs.js) key the
@@ -199,6 +230,7 @@ module.exports = {
   getAttempt: attempts.getAttempt, listAttemptsByPhone: attempts.listAttemptsByPhone, listAttemptsByState: attempts.listAttemptsByState,
   getGroupActivityFor: attempts.getGroupActivityFor,
   // manual posts, connections
+  mutateConnection, listOpenAttemptsByCampaign: attempts.listOpenAttemptsByCampaign,
   listPostActionsByPhone, listConnectedPhones, listPhonesHaltedSince,
   // dwell sessions
   saveDwellSession, listDwellSessionsByPhone,

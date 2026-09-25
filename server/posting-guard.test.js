@@ -71,6 +71,13 @@ async function denies(opts, deps, reason) {
     "account_disabled",
   );
 
+  // ── account_disabled also covers an owner-level review (R5: second disabling halt in 30 days) ──
+  await denies(
+    { phone: PHONE, platform: PLATFORM, action: "reserve" },
+    { db: fakeDb({ conn: { posting_owner_review_required: true, posting_permission: GRANTED } }), env: {} },
+    "account_disabled",
+  );
+
   // ── account_penalty (R5): only day one of a penalty stops a post — while the
   //    newest penalising halt is under 24 h old; after that the caps are halved
   //    (posting-safety), and the guard lets the post through ──
