@@ -70,6 +70,14 @@
   .message-meta{font-size:.76rem;color:var(--ink-soft)}
   .customer-check{width:16px;height:16px;accent-color:var(--gold)}
   @media(max-width:760px){.message-grid{grid-template-columns:1fr}}
+  /* automated posting tab (admin-posting.js) */
+  .posting-row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
+  .posting-row .switch{display:inline-block;vertical-align:middle}
+  .posting-note{font-size:.78rem;color:var(--ink-soft);font-weight:300;margin:4px 0 0}
+  .posting-warn{font-size:.82rem;color:#9a2f25;background:rgba(190,60,50,.08);border:1px solid rgba(190,60,50,.25);border-radius:12px;padding:10px 14px;margin-bottom:14px}
+  .posting-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-bottom:18px}
+  .posting-audit{list-style:none;margin:0;padding:0;font-size:.8rem}
+  .posting-audit li{padding:6px 0;border-bottom:1px solid rgba(23,20,15,.06)}
 </style>
 </head>
 <body class="agent-page admin-page">
@@ -113,6 +121,7 @@
     <button id="tabAgents">סוכנים ופיצ׳רים</button>
     <button id="tabPortfolios">פורטפוליו</button>
     <button id="tabMessages">הודעות לסוכנים</button>
+    <button id="tabPosting">פרסום אוטומטי</button>
     <button id="tabPortfolios">פורטפוליו</button>
   </div>
 
@@ -149,6 +158,44 @@
           <div class="empty hidden" id="customerEmpty">לא נמצאו סוכנים תואמים.</div>
         </div>
       </section>
+    </div>
+  </div>
+
+  <!-- ── AUTOMATED POSTING (admin-posting.js) ── -->
+  <div id="panePosting" class="hidden">
+    <div class="posting-warn hidden" id="postingStepUp">נדרש אימות מחדש — התחברו שוב</div>
+    <div class="empty hidden" id="postingUnavailable">פרסום אוטומטי לא פעיל בשרת הזה.</div>
+    <div id="postingBody" class="hidden">
+      <div class="posting-grid">
+        <section class="message-card">
+          <h2>מתג ראשי</h2>
+          <p>כיבוי עוצר את כל הפרסום האוטומטי של כל הסוכנים לפני הפעולה הבאה.</p>
+          <div class="posting-warn hidden" id="postingEnvNote">POSTING_ENABLED=0 בסביבה — המתג הזה לא יכול להדליק.</div>
+          <div class="posting-row"><label class="switch"><input type="checkbox" id="postingGlobal"><i></i></label> <b id="postingGlobalLabel"></b></div>
+          <p class="posting-note" id="postingLastChange"></p>
+        </section>
+        <section class="message-card">
+          <h2>מתגים נוספים</h2>
+          <p>כל שינוי דורש סיבה ונרשם ביומן.</p>
+          <div id="postingSwitches"></div>
+        </section>
+      </div>
+      <div class="stat-grid" id="postingCounts"></div>
+      <section class="message-card" style="margin-bottom:18px">
+        <h2>חשבונות שנעצרו</h2>
+        <p>כל שורה מציעה רק את הפעולה שמותרת לסוג העצירה.</p>
+        <div class="table-wrap">
+          <table class="admin" style="min-width:640px">
+            <thead><tr><th>סוג</th><th>סוכן</th><th>מתי</th><th>מצב</th><th>פעולות</th></tr></thead>
+            <tbody id="postingHalted"></tbody>
+          </table>
+          <div class="empty hidden" id="postingHaltedEmpty">אין חשבונות עצורים.</div>
+        </div>
+      </section>
+      <div class="posting-grid">
+        <section class="message-card"><h2>בריאות</h2><p id="postingHealth"></p></section>
+        <section class="message-card"><h2>יומן פעולות</h2><ul class="posting-audit" id="postingAudit"></ul></section>
+      </div>
     </div>
   </div>
 
@@ -351,6 +398,7 @@
 
 <script src="/api.js"></script>
 <script src="/admin.js"></script>
+<script src="/admin-posting.js"></script>
 <footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>
