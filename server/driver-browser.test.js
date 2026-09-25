@@ -1,5 +1,6 @@
 /* driver-browser.js — session lifecycle and the error policy. No network:
    fetch and connectOverCDP are stubbed. */
+process.env.FORLY_ENV = "local"; // notes are scoped by it; pin it
 const assert = require("assert");
 const D = require("./driver-browser");
 
@@ -87,8 +88,8 @@ async function quiet(fn) {
     seen.push(list.map((x) => x.sessionId));
     assert.ok(!JSON.stringify(list).includes("ws://"), "liveSessions never carries the cdpUrl");
     assert.ok(!list.some((x) => "cdpUrl" in x));
-    assert.equal(list[0].platform, "facebook");
-    assert.equal(list[0].note, "forly-connect:facebook");
+    assert.equal(list[0].platform, "facebook", "parsed from the env-scoped note");
+    assert.equal(list[0].note, "forly-local-connect:facebook");
     assert.equal(list[0].viewer_available, true);
     return 1;
   }, deps);
@@ -98,14 +99,49 @@ async function quiet(fn) {
   await D.withPage({}, async () => { seen.push(D.liveSessions()); }, deps);
   assert.deepEqual(seen[1], [], "no registry when the flag is off");
 
+  // ── every note is scoped by FORLY_ENV at create time; callers never see it ──
+  let sentNote = null;
+  const noteFetch = async (u, init) => { sentNote = JSON.parse(init.body).note; return ok({ sessionId: "n1", status: "active", cdpUrl: "ws://n" }); };
+  await D.createSession({ note: "forly-extract:job-9" }, { fetchFn: noteFetch, apiKey: "k", sleep: async () => {} });
+  assert.equal(sentNote, "forly-local-extract:job-9");
+  await D.createSession({ note: "forly-local-extract:job-9" }, { fetchFn: noteFetch, apiKey: "k", sleep: async () => {} });
+  assert.equal(sentNote, "forly-local-extract:job-9", "already scoped → unchanged");
+  await D.createSession({ note: "someone-else" }, { fetchFn: noteFetch, apiKey: "k", sleep: async () => {} });
+  assert.equal(sentNote, "someone-else");
+  process.env.FORLY_ENV = "bogus";
+  await D.createSession({ note: "forly-extract:job-9" }, { fetchFn: noteFetch, apiKey: "k", sleep: async () => {} });
+  assert.equal(sentNote, "forly-extract:job-9", "invalid env → unscoped (Driver is off then anyway)");
+  process.env.FORLY_ENV = "local";
+
+  // ── a staging boot's cleanup never touches prod's (or unscoped) sessions ──
+  process.env.FORLY_ENV = "staging";
+  const envDeleted = [];
+  const envDeps = {
+    apiKey: "k", sleep: async () => {},
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { envDeleted.push(url); return ok({ success: true }); }
+      if (!url.includes("status=active")) return ok({ sessions: [] });
+      return ok({ sessions: [
+        { sessionId: "prod1", note: "forly-prod-connect:facebook" },
+        { sessionId: "stg1", note: "forly-staging-connect:facebook" },
+        { sessionId: "old1", note: "forly-connect:facebook" },
+        { sessionId: "stgx", note: "forly-staging-extract:1" },
+      ] });
+    },
+  };
+  assert.equal(await D.cleanupOrphans("forly-connect:", envDeps), 1);
+  assert.equal(envDeleted.length, 1);
+  assert.ok(envDeleted[0].includes("sessionId=stg1"));
+  process.env.FORLY_ENV = "local";
+
   // ── cleanupOrphans stops only our own notes ──
   const deleted = [];
   const cleanupDeps = {
     apiKey: "k", sleep: async () => {},
     fetchFn: async (url, init) => {
       if ((init && init.method) === "DELETE") { deleted.push(url); return ok({ success: true }); }
-      if (url.includes("status=active")) return ok({ sessions: [{ sessionId: "a", note: "forly-extract:1" }, { sessionId: "b", note: "someone-else" }] });
-      return ok({ sessions: [{ sessionId: "c", note: "forly-extract:2" }] });
+      if (url.includes("status=active")) return ok({ sessions: [{ sessionId: "a", note: "forly-local-extract:1" }, { sessionId: "b", note: "someone-else" }] });
+      return ok({ sessions: [{ sessionId: "c", note: "forly-local-extract:2" }] });
     },
   };
   assert.equal(await D.cleanupOrphans("forly-extract:", cleanupDeps), 2);

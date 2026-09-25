@@ -17,6 +17,14 @@
 #      BASE_URL=https://staging.srv1173890.hstgr.cloud
 #      PAGE_BASE_URL=https://staging.srv1173890.hstgr.cloud
 #      ALLOW_INFRA_PAGE_BASE=1
+#      FORLY_ENV=staging                # REQUIRED — never leave the copied "prod": it scopes
+#                                       # Driver session notes and profile names, so with "prod"
+#                                       # a staging boot would stop prod's browser sessions and
+#                                       # open prod agents' logged-in profiles.
+#      PROFILE_KEY=...                  # REQUIRED — staging's OWN key (openssl rand -hex 32), never
+#                                       # prod's: profile names are derived from it.
+#      DRIVER_API_KEY=...               # a separate Driver account/key where possible, so staging
+#                                       # cannot even see prod's sessions or profiles.
 #    Phase 1 shares the rest with production — same Firestore, same GreenAPI,
 #    same n8n, same NADLAN_JWT_SECRET (the shared secret is what lets dev relay
 #    uploads here at all).

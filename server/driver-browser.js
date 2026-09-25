@@ -98,6 +98,20 @@ async function call(method, path, body, deps = {}) {
 // locale, on the create call, where Driver applies them — never patched in the
 // page, which is exactly what looks fake. Callers cannot override these.
 const SESSION_DEFAULTS = { country: "IL", timezone: "Asia/Jerusalem", language: "he-IL" };
+// Notes are scoped by environment HERE, in one place: callers pass
+// "forly-<kind>:<rest>", Driver sees "forly-<env>-<kind>:<rest>". Staging and
+// prod may share a Driver account, and cleanupOrphans matches on the note —
+// unscoped, a staging boot would stop every prod session. An invalid
+// FORLY_ENV leaves the note as is (Driver is disabled then anyway).
+function scopeNote(note) {
+  if (typeof note !== "string") return note;
+  const m = note.match(/^forly-([a-z]+):/);
+  if (!m) return note; // not ours, or already scoped
+  let env;
+  try { env = profileNames.ENV(); } catch (e) { return note; }
+  return `forly-${env}-${m[1]}:${note.slice(m[0].length)}`;
+}
+
 const proxyDefault = () => (process.env.DRIVER_PROXY_URL ? { proxyUrl: process.env.DRIVER_PROXY_URL } : {});
 
 // Dev-only: a registry of live sessions, so a developer can watch every
@@ -107,7 +121,7 @@ const proxyDefault = () => (process.env.DRIVER_PROXY_URL ? { proxyUrl: process.e
 let devView = process.env.DRIVER_DEV_VIEW === "1";
 const live = new Map();
 const platformOfNote = (note) => {
-  const m = String(note || "").match(/^forly-[a-z]+:(.+)$/);
+  const m = String(note || "").match(/^forly-(?:(?:prod|staging|local)-)?[a-z]+:(.+)$/);
   return m ? m[1] : null;
 };
 const liveSessions = () => (devView ? [...live.values()].map((s) => ({
@@ -170,6 +184,7 @@ async function createSession(opts = {}, deps = {}) {
   const sleep = deps.sleep || sleepReal;
   const random = deps.random || Math.random;
   const body = Object.assign({}, proxyDefault(), opts, SESSION_DEFAULTS);
+  if (body.note) body.note = scopeNote(body.note);
   let attempt = 0;
   for (;;) {
     try {
@@ -205,6 +220,7 @@ async function stopSession(id, deps = {}) {
 // A crash before the finally leaves a session running until its duration. Every
 // session we create carries a note; at boot we stop the ones that are ours.
 async function cleanupOrphans(notePrefix, deps = {}) {
+  notePrefix = scopeNote(notePrefix); // this environment's sessions only
   let stopped = 0;
   for (const status of ["active", "starting"]) {
     const r = await listSessions(status, deps).catch(() => ({ sessions: [] }));
@@ -310,7 +326,7 @@ module.exports = {
   cleanupOrphans, waitForActive, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
   redact, driverEnabled, bootCheck, mintViewerGrant, consumeViewerGrant,
   _test: {
-    backoffMs,
+    backoffMs, scopeNote,
     setDevView: (v) => { devView = v; live.clear(); grants.clear(); },
     setNow: (fn) => { nowFn = fn || (() => Date.now()); },
   },
