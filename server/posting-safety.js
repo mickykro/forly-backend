@@ -120,9 +120,11 @@ function configFrom(settings) {
   return out;
 }
 
-// price rounded to a flat bucket: `div` sets how coarse the bucket is
-// ("price2" = tight, "price5" = loose), the same shape for both tiers.
-const priceBucket = (price, div) => Math.round((Number(price) || 0) / div);
+// price rounded to the nearest `pct` (0.02 = 2%, 0.05 = 5%) relative bucket:
+// a logarithmic bucket, so the bucket width scales with price — a flat NIS
+// divisor would lump most rents (e.g. 4,500 and 6,500) into one or two
+// buckets, while a sale price ten times higher would barely move a bucket.
+const priceBucket = (price, pct) => { const p = Number(price) || 0; return p > 0 ? Math.round(Math.log(p) / Math.log(1 + pct)) : ""; };
 const sqmBucket = (sqm) => (sqm === undefined || sqm === null || sqm === "" || !Number.isFinite(Number(sqm)) ? "" : Math.floor(Number(sqm) / 5));
 
 // Same listing, whoever posted it — three tiers of confidence, each an HMAC
@@ -137,8 +139,8 @@ function fingerprint(prop = {}, key = process.env.PROFILE_KEY) {
   const p = prop || {};
   const city = normalizeCity(p.city);
   const rooms = p.rooms ?? "";
-  const price2 = priceBucket(p.price, 2000);
-  const price5 = priceBucket(p.price, 5000);
+  const price2 = priceBucket(p.price, 0.02);
+  const price5 = priceBucket(p.price, 0.05);
   const streetOrProject = p.street || p.project || null;
   let exactMaterial = null;
   if (streetOrProject) exactMaterial = `${city}|${streetOrProject}|${rooms}|${p.floor ?? ""}|${p.size_sqm ?? ""}|${price2}`;
@@ -172,11 +174,12 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
   if (account.disabled_until_admin) return { at: null, reason: "disabled" };
   const recentHalts = (account.halts || []).filter((h) => now.getTime() - new Date(h.at).getTime() < config.halts_window_days * MS_DAY);
   if (recentHalts.length >= config.halts_to_disable) return { at: null, reason: "disabled" };
-  // A live penalty (rate_limited / feature_blocked, R5) pauses posting outright
-  // until penalty_until, rather than merely thinning the schedule: dailyCapFor's
-  // halved cap is a defence in depth for any caller that computes a cap without
-  // going through nextSlot's own gate.
-  if (account.penalty_until && now.getTime() < new Date(account.penalty_until).getTime()) {
+  // R5: feature_blocked / rate_limited is a 14-day penalty with caps halved,
+  // not a hard stop — except day one, which posts nothing at all. "Day one"
+  // is a penalising halt (rate_limited / feature_blocked) under 24h old;
+  // for the rest of penalty_until, dailyCapFor halves the daily cap instead.
+  const freshPenalisingHalt = recentHalts.some((h) => SIGNAL_PENALISES.has(h.code) && now.getTime() - new Date(h.at).getTime() < MS_DAY);
+  if (account.penalty_until && now.getTime() < new Date(account.penalty_until).getTime() && freshPenalisingHalt) {
     return { at: null, reason: "penalty" };
   }
 

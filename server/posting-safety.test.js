@@ -40,7 +40,20 @@ assert.equal(S.isActiveTime(IL("2026-09-21T11:00:00+03:00"), cfg), false, "Yom K
 // ── disabled and penalised accounts never get a slot, whatever the caps say ──
 assert.equal(S.nextSlot({ now: NOW, account: account({ disabled_until_admin: true }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "disabled");
 assert.equal(S.nextSlot({ now: NOW, account: account({ halts: [{ at: at(day(3)), code: "rate_limited" }, { at: at(day(20)), code: "rate_limited" }] }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "disabled", "two halts in 30 days = disabled");
-assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)) }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "penalty");
+assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)), halts: [{ at: at(2 * 3600000), code: "rate_limited" }] }), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "penalty", "day one after a penalising signal: nothing");
+
+// ── past day one, a live penalty halves the cap — it does not stop posting (R5) ──
+{
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
+  const halved = account({
+    penalty_until: at(-day(5)),                              // still 5 days from ending
+    halts: [{ at: at(day(3)), code: "rate_limited" }],        // 3 days old — past the day-one block
+    posts: [{ at: at(3600000), group_id: "a", group_url: "a", page_id: "p", ok: true }], // one post already today
+  });
+  assert.equal(S._test.dailyCapFor(halved, NOW, cfgNoSkip), Math.floor(cfg.daily_cap / cfg.penalty_cap_divisor), "the daily cap is halved for the rest of the penalty window");
+  const r = S.nextSlot({ now: NOW, account: halved, candidates: [ok("g")], pageId: "p", config: cfgNoSkip, rand: noRand });
+  assert.equal(r.reason, "daily_cap", "a post that the full cap would allow is refused at the halved cap, not blocked outright as 'penalty'");
+}
 
 // ── DST: a Jerusalem calendar day is a calendar day, whatever the clock did ──
 {
@@ -134,6 +147,16 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   const sqm97 = S.fingerprint({ city: "חיפה", rooms: 3, price: 900000, size_sqm: 97 }, "k");
   assert.equal(sqm91.strong, sqm93.strong, "sqm 91 vs 93 → same strong bucket");
   assert.notEqual(sqm91.strong, sqm97.strong, "sqm 91 vs 97 → different strong bucket");
+
+  // price buckets are relative (log-scale), not a flat NIS amount: a sale
+  // price and a rent get comparably-sized buckets around their own value.
+  const sale = (price) => ({ city: "חיפה", rooms: 3, size_sqm: 70, floor: 2, street: "הרצל 1", price });
+  assert.equal(S.fingerprint(sale(2_000_000), "k").exact, S.fingerprint(sale(2_030_000), "k").exact, "sale price 2,000,000 vs 2,030,000 → same price2 bucket");
+  assert.notEqual(S.fingerprint(sale(2_000_000), "k").exact, S.fingerprint(sale(2_200_000), "k").exact, "sale price 2,000,000 vs 2,200,000 → different price2 bucket");
+  const rent = (price) => ({ city: "חיפה", rooms: 2, size_sqm: 40, price });
+  assert.notEqual(S.fingerprint(rent(5000), "k").strong, S.fingerprint(rent(6000), "k").strong, "rent 5,000 vs 6,000 → different price2 bucket");
+  assert.notEqual(S.fingerprint(rent(5000), "k").weak, S.fingerprint(rent(6000), "k").weak, "rent 5,000 vs 6,000 → different price5 bucket");
+  assert.equal(S.fingerprint(rent(5000), "k").strong, S.fingerprint(rent(5010), "k").strong, "rent 5,000 vs 5,010 → same price2 bucket (well inside one bucket)");
 
   assert.equal(S.fingerprint({ city: "תל אביב - יפו", rooms: 4, price: 2_010_000, size_sqm: 91 }, "k").strong,
     S.fingerprint({ city: "תל אביב", rooms: 4, price: 2_010_000, size_sqm: 91, street: "רוטשילד 1" }, "k").strong,
