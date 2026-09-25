@@ -17,6 +17,7 @@ const { isLoginWall } = require("../listing-driver")._test;
 const locksLive = require("../profile-lock");
 const guardLive = require("../posting-guard");
 const lifecycleLive = require("../profile-lifecycle");
+const groupsSync = require("../facebook-groups-sync");
 
 const SESSION_SECONDS = 1500; // SMS 2FA on a phone that is also showing the modal takes a while
 const CONSENT_VERSION = "2026-09-24";
@@ -153,9 +154,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     const open = conn[`browser_session_${platform}`];
     if (!open || !open.session_id) return res.status(409).json({ error: "no_open_session" });
 
-    let loggedIn = false, label = null, pages = [];
+    let loggedIn = false, label = null, pages = [], groups = {};
     try {
-      ({ loggedIn, label, pages } = await driver.attachPage(open.session_id, async (page) => {
+      ({ loggedIn, label, pages, groups } = await driver.attachPage(open.session_id, async (page) => {
         await page.goto(spec.checkUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
         const text = await page.innerText("body");
         if (isLoginWall(page.url(), text)) return { loggedIn: false, label: null };
@@ -170,13 +171,26 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         // to the first one; the agent can pick another on the campaign card.
         // Yad2/Madlan have no equivalent (read-only connect, Phase 4).
         let pages = [];
+        let groups = {};
         if (platform === "facebook") {
           try {
             await page.goto(process.env.FB_PAGES_PAGE || "https://www.facebook.com/pages/?category=your_pages", { waitUntil: "domcontentloaded", timeout: 30000 });
             pages = await page.$$eval('a[href*="facebook.com/"][role="link"]', (els) => els.map((a) => ({ url: a.href.split("?")[0], name: (a.textContent || "").trim() })).filter((x) => x.name && /facebook\.com\/[^/]+\/?$/.test(x.url)).slice(0, 10));
           } catch (e) { pages = []; }
+          // Which groups this account is actually a member of (Task 14): the
+          // campaign gate later posts only there. A scrape failure must not
+          // fail the connect — store nothing for groups and move on.
+          try {
+            const scraped = await groupsSync.syncMembership(page);
+            const merged = groupsSync.mergeMembership(conn.facebook_groups_member || [], scraped, {
+              now: new Date(), catalog: await db.listGroupCatalog(500), selected: [],
+            });
+            groups = { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() };
+          } catch (e) {
+            console.error(driverLive.redact(`connections-browser: facebook group sync failed: ${e.message}`));
+          }
         }
-        return { loggedIn: true, label, pages };
+        return { loggedIn: true, label, pages, groups };
       }));
     } catch (e) {
       // Our own browser budget is full (driver-browser claim()): the agent's
@@ -195,13 +209,13 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     await driver.stopSession(open.session_id);
     const first = conn[`${platform}_browser_first_connected_at`] || new Date().toISOString();
-    await db.setConnection(phone, {
+    await db.setConnection(phone, Object.assign({
       [`${platform}_browser_connected_at`]: new Date().toISOString(),
       [`${platform}_browser_first_connected_at`]: first, // warm-up counts from here, not from every reconnect
       [`${platform}_identity_label`]: label,
       [`${platform}_pages`]: pages,
       [`browser_session_${platform}`]: null,
-    });
+    }, groups));
     return res.json({ state: "connected", identity_label: label, pages });
   });
 
