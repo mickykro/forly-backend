@@ -330,18 +330,26 @@ async function setSetting(key, value, { expectVersion } = {}) {
 // ── profile deletes (pending Driver profile deletions) ──
 // profile-lifecycle.js's revoke()/quarantine() write a row here when the
 // Driver delete fails; retryDeletes() reads this collection itself (rather
-// than being handed a list) so the daily sweeper only has to call it. Keyed
-// by `${platform}:${phone}`, not hashed — the phone is already stored in
-// plain text on this same phone's connection doc, so this adds no new
-// exposure.
+// than being handed a list) so the daily sweeper only has to call it. Not
+// hashed — the phone is already stored in plain text on this same phone's
+// connection doc, so this adds no new exposure.
 //
-// `gen`: the profile generation this row's failed delete belongs to. A
-// reconnect can bump `<platform>_profile_gen` while a delete for the OLD
-// generation is still pending — without `gen`, a retry would delete the
-// wrong (current, live) profile instead of the orphaned one. Optional so a
-// pre-existing row written before this field existed still round-trips.
+// `gen`: the profile generation this row's failed delete belongs to, and
+// part of the row's key (`${platform}:${phone}:${gen}`) — a reconnect can
+// bump `<platform>_profile_gen` while a delete for the OLD generation is
+// still pending, and without a per-generation key a second failed delete
+// (for the new generation) would overwrite the still-open row for the old
+// one under the same bare `${platform}:${phone}` id, losing it. `gen` is
+// optional only for a pre-existing row written before this field existed —
+// such a row keeps living under the bare id, listed/retried/cleared exactly
+// as before (profile-lifecycle.js's retryDeletes() treats `gen === undefined`
+// as that legacy case).
+function pendingDeleteId(platform, phone, gen) {
+  return gen === undefined ? `${platform}:${phone}` : `${platform}:${phone}:${gen}`;
+}
+
 async function savePendingDelete({ phone, platform, since, attempts = 0, last_error = null, gen }) {
-  const id = `${platform}:${phone}`;
+  const id = pendingDeleteId(platform, phone, gen);
   const rec = { id, phone: String(phone), platform, since, attempts, last_error };
   if (gen !== undefined) rec.gen = gen;
   if (db) { await db.collection("profile_deletes").doc(id).set(rec); return; }
@@ -356,8 +364,8 @@ async function listPendingDeletes(limit = 100) {
   return [...mem.profileDeletes.values()].slice(0, limit);
 }
 
-async function clearPendingDelete(phone, platform) {
-  const id = `${platform}:${phone}`;
+async function clearPendingDelete(phone, platform, gen) {
+  const id = pendingDeleteId(platform, phone, gen);
   if (db) { await db.collection("profile_deletes").doc(id).delete(); return; }
   mem.profileDeletes.delete(id);
 }

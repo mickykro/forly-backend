@@ -52,21 +52,31 @@ async function deleteDriverProfile(name, deps) {
 // connection's own `<platform>_profile_deleted_at` / `_delete_error` must
 // NOT be touched — those fields describe the live (new-generation) profile,
 // which this delete has nothing to do with. Only the pending-delete row
-// itself (keyed by phone+platform, carrying its own gen) is updated.
+// itself (keyed by phone+platform+gen) is updated.
+//
+// `opts.legacy`: set only by retryDeletes() for a row that predates
+// per-generation tracking (no `gen` field, saved under the bare
+// `${platform}:${phone}` key). Its save/clear stays under that SAME bare
+// key — "exactly as today" — rather than migrating it into the new
+// `${platform}:${phone}:${gen}` scheme; every other call (a fresh
+// revoke/quarantine, or a gen-tracked retry) always saves/clears under the
+// per-generation key, gen 0 included, so two different generations' pending
+// deletes for the same phone+platform never collide.
 async function attemptDelete(phone, platform, conn, deps, opts = {}) {
-  const { since, attempts = 0 } = opts;
+  const { since, attempts = 0, legacy = false } = opts;
   const currentGen = conn[`${platform}_profile_gen`] || 0;
   const gen = opts.gen !== undefined ? opts.gen : currentGen;
   const staleGen = gen !== currentGen;
   const name = profileName(platform, phone, gen);
   const del = await deleteDriverProfile(name, deps);
+  const rowGen = legacy ? undefined : gen;
 
   if (del.ok) {
     if (!staleGen) await deps.db.setConnection(phone, { [`${platform}_profile_deleted_at`]: nowIso(), [`${platform}_profile_delete_error`]: null });
-    await deps.db.clearPendingDelete(phone, platform);
+    await deps.db.clearPendingDelete(phone, platform, rowGen);
   } else {
     if (!staleGen) await deps.db.setConnection(phone, { [`${platform}_profile_delete_error`]: del.error });
-    await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts: attempts + 1, last_error: del.error, gen });
+    await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts: attempts + 1, last_error: del.error, gen: rowGen });
   }
   return { ok: del.ok, error: del.error, gen, staleGen };
 }
@@ -155,9 +165,9 @@ async function retryDeletes(deps) {
     if (row.gen === undefined) {
       if (!["revoked", "quarantined"].includes(conn[`${platform}_profile_state`])) continue; // reconnected past it
       if (conn[`${platform}_profile_deleted_at`]) continue; // already succeeded elsewhere
-      const del = await attemptDelete(phone, platform, conn, deps, { since, attempts });
+      const del = await attemptDelete(phone, platform, conn, deps, { since, attempts, legacy: true });
       const ageMs = since ? Date.now() - new Date(since).getTime() : 0;
-      results.push({ phone, platform, ok: del.ok, staleGen: del.staleGen, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
+      results.push({ phone, platform, gen: del.gen, ok: del.ok, staleGen: del.staleGen, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
       continue;
     }
 
@@ -168,7 +178,7 @@ async function retryDeletes(deps) {
     // (attemptDelete's staleGen check handles that half).
     const del = await attemptDelete(phone, platform, conn, deps, { since, attempts, gen: row.gen });
     const ageMs = since ? Date.now() - new Date(since).getTime() : 0;
-    results.push({ phone, platform, ok: del.ok, staleGen: del.staleGen, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
+    results.push({ phone, platform, gen: del.gen, ok: del.ok, staleGen: del.staleGen, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
   }
   return results;
 }
