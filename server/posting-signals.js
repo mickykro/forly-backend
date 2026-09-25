@@ -58,15 +58,23 @@ const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval"]
 // hasCaptchaFrame is optional, structural evidence the driver (Task 18) can
 // supply when it actually saw a captcha iframe — a stronger signal than any
 // text on the page.
-function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame } = {}) {
+// ownText (optional, Task 18): the text WE typed. A signal phrase found on
+// the page that also appears in it is ignored — the post's own words, or a
+// cut of them in a toast, are never a signal; the same pattern matched by a
+// phrase that is NOT in our text still is. Structural evidence (the URL, a
+// captcha frame) is not text and always counts.
+function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, ownText } = {}) {
   const path = pathOf(landedUrl);
   for (const [code, re] of URL_SIGNALS) if (re.test(path)) return code;
 
-  const dialog = norm(dialogText), alert = norm(alertText);
-  if (hasCaptchaFrame || CAPTCHA_EXACT.test(dialog) || CAPTCHA_EXACT.test(alert)) return "captcha";
+  const dialog = norm(dialogText), alert = norm(alertText), own = norm(ownText);
+  if (hasCaptchaFrame) return "captcha";
+  if ((CAPTCHA_EXACT.test(dialog) || CAPTCHA_EXACT.test(alert)) && !(own && own.toLowerCase().includes("confirm you're human"))) return "captcha";
 
   const t = `${dialog}\n${alert}`;
-  for (const [code, re] of TEXT_SIGNALS) if (re.test(t)) return code;
+  const lowOwn = own.toLowerCase();
+  const foreign = (re) => [...t.matchAll(new RegExp(re.source, `${re.flags}g`))].some((m) => !lowOwn || !lowOwn.includes(m[0].toLowerCase()));
+  for (const [code, re] of TEXT_SIGNALS) if (re.test(t) && foreign(re)) return code;
   return "ok";
 }
 

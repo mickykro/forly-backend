@@ -106,16 +106,20 @@ function mergeMembership(prev, scraped, opts = {}) {
   const { urls: catalogUrls, ids: catalogIds } = catalogMatchers(opts.catalog);
   const prevList = Array.isArray(prev) ? prev : [];
   const prevMap = new Map(prevList.filter((e) => e && e.group_id).map((e) => [e.group_id, e]));
+  // A vanity slug already resolved to its numeric id (Task 18) stays that
+  // entry when the scrape sees the slug again: one group, one entry.
+  const aliasTo = new Map();
+  for (const e of prevList) for (const a of (e && Array.isArray(e.aliases) ? e.aliases : [])) aliasTo.set(String(a), e.group_id);
 
   const out = [];
   const seen = new Set();
   for (const item of Array.isArray(scraped) ? scraped : []) {
     const slug = item && item.slug;
     if (!slug) continue;
-    const group_id = groupIdOf(slug);
+    const group_id = aliasTo.get(groupIdOf(slug)) || groupIdOf(slug);
     if (seen.has(group_id)) continue; // dedup within one scrape, by group_id
     seen.add(group_id);
-    const idVerified = isNumeric(slug);
+    const idVerified = isNumeric(group_id);
     const built = { group_id, canonical_url: item.url, slug, name: item.name, id_verified: idVerified };
     const entry = {
       group_id,
@@ -126,6 +130,8 @@ function mergeMembership(prev, scraped, opts = {}) {
       last_confirmed_at: nowIso,
       id_verified: idVerified,
     };
+    const prevAliases = (prevMap.get(group_id) || {}).aliases;
+    if (Array.isArray(prevAliases) && prevAliases.length) entry.aliases = prevAliases.slice();
     if (shouldKeepName(built, { catalogUrls, catalogIds, selected })) entry.name = built.name;
     else entry.name_hash = nameHash(built.name);
     out.push(entry);
@@ -182,6 +188,8 @@ function mergeResolvedEntries(a, b) {
     last_confirmed_at: newer(a.last_confirmed_at, b.last_confirmed_at),
     id_verified: true,
   };
+  const aliases = [...new Set([...(a.aliases || []), ...(b.aliases || []), a.group_id, b.group_id])].filter((id) => id && id !== merged.group_id);
+  if (aliases.length) merged.aliases = aliases;
   const name = a.name || b.name;
   if (name) merged.name = name;
   else if (a.name_hash || b.name_hash) merged.name_hash = a.name_hash || b.name_hash;
@@ -196,7 +204,10 @@ function resolveGroupId(conn, provisionalId, numericId) {
   const list = Array.isArray(conn && conn.facebook_groups_member) ? conn.facebook_groups_member : [];
   const provIdx = list.findIndex((e) => e && e.group_id === provisionalId);
   if (provIdx === -1) return list;
-  const rewritten = Object.assign({}, list[provIdx], { group_id: numericId, id_verified: true });
+  // The provisional id stays an alias: history recorded under it (attempts,
+  // group buckets, dedup) still belongs to this group.
+  const aliases = [...new Set([...(list[provIdx].aliases || []), provisionalId])].filter((id) => id !== numericId);
+  const rewritten = Object.assign({}, list[provIdx], { group_id: numericId, id_verified: true, aliases });
   const existingIdx = list.findIndex((e, i) => i !== provIdx && e && e.group_id === numericId);
   if (existingIdx === -1) return list.map((e, i) => (i === provIdx ? rewritten : e));
   const merged = mergeResolvedEntries(list[existingIdx], rewritten);

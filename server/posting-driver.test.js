@@ -1,116 +1,18 @@
 /* posting-driver.js — one attempt through its durable states, against a fake
-   page. The fake matches on the EXPORTED selectors. No network, no Driver. */
-process.env.FORLY_ENV = "local";
-process.env.PROFILE_KEY = "test-profile-key";
+   page (posting-driver-fakes.js). The fake matches on the EXPORTED selectors.
+   No network, no Driver. reconcile() is in posting-driver-reconcile.test.js. */
+const F = require("./posting-driver-fakes");
 const assert = require("assert");
 const PD = require("./posting-driver");
-const P = require("./posting-driver-proof");
 const { sha } = require("./posting-campaign");
 const { profileName } = require("./profile-name");
 const S = PD.SELECTORS;
+const { PHONE, NAME, GROUP_NAME, PAGE_NAME, COPY, LINK, GROUP_URL, PERMA, PAGE_URL, PAGE_PERMA, connOf, attemptOf, argsOf, harness } = F;
 
 // Every console line the driver writes is captured and checked at the end.
 const logged = [];
 const real = { log: console.log, error: console.error, warn: console.warn };
 for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "));
-
-const PHONE = "972501234567";
-const NAME = "Dana Cohen";
-const GROUP_NAME = "דירות להשכרה בחיפה";
-const PAGE_NAME = "Dana Nadlan";
-const COPY = "🏠 דירה בחיפה 4 חדרים\nמרפסת שמש, קומה 3, חניה פרטית ומחסן";
-const LINK = `https://f.ly/p/pg1?c=${"a".repeat(32)}`;
-const GROUP_URL = "https://www.facebook.com/groups/111";
-const PERMA = "https://www.facebook.com/groups/111/posts/999/";
-const PAGE_URL = "https://www.facebook.com/dana.nadlan";
-const PAGE_PERMA = "https://www.facebook.com/dana.nadlan/posts/77/";
-
-const connOf = (o) => Object.assign({ facebook_identity_label: NAME, facebook_profile_gen: 0, facebook_groups_member: [{ group_id: "111", name: GROUP_NAME }] }, o);
-const attemptOf = (o) => Object.assign({
-  key: "0123456789abcdef0123456789abcdef", phone: PHONE, page_id: "pg1", campaign_id: "c1", post_id: "p1",
-  target_type: "group", target_id: "111", target_url: GROUP_URL, publisher: "browser", copy_hash: sha(COPY), confirm_membership: false, click_id: "a".repeat(32),
-}, o);
-const argsOf = (o) => Object.assign({ attempt: attemptOf(), copy: COPY, comment: LINK, dryRun: false, campaignId: "c1", phone: PHONE, groupUrl: GROUP_URL }, o);
-const nameOf = (sel) => Object.keys(S).find((k) => S[k] === sel) || "other";
-const denied = (reason) => Object.assign(new Error("posting not allowed"), { code: "posting_disabled", reason });
-
-function fakePage(o = {}) {
-  const ev = o.ev || [];
-  const st = { url: "about:blank", submitted: false, editor: "", typed: [], clicks: [], visited: [], pressed: [] };
-  const v = (x) => (typeof x === "function" ? x(st) : x);
-  const texts = Object.assign({
-    [S.identity]: NAME, [S.targetName]: GROUP_NAME, [S.composerTarget]: GROUP_NAME, [S.composerAuthor]: NAME,
-    [S.editor]: (s) => s.editor, [S.postMessage]: COPY, [S.postAuthor]: NAME, [S.dialog]: "", [S.alert]: "",
-  }, o.texts);
-  const counts = Object.assign({ [S.composer]: 1, [S.editor]: 1, [S.joinGroup]: 0, [S.commentBox]: 1, [S.discard]: 1, [S.captchaFrame]: 0 }, o.counts);
-  const attrs = Object.assign({ [S.targetIdMeta]: "fb://group/111", [S.targetUrlMeta]: "" }, o.attrs);
-  const feed = o.feed !== undefined ? o.feed : (s) => (s.submitted ? [{ href: `${PERMA}?__cft__=x`, author: NAME, text: COPY }] : []);
-  const node = (sel) => {
-    const n = {
-      count: async () => v(counts[sel]) || 0,
-      click: async () => { st.clicks.push(sel); ev.push(`click:${nameOf(sel)}`); if (sel === S.submit) st.submitted = true; },
-      waitFor: async () => { if (!(v(counts[sel]) > 0)) throw new Error("timeout"); },
-      innerText: async () => String(v(texts[sel]) ?? ""),
-      getAttribute: async () => v(attrs[sel]) ?? null,
-    };
-    n.first = () => n; n.nth = () => n;
-    return n;
-  };
-  return {
-    st, ev,
-    goto: async (u) => { st.visited.push(u); ev.push("goto"); st.url = (o.redirect && o.redirect(u)) || u; },
-    url: () => st.url,
-    goBack: async () => { st.url = "https://www.facebook.com/"; },
-    locator: node,
-    innerText: async () => "",
-    keyboard: { type: async (t) => { st.typed.push(t); if (!st.submitted) st.editor += t; }, press: async (k) => { st.pressed.push(k); } },
-    mouse: { wheel: async () => {}, move: async () => {} },
-    waitForLoadState: async () => {},
-    waitForTimeout: async () => {},
-    // Dialog/alert regions run the driver's own in-page filter over fake
-    // elements: { text, composer (the root), inComposer, wrapsComposer }.
-    $$eval: async (sel, fn, arg) => {
-      if (sel === S.feedPost) return v(feed);
-      if (sel !== S.dialog && sel !== S.alert) return [];
-      const regions = (o.regions && o.regions[sel] !== undefined ? v(o.regions[sel]) : [{ text: v(texts[sel]) }]).filter((r) => r && r.text);
-      const R = S.composerRoot;
-      return fn(regions.map((r) => ({
-        innerText: r.text, textContent: r.text,
-        matches: (q) => q === R && !!r.composer,
-        closest: (q) => (q === R && (r.composer || r.inComposer) ? {} : null),
-        querySelector: (q) => (q === R && r.wrapsComposer ? {} : null),
-      })), arg);
-    },
-  };
-}
-
-// posting-tick's postDeps shape: attempts.transition(k, state, detail), guard(action), lockHeld, phone, platform, conn.
-function harness(o = {}) {
-  const ev = [];
-  const page = fakePage(Object.assign({ ev }, o.page));
-  const transitions = [], opened = [], guardCalls = {};
-  const deps = {
-    attempts: {
-      transition: async (k, to, d) => {
-        ev.push(`t:${to}`);
-        transitions.push({ k, to, d, submitClicks: page.st.clicks.filter((s) => s === S.submit).length });
-        if (o.illegalAt === to) throw Object.assign(new Error("x"), { code: "illegal_transition" });
-        return { key: k, state: to };
-      },
-    },
-    guard: async (action) => {
-      guardCalls[action] = (guardCalls[action] || 0) + 1;
-      ev.push(`g:${action}`);
-      if (o.deny && o.deny(action, guardCalls[action])) throw denied("test");
-      return true;
-    },
-    lockHeld: true, phone: PHONE, platform: "facebook", conn: connOf(o.conn),
-    withPage: async (opts, fn, pd) => { opened.push({ opts, pd }); ev.push("open"); try { return await fn(page, { sessionId: "s" }); } finally { ev.push("close"); } },
-    socialDwell: o.socialDwell || (async () => []),
-    typingDelay: () => 0, rand: () => 0.5,
-  };
-  return { ev, page, transitions, opened, deps, states: () => transitions.map((t) => t.to), submits: () => page.st.clicks.filter((s) => s === S.submit).length };
-}
 
 (async () => {
   // ── happy path: every state in order, submit_started durable before the one click, guard last ──
@@ -183,6 +85,7 @@ function harness(o = {}) {
     assert.deepEqual(h.states(), ["session_started", "composer_ready", "submit_started", "outcome_unknown"]);
     assert.equal(out.state, "outcome_unknown");
     assert.equal(h.submits(), 0);
+    assert.equal(h.transitions[3].d.clicked, false, "M9: recorded as not clicked");
   }
 
   // ── R3: every mismatch fails closed as verified_failed with its code, zero clicks ──
@@ -204,6 +107,54 @@ function harness(o = {}) {
     assert.equal(h.submits(), 0, `${label}: zero clicks`);
     assert.ok(!h.states().includes("submit_started"));
   }
+  // M3: a real "Join group" at the proof → not_member + membership left; an unreadable marker → markers_missing
+  {
+    const h = harness({ page: { counts: { [S.joinGroup]: (s) => (s.editor ? 1 : 0) } } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.error_code, out.membership], ["not_member", "left"]);
+    const h2 = harness({ page: { counts: { [S.joinGroup]: (s) => { if (s.editor) throw new Error("detached"); return 0; } } } });
+    const out2 = await PD.postToGroup(argsOf(), h2.deps);
+    assert.deepEqual([out2.state, out2.error_code, out2.membership], ["verified_failed", "markers_missing", undefined]);
+    assert.equal(h2.submits(), 0);
+  }
+  // M5: exactly one composer root — none, or two (a stale draft), and nothing is typed or clicked
+  for (const [n, code] of [[0, "composer_not_found"], [2, "destination_mismatch"]]) {
+    const h = harness({ page: { counts: { [S.composerRoot]: n } } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.error_code], ["verified_failed", code], `${n} composer roots`);
+    assert.equal(h.page.st.typed.length, 0);
+    assert.equal(h.submits(), 0);
+  }
+  {
+    // …and one that appears between typing and the proof is caught by the proof itself
+    const h = harness({ page: { counts: { [S.composerRoot]: (s) => (s.editor ? 2 : 1) } } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.error_code], ["verified_failed", "destination_mismatch"]);
+    assert.equal(h.submits(), 0);
+    assert.ok(S.submit.includes(S.composerRoot) && S.composerTarget.includes(S.composerRoot) && S.composerAuthor.includes(S.composerRoot), "scoped to the composer root");
+  }
+  // M8: every keystroke goes through a locator (the editor, then the comment box) — never page.keyboard.type
+  {
+    const h = harness();
+    await PD.postToGroup(argsOf(), h.deps);
+    assert.equal(h.page.st.keyboardTyped, undefined);
+    assert.ok(h.ev.includes("type:editor") && h.ev.includes("type:commentBox"));
+    assert.ok(h.ev.filter((e) => e.startsWith("type:")).every((e) => e === "type:editor" || e === "type:commentBox"));
+  }
+  {
+    // focus cannot be held inside the editor → typing stops, verified_failed, nothing more typed or clicked
+    const h = harness({ page: { focusLost: (s) => s.editor.length > 3 } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.error_code], ["verified_failed", "composer_focus_lost"]);
+    assert.equal(h.submits(), 0);
+  }
+  // M4: dryRun must be a boolean — anything else is refused before any state is written
+  for (const dryRun of ["true", 1, "false", null]) {
+    const h = harness();
+    await assert.rejects(PD.postToGroup(argsOf({ dryRun }), h.deps), (e) => e.code === "invalid_input", String(dryRun));
+    assert.equal(h.transitions.length, 0);
+  }
+
   // before any browser: the copy is not the attempt's copy, or there is no identity label
   for (const [o, code] of [[{ args: { copy: `${COPY}!` } }, "copy_mismatch"], [{ conn: { facebook_identity_label: null } }, "identity_mismatch"], [{ args: { groupUrl: "https://www.facebook.com/groups/222" } }, "destination_mismatch"]]) {
     const h = harness({ conn: o.conn });
@@ -291,36 +242,73 @@ function harness(o = {}) {
     const h = harness({ page: { feed: (s) => (s.submitted ? [{ href: PERMA, author: NAME, text: `${COPY.slice(0, 30)}… See more` }] : []) } });
     assert.equal((await PD.postToGroup(argsOf(), h.deps)).state, "verified_posted");
   }
+  // ── M1: verified_posted is written BEFORE the comment; the comment's result is a follow-up note ──
   {
-    // the comment fails: the post is still verified_posted, the failure recorded
-    const h = harness({ page: { counts: { [S.commentBox]: 0 } } });
-    const out = await PD.postToGroup(argsOf(), h.deps);
+    const h = harness();
+    await PD.postToGroup(argsOf(), h.deps);
+    assert.ok(h.ev.indexOf("t:verified_posted") < h.ev.indexOf("click:commentSubmit"), "state first, then the comment");
+    const h2 = harness({ page: { counts: { [S.commentBox]: 0 } } });
+    const out = await PD.postToGroup(argsOf(), h2.deps);
     assert.equal(out.state, "verified_posted");
     assert.equal(out.comment_error_code, "comment_box_not_found");
-    assert.equal(h.transitions[4].d.comment_error_code, "comment_box_not_found");
+    assert.equal(h2.transitions[4].d.comment_error_code, undefined, "not part of the state write");
+    assert.deepEqual(h2.annotations, [{ comment_error_code: "comment_box_not_found" }], "recorded in a follow-up write");
+    assert.ok(h2.ev.indexOf("t:verified_posted") < h2.ev.indexOf("annotate"));
+    // the tick timed out and moved the attempt: verified_posted is refused → no comment at all
+    const h3 = harness({ illegalAt: "verified_posted" });
+    const out3 = await PD.postToGroup(argsOf(), h3.deps);
+    assert.equal(out3.error_code, "illegal_transition");
+    assert.ok(!h3.page.st.clicks.includes(S.commentSubmit), "no comment after a refused state write");
+  }
+  // ── M2: a halting signal on the permalink page is returned, even when the feed matched ──
+  {
+    const h = harness({ page: { redirect: (u) => (/\/posts\//.test(u) ? "https://www.facebook.com/checkpoint/1/" : u) } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.signal, out.error_code], ["verified_posted", "checkpoint", "checkpoint"], "the feed matched exactly; the halt still reaches the tick");
+    assert.equal(h.transitions[4].d.signal, "checkpoint");
+    assert.ok(!h.page.st.clicks.includes(S.commentSubmit), "no comment on a checkpoint page");
+    const h2 = harness({ page: {
+      redirect: (u) => (/\/posts\//.test(u) ? "https://www.facebook.com/checkpoint/1/" : u),
+      feed: (s) => (s.submitted ? [{ href: PERMA, author: NAME, text: `${COPY.slice(0, 30)}… See more` }] : []),
+    } });
+    const out2 = await PD.postToGroup(argsOf(), h2.deps);
+    assert.deepEqual([out2.state, out2.signal, out2.error_code], ["outcome_unknown", "checkpoint", "checkpoint"]);
   }
 
-  // ── after the click the composer is still open, and the copy itself reads like
-  // Facebook's own restriction/block sentences: never a signal ──
+  // ── signals: editable content is removed from every region, the copy is stripped,
+  // a phrase that is in our own copy is ignored — the composer's chrome still counts ──
   {
     const COPY2 = "דירה בחיפה. You're restricted from posting in groups? לא אצלנו! נחסמת באופן זמני? גם לא. You're temporarily blocked from posting — no.";
     const a = attemptOf({ copy_hash: sha(COPY2) });
-    const composerOpen = (s) => [{ text: `Create post\n${s.editor}\nPost`, composer: true }, { text: `Preview: ${COPY2}` }];
     const h = harness({ page: {
       texts: { [S.postMessage]: COPY2 },
-      regions: { [S.dialog]: composerOpen, [S.alert]: (s) => [{ text: s.editor, inComposer: true }, { text: `${COPY2} ` , wrapsComposer: true }] },
+      regions: {
+        [S.dialog]: (s) => [{ text: "Create post Post", editable: s.editor }, { text: `Preview: ${COPY2}` }],
+        // a toast with a CUT of the copy (Minor 10) and an alert holding the whole copy
+        [S.alert]: (s) => (s.submitted ? [{ text: `Posted: ${COPY2.slice(0, 60)}…` }, { text: COPY2 }] : []),
+      },
       feed: (s) => (s.submitted ? [{ href: PERMA, author: NAME, text: COPY2 }] : []),
     } });
     const out = await PD.postToGroup(argsOf({ attempt: a, copy: COPY2 }), h.deps);
-    assert.ok(["verified_posted", "outcome_unknown"].includes(out.state), out.state);
-    assert.equal(out.signal, undefined, "the copy never produced a signal");
-    assert.ok(!["restricted", "rate_limited", "checkpoint", "captcha", "feature_blocked", "login_required"].includes(out.error_code));
     assert.equal(out.state, "verified_posted");
+    assert.equal(out.signal, undefined, "the copy never produced a signal");
     assert.equal(h.submits(), 1);
-    // …while a real sentence in a dialog that is not the composer still counts
-    const h2 = harness({ page: { regions: { [S.dialog]: (s) => (s.submitted ? [{ text: s.editor, composer: true }, { text: "Your account is restricted" }] : [{ text: s.editor, composer: true }]) } } });
-    const out2 = await PD.postToGroup(argsOf(), h2.deps);
-    assert.deepEqual([out2.state, out2.signal], ["outcome_unknown", "restricted"]);
+  }
+  for (const [label, region, code] of [
+    ["an inline error in the composer chrome, outside the editor", (s) => ({ text: "Create post You can't post in this group Post", editable: s.editor }), "group_blocked"],
+    ["a restriction dialog wrapping the composer", (s) => ({ text: "Your account is restricted Create post", editable: s.editor }), "restricted"],
+  ]) {
+    // It appears once the composer is open: pre-submit → verified_failed with that code, zero clicks.
+    const h = harness({ page: { regions: { [S.dialog]: (s) => (s.clicks.includes(S.composer) ? [region(s)] : []) } } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.error_code], ["verified_failed", code], label);
+    assert.equal(h.submits(), 0, label);
+  }
+  {
+    // after the click, the same restriction wrapping a still-open composer → reported
+    const h = harness({ page: { regions: { [S.dialog]: (s) => (s.submitted ? [{ text: "Your account is restricted", editable: s.editor }] : [{ text: "Create post", editable: s.editor }]) } } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.signal], ["outcome_unknown", "restricted"]);
   }
 
   // ── dry run: everything up to and including the proof and typing; no click ──
@@ -384,73 +372,6 @@ function harness(o = {}) {
     assert.ok(h.ev.includes("g:dwell"), "dwell asked the guard through the adapter");
     assert.ok(!h.page.st.clicks.includes(require("./social-dwell").SELECTORS.like), "no like without permission");
     assert.equal(h.submits(), 1);
-  }
-
-  // ── reconcile: only ever looks ──
-  const unknown = attemptOf({ state: "outcome_unknown" });
-  const recon = (o = {}) => {
-    const h = harness(o);
-    h.deps.copy = o.copy === undefined ? COPY : o.copy;
-    return h;
-  };
-  const feedWithOurs = [{ href: "https://www.facebook.com/groups/111/posts/1", author: "A", text: "x" }, { href: `${PERMA}?x=1`, author: NAME, text: COPY }, { href: "https://www.facebook.com/groups/111/posts/2", author: "B", text: "y" }];
-  const feedWithout = [1, 2, 3, 4].map((n) => ({ href: `https://www.facebook.com/groups/111/posts/${n}`, author: "Other", text: `post ${n}` }));
-  {
-    const h = recon({ page: { feed: feedWithOurs } });
-    const out = await PD.reconcile(unknown, h.deps);
-    assert.deepEqual(h.states(), ["verified_posted"]);
-    assert.equal(out.permalink, PERMA);
-    assert.equal(h.submits(), 0); assert.equal(h.page.st.typed.length, 0, "reconcile never types");
-    assert.equal(h.page.st.clicks.length, 0, "reconcile never clicks");
-    assert.ok(h.opened[0].opts.note.startsWith("forly-recheck:") && h.opened[0].opts.duration <= 14 * 60);
-    assert.ok(h.ev.includes("g:retry") && h.ev.indexOf("g:retry") < h.ev.indexOf("open"));
-  }
-  {
-    const h = recon({ page: { feed: feedWithout } });
-    const out = await PD.reconcile(unknown, h.deps);
-    assert.deepEqual(h.states(), ["verified_failed"]);
-    assert.equal(h.transitions[0].d.error_code, "reconciled_absent");
-    assert.equal(out.state, "verified_failed");
-    assert.equal(h.page.st.clicks.length, 0);
-  }
-  for (const [o, code] of [
-    [{ page: { feed: [] } }, "feed_unread"],
-    [{ page: { feed: feedWithout, redirect: () => "https://www.facebook.com/checkpoint/1/" } }, "checkpoint"],
-    [{ page: { feed: feedWithout, attrs: { [S.targetIdMeta]: "fb://group/222" } } }, "destination_mismatch"],
-    [{ page: { feed: feedWithOurs, attrs: { [S.targetIdMeta]: (s) => (/\/posts\//.test(s.url) ? "fb://group/222" : "fb://group/111") } } }, "not_verified"],
-  ]) {
-    const h = recon(o);
-    const out = await PD.reconcile(unknown, h.deps);
-    assert.deepEqual([out.state, out.error_code], ["outcome_unknown", code]);
-    assert.equal(h.transitions.length, 0, `${code}: left for operator review`);
-  }
-  for (const [o, code] of [[{ copy: null }, "copy_unavailable"], [{ copy: "something else" }, "copy_unavailable"], [{ deny: (a) => a === "retry" }, "posting_disabled"]]) {
-    const h = recon(o);
-    const out = await PD.reconcile(unknown, h.deps);
-    assert.deepEqual([out.state, out.error_code], ["outcome_unknown", code]);
-    assert.equal(h.opened.length, 0, `${code}: no session`);
-  }
-  {
-    const h = recon({ page: { feed: feedWithOurs }, illegalAt: "verified_posted" });
-    const out = await PD.reconcile(unknown, h.deps);
-    assert.equal(out.error_code, "illegal_transition");
-  }
-  {
-    const h = recon();
-    assert.deepEqual(await PD.reconcile(attemptOf({ state: "verified_posted" }), h.deps), { state: "verified_posted" });
-    assert.equal(h.opened.length, 0);
-  }
-
-  // ── the proof, directly: pure over the page reads ──
-  {
-    const page = fakePage({ texts: { [S.editor]: COPY } });
-    assert.deepEqual(await PD.proveIdentityAndDestination(page, attemptOf(), connOf(), { copy: COPY }), { ok: true });
-    assert.deepEqual(await PD.proveIdentityAndDestination(page, attemptOf(), connOf(), {}), { ok: false, code: "copy_mismatch" });
-    assert.deepEqual(await PD.proveIdentityAndDestination(page, attemptOf({ target_id: "slug:111x", target_url: "https://www.facebook.com/groups/111x" }), connOf(), { copy: COPY }), { ok: false, code: "destination_mismatch" }, "an unresolved slug never passes");
-    assert.equal(P.permalinkOf("https://evil.example/groups/111/posts/1", "group", ["111"]), null);
-    assert.equal(P.permalinkOf("https://www.facebook.com/groups/222/posts/1", "group", ["111"]), null);
-    assert.equal(P.permalinkOf("https://www.facebook.com/permalink.php?story_fbid=9&id=555", "page", ["555"]), "https://www.facebook.com/permalink.php?story_fbid=9&id=555");
-    assert.equal(P.norm("  á\n\n b "), "á b", "NFC, whitespace collapsed, trimmed");
   }
 
   // ── nothing identifying was logged ──

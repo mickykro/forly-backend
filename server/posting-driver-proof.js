@@ -31,14 +31,17 @@ const SELECTORS = {
   composer: 'div[role="main"] [role="button"]:has-text("כתבו משהו"), div[role="main"] [role="button"]:has-text("Write something"), div[role="main"] [role="button"]:has-text("What\'s on your mind")', // [Unverified]
   composerRoot: COMPOSER_ROOT,
   editor: `${COMPOSER_ROOT} div[contenteditable="true"][role="textbox"]`, // [Unverified]
-  composerTarget: 'div[role="dialog"] a[href*="/groups/"][role="link"]', // [Unverified] the dialog names the group
-  composerAuthor: 'div[role="dialog"] h2 ~ div strong, div[role="dialog"] [role="heading"] ~ div strong', // [Unverified] who it posts as
-  submit: 'div[role="dialog"] div[aria-label="פרסום"][role="button"], div[role="dialog"] div[aria-label="Post"][role="button"]', // [Unverified]
+  // Scoped to the composer root (fix round 1, M5): nothing outside our own
+  // composer can be read as its target or author, or clicked as its Post.
+  composerTarget: `${COMPOSER_ROOT} a[href*="/groups/"][role="link"]`, // [Unverified] the dialog names the group
+  composerAuthor: `${COMPOSER_ROOT} h2 ~ div strong, ${COMPOSER_ROOT} [role="heading"] ~ div strong`, // [Unverified] who it posts as
+  submit: `${COMPOSER_ROOT} div[aria-label="פרסום"][role="button"], ${COMPOSER_ROOT} div[aria-label="Post"][role="button"]`, // [Unverified]
   discard: 'div[role="dialog"] div[aria-label="מחיקה"][role="button"], div[role="dialog"] div[aria-label="Discard"][role="button"]', // [Unverified]
   dialog: SD.SELECTORS.dialog,
   alert: SD.SELECTORS.alert,
   captchaFrame: SD.SELECTORS.captchaFrame,
   feedPost: 'div[role="feed"] > div', // [Unverified]
+  chronoMarker: 'div[role="main"] [aria-label="New posts"], div[role="main"] [aria-label="פוסטים חדשים"]', // [Unverified] the group feed's "New posts" sort
   feedPostText: 'div[data-ad-preview="message"], div[data-ad-comet-preview="message"]', // [Unverified]
   feedPostLink: 'a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]', // [Unverified]
   feedPostAuthor: 'h2 strong, h3 strong, h4 strong', // [Unverified]
@@ -55,6 +58,9 @@ const FB_HOST = /^(www\.|m\.|web\.)?facebook\.com$/i;
 const SEG = /^[A-Za-z0-9._-]+$/;
 const POST_ID = /^[A-Za-z0-9]+$/;
 
+// [Unverified] (M6, Task 24): Facebook may render an emoji as <img alt>;
+// innerText drops it, so an editor holding the copy would read without the
+// emoji and the proof would fail closed (copy_mismatch). Calibrate there.
 // ── reads (never throw; a failed read is "" / null / -1) ──
 async function textOf(page, sel) {
   try { return norm(await page.locator(sel).first().innerText()); } catch { return ""; }
@@ -128,25 +134,33 @@ function findOwnPost(posts, { kind, ids, author, copy }) {
   return null;
 }
 
-// The text of every `sel` region that is NOT the composer (not its root,
-// not inside it, not wrapping it), each with the exact copy stripped after
-// normalisation — so the post's own words can never read as a signal.
+// The text of every `sel` region with its editable content removed: each
+// region is CLONED, every [contenteditable] subtree dropped from the clone
+// (what we typed), a space appended to every element so words never run
+// together, and its text taken. The composer's chrome — an inline "You
+// can't post in this group", a restriction dialog wrapping the composer —
+// is still read. Then the exact copy is stripped after normalisation.
 async function regionTexts(page, sel, copy) {
-  const texts = await page.$$eval(sel, (els, root) => els
-    .filter((el) => !(el.matches(root) || el.closest(root) || el.querySelector(root)))
-    .map((el) => el.innerText || el.textContent || ""), COMPOSER_ROOT).catch(() => []);
-  const c = norm(copy);
-  return (Array.isArray(texts) ? texts : []).map((t) => (c ? norm(t).split(c).join(" ") : norm(t))).join("\n");
+  const texts = await page.$$eval(sel, (els) => els.map((el) => {
+    const c = el.cloneNode(true);
+    c.querySelectorAll("[contenteditable]").forEach((n) => n.remove());
+    c.querySelectorAll("*").forEach((n) => n.append(" "));
+    return c.textContent || "";
+  })).catch(() => []);
+  const own = norm(copy);
+  return (Array.isArray(texts) ? texts : []).map((t) => (own ? norm(t).split(own).join(" ") : norm(t))).join("\n");
 }
-// classifySignal over the landed URL, the non-composer dialogs and alerts,
-// and a captcha frame. Used for every read the driver makes.
+// classifySignal over the landed URL, the dialogs and alerts (editable
+// content removed, copy stripped), and a captcha frame. A text pattern that
+// also matches the copy is ignored (classifySignal's ownText): a cut of our
+// own words in a toast is never a signal; the URL and a frame always are.
 async function readSignal(page, copy) {
   const dialogText = await regionTexts(page, SELECTORS.dialog, copy);
   const alertText = await regionTexts(page, SELECTORS.alert, copy);
   const hasCaptchaFrame = (await countOf(page, SELECTORS.captchaFrame)) > 0;
   let landedUrl = "";
   try { landedUrl = page.url(); } catch { landedUrl = ""; }
-  return classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame });
+  return classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, ownText: copy });
 }
 
 async function readFeedPosts(page) {
@@ -193,7 +207,8 @@ function expectedTarget(attempt, conn) {
 /*
  * proveIdentityAndDestination(page, attempt, conn, { copy, resolvedGroupId })
  * → { ok: true } | { ok: false, code } — code ∈ identity_mismatch |
- * destination_mismatch | not_member | copy_mismatch. Runs with the composer
+ * destination_mismatch | not_member | copy_mismatch | markers_missing (the
+ * membership marker could not be read at all). Runs with the composer
  * open and the copy typed, immediately before the Post click.
  */
 async function proveIdentityAndDestination(page, attempt, conn, opts = {}) {
@@ -211,9 +226,14 @@ async function proveIdentityAndDestination(page, attempt, conn, opts = {}) {
   const name = await textOf(page, SELECTORS.targetName);
   if (!name || (want.name && name !== want.name)) return no("destination_mismatch");
 
+  // Exactly one composer: two open composers (a stale draft) could make any
+  // read below — or the click after it — land in the wrong one.
+  if ((await countOf(page, SELECTORS.composerRoot)) !== 1) return no("destination_mismatch");
   const author = await textOf(page, SELECTORS.composerAuthor);
   if (kind === "group") {
-    if ((await countOf(page, SELECTORS.joinGroup)) !== 0) return no("not_member");
+    const join = await countOf(page, SELECTORS.joinGroup);
+    if (join < 0) return no("markers_missing"); // unreadable is not evidence of leaving
+    if (join > 0) return no("not_member");
     if ((await textOf(page, SELECTORS.composerTarget)) !== name) return no("destination_mismatch");
     if (author !== label) return no("identity_mismatch");
   } else if (author !== name) return no("identity_mismatch"); // it must post AS the Page

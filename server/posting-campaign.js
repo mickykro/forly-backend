@@ -214,7 +214,8 @@ async function approvePost(id, postId, deps = {}) {
   const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(c.phone)) || {};
   const account = await A.accountView(c.phone, conn, deps, now, { exclude: post.id });
-  const slot = safety.nextSlot({ now, account, candidates: [{ group_id: post.group_id, url: post.group_url }], pageId: c.page_id, config, rand: x.rand });
+  const cand = { group_id: post.group_id, url: post.group_url };
+  const slot = safety.nextSlot({ now, account, candidates: [{ ...cand, aliases: A.groupIdsOf(cand, conn).slice(1) }], pageId: c.page_id, config, rand: x.rand });
   const at = slot.at || A.nextDayStart(now, config, x.rand);
   return mutate(x, id, (cur) => ({
     posts: cur.posts.map((p) => (p.id === postId && p.status === "pending_approval" ? { ...p, status: "scheduled", scheduled_at: iso(at), approved_at: iso(now) } : p)),
@@ -275,7 +276,9 @@ function candidatesFor(c, ctx) {
     for (const g of c.groups || []) {
       if (used.has(g.group_id)) continue;
       const e = A.eligibility(g, ctx);
-      if (A.isEligible(e)) out.push({ ...g, ...e, target: "group" });
+      // Every other id of this group (a resolved slug, Task 18) rides along,
+      // so cooldowns and group buckets recorded under it still apply.
+      if (A.isEligible(e)) out.push({ ...g, ...e, target: "group", aliases: A.groupIdsOf(g, ctx.conn).slice(1) });
     }
   }
   return out;
@@ -312,8 +315,10 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
   for (const s of scored) {
     const ctx = { conn, catalog, listingType: (s.page.property || {}).listing_type || null, now };
     const cands = candidatesFor(s.c, ctx);
-    const groupIds = cands.filter((g) => g.target === "group").map((g) => g.group_id);
-    const groupActivity = groupIds.length ? await x.store.getGroupActivityFor(groupIds, now) : {};
+    const groupCands = cands.filter((g) => g.target === "group");
+    const groupIds = groupCands.map((g) => g.group_id);
+    const aliases = Object.fromEntries(groupCands.map((g) => [g.group_id, g.aliases || []]));
+    const groupActivity = groupIds.length ? await x.store.getGroupActivityFor(groupIds, now, undefined, aliases) : {};
     const fp = safety.fingerprint(s.page.property || {});
     for (const set of [cands.filter((g) => g.target === "page"), cands.filter((g) => g.target === "group")]) {
       if (!set.length) continue;

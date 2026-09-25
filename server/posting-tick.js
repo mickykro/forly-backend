@@ -164,7 +164,7 @@ async function runDue(c, post, st, deps, x, now) {
   const weekly = past.filter((t) => now.getTime() - t < 7 * MS_DAY).length >= safety.weeklyCapFor(account, now, config);
   if (freshPenalty || weekly) return reschedule(x, c.id, post.id, A.nextDayStart(now, config, x.rand), freshPenalty ? "penalty" : "weekly_cap", false);
 
-  let target;
+  let target, aliases = [];
   const fp = safety.fingerprint((page && page.property) || {});
   if (post.target === "page") {
     target = A.pageTarget(conn);
@@ -174,7 +174,8 @@ async function runDue(c, post, st, deps, x, now) {
     const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: ((page && page.property) || {}).listing_type || null, now };
     if (!g || !A.isEligible(A.eligibility(g, ctx))) return skip(x, c.id, post.id, "ineligible");
     // Another Forly account may have posted this listing here since it was planned.
-    const ga = (await x.store.getGroupActivityFor([g.group_id], now))[g.group_id] || {};
+    aliases = A.groupIdsOf(g, conn).slice(1); // a resolved slug's history is this group's (Task 18)
+    const ga = (await x.store.getGroupActivityFor([g.group_id], now, undefined, { [g.group_id]: aliases }))[g.group_id] || {};
     if (duplicateIn(ga, fp, now, config)) return skip(x, c.id, post.id, "duplicate");
     target = { ...g, target: "group", target_id: g.group_id };
   }
@@ -197,7 +198,7 @@ async function runDue(c, post, st, deps, x, now) {
     return "guard";
   }
   const r = await x.store.reserveAttempt({
-    phone, page_id: c.page_id, target_type: target.target, target_id: target.target_id, target_url: target.url,
+    phone, page_id: c.page_id, target_type: target.target, target_id: target.target_id, target_url: target.url, target_aliases: aliases,
     // R6: the Page's publisher is bound to the attempt; a group has no Graph path.
     publisher: target.target === "page" ? conn.page_publisher || "browser" : "browser",
     fingerprint: fp, campaign_id: c.id, post_id: post.id, copy_hash: sha(copy),
@@ -281,7 +282,10 @@ async function runAttempt(attempt, st, deps, now) {
     [post.target === "page" ? "pageUrl" : "groupUrl"]: target.url,
   };
   const postDeps = {
-    attempts: { transition: (k, state, detail) => (k === attempt.key ? x.store.transition(k, state, detail, x.clock()) : Promise.reject(fail("invalid_input", "foreign attempt"))) },
+    attempts: {
+      transition: (k, state, detail) => (k === attempt.key ? x.store.transition(k, state, detail, x.clock()) : Promise.reject(fail("invalid_input", "foreign attempt"))),
+      annotate: (k, detail) => (k === attempt.key ? x.store.annotateAttempt(k, detail, x.clock()) : Promise.reject(fail("invalid_input", "foreign attempt"))),
+    },
     // R2 inside the driver: navigate, and immediately before Post.
     guard: (action) => x.guard.assertAllowed({ phone, platform: "facebook", action }, gd),
     lockHeld: true, phone, platform: "facebook", conn,
@@ -301,41 +305,8 @@ async function runAttempt(attempt, st, deps, now) {
   if (timedOut && st.lock) st.lock.defer(running);
   if (result && result.noop === true) return "no_driver";
   const state = await settle(attempt.key, result, err, st, deps, x, now);
-  await applyFindings(result, st, x, now);
+  await A.applyFindings(result, st, x, now);
   return state;
-}
-
-// What the driver saw first-hand on a group's own page (Task 18): "Join
-// group" showing (membership "left"), or a vanity slug's real numeric id.
-// The connection's membership list and the campaign's group follow it, so
-// the planner stops choosing a group the account left. Never throws.
-async function applyFindings(result, st, x, now) {
-  const { c, post } = st;
-  const gid = post.group_id;
-  if (!result || typeof result !== "object" || post.target === "page" || !gid) return;
-  const rid = String(result.resolved_group_id || "");
-  const numeric = /^slug:/.test(gid) && /^\d+$/.test(rid) ? rid : null;
-  const left = result.membership === "left";
-  if (!left && !numeric) return;
-  const id = numeric || gid;
-  const note = (what, e) => console.error(redact(`posting ${what} ${tail(c.phone)}: ${code(e)}`));
-  try {
-    const { resolveGroupId } = require("./facebook-groups-sync");
-    await x.store.mutateConnection(c.phone, (conn) => {
-      let list = Array.isArray(conn.facebook_groups_member) ? conn.facebook_groups_member : [];
-      if (numeric) list = resolveGroupId({ facebook_groups_member: list }, gid, numeric);
-      if (left) list = list.map((e) => (e && e.group_id === id ? { ...e, membership_state: "left", observed_at: iso(now) } : e));
-      return { facebook_groups_member: list };
-    });
-  } catch (e) { note("membership update", e); }
-  try {
-    await mutate(x, c.id, (cur) => {
-      const seen = new Set();
-      const groups = (cur.groups || []).map((g) => (g.group_id === gid ? { ...g, group_id: id, ...(left ? { is_member: false } : {}) } : g))
-        .filter((g) => !seen.has(g.group_id) && seen.add(g.group_id));
-      return numeric ? { groups, posts: cur.posts.map((p) => (p.group_id === gid ? { ...p, group_id: id } : p)) } : { groups };
-    });
-  } catch (e) { note("campaign group update", e); }
 }
 
 // Closes the attempt if the driver left it open, mirrors it onto the post,
@@ -472,5 +443,5 @@ async function tick(campaign, deps = {}, now) {
 
 module.exports = {
   tick, tickAccount, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
-  _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn, applyFindings },
+  _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn },
 };

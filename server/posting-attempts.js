@@ -90,6 +90,12 @@ async function reserveAttempt(input = {}) {
   const target_type = input.target_type;
   if (target_type !== "group" && target_type !== "page") throw fail("invalid_input", "target_type must be group|page");
   const target_id = assertId(input.target_id, "target_id");
+  // Other ids of the same target (Task 18: a resolved vanity slug). Their
+  // group buckets count toward the cap, and a live dedup doc under any of
+  // them is a duplicate — the move to a numeric id never resets either.
+  const aliasIn = input.target_aliases === undefined || input.target_aliases === null ? [] : input.target_aliases;
+  if (!Array.isArray(aliasIn) || aliasIn.length > 10) throw fail("invalid_input", "target_aliases must be an array (<= 10)");
+  const target_aliases = [...new Set(aliasIn.map((a) => assertId(a, "target_aliases")))].filter((a) => a !== target_id);
   const publisher = optString(input.publisher, "publisher");
   if (!publisher) throw fail("invalid_input", "publisher required (R6)");
   const fp = cleanFingerprint(input.fingerprint);
@@ -111,19 +117,26 @@ async function reserveAttempt(input = {}) {
   const bKey = budgetKey(phone, date);
   const aKey = target_type === "group" ? safety.activityKey(target_id, now) : null;
   const dKey = dedupKey(page_id, target_type, target_id);
+  const aliasActKeys = target_type === "group" ? target_aliases.map((a) => safety.activityKey(a, now)) : [];
+  const aliasDedupKeys = target_aliases.map((a) => dedupKey(page_id, target_type, a));
 
   return runTx(maps, async (tx) => {
     const existing = await tx.get(ATT, key);
     const budget = await tx.get(BUD, bKey);
     const bucket = aKey ? await tx.get(ACT, aKey) : null;
     const dedup = await tx.get(DED, dKey);
+    const aliasBuckets = [];
+    for (const k of aliasActKeys) aliasBuckets.push(await tx.get(ACT, k));
+    const aliasDedups = [];
+    for (const k of aliasDedupKeys) aliasDedups.push(await tx.get(DED, k));
     // The existing attempt comes back so the caller can resume, reconcile or
     // cancel an orphan left by a commit whose outcome it never saw.
     if (existing) return { ok: false, reason: "already_reserved", attempt: existing };
     if (((budget && budget.count) || 0) >= dailyCap) return { ok: false, reason: "daily_cap" };
-    if (aKey && ((bucket && bucket.posts) || 0) >= groupCap) return { ok: false, reason: "group_cap" };
-    const dedupLive = dedup && !dedup.released && !(typeof dedup.expires_at === "string" && dedup.expires_at <= at);
-    if (dedupLive) return { ok: false, reason: "duplicate" };
+    const aliasPosts = aliasBuckets.reduce((n, b) => n + ((b && b.posts) || 0), 0);
+    if (aKey && ((bucket && bucket.posts) || 0) + aliasPosts >= groupCap) return { ok: false, reason: "group_cap" };
+    const live = (d) => d && !d.released && !(typeof d.expires_at === "string" && d.expires_at <= at);
+    if (live(dedup) || aliasDedups.some(live)) return { ok: false, reason: "duplicate" };
 
     const fpEntry = aKey && fp ? { ...fp, at } : null;
     const attempt = {
@@ -196,6 +209,23 @@ async function applyTransition(key, to, detail, nowIn, guard) {
 }
 
 function transition(key, to, detail = {}, now) { return applyTransition(key, to, detail, now, null); }
+
+// A follow-up note on an attempt, WITHOUT moving it (Task 18): the link
+// comment's result after verified_posted, or why a reconciliation left it
+// for review. Only these fields; never state, reservations or bookkeeping.
+const ANNOTATIONS = new Set(["comment_error_code", "reconcile_note"]);
+async function annotate(key, detail, nowIn) {
+  const extra = cleanDetail(detail);
+  const bad = Object.keys(extra).filter((k) => !ANNOTATIONS.has(k) || (extra[k] !== null && (typeof extra[k] !== "string" || extra[k].length > 60)));
+  if (bad.length || !Object.keys(extra).length) throw fail("invalid_input", `annotate: ${bad.join(", ") || "nothing"}`);
+  const at = toDate(nowIn).toISOString();
+  return runTx(maps, async (tx) => {
+    const a = await tx.get(ATT, key);
+    if (!a) throw fail("not_found", "attempt not found");
+    tx.set(ATT, key, { ...extra, updated_at: at }, { merge: true });
+    return Object.assign({}, a, extra, { updated_at: at });
+  });
+}
 
 async function queryAttempts(where, memFilter, limit) {
   const fdb = firestore();
@@ -296,19 +326,29 @@ function lastDates(today, n) {
 }
 
 // → { [group_id]: { posts_today, fingerprints } } — nextSlot's groupActivity input.
-async function getGroupActivityFor(group_ids, nowIn, windowDays = safety.DEFAULTS.fingerprint_window_days) {
+// `aliases` ({ [group_id]: [other ids] }, Task 18): every alias's buckets are
+// read too and folded into its group's entry.
+async function getGroupActivityFor(group_ids, nowIn, windowDays = safety.DEFAULTS.fingerprint_window_days, aliases = {}) {
   const ids = (group_ids || []).map((g) => assertId(g, "group_id"));
+  windowDays = windowDays === undefined || windowDays === null ? safety.DEFAULTS.fingerprint_window_days : windowDays;
   if (!Number.isInteger(windowDays) || windowDays < 1) throw fail("invalid_input", "windowDays must be a positive integer");
   const dates = lastDates(safety.jerusalemDate(toDate(nowIn)), windowDays);
-  const docIds = ids.flatMap((g) => dates.map((dt) => `${g}|${dt}`));
+  const keysOf = (g) => [g, ...(Array.isArray(aliases && aliases[g]) ? aliases[g].map((a) => assertId(a, "alias")) : [])].filter((k, i, all) => all.indexOf(k) === i);
+  const groupsOf = ids.map((g) => keysOf(g));
+  const docIds = groupsOf.flat().flatMap((g) => dates.map((dt) => `${g}|${dt}`));
   const fdb = firestore();
   let docs;
   if (fdb && docIds.length) docs = (await fdb.getAll(...docIds.map((id) => fdb.collection(ACT).doc(id)))).map((s) => (s.exists ? s.data() : null));
   else docs = docIds.map((id) => (maps[ACT].has(id) ? structuredClone(maps[ACT].get(id)) : null));
   const out = {};
+  let at = 0;
   ids.forEach((g, gi) => {
-    const mine = docs.slice(gi * dates.length, (gi + 1) * dates.length);
-    out[g] = { posts_today: (mine[0] && mine[0].posts) || 0, fingerprints: mine.flatMap((b) => (b && b.fingerprints) || []) };
+    out[g] = { posts_today: 0, fingerprints: [] };
+    for (let k = 0; k < groupsOf[gi].length; k++, at += dates.length) {
+      const mine = docs.slice(at, at + dates.length); // newest date first
+      out[g].posts_today += (mine[0] && mine[0].posts) || 0;
+      out[g].fingerprints = out[g].fingerprints.concat(mine.flatMap((b) => (b && b.fingerprints) || []));
+    }
   });
   return out;
 }
@@ -317,7 +357,7 @@ function reset() { for (const m of Object.values(maps)) m.clear(); }
 
 module.exports = {
   LEASE_MS, EDGES, countingStates, isCounting,
-  attemptKey, reserveAttempt, transition, reapExpired, cancelOpenAttempts,
+  attemptKey, reserveAttempt, transition, annotate, reapExpired, cancelOpenAttempts,
   getAttempt, listAttemptsByPhone, listAttemptsByState, listOpenAttemptsByCampaign, getGroupActivityFor,
   _test: { reset, maps, dedupKey, lastDates },
 };

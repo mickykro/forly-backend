@@ -244,6 +244,14 @@ function weeklyCapFor(account, now, config) {
   return isPenalised(account, now) ? Math.max(1, Math.floor(config.weekly_cap / config.penalty_cap_divisor)) : config.weekly_cap;
 }
 
+// One group, several ids: a vanity "slug:…" id stays an alias of the numeric
+// id it resolved to (Task 18), so history recorded under either id counts.
+// `aliases` are the OTHER ids `b` is known by.
+function sameGroup(a, b, aliases) {
+  if (!a || !b) return false;
+  return String(a) === String(b) || (Array.isArray(aliases) && aliases.map(String).includes(String(a)));
+}
+
 function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, groupActivity = {}, config = DEFAULTS, rand = Math.random }) {
   if (account.disabled_until_admin) return { at: null, reason: "disabled" };
   // Only a halt that actually disables or penalises (R5) counts toward the
@@ -270,7 +278,8 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 
   // Posts are matched to a candidate group by group_id; only a post written
   // before group_id existed falls back to matching by group_url.
-  const postsFor = (c) => posts.filter((p) => (p.group_id ? p.group_id === c.group_id : p.group_url === c.url));
+  // A candidate's `aliases` (its former slug id) match too: sameGroup.
+  const postsFor = (c) => posts.filter((p) => (p.group_id ? sameGroup(p.group_id, c.group_id, c.aliases) : p.group_url === c.url));
   const within = (iso) => now.getTime() - new Date(iso).getTime() < config.fingerprint_window_days * MS_DAY;
   const duplicateReview = [];
   const weakDup = new Set();
@@ -333,7 +342,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 }
 
 module.exports = {
-  DEFAULTS, CALENDAR_OK, nextSlot, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
+  DEFAULTS, CALENDAR_OK, nextSlot, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
   wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },
 };

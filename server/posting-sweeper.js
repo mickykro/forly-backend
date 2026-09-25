@@ -128,7 +128,10 @@ async function reconcileOne(deps, x, now) {
       await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id ? { ...p, reconcile_at: iso(now) } : p)) }));
       const conn = (await x.db.getConnection(a.phone)) || {};
       result = await deps.reconcile(a, {
-        attempts: { transition: (k, state, detail) => (k === a.key ? x.store.transition(k, state, detail, x.clock()) : Promise.reject(fail("invalid_input", "foreign attempt"))) },
+        attempts: {
+          transition: (k, state, detail) => (k === a.key ? x.store.transition(k, state, detail, x.clock()) : Promise.reject(fail("invalid_input", "foreign attempt"))),
+          annotate: (k, detail) => (k === a.key ? x.store.annotateAttempt(k, detail, x.clock()) : Promise.reject(fail("invalid_input", "foreign attempt"))),
+        },
         guard: (action) => x.guard.assertAllowed({ phone: a.phone, platform: "facebook", action }, A.guardDeps(deps, x)),
         lockHeld: true, phone: a.phone, platform: "facebook", conn, copy: post.copy || null,
       });

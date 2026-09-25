@@ -23,6 +23,9 @@
  * R3: posting-driver-proof.proveIdentityAndDestination must pass before the
  * click; any mismatch → `verified_failed` with its code, session stopped.
  *
+ * After verified_posted the link goes in as the first comment; its result
+ * is a follow-up note (attempts.annotate), never part of the state write.
+ *
  * Returns { state, error_code?, permalink?, signal?, membership?,
  * resolved_group_id?, comment_error_code?, dry_run? } for business outcomes;
  * only infrastructure errors throw (posting-tick's settle closes the attempt).
@@ -46,7 +49,9 @@ const POST_SESSION_S = 14 * 60;
 const RECHECK_SESSION_S = 5 * 60;
 const VERIFY_ROUNDS = 3;
 const RECHECK_SCROLLS = 4;
-const MIN_FEED_FOR_ABSENT = 3; // posts actually read before "absent" is definitive
+const MIN_FEED_FOR_ABSENT = 5; // posts read, each with text and author, before "absent" is definitive
+// [Unverified] the group feed sorted newest-first; Task 24 confirms the parameter.
+const CHRONO_PARAM = ["sorting_setting", "CHRONOLOGICAL"];
 const HALTING = new Set([...SIGNAL_DISABLES, ...SIGNAL_PENALISES, "login_required"]);
 
 function fail(code, msg) { const e = new Error(msg || code); e.code = code; return e; }
@@ -76,6 +81,12 @@ function context(kind, args, deps) {
       catch (e) { if (e && e.code === "illegal_transition") throw Object.assign(new Error("stopped"), { stop: true }); throw e; }
       if (to === "submit_started") x.submitted = true;
     },
+    // A follow-up note without a state change (posting-attempts.annotate);
+    // best-effort — a note never changes what happened.
+    async annotate(detail) {
+      if (typeof attempts.annotate !== "function") return;
+      try { await attempts.annotate(attempt.key, detail); } catch { /* the result still carries it */ }
+    },
     async end(to, detail = {}, extra = {}) {
       await x.step(to, detail);
       return Object.assign({ state: to }, detail.error_code ? { error_code: detail.error_code } : {}, x.extra, extra);
@@ -98,7 +109,10 @@ async function settleError(x, e) {
   const stopped = () => Object.assign({ state: null, error_code: "illegal_transition" }, x.extra);
   if (e && e.stop) return stopped();
   if (e && e.denied) {
-    try { return await x.end(x.submitted ? "outcome_unknown" : "cancelled", { error_code: "posting_disabled", reason: e.reason }); }
+    // After submit_started the click has NOT happened (the guard is the last
+    // await before it): recorded as clicked:false for reconciliation.
+    const detail = Object.assign({ error_code: "posting_disabled", reason: e.reason }, x.submitted ? { clicked: false } : {});
+    try { return await x.end(x.submitted ? "outcome_unknown" : "cancelled", detail); }
     catch (e2) { if (e2 && e2.stop) return stopped(); throw e2; }
   }
   throw e;
@@ -124,12 +138,33 @@ async function nav(page, x, url) {
   return true;
 }
 
+// In the page: is focus inside `el`? If not, focus it with the caret at the
+// END (a bare focus() puts a contenteditable's caret at the start).
+function ensureFocus(el) {
+  const inside = () => el === document.activeElement || el.contains(document.activeElement);
+  if (!inside()) {
+    el.focus();
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    r.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+  return inside();
+}
+
 // Word-sized chunks at a per-character delay, a longer pause at some word
-// boundaries. Never one insertText of the whole message.
-async function humanType(page, text, x) {
+// boundaries. Never one insertText of the whole message. Typed THROUGH the
+// target locator (M8), and only while focus is inside it: before every
+// chunk — newlines included — focus is checked (and restored, caret at the
+// end); if it cannot be held, typing stops (composer_focus_lost) rather
+// than a key, or an Enter, landing anywhere else.
+async function humanType(page, target, text, x) {
   for (const w of String(text).split(/(\s+)/)) {
     if (!w) continue;
-    await page.keyboard.type(w, { delay: x.typingDelay() });
+    if (!(await target.evaluate(ensureFocus).catch(() => false))) throw fail("composer_focus_lost", "focus left the editor");
+    await target.pressSequentially(w, { delay: x.typingDelay() });
     if (/\s/.test(w) && x.rand() < 0.06) await x.wait(page, 0.4, 1.5);
   }
 }
@@ -186,16 +221,19 @@ async function drive(page, x, want, args) {
   await composer.click();
   const editor = page.locator(S.editor).first();
   if (!(await editor.waitFor({ timeout: 10000 }).then(() => true, () => false))) return x.end("verified_failed", { error_code: "composer_not_found" });
+  const roots = await P.countOf(page, S.composerRoot);
+  if (roots !== 1) return x.end("verified_failed", { error_code: roots < 1 ? "composer_not_found" : "destination_mismatch" });
   await x.step("composer_ready");
   done = await preSubmitSignal(page, x);
   if (done) return done;
   await editor.click();
-  await humanType(page, copy, x);
+  try { await humanType(page, editor, copy, x); }
+  catch (e) { if (e && e.code === "composer_focus_lost") return x.end("verified_failed", { error_code: e.code }); throw e; }
   await x.wait(page, 5, 20); // re-read before posting, like anyone would
 
   // 4. R3 — prove who, where and what, immediately before Post
   const proof = await P.proveIdentityAndDestination(page, attempt, x.conn, { copy, resolvedGroupId: x.extra.resolved_group_id });
-  if (!proof.ok) return x.end("verified_failed", { error_code: proof.code });
+  if (!proof.ok) return x.end("verified_failed", { error_code: proof.code }, proof.code === "not_member" ? { membership: "left" } : {});
   x.author = kind === "group" ? P.norm(x.conn.facebook_identity_label) : await P.textOf(page, S.targetName);
 
   if (args.dryRun === true) {
@@ -216,18 +254,21 @@ async function drive(page, x, want, args) {
   return verify(page, x, copy, args.comment, clickError);
 }
 
-// → "confirmed" | "contradicted" | "unread": the permalink page itself says
-// it is this target's post, by this author, with this text.
+// → { seen: "confirmed" | "contradicted" | "unread", signal? }: the permalink
+// page itself says it is this target's post, by this author, with this
+// text. A halting signal there is returned too (M2), whatever the feed said.
 async function checkPermalink(page, x, found, copy) {
-  if (!(await x.allows("navigate"))) return "unread";
+  if (!(await x.allows("navigate"))) return { seen: "unread" };
   const ok = await page.goto(found.permalink, { waitUntil: "domcontentloaded", timeout: 30000 }).then(() => true, () => false);
   await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-  if (!ok || (await P.readSignal(page, copy)) !== "ok") return "unread";
+  if (!ok) return { seen: "unread" };
+  const sig = await P.readSignal(page, copy);
+  if (sig !== "ok") return { seen: "unread", signal: HALTING.has(sig) ? sig : undefined };
   const id = await P.readTargetId(page, x.kind);
   const text = await P.textOf(page, S.postMessage);
   const author = await P.textOf(page, S.postAuthor);
-  if (!id && !text && !author) return "unread";
-  return id === x.targetId && P.fingerprint(text) === P.fingerprint(copy) && author === x.author ? "confirmed" : "contradicted";
+  if (!id && !text && !author) return { seen: "unread" };
+  return { seen: id === x.targetId && P.fingerprint(text) === P.fingerprint(copy) && author === x.author ? "confirmed" : "contradicted" };
 }
 
 // The link, as the first comment. Never throws; → null or a comment_error_code.
@@ -237,7 +278,7 @@ async function addComment(page, x, comment) {
     if ((await box.count()) === 0) return "comment_box_not_found";
     await x.wait(page, 8, 25);
     await box.click();
-    await humanType(page, comment, x);
+    await humanType(page, box, comment, x);
     await x.wait(page, 1, 3);
     if (!(await x.allows("post"))) return "posting_disabled"; // R2: the last await before the click
     await page.locator(S.commentSubmit).first().click();
@@ -257,11 +298,18 @@ async function verify(page, x, copy, comment, clickError) {
     if (sig === "group_blocked" || sig === "not_member") return x.end("verified_failed", { error_code: sig }, sig === "not_member" ? { membership: "left" } : {});
     const found = P.findOwnPost(await P.readFeedPosts(page), { kind: x.kind, ids, author: x.author, copy });
     if (found) {
-      const seen = await checkPermalink(page, x, found, copy);
-      if (seen === "contradicted" || (seen === "unread" && !found.exact)) return x.end("outcome_unknown", { error_code: "not_verified" });
-      const commentCode = comment ? (seen === "confirmed" ? await addComment(page, x, comment) : "not_on_permalink") : null;
-      const detail = Object.assign({ permalink: found.permalink, post_url: found.permalink }, commentCode ? { comment_error_code: commentCode } : {});
-      return x.end("verified_posted", detail, Object.assign({ permalink: found.permalink }, commentCode ? { comment_error_code: commentCode } : {}));
+      const { seen, signal } = await checkPermalink(page, x, found, copy);
+      const halted = signal ? { signal } : {};
+      if (seen === "contradicted" || (seen === "unread" && !found.exact)) return x.end("outcome_unknown", { error_code: signal || "not_verified" }, halted);
+      // M1: the post's state is written FIRST; the comment is a follow-up
+      // whose result is annotated. An illegal transition here (the tick
+      // timed out and moved the attempt) stops before any comment.
+      const out = await x.end("verified_posted", Object.assign({ permalink: found.permalink, post_url: found.permalink }, halted),
+        Object.assign({ permalink: found.permalink }, signal ? { signal, error_code: signal } : {})); // error_code: the tick's halt hint
+      if (!comment) return out;
+      const commentCode = seen === "confirmed" && !signal ? await addComment(page, x, comment) : "not_on_permalink";
+      if (commentCode) { out.comment_error_code = commentCode; await x.annotate({ comment_error_code: commentCode }); }
+      return out;
     }
     if (sig === "pending_approval" && !x.pendingBefore) return x.end("submitted_for_approval", {});
   }
@@ -284,6 +332,7 @@ function preflight(kind, x, args) {
 async function run(kind, args = {}, deps = {}) {
   const attempt = args.attempt;
   if (!attempt || typeof attempt.key !== "string" || !attempt.key) throw fail("invalid_input", "attempt required");
+  if (args.dryRun !== undefined && typeof args.dryRun !== "boolean") throw fail("invalid_input", "dryRun must be a boolean");
   const x = context(kind, args, deps);
   try {
     // R1: durable before any browser opens. Already cancelled → Stop, zero sessions.
@@ -305,18 +354,38 @@ async function run(kind, args = {}, deps = {}) {
 const postToGroup = (args, deps) => run("group", args, deps);
 const postToPage = (args, deps) => run("page", args, deps);
 
+// The destination in newest-first order. A Page's own timeline already is
+// ([Unverified], Task 24); a group's needs the sort parameter.
+function chronoUrl(url, kind) {
+  if (kind !== "group") return url;
+  const u = new URL(url);
+  u.searchParams.set(CHRONO_PARAM[0], CHRONO_PARAM[1]);
+  return u.toString();
+}
+async function chronoLoaded(page, kind) {
+  if (kind !== "group") return true;
+  let kept = false;
+  try { kept = new URL(page.url()).searchParams.get(CHRONO_PARAM[0]) === CHRONO_PARAM[1]; } catch { kept = false; }
+  return kept || (await P.countOf(page, S.chronoMarker)) > 0;
+}
+const feedHealthy = (posts) => posts.length >= MIN_FEED_FOR_ABSENT && posts.every((p) => P.norm(p.text) && P.norm(p.author));
+
 /*
  * reconcile(attempt, deps) — an outcome_unknown attempt: look at the
  * destination for a post by this account whose text fingerprint is the
  * attempt's copy_hash. NEVER submits, types or clicks anything.
- * Found → outcome_unknown → verified_posted (with its permalink). The page
- * loaded cleanly, the feed was read and it is not there → verified_failed
- * `reconciled_absent`. Anything less certain → no transition (operator
- * review). deps: posting-sweeper's { attempts, guard, phone, conn, copy, … }.
+ * Found → outcome_unknown → verified_posted (with its permalink). The
+ * newest-first view loaded, at least MIN_FEED_FOR_ABSENT posts were read
+ * with text AND author each (the selectors are healthy), and it is not
+ * there → verified_failed `reconciled_absent`. Anything less certain → no
+ * transition (operator review); a feed that could not be trusted is noted
+ * `reconcile_note: "feed_unread"`. Only an attempt whose state IS
+ * outcome_unknown is looked at. deps: posting-sweeper's { attempts
+ * (transition, annotate), guard, phone, conn, copy, … }.
  */
 async function reconcile(attempt, deps = {}) {
   if (!attempt || typeof attempt.key !== "string" || !attempt.key) throw fail("invalid_input", "attempt required");
-  if (attempt.state && attempt.state !== "outcome_unknown") return { state: attempt.state };
+  if (attempt.state !== "outcome_unknown") return { state: attempt.state || null, error_code: "not_outcome_unknown" };
   const kind = attempt.target_type === "page" ? "page" : "group";
   const x = context(kind, { attempt }, deps);
   const stay = (code, extra) => Object.assign({ state: "outcome_unknown", error_code: code }, extra || {});
@@ -332,13 +401,14 @@ async function reconcile(attempt, deps = {}) {
     const withPage = deps.withPage || driver.withPage;
     return await withPage(sessionOpts(x, "forly-recheck:", RECHECK_SESSION_S), async (page) => {
       if (!(await x.allows("navigate"))) return stay("posting_disabled");
-      const loaded = await page.goto(attempt.target_url, { waitUntil: "domcontentloaded", timeout: 45000 }).then(() => true, () => false);
+      const loaded = await page.goto(chronoUrl(attempt.target_url, kind), { waitUntil: "domcontentloaded", timeout: 45000 }).then(() => true, () => false);
       await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
       const sig = await P.readSignal(page, copy);
       if (!loaded || sig !== "ok") return stay(loaded ? sig : "navigation_failed", sig !== "ok" ? { signal: sig } : {});
       const id = await P.readTargetId(page, kind);
       if (!id || (want.id && id !== want.id)) return stay("destination_mismatch");
-      if (kind === "group" && (await P.countOf(page, S.joinGroup)) !== 0) return stay("not_member");
+      const join = kind === "group" ? await P.countOf(page, S.joinGroup) : 0;
+      if (join !== 0) return stay(join < 0 ? "markers_missing" : "not_member");
       const name = await P.textOf(page, S.targetName);
       if (!name || (want.name && name !== want.name)) return stay("destination_mismatch");
       x.targetId = id;
@@ -352,13 +422,20 @@ async function reconcile(attempt, deps = {}) {
         if (!found) { await page.mouse.wheel(0, Math.round(600 + x.rand() * 600)); await x.wait(page, 2, 5); }
       }
       if (found) {
-        const check = await checkPermalink(page, x, found, copy);
-        if (check === "confirmed" || (check === "unread" && found.exact)) {
+        const { seen: check, signal } = await checkPermalink(page, x, found, copy);
+        if (!signal && (check === "confirmed" || (check === "unread" && found.exact))) {
           return x.end("verified_posted", { permalink: found.permalink, post_url: found.permalink, reconciled: true }, { permalink: found.permalink });
         }
-        return stay("not_verified");
+        return stay(signal || "not_verified", signal ? { signal } : {});
       }
-      if (seen.size < MIN_FEED_FOR_ABSENT) return stay("feed_unread");
+      // "Absent" only from a feed we can trust (fix round 1): the newest-first
+      // view actually loaded, and the selectors read at least
+      // MIN_FEED_FOR_ABSENT posts, EVERY one with text and an author. Anything
+      // less is a feed we could not read, not a post that is not there.
+      if (!(await chronoLoaded(page, kind)) || !feedHealthy([...seen.values()])) {
+        await x.annotate({ reconcile_note: "feed_unread" });
+        return stay("feed_unread", { reconcile_note: "feed_unread" });
+      }
       return x.end("verified_failed", { error_code: "reconciled_absent" });
     }, pageDepsOf(x));
   } catch (e) {

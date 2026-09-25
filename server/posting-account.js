@@ -76,9 +76,23 @@ async function catalogIndex(db) {
   return byUrl;
 }
 
+// A group's id and its aliases (Task 18: a vanity "slug:…" id resolved to
+// its numeric id stays an alias on the campaign group and on the membership
+// entry) are one group everywhere: membership, penalties, cooldowns, the
+// group bucket and the property→group dedup.
+const aliasesOf = (e) => (e && Array.isArray(e.aliases) ? e.aliases.map(String) : []);
+const sameEntry = (m, g) => !!(m && g && g.group_id && (safety.sameGroup(m.group_id, g.group_id, aliasesOf(g)) || aliasesOf(m).includes(String(g.group_id))));
 function memberOf(conn, g) {
   const list = Array.isArray(conn && conn.facebook_groups_member) ? conn.facebook_groups_member : [];
-  return list.find((m) => m && ((g.group_id && m.group_id === g.group_id) || (g.url && (m.canonical_url === g.url || m.url === g.url)))) || null;
+  return list.find((m) => m && (sameEntry(m, g) || (g.url && (m.canonical_url === g.url || m.url === g.url)))) || null;
+}
+// Every id `g` is known by: its own, its aliases, and those of its
+// membership entry. → [group_id, ...aliases], group_id first.
+function groupIdsOf(g, conn) {
+  const ids = new Set([g.group_id, ...aliasesOf(g)].filter(Boolean).map(String));
+  const m = g.group_id ? memberOf(conn, g) : null;
+  if (m && sameEntry(m, g)) for (const id of [m.group_id, ...aliasesOf(m)]) if (id) ids.add(String(id));
+  return [...ids];
 }
 
 // The four booleans a group needs, all true, to be planned (adapt notes):
@@ -91,7 +105,8 @@ function eligibility(g, { conn, catalog, listingType, now }) {
   const m = memberOf(conn, g);
   const cat = catalog.get(g.url) || null;
   const types = cat && Array.isArray(cat.listing_types) ? cat.listing_types : [];
-  const pen = ((conn && conn.posting_group_penalties) || {})[g.group_id];
+  const pens = (conn && conn.posting_group_penalties) || {};
+  const pen = groupIdsOf(g, conn).map((id) => pens[id]).filter(Boolean).sort((a, b) => ms(b.until) - ms(a.until))[0];
   return {
     is_member: !!m && m.membership_state === "member" && g.blocked_code !== "not_member",
     catalog_policy: !(cat && (cat.active === false || DISALLOWED_POLICY.has(cat.agent_policy))),
@@ -226,6 +241,41 @@ async function tellOperator(deps, text) {
   try { await deps.notifyOperator(text); } catch (e) { console.error(redact(`posting operator notify failed: ${(e && e.code) || "error"}`)); }
 }
 
+// What the driver saw first-hand on a group's own page (Task 18): "Join
+// group" showing (membership "left"), or a vanity slug's real numeric id.
+// The connection's membership list and the campaign's group follow it; the
+// old slug id stays an alias of the numeric one on both. Never throws.
+async function applyFindings(result, { c, post }, x, now) {
+  const gid = post && post.group_id;
+  if (!result || typeof result !== "object" || post.target === "page" || !gid) return;
+  const rid = String(result.resolved_group_id || "");
+  const numeric = /^slug:/.test(gid) && /^\d+$/.test(rid) ? rid : null;
+  const left = result.membership === "left";
+  if (!left && !numeric) return;
+  const id = numeric || gid;
+  const note = (what, e) => console.error(redact(`posting ${what} ${tail(c.phone)}: ${(e && (e.code || e.name)) || "error"}`));
+  try {
+    const { resolveGroupId } = require("./facebook-groups-sync");
+    await x.store.mutateConnection(c.phone, (conn) => {
+      let list = Array.isArray(conn.facebook_groups_member) ? conn.facebook_groups_member : [];
+      if (numeric) list = resolveGroupId({ facebook_groups_member: list }, gid, numeric);
+      if (left) list = list.map((e) => (e && (e.group_id === id || aliasesOf(e).includes(id)) ? { ...e, membership_state: "left", observed_at: iso(now) } : e));
+      return { facebook_groups_member: list };
+    });
+  } catch (e) { note("membership update", e); }
+  try {
+    await mutate(x, c.id, (cur) => {
+      const seen = new Set();
+      const groups = (cur.groups || []).map((g) => {
+        if (g.group_id !== gid && !(numeric && g.group_id === id)) return g;
+        const aliases = [...new Set([...aliasesOf(g), ...(numeric ? [gid] : [])])].filter((a) => a !== id);
+        return { ...g, group_id: id, ...(aliases.length ? { aliases } : {}), ...(left ? { is_member: false } : {}) };
+      }).filter((g) => !seen.has(g.group_id) && seen.add(g.group_id));
+      return numeric ? { groups, posts: cur.posts.map((p) => (p.group_id === gid ? { ...p, group_id: id } : p)) } : { groups };
+    });
+  } catch (e) { note("campaign group update", e); }
+}
+
 // Cancels that could not be written (cancel_incomplete, a failed transition)
 // are counted here and drained by the sweep into settings/posting_health.
 let cancelFailures = 0;
@@ -236,6 +286,6 @@ module.exports = {
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
   MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
-  groupIdFromUrl, catalogIndex, memberOf, eligibility, isEligible, needsMembershipCheck,
+  groupIdFromUrl, catalogIndex, memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,
   pageTarget, targetsFor, accountView, currentPosts, limitsFor, nextDayStart,
 };
