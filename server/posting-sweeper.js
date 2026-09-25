@@ -70,18 +70,17 @@ async function fleetBreaker(setting, deps, x, now) {
   const t = Number(setting.fleet_breaker_threshold);
   const threshold = Number.isInteger(t) && t > 0 ? t : FLEET_BREAKER_DEFAULT;
   if (n < threshold) return false;
-  let off = false;
-  for (let i = 0; i < 3 && !off; i++) {
-    const cur = (await x.db.getSetting("posting")) || {};
-    if (cur.enabled === false) { off = true; break; }
-    try {
-      await x.db.setSetting("posting", { enabled: false, disabled_reason: "fleet_breaker", disabled_at: iso(now) }, { expectVersion: cur.version || 0 });
-      off = true;
-    } catch (e) { if (!e || e.code !== "version_conflict") throw e; }
-  }
-  if (!off) {
+  // Compare-and-set against the version the count was made from (Task 21 fix
+  // round 1): the count used THAT doc's enabled_at. If the switch moved in
+  // between (an operator turned posting on, with a new enabled_at), the
+  // count is stale: it is never written over the operator's change, and the
+  // next sweep recounts against the new doc.
+  try {
+    await x.db.setSetting("posting", { enabled: false, disabled_reason: "fleet_breaker", disabled_at: iso(now) }, { expectVersion: setting.version || 0 });
+  } catch (e) {
+    if (!e || e.code !== "version_conflict") throw e;
     // Not OFF, so not reported as OFF — but no account is ticked this sweep either.
-    console.error(`posting: fleet breaker condition met (${n} accounts) but the switch could not be written; skipping this sweep`);
+    console.error(`posting: fleet breaker condition met (${n} accounts) but the switch changed since it was read; recounting next sweep`);
     return true;
   }
   console.error(`posting: FLEET BREAKER tripped — ${n} accounts disabled within the window; posting is OFF`);

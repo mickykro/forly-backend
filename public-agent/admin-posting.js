@@ -10,6 +10,9 @@
   var $ = function (s) { return document.querySelector(s); };
   var esc = FLY.esc;
   var API = "/api/admin/posting";
+  var AUDIT_WARN = "השינוי נשמר אך לא נרשם ביומן — פנו למפתח";
+  var OWNER_ONLY = { owner_reenable: 1, reenable_after_reconnect: 1 };
+  var AGENT_Q = "הסוכן השלים את האימות ואישר שהחשבון תקין?";
   var state = null;
 
   var CLASS_LABELS = {
@@ -60,6 +63,9 @@
     if (e && e.code === "version_conflict") load();
   }
 
+  // A change the server applied but could not write to the audit log.
+  function saved(d, msg) { FLY.toast(d && d.audited === false ? AUDIT_WARN : msg); }
+
   function send(path, body) {
     return FLY.req(API + path, { method: "POST", body: body, noRedirect: true }).then(function (d) {
       $("#postingStepUp").classList.add("hidden");
@@ -76,7 +82,7 @@
     var body = { enabled: want, reason: reason, version: state.version };
     Object.keys(extra || {}).forEach(function (k) { body[k] = extra[k]; });
     send(path, body)
-      .then(function () { FLY.toast("✅ נשמר"); return load(); })
+      .then(function (d) { saved(d, "✅ נשמר"); return load(); })
       .catch(function (e) { input.checked = !want; handleError(e, "שגיאה בעדכון המתג"); })
       .then(function () { input.disabled = false; });
   }
@@ -99,13 +105,16 @@
 
   function actionButtons(a) {
     return (a.allowed_actions || []).filter(function (act) {
-      // Offered only once the agent reconnected a new profile (the server checks again).
+      // Owner-only buttons for owners only; the reconnect lift only once the
+      // agent reconnected a new profile (the server checks both again).
+      if (OWNER_ONLY[act] && !(state && state.is_owner)) return false;
       return act !== "reenable_after_reconnect" || a.reconnected_after_halt === true;
     }).map(function (act) {
       var label = act === "reenable" ? "הפעלה מחדש" : act === "owner_reenable" ? "בדיקת בעלים והפעלה" :
         act === "reenable_after_reconnect" ? "הפעלה מחדש (בעלים)" : act === "revoke_profile" ? "ביטול פרופיל" : act;
       var cls = act === "revoke_profile" ? "btn btn-danger btn-sm" : "btn btn-ghost btn-sm";
-      return '<button type="button" class="' + cls + '" data-posting-act="' + esc(act) + '" data-ref="' + esc(a.ref) + '">' + esc(label) + "</button>";
+      return '<button type="button" class="' + cls + '" data-posting-act="' + esc(act) + '" data-ref="' + esc(a.ref) + '"' +
+        (a.needs_agent_confirmation ? ' data-agent-confirm="1"' : "") + ">" + esc(label) + "</button>";
     }).join(" ") || '<span class="p-addr">—</span>';
   }
 
@@ -175,19 +184,23 @@
     var kind = btn.dataset.postingAct;
     var ref = btn.dataset.ref;
     var ask = {
-      reenable: "הסוכן השלים את האימות ואישר שהחשבון תקין?",
+      reenable: AGENT_Q,
       reenable_after_reconnect: "חשד לפריצה: הסוכן התחבר עם פרופיל חדש. הפעלה מחדש ברמת בעלים — להמשיך?",
       owner_reenable: "הפעלה מחדש ברמת בעלים (חשבון מוגבל או עצירה שנייה ב-30 יום). להמשיך?",
       revoke_profile: "ביטול ומחיקת פרופיל הדפדפן של הסוכן. הסוכן יצטרך להתחבר מחדש. להמשיך?",
     }[kind];
     if (!ask || !window.confirm(ask)) return;
+    // A captcha/checkpoint among the account's halts needs the agent's
+    // confirmation on the owner path too: the operator attests it.
+    var confirmAgent = kind === "reenable" || (kind !== "revoke_profile" && btn.dataset.agentConfirm === "1");
+    if (confirmAgent && kind !== "reenable" && !window.confirm(AGENT_Q)) return;
     var reason = askReason("סיבה?");
     if (!reason) return;
     var path = "/accounts/" + encodeURIComponent(ref) + (kind === "revoke_profile" ? "/revoke-profile" : "/reenable");
-    var body = kind === "reenable" ? { reason: reason, agent_confirmed: true } : { reason: reason };
+    var body = confirmAgent ? { reason: reason, agent_confirmed: true } : { reason: reason };
     btn.disabled = true;
     send(path, body)
-      .then(function () { FLY.toast(kind === "revoke_profile" ? "הפרופיל בוטל" : "✅ החשבון הופעל מחדש"); return load(); })
+      .then(function (d) { saved(d, kind === "revoke_profile" ? "הפרופיל בוטל" : "✅ החשבון הופעל מחדש"); return load(); })
       .catch(function (e) { btn.disabled = false; handleError(e, "הפעולה נכשלה"); });
   }
 

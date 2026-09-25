@@ -19,7 +19,7 @@ const SECRET = "admin-posting-secret";
 const ADMIN = "972500000001";
 const OWNER = "972500000009";
 const NOT_ADMIN = "972500000077";
-const P = { captcha: "972521110001", restricted: "972521110002", review: "972521110003", compromised: "972521110004", penalty: "972521110005", fine: "972521110006", legacy: "972521110007" };
+const P = { captcha: "972521110001", restricted: "972521110002", review: "972521110003", compromised: "972521110004", penalty: "972521110005", fine: "972521110006", legacy: "972521110007", downgraded: "972521110010", scCaptcha: "972521110011" };
 const ALL_PHONES = [ADMIN, OWNER, NOT_ADMIN, ...Object.values(P)];
 const DAY = 86400000;
 
@@ -191,6 +191,8 @@ const noFullPhone = (raw, what) => {
     r = await post(`/accounts/${P.review}/reenable`, { reason: "checked", agent_confirmed: true });
     assert.equal(r.body.error, "owner_required");
     r = await post(`/accounts/${P.review}/reenable`, { reason: "owner reviewed" }, as(OWNER));
+    assert.equal(r.status, 400); assert.equal(r.body.error, "agent_confirmation_required", "the owner path still needs the agent's confirmation for a captcha/checkpoint");
+    r = await post(`/accounts/${P.review}/reenable`, { reason: "owner reviewed", agent_confirmed: true }, as(OWNER));
     assert.equal(r.status, 200);
     c = await db.getConnection(P.review);
     assert.equal(c.posting_disabled_until_admin, false); assert.equal(c.posting_owner_review_required, false, "owner re-enable clears both flags");
@@ -220,6 +222,32 @@ const noFullPhone = (raw, what) => {
     assert.equal(c.posting_reenabled_as, "owner");
     r = await post(`/accounts/${P.legacy}/reenable`, { reason: "x" }, as(OWNER));
     assert.equal(r.body.error, "reconnect_required", "no recorded generation: refused");
+
+    // ── fix round 1: a weaker halt never downgrades the lift; every live halt counts ──
+    await db.setConnection(P.scCaptcha, { facebook_profile_gen: 1, facebook_profile_state: "active", facebook_browser_connected_at: ago(DAY) });
+    await halts.haltAccount(P.scCaptcha, "suspected_compromise", { db, store, lifecycle });
+    await halts.haltAccount(P.scCaptcha, "captcha", { db, store, lifecycle });
+    c = await db.getConnection(P.scCaptcha);
+    assert.equal(c.posting_disabled_class, "suspected_compromise", "a captcha after a suspected compromise keeps the stronger class");
+    assert.deepEqual(c.posting_halts.map((h) => h.code), ["suspected_compromise", "captcha"]);
+    r = await post(`/accounts/${P.scCaptcha}/reenable`, { reason: "x", agent_confirmed: true });
+    assert.equal(r.status, 403); assert.equal(r.body.error, "owner_required");
+    r = await post(`/accounts/${P.scCaptcha}/reenable`, { reason: "x", agent_confirmed: true }, as(OWNER));
+    assert.equal(r.status, 409); assert.equal(r.body.error, "reconnect_required");
+    // A class field already downgraded (written before this fix): the halts still decide.
+    await db.setConnection(P.downgraded, { posting_disabled_until_admin: true, posting_disabled_class: "captcha", posting_disabled_at: ago(3600e3), posting_last_halt_at: ago(3600e3), posting_halts: [halt("restricted", 7200e3), halt("captcha", 3600e3)] });
+    r = await post(`/accounts/${P.downgraded}/reenable`, { reason: "x", agent_confirmed: true });
+    assert.equal(r.status, 403); assert.equal(r.body.error, "owner_required", "restricted then captcha: owner required");
+    r = await post(`/accounts/${P.downgraded}/reenable`, { reason: "appeal accepted" }, as(OWNER));
+    assert.equal(r.body.error, "agent_confirmation_required");
+    r = await post(`/accounts/${P.downgraded}/reenable`, { reason: "appeal accepted", agent_confirmed: true }, as(OWNER));
+    assert.equal(r.status, 200, r.raw);
+    c = await db.getConnection(P.downgraded);
+    assert.equal(c.posting_disabled_until_admin, false); assert.equal(c.posting_agent_confirmed_at, c.posting_reenabled_at);
+    const rule = createRouter._test.reenableRule;
+    const conn = (o) => Object.assign({ posting_disabled_until_admin: true, posting_disabled_class: "captcha" }, o);
+    assert.equal(rule(conn({ posting_halts: [halt("suspected_compromise", 9e3), halt("captcha", 1e3)] })), "compromise");
+    assert.equal(rule(conn({ posting_reenabled_at: ago(5e3), posting_halts: [halt("suspected_compromise", 9e3), halt("captcha", 1e3)] })), "agent_confirmed", "a halt lifted by an earlier re-enable no longer counts");
     // Operator judgement on an account not halted: halted as suspected_compromise, which revokes.
     r = await post(`/accounts/${P.fine}/revoke-profile`, { reason: "agent reports takeover" });
     assert.equal(r.status, 200, r.raw);
@@ -232,7 +260,7 @@ const noFullPhone = (raw, what) => {
     // ── every mutation wrote an audit event, tails only, kept a year ──
     const events = await store.listAuditEvents({ limit: 100 });
     const actions = events.map((e) => e.action).sort();
-    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible"]);
+    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible"]);
     for (const e of events) {
       assert.ok(/^\d{4}$/.test(e.operator_tail), JSON.stringify(e));
       assert.ok(e.target_phone_tail === null || /^\d{4}$/.test(e.target_phone_tail));
@@ -244,7 +272,11 @@ const noFullPhone = (raw, what) => {
     await assert.rejects(store.addAuditEvent({ action: "x", target_phone_tail: P.fine }), (e) => e.code === "invalid_input", "a full phone is refused");
     ov = await overview();
     noFullPhone(ov.raw, "overview after");
-    assert.equal(ov.body.recent_audit.length, 12);
+    assert.equal(ov.body.is_owner, false, "an admin who is not an owner");
+    const scRow = ov.body.halts_by_class.suspected_compromise.find((a) => a.phone_tail === "0011");
+    assert.equal(scRow.needs_agent_confirmation, true); assert.equal(scRow.reconnected_after_halt, false);
+    assert.equal((await call(server, "GET", "/api/admin/posting/overview", as(OWNER, false))).body.is_owner, true);
+    assert.equal(ov.body.recent_audit.length, 13);
 
     // ── the overview degrades: a failing section is named in warnings, the rest loads, 200 ──
     {
@@ -276,8 +308,19 @@ const noFullPhone = (raw, what) => {
         const d = await call(s3, "GET", "/p/overview", as(ADMIN, false));
         assert.equal(d.status, 200); assert.deepEqual(d.body.warnings, ["index_missing:switch"]);
         assert.equal(d.body.enabled, null, "an unread switch is unknown, never shown as on"); assert.equal(d.body.version, null);
-        assert.equal(d.body.accounts_disabled, 3);
+        assert.equal(d.body.accounts_disabled, 4);
       } finally { s3.close(); }
+      // One account read fails: the counts are unknown, not partial.
+      const db4 = Object.assign({}, db, { getConnection: async (ph) => { if (ph === P.penalty) throw new Error("unavailable"); return db.getConnection(ph); } });
+      const app4 = express();
+      app4.use("/p", createRouter({ requireAdmin, requireStepUp, db: db4, store, lifecycle, env }));
+      const s4 = await new Promise((res4) => { const sv = app4.listen(0, () => res4(sv)); });
+      try {
+        const d = await call(s4, "GET", "/p/overview", as(ADMIN, false));
+        assert.equal(d.status, 200); assert.deepEqual(d.body.warnings, ["query_failed:accounts"]);
+        assert.equal(d.body.accounts_disabled, null); assert.equal(d.body.owner_review, null);
+        assert.ok(d.body.halts_by_class.suspected_compromise, "the rows that did load are shown");
+      } finally { s4.close(); }
     }
 
     // ── retention: a campaign that ends gets expire_at = updated_at + 30 d; a restart clears it ──

@@ -40,12 +40,13 @@ const with_ = (deps, o) => Object.assign({}, deps, o);
     assert.equal(r.owner_review, true, "a third disabling halt within 30 days");
     k = await conn();
     assert.deepEqual(k.posting_halts.map((h) => h.code), ["checkpoint", "restricted", "checkpoint"]);
-    assert.equal(k.posting_disabled_class, "checkpoint");
-    assert.equal(k.posting_disabled_at, iso(at(3)));
+    // Task 21 fix round 1: a weaker class never replaces a stronger disable in force.
+    assert.equal(k.posting_disabled_class, "restricted", "the restricted disable keeps its class");
+    assert.equal(k.posting_disabled_at, iso(at(2)), "and its date");
     assert.equal(k.facebook_profile_state, "quarantined", "the profile is quarantined again");
     assert.ok(notes.length > n0, "the agent is told");
     assert.ok(ops.length > o0, "the operator is told");
-    // while that checkpoint's disable stands, another checkpoint is the same halt
+    // while the disable that covers that checkpoint stands, another checkpoint is the same halt
     const n1 = notes.length;
     r = await H.haltAccount(PH, "checkpoint", deps, { now: at(4) });
     assert.equal(r.duplicate, true);
@@ -53,14 +54,39 @@ const with_ = (deps, o) => Object.assign({}, deps, o);
     assert.equal((await conn()).posting_halts.length, 3);
   }
 
-  // ── a disable re-set by another class (never cleared) no longer belongs to the earlier halt ──
+  // ── a disable re-set by another class (never cleared) no longer belongs to the earlier halt;
+  //    the stronger restricted class stays (Task 21 fix round 1) ──
   {
     const { deps } = await setup();
     await H.haltAccount(PH, "checkpoint", deps, { now: at(0) });
     await H.haltAccount(PH, "restricted", deps, { now: at(1) });
     const r = await H.haltAccount(PH, "checkpoint", deps, { now: at(2) });
     assert.ok(!r.duplicate);
-    assert.equal((await conn()).posting_disabled_class, "checkpoint");
+    assert.equal((await conn()).posting_disabled_class, "restricted");
+    assert.deepEqual((await conn()).posting_halts.map((h) => h.code), ["checkpoint", "restricted", "checkpoint"], "the halt is still appended");
+  }
+
+  // ── Task 21 fix round 1: a weaker halt never downgrades a suspected compromise ──
+  {
+    const { deps } = await setup();
+    await db.setConnection(PH, { facebook_profile_gen: 2 });
+    await H.haltAccount(PH, "suspected_compromise", deps, { now: at(0) });
+    await db.setConnection(PH, { facebook_profile_gen: 3 }); // even if the generation moved, the halt's stays
+    let r = await H.haltAccount(PH, "captcha", deps, { now: at(1) });
+    assert.ok(!r.duplicate); assert.equal(r.disabled, true);
+    let k = await conn();
+    assert.equal(k.posting_disabled_class, "suspected_compromise");
+    assert.equal(k.posting_disabled_at, iso(at(0)));
+    assert.equal(k.posting_disabled_profile_gen, 2);
+    assert.deepEqual(k.posting_halts.map((h) => h.code), ["suspected_compromise", "captcha"]);
+    r = await H.haltAccount(PH, "captcha", deps, { now: at(2) });
+    assert.equal(r.duplicate, true, "the captcha is covered by the stronger disable it arrived under");
+    // equal strength still takes over: a checkpoint after a captcha
+    const { deps: d2 } = await setup();
+    await H.haltAccount(PH, "captcha", d2, { now: at(0) });
+    await H.haltAccount(PH, "checkpoint", d2, { now: at(1) });
+    k = await conn();
+    assert.equal(k.posting_disabled_class, "checkpoint"); assert.equal(k.posting_disabled_at, iso(at(1)));
   }
 
   // ── a disable with no class or date (written before these fields existed) is never folded into ──
@@ -142,6 +168,31 @@ const with_ = (deps, o) => Object.assign({}, deps, o);
     assert.deepEqual(k.posting_halts.map((h) => [h.code, h.at]), [["restricted", stamp]]);
     assert.equal(k.posting_disabled_at, stamp);
     assert.equal(k.posting_last_halt_at, stamp);
+  }
+
+  // ── (posting-sweeper.js; its test file is at its line budget) Task 21 fix round 1: the breaker's CAS uses the version it counted from, so an
+  //    operator turning posting on between its read and its write is not undone ──
+  {
+    const { deps, at, ops } = await setup();
+    await C.create(base(), deps);
+    const t = iso(NOW.getTime() - 30 * MIN);
+    for (const ph of ["9725041", "9725042", "9725043"]) await db.setConnection(ph, { posting_halts: [{ at: t, code: "checkpoint" }], posting_last_halt_at: t });
+    let raced = false;
+    const racing = Object.assign({}, db, { setSetting: async (k, v, o) => {
+      if (k === "posting" && o && o.expectVersion !== undefined && !raced) {
+        raced = true; // the operator's switch-on lands first
+        await db.setSetting("posting", { enabled: true, enabled_at: iso(NOW), reason: "operator back on" });
+      }
+      return db.setSetting(k, v, o);
+    } });
+    assert.equal(await S.sweep(with_(deps, { db: racing }), at(NOW)), 0, "stale count: nothing ticked this sweep");
+    assert.ok(raced);
+    const s = await db.getSetting("posting");
+    assert.equal(s.enabled, true, "the operator's switch-on is not undone");
+    assert.equal(s.reason, "operator back on");
+    assert.equal(ops.filter((m) => /FLEET BREAKER/.test(m)).length, 0);
+    assert.equal(await S.sweep(deps, at(NOW)), 1, "recounted from the new enabled_at: the breaker stays closed");
+    assert.equal((await db.getSetting("posting")).enabled, true);
   }
 
   console.log("posting-halts.test.js ok");

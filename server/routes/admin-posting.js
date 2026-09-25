@@ -46,15 +46,26 @@ function cleanReason(v) {
 //   restricted / owner review /
 //   an unknown disabling class      the owner re-enables (POSTING_OWNER_PHONES)
 //   captcha / checkpoint            re-enable once the agent confirmed integrity
+// The class field alone is not trusted (fix round 1): every halt recorded
+// since the last re-enable counts too, and the strictest one wins. Any
+// captcha/checkpoint among them needs the agent's confirmation, the owner
+// path included.
+function liveClasses(conn) {
+  const since = ms(conn.posting_reenabled_at);
+  const live = (conn.posting_halts || []).filter((h) => h && h.code && !(ms(h.at) <= since)).map((h) => h.code);
+  return new Set(live.concat(conn.posting_disabled_class ? [conn.posting_disabled_class] : []));
+}
 function reenableRule(conn) {
   const disabled = conn.posting_disabled_until_admin === true;
   const review = conn.posting_owner_review_required === true;
   if (!disabled && !review) return "not_disabled";
+  const classes = liveClasses(conn);
   const cls = conn.posting_disabled_class || null;
-  if (disabled && cls === "suspected_compromise") return "compromise";
-  if (review || !AGENT_CONFIRMED.has(cls)) return "owner";
+  if (classes.has("suspected_compromise")) return "compromise";
+  if (review || classes.has("restricted") || !AGENT_CONFIRMED.has(cls)) return "owner";
   return "agent_confirmed";
 }
+const needsAgentConfirmation = (conn) => [...liveClasses(conn)].some((c) => AGENT_CONFIRMED.has(c));
 const ACTIONS = { not_disabled: [], compromise: ["revoke_profile", "reenable_after_reconnect"], owner: ["owner_reenable"], agent_confirmed: ["reenable"] };
 
 // Did the agent reconnect a NEW profile after the suspected compromise? The
@@ -86,6 +97,7 @@ function accountRow(phone, conn, now) {
     reenabled_at: conn.posting_reenabled_at || null,
     allowed_actions: ACTIONS[rule],
     reconnected_after_halt: rule === "compromise" && reconnectedAfterHalt(conn),
+    needs_agent_confirmation: rule !== "not_disabled" && needsAgentConfirmation(conn),
     halts_24h: halts.map((h) => ({ code: h.code, at: h.at })),
   };
 }
@@ -169,9 +181,11 @@ module.exports = function createAdminPostingRouter({
     const disabled = await section("accounts_disabled", () => store.listDisabledPhones(), null);
     const recent = await section("halts_recent", () => store.listPhonesHaltedSince(iso(now.getTime() - MS_DAY)), []);
     const accounts = [];
+    let accountsFailed = false;
     for (const phone of [...new Set([...(disabled || []), ...recent])]) {
-      const conn = await section("accounts", () => db.getConnection(phone), null);
-      if (conn) accounts.push(accountRow(phone, conn, now.getTime()));
+      const conn = await section("accounts", () => db.getConnection(phone), undefined);
+      if (conn === undefined) accountsFailed = true;
+      else if (conn) accounts.push(accountRow(phone, conn, now.getTime()));
     }
     const halts_by_class = {};
     for (const a of accounts) (halts_by_class[a.class] = halts_by_class[a.class] || []).push(a);
@@ -182,10 +196,13 @@ module.exports = function createAdminPostingRouter({
     const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, k === "env_forced_off" ? env.POSTING_ENABLED === "0" : null]));
     res.json(Object.assign(sw, {
       campaigns, halts_24h, halts_by_class,
-      // Counted over the disabled list; unknown when that query failed.
-      accounts_disabled: disabled ? accounts.filter((a) => a.disabled).length : null,
-      owner_review: disabled ? accounts.filter((a) => a.owner_review).length : null,
+      // Counted over the disabled list; unknown (never a partial count) when
+      // that query or any account read failed.
+      accounts_disabled: disabled && !accountsFailed ? accounts.filter((a) => a.disabled).length : null,
+      owner_review: disabled && !accountsFailed ? accounts.filter((a) => a.owner_review).length : null,
       owner_configured: ownerSet().size > 0,
+      // The owner gate's own check, so the tab offers owner-only buttons to owners only.
+      is_owner: ownerSet().has(normalizeAuthPhone(req.user && req.user.userId) || ""),
       posting_health: health && {
         last_sweep_at: health.last_sweep_at || null,
         reap_failures: (health.reap_failures || []).slice(0, 20).map((f) => ({ key_tail: f.key_tail, error_code: f.error_code, first_seen_at: f.first_seen_at })),
@@ -262,10 +279,10 @@ module.exports = function createAdminPostingRouter({
       const cls = conn.posting_disabled_class || null;
       const ownerOnly = rule === "owner" || rule === "compromise";
       if (rule === "not_disabled") verdict = { status: 409, error: "not_disabled" };
-      else if (rule === "compromise" && !reconnectedAfterHalt(conn)) verdict = { status: 409, error: "reconnect_required" };
       else if (ownerOnly && !owners.size) verdict = { status: 403, error: "owner_not_configured" };
       else if (ownerOnly && !isOwner) verdict = { status: 403, error: "owner_required" };
-      else if (rule === "agent_confirmed" && b.agent_confirmed !== true) verdict = { status: 400, error: "agent_confirmation_required" };
+      else if (rule === "compromise" && !reconnectedAfterHalt(conn)) verdict = { status: 409, error: "reconnect_required" };
+      else if ((rule === "agent_confirmed" || needsAgentConfirmation(conn)) && b.agent_confirmed !== true) verdict = { status: 400, error: "agent_confirmation_required" };
       else verdict = { ok: true, rule, cls };
       if (!verdict.ok) return null;
       // posting_reenabled_at in the SAME patch as the cleared flags: a later
@@ -275,7 +292,7 @@ module.exports = function createAdminPostingRouter({
         posting_reenabled_at: at, posting_reenabled_by: by, posting_reenable_reason: reason,
         posting_reenabled_as: ownerOnly ? "owner" : "operator",
         facebook_browser_first_connected_at: at, // warm-up restarts
-      }, rule === "agent_confirmed" ? { posting_agent_confirmed_at: at } : {});
+      }, b.agent_confirmed === true && needsAgentConfirmation(conn) ? { posting_agent_confirmed_at: at } : {});
     };
     await store.mutateConnection(phone, decide);
     if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
@@ -306,4 +323,4 @@ module.exports = function createAdminPostingRouter({
   return router;
 };
 
-module.exports._test = { reenableRule, cleanReason, refOf };
+module.exports._test = { reenableRule, needsAgentConfirmation, cleanReason, refOf };

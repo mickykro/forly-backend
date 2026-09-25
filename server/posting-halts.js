@@ -34,6 +34,11 @@ const CLASSES = new Set([...DISABLING, ...PENALISING, "login_required", "suspect
 // Codes the driver (Task 18) reports when the page's own markers are missing.
 const SELECTOR_CODES = new Set(["selector_failure", "composer_not_found", "navigation_failed", "markers_missing"]);
 const SELECTOR_PAUSE_AT = 3;
+// How hard a disable is to lift (Task 21 fix round 1): a halt never replaces
+// an in-force disable of a STRONGER class, so a captcha after a suspected
+// compromise cannot turn an owner-only lift into an operator one.
+const STRENGTH = { suspected_compromise: 3, restricted: 2, checkpoint: 1, captcha: 1 };
+const strength = (cls) => STRENGTH[cls] || 0;
 const OWNER_REVIEW_WINDOW_DAYS = 30, GROUP_PENALTY_DAYS = 30, REMOVALS_WINDOW_DAYS = 7, HALT_KEEP_DAYS = 365;
 
 // A driver/verification code → its R5 class, or null when it is not a halt.
@@ -81,9 +86,13 @@ const MESSAGES = {
 // every disabling class, so the disable must carry h's class and date from h
 // or earlier (a later halt of another class re-set it: h itself was lifted);
 // the penalty must carry h's class and have been set by h or later.
+// A disable of a STRONGER class covers h too (fix round 1) — when it was
+// already in force as h arrived (h was appended under it, the class kept).
+// One set after h may have followed a lift of h, so h is not in force.
 function inForce(conn, cls, h, groupId, now) {
   if (DISABLING.has(cls) || cls === "suspected_compromise") {
-    return conn.posting_disabled_until_admin === true && conn.posting_disabled_class === cls && ms(conn.posting_disabled_at) <= ms(h.at);
+    const own = conn.posting_disabled_class === cls || strength(conn.posting_disabled_class) > strength(cls);
+    return conn.posting_disabled_until_admin === true && own && ms(conn.posting_disabled_at) <= ms(h.at);
   }
   if (PENALISING.has(cls)) {
     return ms(conn.posting_penalty_until) > now.getTime() && conn.posting_penalty_class === cls && ms(conn.posting_penalty_at) >= ms(h.at);
@@ -151,8 +160,12 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
     const v = { disabled: false, owner_review: false, penalty_until: null, reconnect: false };
     if (DISABLING.has(cls) || cls === "suspected_compromise") {
       // The profile generation the halt caught: lifting a suspected
-      // compromise needs a reconnect with a NEWER one (Task 21).
-      Object.assign(patch, { posting_disabled_until_admin: true, posting_disabled_at: at, posting_disabled_class: cls, posting_disabled_profile_gen: conn.facebook_profile_gen || 0 });
+      // compromise needs a reconnect with a NEWER one (Task 21). A stronger
+      // disable in force keeps its class, date and generation; the halt is
+      // still appended above.
+      const stronger = conn.posting_disabled_until_admin === true && strength(conn.posting_disabled_class) > strength(cls);
+      patch.posting_disabled_until_admin = true;
+      if (!stronger) Object.assign(patch, { posting_disabled_at: at, posting_disabled_class: cls, posting_disabled_profile_gen: conn.facebook_profile_gen || 0 });
       v.disabled = true;
       if (DISABLING.has(cls) && prior.some((h) => DISABLING.has(h.code) && within(h, OWNER_REVIEW_WINDOW_DAYS))) {
         patch.posting_owner_review_required = true;
@@ -215,4 +228,4 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
   return out;
 }
 
-module.exports = { haltAccount, classOf, CLASSES, SELECTOR_CODES, SELECTOR_PAUSE_AT };
+module.exports = { haltAccount, classOf, CLASSES, SELECTOR_CODES, SELECTOR_PAUSE_AT, STRENGTH };
