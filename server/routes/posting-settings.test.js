@@ -1,0 +1,193 @@
+/* routes/posting-settings.js — the structured permission, revocation before
+   the response, what GET /settings shows (and hides), the resync's rate limit
+   and error mapping, and forgetting a group. */
+const assert = require("assert");
+const R = require("./posting-routes-kit");
+const { DriverError } = require("../driver-browser");
+
+const { K, PH, G, setup, call, globalOff, globalOn, createRouter } = R;
+const { db, store } = K;
+const put = (app, b) => call(app, "PUT", "/api/posting/settings", b);
+const enable = (b) => Object.assign({ enabled: true, consent: true, default_group_ids: ["111"] }, b);
+
+(async () => {
+  // ── PUT: consent required; default groups must be member groups; the structured permission ──
+  {
+    const { app } = await setup({ noPermission: true });
+    assert.equal((await put(app, { enabled: true, default_group_ids: ["111"] })).body.error, "consent_required");
+    assert.equal((await put(app, enable({ auto_mode: "sometimes" }))).status, 400);
+    assert.equal((await put(app, { consent: true })).status, 400, "enabled must be a boolean");
+    const bad = await put(app, enable({ default_group_ids: ["111", "333", "555"] }));
+    assert.equal(bad.status, 422); assert.equal(bad.body.error, "not_member"); assert.deepEqual(bad.body.group_ids, ["333", "555"]);
+    const ok = await put(app, enable({ default_group_ids: ["111", "slug:haifa.homes"], auto_mode: "per_post", allows_visible_interactions: false, consent_version: createRouter.CONSENT_VERSION }));
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    const perm = (await db.getConnection(PH)).posting_permission;
+    assert.equal(perm.enabled, true); assert.equal(perm.consent_version, createRouter.CONSENT_VERSION); assert.ok(perm.granted_at);
+    assert.deepEqual(perm.platforms, ["facebook"]); assert.deepEqual(perm.targets, ["page", "groups"]);
+    assert.deepEqual(perm.default_group_ids, ["111", "777"], "stored by canonical id");
+    assert.equal(perm.allows_dwell, true); assert.equal(perm.allows_visible_interactions, false); assert.equal(perm.auto_mode, "per_post");
+    assert.equal(perm.page_id, null);
+    assert.equal(ok.body.permission.consent_current, true);
+    // Re-saving under the same consent keeps granted_at.
+    const again = await put(app, enable({ default_group_ids: ["222"] }));
+    assert.equal(again.status, 200);
+    const perm2 = (await db.getConnection(PH)).posting_permission;
+    assert.equal(perm2.granted_at, perm.granted_at); assert.deepEqual(perm2.default_group_ids, ["222"]); assert.equal(perm2.auto_mode, "per_post");
+    assert.equal((await put(app, enable({ consent_version: "old" }))).body.error, "consent_outdated");
+  }
+
+  // ── two Pages: a page target needs the confirmed Page; the card picks it by its handle ──
+  {
+    const pages = [{ url: "https://www.facebook.com/agentone", name: "One" }, { id: "12345", url: "https://www.facebook.com/agenttwo", name: "Two" }];
+    const { app } = await setup({ conn: { facebook_pages: pages } });
+    const r = await put(app, enable());
+    assert.equal(r.status, 409); assert.equal(r.body.error, "page_not_confirmed");
+    assert.equal((await put(app, enable({ targets: ["groups"] }))).status, 200);
+    const s = await call(app, "GET", "/api/posting/settings");
+    assert.equal(s.body.pages.length, 2); assert.equal(s.body.pages[1].id, "12345");
+    assert.ok(/^u:[0-9a-f]{16}$/.test(s.body.pages[0].id)); assert.ok(!s.raw.includes("agentone"), "no Page URL in the response");
+    assert.equal((await put(app, enable({ page_id: "nope" }))).body.error, "unknown_page");
+    const ok = await put(app, enable({ page_id: s.body.pages[0].id, targets: ["page", "groups"] }));
+    assert.equal(ok.status, 200); assert.equal(ok.body.permission.page_id, s.body.pages[0].id);
+    assert.equal((await db.getConnection(PH)).posting_permission.page_id, pages[0].url, "stored as posting-account.pageTarget() reads it");
+  }
+
+  // ── enabled:false: works with posting switched off, and before the response
+  //    running campaigns leave planning and pre-submit attempts are cancelled ──
+  {
+    const env = await setup();
+    const C = require("../posting-campaign");
+    const c = await C.create(K.base(), env.deps);
+    const r1 = await store.reserveAttempt({ phone: PH, page_id: "pg1", campaign_id: c.id, target_type: "group", target_id: "111", publisher: "browser", limits: { daily_cap: 5, group_global_daily_cap: 5 }, now: K.NOW });
+    await store.transition(r1.attempt.key, "session_started");
+    const r2 = await store.reserveAttempt({ phone: PH, page_id: "pg2", target_type: "group", target_id: "222", publisher: "browser", limits: { daily_cap: 5, group_global_daily_cap: 5 }, now: K.NOW });
+    await store.transition(r2.attempt.key, "session_started"); await store.transition(r2.attempt.key, "composer_ready"); await store.transition(r2.attempt.key, "submit_started");
+    globalOff();
+    const off = await put(env.app, { enabled: false });
+    assert.equal(off.status, 200); assert.equal(off.body.permission.enabled, false);
+    assert.equal((await store.getAttempt(r1.attempt.key)).state, "cancelled");
+    assert.equal((await store.getAttempt(r2.attempt.key)).state, "submit_started", "past the Post click: left for reconciliation (R1)");
+    const cc = await store.getPostingCampaign(c.id);
+    assert.equal(cc.status, "paused"); assert.equal(cc.pause_reason, "permission");
+    const perm = (await db.getConnection(PH)).posting_permission;
+    assert.equal(perm.enabled, false); assert.ok(perm.revoked_at); assert.deepEqual(perm.default_group_ids, ["111", "222"], "the rest is kept");
+    // Switching on while the fleet switch is off is refused; with it on, allowed.
+    assert.equal((await put(env.app, enable())).body.reason, "global_off");
+    globalOn();
+    assert.equal((await put(env.app, enable())).status, 200);
+  }
+
+  // ── GET: member groups (hashed ones nameless, no URLs), suggestions, halt state, estimate ──
+  {
+    // db.js has no memory path for businesses: this one answers getBusiness.
+    const bizDb = Object.assign(Object.create(db), { getBusiness: async (ph) => (ph === PH ? { activity_areas: ["חיפה"] } : null) });
+    const env = await setup({ deps: { db: bizDb }, conn: { posting_penalty_until: K.iso(K.NOW.getTime() + 3 * K.DAY), facebook_needs_reconnect: true, facebook_needs_reconnect_at: K.iso(K.NOW) } });
+    const s = await call(env.app, "GET", "/api/posting/settings?page_id=pg1");
+    assert.equal(s.status, 200);
+    const b = s.body;
+    assert.equal(b.consent_version, createRouter.CONSENT_VERSION);
+    assert.equal(b.member_groups.length, 5);
+    const g999 = b.member_groups.find((g) => g.group_id === "999");
+    assert.equal(g999.name, "קבוצה פרטית"); assert.equal(g999.private, true); assert.equal(g999.in_catalog, false);
+    assert.ok(!s.raw.includes("abcd"), "no name hash");
+    const g111 = b.member_groups.find((g) => g.group_id === "111");
+    assert.equal(g111.name, "G111"); assert.equal(g111.agent_policy, "explicitly_allowed"); assert.equal(g111.is_default, true);
+    assert.equal(b.member_groups.find((g) => g.group_id === "777").in_catalog, true, "found through its canonical URL");
+    // Suggestions: in the agent's area (Haifa ≡ חיפה), not a member (777 is haifa.homes), by size.
+    assert.deepEqual(b.suggested_groups.map((g) => g.group_id), ["333"]);
+    assert.equal(b.suggested_groups[0].url, G(333));
+    assert.equal(b.halt_state.needs_reconnect, true); assert.equal(b.halt_state.disabled_until_admin, false);
+    assert.ok(b.halt_state.penalty_until); assert.equal(b.halt_state.owner_review_required, false);
+    assert.equal(b.page_publisher, "browser"); assert.deepEqual(b.pages, []);
+    assert.equal(b.permission.enabled, true); assert.deepEqual(b.permission.default_group_ids, ["111", "222"]);
+    assert.ok("first_post_estimate" in b && "first_post_wait_reason" in b);
+    const members = (await db.getConnection(PH)).facebook_groups_member.filter((m) => m.canonical_url);
+    for (const m of members) assert.ok(!s.body.member_groups.some((g) => JSON.stringify(g).includes(m.canonical_url)), "no member group URL");
+  }
+  {
+    // A running campaign: the estimate is the planner's slot.
+    const env = await setup();
+    await require("../posting-campaign").create(K.base(), env.deps);
+    const s = await call(env.app, "GET", "/api/posting/settings");
+    assert.ok(s.body.first_post_estimate && new Date(s.body.first_post_estimate) >= K.NOW, JSON.stringify(s.body));
+  }
+
+  // ── resync: runs, then at most once per 10 minutes; busy/refused runs give the time back ──
+  {
+    let mode = "ok";
+    const sync = { runSync: async ({ phone }) => {
+      if (mode === "busy") throw Object.assign(new Error("x"), { code: "profile_busy" });
+      if (mode === "driver") throw new DriverError(429, "local concurrency budget");
+      if (mode === "boom") throw new Error("https://www.facebook.com/groups/secret");
+      await db.setConnection(phone, { facebook_groups_synced_at: K.iso(K.NOW) });
+      return 1;
+    } };
+    const env = await setup({ groupsSync: sync });
+    const clk = env.clk;
+    mode = "busy";
+    const b1 = await call(env.app, "POST", "/api/posting/groups/resync");
+    assert.equal(b1.status, 409); assert.equal(b1.body.error, "profile_busy");
+    mode = "driver";
+    const b2 = await call(env.app, "POST", "/api/posting/groups/resync");
+    assert.equal(b2.status, 503); assert.equal(b2.body.error, "driver_busy");
+    mode = "ok";
+    const ok = await call(env.app, "POST", "/api/posting/groups/resync");
+    assert.equal(ok.status, 200, "busy runs did not use up the 10 minutes"); assert.equal(ok.body.member_groups.length, 5);
+    const soon = await call(env.app, "POST", "/api/posting/groups/resync");
+    assert.equal(soon.status, 429); assert.equal(soon.body.error, "too_soon"); assert.ok(soon.body.retry_after_s > 0);
+    clk.t = new Date(K.NOW.getTime() + 11 * K.MIN);
+    mode = "boom";
+    const errs = []; const orig = console.error; console.error = (m) => errs.push(String(m));
+    const bad = await call(env.app, "POST", "/api/posting/groups/resync");
+    console.error = orig;
+    assert.equal(bad.status, 503); assert.equal(bad.body.error, "sync_failed");
+    assert.ok(errs.length && errs.every((m) => !m.includes("facebook.com")), "no URL in the log line");
+    assert.equal((await call(env.app, "POST", "/api/posting/groups/resync")).status, 429, "a sync that ran keeps the stamp");
+    clk.t = new Date(K.NOW.getTime() + 30 * K.MIN);
+    globalOff();
+    const off = await call(env.app, "POST", "/api/posting/groups/resync");
+    assert.equal(off.status, 409); assert.equal(off.body.reason, "global_off");
+    globalOn();
+    mode = "ok";
+    assert.equal((await call(env.app, "POST", "/api/posting/groups/resync")).status, 200, "a refused call did not stamp");
+    const nc = await setup({ conn: { facebook_browser_connected_at: null } });
+    assert.equal((await call(nc.app, "POST", "/api/posting/groups/resync")).body.error, "facebook_not_connected");
+  }
+
+  // ── DELETE a group: gone from the members and from the defaults, aliases included ──
+  {
+    const env = await setup({ conn: { posting_permission: Object.assign({}, K.PERM, { default_group_ids: ["111", "777"] }) } });
+    globalOff(); // a privacy removal is never blocked by a switch
+    const r = await call(env.app, "DELETE", "/api/posting/groups/slug:haifa.homes");
+    assert.equal(r.status, 200); assert.equal(r.body.removed, true);
+    globalOn();
+    const conn = await db.getConnection(PH);
+    assert.ok(!conn.facebook_groups_member.some((m) => m.group_id === "777"));
+    assert.equal(conn.facebook_groups_member.length, 4);
+    assert.deepEqual(conn.posting_permission.default_group_ids, ["111"]);
+    assert.equal(conn.posting_permission.enabled, true, "the rest of the permission is untouched");
+    assert.equal((await call(env.app, "DELETE", "/api/posting/groups/777")).status, 404);
+    assert.equal((await call(env.app, "DELETE", "/api/posting/groups/a%2Fb")).status, 400);
+    // A campaign that still lists the group no longer plans it.
+    const C = require("../posting-campaign");
+    const c = await C.create(K.base({ groups: [{ url: G(111), name: "A" }] }), env.deps);
+    await call(env.app, "DELETE", "/api/posting/groups/111");
+    const A = require("../posting-account");
+    const cat = await A.catalogIndex(db);
+    const e = A.eligibility(c.groups[0], { conn: await db.getConnection(PH), catalog: cat, listingType: "sale", now: K.NOW });
+    assert.equal(e.is_member, false);
+  }
+
+  // ── routes/distribution.js mergedCatalog, lifted to module scope ──
+  {
+    K.reset();
+    const { mergedCatalog } = require("./distribution");
+    db.mem.groupCatalog.push({ url: "https://www.facebook.com/groups/88888/?ref=x", name: "חדש", city: "חיפה", listing_types: ["rent"] });
+    const all = await mergedCatalog(db, "sale");
+    const added = all.find((g) => g.url === G(88888));
+    assert.ok(added); assert.equal(added.match, false); assert.equal(added.agent_policy, "unknown");
+    assert.ok(all.length > 1);
+  }
+
+  console.log("routes/posting-settings.test.js ok");
+})().catch((e) => { console.error(e); process.exit(1); });

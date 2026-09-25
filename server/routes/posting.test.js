@@ -1,0 +1,194 @@
+/* routes/posting.js — campaigns: consent and the permission it records, the
+   member gate (aliases included), the catalog opt-in, ownership, the kill
+   switch (stop/pause/skip always work), resume after a login halt, Page
+   confirmation, and that no browser secret or store internal is ever
+   returned. Settings/groups: posting-settings.test.js; one-tap links:
+   posting-act.test.js. */
+const assert = require("assert");
+const R = require("./posting-routes-kit");
+
+const { K, PH, OTHER, G, setup, call, consented, globalOff, globalOn, pendingCampaign, createRouter } = R;
+const { db, store } = K;
+
+(async () => {
+  // ── consent is required; invalid input is refused before anything is read ──
+  {
+    const { app } = await setup();
+    const no = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_ids: ["111"], mode: "standing" });
+    assert.equal(no.status, 400); assert.equal(no.body.error, "consent_required");
+    for (const bad of [{ mode: "fast" }, { group_ids: "111" }, { group_ids: ["https://www.facebook.com/groups/111"] }, { page_id: "a/b" }, { days: 90 }, { group_ids: Array.from({ length: 21 }, (_, i) => String(i + 1)) }]) {
+      const r = await call(app, "POST", "/api/posting/campaigns", consented(bad));
+      assert.equal(r.status, 400, JSON.stringify(bad)); assert.equal(r.body.error, "invalid_input");
+    }
+    const stale = await call(app, "POST", "/api/posting/campaigns", consented({ consent_version: "2020-01-v0" }));
+    assert.equal(stale.status, 409); assert.equal(stale.body.consent_version, createRouter.CONSENT_VERSION);
+  }
+
+  // ── the member gate: ids the account is not a member of (or left) → 422 with those ids ──
+  {
+    const { app } = await setup();
+    const r = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: ["111", "333", "555"] }));
+    assert.equal(r.status, 422); assert.equal(r.body.error, "not_member");
+    assert.deepEqual(r.body.group_ids, ["333", "555"]);
+    assert.equal((await store.listPostingCampaignsByPhone(PH)).length, 0);
+  }
+
+  // ── a member group outside the catalog needs include_unknown: true ──
+  {
+    const { app } = await setup();
+    const r = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: ["111", "999"] }));
+    assert.equal(r.status, 422); assert.equal(r.body.error, "unknown_group"); assert.deepEqual(r.body.group_ids, ["999"]);
+    const ok = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: ["111", "999"], include_unknown: true }));
+    assert.equal(ok.status, 201);
+    const g999 = ok.body.campaign.groups.find((g) => g.group_id === "999");
+    assert.equal(g999.agent_policy, "unknown"); assert.equal(g999.name, "קבוצה פרטית"); assert.equal(g999.private, true);
+  }
+
+  // ── create: 201, groups by canonical id (an old slug id finds its resolved entry),
+  //    the eligibility booleans, the consent version, and the account's answers ──
+  {
+    const { app } = await setup({ noPermission: true });
+    const r = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: ["111", "slug:haifa.homes", "777"], days: 7, account_aged: false, posted_manually: true }));
+    assert.equal(r.status, 201, JSON.stringify(r.body)); assert.equal(r.body.existing, false);
+    const c = r.body.campaign;
+    assert.deepEqual(c.groups.map((g) => g.group_id), ["111", "777"], "the slug alias and its numeric id are one group");
+    for (const g of c.groups) for (const k of ["is_member", "catalog_policy", "listing_type_allowed", "posting_currently_available"]) assert.equal(g[k], true, k);
+    assert.equal(c.groups[0].agent_policy, "explicitly_allowed");
+    assert.equal(c.consent_version, createRouter.CONSENT_VERSION);
+    assert.equal(c.status, "running");
+    const stored = await store.getPostingCampaign(c.id);
+    assert.equal(stored.groups[1].url, G("haifa.homes"));
+    // The campaign's own consent created the permission the guard's "reserve" needs
+    // — groups-only and without default groups, so new listings are not auto-enrolled.
+    const conn = await db.getConnection(PH);
+    const perm = conn.posting_permission;
+    assert.equal(perm.enabled, true); assert.deepEqual(perm.platforms, ["facebook"]);
+    assert.equal(perm.consent_version, createRouter.CONSENT_VERSION); assert.ok(perm.granted_at);
+    assert.deepEqual(perm.default_group_ids, []); assert.deepEqual(perm.targets, ["groups"]); assert.equal(perm.allows_dwell, true);
+    assert.equal(conn.posting_account_aged, false); assert.equal(conn.posting_posted_manually, true);
+    // No URL of a member group, no store internals in the response.
+    assert.ok(!r.raw.includes("facebook.com/groups"), "no member group URL in the response");
+    // A retried create returns the same campaign, 200.
+    const again = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: ["111"] }));
+    assert.equal(again.status, 200); assert.equal(again.body.existing, true); assert.equal(again.body.campaign.id, c.id);
+    assert.equal(again.body.campaign.groups.length, 2, "unchanged");
+    // An existing permission in force is left as it was.
+    const before = JSON.stringify((await db.getConnection(PH)).posting_permission);
+    await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2" }));
+    assert.equal(JSON.stringify((await db.getConnection(PH)).posting_permission), before);
+  }
+
+  // ── gates: not connected, someone else's page, too many campaigns ──
+  {
+    const { app } = await setup({ conn: { facebook_browser_connected_at: null } });
+    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented())).body.error, "facebook_not_connected");
+  }
+  {
+    const { app } = await setup();
+    const r = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pgX" }));
+    assert.equal(r.status, 404);
+    for (let i = 3; i <= 5; i++) {
+      await db.savePage(K.page(`pg${i}`, PH));
+      assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ page_id: `pg${i}` }))).status, 201);
+    }
+    const busy = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2" }));
+    assert.equal(busy.status, 409); assert.equal(busy.body.error, "too_many_campaigns");
+    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg3" }))).status, 200, "its own page's campaign does not count against it");
+  }
+
+  // ── two Pages and a page target: the agent must confirm one first (R3) ──
+  {
+    const pages = [{ url: "https://www.facebook.com/agentone", name: "One" }, { url: "https://www.facebook.com/agenttwo", name: "Two" }];
+    const { app } = await setup({ conn: { facebook_pages: pages } });
+    const r = await call(app, "POST", "/api/posting/campaigns", consented());
+    assert.equal(r.status, 409); assert.equal(r.body.error, "page_not_confirmed");
+    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ targets: ["groups"] }))).status, 201, "groups only needs no Page");
+    await db.setConnection(PH, { posting_permission: { page_id: pages[1].url } });
+    const ok = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2", targets: ["page", "groups"] }));
+    assert.equal(ok.status, 201); assert.deepEqual(ok.body.campaign.targets, ["page", "groups"]);
+  }
+
+  // ── the kill switch: create/resume/approve refused; stop, pause and skip always work ──
+  {
+    const env = await setup();
+    const { app } = env;
+    const c = await pendingCampaign(env);
+    globalOff();
+    const cr = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2" }));
+    assert.equal(cr.status, 409); assert.equal(cr.body.error, "posting_disabled"); assert.equal(cr.body.reason, "global_off");
+    const ap = await call(app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`);
+    assert.equal(ap.status, 409); assert.equal(ap.body.reason, "global_off");
+    assert.equal((await store.getPostingCampaign(c.id)).posts[0].status, "pending_approval");
+    const sk = await call(app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/skip`);
+    assert.equal(sk.status, 200); assert.equal(sk.body.campaign.posts[0].status, "skipped");
+    const pa = await call(app, "POST", `/api/posting/campaigns/${c.id}/pause`);
+    assert.equal(pa.status, 200); assert.equal(pa.body.campaign.status, "paused"); assert.equal(pa.body.campaign.pause_reason, "agent");
+    const re = await call(app, "POST", `/api/posting/campaigns/${c.id}/resume`);
+    assert.equal(re.status, 409); assert.equal(re.body.reason, "global_off");
+    const st = await call(app, "POST", `/api/posting/campaigns/${c.id}/stop`);
+    assert.equal(st.status, 200); assert.equal(st.body.campaign.status, "stopped");
+    globalOn();
+    // Restart: a stopped campaign is reactivated by create with the new consent.
+    const again = await call(app, "POST", "/api/posting/campaigns", consented());
+    assert.equal(again.status, 201); assert.equal(again.body.campaign.status, "running"); assert.ok(again.body.campaign.restarted_at);
+  }
+
+  // ── approve with posting on; unknown post → 404; resume refused while a reconnect is due ──
+  {
+    const env = await setup();
+    const c = await pendingCampaign(env);
+    assert.equal((await call(env.app, "POST", `/api/posting/campaigns/${c.id}/posts/nope/approve`)).status, 404);
+    const ap = await call(env.app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`);
+    assert.equal(ap.status, 200); assert.equal(ap.body.campaign.posts[0].status, "scheduled");
+    assert.equal(ap.body.campaign.posts[0].copy, undefined, "copy is shown only while pending");
+    await call(env.app, "POST", `/api/posting/campaigns/${c.id}/pause`);
+    await db.setConnection(PH, { facebook_needs_reconnect: true, facebook_needs_reconnect_at: K.iso(K.NOW.getTime() + K.HOUR) });
+    const re = await call(env.app, "POST", `/api/posting/campaigns/${c.id}/resume`);
+    assert.equal(re.status, 409); assert.equal(re.body.error, "needs_reconnect");
+    await db.setConnection(PH, { facebook_browser_connected_at: K.iso(K.NOW.getTime() + 2 * K.HOUR) });
+    const ok = await call(env.app, "POST", `/api/posting/campaigns/${c.id}/resume`);
+    assert.equal(ok.status, 200); assert.equal(ok.body.campaign.status, "running");
+    await call(env.app, "POST", `/api/posting/campaigns/${c.id}/stop`);
+    const st = await call(env.app, "POST", `/api/posting/campaigns/${c.id}/resume`);
+    assert.equal(st.status, 409); assert.equal(st.body.error, "not_paused");
+  }
+
+  // ── another phone's campaign reads as missing, for every route ──
+  {
+    const env = await setup();
+    const c = await pendingCampaign(env);
+    const other = env.as(OTHER);
+    for (const [m, p] of [["GET", ""], ["POST", "/stop"], ["POST", "/pause"], ["POST", "/resume"], ["POST", "/posts/p1/approve"], ["POST", "/posts/p1/skip"]]) {
+      assert.equal((await call(other, m, `/api/posting/campaigns/${c.id}${p}`)).status, 404, p);
+    }
+    assert.equal((await store.getPostingCampaign(c.id)).status, "running");
+    assert.deepEqual((await call(other, "GET", "/api/posting/campaigns")).body.campaigns, []);
+    const mine = await call(env.app, "GET", "/api/posting/campaigns?page_id=pg1");
+    assert.equal(mine.body.campaigns.length, 1);
+    assert.equal((await call(env.app, "GET", "/api/posting/campaigns?page_id=pg2")).body.campaigns.length, 0);
+  }
+
+  // ── publicView: no browser secret, no store internals, post_url only when posted ──
+  {
+    const env = await setup();
+    const c = await pendingCampaign(env, { copy: "טקסט" });
+    await store.mutatePostingCampaign(c.id, (cur) => ({
+      page_snapshot: { cdpUrl: "wss://x" }, view_url: "https://viewer.driver.dev?ws=wss://x", cdpUrl: "wss://x",
+      posts: cur.posts.concat([
+        { id: "p2", status: "posted", group_id: "111", group_name: "דירות בחיפה", post_url: "https://www.facebook.com/groups/111/posts/5", copy_hash: "h", attempt_key: "k".repeat(32), click_id: "c".repeat(32) },
+        { id: "p3", status: "failed", group_id: "999", post_url: "https://www.facebook.com/groups/999/posts/6", error_code: "wss://leak" },
+      ]),
+    }));
+    const r = await call(env.app, "GET", `/api/posting/campaigns/${c.id}`);
+    assert.equal(r.status, 200);
+    for (const s of ["wss://", "viewer.driver.dev", "copy_hash", "attempt_key", "click_id", "page_snapshot", "cdpUrl", "k".repeat(32)]) assert.ok(!r.raw.includes(s), s);
+    const [p1, p2, p3] = r.body.campaign.posts;
+    assert.equal(p1.copy, "טקסט"); assert.equal(p2.post_url, "https://www.facebook.com/groups/111/posts/5");
+    assert.equal(p3.post_url, undefined); assert.equal(p3.group_name, "קבוצה פרטית"); assert.equal(p3.error_code, null);
+    const v = createRouter.publicView({ id: "x", posts: [{ id: "a", status: "posted", post_url: "wss://evil" }], groups: [{ group_id: "1", url: "https://www.facebook.com/groups/1" }] });
+    assert.ok(!JSON.stringify(v).includes("wss://") && !JSON.stringify(v).includes("facebook.com/groups/1"));
+    assert.equal(createRouter.publicView(null), null);
+  }
+
+  console.log("routes/posting.test.js ok");
+})().catch((e) => { console.error(e); process.exit(1); });

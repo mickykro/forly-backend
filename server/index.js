@@ -250,11 +250,15 @@ if (driverBoot.enabled) {
 
   // ── automated group posting: the campaign sweeper (posting-sweeper.js) ──
   const postingSweeper = require("./posting-sweeper");
-  postingSweeper.startSweeper(postingSweeper.liveDeps({
+  const postingDeps = postingSweeper.liveDeps({
     greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
     operatorPhone: process.env.POSTING_OPERATOR_PHONE,
-  }));
+  });
+  postingSweeper.startSweeper(postingDeps);
   console.log("driver: posting sweeper started");
+  // The campaign card's API (consent, campaigns, one-tap links), same deps as the sweeper.
+  const createPostingRouter = require("./routes/posting");
+  app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET, pageBaseUrl: PAGE_BASE_URL, deps: postingDeps }));
 
   // ── the agent's own Yad2/Madlan listings, read and offered as draft pages ──
   const createListingDraftsRouter = require("./routes/listing-drafts");

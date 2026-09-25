@@ -37,6 +37,47 @@ const card = (title, sub, extraHtml = "", redirectTo = null) =>
   `padding:12px 18px;font-size:1rem;width:100%;margin-top:10px;cursor:pointer}</style></head>` +
   `<body><div class="card"><h1>${esc(title)}</h1><p>${esc(sub)}</p>${extraHtml}</div></body></html>`;
 
+// ── the merged group catalog (GET /group-catalog, the share queue, routes/posting.js) ──
+// The bundled seed (Manus research, 50 groups — see
+// docs/distribution/GROUP-CATALOG.md) is the always-present default;
+// Firestore entries merge ON TOP by URL, so the operator can add groups,
+// override names/cities, or disable a seed entry with active:false —
+// all without a deploy. URLs normalized so checkbox state matches the
+// agent's saved (sanitized) list.
+const GROUP_SEED = require("../distribution/group-seed.json")
+  .map((g) => ({ ...g, url: shareKit.sanitizeGroups([g.url])[0] }))
+  .filter((g) => g.url);
+// listing_type=sale|rent marks which groups actually accept that kind of
+// listing, so a sale isn't pushed at rental-only groups. Nothing is
+// hidden — mismatches are flagged and sorted last, the agent decides.
+async function mergedCatalog(db, want) {
+  const byUrl = new Map();
+  for (const g of GROUP_SEED) byUrl.set(g.url, { ...g, active: true });
+  for (const g of await db.listGroupCatalog()) {
+    const url = g.url && shareKit.sanitizeGroups([g.url])[0];
+    if (url) byUrl.set(url, { ...(byUrl.get(url) || {}), ...g, url });
+  }
+  return [...byUrl.values()]
+    .filter((g) => g.active !== false)
+    .map((g) => {
+      const types = Array.isArray(g.listing_types) ? g.listing_types : [];
+      return {
+        name: g.name || g.url, url: g.url,
+        city: g.city || null, members: Number(g.members) || null,
+        listing_types: types,
+        languages: Array.isArray(g.languages) ? g.languages : [],
+        // "unknown" is honest: group rules cannot be inferred from a name.
+        // The curated 2026-08 set may use explicitly_allowed only when its
+        // stored public evidence names a broker/agent/professional listing rule.
+        agent_policy: g.agent_policy || "unknown",
+        policy_evidence: g.policy_evidence || null,
+        source_url: g.source_url || null,
+        curated_at: g.curated_at || null,
+        match: !want || !types.length || types.includes(want),
+      };
+    });
+}
+
 module.exports = function createDistributionRouter(ctx) {
   const { requireAuth, verifyActionToken, verifySession, readToken,
           authSecret, adminApiSecret, pageBaseUrl, greenInstance, greenToken } = ctx;
@@ -278,49 +319,10 @@ module.exports = function createDistributionRouter(ctx) {
   });
 
   // ── GET /group-catalog — curated groups for the dashboard picker ──
-  // The bundled seed (Manus research, 50 groups — see
-  // docs/distribution/GROUP-CATALOG.md) is the always-present default;
-  // Firestore entries merge ON TOP by URL, so the operator can add groups,
-  // override names/cities, or disable a seed entry with active:false —
-  // all without a deploy. URLs normalized so checkbox state matches the
-  // agent's saved (sanitized) list.
-  const GROUP_SEED = require("../distribution/group-seed.json")
-    .map((g) => ({ ...g, url: shareKit.sanitizeGroups([g.url])[0] }))
-    .filter((g) => g.url);
-  // listing_type=sale|rent marks which groups actually accept that kind of
-  // listing, so a sale isn't pushed at rental-only groups. Nothing is
-  // hidden — mismatches are flagged and sorted last, the agent decides.
-  async function mergedCatalog(want) {
-    const byUrl = new Map();
-    for (const g of GROUP_SEED) byUrl.set(g.url, { ...g, active: true });
-    for (const g of await db.listGroupCatalog()) {
-      const url = g.url && shareKit.sanitizeGroups([g.url])[0];
-      if (url) byUrl.set(url, { ...(byUrl.get(url) || {}), ...g, url });
-    }
-    return [...byUrl.values()]
-      .filter((g) => g.active !== false)
-      .map((g) => {
-        const types = Array.isArray(g.listing_types) ? g.listing_types : [];
-        return {
-          name: g.name || g.url, url: g.url,
-          city: g.city || null, members: Number(g.members) || null,
-          listing_types: types,
-          languages: Array.isArray(g.languages) ? g.languages : [],
-          // "unknown" is honest: group rules cannot be inferred from a name.
-          // The curated 2026-08 set may use explicitly_allowed only when its
-          // stored public evidence names a broker/agent/professional listing rule.
-          agent_policy: g.agent_policy || "unknown",
-          policy_evidence: g.policy_evidence || null,
-          source_url: g.source_url || null,
-          curated_at: g.curated_at || null,
-          match: !want || !types.length || types.includes(want),
-        };
-      });
-  }
-
+  // (mergedCatalog lives at module scope, above the router factory)
   router.get("/group-catalog", requireAuth(authSecret), async (req, res) => {
     const want = String(req.query.listing_type || "").trim();
-    const catalog = await mergedCatalog(want);
+    const catalog = await mergedCatalog(db, want);
     const business = await db.getBusiness(req.user.userId);
     const selected = shareKit.sanitizeGroups(
       (business && business.distribution && business.distribution.groups) || []);
@@ -452,7 +454,7 @@ module.exports = function createDistributionRouter(ctx) {
   // catalog, plus — the point of the feature — an offer to reuse the groups
   // already chosen for another property in the SAME city.
   async function pickerFor(session) {
-    const catalog = await mergedCatalog(session.snapshot.listing_type || "sale");
+    const catalog = await mergedCatalog(db, session.snapshot.listing_type || "sale");
     // Reuse offer: the same city is the best match, but "the groups I picked
     // last time" is worth offering in ANY city — most agents work one area
     // and re-tick the same list otherwise.
@@ -724,3 +726,4 @@ module.exports = function createDistributionRouter(ctx) {
 
   return router;
 };
+module.exports.mergedCatalog = mergedCatalog;
