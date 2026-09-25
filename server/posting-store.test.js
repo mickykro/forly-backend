@@ -342,13 +342,22 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
   {
     S._test.reset();
     const at = NOW.toISOString();
-    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: 0, text: "דירה יפה" }), code("invalid_input"));
-    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: { group: "https://www.facebook.com/groups/1" }, likes: 0 }), code("invalid_input"));
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: [], text: "דירה יפה" }), code("invalid_input"));
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: { group: "https://www.facebook.com/groups/1" }, likes: [] }), code("invalid_input"));
+    // likes: an array of {post_id, at} — a numeric Facebook id and an ISO instant, nothing else
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: 1 }), code("invalid_input"), "likes must be an array");
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: [{ post_id: "not-a-number", at }] }), code("invalid_input"), "post_id must be numeric");
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: [{ post_id: "123", at }] }), code("invalid_input"), "post_id must be at least 5 digits");
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: [{ post_id: "1234567890", at: new Date(NOW) }] }), code("invalid_input"), "at must be an ISO string, not a Date");
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: [{ post_id: "1234567890", at: "not a date" }] }), code("invalid_input"), "at must parse");
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: [{ post_id: "1234567890", at, author: "Ann" }] }), code("invalid_input"), "no extra fields on a like");
+    await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: Array.from({ length: 6 }, (_, i) => ({ post_id: String(1000000 + i), at })) }), code("invalid_input"), "at most 5 likes");
     assert.equal(S._test.maps.dwell_sessions.size, 0);
-    const id = await S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: { scrolls: 12, posts_viewed: 5 }, likes: 1 });
-    const idH = await S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: 0, halt_related: true });
+    const id = await S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: { scrolls: 12, posts_viewed: 5, like: 1 }, likes: [{ post_id: "1234567890", at }] });
+    const idH = await S.saveDwellSession({ phone: "972500000001", platform: "facebook", at, actions_summary: {}, likes: [], halt_related: true });
     const d = S._test.maps.dwell_sessions.get(id);
     assert.deepEqual(Object.keys(d).sort(), ["actions_summary", "at", "expire_at", "halt_related", "id", "likes", "phone", "platform"]);
+    assert.deepEqual(d.likes, [{ post_id: "1234567890", at }]);
     assert.equal(d.expire_at.getTime(), NOW.getTime() + 90 * DAY);
     assert.equal(S._test.maps.dwell_sessions.get(idH).expire_at.getTime(), NOW.getTime() + 365 * DAY);
     const listed = await S.listDwellSessionsByPhone("972500000001", NOW.getTime() - DAY);
@@ -356,6 +365,14 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.deepEqual(listed.map((x) => x.at), [at, at]);
     assert.deepEqual(listed.map((x) => x.expire_at).sort(), [new Date(NOW.getTime() + 90 * DAY).toISOString(), new Date(NOW.getTime() + 365 * DAY).toISOString()].sort());
     assert.equal((await S.listDwellSessionsByPhone("972500000001", NOW.getTime() + 1)).length, 0);
+
+    // ── listRecentLikedPostIds: the set of post ids liked since sinceMs ──
+    await S.saveDwellSession({ phone: "972500000001", platform: "facebook", at: new Date(NOW.getTime() - 2 * DAY).toISOString(), actions_summary: { like: 1 }, likes: [{ post_id: "555555", at: new Date(NOW.getTime() - 2 * DAY).toISOString() }] });
+    const recent = await S.listRecentLikedPostIds("972500000001", NOW.getTime() - 3 * DAY);
+    assert.ok(recent instanceof Set);
+    assert.deepEqual([...recent].sort(), ["1234567890", "555555"]);
+    assert.deepEqual([...(await S.listRecentLikedPostIds("972500000001", NOW.getTime() + 1))], []);
+    assert.deepEqual([...(await S.listRecentLikedPostIds("972500099999", NOW.getTime() - 3 * DAY))], []);
   }
 
   // ── the property→target dedup expires after limits.dedup_days (controller ruling 2) ──

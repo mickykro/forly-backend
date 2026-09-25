@@ -9,26 +9,33 @@
  *  - passive dwell (scroll, open a post, let a video play) is part of
  *    connecting and needs no consent beyond the fleet/account switches;
  *  - visible interactions (like, story) additionally need
- *    posting_permission.allows_visible_interactions AND the fleet toggle.
- *    dwell() receives `opts.allowVisible` and skips visible steps entirely
- *    when it is false — posting-guard.assertAllowed() is still asked
- *    immediately before each one (R2), belt and suspenders.
+ *    posting_permission.allows_visible_interactions AND the fleet toggle
+ *    (settings/posting.visible_interactions_enabled). Both live in one
+ *    place — posting-guard.assertAllowed({action:"like"}) — which
+ *    browseSession asks once, non-throwing, to compute `opts.allowVisible`
+ *    for dwell(); dwell() skips visible steps entirely when it is false, and
+ *    still asks the guard again, immediately before each click (R2), belt
+ *    and suspenders.
  *
  * Writes are limited to likes (<= INTERACTION.likes_max per session), never
  * on a post inside the group we are about to post in, never sponsored,
  * sensitive, a competitor, or under INTERACTION.min_reactions, and never a
- * post whose id we already liked this session (or, when the caller supplies
- * `opts.recentlyLikedPostIds`, in the last 30 days). No comments, no
- * follows, no friend requests, no search, no profiles. Nothing is typed.
+ * post whose id we already liked this session or — via
+ * `opts.recentlyLikedPostIds`, which browseSession fills from
+ * posting-store.listRecentLikedPostIds — in the last 30 days. No comments,
+ * no follows, no friend requests, no search, no profiles. Nothing is typed.
  *
  * Idempotency (R2): before clicking, the like button's own aria-pressed/label
  * is read — already liked -> skip; after clicking, re-read once; uncertain ->
- * `like_uncertain`, never retried or toggled.
+ * `like_uncertain`, never retried or toggled, and never counted as "liked"
+ * (only a confirmed `like` is saved to posting-store.saveDwellSession's
+ * `likes: [{post_id, at}]`, which is exactly what the 30-day check reads back).
  *
  * Nothing readable is persisted or logged: no post text, author names, story
  * names, hrefs, cdpUrl or profile names — only action names and, on a like,
- * the numeric Facebook post id, which never leaves this module (browseSession
- * folds the log into counts before it reaches posting-store).
+ * the numeric Facebook post id, which never leaves this module except as
+ * that {post_id, at} pair (browseSession folds everything else into counts
+ * before it reaches posting-store).
  *
  * [Unverified] SELECTORS are a starting point; Task 24's dry run fixes them.
  */
@@ -259,8 +266,9 @@ function aggregate7d(sessions) {
   const out = { sessions: 0 };
   for (const s of sessions) {
     out.sessions += 1;
+    // actions_summary.like already carries the like count; likes itself is
+    // the (short, post-id) idempotency record, not a count to sum here.
     for (const [k, v] of Object.entries(s.actions_summary || {})) out[k] = (out[k] || 0) + (Number(v) || 0);
-    out.like = (out.like || 0) + (Number(s.likes) || 0);
   }
   return out;
 }
@@ -274,6 +282,8 @@ function aggregate7d(sessions) {
  * Task 16b's haltAccount owns halts; posting-tick.js's browse() (the sweeper
  * call site) reads `signal` and calls haltAccount itself.
  */
+const LIKE_LOOKBACK_DAYS = 30;
+
 async function browseSession({ phone, profileName, note } = {}, deps = {}) {
   const withPage = deps.withPage || driver.withPage;
   const db = deps.db || require("./db");
@@ -283,14 +293,21 @@ async function browseSession({ phone, profileName, note } = {}, deps = {}) {
 
   if (!(await checkGuard("session", pageDeps))) return { summary: {}, signal: "ok" };
 
-  const allowVisible = !!(conn.posting_permission && conn.posting_permission.allows_visible_interactions === true);
+  // Both conditions (account permission, fleet toggle) live in one place —
+  // posting-guard's own "like" check — asked here, non-throwing, only to
+  // decide whether to attempt visible interactions at all; it is asked again,
+  // throwing-checked, immediately before every click inside dwell() (R2).
+  const allowVisible = await checkGuard("like", pageDeps);
+  const since = Date.now() - LIKE_LOOKBACK_DAYS * 86400000;
+  const recentlyLikedPostIds = await store.listRecentLikedPostIds(phone, since).catch(() => new Set());
+
   const { log, signal } = await withPage(
     { duration: 600, note: note || "forly-dwell:", profile: { name: profileName, persist: true } },
     async (page) => {
       await page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
       let signal = await readSignal(page);
       if (signal !== "ok") return { log: [], signal };
-      const log = await dwell(page, { allowVisible }, pageDeps);
+      const log = await dwell(page, { allowVisible, recentlyLikedPostIds }, pageDeps);
       signal = await readSignal(page);
       return { log, signal };
     },
@@ -299,9 +316,13 @@ async function browseSession({ phone, profileName, note } = {}, deps = {}) {
 
   const summary = summarize(log);
   const at = new Date();
+  // Only a confirmed like counts as "liked" for idempotency — like_uncertain
+  // is neither retried nor recorded as done, per R2.
+  const likes = log.filter((l) => l.action === "like" && l.detail && l.detail.post_id)
+    .map((l) => ({ post_id: l.detail.post_id, at: l.at })).slice(0, 5);
   await store.saveDwellSession({
     phone, platform: "facebook", at: at.toISOString(),
-    actions_summary: summary, likes: summary.like || 0, halt_related: signal !== "ok",
+    actions_summary: summary, likes, halt_related: signal !== "ok",
   }).catch(() => {});
   const week = await store.listDwellSessionsByPhone(phone, at.getTime() - 7 * 86400000).catch(() => []);
   await db.setConnection(phone, { last_browse_at: at.toISOString(), dwell_summary_7d: aggregate7d(week) }).catch(() => {});

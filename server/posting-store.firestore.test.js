@@ -200,14 +200,23 @@ const doc = (p) => fake.docs.get(p);
   assert.deepEqual(await S.listConnectedPhones(), ["972500000011"]);
   assert.deepEqual(await S.listPhonesHaltedSince(new Date(NOW.getTime() - 3600000).toISOString()), ["972500000011"]);
 
-  // ── dwell sessions: expire_at is a Date (a TTL-able Timestamp) ──
-  const id = await S.saveDwellSession({ phone: "972500000001", platform: "facebook", at: NOW, actions_summary: { scrolls: 3 }, likes: 0 });
+  // ── dwell sessions: expire_at is a Date (a TTL-able Timestamp); likes is an
+  // array of {post_id, at}, stored and read back plainly (no Timestamp involved) ──
+  await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at: NOW, actions_summary: {}, likes: [{ post_id: "abc", at: NOW.toISOString() }] }), code("invalid_input"));
+  await assert.rejects(S.saveDwellSession({ phone: "972500000001", platform: "facebook", at: NOW, actions_summary: {}, likes: [{ post_id: "1234567890", at: NOW }] }), code("invalid_input"), "at must be an ISO string");
+  const id = await S.saveDwellSession({ phone: "972500000001", platform: "facebook", at: NOW, actions_summary: { scrolls: 3, like: 1 }, likes: [{ post_id: "1234567890", at: NOW.toISOString() }] });
   assert.ok(doc(`dwell_sessions/${id}`).expire_at instanceof Timestamp);
+  assert.deepEqual(doc(`dwell_sessions/${id}`).likes, [{ post_id: "1234567890", at: NOW.toISOString() }]);
   {
     const listed = await S.listDwellSessionsByPhone("972500000001", NOW.getTime() - 1);
     assert.equal(listed.length, 1);
     assert.equal(listed[0].expire_at, new Date(NOW.getTime() + 90 * DAY).toISOString(), "a Timestamp comes back as ISO");
     assert.equal(listed[0].at, NOW.toISOString());
+    assert.deepEqual(listed[0].likes, [{ post_id: "1234567890", at: NOW.toISOString() }]);
+  }
+  {
+    const recent = await S.listRecentLikedPostIds("972500000001", NOW.getTime() - 1);
+    assert.deepEqual([...recent], ["1234567890"]);
   }
 
   // ── two concurrent reservations for one remaining budget slot: exactly one wins ──

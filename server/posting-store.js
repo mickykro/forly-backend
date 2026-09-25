@@ -167,9 +167,15 @@ function listPhonesHaltedSince(iso) {
 }
 
 // ── dwell (browse) sessions (dwell_sessions/{id}) ──
-// Only these fields are ever stored — no post text, names or URLs.
+// Only these fields are ever stored — no post text, names or URLs. `likes` is
+// the small set of post ids actually liked (Task 17's 30-day idempotency
+// check reads it back via listRecentLikedPostIds); the LIKE COUNT for display
+// stays where it always was, in actions_summary.like.
 const DWELL_FIELDS = new Set(["phone", "platform", "at", "actions_summary", "likes", "halt_related"]);
 const DWELL_RETENTION_DAYS = 90, DWELL_HALT_RETENTION_DAYS = 365;
+const DWELL_LIKES_MAX = 5;
+const POST_ID_RE = /^\d{5,25}$/;
+const LIKE_FIELDS = new Set(["post_id", "at"]);
 
 function cleanActionsSummary(s) {
   if (s === undefined || s === null) return {};
@@ -182,6 +188,23 @@ function cleanActionsSummary(s) {
   return { ...s };
 }
 
+// A Facebook numeric post id and the ISO instant it was liked — nothing else.
+// `at` must already be an ISO string (this is a record of what happened, not
+// a place to parse arbitrary date-likes).
+function cleanLikes(v) {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) throw fail("invalid_input", "likes must be an array of {post_id, at}");
+  if (v.length > DWELL_LIKES_MAX) throw fail("invalid_input", `likes may not exceed ${DWELL_LIKES_MAX} entries`);
+  return v.map((l) => {
+    if (!isPlainObject(l)) throw fail("invalid_input", "each like must be an object");
+    const extra = Object.keys(l).filter((k) => !LIKE_FIELDS.has(k));
+    if (extra.length) throw fail("invalid_input", `like may not carry ${extra.join(", ")}`);
+    if (typeof l.post_id !== "string" || !POST_ID_RE.test(l.post_id)) throw fail("invalid_input", "post_id must be a Facebook numeric id");
+    if (typeof l.at !== "string" || Number.isNaN(Date.parse(l.at)) || new Date(l.at).toISOString() !== l.at) throw fail("invalid_input", "like.at must be an ISO string");
+    return { post_id: l.post_id, at: l.at };
+  });
+}
+
 async function saveDwellSession(s) {
   if (!isPlainObject(s)) throw fail("invalid_input", "dwell session must be an object");
   const extra = Object.keys(s).filter((k) => !DWELL_FIELDS.has(k));
@@ -189,8 +212,7 @@ async function saveDwellSession(s) {
   const phone = assertId(s.phone, "phone");
   if (typeof s.platform !== "string" || !PLATFORM.test(s.platform)) throw fail("invalid_input", "invalid platform");
   const at = toDate(s.at);
-  const likes = s.likes === undefined ? 0 : s.likes;
-  if (!Number.isInteger(likes) || likes < 0) throw fail("invalid_input", "likes must be a non-negative integer");
+  const likes = cleanLikes(s.likes);
   if (s.halt_related !== undefined && typeof s.halt_related !== "boolean") throw fail("invalid_input", "halt_related must be boolean");
   const halt_related = s.halt_related === true;
   const id = crypto.randomBytes(12).toString("hex");
@@ -219,6 +241,15 @@ async function listDwellSessionsByPhone(phone, sinceMs) {
   return rows.sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0));
 }
 
+// The post ids this phone's dwell sessions liked since sinceMs — Task 17's
+// like-idempotency check (a post liked recently is never liked again).
+async function listRecentLikedPostIds(phone, sinceMs) {
+  const sessions = await listDwellSessionsByPhone(phone, sinceMs);
+  const ids = new Set();
+  for (const s of sessions) for (const l of s.likes || []) if (l && l.post_id) ids.add(l.post_id);
+  return ids;
+}
+
 module.exports = {
   // campaigns
   campaignId, createPostingCampaignIfAbsent, getPostingCampaign, updatePostingCampaign, mutatePostingCampaign,
@@ -233,7 +264,7 @@ module.exports = {
   mutateConnection, listOpenAttemptsByCampaign: attempts.listOpenAttemptsByCampaign,
   listPostActionsByPhone, listConnectedPhones, listPhonesHaltedSince,
   // dwell sessions
-  saveDwellSession, listDwellSessionsByPhone,
+  saveDwellSession, listDwellSessionsByPhone, listRecentLikedPostIds,
   _test: {
     reset() { for (const m of Object.values(maps)) m.clear(); attempts._test.reset(); },
     maps: Object.assign({}, maps, attempts._test.maps),
