@@ -150,7 +150,9 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
     const patch = { posting_halts: prior.concat([entry]), posting_last_halt_at: at, posting_last_halt_code: cls };
     const v = { disabled: false, owner_review: false, penalty_until: null, reconnect: false };
     if (DISABLING.has(cls) || cls === "suspected_compromise") {
-      Object.assign(patch, { posting_disabled_until_admin: true, posting_disabled_at: at, posting_disabled_class: cls });
+      // The profile generation the halt caught: lifting a suspected
+      // compromise needs a reconnect with a NEWER one (Task 21).
+      Object.assign(patch, { posting_disabled_until_admin: true, posting_disabled_at: at, posting_disabled_class: cls, posting_disabled_profile_gen: conn.facebook_profile_gen || 0 });
       v.disabled = true;
       if (DISABLING.has(cls) && prior.some((h) => DISABLING.has(h.code) && within(h, OWNER_REVIEW_WINDOW_DAYS))) {
         patch.posting_owner_review_required = true;

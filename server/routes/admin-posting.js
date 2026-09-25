@@ -3,6 +3,7 @@
  * (Task 21), mounted at /api/admin/posting behind requireAdmin:
  *
  *   GET  /overview                         the fleet: switches, counts, halts by class, health
+ *                                          (a failing section → `warnings`, still 200)
  *   POST /switch           { enabled, reason, version }            global kill switch (R2)
  *   POST /switch/platform  { platform, enabled, reason, version }  settings/posting.platforms.<p>
  *   POST /switch/visible   { enabled, reason, version }            visible_interactions_enabled
@@ -40,7 +41,8 @@ function cleanReason(v) {
 }
 
 // What an operator may do with an account, from the connection alone (R5):
-//   suspected_compromise            revoke the profile; never a re-enable
+//   suspected_compromise            revoke the profile; the OWNER re-enables,
+//                                   only once the agent reconnected a new profile
 //   restricted / owner review /
 //   an unknown disabling class      the owner re-enables (POSTING_OWNER_PHONES)
 //   captcha / checkpoint            re-enable once the agent confirmed integrity
@@ -49,11 +51,21 @@ function reenableRule(conn) {
   const review = conn.posting_owner_review_required === true;
   if (!disabled && !review) return "not_disabled";
   const cls = conn.posting_disabled_class || null;
-  if (disabled && cls === "suspected_compromise") return "revoke_only";
+  if (disabled && cls === "suspected_compromise") return "compromise";
   if (review || !AGENT_CONFIRMED.has(cls)) return "owner";
   return "agent_confirmed";
 }
-const ACTIONS = { not_disabled: [], revoke_only: ["revoke_profile"], owner: ["owner_reenable"], agent_confirmed: ["reenable"] };
+const ACTIONS = { not_disabled: [], compromise: ["revoke_profile", "reenable_after_reconnect"], owner: ["owner_reenable"], agent_confirmed: ["reenable"] };
+
+// Did the agent reconnect a NEW profile after the suspected compromise? The
+// profile generation must have moved past the one the halt recorded, and the
+// connect must be later than the halt. A halt recorded before the generation
+// was stored cannot prove it: refused (fail closed).
+function reconnectedAfterHalt(conn) {
+  const haltGen = conn.posting_disabled_profile_gen;
+  if (!Number.isInteger(haltGen)) return false;
+  return (conn.facebook_profile_gen || 0) > haltGen && ms(conn.facebook_browser_connected_at) > ms(conn.posting_disabled_at);
+}
 
 function accountRow(phone, conn, now) {
   const halts = (conn.posting_halts || []).filter((h) => h && now - ms(h.at) < MS_DAY);
@@ -73,6 +85,7 @@ function accountRow(phone, conn, now) {
     profile_state: conn.facebook_profile_state || null,
     reenabled_at: conn.posting_reenabled_at || null,
     allowed_actions: ACTIONS[rule],
+    reconnected_after_halt: rule === "compromise" && reconnectedAfterHalt(conn),
     halts_24h: halts.map((h) => ({ code: h.code, at: h.at })),
   };
 }
@@ -116,10 +129,13 @@ module.exports = function createAdminPostingRouter({
   }
 
   // The halted/disabled phones an operator can see (a halt is kept a year).
+  // Either query alone is enough to find a ref (a disabled account was
+  // halted), so one missing index does not block a re-enable.
   async function knownPhones(now) {
-    const a = await store.listDisabledPhones();
-    const b = await store.listPhonesHaltedSince(iso(now.getTime() - 365 * MS_DAY));
-    return [...new Set(a.concat(b))];
+    const got = await Promise.allSettled([store.listDisabledPhones(), store.listPhonesHaltedSince(iso(now.getTime() - 365 * MS_DAY))]);
+    const ok = got.filter((g) => g.status === "fulfilled");
+    if (!ok.length) throw got[0].reason;
+    return [...new Set(ok.flatMap((g) => g.value))];
   }
   async function resolveAccount(param, now) {
     const p = String(param || "");
@@ -128,36 +144,56 @@ module.exports = function createAdminPostingRouter({
     return (await knownPhones(now)).find((ph) => refOf(ph) === p) || null;
   }
 
+  // The overview degrades: a section whose query fails (a missing index above
+  // all — Firestore FAILED_PRECONDITION, code 9) is left out and named in
+  // `warnings`; the rest still loads, with status 200.
+  const indexMissing = (e) => !!e && (e.code === 9 || /^failed[-_]precondition$/i.test(String(e.code)) || /FAILED_PRECONDITION|requires an index/i.test(String(e.message)));
   router.get("/overview", requireAdmin, wrap(async (req, res) => {
     const now = clock();
-    const setting = (await db.getSetting("posting")) || {};
-    const health = (await db.getSetting("posting_health")) || {};
-    const campaigns = {};
-    for (const s of STATUSES) campaigns[s] = await store.countPostingCampaignsByStatus(s);
-    const disabled = new Set(await store.listDisabledPhones());
-    const recent = await store.listPhonesHaltedSince(iso(now.getTime() - MS_DAY));
+    const warnings = [];
+    const section = async (name, fn, fallback) => {
+      try { return await fn(); } catch (e) {
+        const w = `${indexMissing(e) ? "index_missing" : "query_failed"}:${name}`;
+        if (!warnings.includes(w)) warnings.push(w);
+        console.error(redact(`posting admin overview ${w} (${(e && e.code) || "error"})`));
+        return fallback;
+      }
+    };
+    const setting = await section("switch", async () => (await db.getSetting("posting")) || {}, null);
+    const health = await section("health", async () => (await db.getSetting("posting_health")) || {}, null);
+    const campaigns = await section("campaigns", async () => {
+      const out = {};
+      for (const st of STATUSES) out[st] = await store.countPostingCampaignsByStatus(st);
+      return out;
+    }, null);
+    const disabled = await section("accounts_disabled", () => store.listDisabledPhones(), null);
+    const recent = await section("halts_recent", () => store.listPhonesHaltedSince(iso(now.getTime() - MS_DAY)), []);
     const accounts = [];
-    for (const phone of [...new Set([...disabled, ...recent])]) {
-      const conn = await db.getConnection(phone);
+    for (const phone of [...new Set([...(disabled || []), ...recent])]) {
+      const conn = await section("accounts", () => db.getConnection(phone), null);
       if (conn) accounts.push(accountRow(phone, conn, now.getTime()));
     }
     const halts_by_class = {};
     for (const a of accounts) (halts_by_class[a.class] = halts_by_class[a.class] || []).push(a);
     const halts_24h = accounts.flatMap((a) => a.halts_24h.map((h) => ({ phone_tail: a.phone_tail, ref: a.ref, code: h.code, at: h.at })))
       .sort((x, y) => (x.at < y.at ? 1 : -1));
-    res.json(Object.assign(switchView(setting, env), {
+    const audit = await section("audit", () => store.listAuditEvents({ sinceMs: now.getTime() - 30 * MS_DAY, limit: 20 }), []);
+    // Without the switch doc nothing about the switches is known: null, never a default "on".
+    const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, k === "env_forced_off" ? env.POSTING_ENABLED === "0" : null]));
+    res.json(Object.assign(sw, {
       campaigns, halts_24h, halts_by_class,
-      accounts_disabled: accounts.filter((a) => a.disabled).length,
-      owner_review: accounts.filter((a) => a.owner_review).length,
+      // Counted over the disabled list; unknown when that query failed.
+      accounts_disabled: disabled ? accounts.filter((a) => a.disabled).length : null,
+      owner_review: disabled ? accounts.filter((a) => a.owner_review).length : null,
       owner_configured: ownerSet().size > 0,
-      posting_health: {
+      posting_health: health && {
         last_sweep_at: health.last_sweep_at || null,
         reap_failures: (health.reap_failures || []).slice(0, 20).map((f) => ({ key_tail: f.key_tail, error_code: f.error_code, first_seen_at: f.first_seen_at })),
         reap_failures_count: (health.reap_failures || []).length,
         cancel_failures_count: health.cancel_failures_count || 0,
       },
-      recent_audit: (await store.listAuditEvents({ sinceMs: now.getTime() - 30 * MS_DAY, limit: 20 }))
-        .map((e) => ({ at: e.at, action: e.action, operator_tail: e.operator_tail, target_phone_tail: e.target_phone_tail, reason: e.reason, detail: e.detail })),
+      recent_audit: audit.map((e) => ({ at: e.at, action: e.action, operator_tail: e.operator_tail, target_phone_tail: e.target_phone_tail, reason: e.reason, detail: e.detail })),
+      warnings,
     }));
   }));
 
@@ -224,10 +260,11 @@ module.exports = function createAdminPostingRouter({
     const decide = (conn) => {
       const rule = reenableRule(conn);
       const cls = conn.posting_disabled_class || null;
+      const ownerOnly = rule === "owner" || rule === "compromise";
       if (rule === "not_disabled") verdict = { status: 409, error: "not_disabled" };
-      else if (rule === "revoke_only") verdict = { status: 409, error: "revoke_only" };
-      else if (rule === "owner" && !owners.size) verdict = { status: 403, error: "owner_not_configured" };
-      else if (rule === "owner" && !isOwner) verdict = { status: 403, error: "owner_required" };
+      else if (rule === "compromise" && !reconnectedAfterHalt(conn)) verdict = { status: 409, error: "reconnect_required" };
+      else if (ownerOnly && !owners.size) verdict = { status: 403, error: "owner_not_configured" };
+      else if (ownerOnly && !isOwner) verdict = { status: 403, error: "owner_required" };
       else if (rule === "agent_confirmed" && b.agent_confirmed !== true) verdict = { status: 400, error: "agent_confirmation_required" };
       else verdict = { ok: true, rule, cls };
       if (!verdict.ok) return null;
@@ -236,13 +273,13 @@ module.exports = function createAdminPostingRouter({
       return Object.assign({
         posting_disabled_until_admin: false, posting_owner_review_required: false,
         posting_reenabled_at: at, posting_reenabled_by: by, posting_reenable_reason: reason,
-        posting_reenabled_as: rule === "owner" ? "owner" : "operator",
+        posting_reenabled_as: ownerOnly ? "owner" : "operator",
         facebook_browser_first_connected_at: at, // warm-up restarts
       }, rule === "agent_confirmed" ? { posting_agent_confirmed_at: at } : {});
     };
     await store.mutateConnection(phone, decide);
     if (!verdict.ok) return res.status(verdict.status).json({ error: verdict.error });
-    const as = verdict.rule === "owner" ? "owner" : "operator";
+    const as = verdict.rule === "agent_confirmed" ? "operator" : "owner";
     const audited = await audit(req, "reenable", { phone, reason, detail: { class: verdict.cls || "unknown", as } });
     console.log(`posting admin: account …${tail(phone)} re-enabled (${verdict.cls || "unknown"}, ${as}) by …${by}`);
     res.json({ ok: true, audited, phone_tail: tail(phone), class: verdict.cls, as });

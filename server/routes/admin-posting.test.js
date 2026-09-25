@@ -19,7 +19,7 @@ const SECRET = "admin-posting-secret";
 const ADMIN = "972500000001";
 const OWNER = "972500000009";
 const NOT_ADMIN = "972500000077";
-const P = { captcha: "972521110001", restricted: "972521110002", review: "972521110003", compromised: "972521110004", penalty: "972521110005", fine: "972521110006" };
+const P = { captcha: "972521110001", restricted: "972521110002", review: "972521110003", compromised: "972521110004", penalty: "972521110005", fine: "972521110006", legacy: "972521110007" };
 const ALL_PHONES = [ADMIN, OWNER, NOT_ADMIN, ...Object.values(P)];
 const DAY = 86400000;
 
@@ -70,7 +70,9 @@ const noFullPhone = (raw, what) => {
     await db.setConnection(P.captcha, { posting_disabled_until_admin: true, posting_disabled_class: "captcha", posting_disabled_at: ago(3600e3), posting_last_halt_at: ago(3600e3), posting_halts: [halt("captcha", 3600e3)], facebook_browser_first_connected_at: ago(90 * DAY) });
     await db.setConnection(P.restricted, { posting_disabled_until_admin: true, posting_disabled_class: "restricted", posting_disabled_at: ago(2 * DAY), posting_last_halt_at: ago(2 * DAY), posting_halts: [halt("restricted", 2 * DAY)] });
     await db.setConnection(P.review, { posting_disabled_until_admin: true, posting_owner_review_required: true, posting_disabled_class: "checkpoint", posting_disabled_at: ago(7200e3), posting_last_halt_at: ago(7200e3), posting_halts: [halt("captcha", 10 * DAY), halt("checkpoint", 7200e3)] });
-    await db.setConnection(P.compromised, { posting_disabled_until_admin: true, posting_disabled_class: "suspected_compromise", posting_disabled_at: ago(600e3), posting_last_halt_at: ago(600e3), posting_halts: [halt("suspected_compromise", 600e3)] });
+    await db.setConnection(P.compromised, { posting_disabled_until_admin: true, posting_disabled_class: "suspected_compromise", posting_disabled_at: ago(600e3), posting_disabled_profile_gen: 0, facebook_profile_gen: 0, posting_last_halt_at: ago(600e3), posting_halts: [halt("suspected_compromise", 600e3)] });
+    // Halted before the profile generation was recorded: a reconnect can never be proven.
+    await db.setConnection(P.legacy, { posting_disabled_until_admin: true, posting_disabled_class: "suspected_compromise", posting_disabled_at: ago(3 * DAY), posting_last_halt_at: ago(3 * DAY), posting_halts: [halt("suspected_compromise", 3 * DAY)], facebook_profile_gen: 4, facebook_browser_connected_at: ago(DAY) });
     await db.setConnection(P.penalty, { posting_penalty_until: new Date(now + 13 * DAY).toISOString(), posting_penalty_class: "rate_limited", posting_last_halt_at: ago(1800e3), posting_halts: [halt("rate_limited", 1800e3)] });
     await db.setConnection(P.fine, { facebook_browser_connected_at: ago(DAY) });
     await db.setSetting("posting_health", { last_sweep_at: ago(60e3), reap_failures: [{ key_tail: "abc123", error_code: "tx_failed", first_seen_at: ago(120e3) }], cancel_failures_count: 2 });
@@ -135,14 +137,16 @@ const noFullPhone = (raw, what) => {
     assert.deepEqual(ov.body.campaigns, { running: 1, paused: 1, stopped: 0, completed: 0 });
     assert.equal(ov.body.enabled, true); assert.equal(ov.body.version, 7); assert.equal(ov.body.visible_interactions_enabled, false);
     assert.equal(ov.body.changed_by_tail, "0001"); assert.equal(ov.body.reason, "after breaker");
-    assert.equal(ov.body.accounts_disabled, 4); assert.equal(ov.body.owner_review, 1); assert.equal(ov.body.owner_configured, false);
+    assert.equal(ov.body.accounts_disabled, 5); assert.deepEqual(ov.body.warnings, []); assert.equal(ov.body.owner_review, 1); assert.equal(ov.body.owner_configured, false);
     const byClass = ov.body.halts_by_class;
     const row = (cls) => { assert.equal(byClass[cls].length, 1, cls); return byClass[cls][0]; };
     assert.deepEqual(row("captcha").allowed_actions, ["reenable"]);
     assert.deepEqual(row("restricted").allowed_actions, ["owner_reenable"]);
     assert.deepEqual(row("checkpoint").allowed_actions, ["owner_reenable"], "an owner review is owner-only, whatever the class");
     assert.equal(row("checkpoint").owner_review, true);
-    assert.deepEqual(row("suspected_compromise").allowed_actions, ["revoke_profile"]);
+    const compRow = byClass.suspected_compromise.find((a) => a.phone_tail === "0004");
+    assert.deepEqual(compRow.allowed_actions, ["revoke_profile", "reenable_after_reconnect"]);
+    assert.equal(compRow.reconnected_after_halt, false);
     assert.deepEqual(row("rate_limited").allowed_actions, [], "a penalty lifts itself");
     assert.equal(row("captcha").phone_tail, "0001"); assert.ok(/^acct_[0-9a-f]{24}$/.test(row("captcha").ref));
     assert.ok(!byClass.unknown, "a connected account with no halt is not listed");
@@ -192,25 +196,43 @@ const noFullPhone = (raw, what) => {
     assert.equal(c.posting_disabled_until_admin, false); assert.equal(c.posting_owner_review_required, false, "owner re-enable clears both flags");
     assert.equal(c.posting_reenabled_as, "owner");
 
-    // ── suspected compromise: never re-enabled; the profile is revoked ──
+    // ── suspected compromise: the profile is revoked; the owner lifts it only after a reconnect ──
     r = await post(`/accounts/${P.compromised}/reenable`, { reason: "x" }, as(OWNER));
-    assert.equal(r.status, 409); assert.equal(r.body.error, "revoke_only");
+    assert.equal(r.status, 409); assert.equal(r.body.error, "reconnect_required", "before the reconnect, not even the owner");
     assert.equal((await post(`/accounts/${P.compromised}/revoke-profile`, {})).body.error, "reason_required");
     r = await post(`/accounts/${P.compromised}/revoke-profile`, { reason: "identity mismatch seen" });
     assert.equal(r.status, 200, r.raw);
     assert.deepEqual(revokes.pop(), { phone: P.compromised, platform: "facebook", reason: "suspected_compromise" });
+    // A connect on the SAME profile generation is not a new profile.
+    await db.setConnection(P.compromised, { facebook_browser_connected_at: new Date().toISOString() });
+    assert.equal((await post(`/accounts/${P.compromised}/reenable`, { reason: "x" }, as(OWNER))).body.error, "reconnect_required");
+    // The agent reconnects: routes/connections-browser.js bumps the generation, finish stamps connected_at.
+    await db.setConnection(P.compromised, { facebook_profile_gen: 1, facebook_profile_state: "active", facebook_browser_connected_at: new Date(Date.now() + 1000).toISOString() });
+    ov = await overview();
+    assert.equal(ov.body.halts_by_class.suspected_compromise.find((a) => a.phone_tail === "0004").reconnected_after_halt, true);
+    r = await post(`/accounts/${P.compromised}/reenable`, { reason: "new profile, identity checked" });
+    assert.equal(r.status, 403); assert.equal(r.body.error, "owner_required", "after the reconnect, still owner only");
+    r = await post(`/accounts/${P.compromised}/reenable`, { reason: "new profile, identity checked" }, as(OWNER));
+    assert.equal(r.status, 200, r.raw); assert.equal(r.body.as, "owner"); assert.equal(r.body.class, "suspected_compromise");
+    c = await db.getConnection(P.compromised);
+    assert.equal(c.posting_disabled_until_admin, false); assert.equal(c.posting_owner_review_required, false);
+    assert.ok(c.posting_reenabled_at); assert.equal(c.facebook_browser_first_connected_at, c.posting_reenabled_at, "warm-up restarts");
+    assert.equal(c.posting_reenabled_as, "owner");
+    r = await post(`/accounts/${P.legacy}/reenable`, { reason: "x" }, as(OWNER));
+    assert.equal(r.body.error, "reconnect_required", "no recorded generation: refused");
     // Operator judgement on an account not halted: halted as suspected_compromise, which revokes.
     r = await post(`/accounts/${P.fine}/revoke-profile`, { reason: "agent reports takeover" });
     assert.equal(r.status, 200, r.raw);
     assert.equal(revokes.pop().phone, P.fine);
     c = await db.getConnection(P.fine);
     assert.equal(c.posting_disabled_until_admin, true); assert.equal(c.posting_disabled_class, "suspected_compromise");
+    assert.equal(c.posting_disabled_profile_gen, 0, "the halt records the profile generation it caught");
     assert.equal((await store.getPostingCampaign(cid)).status, "paused", "its running campaign stops (R2)");
 
     // ── every mutation wrote an audit event, tails only, kept a year ──
     const events = await store.listAuditEvents({ limit: 100 });
     const actions = events.map((e) => e.action).sort();
-    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible"]);
+    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible"]);
     for (const e of events) {
       assert.ok(/^\d{4}$/.test(e.operator_tail), JSON.stringify(e));
       assert.ok(e.target_phone_tail === null || /^\d{4}$/.test(e.target_phone_tail));
@@ -222,7 +244,41 @@ const noFullPhone = (raw, what) => {
     await assert.rejects(store.addAuditEvent({ action: "x", target_phone_tail: P.fine }), (e) => e.code === "invalid_input", "a full phone is refused");
     ov = await overview();
     noFullPhone(ov.raw, "overview after");
-    assert.equal(ov.body.recent_audit.length, 11);
+    assert.equal(ov.body.recent_audit.length, 12);
+
+    // ── the overview degrades: a failing section is named in warnings, the rest loads, 200 ──
+    {
+      const missing = Object.assign(new Error("9 FAILED_PRECONDITION: The query requires an index."), { code: 9 });
+      const store2 = Object.assign({}, store, { listDisabledPhones: async () => { throw missing; }, listAuditEvents: async () => { throw new Error("boom"); } });
+      const app2 = express();
+      app2.use(express.json());
+      app2.use("/p", createRouter({ requireAdmin, requireStepUp, db, store: store2, lifecycle, env }));
+      const s2 = await new Promise((res2) => { const sv = app2.listen(0, () => res2(sv)); });
+      try {
+        const d = await call(s2, "GET", "/p/overview", as(ADMIN, false));
+        assert.equal(d.status, 200, d.raw);
+        assert.deepEqual(d.body.warnings, ["index_missing:accounts_disabled", "query_failed:audit"]);
+        assert.equal(d.body.accounts_disabled, null, "unknown, not zero");
+        assert.equal(d.body.enabled, true); assert.ok(d.body.campaigns); assert.ok(d.body.posting_health);
+        assert.ok(d.body.halts_by_class.captcha, "the 24 h halts still load");
+        assert.deepEqual(d.body.recent_audit, []);
+        noFullPhone(d.raw, "degraded overview");
+        // A ref still resolves through the halt list alone.
+        const ref = d.body.halts_by_class.captcha[0].ref;
+        const found = await call(s2, "POST", `/p/accounts/${ref}/reenable`, as(ADMIN), { reason: "x", agent_confirmed: true });
+        assert.equal(found.body.error, "owner_required", "found (it is under owner review now), not a 404");
+      } finally { s2.close(); }
+      const db3 = Object.assign({}, db, { getSetting: async (k) => { if (k === "posting") throw missing; return db.getSetting(k); } });
+      const app3 = express();
+      app3.use("/p", createRouter({ requireAdmin, requireStepUp, db: db3, store, lifecycle, env }));
+      const s3 = await new Promise((res3) => { const sv = app3.listen(0, () => res3(sv)); });
+      try {
+        const d = await call(s3, "GET", "/p/overview", as(ADMIN, false));
+        assert.equal(d.status, 200); assert.deepEqual(d.body.warnings, ["index_missing:switch"]);
+        assert.equal(d.body.enabled, null, "an unread switch is unknown, never shown as on"); assert.equal(d.body.version, null);
+        assert.equal(d.body.accounts_disabled, 3);
+      } finally { s3.close(); }
+    }
 
     // ── retention: a campaign that ends gets expire_at = updated_at + 30 d; a restart clears it ──
     const campaigns = require("../posting-campaign");

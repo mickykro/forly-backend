@@ -260,6 +260,28 @@ function fakeGuard(reason) {
     assert.equal(connQ.facebook_profile_state, "active");
   }
 
+  // ── a disabled account reconnects only when it is a suspected compromise
+  //    whose profile was revoked (Task 21: the owner lifts it after that) ──
+  {
+    const start = async (conn) => {
+      let created = false;
+      const app = makeApp({
+        driver: { createSession: async () => { created = true; return { sessionId: "sc", status: "active", cdpUrl: "wss://n/c" }; }, stopSession: async () => {} },
+        db: fakeDb(conn), locks: fakeLocks(), guard: fakeGuard("account_disabled"),
+      });
+      return { r: await call(app, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true }), created };
+    };
+    const comp = { posting_disabled_until_admin: true, posting_disabled_class: "suspected_compromise", facebook_profile_state: "revoked", facebook_profile_gen: 2 };
+    const ok = await start(comp);
+    assert.equal(ok.r.status, 200); assert.ok(ok.created);
+    assert.equal(comp.facebook_profile_gen, 3); assert.equal(comp.facebook_profile_state, "active");
+    assert.equal(comp.posting_disabled_until_admin, true, "the reconnect does not lift the disable");
+    const again = await start({ posting_disabled_until_admin: true, posting_disabled_class: "suspected_compromise", facebook_profile_state: "active" });
+    assert.equal(again.r.status, 409, "an un-revoked profile is not a reconnect"); assert.equal(again.created, false);
+    const cap = await start({ posting_disabled_until_admin: true, posting_disabled_class: "captcha", facebook_profile_state: "quarantined" });
+    assert.deepEqual(cap.r.body, { error: "posting_disabled", reason: "account_disabled" }); assert.equal(cap.created, false);
+  }
+
   // ── /start release paths: on a guard refusal, the profile lock and the
   //    session budget are both returned, not leaked ──
   {

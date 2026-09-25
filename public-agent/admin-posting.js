@@ -23,12 +23,16 @@
     switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
     reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל",
   };
+  var SECTION_LABELS = {
+    switch: "המתגים", health: "הבריאות", campaigns: "ספירת הקמפיינים", accounts_disabled: "החשבונות המושבתים",
+    halts_recent: "העצירות האחרונות", accounts: "פרטי החשבונות", audit: "יומן הפעולות",
+  };
   var ERRORS = {
     version_conflict: "המתג שונה בינתיים — המצב נטען מחדש",
     owner_required: "רק בעלים יכולים להפעיל מחדש את החשבון הזה",
     owner_not_configured: "POSTING_OWNER_PHONES לא מוגדר — אין הפעלה מחדש ברמת בעלים",
     agent_confirmation_required: "נדרש אישור שהסוכן וידא את תקינות החשבון",
-    revoke_only: "בחשד לפריצה אין הפעלה מחדש — רק ביטול הפרופיל",
+    reconnect_required: "הסוכן צריך להתחבר מחדש עם פרופיל חדש לפני הפעלה מחדש",
     not_disabled: "החשבון כבר פעיל", reason_required: "חובה לכתוב סיבה", not_found: "החשבון לא נמצא",
   };
 
@@ -87,22 +91,43 @@
       a.owner_review ? "ממתין לבדיקת בעלים" :
       a.penalty_until ? "האטה עד " + fmt(a.penalty_until) :
       a.needs_reconnect ? "ממתין להתחברות מחדש" : "—";
-    if (a.reconnected_since_disable) s += " · הסוכן התחבר מחדש";
+    if (a.class === "suspected_compromise" && a.disabled) {
+      s += a.reconnected_after_halt ? " · הסוכן התחבר עם פרופיל חדש" : " · ממתין להתחברות מחדש עם פרופיל חדש";
+    } else if (a.reconnected_since_disable) s += " · הסוכן התחבר מחדש";
     return s;
   }
 
   function actionButtons(a) {
-    return (a.allowed_actions || []).map(function (act) {
-      var label = act === "reenable" ? "הפעלה מחדש" : act === "owner_reenable" ? "בדיקת בעלים והפעלה" : act === "revoke_profile" ? "ביטול פרופיל" : act;
+    return (a.allowed_actions || []).filter(function (act) {
+      // Offered only once the agent reconnected a new profile (the server checks again).
+      return act !== "reenable_after_reconnect" || a.reconnected_after_halt === true;
+    }).map(function (act) {
+      var label = act === "reenable" ? "הפעלה מחדש" : act === "owner_reenable" ? "בדיקת בעלים והפעלה" :
+        act === "reenable_after_reconnect" ? "הפעלה מחדש (בעלים)" : act === "revoke_profile" ? "ביטול פרופיל" : act;
       var cls = act === "revoke_profile" ? "btn btn-danger btn-sm" : "btn btn-ghost btn-sm";
       return '<button type="button" class="' + cls + '" data-posting-act="' + esc(act) + '" data-ref="' + esc(a.ref) + '">' + esc(label) + "</button>";
     }).join(" ") || '<span class="p-addr">—</span>';
   }
 
+  function renderWarnings(list) {
+    var box = $("#postingWarnings");
+    box.innerHTML = (list || []).map(function (w) {
+      var i = w.indexOf(":");
+      var kind = w.slice(0, i), sec = SECTION_LABELS[w.slice(i + 1)] || w.slice(i + 1);
+      return "<div>" + (kind === "index_missing" ?
+        "חסר אינדקס (" + esc(sec) + ") — יש להריץ firebase deploy --only firestore:indexes" :
+        "טעינת " + esc(sec) + " נכשלה") + "</div>";
+    }).join("");
+    box.classList.toggle("hidden", !(list && list.length));
+  }
+
   function render(d) {
     state = d;
+    renderWarnings(d.warnings);
+    var known = d.enabled === true || d.enabled === false; // null: the switch doc could not be read
     $("#postingGlobal").checked = !!d.enabled;
-    $("#postingGlobalLabel").textContent = onOff(d.enabled) + (d.enabled ? "" : d.disabled_reason ? " — " + d.disabled_reason : "");
+    $("#postingGlobal").disabled = !known;
+    $("#postingGlobalLabel").textContent = !known ? "לא ידוע" : onOff(d.enabled) + (d.enabled ? "" : d.disabled_reason ? " — " + d.disabled_reason : "");
     $("#postingEnvNote").classList.toggle("hidden", !d.env_forced_off);
     var lc = d.last_change;
     $("#postingLastChange").textContent =
@@ -113,16 +138,16 @@
       return switchRow("postingPlatform_" + p, PLATFORM_LABELS[p], d.platforms && d.platforms[p]);
     });
     rows.push(switchRow("postingVisible", "לייקים וצפייה בסטוריז", d.visible_interactions_enabled));
-    $("#postingSwitches").innerHTML = rows.join("");
-    Object.keys(PLATFORM_LABELS).forEach(function (p) {
+    $("#postingSwitches").innerHTML = known ? rows.join("") : '<p class="posting-note">מצב המתגים לא נטען.</p>';
+    if (known) Object.keys(PLATFORM_LABELS).forEach(function (p) {
       var input = $("#postingPlatform_" + p);
       input.addEventListener("change", function () { flip(input, "/switch/platform", { platform: p }); });
     });
-    var vis = $("#postingVisible");
-    vis.addEventListener("change", function () { flip(vis, "/switch/visible"); });
+    var vis = known && $("#postingVisible");
+    if (vis) vis.addEventListener("change", function () { flip(vis, "/switch/visible"); });
 
     var c = d.campaigns || {};
-    var stat = function (n, l) { return '<div class="stat"><div class="n num">' + esc(n == null ? 0 : n) + '</div><div class="l">' + esc(l) + "</div></div>"; };
+    var stat = function (n, l) { return '<div class="stat"><div class="n num">' + esc(n == null ? "—" : n) + '</div><div class="l">' + esc(l) + "</div></div>"; };
     $("#postingCounts").innerHTML = stat(c.running, "קמפיינים פעילים") + stat(c.paused, "מושהים") + stat(c.stopped, "נעצרו") +
       stat(c.completed, "הסתיימו") + stat(d.accounts_disabled, "חשבונות מושבתים") + stat(d.owner_review, "ממתינים לבעלים");
 
@@ -137,8 +162,8 @@
     $("#postingHalted").innerHTML = html.join("");
     $("#postingHaltedEmpty").classList.toggle("hidden", html.length > 0);
 
-    var h = d.posting_health || {};
-    $("#postingHealth").textContent = "סריקה אחרונה: " + fmt(h.last_sweep_at) + " · ניסיונות שלא שוחררו: " + (h.reap_failures_count || 0) +
+    var h = d.posting_health;
+    $("#postingHealth").textContent = !h ? "לא נטען." : "סריקה אחרונה: " + fmt(h.last_sweep_at) + " · ניסיונות שלא שוחררו: " + (h.reap_failures_count || 0) +
       " · ביטולים שנכשלו: " + (h.cancel_failures_count || 0) + (d.owner_configured ? "" : " · POSTING_OWNER_PHONES לא מוגדר");
     $("#postingAudit").innerHTML = (d.recent_audit || []).map(function (e) {
       return "<li>" + esc(fmt(e.at)) + " · " + esc(AUDIT_LABELS[e.action] || e.action) + " · …" + esc(e.operator_tail || "?") +
@@ -151,6 +176,7 @@
     var ref = btn.dataset.ref;
     var ask = {
       reenable: "הסוכן השלים את האימות ואישר שהחשבון תקין?",
+      reenable_after_reconnect: "חשד לפריצה: הסוכן התחבר עם פרופיל חדש. הפעלה מחדש ברמת בעלים — להמשיך?",
       owner_reenable: "הפעלה מחדש ברמת בעלים (חשבון מוגבל או עצירה שנייה ב-30 יום). להמשיך?",
       revoke_profile: "ביטול ומחיקת פרופיל הדפדפן של הסוכן. הסוכן יצטרך להתחבר מחדש. להמשיך?",
     }[kind];

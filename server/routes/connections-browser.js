@@ -52,7 +52,16 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       if (e.code !== "posting_disabled") throw e;
       // Reconnecting is how a revoked profile is replaced — let it through;
       // every other reason (global/platform off, account disabled/penalized) refuses.
-      if (e.reason !== "profile_revoked") return { status: 409, body: { error: "posting_disabled", reason: e.reason } };
+      // One disabled account may reconnect too: a suspected compromise, whose
+      // profile was revoked. R5 lifts it only after a reconnect with a new
+      // profile (routes/admin-posting.js, owner only); the disable itself
+      // still stops every post, like, story and dwell.
+      let compromised = false;
+      if (e.reason === "account_disabled" && platform === "facebook") {
+        const c = (await db.getConnection(phone)) || {};
+        compromised = c.posting_disabled_class === "suspected_compromise" && ["revoked", "quarantined"].includes(c.facebook_profile_state);
+      }
+      if (e.reason !== "profile_revoked" && !compromised) return { status: 409, body: { error: "posting_disabled", reason: e.reason } };
     }
 
     const conn = (await db.getConnection(phone)) || {};
