@@ -171,5 +171,45 @@ function nameHash(name) {
     assert.equal(out[0].name, "מועדון טיולים", "a kept name wins over a hash");
   }
 
+  // ── resolveGroupId: an explicit "left" beats a mere "stale" — leaving is
+  //    positive evidence, staleness is only absence of evidence ──
+  {
+    const older = new Date(NOW.getTime() - 86400000).toISOString();
+    const conn = { facebook_groups_member: [
+      { group_id: "slug:some-club", canonical_url: "https://www.facebook.com/groups/some-club", slug: "some-club", name_hash: "h", membership_state: "stale", observed_at: older, last_confirmed_at: older, id_verified: false },
+      { group_id: "123456", canonical_url: "https://www.facebook.com/groups/123456", slug: "123456", name_hash: "h2", membership_state: "left", observed_at: older, last_confirmed_at: older, id_verified: true },
+    ] };
+    const out = G.resolveGroupId(conn, "slug:some-club", "123456");
+    assert.equal(out.length, 1);
+    assert.equal(out[0].group_id, "123456");
+    assert.equal(out[0].membership_state, "left", "numeric left + vanity stale on the same id stays left");
+  }
+
+  // ── resolveGroupId: a member sighting newer than the left determination
+  //    wins anyway — a re-join is real once it's the newer fact ──
+  {
+    const before = new Date(NOW.getTime() - 2 * 86400000).toISOString();
+    const after = new Date(NOW.getTime() - 86400000).toISOString();
+    const conn = { facebook_groups_member: [
+      { group_id: "slug:some-club", canonical_url: "https://www.facebook.com/groups/some-club", slug: "some-club", name_hash: "h", membership_state: "member", observed_at: after, last_confirmed_at: after, id_verified: false },
+      { group_id: "123456", canonical_url: "https://www.facebook.com/groups/123456", slug: "123456", name_hash: "h2", membership_state: "left", observed_at: before, last_confirmed_at: before, id_verified: true },
+    ] };
+    const out = G.resolveGroupId(conn, "slug:some-club", "123456");
+    assert.equal(out[0].membership_state, "member", "a re-join newer than the left determination wins");
+  }
+
+  // ── mergeMembership: privacy is re-gated on every merge, not only when an
+  //    entry is first observed — a name kept because it was `selected` is
+  //    hashed away once it is no longer selected AND no longer observed ──
+  {
+    const prev = [{ group_id: "333", canonical_url: "https://www.facebook.com/groups/333", slug: "333", name: "לא רלוונטי", membership_state: "member", observed_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(), id_verified: true }];
+    const later = new Date(NOW.getTime() + 86400000);
+    const merged = G.mergeMembership(prev, [], { now: later, catalog: [], selected: [] });
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].membership_state, "stale");
+    assert.equal(merged[0].name, undefined, "no longer selected and not re-observed -> the plaintext name is re-gated away");
+    assert.equal(merged[0].name_hash, nameHash("לא רלוונטי"));
+  }
+
   console.log("facebook-groups-sync.test.js ok");
 })();

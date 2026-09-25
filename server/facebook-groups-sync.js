@@ -26,6 +26,7 @@ const crypto = require("crypto");
 const driver = require("./driver-browser");
 const { profileName } = require("./profile-name");
 const postingGuard = require("./posting-guard");
+const dbLive = require("./db");
 const shareKit = require("./distribution/share-kit");
 
 const GROUPS_URL = process.env.FB_GROUPS_PAGE || "https://www.facebook.com/groups/joins/";
@@ -133,18 +134,45 @@ function mergeMembership(prev, scraped, opts = {}) {
   for (const [group_id, prevEntry] of prevMap) {
     if (seen.has(group_id)) continue; // fresh data for this one already pushed above
     if (ageMs(now, prevEntry.observed_at) > STALE_DROP_MS) continue; // dropped
-    out.push(prevEntry.membership_state === "left"
+    const carried = prevEntry.membership_state === "left"
       ? Object.assign({}, prevEntry)
-      : Object.assign({}, prevEntry, { membership_state: "stale" }));
+      : Object.assign({}, prevEntry, { membership_state: "stale" });
+    // Privacy is re-gated on EVERY merge, not only when an entry is first
+    // observed: an entry kept in the clear earlier (a catalog match, or an
+    // agent selection) can stop qualifying — removed from the catalog, or
+    // deselected — while the row itself is simply carried forward here.
+    // A hash-only entry has nothing left to leak and no way back to a name
+    // from its hash, so there is nothing to re-gate for it.
+    if (carried.name && !shouldKeepName(carried, { catalogUrls, catalogIds, selected })) {
+      carried.name_hash = nameHash(carried.name);
+      delete carried.name;
+    }
+    out.push(carried);
   }
   return out;
 }
 
+// "left" is positive evidence (the agent's own browser showed "Join group");
+// "stale" is only the absence of evidence (we simply didn't see it in the
+// last scrape). So left beats stale, and left beats a member entry too
+// UNLESS that member sighting is more recent than the left determination —
+// a re-join after leaving is real and should win once it's the newer fact.
+function resolveMergedState(a, b) {
+  const memberEntry = a.membership_state === "member" ? a : (b.membership_state === "member" ? b : null);
+  const leftEntry = a.membership_state === "left" ? a : (b.membership_state === "left" ? b : null);
+  if (memberEntry && leftEntry) {
+    const memberAt = new Date(memberEntry.last_confirmed_at || 0).getTime();
+    const leftAt = Math.max(new Date(leftEntry.observed_at || 0).getTime(), new Date(leftEntry.last_confirmed_at || 0).getTime());
+    return memberAt > leftAt ? "member" : "left";
+  }
+  if (memberEntry) return "member"; // member vs. stale
+  if (leftEntry) return "left"; // left vs. stale, or left vs. left
+  return "stale"; // stale vs. stale, or any other combination
+}
+
 function mergeResolvedEntries(a, b) {
   const newer = (x, y) => (new Date(x || 0).getTime() >= new Date(y || 0).getTime() ? x : y);
-  const state = a.membership_state === "member" || b.membership_state === "member"
-    ? "member"
-    : (a.membership_state === "stale" || b.membership_state === "stale" ? "stale" : b.membership_state);
+  const state = resolveMergedState(a, b);
   const merged = {
     group_id: b.group_id,
     canonical_url: newer(a.last_confirmed_at, b.last_confirmed_at) === a.last_confirmed_at ? a.canonical_url : b.canonical_url,
@@ -181,7 +209,7 @@ function resolveGroupId(conn, provisionalId, numericId) {
 async function runSync({ phone }, deps = {}) {
   const withPage = deps.withPage || driver.withPage;
   const guard = deps.guard || postingGuard;
-  const db = deps.db;
+  const db = deps.db || dbLive;
   await guard.assertAllowed({ phone, platform: "facebook", action: "session" }, deps);
   const conn = (await db.getConnection(phone)) || {};
   const gen = conn.facebook_profile_gen || 0;

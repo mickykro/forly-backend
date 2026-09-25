@@ -187,7 +187,10 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
             });
             groups = { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() };
           } catch (e) {
-            console.error(driverLive.redact(`connections-browser: facebook group sync failed: ${e.message}`));
+            // Never e.message here: a scrape failure could in principle throw
+            // with scraped text (a group name/URL) inside it. Only a fixed
+            // string plus the error's code/name — never data — is safe to log.
+            console.error(driverLive.redact(`connections-browser: facebook group sync failed: ${e.code || e.name}`));
           }
         }
         return { loggedIn: true, label, pages, groups };
