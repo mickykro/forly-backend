@@ -46,11 +46,12 @@ function app() {
   }));
   return a;
 }
-function call(a, method, p, { body, cookie, ip = IP } = {}) {
+function call(a, method, p, { body, cookie, ip = IP, ua } = {}) {
   return new Promise((resolve, reject) => {
     const server = a.listen(0, () => {
       const headers = { "content-type": "application/json", "x-forwarded-for": ip };
       if (cookie) headers.cookie = cookie;
+      if (ua) headers["user-agent"] = ua;
       const req = http.request({ port: server.address().port, path: p, method, headers }, (res) => {
         let d = "";
         res.on("data", (c) => (d += c));
@@ -62,6 +63,8 @@ function call(a, method, p, { body, cookie, ip = IP } = {}) {
     });
   });
 }
+function fakeReq(c, ip, headers = {}) { return { query: { c }, headers: Object.assign({ "x-forwarded-for": ip }, headers), socket: { remoteAddress: "127.0.0.1" } }; }
+function fakeRes() { const r = { cookies: [], append(k, v) { if (k === "Set-Cookie") r.cookies.push(v); return r; }, set() { return r; } }; return r; }
 const visits = () => db.mem.portalEvents.filter((e) => e.type === "group_visit" && e.attempt_key);
 const setCookie = (r) => r.headers["set-cookie"] || [];
 
@@ -167,6 +170,74 @@ const setCookie = (r) => r.headers["set-cookie"] || [];
   assert.deepEqual(await AT.countGroupVisits("camp1"), { [a1.key]: 2, [a3.key]: 1 });
   assert.deepEqual(await AT.countLeadsByAttribution("camp1"), { [a1.key]: 1 });
   assert.deepEqual(await AT.countGroupVisits("other"), {});
+
+  // ── fix round 1: the proxy-seen IP, a held cookie, the daily cap, ref reuse, crawlers, a failed event ──
+  {
+    const C2 = "a1".repeat(16);
+    const a2 = await reserve("555", C2);
+    const count = (key) => visits().filter((e) => e.attempt_key === key).length;
+    // the client-controlled leftmost X-Forwarded-For entry does not make a new visitor
+    for (let i = 0; i < 5; i++) await call(A, "GET", `/p/pg1?c=${C2}`, { ip: `10.0.0.${i}, 192.0.2.10` });
+    assert.equal(count(a2.key), 1, "varying the leftmost XFF entry records one visit");
+    // a curl loop from one visitor reuses its ref: no new attribution_refs docs
+    const before = AT._test.maps.attribution_refs.size;
+    const refs = new Set();
+    for (let i = 0; i < 10; i++) refs.add(setCookie(await call(A, "GET", `/p/pg1?c=${C2}`, { ip: "192.0.2.10" }))[0].match(COOKIE_RE)[1]);
+    assert.equal(refs.size, 1); assert.equal(AT._test.maps.attribution_refs.size, before, "no doc per request");
+    // a live fly_ref for this click: no visit, whatever the IP
+    const held = [...refs][0];
+    for (const ip of ["192.0.2.11", "192.0.2.12"]) {
+      const r = await call(A, "GET", `/p/pg1?c=${C2}`, { ip, cookie: `fly_ref=${held}` });
+      assert.equal(r.status, 302); assert.equal(setCookie(r)[0].match(COOKIE_RE)[1], held);
+    }
+    assert.equal(count(a2.key), 1, "a request with a live cookie records none");
+    assert.equal(AT._test.maps.attribution_refs.size, before);
+
+    // link-preview crawlers: a 302, no cookie, nothing recorded
+    const UAS = ["facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)", "Facebot", "WhatsApp/2.23.20.0 A", "TelegramBot (like TwitterBot)",
+      "Twitterbot/1.0", "Slackbot-LinkExpanding 1.0", "LinkedInBot/1.0", "Mozilla/5.0 (compatible; Discordbot/2.0)", "SomeCrawler/1", "my-spider", "Link Preview Fetcher", "Googlebot/2.1"];
+    const refsBefore = AT._test.maps.attribution_refs.size, visitsBefore = visits().length;
+    for (const ua of UAS) {
+      const res = fakeRes();
+      assert.equal(await AT.consumeClick(fakeReq(C2, "192.0.2.50", { "user-agent": ua }), res, "pg1"), true, ua);
+      assert.equal(res.cookies.length, 0, ua);
+    }
+    const bot = await call(A, "GET", `/p/pg1?c=${C2}`, { ip: "192.0.2.51", ua: "facebookexternalhit/1.1" });
+    assert.equal(bot.status, 302); assert.equal(bot.headers.location, "/p/pg1"); assert.equal(setCookie(bot).length, 0);
+    assert.equal(visits().length, visitsBefore); assert.equal(AT._test.maps.attribution_refs.size, refsBefore);
+    const human = fakeRes();
+    await AT.consumeClick(fakeReq(C2, "192.0.2.52", { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/604.1" }), human, "pg1");
+    assert.equal(human.cookies.length, 1, "a phone browser is a visitor");
+
+    // the daily cap: at most DAY_CAP counted visits per click; beyond it, still a cookie
+    const C3 = "b2".repeat(16);
+    const a3c = await reserve("666", C3);
+    let lastRes;
+    for (let i = 0; i < AT.DAY_CAP + 5; i++) {
+      lastRes = fakeRes();
+      assert.equal(await AT.consumeClick(fakeReq(C3, `198.18.${Math.floor(i / 250)}.${i % 250}`), lastRes, "pg1"), true);
+    }
+    assert.equal(count(a3c.key), AT.DAY_CAP, "the cap holds");
+    assert.equal(lastRes.cookies.length, 1, "beyond the cap the visitor still gets a cookie");
+    assert.ok(COOKIE_RE.test(lastRes.cookies[0]));
+
+    // a failed event write keeps the cookie
+    const C4 = "c3".repeat(16);
+    await reserve("777", C4);
+    const failing = { logPortalEvent: async () => { throw Object.assign(new Error("unavailable"), { code: "unavailable" }); } };
+    const r4 = fakeRes();
+    assert.equal(await AT.consumeClick(fakeReq(C4, "192.0.2.60"), r4, "pg1", { db: failing }), true);
+    assert.equal(r4.cookies.length, 1, "logPortalEvent failing never loses the cookie");
+
+    // visitorIp: the entry our proxies appended; the socket without XFF
+    assert.equal(AT.visitorIp({ headers: { "x-forwarded-for": "6.6.6.6, 1.1.1.1" } }, {}), "1.1.1.1");
+    assert.equal(AT.visitorIp({ headers: { "x-forwarded-for": "6.6.6.6, 1.1.1.1, 2.2.2.2" } }, { POSTING_PROXY_HOPS: "2" }), "1.1.1.1");
+    assert.equal(AT.visitorIp({ headers: { "x-forwarded-for": " , 1.1.1.1 ,," } }, { POSTING_PROXY_HOPS: "0" }), "1.1.1.1", "empty entries dropped; hops >= 1");
+    assert.equal(AT.visitorIp({ headers: { "x-forwarded-for": "1.1.1.1" } }, { POSTING_PROXY_HOPS: "5" }), "1.1.1.1");
+    assert.equal(AT.visitorIp({ headers: {}, socket: { remoteAddress: "::1" } }, {}), "::1");
+    const stored2 = JSON.stringify([[...AT._test.maps.click_visits.entries()], [...AT._test.maps.attribution_refs.entries()], db.mem.portalEvents]);
+    assert.ok(!/192\.0\.2\.|198\.18\.|10\.0\.0\./.test(stored2), "still no raw IP stored");
+  }
 
   console.log("posting-attribution.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

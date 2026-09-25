@@ -41,6 +41,10 @@
 #                                       # Driver features stay OFF unless DRIVER_API_KEY, PROFILE_KEY
 #                                       # and FORLY_ENV are all set. Never rotate it casually: a new
 #                                       # key orphans every agent's connected browser profile.
+#      POSTING_PROXY_HOPS=1             # reverse proxies in front of the container that APPEND to
+#                                       # X-Forwarded-For (default 1). Campaign-link visit counting
+#                                       # (posting-attribution.js) keys its rate limit on the entry
+#                                       # at len - hops, never the client-controlled leftmost one.
 #    and place the Firebase service-account key at /root/forly-backend/sa-key.json
 #    NOTE: use the SAME NADLAN_JWT_SECRET the Cloud Functions used, so existing
 #    agent session cookies keep working after the cutover to this server.
