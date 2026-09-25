@@ -12,6 +12,7 @@
  *   4. at most one stale group-membership sync (Task 14);
  *   5. at most one reconciliation of an outcome_unknown attempt (never a
  *      second submit: the reconcile session only looks);
+ *   5b. at most one 24 h re-check session (posting-recheck.js, Task 22);
  *   6. one tick (posting-tick.js) per phone with a running campaign.
  * No step's failure aborts the sweep.
  */
@@ -20,6 +21,7 @@ const { redact } = require("./driver-browser");
 const A = require("./posting-account");
 const T = require("./posting-tick");
 const H = require("./posting-halts");
+const R = require("./posting-recheck");
 
 const { iso, tail, fail, ms, ctxOf, nowOf, mutate, tellOperator, MS_HOUR } = A;
 const SWEEP_MS = 60 * 1000;
@@ -176,6 +178,7 @@ async function sweep(deps = {}, now) {
     if (await fleetBreaker(setting || {}, deps, x, start)) return 0;
     await syncOneStale(deps, x, at()).catch((e) => console.error(redact(`posting sync step: ${code(e)}`)));
     await reconcileOne(deps, x, at()).catch((e) => console.error(redact(`posting reconcile step: ${code(e)}`)));
+    await R.recheckOne(deps, at()).catch((e) => console.error(redact(`posting recheck step: ${code(e)}`)));
     // Paused accounts are ticked too: their housekeeping still mirrors attempts
     // (a tick with nothing running does nothing else).
     const live = (await x.store.listPostingCampaignsByStatus("running", 500)).concat(await x.store.listPostingCampaignsByStatus("paused", 500));

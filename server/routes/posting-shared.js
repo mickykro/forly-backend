@@ -32,6 +32,10 @@ const CAMPAIGN_FIELDS = ["id", "page_id", "mode", "repeat", "status", "pause_rea
 const GROUP_FIELDS = ["group_id", "agent_policy", "is_member", "catalog_policy", "listing_type_allowed", "posting_currently_available"];
 const POST_FIELDS = ["id", "target", "group_id", "status", "scheduled_at", "approved_at", "posted_at", "error_code"];
 
+// Task 22: per-post metrics (posting-metrics.forCampaign) — counts, a
+// visibility state and a time; never an attempt key, a click id or a person.
+const METRIC_FIELDS = ["visits", "leads", "reactions", "comments", "visibility", "checked_at"];
+
 const pick = (o, keys) => { const out = {}; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
 
 // Drops every string that could carry a live browser: a cdpUrl or a viewer URL.
@@ -44,7 +48,8 @@ function scrub(v) {
 
 // A whitelist, not a blacklist: page_snapshot, copy_hash, attempt_key, click
 // ids and anything else the store carries never reach the card.
-function publicView(c) {
+// opts.metrics: forCampaign's map, kept only for this campaign's own posts.
+function publicView(c, opts) {
   if (!c || typeof c !== "object") return null;
   const out = pick(c, CAMPAIGN_FIELDS);
   out.groups = (Array.isArray(c.groups) ? c.groups : []).filter(Boolean)
@@ -57,6 +62,11 @@ function publicView(c) {
     if (p.status === "pending_approval" && typeof p.copy === "string") q.copy = p.copy;
     return q;
   });
+  const metrics = opts && typeof opts === "object" && opts.metrics && typeof opts.metrics === "object" ? opts.metrics : null;
+  if (metrics) {
+    out.metrics = {};
+    for (const p of out.posts) if (p.id && metrics[p.id] && typeof metrics[p.id] === "object") out.metrics[p.id] = pick(metrics[p.id], METRIC_FIELDS);
+  }
   return scrub(out);
 }
 

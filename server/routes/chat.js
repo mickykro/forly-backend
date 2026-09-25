@@ -19,6 +19,7 @@ const businessCache = require("../business-cache");
 const prompt = require("../chat-prompt");
 const chatProvider = require("../chat-provider");
 const { submitLead } = require("../leads");
+const { attributionFor } = require("../posting-attribution"); // R4: fly_ref → attribution, server-side
 const { normalizePhone, sendWhatsApp, asMillis } = require("../utils");
 const qualify = require("../chat-qualify");
 const recommend = require("../chat-recommend");
@@ -400,6 +401,7 @@ module.exports = function createChatRouter(ctx) {
         page, name, phone: prospectPhone, source: "chat", questions,
         qualification: qual.value,
         recommended_page_ids: recommendations.map((m) => m.page_id),
+        attribution: await attributionFor(req, page.page_id),
       });
     } catch (err) {
       console.error("chat submitLead failed:", err.message);

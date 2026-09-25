@@ -14,6 +14,7 @@ const pageEdit = require("../edit");
 const pageAuth = require("../page-auth");
 const chatbotConfig = require("../chatbot-config");
 const { submitLead } = require("../leads");
+const attribution = require("../posting-attribution"); // R4: ?c= and fly_ref, server-side
 const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
@@ -556,7 +557,7 @@ module.exports = function createPagesRouter(ctx) {
     db.mem.throttle.set(prospectPhone, { windowStart: count === 0 ? now : t.windowStart, count: count + 1 });
 
     try {
-      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [] });
+      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [], attribution: await attribution.attributionFor(req, page.page_id) });
 
       // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
       if (!n8nLeadWebhook) {
@@ -881,6 +882,8 @@ module.exports = function createPagesRouter(ctx) {
     let d = null;
     try { d = await db.getPage(id); } catch (e) { /* fall back */ }
     const pageUrl = `${pageBaseUrl}/p/${id}`;
+    // R4: a campaign link's ?c= is consumed here (visit + fly_ref); then a 302 without it.
+    const tracked = await attribution.consumeClick(req, res, id);
     // Group-share attribution (?src=fb_group&s=&g=): record which sharing
     // session/group sent this visitor. Best-effort and fire-and-forget — the
     // canonical og:url stays undecorated so Facebook aggregates shares.
@@ -889,7 +892,7 @@ module.exports = function createPagesRouter(ctx) {
         type: "group_visit", page_id: id,
         listing_id: d.listing_id || null, business_phone: d.business_phone || null,
         share_session: String(req.query.s || "").slice(0, 64),
-        group_token: String(req.query.g).slice(0, 24),
+        group_token: String(req.query.g).slice(0, 64),
       }).catch(() => { /* never block a page render on analytics */ });
     }
     // Portfolio pages live at /:portfolioSlug/:pageSlug — 301 the legacy URL.
@@ -899,14 +902,16 @@ module.exports = function createPagesRouter(ctx) {
         if (business?.portfolio?.slug) {
           const qs = new URLSearchParams(req.query);
           qs.delete("edit_token");
+          qs.delete("c");
           const qsStr = qs.toString();
           // Host-relative so a preview host (tunnel, staging) keeps its own origin;
           // only the canonical og:url is pinned to pageBaseUrl.
           const nested = `/${business.portfolio.slug}/${d.public_slug}`;
-          return res.redirect(301, qsStr ? `${nested}?${qsStr}` : nested);
+          return res.redirect(tracked ? 302 : 301, qsStr ? `${nested}?${qsStr}` : nested);
         }
       } catch (e) { /* fall through to the legacy shell */ }
     }
+    if (tracked) return res.redirect(302, attribution.withoutClick(`/p/${encodeURIComponent(id)}`, req.query));
     renderPropertyPage(res, id, d, pageUrl, { classic: req.query.view === "classic" });
   });
 

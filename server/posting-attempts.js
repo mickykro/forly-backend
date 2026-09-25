@@ -18,6 +18,8 @@
  *   posting_dedup/{hmac(page|type|target)}  { key, at, expires_at }
  *     — expires after limits.dedup_days (the property→group cooldown, or 30 d
  *       for the Page); an expired doc counts as absent and is overwritten.
+ *   click_ids/{click_id}              R4: { campaign_id, attempt_key, page_id, group_id, issued_at, expires_at }
+ *     — written in the reservation's own transaction; read by posting-attribution.js.
  * Every {date} is the Asia/Jerusalem calendar date (R7, posting-safety).
  * Times are ISO strings, so `lease_until < now` is a plain range query.
  */
@@ -25,8 +27,8 @@ const safety = require("./posting-safety");
 const { firestore, runTx, fail, hmacHex, toDate, toIso, assertId, isPlainObject, stripUndefined } = require("./posting-tx");
 
 const LEASE_MS = 20 * 60000;
-const ATT = "posting_attempts", BUD = "posting_budget", ACT = "group_activity", DED = "posting_dedup", GAL = "group_aliases";
-const maps = { [ATT]: new Map(), [BUD]: new Map(), [ACT]: new Map(), [DED]: new Map(), [GAL]: new Map() };
+const ATT = "posting_attempts", BUD = "posting_budget", ACT = "group_activity", DED = "posting_dedup", GAL = "group_aliases", CLK = "click_ids";
+const maps = { [ATT]: new Map(), [BUD]: new Map(), [ACT]: new Map(), [DED]: new Map(), [GAL]: new Map(), [CLK]: new Map() };
 
 // group_aliases (Task 18 fix round 2): one group, several ids, for EVERY
 // account. group_aliases/{slug id} → { group_id, at } and
@@ -99,11 +101,14 @@ const IN_FLIGHT = new Set(["submit_started", "verification_pending"]);
 const countingStates = Object.freeze(["reserved", "session_started", "composer_ready", "submit_started", "verification_pending", "outcome_unknown", "verified_posted", "submitted_for_approval"]);
 const isCounting = (a) => countingStates.includes(a.state) || (a.state === "verified_failed" && a.failed_after_submit === true);
 
+// The 24 h re-check's own fields (Task 22): written only by recordRecheck.
+const RECHECK_FIELDS = ["recheck_due_at", "recheck_tries", "recheck_attempted_at", "visibility", "reactions", "comments", "checked_at", "first_absent_at"];
+const RECHECK_MS = 24 * 3600000;
 // Fields `detail` may never overwrite: they are the attempt's identity and bookkeeping.
 const PROTECTED = new Set(["key", "state", "history", "lease_until", "reserved_at", "finished_at", "updated_at", "released", "failed_after_submit",
   "phone", "page_id", "campaign_id", "post_id", "target_type", "target_id", "target_url", "publisher", "platform", "date",
   "budget_key", "activity_key", "dedup_key", "fingerprint", "copy_hash", "confirm_membership",
-  "click_id", "click_issued_at", "click_expires_at"]);
+  "click_id", "click_issued_at", "click_expires_at", ...RECHECK_FIELDS]);
 const CLICK_TTL_MS = 30 * 86400000; // R4: a click id resolves for 30 days
 
 const HEX = /^[0-9a-f]{1,64}$/;
@@ -208,6 +213,12 @@ async function reserveAttempt(input = {}) {
       history: [{ state: "reserved", at }],
     };
     tx.set(ATT, key, attempt);
+    if (click_id) {
+      tx.set(CLK, click_id, {
+        campaign_id, attempt_key: key, page_id, group_id: target_type === "group" ? target_id : `page:${target_id}`,
+        issued_at: at, expires_at: attempt.click_expires_at, expire_at: new Date(now.getTime() + CLICK_TTL_MS), // a Date: the TTL policy's field
+      });
+    }
     tx.set(BUD, bKey, { phone, date, count: ((budget && budget.count) || 0) + 1 }, { merge: true });
     if (aKey) {
       const fps = ((bucket && bucket.fingerprints) || []).concat(fpEntry ? [fpEntry] : []);
@@ -249,6 +260,8 @@ async function applyTransition(key, to, detail, nowIn, guard) {
     else if (to === "outcome_unknown") next.lease_until = null; // parked for reconciliation, never reaped again
     else next.lease_until = new Date(now.getTime() + LEASE_MS).toISOString();
     if (to === "verified_failed" && !PRE_SUBMIT.has(a.state)) next.failed_after_submit = true;
+    // A group post is looked at again a day later (Task 22, posting-recheck.js).
+    if ((to === "verified_posted" || to === "submitted_for_approval") && a.target_type === "group") next.recheck_due_at = new Date(now.getTime() + RECHECK_MS).toISOString();
     if (release) next.released = true;
 
     tx.set(ATT, key, next, { merge: true });
@@ -411,11 +424,45 @@ async function getGroupActivityFor(group_ids, nowIn, windowDays = safety.DEFAULT
   return out;
 }
 
+// ── the 24 h re-check (Task 22) ──
+const VISIBILITY = new Set(["visible", "pending_approval", "confirmed_removed", "access_denied", "not_found", "session_failure", "selector_failure", "unknown"]);
+const isoOrNull = (v) => v === null || (typeof v === "string" && !Number.isNaN(Date.parse(v)));
+const countOrNull = (v) => v === null || (Number.isInteger(v) && v >= 0 && v < 1e9);
+const RECHECK_CHECK = { visibility: (v) => VISIBILITY.has(v), reactions: countOrNull, comments: countOrNull, recheck_tries: (v) => Number.isInteger(v) && v >= 0 && v < 100,
+  recheck_due_at: isoOrNull, recheck_attempted_at: isoOrNull, checked_at: isoOrNull, first_absent_at: isoOrNull };
+// Aggregates only — never who reacted. → the merged attempt.
+async function recordRecheck(key, patch, nowIn) {
+  if (!isPlainObject(patch) || !Object.keys(patch).length) throw fail("invalid_input", "recheck patch required");
+  const bad = Object.keys(patch).filter((k) => !RECHECK_CHECK[k] || !RECHECK_CHECK[k](patch[k]));
+  if (bad.length) throw fail("invalid_input", `recheck: ${bad.join(", ")}`);
+  const at = toDate(nowIn).toISOString();
+  return runTx(maps, async (tx) => {
+    const a = await tx.get(ATT, key);
+    if (!a) throw fail("not_found", "attempt not found");
+    tx.set(ATT, key, { ...patch, updated_at: at }, { merge: true });
+    return Object.assign({}, a, patch, { updated_at: at });
+  });
+}
+// Attempts whose re-check is due (single-field range: no composite index).
+const listRecheckDue = (nowIn, limit = 50) => {
+  const iso = toDate(nowIn).toISOString();
+  const due = (a) => typeof a.recheck_due_at === "string" && a.recheck_due_at < iso;
+  return queryAttempts([["recheck_due_at", "<", iso]], due, limit).then((rows) => rows.filter(due));
+};
+// R4: a click id's doc, or null. Write-once, so a plain read is enough.
+async function getClick(click_id) {
+  if (typeof click_id !== "string" || !/^[0-9a-f]{32}$/.test(click_id)) return null;
+  const d = await readDoc(CLK, click_id);
+  if (d && d.expire_at) delete d.expire_at;
+  return d;
+}
+
 function reset() { for (const m of Object.values(maps)) m.clear(); }
 
 module.exports = {
   LEASE_MS, EDGES, countingStates, isCounting,
   attemptKey, reserveAttempt, transition, annotate, recordGroupAlias, groupIdsFor, reapExpired, cancelOpenAttempts,
   getAttempt, listAttemptsByPhone, listAttemptsByState, listOpenAttemptsByCampaign, getGroupActivityFor,
+  recordRecheck, listRecheckDue, getClick, VISIBILITY,
   _test: { reset, maps, dedupKey, lastDates },
 };

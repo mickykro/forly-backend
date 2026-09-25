@@ -151,7 +151,10 @@ module.exports = function createPostingRouter(ctx) {
 
   router.get("/campaigns/:id", auth, wrap("get", async (req, res) => {
     const c = await owned(req, res);
-    if (c) return res.json({ campaign: publicView(c) });
+    if (!c) return;
+    // Task 22: per-post metrics; a failed read leaves the card without them, never without the campaign.
+    const metrics = await require("../posting-metrics").forCampaign(c, deps).catch(() => null);
+    return res.json({ campaign: publicView(c, { metrics }) });
   }));
 
   // Always allowed, whatever the switches say.

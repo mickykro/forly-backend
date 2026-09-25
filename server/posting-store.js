@@ -335,6 +335,8 @@ module.exports = {
   reapExpired: attempts.reapExpired, cancelOpenAttempts: attempts.cancelOpenAttempts,
   getAttempt: attempts.getAttempt, listAttemptsByPhone: attempts.listAttemptsByPhone, listAttemptsByState: attempts.listAttemptsByState,
   getGroupActivityFor: attempts.getGroupActivityFor,
+  // the 24 h re-check and R4 click ids (Task 22)
+  recordRecheck: attempts.recordRecheck, listRecheckDue: attempts.listRecheckDue, getClick: attempts.getClick,
   // manual posts, connections
   mutateConnection, listOpenAttemptsByCampaign: attempts.listOpenAttemptsByCampaign,
   listPostActionsByPhone, listConnectedPhones, listPhonesHaltedSince,
