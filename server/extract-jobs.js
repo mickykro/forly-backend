@@ -95,12 +95,21 @@ async function runJobLocked(job, deps) {
   await deps.db.updateExtractJob(job.id, { status: "running", attempts: attempt, updated_at: nowIso() });
 
   try {
+    // A job with a profile opens the agent's CURRENT profile (I2): the name
+    // is derived again from the connection's generation, and the connection
+    // goes to withPage, which refuses a revoked or quarantined profile.
+    let profileName = job.profile_name || null, conn = null;
+    if (profileName) {
+      conn = (await deps.db.getConnection(job.phone)) || {};
+      const platform = String(profileName).split("-")[0];
+      profileName = require("./profile-name").profileName(platform, job.phone, conn[`${platform}_profile_gen`] || 0);
+    }
     const source = await deps.resolve(
       { url: job.url, userId: job.phone },
       {
-        forceSource: job.force_source || "driver", browserType, profileName: job.profile_name, jobId: job.id,
+        forceSource: job.force_source || "driver", browserType, profileName, jobId: job.id,
         // runJob already holds (phone, "facebook") when there is a profile.
-        phone: job.phone, platform: "facebook", lockHeld: !!job.profile_name,
+        phone: job.phone, platform: "facebook", lockHeld: !!job.profile_name, conn,
       },
     );
     const parsed = await deps.parseListing(source.text);

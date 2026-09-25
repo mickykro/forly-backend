@@ -328,7 +328,7 @@ async function deleteProfile(name, deps = {}) {
     // noteworthy.
     if (e instanceof DriverError && e.status === 404) return { ok: true, already_gone: true };
     logError(`driver: delete of ${platform} profile failed: ${e.message}`);
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message, status: e instanceof DriverError ? e.status : undefined };
   }
 }
 

@@ -125,10 +125,14 @@ module.exports = function createExtractRouter(ctx) {
         // customer's own logged-in profile. Demo callers get neither.
         if (!req.user) throw fail("login_required_for_browser");
         if (!driverLimit.take(phone)) throw fail("extract_limit");
-        const job = await extractJobs.create(
-          { phone, url: input.url, forceSource, profileName: withProfile ? profileFor(input.url, phone) : null },
-          jobDeps,
-        );
+        // The profile's current generation (I2): after a reconnect the gen-0 name is refused.
+        let profileName = withProfile ? profileFor(input.url, phone) : null; // null: not a social host
+        if (profileName) {
+          const conn = (await database.getConnection(phone)) || {};
+          const platform = profileName.split("-")[0];
+          profileName = profileFor(input.url, phone, conn[`${platform}_profile_gen`] || 0);
+        }
+        const job = await extractJobs.create({ phone, url: input.url, forceSource, profileName }, jobDeps);
         return { job_id: job.id, status: job.status };
       }
 

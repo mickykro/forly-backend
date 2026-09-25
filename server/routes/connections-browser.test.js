@@ -443,5 +443,17 @@ function fakeGuard(reason) {
   // reconnect + retryDeletes end-to-end scenario) is covered in
   // routes/connections-browser-delete.test.js.
 
+  // ── I11: a Firestore error in any handler is a 500 JSON answer, never a crashed process ──
+  {
+    const down = () => { throw Object.assign(new Error("14 UNAVAILABLE: firestore"), { code: 14 }); };
+    const broken = Object.assign(fakeDb({}), { getConnection: async () => down(), setConnection: async () => down() });
+    const app = makeApp({ db: broken, locks: fakeLocks(), guard: fakeGuard(null), lifecycle: { revoke: async () => down() },
+      driver: { createSession: async () => ({ sessionId: "s", cdpUrl: "wss://x" }), stopSession: async () => {} } });
+    for (const [m, path, body] of [["POST", "/start", { platform: "facebook", consent: true }], ["GET", "/facebook/status"], ["POST", "/facebook/finish"], ["DELETE", "/facebook"]]) {
+      const r = await call(app, m, `/api/connections/browser${path}`, body);
+      assert.deepEqual([r.status, r.body], [500, { error: "internal" }], `${m} ${path}`);
+    }
+  }
+
   console.log("routes/connections-browser.test.js ok");
 })();

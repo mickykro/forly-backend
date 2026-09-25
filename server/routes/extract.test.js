@@ -107,6 +107,19 @@ const get = (app, path) => call(app, "GET", path);
   assert.equal(created[0].forceSource, null, "a driver host needs no forcing");
 }
 
+// ── I2: a Facebook group URL queues its job with the CURRENT profile generation's name ──
+{
+  const created = [];
+  const { profileName } = require("../profile-name");
+  const app = makeApp({
+    db: { getConnection: async () => ({ facebook_profile_gen: 1 }) },
+    extractJobs: { create: async (input) => { created.push(input); return { id: "job-g", status: "queued" }; } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.facebook.com/groups/1/posts/2" });
+  assert.equal(res.status, 202);
+  assert.equal(created[0].profileName, profileName("facebook", "0500000000", 1), "gen 1, never the gen-0 name");
+}
+
 // ── firecrawl failing to READ falls back to a driver job, not an error ──
 {
   const created = [];

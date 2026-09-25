@@ -65,7 +65,7 @@ async function setup(phone = "972500000001", o = {}) {
   await db.savePage(page("pg1", phone));
   await db.setConnection(phone, Object.assign({
     facebook_browser_connected_at: iso(NOW.getTime() - 90 * DAY), facebook_browser_first_connected_at: iso(NOW.getTime() - 90 * DAY),
-    posting_account_aged: true, posting_posted_manually: true, posting_permission: PERM,
+    posting_account_aged: true, posting_posted_manually: true, posting_permission: structuredClone(PERM), // a copy: a merge must never write into PERM
     facebook_groups_member: [member("111"), member("222")], facebook_groups_synced_at: iso(NOW),
   }, o.conn || {}));
   const notes = [], ops = [];

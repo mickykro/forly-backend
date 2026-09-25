@@ -21,6 +21,7 @@ const { profileName } = require("./profile-name");
 const A = require("./posting-account");
 const C = require("./posting-campaign");
 const H = require("./posting-halts");
+const { loginOpen } = require("./profile-lock");
 
 const { iso, tail, fail, ms, ctxOf, nowOf, configOf, mutate, say, tellOperator, MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST } = A;
 const MAX_TICK_ERRORS = 3;
@@ -84,6 +85,13 @@ async function mirrorCampaign(c, x, ctx) {
   return mutate(x, c.id, (cur) => (changed(cur) ? { posts: next(cur) } : null));
 }
 
+// A membership that is only "stale" — missing from the last scrape, the
+// absence of evidence — never ends a campaign (I3): a sync alone must not
+// complete it. Such a group waits for the next sync, or the expiry.
+function staleOnly(conn, g) {
+  const m = A.memberOf(conn, g);
+  return !!m && m.membership_state === "stale" && g.blocked_code !== "not_member" && !A.isHidden(conn, g);
+}
 // Every group has a post that is no longer open, or can never be planned.
 function allDone(c, conn) {
   if ((c.posts || []).some((p) => OPEN_POST.has(p.status))) return false;
@@ -91,7 +99,7 @@ function allDone(c, conn) {
   const pt = (c.targets || []).includes("page") ? A.pageTarget(conn) : null;
   if (pt && !used.has(pt.group_id)) return false;
   if (!(c.targets || ["groups"]).includes("groups")) return true;
-  return (c.groups || []).every((g) => used.has(g.group_id) || g.is_member === false || g.catalog_policy === false || g.listing_type_allowed === false);
+  return (c.groups || []).every((g) => used.has(g.group_id) || (g.is_member === false && !staleOnly(conn, g)) || g.catalog_policy === false || g.listing_type_allowed === false);
 }
 
 // Mirror attempts, then re-read reality for running campaigns: the page may
@@ -397,6 +405,8 @@ async function tickLocked(phone, deps, x, now, lock) {
     for (const c of running) await mutate(x, c.id, (cur) => (cur.status === "running" ? { status: "paused", pause_reason: "account" } : null));
     return "account_blocked";
   }
+  // The agent's login browser is open on this profile (F3): no post, no dwell.
+  if (loginOpen(conn, "facebook", now.getTime())) return "login_open";
   let outcome;
   if (running.some((c) => c.posts.some((p) => p.status === "posting"))) outcome = "in_flight"; // one attempt per account at a time
   else {

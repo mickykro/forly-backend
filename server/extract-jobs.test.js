@@ -12,6 +12,8 @@ function fakeStore() {
     getExtractJob: async (id) => jobs.get(id) || null,
     updateExtractJob: async (id, patch) => { const j = jobs.get(id); if (j) Object.assign(j, patch); },
     listExtractJobsByStatus: async (s, limit = 10) => [...jobs.values()].filter((j) => j.status === s).slice(0, limit),
+    conns: {},
+    getConnection: async function (phone) { return this.conns[phone] || null; },
   };
 }
 
@@ -137,6 +139,20 @@ function fakeStore() {
   assert.equal(d9.platform, "facebook");
   // …and a public-page job holds nothing and claims nothing
   assert.equal(d6.lockHeld, false);
+  assert.equal(d6.conn, null); assert.equal(d6.profileName, null);
+
+  // ── I2: a profile job opens the CURRENT generation's profile, and hands the
+  //    connection on (withPage refuses a revoked or quarantined one) ──
+  {
+    const { profileName } = require("./profile-name");
+    const store10 = fakeStore();
+    store10.conns.p10 = { facebook_profile_gen: 1 };
+    const job10 = await J.create({ phone: "p10", url: "https://www.facebook.com/groups/1/posts/2", profileName: profileName("facebook", "p10", 0) }, { db: store10 });
+    let d10 = null;
+    await J.runJob(job10, { db: store10, resolve: async (input, d) => { d10 = d; return { source: "driver", text: "t", description: "t", photos: [] }; }, parseListing: async () => ({ fields: {}, missing: [] }) });
+    assert.equal(d10.profileName, profileName("facebook", "p10", 1), "gen 1, not the name stored at creation");
+    assert.deepEqual(d10.conn, { facebook_profile_gen: 1 });
+  }
 
   console.log("extract-jobs.test.js ok");
 })();

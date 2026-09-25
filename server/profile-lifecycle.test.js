@@ -71,9 +71,10 @@ function fakeDb(conns = {}) {
   const db2 = fakeDb({ "05x": conn2 });
   await L.revoke({ phone: "05x", platform: "yad2", reason: "agent" }, {
     db: db2,
-    driver: { stopSession: async () => {}, deleteProfile: async () => { throw new Error("503"); } },
+    driver: { stopSession: async () => {}, deleteProfile: async () => { throw Object.assign(new Error("Driver 503: upstream vendor text for 05x"), { status: 503 }); } },
   });
   assert.ok(conn2.yad2_profile_delete_error && !conn2.yad2_profile_deleted_at);
+  assert.equal(conn2.yad2_profile_delete_error, "driver_5xx", "a code (the Driver status class), never the vendor's text");
   assert.equal(conn2.posting_permission, undefined, "revoke on a non-Facebook platform must not touch Facebook-only fields");
   {
     const rows = await db2.listPendingDeletes();
@@ -81,7 +82,7 @@ function fakeDb(conns = {}) {
     assert.equal(rows[0].phone, "05x");
     assert.equal(rows[0].platform, "yad2");
     assert.equal(rows[0].attempts, 1);
-    assert.equal(rows[0].last_error, "503");
+    assert.equal(rows[0].last_error, "driver_5xx", "the pending row stores the code too");
     assert.ok(rows[0].since);
   }
 
@@ -288,6 +289,58 @@ function fakeDb(conns = {}) {
     assert.ok(conns.h.facebook_profile_deleted_at, "already-gone counts as deleted");
     assert.equal(conns.h.facebook_profile_delete_error, null, "no error recorded next to deleted_at");
     assert.deepEqual(await db9.listPendingDeletes(), [], "the pending row is cleared, not retried forever");
+  }
+
+  // ── stored errors are codes (item 17): { ok:false } without a status → delete_failed; a 4xx → driver_4xx ──
+  {
+    const conns = { i: { facebook_profile_state: "revoked" }, j: { facebook_profile_state: "revoked" } };
+    const dbI = fakeDb(conns);
+    await L.quarantine("i", "facebook", "captcha", { db: dbI, driver: { stopSession: async () => {}, deleteProfile: async () => ({ ok: false, error: "profile facebook-local-… is locked by vendor" }) } });
+    assert.equal(conns.i.facebook_profile_delete_error, "delete_failed");
+    await L.quarantine("j", "facebook", "captcha", { db: dbI, driver: { stopSession: async () => {}, deleteProfile: async () => ({ ok: false, error: "Driver 409: text", status: 409 }) } });
+    assert.equal(conns.j.facebook_profile_delete_error, "driver_4xx");
+    for (const r of await dbI.listPendingDeletes()) assert.ok(["delete_failed", "driver_4xx"].includes(r.last_error), r.last_error);
+  }
+
+  // ── I9: a live session holds the profile lock — nothing is deleted now; a
+  //    pending delete (with gen) is filed for retryDeletes, which does it once
+  //    the lock is free, and holds the lock while it does ──
+  {
+    const locks = require("./profile-lock");
+    const conns = { k: { facebook_profile_gen: 2, facebook_browser_connected_at: "2026-09-01", browser_session_facebook: null } };
+    const dbK = fakeDb(conns);
+    const deletedK = [];
+    let heldDuringDelete = null;
+    const driverK = { stopSession: async () => {}, deleteProfile: async (n) => { heldDuringDelete = locks.isHeld("k", "facebook"); deletedK.push(n); return { ok: true }; } };
+    const live = locks.acquire("k", "facebook"); // a post is running in that browser
+    await L.revoke({ phone: "k", platform: "facebook", reason: "agent" }, { db: dbK, driver: driverK });
+    assert.equal(conns.k.facebook_profile_state, "revoked", "the profile is refused at once");
+    assert.deepEqual(deletedK, [], "never deleted under a live session");
+    assert.equal(conns.k.facebook_profile_delete_error, "profile_busy");
+    const rows = await dbK.listPendingDeletes();
+    assert.equal(rows.length, 1); assert.equal(rows[0].gen, 2); assert.equal(rows[0].last_error, "profile_busy"); assert.equal(rows[0].attempts, 0);
+    assert.equal(L.hasDeferredDeletes(), true, "the sweeper retries it at the next sweep");
+    // still busy: stays filed, nothing deleted
+    const still = await L.retryDeletes({ db: dbK, driver: driverK }, { onlyDeferred: true });
+    assert.equal(still[0].ok, false); assert.deepEqual(deletedK, []); assert.equal(L.hasDeferredDeletes(), true);
+    live();
+    const done = await L.retryDeletes({ db: dbK, driver: driverK }, { onlyDeferred: true });
+    assert.equal(done[0].ok, true);
+    assert.deepEqual(deletedK, [profileName("facebook", "k", 2)], "the generation filed is the one deleted");
+    assert.equal(heldDuringDelete, true, "the lock is held for the delete");
+    assert.equal(locks.isHeld("k", "facebook"), false, "and given back after");
+    assert.deepEqual(await dbK.listPendingDeletes(), []);
+    assert.equal(L.hasDeferredDeletes(), false);
+    // onlyDeferred leaves a row that failed for another reason to the daily run
+    await dbK.savePendingDelete({ phone: "k", platform: "facebook", since: new Date().toISOString(), attempts: 1, last_error: "driver_5xx", gen: 2 });
+    assert.deepEqual(await L.retryDeletes({ db: dbK, driver: driverK }, { onlyDeferred: true }), []);
+    assert.equal((await L.retryDeletes({ db: dbK, driver: driverK })).length, 1);
+    // a lock free at revoke time is taken for the delete, then released
+    heldDuringDelete = null;
+    const conns2 = { m: {} };
+    await L.quarantine("m", "facebook", "checkpoint", { db: fakeDb(conns2), driver: { stopSession: async () => {}, deleteProfile: async () => { heldDuringDelete = locks.isHeld("m", "facebook"); return { ok: true }; } } });
+    assert.equal(heldDuringDelete, true); assert.equal(locks.isHeld("m", "facebook"), false);
+    assert.ok(conns2.m.facebook_profile_deleted_at);
   }
 
   console.log("profile-lifecycle.test.js ok");

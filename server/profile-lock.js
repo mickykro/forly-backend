@@ -46,8 +46,22 @@ function isHeld(phone, platform = "facebook") {
   return !!entry && entry.until > Date.now();
 }
 
+// The embedded login browser (routes/connections-browser.js) lives far longer
+// than the request that opened it, so no lock covers it. While one is open —
+// browser_session_<platform> set, and younger than its duration — the agent
+// may be logging in right now: nothing else opens that profile, or the same
+// cookies would be live from two IPs (F3). A record without a readable
+// started_at cannot be shown to be young: not open.
+const LOGIN_SESSION_S = 1500;
+function loginOpen(conn, platform = "facebook", nowMs = Date.now()) {
+  const s = conn && conn[`browser_session_${platform}`];
+  if (!s || !s.session_id) return false;
+  const t = Date.parse(s.started_at);
+  return Number.isFinite(t) && nowMs - t < LOGIN_SESSION_S * 1000;
+}
+
 const budget = () => Number(process.env.DRIVER_MAX_CONCURRENT || 2);
 function trySession() { if (sessions >= budget()) return null; sessions++; return () => { sessions = Math.max(0, sessions - 1); }; }
 function activeSessions() { return sessions; }
 
-module.exports = { tryAcquire, acquire, isHeld, trySession, activeSessions, MAX_HOLD_MS, _test: { held, reset: () => { held.clear(); sessions = 0; } } };
+module.exports = { tryAcquire, acquire, isHeld, trySession, activeSessions, loginOpen, LOGIN_SESSION_S, MAX_HOLD_MS, _test: { held, reset: () => { held.clear(); sessions = 0; } } };

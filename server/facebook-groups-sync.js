@@ -28,6 +28,8 @@ const { profileName } = require("./profile-name");
 const postingGuard = require("./posting-guard");
 const dbLive = require("./db");
 const shareKit = require("./distribution/share-kit");
+const profileLock = require("./profile-lock");
+const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
 
 const GROUPS_URL = process.env.FB_GROUPS_PAGE || "https://www.facebook.com/groups/joins/";
 const SELECTORS = { groupLink: 'a[href*="/groups/"][role="link"]' };
@@ -43,9 +45,16 @@ const groupIdOf = (slug) => (isNumeric(slug) ? slug : `slug:${slug}`);
 // Reads the account's own "Your groups" page: scrolls it fully open, then
 // canonicalises and dedups by slug. share-kit is called one URL at a time —
 // never on the whole list, which would apply its MAX_GROUPS cap here.
-async function syncMembership(page) {
+// opts.guard(action) (runSync): the kill switch before the navigation (R2).
+// The page's own signal is read right after it loads (posting-driver-proof):
+// anything but "ok" — a login wall, a checkpoint, an unreadable page —
+// throws `sync_signal` with `.signal`, and nothing is scraped.
+async function syncMembership(page, opts = {}) {
+  if (typeof opts.guard === "function") await opts.guard("navigate");
   await page.goto(GROUPS_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
   await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+  const signal = await require("./posting-driver-proof").readSignal(page, "");
+  if (signal !== "ok") throw Object.assign(new Error("groups page not readable"), { code: "sync_signal", signal });
   for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, 1200); await page.waitForTimeout(800); } // load the whole list
   const raw = await page.$$eval(SELECTORS.groupLink, (els) => els.map((a) => ({ href: a.href, text: (a.textContent || "").trim() })));
   const out = new Map();
@@ -219,25 +228,66 @@ function resolveGroupId(conn, provisionalId, numericId) {
   return list.filter((_, i) => i !== provIdx && i !== existingIdx).concat(merged);
 }
 
+// A scrape that is not evidence (I3): nothing read at all, or under half of
+// the members known before when there were at least 5. Stale-marking a
+// whole list on a slow render would take every group out of every campaign.
+// → null when the scrape may be merged, else "empty" | "shrunk".
+const SHRINK_MIN_KNOWN = 5;
+function scrapeAnomaly(prev, scraped) {
+  const n = Array.isArray(scraped) ? scraped.length : 0;
+  if (!n) return "empty";
+  const known = (Array.isArray(prev) ? prev : []).filter((e) => e && e.membership_state === "member").length;
+  return known >= SHRINK_MIN_KNOWN && n < known * 0.5 ? "shrunk" : null;
+}
+
+// settings/posting_health.sync_anomalies[kind] += 1 (the admin overview). Never throws.
+async function noteAnomaly(db, kind) {
+  try {
+    const prev = (await db.getSetting("posting_health")) || {};
+    const cur = Object.assign({}, prev.sync_anomalies || {});
+    cur[kind] = (cur[kind] || 0) + 1;
+    await db.setSetting("posting_health", { sync_anomalies: cur, sync_last_anomaly_at: new Date().toISOString() });
+  } catch (e) { console.error(driver.redact(`groups sync anomaly note failed: ${(e && e.code) || "error"}`)); }
+}
+const HALTING = new Set([...SIGNAL_DISABLES, ...SIGNAL_PENALISES, "login_required"]);
+
 // Its own session, on the agent's own persisted Facebook profile. Used by
 // the weekly sweep (Task 16, at most one per account per sweep) and by the
-// agent's own "רענון קבוצות" resync button (Task 19).
+// agent's own "רענון קבוצות" resync button (Task 19). Never while the agent's
+// login browser is open (profile_busy). A halting signal on the groups page
+// halts the account (R5) and writes nothing; an empty or collapsed scrape
+// writes nothing either — both are counted in posting_health and thrown.
 async function runSync({ phone }, deps = {}) {
   const withPage = deps.withPage || driver.withPage;
   const guard = deps.guard || postingGuard;
   const db = deps.db || dbLive;
   await guard.assertAllowed({ phone, platform: "facebook", action: "session" }, deps);
   const conn = (await db.getConnection(phone)) || {};
+  if (profileLock.loginOpen(conn, "facebook")) throw Object.assign(new Error("login browser open"), { code: "profile_busy" });
   const gen = conn.facebook_profile_gen || 0;
   const pageDeps = Object.assign({}, deps, { phone, platform: "facebook", conn });
-  const scraped = await withPage(
-    { duration: 300, note: "forly-sync:groups", profile: { name: profileName("facebook", phone, gen), persist: true } },
-    syncMembership,
-    pageDeps,
-  );
+  const navGuard = (action) => guard.assertAllowed({ phone, platform: "facebook", action }, deps);
+  let scraped;
+  try {
+    scraped = await withPage(
+      { duration: 300, note: "forly-sync:groups", profile: { name: profileName("facebook", phone, gen), persist: true } },
+      (page) => syncMembership(page, { guard: navGuard }),
+      pageDeps,
+    );
+  } catch (e) {
+    if (!e || e.code !== "sync_signal") throw e;
+    await noteAnomaly(db, "signal");
+    if (HALTING.has(e.signal)) await (deps.haltAccount || require("./posting-halts").haltAccount)(phone, e.signal, deps);
+    throw e;
+  }
   const catalog = await db.listGroupCatalog(500);
   // Re-read after the scrape (minutes): a group removed meanwhile stays removed.
   const fresh = (await db.getConnection(phone)) || {};
+  const anomaly = scrapeAnomaly(fresh.facebook_groups_member, scraped);
+  if (anomaly) {
+    await noteAnomaly(db, anomaly);
+    throw Object.assign(new Error("groups scrape not trusted"), { code: "sync_anomaly", anomaly });
+  }
   const merged = mergeMembership(fresh.facebook_groups_member || [], scraped, { now: new Date(), catalog, selected: [], hidden: hiddenIds(fresh) });
   await db.setConnection(phone, { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() });
   return merged.length;
@@ -255,4 +305,4 @@ function hiddenIds(conn) {
 
 const isStale = (conn, now) => !conn.facebook_groups_synced_at || now.getTime() - new Date(conn.facebook_groups_synced_at).getTime() > STALE_MS;
 
-module.exports = { syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, SELECTORS, GROUPS_URL };
+module.exports = { syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };

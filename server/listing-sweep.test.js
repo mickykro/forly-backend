@@ -106,5 +106,34 @@ const PLATFORMS = { yad2: { checkUrl: "https://www.yad2.co.il/my-ads" } };
   assert.equal(sweep.fingerprint("  Dirah   Yafa ", 100), sweep.fingerprint("dirah yafa", 100));
   assert.notEqual(sweep.fingerprint("dirah yafa", 100), sweep.fingerprint("dirah yafa", 200));
 
+  // ── I2: the profile generation. With the real withPage's ownership check
+  //    (Driver itself faked): at gen 1 the sweep opens the gen-1 profile and
+  //    works; a quarantined connection is refused before any session ──
+  {
+    const D = require("./driver-browser");
+    const sessions = [];
+    const fakeDriver = {
+      apiKey: "k", sleep: async () => {},
+      fetchFn: async (url, init) => {
+        sessions.push(init.method);
+        return { ok: true, headers: { get: () => null }, json: async () => (init.method === "DELETE" ? { success: true } : { sessionId: "s1", status: "active", cdpUrl: "wss://x/y" }) };
+      },
+      connectOverCDP: async () => ({ contexts: () => [{ pages: () => [{ goto: async () => {}, url: () => "https://www.yad2.co.il/my-ads", innerText: async () => "המודעות שלי", myAds: async () => [] }] }], close: async () => {} }),
+    };
+    let opened = null;
+    const real = (o, fn, d) => { opened = o.profile.name; return D.withPage(o, fn, Object.assign({}, d, fakeDriver)); };
+    const gen1 = Object.assign(fakeDb(), { getConnection: async () => ({ yad2_browser_connected_at: "2026-01-01T00:00:00.000Z", yad2_profile_gen: 1, yad2_profile_state: "active" }) });
+    const r1 = await sweep.sweep({ platform: "yad2", phone: "0500000001" }, { db: Object.assign(gen1, { listListingsByPhone: async () => [] }), extractJobs, withPage: real, platforms: PLATFORMS });
+    assert.deepEqual(r1, { found: 0, queued: 0, skipped: 0 });
+    assert.equal(opened, profileName("yad2", "0500000001", 1), "the gen-1 name");
+    assert.deepEqual(sessions, ["POST", "DELETE"], "one session, stopped");
+    // the old generation's name would have been refused by the same check
+    assert.throws(() => require("./profile-name").assertOwnership(profileName("yad2", "0500000001"), "0500000001", "yad2", { yad2_profile_gen: 1 }), (e) => e.code === "profile_ownership");
+    sessions.length = 0;
+    const quarantined = Object.assign(fakeDb(), { getConnection: async () => ({ yad2_browser_connected_at: "2026-01-01T00:00:00.000Z", yad2_profile_state: "quarantined" }) });
+    await assert.rejects(() => sweep.sweep({ platform: "yad2", phone: "0500000001" }, { db: quarantined, extractJobs, withPage: real, platforms: PLATFORMS }), (e) => e.code === "profile_ownership");
+    assert.deepEqual(sessions, [], "no Driver session for a quarantined profile");
+  }
+
   console.log("listing-sweep.test.js ok");
 })();

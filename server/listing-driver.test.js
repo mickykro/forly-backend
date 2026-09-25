@@ -72,7 +72,34 @@ assert.equal(isLoginWall("https://www.yad2.co.il/item/abc", "דירה 4 חדרי
     { url: "https://www.facebook.com/groups/1/posts/2", profileName: "facebook-0500000000" },
     { withPage: async (opts, fn, d) => { third = d; return fn(page, {}); }, phone: "0500000000", platform: "facebook", lockHeld: true, forceSource: "driver" },
   );
-  assert.deepEqual(third, { phone: "0500000000", platform: "facebook", lockHeld: true });
+  assert.deepEqual(third, { phone: "0500000000", platform: "facebook", lockHeld: true, conn: null });
+
+  // ── I2: the connection rides through too, and the real withPage checks the
+  //    generation against it: gen 1 opens; a quarantined gen-0 profile is refused ──
+  {
+    process.env.FORLY_ENV = process.env.FORLY_ENV || "local";
+    const D = require("./driver-browser");
+    const { profileName } = require("./profile-name");
+    const calls = [];
+    const fake = {
+      apiKey: "k", sleep: async () => {},
+      fetchFn: async (url, init) => { calls.push(init.method); return { ok: true, headers: { get: () => null }, json: async () => (init.method === "DELETE" ? { success: true } : { sessionId: "s1", status: "active", cdpUrl: "wss://x/y" }) }; },
+      connectOverCDP: async () => ({ contexts: () => [{ pages: () => [page] }], close: async () => {} }),
+    };
+    const real = (o, fn, d) => D.withPage(o, fn, Object.assign({}, d, fake));
+    const PH = "0500000002";
+    const gen1 = { facebook_profile_gen: 1 };
+    const ok = await LD.fromDriver({ url: "https://www.facebook.com/groups/1/posts/2", profileName: profileName("facebook", PH, 1) },
+      { withPage: real, phone: PH, platform: "facebook", conn: gen1 });
+    assert.equal(ok.source, "driver");
+    assert.deepEqual(calls, ["POST", "DELETE"]);
+    calls.length = 0;
+    await assert.rejects(() => LD.fromDriver({ url: "https://www.facebook.com/groups/1/posts/2", profileName: profileName("facebook", PH, 0) },
+      { withPage: real, phone: PH, platform: "facebook", conn: { facebook_profile_state: "quarantined" } }), (e) => e.code === "profile_ownership");
+    await assert.rejects(() => LD.fromDriver({ url: "https://www.facebook.com/groups/1/posts/2", profileName: profileName("facebook", PH, 0) },
+      { withPage: real, phone: PH, platform: "facebook", conn: gen1 }), (e) => e.code === "profile_ownership", "the old generation's name");
+    assert.deepEqual(calls, [], "no Driver session for a refused profile");
+  }
 
   console.log("listing-driver.test.js ok");
 })();

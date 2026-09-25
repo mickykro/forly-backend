@@ -16,6 +16,7 @@ function nameHash(name) {
 (async () => {
   // ── syncMembership: scrapes, canonicalises, dedups ──
   const page = {
+    evaluate: async () => ({ regions: [[], []], count: 0 }), // readSignal: no dialog, alert or captcha
     goto: async () => {}, url: () => "https://www.facebook.com/groups/joins/",
     mouse: { wheel: async () => {} }, waitForTimeout: async () => {}, waitForLoadState: async () => {},
     $$eval: async () => [
@@ -50,7 +51,7 @@ function nameHash(name) {
     assert.ok(conn.facebook_groups_synced_at);
     assert.equal(opts.profile.name, profileName("facebook", "p"));
     assert.ok(String(opts.note).startsWith("forly-sync:"));
-    assert.deepEqual(guarded, { phone: "p", platform: "facebook", action: "session" });
+    assert.deepEqual(guarded, { phone: "p", platform: "facebook", action: "navigate" }, "the navigation is guarded too (the last call)");
     assert.equal(pageDeps.phone, "p");
     assert.equal(pageDeps.platform, "facebook");
   }
@@ -67,6 +68,70 @@ function nameHash(name) {
       (e) => e.code === "posting_disabled",
     );
     assert.equal(opened, false, "no browser session when the guard refuses");
+  }
+
+  // ── I3: runSync never trusts an empty, collapsed or unreadable scrape ──
+  {
+    const T0 = "2026-09-20T00:00:00.000Z";
+    const prevList = () => Array.from({ length: 6 }, (_, i) => ({ group_id: String(200 + i), slug: String(200 + i), membership_state: "member", observed_at: T0, last_confirmed_at: T0 }));
+    const world = (pg, o = {}) => {
+      const conn = Object.assign({ facebook_groups_member: prevList(), facebook_groups_synced_at: T0 }, o.conn || {});
+      const health = {}, halts = [], order = [];
+      const deps = {
+        guard: { assertAllowed: async (a) => { order.push(`guard:${a.action}`); return true; } },
+        withPage: async (op, fn) => fn(Object.assign({}, pg, { goto: async () => { order.push("goto"); } })),
+        haltAccount: async (ph, cls) => { halts.push([ph, cls]); },
+        db: {
+          getConnection: async () => conn, setConnection: async (ph, patch) => Object.assign(conn, patch), listGroupCatalog: async () => [],
+          getSetting: async () => health.doc || null, setSetting: async (k, v) => { health.doc = Object.assign({}, health.doc, v); },
+        },
+      };
+      return { conn, health, halts, order, deps };
+    };
+    const scrape = (n) => Array.from({ length: n }, (_, i) => ({ href: `https://www.facebook.com/groups/${200 + i}/`, text: "דירות" }));
+    const pageOf = (links, evaluate) => Object.assign({}, page, { $$eval: async () => links }, evaluate ? { evaluate } : {});
+    // empty
+    let w = world(pageOf([]));
+    await assert.rejects(() => G.runSync({ phone: "p" }, w.deps), (e) => e.code === "sync_anomaly" && e.anomaly === "empty");
+    assert.deepEqual(w.conn.facebook_groups_member, prevList(), "nothing written"); assert.equal(w.conn.facebook_groups_synced_at, T0);
+    assert.deepEqual(w.health.doc.sync_anomalies, { empty: 1 });
+    // under half of 6 known members
+    w = world(pageOf(scrape(2)));
+    await assert.rejects(() => G.runSync({ phone: "p" }, w.deps), (e) => e.anomaly === "shrunk");
+    assert.deepEqual(w.conn.facebook_groups_member, prevList());
+    // half or more is trusted (and fewer than 5 known never counts as shrunk)
+    w = world(pageOf(scrape(3)));
+    assert.equal(await G.runSync({ phone: "p" }, w.deps), 6);
+    assert.equal(w.conn.facebook_groups_member.filter((m) => m.membership_state === "stale").length, 3);
+    w = world(pageOf(scrape(1)), { conn: { facebook_groups_member: prevList().slice(0, 4) } });
+    assert.equal(await G.runSync({ phone: "p" }, w.deps), 4);
+    // a halting signal on the groups page: the account halts, nothing is scraped or written
+    w = world(pageOf(scrape(6)), { conn: {} });
+    w.deps.withPage = async (op, fn) => fn(Object.assign({}, page, { url: () => "https://www.facebook.com/checkpoint/1501092823525282/", goto: async () => { w.order.push("goto"); } }));
+    await assert.rejects(() => G.runSync({ phone: "p" }, w.deps), (e) => e.code === "sync_signal" && e.signal === "checkpoint");
+    assert.deepEqual(w.halts, [["p", "checkpoint"]]);
+    assert.deepEqual(w.conn.facebook_groups_member, prevList()); assert.equal(w.conn.facebook_groups_synced_at, T0);
+    // an unreadable page is not "ok": nothing written, no halt
+    w = world(pageOf(scrape(6), async () => { throw new Error("navigated"); }));
+    await assert.rejects(() => G.runSync({ phone: "p" }, w.deps), (e) => e.signal === "unreadable");
+    assert.deepEqual(w.halts, []); assert.deepEqual(w.conn.facebook_groups_member, prevList());
+    // the navigation is guarded, before the goto
+    w = world(pageOf(scrape(6)));
+    await G.runSync({ phone: "p" }, w.deps);
+    assert.deepEqual(w.order, ["guard:session", "guard:navigate", "goto"]);
+    // F3: the agent's login browser is open on the profile → profile_busy, no session
+    w = world(pageOf(scrape(6)), { conn: { browser_session_facebook: { session_id: "s", started_at: new Date().toISOString() } } });
+    let opened = false;
+    w.deps.withPage = async () => { opened = true; };
+    await assert.rejects(() => G.runSync({ phone: "p" }, w.deps), (e) => e.code === "profile_busy");
+    assert.equal(opened, false);
+    // an old, expired login record does not block
+    w = world(pageOf(scrape(6)), { conn: { browser_session_facebook: { session_id: "s", started_at: new Date(Date.now() - 3600e3).toISOString() } } });
+    assert.equal(await G.runSync({ phone: "p" }, w.deps), 6);
+    // the pure check
+    assert.equal(G.scrapeAnomaly([], []), "empty");
+    assert.equal(G.scrapeAnomaly(prevList(), scrape(3).map((x, i) => ({ slug: String(i) }))), null);
+    assert.equal(G.scrapeAnomaly(prevList().concat(prevList()), [{ slug: "1" }, { slug: "2" }, { slug: "3" }, { slug: "4" }, { slug: "5" }]), "shrunk");
   }
 
   // ── staleness ──

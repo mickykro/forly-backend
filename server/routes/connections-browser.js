@@ -19,7 +19,10 @@ const guardLive = require("../posting-guard");
 const lifecycleLive = require("../profile-lifecycle");
 const groupsSync = require("../facebook-groups-sync");
 
-const SESSION_SECONDS = 1500; // SMS 2FA on a phone that is also showing the modal takes a while
+// SMS 2FA on a phone that is also showing the modal takes a while. While a
+// login browser this young is recorded, posting, re-check, reconcile and the
+// groups sync leave the profile alone (profile-lock.loginOpen).
+const SESSION_SECONDS = locksLive.LOGIN_SESSION_S;
 const CONSENT_VERSION = "2026-09-24";
 // Disabling halt classes R5 resolves with a reconnect (see startFlow).
 const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
@@ -43,6 +46,12 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
   const router = express.Router();
 
   const viewUrl = (cdpUrl) => `https://viewer.driver.dev?ws=${encodeURIComponent(cdpUrl)}`;
+  // Express 4 does not catch a rejected handler (I11): a Firestore error would
+  // crash the process. Answer 500 with a code; log no data (as posting-shared.wrap).
+  const wrap = (name, fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch((e) => {
+    console.error(driverLive.redact(`connections-browser ${name}: ${(e && (e.code || e.name)) || "error"}`));
+    if (!res.headersSent) res.status(500).json({ error: "internal" });
+  });
 
   // The request body of /start, past validation and lock acquisition. Never
   // touches `res` — returns {status, body} so the route can release the
@@ -122,7 +131,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     };
   }
 
-  router.post("/start", requireAuth(authSecret), async (req, res) => {
+  router.post("/start", requireAuth(authSecret), wrap("start", async (req, res) => {
     const platform = String((req.body && req.body.platform) || "");
     const spec = PLATFORMS[platform];
     if (!spec) return res.status(400).json({ error: "invalid_input" });
@@ -145,9 +154,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       releaseProfile();
     }
     return res.status(result.status).json(result.body);
-  });
+  }));
 
-  router.get("/:platform/status", requireAuth(authSecret), async (req, res) => {
+  router.get("/:platform/status", requireAuth(authSecret), wrap("status", async (req, res) => {
     const platform = String(req.params.platform);
     if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
     const conn = (await db.getConnection(req.user.userId)) || {};
@@ -157,9 +166,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     }
     const open = conn[`browser_session_${platform}`];
     return res.json({ state: open ? "open" : "none" });
-  });
+  }));
 
-  router.post("/:platform/finish", requireAuth(authSecret), async (req, res) => {
+  router.post("/:platform/finish", requireAuth(authSecret), wrap("finish", async (req, res) => {
     const platform = String(req.params.platform);
     const spec = PLATFORMS[platform];
     if (!spec) return res.status(400).json({ error: "invalid_input" });
@@ -195,11 +204,17 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
           // campaign gate later posts only there. A scrape failure must not
           // fail the connect — store nothing for groups and move on.
           try {
+            // An empty or collapsed scrape (a slow render, a login wall) is
+            // never trusted (I3): the stored list stays as it is.
             const scraped = await groupsSync.syncMembership(page);
-            const merged = groupsSync.mergeMembership(conn.facebook_groups_member || [], scraped, {
-              now: new Date(), catalog: await db.listGroupCatalog(500), selected: [], hidden: groupsSync.hiddenIds(conn),
-            });
-            groups = { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() };
+            const anomaly = groupsSync.scrapeAnomaly(conn.facebook_groups_member, scraped);
+            if (anomaly) console.error(`connections-browser: facebook group sync not trusted: ${anomaly}`);
+            else {
+              const merged = groupsSync.mergeMembership(conn.facebook_groups_member || [], scraped, {
+                now: new Date(), catalog: await db.listGroupCatalog(500), selected: [], hidden: groupsSync.hiddenIds(conn),
+              });
+              groups = { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() };
+            }
           } catch (e) {
             // Never e.message here: a scrape failure could in principle throw
             // with scraped text (a group name/URL) inside it. Only a fixed
@@ -234,12 +249,12 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       [`browser_session_${platform}`]: null,
     }, groups));
     return res.json({ state: "connected", identity_label: label, pages });
-  });
+  }));
 
   // The way out. Stops what is running, forgets the login, deletes the profile
   // at Driver. Required by the privacy law the plan's intro names, and by
   // common decency: the agent must be able to take back what they handed over.
-  router.delete("/:platform", requireAuth(authSecret), async (req, res) => {
+  router.delete("/:platform", requireAuth(authSecret), wrap("delete", async (req, res) => {
     const platform = String(req.params.platform);
     if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
     const phone = req.user.userId;
@@ -258,7 +273,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     }
 
     return res.json({ state: "none", advice });
-  });
+  }));
 
   return router;
 };

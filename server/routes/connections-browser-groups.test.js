@@ -35,8 +35,10 @@ function call(app, method, path, body) {
 
 // A page fake wide enough to run through the WHOLE finish flow, including
 // Pages discovery and facebook-groups-sync.syncMembership's own scrape.
-function fullFacebookPage(groupLinks) {
+function fullFacebookPage(groupLinks, o = {}) {
   return {
+    // posting-driver-proof.readSignal's one page read: no dialog, no alert, no captcha frame
+    evaluate: o.evaluate || (async () => ({ regions: [[], []], count: 0 })),
     goto: async () => {},
     url: () => "https://www.facebook.com/me",
     innerText: async () => "הפיד שלי",
@@ -114,6 +116,28 @@ function fullFacebookPage(groupLinks) {
     assert.ok(conn.facebook_browser_connected_at, "the connect itself still completes");
     assert.equal(conn.facebook_groups_member, undefined, "nothing stored for groups on a sync failure");
     assert.equal(conn.facebook_groups_synced_at, undefined);
+  }
+
+  // ── I3: finish never trusts an empty, collapsed or unreadable groups page —
+  //    the connect completes, the stored list stays exactly as it was ──
+  {
+    const prev = Array.from({ length: 10 }, (_, i) => ({ group_id: String(100 + i), membership_state: "member", observed_at: "2026-09-20T00:00:00.000Z", last_confirmed_at: "2026-09-20T00:00:00.000Z" }));
+    const cases = [
+      ["empty", fullFacebookPage([])],
+      ["shrunk", fullFacebookPage([{ href: "https://www.facebook.com/groups/100/", text: "דירות" }, { href: "https://www.facebook.com/groups/101/", text: "דירות" }])],
+      ["unreadable", fullFacebookPage([{ href: "https://www.facebook.com/groups/100/", text: "דירות" }], { evaluate: async () => { throw new Error("navigated"); } })],
+    ];
+    for (const [what, page] of cases) {
+      const conn = { browser_session_facebook: { session_id: "s3" }, facebook_groups_member: prev.map((e) => Object.assign({}, e)), facebook_groups_synced_at: "2026-09-20T00:00:00.000Z" };
+      const app = makeApp({
+        driver: { stopSession: async () => {}, attachPage: async (id, fn) => fn(page) },
+        db: { getConnection: async () => conn, setConnection: async (p, patch) => Object.assign(conn, patch), listGroupCatalog: async () => [] },
+      });
+      const fin = await call(app, "POST", "/api/connections/browser/facebook/finish");
+      assert.equal(fin.status, 200, what); assert.equal(fin.body.state, "connected", what);
+      assert.deepEqual(conn.facebook_groups_member, prev, `${what}: nothing marked stale`);
+      assert.equal(conn.facebook_groups_synced_at, "2026-09-20T00:00:00.000Z", `${what}: not stamped as synced`);
+    }
   }
 
   console.log("routes/connections-browser-groups.test.js ok");

@@ -90,7 +90,8 @@ async function sweep({ platform, phone }, deps) {
     const withPage = deps.withPage || driverLive.withPage;
     const opts = {
       duration: 300, note: `forly-sweep:${platform}`, type: "hosted", country: "IL",
-      profile: { name: profileName(platform, phone), persist: true },
+      // The CURRENT generation's name (I2): after a reconnect the old name is refused.
+      profile: { name: profileName(platform, phone, conn[`${platform}_profile_gen`] || 0), persist: true },
     };
     // We hold the lock (above); withPage still asserts the name is this
     // phone's, and refuses a revoked or quarantined connection.

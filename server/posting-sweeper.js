@@ -29,6 +29,9 @@ const FLEET_WINDOW_MS = MS_HOUR;
 const FLEET_BREAKER_DEFAULT = 3;
 const SYNC_RETRY_MS = 6 * MS_HOUR;
 const code = (e) => (e && (e.code || e.name)) || "error";
+const { loginOpen } = require("./profile-lock");
+// The agent's consent is in force (posting_permission.enabled === true).
+const consented = (conn) => !!(conn && conn.posting_permission && conn.posting_permission.enabled === true);
 
 // 1. → the failures ({ key, error_code }) the reaper could not move.
 async function reap(x, now) {
@@ -99,11 +102,13 @@ async function syncOneStale(deps, x, now) {
     const conn = (await x.db.getConnection(phone)) || {};
     if (!conn.posting_permission || conn.posting_permission.enabled !== true || !sync.isStale(conn, now)) continue;
     if (now.getTime() - (ms(conn.facebook_groups_sync_attempted_at) || 0) < SYNC_RETRY_MS) continue;
+    if (loginOpen(conn, "facebook", now.getTime())) continue; // the agent is logging in on this profile right now
     const release = x.locks.tryAcquire(phone, "facebook");
     if (!release) continue;
     try {
       await x.db.setConnection(phone, { facebook_groups_sync_attempted_at: iso(now) });
-      await sync.runSync({ phone }, { db: x.db, guard: x.guard, env: deps.env, withPage: deps.withPage, lockHeld: true });
+      // The whole deps: a halting signal on the groups page halts the account (posting-halts).
+      await sync.runSync({ phone }, Object.assign({}, deps, { db: x.db, store: x.store, guard: x.guard, env: deps.env, withPage: deps.withPage, lockHeld: true }));
     } catch (e) { console.error(redact(`posting groups sync ${tail(phone)}: ${code(e)}`)); }
     finally { release(); }
     return true;
@@ -122,6 +127,15 @@ async function reconcileOne(deps, x, now) {
     if (!post || post.reconcile_at) continue;
     try { await x.guard.assertAllowed({ phone: a.phone, platform: "facebook", action: "retry" }, A.guardDeps(deps, x)); }
     catch (e) { if (e && e.code === "posting_disabled") continue; throw e; }
+    const pre = (await x.db.getConnection(a.phone)) || {};
+    // I10: the agent withdrew consent — their profile is not opened again,
+    // not even to look. The attempt stays outcome_unknown for operator review.
+    if (!consented(pre)) {
+      await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id ? { ...p, reconcile_at: iso(now) } : p)) }));
+      await x.store.annotateAttempt(a.key, { reconcile_note: "consent_revoked" }, x.clock()).catch(() => {});
+      continue;
+    }
+    if (loginOpen(pre, "facebook", now.getTime())) continue; // the agent is logging in: a later sweep
     const release = x.locks.tryAcquire(a.phone, "facebook");
     if (!release) continue;
     let result = null;
@@ -160,6 +174,29 @@ async function reconcileOne(deps, x, now) {
   return false;
 }
 
+// 1b. Profile deletes that failed, or were deferred because the profile was
+// in use (profile-lifecycle, I9): every row once per Jerusalem day
+// (settings/posting_health.last_delete_retry_day, stamped BEFORE the run so
+// a failing run never repeats within the day), and in between only the
+// deferred ones, as soon as this process has filed one. Runs with posting
+// off too — a delete is the agent's right, not a post. Deletes failing for
+// 7+ days go to the operator. → the results, or null when nothing ran.
+async function retryProfileDeletes(deps, x, now) {
+  const lc = deps.lifecycle || require("./profile-lifecycle");
+  if (typeof lc.retryDeletes !== "function") return null;
+  const day = safety.jerusalemDate(now);
+  const health = (await x.db.getSetting("posting_health")) || {};
+  const daily = health.last_delete_retry_day !== day;
+  if (!daily && !(typeof lc.hasDeferredDeletes === "function" && lc.hasDeferredDeletes())) return null;
+  if (daily) await x.db.setSetting("posting_health", { last_delete_retry_day: day });
+  const results = await lc.retryDeletes({ db: x.db, driver: deps.driver || require("./driver-browser"), locks: x.locks }, { onlyDeferred: !daily });
+  const late = (results || []).filter((r) => r && r.escalate);
+  if (late.length) {
+    await tellOperator(deps, `posting: ${late.length} browser-profile delete(s) failing for 7+ days (${late.slice(0, 5).map((r) => `${r.platform} ${tail(r.phone)}`).join(", ")}) — the cookies are still at Driver`);
+  }
+  return results;
+}
+
 let sweeping = false;
 // → the number of accounts ticked (0 when the switch is off or the breaker tripped).
 async function sweep(deps = {}, now) {
@@ -172,6 +209,7 @@ async function sweep(deps = {}, now) {
   let reapFailures = [];
   try {
     reapFailures = await reap(x, start);
+    await retryProfileDeletes(deps, x, start).catch((e) => console.error(redact(`posting profile delete retry: ${code(e)}`)));
     let setting;
     try { setting = await x.guard.assertFleetAllowed({ platform: "facebook" }, A.guardDeps(deps, x)); }
     catch (e) { if (e && e.code === "posting_disabled") return 0; throw e; }
@@ -234,5 +272,5 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, operator
 module.exports = {
   sweep, startSweeper, liveDeps, SWEEP_MS,
   tick: T.tick, tickAccount: T.tickAccount, runAttempt: T.runAttempt, haltAccount: H.haltAccount,
-  _test: { reap, writeHealth, fleetBreaker, syncOneStale, reconcileOne, optionalFn, reset: () => { sweeping = false; } },
+  _test: { reap, writeHealth, fleetBreaker, syncOneStale, reconcileOne, retryProfileDeletes, optionalFn, reset: () => { sweeping = false; } },
 };

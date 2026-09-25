@@ -12,6 +12,7 @@
  * ask Driver to delete them at once.
  */
 const { profileName } = require("./profile-name");
+const locksLive = require("./profile-lock");
 
 const HALT_CLASSES = new Set(["captcha", "checkpoint", "restricted", "suspected_compromise"]);
 
@@ -41,18 +42,29 @@ async function cancelAttempts(phone, platform, conn, deps) {
   }
 }
 
+// What is stored about a failed delete: a code, never the vendor's text —
+// the Driver status class (driver_4xx / driver_5xx) when there is one, else
+// delete_failed.
+const errorCode = (status) => (Number.isInteger(status) && status >= 400 && status < 600 ? `driver_${Math.floor(status / 100)}xx` : "delete_failed");
+
 // Deletes the named Driver profile. Never throws — returns { ok: true } or
-// { ok: false, error }. Pure: no db access, no opinion on what a caller
-// should do with the result — see attemptDelete for that.
+// { ok: false, error: <code> }. Pure: no db access, no opinion on what a
+// caller should do with the result — see attemptDelete for that.
 async function deleteDriverProfile(name, deps) {
   try {
     const r = await deps.driver.deleteProfile(name);
-    if (r && r.ok === false) throw new Error(r.error || "delete failed");
+    if (r && r.ok === false) return { ok: false, error: errorCode(r.status) };
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: e.message || String(e) };
+    return { ok: false, error: errorCode(e && e.status) };
   }
 }
+
+// A delete filed because the profile was in use (I9): the sweeper retries
+// those at its next sweep instead of waiting for the daily run.
+let deferred = false;
+const hasDeferredDeletes = () => deferred;
+const BUSY = "profile_busy";
 
 // Runs a delete attempt for `opts.gen` (default: the connection's CURRENT
 // gen) and files/clears the pending-delete row that retryDeletes() later
@@ -76,14 +88,28 @@ async function deleteDriverProfile(name, deps) {
 // revoke/quarantine, or a gen-tracked retry) always saves/clears under the
 // per-generation key, gen 0 included, so two different generations' pending
 // deletes for the same phone+platform never collide.
+//
+// The profile lock (I9): a delete never runs under a live session. When the
+// lock for (phone, platform) is held — a post, a re-check or an extract is
+// in that browser right now — nothing is deleted now: the pending-delete row
+// is filed (last_error profile_busy, attempts unchanged) for retryDeletes().
+// When it is free, it is held for the delete.
 async function attemptDelete(phone, platform, conn, deps, opts = {}) {
   const { since, attempts = 0, legacy = false } = opts;
   const currentGen = conn[`${platform}_profile_gen`] || 0;
   const gen = opts.gen !== undefined ? opts.gen : currentGen;
   const staleGen = gen !== currentGen;
   const name = profileName(platform, phone, gen);
-  const del = await deleteDriverProfile(name, deps);
   const rowGen = legacy ? undefined : gen;
+  const release = (deps.locks || locksLive).tryAcquire(phone, platform);
+  if (!release) {
+    deferred = true;
+    if (!staleGen) await deps.db.setConnection(phone, { [`${platform}_profile_delete_error`]: BUSY });
+    await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts, last_error: BUSY, gen: rowGen });
+    return { ok: false, error: BUSY, gen, staleGen, deferred: true };
+  }
+  let del;
+  try { del = await deleteDriverProfile(name, deps); } finally { release(); }
 
   if (del.ok) {
     if (!staleGen) await deps.db.setConnection(phone, { [`${platform}_profile_deleted_at`]: nowIso(), [`${platform}_profile_delete_error`]: null });
@@ -166,10 +192,13 @@ async function quarantine(phone, platform, cls, deps) {
 // have been failing for over ESCALATE_AFTER_DAYS so the caller can notify an
 // operator.
 const ESCALATE_AFTER_DAYS = 7;
-async function retryDeletes(deps) {
-  const pending = await deps.db.listPendingDeletes();
+// opts.onlyDeferred: just the rows filed because the profile was busy.
+async function retryDeletes(deps, opts = {}) {
+  const all = (await deps.db.listPendingDeletes()) || [];
+  const pending = opts.onlyDeferred ? all.filter((r) => r && r.last_error === BUSY) : all;
+  deferred = false; // every deferred row is tried below; one still busy files itself again
   const results = [];
-  for (const row of pending || []) {
+  for (const row of pending) {
     const { phone, platform, since, attempts } = row;
     const conn = (await deps.db.getConnection(phone)) || {};
 
@@ -199,4 +228,4 @@ async function retryDeletes(deps) {
   return results;
 }
 
-module.exports = { revoke, quarantine, retryDeletes, HALT_CLASSES, ESCALATE_AFTER_DAYS };
+module.exports = { revoke, quarantine, retryDeletes, hasDeferredDeletes, HALT_CLASSES, ESCALATE_AFTER_DAYS };

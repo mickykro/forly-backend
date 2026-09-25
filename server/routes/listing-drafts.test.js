@@ -96,5 +96,15 @@ function call(app, method, path, body) {
     assert.deepEqual(r.body, { found: 1, queued: 1, skipped: 0 });
   }
 
+  // ── I11: a store error is a 500 JSON answer, never a crashed process ──
+  {
+    const down = async () => { throw Object.assign(new Error("14 UNAVAILABLE"), { code: 14 }); };
+    const app = makeApp({ db: { listListingDraftsByPhone: down, getListingDraft: down, getConnection: down, updateListingDraft: down } });
+    for (const [m, path] of [["GET", "/api/listing-drafts"], ["GET", "/api/listing-drafts/d1"], ["POST", "/api/listing-drafts/sweep"], ["POST", "/api/listing-drafts/d1/dismiss"]]) {
+      const r = await call(app, m, path);
+      assert.equal(r.status, 500, `${m} ${path}`); assert.equal(r.body.error, "internal");
+    }
+  }
+
   console.log("routes/listing-drafts.test.js ok");
 })();

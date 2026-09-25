@@ -33,6 +33,7 @@ const { redact } = require("./driver-browser");
 const { profileName } = require("./profile-name");
 const A = require("./posting-account");
 const H = require("./posting-halts");
+const { loginOpen } = require("./profile-lock");
 
 const { iso, tail, ms, MS_HOUR, MS_DAY } = A;
 const MAX_POSTS = 3;
@@ -49,9 +50,12 @@ const HALTING = new Set([...safety.SIGNAL_DISABLES, ...safety.SIGNAL_PENALISES, 
 const haltingOf = (o) => [o && o.r && o.r.signal, o && o.gSignal].find((s) => HALTING.has(s)) || null;
 const code = (e) => (e && (e.code || e.name)) || "error";
 
-// The account may not be looked at: disabled, owner review, penalised, or waiting for a reconnect.
+// The account may not be looked at: disabled, owner review, penalised,
+// waiting for a reconnect, or the agent withdrew consent (I10: their profile
+// is not opened again, not even to look).
 function accountSkipped(conn, now) {
-  return conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true
+  return !(conn.posting_permission && conn.posting_permission.enabled === true)
+    || conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true
     || ms(conn.posting_penalty_until) > now.getTime()
     || (conn.facebook_needs_reconnect === true && !(ms(conn.facebook_browser_connected_at) > ms(conn.facebook_needs_reconnect_at)));
 }
@@ -178,6 +182,7 @@ async function recheckOne(deps = {}, now) {
     const defer = (d) => Promise.all(batch.map((a) => x.store.recordRecheck(a.key, { recheck_due_at: iso(now.getTime() + d) }, now)));
     const conn = (await x.db.getConnection(phone)) || {};
     if (accountSkipped(conn, now)) { await defer(DEFER_MS); continue; }
+    if (loginOpen(conn, "facebook", now.getTime())) continue; // the agent is logging in on this profile: a later sweep
     try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "session" }, A.guardDeps(deps, x)); } // R2: before the session
     catch (e) { if (e && e.code === "posting_disabled") { await defer(RETRY_MS); continue; } throw e; }
     const release = x.locks.tryAcquire(phone, "facebook");

@@ -16,22 +16,27 @@ module.exports = function createListingDraftsRouter(ctx) {
   const sweepDeps = ctx.sweepDeps || {};
   const platforms = ctx.platforms || require("./connections-browser").PLATFORMS;
   const router = express.Router();
+  // Express 4 does not catch a rejected handler (I11): answer 500, log no data.
+  const wrap = (name, fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch((e) => {
+    console.error(require("../driver-browser").redact(`listing-drafts ${name}: ${(e && (e.code || e.name)) || "error"}`));
+    if (!res.headersSent) res.status(500).json({ error: "internal" });
+  });
 
-  router.get("/listing-drafts", requireAuth(authSecret), async (req, res) => {
+  router.get("/listing-drafts", requireAuth(authSecret), wrap("list", async (req, res) => {
     const all = await db.listListingDraftsByPhone(req.user.userId, 100);
     const open = all.filter((d) => !d.dismissed_at && d.status !== "created");
     res.json({ drafts: open });
-  });
+  }));
 
   // Ownership mirrors extract job polling: a draft that belongs to someone
   // else answers exactly like one that does not exist.
-  router.get("/listing-drafts/:id", requireAuth(authSecret), async (req, res) => {
+  router.get("/listing-drafts/:id", requireAuth(authSecret), wrap("get", async (req, res) => {
     const d = await db.getListingDraft(String(req.params.id));
     if (!d || d.phone !== req.user.userId) return res.status(404).json({ error: "not_found" });
     res.json(d);
-  });
+  }));
 
-  router.post("/listing-drafts/sweep", requireAuth(authSecret), async (req, res) => {
+  router.post("/listing-drafts/sweep", requireAuth(authSecret), wrap("sweep", async (req, res) => {
     const phone = req.user.userId;
     const conn = (await db.getConnection(phone)) || {};
     const targets = Object.keys(platforms).filter((p) => conn[`${p}_browser_connected_at`]);
@@ -43,14 +48,14 @@ module.exports = function createListingDraftsRouter(ctx) {
       } catch (e) { console.warn(`listing-sweep ${platform} failed: ${require("../driver-browser").redact(e.message)}`); }
     }
     res.json({ found, queued, skipped });
-  });
+  }));
 
-  router.post("/listing-drafts/:id/dismiss", requireAuth(authSecret), async (req, res) => {
+  router.post("/listing-drafts/:id/dismiss", requireAuth(authSecret), wrap("dismiss", async (req, res) => {
     const d = await db.getListingDraft(String(req.params.id));
     if (!d || d.phone !== req.user.userId) return res.status(404).json({ error: "not_found" });
     await db.updateListingDraft(d.id, { status: "dismissed", dismissed_at: new Date().toISOString() });
     res.json({ status: "dismissed" });
-  });
+  }));
 
   return router;
 };

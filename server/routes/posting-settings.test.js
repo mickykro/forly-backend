@@ -209,7 +209,7 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     const sync = require("../facebook-groups-sync");
     const scrape = [["111", "דירות להשכרה"], ["222", "נדלן קריות"], ["haifa.homes", "דירות בחיפה"], ["999", "משהו"]]
       .map(([slug, text]) => ({ href: `https://www.facebook.com/groups/${slug}/?ref=x`, text }));
-    const page = { goto: async () => {}, waitForLoadState: async () => {}, waitForTimeout: async () => {}, mouse: { wheel: async () => {} }, $$eval: async () => scrape };
+    const page = { evaluate: async () => ({ regions: [[], []], count: 0 }), url: () => "https://www.facebook.com/groups/joins/", goto: async () => {}, waitForLoadState: async () => {}, waitForTimeout: async () => {}, mouse: { wheel: async () => {} }, $$eval: async () => scrape };
     const env = await setup({ groupsSync: sync, deps: { withPage: async (opts, fn) => fn(page) } });
     const del = await call(env.app, "DELETE", "/api/posting/groups/777");
     assert.equal(del.status, 200); assert.deepEqual(del.body.hidden_group_ids, ["777"]);
