@@ -93,6 +93,16 @@ function hebrewParts(date, tz) {
   const p = Object.fromEntries(f.formatToParts(date).map((x) => [x.type, x.value]));
   return { month: p.month, day: Number(p.day) };
 }
+// Fail closed: if this runtime's ICU ever spells a Hebrew month differently
+// (or lacks the Hebrew calendar), every holiday check above would silently
+// say "not a holiday" and posting would run on Yom Kippur. So the calendar is
+// checked once against three known dates; if it disagrees, nothing is active.
+const CALENDAR_OK = (() => {
+  try {
+    const want = [["2026-09-12T12:00:00Z", "Tishri", 1], ["2026-04-02T12:00:00Z", "Nisan", 15], ["2026-05-22T12:00:00Z", "Sivan", 6]];
+    return want.every(([iso, m, d]) => { const p = hebrewParts(new Date(iso), "Asia/Jerusalem"); return p.month === m && p.day === d; });
+  } catch { return false; }
+})();
 function isYomTov(date, tz) {
   const { month, day } = hebrewParts(date, tz);
   const days = BLOCKED_HEBREW_DAYS[month];
@@ -105,6 +115,7 @@ function isHolidayEve(date, config) {
 }
 
 function isActiveTime(date, config = DEFAULTS) {
+  if (!CALENDAR_OK) return false; // see CALENDAR_OK: an unverifiable calendar means no posting at all
   const lp = localParts(date, config.timezone);
   if (lp.dow === 6) return false; // Saturday: Shabbat, fully inactive all day (no fixed end-hour to get wrong)
   if (isYomTov(date, config.timezone)) return false;
@@ -319,7 +330,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 }
 
 module.exports = {
-  DEFAULTS, nextSlot, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, configFrom, fingerprint,
+  DEFAULTS, CALENDAR_OK, nextSlot, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, configFrom, fingerprint,
   wantsBrowseSession, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },
 };

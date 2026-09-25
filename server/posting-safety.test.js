@@ -20,6 +20,7 @@ const account = (o = {}) => Object.assign({
 const at = (d) => new Date(NOW.getTime() - d).toISOString();
 
 // ── active hours: Israeli waking hours, never Shabbat, never a yom tov day ──
+assert.equal(S.CALENDAR_OK, true, "this runtime's Hebrew calendar matches the reference dates");
 assert.equal(S.isActiveTime(IL("2026-09-23T10:00:00+03:00"), cfg), true, "Wed 10:00");
 assert.equal(S.isActiveTime(IL("2026-09-23T03:00:00+03:00"), cfg), false, "Wed 03:00");
 assert.equal(S.isActiveTime(IL("2026-09-25T16:00:00+03:00"), cfg), false, "Fri 16:00 — Erev Shabbat");
