@@ -71,6 +71,29 @@ const MESSAGES = {
   removed: () => "ℹ️ מנהלי אחת הקבוצות הסירו פוסט. לא נפרסם בקבוצה הזו בחודש הקרוב.",
 };
 
+// Is the effect of an earlier `cls` halt still on the connection? (For the
+// duplicate check only; the guard and the scheduler read the same fields.)
+function inForce(conn, cls, groupId, now) {
+  if (DISABLING.has(cls) || cls === "suspected_compromise") return conn.posting_disabled_until_admin === true;
+  if (PENALISING.has(cls)) return ms(conn.posting_penalty_until) > now.getTime();
+  if (cls === "confirmed_removed") {
+    const pen = ((conn.posting_group_penalties || {})[String(groupId)]) || null;
+    return !!pen && ms(pen.until) > now.getTime();
+  }
+  if (cls === "login_required") {
+    return conn.facebook_needs_reconnect === true && !(ms(conn.facebook_browser_connected_at) > ms(conn.facebook_needs_reconnect_at));
+  }
+  return false;
+}
+// Was halt `h` lifted after it was recorded? `posting_reenabled_at` is the
+// operator re-enable (Task 21 writes it with the flag it clears); a browser
+// reconnect lifts a login_required.
+function clearedSince(conn, cls, h) {
+  const t = ms(h.at);
+  if (ms(conn.posting_reenabled_at) > t) return true;
+  return cls === "login_required" && ms(conn.facebook_browser_connected_at) > t;
+}
+
 /*
  * haltAccount(phone, cls, deps, { campaignId, group_id, now })
  * → { cls, disabled, owner_review, penalty_until, reconnect, paused, campaign_paused }
@@ -94,11 +117,16 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
   let decided = null;
   const decide = (conn) => {
     const prior = (conn.posting_halts || []).filter((h) => h && now.getTime() - ms(h.at) < HALT_KEEP_DAYS * MS_DAY);
-    // Idempotent (fix round 3): the same account-level class (the same group,
-    // for a removal) already recorded in the last 24 h is not a new halt —
-    // nothing is appended and no penalty or block restarts. A selector
-    // failure is a per-campaign count and is never folded.
-    if (cls !== "selector_failure" && prior.some((h) => h.code === cls && now.getTime() - ms(h.at) < MS_DAY && (cls !== "confirmed_removed" || String(h.group_id) === String(opts.group_id)))) {
+    // Idempotent (fix rounds 3-4): a halt is a duplicate only when the same
+    // class (the same group, for a removal) was recorded in the last 24 h,
+    // that halt is STILL IN FORCE, and nothing cleared it since. Nothing is
+    // then appended and no penalty or block restarts. After an operator
+    // re-enable (or an agent reconnect, for login_required) the next halt is
+    // a new one: full stop, block and messages. A selector failure is a
+    // per-campaign count and is never folded.
+    if (cls !== "selector_failure" && prior.some((h) => h.code === cls && now.getTime() - ms(h.at) < MS_DAY
+      && (cls !== "confirmed_removed" || String(h.group_id) === String(opts.group_id))
+      && inForce(conn, cls, opts.group_id, now) && !clearedSince(conn, cls, h))) {
       decided = {
         duplicate: true, owner_review: conn.posting_owner_review_required === true, penalty_until: conn.posting_penalty_until || null,
         disabled: DISABLING.has(cls) || cls === "suspected_compromise", reconnect: cls === "login_required",

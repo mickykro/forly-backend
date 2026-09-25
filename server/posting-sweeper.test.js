@@ -278,6 +278,61 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     assert.equal(((await db.getConnection(PH)).posting_halts || []).filter((h) => h.code === "rate_limited").length, 2);
   }
 
+  // ── fix round 4: a halt is a duplicate only while the earlier one is still in force and not lifted ──
+  {
+    const { deps, notes, ops } = await setup();
+    const c = await C.create(base(), deps);
+    let r = await H.haltAccount(PH, "checkpoint", deps, { campaignId: c.id, now: NOW });
+    assert.equal(r.disabled, true);
+    assert.equal((await store.getPostingCampaign(c.id)).status, "paused");
+    const told = notes.length, opsTold = ops.length;
+    // while still disabled, a second checkpoint the same day is the same halt
+    r = await H.haltAccount(PH, "checkpoint", deps, { now: new Date(NOW.getTime() + HOUR) });
+    assert.equal(r.duplicate, true);
+    assert.equal(notes.length, told);
+    // the operator re-enables (Task 21 writes the flag and posting_reenabled_at together); the agent resumes
+    await db.setConnection(PH, { posting_disabled_until_admin: false, posting_reenabled_at: iso(NOW.getTime() + 90 * MIN) });
+    assert.equal((await C.resume(c.id, deps)).status, "running");
+    // a new checkpoint 2 h after the first is a NEW halt: disabled again, stopped, everyone told
+    r = await H.haltAccount(PH, "checkpoint", deps, { campaignId: c.id, now: new Date(NOW.getTime() + 2 * HOUR) });
+    assert.ok(!r.duplicate, "a re-escalation after a re-enable is not swallowed");
+    assert.equal(r.disabled, true);
+    assert.equal(r.owner_review, true, "the second checkpoint within 30 days → owner review");
+    const k = await conn();
+    assert.equal(k.posting_disabled_until_admin, true, "the account is disabled again");
+    assert.equal(k.posting_halts.filter((h) => h.code === "checkpoint").length, 2);
+    assert.equal((await store.getPostingCampaign(c.id)).status, "paused", "the running campaign stops again");
+    assert.ok(notes.length > told, "the agent is told again");
+    assert.ok(ops.length > opsTold, "the operator is told again");
+
+    // a flag cleared with no timestamp still counts as lifted: the effect is no longer in force
+    await setup();
+    await H.haltAccount(PH, "restricted", deps, { now: NOW });
+    await db.setConnection(PH, { posting_disabled_until_admin: false });
+    r = await H.haltAccount(PH, "restricted", deps, { now: new Date(NOW.getTime() + HOUR) });
+    assert.ok(!r.duplicate);
+    assert.equal((await conn()).posting_disabled_until_admin, true);
+
+    // a group penalty lifted within the day: the next removal from that group is a new halt
+    await setup();
+    await H.haltAccount(PH, "confirmed_removed", deps, { group_id: "111", now: NOW });
+    r = await H.haltAccount(PH, "confirmed_removed", deps, { group_id: "111", now: new Date(NOW.getTime() + HOUR) });
+    assert.equal(r.duplicate, true, "the group is still off: the same removal");
+    await db.setConnection(PH, { posting_group_penalties: { 111: { code: "confirmed_removed", at: iso(NOW), until: iso(NOW.getTime() + 2 * HOUR) } } });
+    r = await H.haltAccount(PH, "confirmed_removed", deps, { group_id: "111", now: new Date(NOW.getTime() + 3 * HOUR) });
+    assert.ok(!r.duplicate, "the group penalty had ended");
+    assert.ok(r.penalty_until, "and it is the second removal in 7 days");
+
+    // a login_required after the agent reconnected is a new halt
+    await setup();
+    await H.haltAccount(PH, "login_required", deps, { now: NOW });
+    assert.equal((await H.haltAccount(PH, "login_required", deps, { now: new Date(NOW.getTime() + HOUR) })).duplicate, true);
+    await db.setConnection(PH, { facebook_browser_connected_at: iso(NOW.getTime() + 2 * HOUR) });
+    r = await H.haltAccount(PH, "login_required", deps, { now: new Date(NOW.getTime() + 3 * HOUR) });
+    assert.ok(!r.duplicate);
+    assert.equal(r.reconnect, true);
+  }
+
   // ── the profile lock is respected: nothing posts while an extract or login holds it ──
   {
     const { deps, at } = await setup();
