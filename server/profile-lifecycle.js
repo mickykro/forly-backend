@@ -27,19 +27,32 @@ async function stopOpenSession(platform, conn, deps) {
   if (open && open.session_id) await deps.driver.stopSession(open.session_id);
 }
 
-// Deletes the profile at Driver and returns the patch that records the
-// outcome — `<platform>_profile_deleted_at` on success, or
-// `<platform>_profile_delete_error` (never throws) so the caller can persist
-// it and a daily sweep (retryDeletes) can pick failures back up.
+// Deletes the profile at Driver. Never throws — returns { ok: true, patch }
+// with `<platform>_profile_deleted_at` set, or { ok: false, error, patch }
+// with `<platform>_profile_delete_error` set, so the caller can persist the
+// connection patch AND decide whether to file/clear a profile_deletes row.
 async function deleteAndRecord(phone, platform, conn, deps) {
   const name = profileName(platform, phone, conn[`${platform}_profile_gen`] || 0);
   try {
     const r = await deps.driver.deleteProfile(name);
     if (r && r.ok === false) throw new Error(r.error || "delete failed");
-    return { [`${platform}_profile_deleted_at`]: nowIso(), [`${platform}_profile_delete_error`]: null };
+    return { ok: true, patch: { [`${platform}_profile_deleted_at`]: nowIso(), [`${platform}_profile_delete_error`]: null } };
   } catch (e) {
-    return { [`${platform}_profile_delete_error`]: e.message || String(e) };
+    const error = e.message || String(e);
+    return { ok: false, error, patch: { [`${platform}_profile_delete_error`]: error } };
   }
+}
+
+// Runs a delete attempt and files/clears the pending-delete row that
+// retryDeletes() later drains. `since`/`attempts` carry over an existing
+// retry's own history when passed in; a first attempt (revoke/quarantine)
+// omits them and starts a fresh row.
+async function attemptDelete(phone, platform, conn, deps, { since, attempts = 0 } = {}) {
+  const del = await deleteAndRecord(phone, platform, conn, deps);
+  await deps.db.setConnection(phone, del.patch);
+  if (del.ok) await deps.db.clearPendingDelete(phone, platform);
+  else await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts: attempts + 1, last_error: del.error });
+  return del;
 }
 
 // Stops the platform's open session, cancels the phone's open posting
@@ -62,11 +75,15 @@ async function revoke({ phone, platform, reason }, deps) {
     },
     platform === "facebook" ? { facebook_pages: null, facebook_groups_member: null, posting_permission: null } : {},
   );
+  // Two setConnection writes, deliberately not merged into one: the state
+  // write lands FIRST so the profile is refused (assertOwnership) at once,
+  // before the Driver delete even runs; the pending-delete row that
+  // attemptDelete() files on failure makes a crash between the two writes
+  // recoverable — retryDeletes() will still find and finish the delete.
   await deps.db.setConnection(phone, statePatch);
   Object.assign(conn, statePatch);
 
-  const deletePatch = await deleteAndRecord(phone, platform, conn, deps);
-  await deps.db.setConnection(phone, deletePatch);
+  await attemptDelete(phone, platform, conn, deps);
 
   return { advice: AGENT_ADVICE[platform] || null };
 }
@@ -90,33 +107,31 @@ async function quarantine(phone, platform, cls, deps) {
     [`${platform}_browser_connected_at`]: null,
     [`browser_session_${platform}`]: null,
   };
+  // Same intentional split as revoke(): the state write lands first so the
+  // profile is refused at once, and the pending-delete row attemptDelete()
+  // files on failure makes a crash between the two writes recoverable.
   await deps.db.setConnection(phone, statePatch);
   Object.assign(conn, statePatch);
 
-  const deletePatch = await deleteAndRecord(phone, platform, conn, deps);
-  await deps.db.setConnection(phone, deletePatch);
+  await attemptDelete(phone, platform, conn, deps);
 }
 
-// Called from the posting sweeper once a day. `pending` is the list of
-// {phone, platform, since} whose last delete attempt left
-// `<platform>_profile_delete_error` set — listing them is the sweeper's own
-// job (a Firestore scan across connections), not this module's: the only db
-// access this file needs is getConnection/setConnection, per profile-lock's
-// and profile-name's own dependency shape. Escalates (reports, does not
-// itself notify) anything that has been failing for over
-// ESCALATE_AFTER_DAYS.
+// Called from the posting sweeper once a day. Reads its own work — every row
+// in db's profile_deletes collection — retries each, and reports which ones
+// have been failing for over ESCALATE_AFTER_DAYS so the caller can notify an
+// operator.
 const ESCALATE_AFTER_DAYS = 7;
-async function retryDeletes(pending, deps) {
+async function retryDeletes(deps) {
+  const pending = await deps.db.listPendingDeletes();
   const results = [];
-  for (const { phone, platform, since } of pending || []) {
+  for (const row of pending || []) {
+    const { phone, platform, since, attempts } = row;
     const conn = (await deps.db.getConnection(phone)) || {};
     if (!["revoked", "quarantined"].includes(conn[`${platform}_profile_state`])) continue; // reconnected past it
-    if (conn[`${platform}_profile_deleted_at`]) continue; // already succeeded
-    const deletePatch = await deleteAndRecord(phone, platform, conn, deps);
-    await deps.db.setConnection(phone, deletePatch);
-    const failed = !!deletePatch[`${platform}_profile_delete_error`];
+    if (conn[`${platform}_profile_deleted_at`]) continue; // already succeeded elsewhere
+    const del = await attemptDelete(phone, platform, conn, deps, { since, attempts });
     const ageMs = since ? Date.now() - new Date(since).getTime() : 0;
-    results.push({ phone, platform, ok: !failed, escalate: failed && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
+    results.push({ phone, platform, ok: del.ok, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
   }
   return results;
 }

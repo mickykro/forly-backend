@@ -1,10 +1,31 @@
-/* profile-lifecycle.js — revoke, quarantine, retryDeletes. No network, no
-   browser: driver and db are fakes. This is Task 13's acceptance test,
-   adapted to this repo's real module names. */
+/* profile-lifecycle.js — revoke, quarantine, retryDeletes, and the
+   profile_deletes pending-retry store. No network, no browser: driver and db
+   are fakes. Starts from Task 13's acceptance test (revoke, adapted to this
+   repo's real module names), then covers quarantine and the self-contained
+   retryDeletes(deps) added in review-round-1. */
 const assert = require("assert");
 const L = require("./profile-lifecycle");
 const { profileName, assertOwnership } = require("./profile-name");
 process.env.FORLY_ENV = "local"; process.env.PROFILE_KEY = "k";
+
+// A minimal fake of db.js's connection + profile_deletes surface, shared by
+// every scenario below so retryDeletes can be exercised against the SAME
+// kind of store revoke()/quarantine() write into.
+function fakeDb(conns = {}) {
+  const pending = new Map();
+  return {
+    conns,
+    pending,
+    getConnection: async (phone) => conns[phone] || null,
+    setConnection: async (phone, patch) => { conns[phone] = Object.assign(conns[phone] || {}, patch); },
+    cancelOpenAttempts: async () => {},
+    savePendingDelete: async ({ phone, platform, since, attempts, last_error }) => {
+      pending.set(`${platform}:${phone}`, { phone, platform, since, attempts, last_error });
+    },
+    listPendingDeletes: async () => [...pending.values()],
+    clearPendingDelete: async (phone, platform) => { pending.delete(`${platform}:${phone}`); },
+  };
+}
 
 (async () => {
   assert.ok(/^facebook-local-[0-9a-f]{20}$/.test(profileName("facebook", "05x")));
@@ -15,9 +36,11 @@ process.env.FORLY_ENV = "local"; process.env.PROFILE_KEY = "k";
   // ── revoke: stops the session, cancels open attempts, deletes the profile,
   //    clears Facebook-only state, and records what the agent must still do ──
   const conn = { facebook_browser_connected_at: "2026-09-01", facebook_pages: [{}], facebook_groups_member: [{}], posting_permission: { enabled: true }, browser_session_facebook: { session_id: "s1" } };
+  const db1 = fakeDb({ "05x": conn });
   const stopped = [], deleted = [], cancelled = [];
+  db1.cancelOpenAttempts = async (ph, platform) => cancelled.push([ph, platform]);
   const result = await L.revoke({ phone: "05x", platform: "facebook", reason: "agent" }, {
-    db: { getConnection: async () => conn, setConnection: async (p, patch) => Object.assign(conn, patch), cancelOpenAttempts: async (ph, platform) => cancelled.push([ph, platform]) },
+    db: db1,
     driver: { stopSession: async (id) => stopped.push(id), deleteProfile: async (n) => deleted.push(n) },
   });
   assert.deepEqual(stopped, ["s1"]);
@@ -31,24 +54,47 @@ process.env.FORLY_ENV = "local"; process.env.PROFILE_KEY = "k";
   assert.ok(conn.facebook_profile_deleted_at);
   assert.ok(result.advice, "revoke says what the agent should still do at the platform");
   assert.throws(() => assertOwnership(profileName("facebook", "05x"), "05x", "facebook", conn), (e) => e.code === "profile_ownership", "a revoked profile is refused even with the right name");
+  assert.deepEqual(await db1.listPendingDeletes(), [], "a successful delete leaves no pending row");
 
-  // ── Driver refusing the delete is recorded and retried, not swallowed ──
+  // ── Driver refusing the delete is recorded and retried, not swallowed —
+  //    AND files a profile_deletes row so retryDeletes() can find it later ──
   const conn2 = { yad2_browser_connected_at: "2026-09-01" };
+  const db2 = fakeDb({ "05x": conn2 });
   await L.revoke({ phone: "05x", platform: "yad2", reason: "agent" }, {
-    db: { getConnection: async () => conn2, setConnection: async (p, patch) => Object.assign(conn2, patch), cancelOpenAttempts: async () => {} },
+    db: db2,
     driver: { stopSession: async () => {}, deleteProfile: async () => { throw new Error("503"); } },
   });
   assert.ok(conn2.yad2_profile_delete_error && !conn2.yad2_profile_deleted_at);
+  assert.equal(conn2.posting_permission, undefined, "revoke on a non-Facebook platform must not touch Facebook-only fields");
+  {
+    const rows = await db2.listPendingDeletes();
+    assert.equal(rows.length, 1, "a failed delete creates a pending record");
+    assert.equal(rows[0].phone, "05x");
+    assert.equal(rows[0].platform, "yad2");
+    assert.equal(rows[0].attempts, 1);
+    assert.equal(rows[0].last_error, "503");
+    assert.ok(rows[0].since);
+  }
 
-  // ── revoke on a non-Facebook platform must not touch Facebook-only fields ──
-  assert.equal(conn2.posting_permission, undefined);
+  // ── a later successful retry clears the pending record ──
+  {
+    const okDb = fakeDb({ "05x": conn2 }); // same conn2: still revoked, still undeleted
+    okDb.pending.set("yad2:05x", { phone: "05x", platform: "yad2", since: db2.pending.get("yad2:05x").since, attempts: 1, last_error: "503" });
+    const results = await L.retryDeletes({ db: okDb, driver: { deleteProfile: async () => ({ ok: true }) } });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ok, true);
+    assert.ok(conn2.yad2_profile_deleted_at, "the retry recorded success on the connection");
+    assert.deepEqual(await okDb.listPendingDeletes(), [], "success clears the pending row");
+  }
 
   // ── quarantine: sets state, stops the session, cancels attempts, deletes
   //    the profile — and a quarantined profile is refused too ──
   const conn3 = { facebook_browser_connected_at: "2026-09-10", browser_session_facebook: { session_id: "s2" } };
+  const db3 = fakeDb({ "05x": conn3 });
   const stopped3 = [], deleted3 = [], cancelled3 = [];
+  db3.cancelOpenAttempts = async (ph, platform) => cancelled3.push([ph, platform]);
   await L.quarantine("05x", "facebook", "checkpoint", {
-    db: { getConnection: async () => conn3, setConnection: async (p, patch) => Object.assign(conn3, patch), cancelOpenAttempts: async (ph, platform) => cancelled3.push([ph, platform]) },
+    db: db3,
     driver: { stopSession: async (id) => stopped3.push(id), deleteProfile: async (n) => deleted3.push(n) },
   });
   assert.deepEqual(stopped3, ["s2"]);
@@ -62,48 +108,47 @@ process.env.FORLY_ENV = "local"; process.env.PROFILE_KEY = "k";
 
   // ── quarantine refuses an unrecognized halt class ──
   await assert.rejects(
-    () => L.quarantine("05x", "facebook", "bored", { db: {}, driver: {} }),
+    () => L.quarantine("05x", "facebook", "bored", { db: fakeDb(), driver: {} }),
     (e) => e.code === "invalid_input",
   );
 
-  // ── retryDeletes: only re-attempts revoked/quarantined rows still missing a
-  //    successful delete, and flags one old enough to escalate ──
-  const rowA = { yad2_profile_state: "revoked" }; // still failing
-  const rowB = { madlan_profile_state: "revoked", madlan_profile_deleted_at: "2026-09-01" }; // already done
-  const rowC = { facebook_browser_connected_at: "2026-09-20" }; // reconnected — no longer pending
-  const conns = { a: rowA, b: rowB, c: rowC };
-  const retryDeleted = [];
-  const retryDeps = {
-    db: {
-      getConnection: async (phone) => conns[phone],
-      setConnection: async (phone, patch) => Object.assign(conns[phone], patch),
-    },
-    driver: { deleteProfile: async (n) => { retryDeleted.push(n); return { ok: true }; } },
-  };
-  const oldSince = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
-  const results = await L.retryDeletes(
-    [
-      { phone: "a", platform: "yad2", since: oldSince },
-      { phone: "b", platform: "madlan", since: oldSince },
-      { phone: "c", platform: "facebook", since: oldSince },
-    ],
-    retryDeps,
-  );
-  assert.deepEqual(retryDeleted, [profileName("yad2", "a")], "only the still-pending row is retried");
-  assert.ok(rowA.yad2_profile_deleted_at, "the retry recorded success");
-  const onlyResult = results.find((r) => r.phone === "a");
-  assert.ok(onlyResult && onlyResult.ok, "succeeded this time");
-  assert.equal(results.length, 1, "already-done and reconnected rows are skipped, not reported");
+  // ── retryDeletes: reads its own work from db.listPendingDeletes(); skips a
+  //    row whose connection already succeeded and one that reconnected past
+  //    quarantine/revocation, without attempting a delete for either ──
+  {
+    const conns = {
+      a: { yad2_profile_state: "revoked" }, // still pending — should be retried
+      b: { madlan_profile_state: "revoked", madlan_profile_deleted_at: "2026-09-01" }, // already done
+      c: { facebook_browser_connected_at: "2026-09-20" }, // reconnected — no longer pending
+    };
+    const db4 = fakeDb(conns);
+    const since = new Date().toISOString();
+    db4.pending.set("yad2:a", { phone: "a", platform: "yad2", since, attempts: 0, last_error: null });
+    db4.pending.set("madlan:b", { phone: "b", platform: "madlan", since, attempts: 0, last_error: null });
+    db4.pending.set("facebook:c", { phone: "c", platform: "facebook", since, attempts: 0, last_error: null });
+    const attemptedDeletes = [];
+    const results = await L.retryDeletes({ db: db4, driver: { deleteProfile: async (n) => { attemptedDeletes.push(n); return { ok: true }; } } });
+    assert.deepEqual(attemptedDeletes, [profileName("yad2", "a")], "only the still-pending row is retried");
+    assert.equal(results.length, 1, "already-done and reconnected rows are skipped, not reported");
+    assert.equal(results[0].phone, "a");
+    assert.ok(conns.a.yad2_profile_deleted_at);
+  }
 
-  // ── retryDeletes escalates a row that keeps failing past ESCALATE_AFTER_DAYS ──
-  const rowD = { facebook_profile_state: "revoked" };
-  const escDeps = {
-    db: { getConnection: async () => rowD, setConnection: async (p, patch) => Object.assign(rowD, patch) },
-    driver: { deleteProfile: async () => { throw new Error("still 503"); } },
-  };
-  const [esc] = await L.retryDeletes([{ phone: "d", platform: "facebook", since: oldSince }], escDeps);
-  assert.equal(esc.ok, false);
-  assert.equal(esc.escalate, true, "8 days old and still failing must escalate");
+  // ── retryDeletes escalates a row that keeps failing past ESCALATE_AFTER_DAYS,
+  //    and keeps the pending row (with attempts incremented) when it does ──
+  {
+    const conns = { d: { facebook_profile_state: "revoked" } };
+    const db5 = fakeDb(conns);
+    const oldSince = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    db5.pending.set("facebook:d", { phone: "d", platform: "facebook", since: oldSince, attempts: 3, last_error: "503" });
+    const results = await L.retryDeletes({ db: db5, driver: { deleteProfile: async () => { throw new Error("still 503"); } } });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ok, false);
+    assert.equal(results[0].escalate, true, "8 days old and still failing must escalate");
+    const row = db5.pending.get("facebook:d");
+    assert.equal(row.attempts, 4, "attempts increments, since is preserved across retries");
+    assert.equal(row.since, oldSince);
+  }
 
   console.log("profile-lifecycle.test.js ok");
 })();

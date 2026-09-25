@@ -41,5 +41,31 @@ const page = (id, phone, slug) => ({
   assert.ok(found, "the 150th page must resolve; the old .find() over 100 docs missed it");
   assert.strictEqual(found.page_id, "bulk149");
 
+  // ── profile_deletes: pending Driver-profile-deletion retries ──
+  await db.savePendingDelete({ phone: "0500000000", platform: "yad2", since: "2026-09-01T00:00:00.000Z", attempts: 1, last_error: "503" });
+  await db.savePendingDelete({ phone: "0500000000", platform: "facebook", since: "2026-09-02T00:00:00.000Z", attempts: 2, last_error: "timeout" });
+  let pending = await db.listPendingDeletes();
+  assert.equal(pending.length, 2);
+  const yad2Row = pending.find((r) => r.platform === "yad2");
+  assert.equal(yad2Row.phone, "0500000000");
+  assert.equal(yad2Row.attempts, 1);
+  assert.equal(yad2Row.last_error, "503");
+
+  // ── re-saving the same phone+platform overwrites, not duplicates ──
+  await db.savePendingDelete({ phone: "0500000000", platform: "yad2", since: "2026-09-01T00:00:00.000Z", attempts: 2, last_error: "503 again" });
+  pending = await db.listPendingDeletes();
+  assert.equal(pending.length, 2, "same phone+platform is one row");
+  assert.equal(pending.find((r) => r.platform === "yad2").attempts, 2);
+
+  // ── clearPendingDelete removes only that phone+platform ──
+  await db.clearPendingDelete("0500000000", "yad2");
+  pending = await db.listPendingDeletes();
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].platform, "facebook");
+
+  // ── clearing a row that isn't there is a harmless no-op ──
+  await db.clearPendingDelete("0500000000", "yad2");
+  assert.equal((await db.listPendingDeletes()).length, 1);
+
   console.log("db.test.js OK");
 })().catch((err) => { console.error(err); process.exit(1); });
