@@ -62,5 +62,152 @@ assert.equal(lim.take("a", new Date("2026-09-09T00:00:01Z")), true);
   assert.deepEqual([vid.contentType, vid.fname.endsWith(".mp4")], ["video/mp4", true]);
   await assert.rejects(importImage("https://c/v", { fetchFn: fetchOctet(mp4), lookup: async () => [{ address: "1.2.3.4" }] }), (e) => e.code === "page_unreadable");
   await assert.rejects(importImage("https://c/x", { fetchFn: fetchOctet(jpg), lookup: async () => [{ address: "1.2.3.4" }], video: true }), (e) => e.code === "page_unreadable");
-  console.log("routes/extract.test.js ok");
+})();
+
+// ── the queue/poll/fallback route, built with a real Express app ──
+const express = require("express");
+const http = require("http");
+const createExtractRouter = require("./extract");
+
+function makeApp(o = {}) {
+  const phone = o.phone || "0500000000";
+  const requireAuth = () => (req, res, next) => { req.user = { userId: phone }; next(); };
+  const app = express(); app.use(express.json());
+  app.use("/api", createExtractRouter({ requireAuth, authSecret: "s", resolve: o.resolve, db: o.db, extractJobs: o.extractJobs, driverEnabled: o.driverEnabled !== false }));
+  return app;
+}
+function call(app, method, path, body, headers) {
+  return new Promise((resolve) => {
+    const server = app.listen(0, () => {
+      const req = http.request({ port: server.address().port, path, method, headers: Object.assign({ "content-type": "application/json" }, headers || {}) }, (res) => {
+        let d = ""; res.on("data", (c) => (d += c));
+        res.on("end", () => { server.close(); resolve({ status: res.statusCode, body: JSON.parse(d || "{}") }); });
+      });
+      if (body) req.write(JSON.stringify(body)); req.end();
+    });
+  });
+}
+const post = (app, path, body, headers) => call(app, "POST", path, body, headers);
+const get = (app, path) => call(app, "GET", path);
+
+(async () => {
+// ── a driver-routed URL queues a job instead of answering inline ──
+{
+  const created = [];
+  const app = makeApp({
+    extractJobs: { create: async (input) => { created.push(input); return { id: "job-1", status: "queued" }; } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" });
+  assert.equal(res.status, 202);
+  assert.equal(res.body.job_id, "job-1");
+  assert.equal(res.body.status, "queued");
+  assert.equal(created.length, 1);
+  assert.equal(created[0].url, "https://www.yad2.co.il/item/abc");
+  assert.equal(created[0].forceSource, null, "a driver host needs no forcing");
+}
+
+// ── firecrawl failing to READ falls back to a driver job, not an error ──
+{
+  const created = [];
+  const app = makeApp({
+    resolve: async () => { const e = new Error("challenge page"); e.code = "page_unreadable"; throw e; },
+    extractJobs: { create: async (input) => { created.push(input); return { id: "job-2", status: "queued" }; } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.komo.co.il/item/1" });
+  assert.equal(res.status, 202);
+  assert.equal(res.body.job_id, "job-2");
+  assert.equal(created[0].forceSource, "driver");
+  assert.equal(created[0].profileName, null, "a fallback scrape NEVER gets a customer's logged-in profile");
+}
+
+// ── but firecrawl being UNCONFIGURED is not a reason to spend a browser ──
+{
+  const app = makeApp({
+    resolve: async () => { const e = new Error("no key"); e.code = "extract_unavailable"; throw e; },
+    extractJobs: { create: async () => { throw new Error("must not queue"); } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.komo.co.il/item/1" });
+  assert.equal(res.status, 503);
+}
+
+// ── demo callers never reach a browser: they get told to sign in ──
+{
+  const app = makeApp({ extractJobs: { create: async () => { throw new Error("must not queue"); } } });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" }, { "x-demo-key": "demo" });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, "login_required_for_browser");
+}
+
+// ── and with Driver not configured, the answer is an honest 503, not a job that never runs ──
+{
+  const app = makeApp({ driverEnabled: false, extractJobs: { create: async () => { throw new Error("must not queue"); } } });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" });
+  assert.equal(res.status, 503);
+}
+
+// ── but a bad input is still a 400: the browser cannot fix a malformed URL ──
+{
+  const app = makeApp({
+    resolve: async () => { const e = new Error("bad"); e.code = "invalid_input"; throw e; },
+    extractJobs: { create: async () => { throw new Error("must not queue"); } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://example.com/x" });
+  assert.equal(res.status, 400);
+}
+
+// ── polling returns the job, and only to its owner ──
+{
+  const job = { id: "job-3", phone: "0500000000", status: "done", error_code: null,
+    result: { source: "driver", description: "דירה", fields: { city: "חיפה" }, missing: ["rooms"], photos: [] } };
+  const app = makeApp({ db: { getExtractJob: async (id) => (id === "job-3" ? job : null) } });
+  const ok = await get(app, "/api/properties/extract/job-3");
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.status, "done");
+  assert.deepEqual(ok.body.fields, { city: "חיפה" });
+  assert.deepEqual(ok.body.missing, ["rooms"]);
+
+  const missing = await get(app, "/api/properties/extract/nope");
+  assert.equal(missing.status, 404);
+
+  const otherApp = makeApp({
+    phone: "0509999999",
+    db: { getExtractJob: async () => job },
+  });
+  const stolen = await get(otherApp, "/api/properties/extract/job-3");
+  assert.equal(stolen.status, 404, "another agent's job must be indistinguishable from a missing one");
+}
+
+// ── a failed job reports its stable code, never vendor text ──
+{
+  const job = { id: "job-4", phone: "0500000000", status: "failed", error_code: "social_login_required", result: null };
+  const app = makeApp({ db: { getExtractJob: async () => job } });
+  const res = await get(app, "/api/properties/extract/job-4");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, "failed");
+  assert.equal(res.body.error_code, "social_login_required");
+  assert.ok(!("text" in res.body));
+}
+
+// ── the browser cap is separate from, and lower than, the firecrawl cap ──
+{
+  let queued = 0;
+  const app = makeApp({ extractJobs: { create: async () => { queued++; return { id: `j${queued}`, status: "queued" }; } } });
+  for (let i = 0; i < 10; i++) await post(app, "/api/properties/extract", { url: `https://www.yad2.co.il/item/${i}` });
+  const over = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/over" });
+  assert.equal(over.status, 429);
+  assert.equal(over.body.error, "extract_limit");
+  assert.equal(queued, 10, "DRIVER_DAILY_CAP is 10");
+}
+
+// ── profileFor: anchored, and twitter is x ──
+{
+  const { profileFor } = createExtractRouter._test;
+  assert.equal(profileFor("https://www.facebook.com/groups/1", "05x", "k"), profileFor("https://facebook.com/groups/2", "05x", "k"));
+  assert.ok(/^facebook-[a-z]+-[0-9a-f]{20}$/.test(profileFor("https://www.facebook.com/groups/1", "05x", "k")), "hmac, not the phone");
+  assert.equal(profileFor("https://twitter.com/a/status/1", "05x", "k"), profileFor("https://x.com/a/status/1", "05x", "k"));
+  assert.equal(profileFor("https://netflix.com/x", "05x", "k"), null, "not left-anchored → netflix matched x.com");
+  assert.equal(profileFor("https://evilfacebook.com/x", "05x", "k"), null);
+  assert.equal(profileFor("https://www.yad2.co.il/item/1", "05x", "k"), null, "no profile for non-social hosts");
+}
+console.log("routes/extract.test.js ok");
 })();

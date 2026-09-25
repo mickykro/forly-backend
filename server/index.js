@@ -218,6 +218,22 @@ app.use("/api", createExtractRouter({
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
 }));
 
+// ── browser-backed extracts ──
+// A crash between "session created" and the finally leaves a browser running
+// until its duration expires, holding a concurrency slot the whole time. Ours
+// all carry a forly-extract: note, so we can tell them from anyone else's.
+if (process.env.DRIVER_API_KEY) {
+  const extractJobs = require("./extract-jobs");
+  const driverBrowser = require("./driver-browser");
+  driverBrowser.cleanupOrphans("forly-extract:")
+    .then((n) => { if (n) console.log(`driver: stopped ${n} orphaned session(s) at boot`); })
+    .catch((e) => console.warn(`driver: orphan cleanup failed: ${e.message}`));
+  extractJobs.startSweeper(extractJobs.liveDeps());
+  console.log("driver: extract sweeper started");
+} else {
+  console.warn("DRIVER_API_KEY not set — yad2/madlan/social URLs will fail to extract");
+}
+
 // ── profile onboarding (the 15-field "השלמת פרופיל" form) ──
 const createProfileRouter = require("./routes/profile");
 app.use("/api", createProfileRouter({ requireAuth, authSecret: AUTH_SECRET }));

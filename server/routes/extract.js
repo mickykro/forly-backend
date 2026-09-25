@@ -9,7 +9,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { parseListing, MAX_INPUT } = require("../listing-extract");
-const { resolve, isPublicUrl, TIMEOUT_MS } = require("../listing-sources");
+const { isPublicUrl, TIMEOUT_MS } = require("../listing-sources");
 const { storeBuffer } = require("../upload-store");
 const { REVIEW_SCOPES } = require("../auth");
 
@@ -19,9 +19,16 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mp4" };
 const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
 const DAILY_CAP = 30;
+// A browser scrape is a whole Chrome instance plus metered bandwidth, where a
+// firecrawl scrape is one HTTP call. Same abuse surface, very different cost.
+const DRIVER_DAILY_CAP = 10;
 
-const STATUS = { invalid_input: 400, facebook_not_connected: 409, page_unreadable: 422, extract_limit: 429, extract_unavailable: 503 };
+const STATUS = {
+  invalid_input: 400, facebook_not_connected: 409, social_login_required: 409, login_required_for_browser: 409,
+  page_unreadable: 422, extract_limit: 429, extract_unavailable: 503,
+};
 function statusFor(code) { return STATUS[code] || 500; }
+const fail = (code, msg) => { const e = new Error(msg || code); e.code = code; return e; };
 
 function validateBody(body) {
   const b = body || {};
@@ -75,10 +82,36 @@ async function importImage(url, { fetchFn = fetch, lookup, video = false } = {})
   return { fname: `${crypto.randomUUID()}.${TYPES[ct]}`, buffer, contentType: ct };
 }
 
+// One persisted browser profile per agent per platform. The agent logs in once
+// through the embedded browser; the cookies live in the profile, never here.
+// The name is an HMAC of the phone: the Driver key alone must not be able to
+// enumerate customers.
+// ponytail: kept inline rather than split into server/profile-name.js — its
+// only other planned callers (routes/connections-browser.js, posting-campaign.js)
+// are out of scope here. Extract when one of those lands.
+const SOCIAL = /(^|\.)(facebook\.com|instagram\.com|tiktok\.com|linkedin\.com|x\.com|twitter\.com)$/i;
+function profileFor(url, phone, key = process.env.PROFILE_KEY, env = process.env.FORLY_ENV || "prod") {
+  let host;
+  try { host = new URL(url).hostname; } catch (e) { return null; }
+  const m = host.match(SOCIAL);
+  if (!m) return null;
+  const name = m[2].split(".")[0].toLowerCase();
+  const platform = name === "twitter" ? "x" : name; // one account, one profile
+  const tag = crypto.createHmac("sha256", String(key || "dev")).update(String(phone)).digest("hex").slice(0, 20);
+  return `${platform}-${env}-${tag}`;
+}
+
 module.exports = function createExtractRouter(ctx) {
   const { requireAuth, authSecret, uploadDir, uploadPublicBase, remoteUploadBase } = ctx;
+  const resolve = ctx.resolve || require("../listing-sources").resolve;
+  const database = ctx.db || require("../db");
+  const extractJobs = ctx.extractJobs || require("../extract-jobs");
+  const jobDeps = ctx.jobDeps || require("../extract-jobs").liveDeps();
+  const driverEnabled = ctx.driverEnabled !== undefined ? ctx.driverEnabled : !!process.env.DRIVER_API_KEY;
+  const { sourceFor } = require("../listing-sources")._test;
   const router = express.Router();
   const limit = new DailyLimit(DAILY_CAP);
+  const driverLimit = new DailyLimit(DRIVER_DAILY_CAP);
 
   function auth(req, res, next) {
     if ("x-demo-key" in req.headers) return next();
@@ -95,12 +128,62 @@ module.exports = function createExtractRouter(ctx) {
     const input = validateBody(req.body);
     if (!input) return res.status(400).json({ error: "invalid_input" });
     if (!limit.take(keyFor(req))) return res.status(429).json({ error: "extract_limit" });
+    const phone = keyFor(req);
     try {
-      const src = await resolve({ ...input, userId: req.user && req.user.userId });
+      // Driver-routed hosts never try firecrawl: we already know it cannot read them.
+      const kind = input.text ? "text" : sourceFor(input);
+
+      async function queueDriverJob(forceSource, withProfile) {
+        if (!driverEnabled) throw fail("extract_unavailable", "DRIVER_API_KEY is not set");
+        // A browser session is a paid resource and, for social hosts, opens the
+        // customer's own logged-in profile. Demo callers get neither.
+        if (!req.user) throw fail("login_required_for_browser");
+        if (!driverLimit.take(phone)) throw fail("extract_limit");
+        const job = await extractJobs.create(
+          { phone, url: input.url, forceSource, profileName: withProfile ? profileFor(input.url, phone) : null },
+          jobDeps,
+        );
+        return { job_id: job.id, status: job.status };
+      }
+
+      if (kind === "driver") return res.status(202).json(await queueDriverJob(null, true));
+
+      let src;
+      try {
+        src = await resolve({ ...input, userId: req.user && req.user.userId });
+      } catch (err) {
+        // "or if firecrawl returns an error": a browser is the next thing to try —
+        // but only when firecrawl actually failed to READ the page. A missing key
+        // (extract_unavailable) or a bad URL (invalid_input) is not that. And the
+        // fallback never carries a profile: an arbitrary URL must not be opened in
+        // a browser that holds the customer's Facebook cookies.
+        if (kind === "scrape" && err.code === "page_unreadable") {
+          return res.status(202).json(await queueDriverJob("driver", false));
+        }
+        throw err;
+      }
       const { fields, missing } = await parseListing(src.text);
       console.log(`[extract] fields ${JSON.stringify(fields)} missing ${missing.join(",")}`);
       res.json({ source: src.source, fields, missing, description: src.description.slice(0, 2000), photos: src.photos });
     } catch (err) { sendError(res, err); }
+  });
+
+  // Poll target for a queued browser scrape. A job that belongs to someone else
+  // answers exactly like one that does not exist — an agent must not be able to
+  // probe for other agents' job ids.
+  router.get("/properties/extract/:job_id", requireAuth(authSecret), async (req, res) => {
+    const job = await database.getExtractJob(String(req.params.job_id)).catch(() => null);
+    if (!job || job.phone !== req.user.userId) return res.status(404).json({ error: "not_found" });
+    const out = { status: job.status };
+    if (job.status === "done" && job.result) {
+      out.source = job.result.source;
+      out.fields = job.result.fields;
+      out.missing = job.result.missing;
+      out.description = job.result.description;
+      out.photos = job.result.photos;
+    }
+    if (job.status === "failed") out.error_code = job.error_code;
+    return res.json(out);
   });
 
   router.post("/photos/import-url", auth, async (req, res) => {
@@ -121,4 +204,4 @@ module.exports = function createExtractRouter(ctx) {
 
 module.exports.importImage = importImage;
 module.exports.DailyLimit = DailyLimit;
-module.exports._test = { validateBody, statusFor, DailyLimit, importImage, IMAGE_TYPES };
+module.exports._test = { validateBody, statusFor, DailyLimit, importImage, IMAGE_TYPES, profileFor };

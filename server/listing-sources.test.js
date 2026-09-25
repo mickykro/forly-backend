@@ -6,10 +6,32 @@ const { sourceFor, facebookPostId, listingImages, isPrivateIp } = S._test;
 
 // ── routing by host ──
 assert.equal(sourceFor({ text: "3 חדרים" }), "text");
+
+// facebook PAGE posts keep the Graph path: faster, free, already working
 assert.equal(sourceFor({ url: "https://www.facebook.com/golan.nadlan/posts/123" }), "facebook");
-assert.equal(sourceFor({ url: "https://fb.watch/abc" }), "facebook");
-assert.equal(sourceFor({ url: "https://www.yad2.co.il/item/abc" }), "scrape");
-assert.equal(sourceFor({ url: "https://www.madlan.co.il/listings/x" }), "scrape");
+assert.equal(sourceFor({ url: "https://fb.watch/abc" }), "facebook"); // fb.watch is always a video post
+assert.equal(sourceFor({ url: "https://www.facebook.com/permalink.php?story_fbid=555&id=777" }), "facebook");
+
+// groups have no Graph equivalent, and a bare profile is not a post → browser
+assert.equal(sourceFor({ url: "https://www.facebook.com/groups/123/posts/456" }), "driver");
+assert.equal(sourceFor({ url: "https://www.facebook.com/golan.nadlan" }), "driver");
+
+// the rest of the driver allowlist
+assert.equal(sourceFor({ url: "https://www.yad2.co.il/item/abc" }), "driver");
+assert.equal(sourceFor({ url: "https://madlan.co.il/listings/x" }), "driver");
+assert.equal(sourceFor({ url: "https://www.instagram.com/p/abc/" }), "driver");
+assert.equal(sourceFor({ url: "https://www.tiktok.com/@a/video/1" }), "driver");
+assert.equal(sourceFor({ url: "https://www.linkedin.com/posts/abc" }), "driver");
+assert.equal(sourceFor({ url: "https://x.com/a/status/1" }), "driver");
+
+// everything else still goes to firecrawl first
+assert.equal(sourceFor({ url: "https://www.komo.co.il/item/1" }), "scrape");
+assert.equal(sourceFor({ url: "https://example.com/listing" }), "scrape");
+
+// a lookalike host must NOT match the allowlist by substring
+assert.equal(sourceFor({ url: "https://yad2.co.il.evil.com/x" }), "scrape");
+assert.equal(sourceFor({ url: "https://notyad2.co.il/x" }), "scrape");
+
 assert.throws(() => sourceFor({ url: "ftp://x" }), (e) => e.code === "invalid_input");
 assert.throws(() => sourceFor({}), (e) => e.code === "invalid_input");
 
@@ -52,14 +74,14 @@ assert.equal(listingImages(Array.from({ length: 30 }, (_, i) => `![](https://c/$
     fcReq = { url, opts };
     return { ok: true, json: async () => ({ success: true, data: { markdown: "דירת 4 חדרים\n![](https://c/a.jpg)", metadata: { description: "meta desc" } } }) };
   };
-  const sc = await S.resolve({ url: "https://www.yad2.co.il/item/1" }, { fetchFn: fetchOk, firecrawlKey: "k", lookup: async () => [{ address: "1.2.3.4" }] });
+  const sc = await S.resolve({ url: "https://www.komo.co.il/item/1" }, { fetchFn: fetchOk, firecrawlKey: "k", lookup: async () => [{ address: "1.2.3.4" }] });
   assert.equal(sc.source, "scrape");
   assert.equal(sc.text, "דירת 4 חדרים\n![](https://c/a.jpg)");
   assert.equal(sc.description, "meta desc");
   assert.deepEqual(sc.photos, [{ url: "https://c/a.jpg", source: "scrape" }]);
   assert.equal(fcReq.url, "https://api.firecrawl.dev/v1/scrape");
   assert.equal(fcReq.opts.headers.Authorization, "Bearer k");
-  assert.equal(JSON.parse(fcReq.opts.body).url, "https://www.yad2.co.il/item/1");
+  assert.equal(JSON.parse(fcReq.opts.body).url, "https://www.komo.co.il/item/1");
   assert.equal(JSON.parse(fcReq.opts.body).waitFor, 3000, "JS-rendered listings get time to load");
 
   // ── firecrawl: blocked / empty → page_unreadable; no key → extract_unavailable; private host → invalid_input ──
@@ -114,7 +136,12 @@ assert.equal(listingImages(Array.from({ length: 30 }, (_, i) => `![](https://c/$
   // ── facebook: not connected / no user / unparseable url / empty post ──
   await assert.rejects(S.resolve({ url: "https://www.facebook.com/golan/posts/123", userId: "u" }, { graphCall, getConnection: async () => null }), (e) => e.code === "facebook_not_connected");
   await assert.rejects(S.resolve({ url: "https://www.facebook.com/golan/posts/123" }, { graphCall, getConnection: async () => ({ page_token: "PT" }) }), (e) => e.code === "facebook_not_connected");
-  await assert.rejects(S.resolve({ url: "https://www.facebook.com/golan", userId: "u" }, { graphCall, getConnection: async () => ({ page_id: "1", page_token: "PT" }) }), (e) => e.code === "page_unreadable");
+  // a bare profile now routes to "driver" (no Graph post id to read)
+  await assert.rejects(
+    S.resolve({ url: "https://www.facebook.com/golan", userId: "u" },
+      { withPage: async () => { throw Object.assign(new Error("x"), { code: "page_unreadable" }); } }),
+    (e) => e.code === "page_unreadable",
+  );
   await assert.rejects(S.resolve({ url: "https://www.facebook.com/golan/posts/5", userId: "u" }, { graphCall: async () => ({}), getConnection: async () => ({ page_id: "1", page_token: "PT" }) }), (e) => e.code === "page_unreadable");
   console.log("listing-sources.test.js ok");
 })();

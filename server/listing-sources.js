@@ -20,6 +20,10 @@ const FIRECRAWL_WAIT_MS = 3000;
 const MAX_PHOTOS = 12;
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/scrape";
 const FB_HOSTS = /(^|\.)(facebook\.com|fb\.com|fb\.watch)$/i;
+// Sites a plain HTTP scrape cannot read: JS-rendered facts, bot defences, or a
+// login wall. Anchored on the registrable domain — a substring test would let
+// yad2.co.il.evil.com through.
+const DRIVER_HOSTS = /(^|\.)(yad2\.co\.il|madlan\.co\.il|instagram\.com|tiktok\.com|linkedin\.com|x\.com|twitter\.com)$/i;
 const IMAGE_EXT = /\.(jpe?g|png|webp)(\?|$)/i;
 const NOT_LISTING = /(logo|icon|sprite|pixel|avatar|badge|flag|banner|placeholder)/i;
 
@@ -35,7 +39,16 @@ function parseUrl(url) {
 function sourceFor({ text, url }) {
   if (typeof text === "string" && text.trim()) return "text";
   if (!url) throw fail("invalid_input", "text or url required");
-  return FB_HOSTS.test(parseUrl(url).hostname) ? "facebook" : "scrape";
+  const u = parseUrl(url);
+  if (FB_HOSTS.test(u.hostname)) {
+    // A group post has no Graph equivalent, and a bare profile URL is not a
+    // post at all — both need a real browser. Page posts keep the Graph path.
+    if (/^\/groups\//i.test(u.pathname)) return "driver";
+    if (/(^|\.)fb\.watch$/i.test(u.hostname)) return "facebook"; // always a video post
+    return facebookPostId(url) ? "facebook" : "driver";
+  }
+  if (DRIVER_HOSTS.test(u.hostname)) return "driver";
+  return "scrape";
 }
 
 // ── SSRF guard ──
@@ -142,11 +155,14 @@ async function fromFirecrawl({ url }, { fetchFn = fetch, firecrawlKey = process.
 }
 
 async function resolve(input, deps = {}) {
-  const kind = sourceFor(input);
+  const kind = deps.forceSource || sourceFor(input);
   if (kind === "text") { const text = input.text.trim(); return { source: "text", text, description: text, photos: [] }; }
-  const result = kind === "facebook" ? await fromFacebook(input, deps) : await fromFirecrawl(input, deps);
-//  console.log(`[extract] scraped ${kind} ${input.url} -> ${result.text} , ${result.photos.length} photos`);
-  return result;
+  if (kind === "facebook") return fromFacebook(input, deps);
+  if (kind === "driver") return require("./listing-driver").fromDriver(input, deps);
+  return fromFirecrawl(input, deps);
 }
 
-module.exports = { resolve, isPublicUrl, TIMEOUT_MS, _test: { sourceFor, facebookPostId, listingImages, isPrivateIp, attachmentImages } };
+module.exports = {
+  resolve, isPublicUrl, TIMEOUT_MS, MAX_PHOTOS, IMAGE_EXT, NOT_LISTING,
+  _test: { sourceFor, facebookPostId, listingImages, isPrivateIp, attachmentImages, DRIVER_HOSTS },
+};

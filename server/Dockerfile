@@ -16,6 +16,9 @@ FROM node:22-alpine
 # substitutes per-glyph via fontconfig.
 RUN apk add --no-cache ffmpeg font-noto-hebrew font-dejavu
 WORKDIR /app
+# patchright drives a REMOTE Chrome over CDP — we never launch one locally, so
+# the bundled browser download is pure image weight.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY server/package.json server/
 RUN cd server && npm install --omit=dev
 COPY server/ server/

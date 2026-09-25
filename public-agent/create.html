@@ -161,6 +161,7 @@
           <button type="button" class="link-btn" id="extractManual" data-i18n="ext_manual">או מלאו את הטופס ידנית</button>
         </div>
         <p class="form-err" id="extractErr"></p>
+        <p class="hint" id="extractStage"></p>
       </div>
       <div id="extractCard" class="extract-card hidden">
         <div class="sec-title" id="extractCardTitle" data-i18n="ext_missing_title">פורלי צריכה עוד כמה פרטים</div>
@@ -1167,6 +1168,32 @@
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, ok: r.ok, body: j }; });
     }).then(function (res) {
+      if (res.status === 202 && res.body.job_id) {
+        // The button keeps the short "working" label (a sentence in a gold
+        // button wraps on a phone); a muted line under it advances so 60–90s
+        // reads as progress, and the manual path stays one tap away.
+        var stage = $("#extractStage");
+        var stages = [[0, "ext_stage_open"], [15000, "ext_stage_read"], [35000, "ext_stage_photos"], [60000, "ext_stage_slow"]];
+        var timers = stages.map(function (st) { return setTimeout(function () { stage.textContent = FT(st[1]); }, st[0]); });
+        return X.pollJob(res.body.job_id, { headers: uploadHeaders }).then(function (j) {
+          timers.forEach(clearTimeout); stage.textContent = "";
+          if (j.status === "failed") {
+            hideMissingCard();
+            showExtractErr(X.errorKey(409, j.error_code));
+            revealManual();
+            return null;
+          }
+          return { status: 200, ok: true, body: j };
+        }).catch(function () {
+          timers.forEach(clearTimeout); stage.textContent = "";
+          hideMissingCard();
+          showExtractErr("ext_err_unavailable"); revealManual();
+          return null;
+        });
+      }
+      return res;
+    }).then(function (res) {
+      if (!res) return;
       if (!res.ok) {
         // a card left over from an earlier run would contradict this error
         hideMissingCard();
@@ -1178,7 +1205,7 @@
         if (res.status === 422 || res.status === 409) $("#extractInput").focus();
         return;
       }
-      if (res.body.source === "scrape" || res.body.source === "facebook") extractedFromUrl = true;
+      if (res.body.source === "scrape" || res.body.source === "facebook" || res.body.source === "driver") extractedFromUrl = true;
       X.fillFields(res.body.fields, $);
       syncDealButtons(); updatePriceLabel(); renderPriceChips();
       if (!$("#pDesc").value.trim()) $("#pDesc").value = String(res.body.description || "").slice(0, 2000);
