@@ -17,9 +17,9 @@
  * a page merely mentioning "verification" is not a captcha.
  */
 
-// Curly quotes → straight, whitespace collapsed, so "you’re" / "you're" /
+// NFC, curly quotes → straight, whitespace collapsed, so "you’re" / "you're" /
 // "you  re" (odd copy-paste spacing) all match the same pattern.
-const norm = (s) => String(s || "").replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim();
+const norm = (s) => String(s || "").normalize("NFC").replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim();
 
 function pathOf(url) {
   try { return new URL(String(url)).pathname; } catch { return ""; }
@@ -42,14 +42,19 @@ const CAPTCHA_EXACT = /^confirm you're human\.?$/i;
 // fragment like "security check" or "לוודא שאת" also appears in a group's
 // own rules dialog ("every post passes a security check", "מנהלי הקבוצה
 // רוצים לוודא שאתם מכירים את הכללים") and must never read as a real signal.
-const TEXT_SIGNALS = [
-  ["feature_blocked", /(can't use this feature right now|we limit how often you can do this|לא ניתן להשתמש בתכונה)/i],
-  ["rate_limited", /(you're temporarily blocked from posting|temporarily blocked from posting|posting too fast|נחסמת באופן זמני|חסימה זמנית|חסומה זמנית|חסומים זמנית|חסום זמנית)/i],
-  ["restricted", /(your account is restricted|you're restricted from posting in groups|החשבון שלך מוגבל)/i],
-  ["pending_approval", /(your post is pending approval|will be reviewed by a group admin|ממתין לאישור|ייבדק על ידי מנהל)/i],
-  ["group_blocked", /(you can't post in this group|you're no longer able to post in this group|לא ניתן לפרסם בקבוצה)/i],
-  ["not_member", /(join (this )?group to post|הצטרפו לקבוצה כדי לפרסם|הצטרפות לקבוצה)/i],
+// Each code's phrases (regex sources), in priority order. TEXT_SIGNALS is
+// the one-regex-per-code form; ALT_SIGNALS keeps every phrase separate so the
+// echo rule (below) can judge each match on its own.
+const TEXT_PHRASES = [
+  ["feature_blocked", ["can't use this feature right now", "we limit how often you can do this", "לא ניתן להשתמש בתכונה"]],
+  ["rate_limited", ["you're temporarily blocked from posting", "temporarily blocked from posting", "posting too fast", "נחסמת באופן זמני", "חסימה זמנית", "חסומה זמנית", "חסומים זמנית", "חסום זמנית"]],
+  ["restricted", ["your account is restricted", "you're restricted from posting in groups", "החשבון שלך מוגבל"]],
+  ["pending_approval", ["your post is pending approval", "will be reviewed by a group admin", "ממתין לאישור", "ייבדק על ידי מנהל"]],
+  ["group_blocked", ["you can't post in this group", "you're no longer able to post in this group", "לא ניתן לפרסם בקבוצה"]],
+  ["not_member", ["join (this )?group to post", "הצטרפו לקבוצה כדי לפרסם", "הצטרפות לקבוצה"]],
 ];
+const TEXT_SIGNALS = TEXT_PHRASES.map(([code, ps]) => [code, new RegExp(`(${ps.join("|")})`, "i")]);
+const ALT_SIGNALS = TEXT_PHRASES.map(([code, ps]) => [code, ps.map((p) => new RegExp(p, "gi"))]);
 
 const SIGNAL_DISABLES = new Set(["checkpoint", "captcha", "restricted"]);
 const SIGNAL_PENALISES = new Set(["rate_limited", "feature_blocked"]);
@@ -58,36 +63,57 @@ const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval"]
 // hasCaptchaFrame is optional, structural evidence the driver (Task 18) can
 // supply when it actually saw a captcha iframe — a stronger signal than any
 // text on the page.
-// Our own words, echoed back (Task 18). `regions` (optional): the text of
-// each dialog / alert / status region SEPARATELY (the driver has already
-// removed any editable content). From each region, every maximal substring
-// of at least MIN_ECHO characters that also occurs in `ownText` (the copy we
-// typed) is removed — a toast, preview or card repeating a piece of our post
-// — and only what REMAINS of that region is classified. A region never
-// excuses another; a short phrase we happen to share ("הכביש חסום זמנית" vs
-// "אתה חסום זמנית מפרסום", a real 16-character "נחסמת באופן זמני") is never
-// removed. Structural evidence (the URL, a captcha frame) always counts.
-const MIN_ECHO = 20;
-function stripEcho(text, own, min = MIN_ECHO) {
-  const t = norm(text), o = norm(own);
-  if (!t || o.length < min) return t;
+//
+// Our own words, echoed back (Task 18, fix round 4). `regions` (optional):
+// the text of each dialog / alert / status region SEPARATELY (the driver has
+// already removed any editable content). Detection runs on each region's
+// UNSTRIPPED text, one phrase match at a time, every occurrence. A match
+// [s,e) is excused only when it lies wholly inside ONE contiguous piece of
+// that same region, region[a,b) with a <= s, e <= b and b - a >= MIN_ECHO,
+// that also occurs in the copy — a toast, preview or card repeating a piece
+// of our post. So a run shared with the copy that only cuts into Facebook's
+// sentence ("…temporarily blocked from post…" beside "You're temporarily
+// blocked from posting in this group") never hides it; a short phrase we
+// happen to share ("הכביש חסום זמנית" vs "אתה חסום זמנית מפרסום", a real
+// 16-character "נחסמת באופן זמני") is never excused; a region never excuses
+// another. The URL and a captcha frame are never excused.
+//
+// Bounded: each region is cut to REGION_CAP characters and the copy to
+// OWN_CAP before any matching (Facebook's system alerts are short; a
+// comment-thread dialog can be megabytes), and the echo check only looks
+// around actual matches.
+const MIN_ECHO = 20, REGION_CAP = 4000, OWN_CAP = 5000;
+const capped = (s, n) => norm(String(s || "").slice(0, n * 2)).slice(0, n);
+
+// Does t[s,e) sit inside a run of >= MIN_ECHO characters of t that also
+// occurs in o? (t and o already normalised; compared case-insensitively.)
+function echoed(t, o, s, e) {
   const lt = t.toLowerCase(), lo = o.toLowerCase();
-  if (lt.length !== t.length || lo.length !== o.length) return t; // never mis-index (rare case-folding)
-  // O(n·m) longest common suffix at every (i, j); mark each maximal run >= min.
-  const cut = new Uint8Array(t.length);
-  let prev = new Uint16Array(o.length + 1), cur = new Uint16Array(o.length + 1);
-  for (let i = 1; i <= t.length; i++) {
-    let best = 0;
-    for (let j = 1; j <= o.length; j++) {
-      cur[j] = lt[i - 1] === lo[j - 1] ? Math.min(prev[j - 1] + 1, 65535) : 0;
-      if (cur[j] > best) best = cur[j];
-    }
-    if (best >= min) cut.fill(1, i - best, i);
-    [prev, cur] = [cur, prev];
+  // never mis-index when case-folding changes a length: compare exactly (a rare
+  // character only makes the excuse harder to earn, never easier)
+  const [T, O] = lt.length === t.length && lo.length === o.length ? [lt, lo] : [t, o];
+  const len = e - s, sub = T.slice(s, e);
+  if (!len || len > O.length) return false;
+  for (let p = O.indexOf(sub); p !== -1; p = O.indexOf(sub, p + 1)) {
+    if (len >= MIN_ECHO) return true;
+    let l = 0, r = 0;
+    while (len + l < MIN_ECHO && s - l > 0 && p - l > 0 && T[s - l - 1] === O[p - l - 1]) l++;
+    while (len + l + r < MIN_ECHO && e + r < T.length && p + len + r < O.length && T[e + r] === O[p + len + r]) r++;
+    if (len + l + r >= MIN_ECHO) return true;
   }
-  let out = "";
-  for (let i = 0; i < t.length; i++) out += cut[i] ? " " : t[i];
-  return norm(out);
+  return false;
+}
+
+// Is there a match of any of `res` in region t that is NOT an echo of o?
+function unexcused(t, o, res) {
+  for (const re of res) {
+    re.lastIndex = 0;
+    for (let m = re.exec(t); m; m = re.exec(t)) {
+      if (!m[0].length || !o || !echoed(t, o, m.index, m.index + m[0].length)) return true;
+      re.lastIndex = m.index + 1; // every occurrence, overlapping ones included
+    }
+  }
+  return false;
 }
 
 function classifyText(dialog, alert) {
@@ -102,12 +128,13 @@ function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, own
   for (const [code, re] of URL_SIGNALS) if (re.test(path)) return code;
   if (hasCaptchaFrame) return "captcha";
   if (!Array.isArray(regions)) return classifyText(norm(dialogText), norm(alertText));
-  // Each region on its own, echo-stripped; the first code in TEXT_SIGNALS
-  // order that any region shows wins (the same priority as above).
-  const rest = regions.map((r) => stripEcho(r, ownText)).filter(Boolean);
-  if (rest.some((r) => CAPTCHA_EXACT.test(r))) return "captcha";
-  for (const [code, re] of TEXT_SIGNALS) if (rest.some((r) => re.test(r))) return code;
+  const own = capped(ownText, OWN_CAP);
+  const rs = regions.map((r) => capped(r, REGION_CAP)).filter(Boolean);
+  // CAPTCHA_EXACT is a whole-region phrase: its match is the region itself.
+  if (rs.some((r) => CAPTCHA_EXACT.test(r) && !(own && echoed(r, own, 0, r.length)))) return "captcha";
+  // The first code in TEXT_SIGNALS order that any region shows wins.
+  for (const [code, res] of ALT_SIGNALS) if (rs.some((r) => unexcused(r, own, res))) return code;
   return "ok";
 }
 
-module.exports = { classifySignal, stripEcho, MIN_ECHO, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS };
+module.exports = { classifySignal, echoed, MIN_ECHO, REGION_CAP, OWN_CAP, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS };

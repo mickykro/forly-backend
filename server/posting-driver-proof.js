@@ -15,7 +15,7 @@
  */
 const { sha } = require("./posting-campaign");
 const SD = require("./social-dwell");
-const { classifySignal } = require("./posting-signals");
+const { classifySignal, REGION_CAP } = require("./posting-signals");
 
 // The composer's root: the INNERMOST dialog that holds the editor — one that
 // contains no other such dialog (fix round 2). A modal layer or a
@@ -140,28 +140,29 @@ function findOwnPost(posts, { kind, ids, author, copy }) {
 // subtree removed (what we typed) and a space appended to every element so
 // words never run together. The composer's chrome — an inline "You can't
 // post in this group", a restriction dialog wrapping the composer — is
-// still read.
+// still read. Whitespace is collapsed and each region cut to RAW_CAP in the
+// page, so a megabyte comment thread never crosses into Node whole
+// (classifySignal cuts it further, to REGION_CAP).
+const RAW_CAP = 2 * REGION_CAP;
 async function regionTexts(page, sel) {
-  const out = await page.$$eval(sel, (els) => els.map((el) => {
+  const out = await page.$$eval(sel, (els, cap) => els.map((el) => {
     const c = el.cloneNode(true);
     c.querySelectorAll("[contenteditable]").forEach((n) => n.remove());
     c.querySelectorAll("*").forEach((n) => n.append(" "));
-    return c.textContent || "";
-  })).catch(() => []);
-  return Array.isArray(out) ? out.map(String) : [];
+    return (c.textContent || "").replace(/\s+/g, " ").trim().slice(0, cap);
+  }), RAW_CAP).catch(() => []);
+  return Array.isArray(out) ? out.map((t) => String(t).slice(0, RAW_CAP)) : [];
 }
 // classifySignal over the landed URL, a captcha frame, and every dialog and
-// alert/status region SEPARATELY: from each, the exact copy and every run of
-// >= 20 characters it shares with the copy are removed (an echo of our own
-// post), and only what remains of that region is classified.
+// alert/status region SEPARATELY, on its unstripped text: a phrase match is
+// excused only when it sits wholly inside a run of >= 20 characters of that
+// region that also occurs in the copy (an echo of our own post).
 async function readSignal(page, copy) {
-  const own = norm(copy);
-  const regions = [...(await regionTexts(page, SELECTORS.dialog)), ...(await regionTexts(page, SELECTORS.alert))]
-    .map((t) => (own ? norm(t).split(own).join(" ") : norm(t)));
+  const regions = [...(await regionTexts(page, SELECTORS.dialog)), ...(await regionTexts(page, SELECTORS.alert))].map(norm);
   const hasCaptchaFrame = (await countOf(page, SELECTORS.captchaFrame)) > 0;
   let landedUrl = "";
   try { landedUrl = page.url(); } catch { landedUrl = ""; }
-  return classifySignal({ landedUrl, hasCaptchaFrame, ownText: copy, regions });
+  return classifySignal({ landedUrl, hasCaptchaFrame, ownText: norm(copy), regions });
 }
 
 async function readFeedPosts(page) {
@@ -249,6 +250,6 @@ async function proveIdentityAndDestination(page, attempt, conn, opts = {}) {
 
 module.exports = {
   SELECTORS, norm, fingerprint, sha,
-  textOf, attrOf, countOf, readSignal, readTargetId, readFeedPosts, urlSegment, permalinkOf, findOwnPost, isCutOf,
+  textOf, attrOf, countOf, readSignal, regionTexts, readTargetId, readFeedPosts, urlSegment, permalinkOf, findOwnPost, isCutOf,
   expectedTarget, proveIdentityAndDestination,
 };

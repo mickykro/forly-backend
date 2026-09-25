@@ -86,18 +86,53 @@ const PAGE_NAME = F.PAGE_NAME;
     assert.equal(h.opened.length, 0, `${state}: no session`);
   }
 
-  // ── fix round 3: the per-region echo strip, directly ──
+  // ── fix rounds 3-4: the echo rule, directly — per region, per match ──
   {
-    const { stripEcho, classifySignal } = require("./posting-signals");
+    const { echoed, classifySignal } = require("./posting-signals");
     const copy = "דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות, חניה בשפע";
-    assert.equal(stripEcho("Posted: הכביש חסום זמנית בגלל עבודות…", copy), "Posted: …", "a >= 20-char run shared with the copy is removed");
-    assert.equal(stripEcho("אתה חסום זמנית מפרסום בקבוצות", copy), "אתה חסום זמנית מפרסום בקבוצות", "a short shared phrase is not");
+    const at = (t, phrase) => [t.indexOf(phrase), t.indexOf(phrase) + phrase.length];
+    const toast = "Posted: הכביש חסום זמנית בגלל עבודות…";
+    assert.equal(echoed(toast, copy, ...at(toast, "חסום זמנית")), true, "a match inside a >= 20-char run shared with the copy is excused");
+    const alert = "אתה חסום זמנית מפרסום בקבוצות";
+    assert.equal(echoed(alert, copy, ...at(alert, "חסום זמנית")), false, "a short shared phrase is not");
     const echo = "הכביש חסום זמנית בגלל עבודות", real = "אתה חסום זמנית מפרסום בקבוצות עד מחר";
     assert.equal(classifySignal({ regions: [echo, real], ownText: copy }), "rate_limited", "one region never excuses another");
+    assert.equal(classifySignal({ regions: [`${echo} ${real}`], ownText: copy }), "rate_limited", "an echo beside a real alert in ONE region: the real match is not excused");
     assert.equal(classifySignal({ regions: [echo], ownText: copy }), "ok");
     assert.equal(classifySignal({ regions: ["הפוסט שלך ממתין לאישור מנהל הקבוצה"], ownText: "הנכס ממתין לאישור טאבו, כניסה מיידית" }), "pending_approval");
     assert.equal(classifySignal({ regions: [echo], ownText: copy, landedUrl: "https://www.facebook.com/checkpoint/1/" }), "checkpoint", "the URL always counts");
+    assert.equal(classifySignal({ regions: [echo], ownText: copy, hasCaptchaFrame: true }), "captcha", "a captcha frame always counts");
+    assert.equal(classifySignal({ regions: ["Confirm you're human"], ownText: "Confirm you're human, then read on: 3 rooms" }), "ok", "the exact captcha sentence, echoed from the copy");
+    assert.equal(classifySignal({ regions: ["Confirm you're human"], ownText: "3 rooms" }), "captcha");
     assert.equal(classifySignal({ dialogText: "You can't use this feature right now" }), "feature_blocked", "the old string form is unchanged");
+
+    // round-3 regression: a shared run that only CUTS INTO Facebook's sentence never hides it
+    const enAlert = "You're temporarily blocked from posting in this group";
+    const enCopy = "Quiet street, never temporarily blocked from post office traffic. 3 rooms";
+    assert.equal(classifySignal({ regions: [enAlert], ownText: enCopy }), "rate_limited", "EN bisect: the 29-char shared run cuts 'posting'");
+    const heAlert = "דירה למכירה. נחסמת באופן זמני מפרסום";
+    const heCopy = "דירה למכירה. נחסמת באופנוע בדרך לדירה? יש חניה";
+    assert.equal(classifySignal({ regions: [heAlert], ownText: heCopy }), "rate_limited", "HE bisect: the 23-char shared run cuts 'באופן זמני'");
+    assert.equal(classifySignal({ regions: [`Posted: ${enCopy.slice(0, 50)}… ${enAlert}`], ownText: enCopy }), "rate_limited", "echo toast and a real alert in one region");
+
+    // bounded: a megabyte comment-thread dialog, and a long copy, classify fast
+    const thread = "Nice flat! temporarily blocked from post office? ".repeat(21000); // ~1M characters
+    assert.ok(thread.length >= 1e6);
+    const longCopy = "Quiet street, never temporarily blocked from post office traffic. ".repeat(2000);
+    const heEcho = "הכביש חסום זמנית בגלל עבודות, הבניין ממתין לאישור. ".repeat(500);
+    for (const [label, regions, own, want] of [
+      ["1M-char region, no signal", [thread], longCopy, "ok"],
+      ["1M-char region with a real alert at the top", [enAlert + " " + thread], longCopy, "rate_limited"],
+      ["1M-char region that is all echo", [longCopy.repeat(8)], longCopy, "ok"],
+      ["1M-char region of echoed signal phrases", [heEcho.repeat(40)], heEcho, "ok"],
+      ["1M-char region, a shared phrase in a different context", ["x חסום זמנית y ".repeat(70000)], "a חסום זמנית b ".repeat(1000), "rate_limited"],
+    ]) {
+      const t0 = process.hrtime.bigint();
+      const got = classifySignal({ regions, ownText: own });
+      const took = Number(process.hrtime.bigint() - t0) / 1e6;
+      assert.equal(got, want, label);
+      assert.ok(took < 50, `${label}: ${took.toFixed(1)} ms`);
+    }
   }
 
   // ── the proof, directly: pure over the page reads ──

@@ -71,8 +71,19 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
       ["ordinary copy sharing a short phrase (HE, rate_limited)", "דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות", `<div role="alert">אתה חסום זמנית מפרסום בקבוצות</div>`, "rate_limited"],
       ["ordinary copy sharing a short phrase (HE, pending)", "הנכס ממתין לאישור טאבו, כניסה מיידית", `<div role="status">הפוסט שלך ממתין לאישור מנהל הקבוצה</div>`, "pending_approval"],
       ["a short bolded fragment that is also in our copy", "הכביש חסום זמנית בגלל עבודות", `<div role="alert">אתה <b>חסום זמנית</b> מפרסום</div>`, "rate_limited"],
+      // fix round 4: a run shared with the copy that only cuts INTO Facebook's sentence never hides it
+      ["EN bisect: the copy shares '…temporarily blocked from post…'", "Quiet street, never temporarily blocked from post office traffic. 3 rooms", `<div role="alert">You're temporarily blocked from posting in this group</div>`, "rate_limited"],
+      ["HE bisect: the copy shares 'דירה למכירה. נחסמת באופ…'", "דירה למכירה. נחסמת באופנוע בדרך לדירה? יש חניה", `<div role="alert"><span>דירה למכירה.</span> נחסמת באופן זמני מפרסום</div>`, "rate_limited"],
+      ["an echo toast beside a real alert in ONE region", R3, `<div role="alert"><span>פורסם: הכביש חסום זמנית בגלל עבודות…</span> <span>אתה חסום זמנית מפרסום בקבוצות</span></div>`, "rate_limited"],
       ["a captcha frame is structural, whatever the copy says", "Confirm you're human", `<div role="dialog">${editor("Confirm you're human")}</div><iframe title="captcha"></iframe>`, "captcha"],
     ]) assert.equal(await sig(html, copy), want, label);
+
+    // ── fix round 4: a megabyte comment-thread dialog is cut in the page, then classified fast ──
+    await page.setContent(`<div role="dialog"><div role="alert">You're temporarily blocked from posting</div><div id="t"></div></div>`);
+    await page.evaluate(() => { document.getElementById("t").textContent = "Nice flat! Is it still available? ".repeat(30000); });
+    const [big] = await P.regionTexts(page, S.dialog);
+    assert.ok(big.length <= 8000, "no more than RAW_CAP crosses into Node");
+    assert.equal(await P.readSignal(page, PLAIN), "rate_limited");
 
     // ── fix round 2 A: only INNERMOST composer roots count ──
     for (const [label, html, n] of [
