@@ -163,10 +163,74 @@ function cycleRand(seq) { let i = 0; return () => seq[i++ % seq.length]; }
     assert.ok(!log.some((l) => l.action === "open_post" || l.action === "like"));
   }
 
+  // ── fix round 1, item 3: an invisible/format character inserted into the
+  // text must not defeat the content filter — normalised (NFKC, invisible
+  // characters stripped) before every regex test, English matches
+  // case-insensitive ──
+  for (const bad of [
+    { href: "https://www.facebook.com/x/posts/100011", author: "A", hasVideo: false, group: null, sponsored: false, reactions: 40, text: "דירה מ‌מומן להשכרה" }, // "מ‌מומן" (ZWNJ inside "ממומן")
+    { href: "https://www.facebook.com/x/posts/100012", author: "A", hasVideo: false, group: null, sponsored: false, reactions: 40, text: "Spon‌sored post" }, // ZWNJ inside "Sponsored"
+    { href: "https://www.facebook.com/x/posts/100013", author: "A", hasVideo: false, group: null, sponsored: false, reactions: 40, text: "SPONSORED content" }, // plain uppercase — case-insensitive
+    { href: "https://www.facebook.com/x/posts/100014", author: "A", hasVideo: false, group: null, sponsored: false, reactions: 40, text: "breaking ne‍ws today" }, // ZWJ inside "news"
+  ]) {
+    const page = fakePage({ feed: [bad] });
+    const rand = () => 0.01;
+    const log = await SD.dwell(page, { allowVisible: true }, Object.assign({ rand, guard: ALLOW_GUARD }, fastWait));
+    assert.ok(!log.some((l) => l.action === "like" || l.action === "like_uncertain"), `an invisible character must not defeat the filter: ${JSON.stringify(bad.text)}`);
+    assert.ok(page.clicked.filter((c) => c === S.like).length === 0);
+  }
+  // the same normalisation applied to the in-page sponsored-label detection:
+  // a fake `$$eval` that actually runs readFeed's real mapping callback
+  // (unlike the other tests' fakePage, whose $$eval just returns a canned
+  // feed), so this exercises the production in-page extraction itself.
+  {
+    const els = [{
+      textContent: "Spon‌sored post", // ZWNJ inside "Sponsored", no querySelector match for sponsoredLabel
+      querySelector: (sel) => {
+        if (sel === S.postLink) return { href: "https://www.facebook.com/x/posts/100020" };
+        if (sel === S.author) return { textContent: "A" };
+        return null;
+      },
+    }];
+    const page = fakePage();
+    page.$$eval = async (sel, fn, args) => (sel === S.feedPost ? fn(els, args) : []);
+    const rand = () => 0.01;
+    const log = await SD.dwell(page, { allowVisible: true }, Object.assign({ rand, guard: ALLOW_GUARD }, fastWait));
+    assert.ok(log.some((l) => l.action === "open_post"));
+    assert.ok(!log.some((l) => l.action === "like" || l.action === "like_uncertain"), "the in-page sponsored-label check is not defeated by an invisible character");
+  }
+
   // ── no story tray: no story actions, no crash ──
   {
     const log = await SD.dwell(fakePage({ noStories: true }), { allowVisible: true }, Object.assign({ rand: cycleRand([0.1, 0.9, 0.2, 0.3]), guard: ALLOW_GUARD }, fastWait));
     assert.ok(!log.some((l) => l.action === "story"));
+  }
+
+  // ── fix round 1, item 2: open_posts is drawn WITHOUT replacement, and an
+  // uncertain like's post id is never attempted again this session. With a
+  // multi-post feed, an always-unreadable aria-pressed (so every attempt is
+  // uncertain, never confirmed) and a rand crafted so open_posts=2, each
+  // distinct post's like button is clicked at most once. ──
+  {
+    const feed = [
+      { href: "https://www.facebook.com/x/posts/100001", author: "A", hasVideo: false, group: null, sponsored: false, reactions: 40, text: "" },
+      { href: "https://www.facebook.com/x/posts/100002", author: "B", hasVideo: false, group: null, sponsored: false, reactions: 40, text: "" },
+      { href: "https://www.facebook.com/x/posts/100003", author: "C", hasVideo: false, group: null, sponsored: false, reactions: 40, text: "" },
+    ];
+    // index 7 (open_posts's own draw, given nScroll=3 from a leading 0.01)
+    // is the only call that needs to be high, to force two posts opened;
+    // every other call stays low, so every draw's like-probability succeeds.
+    const overrides = { 7: 0.9 };
+    let i = 0;
+    const rand = () => { const v = Object.prototype.hasOwnProperty.call(overrides, i) ? overrides[i] : 0.01; i++; return v; };
+    const page = fakePage({ feed }); // no likeState configured: aria-pressed reads as unreadable, always
+    const log = await SD.dwell(page, { allowVisible: true }, Object.assign({ rand, guard: ALLOW_GUARD }, fastWait));
+    assert.equal(log.filter((l) => l.action === "open_post").length, 2, "two distinct posts opened (drawn without replacement)");
+    assert.equal(log.filter((l) => l.action === "like").length, 0, "aria-pressed never reads back confirmed, so every attempt is uncertain");
+    assert.equal(log.filter((l) => l.action === "like_uncertain").length, 2);
+    const likedIds = log.filter((l) => l.action === "like_uncertain").map((l) => l.detail.post_id);
+    assert.equal(new Set(likedIds).size, likedIds.length, "each attempted post id is distinct — none clicked twice");
+    assert.equal(page.clicked.filter((c) => c === S.like).length, 2, "the like button was clicked exactly once per attempt, never twice for one post");
   }
 
   // ── a checkpoint reached mid-session stops the routine right there: no
@@ -245,6 +309,23 @@ function cycleRand(seq) { let i = 0; return () => seq[i++ % seq.length]; }
     });
     assert.equal(opened, false);
     assert.equal(out.signal, "ok");
+  }
+
+  // ── fix round 1, item 1: "session" is allowed but "navigate" is denied ->
+  // browseSession's own first goto (before dwell() ever runs) never happens,
+  // nothing is clicked, and the signal reads "ok" ──
+  {
+    const page = fakePage();
+    const out = await SD.browseSession({ phone: "p", profileName: "facebook-prod-x", note: "forly-dwell:" }, {
+      guard: denyOn("navigate"), rand: () => 0.01,
+      withPage: async (opts, fn) => fn(page),
+      db: { getConnection: async () => ({}), setConnection: async () => {} },
+      store: { saveDwellSession: async () => {}, listDwellSessionsByPhone: async () => [], listRecentLikedPostIds: async () => new Set() },
+    });
+    assert.equal(page.visited.length, 0, "no goto at all");
+    assert.equal(page.clicked.length, 0);
+    assert.equal(out.signal, "ok");
+    assert.deepEqual(out.summary, {});
   }
 
   // ── browseSession: a checkpoint hit right at session start is surfaced,
@@ -327,7 +408,8 @@ function cycleRand(seq) { let i = 0; return () => seq[i++ % seq.length]; }
     assert.deepEqual(all[1].likes, []);
   }
 
-  // ── recheckPost: visible with counts, not_found, or unknown (login wall) ──
+  // ── recheckPost: visible with counts, not_found, or unknown — with the
+  // signal attached, not inferred from selectors failing to match ──
   {
     const present = fakePage();
     present.innerText = async (sel) => (sel === S.reactionCount ? "12" : sel === S.commentCount ? "3 תגובות" : "");
@@ -338,7 +420,16 @@ function cycleRand(seq) { let i = 0; return () => seq[i++ % seq.length]; }
     assert.deepEqual(await SD.recheckPost(gone, "https://www.facebook.com/groups/1/posts/9"), { state: "not_found", reactions: null, comments: null });
 
     const wall = fakePage({ redirects: { "https://www.facebook.com/groups/1/posts/9": "https://www.facebook.com/login.php" } });
-    assert.deepEqual(await SD.recheckPost(wall, "https://www.facebook.com/groups/1/posts/9"), { state: "unknown", reactions: null, comments: null });
+    assert.deepEqual(await SD.recheckPost(wall, "https://www.facebook.com/groups/1/posts/9"), { state: "unknown", reactions: null, comments: null, signal: "login_required" });
+
+    // /checkpoint/block (classifySignal's "restricted") — explicit, not a
+    // selector-mismatch guess
+    const blocked = fakePage({ redirects: { "https://www.facebook.com/groups/1/posts/9": "https://www.facebook.com/checkpoint/block/" } });
+    assert.deepEqual(await SD.recheckPost(blocked, "https://www.facebook.com/groups/1/posts/9"), { state: "unknown", reactions: null, comments: null, signal: "restricted" });
+
+    // the same captcha-iframe check dwell() uses
+    const captcha = fakePage({ captchaCount: 1 });
+    assert.deepEqual(await SD.recheckPost(captcha, "https://www.facebook.com/groups/1/posts/9"), { state: "unknown", reactions: null, comments: null, signal: "captcha" });
   }
 
   console.log("social-dwell.test.js ok");

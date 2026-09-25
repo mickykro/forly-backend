@@ -72,13 +72,29 @@ const SELECTORS = {
 };
 
 // Sensitive topics an ordinary agent account should never be seen reacting
-// to — exactly the list R2 gives.
+// to — exactly the list R2 gives. Both English and Hebrew matches are
+// case-insensitive (the /i flag; Hebrew has no case, English does).
 const SENSITIVE_RE = /politic|בחירות|ממשלה|war|מלחמה|חדשות|news|תאונה|accident|בריאות|health|דת|religion|הלוויה|died|נפטר/i;
 const SPONSORED_RE = /sponsored|ממומן|suggested for you/i;
 // No agency catalog lives in this repo yet (see report: task-17). Exported so
 // an operator — or a later task — can fill it without touching the filter
 // logic; empty means "no competitor is ever matched", not "skip the check".
 const COMPETITOR_PATTERNS = [];
+
+// Soft hyphen, combining grapheme joiner, Arabic letter mark, Hangul/Khmer/
+// Mongolian fillers, zero-width space through right-to-left mark, the
+// bidi-embedding/override controls, word joiner through nominal digit
+// shapes, and the BOM — every character a post could insert between letters
+// to read as "sponsored" to a person while defeating a literal regex. Fix
+// round 1: stripped, after Unicode NFKC normalisation, before every content-
+// filter regex test (sponsored, sensitive, competitor) — on both this
+// module's own regex checks and the in-page sponsored-label check in
+// readFeed below.
+const INVISIBLE_SRC = "[\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180B-\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uFEFF]";
+const INVISIBLE_RE = new RegExp(INVISIBLE_SRC, "g");
+function normalizeForFilter(s) {
+  return String(s || "").normalize("NFKC").replace(INVISIBLE_RE, "");
+}
 
 const pick = (r, [a, b]) => a + Math.floor(r() * (b - a + 1));
 const secs = (r, [a, b]) => Math.round((a + r() * (b - a)) * 1000);
@@ -102,12 +118,17 @@ function isGroupAvoided(p, opts) {
 }
 // R2's content filter — applied only to the LIKE decision; reading/opening an
 // ordinary post (sponsored or not) is unremarkable, leaving a visible like on
-// sensitive or sponsored content is not.
+// sensitive or sponsored content is not. Text and author are normalised
+// (NFKC, invisible characters stripped) before every regex test, so an
+// inserted zero-width character cannot slip a sponsored/sensitive post past
+// the filter.
 function filteredFromLikes(p, opts) {
   if (!p || !p.href) return true;
-  if (p.sponsored || SPONSORED_RE.test(p.text || "")) return true;
-  if (SENSITIVE_RE.test(p.text || "")) return true;
-  if (COMPETITOR_PATTERNS.some((re) => re.test(p.text || "") || re.test(p.author || ""))) return true;
+  const text = normalizeForFilter(p.text);
+  const author = normalizeForFilter(p.author);
+  if (p.sponsored || SPONSORED_RE.test(text)) return true;
+  if (SENSITIVE_RE.test(text)) return true;
+  if (COMPETITOR_PATTERNS.some((re) => re.test(text) || re.test(author))) return true;
   if (isGroupAvoided(p, opts)) return true;
   if (!Number.isFinite(p.reactions) || p.reactions < INTERACTION.min_reactions) return true;
   return false;
@@ -117,17 +138,24 @@ async function readFeed(page) {
   return page.$$eval(SELECTORS.feedPost, (els, sels) => els.slice(0, 12).map((el) => {
     const link = el.querySelector(sels.postLink), auth = el.querySelector(sels.author);
     const href = link ? link.href : null;
-    const text = (el.textContent || "").slice(0, 2000);
+    // Normalise in-page too, so the sponsored-label check is not itself
+    // defeated by an invisible character (fix round 1).
+    const norm = (String(el.textContent || "")).normalize("NFKC").replace(new RegExp(sels.invisibleSrc, "g"), "");
+    const text = norm.slice(0, 2000);
     const reactMatch = text.match(/([\d,.]+)\s*(?:reactions|תגובות|לייקים)/i);
+    const sponsored = !!el.querySelector(sels.sponsoredLabel) || new RegExp(sels.sponsoredSrc, "i").test(text);
     return {
       href, author: auth ? (auth.textContent || "").trim() : null,
       hasVideo: !!el.querySelector(sels.video),
-      sponsored: !!el.querySelector(sels.sponsoredLabel),
+      sponsored,
       reactions: reactMatch ? Number(reactMatch[1].replace(/[,.]/g, "")) : null,
       text,
       group: href && /\/groups\/([^/?#]+)/.test(href) ? href.replace(/(\/groups\/[^/?#]+).*/, "$1") : null,
     };
-  }), { postLink: SELECTORS.postLink, author: SELECTORS.author, video: SELECTORS.video, sponsoredLabel: SELECTORS.sponsoredLabel }).catch(() => []);
+  }), {
+    postLink: SELECTORS.postLink, author: SELECTORS.author, video: SELECTORS.video, sponsoredLabel: SELECTORS.sponsoredLabel,
+    invisibleSrc: INVISIBLE_SRC, sponsoredSrc: SPONSORED_RE.source,
+  }).catch(() => []);
 }
 
 // R2: called immediately before every visible action, and once before any
@@ -208,10 +236,18 @@ async function dwell(page, opts = {}, deps = {}) {
     await wait(secs(r, INTERACTION.scroll_pause_s));
   }
 
-  const openable = feed.filter((f) => f.href && !isGroupAvoided(f, opts));
+  // Drawn WITHOUT replacement (fix round 1: with replacement, a small feed
+  // could draw — and open, and attempt to like — the same post twice in one
+  // session). `attempted` additionally remembers every post id whose like
+  // button was clicked or attempted, confirmed or uncertain, this session (on
+  // top of `recentlyLiked`, the 30-day cross-session record) — belt and
+  // suspenders against two different feed entries resolving to the same id.
+  const pool = feed.filter((f) => f.href && !isGroupAvoided(f, opts));
+  const attempted = new Set(recentlyLiked);
   let likes = 0;
-  for (let i = 0; i < Math.min(pick(r, INTERACTION.open_posts), openable.length); i++) {
-    const p = openable[Math.floor(r() * openable.length)];
+  const toOpen = Math.min(pick(r, INTERACTION.open_posts), pool.length);
+  for (let i = 0; i < toOpen; i++) {
+    const p = pool.splice(Math.floor(r() * pool.length), 1)[0];
     const postId = postIdFromHref(p.href);
     if (!(await checkGuard("navigate", deps))) continue;
     await page.goto(p.href, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
@@ -220,16 +256,18 @@ async function dwell(page, opts = {}, deps = {}) {
     await wait(secs(r, INTERACTION.read_s));
 
     if (allowVisible && likes < INTERACTION.likes_max && r() < INTERACTION.like_probability
-        && postId && !recentlyLiked.has(postId) && !filteredFromLikes(p, opts)) {
-      if (await checkGuard("like", deps)) {
-        const btn = page.locator(SELECTORS.like).first();
-        if ((await btn.count()) > 0) {
-          const before = await readPressed(btn);
-          if (before !== true) {
+        && postId && !attempted.has(postId) && !filteredFromLikes(p, opts)) {
+      const btn = page.locator(SELECTORS.like).first();
+      if ((await btn.count()) > 0) {
+        const before = await readPressed(btn);
+        if (before !== true) {
+          attempted.add(postId); // never click this post's like button again this session
+          // R2: the guard is the last await before the click itself.
+          if (await checkGuard("like", deps)) {
             await btn.click();
             await wait(1200);
             const after = await readPressed(btn);
-            if (after === true) { likes++; recentlyLiked.add(postId); note("like", { post_id: postId }); }
+            if (after === true) { likes++; note("like", { post_id: postId }); }
             else note("like_uncertain", { post_id: postId }); // never retried or toggled
           }
         }
@@ -240,11 +278,12 @@ async function dwell(page, opts = {}, deps = {}) {
   }
 
   if (allowVisible && r() < INTERACTION.story_probability && !(await blocked())) {
-    if (await checkGuard("story", deps)) {
-      const tray = page.locator(SELECTORS.storyTray).first();
-      if ((await tray.count()) > 0) {
-        const card = page.locator(SELECTORS.storyCard).first();
-        if ((await card.count()) > 0) {
+    const tray = page.locator(SELECTORS.storyTray).first();
+    if ((await tray.count()) > 0) {
+      const card = page.locator(SELECTORS.storyCard).first();
+      if ((await card.count()) > 0) {
+        // R2: the guard is the last await before the click itself.
+        if (await checkGuard("story", deps)) {
           await card.click();
           for (let i = 0; i < pick(r, INTERACTION.stories); i++) { await wait(secs(r, INTERACTION.story_watch_s)); note("story"); }
           await page.locator(SELECTORS.storyClose).first().click().catch(() => page.keyboard.press("Escape"));
@@ -304,6 +343,12 @@ async function browseSession({ phone, profileName, note } = {}, deps = {}) {
   const { log, signal } = await withPage(
     { duration: 600, note: note || "forly-dwell:", profile: { name: profileName, persist: true } },
     async (page) => {
+      // R2: this is a navigation like any other — guarded like the ones
+      // inside dwell() itself (fix round 1: this one used to run unguarded,
+      // and since it lands the page on facebook.com before dwell() ever
+      // looks, dwell()'s own "already there" branch then never navigates
+      // either — no navigation in the common path was guarded at all).
+      if (!(await checkGuard("navigate", pageDeps))) return { log: [], signal: "ok" };
       await page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
       let signal = await readSignal(page);
       if (signal !== "ok") return { log: [], signal };
@@ -336,12 +381,20 @@ async function browseSession({ phone, profileName, note } = {}, deps = {}) {
 async function recheckPost(page, postUrl) {
   await page.goto(postUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
   await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+  // The same signal read dwell() uses (dialog/alert text, hasCaptchaFrame,
+  // the landed URL) — fix round 1: a bare landedUrl-only check missed
+  // /checkpoint/block ("restricted") and any dialog/alert/captcha signal
+  // entirely, and would fall through to reading selectors off a restriction
+  // or captcha page instead of reporting it. Any non-"ok" signal — checkpoint,
+  // its /checkpoint/block form, a login wall, a captcha, a rate limit — is
+  // reported as `unknown` with the signal attached, not inferred from
+  // selectors failing to match.
+  const signal = await readSignal(page);
+  if (signal !== "ok") return { state: "unknown", reactions: null, comments: null, signal };
   const body = await page.innerText("body").catch(() => "");
   if (/isn'?t available|content isn'?t available|התוכן אינו זמין|לא זמין כרגע|this content is no longer available/i.test(body)) {
     return { state: "not_found", reactions: null, comments: null };
   }
-  const signal = classifySignal({ landedUrl: page.url(), dialogText: "", alertText: "" });
-  if (signal === "login_required" || signal === "checkpoint") return { state: "unknown", reactions: null, comments: null };
   const num = (t) => { const m = String(t || "").replace(/[, ]/g, "").match(/\d+/); return m ? Number(m[0]) : null; };
   const reactions = num(await page.innerText(SELECTORS.reactionCount).catch(() => ""));
   const comments = num(await page.innerText(SELECTORS.commentCount).catch(() => ""));
