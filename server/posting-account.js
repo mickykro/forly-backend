@@ -127,6 +127,28 @@ function catalogEntriesFor(catalog, g, conn) {
   return out;
 }
 const policyDisallowed = (e) => !!e && (e.active === false || DISALLOWED_POLICY.has(e.agent_policy));
+// Does this member group suit this property? In its area — the catalog puts
+// the group in the property's city (or nationwide), or the group's own name
+// names that city — and not for the other kind of deal: a group whose name
+// says "להשכרה" and not "למכירה" never suits a sale, and the reverse. Picks a
+// property's groups on the publishing page and for enrollNewPage.
+const RENT_NAME = /להשכר|השכרה|שכירות|שכ"ד|שכ״ד/;
+const SALE_NAME = /למכיר|מכירה|לקני|קנייה/;
+function nameDealConflict(name, listingType) {
+  const n = String(name || "");
+  if (listingType === "sale") return RENT_NAME.test(n) && !SALE_NAME.test(n);
+  if (listingType === "rent") return SALE_NAME.test(n) && !RENT_NAME.test(n);
+  return false;
+}
+function fitsProperty(member, cats, property) {
+  const { sameArea, mentionsCity } = require("./distribution/city-normalize");
+  const city = property && property.city;
+  const listingType = (property && property.listing_type) || null;
+  const list = Array.isArray(cats) ? cats.filter(Boolean) : [];
+  if (!member || !city) return false;
+  const inArea = list.some((e) => e.city && sameArea(city, e.city)) || mentionsCity(member.name, city);
+  return inArea && !nameDealConflict(member.name, listingType) && !list.some((e) => typeExcluded(e, listingType));
+}
 const typeExcluded = (e, listingType) => !!listingType && Array.isArray(e.listing_types) && e.listing_types.length > 0 && !e.listing_types.includes(listingType);
 
 // Groups the agent removed from their list (facebook_groups_hidden, Task 19):
@@ -351,7 +373,7 @@ module.exports = {
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
   MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
-  groupIdFromUrl, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY,
+  groupIdFromUrl, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY, fitsProperty, nameDealConflict,
   memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,
   pageTarget, pageTargetAvailable, numericPageId, targetsFor, accountView, currentPosts, limitsFor, nextDayStart,
 };

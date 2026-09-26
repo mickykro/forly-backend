@@ -228,8 +228,11 @@ const wrap = (name, fn) => (req, res, next) => Promise.resolve(fn(req, res, next
   if (!res.headersSent) res.status(500).json({ error: "internal" });
 });
 
+// How many properties may post automatically at once (one account's pace).
+const MAX_ACTIVE_CAMPAIGNS = 3;
+
 module.exports = {
-  CONSENT_VERSION, PRIVATE_NAME, ACTIONS, ACT_TTL_S, TARGETS, DEFAULT_TARGETS, MAX_GROUP_IDS, GROUP_ID_RE, ID_RE,
+  MAX_ACTIVE_CAMPAIGNS, CONSENT_VERSION, PRIVATE_NAME, ACTIONS, ACT_TTL_S, TARGETS, DEFAULT_TARGETS, MAX_GROUP_IDS, GROUP_ID_RE, ID_RE,
   publicView, scrub, actionLink, readActionLink, card, allowed,
   hiddenIds, memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, catalogLookup, publicMember,
   pagesOf, pageKey, storedPageId, pageByStored, pageByKey, pageConfirmed, parseTargets,

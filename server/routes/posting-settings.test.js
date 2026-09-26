@@ -101,7 +101,7 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal(g999.name, "קבוצה פרטית"); assert.equal(g999.private, true); assert.equal(g999.in_catalog, false);
     assert.ok(!s.raw.includes("abcd"), "no name hash");
     const g111 = b.member_groups.find((g) => g.group_id === "111");
-    assert.equal(g111.name, "G111"); assert.equal(g111.agent_policy, "explicitly_allowed"); assert.equal(g111.is_default, true);
+    assert.equal(g111.name, "דירות בחיפה G111"); assert.equal(g111.agent_policy, "explicitly_allowed"); assert.equal(g111.is_default, true);
     assert.equal(b.member_groups.find((g) => g.group_id === "777").in_catalog, true, "found through its canonical URL");
     // Suggestions: in the agent's area (Haifa ≡ חיפה), not a member (777 is haifa.homes), by size.
     assert.deepEqual(b.suggested_groups.map((g) => g.group_id), ["333"]);

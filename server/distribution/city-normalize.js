@@ -26,4 +26,11 @@ function sameArea(a, b) {
   const x = normalizeCity(a), y = normalizeCity(b);
   return x === "כל הארץ" || y === "כל הארץ" || x === y;
 }
-module.exports = { normalizeCity, sameArea, ALIASES };
+// Whether a free-text name (a Facebook group's) names this city, in any of
+// its known spellings — "דירות להשכרה בהוד השרון" names הוד השרון.
+function mentionsCity(name, city) {
+  const n = fold(name).toLowerCase(), c = normalizeCity(city);
+  if (!n || !c || c === "כל הארץ") return false;
+  return [c, ...(ALIASES[c] || [])].map((x) => fold(x).toLowerCase()).filter((x) => x.length >= 2).some((x) => n.includes(x));
+}
+module.exports = { normalizeCity, sameArea, mentionsCity, ALIASES };

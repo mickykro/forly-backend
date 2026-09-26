@@ -208,7 +208,8 @@
     defaultPicks, planText, chipText, splitPasses, FIRST_WEEK, REACH_NOTE, HALT, ERRORS,
   };
   if (typeof module === "object" && module.exports) { module.exports = CampaignUI; return; }
-  root.ForlyCampaign = { mount: (opts) => mount(CampaignUI, opts || {}) };
+  // ui: the same helpers for autopublish.js (the all-properties page).
+  root.ForlyCampaign = { mount: (opts) => mount(CampaignUI, opts || {}), ui: CampaignUI };
 
   // ── the browser half ──
   function mount(U, { pageId, toast }) {

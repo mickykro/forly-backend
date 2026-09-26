@@ -15,8 +15,11 @@ const routes = fs.readFileSync(path.join(root, "server", "routes", "distribution
 const serverIndex = fs.readFileSync(path.join(root, "server", "index.js"), "utf8");
 const envExample = fs.readFileSync(path.join(root, "server", ".env.example"), "utf8");
 
-// One selected property opens one combined Page-and-Groups workspace.
-assert.match(indexHtml, /\/publish\.html\?page=/);
+// The dashboard's one "פרסום" button opens the all-properties publishing
+// page; each property there opens its own Page-and-Groups workspace.
+const autopublishJs = fs.readFileSync(path.join(root, "public-agent", "autopublish.js"), "utf8");
+assert.match(indexHtml, /\/autopublish\.html/);
+assert.match(autopublishJs, /\/publish\.html\?page=/);
 assert.match(publishJs, /share-session/);
 assert.match(publishJs, /\/api\/distribution\/publish/);
 assert.match(publishJs, /openConnectDialog/);

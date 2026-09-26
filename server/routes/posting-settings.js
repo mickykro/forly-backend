@@ -8,6 +8,7 @@
  *   POST   /groups/resync       re-read "Your groups" (at most once per 10 minutes)
  *   DELETE /groups/:group_id    forget one membership entry, and keep it forgotten
  *   POST   /groups/:group_id/unhide   the agent selects a removed group again
+ *   GET    /properties          every active property: its campaign, and the member groups that suit it
  *
  * PUT with enabled:false always works — it is how an agent switches off.
  */
@@ -115,6 +116,37 @@ module.exports = function mountPostingSettings(router, S, auth) {
       connected: !!conn.facebook_browser_connected_at,
       halt_state: await haltView(conn, now),
     });
+  }));
+
+  // The publishing page's list, in one call: each active property of this
+  // agent, its latest campaign (public view), and which member groups suit
+  // it (A.fitsProperty — its city, its kind of deal). Group ids only.
+  router.get("/properties", auth, wrap("properties", async (req, res) => {
+    const phone = req.user.userId;
+    const conn = (await db.getConnection(phone)) || {};
+    const lookup = S_.catalogLookup(await S.catalog(null));
+    const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
+    const listings = typeof db.listListingsByPhone === "function" ? await db.listListingsByPhone(phone) : [];
+    const camps = await store.listPostingCampaignsByPhone(phone);
+    const latest = (pageId) => camps.filter((c) => c.page_id === pageId)
+      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0] || null;
+    const out = [];
+    for (const l of listings) {
+      if (!l || l.status === "archived" || !l.page_id) continue;
+      const page = await db.getPage(l.page_id).catch(() => null);
+      if (!page || page.business_phone !== phone || !A.ACTIVE_PAGE.has(page.status || "active")) continue;
+      const property = Object.assign({ city: l.city, listing_type: l.listing_type || "sale" }, page.property || {});
+      out.push({
+        page_id: page.page_id,
+        title: `${property.rooms || l.rooms || ""} חד׳ ב${property.neighborhood || l.neighborhood || property.city || ""}`.trim(),
+        city: property.city || null,
+        listing_type: property.listing_type || "sale",
+        thumb_url: (l.photos_urls && l.photos_urls[0]) || null,
+        campaign: S_.publicView(latest(page.page_id)),
+        fit_group_ids: members.filter((m) => A.fitsProperty(m, lookup.all(m), property)).map((m) => m.group_id),
+      });
+    }
+    return res.json({ properties: out, max_active: S_.MAX_ACTIVE_CAMPAIGNS });
   }));
 
   router.put("/settings", auth, wrap("settings.put", async (req, res) => {

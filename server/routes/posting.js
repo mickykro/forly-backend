@@ -20,7 +20,7 @@ const { escapeHtml: esc } = require("../utils");
 const { postingEnvAllowed } = require("../posting-guard");
 
 const { CONSENT_VERSION, publicView, wrap, allowed, card } = S_;
-const MAX_ACTIVE_CAMPAIGNS = 3;
+const { MAX_ACTIVE_CAMPAIGNS } = S_;
 const MODES = new Set(["per_post", "standing"]);
 const LIVE = new Set(["running", "paused"]);
 const ENDED = new Set(["stopped", "completed"]);

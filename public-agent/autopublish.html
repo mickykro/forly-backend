@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>פרסום אוטומטי — Forly</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;600&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  body{background:var(--bg)}
+  .wrap{width:min(720px,100%);margin:0 auto;padding:18px 16px 100px}
+  h1{font-family:var(--serif);font-size:1.3rem;font-weight:600;margin-bottom:4px}
+  .sub{color:var(--ink-soft);font-size:.88rem;font-weight:300;margin-bottom:14px}
+  .ap-props{display:flex;flex-direction:column;gap:10px;margin:10px 0 22px}
+  .ap-prop{background:var(--paper);border:1px solid rgba(185,138,47,.25);border-radius:16px;padding:12px}
+  .ap-prop.on{border-color:rgba(31,175,90,.45)}
+  .ap-top{display:flex;align-items:center;gap:12px}
+  .ap-thumb{width:64px;height:48px;border-radius:10px;object-fit:cover;background:var(--gold-faint);flex-shrink:0}
+  .ap-main{flex:1;min-width:0}
+  .ap-title{font-weight:600;font-size:.98rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ap-meta{font-size:.78rem;color:var(--ink-soft)}
+  .ap-status{font-size:.82rem;margin-top:2px}
+  .ap-status.live{color:#157A3F}.ap-status.warn{color:#8A6A1E}
+  .ap-switch{display:flex;align-items:center;gap:8px;font-size:.8rem;color:var(--ink-soft);white-space:nowrap}
+  .ap-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .ap-actions .btn{min-height:34px}
+  .ap-groups{margin-top:10px;border-top:1px solid rgba(23,20,15,.08);padding-top:10px}
+  .ap-groups .camp-groups{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto}
+  .ap-note{font-size:.8rem;color:#8A6A1E;margin:6px 0}
+  .rules{font-size:.8rem;color:var(--ink-soft);background:rgba(185,138,47,.08);border-radius:12px;padding:10px 12px;margin-bottom:14px}
+  #apSettings{margin:6px 0 14px}#apSettings summary{cursor:pointer;padding:6px 0}
+  .ap-count{font-size:.82rem;color:var(--ink-soft);margin-bottom:6px}
+  #msg{position:fixed;bottom:18px;right:50%;transform:translate(50%,0);background:var(--dark);
+    color:#fff;border-radius:100px;padding:11px 22px;font-size:.88rem;display:none;z-index:50}
+  @media (max-width:520px){.ap-top{flex-wrap:wrap}.ap-switch{width:100%;justify-content:flex-start}}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+  <a class="btn btn-sm" href="/" style="margin-inline-start:auto;background:rgba(255,255,255,.12);color:#fff">← הנכסים שלי</a>
+</header>
+
+<div class="wrap">
+  <h1>פרסום אוטומטי בפייסבוק</h1>
+  <p class="sub">בחרו אילו נכסים פורלי תפרסם בקבוצות שלכם. כל נכס מתפרסם בקבוצות שמתאימות לעיר ולסוג העסקה שלו — לאט ובזהירות, כמה פוסטים ביום, בשעות היום, לא בשבת. אפשר לעצור בכל רגע.</p>
+
+  <div id="loading" class="center" style="padding:50px 0"><div class="spinner"></div></div>
+
+  <div id="app" class="camp" hidden>
+    <div class="camp-halt" id="apHalt" hidden>
+      <p id="apHaltMsg"></p>
+      <a class="btn btn-gold btn-sm" id="apHaltBrowserBtn" href="distribution.html#browserConnectCard" hidden>חיבור החשבון מחדש</a>
+      <button type="button" class="btn btn-ghost btn-sm" id="apResumeBtn" hidden>להמשיך</button>
+    </div>
+
+    <div id="apNeedConnect" class="rules" hidden>
+      <p>כדי שפורלי תפרסם בקבוצות צריך קודם לחבר את החשבון האישי שלכם בפייסבוק.</p>
+      <a class="btn btn-gold btn-sm" href="distribution.html#browserConnectCard">חיבור החשבון</a>
+    </div>
+
+    <h2>הנכסים שלכם</h2>
+    <p class="ap-count" id="apCount"></p>
+    <p class="camp-est" id="apFirstPost"></p>
+    <div class="ap-props" id="apProps"></div>
+
+    <details id="apSettings">
+      <summary><strong>הגדרות לכל הנכסים</strong> <span class="camp-muted camp-small">— מצב פרסום, אישור, הקבוצות שלכם</span></summary>
+
+      <h3>הקבוצות שלכם <button type="button" class="btn btn-ghost btn-sm" id="apResync">רענון</button></h3>
+      <p class="camp-muted camp-small">פורלי מפרסמת רק בקבוצות שאתם חברים בהן. הסירו כאן קבוצה שלא מתאימה לאף נכס.</p>
+      <div id="apMemberGroups" class="camp-groups"></div>
+      <button type="button" class="camp-link" id="apUnhide" hidden></button>
+
+      <h3>קבוצות פופולריות באזור שלכם</h3>
+      <p class="camp-muted camp-small">עוד לא חברים? הצטרפו בעצמכם, ואחרי רענון הן יופיעו למעלה.</p>
+      <div id="apSuggested" class="camp-groups"></div>
+
+      <label class="camp-consent"><input type="checkbox" id="apAutoEnroll"> <span><strong>לפרסם אוטומטית גם כל נכס חדש</strong><small>בקבוצות שלכם שמתאימות לעיר ולסוג העסקה שלו, באותם תנאים. אפשר לכבות בכל רגע.</small></span></label>
+      <label class="camp-consent"><input type="checkbox" id="apVisible"> <span><strong>לייקים וסטוריז</strong><small>פורלי גם תסמן לייק פה ושם ותצפה בסטוריז — זה נראה לחברים שלכם. בלי זה היא רק גוללת וקוראת.</small></span></label>
+      <div id="apPageTarget"></div>
+
+      <fieldset class="camp-mode">
+        <legend>מתי פורלי מפרסמת?</legend>
+        <label class="camp-opt"><input type="radio" name="apMode" value="per_post" checked>
+          <span><strong>רק אחרי אישור שלכם, פוסט-פוסט</strong><small>לפני כל פוסט תקבלו וואטסאפ עם הטקסט והקבוצה. אישור בלחיצה אחת — בלי אישור לא מפרסמים.</small></span></label>
+        <label class="camp-opt"><input type="radio" name="apMode" value="standing">
+          <span><strong>לבד, עד שתעצרו</strong><small>מאשרים פעם אחת, פורלי מפרסמת בקצב שלה, ואפשר לעצור בכל רגע בלחיצה.</small></span></label>
+        <p class="camp-muted camp-small">חל על נכסים שתפעילו מעכשיו. נכס שכבר פועל ממשיך במצב שבו הופעל.</p>
+      </fieldset>
+
+      <div class="camp-questions">
+        <label><input type="checkbox" id="apAged" checked> חשבון הפייסבוק שלי בן יותר מחצי שנה</label>
+        <label><input type="checkbox" id="apManual" checked> כבר פרסמתי בקבוצות האלה בעצמי</label>
+        <p class="camp-muted camp-small">אם אחד מאלה לא נכון, פורלי תתחיל לאט במיוחד — החימום יהיה ארוך פי שניים.</p>
+        <p class="camp-muted camp-small" id="apFirstWeek"></p>
+      </div>
+    </details>
+
+    <p class="camp-warn" id="apConsentOld" hidden>נוסח האישור התעדכן מאז שאישרתם — קראו אותו וסמנו שוב.</p>
+    <label class="camp-consent" id="apConsentRow"><input type="checkbox" id="apConsent">
+      <span><span id="apConsentText">הבנתי שפייסבוק לא אוהבת פרסום אוטומטי מחשבון אישי ולפעמים מגבילה חשבונות בגלל זה. פורלי מפרסמת לאט ובזהירות כדי להקטין את הסיכון, ואני רוצה להמשיך.</span><small>נוסח האישור: <bdi id="apConsentVer"></bdi></small></span></label>
+    <p class="camp-muted camp-small" id="apConsentDone" hidden>✓ אישרתם · מפרסמים על אחריותכם · פורלי מפרסמת לאט ובזהירות</p>
+    <button type="button" class="btn btn-ghost btn-sm" id="apSaveSettings">שמירת ההגדרות</button>
+    <p class="camp-muted camp-small" id="apReach"></p>
+  </div>
+</div>
+<div id="msg" role="status"></div>
+<script src="publish-campaign.js"></script>
+<script src="autopublish.js"></script>
+</body>
+</html>
