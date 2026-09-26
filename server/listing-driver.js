@@ -85,12 +85,61 @@ function descriptionOf(text, meta) {
   return t.length <= SHORT_PAGE ? t : "";
 }
 
+// A Facebook post's page is the whole Facebook screen around it: the menu,
+// stories, the feed, sponsored posts and the comments. Read only the post: its
+// message element, and the large images of the post itself (not avatars, story
+// thumbnails or UI icons). The post opens either as a dialog over the feed or
+// on its own page. [Unverified] selectors — Facebook's markup changes.
+const FB_HOST = /(^|\.)facebook\.com$/i;
+const FB_MESSAGE = '[data-ad-rendering-role="story_message"], [data-ad-comet-preview="message"], [data-ad-preview="message"]';
+const FB_MIN_PHOTO = 200;
+const SEE_MORE = /^\s*(…\s*)?(ראה עוד|See more)\s*$/;
+// Runs in the page (page.evaluate serialises it): no outer references.
+function scopeFacebookPost({ sel, minPhoto }) {
+  const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter((d) => d.querySelector(sel));
+  const scope = dialogs[dialogs.length - 1] || document.querySelector('[role="main"]');
+  const msg = scope && scope.querySelector(sel);
+  if (!msg) return null;
+  const big = (i) => (i.naturalWidth || i.width || 0) >= minPhoto && !/\/rsrc\.php\//.test(i.currentSrc || i.src);
+  // The post's own box: its article, or the nearest ancestor of the message
+  // that holds a photo — never climbing past the dialog/main it sits in.
+  let box = msg.closest('[role="article"]');
+  if (!box || !scope.contains(box)) {
+    box = null;
+    for (let el = msg, n = 0; el && n < 8; el = el.parentElement, n++) {
+      if ([...el.querySelectorAll("img")].some(big)) { box = el; break; }
+      if (el === scope) break;
+    }
+  }
+  const srcs = box ? [...box.querySelectorAll("img")].filter(big).map((i) => i.currentSrc || i.src) : [];
+  return { text: msg.innerText, srcs };
+}
+async function readFacebookPost(page) {
+  // A long post is cut at "ראה עוד"; open it, as a reader would.
+  try {
+    const buttons = FB_MESSAGE.split(", ").map((s) => `${s} [role="button"]`).join(", ");
+    const dialog = page.locator('[role="dialog"]').filter({ has: page.locator(FB_MESSAGE) });
+    const scope = (await dialog.count()) ? dialog.last() : page.locator('[role="main"]');
+    await scope.locator(buttons).filter({ hasText: SEE_MORE }).first().click({ timeout: 1500 });
+    await page.waitForTimeout(400);
+  } catch (e) { /* no "see more", or not clickable: read what is shown */ }
+  try { return await page.evaluate(scopeFacebookPost, { sel: FB_MESSAGE, minPhoto: FB_MIN_PHOTO }); }
+  catch (e) { return null; }
+}
+
 async function readPage(page, url) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
   // Auto-waiting, not a fixed sleep: settle on the network going quiet, and
   // carry on regardless if it never does — a chatty analytics beacon must not
   // cost us the scrape.
   if (page.waitForLoadState) await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+  let host = "";
+  try { host = new URL(url).hostname; } catch (e) { host = ""; }
+  const post = FB_HOST.test(host) && page.evaluate ? await readFacebookPost(page) : null;
+  if (post && String(post.text || "").trim().length >= 10) {
+    const text = String(post.text).split("\n").filter((l) => !SEE_MORE.test(l)).join("\n").trim();
+    return { landedUrl: page.url(), text, srcs: post.srcs || [], meta: null };
+  }
   const text = String(await page.innerText("body")).trim();
   const srcs = page.imageSrcs
     ? await page.imageSrcs()
@@ -131,4 +180,4 @@ async function fromDriver(input, deps = {}) {
   return { source: "driver", text, description: descriptionOf(text, meta), photos };
 }
 
-module.exports = { fromDriver, _test: { pickImages, isLoginWall, readPage, descriptionOf } };
+module.exports = { fromDriver, _test: { pickImages, isLoginWall, readPage, descriptionOf, scopeFacebookPost, FB_MESSAGE } };
