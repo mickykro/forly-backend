@@ -67,6 +67,11 @@ const DEFAULTS = {
   max_consecutive_failures: 2,
 };
 
+const LOCAL_PACING = {
+  observe_calendar: false, min_gap_minutes: 5, gap_jitter: 0, long_break_probability: 0,
+  day_start_jitter_min: 0, skip_day_probability: 0,
+};
+
 const MS_MIN = 60000, MS_HOUR = 3600000, MS_DAY = 24 * MS_HOUR;
 
 function localParts(date, tz) {
@@ -115,6 +120,7 @@ function isHolidayEve(date, config) {
 }
 
 function isActiveTime(date, config = DEFAULTS) {
+  if (config.observe_calendar === false) { const h = localParts(date, config.timezone).hour; return h >= config.active_hours.start && h < config.active_hours.end; }
   if (!CALENDAR_OK) return false; // see CALENDAR_OK: an unverifiable calendar means no posting at all
   const lp = localParts(date, config.timezone);
   if (lp.dow === 6) return false; // Saturday: Shabbat, fully inactive all day (no fixed end-hour to get wrong)
@@ -162,13 +168,19 @@ function jerusalemDate(date) { return localDate(new Date(date), DEFAULTS.timezon
 // A deep copy: a caller mutating the returned config (e.g. config.active_hours)
 // must never corrupt the shared DEFAULTS object other callers read.
 // env (the caller's, never read here): on a local box the warm-up is
-// skipped so posting can be tested at once — POSTING_WARMUP=1 keeps it.
-// Only FORLY_ENV=local; prod and staging always warm up.
+// skipped so posting can be tested at once — POSTING_WARMUP=1 keeps it —
+// and so is the pacing: any hour, any day (Shabbat and holidays included),
+// no start jitter, no skipped days, no long breaks, a 5-minute gap —
+// POSTING_PACING=1 keeps it. Group cooldowns and caps stay: the account is
+// real. Only FORLY_ENV=local; prod and staging always pace and warm up.
 function configFrom(settings, env = {}) {
   const out = structuredClone(DEFAULTS);
   const v = settings && settings.group_global_daily_cap;
   if (Number.isInteger(v) && v > 0) out.group_global_daily_cap = v;
   if (env.FORLY_ENV === "local" && env.POSTING_WARMUP !== "1") out.warmup = [];
+  if (env.FORLY_ENV === "local" && env.POSTING_PACING !== "1") {
+    Object.assign(out, LOCAL_PACING, { active_hours: { start: 0, end: 24 } });
+  }
   return out;
 }
 

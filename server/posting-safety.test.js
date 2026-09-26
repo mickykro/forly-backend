@@ -411,4 +411,29 @@ assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("l
   assert.ok(local.at, "a slot on day 1: " + JSON.stringify(local));
 }
 
+// ── a local box posts at once, even on Shabbat and a holiday (POSTING_PACING=1 keeps the pacing) ──
+{
+  const sukkot = new Date("2026-09-26T12:30:00+03:00"); // Shabbat and Sukkot I
+  const night = new Date("2026-09-27T23:10:00+03:00");
+  const acc = { first_connected_at: "2026-09-20T08:00:00+03:00", posts: [], halts: [], account_aged: true, posted_manually: true };
+  const cand = [{ group_id: "1", url: "https://www.facebook.com/groups/1" }];
+  const slot = (now, env) => S.nextSlot({ now, account: acc, candidates: cand, pageId: "p", config: S.configFrom(null, env), rand: () => 0.99 });
+  for (const now of [sukkot, night]) {
+    assert.equal(slot(now, { FORLY_ENV: "local" }).at.getTime(), now.getTime(), "local: now — " + now.toISOString());
+    const later = (r) => !r.at || r.at > now; // a paced day may be skipped outright (at: null)
+    assert.ok(later(slot(now, { FORLY_ENV: "local", POSTING_PACING: "1" })), "kept on request");
+    assert.ok(later(slot(now, { FORLY_ENV: "prod" })), "prod paces");
+  }
+  const local = S.configFrom(null, { FORLY_ENV: "local" });
+  assert.ok(S.isActiveTime(sukkot, local) && !S.isActiveTime(sukkot, S.configFrom(null, { FORLY_ENV: "staging" })));
+  assert.equal(local.group_cooldown_days, S.DEFAULTS.group_cooldown_days, "cooldowns stay");
+  assert.equal(local.daily_cap, S.DEFAULTS.daily_cap, "caps stay");
+  assert.equal(S.DEFAULTS.min_gap_minutes, 120, "DEFAULTS untouched");
+  // 5 minutes after the last post, not 2 hours
+  const after = slot(night, { FORLY_ENV: "local" });
+  const one = { ...acc, posts: [{ at: new Date(night.getTime() - 60000).toISOString(), group_id: "9", page_id: "q" }] };
+  const next = S.nextSlot({ now: night, account: one, candidates: cand, pageId: "p", config: local, rand: () => 0.99 });
+  assert.ok(after.at && next.at.getTime() === night.getTime() + 4 * 60000, "gap: " + next.at.toISOString());
+}
+
 console.log("posting-safety.test.js ok");
