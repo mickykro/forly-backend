@@ -69,6 +69,34 @@ const PAGE = `<html><body>
     assert.equal(out2.text, "למכירה דירת 4 חדרים בגבעתיים");
     assert.deepEqual(out2.photos.map((p) => new URL(p.url).pathname.split("/").pop()), ["solo-photo.jpg"]);
 
+    // "+4": five tiles shown, nine in the album — read through the photo viewer.
+    const tile = (n, px) => `<a href="/photo/?fbid=${n}&set=pcb.456">${img("tile" + n, px)}${n === 5 ? "<div><span>+4</span></div>" : ""}</a>`;
+    const album = `<html><body><div role="main">${img("feed-photo", 500)}</div><div role="dialog">
+      <div ${MSG}>דירה עם הרבה תמונות להשכרה</div>
+      <div>${tile(1, 600)}${tile(2, 300)}${tile(3, 300)}${tile(4, 300)}${tile(5, 300)}</div>
+      <div role="article" aria-label="תגובה">${img("commenter", 32)} יפה</div></div></body></html>`;
+    const viewer = (n) => `<html><body style="margin:0">${img("full" + n, 700)}<div>${img("poster-avatar", 40)} תגובות</div>
+      <script>addEventListener("keydown", (e) => { if (e.key === "ArrowRight") location.href = "/photo/?fbid=${(n % 9) + 1}&set=pcb.456"; });</script></body></html>`;
+    await page.unroute("https://www.facebook.com/**");
+    await page.route("https://www.facebook.com/**", (r) => {
+      const u = new URL(r.request().url());
+      const body = u.pathname.startsWith("/photo") ? viewer(Number(u.searchParams.get("fbid"))) : album;
+      r.fulfill({ contentType: "text/html; charset=utf-8", body });
+    });
+    const out4 = await LD.fromDriver({ url }, { withPage: async (o, fn) => fn(page, {}) });
+    assert.equal(out4.text, "דירה עם הרבה תמונות להשכרה");
+    assert.deepEqual(out4.photos.map((p) => new URL(p.url).pathname.split("/").pop()),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `full${n}.jpg`), "all nine, in order, full size");
+
+    // A viewer that does not move on: the five photos the post showed stay.
+    await page.unroute("https://www.facebook.com/**");
+    await page.route("https://www.facebook.com/**", (r) => {
+      const u = new URL(r.request().url());
+      r.fulfill({ contentType: "text/html; charset=utf-8", body: u.pathname.startsWith("/photo") ? `<html><body>${img("full1", 700)}</body></html>` : album });
+    });
+    const out5 = await LD.fromDriver({ url }, { withPage: async (o, fn) => fn(page, {}) });
+    assert.deepEqual(out5.photos.map((p) => new URL(p.url).pathname.split("/").pop()), [1, 2, 3, 4, 5].map((n) => `tile${n}.jpg`));
+
     // No post message found: the whole page is read as before.
     await page.unroute("https://www.facebook.com/**");
     await page.route("https://www.facebook.com/**", (r) => r.fulfill({ contentType: "text/html; charset=utf-8", body: "<html><body><div role='main'>דירה 3 חדרים להשכרה בהוד השרון</div></body></html>" }));

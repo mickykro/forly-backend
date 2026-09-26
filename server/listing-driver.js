@@ -112,7 +112,56 @@ function scopeFacebookPost({ sel, minPhoto }) {
     }
   }
   const srcs = box ? [...box.querySelectorAll("img")].filter(big).map((i) => i.currentSrc || i.src) : [];
-  return { text: msg.innerText, srcs };
+  // Facebook shows at most five tiles; the last one says "+4" when there are
+  // more. The rest are only reachable through the photo viewer.
+  let more = 0, firstPhoto = null;
+  if (box) {
+    for (const el of box.querySelectorAll("*")) {
+      const m = el.childElementCount === 0 && /^\+\s*(\d{1,3})$/.exec((el.textContent || "").trim());
+      if (m) { more = Number(m[1]); break; }
+    }
+    const a = [...box.querySelectorAll('a[href*="/photo"]')].find((x) => [...x.querySelectorAll("img")].some(big));
+    if (a) firstPhoto = { href: a.href, selector: `a[href="${CSS.escape(a.getAttribute("href"))}"]` };
+  }
+  return { text: msg.innerText, srcs, more, firstPhoto };
+}
+
+// Runs in the page: the largest visible image — in the photo viewer, the photo.
+function largestImage(minPhoto) {
+  let best = null, area = 0;
+  for (const i of document.querySelectorAll("img")) {
+    const src = i.currentSrc || i.src;
+    const r = i.getBoundingClientRect();
+    if (!src || /\/rsrc\.php\//.test(src) || r.width < minPhoto || r.bottom < 0 || r.top > innerHeight) continue;
+    if (r.width * r.height > area) { area = r.width * r.height; best = src; }
+  }
+  return best;
+}
+
+// The whole album, one photo at a time: open the first photo and step with
+// the arrow key, as a person browsing it would, until it comes back around or
+// stops changing. At a reading pace — this is the agent's own account.
+async function readAlbum(page, first, want, deps = {}) {
+  const rand = deps.rand || Math.random;
+  const key = (u) => String(u || "").split("?")[0];
+  try { await page.locator(first.selector).first().click({ timeout: 3000 }); }
+  catch (e) { await page.goto(first.href, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS }); }
+  const out = [], seen = new Set();
+  let prev = null;
+  for (let i = 0; i < want; i++) {
+    let src = null;
+    for (let t = 0; t < 20; t++) { // up to ~5 s for the next photo to show
+      src = await page.evaluate(largestImage, FB_MIN_PHOTO).catch(() => null);
+      if (src && key(src) !== key(prev)) break;
+      await page.waitForTimeout(250);
+    }
+    if (!src || key(src) === key(prev) || seen.has(key(src))) break;
+    seen.add(key(src)); out.push(src); prev = src;
+    if (out.length >= want) break;
+    await page.waitForTimeout(500 + Math.floor(rand() * 700));
+    await page.keyboard.press("ArrowRight");
+  }
+  return out;
 }
 async function readFacebookPost(page) {
   // A long post is cut at "ראה עוד"; open it, as a reader would.
@@ -123,8 +172,17 @@ async function readFacebookPost(page) {
     await scope.locator(buttons).filter({ hasText: SEE_MORE }).first().click({ timeout: 1500 });
     await page.waitForTimeout(400);
   } catch (e) { /* no "see more", or not clickable: read what is shown */ }
-  try { return await page.evaluate(scopeFacebookPost, { sel: FB_MESSAGE, minPhoto: FB_MIN_PHOTO }); }
+  let post;
+  try { post = await page.evaluate(scopeFacebookPost, { sel: FB_MESSAGE, minPhoto: FB_MIN_PHOTO }); }
   catch (e) { return null; }
+  if (post && post.more > 0 && post.firstPhoto) {
+    try {
+      const album = await readAlbum(page, post.firstPhoto, Math.min(MAX_PHOTOS, post.srcs.length + post.more));
+      // Only when the viewer gave at least what the post showed.
+      if (album.length > post.srcs.length) post.srcs = album;
+    } catch (e) { /* keep the photos the post showed */ }
+  }
+  return post;
 }
 
 async function readPage(page, url) {
@@ -180,4 +238,4 @@ async function fromDriver(input, deps = {}) {
   return { source: "driver", text, description: descriptionOf(text, meta), photos };
 }
 
-module.exports = { fromDriver, _test: { pickImages, isLoginWall, readPage, descriptionOf, scopeFacebookPost, FB_MESSAGE } };
+module.exports = { fromDriver, _test: { pickImages, isLoginWall, readPage, descriptionOf, scopeFacebookPost, readAlbum, FB_MESSAGE } };
