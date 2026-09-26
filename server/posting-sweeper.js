@@ -218,7 +218,7 @@ const optionalCall = (mod, name) => async (...args) => {
 
 function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, operatorPhone } = {}) {
   const db = require("./db");
-  const { sendWhatsApp } = require("./utils");
+  const { sendWhatsApp, sendWhatsAppRich, textOfButtons } = require("./utils");
   const build = optionalFn("./posting-messages", "build");
   const operator = operatorPhone || process.env.POSTING_OPERATOR_PHONE || null;
   return {
@@ -228,11 +228,12 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, operator
     reconcile: optionalCall("./posting-driver", "reconcile"), // Task 18 must export posting-driver.reconcile(attempt, deps)
     dwell: optionalCall("./social-dwell", "browseSession"),
     groupsSync: require("./facebook-groups-sync"),
-    // No Green API on a local box: the message goes to the console instead,
-    // so an approval request can still be seen (phone tail only).
+    // A message is a button payload (posting-messages) or plain text. No
+    // Green API on a local box: it goes to the console instead, links spelled
+    // out, so an approval request can still be tapped (phone tail only).
     notify: (greenInstance && greenToken) || process.env.FORLY_ENV !== "local"
-      ? (phone, text) => sendWhatsApp(phone, text, greenInstance, greenToken)
-      : async (phone, text) => { console.log(`[whatsapp → ${tail(phone)} · not sent: no GREENAPI_TOKEN]\n${text}`); },
+      ? (phone, m) => (typeof m === "string" ? sendWhatsApp(phone, m, greenInstance, greenToken) : sendWhatsAppRich(phone, m, greenInstance, greenToken))
+      : async (phone, m) => { console.log(`[whatsapp → ${tail(phone)} · not sent: no GREENAPI_TOKEN]\n${typeof m === "string" ? m : textOfButtons(m)}`); },
     notifyOperator: operator ? (text) => sendWhatsApp(operator, text, greenInstance, greenToken) : null,
     messages: build ? build({ pageBaseUrl, authSecret }) : undefined,
   };

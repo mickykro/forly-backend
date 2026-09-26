@@ -147,19 +147,25 @@ module.exports = function createWhatsappRouter(ctx) {
     };
   }
 
+  // Quick-reply words and links (URL buttons) go as one button message; the
+  // plain fallback spells the links out, so a link is never lost.
   async function send(phone, reply) {
-    if (reply.buttons && sendButtons) {
+    const links = (reply.links || []).filter((l) => l && l.url);
+    if ((reply.buttons || links.length) && sendButtons) {
       try {
         await sendButtons(phone, {
           header: "Forly",
           body: reply.text,
-          footer: "בחרו אפשרות",
-          buttons: reply.buttons.map((b, i) => ({ buttonId: String(i + 1), buttonText: b })),
+          footer: reply.buttons ? "בחרו אפשרות" : " ",
+          buttons: [
+            ...(reply.buttons || []).map((b) => ({ buttonText: b })),
+            ...links.map((l) => ({ type: "url", buttonText: l.text, url: l.url })),
+          ].slice(0, 3).map((b, i) => ({ ...b, buttonId: String(i + 1) })),
         });
         return;
       } catch (err) { console.warn("[whatsapp] buttons failed, sending plain:", err.message); }
     }
-    await sendWhatsApp(phone, reply.text);
+    await sendWhatsApp(phone, [reply.text, ...links.map((l) => `${l.text}: ${l.url}`)].join("\n"));
   }
 
   async function persistAndSend(phone, turn) {
@@ -297,6 +303,7 @@ module.exports = function createWhatsappRouter(ctx) {
   });
 
   router.sweepStuckBuilds = sweepStuckBuilds; // exposed for tests
+  router.sendReply = send; // exposed for tests
   return router;
 };
 module.exports.transcribe = transcribe;

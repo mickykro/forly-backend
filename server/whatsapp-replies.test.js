@@ -27,7 +27,15 @@ for (const r of all) {
 }
 assert.deepEqual(R.offer(4).buttons, ["כן", "לא"]);
 assert.equal(R.reviewReady("https://a/create.html?whatsapp=1").buttons, undefined, "the link is the only action, no buttons");
-assert.match(R.reviewReady("https://a/create.html?whatsapp=1").text, /https:\/\/a\/create\.html\?whatsapp=1/);
+// Links sit behind URL buttons, never in the text.
+assert.deepEqual(R.reviewReady("https://a/create.html?whatsapp=1").links, [{ text: "לבדיקה ובנייה", url: "https://a/create.html?whatsapp=1" }]);
+for (const r of [R.reviewReady("https://a/x"), R.previewOnly("https://a/r"), R.sourceError("x", "https://a/c"), R.extractLimit("https://a/c"), R.createFailed("https://a/c"), R.noLinkHint("https://a/c"),
+  R.outOfQuota("המכסה נוצלה.\nלרכישת חבילה נוספת: https://pay/x\nלאחר התשלום נעדכן.")]) {
+  assert.doesNotMatch(r.text, /https?:\/\//, r.text);
+  assert.ok(r.links.length === 1 && /^https:\/\//.test(r.links[0].url) && r.links[0].text.length <= 25);
+}
+assert.equal(R.outOfQuota("המכסה נוצלה.\nלרכישת חבילה נוספת: https://pay/x").links[0].url, "https://pay/x");
+assert.equal(R.outOfQuota("נגמר").links, undefined, "no link: none invented");
 assert.deepEqual(R.resumePrompt(sum).buttons, ["המשך", "חדש", "ביטול"]);
 assert.match(R.choose().text, /בלי תצוגה מקדימה/, "create warns there is no preview after it");
 assert.match(R.reviewReady("L", ["neighborhood", "floor"]).text, /דילגתם על: שכונה, קומה/);

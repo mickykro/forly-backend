@@ -18,6 +18,7 @@
  * derived from attempts, never written.
  */
 const crypto = require("crypto");
+const { publicUrl } = require("./utils");
 const safety = require("./posting-safety");
 const shareKit = require("./distribution/share-kit");
 const { redact } = require("./driver-browser");
@@ -351,9 +352,10 @@ function buildCopy(page, c, target) {
 
 // The post's media: the property's own walkthrough video (the one its page
 // plays), the copy being its description. http(s) only; none → text only.
+// Never a local dev address: Facebook, the driver and a phone must reach it.
 function videoOf(page) {
   const h = (page && page.hero) || {};
-  const ok = (u) => (typeof u === "string" && /^https?:\/\/[^\s]+$/i.test(u) ? u : null);
+  const ok = (u) => (typeof u === "string" && /^https?:\/\/[^\s]+$/i.test(u) ? publicUrl(u) : null);
   const video_url = ok(h.video_url);
   return { video_url, poster_url: video_url ? ok(h.poster_url) : null };
 }

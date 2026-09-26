@@ -414,6 +414,15 @@ async function queuedDist(deps, { force = false } = {}) {
     }
   }
 
+  // ── a plain summary's post links go behind buttons, out of the text ──
+  {
+    const text = jobs.M.posted("דירה", "https://www.facebook.com/V1") + "\n" + jobs.M.igPosted("דירה", "https://www.instagram.com/p/X");
+    const p = jobs.summaryButtons(text);
+    assert.ok(!/https?:\/\//.test(p.body) && p.body.includes("פורסם"), p.body);
+    assert.deepEqual(p.buttons.map((b) => [b.buttonText, b.url]), [["לצפייה בפוסט", "https://www.facebook.com/V1"], ["לצפייה באינסטגרם", "https://www.instagram.com/p/X"]]);
+    assert.equal(jobs.summaryButtons(jobs.M.failed("דירה")), null, "no link: stays text");
+  }
+
   // ── buttons unsupported/rejected ⇒ silent fallback to the text message ──
   {
     const db = fakeDb(); seed(db);

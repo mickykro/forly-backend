@@ -44,7 +44,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploa
 // happens to answer on (hstgr.cloud, a cloudflare tunnel, an IP). PAGE_BASE_URL
 // wins when set; otherwise local dev keeps its own BASE_URL and anything else
 // falls back to the canonical domain.
-const PUBLIC_BASE_URL = "https://nadlan.call4li.com";
+const { PUBLIC_BASE_URL } = require("./utils");
 // The rule lives in utils.js (resolvePageBaseUrl) so it is unit-testable and so
 // the operator scripts can share the same INFRA_HOST definition. Setting
 // ALLOW_INFRA_PAGE_BASE=1 — dev and staging only — lets a *.hstgr.cloud
@@ -114,7 +114,7 @@ db.init();
 const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
-const { sendWhatsApp, sendWhatsAppButtons } = require("./utils");
+const { sendWhatsApp, sendWhatsAppButtons, sendWhatsAppRich } = require("./utils");
 // A number that tries to log in but has no businesses/{phone} doc isn't a
 // Forly client yet — self-service signup off the login screen is gone (see
 // the issue this shipped with), so the OTP route forwards them here as a
@@ -175,6 +175,7 @@ app.use("/api/auth/verify", rateLimit({ windowMs: 60_000, max: 10 }));
 app.use("/api/auth", createAuthRouter({
   db: db.db, mem: db.mem,
   sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  sendWhatsAppRich: (phone, payload) => sendWhatsAppRich(phone, payload, GREENAPI_INSTANCE, GREENAPI_TOKEN),
   secret: AUTH_SECRET,
   salesLeadPhone: SALES_LEAD_PHONE,
 }));

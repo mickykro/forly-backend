@@ -20,7 +20,7 @@ const prompt = require("../chat-prompt");
 const chatProvider = require("../chat-provider");
 const { submitLead } = require("../leads");
 const { attributionFor } = require("../posting-attribution"); // R4: fly_ref → attribution, server-side
-const { normalizePhone, sendWhatsApp, asMillis } = require("../utils");
+const { normalizePhone, sendWhatsAppRich, asMillis } = require("../utils");
 const qualify = require("../chat-qualify");
 const recommend = require("../chat-recommend");
 
@@ -276,16 +276,18 @@ module.exports = function createChatRouter(ctx) {
       const title = (page.property && page.property.address) || "";
       const city = (page.property && page.property.city) || "";
       const listingType = (page.property && page.property.listing_type) || "sale";
-      const msg = [
-        `🔔 שאלה נוספת מליד "${title}, ${city}"`,
+      const alert = [
+        `מהליד "${title}, ${city}"`,
         `👤 ${convo.lead.name}`,
         `📞 0${convo.lead.phone.slice(3)}`,
         ...(convo.lead.qualification ? qualify.qualificationLines(convo.lead.qualification, listingType) : []),
         `❓ שאלה חדשה:`,
         `• ${parsed.unanswered_question || message}`,
-        `דברו איתו עכשיו: https://wa.me/${convo.lead.phone}`,
       ].join("\n");
-      sendWhatsApp(page.business_phone, msg, greenInstance, greenToken)
+      sendWhatsAppRich(page.business_phone, {
+        header: "🔔 שאלה נוספת מליד", body: alert, footer: "",
+        buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${convo.lead.phone}` }],
+      }, greenInstance, greenToken)
         .catch((e) => console.error("chat followup notify failed:", e.message));
 
       await saveConversation(pageId, cid, convo);
@@ -410,16 +412,18 @@ module.exports = function createChatRouter(ctx) {
 
     const title = (page.property && page.property.address) || "";
     const city = (page.property && page.property.city) || "";
-    const msg = [
-      `🔔 ליד חדש מדף הנכס "${title}, ${city}"`,
+    const alert = [
+      `מדף הנכס "${title}, ${city}"`,
       `👤 ${name}`,
       `📞 0${prospectPhone.slice(3)}`,
       ...qualify.qualificationLines(qual.value, listingType),
       ...(questions.length ? ["❓ שאלות שלא נענו:", ...questions.map((q) => `• ${q}`)] : []),
       ...recommend.recommendationLines(recommendations),
-      `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
     ].join("\n");
-    sendWhatsApp(page.business_phone, msg, greenInstance, greenToken)
+    sendWhatsAppRich(page.business_phone, {
+      header: "🔔 ליד חדש", body: alert, footer: "",
+      buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${prospectPhone}` }],
+    }, greenInstance, greenToken)
       .catch((e) => console.error("chat lead notify failed:", e.message));
 
     const at = new Date();

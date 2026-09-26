@@ -7,6 +7,10 @@
  * The kinds in use today: approve, posted, paused, halted, penalty,
  * reconnect, removed, stopped, completed.
  *
+ * Each is a button message { header, body, footer, buttons } (Green API
+ * sendInteractiveButtons): links sit behind buttons, never in the text;
+ * utils.sendWhatsAppRich falls back to the text with the links spelled out.
+ *
  * Same rules as distribution/jobs.js's M: user-facing Hebrew only, vendor
  * error text NEVER, and the approval shows the EXACT copy that will go out
  * under the agent's name. Links are Task 19's signed one-tap links
@@ -44,42 +48,53 @@ const PENALTY_DEFAULT = PENALTY.rate_limited;
 
 function build({ pageBaseUrl, authSecret }) {
   const link = (c, p, a) => actionLink({ campaignId: c, postId: p, action: a }, { authSecret, pageBaseUrl });
-  const stopLine = (c) => (c && c.id ? `\n\nלעצירת הפרסום: ${link(c.id, undefined, "stop")}` : "");
+  const base = String(pageBaseUrl || "").replace(/\/+$/, "");
+  const btn = (buttonText, url) => ({ type: "url", buttonText, url });
+  const stopBtn = (c, p) => (c && c.id ? [btn("לעצירת הפרסום", link(c.id, p, "stop"))] : []);
+  const publishBtn = btn("לעמוד הפרסום", `${base}/autopublish.html`);
+  // A button message; never without a button (the publishing page, at least).
+  const msg = (header, body, buttons, footer = "") => ({
+    header: header.length > 60 ? `${header.slice(0, 59)}…` : header, body, footer,
+    buttons: buttons.length ? buttons.slice(0, 3) : [publishBtn],
+  });
 
   return {
     // A post is ready for a tap — the exact copy Forly will post under the agent's name.
-    approve: (c, p) =>
-      `📣 פוסט מוכן ל${nameOf(p)}\nיעלה ${when(p.scheduled_at)} — אחרי האישור שלכם.\n${FENCE}\n${p.copy}\n${FENCE}\n\n` +
-      `✅ לאישור: ${link(c.id, p.id, "approve")}\n` +
-      `⏭ לדילוג על ${p.target === "page" ? "הפוסט הזה" : "הקבוצה הזו"}: ${link(c.id, p.id, "skip")}\n` +
-      `✋ לעצירת כל הפרסום: ${link(c.id, p.id, "stop")}\n\n` +
-      `לא מפרסמים בלי האישור שלכם.`,
+    approve: (c, p) => msg(`פוסט מוכן ל${nameOf(p)}`,
+      `יעלה ${when(p.scheduled_at)} — אחרי האישור שלכם.\n${FENCE}\n${p.copy}\n`,
+      [btn("לאישור", link(c.id, p.id, "approve")),
+        btn(p.target === "page" ? "לדילוג על הפוסט" : "לדילוג על הקבוצה", link(c.id, p.id, "skip")),
+        ...stopBtn(c, p.id)],
+      "לא מפרסמים בלי האישור שלכם"),
 
-    // A post went out on its own (standing mode) — a stop link, no approval needed.
-    posted: (c, p) =>
-      `✅ הפוסט עלה ל${nameOf(p)}.${p && p.post_url ? `\n${p.post_url}` : ""}${stopLine(c)}`,
+    // A post went out on its own (standing mode) — a stop button, no approval needed.
+    posted: (c, p) => msg("✅ הפוסט עלה", `הפוסט עלה ל${nameOf(p)}.`,
+      [...(p && /^https:\/\//.test(p.post_url || "") ? [btn("לצפייה בפוסט", p.post_url)] : []), ...stopBtn(c)]),
 
     // Two posts in a row didn't land: Forly paused itself rather than keep guessing.
-    paused: (c) =>
-      `⏸ שני פוסטים ברצף לא עלו, אז פורלי עצרה לבדוק. בדקו שאתם עדיין חברים בקבוצות, ואז אפשר להמשיך מעמוד הנכס.${stopLine(c)}`,
+    paused: (c) => msg("⏸ הפרסום הושהה",
+      "שני פוסטים ברצף לא עלו, אז פורלי עצרה לבדוק. בדקו שאתם עדיין חברים בקבוצות, ואז אפשר להמשיך מעמוד הפרסום.",
+      [publishBtn, ...stopBtn(c)]),
 
     // R5: the account itself was disabled by Facebook (captcha/checkpoint/restricted/suspected_compromise).
-    halted: (c, code) => `${HALT[code] || HALT_DEFAULT}${stopLine(c)}`,
+    halted: (c, code) => msg("הפרסום מושהה", HALT[code] || HALT_DEFAULT, stopBtn(c)),
 
     // R5: a temporary Facebook-side rate limit — Forly already slowed down on its own.
-    penalty: (c, code) => PENALTY[code] || PENALTY_DEFAULT,
+    penalty: (c, code) => msg("הפרסום הואט", PENALTY[code] || PENALTY_DEFAULT, [publishBtn]),
 
     // R5: the Facebook connection needs to be re-established.
-    reconnect: () => "🔑 החיבור לחשבון הפייסבוק פג. כדי שהפרסום ימשיך, צריך לחבר אותו מחדש מעמוד ההפצה.",
+    reconnect: () => msg("🔑 צריך לחבר מחדש",
+      "החיבור לחשבון הפייסבוק פג. כדי שהפרסום ימשיך, צריך לחבר אותו מחדש מעמוד ההפצה.",
+      [btn("לחיבור מחדש", `${base}/distribution.html`)]),
 
     // R5: a group admin removed a post — that group is off for a while.
-    removed: () => "ℹ️ מנהלי אחת הקבוצות הסירו פוסט. לא נפרסם בקבוצה הזו בחודש הקרוב.",
+    removed: () => msg("ℹ️ פוסט הוסר", "מנהלי אחת הקבוצות הסירו פוסט. לא נפרסם בקבוצה הזו בחודש הקרוב.", [publishBtn]),
 
     // The agent (or a one-tap link) stopped the campaign.
-    stopped: () => "✋ הפרסום נעצר. מה שכבר פורסם נשאר בקבוצות. אפשר להתחיל שוב מתי שתרצו, מעמוד הנכס.",
+    stopped: () => msg("✋ הפרסום נעצר", "מה שכבר פורסם נשאר בקבוצות. אפשר להתחיל שוב מתי שתרצו, מעמוד הפרסום.", [publishBtn]),
 
     // Every group (and the Page, if included) got its post — nothing left to schedule.
-    completed: () => "🎉 פורלי סיימה לפרסם את הנכס בכל הקבוצות שבחרתם. אפשר להפעיל שוב אחרי שבועיים, מעמוד הנכס.",
+    completed: () => msg("🎉 הפרסום הושלם", "פורלי סיימה לפרסם את הנכס בכל הקבוצות שבחרתם. אפשר להפעיל שוב אחרי שבועיים, מעמוד הפרסום.", [publishBtn]),
   };
 }
 

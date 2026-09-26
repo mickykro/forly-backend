@@ -199,10 +199,15 @@ const PH = "972500000001";
     assert.equal(c.posts[0].video_url, V); assert.equal(c.posts[0].poster_url, "https://cdn.f.ly/files/pg1/poster.jpg");
     assert.equal(deps.post.calls.length, 0);
     c = await C.approvePost(c.id, c.posts[0].id, deps);
-    await S.tick(c, deps, at(dueOf(await store.getPostingCampaign(c.id))));
+    // Run from a local server: the first comment's link is still the public one.
+    await S.tick(c, Object.assign({}, deps, { pageBaseUrl: "http://127.0.0.1:8787" }), at(dueOf(await store.getPostingCampaign(c.id))));
     assert.equal(deps.post.calls.length, 1);
     assert.equal(deps.post.calls[0].videoUrl, V, "the driver attaches it");
+    assert.ok(deps.post.calls[0].comment.startsWith("https://nadlan.call4li.com/p/pg1?c="), deps.post.calls[0].comment);
     assert.deepEqual(C.videoOf({ hero: { video_url: "javascript:x", poster_url: V } }), { video_url: null, poster_url: null }, "http(s) only");
+    // Never a local dev address: the video and the first comment's link are the public ones.
+    assert.equal(C.videoOf({ hero: { video_url: "http://127.0.0.1:8787/files/v.mp4" } }).video_url, "https://nadlan.call4li.com/files/v.mp4");
+
   }
 
   // ── stop cancels what is scheduled; a later tick posts nothing; stop(id, { db }) works too ──

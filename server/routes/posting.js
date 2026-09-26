@@ -16,7 +16,7 @@
 const express = require("express");
 const A = require("../posting-account");
 const S_ = require("./posting-shared");
-const { escapeHtml: esc } = require("../utils");
+const { escapeHtml: esc, publicUrl } = require("../utils");
 const { postingEnvAllowed } = require("../posting-guard");
 
 const { CONSENT_VERSION, publicView, wrap, allowed, card } = S_;
@@ -261,7 +261,7 @@ module.exports = function createPostingRouter(ctx) {
     const v = post.video_url === undefined ? require("../posting-campaign").videoOf(page) : { video_url: post.video_url, poster_url: post.poster_url || null };
     const conn = (await db.getConnection(camp.phone).catch(() => null)) || {};
     const who = esc(conn.facebook_identity_label || "החשבון שלכם");
-    const link = `${deps.pageBaseUrl || ""}/p/${camp.page_id}`;
+    const link = publicUrl(`${deps.pageBaseUrl || ""}/p/${camp.page_id}`);
     const video = v.video_url
       ? `<video controls playsinline preload="metadata" src="${esc(v.video_url)}"${v.poster_url ? ` poster="${esc(v.poster_url)}"` : ""} style="width:100%;max-height:70vh;background:#000;display:block"></video>`
       : `<p style="margin:0 12px 10px;color:#8A8276;font-size:.85rem">לנכס הזה אין סרטון — הפוסט יעלה כטקסט בלבד.</p>`;

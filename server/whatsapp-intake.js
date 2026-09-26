@@ -41,7 +41,8 @@ function promptFor(draft, deps) {
 // Several replies as one WhatsApp bubble; the last one's buttons are kept.
 function oneBubble(replies) {
   const last = replies[replies.length - 1];
-  return { text: replies.map((r) => r.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}) };
+  const links = replies.flatMap((r) => r.links || []);
+  return { text: replies.map((r) => r.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}), ...(links.length ? { links } : {}) };
 }
 
 // Build the page straight from the draft (the agent chose "ליצור"). On failure

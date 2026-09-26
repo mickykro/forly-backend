@@ -9,7 +9,7 @@ const fs = require("fs");
 const db = require("../db");
 const { REVIEW_SCOPES } = require("../auth");
 const portalStream = require("../portal-stream");
-const { sendWhatsApp } = require("../utils");
+const { sendWhatsAppRich, PUBLIC_BASE_URL } = require("../utils");
 const { portfolioSlug, normalizePortfolio, visiblePortfolioPages, nextPortfolioStatus } = require("../portfolio");
 const businessCache = require("../business-cache");
 
@@ -132,11 +132,14 @@ module.exports = function createDashboardRouter(ctx) {
       businessCache.invalidate(phone);
       // Welcome message is best-effort — a WhatsApp outage must not fail signup.
       try {
-        await sendWhatsApp(phone,
-          `ברוכים הבאים לפורלי 🦉\n${fullName}, החשבון של ${businessName} מוכן!\n\n` +
-          `מה עכשיו? נכנסים ל-nadlan.call4li.com, פותחים נכס ראשון — ` +
-          `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
-          greenInstance, greenToken);
+        await sendWhatsAppRich(phone, {
+          header: "ברוכים הבאים לפורלי 🦉",
+          body: `${fullName}, החשבון של ${businessName} מוכן!\n\n` +
+            `מה עכשיו? נכנסים לפורלי, פותחים נכס ראשון — ` +
+            `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
+          footer: "",
+          buttons: [{ type: "url", buttonText: "לכניסה לפורלי", url: PUBLIC_BASE_URL }],
+        }, greenInstance, greenToken);
       } catch (err) { console.error("welcome send failed (signup still ok):", err.message); }
       res.json({ ok: true });
     } catch (err) {

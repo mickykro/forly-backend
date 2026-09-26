@@ -19,7 +19,7 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsAppRich } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
@@ -562,10 +562,12 @@ module.exports = function createPagesRouter(ctx) {
 
       // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
       if (!n8nLeadWebhook) {
-        sendWhatsApp(page.business_phone,
-          `🔔 ליד חדש מדף הנכס "${page.property.address}, ${page.property.city}"!\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
-          `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
-          greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
+        sendWhatsAppRich(page.business_phone, {
+          header: "🔔 ליד חדש",
+          body: `מדף הנכס "${page.property.address}, ${page.property.city}"\n👤 ${name}\n📞 0${prospectPhone.slice(3)}`,
+          footer: "",
+          buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${prospectPhone}` }],
+        }, greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
       }
 
       if (n8nLeadWebhook) {

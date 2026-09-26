@@ -33,7 +33,7 @@ const todayKey = () => new Date().toISOString().slice(0, 10);
 // Canonical form lives in utils.js so ownership checks and their tests can
 // reach it without loading Express. Aliased here to keep call sites unchanged.
 const normalizeAny = require("./utils").normalizeAuthPhone;
-const { decideLoginLead, leadMessage } = require("./login-leads");
+const { decideLoginLead, leadMessage, leadButtons } = require("./login-leads");
 
 // ── crypto ──
 const hashCode = (secret, phone, code) =>
@@ -88,7 +88,7 @@ function readToken(req) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, salesLeadPhone }) {
+module.exports = function createAuthRouter({ db, mem, sendWhatsApp, sendWhatsAppRich, secret, salesLeadPhone }) {
   const router = express.Router();
   if (!secret) throw new Error("auth: FORLY_JWT_SECRET is required");
   if (mem && !mem.otps) mem.otps = new Map();
@@ -132,7 +132,10 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
       const now = new Date();
       const { notify, doc } = decideLoginLead(prev, now);
       await saveLoginLead(phone, { phone, ...doc });
-      if (notify && salesLeadPhone) await sendWhatsApp(salesLeadPhone, leadMessage(phone));
+      if (notify && salesLeadPhone) {
+        if (sendWhatsAppRich) await sendWhatsAppRich(salesLeadPhone, leadButtons(phone));
+        else await sendWhatsApp(salesLeadPhone, leadMessage(phone));
+      }
     } catch (err) {
       console.error("not-a-client lead notice failed:", err.message);
     }

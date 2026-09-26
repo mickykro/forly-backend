@@ -1,6 +1,7 @@
 /*
  * whatsapp-replies.js — every message the property chat sends, in one place.
- * Each function returns { text, buttons? }. Button texts ARE the command words
+ * Each function returns { text, buttons?, links? }: links ({ text, url }) are
+ * sent as URL buttons, never in the text (routes/whatsapp.js send()). Button texts ARE the command words
  * property-draft.command() understands, so a tap and a typed word behave the
  * same. Green API: max 3 buttons, 25 chars each (utils.sendWhatsAppButtons).
  */
@@ -96,9 +97,9 @@ function choose() {
 function reviewReady(link, skipped = []) {
   const names = skipped.filter((f) => LABELS[f]).map((f) => LABELS[f]);
   const note = names.length ? `\nדילגתם על: ${names.join(", ")}. אפשר להשלים בדף, או כאן — למשל /${LABELS[skipped[0]]} …` : "";
-  return { text: `כל הפרטים מוכנים ✅\nבדקו, ערכו אם צריך ובנו את דף הנכס כאן:\n${link}${note}` };
+  return { text: `כל הפרטים מוכנים ✅\nבדקו, ערכו אם צריך ובנו את דף הנכס — בכפתור.${note}`, links: [{ text: "לבדיקה ובנייה", url: link }] };
 }
-function previewOnly(link) { return { text: `בחרתם תצוגה מקדימה — היצירה ממשיכה בדף:\n${link}` }; }
+function previewOnly(link) { return { text: "בחרתם תצוגה מקדימה — היצירה ממשיכה בדף.", links: [{ text: "להמשך בדף", url: link }] }; }
 
 // ── corrections ──
 const CODES = { city: "c", price: "p", rooms: "r", deal: "d", size_sqm: "s", floor: "f", parking: "k", neighborhood: "n", description: "t", template: "x" };
@@ -142,13 +143,20 @@ function buildFailed(retry, listing = {}) {
   const head = `בניית הדף${which ? ` (${which})` : ""} נכשלה 😕`;
   return { text: retry ? `${head} כתבו ״ליצור״ כדי לנסות שוב.` : `${head} אפשר לשלוח שוב את הקישור או את טקסט המודעה, או לכתוב ״נכס חדש״.` };
 }
-function outOfQuota(message) { return { text: message || "נגמרה המכסה שלך ליצירת דפים. כתבו לנו לחידוש החבילה." }; }
+// quota.blockedMessage spells out the payment link: it moves behind a button.
+function outOfQuota(message) {
+  const text = message || "נגמרה המכסה שלך ליצירת דפים. כתבו לנו לחידוש החבילה.";
+  const url = (text.match(/https?:\/\/\S+/) || [])[0];
+  return url ? { text: text.replace(/:?\s*https?:\/\/\S+/, "").trim(), links: [{ text: "לרכישת חבילה", url }] } : { text };
+}
 function building(s) { return { text: `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).` }; }
 function cancelled() { return { text: "ביטלתי את הטיוטה. אפשר להתחיל מחדש עם קישור, טקסט או ״נכס חדש״." }; }
 function declined() { return { text: "בסדר, לא בונים דף מהתמונות האלה." }; }
 function resumePrompt(s) {
   return { text: `יש לך טיוטה פתוחה: ${summaryLines(s)}.\nלהמשיך אותה, להתחיל נכס חדש, או לבטל?`, buttons: ["המשך", "חדש", "ביטול"] };
 }
+
+const manual = (createUrl) => (createUrl ? [{ text: "למילוי ידני", url: createUrl }] : []);
 
 const SOURCE_ERRORS = {
   facebook_not_connected: "כדי לקרוא פוסטים מפייסבוק צריך קודם לחבר את עמוד הפייסבוק בפאנל.",
@@ -157,12 +165,12 @@ const SOURCE_ERRORS = {
 };
 function sourceError(code, createUrl) {
   const why = SOURCE_ERRORS[code] || SOURCE_ERRORS.page_unreadable;
-  return { text: `${why}\nאפשר להדביק כאן את טקסט המודעה, לשלוח תמונות, או למלא ידנית: ${createUrl}` };
+  return { text: `${why}\nאפשר להדביק כאן את טקסט המודעה, לשלוח תמונות, או למלא ידנית.`, links: manual(createUrl) };
 }
-function extractLimit(createUrl) { return { text: `הגעת למכסת הקישורים היומית. נסו מחר, או מלאו ידנית: ${createUrl}` }; }
-function createFailed(createUrl) { return { text: `משהו השתבש ביצירת הדף. נסו שוב, או מלאו ידנית: ${createUrl}` }; }
+function extractLimit(createUrl) { return { text: "הגעת למכסת הקישורים היומית. נסו מחר, או מלאו ידנית.", links: manual(createUrl) }; }
+function createFailed(createUrl) { return { text: "משהו השתבש ביצירת הדף. נסו שוב, או מלאו ידנית.", links: manual(createUrl) }; }
 function noLinkHint(createUrl) {
-  return { text: `שלחו לי קישור למודעה (יד2, מדלן, פייסבוק), את טקסט המודעה, או כתבו ״נכס חדש״.\nאפשר גם ידנית: ${createUrl}` };
+  return { text: "שלחו לי קישור למודעה (יד2, מדלן, פייסבוק), את טקסט המודעה, או כתבו ״נכס חדש״.\nאפשר גם ידנית.", links: manual(createUrl) };
 }
 
 module.exports = {

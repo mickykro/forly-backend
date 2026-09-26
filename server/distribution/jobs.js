@@ -162,6 +162,22 @@ async function notifyRich(deps, phone, payload, fallbackText) {
   await notify(deps, phone, fallbackText);
 }
 
+// A plain summary's links (the Facebook / Instagram post) go behind buttons;
+// the text keeps everything else. No link → the text as is.
+function summaryButtons(text) {
+  const urls = [...new Set(String(text || "").match(/https?:\/\/\S+/g) || [])].slice(0, 3);
+  if (!urls.length) return null;
+  const label = (u) => (/instagram\.com/i.test(u) ? "לצפייה באינסטגרם" : /facebook\.com|fb\.com/i.test(u) ? "לצפייה בפוסט" : "לפתיחה");
+  return {
+    header: "Forly", body: String(text).replace(/\n?https?:\/\/\S+/g, "").trim(), footer: "",
+    buttons: urls.map((url, i) => ({ type: "url", buttonId: String(i + 1), buttonText: label(url), url })),
+  };
+}
+async function notifyText(deps, phone, text) {
+  const payload = summaryButtons(text);
+  return payload ? notifyRich(deps, phone, payload, text) : notify(deps, phone, text);
+}
+
 async function audit(deps, dist, target, action, extra = {}) {
   const snap = dist.snapshot || {};
   const mediaUrls = snap.video_url ? [snap.video_url] : (snap.photo_urls || []);
@@ -568,7 +584,7 @@ async function executeJob(deps, dist) {
         if (outcome === "requeued") {
           // Don't lose an already-composed FB failure/timeout warning — the
           // next sweep starts with a fresh (null) summary.
-          if (summary) await notify(deps, dist.business_phone, summary);
+          if (summary) await notifyText(deps, dist.business_phone, summary);
           return;
         }
         ig.status = "failed";
@@ -623,7 +639,7 @@ async function executeJob(deps, dist) {
   });
   if (summary) {
     if (summaryBtn) await notifyRich(deps, dist.business_phone, summaryBtn, summary);
-    else await notify(deps, dist.business_phone, summary);
+    else await notifyText(deps, dist.business_phone, summary);
   }
 }
 
@@ -668,5 +684,5 @@ module.exports = {
   MAX_ATTEMPTS, M, BTN, baseTargets, hasLivePost, hasInFlight,
   liveDeps, maybeOffer, enqueueFromConfirm, createQueued, publicMedia,
   executeJob, runSweep, startSweeper,
-  createShareSession, queueUrl, groupKey, resolveGroups,
+  createShareSession, queueUrl, groupKey, resolveGroups, summaryButtons,
 };

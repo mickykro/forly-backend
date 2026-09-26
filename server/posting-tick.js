@@ -15,6 +15,7 @@
  * to outcome_unknown and reconciliation.
  */
 const crypto = require("crypto");
+const { publicUrl } = require("./utils");
 const safety = require("./posting-safety");
 const { redact } = require("./driver-browser");
 const { profileName } = require("./profile-name");
@@ -293,7 +294,7 @@ async function runAttempt(attempt, st, deps, now) {
     return settle(attempt.key, null, null, st, deps, x, now);
   }
   const args = {
-    attempt, copy, comment: `${deps.pageBaseUrl || ""}/p/${c.page_id}?c=${attempt.click_id}`,
+    attempt, copy, comment: publicUrl(`${deps.pageBaseUrl || ""}/p/${c.page_id}?c=${attempt.click_id}`), // never a local address in a Facebook comment
     profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0),
     dryRun: deps.dryRun === true, campaignId: c.id, phone, videoUrl: (video && video.video_url) || null,
     [post.target === "page" ? "pageUrl" : "groupUrl"]: target.url,

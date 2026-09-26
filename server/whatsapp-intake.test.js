@@ -28,7 +28,8 @@ function deps(over = {}) {
 }
 // handleTurn mutates the draft it is given; clone so a test can branch from one draft.
 const turn = (input, d) => handleTurn({ phone: PHONE, now: T0, ...input, draft: input.draft ? structuredClone(input.draft) : null }, d);
-const texts = (t) => t.replies.map((r) => r.text).join("\n");
+// What the agent sees: each reply's text and its link buttons' URLs.
+const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) => l.url)].join("\n")).join("\n");
 
 (async () => {
   // ── not ours ──
@@ -81,7 +82,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d } = deps({ createListing: async () => ({ error: "quota", code: 402, message: "המכסה שלך נוצלה. לרכישה: https://pay" }) }));
   t = await turn({ text: "דלג", draft }, d);
   assert.deepEqual([t.status, t.draft.status, t.draft.skipped.includes("template")], ["create_failed:402", "active", true]);
-  assert.match(texts(t), /המכסה שלך נוצלה. לרכישה: https:\/\/pay/, "out of quota says so, with the payment link");
+  assert.match(texts(t), /המכסה שלך נוצלה. לרכישה\nhttps:\/\/pay/, "out of quota says so, with the payment link");
+  assert.deepEqual(t.replies[t.replies.length - 1].links, [{ text: "לרכישת חבילה", url: "https://pay" }], "the link behind a button");
   ({ d } = deps({ createListing: async () => ({ error: "boom", code: 500 }) }));
   t = await turn({ text: "דלג", draft }, d);
   assert.match(texts(t), /משהו השתבש/);
