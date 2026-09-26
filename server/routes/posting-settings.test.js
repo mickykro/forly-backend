@@ -175,6 +175,9 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal(bad.status, 503); assert.equal(bad.body.error, "sync_failed");
     assert.ok(errs.length && errs.every((m) => !m.includes("facebook.com")), "no URL in the log line");
     assert.equal((await call(env.app, "POST", "/api/posting/groups/resync")).status, 429, "a sync that ran keeps the stamp");
+    // On a local box the limit is off: the owner re-reads groups while testing.
+    const local = R.makeApp({ deps: Object.assign({}, env.deps, { env: Object.assign({}, env.deps.env, { FORLY_ENV: "local", POSTING_SWEEPER: "1" }) }) });
+    assert.notEqual((await call(local, "POST", "/api/posting/groups/resync")).body.error, "too_soon", "FORLY_ENV=local resyncs at once");
     clk.t = new Date(K.NOW.getTime() + 30 * K.MIN);
     globalOff();
     const off = await call(env.app, "POST", "/api/posting/groups/resync");
