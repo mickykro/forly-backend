@@ -26,7 +26,14 @@ const { loginOpen } = require("./profile-lock");
 const { iso, tail, fail, ms, ctxOf, nowOf, configOf, mutate, say, tellOperator, MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST } = A;
 const MAX_TICK_ERRORS = 3;
 const MAX_RETRIES = 3; // refusals / infrastructure cancels before a post is skipped
+// The spacing between warm-up browses: 20 h; on a local box
+// POSTING_BROWSE_EVERY_MIN minutes (default 20), to watch browsing while testing.
 const BROWSE_EVERY_MS = 20 * MS_HOUR;
+function browseEveryMs(env = process.env) {
+  if (env.FORLY_ENV !== "local") return BROWSE_EVERY_MS;
+  const min = Number(env.POSTING_BROWSE_EVERY_MIN || 20);
+  return Number.isFinite(min) && min >= 1 ? min * MS_MIN : BROWSE_EVERY_MS;
+}
 // Clearly below profile-lock's MAX_HOLD_MS (20 min): the profile lock must
 // still be ours when a hung driver call is settled (asserted in the tests).
 const POST_TIMEOUT_MS = 15 * MS_MIN;
@@ -371,7 +378,7 @@ async function settle(key, result, err, st, deps, x, now) {
 // ── nothing due: plan the next post, or browse on a warm-up day ──
 async function browse(phone, conn, deps, x, now) {
   if (typeof deps.dwell !== "function") return;
-  if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < BROWSE_EVERY_MS) return;
+  if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < browseEveryMs(deps.env || process.env)) return;
   try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "dwell" }, A.guardDeps(deps, x)); } catch (e) { if (e && e.code === "posting_disabled") return; throw e; }
   await x.db.setConnection(phone, { last_browse_attempt_at: iso(now) });
   const r = await deps.dwell({ phone, profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0), note: "forly-dwell:" }, { lockHeld: true, phone, platform: "facebook", conn });
@@ -394,8 +401,11 @@ async function warmIdle(phone, deps = {}, now) {
   if (C._test.accountBlocked(conn)) return "account_blocked";
   if (loginOpen(conn, "facebook", now.getTime())) return "login_open";
   const config = await configOf(deps, x);
-  if (!safety.wantsBrowseSession(await A.accountView(phone, conn, deps, now), now, config)) return "idle";
-  if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < BROWSE_EVERY_MS) return "browse_only";
+  // A local box browses every interval whatever the warm-up says (it skips
+  // the warm-up to test posting, and browsing should still be watchable).
+  const local = (deps.env || process.env).FORLY_ENV === "local";
+  if (!local && !safety.wantsBrowseSession(await A.accountView(phone, conn, deps, now), now, config)) return "idle";
+  if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < browseEveryMs(deps.env || process.env)) return "browse_only";
   const release = x.locks.tryAcquire(phone, "facebook");
   if (!release) return "profile_busy";
   Promise.resolve().then(() => browse(phone, conn, deps, x, now))
@@ -476,6 +486,6 @@ async function tick(campaign, deps = {}, now) {
 }
 
 module.exports = {
-  tick, tickAccount, warmIdle, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
+  tick, tickAccount, warmIdle, browseEveryMs, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
   _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn },
 };

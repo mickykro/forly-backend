@@ -56,5 +56,20 @@ const PH = "972500000001";
     assert.equal(calls.length, 0, "the main switch off: no browse");
     assert.equal(Sw.status().last.result, "off");
   }
+  // ── a local box: every POSTING_BROWSE_EVERY_MIN minutes (default 20), warm-up or not ──
+  {
+    const { deps } = await K.setup(PH); // connected 90 days ago: past any warm-up
+    const calls = [];
+    Object.assign(deps, { dwell: dwellFor(calls, []), env: { POSTING_ENABLED: "1", FORLY_ENV: "local", POSTING_SWEEPER: "1" } });
+    assert.equal(T.browseEveryMs({ FORLY_ENV: "local" }), 20 * 60000);
+    assert.equal(T.browseEveryMs({ FORLY_ENV: "local", POSTING_BROWSE_EVERY_MIN: "5" }), 5 * 60000);
+    assert.equal(T.browseEveryMs({ FORLY_ENV: "prod", POSTING_BROWSE_EVERY_MIN: "5" }), 20 * K.HOUR, "prod ignores it");
+    assert.equal(await T.warmIdle(PH, deps, K.NOW), "browse_started", "local browses past the warm-up");
+    await settle();
+    assert.equal(await T.warmIdle(PH, deps, new Date(K.NOW.getTime() + 10 * 60000)), "browse_only", "not within 20 min");
+    assert.equal(await T.warmIdle(PH, deps, new Date(K.NOW.getTime() + 21 * 60000)), "browse_started", "again after 20 min");
+    await settle();
+    assert.equal(calls.length, 2);
+  }
   console.log("posting-warmup.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

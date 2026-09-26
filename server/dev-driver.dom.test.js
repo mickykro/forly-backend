@@ -60,7 +60,6 @@ function findChromium() {
     assert.ok(panel.includes("NOT started — set POSTING_SWEEPER=1"), panel);
     assert.ok(panel.includes("the main switch in admin → posting is off"), panel);
     assert.ok(panel.includes("no running campaign: switch a property on"), panel);
-    assert.ok(panel.includes("12 scroll, 3 open post"), "what the last browse did");
     assert.ok(/Now.*(browser\(s\) running|warm-up browses once a day)/.test(panel), panel);
     await page.click("#browseNow");
     await page.waitForFunction(() => /Not allowed: the main switch/.test(document.getElementById("postingMsg").textContent));

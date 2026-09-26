@@ -12,7 +12,8 @@
  */
 const express = require("express");
 
-const BROWSE_EVERY_MS = 20  ; // posting-tick's spacing between warm-up browses
+// The sweeper's own spacing between warm-up browses (20 h; minutes on a local box).
+const { browseEveryMs } = require("../posting-tick");
 const tail = (p) => `…${String(p || "").slice(-4)}`;
 
 /*
@@ -87,7 +88,7 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
         running: campaigns.filter((c) => c.status === "running").length, paused: campaigns.filter((c) => c.status === "paused").length,
         last_tick: mine && { at: mine.at, outcome: mine.outcome },
         last_browse_at: conn.last_browse_at || null,
-        next_browse_at: lastBrowse ? new Date(lastBrowse + BROWSE_EVERY_MS).toISOString() : null,
+        next_browse_at: lastBrowse ? new Date(lastBrowse + browseEveryMs((P.deps && P.deps.env) || process.env)).toISOString() : null,
         dwell_blocked: await reasonOf(phone, "dwell"),
       },
     });
