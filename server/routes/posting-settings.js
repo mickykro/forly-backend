@@ -39,7 +39,9 @@ module.exports = function mountPostingSettings(router, S, auth) {
   async function publicMembers(conn, lookup) {
     const defaults = new Set(((conn.posting_permission || {}).default_group_ids || []).map(String));
     const find = lookup || S_.catalogLookup(await S.catalog(null));
-    return S_.memberList(conn).filter((m) => isRealEstateGroup(m, find.all ? find.all(m) : [find(m)])).map((m) => S_.publicMember(m, find(m), defaults));
+    // Real-estate groups only, and only with a real name — never "קבוצה פרטית".
+    return S_.memberList(conn).filter((m) => isRealEstateGroup(m, find.all ? find.all(m) : [find(m)]))
+      .map((m) => S_.publicMember(m, find(m), defaults)).filter((g) => !g.private);
   }
 
   // When the next post would go out: the planner's answer for the running
@@ -126,7 +128,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const phone = req.user.userId;
     const conn = (await db.getConnection(phone)) || {};
     const lookup = S_.catalogLookup(await S.catalog(null));
-    const members = S_.memberList(conn).filter((m) => m.membership_state === "member" && isRealEstateGroup(m, lookup.all(m)));
+    const members = S_.memberList(conn).filter((m) => m.membership_state === "member" && isRealEstateGroup(m, lookup.all(m)) && (m.name || (lookup(m) || {}).name));
     const listings = typeof db.listListingsByPhone === "function" ? await db.listListingsByPhone(phone) : [];
     const camps = await store.listPostingCampaignsByPhone(phone);
     const latest = (pageId) => camps.filter((c) => c.page_id === pageId)

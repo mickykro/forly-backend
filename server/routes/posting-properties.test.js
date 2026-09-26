@@ -102,5 +102,14 @@ const { db, store } = K;
     const s = await call(app, "GET", "/api/posting/settings");
     assert.ok(!s.body.member_groups.some((g) => g.group_id === "321" || g.group_id === "999"));
   }
+  // ── never "קבוצה פרטית": a catalog group stored without its name shows the catalog's; one with no name at all is not listed ──
+  {
+    const { app } = await setup({ conn: { facebook_groups_member: [K.member("111", { name: undefined, name_hash: "h" }), K.member("999", { name: undefined, name_hash: "x" }), K.member("222")] } });
+    const s = await call(app, "GET", "/api/posting/settings");
+    assert.equal(s.status, 200);
+    assert.ok(!s.raw.includes("קבוצה פרטית"), s.raw);
+    assert.equal(s.body.member_groups.find((g) => g.group_id === "111").name, "דירות בחיפה", "the catalog's name");
+    assert.ok(!s.body.member_groups.some((g) => g.group_id === "999"));
+  }
   console.log("routes/posting-properties.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -173,7 +173,9 @@ function catalogLookup(list) {
 // when Task 14 kept it.
 function publicMember(m, cat, defaults) {
   return {
-    group_id: m.group_id, name: m.name || PRIVATE_NAME, private: !m.name, membership_state: m.membership_state || null,
+    // The name Facebook showed, else the catalog's name for the group. The
+    // settings list never shows a group it has no name for (posting-settings).
+    group_id: m.group_id, name: m.name || (cat && cat.name) || PRIVATE_NAME, private: !(m.name || (cat && cat.name)), membership_state: m.membership_state || null,
     in_catalog: !!cat, agent_policy: A.nameBarsAgents(m.name) ? "no_agents" : (cat && cat.agent_policy) || "unknown", is_default: idsOf(m).some((id) => defaults.has(id)),
   };
 }
