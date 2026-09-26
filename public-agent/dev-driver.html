@@ -57,6 +57,7 @@
   var grid = document.getElementById("grid");
   var statusEl = document.getElementById("status");
   var tiles = {}; // sessionId → { el, viewer }
+  var liveCount = 0;
   function setStatus(msg, isErr) { statusEl.textContent = msg; statusEl.className = isErr ? "err" : ""; }
   function text(tag, t) { var e = document.createElement(tag); e.textContent = t == null ? "—" : String(t); return e; }
 
@@ -108,6 +109,7 @@
       })
       .then(function (b) {
         var sessions = b.sessions || [], live = {};
+        liveCount = sessions.length;
         sessions.forEach(function (s) { live[s.sessionId] = true; if (!tiles[s.sessionId]) addTile(s); });
         Object.keys(tiles).forEach(function (id) { if (!live[id]) removeTile(id); });
         var empty = grid.querySelector(".empty");
@@ -148,7 +150,13 @@
       row("My account " + (me.phone || ""), (me.connected ? "Facebook connected" : "Facebook NOT connected") + " · " + me.running + " running, " + me.paused + " paused", me.connected && me.running ? "ok" : "bad");
       row("My last tick", me.last_tick ? when(me.last_tick.at) + " · " + (OUTCOME[me.last_tick.outcome] || me.last_tick.outcome) : (me.running ? "not ticked yet" : "— (no running campaign: switch a property on at /autopublish.html)"));
       row("Browsing allowed", me.dwell_blocked ? "no — " + (FLEET[me.dwell_blocked] || me.dwell_blocked) : "yes", me.dwell_blocked ? "bad" : "ok");
-      row("Last browse", when(me.last_browse_at));
+      var ls = me.last_session, acts = ls && Object.keys(ls.actions || {}).filter(function (k) { return ls.actions[k]; })
+        .map(function (k) { return ls.actions[k] + " " + k.replace(/_/g, " "); }).join(", ");
+      row("Last browse", when(me.last_browse_at) + (ls ? " · " + (acts || "no actions recorded") + (ls.halt_related ? " · ended by a Facebook warning" : "") : ""), ls && ls.halt_related ? "bad" : "");
+      var nextAt = me.next_browse_at ? new Date(me.next_browse_at) : null;
+      row("Now", liveCount ? liveCount + " browser(s) running — below" : (nextAt && nextAt > new Date()
+        ? "nothing running · warm-up browses once a day; the next is due from " + nextAt.toLocaleString() + " · press “Browse now” to watch one now"
+        : "nothing running · press “Browse now” to start one"));
       row("Next browse (earliest)", me.next_browse_at ? when(me.next_browse_at) : "as soon as the planner says it's a browse day");
     }).catch(function () {});
   }

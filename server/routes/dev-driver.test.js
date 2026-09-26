@@ -134,7 +134,13 @@ function call(server, method, path, headers = {}) {
           assertFleetAllowed: async () => { if (blocked) throw Object.assign(new Error("off"), { code: "posting_disabled", reason: blocked }); },
         },
         db: { getConnection: async (p) => (p === ADMIN_A ? conn : null) },
-        store: { listPostingCampaignsByPhone: async () => [{ status: "running" }] },
+        store: {
+          listPostingCampaignsByPhone: async () => [{ status: "running" }],
+          listDwellSessionsByPhone: async () => [
+            { at: "2026-09-26T08:00:00.000Z", actions_summary: { scroll: 1 }, likes: [] },
+            { at: "2026-09-26T09:00:00.000Z", actions_summary: { scroll: 12, open_post: 3, like: 0 }, likes: [], halt_related: false },
+          ],
+        },
         locks: { tryAcquire: () => (lockFree ? () => { released++; } : null) },
         dwell: async (args, deps) => { dwellCalls.push([args, deps]); },
       };
@@ -151,6 +157,7 @@ function call(server, method, path, headers = {}) {
         assert.equal(st.fleet_off, "global_off"); assert.equal(st.sweeper.last.reason, "global_off");
         assert.equal(st.me.connected, true); assert.equal(st.me.running, 1); assert.equal(st.me.dwell_blocked, "global_off");
         assert.equal(st.me.last_tick.outcome, "browse_only");
+        assert.deepEqual(st.me.last_session, { at: "2026-09-26T09:00:00.000Z", actions: { scroll: 12, open_post: 3, like: 0 }, likes: 0, halt_related: false }, "the newest browse, counts only");
         assert.equal(st.me.next_browse_at, "2026-09-27T05:00:00.000Z", "20 h after the last browse");
         assert.ok(!JSON.stringify(st).includes(ADMIN_A), "phone tails only");
 

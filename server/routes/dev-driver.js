@@ -70,6 +70,13 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
     catch (e) { if (e && e.code === "posting_disabled") fleet = e.reason || "off"; else throw e; }
     const lastBrowse = [conn.last_browse_at, conn.last_browse_attempt_at].map((v) => (v ? new Date(v).getTime() : 0)).reduce((a, b) => Math.max(a, b), 0);
     const mine = st.accounts.find((a) => a.phone === phone) || null;
+    // What the last browse did: counts only (social-dwell stores no text or names).
+    let lastSession = null;
+    try {
+      const rows = await P.store.listDwellSessionsByPhone(phone);
+      const r = (rows || []).slice().sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
+      if (r) lastSession = { at: r.at, actions: r.actions_summary || {}, likes: (r.likes || []).length, halt_related: r.halt_related === true };
+    } catch (e) { lastSession = null; }
     res.json({
       enabled: true,
       sweeper: { started: st.started, last: st.last },
@@ -80,6 +87,7 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
         running: campaigns.filter((c) => c.status === "running").length, paused: campaigns.filter((c) => c.status === "paused").length,
         last_tick: mine && { at: mine.at, outcome: mine.outcome },
         last_browse_at: conn.last_browse_at || null,
+        last_session: lastSession,
         next_browse_at: lastBrowse ? new Date(lastBrowse + BROWSE_EVERY_MS).toISOString() : null,
         dwell_blocked: await reasonOf(phone, "dwell"),
       },

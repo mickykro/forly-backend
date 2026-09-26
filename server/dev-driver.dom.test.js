@@ -39,7 +39,8 @@ function findChromium() {
   const app = express(); app.use(express.json());
   app.get("/api/dev/driver/sessions", (q, r) => r.json({ sessions }));
   app.get("/api/dev/driver/posting", (q, r) => r.json({ enabled: true, sweeper: { started: false, last: null }, fleet_off: "global_off", accounts: [],
-    me: { phone: "…0001", connected: true, running: 0, paused: 0, last_tick: null, last_browse_at: null, next_browse_at: null, dwell_blocked: "global_off" } }));
+    me: { phone: "…0001", connected: true, running: 0, paused: 0, last_tick: null, last_browse_at: "2026-09-26T12:43:49.000Z", next_browse_at: "2099-01-01T08:43:49.000Z", dwell_blocked: "global_off",
+      last_session: { at: "2026-09-26T12:43:49.000Z", actions: { scroll: 12, open_post: 3, like: 0 }, likes: 0, halt_related: false } } }));
   let browseAsked = 0;
   app.post("/api/dev/driver/posting/browse", (q, r) => { browseAsked++; r.status(409).json({ error: "posting_disabled", reason: "global_off" }); });
   app.get("/api/dev/driver/sessions/:id/view", (q, r) => {
@@ -59,6 +60,8 @@ function findChromium() {
     assert.ok(panel.includes("NOT started — set POSTING_SWEEPER=1"), panel);
     assert.ok(panel.includes("the main switch in admin → posting is off"), panel);
     assert.ok(panel.includes("no running campaign: switch a property on"), panel);
+    assert.ok(panel.includes("12 scroll, 3 open post"), "what the last browse did");
+    assert.ok(/Now.*(browser\(s\) running|warm-up browses once a day)/.test(panel), panel);
     await page.click("#browseNow");
     await page.waitForFunction(() => /Not allowed: the main switch/.test(document.getElementById("postingMsg").textContent));
     assert.equal(browseAsked, 1);
