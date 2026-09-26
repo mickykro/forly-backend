@@ -89,7 +89,7 @@
     el.appendChild(head); el.appendChild(msg); el.appendChild(view);
     grid.appendChild(el);
     var viewer = window.ForlyViewer.create(view, "/api/dev/driver/sessions/" + encodeURIComponent(s.sessionId) + "/view", {
-      onEnd: function (code) { msg.textContent = "Browser ended (" + code + ")."; },
+      onEnd: function (code, gotFrame, detail) { msg.textContent = (gotFrame ? "Browser ended (" : "Could not show this browser (") + code + ")" + (detail ? ": " + detail : "") + "."; },
     });
     tiles[s.sessionId] = { el: el, viewer: viewer };
   }

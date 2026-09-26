@@ -47,11 +47,11 @@ window.ForlyViewer = (() => {
     const me = { box, alive: true, ac: new AbortController(), size: null, gotFrame: false, queue: Promise.resolve(), ended: false };
     const img = box.querySelector(".cv-img"), wait = box.querySelector(".cv-wait"), url = box.querySelector(".cv-url"), ta = box.querySelector(".cv-keys");
 
-    const end = (code) => {
+    const end = (code, detail) => {
       if (me.ended || !me.alive) return;
       me.ended = true;
       wait.hidden = false; wait.textContent = "הדפדפן נסגר";
-      if (opts.onEnd) opts.onEnd(code, me.gotFrame);
+      if (opts.onEnd) opts.onEnd(code, me.gotFrame, detail);
     };
     // Sequential, so text and keys arrive in the order they were typed.
     const send = (ev) => (me.queue = me.queue.then(async () => {
@@ -80,7 +80,7 @@ window.ForlyViewer = (() => {
         try { r = await fetch(base, { credentials: "include", signal: me.ac.signal, headers: { Accept: "text/event-stream" } }); }
         catch (e) { r = null; }
         if (!me.alive) return;
-        if (r && !r.ok) { const b = await r.json().catch(() => ({})); end(b.error || "viewer_unavailable"); return; }
+        if (r && !r.ok) { const b = await r.json().catch(() => ({})); end(b.error || "viewer_unavailable", b.detail); return; }
         if (r && r.body) {
           tries = 0;
           const reader = r.body.getReader(), dec = new TextDecoder();

@@ -381,6 +381,29 @@ async function browse(phone, conn, deps, x, now) {
   if (cls) await H.haltAccount(phone, cls, deps); // stamped with the clock as it runs
 }
 
+// A connected account with no running campaign still warms up: the first
+// days are browse-only from the day it connected, whatever is switched on
+// (the connect page says so). The browse runs in the background under the
+// profile lock, so the sweep goes on; the guard still decides every step.
+async function warmIdle(phone, deps = {}, now) {
+  const x = ctxOf(deps);
+  now = now || nowOf(deps, x);
+  if (typeof deps.dwell !== "function") return "no_driver";
+  const conn = (await x.db.getConnection(phone)) || {};
+  if (!conn.facebook_browser_connected_at) return "idle";
+  if (C._test.accountBlocked(conn)) return "account_blocked";
+  if (loginOpen(conn, "facebook", now.getTime())) return "login_open";
+  const config = await configOf(deps, x);
+  if (!safety.wantsBrowseSession(await A.accountView(phone, conn, deps, now), now, config)) return "idle";
+  if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < BROWSE_EVERY_MS) return "browse_only";
+  const release = x.locks.tryAcquire(phone, "facebook");
+  if (!release) return "profile_busy";
+  Promise.resolve().then(() => browse(phone, conn, deps, x, now))
+    .catch((e) => console.error(redact(`posting warm-up browse ${tail(phone)}: ${code(e)}`)))
+    .finally(release);
+  return "browse_started";
+}
+
 async function planNext(phone, st, deps, x, now) {
   const decision = await C.planAccount(phone, deps, now, { conn: st.conn, config: st.config, campaigns: st.campaigns });
   if (!decision) return "idle";
@@ -453,6 +476,6 @@ async function tick(campaign, deps = {}, now) {
 }
 
 module.exports = {
-  tick, tickAccount, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
+  tick, tickAccount, warmIdle, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
   _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn },
 };

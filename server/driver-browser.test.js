@@ -162,6 +162,22 @@ async function quiet(fn) {
   assert.equal(await D.attachPage("s9", async (p) => p.marker, attachDeps), "live");
   assert.equal(stops.length, 0, "attachPage must leave the session running");
 
+  // ── on a local box, every browser withPage drives is watchable over its own connection ──
+  {
+    const { EventEmitter } = require("events");
+    const V = require("./connect-viewer");
+    const mk = () => { const b = new EventEmitter(); const ctx = new EventEmitter(); ctx.pages = () => [{ marker: "p" }]; b.contexts = () => [ctx]; b.close = async () => { b.emit("disconnected"); }; return b; };
+    const wdeps = { apiKey: "k", sleep: async () => {}, fetchFn: async (u, init) => ok((init && init.method) === "DELETE" ? { success: true } : { sessionId: "w1", status: "active", cdpUrl: "ws://w" }), connectOverCDP: async () => mk() };
+    D._test.setDevView(true);
+    let during = null;
+    await D.withPage({ duration: 60 }, async () => { during = V._hubs.get("dev|w1"); }, wdeps);
+    assert.ok(during && during.adopted === true, "adopted while it works");
+    assert.ok(!V._hubs.has("dev|w1"), "gone when it ends");
+    D._test.setDevView(false);
+    await D.withPage({ duration: 60 }, async () => { during = V._hubs.get("dev|w1"); }, wdeps);
+    assert.equal(during, undefined, "never outside the local monitor");
+  }
+
   // ── deleteProfile never throws, and reports ok/error so revoke() can record it ──
   const okDel = await D.deleteProfile("facebook-local-aaaa", { apiKey: "k", fetchFn: async () => ok({ success: true }) });
   assert.deepEqual(okDel, { ok: true });

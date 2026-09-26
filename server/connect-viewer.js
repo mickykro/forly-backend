@@ -73,7 +73,46 @@ async function close(key, reason = "closed") {
   emit(hub, { t: "end", reason });
   hub.subs.clear();
   if (hub.cdp) { try { await hub.cdp.detach(); } catch (e) { /* page gone */ } }
-  if (hub.browser) { try { await hub.browser.close(); } catch (e) { /* our connection only */ } }
+  // An adopted hub rides the automation's own connection: never close it.
+  if (hub.browser && !hub.adopted) { try { await hub.browser.close(); } catch (e) { /* our connection only */ } }
+}
+
+// Stop the screencast of an adopted hub nobody watches; the next viewer wakes it.
+async function sleep(hub) {
+  const cdp = hub.cdp;
+  hub.cdp = null; hub.page = null;
+  if (cdp) { try { await cdp.detach(); } catch (e) { /* page gone */ } }
+}
+const lastPage = (hub) => { const ps = hub.context ? hub.context.pages() : []; return ps[ps.length - 1] || null; };
+
+// Popups take the screen; when one closes, the tab before it gets it back.
+function followPages(hub) {
+  hub.context.on("page", (p) => {
+    if (hub.adopted && !hub.subs.size) return; // asleep: the next viewer picks the last page
+    watch(hub, p).catch(() => {});
+    p.on("close", () => {
+      if (hub.page !== p || hub.closed) return;
+      const rest = hub.context.pages().filter((x) => x !== p);
+      if (rest.length) watch(hub, rest[rest.length - 1]).catch(() => {});
+    });
+  });
+}
+
+/*
+ * A browser the server is driving itself (driver-browser.withPage, on a local
+ * box): the monitor watches it over the SAME connection instead of opening a
+ * second one — Driver may not take a second client while automation holds
+ * one [Inference]. The screencast runs only while someone watches.
+ */
+function adopt(key, sessionId, browser, context) {
+  const prev = hubs.get(key);
+  if (prev) close(key, "replaced").catch(() => {});
+  const hub = { key, sessionId, browser, context, adopted: true, page: null, cdp: null, subs: new Set(), last: null,
+    size: { w: 1280, h: 800 }, closed: false, idle: null, sent: [], idleMs: IDLE_MS };
+  browser.on("disconnected", () => { if (hubs.get(key) === hub) close(key, "session_ended"); });
+  followPages(hub);
+  hubs.set(key, hub);
+  return hub;
 }
 
 // Point the screencast at `page` (the login tab, or a sign-in popup it opened).
@@ -103,27 +142,27 @@ async function open(key, sessionId, deps) {
   let session;
   try { session = await driver.waitForActive(await driver.getSession(sessionId, deps.driverDeps), deps.driverDeps); }
   catch (e) { throw err("session_expired"); }
-  const browser = await connect(session.cdpUrl);
+  // Why a viewer could not open, for the server log and the local monitor:
+  // the error's own words with every browser address removed.
+  const unavailable = (stage, e) => {
+    const detail = driverLive.redact(`${stage}: ${(e && e.name) || "Error"}: ${(e && e.message) || ""}`).slice(0, 300);
+    console.error(`connect-viewer: ${detail}`);
+    return Object.assign(err("viewer_unavailable"), { detail });
+  };
+  let browser;
+  try { browser = await connect(session.cdpUrl); }
+  catch (e) { throw unavailable("connect", e); }
   const hub = { key, sessionId, browser, context: null, page: null, cdp: null, subs: new Set(), last: null,
     size: { w: 1280, h: 800 }, closed: false, idle: null, sent: [], idleMs: deps.idleMs || IDLE_MS };
   try {
     hub.context = browser.contexts()[0] || (await browser.newContext());
     browser.on("disconnected", () => { if (hubs.get(key) === hub) close(key, "session_ended"); });
-    // A "sign in with Google" popup takes the screen; when it closes, the
-    // login tab gets it back.
-    hub.context.on("page", (p) => {
-      watch(hub, p).catch(() => {});
-      p.on("close", () => {
-        if (hub.page !== p || hub.closed) return;
-        const rest = hub.context.pages().filter((x) => x !== p);
-        if (rest.length) watch(hub, rest[rest.length - 1]).catch(() => {});
-      });
-    });
+    followPages(hub);
     await watch(hub, hub.context.pages()[0] || (await hub.context.newPage()));
   } catch (e) {
     hub.closed = true;
     try { await browser.close(); } catch (x) { /* ignore */ }
-    throw err("viewer_unavailable");
+    throw unavailable("screencast", e);
   }
   return hub;
 }
@@ -152,10 +191,14 @@ function subscribe(hub, fn) {
   clearTimeout(hub.idle);
   hub.subs.add(fn);
   if (hub.last) fn(hub.last);
+  if (hub.adopted && !hub.cdp && !hub.page && lastPage(hub)) watch(hub, lastPage(hub)).catch(() => {});
   return () => {
     hub.subs.delete(fn);
     if (!hub.subs.size && !hub.closed) {
-      hub.idle = setTimeout(() => { if (!hub.subs.size && hubs.get(hub.key) === hub) close(hub.key, "idle"); }, hub.idleMs);
+      hub.idle = setTimeout(() => {
+        if (hub.subs.size || hubs.get(hub.key) !== hub) return;
+        if (hub.adopted) sleep(hub); else close(hub.key, "idle");
+      }, hub.idleMs);
     }
   };
 }
@@ -231,4 +274,4 @@ function pipe(req, res, hub, sub = subscribe) {
   if (req.destroyed) done();
 }
 
-module.exports = { attach, subscribe, pipe, input, close, parseInput, shortUrl, _hubs: hubs, MAX_TEXT };
+module.exports = { attach, adopt, subscribe, pipe, input, close, parseInput, shortUrl, _hubs: hubs, MAX_TEXT };

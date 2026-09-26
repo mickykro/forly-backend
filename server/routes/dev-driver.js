@@ -34,7 +34,8 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
     try { hub = await viewer.attach(key(id), id); }
     catch (e) {
       const code = ["session_expired", "driver_busy"].includes(e && e.code) ? e.code : "viewer_unavailable";
-      return res.status(code === "session_expired" ? 409 : 503).json({ error: code });
+      // Local and admin-only: the reason, with every browser address removed.
+      return res.status(code === "session_expired" ? 409 : 503).json({ error: code, detail: (e && e.detail) || driver.redact(String((e && e.message) || "")).slice(0, 300) });
     }
     viewer.pipe(req, res, hub);
   });

@@ -290,6 +290,8 @@ async function withPage(opts, fn, deps = {}) {
     try {
       const context = browser.contexts()[0] || (await browser.newContext());
       const page = context.pages()[0] || (await context.newPage());
+      // Local monitor: this browser is watched over this same connection.
+      if (devView) { try { require("./connect-viewer").adopt(`dev|${active.sessionId || session.sessionId}`, active.sessionId || session.sessionId, browser, context); } catch (e) { /* watching never breaks the work */ } }
       return await fn(page, active);
     } finally {
       await browser.close(); // our connection only; the session is still up

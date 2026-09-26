@@ -176,6 +176,14 @@ async function sweep(deps = {}, now) {
     const live = (await x.store.listPostingCampaignsByStatus("running", 500)).concat(await x.store.listPostingCampaignsByStatus("paused", 500));
     const phones = [...new Set(live.map((c) => c.phone))];
     for (const phone of phones) state.accounts.set(phone, { at: stamp(), outcome: await T.tickAccount(phone, deps, at()) });
+    // Connected accounts with nothing running still warm up — at most one new
+    // browse per sweep, so a fleet of fresh connections is spread out.
+    const idle = (await x.store.listConnectedPhones("facebook").catch(() => [])).filter((p) => !phones.includes(p));
+    for (const phone of idle) {
+      const outcome = await T.warmIdle(phone, deps, at()).catch((e) => { console.error(redact(`posting warm-up ${tail(phone)}: ${code(e)}`)); return "error"; });
+      state.accounts.set(phone, { at: stamp(), outcome });
+      if (outcome === "browse_started") break;
+    }
     state.last = { at: stamp(), result: "ticked", accounts: phones.length };
     return phones.length;
   } catch (e) {

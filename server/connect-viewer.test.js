@@ -228,6 +228,32 @@ async function realChromium() {
     const kept = await again.contexts()[0].pages()[0].evaluate(() => document.getElementById("q").value);
     assert.equal(kept, "שלום ab");
     await again.close();
+    // ── watching a browser the server itself drives: over ITS connection ──
+    {
+      const auto = await require("patchright").chromium.connectOverCDP(wsUrl);
+      const ctx = auto.contexts()[0];
+      const hubA = V.adopt("dev|auto1", "auto1", auto, ctx);
+      const noSecond = { getSession: async () => { throw new Error("a second connection was opened"); }, waitForActive: async (x) => x };
+      assert.equal(await V.attach("dev|auto1", "auto1", { driver: noSecond }), hubA, "the monitor gets the adopted hub, no second connection");
+      assert.equal(hubA.cdp, null, "no screencast while nobody watches");
+      const seen = [];
+      const offA = V.subscribe(hubA, (e) => seen.push(e));
+      for (let i = 0; i < 50 && !seen.some((f) => f.t === "frame"); i++) await new Promise((r) => setTimeout(r, 100));
+      assert.ok(seen.some((f) => f.t === "frame"), "frames once watched");
+      await V.input("dev|auto1", { t: "click", x: 50 / hubA.size.w, y: 50 / hubA.size.h });
+      offA();
+      hubA.idleMs = 0;
+      V.subscribe(hubA, () => {})(); // leave again, with no idle wait
+      await new Promise((r) => setTimeout(r, 30));
+      assert.equal(hubA.cdp, null, "asleep again");
+      assert.equal(auto.isConnected(), true, "the automation's connection is never closed by the monitor");
+      const ended = [];
+      V.subscribe(hubA, (e) => ended.push(e));
+      await auto.close();
+      for (let i = 0; i < 20 && !ended.some((e) => e.t === "end"); i++) await new Promise((r) => setTimeout(r, 50));
+      assert.deepEqual(ended.filter((e) => e.t === "end"), [{ t: "end", reason: "session_ended" }], "ends with the automation");
+      assert.ok(!V._hubs.has("dev|auto1"));
+    }
     console.log("connect-viewer.test.js: real Chromium ok");
   } finally {
     proc.kill("SIGKILL");
