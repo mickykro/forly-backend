@@ -402,9 +402,10 @@ function fakeGuard(reason) {
   }
 
   // ── finish: logged in → connected, and the session is stopped ──
-  const stopped = [];
+  const stopped = [], connectedCalls = [];
   const conn2 = { browser_session_facebook: { session_id: "s2", started_at: new Date().toISOString() } };
   const okApp = makeApp({
+    onConnected: (ph, pl) => connectedCalls.push([ph, pl, stopped.length]),
     driver: {
       getSession: async () => ({ sessionId: "s2", status: "active", cdpUrl: "wss://n/2" }),
       stopSession: async (id) => stopped.push(id),
@@ -419,6 +420,7 @@ function fakeGuard(reason) {
   assert.equal(fin.body.state, "connected");
   assert.deepEqual(stopped, ["s2"]);
   assert.ok(conn2.facebook_browser_connected_at);
+  assert.deepEqual(connectedCalls, [[PHONE, "facebook", 1]], "warm-up is started the moment it connects, after the login browser stopped");
 
   // ── finish while still on a login wall → 409, and the session is KEPT: the agent
   //    is probably waiting for an SMS code; killing it forces a second login from a

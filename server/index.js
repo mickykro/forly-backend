@@ -254,7 +254,20 @@ if (driverBoot.enabled) {
   console.log("driver: extract sweeper started");
 
   const createConnectionsBrowserRouter = require("./routes/connections-browser");
-  app.use("/api/connections/browser", createConnectionsBrowserRouter({ requireAuth, authSecret: AUTH_SECRET, campaigns: require("./posting-campaign") }));
+  app.use("/api/connections/browser", createConnectionsBrowserRouter({
+    requireAuth, authSecret: AUTH_SECRET, campaigns: require("./posting-campaign"),
+    // Facebook just connected: its warm-up browse starts right away (not at the
+    // next sweep) wherever the sweeper may run. A short pause lets Driver finish
+    // saving the profile the login browser just closed [Unverified: needed].
+    onConnected: (phone, platform) => {
+      if (platform !== "facebook" || !devPostingDeps || !require("./posting-guard").postingEnvAllowed(process.env)) return;
+      const t = setTimeout(() => {
+        require("./posting-tick").warmIdle(phone, devPostingDeps)
+          .catch((e) => console.error(require("./driver-browser").redact(`warm-up on connect: ${(e && (e.code || e.name)) || "error"}`)));
+      }, 10000);
+      if (t.unref) t.unref();
+    },
+  }));
 
   // ── automated group posting: the campaign sweeper (posting-sweeper.js) ──
   const postingSweeper = require("./posting-sweeper");

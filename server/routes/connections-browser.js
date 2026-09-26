@@ -344,6 +344,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       [`${platform}_pages`]: pages,
       [`browser_session_${platform}`]: null,
     }, groups));
+    // Warm-up starts now, not at the next sweep (index.js: the first browse,
+    // under the same guard and profile lock). Never delays or fails the connect.
+    if (typeof ctx.onConnected === "function") { try { ctx.onConnected(phone, platform); } catch (e) { /* the sweep will start it */ } }
     return res.json({ state: "connected", identity_label: label, pages });
   }));
 
