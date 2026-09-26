@@ -126,6 +126,11 @@ function catalogEntriesFor(catalog, g, conn) {
   for (const u of [g.url, m && m.canonical_url, m && m.url]) if (u) add(ix.byUrl.get(u));
   return out;
 }
+// A group that says in its own name that agents are not welcome is barred
+// exactly like a catalog "no_agents" group, whatever the catalog says:
+// "אין כניסה ⛔ למתווכים", "ללא מתווכים", "בלי תיווך", "no agents".
+const NO_AGENTS_NAME = /(?:^|[^\p{L}])(?:אין|ללא|בלי|לא)[\s\p{P}\p{S}]*(?:כניסה[\s\p{P}\p{S}]*)?(?:ל|ה)?(?:מתווכ|תיווך|עמלת\s*תיווך)|\bno\s+(?:real\s+estate\s+)?(?:agents|brokers|realtors)\b/iu;
+const nameBarsAgents = (name) => NO_AGENTS_NAME.test(String(name || ""));
 const policyDisallowed = (e) => !!e && (e.active === false || DISALLOWED_POLICY.has(e.agent_policy));
 // Does this member group suit this property? In its area — the catalog puts
 // the group in the property's city (or nationwide), or the group's own name
@@ -145,7 +150,7 @@ function fitsProperty(member, cats, property) {
   const city = property && property.city;
   const listingType = (property && property.listing_type) || null;
   const list = Array.isArray(cats) ? cats.filter(Boolean) : [];
-  if (!member || !city) return false;
+  if (!member || !city || nameBarsAgents(member.name)) return false;
   const inArea = list.some((e) => e.city && sameArea(city, e.city)) || mentionsCity(member.name, city);
   return inArea && !nameDealConflict(member.name, listingType) && !list.some((e) => typeExcluded(e, listingType));
 }
@@ -172,7 +177,7 @@ function eligibility(g, { conn, catalog, listingType, now }) {
   const pen = groupIdsOf(g, conn).map((id) => pens[id]).filter(Boolean).sort((a, b) => ms(b.until) - ms(a.until))[0];
   return {
     is_member: !!m && m.membership_state === "member" && g.blocked_code !== "not_member" && !isHidden(conn, g),
-    catalog_policy: !cats.some(policyDisallowed) && !DISALLOWED_POLICY.has(g.agent_policy),
+    catalog_policy: !cats.some(policyDisallowed) && !DISALLOWED_POLICY.has(g.agent_policy) && !nameBarsAgents(g.name || (m && m.name)),
     listing_type_allowed: !cats.some((e) => typeExcluded(e, listingType)),
     posting_currently_available: !(pen && ms(pen.until) > now.getTime()) && g.blocked_code !== "group_blocked",
   };
@@ -373,7 +378,7 @@ module.exports = {
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
   MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
-  groupIdFromUrl, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY, fitsProperty, nameDealConflict,
+  groupIdFromUrl, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY, fitsProperty, nameDealConflict, nameBarsAgents,
   memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,
   pageTarget, pageTargetAvailable, numericPageId, targetsFor, accountView, currentPosts, limitsFor, nextDayStart,
 };

@@ -116,7 +116,7 @@ module.exports = function createPostingRouter(ctx) {
     if (unknown.length && b.include_unknown !== true) return res.status(422).json({ error: "unknown_group", group_ids: unknown });
     // A group the catalog forbids to agents, or whose listing types exclude
     // this page's, is refused here rather than kept and never planned.
-    const disallowed = gate.entries.filter((m) => lookup.all(m).some(A.policyDisallowed)).map((m) => m.group_id);
+    const disallowed = gate.entries.filter((m) => lookup.all(m).some(A.policyDisallowed) || A.nameBarsAgents(m.name)).map((m) => m.group_id);
     if (disallowed.length) return res.status(422).json({ error: "group_disallowed", group_ids: disallowed });
     const wrongType = gate.entries.filter((m) => lookup.all(m).some((e) => A.typeExcluded(e, listingType))).map((m) => m.group_id);
     if (wrongType.length) return res.status(422).json({ error: "listing_type_not_allowed", group_ids: wrongType });

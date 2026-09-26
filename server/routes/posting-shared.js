@@ -125,7 +125,9 @@ const idsOf = (m) => [m.group_id, ...(Array.isArray(m.aliases) ? m.aliases : [])
 function memberList(conn) {
   const hidden = hiddenIds(conn);
   const list = Array.isArray(conn && conn.facebook_groups_member) ? conn.facebook_groups_member : [];
-  return list.filter((m) => m && m.group_id && !idsOf(m).some((id) => hidden.has(id)));
+  // Facebook's own /groups/<menu> links were once scraped as groups: never a group.
+  const nav = require("../facebook-groups-sync").isNavSlug;
+  return list.filter((m) => m && m.group_id && !idsOf(m).some((id) => hidden.has(id)) && !nav(m.slug));
 }
 const findMember = (conn, id) => A.memberOf(conn, { group_id: String(id) });
 const isMember = (m) => !!m && m.membership_state === "member";
@@ -172,7 +174,7 @@ function catalogLookup(list) {
 function publicMember(m, cat, defaults) {
   return {
     group_id: m.group_id, name: m.name || PRIVATE_NAME, private: !m.name, membership_state: m.membership_state || null,
-    in_catalog: !!cat, agent_policy: (cat && cat.agent_policy) || "unknown", is_default: idsOf(m).some((id) => defaults.has(id)),
+    in_catalog: !!cat, agent_policy: A.nameBarsAgents(m.name) ? "no_agents" : (cat && cat.agent_policy) || "unknown", is_default: idsOf(m).some((id) => defaults.has(id)),
   };
 }
 

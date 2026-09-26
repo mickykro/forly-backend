@@ -67,5 +67,28 @@ const { db, store } = K;
     assert.deepEqual(p.fit_group_ids.slice().sort(), ["111", "222", "777"]);
     assert.ok(!JSON.stringify(r.body).includes(G(111)), "no group URL leaves");
   }
+  // ── a group that says "no agents" in its own name is barred everywhere ──
+  {
+    for (const n of ["דירות 🏢 בשושו רעננה כפר סבא - אין כניסה ⛔ למתווכים!!!", "דירות להשכרה ללא מתווכים", "בלי תיווך - חיפה", "ללא עמלת תיווך", "TLV rentals - no agents"]) assert.equal(A.nameBarsAgents(n), true, n);
+    for (const n of ["מתווכים משתפי פעולה \\ תיווך נדל\"ן", "קהילת מתווכי הנדל\"ן, מתווכים עם דרך ארץ", "עולם הנדל\"ן - קבלנים, מתווכים", "דירות להשכרה בכפר סבא"]) assert.equal(A.nameBarsAgents(n), false, n);
+    const barred = K.member("888", { name: "דירות בחיפה - אין כניסה למתווכים" });
+    assert.equal(A.fitsProperty(barred, [], { city: "חיפה", listing_type: "sale" }), false, "never auto-picked");
+    assert.equal(A.eligibility({ group_id: "888", url: G(888), name: barred.name, agent_policy: "unknown" }, { conn: { facebook_groups_member: [barred] }, catalog: [], listingType: "sale", now: new Date() }).catalog_policy, false, "never planned");
+    const S_ = require("./posting-shared");
+    assert.equal(S_.publicMember(barred, null, new Set()).agent_policy, "no_agents", "shown as barring agents");
+    const { app } = await setup({ conn: { facebook_groups_member: R.members().concat([barred]) } });
+    const r = await call(app, "POST", "/api/posting/campaigns", R.consented({ group_ids: ["111", "888"], include_unknown: true }));
+    assert.equal(r.status, 422); assert.equal(r.body.error, "group_disallowed"); assert.deepEqual(r.body.group_ids, ["888"]);
+  }
+
+  // ── Facebook's /groups/<menu> links are never member groups ──
+  {
+    const S_ = require("./posting-shared");
+    const conn = { facebook_groups_member: ["feed", "discover", "joins"].map((s) => K.member(`slug:${s}`, { slug: s })).concat([K.member("111")]) };
+    assert.deepEqual(S_.memberList(conn).map((m) => m.group_id), ["111"]);
+    const FG = require("../facebook-groups-sync");
+    const merged = FG.mergeMembership(conn.facebook_groups_member, [{ url: G(222), slug: "222", name: "x" }], { now: new Date() });
+    assert.ok(!merged.some((m) => ["feed", "discover", "joins"].includes(m.slug)), "dropped from storage on the next merge");
+  }
   console.log("routes/posting-properties.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -47,6 +47,10 @@ function groupName(text) {
   return first.replace(NAME_NOISE, "").trim().slice(0, 120);
 }
 
+// Facebook's own pages under /groups/ — the menu on "Your groups" links to
+// them with the same selector as a group. Never a group.
+const NAV_SLUGS = new Set(["feed", "discover", "joins", "create", "notifications", "search", "you", "your_groups", "browse", "category", "invites", "requests", "manage", "settings", "suggested", "pending"]);
+const isNavSlug = (slug) => NAV_SLUGS.has(String(slug || "").toLowerCase());
 const slugOf = (url) => (String(url).match(/\/groups\/([^/?#]+)/) || [])[1] || null;
 const isNumeric = (slug) => /^\d+$/.test(String(slug || ""));
 const groupIdOf = (slug) => (isNumeric(slug) ? slug : `slug:${slug}`);
@@ -69,7 +73,7 @@ async function syncMembership(page, opts = {}) {
   const out = new Map();
   for (const { href, text } of raw) {
     const slug = slugOf(href);
-    if (!slug || !text || out.has(slug)) continue;
+    if (!slug || !text || out.has(slug) || isNavSlug(slug)) continue;
     const url = shareKit.sanitizeGroups([href])[0] || `https://www.facebook.com/groups/${slug}`;
     const name = groupName(text);
     if (!name) continue;
@@ -163,6 +167,7 @@ function mergeMembership(prev, scraped, opts = {}) {
 
   for (const [group_id, prevEntry] of prevMap) {
     if (seen.has(group_id)) continue; // fresh data for this one already pushed above
+    if (isNavSlug(prevEntry.slug)) continue; // a scraped menu link, not a group
     if ([group_id, ...(prevEntry.aliases || [])].some((id) => hidden.has(String(id)))) continue;
     if (ageMs(now, prevEntry.observed_at) > STALE_DROP_MS) continue; // dropped
     const carried = prevEntry.membership_state === "left"
@@ -316,4 +321,4 @@ function hiddenIds(conn) {
 
 const isStale = (conn, now) => !conn.facebook_groups_synced_at || now.getTime() - new Date(conn.facebook_groups_synced_at).getTime() > STALE_MS;
 
-module.exports = { groupName, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };
+module.exports = { groupName, isNavSlug, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };
