@@ -20,7 +20,7 @@ function fakeBrowser() {
   Object.assign(page, {
     url: () => "https://www.madlan.co.il/some/path?code=secret",
     bringToFront: async () => {},
-    mouse: { click: async (x, y) => calls.push(["click", x, y]), move: async (x, y) => calls.push(["move", x, y]), wheel: async (dx, dy) => calls.push(["wheel", dx, dy]) },
+    mouse: { click: async (x, y) => calls.push(["click", x, y]), move: async (x, y) => calls.push(["move", x, y]), wheel: async (dx, dy) => calls.push(["wheel", dx, dy]), down: async () => calls.push(["down"]), up: async () => calls.push(["up"]) },
     keyboard: { press: async (k) => calls.push(["press", k]), insertText: async (t) => calls.push(["text", t]) },
     evaluate: async () => true,
     goBack: async () => calls.push(["back"]),
@@ -49,6 +49,8 @@ const driverOk = { getSession: async (id) => ({ sessionId: id, status: "active",
   assert.deepEqual(V.parseInput({ t: "text", text: "שלום 123" }), { t: "text", text: "שלום 123" });
   assert.equal(V.parseInput({ t: "wheel", x: 0, y: 0, dx: 0, dy: 99999 }), null);
   assert.equal(V.parseInput({ t: "eval" }), null);
+  assert.deepEqual(V.parseInput({ t: "down", x: 0.1, y: 0.2 }), { t: "down", x: 0.1, y: 0.2 });
+  assert.equal(V.parseInput({ t: "up", x: 2, y: 0 }), null);
   assert.equal(V.parseInput(null), null);
   assert.equal(V.shortUrl("https://www.madlan.co.il/a/b?code=1#x"), "https://www.madlan.co.il/a/b");
   assert.equal(V.shortUrl("javascript:alert(1)"), "");
@@ -88,6 +90,12 @@ const driverOk = { getSession: async (id) => ({ sessionId: id, status: "active",
     assert.ok(f.calls.some((c) => c[0] === "text" && c[1] === "שלום"));
     assert.ok(f.calls.some((c) => c[0] === "press" && c[1] === "Enter"));
     assert.ok(f.calls.some((c) => c[0] === "wheel" && c[2] === 300));
+    // A held press: down at the point, moves, up.
+    await V.input("p1|madlan", { t: "down", x: 0.5, y: 0.5 });
+    await V.input("p1|madlan", { t: "move", x: 0.51, y: 0.5 });
+    await V.input("p1|madlan", { t: "up", x: 0.51, y: 0.5 });
+    const seq = f.calls.filter((c) => ["down", "up", "move"].includes(c[0])).map((c) => c[0]);
+    assert.deepEqual(seq.slice(-5), ["move", "down", "move", "move", "up"]);
     await assert.rejects(V.input("p1|madlan", { t: "key", key: "F5" }), (e) => e.code === "invalid_input");
     await assert.rejects(V.input("p2|madlan", { t: "click", x: 0, y: 0 }), (e) => e.code === "no_viewer", "another phone has no hub here");
 
@@ -176,7 +184,7 @@ async function realChromium() {
   const exe = findChromium();
   if (!exe) { console.log("connect-viewer.test.js: real-browser part skipped (no Chromium binary)"); return; }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cv-"));
-  const html = `<html><body style="margin:0"><input id="q" style="position:absolute;left:0;top:0;width:400px;height:100px;font-size:40px"><div style="height:3000px"></div></body></html>`;
+  const html = `<html><body style="margin:0"><input id="q" style="position:absolute;left:0;top:0;width:400px;height:100px;font-size:40px"><div id="h" style="position:absolute;left:0;top:200px;width:300px;height:100px"></div><div style="height:3000px"></div></body></html>`;
   const proc = spawn(exe, ["--headless=new", "--no-sandbox", "--remote-debugging-port=0", `--user-data-dir=${dir}`, "--window-size=800,600", `data:text/html,${encodeURIComponent(html)}`], { stdio: ["ignore", "ignore", "pipe"] });
   try {
     const wsUrl = await new Promise((ok, no) => {
@@ -199,6 +207,14 @@ async function realChromium() {
     await V.input("real|madlan", { t: "key", key: "Backspace" });
     const value = await hub.page.evaluate(() => document.getElementById("q").value);
     assert.equal(value, "שלום ab");
+    // Press and hold: a real, trusted press that lasts as long as it is held.
+    await hub.page.evaluate(() => { const h = document.getElementById("h"); h.addEventListener("mousedown", (e) => { window.__d = [Date.now(), e.isTrusted]; }); h.addEventListener("mouseup", () => { window.__held = Date.now() - window.__d[0]; }); });
+    await V.input("real|madlan", { t: "down", x: 150 / fr.w, y: 250 / fr.h });
+    await new Promise((r) => setTimeout(r, 1200));
+    await V.input("real|madlan", { t: "move", x: 152 / fr.w, y: 251 / fr.h });
+    await V.input("real|madlan", { t: "up", x: 152 / fr.w, y: 251 / fr.h });
+    const held = await hub.page.evaluate(() => [window.__held, window.__d && window.__d[1]]);
+    assert.ok(held[0] >= 1100 && held[1] === true, `held ${held[0]} ms, trusted ${held[1]}`);
     await V.input("real|madlan", { t: "wheel", x: 0.5, y: 0.5, dx: 0, dy: 600 });
     let y = 0;
     for (let i = 0; i < 20 && !y; i++) { await new Promise((r) => setTimeout(r, 50)); y = await hub.page.evaluate(() => window.scrollY); }

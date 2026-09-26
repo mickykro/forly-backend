@@ -122,6 +122,18 @@ function findChromium() {
     assert.equal(seen.inputs.filter((i) => i.t === "text").map((i) => i.text).join(""), "שלום a");
     const keys = seen.inputs.filter((i) => i.t === "key").map((i) => i.key);
     assert.deepEqual(keys, ["Backspace", "Enter"]);
+    // Press and hold (a bot check's "לחץ והחזק"): down, moves, up — no click.
+    seen.inputs.length = 0;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(600);
+    await page.mouse.move(box.x + box.width / 2 + 3, box.y + box.height / 2);
+    await page.waitForTimeout(100);
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+    const holdSeq = seen.inputs.map((i) => i.t);
+    assert.equal(holdSeq[0], "down"); assert.equal(holdSeq[holdSeq.length - 1], "up");
+    assert.ok(!holdSeq.includes("click"), JSON.stringify(holdSeq));
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.wheel(0, 400);
     await page.waitForTimeout(200);

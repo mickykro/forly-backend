@@ -119,14 +119,27 @@ window.ForlyViewer = (() => {
       wheelAcc = wheelAcc ? { x: wheelAcc.x, y: wheelAcc.y, dx: wheelAcc.dx + dx, dy: wheelAcc.dy + dy } : { x: p.x, y: p.y, dx, dy };
       if (!wheelTimer) wheelTimer = setTimeout(flushWheel, 60);
     };
+    // A press held still for HOLD_MS is sent as a real held button (down …
+    // moves … up), for "press and hold" checks; a quick tap stays a click.
+    const HOLD_MS = 250;
+    let lastMove = 0;
+    const release = (d, x, y) => { clearTimeout(d.timer); if (d.held) send(Object.assign({ t: "up" }, frac(x, y))); };
     img.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
-      down = { x: e.clientX, y: e.clientY, lastY: e.clientY, lastX: e.clientX, moved: 0, type: e.pointerType };
+      const d = down = { x: e.clientX, y: e.clientY, lastY: e.clientY, lastX: e.clientX, moved: 0, type: e.pointerType, held: false };
+      d.timer = setTimeout(() => { if (down === d && d.moved <= 10) { d.held = true; send(Object.assign({ t: "down" }, frac(d.x, d.y))); } }, HOLD_MS);
       try { img.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
     });
     img.addEventListener("pointermove", (e) => {
       if (!down) return;
+      if (down.held) {
+        const now = Date.now();
+        if (now - lastMove > 80) { lastMove = now; send(Object.assign({ t: "move" }, frac(e.clientX, e.clientY))); }
+        down.lastX = e.clientX; down.lastY = e.clientY;
+        return;
+      }
       down.moved = Math.max(down.moved, Math.hypot(e.clientX - down.x, e.clientY - down.y));
+      if (down.moved > 10) clearTimeout(down.timer);
       if (down.type !== "mouse" && down.moved > 10) {
         const k = scale();
         addWheel(frac(down.x, down.y), (down.lastX - e.clientX) * k, (down.lastY - e.clientY) * k);
@@ -135,14 +148,17 @@ window.ForlyViewer = (() => {
     });
     img.addEventListener("pointerup", (e) => {
       const d = down; down = null;
-      if (!d || d.moved > 10) return;
+      if (!d) return;
+      if (d.held) { release(d, e.clientX, e.clientY); return; }
+      clearTimeout(d.timer);
+      if (d.moved > 10) return;
       const touch = d.type !== "mouse";
       // A phone opens its keyboard only on focus inside the tap itself; if
       // the page's focus did not land in a text field, it is closed again.
       ta.focus({ preventScroll: true });
       send(Object.assign({ t: "click" }, frac(d.x, d.y))).then((r) => { if (touch && r && r.editable === false) ta.blur(); });
     });
-    img.addEventListener("pointercancel", () => { down = null; });
+    img.addEventListener("pointercancel", () => { const d = down; down = null; if (d) release(d, d.lastX, d.lastY); });
     img.addEventListener("wheel", (e) => {
       e.preventDefault();
       const k = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1;

@@ -26,6 +26,8 @@ const SCREENCAST = { format: "jpeg", quality: 60, maxWidth: 1280, maxHeight: 128
 const KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 const MAX_TEXT = 256;
 const RATE_PER_S = 40;
+// A press is released by itself when its "up" never comes (the viewer left).
+const HOLD_MAX_MS = 30000;
 
 const hubs = new Map();
 
@@ -42,6 +44,8 @@ function parseInput(b) {
   const frac = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
   switch (b.t) {
     case "click": return frac(b.x) && frac(b.y) ? { t: "click", x: b.x, y: b.y } : null;
+    // A held press (a "press and hold" bot check): down, moves, up.
+    case "down": case "move": case "up": return frac(b.x) && frac(b.y) ? { t: b.t, x: b.x, y: b.y } : null;
     case "wheel": {
       const d = (v) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 5000;
       return frac(b.x) && frac(b.y) && d(b.dx) && d(b.dy) ? { t: "wheel", x: b.x, y: b.y, dx: b.dx, dy: b.dy } : null;
@@ -64,6 +68,8 @@ async function close(key, reason = "closed") {
   hubs.delete(key);
   hub.closed = true;
   clearTimeout(hub.idle);
+  clearTimeout(hub.holdTimer);
+  if (hub.holding && hub.page) { try { await hub.page.mouse.up(); } catch (e) { /* page gone */ } }
   emit(hub, { t: "end", reason });
   hub.subs.clear();
   if (hub.cdp) { try { await hub.cdp.detach(); } catch (e) { /* page gone */ } }
@@ -179,7 +185,19 @@ async function input(key, raw) {
       } catch (e) { editable = false; }
       return { editable };
     }
-    if (ev.t === "wheel") { await page.mouse.move(px(ev.x, hub.size.w), px(ev.y, hub.size.h)); await page.mouse.wheel(ev.dx, ev.dy); }
+    if (ev.t === "down") {
+      clearTimeout(hub.holdTimer);
+      await page.mouse.move(px(ev.x, hub.size.w), px(ev.y, hub.size.h));
+      await page.mouse.down();
+      hub.holding = true;
+      hub.holdTimer = setTimeout(() => { hub.holding = false; page.mouse.up().catch(() => {}); }, HOLD_MAX_MS);
+    } else if (ev.t === "move") await page.mouse.move(px(ev.x, hub.size.w), px(ev.y, hub.size.h));
+    else if (ev.t === "up") {
+      clearTimeout(hub.holdTimer);
+      hub.holding = false;
+      await page.mouse.move(px(ev.x, hub.size.w), px(ev.y, hub.size.h));
+      await page.mouse.up();
+    } else if (ev.t === "wheel") { await page.mouse.move(px(ev.x, hub.size.w), px(ev.y, hub.size.h)); await page.mouse.wheel(ev.dx, ev.dy); }
     else if (ev.t === "key") await page.keyboard.press(ev.key);
     else if (ev.t === "text") await page.keyboard.insertText(ev.text);
     else if (ev.t === "back") await page.goBack({ timeout: 15000 }).catch(() => null);
