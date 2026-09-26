@@ -125,6 +125,7 @@ async function runJobLocked(job, deps) {
         missing: parsed.missing,
       },
     };
+    console.log(`[extract job ${job.id}] scan result:`, JSON.stringify(patch.result, null, 2));
     await deps.db.updateExtractJob(job.id, patch);
     if (job.draft_id) {
       await deps.db.updateListingDraft(job.draft_id, { status: "ready", extract: patch.result, updated_at: nowIso() })
@@ -170,7 +171,7 @@ async function sweepOnce(deps) {
   for (const job of queued) {
     // Deliberately not awaited: the sweep starts jobs, it does not wait on them.
     // Driver error text is vendor text: it goes through the same redaction.
-    Promise.resolve(run(job, deps)).catch((e) => console.error(`extract job ${job.id} crashed: ${require("./driver-browser").redact(e.message)}`));
+    Promise.resolve(run(job, deps)).catch((e) => console.error(`extract job ${job.id} crashed: ${require("./driver-browser").redact(require("./driver-browser").describeError(e))}`));
   }
   return queued.length;
 }

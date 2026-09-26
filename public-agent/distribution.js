@@ -7,7 +7,11 @@
  */
 (() => {
   const $ = (id) => document.getElementById(id);
-  const api = (path, opts) => fetch(path, { credentials: "include", ...opts })
+  const api = (path, opts = {}) => fetch(path, {
+    credentials: "include",
+    ...opts,
+    headers: opts.body ? { "Content-Type": "application/json", ...opts.headers } : opts.headers,
+  })
     .catch(() => { throw Object.assign(new Error("network"), { code: "network" }); })
     .then(async (r) => {
       if (r.status === 401) { location.href = "/"; throw new Error("unauthenticated"); }

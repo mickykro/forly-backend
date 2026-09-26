@@ -117,7 +117,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
   // Express 4 does not catch a rejected handler (I11): a Firestore error would
   // crash the process. Answer 500 with a code; log no data (as posting-shared.wrap).
   const wrap = (name, fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch((e) => {
-    console.error(driverLive.redact(`connections-browser ${name}: ${(e && (e.code || e.name)) || "error"}`));
+    console.error(driverLive.redact(`connections-browser ${name}: ${driverLive.describeError(e)}`));
     if (!res.headersSent) res.status(500).json({ error: "internal" });
   });
 
@@ -321,6 +321,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       if (e instanceof driverLive.DriverError && e.status === 429) {
         return res.status(503).json({ error: "driver_busy", retry: true });
       }
+      console.error(driverLive.redact(`connections-browser finish attachPage failed: ${driverLive.describeError(e)}`));
       // A session that already ended reads as expired, not as "not logged in".
       return res.status(409).json({ error: "session_expired" });
     }

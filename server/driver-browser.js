@@ -31,6 +31,14 @@ function redact(msg) {
 }
 const shortId = (id) => `…${String(id || "").slice(-6)}`;
 const logError = (msg) => console.error(redact(msg));
+// A DriverError already carries status/code/retryAfter separate from its
+// message; any other error is a JS-side failure (network, coding) with a
+// name/stack worth keeping. One line either way, so a log never just says
+// "failed" with nothing to act on.
+function describeError(e) {
+  if (e instanceof DriverError) return `status=${e.status} code=${e.code || "none"} retryAfter=${e.retryAfter ?? "none"} message=${e.message}`;
+  return `${e && e.name}: ${e && e.message}${e && e.stack ? `\n${e.stack}` : ""}`;
+}
 
 // Driver features need all three: the API key, the key that makes profile
 // names unguessable, and an environment to keep prod and staging profiles
@@ -189,6 +197,7 @@ async function createSession(opts = {}, deps = {}) {
   const random = deps.random || Math.random;
   const body = Object.assign({}, proxyDefault(), opts, SESSION_DEFAULTS);
   if (body.note) body.note = scopeNote(body.note);
+  console.log("driver: creating browser session", { ...body, proxyUrl: body.proxyUrl ? redact(body.proxyUrl) : undefined });
   let attempt = 0;
   for (;;) {
     try {
@@ -215,9 +224,9 @@ async function stopSession(id, deps = {}) {
   live.delete(id);
   try {
     const r = await call("DELETE", `/v1/browser/session?sessionId=${encodeURIComponent(id)}`, null, deps);
-    if (!r || r.success !== true) logError(`driver: stop of ${shortId(id)} did not succeed`);
+    if (!r || r.success !== true) logError(`driver: stop of ${shortId(id)} did not succeed: response=${JSON.stringify(r)}`);
   } catch (e) {
-    logError(`driver: stop of ${shortId(id)} failed: ${e.message}`);
+    logError(`driver: stop of ${shortId(id)} failed: ${describeError(e)}`);
   }
 }
 
@@ -269,7 +278,7 @@ async function withPage(opts, fn, deps = {}) {
   try {
     session = await createSession(opts, deps);
     const active = await waitForActive(session, deps);
-    const connect = deps.connectOverCDP || require("patchright").chromium.connectOverCDP;
+    const connect = deps.connectOverCDP || ((url) => require("patchright").chromium.connectOverCDP(url));
     const browser = await connect(active.cdpUrl);
     try {
       const context = browser.contexts()[0] || (await browser.newContext());
@@ -294,7 +303,7 @@ async function attachPage(sessionId, fn, deps = {}) {
   const release = claim(!!deps.phone, undefined, deps);
   try {
     const session = await waitForActive(await getSession(sessionId, deps), deps);
-    const connect = deps.connectOverCDP || require("patchright").chromium.connectOverCDP;
+    const connect = deps.connectOverCDP || ((url) => require("patchright").chromium.connectOverCDP(url));
     const browser = await connect(session.cdpUrl);
     try {
       const context = browser.contexts()[0] || (await browser.newContext());
@@ -333,7 +342,7 @@ async function deleteProfile(name, deps = {}) {
     // already happened. Nothing worth logging: a 404 here is expected, not
     // noteworthy.
     if (e instanceof DriverError && e.status === 404) return { ok: true, already_gone: true };
-    logError(`driver: delete of ${platform} profile failed: ${e.message}`);
+    logError(`driver: delete of ${platform} profile failed: ${describeError(e)}`);
     return { ok: false, error: e.message, status: e instanceof DriverError ? e.status : undefined };
   }
 }
@@ -341,7 +350,7 @@ async function deleteProfile(name, deps = {}) {
 module.exports = {
   DriverError, createSession, getSession, listSessions, stopSession,
   cleanupOrphans, waitForActive, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
-  redact, driverEnabled, bootCheck, mintViewerGrant, consumeViewerGrant,
+  redact, describeError, driverEnabled, bootCheck, mintViewerGrant, consumeViewerGrant,
   _test: {
     backoffMs, scopeNote,
     setDevView: (v) => { devView = v; live.clear(); grants.clear(); },
