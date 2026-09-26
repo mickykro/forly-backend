@@ -25,6 +25,8 @@ const MODES = new Set(["per_post", "standing"]);
 const LIVE = new Set(["running", "paused"]);
 const ENDED = new Set(["stopped", "completed"]);
 const PERMISSION_CURED = ["no_permission", "permission_scope"]; // this request's consent grants it
+const PLAN_WAIT_MS = 8000;
+const BUSY = new Set(["profile_busy", "login_open"]); // a tick that could not look: the card says why
 
 // Everything a route needs, resolved once. Tests pass fakes through ctx.deps
 // (db, store, guard, groupsSync, clock …) exactly as posting-campaign takes them.
@@ -77,6 +79,32 @@ module.exports = function createPostingRouter(ctx) {
   // POSTING_SWEEPER=1). Read-only GETs stay.
   router.use((req, res, next) => (req.method === "GET" || req.method === "HEAD" || postingEnvAllowed(ctx.env || deps.env || process.env) ? next()
     : res.status(503).json({ error: "posting_unavailable_in_env" })));
+
+  // A running campaign always shows its next post or why it waits: plan now
+  // rather than at the next sweep (up to a minute, or never while the sweep
+  // is blocked). Plan only — a due post and warm-up browsing stay the
+  // sweeper's — and capped, so the reply never hangs. → the campaign as it is now.
+  // opts.throttle (the card's polling GET): at most once a minute per campaign.
+  const planned = new Map();
+  async function planNow(c, opts = {}) {
+    if (!c || c.status !== "running" || (c.posts || []).some((p) => A.OPEN_POST.has(p.status))) return c;
+    if (c.wait_reason && !BUSY.has(c.wait_reason)) return c; // the planner already said why
+    if (!postingEnvAllowed(ctx.env || deps.env || process.env)) return c;
+    const t = S.clock().getTime();
+    if (opts.throttle && t - (planned.get(c.id) || 0) < 60000) return c;
+    planned.set(c.id, t);
+    if (planned.size > 1000) planned.delete(planned.keys().next().value);
+    const plan = ctx.planNow || ((phone) => require("../posting-tick").tickAccount(phone, deps, undefined, { planOnly: true }));
+    let timer;
+    const out = await Promise.race([
+      Promise.resolve().then(() => plan(c.phone)).catch(() => "error"),
+      new Promise((ok) => { timer = setTimeout(ok, PLAN_WAIT_MS, "slow"); }),
+    ]).finally(() => clearTimeout(timer));
+    if (BUSY.has(out)) {
+      await A.mutate(A.ctxOf(deps), c.id, (cur) => (cur.status === "running" && (!cur.wait_reason || BUSY.has(cur.wait_reason)) && !(cur.posts || []).some((p) => A.OPEN_POST.has(p.status)) ? { wait_reason: out } : null)).catch(() => null);
+    }
+    return (await store.getPostingCampaign(c.id)) || c;
+  }
 
   async function owned(req, res) {
     const id = String(req.params.id || "");
@@ -148,7 +176,7 @@ module.exports = function createPostingRouter(ctx) {
       consent: { at: A.iso(now), version: CONSENT_VERSION },
     }, deps);
     const existing = !!before && !ENDED.has(before.status);
-    return res.status(existing ? 200 : 201).json({ campaign: publicView(c), existing });
+    return res.status(existing ? 200 : 201).json({ campaign: publicView(await planNow(c)), existing });
   }));
 
   router.get("/campaigns", auth, wrap("list", async (req, res) => {
@@ -158,7 +186,7 @@ module.exports = function createPostingRouter(ctx) {
   }));
 
   router.get("/campaigns/:id", auth, wrap("get", async (req, res) => {
-    const c = await owned(req, res);
+    const c = await planNow(await owned(req, res), { throttle: true });
     if (!c) return;
     // Task 22: per-post metrics; a failed read leaves the card without them, never without the campaign.
     const metrics = await require("../posting-metrics").forCampaign(c, deps).catch(() => null);
@@ -194,7 +222,7 @@ module.exports = function createPostingRouter(ctx) {
       const conn = (await db.getConnection(c.phone)) || {};
       return res.status(409).json({ error: S_.needsReconnect(conn) ? "needs_reconnect" : "not_resumable" });
     }
-    return res.json({ campaign: publicView(out) });
+    return res.json({ campaign: publicView(await planNow(out)) });
   }));
 
   router.post("/campaigns/:id/posts/:post_id/approve", auth, wrap("approve", async (req, res) => {

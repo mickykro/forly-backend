@@ -421,7 +421,7 @@ async function planNext(phone, st, deps, x, now) {
   const decision = await C.planAccount(phone, deps, now, { conn: st.conn, config: st.config, campaigns: st.campaigns });
   if (!decision) return "idle";
   if (decision.campaignId) { await C.schedulePost(decision, deps, now); return "scheduled"; }
-  if (decision.reason === "browse_only") await browse(phone, st.conn, deps, x, now);
+  if (decision.reason === "browse_only" && !st.planOnly) await browse(phone, st.conn, deps, x, now);
   for (const c of st.campaigns) {
     if (c.status === "running" && !(c.posts || []).some((p) => OPEN_POST.has(p.status)) && c.wait_reason !== decision.reason) {
       await mutate(x, c.id, (cur) => (cur.status === "running" ? { wait_reason: decision.reason } : null));
@@ -431,7 +431,7 @@ async function planNext(phone, st, deps, x, now) {
 }
 
 // ── one account ──
-async function tickLocked(phone, deps, x, now, lock) {
+async function tickLocked(phone, deps, x, now, lock, opts = {}) {
   const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(phone)) || {};
   const campaigns = await housekeep(phone, conn, deps, x, now, config);
@@ -448,14 +448,15 @@ async function tickLocked(phone, deps, x, now, lock) {
   else {
     const due = running.flatMap((c) => c.posts.filter((p) => p.status === "scheduled" && ms(p.scheduled_at) <= now.getTime()).map((p) => ({ c, p })))
       .sort((a, b) => ms(a.p.scheduled_at) - ms(b.p.scheduled_at))[0];
-    const st = { phone, conn, config, campaigns, lock };
-    outcome = due ? await runDue(due.c, due.p, st, deps, x, now) : await planNext(phone, st, deps, x, now);
+    const st = { phone, conn, config, campaigns, lock, planOnly: !!opts.planOnly };
+    outcome = due ? (opts.planOnly ? "due" : await runDue(due.c, due.p, st, deps, x, now)) : await planNext(phone, st, deps, x, now);
   }
   for (const c of running) if (c.tick_errors) await mutate(x, c.id, () => ({ tick_errors: 0 }));
   return outcome;
 }
 
-async function tickAccount(phone, deps = {}, now) {
+// opts.planOnly (routes/posting): plan the next post, never run a due one or browse.
+async function tickAccount(phone, deps = {}, now, opts = {}) {
   const x = ctxOf(deps);
   now = now || nowOf(deps, x);
   const release = x.locks.tryAcquire(phone, "facebook");
@@ -463,7 +464,7 @@ async function tickAccount(phone, deps = {}, now) {
   // A timed-out driver call defers the release until its promise settles.
   let pending = null;
   const lock = { defer: (p) => { pending = p; } };
-  try { return await tickLocked(phone, deps, x, now, lock); }
+  try { return await tickLocked(phone, deps, x, now, lock, opts); }
   catch (e) {
     console.error(redact(`posting tick ${tail(phone)}: ${code(e)}`));
     try {

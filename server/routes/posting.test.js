@@ -257,5 +257,32 @@ const { db, store } = K;
     assert.equal((await call(local, "POST", `/api/posting/campaigns/${c.id}/pause`)).status, 200, "a local box with POSTING_SWEEPER=1 may");
   }
 
+  // ── a started campaign is planned at once: the card shows its post or why it waits ──
+  {
+    const env = await setup({ planNow: null }); // the real plan-only tick
+    const r = await call(env.app, "POST", "/api/posting/campaigns", consented());
+    assert.equal(r.status, 201);
+    const c = r.body.campaign;
+    assert.ok(c.posts.length === 1 || c.wait_reason, "a post or a reason: " + JSON.stringify(c));
+    if (c.posts.length) assert.ok(["scheduled", "pending_approval"].includes(c.posts[0].status), "planned, never run: " + c.posts[0].status);
+  }
+  {
+    let calls = 0;
+    const env = await setup({ planNow: async () => { calls++; return "profile_busy"; } });
+    const r = await call(env.app, "POST", "/api/posting/campaigns", consented());
+    assert.equal(r.body.campaign.wait_reason, "profile_busy", "the card says the profile is busy");
+    const id = r.body.campaign.id;
+    await call(env.app, "GET", `/api/posting/campaigns/${id}`);
+    await call(env.app, "GET", `/api/posting/campaigns/${id}`);
+    assert.equal(calls, 1, "the start planned; the polling GET plans at most once a minute");
+    env.clk.t = new Date(env.clk.t.getTime() + 61000);
+    await call(env.app, "GET", `/api/posting/campaigns/${id}`);
+    assert.equal(calls, 2, "and again after a minute: a busy reason never blocks the next try");
+    const off = R.makeApp({ deps: Object.assign({}, env.deps, { env: { FORLY_ENV: "staging" } }), planNow: async () => { calls++; return "profile_busy"; } });
+    env.clk.t = new Date(env.clk.t.getTime() + 61000);
+    await call(off, "GET", `/api/posting/campaigns/${id}`);
+    assert.equal(calls, 2, "never where posting is not allowed");
+  }
+
   console.log("routes/posting.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

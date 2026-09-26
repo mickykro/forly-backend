@@ -40,15 +40,17 @@ async function setup(o = {}) {
   const deps = Object.assign({}, env.deps, {
     groupsSync: o.groupsSync || { runSync: async (a) => { syncs.push(a.phone); return 2; } },
   }, o.deps || {});
-  const app = makeApp({ deps, phone: o.phone });
-  return Object.assign(env, { deps, app, syncs, as: (phone) => makeApp({ deps, phone }) });
+  const app = makeApp({ deps, phone: o.phone, planNow: o.planNow });
+  return Object.assign(env, { deps, app, syncs, as: (phone) => makeApp({ deps, phone, planNow: o.planNow }) });
 }
 
-function makeApp({ deps, phone = PH, catalog = async () => CATALOG }) {
+// planNow: the route's immediate plan. Stubbed (a no-op) unless a test passes
+// its own, or null for the real posting-tick plan.
+function makeApp({ deps, phone = PH, catalog = async () => CATALOG, planNow = async () => "stubbed" }) {
   const requireAuth = () => (req, res, next) => { req.user = { userId: phone }; next(); };
   const app = express();
   app.use(express.json());
-  app.use("/api/posting", createRouter({ requireAuth, authSecret: AUTH, pageBaseUrl: "https://f.ly", deps, catalog }));
+  app.use("/api/posting", createRouter({ requireAuth, authSecret: AUTH, pageBaseUrl: "https://f.ly", deps, catalog, planNow: planNow || undefined }));
   return app;
 }
 
