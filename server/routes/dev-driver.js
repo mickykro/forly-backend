@@ -30,6 +30,13 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
   router.get("/sessions/:id/view", requireAdmin, async (req, res) => {
     const id = String(req.params.id);
     if (!isLive(id)) return res.status(404).json({ error: "not_found" });
+    // A browser the server drives itself is handed over by withPage a moment
+    // after it appears in the list: wait for that rather than open a second
+    // connection. A login browser (forly-connect) is never adopted.
+    const s = driver.liveSessions().find((x) => x.sessionId === id);
+    if (s && !/-connect:/.test(String(s.note || ""))) {
+      for (let i = 0; i < 40 && !(viewer._hubs && viewer._hubs.get(key(id))); i++) await new Promise((r) => setTimeout(r, 250));
+    }
     let hub;
     try { hub = await viewer.attach(key(id), id); }
     catch (e) {

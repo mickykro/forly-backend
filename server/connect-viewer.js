@@ -177,11 +177,22 @@ async function attach(key, sessionId, deps = {}) {
   if (have) await close(key, "replaced");
   if (hubs.size >= (deps.maxHubs || MAX_HUBS)) throw err("driver_busy");
   const placeholder = { sessionId, closed: false, subs: new Set() };
+  // While this connection was opening, the automation may have handed the
+  // monitor its own (adopt): that hub wins, and this one is dropped quietly.
+  const adoptedNow = () => { const cur = hubs.get(key); return cur && cur.adopted && cur.sessionId === sessionId && !cur.closed ? cur : null; };
   placeholder.ready = open(key, sessionId, deps).then((hub) => {
-    if (hubs.get(key) !== placeholder) { hub.closed = true; hub.browser.close().catch(() => {}); throw err("replaced"); }
+    if (hubs.get(key) !== placeholder) {
+      hub.closed = true; hub.browser.close().catch(() => {});
+      const a = adoptedNow(); if (a) return a;
+      throw err("replaced");
+    }
     hubs.set(key, hub);
     return hub;
-  }, (e) => { if (hubs.get(key) === placeholder) hubs.delete(key); throw e; });
+  }, (e) => {
+    const a = adoptedNow(); if (a) return a;
+    if (hubs.get(key) === placeholder) hubs.delete(key);
+    throw e;
+  });
   hubs.set(key, placeholder);
   return placeholder.ready;
 }

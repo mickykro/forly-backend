@@ -166,6 +166,23 @@ const driverOk = { getSession: async (id) => ({ sessionId: id, status: "active",
     await V.close("p6|madlan");
   }
 
+  // ── the race: the monitor starts a second connection, then the automation hands over its own ──
+  {
+    const f = fakeBrowser(), auto = fakeBrowser();
+    let letConnect;
+    const slow = { driver: driverOk, connectOverCDP: () => new Promise((r) => { letConnect = () => r(f.browser); }) };
+    const pending = V.attach("dev|race", "sR", slow);
+    await new Promise((r) => setImmediate(r));
+    const adopted = V.adopt("dev|race", "sR", auto.browser, auto.context);
+    letConnect();
+    assert.equal(await pending, adopted, "the viewer gets the automation's hub, not 'replaced'");
+    assert.ok(f.calls.some((c) => c[0] === "close"), "the second connection is dropped");
+    // …and when the second connection is refused outright, the same.
+    const refused = V.attach("dev|race2", "sQ", { driver: driverOk, connectOverCDP: async () => { V.adopt("dev|race2", "sQ", auto.browser, auto.context); throw new Error("one client only"); } });
+    assert.equal((await refused).adopted, true);
+    await V.close("dev|race"); await V.close("dev|race2");
+  }
+
   await realChromium();
   console.log("connect-viewer.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

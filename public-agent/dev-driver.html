@@ -89,10 +89,22 @@
     var view = document.createElement("div"); view.className = "view";
     el.appendChild(head); el.appendChild(msg); el.appendChild(view);
     grid.appendChild(el);
-    var viewer = window.ForlyViewer.create(view, "/api/dev/driver/sessions/" + encodeURIComponent(s.sessionId) + "/view", {
-      onEnd: function (code, gotFrame, detail) { msg.textContent = (gotFrame ? "Browser ended (" : "Could not show this browser (") + code + ")" + (detail ? ": " + detail : "") + "."; },
-    });
-    tiles[s.sessionId] = { el: el, viewer: viewer };
+    var t = tiles[s.sessionId] = { el: el, viewer: null, tries: 0 };
+    function mount() {
+      t.viewer = window.ForlyViewer.create(view, "/api/dev/driver/sessions/" + encodeURIComponent(s.sessionId) + "/view", {
+        onEnd: function (code, gotFrame, detail) {
+          // Not shown yet: try again a few times while the browser is still listed.
+          if (!gotFrame && code === "viewer_unavailable" && t.tries < 3 && tiles[s.sessionId] === t) {
+            t.tries++; msg.textContent = "Connecting… (" + (detail || code) + ")";
+            setTimeout(function () { if (tiles[s.sessionId] === t) { t.viewer.unmount(); mount(); } }, 2000);
+            return;
+          }
+          msg.textContent = (gotFrame ? "Browser ended (" : "Could not show this browser (") + code + ")" + (detail ? ": " + detail : "") + ".";
+        },
+        onFrame: function () { msg.textContent = ""; },
+      });
+    }
+    mount();
   }
   function removeTile(id) {
     var t = tiles[id]; if (!t) return;
