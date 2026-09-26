@@ -27,18 +27,36 @@ function findChromium() {
   try { browser = await chromium.launch({ executablePath: exe, headless: true, args: ["--no-sandbox"] }); }
   catch { console.log("distribution-connect.dom.test.js skipped (launch failed)"); return; }
 
+  let JPEG = "";
+  {
+    const p0 = await browser.newPage();
+    JPEG = (await p0.evaluate(() => { const c = document.createElement("canvas"); c.width = 800; c.height = 600; const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, 800, 600); return c.toDataURL("image/jpeg"); })).split(",")[1];
+    await p0.close();
+  }
   const mode = {};
   const app = express(); app.use(express.json());
   app.get("/api/distribution/status", (q, r) => r.json({ entitled: true, connected: false, groups: [] }));
   app.get("/api/distribution/group-catalog", (q, r) => r.json({ groups: [] }));
-  app.get("/api/connections/browser/:p/status", (q, r) => (mode.status === 200 ? r.json({ state: "connected" }) : r.status(mode.status || 500).json({ error: "internal" })));
+  app.get("/api/connections/browser/:p/status", (q, r) => (mode.status === 200 ? r.json({ state: "connected" }) : mode.status === "open" ? r.json({ state: "open" }) : r.status(mode.status || 500).json({ error: "internal" })));
+  const seen = { starts: 0, inputs: [], views: 0 };
+  let streams = [];
   app.post("/api/connections/browser/start", (q, r) => {
+    seen.starts++;
     if (mode.start === "network") return q.socket.destroy();
     if (mode.start === 404) return r.status(404).send("<html>Not Found</html>");
-    if (mode.start === 200) return r.json({ view_url: `http://127.0.0.1:${srv.address().port}/viewer-stub` });
+    if (mode.start === 200) { if (mode.afterStart) Object.assign(mode, mode.afterStart); return r.json({ platform: q.body.platform, expires_in: 1500 }); }
     r.status(mode.start).json(mode.body);
   });
-  app.get("/viewer-stub", (q, r) => r.send("<html><body>viewer</body></html>"));
+  app.get("/api/connections/browser/:p/view", (q, r) => {
+    seen.views++;
+    if (mode.view === "expired") return r.status(409).json({ error: "session_expired" });
+    r.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
+    r.write(": open\n\n");
+    r.write(`data: ${JSON.stringify({ t: "frame", d: JPEG, w: 800, h: 600, u: "https://www.madlan.co.il/" })}\n\n`);
+    streams.push(r);
+    q.on("close", () => { streams = streams.filter((x) => x !== r); });
+  });
+  app.post("/api/connections/browser/:p/view/input", (q, r) => { seen.inputs.push(q.body); r.json(q.body.t === "click" ? { editable: true } : {}); });
   app.use(express.static(path.join(__dirname, "..", "public-agent")));
   let srv = null;
   srv = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
@@ -68,43 +86,70 @@ function findChromium() {
     // fresh page: the earlier "connected" case taught the page that state
     Object.keys(mode).forEach((k) => delete mode[k]); mode.status = 500;
     await page.reload(); await page.waitForSelector("#browserConnectBtn_madlan");
-    // ── a failed start closes the blank login window it opened on the click ──
-    {
-      Object.keys(mode).forEach((k) => delete mode[k]); Object.assign(mode, { start: 503, body: { error: "driver_busy" }, status: 500 });
-      const popup = page.waitForEvent("popup", { timeout: 3000 }).catch(() => null);
-      await page.check("#browserConsent_madlan"); await page.click("#browserConnectBtn_madlan");
-      const w = await popup;
-      if (w) { await w.waitForEvent("close", { timeout: 3000 }).catch(() => null); assert.ok(w.isClosed(), "the blank window is closed again on an error"); }
-      assert.equal((await page.textContent("#browserConnectBtn_madlan")).trim(), "חיבור החשבון");
-    }
-    // ── Madlan: the window opens on the click and lands on the viewer; the
-    //    modal names Madlan, gives Madlan's steps, and never says "blocked" ──
-    {
-      Object.keys(mode).forEach((k) => delete mode[k]); Object.assign(mode, { start: 200, status: 500 });
-      const popup = page.waitForEvent("popup", { timeout: 5000 });
-      await page.check("#browserConsent_madlan"); await page.click("#browserConnectBtn_madlan");
-      const w = await popup;
-      await w.waitForURL(/viewer-stub/, { timeout: 5000 });
-      await page.waitForSelector("#browserModal:not([hidden])");
-      assert.equal((await page.textContent("#browserModalTitle")).trim(), "התחברות למדלן");
-      assert.ok((await page.textContent("#browserModalSub")).includes("מדלן"));
-      const body = await page.textContent("#browserModalBody");
-      assert.ok(body.includes("עמוד הבית של מדלן") && body.includes("כפתור ההתחברות"), "Madlan's own steps");
-      assert.ok(!/חסם|לא פתח/.test(body), "no 'blocked' note when the window opened");
-      assert.equal(await w.evaluate(() => window.opener), null, "the login window has no opener");
-      await w.close(); await page.click("#browserModalClose");
-    }
-    // ── a blocked popup: the modal says so and offers a button that opens it ──
-    {
-      Object.keys(mode).forEach((k) => delete mode[k]); Object.assign(mode, { start: 200, status: 500 });
-      await page.evaluate(() => { window.__open = window.open; window.open = () => null; }, undefined, {}, false); // main world: the page's own window.open
-      await page.check("#browserConsent_yad2"); await page.click("#browserConnectBtn_yad2");
-      await page.waitForSelector("#browserModal:not([hidden])");
-      assert.equal((await page.textContent("#browserModalTitle")).trim(), "התחברות ליד2");
-      const blockedBody = await page.textContent("#browserModalBody"); assert.ok(blockedBody.includes("לא פתח את החלון"), blockedBody);
-      assert.ok(/viewer-stub/.test(await page.getAttribute("#browserReopen", "href")), "a button opens the login window");
-      await page.evaluate(() => { window.open = window.__open; }, undefined, {}, false);
-    }
+    // No window is ever opened: the login browser shows inside the modal.
+    await page.evaluate(() => { window.__opens = 0; const o = window.open; window.open = (...a) => { window.__opens++; return o.apply(window, a); }; }, undefined, {}, false);
+    const reset = (m) => { Object.keys(mode).forEach((k) => delete mode[k]); Object.assign(mode, m); seen.inputs.length = 0; seen.starts = 0; seen.views = 0; };
+    // ── a failed start: the label is back, nothing opened ──
+    reset({ start: 503, body: { error: "driver_busy" }, status: 500 });
+    await page.check("#browserConsent_madlan"); await page.click("#browserConnectBtn_madlan");
+    await page.waitForFunction(() => !/פותחים/.test(document.getElementById("browserConnectBtn_madlan").textContent));
+    assert.equal((await page.textContent("#browserConnectBtn_madlan")).trim(), "חיבור החשבון");
+    assert.ok(await page.isHidden("#browserModal"));
+
+    // ── Madlan: the browser shows in the modal, with Madlan's steps ──
+    reset({ start: 200, status: 500, afterStart: { status: "open" } });
+    await page.click("#browserConnectBtn_madlan");
+    await page.waitForSelector("#browserModal:not([hidden])");
+    await page.waitForSelector(".cv-img:not([hidden])", { timeout: 5000 });
+    assert.equal((await page.textContent("#browserModalTitle")).trim(), "התחברות למדלן");
+    assert.ok((await page.textContent("#browserModalSub")).includes("מדלן"));
+    const body = await page.textContent("#browserModalBody");
+    assert.ok(body.includes("עמוד הבית של מדלן") && body.includes("הרשמה/התחברות"), "Madlan's own steps name its sign-in button");
+    assert.ok((await page.getAttribute(".cv-img", "src")).startsWith("data:image/jpeg;base64,"));
+    assert.equal(await page.textContent(".cv-url"), "https://www.madlan.co.il/");
+    const box = await page.locator(".cv-img").boundingBox();
+    assert.ok(box.width > 300 && box.height > 200, `the page is shown at a usable size (${box.width}x${box.height})`);
+
+    // A click is sent as fractions of the frame; typing follows it.
+    await page.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.5);
+    await page.waitForFunction(() => document.activeElement && document.activeElement.classList.contains("cv-keys"));
+    await page.keyboard.type("שלום a");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+    const click = seen.inputs.find((i) => i.t === "click");
+    assert.ok(click && Math.abs(click.x - 0.25) < 0.02 && Math.abs(click.y - 0.5) < 0.02, JSON.stringify(click));
+    assert.equal(seen.inputs.filter((i) => i.t === "text").map((i) => i.text).join(""), "שלום a");
+    const keys = seen.inputs.filter((i) => i.t === "key").map((i) => i.key);
+    assert.deepEqual(keys, ["Backspace", "Enter"]);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 400);
+    await page.waitForTimeout(200);
+    const wheel = seen.inputs.find((i) => i.t === "wheel");
+    assert.ok(wheel && wheel.dy === 400, JSON.stringify(wheel));
+    assert.equal(await page.evaluate(() => window.__opens, undefined, {}, false), 0, "no window opened");
+
+    // ── the session ends at Driver while watching: the modal says so ──
+    streams.forEach((r) => r.end(`data: ${JSON.stringify({ t: "end", reason: "session_ended" })}\n\n`));
+    await page.waitForFunction(() => /עבר יותר מדי זמן/.test(document.getElementById("browserModalMsg").textContent));
+    await page.click("#browserModalClose");
+    await page.waitForTimeout(150);
+    assert.equal(streams.length, 0, "closing the modal stops the stream");
+
+    // ── an open login is resumed, not replaced: no second /start ──
+    reset({ status: "open" });
+    await page.waitForFunction(() => document.getElementById("browserConnectBtn_madlan").textContent === "המשך ההתחברות");
+    await page.click("#browserConnectBtn_madlan");
+    await page.waitForSelector(".cv-img:not([hidden])", { timeout: 5000 });
+    assert.equal(seen.starts, 0, "resumed without a new browser");
+    await page.click("#browserModalClose");
+
+    // ── a recorded login that already expired opens a fresh one by itself ──
+    reset({ status: "open", view: "expired", start: 200, afterStart: { view: "ok" } });
+    await page.click("#browserConnectBtn_madlan");
+    await page.waitForSelector(".cv-img:not([hidden])", { timeout: 5000 });
+    assert.equal(seen.starts, 1, "one fresh browser");
+    await page.click("#browserModalClose");
     console.log("distribution-connect.dom.test.js ok");
   } finally { await browser.close(); srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -8,7 +8,8 @@
  * Forly stores a session id and a timestamp, and never a credential.
  *
  * The cdpUrl is the one secret here: anyone holding it drives that browser. It
- * is returned once, to the authenticated owner, and never stored or logged.
+ * never leaves the server — the agent sees the browser through
+ * connect-viewer.js (GET /:platform/view), and it is never stored or logged.
  */
 const express = require("express");
 const driverLive = require("../driver-browser");
@@ -18,6 +19,7 @@ const locksLive = require("../profile-lock");
 const guardLive = require("../posting-guard");
 const lifecycleLive = require("../profile-lifecycle");
 const groupsSync = require("../facebook-groups-sync");
+const viewerLive = require("../connect-viewer");
 
 // SMS 2FA on a phone that is also showing the modal takes a while. While a
 // login browser this young is recorded, posting, re-check, reconcile and the
@@ -35,10 +37,11 @@ const PLATFORMS = {
   facebook: { loginUrl: "https://www.facebook.com/login", checkUrl: "https://www.facebook.com/me" },
   yad2: { loginUrl: process.env.YAD2_LOGIN || "https://www.yad2.co.il/auth/login", checkUrl: process.env.YAD2_MY_ADS || "https://www.yad2.co.il/my-ads" },
   // Madlan has no login page of its own (/login is a 404): the agent logs in
-  // from the home page's sign-in button. [Unverified] checkUrl — the agent's
-  // own-listings page; if it answers 4xx/5xx, /finish refuses to call the
-  // account connected (cannot_verify_login) instead of trusting a 404 page.
-  madlan: { loginUrl: process.env.MADLAN_LOGIN || "https://www.madlan.co.il/", checkUrl: process.env.MADLAN_MY_LISTINGS || "https://www.madlan.co.il/my" },
+  // from the home page's "הרשמה/התחברות" button. checkUrl is the agent's
+  // own-listings page (manage-bulletins, from the owner); if it answers
+  // 4xx/5xx, /finish refuses to call the account connected
+  // (cannot_verify_login) instead of trusting an error page.
+  madlan: { loginUrl: process.env.MADLAN_LOGIN || "https://www.madlan.co.il/", checkUrl: process.env.MADLAN_MY_LISTINGS || "https://www.madlan.co.il/manage-bulletins" },
 };
 
 // ── /finish helpers (Facebook) ──
@@ -108,9 +111,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
   const locks = ctx.locks || locksLive;
   const guard = ctx.guard || guardLive;
   const lifecycle = ctx.lifecycle || lifecycleLive;
+  const viewer = ctx.viewer || viewerLive;
   const router = express.Router();
-
-  const viewUrl = (cdpUrl) => `https://viewer.driver.dev?ws=${encodeURIComponent(cdpUrl)}`;
+  const hubKey = (phone, platform) => `${phone}|${platform}`;
   // Express 4 does not catch a rejected handler (I11): a Firestore error would
   // crash the process. Answer 500 with a code; log no data (as posting-shared.wrap).
   const wrap = (name, fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch((e) => {
@@ -184,7 +187,10 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     // Never open a second login browser on this profile while one is recorded.
     const existing = conn[`browser_session_${platform}`];
-    if (existing && existing.session_id) await driver.stopSession(existing.session_id);
+    if (existing && existing.session_id) {
+      await viewer.close(hubKey(phone, platform), "replaced");
+      await driver.stopSession(existing.session_id);
+    }
 
     let session;
     try {
@@ -206,11 +212,8 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       browser_consent_version: CONSENT_VERSION,
     }, statePatch));
 
-    // view_url carries the cdpUrl: response only, never a log line, never Firestore.
-    return {
-      status: 200,
-      body: { platform, session_id: session.sessionId, view_url: viewUrl(session.cdpUrl), expires_in: SESSION_SECONDS },
-    };
+    // No cdpUrl and no viewer address: the page watches it via /:platform/view.
+    return { status: 200, body: { platform, expires_in: SESSION_SECONDS } };
   }
 
   router.post("/start", requireAuth(authSecret), wrap("start", async (req, res) => {
@@ -330,6 +333,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     }
     if (!loggedIn) return res.status(409).json({ error: "not_logged_in" });
 
+    await viewer.close(hubKey(phone, platform), "connected");
     await driver.stopSession(open.session_id);
     const first = conn[`${platform}_browser_first_connected_at`] || new Date().toISOString();
     await db.setConnection(phone, Object.assign({
@@ -342,6 +346,54 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     return res.json({ state: "connected", identity_label: label, pages });
   }));
 
+  // The login browser, inside Forly: a server-sent-events stream of JPEG
+  // frames ({t:"frame",d,w,h,u}), ending with {t:"end",reason}. Only the
+  // owner's own open session; the hub key is the authenticated phone, so
+  // /view/input needs no connection read per keystroke.
+  router.get("/:platform/view", requireAuth(authSecret), wrap("view", async (req, res) => {
+    const platform = String(req.params.platform);
+    if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
+    const phone = req.user.userId;
+    const conn = (await db.getConnection(phone)) || {};
+    const open = conn[`browser_session_${platform}`];
+    if (!open || !open.session_id) return res.status(409).json({ error: "no_open_session" });
+    let hub;
+    try { hub = await viewer.attach(hubKey(phone, platform), open.session_id); }
+    catch (e) {
+      const code = ["session_expired", "driver_busy"].includes(e && e.code) ? e.code : "viewer_unavailable";
+      return res.status(code === "session_expired" ? 409 : 503).json({ error: code });
+    }
+    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" });
+    res.write(": open\n\n");
+    let behind = false;
+    const off = viewer.subscribe(hub, (evt) => {
+      if (res.writableEnded) return;
+      // A slow connection skips frames and gets the newest one when it drains.
+      if (evt.t === "frame" && res.writableNeedDrain) {
+        if (!behind) { behind = true; res.once("drain", () => { behind = false; if (hub.last && !res.writableEnded) res.write(`data: ${JSON.stringify(hub.last)}\n\n`); }); }
+        return;
+      }
+      res.write(`data: ${JSON.stringify(evt)}\n\n`);
+      if (evt.t === "end") res.end();
+    });
+    const beat = setInterval(() => { if (!res.writableEnded) res.write(": k\n\n"); }, 15000);
+    const done = () => { clearInterval(beat); off(); };
+    req.on("close", done);
+    if (req.destroyed) done();
+  }));
+
+  router.post("/:platform/view/input", requireAuth(authSecret), wrap("input", async (req, res) => {
+    const platform = String(req.params.platform);
+    if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
+    try {
+      return res.json(await viewer.input(hubKey(req.user.userId, platform), req.body));
+    } catch (e) {
+      const code = e && e.code;
+      const status = { no_viewer: 409, invalid_input: 400, slow_down: 429 }[code] || 502;
+      return res.status(status).json({ error: status === 502 ? "input_failed" : code });
+    }
+  }));
+
   // The way out. Stops what is running, forgets the login, deletes the profile
   // at Driver. Required by the privacy law the plan's intro names, and by
   // common decency: the agent must be able to take back what they handed over.
@@ -352,6 +404,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     // revoke() stops the open session, cancels open posting attempts, deletes
     // the Driver profile, and clears pages/groups/posting_permission.
+    await viewer.close(hubKey(phone, platform), "closed");
     const { advice } = await lifecycle.revoke({ phone, platform, reason: "agent" }, { db, driver });
 
     // ctx.campaigns is provided by Task 16 (posting-campaign.js); until then

@@ -209,21 +209,21 @@
 
   const PLATFORM_ROWS = [
     { key: "facebook", label: "פייסבוק", steps: [
-      "התחברו לפייסבוק בחלון שנפתח, כמו שאתם מתחברים תמיד.",
+      "התחברו לפייסבוק בחלון שלמטה, כמו שאתם מתחברים תמיד.",
       "אם פייסבוק שולחת קוד בסמס או מבקשת אישור — השלימו אותו באותו חלון.",
     ], copy: [
       "חיבור אחד לפייסבוק — פורלי תפרסם גם בדף העסקי וגם בקבוצות מאותו חשבון, ותקרא פוסטים מקבוצות. מתחברים כאן פעם אחת, כמו בדפדפן רגיל.",
       "בשלושת הימים הראשונים פורלי רק מסתובבת בפייסבוק מהחשבון שלכם — גוללת, צופה, מסמנת לייק פה ושם — בלי לפרסם. אחר כך פוסט אחד ביום, ובהדרגה יותר. ככה פייסבוק רואה פעילות רגילה ולא רובוט, וזה מה ששומר על החשבון שלכם.",
     ], small: "פרסום אוטומטי בקבוצות נעשה על אחריותכם — נסביר בדיוק לפני שמתחילים." },
     { key: "yad2", label: "יד2", steps: [
-      "התחברו ליד2 בחלון שנפתח — בטלפון או במייל, כמו תמיד.",
+      "התחברו ליד2 בחלון שלמטה — בטלפון או במייל, כמו תמיד.",
       "אם יד2 שולחת קוד בסמס — הזינו אותו באותו חלון.",
     ], copy: [
       "מתחברים ליד2 כדי שפורלי תוכל לקרוא את המודעות שלכם באתר ולהציע אותן כדף נכס מוכן — פורלי לא מפרסמת דרך החשבון הזה.",
     ] },
     { key: "madlan", label: "מדלן", steps: [
-      "בחלון שנפתח יופיע עמוד הבית של מדלן.",
-      "לחצו על כפתור ההתחברות בראש העמוד, והתחברו כמו שאתם מתחברים תמיד — בטלפון או במייל.",
+      "בחלון שלמטה מופיע עמוד הבית של מדלן.",
+      "לחצו על \"הרשמה/התחברות\" בראש העמוד, והתחברו כמו שאתם מתחברים תמיד — בטלפון או במייל.",
       "אם מדלן שולחת קוד בסמס — הזינו אותו באותו חלון.",
     ], copy: [
       "מתחברים למדלן כדי שפורלי תוכל לקרוא את המודעות שלכם באתר ולהציע אותן כדף נכס מוכן — פורלי לא מפרסמת דרך החשבון הזה.",
@@ -264,50 +264,61 @@
     })[code] || "משהו השתבש — נסו שוב בעוד רגע.";
   }
 
-  // The viewer refuses to be framed (X-Frame-Options / frame-ancestors), so
-  // it opens in its own window. The window is opened on the click itself (a
-  // popup opened after an await is blocked by most browsers) and navigated
-  // once the session exists. No "noopener" feature: with it window.open()
-  // always returns null, which read as "blocked" although the window opened;
-  // the opener is cut by hand instead, before it leaves about:blank.
-  const WIN = "forly-connect", WIN_FEATURES = "width=1200,height=820";
-  function openLoginWindow() {
-    let w = null;
-    try { w = window.open("about:blank", WIN, WIN_FEATURES); } catch (e) { w = null; }
-    if (w) { try { w.opener = null; } catch (e) { /* cross-origin already */ } }
-    return w;
-  }
+  // The login browser shows inside the modal (connect-viewer.js): the server
+  // relays its screen and the agent's clicks and typing, so no window opens
+  // and the browser's address never reaches this page.
   const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  function openBrowser(viewUrl, platform, win) {
+  const SMS_NOTE = "קיבלתם קוד בסמס? אפשר לצאת לרגע ולחזור — הדפדפן מחכה לכם כמה דקות.";
+  function openBrowser(platform) {
     const row = PLATFORM_ROWS.find((r) => r.key === platform) || PLATFORM_ROWS[0];
     $("browserModalTitle").textContent = `התחברות ל${row.label}`;
-    $("browserModalSub").textContent = `זה ${row.label} האמיתי. מתחברים כרגיל — פורלי לא רואה את הסיסמה ולא שומרת אותה.`;
-    let opened = false;
-    if (win && !win.closed) { try { win.location.replace(viewUrl); opened = true; } catch (e) { opened = false; } }
-    const steps = row.steps.concat(['כשסיימתם, חזרו לכאן ולחצו "סיימתי להתחבר".']);
-    bBody.innerHTML =
-      (opened ? "" : '<p class="popup-note">הדפדפן לא פתח את החלון לבד — לחצו על הכפתור כדי לפתוח אותו.</p>') +
-      `<ol class="popup-steps">${steps.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>` +
-      `<p><a class="btn btn-ghost" id="browserReopen" href="${esc(viewUrl)}" target="${WIN}" rel="noopener">${opened ? "החלון נסגר? לפתוח אותו שוב" : `פתיחת חלון ההתחברות ל${esc(row.label)}`}</a></p>`;
-    bMsg.textContent = "קיבלתם קוד בסמס? אפשר לצאת לרגע ולחזור — החלון מחכה לכם כמה דקות.";
+    $("browserModalSub").textContent = `זה ${row.label} האמיתי, בתוך פורלי. מתחברים כרגיל — פורלי לא שומרת את הסיסמה.`;
+    const steps = row.steps.concat(['כשסיימתם, לחצו "סיימתי להתחבר".']);
+    bBody.innerHTML = `<details class="popup-steps-box" open><summary>איך מתחברים</summary><ol class="popup-steps">${steps.map((t) => `<li>${esc(t)}</li>`).join("")}</ol></details><div id="browserView" class="browser-view"></div>`;
+    bMsg.textContent = SMS_NOTE;
     bModal.hidden = false; bOpen = true;
+    window.ForlyViewer.mount($("browserView"), platform, {
+      // On a phone the steps fold away once the page shows, to give it the room.
+      onFrame: () => { const d = bBody.querySelector(".popup-steps-box"); if (d && window.matchMedia("(max-width: 640px)").matches) d.open = false; },
+      onEnd: (code, gotFrame) => onViewerEnd(platform, code, gotFrame),
+    });
   }
-  function closeBrowser() { bModal.hidden = true; bBody.innerHTML = ""; bOpen = false; }
+  function closeBrowser() { window.ForlyViewer.unmount(); bModal.hidden = true; bBody.innerHTML = ""; bOpen = false; }
+
+  // A login browser recorded for this account that is already gone (expired,
+  // or stopped at Driver): open a fresh one, once, without a second click.
+  let restarted = false;
+  async function onViewerEnd(platform, code, gotFrame) {
+    if (!bOpen || currentPlatform !== platform || code === "connected" || code === "replaced") return;
+    const expired = ["session_ended", "session_expired", "no_open_session"].includes(code);
+    if (expired && !gotFrame && !restarted) {
+      restarted = true;
+      bMsg.textContent = "הדפדפן הקודם נסגר — פותחים חדש…";
+      try { await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform, consent: true }) }); openBrowser(platform); }
+      catch (e) { bMsg.textContent = connectErrorText(e); }
+      return;
+    }
+    bMsg.textContent = expired
+      ? "עבר יותר מדי זמן והדפדפן נסגר. סגרו את החלון ולחצו שוב על חיבור החשבון."
+      : code === "driver_busy" ? connectErrorText({ code })
+        : "לא הצלחנו להציג את הדפדפן — סגרו את החלון ונסו שוב בעוד רגע.";
+  }
 
   // The connect button's label always comes from here — never left as a
   // "working…" text. When status cannot be read, the row keeps what it last
   // knew (connected or not), so a failed check never flips it.
-  const connected = {};
+  const connected = {}, pending = {};
   function paintRow(platform) {
     const on = !!connected[platform];
     $(`browserConnChip_${platform}`).textContent = on ? "מחובר" : "";
     $(`browserDisconnectBtn_${platform}`).hidden = !on;
-    $(`browserConnectBtn_${platform}`).textContent = on ? "חיבור מחדש" : "חיבור החשבון";
+    $(`browserConnectBtn_${platform}`).textContent = on ? "חיבור מחדש" : pending[platform] ? "המשך ההתחברות" : "חיבור החשבון";
   }
   async function refreshBrowserChip(platform) {
     try {
       const j = await api(`/api/connections/browser/${platform}/status`);
       connected[platform] = j.state === "connected";
+      pending[platform] = j.state === "open";
       $(`browserIdentity_${platform}`).textContent = connected[platform] && j.identity_label ? `מחובר בתור ${j.identity_label}` : "";
     } catch (e) { /* keep what we knew */ }
     paintRow(platform);
@@ -317,13 +328,14 @@
     $(`browserConnectBtn_${platform}`).addEventListener("click", async function () {
       if (!$(`browserConsent_${platform}`).checked) { toast("סמנו את האישור שמעל הכפתור"); return; }
       const btn = this; btn.disabled = true; btn.textContent = "פותחים דפדפן…";
-      currentPlatform = platform;
-      const win = openLoginWindow(); // on the click itself, before any await
+      currentPlatform = platform; restarted = false;
       try {
-        const j = await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform, consent: true }) });
-        openBrowser(j.view_url, platform, win);
+        // A login already under way (the agent went for the SMS and closed
+        // the modal) is resumed, not replaced by a second browser.
+        if (!pending[platform] || connected[platform]) await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform, consent: true }) });
+        pending[platform] = true;
+        openBrowser(platform);
       } catch (e) {
-        if (win && !win.closed) { try { win.close(); } catch (x) { /* ignore */ } }
         toast(connectErrorText(e));
       } finally {
         btn.disabled = false; paintRow(platform); // the label is back at once, whatever happened
@@ -344,6 +356,7 @@
     try {
       const j = await api(`/api/connections/browser/${currentPlatform}/finish`, { method: "POST" });
       toast(j.identity_label ? `החשבון מחובר ✓ (${j.identity_label})` : "החשבון מחובר ✓");
+      pending[currentPlatform] = false;
       closeBrowser(); refreshBrowserChip(currentPlatform);
     } catch (e) {
       // driver_busy: our browser budget is full, the login window is fine —
@@ -352,7 +365,7 @@
       bMsg.textContent = code === "driver_busy"
         ? "הדפדפן עסוק כרגע, נסו שוב בעוד דקה"
         : code === "session_expired" || code === "no_open_session"
-          ? "עבר יותר מדי זמן והחלון נסגר. פתחו אותו שוב ונסו להתחבר."
+          ? "עבר יותר מדי זמן והדפדפן נסגר. סגרו את החלון ולחצו שוב על חיבור החשבון."
           : code === "not_logged_in"
             ? "נראה שעדיין לא התחברתם — השלימו את ההתחברות בחלון ואז לחצו שוב."
             : code === "cannot_verify_login"
@@ -361,7 +374,7 @@
     } finally { btn.disabled = false; }
   });
 
-  $("browserModalClose").addEventListener("click", closeBrowser);
+  $("browserModalClose").addEventListener("click", () => { closeBrowser(); if (currentPlatform) refreshBrowserChip(currentPlatform); });
 
   // If the agent leaves for the SMS and comes back, the modal is still here;
   // only when they close it explicitly is the session's fate decided by /finish.

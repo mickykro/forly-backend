@@ -167,18 +167,28 @@ body.agent-page::before{content:"";position:fixed;inset:0;z-index:-1;pointer-eve
    small box is unusable on a phone. dvh, not vh: iOS Safari's bottom bar. */
 .browser-modal { position: fixed; inset: 0; background: rgba(20,17,12,.72); display: flex; align-items: center; justify-content: center; z-index: 90; }
 .browser-modal[hidden] { display: none; }
-.browser-modal-inner { background: var(--bg); border-radius: var(--radius); width: min(620px, 96vw); max-height: 92dvh; display: flex; flex-direction: column; overflow: hidden; }
+.browser-modal-inner { background: var(--bg); border-radius: var(--radius); width: min(1180px, 98vw); height: 94dvh; display: flex; flex-direction: column; overflow: hidden; }
 .browser-modal-inner > header, .browser-modal-inner > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; }
 .browser-modal-inner > footer { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 .browser-modal-inner > footer .btn, .browser-modal-inner > header .btn { white-space: nowrap; flex-shrink: 0; }
-.browser-modal-body { flex: 1; min-height: 0; overflow: auto; background: #fff; padding: 18px 20px; }
-.browser-modal-body iframe { width: 100%; height: 100%; border: 0; display: block; }
-.browser-modal-body .popup-note { margin: 0 0 12px; padding: 12px 14px; border-radius: 10px; background: #FFF6E5; color: var(--ink, #17140F); line-height: 1.6; }
-.browser-modal-body .popup-steps { margin: 0 0 14px; padding-inline-start: 22px; line-height: 1.8; }
+.browser-modal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; background: #fff; padding: 10px 12px; }
+.browser-modal-body .popup-steps-box summary { cursor: pointer; font-weight: 700; font-size: .9rem; }
+.browser-modal-body .popup-steps { margin: 4px 0 0; padding-inline-start: 22px; line-height: 1.7; font-size: .92rem; }
 .browser-modal-body .popup-steps li { margin-bottom: 4px; }
 .conn-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .consent-line { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; line-height: 1.5; }
-@media (max-width: 640px) { .browser-modal-inner { width: 100vw; max-height: 100dvh; border-radius: 0; } .browser-modal-inner > footer { flex-wrap: wrap; } }
+.browser-view { flex: 1; min-height: 0; }
+.cv { height: 100%; display: flex; flex-direction: column; gap: 6px; position: relative; }
+.cv-bar { display: flex; align-items: center; gap: 6px; }
+.cv-bar .cv-btn { padding: 4px 10px; font-size: .85rem; white-space: nowrap; }
+.cv-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; color: var(--muted, #6B6358); text-align: left; }
+.cv-screen { flex: 1; min-height: 0; display: flex; align-items: flex-start; justify-content: center; background: #F3F1EC; border-radius: 8px; overflow: hidden; }
+.cv-img { max-width: 100%; max-height: 100%; width: auto; height: auto; display: block; cursor: pointer; touch-action: pinch-zoom; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.cv-img[hidden] { display: none; }
+.cv-wait { margin: auto; color: var(--muted, #6B6358); font-size: .95rem; }
+.cv-wait[hidden] { display: none; }
+.cv-keys { position: absolute; bottom: 0; left: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; resize: none; font-size: 16px; }
+@media (max-width: 640px) { .browser-modal-inner { width: 100vw; height: 100dvh; border-radius: 0; } .browser-modal-inner > footer { flex-wrap: wrap; } .browser-modal-body { padding: 8px; } }
 @media(max-width:760px){.agent-hero{grid-template-columns:1fr}.agent-hero .agent-aside{display:none}.dashboard-page .auth-wrap::before,.signup-page .auth-wrap::before{display:none}.agent-topbar{min-height:68px}.agent-topbar .brand b{font-size:1.1rem}.agent-progress{gap:11px}.agent-progress span{font-size:.72rem}.agent-progress span:not(.active){opacity:.7}.creation-page .container{padding-inline:14px}.agent-page .card{padding:20px}.legal-page .legal-paper{padding:25px 20px}}
 /* Task 23 — the campaign card on publish.html; everything under .camp */
 .camp{padding:18px;margin:12px 0 18px}

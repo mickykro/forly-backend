@@ -87,7 +87,7 @@ function fakeGuard(reason) {
 }
 
 (async () => {
-  // ── start: creates a persisted-profile session and hands back the view URL ──
+  // ── start: creates a persisted-profile session and and hands back no browser address ──
   let created = null;
   const db1 = fakeDb({});
   const app = makeApp({
@@ -106,8 +106,9 @@ function fakeGuard(reason) {
   const started = await call(app, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
   assert.equal(started.status, 200);
   assert.ok(db1.conn.browser_consent_at, "consent is persisted, not just ticked");
-  assert.equal(started.body.session_id, "s1");
-  assert.equal(started.body.view_url, "https://viewer.driver.dev?ws=" + encodeURIComponent("wss://node/abc"));
+  // The browser is shown through /:platform/view: no cdpUrl, viewer URL or session id leaves the server.
+  assert.deepEqual(Object.keys(started.body).sort(), ["expires_in", "platform"]);
+  assert.ok(!JSON.stringify(started.body).includes("wss://"));
   assert.equal(created.profile.name, profileName("facebook", PHONE));
   assert.equal(created.profile.persist, true);
   assert.equal(created.url, "https://www.facebook.com/login");
