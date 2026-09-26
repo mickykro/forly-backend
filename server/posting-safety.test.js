@@ -388,4 +388,12 @@ for (const x of ["rate_limited", "feature_blocked"]) assert.ok(S.SIGNAL_PENALISE
 for (const x of ["group_blocked", "not_member", "pending_approval"]) assert.ok(S.SIGNAL_SKIPS.has(x));
 assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("login_required"), "a cookie expiry is a reconnect, not a punishment");
 
+// ── Shabbat stops posting, never warm-up browsing ──
+{
+  const sat = new Date("2026-09-26T10:00:00+03:00"); // a Saturday
+  assert.equal(S.isActiveTime(sat), false, "no post on Shabbat");
+  const acc = { first_connected_at: "2026-09-26T08:00:00+03:00", posts: [], halts: [], account_aged: true, posted_manually: true };
+  assert.deepEqual(S.nextSlot({ now: sat, account: acc, candidates: [{ group_id: "1", url: "https://www.facebook.com/groups/1" }], pageId: "p" }), { at: null, reason: "browse_only" }, "a warm-up browse on Shabbat");
+}
+
 console.log("posting-safety.test.js ok");
