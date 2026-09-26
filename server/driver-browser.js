@@ -131,7 +131,25 @@ function scopeNote(note) {
   return `forly-${env}-${m[1]}:${note.slice(m[0].length)}`;
 }
 
-const proxyDefault = () => (process.env.DRIVER_PROXY_URL ? { proxyUrl: process.env.DRIVER_PROXY_URL } : {});
+// DRIVER_PROXY_URL may carry "{agent}" (e.g. http://user-session-{agent}:pass@host:port):
+// each agent then always leaves through the same residential address — the
+// provider's sticky session — so Facebook sees one steady home network per
+// agent. The name is an HMAC of the phone under PROFILE_KEY, never the phone.
+// A session with no agent (an anonymous listing read) gets a one-off name.
+function proxyFor(phone, env = process.env) {
+  const tpl = env.DRIVER_PROXY_URL;
+  if (!tpl) return {};
+  if (!tpl.includes("{agent}")) return { proxyUrl: tpl };
+  const id = phone
+    ? crypto.createHmac("sha256", String(env.PROFILE_KEY || "")).update(`proxy|${phone}`).digest("hex").slice(0, 16)
+    : `anon${crypto.randomBytes(6).toString("hex")}`;
+  return { proxyUrl: tpl.split("{agent}").join(id) };
+}
+// What a session request may say in a log line: never the proxy's credentials,
+// the profile name or a phone.
+const sessionLogLine = (b) => ({ note: b.note || null, duration: b.duration || null, type: b.type || null, country: b.country || null,
+  url_host: (() => { try { return b.url ? new URL(b.url).host : null; } catch (e) { return null; } })(),
+  profile: b.profile ? "set" : "none", proxy: b.proxyUrl ? "set" : "none" });
 
 // Dev-only: a registry of live sessions, so a developer can watch every
 // browser the server opens (routes/dev-driver.js). Never on in production
@@ -202,9 +220,9 @@ function claim(usesProfile, profileNameToCheck, deps) {
 async function createSession(opts = {}, deps = {}) {
   const sleep = deps.sleep || sleepReal;
   const random = deps.random || Math.random;
-  const body = Object.assign({}, proxyDefault(), opts, SESSION_DEFAULTS);
+  const body = Object.assign({}, proxyFor(deps.phone || null), opts, SESSION_DEFAULTS);
   if (body.note) body.note = scopeNote(body.note);
-  console.log("driver: creating browser session", { ...body, proxyUrl: body.proxyUrl ? redact(body.proxyUrl) : undefined });
+  console.log("driver: creating browser session", sessionLogLine(body));
   let attempt = 0;
   for (;;) {
     try {
@@ -361,7 +379,7 @@ module.exports = {
   cleanupOrphans, waitForActive, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
   redact, describeError, driverEnabled, bootCheck, devViewOn, mintViewerGrant, consumeViewerGrant,
   _test: {
-    backoffMs, scopeNote,
+    backoffMs, scopeNote, proxyFor, sessionLogLine,
     setDevView: (v) => { devView = v; live.clear(); grants.clear(); },
     setNow: (fn) => { nowFn = fn || (() => Date.now()); },
   },

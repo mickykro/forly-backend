@@ -178,6 +178,33 @@ async function quiet(fn) {
     assert.equal(during, undefined, "never outside the local monitor");
   }
 
+  // ── a sticky proxy address per agent: the same agent always, never the phone itself ──
+  {
+    const P = D._test.proxyFor;
+    const env = { DRIVER_PROXY_URL: "http://user-session-{agent}:pw@proxy.example:7000", PROFILE_KEY: "k1" };
+    const a1 = P("972500000001", env).proxyUrl, a1again = P("972500000001", env).proxyUrl, a2 = P("972500000002", env).proxyUrl;
+    assert.equal(a1, a1again, "the same agent, the same address");
+    assert.notEqual(a1, a2, "another agent, another address");
+    assert.match(a1, /^http:\/\/user-session-[0-9a-f]{16}:pw@proxy\.example:7000$/);
+    assert.ok(!a1.includes("972500000001"), "never the phone");
+    assert.notEqual(P("972500000001", Object.assign({}, env, { PROFILE_KEY: "k2" })).proxyUrl, a1, "keyed by PROFILE_KEY");
+    const anon1 = P(null, env).proxyUrl, anon2 = P(null, env).proxyUrl;
+    assert.ok(/user-session-anon[0-9a-f]{12}:/.test(anon1) && anon1 !== anon2, "no agent: a one-off name");
+    assert.deepEqual(P("972500000001", { DRIVER_PROXY_URL: "http://fixed:pw@h:1" }), { proxyUrl: "http://fixed:pw@h:1" }, "no placeholder: as given");
+    assert.deepEqual(P("972500000001", {}), {}, "no proxy");
+    // createSession uses the caller's phone.
+    const saved = process.env.DRIVER_PROXY_URL, savedKey = process.env.PROFILE_KEY;
+    Object.assign(process.env, env);
+    let sent = null;
+    await D.createSession({ duration: 60, profile: { name: "facebook-local-" + "a".repeat(20), persist: true } }, { phone: "972500000001", apiKey: "k", fetchFn: async (u, init) => { sent = JSON.parse(init.body); return ok({ sessionId: "px", status: "active", cdpUrl: "ws://p" }); }, sleep: async () => {} });
+    assert.equal(sent.proxyUrl, a1);
+    if (saved === undefined) delete process.env.DRIVER_PROXY_URL; else process.env.DRIVER_PROXY_URL = saved;
+    if (savedKey === undefined) delete process.env.PROFILE_KEY; else process.env.PROFILE_KEY = savedKey;
+    // The session log line: no credentials, no profile name.
+    const line = JSON.stringify(D._test.sessionLogLine({ note: "forly-local-post:facebook", proxyUrl: a1, profile: { name: "facebook-local-" + "a".repeat(20) }, url: "https://www.facebook.com/x?y=1" }));
+    assert.ok(!line.includes("pw@") && !line.includes("facebook-local-a") && line.includes("www.facebook.com") && line.includes('"proxy":"set"'), line);
+  }
+
   // ── deleteProfile never throws, and reports ok/error so revoke() can record it ──
   const okDel = await D.deleteProfile("facebook-local-aaaa", { apiKey: "k", fetchFn: async () => ok({ success: true }) });
   assert.deepEqual(okDel, { ok: true });

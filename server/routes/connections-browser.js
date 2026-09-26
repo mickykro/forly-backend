@@ -199,7 +199,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         url: spec.loginUrl,
         profile: { name: profileName(platform, phone, gen), persist: true },
         note: `forly-connect:${platform}`, // never the phone
-      });
+      }, { phone }); // the agent's sticky proxy address (driver-browser.proxyFor)
     } catch (e) {
       return { status: 503, body: { error: "extract_unavailable" } };
     }
