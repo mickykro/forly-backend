@@ -36,7 +36,11 @@ const SELECTORS = { groupLink: 'a[href*="/groups/"][role="link"]' };
 const STALE_MS = 7 * 86400000; // isStale(): a sync older than this is due for a refresh
 const STALE_DROP_MS = 30 * 86400000; // mergeMembership(): a stale/left entry this old is forgotten
 
-const REAL_ESTATE_RE = /דיר|נדל|להשכר|למכיר|apartment|rent|real estate|נכס/i;
+const REAL_ESTATE_RE = /דיר|נדל|להשכר|למכיר|שכירות|מתווכ|תיווך|נכס|apartment|rent|real estate|realtor|broker/i;
+// What the agent is shown and can pick: real-estate groups only — one the
+// curated catalog carries, or one whose own name reads as real estate.
+// Everything else the account belongs to (a hobby, a job board) stays out.
+const isRealEstateGroup = (m, cats) => (Array.isArray(cats) && cats.some(Boolean)) || REAL_ESTATE_RE.test(String((m && m.name) || ""));
 
 // The link on "Your groups" also carries the group's last-activity line;
 // only the first line is the name. The suffix is also cut when the two come
@@ -321,4 +325,4 @@ function hiddenIds(conn) {
 
 const isStale = (conn, now) => !conn.facebook_groups_synced_at || now.getTime() - new Date(conn.facebook_groups_synced_at).getTime() > STALE_MS;
 
-module.exports = { groupName, isNavSlug, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };
+module.exports = { groupName, isNavSlug, isRealEstateGroup, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };

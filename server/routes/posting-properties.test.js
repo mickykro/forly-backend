@@ -90,5 +90,17 @@ const { db, store } = K;
     const merged = FG.mergeMembership(conn.facebook_groups_member, [{ url: G(222), slug: "222", name: "x" }], { now: new Date() });
     assert.ok(!merged.some((m) => ["feed", "discover", "joins"].includes(m.slug)), "dropped from storage on the next merge");
   }
+  // ── only real-estate groups are shown: in the catalog, or named as real estate ──
+  {
+    const FG = require("../facebook-groups-sync");
+    assert.equal(FG.isRealEstateGroup({ name: "מתווכים משתפים פעולה בעסקאות" }, []), true);
+    assert.equal(FG.isRealEstateGroup({ name: "יחידות / דירות להשכרה בשרון" }, []), true);
+    assert.equal(FG.isRealEstateGroup({ name: "Real Madrid Israel" }, []), false);
+    assert.equal(FG.isRealEstateGroup({ name: undefined, name_hash: "h" }, []), false, "a private group we know nothing about");
+    assert.equal(FG.isRealEstateGroup({ name: undefined }, [{ city: "חיפה" }]), true, "the catalog carries it");
+    const { app } = await setup({ conn: { facebook_groups_member: R.members().concat([K.member("321", { name: "Burning Man Israel" })]) } });
+    const s = await call(app, "GET", "/api/posting/settings");
+    assert.ok(!s.body.member_groups.some((g) => g.group_id === "321" || g.group_id === "999"));
+  }
   console.log("routes/posting-properties.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

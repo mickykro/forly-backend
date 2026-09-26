@@ -96,9 +96,8 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal(s.status, 200);
     const b = s.body;
     assert.equal(b.consent_version, createRouter.CONSENT_VERSION);
-    assert.equal(b.member_groups.length, 5);
-    const g999 = b.member_groups.find((g) => g.group_id === "999");
-    assert.equal(g999.name, "קבוצה פרטית"); assert.equal(g999.private, true); assert.equal(g999.in_catalog, false);
+    assert.equal(b.member_groups.length, 4);
+    assert.ok(!b.member_groups.some((g) => g.group_id === "999"), "a group that is not real estate (no such name, not in the catalog) is not shown");
     assert.ok(!s.raw.includes("abcd"), "no name hash");
     const g111 = b.member_groups.find((g) => g.group_id === "111");
     assert.equal(g111.name, "דירות בחיפה G111"); assert.equal(g111.agent_policy, "explicitly_allowed"); assert.equal(g111.is_default, true);
@@ -165,7 +164,7 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal(b2.status, 503); assert.equal(b2.body.error, "driver_busy");
     mode = "ok";
     const ok = await call(env.app, "POST", "/api/posting/groups/resync");
-    assert.equal(ok.status, 200, "busy runs did not use up the 10 minutes"); assert.equal(ok.body.member_groups.length, 5);
+    assert.equal(ok.status, 200, "busy runs did not use up the 10 minutes"); assert.equal(ok.body.member_groups.length, 4, "the one that is not real estate is not shown");
     const soon = await call(env.app, "POST", "/api/posting/groups/resync");
     assert.equal(soon.status, 429); assert.equal(soon.body.error, "too_soon"); assert.ok(soon.body.retry_after_s > 0);
     clk.t = new Date(K.NOW.getTime() + 11 * K.MIN);
