@@ -36,6 +36,18 @@ The review accepted the direction and named six blockers, all about making irrev
 
 Pushed back on two details, with the reason in place: the review's multi-instance registry concern (this deployment is one container, stated in Global Constraints; the dev viewer is documented as single-instance) and its reading of the CSP (the absence of `frame-src` permits embedding; Task 11 adds an explicit `frame-src` anyway, and the dev viewer no longer uses an iframe at all).
 
+### Revision 3 — implemented (Phase 3, 2026-09-26)
+
+Phase 3 (Tasks 13–24) is built on `feat/driver-listing-import-publish`, test-first, each task reviewed. Where the code differs from this text, the code governs:
+
+- **Groups are keyed by `group_id`** (numeric, or `slug:<slug>` until resolved), with aliases kept after resolution and a global `group_aliases` registry, so cooldowns, caps and dedup never lose continuity.
+- **Storage lives outside `db.js`**: `posting-store.js`, `posting-attempts.js` (R1 attempts, buckets, dedup — expiring after 14 d per group / 30 d per Page), `posting-tx.js`. Task 16 became 16a (store) + 16b (campaign, account, tick, sweeper, halts modules).
+- **Kill switch is off by default**: posting needs `POSTING_ENABLED=1` and an operator's first "on" (which creates `settings/posting`); the sweeper runs only with `FORLY_ENV=prod` (never staging). Connecting an account is not blocked by the posting switches.
+- **R5 re-enable per class** in `routes/admin-posting.js`: captcha/checkpoint need the operator's attestation of the agent's confirmation; restricted and owner review need `POSTING_OWNER_PHONES`; suspected compromise needs the owner and a reconnect with a new profile. A weaker halt never downgrades a stronger one.
+- **The Facebook Page is opt-in** and needs the agent's explicit choice plus the Page's numeric id; groups are the default target.
+- **Signals** are read per region; a phrase is excused as an echo of our own copy only inside a copy run ≥ max(20, phrase + 10) characters; an unreadable page read is never "ok".
+- **Deferred to the owner**: the live runs (G1, G4, G5 — `scripts/posting-calibrate.local.js`, findings in `2026-09-22-driver-spike-findings.md`), the operator viewer for customer sessions (not built), and the rule text for the link-in-first-comment (R-section says no comments).
+
 **Tech Stack:** Node >= 20 CommonJS, Express 4, Firebase Admin (Firestore), `patchright` (Playwright-compatible, connect-only), vanilla browser JS in `public-agent/`, plain `node x.test.js` assertion scripts.
 
 ## Global Constraints
