@@ -396,4 +396,19 @@ assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("l
   assert.deepEqual(S.nextSlot({ now: sat, account: acc, candidates: [{ group_id: "1", url: "https://www.facebook.com/groups/1" }], pageId: "p" }), { at: null, reason: "browse_only" }, "a warm-up browse on Shabbat");
 }
 
+// ── a local box skips the warm-up (POSTING_WARMUP=1 keeps it); prod never does ──
+{
+  const day1 = new Date("2026-09-27T10:00:00+03:00"); // a Sunday
+  const acc = { first_connected_at: "2026-09-27T08:00:00+03:00", posts: [], halts: [], account_aged: true, posted_manually: true };
+  const cand = [{ group_id: "1", url: "https://www.facebook.com/groups/1" }];
+  const slot = (env) => S.nextSlot({ now: day1, account: acc, candidates: cand, pageId: "p", config: S.configFrom(null, env), rand: () => 0 });
+  assert.equal(slot({ FORLY_ENV: "prod" }).reason, "browse_only", "prod: day 1 only browses");
+  assert.equal(slot({ FORLY_ENV: "staging" }).reason, "browse_only");
+  assert.equal(slot({ FORLY_ENV: "local", POSTING_WARMUP: "1" }).reason, "browse_only", "kept on request");
+  assert.equal(slot({}).reason, "browse_only", "no env given: the warm-up stands");
+  const local = slot({ FORLY_ENV: "local" });
+  assert.notEqual(local.reason, "browse_only", "local: day 1 may post");
+  assert.ok(local.at, "a slot on day 1: " + JSON.stringify(local));
+}
+
 console.log("posting-safety.test.js ok");

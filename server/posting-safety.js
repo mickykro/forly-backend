@@ -161,10 +161,14 @@ function jerusalemDate(date) { return localDate(new Date(date), DEFAULTS.timezon
 // integer override — is ignored, so nextSlot stays pure and predictable.
 // A deep copy: a caller mutating the returned config (e.g. config.active_hours)
 // must never corrupt the shared DEFAULTS object other callers read.
-function configFrom(settings) {
+// env (the caller's, never read here): on a local box the warm-up is
+// skipped so posting can be tested at once — POSTING_WARMUP=1 keeps it.
+// Only FORLY_ENV=local; prod and staging always warm up.
+function configFrom(settings, env = {}) {
   const out = structuredClone(DEFAULTS);
   const v = settings && settings.group_global_daily_cap;
   if (Number.isInteger(v) && v > 0) out.group_global_daily_cap = v;
+  if (env.FORLY_ENV === "local" && env.POSTING_WARMUP !== "1") out.warmup = [];
   return out;
 }
 

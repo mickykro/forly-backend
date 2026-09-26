@@ -64,7 +64,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     try {
       const plan = await campaigns.planAccount(phone, deps, now);
       if (plan) return { at: plan.at ? A.iso(plan.at) : null, reason: plan.at ? null : plan.reason || null };
-      const config = deps.config || safety.configFrom(await db.getSetting("posting"));
+      const config = deps.config || safety.configFrom(await db.getSetting("posting"), deps.env || process.env);
       const account = await A.accountView(phone, conn, deps, now);
       const slot = safety.nextSlot({ now, account, candidates: [{ group_id: "first-post-estimate", url: null }], pageId: null, config, rand: deps.rand || Math.random });
       return { at: slot.at ? A.iso(slot.at) : null, reason: slot.at ? null : slot.reason || null };

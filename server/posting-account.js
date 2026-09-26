@@ -50,7 +50,7 @@ const guardDeps = (deps, x) => ({ db: x.db, env: deps.env || process.env });
 
 async function configOf(deps, x) {
   if (deps.config) return deps.config;
-  return safety.configFrom(await x.db.getSetting("posting"));
+  return safety.configFrom(await x.db.getSetting("posting"), deps.env || process.env);
 }
 
 // facebook.com/groups/<slug> → the Task 14 group_id: the numeric id, or
