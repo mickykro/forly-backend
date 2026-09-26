@@ -8,10 +8,11 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const api = (path, opts) => fetch(path, { credentials: "include", ...opts })
+    .catch(() => { throw Object.assign(new Error("network"), { code: "network" }); })
     .then(async (r) => {
       if (r.status === 401) { location.href = "/"; throw new Error("unauthenticated"); }
       const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw Object.assign(new Error(body.error || "error"), { code: body.error });
+      if (!r.ok) throw Object.assign(new Error(body.error || "error"), { code: body.error || (r.status === 404 ? "unavailable" : "error"), status: r.status, reason: body.reason });
       return body;
     });
 
@@ -234,6 +235,25 @@
   }
   $("browserRows").innerHTML = PLATFORM_ROWS.map(rowHtml).join("");
 
+  // Every error the connect routes can answer, in the agent's words. A 404
+  // means the feature is not switched on on this server (Driver not set up).
+  function connectErrorText(e) {
+    const code = e && e.code;
+    if (code === "posting_disabled") {
+      return e.reason === "account_disabled"
+        ? "החשבון הזה מושהה אצלנו כרגע, ולכן אי אפשר לחבר אותו. הצוות שלנו יחזור אליכם."
+        : "אי אפשר לחבר את החשבון כרגע — נסו שוב מאוחר יותר.";
+    }
+    return ({
+      profile_busy: "פורלי משתמשת בחשבון הזה ממש עכשיו — נסו שוב בעוד כמה דקות.",
+      driver_busy: "כל הדפדפנים שלנו תפוסים כרגע — נסו שוב בעוד דקה.",
+      consent_required: "סמנו את האישור שמעל הכפתור.",
+      extract_unavailable: "לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע.",
+      unavailable: "חיבור חשבונות עדיין לא זמין בשרת הזה.",
+      network: "אין חיבור לשרת — בדקו את האינטרנט ונסו שוב.",
+    })[code] || "משהו השתבש — נסו שוב בעוד רגע.";
+  }
+
   function openBrowser(viewUrl) {
     // The viewer refuses to be framed (X-Frame-Options / frame-ancestors), so
     // it opens in its own window. Stripping that header server-side would mean
@@ -245,15 +265,23 @@
   }
   function closeBrowser() { bModal.hidden = true; bBody.innerHTML = ""; bOpen = false; }
 
+  // The connect button's label always comes from here — never left as a
+  // "working…" text. When status cannot be read, the row keeps what it last
+  // knew (connected or not), so a failed check never flips it.
+  const connected = {};
+  function paintRow(platform) {
+    const on = !!connected[platform];
+    $(`browserConnChip_${platform}`).textContent = on ? "מחובר" : "";
+    $(`browserDisconnectBtn_${platform}`).hidden = !on;
+    $(`browserConnectBtn_${platform}`).textContent = on ? "חיבור מחדש" : "חיבור החשבון";
+  }
   async function refreshBrowserChip(platform) {
     try {
       const j = await api(`/api/connections/browser/${platform}/status`);
-      const on = j.state === "connected";
-      $(`browserConnChip_${platform}`).textContent = on ? "מחובר" : "";
-      $(`browserIdentity_${platform}`).textContent = on && j.identity_label ? `מחובר בתור ${j.identity_label}` : "";
-      $(`browserDisconnectBtn_${platform}`).hidden = !on;
-      $(`browserConnectBtn_${platform}`).textContent = on ? "חיבור מחדש" : "חיבור החשבון";
-    } catch (e) { /* row stays in its default state */ }
+      connected[platform] = j.state === "connected";
+      $(`browserIdentity_${platform}`).textContent = connected[platform] && j.identity_label ? `מחובר בתור ${j.identity_label}` : "";
+    } catch (e) { /* keep what we knew */ }
+    paintRow(platform);
   }
 
   PLATFORM_ROWS.forEach(({ key: platform }) => {
@@ -265,14 +293,18 @@
         const j = await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform, consent: true }) });
         openBrowser(j.view_url);
       } catch (e) {
-        toast(e && e.code === "profile_busy" ? "פורלי כבר משתמשת בחשבון הזה — נסו שוב בעוד כמה דקות" : "לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע");
-      } finally { btn.disabled = false; refreshBrowserChip(platform); }
+        toast(connectErrorText(e));
+      } finally {
+        btn.disabled = false; paintRow(platform); // the label is back at once, whatever happened
+        refreshBrowserChip(platform);
+      }
     });
     $(`browserDisconnectBtn_${platform}`).addEventListener("click", async function () {
       if (!confirm("לנתק את החשבון? פורלי תפסיק להשתמש בו ותמחק את ההתחברות השמורה.")) return;
-      try { await api(`/api/connections/browser/${platform}`, { method: "DELETE" }); toast("החשבון נותק"); }
-      catch (e) { toast("לא הצלחנו לנתק — נסו שוב"); }
-      refreshBrowserChip(platform);
+      const btn = this; btn.disabled = true;
+      try { await api(`/api/connections/browser/${platform}`, { method: "DELETE" }); connected[platform] = false; toast("החשבון נותק"); }
+      catch (e) { toast(e && e.code === "network" ? connectErrorText(e) : "לא הצלחנו לנתק — נסו שוב"); }
+      finally { btn.disabled = false; refreshBrowserChip(platform); }
     });
   });
 
@@ -288,9 +320,11 @@
       const code = e && e.code;
       bMsg.textContent = code === "driver_busy"
         ? "הדפדפן עסוק כרגע, נסו שוב בעוד דקה"
-        : code === "session_expired"
+        : code === "session_expired" || code === "no_open_session"
           ? "עבר יותר מדי זמן והחלון נסגר. פתחו אותו שוב ונסו להתחבר."
-          : "נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ואז לחצו שוב.";
+          : code === "not_logged_in"
+            ? "נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ואז לחצו שוב."
+            : connectErrorText(e);
     } finally { btn.disabled = false; }
   });
 
