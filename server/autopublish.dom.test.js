@@ -68,7 +68,7 @@ function findChromium() {
     const c = Object.values(state.campaigns).find((x) => x.id === q.params.id); c.status = "stopped";
     r.json({ campaign: c });
   });
-  app.get("/api/posting/preview", (q, r) => { state.calls.push(["preview", q.query]); r.json({ copy: `🏡 דירה ב${q.query.page_id}\nשורה שנייה`, comment_link: `https://f.ly/p/${q.query.page_id}`, author: "מיקי", group_name: "דירות בכפר סבא" }); });
+  app.get("/api/posting/preview", (q, r) => { state.calls.push(["preview", q.query]); r.json({ video_url: `https://cdn.f.ly/${q.query.page_id}.mp4`, poster_url: null, copy: `🏡 דירה ב${q.query.page_id}\nשורה שנייה`, comment_link: `https://f.ly/p/${q.query.page_id}`, author: "מיקי", group_name: "דירות בכפר סבא" }); });
   app.use(express.static(path.join(__dirname, "..", "public-agent")));
   const srv = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
   const page = await browser.newPage();
@@ -91,6 +91,7 @@ function findChromium() {
     await page.waitForSelector('button[data-confirm="pgK"]');
     const card = await rows.nth(0).locator(".ap-fb").textContent();
     assert.ok(card.includes("🏡 דירה בpgK") && card.includes("מיקי") && card.includes("https://f.ly/p/pgK") && card.includes("דירות בכפר סבא"), card);
+    assert.equal(await rows.nth(0).locator(".ap-fb video").getAttribute("src"), "https://cdn.f.ly/pgK.mp4", "the post's video");
     assert.equal(await rows.nth(0).locator("[data-toggle]").isChecked(), false);
     assert.deepEqual(state.calls.map((c) => c[0]), ["preview"]);
     assert.equal(state.calls[0][1].group_id, "k1", "previewed for the property's first group");

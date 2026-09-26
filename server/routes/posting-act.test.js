@@ -48,6 +48,30 @@ const linkFor = (campaignId, postId, action, now = K.NOW) => pathOf(createRouter
     assert.equal(JSON.stringify(await store.getPostingCampaign(c.id)), before, "a GET changes nothing");
   }
 
+  // ── GET shows the post: the property's video, the copy as its description, the link as the first comment ──
+  {
+    const env = await setup();
+    const V = "https://cdn.f.ly/files/pg/walkthrough.mp4", PO = "https://cdn.f.ly/files/pg/poster.jpg";
+    const c = await pendingCampaign(env, { copy: "דירה בחיפה\n4 חדרים", video_url: V, poster_url: PO });
+    const r = await call(env.app, "GET", linkFor(c.id, "p1", "approve"));
+    assert.ok(r.raw.includes(`<video controls playsinline preload="metadata" src="${V}" poster="${PO}"`), "the video");
+    assert.ok(r.raw.includes("דירה בחיפה\n4 חדרים"), "the copy, line breaks kept");
+    assert.ok(r.raw.includes(`/p/${c.page_id}`) && r.raw.includes("תגובה ראשונה"), "the first comment");
+    assert.ok(r.raw.indexOf("<video") < r.raw.indexOf("<form"), "the post above the button");
+    // A post planned before videos were stored: the page's own video.
+    const page = await K.db.getPage(c.page_id);
+    await K.db.savePage(Object.assign({}, page, { hero: { video_url: V, poster_url: "javascript:alert(1)" } }));
+    const old = await pendingCampaign(env);
+    const r2 = await call(env.app, "GET", linkFor(old.id, "p1", "approve"));
+    assert.ok(r2.raw.includes(`src="${V}"`) && !r2.raw.includes("javascript:"), "the page's video; no unsafe poster");
+    // No video: said so, no player.
+    const none = await pendingCampaign(env, { video_url: null });
+    const r3 = await call(env.app, "GET", linkFor(none.id, "p1", "skip"));
+    assert.ok(!r3.raw.includes("<video") && r3.raw.includes("טקסט בלבד"));
+    // Stop has no post to show.
+    assert.ok(!(await call(env.app, "GET", linkFor(c.id, "", "stop"))).raw.includes("<video"));
+  }
+
   // ── POST a valid stop link: stopped — with no login, and whatever the switches say ──
   {
     const env = await setup();

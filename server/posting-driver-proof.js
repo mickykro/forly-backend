@@ -51,6 +51,14 @@ const SELECTORS = {
   postAuthor: 'div[role="main"] h2 strong, div[role="main"] h3 strong', // [Unverified]
   commentBox: 'div[aria-label^="כתיבת תגובה"], div[aria-label^="Write a comment"]', // [Unverified]
   commentSubmit: 'div[aria-label="תגובה"][role="button"], div[aria-label="Comment"][role="button"]', // [Unverified]
+  // The post's video (posting-media.js), all inside our own composer: its
+  // file input, else its Photo/video button (then a drop zone that opens the
+  // file chooser); attached = a preview; uploading = a progress bar.
+  mediaInput: `${COMPOSER_ROOT} input[type="file"]`, // [Unverified]
+  mediaButton: `${COMPOSER_ROOT} div[aria-label="תמונה/סרטון"][role="button"], ${COMPOSER_ROOT} div[aria-label="Photo/video"][role="button"]`, // [Unverified]
+  mediaDrop: `${COMPOSER_ROOT} [role="button"]:has-text("הוספת תמונות/סרטונים"), ${COMPOSER_ROOT} [role="button"]:has-text("Add photos/videos")`, // [Unverified]
+  mediaAttached: `${COMPOSER_ROOT} video, ${COMPOSER_ROOT} img[src^="blob:"]`, // [Unverified]
+  mediaProgress: `${COMPOSER_ROOT} [role="progressbar"]`, // [Unverified]
 };
 
 const norm = (s) => (s === undefined || s === null ? "" : String(s)).normalize("NFC").replace(/\s+/g, " ").trim();

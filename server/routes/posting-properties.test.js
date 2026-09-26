@@ -124,6 +124,10 @@ const { db, store } = K;
     assert.ok(!/https?:\/\//.test(r.body.copy), "no link in the body: it goes in the first comment");
     assert.equal(r.body.comment_link, "https://f.ly/p/pg2");
     assert.equal(r.body.author, "דנה כהן"); assert.equal(r.body.group_name, "דירות בחיפה G111");
+    assert.equal(r.body.video_url, null, "no video on the page: none in the post");
+    await db.savePage(Object.assign({}, page, { hero: { video_url: "https://cdn.f.ly/w.mp4", poster_url: "https://cdn.f.ly/p.jpg" } }));
+    const withVideo = (await call(app, "GET", "/api/posting/preview?page_id=pg2&group_id=111")).body;
+    assert.deepEqual([withVideo.video_url, withVideo.poster_url], ["https://cdn.f.ly/w.mp4", "https://cdn.f.ly/p.jpg"], "the page's own video");
     assert.equal((await call(app, "GET", "/api/posting/preview?page_id=pgX")).status, 404, "another agent's page");
     assert.equal((await call(app, "GET", "/api/posting/preview?page_id=../x")).status, 400);
   }

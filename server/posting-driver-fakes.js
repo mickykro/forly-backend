@@ -48,6 +48,7 @@ function fakePage(o = {}) {
       pressSequentially: async (t) => { st.typed.push(t); ev.push(`type:${nameOf(sel)}`); if (sel === S.editor && !st.submitted) st.editor += t; },
       innerText: async () => String(v(texts[sel]) ?? ""),
       getAttribute: async () => v(attrs[sel]) ?? null,
+      setInputFiles: async (f) => { st.files = (st.files || []).concat([f]); ev.push(`files:${nameOf(sel)}`); },
     };
     n.first = () => n; n.nth = () => n;
     return n;

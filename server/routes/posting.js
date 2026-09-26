@@ -250,8 +250,27 @@ module.exports = function createPostingRouter(ctx) {
     const form = `<form method="post" action="${esc(action)}"><button type="submit" style="background:#B98A2F;color:#fff;border:0;` +
       `border-radius:12px;padding:12px 18px;font-size:1rem;width:100%;cursor:pointer">${esc(button)}</button></form>`;
     const body = r.post ? `פוסט ${where(r.post)}.` : "מה שכבר פורסם יישאר בקבוצות.";
-    return r.send(200, question, body, form);
+    return r.send(200, question, body, (await postCard(r.camp, r.post)) + form);
   }));
+
+  // The post as it will look: the property's video, the copy as its
+  // description, the link as the first comment. Nothing when the text is gone.
+  async function postCard(camp, post) {
+    if (!post || typeof post.copy !== "string" || !post.copy) return "";
+    const page = post.video_url === undefined ? await db.getPage(camp.page_id).catch(() => null) : null;
+    const v = post.video_url === undefined ? require("../posting-campaign").videoOf(page) : { video_url: post.video_url, poster_url: post.poster_url || null };
+    const conn = (await db.getConnection(camp.phone).catch(() => null)) || {};
+    const who = esc(conn.facebook_identity_label || "החשבון שלכם");
+    const link = `${deps.pageBaseUrl || ""}/p/${camp.page_id}`;
+    const video = v.video_url
+      ? `<video controls playsinline preload="metadata" src="${esc(v.video_url)}"${v.poster_url ? ` poster="${esc(v.poster_url)}"` : ""} style="width:100%;max-height:70vh;background:#000;display:block"></video>`
+      : `<p style="margin:0 12px 10px;color:#8A8276;font-size:.85rem">לנכס הזה אין סרטון — הפוסט יעלה כטקסט בלבד.</p>`;
+    return `<div style="background:#fff;border:1px solid #E6DFD3;border-radius:12px;text-align:right;margin:0 0 16px;overflow:hidden">` +
+      `<div style="padding:12px;font-size:.9rem"><b>${who}</b> ◂ ${esc(post.target === "page" ? "הדף העסקי" : post.group_name || S_.PRIVATE_NAME)}</div>` +
+      `<div style="padding:0 12px 12px;white-space:pre-wrap;line-height:1.6">${esc(post.copy)}</div>${video}` +
+      `<div style="padding:10px 12px;border-top:1px solid #EFE9DF;font-size:.85rem"><b>${who}</b> <span dir="ltr">${esc(link)}</span>` +
+      `<div style="color:#8A8276;font-size:.75rem">תגובה ראשונה — הקישור לדף הנכס</div></div></div>`;
+  }
 
   router.post("/act", wrap("act", async (req, res) => {
     const r = await readAct(req, res);

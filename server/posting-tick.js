@@ -197,9 +197,11 @@ async function runDue(c, post, st, deps, x, now) {
 
   // Standing: the copy is rebuilt from the page as it is now. Per-post: the
   // agent approved exact text — if the page changed since, ask again.
+  // The video is part of what was approved: a new (or first) one asks again.
   const fresh = C._test.buildCopy(page, c, target);
-  if (c.mode === "per_post" && fresh !== post.copy) {
-    const next = await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "pending_approval", copy: fresh, copy_hash: sha(fresh), approved_at: null } : p)) }));
+  const video = C.videoOf(page);
+  if (c.mode === "per_post" && (fresh !== post.copy || (post.video_url || null) !== video.video_url)) {
+    const next = await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "pending_approval", copy: fresh, copy_hash: sha(fresh), approved_at: null, ...video } : p)) }));
     const p2 = next && next.posts.find((p) => p.id === post.id);
     if (p2) await say(deps, phone, "approve", `📣 פרטי הנכס השתנו — פוסט מעודכן לאישור:\n──────────\n${fresh}\n──────────`, next, p2);
     return "reapproval";
@@ -221,12 +223,12 @@ async function runDue(c, post, st, deps, x, now) {
     click_id: crypto.randomBytes(16).toString("hex"), // R4: ?c= on this attempt's link
     limits: A.limitsFor(account, now, config, target.target), now,
   });
-  if (r.ok) return startAttempt(r.attempt, { c, post, copy, target, conn, lock: st.lock }, deps, x, now);
+  if (r.ok) return startAttempt(r.attempt, { c, post, copy, target, conn, video, lock: st.lock }, deps, x, now);
 
   if (r.reason === "already_reserved" && r.attempt) {
     const a = r.attempt;
     const ours = a.campaign_id === c.id && a.post_id === post.id;
-    if (ours && a.state === "reserved" && a.copy_hash === sha(copy)) return startAttempt(a, { c, post, copy, target, conn, lock: st.lock }, deps, x, now);
+    if (ours && a.state === "reserved" && a.copy_hash === sha(copy)) return startAttempt(a, { c, post, copy, target, conn, video, lock: st.lock }, deps, x, now);
     if (ours && a.state !== "cancelled" && !a.released) {
       // An orphan of ours past `reserved`: adopt it; the reaper and the mirror finish it.
       await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "posting", attempt_key: a.key, posting_started_at: a.reserved_at } : p)) }));
@@ -269,7 +271,7 @@ const isInfra = (err) => !!err && err.code !== "posting_disabled" && !H.classOf(
 // Runs one reserved attempt through the injected driver (Task 18).
 async function runAttempt(attempt, st, deps, now) {
   const x = ctxOf(deps);
-  const { c, post, copy, target, conn } = st;
+  const { c, post, copy, target, conn, video } = st;
   const phone = attempt.phone;
   const gd = A.guardDeps(deps, x);
   // R2: before creating a session.
@@ -293,7 +295,7 @@ async function runAttempt(attempt, st, deps, now) {
   const args = {
     attempt, copy, comment: `${deps.pageBaseUrl || ""}/p/${c.page_id}?c=${attempt.click_id}`,
     profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0),
-    dryRun: deps.dryRun === true, campaignId: c.id, phone,
+    dryRun: deps.dryRun === true, campaignId: c.id, phone, videoUrl: (video && video.video_url) || null,
     [post.target === "page" ? "pageUrl" : "groupUrl"]: target.url,
   };
   const postDeps = {

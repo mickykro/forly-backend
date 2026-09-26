@@ -32,7 +32,7 @@ const PENALISING = safety.SIGNAL_PENALISES; // rate_limited, feature_blocked
 const QUARANTINED = new Set(["captcha", "checkpoint"]);
 const CLASSES = new Set([...DISABLING, ...PENALISING, "login_required", "suspected_compromise", "selector_failure", "confirmed_removed"]);
 // Codes the driver (Task 18) reports when the page's own markers are missing.
-const SELECTOR_CODES = new Set(["selector_failure", "composer_not_found", "navigation_failed", "markers_missing"]);
+const SELECTOR_CODES = new Set(["selector_failure", "composer_not_found", "navigation_failed", "markers_missing", "media_not_found"]);
 const SELECTOR_PAUSE_AT = 3;
 // How hard a disable is to lift (Task 21 fix round 1): a halt never replaces
 // an in-force disable of a STRONGER class, so a captcha after a suspected

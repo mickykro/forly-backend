@@ -349,6 +349,15 @@ function buildCopy(page, c, target) {
   return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, "", { variantSeed: c.page_id + target.url, linkInComment: true });
 }
 
+// The post's media: the property's own walkthrough video (the one its page
+// plays), the copy being its description. http(s) only; none → text only.
+function videoOf(page) {
+  const h = (page && page.hero) || {};
+  const ok = (u) => (typeof u === "string" && /^https?:\/\/[^\s]+$/i.test(u) ? u : null);
+  const video_url = ok(h.video_url);
+  return { video_url, poster_url: video_url ? ok(h.poster_url) : null };
+}
+
 // Appends the planned post to its campaign (scheduled, or pending_approval in
 // per_post mode — the agent then sees the exact copy).
 async function schedulePost(decision, deps = {}, now) {
@@ -361,11 +370,13 @@ async function schedulePost(decision, deps = {}, now) {
   const target = decision.target === "page" ? A.pageTarget(conn) : c.groups.find((g) => g.group_id === decision.group_id);
   if (!target) return c;
   const copy = buildCopy(page, c, target);
+  const video = videoOf(page);
   const base = {
     id: crypto.randomUUID(), target: decision.target === "page" ? "page" : "group",
     group_id: target.group_id, group_url: target.url, group_name: target.name || "",
     scheduled_at: iso(decision.at), created_at: iso(now), approved_at: null, posting_started_at: null, posted_at: null,
     post_url: null, error_code: null, attempt_key: null, retries: 0, copy, copy_hash: sha(copy),
+    video_url: video.video_url, poster_url: video.poster_url,
   };
   // Appended only while the campaign is still running (a STOP may have landed
   // since the read above); the mode is the committed one.
@@ -375,13 +386,13 @@ async function schedulePost(decision, deps = {}, now) {
   }));
   const post = next && next.posts.find((p) => p.id === base.id);
   if (post && post.status === "pending_approval") {
-    await say(deps, c.phone, "approve", `📣 פוסט מוכן לאישור ל${post.target === "page" ? "דף העסקי" : `קבוצה "${post.group_name || post.group_url}"`}:\n──────────\n${copy}\n──────────`, next, post);
+    await say(deps, c.phone, "approve", `📣 פוסט מוכן לאישור ל${post.target === "page" ? "דף העסקי" : `קבוצה "${post.group_name || post.group_url}"`}${video.video_url ? " (עם סרטון הנכס)" : ""}:\n──────────\n${copy}\n──────────`, next, post);
   }
   return next;
 }
 
 module.exports = {
-  create, enrollNewPage, pause, resume, stop, approvePost, skipPost, revokePermission, planAccount, schedulePost, buildCopy,
+  create, enrollNewPage, pause, resume, stop, approvePost, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.
   tick: (...a) => require("./posting-sweeper").tick(...a),

@@ -183,6 +183,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const cat = m ? S_.catalogLookup(await S.catalog(null))(m) : null;
     const target = { group_id: m ? m.group_id : null, url: m ? S_.memberUrl(m) : `preview:${pageId}` };
     return res.json({
+      ...require("../posting-campaign").videoOf(page), // the post's video; the copy is its description
       copy: campaigns.buildCopy(page, { page_id: pageId }, target),
       comment_link: `${S.pageBaseUrl || deps.pageBaseUrl || ""}/p/${pageId}`,
       author: conn.facebook_identity_label || null,

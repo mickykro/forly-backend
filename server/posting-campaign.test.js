@@ -185,6 +185,26 @@ const PH = "972500000001";
     assert.equal(c.posts[0].error_code, "agent");
   }
 
+  // ── the property's video is part of the post: stored when planned, re-approved when it changes, handed to the driver ──
+  {
+    const { deps, at } = await setup();
+    let c = await C.create(base({ mode: "per_post" }), deps);
+    c = await S.tick(c, deps, at(NOW));
+    assert.equal(c.posts[0].video_url, null, "no video yet: a text post");
+    c = await C.approvePost(c.id, c.posts[0].id, deps);
+    const V = "https://cdn.f.ly/files/pg1/walkthrough.mp4";
+    await db.updatePage("pg1", { hero: { video_url: V, poster_url: "https://cdn.f.ly/files/pg1/poster.jpg" } });
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal(c.posts[0].status, "pending_approval", "a video added after approval: asked again");
+    assert.equal(c.posts[0].video_url, V); assert.equal(c.posts[0].poster_url, "https://cdn.f.ly/files/pg1/poster.jpg");
+    assert.equal(deps.post.calls.length, 0);
+    c = await C.approvePost(c.id, c.posts[0].id, deps);
+    await S.tick(c, deps, at(dueOf(await store.getPostingCampaign(c.id))));
+    assert.equal(deps.post.calls.length, 1);
+    assert.equal(deps.post.calls[0].videoUrl, V, "the driver attaches it");
+    assert.deepEqual(C.videoOf({ hero: { video_url: "javascript:x", poster_url: V } }), { video_url: null, poster_url: null }, "http(s) only");
+  }
+
   // ── stop cancels what is scheduled; a later tick posts nothing; stop(id, { db }) works too ──
   {
     const { deps, at } = await setup();

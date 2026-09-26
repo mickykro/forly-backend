@@ -45,6 +45,37 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(pd.phone, PHONE); assert.equal(pd.platform, "facebook"); assert.equal(pd.lockHeld, true);
   }
 
+  // ── the property's video: fetched before any browser, attached in the composer before the text, then posted ──
+  {
+    const VIDEO = { name: "property.mp4", mimeType: "video/mp4", buffer: Buffer.from("mp4") };
+    const fetched = [];
+    const h = harness({ page: { counts: { [S.mediaInput]: 1, [S.mediaAttached]: (s) => (s.files ? 1 : 0), [S.mediaProgress]: 0 } } });
+    h.deps.fetchMedia = async (u) => { fetched.push(u); h.ev.push("fetch"); return VIDEO; };
+    const out = await PD.postToGroup(argsOf({ videoUrl: "https://cdn.f.ly/v.mp4" }), h.deps);
+    assert.deepEqual(fetched, ["https://cdn.f.ly/v.mp4"]);
+    assert.ok(h.ev.indexOf("fetch") < h.ev.indexOf("open"), "fetched before the browser opens");
+    assert.deepEqual(h.page.st.files, [VIDEO], "the video went into the composer's file input");
+    assert.ok(h.ev.indexOf("t:composer_ready") < h.ev.indexOf("files:mediaInput") && h.ev.indexOf("files:mediaInput") < h.ev.indexOf("type:editor"), "attached, then the description typed");
+    assert.equal(h.page.st.editor, COPY, "the copy is the video's description");
+    assert.equal(out.state, "verified_posted"); assert.equal(out.media, "video"); assert.equal(h.submits(), 1);
+  }
+  // A video we cannot fetch: failed before any session — never a text-only post.
+  {
+    const h = harness();
+    h.deps.fetchMedia = async () => { throw Object.assign(new Error("x"), { code: "ECONNREFUSED" }); };
+    const out = await PD.postToGroup(argsOf({ videoUrl: "https://cdn.f.ly/v.mp4" }), h.deps);
+    assert.equal(out.state, "verified_failed"); assert.equal(out.error_code, "media_unavailable");
+    assert.equal(h.opened.length, 0, "no browser opened"); assert.equal(h.submits(), 0);
+  }
+  // Nowhere to attach it: failed before Post (a selector failure), nothing typed.
+  {
+    const h = harness();
+    h.deps.fetchMedia = async () => ({ name: "property.mp4", mimeType: "video/mp4", buffer: Buffer.from("mp4") });
+    const out = await PD.postToGroup(argsOf({ videoUrl: "https://cdn.f.ly/v.mp4" }), h.deps);
+    assert.equal(out.error_code, "media_not_found"); assert.equal(h.submits(), 0); assert.equal(h.page.st.editor, "");
+    assert.equal(require("./posting-halts").classOf("media_not_found"), "selector_failure");
+  }
+
   // ── already cancelled (STOP / revoke / reaper): session_started refused → zero sessions ──
   {
     const h = harness({ illegalAt: "session_started" });

@@ -59,6 +59,7 @@
     return `<div class="ap-preview"><div class="ap-fb">
         <div class="ap-fb-head"><b>${who}</b> ◂ ${U.esc(v.group_name || "הקבוצה")}</div>
         <div class="ap-fb-body">${U.esc(v.copy)}</div>
+        ${/^https?:\/\//.test(v.video_url || "") ? `<video class="ap-fb-video" controls playsinline preload="metadata" src="${U.esc(v.video_url)}"${/^https?:\/\//.test(v.poster_url || "") ? ` poster="${U.esc(v.poster_url)}"` : ""}></video>` : ""}
         <div class="ap-fb-comment"><b>${who}</b> <span dir="ltr">${U.esc(v.comment_link)}</span><small>תגובה ראשונה — הקישור לדף הנכס</small></div>
       </div>
       <p class="camp-muted camp-small">כך ייראה הפוסט. הנוסח משתנה מעט מקבוצה לקבוצה, והמחיר והפרטים נלקחים מדף הנכס ברגע הפרסום.</p>

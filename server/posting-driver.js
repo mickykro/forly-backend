@@ -23,11 +23,15 @@
  * R3: posting-driver-proof.proveIdentityAndDestination must pass before the
  * click; any mismatch → `verified_failed` with its code, session stopped.
  *
+ * With a videoUrl the property's video is attached in the composer
+ * (posting-media.js) and the copy is its description; a video that cannot
+ * be fetched or attached fails the attempt before Post — never text only.
+ *
  * After verified_posted the link goes in as the first comment; its result
  * is a follow-up note (attempts.annotate), never part of the state write.
  *
  * Returns { state, error_code?, permalink?, signal?, membership?,
- * resolved_group_id?, comment_error_code?, dry_run? } for business outcomes;
+ * resolved_group_id?, comment_error_code?, dry_run?, media? } for business outcomes;
  * only infrastructure errors throw (posting-tick's settle closes the attempt).
  * A halting signal is reported (`signal`), never acted on here: 16b's
  * haltAccount does that from the attempt's error_code.
@@ -40,6 +44,7 @@ const social = require("./social-dwell");
 const { profileName } = require("./profile-name");
 const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
 const P = require("./posting-driver-proof");
+const media = require("./posting-media");
 
 const S = P.SELECTORS;
 const FEED_URL = "https://www.facebook.com/";
@@ -229,10 +234,20 @@ async function drive(page, x, want, args) {
   const roots = await P.countOf(page, S.composerRoot);
   if (roots !== 1) return x.end("verified_failed", { error_code: roots < 1 ? "composer_not_found" : "destination_mismatch" });
   await x.step("composer_ready");
+  // The property's video first (it uploads while the text is typed); the copy is its description.
+  if (x.media) {
+    const bad = await media.attach(page, x, x.media);
+    if (bad) return x.end("verified_failed", { error_code: bad });
+    x.extra.media = "video";
+  }
   await editor.click();
   try { await humanType(page, editor, copy, x); }
   catch (e) { if (e && e.code === "composer_focus_lost") return x.end("verified_failed", { error_code: e.code }); throw e; }
   await x.wait(page, 5, 20); // re-read before posting, like anyone would
+  if (x.media) {
+    const bad = await media.waitUploaded(page, x);
+    if (bad) return x.end("verified_failed", { error_code: bad });
+  }
 
   // 4. R3 — prove who, where and what, immediately before Post
   const proof = await P.proveIdentityAndDestination(page, attempt, x.conn, { copy, resolvedGroupId: x.resolvedId });
@@ -347,6 +362,11 @@ async function run(kind, args = {}, deps = {}) {
     if (!want.ok) return await x.end("verified_failed", { error_code: want.code });
     x.want = want;
     await x.guard("session"); // R2
+    // The video is fetched before any browser opens: one we cannot serve costs no session.
+    if (args.videoUrl) {
+      try { x.media = await media.fetchVideo(args.videoUrl, deps); }
+      catch (e) { return await x.end("verified_failed", { error_code: /^media_/.test((e && e.code) || "") ? e.code : "media_unavailable" }); }
+    }
     const withPage = deps.withPage || driver.withPage;
     return await withPage(sessionOpts(x, "forly-post:", POST_SESSION_S), (page) => drive(page, x, want, args), pageDepsOf(x));
   } catch (e) {
@@ -354,7 +374,7 @@ async function run(kind, args = {}, deps = {}) {
   }
 }
 
-// postToGroup / postToPage({ attempt, copy, comment, dryRun, groupUrl|pageUrl }, deps)
+// postToGroup / postToPage({ attempt, copy, comment, videoUrl, dryRun, groupUrl|pageUrl }, deps)
 // → { state, … } (see the header). deps: posting-tick's postDeps.
 const postToGroup = (args, deps) => run("group", args, deps);
 const postToPage = (args, deps) => run("page", args, deps);
