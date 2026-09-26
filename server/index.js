@@ -289,10 +289,11 @@ if (driverBoot.enabled) {
 }
 
 // ── dev-only: watch the browsers this server opens (routes/dev-driver.js) ──
-// bootCheck already refused to start with the flag outside FORLY_ENV=local.
+// On by itself under FORLY_ENV=local (driver-browser.devViewOn); bootCheck
+// refuses DRIVER_DEV_VIEW=1 anywhere else.
 if (driverBoot.devView) {
   app.use("/api/dev/driver", require("./routes/dev-driver")({ requireAdmin, requireStepUp }));
-  console.warn("DRIVER_DEV_VIEW=1: dev browser viewer at /dev-driver.html");
+  console.warn("FORLY_ENV=local: every Driver browser is shown at /dev-driver.html (DRIVER_DEV_VIEW=0 turns it off)");
 }
 
 // ── profile onboarding (the 15-field "השלמת פרופיל" form) ──

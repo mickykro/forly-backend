@@ -14,6 +14,7 @@ function fakeViewer() {
   v.hub = { last: null };
   v.attach = async (key, sid) => { if (v.attachError) { const e = new Error(v.attachError); e.code = v.attachError; throw e; } v.attached.push([key, sid]); return v.hub; };
   v.subscribe = (hub, fn) => { v.subs.add(fn); return () => v.subs.delete(fn); };
+  v.pipe = (req, res, hub) => require("../connect-viewer").pipe(req, res, hub, v.subscribe);
   v.emit = (evt) => { for (const fn of [...v.subs]) fn(evt); };
   v.close = async (key, reason) => { v.closed.push([key, reason]); };
   v.input = async (key, body) => { if (v.inputError) { const e = new Error(v.inputError); e.code = v.inputError; throw e; } v.inputs.push([key, body]); return { editable: true }; };

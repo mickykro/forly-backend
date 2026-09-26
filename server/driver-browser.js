@@ -52,6 +52,13 @@ function driverMissing(env) {
 }
 const driverEnabled = (env = process.env) => !!env.DRIVER_API_KEY && driverMissing(env).length === 0;
 
+// The dev browser monitor (/dev-driver.html): on by itself on a local box —
+// every browser this server opens is shown there — and never anywhere else.
+// DRIVER_DEV_VIEW=0 turns it off locally; =1 outside local is refused at boot.
+function devViewOn(env = process.env) {
+  return env.DRIVER_DEV_VIEW !== "0" && env.FORLY_ENV === "local" && env.NODE_ENV !== "production";
+}
+
 // index.js's boot decision, as a pure function: `fatal` → refuse to start.
 // An unset FORLY_ENV still boots (profileName refuses when called; Driver
 // stays off); a wrong one does not. NODE_ENV=production without
@@ -68,8 +75,8 @@ function bootCheck(env = process.env) {
     if (env.FORLY_ENV !== "local" || env.NODE_ENV === "production") {
       return fatal("DRIVER_DEV_VIEW=1 is allowed only with FORLY_ENV=local and NODE_ENV not production — unset it");
     }
-    out.devView = true;
   }
+  out.devView = devViewOn(env);
   if (env.DRIVER_API_KEY) {
     out.missing = driverMissing(env);
     out.enabled = out.missing.length === 0;
@@ -130,7 +137,7 @@ const proxyDefault = () => (process.env.DRIVER_PROXY_URL ? { proxyUrl: process.e
 // browser the server opens (routes/dev-driver.js). Never on in production
 // (index.js refuses to boot with the flag outside FORLY_ENV=local). The list
 // carries no cdpUrl — watching one takes a viewer grant.
-let devView = process.env.DRIVER_DEV_VIEW === "1";
+let devView = devViewOn(process.env);
 const live = new Map();
 const platformOfNote = (note) => {
   const m = String(note || "").match(/^forly-(?:(?:prod|staging|local)-)?[a-z]+:(.+)$/);
@@ -350,7 +357,7 @@ async function deleteProfile(name, deps = {}) {
 module.exports = {
   DriverError, createSession, getSession, listSessions, stopSession,
   cleanupOrphans, waitForActive, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
-  redact, describeError, driverEnabled, bootCheck, mintViewerGrant, consumeViewerGrant,
+  redact, describeError, driverEnabled, bootCheck, devViewOn, mintViewerGrant, consumeViewerGrant,
   _test: {
     backoffMs, scopeNote,
     setDevView: (v) => { devView = v; live.clear(); grants.clear(); },

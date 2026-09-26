@@ -364,23 +364,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       const code = ["session_expired", "driver_busy"].includes(e && e.code) ? e.code : "viewer_unavailable";
       return res.status(code === "session_expired" ? 409 : 503).json({ error: code });
     }
-    res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" });
-    res.write(": open\n\n");
-    let behind = false;
-    const off = viewer.subscribe(hub, (evt) => {
-      if (res.writableEnded) return;
-      // A slow connection skips frames and gets the newest one when it drains.
-      if (evt.t === "frame" && res.writableNeedDrain) {
-        if (!behind) { behind = true; res.once("drain", () => { behind = false; if (hub.last && !res.writableEnded) res.write(`data: ${JSON.stringify(hub.last)}\n\n`); }); }
-        return;
-      }
-      res.write(`data: ${JSON.stringify(evt)}\n\n`);
-      if (evt.t === "end") res.end();
-    });
-    const beat = setInterval(() => { if (!res.writableEnded) res.write(": k\n\n"); }, 15000);
-    const done = () => { clearInterval(beat); off(); };
-    req.on("close", done);
-    if (req.destroyed) done();
+    viewer.pipe(req, res, hub);
   }));
 
   router.post("/:platform/view/input", requireAuth(authSecret), wrap("input", async (req, res) => {

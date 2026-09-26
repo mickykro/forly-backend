@@ -209,4 +209,26 @@ async function input(key, raw) {
   return {};
 }
 
-module.exports = { attach, subscribe, input, close, parseInput, shortUrl, _hubs: hubs, MAX_TEXT };
+// The hub as a server-sent-events response: frames ({t:"frame",d,w,h,u}),
+// ending with {t:"end",reason}. A slow connection skips frames and gets the
+// newest one when it drains; a heartbeat keeps proxies from closing it.
+function pipe(req, res, hub, sub = subscribe) {
+  res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no" });
+  res.write(": open\n\n");
+  let behind = false;
+  const off = sub(hub, (evt) => {
+    if (res.writableEnded) return;
+    if (evt.t === "frame" && res.writableNeedDrain) {
+      if (!behind) { behind = true; res.once("drain", () => { behind = false; if (hub.last && !res.writableEnded) res.write(`data: ${JSON.stringify(hub.last)}\n\n`); }); }
+      return;
+    }
+    res.write(`data: ${JSON.stringify(evt)}\n\n`);
+    if (evt.t === "end") res.end();
+  });
+  const beat = setInterval(() => { if (!res.writableEnded) res.write(": k\n\n"); }, 15000);
+  const done = () => { clearInterval(beat); off(); };
+  req.on("close", done);
+  if (req.destroyed) done();
+}
+
+module.exports = { attach, subscribe, pipe, input, close, parseInput, shortUrl, _hubs: hubs, MAX_TEXT };

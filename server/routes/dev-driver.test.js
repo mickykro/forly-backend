@@ -95,6 +95,32 @@ function call(server, method, path, headers = {}) {
     mixed.cookie = headersFor(ADMIN_B, { stepup: true }).cookie;
     assert.equal((await call(server, "POST", "/api/dev/driver/sessions/sess-1/grant", mixed)).status, 401);
 
+    // ── in-page view: any admin, no step-up, no browser address; live sessions only ──
+    {
+      const attached = [], inputs = [];
+      const fake = {
+        attach: async (key, id) => { attached.push([key, id]); return { last: null }; },
+        pipe: (req, res) => { res.writeHead(200, { "Content-Type": "text/event-stream" }); res.end(`data: ${JSON.stringify({ t: "end", reason: "closed" })}\n\n`); },
+        input: async (key, body) => { inputs.push([key, body]); return {}; },
+      };
+      const app2 = express(); app2.use(express.json());
+      app2.use("/api/dev/driver", createRouter({ requireAdmin, requireStepUp, driver: D, viewer: fake }));
+      const s2 = await new Promise((r) => { const x = app2.listen(0, () => r(x)); });
+      try {
+        assert.equal((await call(s2, "GET", "/api/dev/driver/sessions/sess-1/view")).status, 401, "admins only");
+        assert.equal((await call(s2, "GET", "/api/dev/driver/sessions/nope/view", headersFor(ADMIN_B))).status, 404, "only a browser this server opened");
+        const v = await call(s2, "GET", "/api/dev/driver/sessions/sess-1/view", headersFor(ADMIN_B));
+        assert.equal(v.status, 200); assert.match(v.headers["content-type"], /event-stream/);
+        assert.deepEqual(attached[0], ["dev|sess-1", "sess-1"]);
+        assert.ok(!v.raw.includes("wss") && !v.raw.includes("viewer.driver.dev"));
+        const inp = await new Promise((resolve) => {
+          const req = http.request({ port: s2.address().port, path: "/api/dev/driver/sessions/sess-1/view/input", method: "POST", headers: Object.assign({ "content-type": "application/json" }, headersFor(ADMIN_B)) }, (res) => { res.resume(); res.on("end", () => resolve(res.statusCode)); });
+          req.end(JSON.stringify({ t: "click", x: 0.5, y: 0.5 }));
+        });
+        assert.equal(inp, 200); assert.deepEqual(inputs[0], ["dev|sess-1", { t: "click", x: 0.5, y: 0.5 }]);
+      } finally { s2.close(); }
+    }
+
     console.log("routes/dev-driver.test.js ok");
   } finally {
     D._test.setDevView(false);

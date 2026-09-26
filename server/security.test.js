@@ -57,8 +57,10 @@ const auth = require("./auth");
   };
   assert.strictEqual(through("/api/dev/driver/sessions").h["Cache-Control"], "no-store");
   assert.strictEqual(through("/api/devices").h["Cache-Control"], undefined);
-  const savedDevView = process.env.DRIVER_DEV_VIEW;
+  // The page exists only on a local box (driver-browser.devViewOn).
+  const savedDevView = process.env.DRIVER_DEV_VIEW, savedEnv = process.env.FORLY_ENV;
   delete process.env.DRIVER_DEV_VIEW;
+  process.env.FORLY_ENV = "prod";
   for (const p of ["/dev-driver.html", "/dev%2Ddriver.html", "//dev-driver.html", "/./dev-driver.html", "/DEV-DRIVER.HTML"]) {
     const r = through(p);
     assert.strictEqual(r.status, 404, p);
@@ -66,8 +68,13 @@ const auth = require("./auth");
   }
   assert.strictEqual(through("/index.html").nexted, true);
   process.env.DRIVER_DEV_VIEW = "1";
-  assert.strictEqual(through("/dev-driver.html").nexted, true);
+  assert.strictEqual(through("/dev-driver.html").status, 404, "the flag alone does not open it outside local");
+  process.env.FORLY_ENV = "local"; delete process.env.DRIVER_DEV_VIEW;
+  assert.strictEqual(through("/dev-driver.html").nexted, true, "local: on by itself");
+  process.env.DRIVER_DEV_VIEW = "0";
+  assert.strictEqual(through("/dev-driver.html").status, 404, "local, turned off");
   if (savedDevView === undefined) delete process.env.DRIVER_DEV_VIEW; else process.env.DRIVER_DEV_VIEW = savedDevView;
+  if (savedEnv === undefined) delete process.env.FORLY_ENV; else process.env.FORLY_ENV = savedEnv;
 
   // ── rate limiter: allows `max` then 429s ──
   const mw = rateLimit({ windowMs: 60_000, max: 2, keyBy: () => "k" });

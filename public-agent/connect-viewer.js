@@ -13,19 +13,27 @@ window.ForlyViewer = (() => {
   const S = "​​";
   const SPECIAL = new Set(["Enter", "Tab", "Escape", "Delete", "Backspace", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
   let cur = null;
+  const stop = (me) => {
+    if (!me || !me.alive) return;
+    me.alive = false;
+    try { me.ac.abort(); } catch (e) { /* already done */ }
+    me.box.innerHTML = "";
+  };
 
-  function unmount() {
-    if (!cur) return;
-    cur.alive = false;
-    try { cur.ac.abort(); } catch (e) { /* already done */ }
-    cur.box.innerHTML = "";
-    cur = null;
-  }
-
+  // The connect modal's one viewer.
+  function unmount() { stop(cur); cur = null; }
   // opts: { onEnd(code), onFrame() }. code: session_ended | no_open_session |
   // session_expired | driver_busy | viewer_unavailable | connected | closed | …
   function mount(box, platform, opts = {}) {
     unmount();
+    cur = create(box, `/api/connections/browser/${platform}/view`, opts);
+    return cur;
+  }
+
+  // Any number of viewers side by side (the dev monitor, dev-driver.html):
+  // `base` is the stream's URL, `${base}/input` takes the input. Returns a
+  // handle with unmount().
+  function create(box, base, opts = {}) {
     box.innerHTML = `<div class="cv">
       <div class="cv-bar">
         <button type="button" class="btn btn-ghost cv-btn" data-a="back">חזרה</button>
@@ -37,9 +45,7 @@ window.ForlyViewer = (() => {
       <textarea class="cv-keys" aria-label="הקלדה לדפדפן" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
     </div>`;
     const me = { box, alive: true, ac: new AbortController(), size: null, gotFrame: false, queue: Promise.resolve(), ended: false };
-    cur = me;
     const img = box.querySelector(".cv-img"), wait = box.querySelector(".cv-wait"), url = box.querySelector(".cv-url"), ta = box.querySelector(".cv-keys");
-    const base = `/api/connections/browser/${platform}/view`;
 
     const end = (code) => {
       if (me.ended || !me.alive) return;
@@ -198,8 +204,10 @@ window.ForlyViewer = (() => {
       if (a === "kbd") ta.focus();
       else if (a === "back" || a === "reload") send({ t: a });
     });
-    return { send };
+    me.send = send;
+    me.unmount = () => stop(me);
+    return me;
   }
 
-  return { mount, unmount };
+  return { mount, unmount, create };
 })();

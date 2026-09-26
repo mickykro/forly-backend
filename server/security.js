@@ -30,9 +30,9 @@ function securityHeaders(req, res, next) {
   }
   const reqPath = String(req.path || "");
   // The dev browser viewer (routes/dev-driver.js): nothing under it may sit in
-  // a cache, and its page does not exist unless the flag is on.
+  // a cache, and its page does not exist outside a local box (devViewOn).
   if (reqPath.startsWith("/api/dev/")) res.setHeader("Cache-Control", "no-store");
-  if (isDevDriverPage(reqPath) && process.env.DRIVER_DEV_VIEW !== "1") {
+  if (isDevDriverPage(reqPath) && !require("./driver-browser").devViewOn(process.env)) {
     return res.status(404).type("text/plain").send("Not Found");
   }
   next();

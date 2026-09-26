@@ -353,6 +353,10 @@ async function quiet(fn) {
   assert.ok(B({ DRIVER_DEV_VIEW: "1", FORLY_ENV: "staging" }).fatal);
   assert.ok(B({ DRIVER_DEV_VIEW: "1", FORLY_ENV: "local", NODE_ENV: "production" }).fatal);
   assert.deepEqual(B({ DRIVER_DEV_VIEW: "1", FORLY_ENV: "local" }), { fatal: null, enabled: false, missing: [], devView: true });
+  assert.equal(B({ FORLY_ENV: "local" }).devView, true, "local shows every browser by itself");
+  assert.equal(B({ FORLY_ENV: "local", DRIVER_DEV_VIEW: "0" }).devView, false, "unless turned off");
+  assert.equal(B({ FORLY_ENV: "prod", NODE_ENV: "production", DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).devView, false);
+  assert.equal(B({ FORLY_ENV: "staging" }).devView, false);
   assert.equal(B({ DRIVER_DEV_VIEW: "0", FORLY_ENV: "staging" }).devView, false);
   assert.deepEqual(B({ DRIVER_API_KEY: "k" }).missing, ["PROFILE_KEY", "FORLY_ENV"]);
   assert.deepEqual(B({ DRIVER_API_KEY: "k", FORLY_ENV: "local" }).missing, ["PROFILE_KEY"]);

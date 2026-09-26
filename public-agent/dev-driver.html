@@ -1,94 +1,87 @@
 <!doctype html>
 <!--
-  dev-driver.html — dev-only: the live Driver browsers this server has open.
-  Served only with DRIVER_DEV_VIEW=1 (security.js 404s it otherwise); the API
-  behind it exists only under FORLY_ENV=local. No iframe: "watch" asks for a
-  single-use viewer grant (needs an OTP login in the last 10 minutes) and
-  opens it in a new tab, where the server redirects to the Driver viewer.
+  dev-driver.html — local only: every Driver browser this server has open,
+  shown live. Served only on a local box (driver-browser.devViewOn: 404
+  anywhere else); the API behind it exists only there too. Each browser is
+  shown in the page through connect-viewer.js — its address never reaches
+  the page. "Open externally" asks for a single-use viewer grant (needs an
+  OTP login in the last 10 minutes) and opens Driver's own viewer in a tab.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>Driver sessions (dev)</title>
+<title>Driver browsers (local)</title>
+<link rel="stylesheet" href="/app.css">
 <style>
-  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; color: #1a1a1a; background: #fafafa; }
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; color: #1a1a1a; background: #f4f2ee; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   #status { color: #666; margin-bottom: 12px; min-height: 1.4em; }
   #status.err { color: #b00020; }
-  table { border-collapse: collapse; width: 100%; max-width: 900px; background: #fff; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5e5e5; }
-  th { font-weight: 600; color: #444; }
-  button { font: inherit; padding: 4px 10px; cursor: pointer; }
-  .empty { color: #888; padding: 12px 8px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
+  .tile { background: #fff; border: 1px solid #e0dcd4; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; height: 380px; }
+  .tile.big { grid-column: 1 / -1; height: 80vh; }
+  .tile header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .tile header b { font-size: 13px; }
+  .tile header span { color: #777; font-size: 12px; }
+  .tile header .sp { flex: 1; }
+  .tile header button { font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 6px; }
+  .tile .view { flex: 1; min-height: 0; }
+  .tile .msg { color: #b00020; font-size: 12px; min-height: 1em; }
+  .empty { color: #888; padding: 24px 0; }
+  @media (max-width: 480px) { #grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
-<h1>Driver sessions (dev)</h1>
+<h1>Driver browsers (local)</h1>
 <div id="status">Loading…</div>
-<table>
-  <thead><tr><th>Note</th><th>Platform</th><th>Started</th><th></th></tr></thead>
-  <tbody id="rows"></tbody>
-</table>
+<div id="grid"></div>
+<script src="/connect-viewer.js"></script>
 <script>
 (function () {
-  var rows = document.getElementById("rows");
+  var grid = document.getElementById("grid");
   var statusEl = document.getElementById("status");
+  var tiles = {}; // sessionId → { el, viewer }
+  function setStatus(msg, isErr) { statusEl.textContent = msg; statusEl.className = isErr ? "err" : ""; }
+  function text(tag, t) { var e = document.createElement(tag); e.textContent = t == null ? "—" : String(t); return e; }
 
-  function setStatus(msg, isErr) {
-    statusEl.textContent = msg;
-    statusEl.className = isErr ? "err" : "";
-  }
-
-  function cell(tr, text) {
-    var td = document.createElement("td");
-    td.textContent = text == null ? "—" : String(text);
-    tr.appendChild(td);
-    return td;
-  }
-
-  function watch(sessionId, btn) {
-    btn.disabled = true;
-    fetch("/api/dev/driver/sessions/" + encodeURIComponent(sessionId) + "/grant", { method: "POST", credentials: "same-origin" })
+  function openExternally(s, msg, btn) {
+    btn.disabled = true; msg.textContent = "";
+    fetch("/api/dev/driver/sessions/" + encodeURIComponent(s.sessionId) + "/grant", { method: "POST", credentials: "same-origin" })
       .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
       .then(function (res) {
-        if (res.status === 401 && res.body.error === "stepup_required") {
-          setStatus("Step-up required: log in again with an OTP (valid 10 minutes), then retry.", true);
-        } else if (res.status !== 200) {
-          setStatus("Could not get a viewer grant (" + (res.body.error || res.status) + ").", true);
-        } else {
-          window.open(res.body.open_url, "_blank", "noopener");
-        }
+        if (res.status === 401 && res.body.error === "stepup_required") msg.textContent = "Step-up required: log in again with an OTP (valid 10 minutes), then retry.";
+        else if (res.status !== 200) msg.textContent = "Could not get a viewer grant (" + (res.body.error || res.status) + ").";
+        else window.open(res.body.open_url, "_blank", "noopener");
       })
-      .catch(function () { setStatus("Network error while requesting a grant.", true); })
+      .catch(function () { msg.textContent = "Network error while requesting a grant."; })
       .then(function () { btn.disabled = false; });
   }
 
-  function render(sessions) {
-    rows.textContent = "";
-    if (!sessions.length) {
-      var tr = document.createElement("tr");
-      var td = cell(tr, "No live sessions.");
-      td.colSpan = 4; td.className = "empty";
-      rows.appendChild(tr);
-      return;
-    }
-    sessions.forEach(function (s) {
-      var tr = document.createElement("tr");
-      cell(tr, s.note);
-      cell(tr, s.platform);
-      cell(tr, s.startedAt ? new Date(s.startedAt).toLocaleString() : null);
-      var td = document.createElement("td");
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = "Watch";
-      btn.disabled = !s.viewer_available;
-      btn.addEventListener("click", function () { watch(s.sessionId, btn); });
-      td.appendChild(btn);
-      tr.appendChild(td);
-      rows.appendChild(tr);
+  function addTile(s) {
+    var el = document.createElement("div"); el.className = "tile";
+    var head = document.createElement("header");
+    head.appendChild(text("b", s.note));
+    head.appendChild(text("span", (s.platform || "") + " · " + (s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : "")));
+    var sp = document.createElement("span"); sp.className = "sp"; head.appendChild(sp);
+    var big = text("button", "Enlarge"); big.type = "button";
+    big.addEventListener("click", function () { el.classList.toggle("big"); big.textContent = el.classList.contains("big") ? "Shrink" : "Enlarge"; });
+    var ext = text("button", "Open externally"); ext.type = "button"; ext.disabled = !s.viewer_available;
+    var msg = document.createElement("div"); msg.className = "msg";
+    ext.addEventListener("click", function () { openExternally(s, msg, ext); });
+    head.appendChild(big); head.appendChild(ext);
+    var view = document.createElement("div"); view.className = "view";
+    el.appendChild(head); el.appendChild(msg); el.appendChild(view);
+    grid.appendChild(el);
+    var viewer = window.ForlyViewer.create(view, "/api/dev/driver/sessions/" + encodeURIComponent(s.sessionId) + "/view", {
+      onEnd: function (code) { msg.textContent = "Browser ended (" + code + ")."; },
     });
+    tiles[s.sessionId] = { el: el, viewer: viewer };
+  }
+  function removeTile(id) {
+    var t = tiles[id]; if (!t) return;
+    t.viewer.unmount(); t.el.remove(); delete tiles[id];
   }
 
   function poll() {
@@ -100,12 +93,16 @@
         return r.json();
       })
       .then(function (b) {
-        render(b.sessions || []);
-        setStatus("Updated " + new Date().toLocaleTimeString() + " · refreshes every 5 s", false);
+        var sessions = b.sessions || [], live = {};
+        sessions.forEach(function (s) { live[s.sessionId] = true; if (!tiles[s.sessionId]) addTile(s); });
+        Object.keys(tiles).forEach(function (id) { if (!live[id]) removeTile(id); });
+        var empty = grid.querySelector(".empty");
+        if (!sessions.length && !empty) { var e = text("div", "No live browsers. They appear here as soon as the server opens one."); e.className = "empty"; grid.appendChild(e); }
+        if (sessions.length && empty) empty.remove();
+        setStatus(sessions.length + " live · updated " + new Date().toLocaleTimeString() + " · refreshes every 5 s", false);
       })
       .catch(function (e) { setStatus(e.message, true); });
   }
-
   poll();
   setInterval(poll, 5000);
 })();
