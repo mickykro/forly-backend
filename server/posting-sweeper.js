@@ -139,7 +139,8 @@ async function retryProfileDeletes(deps, x, now) {
   if (!daily && !(typeof lc.hasDeferredDeletes === "function" && lc.hasDeferredDeletes())) return null;
   if (daily) await x.db.setSetting("posting_health", { last_delete_retry_day: day });
   const results = await lc.retryDeletes({ db: x.db, driver: deps.driver || require("./driver-browser"), locks: x.locks }, { onlyDeferred: !daily });
-  const late = (results || []).filter((r) => r && r.escalate);
+  // Escalate from the daily run only: a busy-only retry every sweep would re-alert every minute.
+  const late = daily ? (results || []).filter((r) => r && r.escalate) : [];
   if (late.length) {
     await tellOperator(deps, `posting: ${late.length} browser-profile delete(s) failing for 7+ days (${late.slice(0, 5).map((r) => `${r.platform} ${tail(r.phone)}`).join(", ")}) — the cookies are still at Driver`);
   }

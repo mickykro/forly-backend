@@ -258,6 +258,12 @@ async function waitForActive(session, deps = {}) {
  */
 async function withPage(opts, fn, deps = {}) {
   const profile = opts && opts.profile;
+  // The agent's login browser holds no lock once /start returns; never open the
+  // same profile (same cookies, another IP) while it is live. Every caller that
+  // passes conn — posting, extract, listing-sweep — gets this for free.
+  if (profile && deps.conn && deps.platform && profileLock.loginOpen(deps.conn, deps.platform)) {
+    const e = new Error("profile is busy: login in progress"); e.code = "profile_busy"; throw e;
+  }
   const release = claim(!!profile, profile ? profile.name : undefined, deps);
   let session = null;
   try {

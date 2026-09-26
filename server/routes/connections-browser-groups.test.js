@@ -186,6 +186,8 @@ function fullFacebookPage(groupLinks, o = {}) {
       // the driver's own R3 check accepts what finish stored (for the single-Page case it would post to)
       const A = require("../posting-account");
       const one = Object.assign({}, conn, { facebook_pages: [conn.facebook_pages[1]], posting_permission: {} });
+      assert.equal(A.pageTarget(one), null, "a single discovered Page is never picked without the agent's explicit choice");
+      one.posting_permission = { page_id: conn.facebook_pages[1].id };
       const t = A.pageTarget(one);
       assert.deepEqual(P.expectedTarget({ target_type: "page", target_id: t.target_id, target_url: t.url }, one).ok, true);
       assert.equal(A.pageTarget(Object.assign({}, conn, { facebook_pages: [conn.facebook_pages[2]] })), null, "no id → no target");

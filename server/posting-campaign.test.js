@@ -260,10 +260,17 @@ const PH = "972500000001";
     assert.equal((await store.getPostingCampaign((await C.planAccount(PH, deps, NOW)).campaignId)).page_id, "new");
   }
 
-  // ── page target: with one Page and page_publisher "browser", the Page goes first ──
+  // ── page target: the Page is opt-in and needs the agent's explicit choice,
+  //    even when only one was discovered ──
   {
-    const { deps, at } = await setup(PH, { conn: { facebook_pages: [{ id: "61550000000001", url: "https://www.facebook.com/dana.nadlan", name: "Dana" }], page_publisher: "browser" } });
-    let c = await C.create(base(), deps);
+    const onePage = { facebook_pages: [{ id: "61550000000001", url: "https://www.facebook.com/dana.nadlan", name: "Dana" }], page_publisher: "browser" };
+    {
+      const { deps } = await setup(PH, { conn: onePage });
+      const c0 = await C.create(base({ targets: ["page", "groups"] }), deps);
+      assert.deepEqual(c0.targets, ["groups"], "one discovered Page, no explicit choice → no Page target");
+    }
+    const { deps, at } = await setup(PH, { conn: Object.assign({}, onePage, { posting_permission: Object.assign(structuredClone(PERM), { page_id: "61550000000001" }) }) });
+    let c = await C.create(base({ targets: ["page", "groups"] }), deps);
     assert.deepEqual(c.targets, ["page", "groups"]);
     c = await S.tick(c, deps, at(NOW));
     assert.equal(c.posts[0].target, "page");

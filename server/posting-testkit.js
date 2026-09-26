@@ -15,7 +15,7 @@ const iso = (d) => new Date(d).toISOString();
 // One post a day (daily_cap 1 → every day's target is 1), no jitter: deterministic.
 const cfg = Object.assign(safety.configFrom(null), { daily_cap: 1, skip_day_probability: 0, day_start_jitter_min: 0, long_break_probability: 0, gap_jitter: 0 });
 const G = (id) => `https://www.facebook.com/groups/${id}`;
-const PERM = { enabled: true, consent_version: "2026-09-24", granted_at: iso(NOW.getTime() - DAY), platforms: ["facebook"], targets: ["page", "groups"], default_group_ids: ["111", "222"], page_id: null, allows_dwell: true, allows_visible_interactions: false };
+const PERM = { enabled: true, consent_version: "2026-09-24", granted_at: iso(NOW.getTime() - DAY), platforms: ["facebook"], targets: ["groups"], default_group_ids: ["111", "222"], page_id: null, allows_dwell: true, allows_visible_interactions: false };
 const member = (id, o = {}) => Object.assign({ group_id: id, canonical_url: G(id), slug: id, name: `G${id}`, membership_state: "member", observed_at: iso(NOW), last_confirmed_at: iso(NOW), id_verified: true }, o);
 const page = (id = "pg1", phone = "972500000001", o = {}) => Object.assign({
   page_id: id, status: "active", business_phone: phone, created_at: new Date(NOW.getTime() - 30 * DAY),

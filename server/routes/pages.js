@@ -55,6 +55,7 @@ module.exports = function createPagesRouter(ctx) {
   // when its account opted in. Fire-and-forget — enrollment never fails or
   // delays the page; its own failure is stored as posting_enroll_error.
   const enrollPosting = (page) => {
+    if (!require("../posting-guard").postingEnvAllowed(process.env)) return; // C1: never from staging/local
     Promise.resolve().then(() => require("../posting-campaign").enrollNewPage(page, ctx.postingDeps || {})).catch(() => null);
   };
 

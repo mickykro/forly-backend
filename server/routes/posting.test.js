@@ -124,9 +124,11 @@ const { db, store } = K;
   {
     const pages = [{ url: "https://www.facebook.com/agentone", name: "One" }, { url: "https://www.facebook.com/agenttwo", name: "Two" }];
     const { app } = await setup({ conn: { facebook_pages: pages } });
-    const r = await call(app, "POST", "/api/posting/campaigns", consented());
+    const r = await call(app, "POST", "/api/posting/campaigns", consented({ targets: ["page", "groups"] }));
     assert.equal(r.status, 409); assert.equal(r.body.error, "page_not_confirmed");
-    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ targets: ["groups"] }))).status, 201, "groups only needs no Page");
+    const dflt = await call(app, "POST", "/api/posting/campaigns", consented());
+    assert.equal(dflt.status, 201, "no targets asked → groups only, the Page is opt-in");
+    assert.deepEqual(dflt.body.campaign.targets, ["groups"]);
     await db.setConnection(PH, { posting_permission: { page_id: pages[1].url } });
     // I4: without the Page's numeric id the page target is refused
     const noId = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2", targets: ["page", "groups"] }));

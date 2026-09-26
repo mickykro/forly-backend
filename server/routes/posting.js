@@ -101,7 +101,7 @@ module.exports = function createPostingRouter(ctx) {
     if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
     const others = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== page.page_id);
     if (others.length >= MAX_ACTIVE_CAMPAIGNS) return res.status(409).json({ error: "too_many_campaigns" });
-    const wanted = v.targets || S_.TARGETS;
+    const wanted = v.targets || S_.DEFAULT_TARGETS;
     if (wanted.includes("page") && !S_.pageConfirmed(conn)) return res.status(409).json({ error: "page_not_confirmed" });
     // Until connect has read the Page's numeric id, R3 could never prove it: refused (I4).
     if (v.targets && v.targets.includes("page") && !A.pageTarget(conn)) return res.status(409).json({ error: "page_target_unavailable" });

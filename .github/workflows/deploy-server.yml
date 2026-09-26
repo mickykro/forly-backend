@@ -51,7 +51,8 @@
 #                                       # also OFF until an operator turns the admin switch on (the
 #                                       # settings/posting doc is created by that first "on").
 #                                       # Connecting a browser account (/api/connections/browser/start)
-#                                       # asks the same switches, so it is refused while posting is off.
+#                                       # is NOT blocked by these switches (it only opens a login
+#                                       # browser); account-level halts still apply.
 #      POSTING_SWEEPER=                 # leave unset in prod (FORLY_ENV=prod already runs the posting
 #                                       # sweeper). "1" opts a LOCAL box in to the sweeper and the
 #                                       # mutating posting routes; it never does on staging.

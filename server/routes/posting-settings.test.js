@@ -23,7 +23,7 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
     const perm = (await db.getConnection(PH)).posting_permission;
     assert.equal(perm.enabled, true); assert.equal(perm.consent_version, createRouter.CONSENT_VERSION); assert.ok(perm.granted_at);
-    assert.deepEqual(perm.platforms, ["facebook"]); assert.deepEqual(perm.targets, ["page", "groups"]);
+    assert.deepEqual(perm.platforms, ["facebook"]); assert.deepEqual(perm.targets, ["groups"], "the Page is opt-in");
     assert.deepEqual(perm.default_group_ids, ["111", "777"], "stored by canonical id");
     assert.equal(perm.allows_dwell, true); assert.equal(perm.allows_visible_interactions, false); assert.equal(perm.auto_mode, "per_post");
     assert.equal(perm.page_id, null);
@@ -42,9 +42,9 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
   {
     const pages = [{ url: "https://www.facebook.com/agentone", name: "One" }, { id: "12345", url: "https://www.facebook.com/agenttwo", name: "Two" }];
     const { app } = await setup({ conn: { facebook_pages: pages } });
-    const r = await put(app, enable());
+    const r = await put(app, enable({ targets: ["page", "groups"] }));
     assert.equal(r.status, 409); assert.equal(r.body.error, "page_not_confirmed");
-    assert.equal((await put(app, enable({ targets: ["groups"] }))).status, 200);
+    assert.equal((await put(app, enable())).status, 200, "no targets asked → groups only");
     const s = await call(app, "GET", "/api/posting/settings");
     assert.equal(s.body.pages.length, 2); assert.equal(s.body.pages[1].id, "12345");
     assert.ok(/^u:[0-9a-f]{16}$/.test(s.body.pages[0].id)); assert.ok(!s.raw.includes("agentone"), "no Page URL in the response");

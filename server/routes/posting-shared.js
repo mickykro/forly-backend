@@ -20,6 +20,7 @@ const PAGE_NAME = "הדף העסקי";
 const ACTIONS = new Set(["approve", "skip", "stop"]);
 const ACT_TTL_S = 72 * 3600; // a one-tap link works for 72 hours
 const TARGETS = ["page", "groups"];
+const DEFAULT_TARGETS = ["groups"]; // the Page is opt-in, by the agent's explicit choice
 const MAX_GROUP_IDS = 20; // share-kit MAX_GROUPS: a campaign keeps at most 20 groups
 // A Task 14 group id: numeric, or "slug:<vanity>" until the driver resolves it.
 const GROUP_ID_RE = /^(?:\d{1,30}|slug:[^\s/|?#:]{1,120})$/;
@@ -183,10 +184,10 @@ const pageKey = (p) => (p.id ? String(p.id) : `u:${crypto.createHash("sha256").u
 const storedPageId = (p) => String(p.id || p.url);
 const pageByStored = (conn, pid) => (pid ? pagesOf(conn).find((p) => p.id === pid || p.url === pid) || null : null);
 const pageByKey = (conn, key) => pagesOf(conn).find((p) => pageKey(p) === key) || null;
-// R3: with several Pages, a Page post needs the agent's confirmed choice.
+// R3: a Page post always needs the agent's explicit choice of Page, even when
+// only one was discovered (the scrape can mistake a profile for a Page).
 function pageConfirmed(conn, pid = (conn.posting_permission || {}).page_id) {
-  const pages = pagesOf(conn);
-  return pages.length <= 1 || !!pageByStored(conn, pid);
+  return !!pageByStored(conn, pid);
 }
 function parseTargets(v) {
   if (v === undefined || v === null) return { targets: null };
@@ -228,7 +229,7 @@ const wrap = (name, fn) => (req, res, next) => Promise.resolve(fn(req, res, next
 });
 
 module.exports = {
-  CONSENT_VERSION, PRIVATE_NAME, ACTIONS, ACT_TTL_S, TARGETS, MAX_GROUP_IDS, GROUP_ID_RE, ID_RE,
+  CONSENT_VERSION, PRIVATE_NAME, ACTIONS, ACT_TTL_S, TARGETS, DEFAULT_TARGETS, MAX_GROUP_IDS, GROUP_ID_RE, ID_RE,
   publicView, scrub, actionLink, readActionLink, card, allowed,
   hiddenIds, memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, catalogLookup, publicMember,
   pagesOf, pageKey, storedPageId, pageByStored, pageByKey, pageConfirmed, parseTargets,

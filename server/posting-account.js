@@ -174,7 +174,10 @@ function pageTarget(conn) {
   if (!conn || (conn.page_publisher || "browser") !== "browser") return null;
   const pages = Array.isArray(conn.facebook_pages) ? conn.facebook_pages.filter((p) => p && p.url) : [];
   const chosen = (conn.posting_permission || {}).page_id;
-  const p = chosen ? pages.find((x) => x.id === chosen || x.url === chosen) : pages.length === 1 ? pages[0] : null;
+  // Never picked automatically, even when only one was discovered: the scrape can
+  // mistake the agent's own (or a friend's) profile for a Page, and that would
+  // pass R3 on a personal timeline. The agent's explicit choice is the proof.
+  const p = chosen ? pages.find((x) => x.id === chosen || x.url === chosen) : null;
   if (!numericPageId(p)) return null;
   const target_id = String(p.id);
   return { target: "page", target_id, group_id: `page:${target_id}`, url: p.url, name: p.name || "" };
@@ -185,7 +188,7 @@ const pageTargetAvailable = (conn) => !!conn && (conn.page_publisher || "browser
   && Array.isArray(conn.facebook_pages) && conn.facebook_pages.some((p) => p && p.url && numericPageId(p));
 
 function targetsFor(conn, requested) {
-  const want = Array.isArray(requested) && requested.length ? requested : ["page", "groups"];
+  const want = Array.isArray(requested) && requested.length ? requested : ["groups"]; // the Page is opt-in
   const hasPage = !!pageTarget(conn);
   return ["page", "groups"].filter((t) => want.includes(t) && (t === "groups" || hasPage));
 }

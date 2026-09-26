@@ -153,7 +153,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
       if (!p) return res.status(422).json({ error: "unknown_page" });
       pageId = S_.storedPageId(p);
     }
-    const targets = t.targets || (Array.isArray(prev.targets) && prev.targets.length ? prev.targets : S_.TARGETS);
+    const targets = t.targets || (Array.isArray(prev.targets) && prev.targets.length ? prev.targets : S_.DEFAULT_TARGETS);
     if (targets.includes("page") && !S_.pageConfirmed(conn, pageId)) return res.status(409).json({ error: "page_not_confirmed" });
     // A Page asked for by name must be one the browser can prove (its numeric id, I4).
     if (t.targets && t.targets.includes("page") && !A.pageTarget(Object.assign({}, conn, { posting_permission: Object.assign({}, prev, { page_id: pageId }) }))) {

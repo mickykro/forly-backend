@@ -386,6 +386,7 @@
         default_group_ids: auto ? ids : [], targets: auto ? targets : ["groups"], allows_visible_interactions: $("campVisible").checked,
       };
       if (sel && sel.value) b.page_id = sel.value;
+      else if (pageOn() && pages().length === 1) b.page_id = pages()[0].id; // ticking the one named Page is the choice
       return b;
     }
 

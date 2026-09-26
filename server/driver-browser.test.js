@@ -361,5 +361,22 @@ async function quiet(fn) {
   assert.deepEqual(B({ DRIVER_API_KEY: "k", PROFILE_KEY: "p", FORLY_ENV: "staging" }), { fatal: null, enabled: true, missing: [], devView: false });
   assert.equal(B({ PROFILE_KEY: "p", FORLY_ENV: "staging" }).enabled, false, "no key, no Driver");
 
+  // ── no browser on a profile while the agent's login browser is live (same
+  //    cookies from two IPs); withPage refuses before any session is created ──
+  {
+    const D = require("./driver-browser");
+    const { profileName } = require("./profile-name");
+    let created = 0;
+    const fetchStub = async () => { created++; throw new Error("must not be called"); };
+    const conn = { browser_session_facebook: { session_id: "s1", started_at: new Date().toISOString() } };
+    const name = profileName("facebook", "972500000009", 0);
+    await assert.rejects(
+      D.withPage({ profile: { name, persist: true }, note: "forly-extract:x" }, async () => 1, { phone: "972500000009", platform: "facebook", conn, fetch: fetchStub }),
+      (e) => e.code === "profile_busy");
+    assert.equal(created, 0, "no Driver call while the login browser is live");
+    const old = { browser_session_facebook: { session_id: "s1", started_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString() } };
+    assert.equal(require("./profile-lock").loginOpen(old, "facebook"), false, "an old login session no longer blocks");
+  }
+
   console.log("driver-browser.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
