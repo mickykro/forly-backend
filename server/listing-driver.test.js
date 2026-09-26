@@ -37,6 +37,31 @@ assert.equal(isLoginWall("https://www.yad2.co.il/item/abc", "דירה 4 חדרי
   assert.equal(out.description, out.text);
   assert.deepEqual(out.photos, [{ url: "https://img.yad2.co.il/Pic/1.jpg", source: "driver" }]);
 
+  // ── Madlan: only the "תיאור הנכס" section, not the menus, contact form or history ──
+  {
+    const D = LD._test.descriptionOf;
+    const madlan = [
+      "דירות לקניה", "דירות להשכרה", "מתווכים", "‏1,500,000 ‏₪", "3", "חדרים", "יתרונות הנכס", "חניה", "מעלית",
+      "תיאור הנכס", "", "דירת 3 חדרים מרווחת בקומה גבוהה עם מרפסת גדולה.", "כניסה מיידית, מוכנה למגורים.", "",
+      "מפרט מלא", "חניה", "מידע נוסף על הנכס", "מחיר למ״ר", "יצירת קשר", "סוכן לדוגמה", "הציגו מספר טלפון",
+      "היסטוריית עסקאות", "1.55 מ׳ ₪",
+    ].join("\n");
+    assert.equal(D(madlan, "דירה למכירה בבאר שבע, 3 חדרים"), "דירת 3 חדרים מרווחת בקומה גבוהה עם מרפסת גדולה.\nכניסה מיידית, מוכנה למגורים.");
+    // A "read more" toggle inside the section is dropped.
+    assert.equal(D("תיאור הנכס\nדירה יפה ומוארת מאוד ליד הפארק\nקרא עוד\nמפרט מלא\nחניה", null), "דירה יפה ומוארת מאוד ליד הפארק");
+    // No section: the meta description; a long page without either gives nothing.
+    assert.equal(D("x\n".repeat(1000), "תיאור קצר מתגית המטא של העמוד"), "תיאור קצר מתגית המטא של העמוד");
+    assert.equal(D("תפריט\n".repeat(400), null), "");
+    // A short page (a group post) is its own description.
+    assert.equal(D("למכירה דירת 4 חדרים בגבעתיים, 2.2 מיליון", null), "למכירה דירת 4 חדרים בגבעתיים, 2.2 מיליון");
+    // fromDriver uses it; the full text still goes to the field extractor.
+    const mpage = { goto: async () => {}, url: () => "https://www.madlan.co.il/listings/x", innerText: async () => madlan, imageSrcs: async () => [],
+      $eval: async () => "דירה למכירה בבאר שבע, 3 חדרים" };
+    const mo = await LD.fromDriver({ url: "https://www.madlan.co.il/listings/x" }, { withPage: async (o, fn) => fn(mpage, {}) });
+    assert.ok(mo.description.startsWith("דירת 3 חדרים") && !mo.description.includes("היסטוריית"));
+    assert.equal(mo.text, madlan);
+  }
+
   // ── an empty page is an error, not an empty success ──
   const blank = { goto: async () => {}, url: () => "https://www.madlan.co.il/x", innerText: async () => "   ", imageSrcs: async () => [] };
   await assert.rejects(

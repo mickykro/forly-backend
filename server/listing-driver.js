@@ -37,6 +37,35 @@ function isLoginWall(landedUrl, text) {
   return t.length < 400 && /(log in to continue|יש להתחבר כדי להמשיך)/i.test(t);
 }
 
+// The listing's own description, not the whole page: innerText also carries
+// the site's menus, the price box, the contact form and the transaction
+// history. Taken from the heading "תיאור הנכס" (Madlan; the others
+// [Unverified]) up to the next section heading. Without one: the page's meta
+// description, then the text itself only when it is short enough to be just
+// the listing (a group post); otherwise empty — the agent writes their own.
+const DESC_HEAD = /^(תיאור הנכס|תיאור הדירה|תיאור המודעה|תיאור|על הנכס)[:：]?$/;
+const DESC_STOP = /^(מפרט מלא|פרטים נוספים|מידע נוסף( על הנכס)?|מאפייני הנכס|מה יש בנכס|יתרונות הנכס|יצירת קשר|חשוב לדעת|היסטוריית עסקאות|הציגו מספר טלפון|יש טעות במודעה\?.*|מודעות דומות|נכסים דומים)$/;
+const DESC_MORE = /^(קרא(ו)? עוד|הצג(ו)? עוד|עוד|הצג פחות|קרא פחות)$/;
+const DESC_MAX = 3000;
+const SHORT_PAGE = 1500;
+function descriptionOf(text, meta) {
+  const lines = String(text || "").split("\n").map((l) => l.trim());
+  const at = lines.findIndex((l) => DESC_HEAD.test(l));
+  if (at >= 0) {
+    const out = [];
+    for (const l of lines.slice(at + 1)) {
+      if (DESC_STOP.test(l) || DESC_HEAD.test(l)) break;
+      if (!DESC_MORE.test(l)) out.push(l);
+    }
+    const d = out.join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, DESC_MAX);
+    if (d.length >= 20) return d;
+  }
+  const m = String(meta || "").trim();
+  if (m.length >= 20) return m.slice(0, DESC_MAX);
+  const t = String(text || "").trim();
+  return t.length <= SHORT_PAGE ? t : "";
+}
+
 async function readPage(page, url) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: GOTO_TIMEOUT_MS });
   // Auto-waiting, not a fixed sleep: settle on the network going quiet, and
@@ -47,7 +76,9 @@ async function readPage(page, url) {
   const srcs = page.imageSrcs
     ? await page.imageSrcs()
     : await page.$$eval("img", (els) => els.map((e) => e.currentSrc || e.src).filter(Boolean));
-  return { landedUrl: page.url(), text, srcs };
+  let meta = null;
+  try { meta = await page.$eval('meta[property="og:description"], meta[name="description"]', (e) => e.content); } catch (e) { meta = null; }
+  return { landedUrl: page.url(), text, srcs, meta };
 }
 
 async function fromDriver(input, deps = {}) {
@@ -73,12 +104,12 @@ async function fromDriver(input, deps = {}) {
   // deps.conn (I2): the connection, so withPage checks the profile's generation
   // and refuses a revoked or quarantined one.
   const owner = { phone: deps.phone, platform: deps.platform, lockHeld: deps.lockHeld, conn: deps.conn || null };
-  const { landedUrl, text, srcs } = await withPage(opts, (page) => readPage(page, url), owner);
+  const { landedUrl, text, srcs, meta } = await withPage(opts, (page) => readPage(page, url), owner);
   if (isLoginWall(landedUrl, text)) throw fail("social_login_required", "login wall");
   const photos = pickImages(srcs).map((u) => ({ url: u, source: "driver" }));
   if (!text && !photos.length) throw fail("page_unreadable", "empty page");
   if (!text) throw fail("page_unreadable", "no text");
-  return { source: "driver", text, description: text, photos };
+  return { source: "driver", text, description: descriptionOf(text, meta), photos };
 }
 
-module.exports = { fromDriver, _test: { pickImages, isLoginWall, readPage } };
+module.exports = { fromDriver, _test: { pickImages, isLoginWall, readPage, descriptionOf } };
