@@ -227,7 +227,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     await store.mutateConnection(phone, (cur) => {
       prevAt = cur.facebook_groups_resync_at || null;
       const since = now.getTime() - A.ms(prevAt);
-      wait = since >= 0 && since < RESYNC_MIN_MS ? RESYNC_MIN_MS - since : 0;
+      wait = process.env.FORLY_ENV === "local" ? 0 : since >= 0 && since < RESYNC_MIN_MS ? RESYNC_MIN_MS - since : 0;
       return wait ? null : { facebook_groups_resync_at: stamp };
     });
     if (wait) return res.status(429).json({ error: "too_soon", retry_after_s: Math.ceil(wait / 1000) });
