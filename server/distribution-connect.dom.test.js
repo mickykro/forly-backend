@@ -35,10 +35,13 @@ function findChromium() {
   app.post("/api/connections/browser/start", (q, r) => {
     if (mode.start === "network") return q.socket.destroy();
     if (mode.start === 404) return r.status(404).send("<html>Not Found</html>");
+    if (mode.start === 200) return r.json({ view_url: `http://127.0.0.1:${srv.address().port}/viewer-stub` });
     r.status(mode.start).json(mode.body);
   });
+  app.get("/viewer-stub", (q, r) => r.send("<html><body>viewer</body></html>"));
   app.use(express.static(path.join(__dirname, "..", "public-agent")));
-  const srv = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
+  let srv = null;
+  srv = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
   try {
     const page = await browser.newPage();
     await page.route(/fonts\.(googleapis|gstatic)/, (rt) => rt.abort());
@@ -61,6 +64,46 @@ function findChromium() {
         assert.equal((await page.textContent(`#browserConnectBtn_${p}`)).trim(), label, `${p} ${JSON.stringify(m)}`);
         assert.ok(msg.test(await page.textContent("#msg")), `${p} ${JSON.stringify(m)} shows its reason`);
       }
+    }
+    // fresh page: the earlier "connected" case taught the page that state
+    Object.keys(mode).forEach((k) => delete mode[k]); mode.status = 500;
+    await page.reload(); await page.waitForSelector("#browserConnectBtn_madlan");
+    // ── a failed start closes the blank login window it opened on the click ──
+    {
+      Object.keys(mode).forEach((k) => delete mode[k]); Object.assign(mode, { start: 503, body: { error: "driver_busy" }, status: 500 });
+      const popup = page.waitForEvent("popup", { timeout: 3000 }).catch(() => null);
+      await page.check("#browserConsent_madlan"); await page.click("#browserConnectBtn_madlan");
+      const w = await popup;
+      if (w) { await w.waitForEvent("close", { timeout: 3000 }).catch(() => null); assert.ok(w.isClosed(), "the blank window is closed again on an error"); }
+      assert.equal((await page.textContent("#browserConnectBtn_madlan")).trim(), "חיבור החשבון");
+    }
+    // ── Madlan: the window opens on the click and lands on the viewer; the
+    //    modal names Madlan, gives Madlan's steps, and never says "blocked" ──
+    {
+      Object.keys(mode).forEach((k) => delete mode[k]); Object.assign(mode, { start: 200, status: 500 });
+      const popup = page.waitForEvent("popup", { timeout: 5000 });
+      await page.check("#browserConsent_madlan"); await page.click("#browserConnectBtn_madlan");
+      const w = await popup;
+      await w.waitForURL(/viewer-stub/, { timeout: 5000 });
+      await page.waitForSelector("#browserModal:not([hidden])");
+      assert.equal((await page.textContent("#browserModalTitle")).trim(), "התחברות למדלן");
+      assert.ok((await page.textContent("#browserModalSub")).includes("מדלן"));
+      const body = await page.textContent("#browserModalBody");
+      assert.ok(body.includes("עמוד הבית של מדלן") && body.includes("כפתור ההתחברות"), "Madlan's own steps");
+      assert.ok(!/חסם|לא פתח/.test(body), "no 'blocked' note when the window opened");
+      assert.equal(await w.evaluate(() => window.opener), null, "the login window has no opener");
+      await w.close(); await page.click("#browserModalClose");
+    }
+    // ── a blocked popup: the modal says so and offers a button that opens it ──
+    {
+      Object.keys(mode).forEach((k) => delete mode[k]); Object.assign(mode, { start: 200, status: 500 });
+      await page.evaluate(() => { window.__open = window.open; window.open = () => null; }, undefined, {}, false); // main world: the page's own window.open
+      await page.check("#browserConsent_yad2"); await page.click("#browserConnectBtn_yad2");
+      await page.waitForSelector("#browserModal:not([hidden])");
+      assert.equal((await page.textContent("#browserModalTitle")).trim(), "התחברות ליד2");
+      const blockedBody = await page.textContent("#browserModalBody"); assert.ok(blockedBody.includes("לא פתח את החלון"), blockedBody);
+      assert.ok(/viewer-stub/.test(await page.getAttribute("#browserReopen", "href")), "a button opens the login window");
+      await page.evaluate(() => { window.open = window.__open; }, undefined, {}, false);
     }
     console.log("distribution-connect.dom.test.js ok");
   } finally { await browser.close(); srv.close(); }

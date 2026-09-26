@@ -34,7 +34,11 @@ const { profileName } = require("../profile-name");
 const PLATFORMS = {
   facebook: { loginUrl: "https://www.facebook.com/login", checkUrl: "https://www.facebook.com/me" },
   yad2: { loginUrl: process.env.YAD2_LOGIN || "https://www.yad2.co.il/auth/login", checkUrl: process.env.YAD2_MY_ADS || "https://www.yad2.co.il/my-ads" },
-  madlan: { loginUrl: process.env.MADLAN_LOGIN || "https://www.madlan.co.il/login", checkUrl: process.env.MADLAN_MY_LISTINGS || "https://www.madlan.co.il/my" },
+  // Madlan has no login page of its own (/login is a 404): the agent logs in
+  // from the home page's sign-in button. [Unverified] checkUrl — the agent's
+  // own-listings page; if it answers 4xx/5xx, /finish refuses to call the
+  // account connected (cannot_verify_login) instead of trusting a 404 page.
+  madlan: { loginUrl: process.env.MADLAN_LOGIN || "https://www.madlan.co.il/", checkUrl: process.env.MADLAN_MY_LISTINGS || "https://www.madlan.co.il/my" },
 };
 
 // ── /finish helpers (Facebook) ──
@@ -255,10 +259,15 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     const open = conn[`browser_session_${platform}`];
     if (!open || !open.session_id) return res.status(409).json({ error: "no_open_session" });
 
-    let loggedIn = false, label = null, pages = [], groups = {};
+    let loggedIn = false, label = null, pages = [], groups = {}, unverifiable = null;
     try {
-      ({ loggedIn, label, pages, groups } = await driver.attachPage(open.session_id, async (page) => {
-        await page.goto(spec.checkUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+      ({ loggedIn, label, pages, groups, unverifiable } = await driver.attachPage(open.session_id, async (page) => {
+        const resp = await page.goto(spec.checkUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+        // A check page that is itself missing or broken proves nothing — a 404
+        // page is long and has no login wall, so it would read as "logged in".
+        // Fail closed: the account is not connected until the page answers.
+        const status = resp && typeof resp.status === "function" ? resp.status() : 200;
+        if (status >= 400) return { loggedIn: false, label: null, unverifiable: status };
         const text = await page.innerText("body");
         if (isLoginWall(page.url(), text)) return { loggedIn: false, label: null };
         // The profile's display name, so the campaign card can say "posting as …"
@@ -315,6 +324,10 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     // Not logged in yet: KEEP the session. The agent is most likely waiting for
     // an SMS code; stopping here forces a second login from a second IP.
+    if (unverifiable) {
+      console.error(`connections-browser: ${platform} login check page answered ${unverifiable} — set the check URL (e.g. MADLAN_MY_LISTINGS / YAD2_MY_ADS)`);
+      return res.status(409).json({ error: "cannot_verify_login" });
+    }
     if (!loggedIn) return res.status(409).json({ error: "not_logged_in" });
 
     await driver.stopSession(open.session_id);

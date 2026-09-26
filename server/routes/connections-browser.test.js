@@ -170,6 +170,29 @@ function fakeGuard(reason) {
     assert.equal(wentToPages, false, "Pages discovery is Facebook-only");
   }
 
+  // ── a check page that answers 404 (e.g. a wrong Madlan "my listings" URL)
+  //    proves nothing: the account is NOT marked connected, the session stays ──
+  {
+    let stopped = false;
+    const connM = { browser_session_madlan: { session_id: "sm" } };
+    const mApp = makeApp({
+      driver: {
+        stopSession: async () => { stopped = true; },
+        attachPage: async (id, fn) => fn({
+          goto: async () => ({ status: () => 404 }),
+          url: () => "https://www.madlan.co.il/my", innerText: async () => "אוי, העמוד שחיפשת איננו.. ".repeat(40),
+        }),
+      },
+      db: { getConnection: async () => connM, setConnection: async (p, patch) => Object.assign(connM, patch) },
+    });
+    const fin = await call(mApp, "POST", "/api/connections/browser/madlan/finish");
+    assert.equal(fin.status, 409); assert.equal(fin.body.error, "cannot_verify_login");
+    assert.equal(connM.madlan_browser_connected_at, undefined, "a 404 check page never counts as logged in");
+    assert.equal(stopped, false, "the login session is kept");
+  }
+  // ── Madlan's login starts from its home page (it has no /login page) ──
+  assert.equal(require("./connections-browser").PLATFORMS.madlan.loginUrl, process.env.MADLAN_LOGIN || "https://www.madlan.co.il/");
+
   // ── an unknown platform is rejected before any session is created ──
   let touched = false;
   const badApp = makeApp({

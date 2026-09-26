@@ -208,14 +208,24 @@
   let bOpen = false, currentPlatform = null;
 
   const PLATFORM_ROWS = [
-    { key: "facebook", label: "פייסבוק", copy: [
+    { key: "facebook", label: "פייסבוק", steps: [
+      "התחברו לפייסבוק בחלון שנפתח, כמו שאתם מתחברים תמיד.",
+      "אם פייסבוק שולחת קוד בסמס או מבקשת אישור — השלימו אותו באותו חלון.",
+    ], copy: [
       "חיבור אחד לפייסבוק — פורלי תפרסם גם בדף העסקי וגם בקבוצות מאותו חשבון, ותקרא פוסטים מקבוצות. מתחברים כאן פעם אחת, כמו בדפדפן רגיל.",
       "בשלושת הימים הראשונים פורלי רק מסתובבת בפייסבוק מהחשבון שלכם — גוללת, צופה, מסמנת לייק פה ושם — בלי לפרסם. אחר כך פוסט אחד ביום, ובהדרגה יותר. ככה פייסבוק רואה פעילות רגילה ולא רובוט, וזה מה ששומר על החשבון שלכם.",
     ], small: "פרסום אוטומטי בקבוצות נעשה על אחריותכם — נסביר בדיוק לפני שמתחילים." },
-    { key: "yad2", label: "יד2", copy: [
+    { key: "yad2", label: "יד2", steps: [
+      "התחברו ליד2 בחלון שנפתח — בטלפון או במייל, כמו תמיד.",
+      "אם יד2 שולחת קוד בסמס — הזינו אותו באותו חלון.",
+    ], copy: [
       "מתחברים ליד2 כדי שפורלי תוכל לקרוא את המודעות שלכם באתר ולהציע אותן כדף נכס מוכן — פורלי לא מפרסמת דרך החשבון הזה.",
     ] },
-    { key: "madlan", label: "מדלן", copy: [
+    { key: "madlan", label: "מדלן", steps: [
+      "בחלון שנפתח יופיע עמוד הבית של מדלן.",
+      "לחצו על כפתור ההתחברות בראש העמוד, והתחברו כמו שאתם מתחברים תמיד — בטלפון או במייל.",
+      "אם מדלן שולחת קוד בסמס — הזינו אותו באותו חלון.",
+    ], copy: [
       "מתחברים למדלן כדי שפורלי תוכל לקרוא את המודעות שלכם באתר ולהציע אותן כדף נכס מוכן — פורלי לא מפרסמת דרך החשבון הזה.",
     ] },
   ];
@@ -254,13 +264,32 @@
     })[code] || "משהו השתבש — נסו שוב בעוד רגע.";
   }
 
-  function openBrowser(viewUrl) {
-    // The viewer refuses to be framed (X-Frame-Options / frame-ancestors), so
-    // it opens in its own window. Stripping that header server-side would mean
-    // proxying their websocket and defeating a deliberate control.
-    const win = window.open(viewUrl, "forly-connect", "width=1200,height=820,noopener");
-    bBody.innerHTML = '<p class="popup-note">ההתחברות נפתחה בחלון נפרד. כשסיימתם, חזרו לכאן ולחצו "סיימתי להתחבר".</p>';
-    if (!win) bBody.innerHTML = '<p class="popup-note">הדפדפן חסם את החלון — אשרו חלונות קופצים לאתר ונסו שוב.</p>';
+  // The viewer refuses to be framed (X-Frame-Options / frame-ancestors), so
+  // it opens in its own window. The window is opened on the click itself (a
+  // popup opened after an await is blocked by most browsers) and navigated
+  // once the session exists. No "noopener" feature: with it window.open()
+  // always returns null, which read as "blocked" although the window opened;
+  // the opener is cut by hand instead, before it leaves about:blank.
+  const WIN = "forly-connect", WIN_FEATURES = "width=1200,height=820";
+  function openLoginWindow() {
+    let w = null;
+    try { w = window.open("about:blank", WIN, WIN_FEATURES); } catch (e) { w = null; }
+    if (w) { try { w.opener = null; } catch (e) { /* cross-origin already */ } }
+    return w;
+  }
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  function openBrowser(viewUrl, platform, win) {
+    const row = PLATFORM_ROWS.find((r) => r.key === platform) || PLATFORM_ROWS[0];
+    $("browserModalTitle").textContent = `התחברות ל${row.label}`;
+    $("browserModalSub").textContent = `זה ${row.label} האמיתי. מתחברים כרגיל — פורלי לא רואה את הסיסמה ולא שומרת אותה.`;
+    let opened = false;
+    if (win && !win.closed) { try { win.location.replace(viewUrl); opened = true; } catch (e) { opened = false; } }
+    const steps = row.steps.concat(['כשסיימתם, חזרו לכאן ולחצו "סיימתי להתחבר".']);
+    bBody.innerHTML =
+      (opened ? "" : '<p class="popup-note">הדפדפן לא פתח את החלון לבד — לחצו על הכפתור כדי לפתוח אותו.</p>') +
+      `<ol class="popup-steps">${steps.map((t) => `<li>${esc(t)}</li>`).join("")}</ol>` +
+      `<p><a class="btn btn-ghost" id="browserReopen" href="${esc(viewUrl)}" target="${WIN}" rel="noopener">${opened ? "החלון נסגר? לפתוח אותו שוב" : `פתיחת חלון ההתחברות ל${esc(row.label)}`}</a></p>`;
+    bMsg.textContent = "קיבלתם קוד בסמס? אפשר לצאת לרגע ולחזור — החלון מחכה לכם כמה דקות.";
     bModal.hidden = false; bOpen = true;
   }
   function closeBrowser() { bModal.hidden = true; bBody.innerHTML = ""; bOpen = false; }
@@ -289,10 +318,12 @@
       if (!$(`browserConsent_${platform}`).checked) { toast("סמנו את האישור שמעל הכפתור"); return; }
       const btn = this; btn.disabled = true; btn.textContent = "פותחים דפדפן…";
       currentPlatform = platform;
+      const win = openLoginWindow(); // on the click itself, before any await
       try {
         const j = await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform, consent: true }) });
-        openBrowser(j.view_url);
+        openBrowser(j.view_url, platform, win);
       } catch (e) {
+        if (win && !win.closed) { try { win.close(); } catch (x) { /* ignore */ } }
         toast(connectErrorText(e));
       } finally {
         btn.disabled = false; paintRow(platform); // the label is back at once, whatever happened
@@ -323,8 +354,10 @@
         : code === "session_expired" || code === "no_open_session"
           ? "עבר יותר מדי זמן והחלון נסגר. פתחו אותו שוב ונסו להתחבר."
           : code === "not_logged_in"
-            ? "נראה שעדיין לא התחברתם — השלימו את ההתחברות בדפדפן ואז לחצו שוב."
-            : connectErrorText(e);
+            ? "נראה שעדיין לא התחברתם — השלימו את ההתחברות בחלון ואז לחצו שוב."
+            : code === "cannot_verify_login"
+              ? "לא הצלחנו לוודא שההתחברות הושלמה — החלון נשאר פתוח. נסו שוב בעוד רגע, ואם זה חוזר כתבו לנו."
+              : connectErrorText(e);
     } finally { btn.disabled = false; }
   });
 
