@@ -38,6 +38,15 @@ const STALE_DROP_MS = 30 * 86400000; // mergeMembership(): a stale/left entry th
 
 const REAL_ESTATE_RE = /דיר|נדל|להשכר|למכיר|apartment|rent|real estate|נכס/i;
 
+// The link on "Your groups" also carries the group's last-activity line;
+// only the first line is the name. The suffix is also cut when the two come
+// glued (textContent has no line break).
+const NAME_NOISE = /\s*(פעילות אחרונה|פעילות לאחרונה|Last active|You last visited|ביקרת לאחרונה).*$/is;
+function groupName(text) {
+  const first = String(text || "").split("\n").map((l) => l.trim()).find(Boolean) || "";
+  return first.replace(NAME_NOISE, "").trim().slice(0, 120);
+}
+
 const slugOf = (url) => (String(url).match(/\/groups\/([^/?#]+)/) || [])[1] || null;
 const isNumeric = (slug) => /^\d+$/.test(String(slug || ""));
 const groupIdOf = (slug) => (isNumeric(slug) ? slug : `slug:${slug}`);
@@ -56,13 +65,15 @@ async function syncMembership(page, opts = {}) {
   const signal = await require("./posting-driver-proof").readSignal(page, "");
   if (signal !== "ok") throw Object.assign(new Error("groups page not readable"), { code: "sync_signal", signal });
   for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, 1200); await page.waitForTimeout(800); } // load the whole list
-  const raw = await page.$$eval(SELECTORS.groupLink, (els) => els.map((a) => ({ href: a.href, text: (a.textContent || "").trim() })));
+  const raw = await page.$$eval(SELECTORS.groupLink, (els) => els.map((a) => ({ href: a.href, text: (a.innerText || a.textContent || "").trim() })));
   const out = new Map();
   for (const { href, text } of raw) {
     const slug = slugOf(href);
     if (!slug || !text || out.has(slug)) continue;
     const url = shareKit.sanitizeGroups([href])[0] || `https://www.facebook.com/groups/${slug}`;
-    out.set(slug, { url, slug, name: text.slice(0, 120) });
+    const name = groupName(text);
+    if (!name) continue;
+    out.set(slug, { url, slug, name });
   }
   return [...out.values()];
 }
@@ -305,4 +316,4 @@ function hiddenIds(conn) {
 
 const isStale = (conn, now) => !conn.facebook_groups_synced_at || now.getTime() - new Date(conn.facebook_groups_synced_at).getTime() > STALE_MS;
 
-module.exports = { syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };
+module.exports = { groupName, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };

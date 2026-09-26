@@ -278,3 +278,12 @@ function nameHash(name) {
 
   console.log("facebook-groups-sync.test.js ok");
 })();
+
+// ── a group's name is its link's first line, without the last-activity text ──
+{
+  const { groupName } = require("./facebook-groups-sync");
+  assert.equal(groupName("דירות להשכרה בכפר סבא והסביבה\nפעילות אחרונה לפני 10 דקות"), "דירות להשכרה בכפר סבא והסביבה");
+  assert.equal(groupName("❤️ דירות להשכרה בהוד השרון ❤️פעילות אחרונה לפני 3 שעות"), "❤️ דירות להשכרה בהוד השרון ❤️");
+  assert.equal(groupName("Rentals TLV Last active 2 hours ago"), "Rentals TLV");
+  assert.equal(groupName("  \n  "), "");
+}
