@@ -80,7 +80,8 @@
     if (live(p.campaign)) return new Set((p.campaign.groups || []).map((g) => String(g.group_id)));
     if (!picks.has(p.page_id)) {
       const ok = new Set(usableIds());
-      picks.set(p.page_id, new Set((p.fit_group_ids || []).map(String).filter((id) => ok.has(id)).slice(0, 5)));
+      const no = new Set((p.excluded_group_ids || []).map(String));
+      picks.set(p.page_id, new Set((p.fit_group_ids || []).map(String).filter((id) => ok.has(id) && !no.has(id)).slice(0, 5)));
     }
     return picks.get(p.page_id);
   }
@@ -100,13 +101,18 @@
 
   function propHtml(p) {
     const on = live(p.campaign), ids = groupsOf(p), st = statusOf(p), id = U.esc(p.page_id);
-    const fit = new Set((p.fit_group_ids || []).map(String));
+    const fit = new Set((p.fit_group_ids || []).map(String)), excluded = new Set((p.excluded_group_ids || []).map(String));
     const thumb = /^https:\/\//.test(p.thumb_url || "") ? `<img class="ap-thumb" src="${U.esc(p.thumb_url)}" alt="" loading="lazy">` : '<div class="ap-thumb"></div>';
     const where = [p.city, DEAL[p.listing_type]].filter(Boolean).map(U.esc).join(" · ");
     const none = !on && !ids.size ? `<p class="ap-note">לא מצאנו קבוצה שלכם שמתאימה ל${U.esc(p.city || "נכס הזה")} — בחרו קבוצות.</p>` : "";
     const panel = !open.has(p.page_id) ? "" : `<div class="ap-groups"><div class="camp-groups">` +
       (members().filter(U.usable).map((g) => {
         const gid = String(g.group_id), checked = ids.has(gid);
+        // A group the server refuses for this property's deal is shown, never tickable.
+        if (excluded.has(gid) && !checked) {
+          return `<div class="camp-g off"><label><input type="checkbox" disabled> <span class="camp-gn">${U.esc(g.name)}</span>` +
+            ` <small>לא מתאימה ל${U.esc(DEAL[p.listing_type] ? `נכס ${DEAL[p.listing_type]}` : "סוג העסקה")}</small></label></div>`;
+        }
         return `<div class="camp-g${checked ? " on" : ""}"><label><input type="checkbox" data-page="${id}" data-group="${U.esc(gid)}"${checked ? " checked" : ""}>` +
           ` <span class="camp-gn">${U.esc(g.name)}</span> <small>${fit.has(gid) ? `מתאימה ל${U.esc(p.city || "נכס")} · ` : ""}${U.esc(U.groupNote(g))}</small></label></div>`;
       }).join("") || '<p class="camp-muted">אין קבוצות ברשימה. רעננו את הקבוצות בהגדרות למטה.</p>') + "</div>" +
@@ -208,16 +214,33 @@
     return true;
   }
 
+  // Groups the server refuses for this property (not a member any more,
+  // barred to agents, the wrong kind of deal): dropped, and the rest go ahead.
+  const startedText = (dropped) => (!dropped ? "התחלנו ✓ אפשר לעצור בכל רגע"
+    : `הורדנו ${dropped === 1 ? "קבוצה אחת שלא מתאימה" : `${dropped} קבוצות שלא מתאימות`} לנכס — הפרסום התחיל בשאר ✓`);
+  const DROPPABLE = new Set(["not_member", "group_disallowed", "listing_type_not_allowed"]);
   async function start(p, ids) {
-    const unknown = members().some((g) => ids.includes(String(g.group_id)) && g.agent_policy === "unknown");
     const targets = withPage() ? ["page", "groups"] : ["groups"];
     await put("/api/posting/settings", settingsBody());
-    await post("/api/posting/campaigns", {
-      page_id: p.page_id, group_ids: ids, mode: mode(), days: 14, repeat: false, targets, consent: true,
-      consent_version: settings.consent_version, include_unknown: unknown,
-      account_aged: $("apAged").checked, posted_manually: $("apManual").checked,
-    });
-    consentGiven = true;
+    let left = ids.slice();
+    for (let round = 0; round < 3; round++) {
+      const unknown = members().some((g) => left.includes(String(g.group_id)) && g.agent_policy === "unknown");
+      try {
+        await post("/api/posting/campaigns", {
+          page_id: p.page_id, group_ids: left, mode: mode(), days: 14, repeat: false, targets, consent: true,
+          consent_version: settings.consent_version, include_unknown: unknown,
+          account_aged: $("apAged").checked, posted_manually: $("apManual").checked,
+        });
+        consentGiven = true;
+        return ids.length - left.length; // how many were dropped
+      } catch (e) {
+        const bad = new Set(((e && e.body && e.body.group_ids) || []).map(String));
+        if (!e || !DROPPABLE.has(e.code) || !bad.size) throw e;
+        if (picks.has(p.page_id)) bad.forEach((id) => picks.get(p.page_id).delete(id));
+        left = left.filter((id) => !bad.has(String(id)));
+        if (!left.length) throw e;
+      }
+    }
   }
 
   async function withBusy(p, fn) {
@@ -242,7 +265,7 @@
       }
       if (pageOn() && !withPage()) { $("apSettings").open = true; toast("בחרו באיזה דף עסקי לפרסם, או בטלו את \"גם בדף העסקי\""); return renderProps(); }
       if (needConsent()) return renderProps();
-      return withBusy(p, async () => { await start(p, ids); open.delete(p.page_id); toast("התחלנו ✓ אפשר לעצור בכל רגע"); });
+      return withBusy(p, async () => { toast(startedText(await start(p, ids))); open.delete(p.page_id); });
     }
     // STOP: always allowed, whatever the switches or halts say (routes/posting.js).
     if (!confirm("לעצור את הפרסום של הנכס הזה? מה שכבר עלה נשאר בקבוצות. אפשר להפעיל שוב מתי שתרצו.")) return renderProps();

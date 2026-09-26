@@ -127,5 +127,20 @@ const { db, store } = K;
     assert.equal((await call(app, "GET", "/api/posting/preview?page_id=pgX")).status, 404, "another agent's page");
     assert.equal((await call(app, "GET", "/api/posting/preview?page_id=../x")).status, 400);
   }
+  // ── a group the catalog keeps for rentals is never offered for a sale ──
+  {
+    const env = await setup({ conn: { facebook_groups_member: R.members().concat([K.member("444", { name: "דירות להשכרה בחיפה" })]) } });
+    const catalog = async () => R.CATALOG.concat([{ url: G(444), name: "דירות להשכרה בחיפה", city: "חיפה", listing_types: ["rent"], agent_policy: "unknown" }]);
+    const app = R.makeApp({ deps: env.deps, catalog });
+    await db.saveListing({ listing_id: "lR", business_phone: PH, page_id: "pg2", city: "חיפה", rooms: 4, status: "active" });
+    const props = (await call(app, "GET", "/api/posting/properties")).body.properties;
+    const p2 = props.find((p) => p.page_id === "pg2");
+    assert.ok(p2.excluded_group_ids.includes("444") && !p2.fit_group_ids.includes("444"), JSON.stringify(p2));
+    const st = (await call(app, "GET", "/api/posting/settings?page_id=pg2")).body;
+    const g444 = st.member_groups.find((g) => g.group_id === "444"), g111 = st.member_groups.find((g) => g.group_id === "111");
+    assert.equal(g444.excluded, true); assert.equal(g444.fits, false);
+    assert.equal(g111.excluded, false); assert.equal(g111.fits, true);
+    assert.equal((await call(app, "GET", "/api/posting/settings")).body.member_groups.find((g) => g.group_id === "444").excluded, undefined, "no property, no verdict");
+  }
   console.log("routes/posting-properties.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

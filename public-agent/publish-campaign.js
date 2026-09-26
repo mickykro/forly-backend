@@ -175,13 +175,16 @@
   const usable = (g) => !!g && g.membership_state === "member" && !DISALLOWED.has(g.agent_policy);
   function groupNote(g) {
     if (g.membership_state !== "member") return "לא חברים כרגע";
+    if (g.excluded) return "לא מתאימה לסוג העסקה של הנכס";
     if (DISALLOWED.has(g.agent_policy)) return "הקבוצה לא מאפשרת פרסום מתווכים";
     if (g.agent_policy === "explicitly_allowed") return "מתווכים מורשים";
     return "בדקו את כללי הקבוצה";
   }
   // Up to five ticked: the saved default groups, else catalog-approved groups first (the API gives no member counts).
+  // With a property (settings?page_id=): only groups that suit it are ticked,
+  // and one the server would refuse for its deal (excluded) never is.
   function defaultPicks(members) {
-    const ok = (Array.isArray(members) ? members : []).filter(usable);
+    const ok = (Array.isArray(members) ? members : []).filter((g) => usable(g) && !g.excluded && g.fits !== false);
     const defs = ok.filter((g) => g.is_default);
     const rank = (g) => (g.agent_policy === "explicitly_allowed" ? 0 : g.in_catalog ? 1 : 2);
     return (defs.length ? defs : ok.slice().sort((a, b) => rank(a) - rank(b))).slice(0, 5).map((g) => String(g.group_id));
@@ -259,7 +262,7 @@
       if (!settings) return;
       const ms = members();
       $("campMemberGroups").innerHTML = ms.map((g) => {
-        const id = U.esc(g.group_id), ok = U.usable(g), on = ok && picked.has(String(g.group_id));
+        const id = U.esc(g.group_id), ok = U.usable(g) && !g.excluded, on = ok && picked.has(String(g.group_id));
         return `<div class="camp-g${on ? " on" : ""}${ok ? "" : " off"}"><label><input type="checkbox" data-id="${id}"${on ? " checked" : ""}${ok ? "" : " disabled"}>` +
           ` <span class="camp-gn">${U.esc(g.name)}</span> <small>${U.esc(U.groupNote(g))}</small></label>` +
           `<button type="button" class="camp-x" data-rm="${id}" title="הסרה מהרשימה" aria-label="הסרת הקבוצה מהרשימה">×</button></div>`;

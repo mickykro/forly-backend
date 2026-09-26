@@ -37,12 +37,24 @@ module.exports = function mountPostingSettings(router, S, auth) {
   const hiddenList = (conn) => (Array.isArray(conn.facebook_groups_hidden) ? conn.facebook_groups_hidden : [])
     .filter((h) => h && Array.isArray(h.ids) && h.ids.length);
 
-  async function publicMembers(conn, lookup) {
+  // With a property: whether each group suits it (fits — the automatic
+  // pick) and whether a campaign for it would be refused (excluded — the
+  // catalog's listing types leave its kind of deal out, as POST /campaigns
+  // answers listing_type_not_allowed), so the card never offers one.
+  async function publicMembers(conn, lookup, property) {
     const defaults = new Set(((conn.posting_permission || {}).default_group_ids || []).map(String));
     const find = lookup || S_.catalogLookup(await S.catalog(null));
+    const all = (m) => (find.all ? find.all(m) : [find(m)]);
     // Real-estate groups only, and only with a real name — never "קבוצה פרטית".
-    return S_.memberList(conn).filter((m) => isRealEstateGroup(m, find.all ? find.all(m) : [find(m)]))
-      .map((m) => S_.publicMember(m, find(m), defaults)).filter((g) => !g.private);
+    return S_.memberList(conn).filter((m) => isRealEstateGroup(m, all(m)))
+      .map((m) => {
+        const g = S_.publicMember(m, find(m), defaults);
+        if (property) {
+          g.fits = A.fitsProperty(m, all(m), property);
+          g.excluded = all(m).some((e) => e && A.typeExcluded(e, property.listing_type || null));
+        }
+        return g;
+      }).filter((g) => !g.private);
   }
 
   // When the next post would go out: the planner's answer for the running
@@ -91,10 +103,11 @@ module.exports = function mountPostingSettings(router, S, auth) {
     // "Groups in your area" the agent is not in: the business's activity
     // areas and, with ?page_id=, that property's city. Joining is the agent's act.
     const areas = (Array.isArray(biz.activity_areas) ? biz.activity_areas : []).filter((a) => typeof a === "string" && a.trim());
+    let property = null;
     if (typeof req.query.page_id === "string" && S_.ID_RE.test(req.query.page_id)) {
       const page = await db.getPage(req.query.page_id);
-      const city = page && page.business_phone === phone && page.property && page.property.city;
-      if (city) areas.push(String(city));
+      if (page && page.business_phone === phone) property = Object.assign({ listing_type: "sale" }, page.property || {});
+      if (property && property.city) areas.push(String(property.city));
     }
     const memberCats = new Set(members.filter((m) => m.membership_state !== "left").map(lookup).filter(Boolean));
     const hidden = S_.hiddenIds(conn);
@@ -108,7 +121,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     return res.json({
       consent_version: CONSENT_VERSION,
       permission: S_.publicPermission(conn),
-      member_groups: await publicMembers(conn, lookup),
+      member_groups: await publicMembers(conn, lookup, property),
       hidden_group_ids: hiddenList(conn).map((h) => h.ids[0]),
       suggested_groups: suggested,
       // available: this Page's numeric id is known, so it can be a campaign target (I4).
@@ -148,6 +161,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
         thumb_url: (l.photos_urls && l.photos_urls[0]) || null,
         campaign: S_.publicView(latest(page.page_id)),
         fit_group_ids: members.filter((m) => A.fitsProperty(m, lookup.all(m), property)).map((m) => m.group_id),
+        // Refused for this property (POST /campaigns: listing_type_not_allowed): never offered.
+        excluded_group_ids: members.filter((m) => lookup.all(m).some((e) => e && A.typeExcluded(e, property.listing_type))).map((m) => m.group_id),
       });
     }
     return res.json({ properties: out, max_active: S_.MAX_ACTIVE_CAMPAIGNS });

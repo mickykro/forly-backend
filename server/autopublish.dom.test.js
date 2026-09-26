@@ -47,14 +47,17 @@ function findChromium() {
     first_post_estimate: null, first_post_wait_reason: "browse_only", connected: true, halt_state: {},
   });
   const properties = () => [
-    { page_id: "pgK", title: "3 חד׳ בכפר סבא", city: "כפר סבא", listing_type: "sale", thumb_url: null, campaign: state.campaigns.pgK || null, fit_group_ids: ["k1", "k2", "x"] },
+    { page_id: "pgK", title: "3 חד׳ בכפר סבא", city: "כפר סבא", listing_type: "sale", thumb_url: null, campaign: state.campaigns.pgK || null, fit_group_ids: ["k1", "k2", "x"], excluded_group_ids: ["h1"] },
     { page_id: "pgE", title: "4 חד׳ באילת", city: "אילת", listing_type: "sale", thumb_url: null, campaign: state.campaigns.pgE || null, fit_group_ids: [] },
+    ...(state.withR ? [{ page_id: "pgR", title: "2 חד׳", city: "כפר סבא", listing_type: "sale", thumb_url: null, campaign: state.campaigns.pgR || null, fit_group_ids: ["k1", "h1"] }] : []),
   ];
   const app = express(); app.use(express.json());
   app.get("/api/posting/settings", (q, r) => r.json(settings()));
   app.get("/api/posting/properties", (q, r) => r.json({ properties: properties(), max_active: 3 }));
   app.put("/api/posting/settings", (q, r) => { state.calls.push(["put", q.body]); if (q.body.consent === true) state.consent = true; r.json({ ok: true, permission: settings().permission }); });
   app.post("/api/posting/campaigns", (q, r) => {
+    // The server refuses h1 for a sale, like POST /campaigns does.
+    if (q.body.page_id === "pgR" && q.body.group_ids.includes("h1")) { state.calls.push(["refused", q.body]); return r.status(422).json({ error: "listing_type_not_allowed", group_ids: ["h1"] }); }
     state.calls.push(["create", q.body]);
     const c = { id: `c-${q.body.page_id}`, page_id: q.body.page_id, status: "running", mode: q.body.mode, groups: q.body.group_ids.map((g) => ({ group_id: g })), posts: [], wait_reason: "browse_only" };
     state.campaigns[q.body.page_id] = c;
@@ -134,10 +137,27 @@ function findChromium() {
     await rows.nth(0).locator(".switch i").click();
     await page.waitForFunction(() => /נעצר/.test(document.getElementById("msg").textContent));
     assert.equal(state.calls[state.calls.length - 1][0], "stop");
-    assert.ok((await rows.nth(0).textContent()).includes("כבוי"));
+    // The list re-renders after the message: wait for it rather than race it.
+    await page.waitForFunction(() => /כבוי/.test(document.querySelector(".ap-prop .ap-status").textContent));
 
     // Manual sharing and details stay per property.
     assert.equal(await rows.nth(0).locator('a:has-text("שיתוף ידני")').getAttribute("href"), "/publish.html?page=pgK");
+    // A group refused for the property's deal: shown, not tickable.
+    await rows.nth(0).locator("[data-groups]").click();
+    assert.equal(await page.locator('input[data-page="pgK"][data-group="h1"]').count(), 0, "h1 cannot be ticked for pgK");
+    assert.ok((await rows.nth(0).textContent()).includes("לא מתאימה לנכס למכירה"));
+
+    // A refusal the page did not know about: the group is dropped and the rest start.
+    state.withR = true; state.calls.length = 0;
+    await page.reload(); await page.waitForSelector("#app:not([hidden])");
+    const rowR = page.locator(".ap-prop").nth(2);
+    await rowR.locator(".switch i").click();
+    await page.waitForSelector('button[data-confirm="pgR"]');
+    await page.click('button[data-confirm="pgR"]');
+    await page.waitForFunction(() => /הורדנו קבוצה אחת שלא מתאימה/.test(document.getElementById("msg").textContent));
+    const kinds = state.calls.map((c) => c[0]).filter((k) => k !== "preview");
+    assert.deepEqual(kinds, ["put", "refused", "create"]);
+    assert.deepEqual(state.calls.find((c) => c[0] === "create")[1].group_ids, ["k1"]);
     console.log("autopublish.dom.test.js ok");
   } finally { await browser.close(); srv.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });
