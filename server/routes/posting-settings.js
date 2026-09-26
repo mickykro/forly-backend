@@ -9,6 +9,7 @@
  *   DELETE /groups/:group_id    forget one membership entry, and keep it forgotten
  *   POST   /groups/:group_id/unhide   the agent selects a removed group again
  *   GET    /properties          every active property: its campaign, and the member groups that suit it
+ *   GET    /preview             the post as it would go out for a property (and one of its groups)
  *
  * PUT with enabled:false always works — it is how an agent switches off.
  */
@@ -150,6 +151,28 @@ module.exports = function mountPostingSettings(router, S, auth) {
       });
     }
     return res.json({ properties: out, max_active: S_.MAX_ACTIVE_CAMPAIGNS });
+  }));
+
+  // What will be posted: the same buildCopy the scheduler uses, from the page
+  // as it is now, seeded by the group like a real post (the wording varies a
+  // little from group to group). The link goes in the first comment.
+  router.get("/preview", auth, wrap("preview", async (req, res) => {
+    const phone = req.user.userId;
+    const pageId = typeof req.query.page_id === "string" ? req.query.page_id : "";
+    if (!S_.ID_RE.test(pageId)) return res.status(400).json({ error: "invalid_input" });
+    const page = await db.getPage(pageId);
+    if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
+    const conn = (await db.getConnection(phone)) || {};
+    const gid = typeof req.query.group_id === "string" && req.query.group_id.length <= 120 ? req.query.group_id : null;
+    const m = gid ? S_.findMember(conn, gid) : null;
+    const cat = m ? S_.catalogLookup(await S.catalog(null))(m) : null;
+    const target = { group_id: m ? m.group_id : null, url: m ? S_.memberUrl(m) : `preview:${pageId}` };
+    return res.json({
+      copy: campaigns.buildCopy(page, { page_id: pageId }, target),
+      comment_link: `${S.pageBaseUrl || deps.pageBaseUrl || ""}/p/${pageId}`,
+      author: conn.facebook_identity_label || null,
+      group_name: m ? m.name || (cat && cat.name) || null : null,
+    });
   }));
 
   router.put("/settings", auth, wrap("settings.put", async (req, res) => {

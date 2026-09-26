@@ -121,6 +121,55 @@ function call(server, method, path, headers = {}) {
       } finally { s2.close(); }
     }
 
+    // ── the posting panel: why nothing happens; run a sweep; browse now ──
+    {
+      const conn = { facebook_browser_connected_at: "2026-09-26T08:00:00.000Z", last_browse_at: "2026-09-26T09:00:00.000Z" };
+      let blocked = null, lockFree = true, released = 0, swept = 0;
+      const dwellCalls = [];
+      const posting = {
+        deps: { env: {} },
+        sweeper: { status: () => ({ started: true, last: { at: "t", result: "off", reason: "global_off" }, accounts: [{ phone: ADMIN_A, at: "t2", outcome: "browse_only" }] }), sweep: async () => { swept++; return 1; } },
+        guard: {
+          assertAllowed: async () => { if (blocked) throw Object.assign(new Error("off"), { code: "posting_disabled", reason: blocked }); },
+          assertFleetAllowed: async () => { if (blocked) throw Object.assign(new Error("off"), { code: "posting_disabled", reason: blocked }); },
+        },
+        db: { getConnection: async (p) => (p === ADMIN_A ? conn : null) },
+        store: { listPostingCampaignsByPhone: async () => [{ status: "running" }] },
+        locks: { tryAcquire: () => (lockFree ? () => { released++; } : null) },
+        dwell: async (args, deps) => { dwellCalls.push([args, deps]); },
+      };
+      const app3 = express(); app3.use(express.json());
+      app3.use("/api/dev/driver", createRouter({ requireAdmin, requireStepUp, driver: D, posting }));
+      const app4 = express(); app4.use("/api/dev/driver", createRouter({ requireAdmin, requireStepUp, driver: D }));
+      const s3 = await new Promise((r) => { const x = app3.listen(0, () => r(x)); });
+      const s4 = await new Promise((r) => { const x = app4.listen(0, () => r(x)); });
+      try {
+        assert.deepEqual((await call(s4, "GET", "/api/dev/driver/posting", headersFor(ADMIN_A))).body, { enabled: false }, "Driver off: the panel says so");
+        assert.equal((await call(s3, "GET", "/api/dev/driver/posting")).status, 401, "admins only");
+        blocked = "global_off";
+        const st = (await call(s3, "GET", "/api/dev/driver/posting", headersFor(ADMIN_A))).body;
+        assert.equal(st.fleet_off, "global_off"); assert.equal(st.sweeper.last.reason, "global_off");
+        assert.equal(st.me.connected, true); assert.equal(st.me.running, 1); assert.equal(st.me.dwell_blocked, "global_off");
+        assert.equal(st.me.last_tick.outcome, "browse_only");
+        assert.equal(st.me.next_browse_at, "2026-09-27T05:00:00.000Z", "20 h after the last browse");
+        assert.ok(!JSON.stringify(st).includes(ADMIN_A), "phone tails only");
+
+        const post = (path, who) => call(s3, "POST", `/api/dev/driver/posting/${path}`, headersFor(who));
+        const r1 = await post("browse", ADMIN_A);
+        assert.equal(r1.status, 409); assert.equal(r1.body.reason, "global_off"); assert.equal(dwellCalls.length, 0);
+        blocked = null;
+        assert.equal((await post("browse", ADMIN_B)).body.error, "facebook_not_connected");
+        lockFree = false;
+        assert.equal((await post("browse", ADMIN_A)).body.error, "profile_busy");
+        lockFree = true;
+        assert.equal((await post("browse", ADMIN_A)).status, 202);
+        await new Promise((r) => setTimeout(r, 20));
+        assert.equal(dwellCalls.length, 1); assert.equal(dwellCalls[0][1].lockHeld, true); assert.equal(dwellCalls[0][0].note, "forly-dwell:");
+        assert.equal(released, 1, "the profile lock is released when the browse ends");
+        assert.equal((await post("sweep", ADMIN_A)).body.ticked, 1); assert.equal(swept, 1);
+      } finally { s3.close(); s4.close(); }
+    }
+
     console.log("routes/dev-driver.test.js ok");
   } finally {
     D._test.setDevView(false);

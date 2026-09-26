@@ -30,12 +30,26 @@
   .tile .view { flex: 1; min-height: 0; }
   .tile .msg { color: #b00020; font-size: 12px; min-height: 1em; }
   .empty { color: #888; padding: 24px 0; }
+  #posting { background: #fff; border: 1px solid #e0dcd4; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; max-width: 900px; }
+  #posting h2 { font-size: 15px; margin: 0 0 6px; }
+  #posting dl { display: grid; grid-template-columns: 170px 1fr; gap: 3px 10px; margin: 0 0 8px; font-size: 13px; }
+  #posting dt { color: #666; }
+  #posting .bad { color: #b00020; } #posting .ok { color: #157a3f; }
+  #posting button { font: inherit; font-size: 13px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 6px; margin-inline-end: 6px; }
+  #postingMsg { font-size: 12px; color: #555; margin-top: 6px; min-height: 1em; }
   @media (max-width: 480px) { #grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <h1>Driver browsers (local)</h1>
 <div id="status">Loading…</div>
+<section id="posting" hidden>
+  <h2>Posting &amp; warm-up browsing</h2>
+  <dl id="postingDl"></dl>
+  <button type="button" id="sweepNow">Run sweep now</button>
+  <button type="button" id="browseNow">Browse now (my account)</button>
+  <div id="postingMsg"></div>
+</section>
 <div id="grid"></div>
 <script src="/connect-viewer.js"></script>
 <script>
@@ -103,8 +117,63 @@
       })
       .catch(function (e) { setStatus(e.message, true); });
   }
-  poll();
+  // ── posting panel: why nothing is happening ──
+  var OUTCOME = {
+    browse_only: "warm-up day: only browsing (a browse runs at most every 20 h)",
+    idle: "no running campaign on this account",
+    day_skipped: "today is a rest day (random, 1 in 5)", daily_cap: "today's posts are done", weekly_cap: "this week's posts are done",
+    penalty: "Facebook asked to slow down: waiting", disabled: "account disabled", no_eligible_group: "no group available right now",
+    login_open: "the login browser is open on this profile", account_blocked: "account blocked (halt)", in_flight: "a post is being published",
+    profile_busy: "another browser holds this profile", scheduled: "a post was scheduled", error: "the tick failed (see server log)",
+    no_slot_in_horizon: "no posting slot soon (night, Shabbat/holiday or caps)", guard: "stopped by the kill switch", no_driver: "the posting driver is missing"
+  };
+  var FLEET = { env_off: "POSTING_ENABLED is not 1 in server/.env", global_off: "the main switch in admin → posting is off",
+    platform_off: "the Facebook switch in admin → posting is off", visible_off: "likes/stories are off for the fleet",
+    account_disabled: "this account is disabled (a halt)", account_penalty: "Facebook asked this account to slow down",
+    no_permission: "no posting consent yet — switch a property on at /autopublish.html", permission_scope: "the consent does not cover Facebook", profile_revoked: "the Facebook connection was removed — reconnect" };
+  var dl = document.getElementById("postingDl"), pmsg = document.getElementById("postingMsg");
+  function row(k, v, cls) { var dt = text("dt", k), dd = text("dd", v); if (cls) dd.className = cls; dl.appendChild(dt); dl.appendChild(dd); }
+  function when(iso) { return iso ? new Date(iso).toLocaleString() : "—"; }
+  function pollPosting() {
+    fetch("/api/dev/driver/posting", { credentials: "same-origin", cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (b) {
+      var box = document.getElementById("posting");
+      if (!b) return;
+      box.hidden = false; dl.textContent = "";
+      if (!b.enabled) { row("Posting", "Driver is off on this server (DRIVER_API_KEY / PROFILE_KEY / FORLY_ENV)", "bad"); return; }
+      var sw = b.sweeper || {}, last = sw.last || {};
+      row("Sweeper", sw.started ? "running, every minute" : "NOT started — set POSTING_SWEEPER=1 in server/.env and restart", sw.started ? "ok" : "bad");
+      row("Last sweep", last.at ? when(last.at) + " · " + (last.result === "off" ? "skipped: " + (FLEET[last.reason] || last.reason) : last.result === "ticked" ? last.accounts + " account(s) ticked" : last.result + (last.code ? " (" + last.code + ")" : "")) : "none yet", last.result === "off" || last.result === "error" ? "bad" : "");
+      row("Main switch", b.fleet_off ? "OFF — " + (FLEET[b.fleet_off] || b.fleet_off) : "on", b.fleet_off ? "bad" : "ok");
+      var me = b.me || {};
+      row("My account " + (me.phone || ""), (me.connected ? "Facebook connected" : "Facebook NOT connected") + " · " + me.running + " running, " + me.paused + " paused", me.connected && me.running ? "ok" : "bad");
+      row("My last tick", me.last_tick ? when(me.last_tick.at) + " · " + (OUTCOME[me.last_tick.outcome] || me.last_tick.outcome) : (me.running ? "not ticked yet" : "— (no running campaign: switch a property on at /autopublish.html)"));
+      row("Browsing allowed", me.dwell_blocked ? "no — " + (FLEET[me.dwell_blocked] || me.dwell_blocked) : "yes", me.dwell_blocked ? "bad" : "ok");
+      row("Last browse", when(me.last_browse_at));
+      row("Next browse (earliest)", me.next_browse_at ? when(me.next_browse_at) : "as soon as the planner says it's a browse day");
+    }).catch(function () {});
+  }
+  function act(path, btn, done) {
+    btn.disabled = true; pmsg.textContent = "…";
+    fetch("/api/dev/driver/posting/" + path, { method: "POST", credentials: "same-origin" })
+      .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
+      .then(function (res) { pmsg.textContent = done(res); pollPosting(); poll(); })
+      .catch(function () { pmsg.textContent = "Network error."; })
+      .then(function () { btn.disabled = false; });
+  }
+  document.getElementById("sweepNow").addEventListener("click", function () {
+    act("sweep", this, function (res) { return res.status === 200 ? "Sweep done: " + res.body.ticked + " account(s) ticked." : "Failed: " + (res.body.error || res.status); });
+  });
+  document.getElementById("browseNow").addEventListener("click", function () {
+    act("browse", this, function (res) {
+      if (res.status === 202) return "Browsing started — its browser appears below within a few seconds.";
+      if (res.body.error === "posting_disabled") return "Not allowed: " + (FLEET[res.body.reason] || res.body.reason);
+      return "Not started: " + (res.body.error || res.status);
+    });
+  });
+
+  poll(); pollPosting();
   setInterval(poll, 5000);
+  setInterval(pollPosting, 10000);
 })();
 </script>
 </body>

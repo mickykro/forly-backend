@@ -381,7 +381,7 @@ async function schedulePost(decision, deps = {}, now) {
 }
 
 module.exports = {
-  create, enrollNewPage, pause, resume, stop, approvePost, skipPost, revokePermission, planAccount, schedulePost,
+  create, enrollNewPage, pause, resume, stop, approvePost, skipPost, revokePermission, planAccount, schedulePost, buildCopy,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.
   tick: (...a) => require("./posting-sweeper").tick(...a),

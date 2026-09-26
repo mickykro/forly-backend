@@ -240,6 +240,8 @@ const { makeAdminGuard, makeStepUpGuard } = require("./admin-auth");
 const { requireAdmin } = makeAdminGuard({ verifySession, readToken, authSecret: AUTH_SECRET, adminPhones: ADMIN_PHONES });
 const { requireStepUp } = makeStepUpGuard({ verifySession, authSecret: AUTH_SECRET });
 
+// The sweeper's deps, when Driver is on — also handed to the local monitor.
+let devPostingDeps = null;
 if (driverBoot.enabled) {
   const extractJobs = require("./extract-jobs");
   const ORPHAN_NOTES = ["forly-extract:", "forly-connect:", "forly-sweep:", "forly-post:", "forly-dwell:", "forly-recheck:", "forly-sync:"];
@@ -256,7 +258,7 @@ if (driverBoot.enabled) {
 
   // ── automated group posting: the campaign sweeper (posting-sweeper.js) ──
   const postingSweeper = require("./posting-sweeper");
-  const postingDeps = postingSweeper.liveDeps({
+  const postingDeps = devPostingDeps = postingSweeper.liveDeps({
     greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
     operatorPhone: process.env.POSTING_OPERATOR_PHONE,
   });
@@ -289,10 +291,11 @@ if (driverBoot.enabled) {
 }
 
 // ── dev-only: watch the browsers this server opens (routes/dev-driver.js) ──
+// With Driver on, the monitor's posting panel gets the sweeper's own deps.
 // On by itself under FORLY_ENV=local (driver-browser.devViewOn); bootCheck
 // refuses DRIVER_DEV_VIEW=1 anywhere else.
 if (driverBoot.devView) {
-  app.use("/api/dev/driver", require("./routes/dev-driver")({ requireAdmin, requireStepUp }));
+  app.use("/api/dev/driver", require("./routes/dev-driver")({ requireAdmin, requireStepUp, posting: devPostingDeps ? { deps: devPostingDeps } : null }));
   console.warn("FORLY_ENV=local: every Driver browser is shown at /dev-driver.html (DRIVER_DEV_VIEW=0 turns it off)");
 }
 

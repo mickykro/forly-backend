@@ -148,6 +148,10 @@ async function retryProfileDeletes(deps, x, now) {
 }
 
 let sweeping = false;
+// What the sweeper last did, for the local monitor (routes/dev-driver.js):
+// the last sweep's result and each account's last tick outcome. In memory.
+const state = { started: false, last: null, accounts: new Map() };
+const stamp = () => new Date().toISOString();
 // → the number of accounts ticked (0 when the switch is off or the breaker tripped).
 async function sweep(deps = {}, now) {
   if (sweeping) return 0;
@@ -162,8 +166,8 @@ async function sweep(deps = {}, now) {
     await retryProfileDeletes(deps, x, start).catch((e) => console.error(redact(`posting profile delete retry: ${code(e)}`)));
     let setting;
     try { setting = await x.guard.assertFleetAllowed({ platform: "facebook" }, A.guardDeps(deps, x)); }
-    catch (e) { if (e && e.code === "posting_disabled") return 0; throw e; }
-    if (await fleetBreaker(setting || {}, deps, x, start)) return 0;
+    catch (e) { if (e && e.code === "posting_disabled") { state.last = { at: stamp(), result: "off", reason: e.reason || null }; return 0; } throw e; }
+    if (await fleetBreaker(setting || {}, deps, x, start)) { state.last = { at: stamp(), result: "breaker" }; return 0; }
     await syncOneStale(deps, x, at()).catch((e) => console.error(redact(`posting sync step: ${code(e)}`)));
     await reconcileOne(deps, x, at()).catch((e) => console.error(redact(`posting reconcile step: ${code(e)}`)));
     await R.recheckOne(deps, at()).catch((e) => console.error(redact(`posting recheck step: ${code(e)}`)));
@@ -171,9 +175,11 @@ async function sweep(deps = {}, now) {
     // (a tick with nothing running does nothing else).
     const live = (await x.store.listPostingCampaignsByStatus("running", 500)).concat(await x.store.listPostingCampaignsByStatus("paused", 500));
     const phones = [...new Set(live.map((c) => c.phone))];
-    for (const phone of phones) await T.tickAccount(phone, deps, at());
+    for (const phone of phones) state.accounts.set(phone, { at: stamp(), outcome: await T.tickAccount(phone, deps, at()) });
+    state.last = { at: stamp(), result: "ticked", accounts: phones.length };
     return phones.length;
   } catch (e) {
+    state.last = { at: stamp(), result: "error", code: code(e) };
     console.error(redact(`posting sweep: ${code(e)}`));
     return 0;
   } finally {
@@ -183,6 +189,7 @@ async function sweep(deps = {}, now) {
 }
 
 function startSweeper(deps = {}) {
+  state.started = true;
   const t = setInterval(() => { sweep(deps).catch((e) => console.error(redact(`posting sweep: ${code(e)}`))); }, deps.sweepMs || SWEEP_MS);
   if (t.unref) t.unref();
   return () => clearInterval(t);
@@ -221,6 +228,7 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, operator
 
 module.exports = {
   sweep, startSweeper, liveDeps, SWEEP_MS,
+  status: () => ({ started: state.started, last: state.last, accounts: [...state.accounts].map(([phone, v]) => Object.assign({ phone }, v)) }),
   tick: T.tick, tickAccount: T.tickAccount, runAttempt: T.runAttempt, haltAccount: H.haltAccount,
   _test: { reap, writeHealth, fleetBreaker, syncOneStale, reconcileOne, retryProfileDeletes, optionalFn, reset: () => { sweeping = false; } },
 };

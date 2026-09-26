@@ -65,6 +65,7 @@ function findChromium() {
     const c = Object.values(state.campaigns).find((x) => x.id === q.params.id); c.status = "stopped";
     r.json({ campaign: c });
   });
+  app.get("/api/posting/preview", (q, r) => { state.calls.push(["preview", q.query]); r.json({ copy: `🏡 דירה ב${q.query.page_id}\nשורה שנייה`, comment_link: `https://f.ly/p/${q.query.page_id}`, author: "מיקי", group_name: "דירות בכפר סבא" }); });
   app.use(express.static(path.join(__dirname, "..", "public-agent")));
   const srv = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
   const page = await browser.newPage();
@@ -82,20 +83,31 @@ function findChromium() {
     assert.ok((await rows.nth(1).textContent()).includes("לא מצאנו קבוצה שלכם שמתאימה לאילת"));
     assert.equal(await page.isVisible("#apSettings[open]"), true, "settings open until the consent is given");
 
-    // Switching on without the consent: refused, the switch goes back off, nothing sent.
+    // Switching on first shows the post: nothing starts until it is confirmed.
     await rows.nth(0).locator(".switch i").click();
+    await page.waitForSelector('button[data-confirm="pgK"]');
+    const card = await rows.nth(0).locator(".ap-fb").textContent();
+    assert.ok(card.includes("🏡 דירה בpgK") && card.includes("מיקי") && card.includes("https://f.ly/p/pgK") && card.includes("דירות בכפר סבא"), card);
+    assert.equal(await rows.nth(0).locator("[data-toggle]").isChecked(), false);
+    assert.deepEqual(state.calls.map((c) => c[0]), ["preview"]);
+    assert.equal(state.calls[0][1].group_id, "k1", "previewed for the property's first group");
+    // Confirmed without the consent: refused, the switch stays off, nothing sent.
+    await page.click('button[data-confirm="pgK"]');
     await page.waitForFunction(() => /סמנו את האישור/.test(document.getElementById("msg").textContent));
     assert.equal(await rows.nth(0).locator("[data-toggle]").isChecked(), false);
-    assert.equal(state.calls.length, 0);
+    assert.deepEqual(state.calls.map((c) => c[0]), ["preview"]);
+    state.calls.length = 0;
 
     // Edit Kfar Saba's groups first: drop k2.
     await rows.nth(0).locator("[data-groups]").click();
     await page.locator('input[data-page="pgK"][data-group="k2"]').uncheck();
     assert.ok((await rows.nth(0).textContent()).includes("קבוצות (1)"));
 
-    // With the consent: settings saved, then the campaign, with THIS property's groups.
+    // With the consent (the post already seen): settings saved, then the campaign, with THIS property's groups.
     await page.check("#apConsent");
     await rows.nth(0).locator(".switch i").click();
+    await page.waitForFunction(() => /פעיל/.test(document.querySelector(".ap-prop").textContent));
+    state.calls = state.calls.filter((c) => c[0] !== "preview");
     await page.waitForFunction(() => /פעיל/.test(document.querySelector(".ap-prop").textContent));
     const [put, create] = state.calls;
     assert.equal(put[0], "put"); assert.equal(put[1].consent, true); assert.equal(put[1].consent_version, "v1");

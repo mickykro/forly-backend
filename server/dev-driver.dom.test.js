@@ -38,6 +38,10 @@ function findChromium() {
   const inputs = [];
   const app = express(); app.use(express.json());
   app.get("/api/dev/driver/sessions", (q, r) => r.json({ sessions }));
+  app.get("/api/dev/driver/posting", (q, r) => r.json({ enabled: true, sweeper: { started: false, last: null }, fleet_off: "global_off", accounts: [],
+    me: { phone: "…0001", connected: true, running: 0, paused: 0, last_tick: null, last_browse_at: null, next_browse_at: null, dwell_blocked: "global_off" } }));
+  let browseAsked = 0;
+  app.post("/api/dev/driver/posting/browse", (q, r) => { browseAsked++; r.status(409).json({ error: "posting_disabled", reason: "global_off" }); });
   app.get("/api/dev/driver/sessions/:id/view", (q, r) => {
     r.writeHead(200, { "Content-Type": "text/event-stream" });
     r.write(`data: ${JSON.stringify({ t: "frame", d: JPEG, w: 800, h: 600, u: `https://example.com/${q.params.id}` })}\n\n`);
@@ -49,6 +53,15 @@ function findChromium() {
   try {
     await page.goto(`http://127.0.0.1:${srv.address().port}/dev-driver.html`);
     await page.waitForFunction(() => document.querySelectorAll(".tile .cv-img:not([hidden])").length === 2, null, { timeout: 8000 });
+    // The posting panel says why nothing runs, in words.
+    await page.waitForSelector("#posting:not([hidden])");
+    const panel = await page.textContent("#posting");
+    assert.ok(panel.includes("NOT started — set POSTING_SWEEPER=1"), panel);
+    assert.ok(panel.includes("the main switch in admin → posting is off"), panel);
+    assert.ok(panel.includes("no running campaign: switch a property on"), panel);
+    await page.click("#browseNow");
+    await page.waitForFunction(() => /Not allowed: the main switch/.test(document.getElementById("postingMsg").textContent));
+    assert.equal(browseAsked, 1);
     const heads = await page.locator(".tile header b").allTextContents();
     assert.deepEqual(heads, ["forly-local-extract:job1", "forly-local-post:facebook"]);
     assert.deepEqual(await page.locator(".tile .cv-url").allTextContents(), ["https://example.com/sA", "https://example.com/sB"]);

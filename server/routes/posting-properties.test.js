@@ -111,5 +111,21 @@ const { db, store } = K;
     assert.equal(s.body.member_groups.find((g) => g.group_id === "111").name, "דירות בחיפה", "the catalog's name");
     assert.ok(!s.body.member_groups.some((g) => g.group_id === "999"));
   }
+  // ── the post preview: the scheduler's own copy, for this agent's page only ──
+  {
+    const { app } = await setup({ conn: { facebook_identity_label: "דנה כהן" } });
+    const r = await call(app, "GET", "/api/posting/preview?page_id=pg2&group_id=111");
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const page = await db.getPage("pg2");
+    const conn = await db.getConnection(PH);
+    const member = conn.facebook_groups_member.find((m) => m.group_id === "111");
+    assert.equal(r.body.copy, C.buildCopy(page, { page_id: "pg2" }, { url: member.canonical_url }), "exactly what the scheduler would write for that group");
+    assert.ok(r.body.copy.includes("דירה בחיפה"));
+    assert.ok(!/https?:\/\//.test(r.body.copy), "no link in the body: it goes in the first comment");
+    assert.equal(r.body.comment_link, "https://f.ly/p/pg2");
+    assert.equal(r.body.author, "דנה כהן"); assert.equal(r.body.group_name, "דירות בחיפה G111");
+    assert.equal((await call(app, "GET", "/api/posting/preview?page_id=pgX")).status, 404, "another agent's page");
+    assert.equal((await call(app, "GET", "/api/posting/preview?page_id=../x")).status, 400);
+  }
   console.log("routes/posting-properties.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

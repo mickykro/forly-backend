@@ -38,6 +38,32 @@
   let settings = null, props = [], maxActive = 3, consentGiven = false, timer = null;
   const picks = new Map(); // page_id → Set of group ids, for properties not posting yet
   const open = new Set(); // page_ids whose group panel is open
+  // The post preview: shown per property, and always once before a property
+  // is first switched on (its confirm button is what switches it on).
+  const previewOpen = new Set(), previewed = new Set(), confirming = new Set();
+  const previews = new Map(); // `${page_id}|${group_id}` → { copy, comment_link, author, group_name } | "loading" | "error"
+  function previewKey(p) { return `${p.page_id}|${[...groupsOf(p)][0] || ""}`; }
+  function loadPreview(p) {
+    const k = previewKey(p), gid = [...groupsOf(p)][0];
+    if (previews.has(k)) return;
+    previews.set(k, "loading");
+    api(`/api/posting/preview?page_id=${encodeURIComponent(p.page_id)}${gid ? `&group_id=${encodeURIComponent(gid)}` : ""}`)
+      .then((j) => previews.set(k, j), () => previews.set(k, "error"))
+      .then(renderProps);
+  }
+  function previewHtml(p) {
+    const v = previews.get(previewKey(p)), id = U.esc(p.page_id);
+    if (!v || v === "loading") return '<div class="ap-preview"><p class="camp-muted">טוענים את הפוסט…</p></div>';
+    if (v === "error") return '<div class="ap-preview"><p class="ap-note">לא הצלחנו להציג את הפוסט — נסו שוב.</p></div>';
+    const who = U.esc(v.author || "החשבון שלכם");
+    return `<div class="ap-preview"><div class="ap-fb">
+        <div class="ap-fb-head"><b>${who}</b> ◂ ${U.esc(v.group_name || "הקבוצה")}</div>
+        <div class="ap-fb-body">${U.esc(v.copy)}</div>
+        <div class="ap-fb-comment"><b>${who}</b> <span dir="ltr">${U.esc(v.comment_link)}</span><small>תגובה ראשונה — הקישור לדף הנכס</small></div>
+      </div>
+      <p class="camp-muted camp-small">כך ייראה הפוסט. הנוסח משתנה מעט מקבוצה לקבוצה, והמחיר והפרטים נלקחים מדף הנכס ברגע הפרסום.</p>
+      ${confirming.has(p.page_id) ? `<button type="button" class="btn btn-gold btn-sm" data-confirm="${id}">נראה טוב — הפעלת פרסום אוטומטי</button>` : ""}</div>`;
+  }
   const busy = new Set(); // page_ids with a request in flight
   const live = (c) => !!c && (c.status === "running" || c.status === "paused");
   const members = () => (settings && settings.member_groups) || [];
@@ -93,9 +119,10 @@
       </div>${none}
       <div class="ap-actions">
         <button type="button" class="btn btn-ghost btn-sm" data-groups="${id}">קבוצות (${ids.size})</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-preview="${id}">${previewOpen.has(p.page_id) ? "הסתרת התצוגה" : "תצוגה מקדימה של הפוסט"}</button>
         <a class="btn btn-ghost btn-sm" href="/publish.html?page=${encodeURIComponent(p.page_id)}">שיתוף ידני</a>
         ${p.campaign ? `<a class="btn btn-ghost btn-sm" href="/publish.html?page=${encodeURIComponent(p.page_id)}#campaignCard">פרטים ואישורים</a>` : ""}
-      </div>${panel}</div>`;
+      </div>${previewOpen.has(p.page_id) ? previewHtml(p) : ""}${panel}</div>`;
   }
 
   function renderProps() {
@@ -209,6 +236,10 @@
       if (!settings.connected) { toast("קודם חברו את החשבון האישי שלכם בפייסבוק."); return renderProps(); }
       const ids = [...groupsOf(p)];
       if (!ids.length) { open.add(p.page_id); toast("בחרו לפחות קבוצה אחת לנכס הזה"); return renderProps(); }
+      if (!previewed.has(p.page_id)) {
+        previewOpen.add(p.page_id); confirming.add(p.page_id); loadPreview(p);
+        toast("בדקו את הפוסט ואשרו כדי להפעיל"); return renderProps();
+      }
       if (pageOn() && !withPage()) { $("apSettings").open = true; toast("בחרו באיזה דף עסקי לפרסם, או בטלו את \"גם בדף העסקי\""); return renderProps(); }
       if (needConsent()) return renderProps();
       return withBusy(p, async () => { await start(p, ids); open.delete(p.page_id); toast("התחלנו ✓ אפשר לעצור בכל רגע"); });
@@ -247,6 +278,16 @@
     const b = ev.target.closest && ev.target.closest("button"); if (!b) return;
     if (b.dataset.groups) { if (open.has(b.dataset.groups)) open.delete(b.dataset.groups); else open.add(b.dataset.groups); renderProps(); }
     if (b.dataset.save && byId(b.dataset.save)) saveGroups(byId(b.dataset.save));
+    if (b.dataset.preview && byId(b.dataset.preview)) {
+      const p = byId(b.dataset.preview);
+      if (previewOpen.has(p.page_id)) { previewOpen.delete(p.page_id); confirming.delete(p.page_id); } else { previewOpen.add(p.page_id); loadPreview(p); }
+      renderProps();
+    }
+    if (b.dataset.confirm && byId(b.dataset.confirm)) {
+      const p = byId(b.dataset.confirm);
+      previewed.add(p.page_id); confirming.delete(p.page_id); previewOpen.delete(p.page_id);
+      toggle(p, true);
+    }
   });
   $("apMemberGroups").addEventListener("click", async (ev) => {
     const b = ev.target.closest && ev.target.closest("button[data-rm]"); if (!b) return;
