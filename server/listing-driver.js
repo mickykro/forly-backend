@@ -39,17 +39,24 @@ function isLoginWall(landedUrl, text) {
 
 // The listing's own description, not the whole page: innerText also carries
 // the site's menus, the price box, the contact form and the transaction
-// history. Taken from the heading "תיאור הנכס" (Madlan; the others
-// [Unverified]) up to the next section heading. Without one: the page's meta
-// description, then the text itself only when it is short enough to be just
-// the listing (a group post); otherwise empty — the agent writes their own.
+// history. In order:
+//  1. the heading "תיאור הנכס" (Madlan) up to the next section heading;
+//  2. no heading (Yad2): the text just above "מפה" / "פרטים נוספים", back to
+//     the "4חדריםקומה8/9116מ״ר" facts line — only when that line is found;
+//  3. the page's meta description;
+//  4. the text itself only when it is short enough to be just the listing (a
+//     group post); otherwise empty — the agent writes their own.
 const DESC_HEAD = /^(תיאור הנכס|תיאור הדירה|תיאור המודעה|תיאור|על הנכס)[:：]?$/;
 const DESC_STOP = /^(מפרט מלא|פרטים נוספים|מידע נוסף( על הנכס)?|מאפייני הנכס|מה יש בנכס|יתרונות הנכס|יצירת קשר|חשוב לדעת|היסטוריית עסקאות|הציגו מספר טלפון|יש טעות במודעה\?.*|מודעות דומות|נכסים דומים)$/;
 const DESC_MORE = /^(קרא(ו)? עוד|הצג(ו)? עוד|עוד|הצג פחות|קרא פחות)$/;
 const DESC_MAX = 3000;
+const BLOCK_END = /^(מפה|פרטים נוספים)$/;
+const FACTS_LINE = /^\d+(\.\d+)?\s*חדרים/;
+const INVISIBLE = /[\u200b-\u200f\u2060\ufeff]/g;
 const SHORT_PAGE = 1500;
 function descriptionOf(text, meta) {
-  const lines = String(text || "").split("\n").map((l) => l.trim());
+  const lines = String(text || "").split("\n").map((l) => l.replace(INVISIBLE, "").trim());
+  const tidy = (arr) => arr.join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, DESC_MAX);
   const at = lines.findIndex((l) => DESC_HEAD.test(l));
   if (at >= 0) {
     const out = [];
@@ -57,8 +64,20 @@ function descriptionOf(text, meta) {
       if (DESC_STOP.test(l) || DESC_HEAD.test(l)) break;
       if (!DESC_MORE.test(l)) out.push(l);
     }
-    const d = out.join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, DESC_MAX);
+    const d = tidy(out);
     if (d.length >= 20) return d;
+  }
+  const end = lines.findIndex((l) => BLOCK_END.test(l));
+  if (end > 0) {
+    const out = [];
+    for (let i = end - 1; i >= 0 && i >= end - 40; i--) {
+      if (FACTS_LINE.test(lines[i])) {
+        const d = tidy(out.reverse());
+        if (d.length >= 20) return d;
+        break;
+      }
+      out.push(lines[i]);
+    }
   }
   const m = String(meta || "").trim();
   if (m.length >= 20) return m.slice(0, DESC_MAX);
