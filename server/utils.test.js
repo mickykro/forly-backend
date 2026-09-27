@@ -142,6 +142,14 @@ const fakeFetch = (body) => async () => ({
     assert.strictEqual(publicUrl("http://localhost:8787/p/x?c=1"), "https://nadlan.call4li.com/p/x?c=1");
     assert.strictEqual(publicUrl("https://cdn.example.com/files/a.mp4"), "https://cdn.example.com/files/a.mp4");
     assert.strictEqual(publicUrl("http://127.0.0.1.evil.com/x"), "http://127.0.0.1.evil.com/x");
+    // staging, hosting and tunnel origins never reach a buyer either
+    assert.strictEqual(publicUrl("https://staging.srv1173890.hstgr.cloud/p/krvytvrv-nksym-632dd?c=ab"), "https://nadlan.call4li.com/p/krvytvrv-nksym-632dd?c=ab");
+    assert.strictEqual(publicUrl("https://srv1173890.hstgr.cloud/files/a.mp4"), "https://nadlan.call4li.com/files/a.mp4");
+    assert.strictEqual(publicUrl("https://abc.trycloudflare.com/p/x"), "https://nadlan.call4li.com/p/x");
+    assert.strictEqual(publicUrl("http://10.0.0.5:8787/p/x#top"), "https://nadlan.call4li.com/p/x#top");
+    assert.strictEqual(publicUrl("https://staging-news.com/p/x"), "https://staging-news.com/p/x");
+    assert.strictEqual(publicUrl("https://nadlan.call4li.com/p/x"), "https://nadlan.call4li.com/p/x");
+    assert.strictEqual(publicUrl("not a url"), "not a url");
     assert.strictEqual(publicUrl(null), null);
   }
 

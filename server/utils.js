@@ -97,9 +97,17 @@ const INFRA_HOST = /(hstgr\.cloud|trycloudflare\.com|ngrok(-free)?\.(io|app|dev)
 // comment — never points at a local dev server: a loopback origin becomes the
 // public one, the path kept. Any other URL is returned as is.
 const PUBLIC_BASE_URL = "https://nadlan.call4li.com";
-const LOOPBACK_ORIGIN = /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:\d+)?(?=[/?#]|$)/i;
+// A link that leaves the machine (a Facebook post, a WhatsApp button) never
+// carries a local, staging, tunnel or raw-IP origin: that origin becomes the
+// public one, path and query kept. Matched on the parsed hostname, so
+// "127.0.0.1.evil.com" or "staging-news.com" is left alone.
+const NON_PUBLIC_HOST = /^(localhost|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+)$|^staging\.|\.staging\.|(^|\.)(hstgr\.cloud|trycloudflare\.com|ngrok(-free)?\.(io|app|dev)|loca\.lt)$/i;
 function publicUrl(url) {
-  return typeof url === "string" ? url.replace(LOOPBACK_ORIGIN, PUBLIC_BASE_URL) : url;
+  if (typeof url !== "string") return url;
+  let u;
+  try { u = new URL(url); } catch { return url; }
+  if (!/^https?:$/.test(u.protocol) || !NON_PUBLIC_HOST.test(u.hostname)) return url;
+  return PUBLIC_BASE_URL + u.pathname + u.search + u.hash;
 }
 
 function resolvePageBaseUrl({ pageBaseUrl, baseUrl, publicBaseUrl, allowInfra }) {
