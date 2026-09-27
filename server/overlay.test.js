@@ -6,7 +6,7 @@ const assert = require("assert");
 const zlib = require("zlib");
 const { _test, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS } = require("./overlay");
 const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng,
-        bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin } = _test;
+        bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin, endStyleFor } = _test;
 
 // ── roomLabel mapping ──
 assert.equal(roomLabel("living room"), "סלון");
@@ -234,4 +234,12 @@ assert.equal(pickAudioUrl("nope"), null);
 
 assert.equal(MAX_ROOMS, 12);
 assert.equal(MAX_CLIPS, 4);
+// ── endStyleFor: last-frame brightness picks the title palette ──
+assert.equal(endStyleFor(181), "light");
+assert.equal(endStyleFor(136), "light");
+assert.equal(endStyleFor(135), "dark");
+assert.equal(endStyleFor(99), "dark");
+assert.equal(endStyleFor(null), "dark", "probe failure → cream + shadow, reads on anything");
+assert.equal(endStyleFor(NaN), "dark");
+
 console.log("all overlay tests passed");

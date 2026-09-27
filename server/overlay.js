@@ -420,6 +420,28 @@ async function sampleClipFrames(file, framesDir, prefix, duration, count, offset
   }));
 }
 
+// End-title palette from how bright the bottom third of the closing frame is:
+// brown text on light floors/walls, cream + shadow on dark ones.
+const END_LUMA_LIGHT = 135;
+function endStyleFor(luma) {
+  return Number.isFinite(luma) && luma > END_LUMA_LIGHT ? "light" : "dark";
+}
+
+// Mean luma (0-255) of the bottom third of a clip's last frame, or null.
+async function endFrameLuma(file) {
+  try {
+    const out = await run(FFMPEG, [
+      "-sseof", "-0.3", "-i", file, "-frames:v", "1",
+      "-vf", "crop=iw:ih/3:0:ih*2/3,signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-",
+      "-f", "null", "-",
+    ], 30000);
+    const m = out.match(/YAVG=([\d.]+)/);
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 // Sample every clip, classify the lot in one call, smooth into segments, and
 // attach a descriptor. Frames come from the SOURCE clips rather than the
 // stitched output so no throwaway encode is needed; the few frames that land
@@ -726,5 +748,6 @@ module.exports = {
   _test: {
     buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
     modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin,
+    endStyleFor, endFrameLuma,
   },
 };
