@@ -60,6 +60,12 @@ assert.equal(segs[0].label, "a");
 segs = labelsToSegments(["a", "b", "c", "d", "e", "f"], times.slice(0, 6), 3);
 assert.equal(segs.length, 0);
 
+// bathrooms/toilets/showers/hallways are classified but never labelled
+segs = labelsToSegments(["סלון", "סלון", "חדר רחצה", "חדר רחצה", "מסדרון", "מסדרון", "שירותים", "שירותים", "מקלחת", "מקלחת", "מטבח", "מטבח"],
+  times.slice(0, 12), 6);
+assert.deepEqual(segs.map((s) => s.label), ["סלון", "מטבח"]);
+assert.ok(Math.abs(segs[0].end - times[1]) < 1e-9, "the bathroom run still closes the lounge label");
+
 // ── afterJoin: a label may not open inside a crossfade ──
 // Two 15s clips -> clip 1 starts at 14.5, crossfade runs 14.5..15.0. Frames in
 // that window come from clip 1's source (fully its opening room) while the

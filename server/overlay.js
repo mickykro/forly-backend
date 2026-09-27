@@ -45,7 +45,7 @@ const os = require("os");
 const zlib = require("zlib");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
-const { roomLabel } = require("./rooms");
+const { roomLabel, UNLABELLED_ROOMS } = require("./rooms");
 const { assertPublicHttpUrl } = require("./utils");
 
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
@@ -292,7 +292,8 @@ function buildAss({ width, height, duration }, lines, roomSegments = []) {
 
 // Collapse per-frame labels into display segments. A lone mislabeled/null
 // frame between two identical neighbors is treated as its neighbors; runs
-// shorter than MIN_RUN samples are dropped as noise.
+// shorter than MIN_RUN samples are dropped as noise. UNLABELLED_ROOMS runs
+// still count as runs (so they don't bleed into neighbours) but emit nothing.
 //
 // Segment edges sit ON the confirming samples, not midway between them. The
 // midpoint is a guess at where the cut fell and lands early half the time,
@@ -312,7 +313,7 @@ function labelsToSegments(labels, times, duration) {
   for (let i = 1; i <= filled.length; i++) {
     if (i === filled.length || filled[i] !== filled[runStart]) {
       const label = filled[runStart];
-      if (label && i - runStart >= MIN_RUN) {
+      if (label && !UNLABELLED_ROOMS.has(label) && i - runStart >= MIN_RUN) {
         segs.push({
           label,
           // First frame that actually showed this room (or 0 — the opening
