@@ -36,6 +36,9 @@
   #shots li { display: grid; grid-template-columns: 160px 1fr; gap: 10px; align-items: start; }
   #shots img { width: 160px; border: 1px solid #ccc; border-radius: 4px; display: block; }
   #shots .why { font-weight: 600; }
+  #shots .kv { font-size: 12px; margin-top: 2px; word-break: break-word; }
+  #shots .kv.bad { color: #a4231a; }
+  #shots pre { font-size: 11px; white-space: pre-wrap; word-break: break-word; background: #f6f6f6; padding: 6px; border-radius: 4px; max-height: 260px; overflow: auto; }
   #shots .noimg { width: 160px; font-size: 12px; color: #777; border: 1px dashed #ccc; border-radius: 4px; padding: 8px; box-sizing: border-box; }
   @media (max-width: 480px) { #shots li { grid-template-columns: 1fr; } #shots img { width: 100%; } }
   #posting dl { display: grid; grid-template-columns: 170px 1fr; gap: 3px 10px; margin: 0 0 8px; font-size: 13px; }
@@ -206,6 +209,42 @@
   // ── failed posts: the screenshot, the reason and the step reached (posting-shots.js) ──
   var STEPS = { reserved: "before opening the browser", session_started: "browser open, before the group's composer",
     composer_ready: "composer open, before clicking Post", submit_started: "while clicking Post", verification_pending: "after Post, while confirming" };
+  // The failure's full diagnostic (posting-diag): the check, what was expected
+  // and found, what the page had. Everything is text — never HTML from the page.
+  function kv(label, value, bad) {
+    var d = document.createElement("div"); d.className = "kv" + (bad ? " bad" : "");
+    var b = document.createElement("b"); b.textContent = label + ": "; d.appendChild(b);
+    d.appendChild(document.createTextNode(value == null || value === "" ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value)));
+    return d;
+  }
+  function detailsOf(s) {
+    var out = [], W = window.ForlyCampaignWhy || {}, f = s.facts || {}, g = s.diag || {};
+    if (s.check) out.push(kv("Check", s.check + (W.CHECKS && W.CHECKS[s.check] ? " — " + W.CHECKS[s.check] : ""), true));
+    if (g.why) out.push(kv("What happened", g.why, true));
+    if ("expected" in g || "found" in g) { out.push(kv("Expected", g.expected)); out.push(kv("Found on the page", g.found, true)); }
+    ["host", "http", "type", "bytes", "max_bytes", "post_disabled"].forEach(function (k) { if (g[k] != null) out.push(kv(k, g[k])); });
+    if (g.counts) out.push(kv("Video controls found", g.counts));
+    if (f.where || f.title) out.push(kv("Page", (f.where || "?") + (f.title ? " · \"" + f.title + "\"" : "")));
+    if (f.counts) {
+      var n = [];
+      Object.keys(f.counts).forEach(function (k) { n.push(k + "=" + (f.counts[k] == null ? "?" : f.counts[k])); });
+      out.push(kv("Elements on the page", n.join(" · ")));
+    }
+    var r = f.read || {}, e = f.expected || {};
+    if (Object.keys(r).length) {
+      out.push(kv("Name at the top (expected " + (e.identity || "?") + ")", r.header_identity, e.identity && r.header_identity !== e.identity));
+      out.push(kv("Group id on the page (expected " + (e.target_id || "?") + ")", r.target_id, e.target_id && r.target_id && r.target_id !== String(e.target_id).replace(/^slug:/, "")));
+      out.push(kv("Group name on the page", r.group_name));
+      out.push(kv("Composer posts to / as", (r.composer_target || "—") + " / " + (r.composer_author || "—")));
+      out.push(kv("Text in the editor", r.editor_chars == null ? null : r.editor_chars + " chars (expected " + (e.copy_chars == null ? "?" : e.copy_chars) + ")", s.check === "editor_text")); // typing may not have started yet at other checks
+    }
+    if (f.page_text && f.page_text.length) out.push(kv("Dialogs / alerts on the page", f.page_text.join(" | "), true));
+    var raw = document.createElement("details"); var sum = document.createElement("summary"); sum.textContent = "Raw diagnostic";
+    var pre = document.createElement("pre"); pre.textContent = JSON.stringify({ check: s.check, step: s.step, diag: s.diag, facts: s.facts }, null, 2);
+    raw.appendChild(sum); raw.appendChild(pre); out.push(raw);
+    return out;
+  }
+
   function pollShots() {
     fetch("/api/dev/driver-shots/", { credentials: "same-origin", cache: "no-store" })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (b) { return { status: r.status, body: b }; }); })
@@ -231,6 +270,7 @@
           info.appendChild(text("div", new Date(s.at).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }) + " · " + (s.kind || "post")));
           var w = text("div", (why ? why + " " : "") + "(" + (s.error_code || "?") + ")"); w.className = "why"; info.appendChild(w);
           info.appendChild(text("div", "Stopped " + (STEPS[s.step] || s.step || "?") + " · attempt " + (s.key_tail || "?") + " · account " + (s.phone_tail || "?")));
+          detailsOf(s).forEach(function (row) { info.appendChild(row); });
           li.appendChild(a); li.appendChild(info); list.appendChild(li);
         });
       }).catch(function () {});

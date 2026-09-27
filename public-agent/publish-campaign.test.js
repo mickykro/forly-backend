@@ -134,6 +134,10 @@ t("timeline texts", () => {
   assert.strictEqual(W.whyText({ why: "cooldown", until: "2026-10-01T10:00:00Z" }, () => "יום ה׳"), "קיבלה מכם פוסט לאחרונה — שוב אפשר ביום ה׳");
   assert.strictEqual(W.whyText({ why: "this_round" }, () => "x"), "כבר קיבלה פוסט בסבב הזה");
   assert.strictEqual(W.whyText({ why: "<b>" }), "לא זמינה כרגע");
+  assert.strictEqual(W.failDetail({ status: "failed", error_check: "composer_button", failed_step: "session_started" }),
+    "לא נמצא בקבוצה הכפתור \"כתבו משהו\". ייתכן שבקבוצה הזו רק מנהלים מפרסמים. נעצר אחרי שנפתח הדפדפן, לפני חלון הכתיבה.");
+  assert.strictEqual(W.failDetail({ status: "posted", error_check: "composer_button" }), "", "only a failed post");
+  assert.strictEqual(W.failDetail({ status: "failed", error_check: "<b>", failed_step: "x" }), "", "unknown names: nothing");
   const m = U.metricsText({ visits: 12, leads: 2, reactions: 5, comments: null, visibility: "confirmed_removed" });
   assert.match(m, /12 כניסות/); assert.match(m, /2 לידים/); assert.match(m, /5 לייקים/); assert.match(m, /הוסר/);
   assert.ok(!/תגובות ·|null/.test(m));

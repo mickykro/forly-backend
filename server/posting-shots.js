@@ -6,7 +6,7 @@
  *
  * Kept on this server's disk only (POSTING_SHOTS_DIR, default a temp dir):
  * the newest MAX_SHOTS, at most MAX_AGE_MS old. Each shot is <id>.jpg plus
- * <id>.json { id, at, kind, error_code, step, image, key_tail, campaign_id, phone_tail }
+ * <id>.json { id, at, kind, error_code, step, image, check, diag, facts, key_tail, campaign_id, phone_tail }
  * — no full phone, no URL, no profile name. Best-effort: a failed capture
  * never changes the attempt's outcome, and never throws.
  * Served to an admin by routes/driver-shots.js (/dev-driver.html shows them).
@@ -24,6 +24,14 @@ const ID_RE = /^[0-9]{13}-[0-9a-f]{8}$/;
 const enabled = (env = process.env) => ["local", "staging"].includes(env.FORLY_ENV) && env.POSTING_SHOTS !== "0";
 const dirOf = (env = process.env) => env.POSTING_SHOTS_DIR || path.join(os.tmpdir(), "forly-driver-shots");
 let last = 0;
+// A diagnostic as plain JSON, every string clipped, at most ~8 KB — never a cycle or a Buffer.
+function bounded(v) {
+  if (v == null) return null;
+  try {
+    const s = JSON.stringify(v, (k, x) => (typeof x === "string" && x.length > 200 ? `${x.slice(0, 200)}…` : x));
+    return s && s.length <= 8192 ? JSON.parse(s) : { truncated: true };
+  } catch { return null; }
+}
 const tail = (s, n = 6) => (s ? `…${String(s).slice(-n)}` : null);
 
 // → the entry's id, or null (off, or the write failed). No page (a failure
@@ -47,6 +55,7 @@ async function capture(page, meta = {}, env = process.env) {
     }
     const doc = {
       id, at: new Date(now).toISOString(), kind: meta.kind || null, error_code: meta.error_code || null, step: meta.step || null, image,
+      check: meta.check || null, diag: bounded(meta.diag), facts: bounded(meta.facts), // posting-diag: what was expected, what the page had
       key_tail: tail(meta.attempt_key), campaign_id: meta.campaign_id || null, phone_tail: tail(meta.phone, 4),
     };
     await fs.promises.writeFile(path.join(dir, `${id}.json`), JSON.stringify(doc), { mode: 0o600 });

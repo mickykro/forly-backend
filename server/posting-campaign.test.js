@@ -472,5 +472,13 @@ const PH = "972500000001";
     assert.equal(again.group_id, g1, "planned again after the resync");
   }
 
+  // ── a failed attempt's check and step reach the post (names only) ──
+  {
+    const T = require("./posting-tick");
+    const p = { id: "p1", status: "posting", attempt_key: "k1" };
+    const out = T._test.mirrorPost(p, { key: "k1", state: "verified_failed", error_code: "composer_not_found", error_check: "composer_button", failed_step: "session_started" }, { now: NOW, running: true });
+    assert.deepEqual([out.status, out.error_code, out.error_check, out.failed_step], ["failed", "composer_not_found", "composer_button", "session_started"]);
+  }
+
   console.log("posting-campaign.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

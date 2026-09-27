@@ -287,7 +287,7 @@
       const stats = U.metricsText(m);
       li.innerHTML = `<div class="l1"><span class="camp-gn">${U.esc(p.group_name)}</span><span class="st st-${U.esc(p.status)}">${U.esc(U.statusText(p))}</span></div>` +
         `<div class="l2">${U.esc(U.fmt(p.posted_at || p.scheduled_at))}${link ? ` · <a href="${U.esc(link)}" target="_blank" rel="noopener noreferrer">לפוסט ↗</a>` : ""}` +
-        `${stats ? ` · ${U.esc(stats)}` : ""}</div>`;
+        `${stats ? ` · ${U.esc(stats)}` : ""}</div>${Why.failDetail(p) ? `<div class="l3 camp-small camp-muted">${U.esc(Why.failDetail(p))}</div>` : ""}`;
       if (p.status === "pending_approval") {
         if (typeof p.copy === "string") {
           const d = document.createElement("details"); d.open = true;

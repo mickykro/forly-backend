@@ -57,6 +57,9 @@ const FIXTURES = {
   const codeOf = (p) => p.then(() => "ok", (e) => e.code);
   assert.equal(await codeOf(M.fetchVideo(`${base}/page`)), "media_unavailable", "not a video");
   assert.equal(await codeOf(M.fetchVideo(`${base}/gone`)), "media_unavailable", "404");
+  const gone = await M.fetchVideo(`${base}/gone`).catch((e) => e.detail);
+  assert.deepEqual([gone.http, gone.why, gone.host], [404, "HTTP 404", `127.0.0.1:${srv.address().port}`], "the failure says what the download saw");
+  assert.match((await M.fetchVideo(`${base}/page`).catch((e) => e.detail)).why, /not a video \(text\/html\)/);
   assert.equal(await codeOf(M.fetchVideo(`${base}/big`)), "media_too_large");
   assert.equal(await codeOf(M.fetchVideo("file:///etc/passwd")), "media_unavailable", "http(s) only");
   srv.close();

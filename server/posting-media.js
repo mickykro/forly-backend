@@ -20,27 +20,34 @@ const MAX_BYTES = 48 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 60 * 1000;
 const UPLOAD_TIMEOUT_MS = 4 * 60 * 1000;
 
-const fail = (code) => Object.assign(new Error(code), { code });
+// detail: what the download saw (posting-diag's failure note): the host, never the path.
+const fail = (code, detail) => Object.assign(new Error(code), { code, detail: detail || null });
+const hostOf = (u) => { try { return new URL(u).host; } catch { return null; } };
 
 // → { name, mimeType, buffer }. Throws { code } on anything short of a video.
 async function fetchVideo(url, deps = {}) {
-  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) throw fail("media_unavailable");
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) throw fail("media_unavailable", { why: "not an http(s) address" });
   if (typeof deps.fetchMedia === "function") return deps.fetchMedia(url);
+  const host = hostOf(url);
   let res;
   try { res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: "follow" }); }
-  catch { throw fail("media_unavailable"); }
-  if (!res.ok) throw fail("media_unavailable");
+  catch (e) { throw fail("media_unavailable", { host, why: `no response (${(e && (e.cause && e.cause.code || e.name)) || "error"})` }); }
   const type = String(res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
-  if (type && !type.startsWith("video/") && type !== "application/octet-stream") throw fail("media_unavailable");
-  if (Number(res.headers.get("content-length")) > MAX_BYTES) throw fail("media_too_large");
+  const seen = { host, http: res.status, type: type || null, bytes: Number(res.headers.get("content-length")) || null, max_bytes: MAX_BYTES };
+  if (!res.ok) throw fail("media_unavailable", { ...seen, why: `HTTP ${res.status}` });
+  if (type && !type.startsWith("video/") && type !== "application/octet-stream") throw fail("media_unavailable", { ...seen, why: `not a video (${type})` });
+  if (Number(res.headers.get("content-length")) > MAX_BYTES) throw fail("media_too_large", { ...seen, why: "larger than the upload limit" });
   const buffer = Buffer.from(await res.arrayBuffer());
-  if (!buffer.length) throw fail("media_unavailable");
-  if (buffer.length > MAX_BYTES) throw fail("media_too_large");
+  if (!buffer.length) throw fail("media_unavailable", { ...seen, why: "empty file" });
+  if (buffer.length > MAX_BYTES) throw fail("media_too_large", { ...seen, bytes: buffer.length, why: "larger than the upload limit" });
   const mimeType = type.startsWith("video/") ? type : "video/mp4";
   return { name: `property.${mimeType === "video/quicktime" ? "mov" : "mp4"}`, mimeType, buffer };
 }
 
 const countOf = (page, sel) => page.locator(sel).count().catch(() => 0);
+// How many of each thing the attach step looks for were on the page.
+const mediaCounts = async (page) => ({ file_input: await countOf(page, S.mediaInput), photo_video_button: await countOf(page, S.mediaButton),
+  add_photos_area: await countOf(page, S.mediaDrop), video_preview: await countOf(page, S.mediaAttached), progress_bar: await countOf(page, S.mediaProgress) });
 
 // → null when the file is in the composer, else an error code.
 async function attach(page, x, file) {
@@ -64,9 +71,10 @@ async function attach(page, x, file) {
         done = true;
       }
     }
-    if (!done) return "media_not_found";
-  } catch { return "media_not_found"; }
+    if (!done) { x.diag = { why: "no way to attach a video in the composer", counts: await mediaCounts(page) }; return "media_not_found"; }
+  } catch (e) { x.diag = { why: `attaching threw (${(e && e.name) || "error"})`, counts: await mediaCounts(page) }; return "media_not_found"; }
   const seen = await page.locator(S.mediaAttached).first().waitFor({ timeout: 30000 }).then(() => true, () => false);
+  if (!seen) x.diag = { why: "the file was handed over but no video preview appeared in 30 s", counts: await mediaCounts(page) };
   return seen ? null : "media_upload_failed";
 }
 
@@ -79,6 +87,8 @@ async function waitUploaded(page, x, timeoutMs = UPLOAD_TIMEOUT_MS) {
     if (busy === 0 && disabled !== "true" && (await countOf(page, S.mediaAttached)) > 0) return null;
     await x.wait(page, 1, 2);
   }
+  x.diag = { why: `the upload did not finish in ${Math.round(timeoutMs / 1000)} s`, counts: await mediaCounts(page),
+    post_disabled: await page.locator(S.submit).first().getAttribute("aria-disabled").catch(() => null) };
   return "media_upload_failed";
 }
 

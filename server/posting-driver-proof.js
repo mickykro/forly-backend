@@ -272,35 +272,39 @@ function expectedTarget(attempt, conn) {
  * open and the copy typed, immediately before the Post click.
  */
 async function proveIdentityAndDestination(page, attempt, conn, opts = {}) {
-  const no = (code) => ({ ok: false, code });
+  // check: which check failed; expected/found go to the local failure note only (posting-diag).
+  const no = (code, check, expected, found) => ({ ok: false, code, check, expected: expected ?? null, found: found ?? null });
   const label = norm(conn && conn.facebook_identity_label);
   const header = await textOf(page, SELECTORS.identity);
-  if (!label || header !== label) return no("identity_mismatch");
+  if (!label || header !== label) return no("identity_mismatch", label ? "header_name" : "no_identity_label", label, header);
 
   const want = expectedTarget(attempt || {}, conn);
-  if (!want.ok) return no(want.code);
+  if (!want.ok) return no(want.code, "target_address");
   const kind = attempt.target_type;
   const wantId = want.id || (kind === "group" && /^\d+$/.test(String(opts.resolvedGroupId || "")) ? String(opts.resolvedGroupId) : null);
   const id = await readTargetId(page, kind);
-  if (!wantId || id !== wantId) return no("destination_mismatch");
+  if (!wantId || id !== wantId) return no("destination_mismatch", wantId ? "group_id_on_page" : "group_id_unresolved", wantId, id);
   const name = await textOf(page, SELECTORS.targetName);
-  if (!name || (want.name && name !== want.name)) return no("destination_mismatch");
+  if (!name || (want.name && name !== want.name)) return no("destination_mismatch", "group_name", want.name, name);
 
   // Exactly one composer: two open composers (a stale draft) could make any
   // read below — or the click after it — land in the wrong one.
-  if ((await countOf(page, SELECTORS.composerRoot)) !== 1) return no("destination_mismatch");
+  const roots = await countOf(page, SELECTORS.composerRoot);
+  if (roots !== 1) return no("destination_mismatch", "composer_count", 1, roots);
   const author = await textOf(page, SELECTORS.composerAuthor);
   if (kind === "group") {
     const join = await countOf(page, SELECTORS.joinGroup);
-    if (join < 0) return no("markers_missing"); // unreadable is not evidence of leaving
-    if (join > 0) return no("not_member");
-    if ((await textOf(page, SELECTORS.composerTarget)) !== name) return no("destination_mismatch");
-    if (author !== label) return no("identity_mismatch");
-  } else if (author !== name) return no("identity_mismatch"); // it must post AS the Page
+    if (join < 0) return no("markers_missing", "join_button_unreadable"); // unreadable is not evidence of leaving
+    if (join > 0) return no("not_member", "join_button_in_composer", 0, join);
+    const target = await textOf(page, SELECTORS.composerTarget);
+    if (target !== name) return no("destination_mismatch", "composer_target_name", name, target);
+    if (author !== label) return no("identity_mismatch", "composer_author", label, author);
+  } else if (author !== name) return no("identity_mismatch", "composer_author", name, author); // it must post AS the Page
 
   const copy = opts.copy;
-  if (typeof copy !== "string" || !norm(copy) || sha(copy) !== attempt.copy_hash) return no("copy_mismatch");
-  if ((await textOf(page, SELECTORS.editor)) !== norm(copy)) return no("copy_mismatch");
+  if (typeof copy !== "string" || !norm(copy) || sha(copy) !== attempt.copy_hash) return no("copy_mismatch", "copy_hash");
+  const typed = await textOf(page, SELECTORS.editor);
+  if (typed !== norm(copy)) return no("copy_mismatch", "editor_text", `${norm(copy).length} chars`, typed == null ? null : `${typed.length} chars: ${typed.slice(0, 80)}`);
   return { ok: true };
 }
 

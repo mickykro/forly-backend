@@ -155,8 +155,8 @@ const PAGE_NAME = F.PAGE_NAME;
   {
     const page = fakePage({ texts: { [S.editor]: COPY } });
     assert.deepEqual(await PD.proveIdentityAndDestination(page, attemptOf(), connOf(), { copy: COPY }), { ok: true });
-    assert.deepEqual(await PD.proveIdentityAndDestination(page, attemptOf(), connOf(), {}), { ok: false, code: "copy_mismatch" });
-    assert.deepEqual(await PD.proveIdentityAndDestination(page, attemptOf({ target_id: "slug:111x", target_url: "https://www.facebook.com/groups/111x" }), connOf(), { copy: COPY }), { ok: false, code: "destination_mismatch" }, "an unresolved slug never passes");
+    assert.deepEqual(await PD.proveIdentityAndDestination(page, attemptOf(), connOf(), {}), { ok: false, code: "copy_mismatch", check: "copy_hash", expected: null, found: null });
+    assert.deepEqual(await PD.proveIdentityAndDestination(page, attemptOf({ target_id: "slug:111x", target_url: "https://www.facebook.com/groups/111x" }), connOf(), { copy: COPY }), { ok: false, code: "destination_mismatch", check: "group_id_unresolved", expected: null, found: "111" }, "an unresolved slug never passes");
     assert.equal(P.permalinkOf("https://evil.example/groups/111/posts/1", "group", ["111"]), null);
     assert.equal(P.permalinkOf("https://www.facebook.com/groups/222/posts/1", "group", ["111"]), null);
     assert.equal(P.permalinkOf("https://www.facebook.com/permalink.php?story_fbid=9&id=555", "page", ["555"]), "https://www.facebook.com/permalink.php?story_fbid=9&id=555");

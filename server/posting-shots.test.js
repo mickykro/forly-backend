@@ -38,7 +38,7 @@ function call(app, p) {
     assert.match(id, /^\d{13}-[0-9a-f]{8}$/);
     assert.deepEqual(await shots.read(id, LOCAL), JPG);
     const [doc] = await shots.list(LOCAL);
-    assert.deepEqual({ ...doc, at: undefined }, { id, at: undefined, kind: "group", error_code: "composer_not_found", step: "session_started", image: true, key_tail: "…123456", campaign_id: "c1", phone_tail: "…4567" });
+    assert.deepEqual({ ...doc, at: undefined }, { id, at: undefined, kind: "group", error_code: "composer_not_found", step: "session_started", image: true, check: null, diag: null, facts: null, key_tail: "…123456", campaign_id: "c1", phone_tail: "…4567" });
     assert.ok(!fs.readFileSync(path.join(dir, `${id}.json`), "utf8").includes("972501234567"), "no full phone on disk");
     for (const bad of ["../x", `${id}/../x`, "x", ""]) assert.equal(await shots.read(bad, LOCAL), null, bad);
     assert.equal(await shots.read(id, { ...LOCAL, FORLY_ENV: "prod" }), null, "never served in prod");
@@ -89,6 +89,16 @@ function call(app, p) {
     const [last] = await shots.list(LOCAL);
     assert.equal(last.error_code, "identity_mismatch");
     assert.equal(last.step, "composer_ready", "the step it reached");
+    // the detail: which check, what was expected and found, what the page had
+    assert.equal(last.check, "header_name");
+    assert.deepEqual([last.diag.expected, last.diag.found], [F.NAME, "Someone Else"]);
+    assert.equal(last.facts.read.header_identity, "Someone Else");
+    assert.equal(last.facts.expected.identity, F.NAME);
+    assert.equal(typeof last.facts.counts.composer, "number", "element counts");
+    // the attempt keeps names only — no page text
+    const t = h.transitions.find((x) => x.to === "verified_failed").d;
+    assert.deepEqual([t.error_code, t.error_check, t.failed_step], ["identity_mismatch", "header_name", "composer_ready"]);
+    assert.ok(!JSON.stringify(t).includes("Someone Else"), "no page text on the attempt");
     assert.equal((await shots.list(LOCAL)).length, Math.min(before + 1, shots.MAX_SHOTS));
     // a video that cannot be fetched fails before any browser opens: listed, without an image
     const h2 = F.harness();
@@ -97,7 +107,7 @@ function call(app, p) {
     const out2 = await PD.postToGroup({ ...F.argsOf(), videoUrl: "https://example.test/v.mp4" }, h2.deps);
     assert.deepEqual([out2.state, out2.error_code], ["verified_failed", "media_unavailable"]);
     const [pre] = await shots.list(LOCAL);
-    assert.deepEqual([pre.error_code, pre.image, pre.step], ["media_unavailable", false, "session_started"]);
+    assert.deepEqual([pre.error_code, pre.image, pre.step, pre.check], ["media_unavailable", false, "session_started", "video_download"]);
     console.log("posting-shots.test.js ok");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 })().catch((e) => { console.error(e); process.exit(1); });

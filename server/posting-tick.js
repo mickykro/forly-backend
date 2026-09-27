@@ -67,6 +67,7 @@ function mirrorPost(p, a, ctx) {
     };
   }
   const out = { ...p, status, error_code: status === "posted" || status === "pending_group_approval" ? null : a.error_code || p.error_code || null };
+  if (status === "failed" || status === "unknown") Object.assign(out, { error_check: a.error_check || null, failed_step: a.failed_step || null }); // posting-diag names
   if (status !== "unknown") out.copy = undefined; // reconciliation may still need the text
   if (status === "posted") { out.posted_at = a.finished_at || iso(ctx.now); out.post_url = a.post_url || p.post_url || null; }
   if (status === "pending_group_approval") out.post_url = a.post_url || null;

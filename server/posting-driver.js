@@ -46,6 +46,7 @@ const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
 const P = require("./posting-driver-proof");
 const media = require("./posting-media");
 const shots = require("./posting-shots");
+const diag = require("./posting-diag");
 
 const S = P.SELECTORS;
 const FEED_URL = "https://www.facebook.com/";
@@ -95,12 +96,17 @@ function context(kind, args, deps) {
       if (typeof attempts.annotate !== "function") return;
       try { await attempts.annotate(attempt.key, detail); } catch { /* the result still carries it */ }
     },
+    // detail.check names the check that failed: kept on the attempt (error_check,
+    // failed_step: names only, posting-diag.safeDetail); the full diagnostic —
+    // x.diag and a snapshot of the page — goes to the local/staging note only.
     async end(to, detail = {}, extra = {}) {
       const step = x.reached;
-      await x.step(to, detail);
-      // local/staging only: what the page looked like when it failed (never changes the outcome)
-      if (to === "verified_failed" || to === "outcome_unknown") {
-        await shots.capture(x.page, { kind, error_code: detail.error_code || to, step, attempt_key: attempt.key, campaign_id: attempt.campaign_id, phone }, deps.env || process.env);
+      const failed = to === "verified_failed" || to === "outcome_unknown";
+      const { check, ...rest } = detail;
+      await x.step(to, failed ? { ...rest, ...diag.safeDetail({ check, step }) } : rest);
+      if (failed && shots.enabled(deps.env || process.env)) {
+        const facts = await diag.snapshot(x.page, x).catch(() => null);
+        await shots.capture(x.page, { kind, error_code: detail.error_code || to, step, check, diag: x.diag || null, facts, attempt_key: attempt.key, campaign_id: attempt.campaign_id, phone }, deps.env || process.env);
       }
       return Object.assign({ state: to }, detail.error_code ? { error_code: detail.error_code } : {}, x.extra, extra);
     },
@@ -186,10 +192,10 @@ async function humanType(page, target, text, x) {
 // that code (this releases its reservation, 16a) and is reported.
 async function preSubmitSignal(page, x, known) {
   const sig = known || (await P.readSignal(page, x.copy));
-  if (HALTING.has(sig)) return x.end("verified_failed", { error_code: sig }, { signal: sig });
-  if (sig === "not_member") return x.end("verified_failed", { error_code: sig }, { membership: "left" });
-  if (sig === "group_blocked") return x.end("verified_failed", { error_code: sig });
-  if (sig === "unreadable") return x.end("verified_failed", { error_code: "markers_missing" }); // fail closed, pre-submit
+  if (HALTING.has(sig)) return x.end("verified_failed", { error_code: sig, check: "page_signal" }, { signal: sig });
+  if (sig === "not_member") return x.end("verified_failed", { error_code: sig, check: "join_text_on_page" }, { membership: "left" });
+  if (sig === "group_blocked") return x.end("verified_failed", { error_code: sig, check: "group_blocked_text" });
+  if (sig === "unreadable") return x.end("verified_failed", { error_code: "markers_missing", check: "page_unreadable" }); // fail closed, pre-submit
   return null;
 }
 
@@ -198,7 +204,7 @@ async function drive(page, x, want, args) {
   x.page = page;
   const copy = args.copy;
   // 1. the feed first, and a few minutes of being a person (Task 17)
-  if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed" });
+  if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
   let done = await preSubmitSignal(page, x);
   if (done) return done;
   const allowVisible = await x.allows("like");
@@ -209,58 +215,58 @@ async function drive(page, x, want, args) {
   if (HALTING.has(dwellSig)) return x.end("verified_failed", { error_code: dwellSig }, { signal: dwellSig });
 
   // 2. the destination: signals, membership, its canonical id
-  if (!(await nav(page, x, attempt.target_url))) return x.end("verified_failed", { error_code: "navigation_failed" });
+  if (!(await nav(page, x, attempt.target_url))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_group" });
   const landed = await P.readSignal(page, x.copy);
   done = await preSubmitSignal(page, x, landed);
   if (done) return done;
   x.pendingBefore = landed === "pending_approval"; // an old banner never reads as ours
   if (kind === "group") {
     const join = await P.countOf(page, S.joinGroup);
-    if (join > 0) return x.end("verified_failed", { error_code: "not_member" }, { membership: "left" });
-    if (join < 0) return x.end("verified_failed", { error_code: "markers_missing" });
+    if (join > 0) return x.end("verified_failed", { error_code: "not_member", check: "join_button_on_group_page" }, { membership: "left" });
+    if (join < 0) return x.end("verified_failed", { error_code: "markers_missing", check: "join_button_unreadable" });
   }
   const id = await P.readTargetId(page, kind);
   if (!want.id) {
-    if (!id) return x.end("verified_failed", { error_code: "destination_mismatch" }); // unresolved slug: fail closed
+    if (!id) return x.end("verified_failed", { error_code: "destination_mismatch", check: "group_id_unresolved" }); // unresolved slug: fail closed
     x.resolvedId = id; // reported only once the R3 proof has passed (fix round 2 C)
     want.id = id;
     want.ids = [...new Set([id, ...want.ids])];
-  } else if (id !== want.id) return x.end("verified_failed", { error_code: "destination_mismatch" });
+  } else if (id !== want.id) { x.diag = { expected: want.id, found: id }; return x.end("verified_failed", { error_code: "destination_mismatch", check: "group_id_on_page" }); }
   x.targetId = want.id;
   await page.mouse.wheel(0, Math.round(200 + x.rand() * 400));
   await x.wait(page, 3, 8);
 
   // 3. compose
   const composer = page.locator(S.composer).first();
-  if ((await composer.count().catch(() => 0)) === 0) return x.end("verified_failed", { error_code: "composer_not_found" });
+  if ((await composer.count().catch(() => 0)) === 0) return x.end("verified_failed", { error_code: "composer_not_found", check: "composer_button" });
   await composer.click();
   const editor = page.locator(S.editor).first();
-  if (!(await editor.waitFor({ timeout: 10000 }).then(() => true, () => false))) return x.end("verified_failed", { error_code: "composer_not_found" });
+  if (!(await editor.waitFor({ timeout: 10000 }).then(() => true, () => false))) return x.end("verified_failed", { error_code: "composer_not_found", check: "editor_did_not_open" });
   // What the page says comes first (fix round 2): a restriction dialog that
   // opened around the composer is `restricted`, not a composer problem.
   done = await preSubmitSignal(page, x);
   if (done) return done;
   const roots = await P.countOf(page, S.composerRoot);
-  if (roots !== 1) return x.end("verified_failed", { error_code: roots < 1 ? "composer_not_found" : "destination_mismatch" });
+  if (roots !== 1) { x.diag = { expected: 1, found: roots }; return x.end("verified_failed", { error_code: roots < 1 ? "composer_not_found" : "destination_mismatch", check: "composer_count" }); }
   await x.step("composer_ready");
   // The property's video first (it uploads while the text is typed); the copy is its description.
   if (x.media) {
     const bad = await media.attach(page, x, x.media);
-    if (bad) return x.end("verified_failed", { error_code: bad });
+    if (bad) return x.end("verified_failed", { error_code: bad, check: "video_attach" });
     x.extra.media = "video";
   }
   await editor.click();
   try { await humanType(page, editor, copy, x); }
-  catch (e) { if (e && e.code === "composer_focus_lost") return x.end("verified_failed", { error_code: e.code }); throw e; }
+  catch (e) { if (e && e.code === "composer_focus_lost") return x.end("verified_failed", { error_code: e.code, check: "typing_focus" }); throw e; }
   await x.wait(page, 5, 20); // re-read before posting, like anyone would
   if (x.media) {
     const bad = await media.waitUploaded(page, x);
-    if (bad) return x.end("verified_failed", { error_code: bad });
+    if (bad) return x.end("verified_failed", { error_code: bad, check: "video_upload" });
   }
 
   // 4. R3 — prove who, where and what, immediately before Post
   const proof = await P.proveIdentityAndDestination(page, attempt, x.conn, { copy, resolvedGroupId: x.resolvedId });
-  if (!proof.ok) return x.end("verified_failed", { error_code: proof.code }, proof.code === "not_member" ? { membership: "left" } : {});
+  if (!proof.ok) { x.diag = { expected: proof.expected, found: proof.found }; return x.end("verified_failed", { error_code: proof.code, check: proof.check }, proof.code === "not_member" ? { membership: "left" } : {}); }
   if (x.resolvedId) x.extra.resolved_group_id = x.resolvedId; // the proof matched this id to the target
   x.author = kind === "group" ? P.norm(x.conn.facebook_identity_label) : await P.textOf(page, S.targetName);
 
@@ -348,13 +354,13 @@ async function verify(page, x, copy, comment, clickError) {
 // Checks that need no browser: the target, the identity label, the copy.
 function preflight(kind, x, args) {
   const { attempt, conn } = x;
-  if (attempt.target_type !== kind) return { ok: false, code: "destination_mismatch" };
+  if (attempt.target_type !== kind) return { ok: false, code: "destination_mismatch", check: "target_kind" };
   const urlArg = kind === "group" ? args.groupUrl : args.pageUrl;
-  if (urlArg !== undefined && urlArg !== null && urlArg !== attempt.target_url) return { ok: false, code: "destination_mismatch" };
+  if (urlArg !== undefined && urlArg !== null && urlArg !== attempt.target_url) return { ok: false, code: "destination_mismatch", check: "target_url" };
   const want = P.expectedTarget(attempt, conn);
   if (!want.ok) return want;
-  if (!P.norm(conn.facebook_identity_label)) return { ok: false, code: "identity_mismatch" };
-  if (typeof args.copy !== "string" || !P.norm(args.copy) || P.sha(args.copy) !== attempt.copy_hash) return { ok: false, code: "copy_mismatch" };
+  if (!P.norm(conn.facebook_identity_label)) return { ok: false, code: "identity_mismatch", check: "no_identity_label" };
+  if (typeof args.copy !== "string" || !P.norm(args.copy) || P.sha(args.copy) !== attempt.copy_hash) return { ok: false, code: "copy_mismatch", check: "copy_hash" };
   return want;
 }
 
@@ -368,13 +374,13 @@ async function run(kind, args = {}, deps = {}) {
     await x.step("session_started");
     if (!deps.conn) x.conn = x.dwellDeps.conn = (await (deps.db || require("./db")).getConnection(x.phone)) || {};
     const want = preflight(kind, x, args);
-    if (!want.ok) return await x.end("verified_failed", { error_code: want.code });
+    if (!want.ok) return await x.end("verified_failed", { error_code: want.code, check: want.check || "preflight" });
     x.want = want;
     await x.guard("session"); // R2
     // The video is fetched before any browser opens: one we cannot serve costs no session.
     if (args.videoUrl) {
       try { x.media = await media.fetchVideo(args.videoUrl, deps); }
-      catch (e) { return await x.end("verified_failed", { error_code: /^media_/.test((e && e.code) || "") ? e.code : "media_unavailable" }); }
+      catch (e) { x.diag = (e && e.detail) || null; return await x.end("verified_failed", { error_code: /^media_/.test((e && e.code) || "") ? e.code : "media_unavailable", check: "video_download" }); }
     }
     const withPage = deps.withPage || driver.withPage;
     return await withPage(sessionOpts(x, "forly-post:", POST_SESSION_S), (page) => drive(page, x, want, args), pageDepsOf(x));
