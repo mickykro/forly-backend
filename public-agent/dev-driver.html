@@ -31,7 +31,12 @@
   .tile .msg { color: #b00020; font-size: 12px; min-height: 1em; }
   .empty { color: #888; padding: 24px 0; }
   #posting { background: #fff; border: 1px solid #e0dcd4; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; max-width: 900px; }
-  #posting h2 { font-size: 15px; margin: 0 0 6px; }
+  #posting h2, #shots h2 { font-size: 15px; margin: 0 0 6px; }
+  #shots ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  #shots li { display: grid; grid-template-columns: 160px 1fr; gap: 10px; align-items: start; }
+  #shots img { width: 160px; border: 1px solid #ccc; border-radius: 4px; display: block; }
+  #shots .why { font-weight: 600; }
+  @media (max-width: 480px) { #shots li { grid-template-columns: 1fr; } #shots img { width: 100%; } }
   #posting dl { display: grid; grid-template-columns: 170px 1fr; gap: 3px 10px; margin: 0 0 8px; font-size: 13px; }
   #posting dt { color: #666; }
   #posting .bad { color: #b00020; } #posting .ok { color: #157a3f; }
@@ -50,8 +55,14 @@
   <button type="button" id="browseNow">Browse now (my account)</button>
   <div id="postingMsg"></div>
 </section>
+<section id="shots" hidden>
+  <h2>Failed posts — what the page looked like (local and staging only, kept 3 days)</h2>
+  <div id="shotsMsg"></div>
+  <ul id="shotsList"></ul>
+</section>
 <div id="grid"></div>
 <script src="/connect-viewer.js"></script>
+<script src="/publish-campaign-why.js"></script>
 <script>
 (function () {
   var grid = document.getElementById("grid");
@@ -191,9 +202,39 @@
     });
   });
 
-  poll(); pollPosting();
+  // ── failed posts: the screenshot, the reason and the step reached (posting-shots.js) ──
+  var STEPS = { reserved: "before opening the browser", session_started: "browser open, before the group's composer",
+    composer_ready: "composer open, before clicking Post", submit_started: "while clicking Post", verification_pending: "after Post, while confirming" };
+  function pollShots() {
+    fetch("/api/dev/driver-shots/", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (b) { return { status: r.status, body: b }; }); })
+      .then(function (res) {
+        var sec = document.getElementById("shots"), list = document.getElementById("shotsList"), msg = document.getElementById("shotsMsg");
+        if (res.status === 404) { sec.hidden = true; return; } // not local/staging
+        sec.hidden = false;
+        if (res.status === 401 && res.body.error === "stepup_required") { msg.textContent = "Step-up required: log in again with an OTP (valid 10 minutes)."; return; }
+        if (res.status !== 200) { msg.textContent = "Could not load (" + (res.body.error || res.status) + ")."; return; }
+        var shots = res.body.shots || [];
+        msg.textContent = shots.length ? "" : "No failed post yet.";
+        list.textContent = "";
+        shots.forEach(function (s) {
+          var li = document.createElement("li");
+          var a = document.createElement("a"); a.href = "/api/dev/driver-shots/" + encodeURIComponent(s.id) + ".jpg"; a.target = "_blank"; a.rel = "noopener";
+          var img = document.createElement("img"); img.loading = "lazy"; img.alt = "screenshot"; img.src = a.href; a.appendChild(img);
+          var info = document.createElement("div");
+          var why = window.ForlyCampaignWhy ? window.ForlyCampaignWhy.failedText(s.error_code) : "";
+          info.appendChild(text("div", new Date(s.at).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }) + " · " + (s.kind || "post")));
+          var w = text("div", (why ? why + " " : "") + "(" + (s.error_code || "?") + ")"); w.className = "why"; info.appendChild(w);
+          info.appendChild(text("div", "Stopped " + (STEPS[s.step] || s.step || "?") + " · attempt " + (s.key_tail || "?") + " · account " + (s.phone_tail || "?")));
+          li.appendChild(a); li.appendChild(info); list.appendChild(li);
+        });
+      }).catch(function () {});
+  }
+
+  poll(); pollPosting(); pollShots();
   setInterval(poll, 5000);
   setInterval(pollPosting, 10000);
+  setInterval(pollShots, 30000);
 })();
 </script>
 </body>

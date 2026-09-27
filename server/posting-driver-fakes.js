@@ -3,6 +3,7 @@
    like posting-tick's postDeps. Not a test itself. No network, no Driver. */
 process.env.FORLY_ENV = "local";
 process.env.PROFILE_KEY = "test-profile-key";
+process.env.POSTING_SHOTS = "0"; // tests never write into the dev page's screenshot folder (posting-shots.test.js opts in)
 const { sha } = require("./posting-campaign");
 const PD = require("./posting-driver");
 const S = PD.SELECTORS;

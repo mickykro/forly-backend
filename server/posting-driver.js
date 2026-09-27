@@ -45,6 +45,7 @@ const { profileName } = require("./profile-name");
 const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
 const P = require("./posting-driver-proof");
 const media = require("./posting-media");
+const shots = require("./posting-shots");
 
 const S = P.SELECTORS;
 const FEED_URL = "https://www.facebook.com/";
@@ -79,12 +80,14 @@ function context(kind, args, deps) {
   const rand = deps.rand || Math.random;
   const x = {
     kind, attempt, phone, rand, deps, extra: {}, submitted: false, copy: args.copy,
+    page: null, reached: "reserved", // the open page and the last step reached: a failure's screenshot (posting-shots)
     conn: deps.conn || {},
     // R1. `illegal_transition` → a Stop that unwinds everything (no click after it).
     async step(to, detail) {
       try { await attempts.transition(attempt.key, to, detail || {}); }
       catch (e) { if (e && e.code === "illegal_transition") throw Object.assign(new Error("stopped"), { stop: true }); throw e; }
       if (to === "submit_started") x.submitted = true;
+      x.reached = to;
     },
     // A follow-up note without a state change (posting-attempts.annotate);
     // best-effort — a note never changes what happened.
@@ -93,7 +96,12 @@ function context(kind, args, deps) {
       try { await attempts.annotate(attempt.key, detail); } catch { /* the result still carries it */ }
     },
     async end(to, detail = {}, extra = {}) {
+      const step = x.reached;
       await x.step(to, detail);
+      // local/staging only: what the page looked like when it failed (never changes the outcome)
+      if ((to === "verified_failed" || to === "outcome_unknown") && x.page) {
+        await shots.capture(x.page, { kind, error_code: detail.error_code || to, step, attempt_key: attempt.key, campaign_id: attempt.campaign_id, phone }, deps.env || process.env);
+      }
       return Object.assign({ state: to }, detail.error_code ? { error_code: detail.error_code } : {}, x.extra, extra);
     },
     // R2, throwing: a denial unwinds the session (see settleError).
@@ -187,6 +195,7 @@ async function preSubmitSignal(page, x, known) {
 
 async function drive(page, x, want, args) {
   const { attempt, kind } = x;
+  x.page = page;
   const copy = args.copy;
   // 1. the feed first, and a few minutes of being a person (Task 17)
   if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed" });

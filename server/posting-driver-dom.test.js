@@ -2,6 +2,7 @@
    setContent — no network). Skipped, saying so, when no Chromium binary is
    found (CHROMIUM_PATH, or PLAYWRIGHT_BROWSERS_PATH / /opt/pw-browsers). */
 process.env.FORLY_ENV = "local";
+process.env.POSTING_SHOTS = "0"; // never into the dev page's screenshot folder
 process.env.PROFILE_KEY = "test-profile-key";
 const assert = require("assert");
 const fs = require("fs");

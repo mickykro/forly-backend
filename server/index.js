@@ -313,6 +313,11 @@ if (driverBoot.devView) {
   console.warn("FORLY_ENV=local: every Driver browser is shown at /dev-driver.html (DRIVER_DEV_VIEW=0 turns it off)");
 }
 
+// ── failed-post screenshots (posting-shots.js): local and staging only ──
+if (require("./posting-shots").enabled(process.env)) {
+  app.use("/api/dev/driver-shots", require("./routes/driver-shots")({ requireAdmin, requireStepUp }));
+}
+
 // ── profile onboarding (the 15-field "השלמת פרופיל" form) ──
 const createProfileRouter = require("./routes/profile");
 app.use("/api", createProfileRouter({ requireAuth, authSecret: AUTH_SECRET }));
