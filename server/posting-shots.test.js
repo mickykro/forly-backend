@@ -38,16 +38,22 @@ function call(app, p) {
     assert.match(id, /^\d{13}-[0-9a-f]{8}$/);
     assert.deepEqual(await shots.read(id, LOCAL), JPG);
     const [doc] = await shots.list(LOCAL);
-    assert.deepEqual({ ...doc, at: undefined }, { id, at: undefined, kind: "group", error_code: "composer_not_found", step: "session_started", key_tail: "…123456", campaign_id: "c1", phone_tail: "…4567" });
+    assert.deepEqual({ ...doc, at: undefined }, { id, at: undefined, kind: "group", error_code: "composer_not_found", step: "session_started", image: true, key_tail: "…123456", campaign_id: "c1", phone_tail: "…4567" });
     assert.ok(!fs.readFileSync(path.join(dir, `${id}.json`), "utf8").includes("972501234567"), "no full phone on disk");
     for (const bad of ["../x", `${id}/../x`, "x", ""]) assert.equal(await shots.read(bad, LOCAL), null, bad);
     assert.equal(await shots.read(id, { ...LOCAL, FORLY_ENV: "prod" }), null, "never served in prod");
 
-    // ── a capture that fails or hangs is swallowed; no page, nothing ──
+    // ── a screenshot that fails, or no page at all (failed before the browser opened): the note alone ──
     const quiet = console.error; console.error = () => {};
-    try { assert.equal(await shots.capture({ screenshot: async () => { throw new Error("closed"); } }, meta, LOCAL), null); }
+    let broken;
+    try { broken = await shots.capture({ screenshot: async () => { throw new Error("closed"); } }, meta, LOCAL); }
     finally { console.error = quiet; }
-    assert.equal(await shots.capture(null, meta, LOCAL), null);
+    const noPage = await shots.capture(null, { ...meta, error_code: "media_unavailable", step: "session_started" }, LOCAL);
+    const notes = await shots.list(LOCAL);
+    assert.deepEqual([notes[0].id, notes[0].image, notes[0].error_code], [noPage, false, "media_unavailable"], "a pre-browser failure is listed");
+    assert.equal(notes.find((n) => n.id === broken).image, false);
+    assert.equal(await shots.read(noPage, LOCAL), null, "no image to serve");
+    assert.equal(doc.image, true, "a real screenshot says so");
 
     // ── kept small: the newest MAX_SHOTS; older than 3 days dropped ──
     const old = `${Date.now() - shots.MAX_AGE_MS - 60000}-00000000`;
@@ -84,6 +90,14 @@ function call(app, p) {
     assert.equal(last.error_code, "identity_mismatch");
     assert.equal(last.step, "composer_ready", "the step it reached");
     assert.equal((await shots.list(LOCAL)).length, Math.min(before + 1, shots.MAX_SHOTS));
+    // a video that cannot be fetched fails before any browser opens: listed, without an image
+    const h2 = F.harness();
+    h2.deps.env = LOCAL;
+    h2.deps.fetchMedia = async () => { throw Object.assign(new Error("x"), { code: "media_unavailable" }); };
+    const out2 = await PD.postToGroup({ ...F.argsOf(), videoUrl: "https://example.test/v.mp4" }, h2.deps);
+    assert.deepEqual([out2.state, out2.error_code], ["verified_failed", "media_unavailable"]);
+    const [pre] = await shots.list(LOCAL);
+    assert.deepEqual([pre.error_code, pre.image, pre.step], ["media_unavailable", false, "session_started"]);
     console.log("posting-shots.test.js ok");
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 })().catch((e) => { console.error(e); process.exit(1); });

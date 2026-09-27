@@ -318,7 +318,8 @@ module.exports = function createPostingRouter(ctx) {
   async function postCard(camp, post, editable = false) {
     if (!post || typeof post.copy !== "string" || !post.copy) return "";
     const page = post.video_url === undefined ? await db.getPage(camp.page_id).catch(() => null) : null;
-    const v = post.video_url === undefined ? require("../posting-campaign").videoOf(page) : { video_url: post.video_url, poster_url: post.poster_url || null };
+    const C = require("../posting-campaign");
+    const v = C.videoView(post.video_url === undefined ? C.videoOf(page) : { video_url: post.video_url, poster_url: post.poster_url || null });
     const conn = (await db.getConnection(camp.phone).catch(() => null)) || {};
     const who = esc(conn.facebook_identity_label || "החשבון שלכם");
     const link = publicUrl(`${deps.pageBaseUrl || ""}/p/${camp.page_id}`);

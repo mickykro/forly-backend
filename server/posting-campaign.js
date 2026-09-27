@@ -18,7 +18,6 @@
  * derived from attempts, never written.
  */
 const crypto = require("crypto");
-const { publicUrl } = require("./utils");
 const safety = require("./posting-safety");
 const shareKit = require("./distribution/share-kit");
 const { redact } = require("./driver-browser");
@@ -393,12 +392,22 @@ function buildCopy(page, c, target) {
 // The post's media: the property's own walkthrough video (the one its page
 // plays), the copy being its description. http(s) only; none → text only.
 // Never a local dev address: Facebook, the driver and a phone must reach it.
+// The property's video where it actually lives (this server, or the upload
+// server it relays to): the driver downloads it and uploads it as a file, so
+// the address never reaches Facebook — only the first comment's link must be
+// public (publicUrl). Rewriting it to production 404'd every local upload.
 function videoOf(page) {
   const h = (page && page.hero) || {};
-  const ok = (u) => (typeof u === "string" && /^https?:\/\/[^\s]+$/i.test(u) ? publicUrl(u) : null);
+  const ok = (u) => (typeof u === "string" && /^https?:\/\/[^\s]+$/i.test(u) ? u : null);
   const video_url = ok(h.video_url);
   return { video_url, poster_url: video_url ? ok(h.poster_url) : null };
 }
+// For a page shown in the agent's browser (the approval page, the preview): a
+// loopback address would not load on their phone, so it becomes a path on the
+// server showing the page, which serves the same /files.
+const LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:\d+)?(?=[/?#])/i;
+const viewUrl = (u) => (typeof u === "string" ? u.replace(LOOPBACK, "") : u);
+const videoView = (v) => ({ video_url: viewUrl(v && v.video_url) || null, poster_url: viewUrl(v && v.poster_url) || null });
 
 // Appends the planned post to its campaign (scheduled, or pending_approval in
 // per_post mode — the agent then sees the exact copy).
@@ -469,7 +478,7 @@ async function explainGroups(c, deps = {}, now) {
 
 module.exports = {
   explainGroups, addGroups,
-  create, enrollNewPage, pause, resume, stop, approvePost, cleanCopy, MAX_COPY, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
+  create, enrollNewPage, pause, resume, stop, approvePost, cleanCopy, MAX_COPY, videoView, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.
   tick: (...a) => require("./posting-sweeper").tick(...a),

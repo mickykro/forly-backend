@@ -36,6 +36,7 @@
   #shots li { display: grid; grid-template-columns: 160px 1fr; gap: 10px; align-items: start; }
   #shots img { width: 160px; border: 1px solid #ccc; border-radius: 4px; display: block; }
   #shots .why { font-weight: 600; }
+  #shots .noimg { width: 160px; font-size: 12px; color: #777; border: 1px dashed #ccc; border-radius: 4px; padding: 8px; box-sizing: border-box; }
   @media (max-width: 480px) { #shots li { grid-template-columns: 1fr; } #shots img { width: 100%; } }
   #posting dl { display: grid; grid-template-columns: 170px 1fr; gap: 3px 10px; margin: 0 0 8px; font-size: 13px; }
   #posting dt { color: #666; }
@@ -219,8 +220,12 @@
         list.textContent = "";
         shots.forEach(function (s) {
           var li = document.createElement("li");
-          var a = document.createElement("a"); a.href = "/api/dev/driver-shots/" + encodeURIComponent(s.id) + ".jpg"; a.target = "_blank"; a.rel = "noopener";
-          var img = document.createElement("img"); img.loading = "lazy"; img.alt = "screenshot"; img.src = a.href; a.appendChild(img);
+          var a;
+          if (s.image === false) { a = text("div", "No screenshot: it failed before the browser opened."); a.className = "noimg"; }
+          else {
+            a = document.createElement("a"); a.href = "/api/dev/driver-shots/" + encodeURIComponent(s.id) + ".jpg"; a.target = "_blank"; a.rel = "noopener";
+            var img = document.createElement("img"); img.loading = "lazy"; img.alt = "screenshot"; img.src = a.href; a.appendChild(img);
+          }
           var info = document.createElement("div");
           var why = window.ForlyCampaignWhy ? window.ForlyCampaignWhy.failedText(s.error_code) : "";
           info.appendChild(text("div", new Date(s.at).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }) + " · " + (s.kind || "post")));

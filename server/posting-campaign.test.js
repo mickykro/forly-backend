@@ -206,7 +206,12 @@ const PH = "972500000001";
     assert.ok(deps.post.calls[0].comment.startsWith("https://nadlan.call4li.com/p/pg1/"), deps.post.calls[0].comment);
     assert.deepEqual(C.videoOf({ hero: { video_url: "javascript:x", poster_url: V } }), { video_url: null, poster_url: null }, "http(s) only");
     // Never a local dev address: the video and the first comment's link are the public ones.
-    assert.equal(C.videoOf({ hero: { video_url: "http://127.0.0.1:8787/files/v.mp4" } }).video_url, "https://nadlan.call4li.com/files/v.mp4");
+    // The video is downloaded from where it lives, never from a rewritten address (a local upload 404'd on prod).
+    assert.equal(C.videoOf({ hero: { video_url: "http://127.0.0.1:8787/files/v.mp4" } }).video_url, "http://127.0.0.1:8787/files/v.mp4");
+    assert.equal(C.videoOf({ hero: { video_url: "https://staging.srv1173890.hstgr.cloud/files/v.mp4" } }).video_url, "https://staging.srv1173890.hstgr.cloud/files/v.mp4");
+    // Shown to the agent: a loopback address becomes a path on the server showing the page.
+    assert.deepEqual(C.videoView({ video_url: "http://127.0.0.1:8787/files/v.mp4", poster_url: "http://localhost:8787/files/p.jpg" }), { video_url: "/files/v.mp4", poster_url: "/files/p.jpg" });
+    assert.deepEqual(C.videoView({ video_url: V, poster_url: null }), { video_url: V, poster_url: null });
 
   }
 

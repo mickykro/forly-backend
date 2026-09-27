@@ -99,7 +99,7 @@ function context(kind, args, deps) {
       const step = x.reached;
       await x.step(to, detail);
       // local/staging only: what the page looked like when it failed (never changes the outcome)
-      if ((to === "verified_failed" || to === "outcome_unknown") && x.page) {
+      if (to === "verified_failed" || to === "outcome_unknown") {
         await shots.capture(x.page, { kind, error_code: detail.error_code || to, step, attempt_key: attempt.key, campaign_id: attempt.campaign_id, phone }, deps.env || process.env);
       }
       return Object.assign({ state: to }, detail.error_code ? { error_code: detail.error_code } : {}, x.extra, extra);
