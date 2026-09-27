@@ -6,7 +6,8 @@ const assert = require("assert");
 const zlib = require("zlib");
 const { _test, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS } = require("./overlay");
 const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng,
-        bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin, endStyleFor, swooshPath } = _test;
+        bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin, endStyleFor, swooshPath, wrapText, textWidth } = _test;
+const { promoVideoUrl } = require("./overlay");
 
 // ── roomLabel mapping ──
 assert.equal(roomLabel("living room"), "סלון");
@@ -263,5 +264,71 @@ assert.equal(endStyleFor(135), "dark");
 assert.equal(endStyleFor(99), "dark");
 assert.equal(endStyleFor(null), "dark", "probe failure → cream + shadow, reads on anything");
 assert.equal(endStyleFor(NaN), "dark");
+
+// ── end titles never cut: wrap at words, shrink past 2 rows ──
+{
+  const W = 720, H = 1280;
+  const long = "דירת יוקרה מודרנית | שיכון ותיקים, כפר סבא | 5 חדרים עם מרפסת שמש ענקית";
+  const rows = wrapText(long, 58, W * 0.86);
+  assert.ok(rows.length >= 2, "long title wraps");
+  const words = (x) => x.replace(/\|/g, " ").split(/\s+/).filter(Boolean);
+  assert.deepEqual(words(rows.join(" ")), words(long), "every word kept, in order");
+  assert.ok(rows.some((r) => r.includes("שיכון ותיקים")), "breaks at | before splitting a segment");
+  assert.ok(rows.every((r) => !/^\s*\||\|\s*$/.test(r)), "no dangling separator at a break");
+  for (const r of rows) assert.ok(textWidth(r, 58) <= W * 0.86, "each row fits the frame");
+  assert.deepEqual(wrapText("קצר", 58, W * 0.86), ["קצר"]);
+  // a line too long for 2 rows shrinks instead of being cut
+  const huge = Array(5).fill("מילה ארוכה מאוד").join(" ");
+  const a = buildAss({ width: W, height: H, duration: 10 }, [huge, "דירת 110 מ״ר | קומה 5 | 4 חדרים | מרפסת | חניה | מחסן | מעלית"], [], "dark");
+  const titleRows = a.split("\n").filter((l) => l.includes(",Title,"));
+  assert.ok(titleRows.length <= 2 && titleRows.length >= 1);
+  const shown = titleRows.map((l) => l.replace(/^.*\}‏?/, "")).join(" ");
+  assert.equal(shown, huge, "no word of the title is dropped");
+  assert.ok(/\\fs\d+/.test(titleRows[0]), "shrunk via \\fs override");
+  assert.ok(!a.includes("WrapStyle: 2") || titleRows.every((l) => l.includes("\\pos(")), "rows are placed explicitly");
+  // rows never overlap: every event's y is distinct and title rows sit above sub rows
+  const ys = a.split("\n").filter((l) => /,(Title|Sub),/.test(l)).map((l) => Number(/\\pos\(\d+,(\d+)\)/.exec(l)[1]));
+  assert.equal(new Set(ys).size, ys.length, "one row per y");
+  assert.ok(Math.max(...ys.slice(0, titleRows.length)) < Math.min(...ys.slice(titleRows.length)), "title above details");
+  // absurd length: min font, more rows, still every word
+  const absurd = Array(12).fill("מילה ארוכה מאוד").join(" ");
+  const c = buildAss({ width: W, height: H, duration: 10 }, [absurd], [], "dark");
+  assert.equal(c.split("\n").filter((l) => l.includes(",Title,")).map((l) => l.replace(/^.*\}‏?/, "")).join(" "), absurd);
+  // lines longer than the old 60-char cap survive intact
+  const b = buildAss({ width: W, height: H, duration: 10 }, ["x".repeat(5), "א ".repeat(45).trim()], [], "light");
+  assert.equal(b.split("\n").filter((l) => l.includes(",Sub,")).map((l) => l.replace(/^.*\}‏?/, "")).join(" "), "א ".repeat(45).trim());
+}
+
+// ── dual output: clean (music only) + titled (titles, labels, logo) ──
+{
+  const base = { inFiles: ["a.mp4", "b.mp4"], assFile: "t.ass", outFile: "out.mp4", info: { width: 720, height: 1280, fps: 24, duration: 19.5 },
+    durations: [10, 10], roomSegments: [], gradFile: null, musicFile: "m.m4a" };
+  const dual = buildFfmpegArgs({ ...base, cleanFile: "clean.mp4", logoFile: "logo.png" });
+  const fc = dual[dual.indexOf("-filter_complex") + 1];
+  assert.ok(fc.includes("split=2[vmain][vclean]"), "stitched video split once for both outputs");
+  assert.ok(fc.includes("asplit=2[a][aclean]"), "music shared by both outputs");
+  assert.equal(dual.filter((x) => x === "out.mp4" || x === "clean.mp4").length, 2, "two output files");
+  assert.ok(dual.indexOf("out.mp4") < dual.indexOf("clean.mp4"));
+  const cleanArgs = dual.slice(dual.indexOf("out.mp4") + 1);
+  assert.deepEqual(cleanArgs.filter((x) => x.startsWith("[")), ["[vclean]", "[aclean]"], "clean output maps the untouched video + music");
+  // logo: looped still, scaled to 16% width, ~80% opacity, top-left inset, titled output only
+  const li = dual.indexOf("logo.png");
+  assert.deepEqual(dual.slice(li - 5, li), ["-loop", "1", "-t", "19.500", "-i"], "logo looped for the video length");
+  assert.ok(/\[2:v\]scale=115:-1,format=rgba,colorchannelmixer=aa=0\.8,fade=in:st=0:d=0\.5:alpha=1\[lg\]/.test(fc), "logo scaled + blended");
+  assert.ok(fc.includes("overlay=x=29:y=29[lgo]"), "top-left, 4% inset");
+  assert.ok(/\[lgo\]format=yuv420p,ass=/.test(fc), "titles drawn over the logo layer");
+  assert.ok(!/\[vclean\][^;]*(ass=|overlay)/.test(fc), "clean output gets no titles or logo");
+  // music input index accounts for the logo input
+  assert.ok(fc.includes("[3:a]atrim"), "music is input 3 (2 clips + logo)");
+  // unchanged single-output call keeps working
+  const single = buildFfmpegArgs(base);
+  assert.ok(!single.includes("clean.mp4") && !single.join(" ").includes("split=2"));
+}
+
+// ── promoVideoUrl: a clean overlay URL points at its titled sibling ──
+assert.equal(promoVideoUrl("https://x/files/overlays/ab-1.clean.mp4"), "https://x/files/overlays/ab-1.mp4");
+assert.equal(promoVideoUrl("https://x/files/overlays/ab-1.mp4"), null, "titled URL has no promo sibling");
+assert.equal(promoVideoUrl("https://cdn/other.clean.mp4"), null, "only our overlays folder");
+assert.equal(promoVideoUrl(null), null);
 
 console.log("all overlay tests passed");

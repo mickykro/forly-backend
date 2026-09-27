@@ -173,6 +173,15 @@ module.exports = function createPagesRouter(ctx) {
       // landed here, which the captioning pass below reads back.
       const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl, rehostOpts);
       const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
+      // A clean overlay render (<id>.clean.mp4) has a titled sibling for
+      // publishing; keep both. Best-effort — the page stands on the clean one.
+      const promoSrc = promoVideoUrl(body.video_url);
+      const promoP = promoSrc
+        ? rehostFn(promoSrc, `${base}/promo.mp4`).catch((err) => {
+          console.warn("createPropertyPage: promo video rehost failed:", err.message);
+          return null;
+        })
+        : Promise.resolve(null);
       const posterSrc = body.poster_url || body.photos[0].url;
       const posterP = rehostFn(posterSrc, `${base}/poster.${guessImageExt(posterSrc)}`);
       const photoPs = body.photos.slice(0, 12).map((p, i) =>
@@ -184,6 +193,7 @@ module.exports = function createPagesRouter(ctx) {
         videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
       ]);
       const videoUrl = video.url;
+      const promo = await promoP;
       const posterUrl = poster.url;
       const photos = rest.slice(0, photoPs.length);
       const photoUrls = photos.map((r) => r.url);
@@ -274,7 +284,7 @@ module.exports = function createPagesRouter(ctx) {
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
-        hero: { phrase: body.hero_phrase || "", video_url: videoUrl, poster_url: posterUrl },
+        hero: { phrase: body.hero_phrase || "", video_url: videoUrl, promo_video_url: promo ? promo.url : null, poster_url: posterUrl },
         gallery: { images: galleryImages },
         carousel: { slides: (body.carousel_slides || []).slice(0, 6) },
         area: {
@@ -576,7 +586,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── video stitch + overlay ──
-  const { overlayVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
+  const { overlayVideo, promoVideoUrl, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
     // video_urls (ordered clips, stitched with a crossfade) is the current
@@ -597,8 +607,19 @@ module.exports = function createPagesRouter(ctx) {
         error: `1-${MAX_CLIPS} video urls (video_urls or video_url) and 1-${MAX_LINES} lines required`,
       });
     }
+    // Optional agent logo on the titled cut, looked up from the agent's phone.
+    let logoUrl = null;
+    const phone = body.phone ? normalizePhone(body.phone) : null;
+    if (phone) {
+      try {
+        const biz = await db.getBusiness(phone);
+        logoUrl = biz && /^https?:\/\//i.test(String(biz.logo_url || "")) ? biz.logo_url : null;
+      } catch (err) {
+        console.warn("video-overlay: business lookup failed, no logo:", err.message);
+      }
+    }
     try {
-      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);

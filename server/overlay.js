@@ -235,8 +235,8 @@ function assTime(sec) {
 // ASS text field: strip control chars and the {}\ specials libass interprets.
 // Lines containing Hebrew get an RLM (U+200F) prefix to force RTL paragraph
 // direction — otherwise lines starting with ₪/digits get mis-ordered by BiDi.
-function sanitizeAss(text) {
-  const clean = String(text).replace(/[{}\\\r\n\t]/g, " ").trim().slice(0, MAX_LINE_CHARS);
+function sanitizeAss(text, max = MAX_LINE_CHARS) {
+  const clean = String(text).replace(/[{}\\\r\n\t]/g, " ").trim().slice(0, max);
   return /[֐-׿]/.test(clean) ? "‏" + clean : clean;
 }
 
@@ -247,6 +247,67 @@ function swooshPath(w, h = 7) {
   const r = (n) => Math.round(n);
   return `m 0 ${h} b ${r(w * 0.3)} ${r(-h * 0.6)} ${r(w * 0.7)} ${r(-h * 0.6)} ${w} ${h} ` +
     `b ${r(w * 0.7)} ${r(h * 0.9)} ${r(w * 0.3)} ${r(h * 0.9)} 0 ${h}`;
+}
+
+// Rendered width in px of `text` at ASS font size `size` in Heebo. libass sizes
+// by line height (ascent+descent = 1.469em for Heebo), so 1em = size/1.469.
+// Advances measured from the font; wide letters rounded up so rows never
+// overflow. Titles are wrapped by us, not libass, so we know where each row
+// lands and can stack title, swoosh and details without overlap.
+const HEEBO_EM_PER_SIZE = 1 / 1.469;
+function charEm(c) {
+  if (c === " ") return 0.25;
+  if (/[֐-׿]/.test(c)) return /[שמםטצץ]/.test(c) ? 0.85 : 0.6;
+  if (/[0-9]/.test(c)) return 0.58;
+  if (/[A-Za-z]/.test(c)) return /[MWmw]/.test(c) ? 0.88 : 0.6;
+  return 0.45;
+}
+function textWidth(text, size) {
+  let em = 0;
+  for (const c of String(text)) em += charEm(c);
+  return em * size * HEEBO_EM_PER_SIZE;
+}
+// Wrap into rows no wider than maxW, breaking at " | " separators first (so
+// "שיכון ותיקים" stays whole) and inside a segment only when it alone is too
+// wide. A break drops the separator. A single word wider than maxW gets its
+// own row (the caller shrinks the font until it fits).
+function wrapWords(text, size, maxW) {
+  const rows = [];
+  let row = "";
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    const next = row ? `${row} ${word}` : word;
+    if (row && textWidth(next, size) > maxW) { rows.push(row); row = word; } else row = next;
+  }
+  if (row) rows.push(row);
+  return rows;
+}
+function wrapText(text, size, maxW) {
+  const rows = [];
+  let row = "";
+  for (const seg of String(text).split(/\s*\|\s*/).filter(Boolean)) {
+    const next = row ? `${row} | ${seg}` : seg;
+    if (textWidth(next, size) <= maxW) { row = next; continue; }
+    if (row) rows.push(row);
+    if (textWidth(seg, size) <= maxW) { row = seg; continue; }
+    const parts = wrapWords(seg, size, maxW);
+    row = parts.pop();
+    rows.push(...parts);
+  }
+  if (row) rows.push(row);
+  return rows;
+}
+
+// Fit a line into at most `maxRows` rows, shrinking the font (down to 60%)
+// rather than cutting any text.
+function fitLine(text, size, maxW, maxRows = 2) {
+  let sz = size;
+  let rows = wrapText(text, sz, maxW);
+  while ((rows.length > maxRows || rows.some((r) => textWidth(r, sz) > maxW)) && sz > size * 0.6) {
+    sz = Math.max(Math.round(size * 0.6), Math.floor(sz * 0.92));
+    rows = wrapText(text, sz, maxW);
+    if (sz === Math.round(size * 0.6)) break;
+  }
+  return { rows, size: sz };
 }
 
 function buildAss({ width, height, duration }, lines, roomSegments = [], endStyle = "dark") {
@@ -292,21 +353,43 @@ function buildAss({ width, height, duration }, lines, roomSegments = [], endStyl
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
   ];
   const blur = light ? "" : "\\blur6";
-  const events = lines.slice(0, MAX_LINES).map((line, i) => {
-    const style = i === 0 ? "Title" : "Sub";
-    // Stack extra sub-lines below each other by shrinking MarginV per line.
-    const marginOverride = i <= 1 ? 0 : Math.max(20, subMarginV - (i - 1) * Math.round(subSize * 1.5));
-    return `Dialogue: 0,${start},${end},${style},,0,0,${marginOverride},,{\\fad(300,0)${blur}}${sanitizeAss(line)}`;
-  });
-  if (lines.length) {
-    // Estimated title width (Heebo ExtraBold Hebrew ~0.33em per char,
-    // measured), 85% of it, capped.
-    const titleChars = sanitizeAss(lines[0]).length;
-    const w = Math.round(Math.min(width * 0.8, titleChars * titleSize * 0.33 * 0.85));
+  // Lay the end titles out bottom-up with explicit positions: details rows
+  // (each input line wraps to <=2 rows), then the swoosh, then the title rows.
+  const maxW = width * 0.86;
+  const cx = Math.round(width / 2);
+  const fitted = lines.slice(0, MAX_LINES).map((line, i) =>
+    fitLine(sanitizeAss(line, 200).replace(/^‏/, ""), i === 0 ? titleSize : subSize, maxW));
+  const rowEvent = (style, y, sz, base, row) => {
+    const fs = sz !== base ? `\\fs${sz}` : "";
+    return `Dialogue: 0,${start},${end},${style},,0,0,0,,{\\fad(300,0)\\an2\\pos(${cx},${y})${fs}${blur}}${sanitizeAss(row, 200)}`;
+  };
+  const subEvents = [];
+  let y = height - Math.round(height * 0.054);
+  for (let i = fitted.length - 1; i >= 1; i--) {
+    const { rows, size } = fitted[i];
+    for (let r = rows.length - 1; r >= 0; r--) {
+      subEvents.unshift(rowEvent("Sub", y, size, subSize, rows[r]));
+      y -= Math.round(size * 1.5);
+    }
+  }
+  const events = [];
+  if (fitted.length) {
+    const { rows, size } = fitted[0];
+    // Title bottom sits a swoosh-height above the top details row.
+    let ty = fitted.length > 1 ? y + Math.round(subSize * 1.5) - Math.round(subSize * 1.6) : y;
+    const titleEvents = [];
+    const swooshY = ty + 6;
+    for (let r = rows.length - 1; r >= 0; r--) {
+      titleEvents.unshift(rowEvent("Title", ty, size, titleSize, rows[r]));
+      ty -= Math.round(size * 1.2);
+    }
+    events.push(...titleEvents);
+    // Swoosh: 85% of the widest title row.
+    const w = Math.round(Math.min(maxW, Math.max(...rows.map((r) => textWidth(r, size)))) * 0.85);
     const x = Math.round((width - w) / 2);
-    const y = height - titleMarginV + 6;
     const path = swooshPath(w, Math.max(4, Math.round(height * 0.0055)));
-    events.push(`Dialogue: 0,${start},${end},Swoosh,,0,0,0,,{\\fad(300,0)\\an7\\pos(${x},${y})\\1c&H5CA4C9&\\p1}${path}`);
+    events.push(...subEvents);
+    events.push(`Dialogue: 0,${start},${end},Swoosh,,0,0,0,,{\\fad(300,0)\\an7\\pos(${x},${swooshY})\\1c&H5CA4C9&\\p1}${path}`);
   }
   // The title window never carries a room name, whatever the caller passes.
   const cutoff = Math.max(0, duration - OVERLAY_SECONDS);
@@ -626,11 +709,19 @@ async function resolveMusic({ duration, musicUrl, musicPrompt, tmp }) {
 //
 // xfade needs its inputs to agree on size, SAR, frame rate and pixel format,
 // so every clip is normalized to the first one's geometry before joining.
-function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegments, gradFile, musicFile }) {
+// Agent logo on the titled video: a still looped for the whole video, 16% of
+// the width, ~80% opaque so the room shows through, inset 4% from top-left.
+const LOGO_WIDTH_FRAC = 0.16;
+const LOGO_INSET_FRAC = 0.04;
+const LOGO_OPACITY = 0.8;
+
+// One encode, up to two outputs: `outFile` (titles, room labels, logo) and,
+// when `cleanFile` is given, the same stitch + music with no overlay at all.
+function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegments, gradFile, musicFile, cleanFile = null, logoFile = null }) {
   const n = inFiles.length;
   const useGradient = Boolean(gradFile && roomSegments.length);
 
-  if (n === 1 && !useGradient && !musicFile) {
+  if (n === 1 && !useGradient && !musicFile && !cleanFile && !logoFile) {
     return [
       "-y", "-i", inFiles[0],
       "-vf", `ass=${assFile}:fontsdir=${FONTS_DIR}`,
@@ -659,6 +750,10 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
   }
 
   let last = "vcat";
+  if (cleanFile) {
+    parts.push("[vcat]split=2[vmain][vclean]");
+    last = "vmain";
+  }
   if (useGradient) {
     const y = info.height - bandHeight(info.height);
     const enable = roomSegments
@@ -667,31 +762,43 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
     parts.push(`[${last}][${n}:v]overlay=x=0:y=${y}:enable=${enable}[bg]`);
     last = "bg";
   }
+  const logoIdx = n + (useGradient ? 1 : 0);
+  if (logoFile) {
+    const w = Math.round(info.width * LOGO_WIDTH_FRAC);
+    const inset = Math.round(info.width * LOGO_INSET_FRAC);
+    parts.push(`[${logoIdx}:v]scale=${w}:-1,format=rgba,colorchannelmixer=aa=${LOGO_OPACITY},fade=in:st=0:d=0.5:alpha=1[lg]`);
+    parts.push(`[${last}][lg]overlay=x=${inset}:y=${inset}[lgo]`);
+    last = "lgo";
+  }
   parts.push(`[${last}]format=yuv420p,ass=${assFile}:fontsdir=${FONTS_DIR}[v]`);
 
   if (musicFile) {
-    const idx = n + (useGradient ? 1 : 0);
+    const idx = logoIdx + (logoFile ? 1 : 0);
     const fadeAt = Math.max(0, info.duration - MUSIC_FADE_SECONDS).toFixed(3);
     parts.push(
       `[${idx}:a]atrim=0:${info.duration.toFixed(3)},asetpts=PTS-STARTPTS,` +
-      `afade=t=out:st=${fadeAt}:d=${MUSIC_FADE_SECONDS}[a]`
+      `afade=t=out:st=${fadeAt}:d=${MUSIC_FADE_SECONDS}` + (cleanFile ? ",asplit=2[a][aclean]" : "[a]")
     );
   }
 
   const args = ["-y"];
   for (const f of inFiles) args.push("-i", f);
   if (useGradient) args.push("-i", gradFile);
+  if (logoFile) args.push("-loop", "1", "-t", info.duration.toFixed(3), "-i", logoFile);
   // -stream_loop applies to the input that follows it, so a bed shorter than
   // the video repeats instead of cutting out; atrim above bounds it again.
   if (musicFile) args.push("-stream_loop", "-1", "-i", musicFile);
   args.push("-filter_complex", parts.join(";"), "-map", "[v]");
   if (musicFile) args.push("-map", "[a]", "-c:a", "aac", "-b:a", "128k");
   else if (n === 1) args.push("-map", "0:a?", "-c:a", "copy");
-  args.push(
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-    "-movflags", "+faststart",
-    outFile
-  );
+  const enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart"];
+  args.push(...enc, outFile);
+  if (cleanFile) {
+    args.push("-map", "[vclean]");
+    if (musicFile) args.push("-map", "[aclean]", "-c:a", "aac", "-b:a", "128k");
+    else if (n === 1) args.push("-map", "0:a?", "-c:a", "copy");
+    args.push(...enc, cleanFile);
+  }
   return args;
 }
 
@@ -703,7 +810,15 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
  * gradient) on the segments where each room is on screen.
  * Writes the result under `uploadDir`/overlays and returns its public URL.
  */
-async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl }) {
+// The clean render sits next to the titled one as <id>.clean.mp4. Given the
+// clean URL (what the property page stores), return its titled sibling (what
+// gets published), or null for any other URL.
+function promoVideoUrl(url) {
+  const m = /^(.*\/files\/overlays\/[\w-]+)\.clean\.mp4$/.exec(String(url || ""));
+  return m ? `${m[1]}.mp4` : null;
+}
+
+async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl }) {
   const urls = (Array.isArray(videoUrls) && videoUrls.length ? videoUrls : [videoUrl])
     .filter((u) => typeof u === "string" && /^https?:\/\//.test(u));
   if (!urls.length) throw new Error("no video url given");
@@ -713,6 +828,7 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
   try {
     const assFile = path.join(tmp, "titles.ass");
     const outFile = path.join(tmp, "out.mp4");
+    const cleanFile = path.join(tmp, "clean.mp4");
     const inFiles = [];
     const probes = [];
     for (let i = 0; i < urls.length; i++) {
@@ -755,14 +871,32 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
     }
     const music = await resolveMusic({ duration, musicUrl, musicPrompt, tmp });
     const musicFile = music.file;
-    const args = buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegments, gradFile, musicFile });
+    // The agent's logo is best-effort, like music: a bad URL ships the video without it.
+    let logoFile = null;
+    let logoDebug = "no_logo";
+    if (logoUrl) {
+      try {
+        const ext = (/\.(png|jpe?g|webp)(\?|$)/i.exec(logoUrl) || [, "png"])[1].toLowerCase();
+        logoFile = path.join(tmp, `logo.${ext}`);
+        await download(logoUrl, logoFile);
+        logoDebug = "ok";
+      } catch (err) {
+        logoFile = null;
+        logoDebug = "error: " + err.message.slice(0, 200);
+        console.warn("video-overlay: logo download failed, continuing without:", err.message);
+      }
+    }
+    const args = buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegments, gradFile, musicFile, cleanFile, logoFile });
     await run(FFMPEG, args, 240000);
-    const rel = `overlays/${crypto.randomUUID()}.mp4`;
-    const finalPath = path.join(uploadDir, rel);
-    fs.mkdirSync(path.dirname(finalPath), { recursive: true });
-    fs.copyFileSync(outFile, finalPath);
+    const id = crypto.randomUUID();
+    const rel = `overlays/${id}.mp4`;
+    const relClean = `overlays/${id}.clean.mp4`;
+    fs.mkdirSync(path.join(uploadDir, "overlays"), { recursive: true });
+    fs.copyFileSync(outFile, path.join(uploadDir, rel));
+    fs.copyFileSync(cleanFile, path.join(uploadDir, relClean));
     return {
       video_url: `${baseUrl}/files/${rel}`,
+      clean_video_url: `${baseUrl}/files/${relClean}`,
       duration: info.duration,
       clip_count: inFiles.length,
       clip_durations: durations,
@@ -771,6 +905,7 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
       room_segments: roomSegments,
       room_debug: roomDebug,
       end_style: endStyle,
+      logo_debug: logoDebug,
     };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -778,10 +913,10 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
 }
 
 module.exports = {
-  overlayVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS,
+  overlayVideo, promoVideoUrl, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS,
   _test: {
     buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
     modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin,
-    endStyleFor, endFrameLuma, swooshPath,
+    endStyleFor, endFrameLuma, swooshPath, wrapText, textWidth,
   },
 };
