@@ -210,6 +210,32 @@ const PH = "972500000001";
 
   }
 
+  // ── text the agent edited on the approval page: typed as edited; asked again only when the property changes ──
+  {
+    const { deps, at } = await setup();
+    let c = await C.create(base({ mode: "per_post" }), deps);
+    c = await S.tick(c, deps, at(NOW));
+    const MINE = "דירת 4 חדרים בחיפה — כתבו לי בפרטי";
+    c = await C.approvePost(c.id, c.posts[0].id, deps, { copy: MINE });
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal(deps.post.calls.length, 1, "the property is unchanged: not asked again");
+    assert.equal(deps.post.calls[0].copy, MINE, "the driver types the edited text");
+    assert.equal(deps.post.calls[0].attempt.copy_hash, C.sha(MINE), "and checks it against the edited text");
+
+    const two = await setup();
+    let d = await C.create(base({ mode: "per_post" }), two.deps);
+    d = await S.tick(d, two.deps, two.at(NOW));
+    d = await C.approvePost(d.id, d.posts[0].id, two.deps, { copy: MINE });
+    await db.updatePage("pg1", { property: { ...K.page().property, price: 1850000 } });
+    d = await S.tick(d, two.deps, two.at(dueOf(d)));
+    assert.equal(d.posts[0].status, "pending_approval", "the price changed: asked again");
+    assert.ok(d.posts[0].copy !== MINE && /1,850,000/.test(d.posts[0].copy), "with the new generated text");
+    assert.equal(d.posts[0].copy_edited, false);
+    assert.equal(two.deps.post.calls.length, 0);
+    assert.equal(C.cleanCopy(" a\r\nb\u0000 "), "a\nb"); assert.equal(C.cleanCopy("  "), null); assert.equal(C.cleanCopy(7), null);
+    assert.equal(C.cleanCopy("x".repeat(C.MAX_COPY + 1)), null);
+  }
+
   // ── stop cancels what is scheduled; a later tick posts nothing; stop(id, { db }) works too ──
   {
     const { deps, at } = await setup();

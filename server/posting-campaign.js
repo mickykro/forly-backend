@@ -231,7 +231,20 @@ async function stop(id, deps = {}, reason = "agent") {
 
 // Approval is also a re-timing: the agent may tap at 23:40, and the slot the
 // post was proposed for is long gone. Ask posting-safety again.
-async function approvePost(id, postId, deps = {}) {
+// The agent's own text for a post (the approval page): line breaks kept,
+// control characters dropped, trimmed. → the text, or null when empty or
+// longer than MAX_COPY.
+const MAX_COPY = 3000;
+function cleanCopy(s) {
+  if (typeof s !== "string") return null;
+  const t = s.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "").trim();
+  return t && t.length <= MAX_COPY ? t : null;
+}
+
+// opts.copy (cleanCopy'd): the agent edited the text before approving. It is
+// what gets typed; base_hash keeps the generated text it was edited from, so
+// posting-tick asks again only when the property itself changes.
+async function approvePost(id, postId, deps = {}, opts = {}) {
   const x = ctxOf(deps);
   const now = nowOf(deps, x);
   const c = await x.store.getPostingCampaign(id);
@@ -245,7 +258,12 @@ async function approvePost(id, postId, deps = {}) {
   const slot = safety.nextSlot({ now, account, candidates: [{ ...cand, aliases: A.groupIdsOf(cand, conn).slice(1) }], pageId: c.page_id, config, rand: x.rand });
   const at = slot.at || A.nextDayStart(now, config, x.rand);
   return mutate(x, id, (cur) => ({
-    posts: cur.posts.map((p) => (p.id === postId && p.status === "pending_approval" ? { ...p, status: "scheduled", scheduled_at: iso(at), approved_at: iso(now) } : p)),
+    posts: cur.posts.map((p) => {
+      if (p.id !== postId || p.status !== "pending_approval") return p;
+      const edited = typeof opts.copy === "string" && opts.copy !== p.copy
+        ? { copy: opts.copy, copy_hash: sha(opts.copy), copy_edited: true, base_hash: p.copy_edited ? p.base_hash : sha(p.copy) } : {};
+      return { ...p, ...edited, status: "scheduled", scheduled_at: iso(at), approved_at: iso(now) };
+    }),
   }));
 }
 
@@ -451,7 +469,7 @@ async function explainGroups(c, deps = {}, now) {
 
 module.exports = {
   explainGroups, addGroups,
-  create, enrollNewPage, pause, resume, stop, approvePost, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
+  create, enrollNewPage, pause, resume, stop, approvePost, cleanCopy, MAX_COPY, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.
   tick: (...a) => require("./posting-sweeper").tick(...a),

@@ -196,12 +196,14 @@ async function runDue(c, post, st, deps, x, now) {
   }
 
   // Standing: the copy is rebuilt from the page as it is now. Per-post: the
-  // agent approved exact text — if the page changed since, ask again.
+  // agent approved exact text — if the page changed since, ask again (text
+  // the agent edited: when the text it was edited from is no longer current).
   // The video is part of what was approved: a new (or first) one asks again.
   const fresh = C._test.buildCopy(page, c, target);
   const video = C.videoOf(page);
-  if (c.mode === "per_post" && (fresh !== post.copy || (post.video_url || null) !== video.video_url)) {
-    const next = await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "pending_approval", copy: fresh, copy_hash: sha(fresh), approved_at: null, ...video } : p)) }));
+  const stale = post.copy_edited ? sha(fresh) !== post.base_hash : fresh !== post.copy;
+  if (c.mode === "per_post" && (stale || (post.video_url || null) !== video.video_url)) {
+    const next = await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "pending_approval", copy: fresh, copy_hash: sha(fresh), copy_edited: false, base_hash: null, approved_at: null, ...video } : p)) }));
     const p2 = next && next.posts.find((p) => p.id === post.id);
     if (p2) await say(deps, phone, "approve", `📣 פרטי הנכס השתנו — פוסט מעודכן לאישור:\n──────────\n${fresh}\n──────────`, next, p2);
     return "reapproval";

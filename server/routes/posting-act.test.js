@@ -40,7 +40,7 @@ const linkFor = (campaignId, postId, action, now = K.NOW) => pathOf(createRouter
       assert.equal(r.status, 200, a); assert.ok(r.headers["content-type"].startsWith("text/html"));
       assert.ok(r.raw.includes(q), a);
       assert.equal(r.headers["cache-control"], "no-store"); assert.equal(r.headers["referrer-policy"], "no-referrer"); assert.equal(r.headers["x-robots-tag"], "noindex");
-      const forms = r.raw.match(/<form method="post" action="([^"]+)">/g) || [];
+      const forms = r.raw.match(/<form id="act" method="post" action="([^"]+)">/g) || [];
       assert.equal(forms.length, 1, a); assert.equal((r.raw.match(/<button/g) || []).length, 1, a);
       const action = forms[0].match(/action="([^"]+)"/)[1].replace(/&amp;/g, "&");
       assert.equal(action, path, "the button posts to the same link");
@@ -151,6 +151,49 @@ const linkFor = (campaignId, postId, action, now = K.NOW) => pathOf(createRouter
     const c2 = await pendingCampaign(await setup(), { group_name: "<b>x</b>" });
     const html = await call(env.app, "POST", linkFor(c2.id, "p1", "approve"));
     assert.ok(!html.raw.includes("<b>x</b>") && html.raw.includes("&lt;b&gt;"), "escaped");
+  }
+
+  // ── the approval page: the text is editable, and what the agent leaves is what gets posted ──
+  {
+    const http = require("http");
+    const { sha } = require("../posting-campaign");
+    const form = (app, path, fields) => new Promise((resolve, reject) => {
+      const body = new URLSearchParams(fields).toString();
+      const srv = app.listen(0, () => {
+        const q = http.request({ port: srv.address().port, path, method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "content-length": Buffer.byteLength(body) } }, (r) => {
+          let d = ""; r.on("data", (c) => (d += c)); r.on("end", () => { srv.close(); resolve({ status: r.statusCode, raw: d }); });
+        });
+        q.on("error", reject); q.end(body);
+      });
+    });
+    const env = await setup();
+    const c = await pendingCampaign(env);
+    const original = (await store.getPostingCampaign(c.id)).posts[0].copy;
+    const ask = await call(env.app, "GET", linkFor(c.id, "p1", "approve"));
+    assert.match(ask.raw, /<textarea id="copy" name="copy" form="act"/, "approve: an editable text in the form");
+    assert.ok(ask.raw.includes("אפשר לערוך את הטקסט"));
+    const skipPage = await call(env.app, "GET", linkFor(c.id, "p1", "skip"));
+    assert.ok(!skipPage.raw.includes("<textarea"), "skip: read-only");
+    // empty or too long → refused, still waiting
+    for (const bad of ["   ", "x".repeat(3001)]) {
+      const r = await form(env.app, linkFor(c.id, "p1", "approve"), { copy: bad });
+      assert.equal(r.status, 400, bad.length);
+      assert.equal((await store.getPostingCampaign(c.id)).posts[0].status, "pending_approval");
+    }
+    const mine = "דירה מדהימה 🏠\r\nכתבו לי בפרטי\u0007";
+    const ok = await form(env.app, linkFor(c.id, "p1", "approve"), { copy: mine });
+    assert.equal(ok.status, 200); assert.ok(ok.raw.includes("עם הטקסט שערכתם"));
+    const p = (await store.getPostingCampaign(c.id)).posts[0];
+    assert.deepEqual([p.status, p.copy, p.copy_hash, p.copy_edited, p.base_hash],
+      ["scheduled", "דירה מדהימה 🏠\nכתבו לי בפרטי", sha("דירה מדהימה 🏠\nכתבו לי בפרטי"), true, sha(original)], "saved clean, with the text it was edited from");
+    // the text left as it was → approved as generated
+    const env2 = await setup();
+    const c2 = await pendingCampaign(env2);
+    const same = (await store.getPostingCampaign(c2.id)).posts[0].copy;
+    const ok2 = await form(env2.app, linkFor(c2.id, "p1", "approve"), { copy: same });
+    assert.equal(ok2.status, 200); assert.ok(!ok2.raw.includes("עם הטקסט שערכתם"));
+    const p2 = (await store.getPostingCampaign(c2.id)).posts[0];
+    assert.equal(p2.copy_edited, undefined); assert.equal(p2.copy, same);
   }
 
   console.log("routes/posting-act.test.js ok");

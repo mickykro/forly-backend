@@ -304,15 +304,18 @@ module.exports = function createPostingRouter(ctx) {
     if (!r) return;
     const [question, button] = ASK[r.link.a];
     const action = `${req.baseUrl}/act?${qs(r.link)}`;
-    const form = `<form method="post" action="${esc(action)}"><button type="submit" style="background:#B98A2F;color:#fff;border:0;` +
+    const form = `<form id="act" method="post" action="${esc(action)}"><button type="submit" style="background:#B98A2F;color:#fff;border:0;` +
       `border-radius:12px;padding:12px 18px;font-size:1rem;width:100%;cursor:pointer">${esc(button)}</button></form>`;
     const body = r.post ? `פוסט ${where(r.post)}.` : "מה שכבר פורסם יישאר בקבוצות.";
-    return r.send(200, question, body, (await postCard(r.camp, r.post)) + form);
+    // Approving a post still waiting: its text is editable, and goes with the form.
+    const editable = r.link.a === "approve" && r.post && r.post.status === "pending_approval";
+    return r.send(200, question, body, (await postCard(r.camp, r.post, editable)) + form);
   }));
 
   // The post as it will look: the property's video, the copy as its
   // description, the link as the first comment. Nothing when the text is gone.
-  async function postCard(camp, post) {
+  // editable: the text is a textarea in the approve form (name="copy").
+  async function postCard(camp, post, editable = false) {
     if (!post || typeof post.copy !== "string" || !post.copy) return "";
     const page = post.video_url === undefined ? await db.getPage(camp.page_id).catch(() => null) : null;
     const v = post.video_url === undefined ? require("../posting-campaign").videoOf(page) : { video_url: post.video_url, poster_url: post.poster_url || null };
@@ -324,12 +327,16 @@ module.exports = function createPostingRouter(ctx) {
       : `<p style="margin:0 12px 10px;color:#8A8276;font-size:.85rem">לנכס הזה אין סרטון — הפוסט יעלה כטקסט בלבד.</p>`;
     return `<div style="background:#fff;border:1px solid #E6DFD3;border-radius:12px;text-align:right;margin:0 0 16px;overflow:hidden">` +
       `<div style="padding:12px;font-size:.9rem"><b>${who}</b> ◂ ${esc(post.target === "page" ? "הדף העסקי" : post.group_name || S_.PRIVATE_NAME)}</div>` +
-      `<div style="padding:0 12px 12px;white-space:pre-wrap;line-height:1.6">${esc(post.copy)}</div>${video}` +
+      (editable
+        ? `<div style="padding:0 12px 12px"><label for="copy" style="display:block;color:#8A6A1E;font-size:.8rem;margin-bottom:4px">✏️ אפשר לערוך את הטקסט לפני האישור</label>` +
+          `<textarea id="copy" name="copy" form="act" dir="auto" maxlength="${campaigns.MAX_COPY || 3000}" rows="${Math.min(18, post.copy.split("\n").length + 2)}" ` +
+          `style="width:100%;box-sizing:border-box;font:inherit;line-height:1.6;border:1px solid #D9CFBF;border-radius:8px;padding:8px;resize:vertical;background:#FFFDF9">${esc(post.copy)}</textarea></div>`
+        : `<div style="padding:0 12px 12px;white-space:pre-wrap;line-height:1.6">${esc(post.copy)}</div>`) + video +
       `<div style="padding:10px 12px;border-top:1px solid #EFE9DF;font-size:.85rem"><b>${who}</b> <span dir="ltr">${esc(link)}</span>` +
       `<div style="color:#8A8276;font-size:.75rem">תגובה ראשונה — הקישור לדף הנכס</div></div></div>`;
   }
 
-  router.post("/act", wrap("act", async (req, res) => {
+  router.post("/act", express.urlencoded({ extended: false, limit: "32kb" }), wrap("act", async (req, res) => {
     const r = await readAct(req, res);
     if (!r) return;
     const { link, camp, post, send } = r;
@@ -349,10 +356,15 @@ module.exports = function createPostingRouter(ctx) {
       if (!e || e.code !== "posting_disabled") throw e;
       return send(409, "הפרסום כבוי כרגע", "לא אישרנו את הפוסט. אפשר לנסות שוב מכרטיס הפרסום בדשבורד.");
     }
-    const out = await campaigns.approvePost(camp.id, post.id, deps);
+    // The text as the agent left it on the page (unchanged, or edited).
+    const sent = req.body && req.body.copy !== undefined ? req.body.copy : undefined;
+    const copy = sent === undefined ? undefined : campaigns.cleanCopy(sent);
+    if (sent !== undefined && !copy) return send(400, "הטקסט ריק או ארוך מדי", `לא אישרנו. חזרו לקישור ונסו שוב (עד ${campaigns.MAX_COPY || 3000} תווים).`);
+    const out = await campaigns.approvePost(camp.id, post.id, deps, copy === undefined ? {} : { copy });
     const p = ((out && out.posts) || []).find((x) => x && x.id === post.id) || {};
     const when = p.scheduled_at ? new Date(p.scheduled_at).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-    return send(200, "✅ אושר!", `הפוסט יעלה ${where(p)}${when ? ` ב-${when}` : ""}. נעדכן בוואטסאפ כשזה קורה.`);
+    const mine = copy !== undefined && copy !== post.copy ? " עם הטקסט שערכתם" : "";
+    return send(200, "✅ אושר!", `הפוסט יעלה ${where(p)}${mine}${when ? ` ב-${when}` : ""}. נעדכן בוואטסאפ כשזה קורה.`);
   }));
 
   require("./posting-settings")(router, S, auth);
