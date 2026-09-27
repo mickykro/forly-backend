@@ -358,6 +358,7 @@
       const why = !next && !pending.length && Array.isArray(campaign.blocked_groups) ? campaign.blocked_groups : [];
       $("campWhy").hidden = !why.length;
       $("campWhy").innerHTML = why.map((b) => `<li><b>${U.esc(((campaign.groups || []).find((g) => g.group_id === b.group_id) || {}).name || "קבוצה")}</b>: ${U.esc(Why.whyText(b, U.fmt))}</li>`).join("");
+      if (root.ForlyCampaignMore) root.ForlyCampaignMore.render($("campMore"), { campaign, settings, stuck: why.length > 0, U, post, say, refresh });
       startPolling();
     }
 

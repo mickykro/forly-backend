@@ -284,5 +284,29 @@ const { db, store } = K;
     assert.equal(calls, 2, "never where posting is not allowed");
   }
 
+  // ── no group available → add more of the agent's own groups to the live campaign ──
+  {
+    const env = await setup();
+    const c = (await call(env.app, "POST", "/api/posting/campaigns", consented())).body.campaign;
+    assert.deepEqual(c.groups.map((g) => g.group_id), ["111"]);
+    const add = (body, id = c.id) => call(env.app, "POST", `/api/posting/campaigns/${id}/groups`, body);
+    const ok = await add({ group_ids: ["222", "111"], include_unknown: true });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(ok.body.campaign.groups.map((g) => g.group_id), ["111", "222"], "appended once; one already in it stays");
+    assert.equal((await add({ group_ids: ["222"] })).status, 200, "already in it: a no-op");
+    const left = await add({ group_ids: ["555"] });
+    assert.deepEqual([left.status, left.body.error, left.body.group_ids], [422, "not_member", ["555"]], "the same gate as create");
+    const unknown = await add({ group_ids: ["999"] });
+    assert.deepEqual([unknown.status, unknown.body.error], [422, "unknown_group"]);
+    for (const bad of [{}, { group_ids: [] }, { group_ids: ["../x"] }, { group_ids: ["333"], include_unknown: "yes" }]) {
+      assert.equal((await add(bad)).status, 400, JSON.stringify(bad));
+    }
+    const other = await call(env.as(OTHER), "POST", `/api/posting/campaigns/${c.id}/groups`, { group_ids: ["222"] });
+    assert.equal(other.status, 404, "only the owner");
+    await call(env.app, "POST", `/api/posting/campaigns/${c.id}/stop`);
+    const ended = await add({ group_ids: ["222"] });
+    assert.deepEqual([ended.status, ended.body.error], [409, "not_live"]);
+  }
+
   console.log("routes/posting.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

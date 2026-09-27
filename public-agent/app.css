@@ -210,6 +210,10 @@ body.agent-page::before{content:"";position:fixed;inset:0;z-index:-1;pointer-eve
 .camp-gn{font-weight:600;color:var(--ink);word-break:break-word}
 .camp-x{border:none;background:none;color:var(--ink-soft);font-size:1.1rem;cursor:pointer;padding:2px 6px;line-height:1}
 .camp-s a{color:#8A6A1E;font-weight:600;white-space:nowrap;text-decoration:none}
+.camp-more{display:grid;gap:8px;margin-top:10px;padding:10px;border:1px dashed rgba(23,20,15,.18);border-radius:12px}
+.camp-more-h{margin:0;font-weight:700}
+.camp-more-list{display:grid;gap:6px}
+.camp-why{margin:6px 0 0;padding-inline-start:18px}
 .camp-link{border:none;background:none;color:#8A6A1E;font:inherit;font-size:.8rem;cursor:pointer;padding:0;text-decoration:underline}
 .camp-consent{display:flex;gap:8px;align-items:flex-start;margin:12px 0;line-height:1.55;font-size:.88rem;color:var(--ink)}
 .camp-consent small,.camp-opt small{display:block;color:var(--ink-soft);font-size:.78rem;margin-top:2px;line-height:1.5}

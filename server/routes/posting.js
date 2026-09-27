@@ -107,6 +107,29 @@ module.exports = function createPostingRouter(ctx) {
     return (await store.getPostingCampaign(c.id)) || c;
   }
 
+  // The hard gate for groups a campaign may post to (create, add): only groups
+  // this account belongs to now; the catalog adds names and policy. A group
+  // the catalog forbids to agents, or whose listing types exclude this page's,
+  // is refused here rather than kept and never planned. → { groups } or
+  // { error, group_ids } (a 422). posting-campaign derives the eligibility
+  // booleans itself from these fields, the connection and the raw catalog.
+  async function vetGroups(conn, page, ids, includeUnknown) {
+    const gate = S_.memberGate(conn, ids);
+    if (gate.notMember) return { error: "not_member", group_ids: gate.notMember };
+    const listingType = (page.property || {}).listing_type || null;
+    const lookup = S_.catalogLookup(await S.catalog(listingType || "sale"));
+    const unknown = gate.entries.filter((m) => !lookup(m)).map((m) => m.group_id);
+    if (unknown.length && !includeUnknown) return { error: "unknown_group", group_ids: unknown };
+    const disallowed = gate.entries.filter((m) => lookup.all(m).some(A.policyDisallowed) || A.nameBarsAgents(m.name)).map((m) => m.group_id);
+    if (disallowed.length) return { error: "group_disallowed", group_ids: disallowed };
+    const wrongType = gate.entries.filter((m) => lookup.all(m).some((e) => A.typeExcluded(e, listingType))).map((m) => m.group_id);
+    if (wrongType.length) return { error: "listing_type_not_allowed", group_ids: wrongType };
+    return { groups: gate.entries.map((m) => {
+      const cat = lookup(m);
+      return { group_id: m.group_id, url: S_.memberUrl(m), name: m.name || (cat && cat.name) || "", agent_policy: (cat && cat.agent_policy) || "unknown" };
+    }) };
+  }
+
   async function owned(req, res) {
     const id = String(req.params.id || "");
     const c = S_.ID_RE.test(id) ? await store.getPostingCampaign(id) : null;
@@ -135,27 +158,9 @@ module.exports = function createPostingRouter(ctx) {
     // Until connect has read the Page's numeric id, R3 could never prove it: refused (I4).
     if (v.targets && v.targets.includes("page") && !A.pageTarget(conn)) return res.status(409).json({ error: "page_target_unavailable" });
 
-    // The hard gate: only groups this account belongs to. The catalog adds
-    // names and policy; membership comes from the account (Task 14).
-    const gate = S_.memberGate(conn, v.ids);
-    if (gate.notMember) return res.status(422).json({ error: "not_member", group_ids: gate.notMember });
-    const listingType = (page.property || {}).listing_type || null;
-    const lookup = S_.catalogLookup(await S.catalog(listingType || "sale"));
-    const unknown = gate.entries.filter((m) => !lookup(m)).map((m) => m.group_id);
-    if (unknown.length && b.include_unknown !== true) return res.status(422).json({ error: "unknown_group", group_ids: unknown });
-    // A group the catalog forbids to agents, or whose listing types exclude
-    // this page's, is refused here rather than kept and never planned.
-    const disallowed = gate.entries.filter((m) => lookup.all(m).some(A.policyDisallowed) || A.nameBarsAgents(m.name)).map((m) => m.group_id);
-    if (disallowed.length) return res.status(422).json({ error: "group_disallowed", group_ids: disallowed });
-    const wrongType = gate.entries.filter((m) => lookup.all(m).some((e) => A.typeExcluded(e, listingType))).map((m) => m.group_id);
-    if (wrongType.length) return res.status(422).json({ error: "listing_type_not_allowed", group_ids: wrongType });
-    // posting-campaign.create() derives the four eligibility booleans itself
-    // (is_member, catalog_policy, listing_type_allowed,
-    // posting_currently_available) from these fields, the connection and the raw catalog.
-    const groups = gate.entries.map((m) => {
-      const cat = lookup(m);
-      return { group_id: m.group_id, url: S_.memberUrl(m), name: m.name || (cat && cat.name) || "", agent_policy: (cat && cat.agent_policy) || "unknown" };
-    });
+    const vet = await vetGroups(conn, page, v.ids, b.include_unknown === true);
+    if (vet.error) return res.status(422).json(vet);
+    const groups = vet.groups;
     if (!groups.length && !(wanted.includes("page") && A.pageTarget(conn))) return res.status(400).json({ error: "invalid_input" });
 
     // The consent is recorded before the campaign exists: the account's two
@@ -227,6 +232,25 @@ module.exports = function createPostingRouter(ctx) {
       const conn = (await db.getConnection(c.phone)) || {};
       return res.status(409).json({ error: S_.needsReconnect(conn) ? "needs_reconnect" : "not_resumable" });
     }
+    return res.json({ campaign: publicView(await planNow(out)) });
+  }));
+
+  // More groups for a live campaign (the card's "no group available" way out):
+  // the same gate as create; the consent given at create covers them.
+  router.post("/campaigns/:id/groups", auth, wrap("add_groups", async (req, res) => {
+    const c = await owned(req, res);
+    if (!c) return;
+    const b = req.body && typeof req.body === "object" ? req.body : {};
+    const g = S_.parseGroupIds(b.group_ids, { required: true });
+    if (g.error || !g.ids.length || (b.include_unknown !== undefined && typeof b.include_unknown !== "boolean")) return res.status(400).json({ error: "invalid_input" });
+    if (!LIVE.has(c.status)) return res.status(409).json({ error: "not_live", status: c.status });
+    if (!(await allowed(S, c.phone, res))) return;
+    const page = await db.getPage(c.page_id);
+    if (!page || page.business_phone !== c.phone) return res.status(404).json({ error: "not_found" });
+    const vet = await vetGroups((await db.getConnection(c.phone)) || {}, page, g.ids, b.include_unknown === true);
+    if (vet.error) return res.status(422).json(vet);
+    const out = await campaigns.addGroups(c.id, vet.groups, deps);
+    if (!out) return res.status(404).json({ error: "not_found" });
     return res.json({ campaign: publicView(await planNow(out)) });
   }));
 

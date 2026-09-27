@@ -164,4 +164,18 @@ t("the Page option is hidden until the server can target a Page (I4)", () => {
   assert.ok(/חברו מחדש/.test(U.errorText({ code: "page_target_unavailable" })));
 });
 
+t("more groups: only the agent's own, fitting groups not in the campaign yet", () => {
+  const M = require("./publish-campaign-more");
+  const settings = { member_groups: [
+    { group_id: "1", membership_state: "member", agent_policy: "explicitly_allowed" },
+    { group_id: "2", membership_state: "member", agent_policy: "unknown" },
+    { group_id: "3", membership_state: "left" },
+    { group_id: "4", membership_state: "member", excluded: true },
+    { group_id: "5", membership_state: "member", fits: false },
+    { group_id: "6", membership_state: "member", agent_policy: "no_agents" },
+  ] };
+  assert.deepStrictEqual(M.addable(settings, { groups: [{ group_id: "1" }] }).map((g) => g.group_id), ["2"]);
+  assert.deepStrictEqual(M.addable(null, null), []);
+});
+
 console.log(`publish-campaign.test.js: ${n} passed`);

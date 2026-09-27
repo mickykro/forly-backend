@@ -142,6 +142,25 @@ async function enrollNewPage(page, deps = {}) {
   }
 }
 
+// More groups for a live campaign: appended (a group already in it stays as
+// it is), normalised like create's, and the wait reason cleared so the next
+// plan looks again. → the campaign, or null.
+async function addGroups(id, groups, deps = {}) {
+  const x = ctxOf(deps);
+  const now = nowOf(deps, x);
+  const c = await x.store.getPostingCampaign(id);
+  if (!c) return null;
+  const page = (await x.db.getPage(c.page_id)) || {};
+  const ctx = { conn: (await x.db.getConnection(c.phone)) || {}, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
+  const added = normalizeGroups(groups, ctx);
+  return mutate(x, id, (cur) => {
+    if (cur.status !== "running" && cur.status !== "paused") return null;
+    const have = new Set((cur.groups || []).map((g) => g.group_id));
+    const fresh = added.filter((g) => !have.has(g.group_id));
+    return fresh.length ? { groups: (cur.groups || []).concat(fresh).slice(0, shareKit.MAX_GROUPS), wait_reason: null } : null;
+  });
+}
+
 async function pause(id, reason, deps = {}) {
   const x = ctxOf(deps);
   return mutate(x, id, (c) => (c.status === "running" ? { status: "paused", pause_reason: reason || "agent" } : null));
@@ -431,7 +450,7 @@ async function explainGroups(c, deps = {}, now) {
 }
 
 module.exports = {
-  explainGroups,
+  explainGroups, addGroups,
   create, enrollNewPage, pause, resume, stop, approvePost, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.
