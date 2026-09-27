@@ -19,6 +19,7 @@
  *     — expires after limits.dedup_days (the property→group cooldown, or 30 d
  *       for the Page); an expired doc counts as absent and is overwritten.
  *   click_ids/{click_id}              R4: { campaign_id, attempt_key, page_id, group_id, issued_at, expires_at }
+ *     — click_id: 6 characters (the link's /p/<page>/<code>); 32 hex before that (?c=, still read).
  *     — written in the reservation's own transaction; read by posting-attribution.js.
  * Every {date} is the Asia/Jerusalem calendar date (R7, posting-safety).
  * Times are ISO strings, so `lease_until < now` is a plain range query.
@@ -27,6 +28,9 @@ const safety = require("./posting-safety");
 const { firestore, runTx, fail, hmacHex, toDate, toIso, assertId, isPlainObject, stripUndefined } = require("./posting-tx");
 
 const LEASE_MS = 20 * 60000;
+// A short click code: 31 letters and digits with no i/l/o/0/1, 6 of them (~887M).
+const CLICK_ABC = "abcdefghjkmnpqrstuvwxyz23456789", CLICK_RE = /^([0-9a-f]{32}|[a-hjkmnp-z2-9]{6})$/;
+const newClickCode = () => Array.from(require("crypto").randomBytes(6), (b) => CLICK_ABC[b % CLICK_ABC.length]).join("");
 const ATT = "posting_attempts", BUD = "posting_budget", ACT = "group_activity", DED = "posting_dedup", GAL = "group_aliases", CLK = "click_ids";
 const maps = { [ATT]: new Map(), [BUD]: new Map(), [ACT]: new Map(), [DED]: new Map(), [GAL]: new Map(), [CLK]: new Map() };
 
@@ -164,9 +168,9 @@ async function reserveAttempt(input = {}) {
   const fp = cleanFingerprint(input.fingerprint);
   const campaign_id = optString(input.campaign_id, "campaign_id"), post_id = optString(input.post_id, "post_id");
   const target_url = optString(input.target_url, "target_url"), copy_hash = optString(input.copy_hash, "copy_hash");
-  // R4: the campaign link's ?c= id, issued per attempt (16 random bytes, hex).
-  const click_id = input.click_id === undefined || input.click_id === null ? null : input.click_id;
-  if (click_id !== null && (typeof click_id !== "string" || !/^[0-9a-f]{32}$/.test(click_id))) throw fail("invalid_input", "click_id must be 32 hex characters");
+  // R4: the campaign link's click code, issued per attempt (newClickCode).
+  const clickIn = input.click_id === undefined || input.click_id === null ? null : input.click_id;
+  if (clickIn !== null && (typeof clickIn !== "string" || !CLICK_RE.test(clickIn))) throw fail("invalid_input", "click_id must be a click code");
   const dailyCap = capOf(input.limits, "daily_cap");
   const groupCap = target_type === "group" ? capOf(input.limits, "group_global_daily_cap") : null;
   // How long the property→target dedup holds. Absent → it never expires (the
@@ -196,6 +200,9 @@ async function reserveAttempt(input = {}) {
     for (const k of aliasActKeys) aliasBuckets.push(await tx.get(ACT, k));
     const aliasDedups = [];
     for (const k of aliasDedupKeys) aliasDedups.push(await tx.get(DED, k));
+    // A code already issued is never reissued: a short one is redrawn (read before any write).
+    let click_id = clickIn;
+    for (let i = 0; click_id && (await tx.get(CLK, click_id)); i++) { if (i >= 5) throw fail("click_collision", "no free click code"); click_id = newClickCode(); }
     // The existing attempt comes back so the caller can resume, reconcile or
     // cancel an orphan left by a commit whose outcome it never saw.
     if (existing) return { ok: false, reason: "already_reserved", attempt: existing };
@@ -471,7 +478,7 @@ const listReconcileDue = (nowIn, limit = 50) => {
 };
 // R4: a click id's doc, or null. Write-once, so a plain read is enough.
 async function getClick(click_id) {
-  if (typeof click_id !== "string" || !/^[0-9a-f]{32}$/.test(click_id)) return null;
+  if (typeof click_id !== "string" || !CLICK_RE.test(click_id)) return null;
   const d = await readDoc(CLK, click_id);
   if (d && d.expire_at) delete d.expire_at;
   return d;
@@ -480,7 +487,7 @@ async function getClick(click_id) {
 function reset() { for (const m of Object.values(maps)) m.clear(); }
 
 module.exports = {
-  LEASE_MS, EDGES, countingStates, isCounting,
+  LEASE_MS, CLICK_RE, newClickCode, EDGES, countingStates, isCounting,
   attemptKey, reserveAttempt, transition, annotate, recordGroupAlias, groupIdsFor, reapExpired, cancelOpenAttempts,
   getAttempt, listAttemptsByPhone, listAttemptsByState, listOpenAttemptsByCampaign, getGroupActivityFor,
   recordRecheck, listRecheckDue, recordReconcile, listReconcileDue, getClick, VISIBILITY,

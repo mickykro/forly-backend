@@ -879,6 +879,14 @@ module.exports = function createPagesRouter(ctx) {
     res.type("html").send(html);
   }
 
+  // R4: a campaign post's link, /p/:id/<code>: the click is consumed like ?c=
+  // (visit + fly_ref), then a 302 to the page itself — so is an unknown code.
+  router.get("/p/:id/:code", async (req, res, next) => {
+    if (!/^[a-z0-9]{6}$/.test(req.params.code)) return next();
+    await attribution.consumeClick(req, res, req.params.id, {}, req.params.code);
+    return res.redirect(302, attribution.withoutClick(`/p/${encodeURIComponent(req.params.id)}`, req.query));
+  });
+
   // ── legacy /p/:id redirect to nested URL ──
   router.get("/p/:id", async (req, res) => {
     const id = req.params.id;

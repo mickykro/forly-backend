@@ -1,7 +1,8 @@
 /*
  * posting-attribution.js — R4: campaign attribution is server-side.
  *
- * A campaign post's link carries only `?c=<click_id>`; the click id was
+ * A campaign post's link carries only its click code — /p/<page>/<code>
+ * (routes/pages.js; `?c=<click_id>` on links posted before); the click id was
  * issued per attempt and its doc (click_ids/{click_id}: campaign_id,
  * attempt_key, page_id, group_id, issued_at, expires_at) was written in the
  * reservation's own transaction (posting-attempts.js).
@@ -74,7 +75,7 @@ async function readDoc(col, id) {
 
 // A click that resolves: known, unexpired, and issued for this page.
 async function validClick(c, pageId, now) {
-  if (typeof c !== "string" || !HEX32.test(c)) return null;
+  if (typeof c !== "string" || !attempts.CLICK_RE.test(c)) return null;
   const k = await attempts.getClick(c);
   if (!k || k.page_id !== String(pageId) || !(Date.parse(k.expires_at) > now.getTime())) return null;
   return k;
@@ -85,8 +86,9 @@ async function validClick(c, pageId, now) {
 // visit is counted when it is new: not already carrying a live fly_ref for
 // this click, not this visitor again within 30 min, and under the click's
 // daily cap. A refresh loop reuses the visitor's ref instead of minting docs.
-async function consumeClick(req, res, pageId, deps = {}) {
-  const c = req && req.query ? req.query.c : undefined;
+// `code`: the link's path segment (/p/:id/:code); else ?c=.
+async function consumeClick(req, res, pageId, deps = {}, code) {
+  const c = code !== undefined ? code : req && req.query ? req.query.c : undefined;
   if (c === undefined) return false;
   let out;
   let click;
@@ -142,6 +144,9 @@ async function consumeClick(req, res, pageId, deps = {}) {
   return true;
 }
 
+// The link a campaign post carries: the page, then its click code.
+const clickLink = (base, pageId, clickId) => `${base}/p/${pageId}/${clickId}`;
+
 // `path` with the request's query minus `c` — the canonical target of the 302.
 function withoutClick(path, query) {
   const qs = new URLSearchParams();
@@ -195,6 +200,7 @@ async function countLeadsByAttribution(campaignId) {
 }
 
 module.exports = {
+  clickLink,
   consumeClick, attributionFor, withoutClick, countGroupVisits, countLeadsByAttribution, readCookie,
   COOKIE, REF_TTL_S, VISIT_WINDOW_MS, DAY_CAP, visitorIp, isPreviewBot,
   _test: { reset() { for (const m of Object.values(maps)) m.clear(); }, maps, cookieHeader },

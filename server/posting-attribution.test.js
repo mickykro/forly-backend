@@ -239,5 +239,34 @@ const setCookie = (r) => r.headers["set-cookie"] || [];
     assert.ok(!/192\.0\.2\.|198\.18\.|10\.0\.0\./.test(stored2), "still no raw IP stored");
   }
 
+  // ── the short link: /p/:id/<code> → one visit, the cookie, a 302 to the page; old ?c= links still count ──
+  {
+    const A2 = app();
+    const code = require("./posting-attempts").newClickCode();
+    assert.match(code, /^[a-hjkmnp-z2-9]{6}$/);
+    const D1 = new Date(T0.getTime() + DAY); // a fresh day: the earlier cases used up T0's cap
+    const ak = await reserve("7001", code, D1, "pg1");
+    assert.equal(ak.click_id, code);
+    assert.equal(AT.clickLink("https://f.ly", "pg1", code), `https://f.ly/p/pg1/${code}`);
+    const before = visits().length;
+    const r = await call(A2, "GET", `/p/pg1/${code}?utm_source=x`, { ip: "203.0.113.70" });
+    assert.equal(r.status, 302); assert.equal(r.headers.location, "/p/pg1?utm_source=x", "the code is consumed, never forwarded");
+    assert.ok(COOKIE_RE.test(setCookie(r)[0] || ""));
+    assert.equal(visits().length, before + 1);
+    assert.equal(visits()[visits().length - 1].attempt_key, ak.key);
+    // a code never issued, or issued for another page: the page, nothing recorded
+    for (const p of ["/p/pg1/zzzzzz", "/p/pg2/" + code]) {
+      const n = await call(A2, "GET", p, { ip: "203.0.113.71" });
+      assert.equal(n.status, 302, p); assert.equal(setCookie(n).length, 0, p);
+    }
+    assert.equal(visits().length, before + 1);
+    // not a code: another route's business
+    assert.equal((await call(A2, "GET", "/p/pg1/edit-this", { ip: "203.0.113.72" })).status, 404);
+    // a code already issued is redrawn in the reservation, never shared
+    const again = await reserve("7002", code, D1, "pg1");
+    assert.notEqual(again.click_id, code); assert.match(again.click_id, /^[a-hjkmnp-z2-9]{6}$/);
+    assert.equal((await store.getClick(code)).attempt_key, ak.key, "the first code's click is untouched");
+  }
+
   console.log("posting-attribution.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

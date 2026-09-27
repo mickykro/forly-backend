@@ -14,7 +14,6 @@
  * state. Nothing at or past submit_started is ever submitted again: it goes
  * to outcome_unknown and reconciliation.
  */
-const crypto = require("crypto");
 const { publicUrl } = require("./utils");
 const safety = require("./posting-safety");
 const { redact } = require("./driver-browser");
@@ -221,7 +220,7 @@ async function runDue(c, post, st, deps, x, now) {
     publisher: target.target === "page" ? conn.page_publisher || "browser" : "browser",
     fingerprint: fp, campaign_id: c.id, post_id: post.id, copy_hash: sha(copy),
     confirm_membership: A.needsMembershipCheck(conn, target, now),
-    click_id: crypto.randomBytes(16).toString("hex"), // R4: ?c= on this attempt's link
+    click_id: require("./posting-attempts").newClickCode(), // R4: this attempt's link code
     limits: A.limitsFor(account, now, config, target.target), now,
   });
   if (r.ok) return startAttempt(r.attempt, { c, post, copy, target, conn, video, lock: st.lock }, deps, x, now);
@@ -294,7 +293,7 @@ async function runAttempt(attempt, st, deps, now) {
     return settle(attempt.key, null, null, st, deps, x, now);
   }
   const args = {
-    attempt, copy, comment: publicUrl(`${deps.pageBaseUrl || ""}/p/${c.page_id}?c=${attempt.click_id}`), // never a local address in a Facebook comment
+    attempt, copy, comment: publicUrl(require("./posting-attribution").clickLink(deps.pageBaseUrl || "", c.page_id, attempt.click_id)), // never a local address
     profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0),
     dryRun: deps.dryRun === true, campaignId: c.id, phone, videoUrl: (video && video.video_url) || null,
     [post.target === "page" ? "pageUrl" : "groupUrl"]: target.url,
