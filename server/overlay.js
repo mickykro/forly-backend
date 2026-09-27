@@ -240,7 +240,14 @@ function sanitizeAss(text) {
   return /[֐-׿]/.test(clean) ? "‏" + clean : clean;
 }
 
-function buildAss({ width, height, duration }, lines, roomSegments = []) {
+// Tapered brush stroke, w px wide, ~7px tall at the middle, as ASS drawing
+// commands (\p1). Top edge bows up more than the bottom, so the ends taper.
+function swooshPath(w) {
+  const r = (n) => Math.round(n);
+  return `m 0 4 b ${r(w * 0.3)} -3 ${r(w * 0.7)} -3 ${w} 4 b ${r(w * 0.7)} 2 ${r(w * 0.3)} 2 0 4`;
+}
+
+function buildAss({ width, height, duration }, lines, roomSegments = [], endStyle = "dark") {
   const start = assTime(Math.max(0, duration - OVERLAY_SECONDS));
   const end = assTime(duration + 1); // past EOF is fine; clamps to last frame
   // Font sizes/margins scale with video height so 720p and 1080p both look right.
@@ -253,9 +260,14 @@ function buildAss({ width, height, duration }, lines, roomSegments = []) {
   const roomOutline = Math.max(2, Math.round(height * 0.003));
   const roomMarginR = Math.round(width * 0.045);
   const roomMarginV = Math.round(height * 0.030);
-  const fonts = "Noto Sans Hebrew";
-  // Colors are &HAABBGGRR. BackColour 78000000 = ~47% black band (BorderStyle 3).
-  // Gold #B98A2F -> BGR 2F8AB9.
+  const fonts = "Noto Sans Hebrew"; // room labels keep Noto
+  // Colors are &HAABBGGRR. End titles: brown #3B2314 on light closing frames,
+  // cream #F7F3EC with a soft shadow on dark ones; gold #C9A45C swoosh.
+  const light = endStyle === "light";
+  const text = light ? "&H0014233B" : "&H00ECF3F7";
+  // Dark frames: thin translucent outline + blur = soft shadow; light: flat.
+  const outline = light ? 0 : Math.max(2, Math.round(titleSize * 0.06));
+  const shadow = light ? 0 : 2;
   const header = [
     "[Script Info]",
     "ScriptType: v4.00+",
@@ -266,8 +278,9 @@ function buildAss({ width, height, duration }, lines, roomSegments = []) {
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    `Style: Title,${fonts},${titleSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,3,${Math.round(titleSize * 0.28)},0,2,40,40,${titleMarginV},1`,
-    `Style: Sub,${fonts},${subSize},&H002F8AB9,&H00FFFFFF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,3,${Math.round(subSize * 0.28)},0,2,40,40,${subMarginV},1`,
+    `Style: Title,Heebo ExtraBold,${titleSize},${text},${text},&H90000000,&HA0000000,0,0,0,0,100,100,0,0,1,${outline},${shadow},2,40,40,${titleMarginV},1`,
+    `Style: Sub,Heebo SemiBold,${subSize},${text},${text},&H90000000,&HA0000000,0,0,0,0,100,100,0,0,1,${outline},${shadow},2,40,40,${subMarginV},1`,
+    "Style: Swoosh,Heebo SemiBold,10,&H005CA4C9,&H005CA4C9,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1",
     // Room label: bottom-right (Alignment 3), outline style (BorderStyle 1) —
     // white fill, black outline — because the cream band is drawn by ffmpeg,
     // not by an ASS box. MarginR/V lift it off the corner.
@@ -276,13 +289,27 @@ function buildAss({ width, height, duration }, lines, roomSegments = []) {
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
   ];
+  const blur = light ? "" : "\\blur6";
   const events = lines.slice(0, MAX_LINES).map((line, i) => {
     const style = i === 0 ? "Title" : "Sub";
     // Stack extra sub-lines below each other by shrinking MarginV per line.
     const marginOverride = i <= 1 ? 0 : Math.max(20, subMarginV - (i - 1) * Math.round(subSize * 1.5));
-    return `Dialogue: 0,${start},${end},${style},,0,0,${marginOverride},,{\\fad(300,0)}${sanitizeAss(line)}`;
+    return `Dialogue: 0,${start},${end},${style},,0,0,${marginOverride},,{\\fad(300,0)${blur}}${sanitizeAss(line)}`;
   });
-  const roomEvents = roomSegments.map((s) => {
+  if (lines.length) {
+    // Estimated title width (Heebo ExtraBold ~0.52em per char), 85% of it, capped.
+    const titleChars = sanitizeAss(lines[0]).length;
+    const w = Math.round(Math.min(width * 0.8, titleChars * titleSize * 0.52 * 0.85));
+    const x = Math.round((width - w) / 2);
+    const y = height - titleMarginV + 6;
+    events.push(`Dialogue: 0,${start},${end},Swoosh,,0,0,0,,{\\fad(300,0)\\an7\\pos(${x},${y})\\1c&H5CA4C9&\\p1}${swooshPath(w)}`);
+  }
+  // The title window never carries a room name, whatever the caller passes.
+  const cutoff = Math.max(0, duration - OVERLAY_SECONDS);
+  const roomEvents = roomSegments
+    .map((s) => ({ ...s, end: Math.min(s.end, cutoff) }))
+    .filter((s) => s.end - s.start >= 0.5)
+    .map((s) => {
     const name = sanitizeAss(s.label);
     // Descriptor stacks under the name (smaller) via an inline \fs override.
     const body = s.desc
@@ -748,6 +775,6 @@ module.exports = {
   _test: {
     buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
     modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin,
-    endStyleFor, endFrameLuma,
+    endStyleFor, endFrameLuma, swooshPath,
   },
 };

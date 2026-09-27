@@ -6,7 +6,7 @@ const assert = require("assert");
 const zlib = require("zlib");
 const { _test, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS } = require("./overlay");
 const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng,
-        bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin, endStyleFor } = _test;
+        bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin, endStyleFor, swooshPath } = _test;
 
 // ── roomLabel mapping ──
 assert.equal(roomLabel("living room"), "סלון");
@@ -96,7 +96,7 @@ assert.equal(roomStyle[15], "1", "BorderStyle 1 (outline, not box)");
 assert.equal(roomStyle[18], "3", "Alignment 3 (bottom-right)");
 // Room events
 assert.ok(ass.includes("Dialogue: 0,0:00:00.00,0:00:04.00,Room,"), "first room event timing");
-assert.ok(ass.includes("Dialogue: 0,0:00:04.00,0:00:07.25,Room,"), "second room event timing");
+assert.ok(ass.includes("Dialogue: 0,0:00:04.00,0:00:07.00,Room,"), "second room event clamped to the title window");
 // descriptor stacks under the name via \N + \fs override (1280*0.028=36); RLM on both lines
 assert.ok(ass.includes("{\\fad(150,150)}‏סלון\\N{\\fs36}‏מרווח ומואר"), "name + descriptor line");
 // no-descriptor segment is a single line
@@ -107,6 +107,28 @@ assert.ok(ass.includes("Dialogue: 0,0:00:07.00,0:00:11.00,Title,"), "title event
 // no rooms → no room events
 const ass2 = buildAss({ width: 720, height: 1280, duration: 10 }, ["שורה"]);
 assert.ok(!ass2.includes(",Room,,"), "no room events without segments");
+
+// ── end titles: Heebo, no black box, palette per style, gold swoosh ──
+const endInfo = { width: 720, height: 1280, duration: 10 };
+const styleLine = (a, name) => a.split("\n").find((l) => l.startsWith(`Style: ${name},`)).split(",");
+for (const [style, colour] of [["light", "&H0014233B"], ["dark", "&H00ECF3F7"]]) {
+  const a = buildAss(endInfo, ["נחל קדרון 11 | שכונת הפארק", "דירת 110 מ״ר", "לפרטים 054-658-2548"], [], style);
+  const t = styleLine(a, "Title"), s = styleLine(a, "Sub");
+  assert.equal(t[1], "Heebo ExtraBold"); assert.equal(s[1], "Heebo SemiBold");
+  assert.equal(t[3], colour, `${style} title colour`); assert.equal(s[3], colour, `${style} sub colour`);
+  assert.notEqual(t[15], "3", "no opaque box behind the title"); assert.notEqual(s[15], "3");
+  assert.ok(/,Swoosh,.*\\p1.*m 0 /.test(a), "swoosh drawn as a vector path");
+  assert.ok(a.includes("\\1c&H5CA4C9&"), "swoosh is gold");
+}
+assert.ok(buildAss(endInfo, ["x"], [], "dark").includes("\\blur"), "dark titles get a soft shadow");
+assert.ok(!buildAss(endInfo, ["x"], [], "light").includes("\\blur"), "light titles stay flat");
+assert.equal(buildAss(endInfo, ["x"]), buildAss(endInfo, ["x"], [], "dark"), "default style is dark");
+assert.ok(swooshPath(300).startsWith("m 0 ") && swooshPath(300).includes(" 300 "));
+// no room label may overlap the title window (buildAss clamps, whatever the caller passes)
+const late = buildAss(endInfo, ["x"], [{ label: "סלון", start: 0, end: 9.5 }, { label: "מטבח", start: 8, end: 10 }], "dark");
+const roomLines = late.split("\n").filter((l) => l.includes(",Room,"));
+assert.equal(roomLines.length, 1, "a segment starting inside the title window is dropped");
+assert.equal(roomLines[0].split(",")[2], "0:00:07.00", "room label clamped to the title window start");
 
 // ── parseFps ──
 assert.equal(parseFps("30/1"), 30);
