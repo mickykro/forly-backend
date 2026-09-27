@@ -240,11 +240,13 @@ function sanitizeAss(text) {
   return /[֐-׿]/.test(clean) ? "‏" + clean : clean;
 }
 
-// Tapered brush stroke, w px wide, ~7px tall at the middle, as ASS drawing
-// commands (\p1). Top edge bows up more than the bottom, so the ends taper.
-function swooshPath(w) {
+// Tapered brush stroke w px wide as ASS drawing commands (\p1): both edges
+// meet at the ends; the top bows up and the bottom sags, so it is ~1.1*h
+// thick in the middle and arcs like a brush swipe.
+function swooshPath(w, h = 7) {
   const r = (n) => Math.round(n);
-  return `m 0 4 b ${r(w * 0.3)} -3 ${r(w * 0.7)} -3 ${w} 4 b ${r(w * 0.7)} 2 ${r(w * 0.3)} 2 0 4`;
+  return `m 0 ${h} b ${r(w * 0.3)} ${r(-h * 0.6)} ${r(w * 0.7)} ${r(-h * 0.6)} ${w} ${h} ` +
+    `b ${r(w * 0.7)} ${r(h * 0.9)} ${r(w * 0.3)} ${r(h * 0.9)} 0 ${h}`;
 }
 
 function buildAss({ width, height, duration }, lines, roomSegments = [], endStyle = "dark") {
@@ -297,12 +299,14 @@ function buildAss({ width, height, duration }, lines, roomSegments = [], endStyl
     return `Dialogue: 0,${start},${end},${style},,0,0,${marginOverride},,{\\fad(300,0)${blur}}${sanitizeAss(line)}`;
   });
   if (lines.length) {
-    // Estimated title width (Heebo ExtraBold ~0.52em per char), 85% of it, capped.
+    // Estimated title width (Heebo ExtraBold Hebrew ~0.33em per char,
+    // measured), 85% of it, capped.
     const titleChars = sanitizeAss(lines[0]).length;
-    const w = Math.round(Math.min(width * 0.8, titleChars * titleSize * 0.52 * 0.85));
+    const w = Math.round(Math.min(width * 0.8, titleChars * titleSize * 0.33 * 0.85));
     const x = Math.round((width - w) / 2);
     const y = height - titleMarginV + 6;
-    events.push(`Dialogue: 0,${start},${end},Swoosh,,0,0,0,,{\\fad(300,0)\\an7\\pos(${x},${y})\\1c&H5CA4C9&\\p1}${swooshPath(w)}`);
+    const path = swooshPath(w, Math.max(4, Math.round(height * 0.0055)));
+    events.push(`Dialogue: 0,${start},${end},Swoosh,,0,0,0,,{\\fad(300,0)\\an7\\pos(${x},${y})\\1c&H5CA4C9&\\p1}${path}`);
   }
   // The title window never carries a room name, whatever the caller passes.
   const cutoff = Math.max(0, duration - OVERLAY_SECONDS);
@@ -741,7 +745,9 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
         }
       }
     }
-    fs.writeFileSync(assFile, buildAss(info, lines, roomSegments), "utf8");
+    // The titles sit on the last clip's closing frame; read its brightness there.
+    const endStyle = endStyleFor(await endFrameLuma(inFiles[inFiles.length - 1]));
+    fs.writeFileSync(assFile, buildAss(info, lines, roomSegments, endStyle), "utf8");
     let gradFile = null;
     if (roomSegments.length) {
       gradFile = path.join(tmp, "grad.png");
@@ -764,6 +770,7 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
       music_debug: music.debug,
       room_segments: roomSegments,
       room_debug: roomDebug,
+      end_style: endStyle,
     };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
