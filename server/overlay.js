@@ -51,6 +51,9 @@ const { assertPublicHttpUrl } = require("./utils");
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE = process.env.FFPROBE_PATH || "ffprobe";
 const OVERLAY_SECONDS = 3;
+// Heebo (OFL) for the end titles; handed to libass via fontsdir so the image
+// needs no extra apk font package.
+const FONTS_DIR = path.join(__dirname, "assets", "fonts");
 const MAX_LINES = 3;
 const MAX_LINE_CHARS = 60;
 const MAX_ROOMS = 12;
@@ -577,7 +580,7 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
   if (n === 1 && !useGradient && !musicFile) {
     return [
       "-y", "-i", inFiles[0],
-      "-vf", `ass=${assFile}`,
+      "-vf", `ass=${assFile}:fontsdir=${FONTS_DIR}`,
       "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
       "-c:a", "copy",
       "-movflags", "+faststart",
@@ -611,7 +614,7 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
     parts.push(`[${last}][${n}:v]overlay=x=0:y=${y}:enable=${enable}[bg]`);
     last = "bg";
   }
-  parts.push(`[${last}]format=yuv420p,ass=${assFile}[v]`);
+  parts.push(`[${last}]format=yuv420p,ass=${assFile}:fontsdir=${FONTS_DIR}[v]`);
 
   if (musicFile) {
     const idx = n + (useGradient ? 1 : 0);

@@ -137,7 +137,7 @@ const plain = buildFfmpegArgs({
   inFiles: ["in.mp4"], assFile: "t.ass", outFile: "out.mp4", info,
   durations: [10], roomSegments: [], gradFile: null, musicFile: null,
 });
-assert.ok(plain.includes("-vf") && plain[plain.indexOf("-vf") + 1] === "ass=t.ass");
+assert.ok(plain.includes("-vf") && /^ass=t\.ass:fontsdir=.+assets[\\/]fonts$/.test(plain[plain.indexOf("-vf") + 1]));
 assert.ok(!plain.includes("-filter_complex"), "no filter_complex without rooms");
 
 // rooms → gradient PNG overlay + ass, enable windows, escaped commas
@@ -152,7 +152,7 @@ assert.ok(fc.includes("grad.png"), "gradient PNG is a second input");
 assert.ok(!fc.join(" ").includes("geq") && !fc.join(" ").includes("lavfi"), "no geq/lavfi gradient tricks");
 assert.ok(filter.includes("[vcat][1:v]overlay=x=0:y=998:"), "gradient overlaid at bottom (1280-282)");
 assert.ok(filter.includes("between(t\\,0.00\\,4.00)+between(t\\,4.00\\,7.25)"), "per-segment enable, escaped commas");
-assert.ok(filter.includes("format=yuv420p,ass=t.ass"), "yuv420p then ass burn");
+assert.ok(/format=yuv420p,ass=t\.ass:fontsdir=.+assets[\\/]fonts\[v\]/.test(filter), "yuv420p then ass burn with fontsdir");
 assert.ok(fc.includes("0:a?"), "audio mapped optionally");
 
 // ── two clips: xfade chain, offsets from stitchTimeline ──
