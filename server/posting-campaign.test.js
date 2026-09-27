@@ -414,5 +414,32 @@ const PH = "972500000001";
     assert.ok(!lines.join("\n").includes(PH), "no full phone in the log");
   }
 
+  // ── "no group available" names each group and why; a resync lifts a "not a member" seen while posting ──
+  {
+    const A = require("./posting-account");
+    const { deps } = await setup();
+    const c = await C.create(base(), deps);
+    const [g1, g2] = c.groups.map((g) => g.group_id);
+    // g1: Facebook showed "Join group" on the last attempt; g2: posted to 2 days ago (7-day cooldown).
+    await A.mutate(A.ctxOf(deps), c.id, (cur) => ({ groups: cur.groups.map((g) => (g.group_id === g1 ? { ...g, blocked_code: "not_member", blocked_at: iso(NOW) } : g)) }));
+    const r = await store.reserveAttempt({ phone: PH, page_id: "other", target_type: "group", target_id: g2, target_url: G(222), publisher: "browser",
+      now: new Date(NOW.getTime() - 2 * DAY), limits: { daily_cap: 10, group_global_daily_cap: 10 } });
+    await store.transition(r.attempt.key, "session_started"); await store.transition(r.attempt.key, "composer_ready");
+    await store.transition(r.attempt.key, "submit_started"); await store.transition(r.attempt.key, "verification_pending");
+    await store.transition(r.attempt.key, "verified_posted", { post_url: `${G(222)}/posts/1` });
+    const cur = await store.getPostingCampaign(c.id);
+    const why = await C.explainGroups(cur, deps);
+    assert.deepEqual(why.map((w) => [w.group_id, w.why]), [[g1, "seen_not_member"], [g2, "cooldown"]]);
+    assert.equal(why[1].until, new Date(NOW.getTime() - 2 * DAY + 7 * DAY).toISOString(), "until when");
+    const plan = await C.planAccount(PH, deps);
+    assert.equal(plan.reason, "no_eligible_group", "the card's reason and the explanation agree");
+    // a later groups sync sees the account in g1 again → the block lifts
+    await db.setConnection(PH, { facebook_groups_member: [K.member("111", { observed_at: iso(NOW.getTime() + MIN) }), K.member("222")] });
+    deps.clock = () => new Date(NOW.getTime() + 2 * MIN);
+    assert.equal((await C.explainGroups(cur, deps))[0].why, "available");
+    const again = await C.planAccount(PH, deps, new Date(NOW.getTime() + 2 * MIN));
+    assert.equal(again.group_id, g1, "planned again after the resync");
+  }
+
   console.log("posting-campaign.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

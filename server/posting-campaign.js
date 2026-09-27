@@ -272,10 +272,13 @@ function scoreOf(c, page, now) {
 // repeating campaign may return to a group once nothing is open there — the
 // property→group cooldown (nextSlot) and the expiring dedup (R1) set when —
 // and to the Page after 30 days.
+// The targets this pass already took (a pass posts to each group once).
+function usedTargets(c, now) {
+  const recentPage = (p) => p.target === "page" && p.status !== "skipped" && now.getTime() - ms(p.scheduled_at) < 30 * MS_DAY;
+  return new Set(A.currentPosts(c).filter((p) => !c.repeat || OPEN_POST.has(p.status) || recentPage(p)).map((p) => p.group_id));
+}
 function candidatesFor(c, ctx) {
-  const posts = A.currentPosts(c);
-  const recentPage = (p) => p.target === "page" && p.status !== "skipped" && ctx.now.getTime() - ms(p.scheduled_at) < 30 * MS_DAY;
-  const used = new Set(posts.filter((p) => !c.repeat || OPEN_POST.has(p.status) || recentPage(p)).map((p) => p.group_id));
+  const used = usedTargets(c, ctx.now);
   const targets = c.targets || ["groups"];
   const out = [];
   const pt = targets.includes("page") ? A.pageTarget(ctx.conn) : null;
@@ -393,7 +396,42 @@ async function schedulePost(decision, deps = {}, now) {
   return next;
 }
 
+// Why each of the campaign's groups takes no post now — what the card shows
+// under "no group available". The planner's own rules, in its order: this
+// pass, eligibility, then posting-safety.groupBlock. → [{ group_id, why, until }].
+async function explainGroups(c, deps = {}, now) {
+  const x = ctxOf(deps);
+  now = now || nowOf(deps, x);
+  const config = await configOf(deps, x);
+  const conn = (await x.db.getConnection(c.phone)) || {};
+  const page = (await x.db.getPage(c.page_id)) || {};
+  const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
+  const used = usedTargets(c, now);
+  const account = await A.accountView(c.phone, conn, deps, now);
+  const groups = (c.groups || []).filter((g) => g && g.group_id);
+  const aliases = Object.fromEntries(groups.map((grp) => [grp.group_id, A.groupIdsOf(grp, conn).slice(1)]));
+  const activity = groups.length ? await x.store.getGroupActivityFor(groups.map((grp) => grp.group_id), now, undefined, aliases) : {};
+  const g = { now, posts: safety.withTimes(account), pageId: c.page_id, fp: safety.fingerprint(page.property || {}), groupActivity: activity, config };
+  const pens = conn.posting_group_penalties || {};
+  return groups.map((grp) => {
+    const out = (why, until = null) => ({ group_id: grp.group_id, why, until });
+    if (used.has(grp.group_id)) return out("this_round");
+    const e = A.eligibility(grp, ctx);
+    if (!e.is_member) return out(A.isHidden(conn, grp) ? "hidden" : grp.blocked_code === "not_member" ? "seen_not_member" : "not_member");
+    if (!e.catalog_policy) return out("policy");
+    if (!e.listing_type_allowed) return out("listing_type");
+    if (!e.posting_currently_available) {
+      if (grp.blocked_code === "group_blocked") return out("group_blocked");
+      const pen = A.groupIdsOf(grp, conn).map((id) => pens[id]).filter(Boolean).sort((a, b) => ms(b.until) - ms(a.until))[0];
+      return out("group_penalty", pen ? pen.until : null);
+    }
+    const b = safety.groupBlock({ ...grp, aliases: aliases[grp.group_id] }, g);
+    return b ? out(b.why, b.until) : out("available");
+  });
+}
+
 module.exports = {
+  explainGroups,
   create, enrollNewPage, pause, resume, stop, approvePost, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.

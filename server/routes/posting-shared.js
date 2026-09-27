@@ -63,6 +63,8 @@ function publicView(c, opts) {
     if (p.status === "pending_approval" && typeof p.copy === "string") q.copy = p.copy;
     return q;
   });
+  // opts.blocked_groups: posting-campaign.explainGroups, only while nothing is planned.
+  if (opts && Array.isArray(opts.blocked_groups)) out.blocked_groups = opts.blocked_groups.map((b) => pick(b, ["group_id", "why", "until"]));
   const metrics = opts && typeof opts === "object" && opts.metrics && typeof opts.metrics === "object" ? opts.metrics : null;
   if (metrics) {
     out.metrics = {};

@@ -268,6 +268,38 @@ function sameGroup(a, b, aliases) {
   return String(a) === String(b) || (Array.isArray(aliases) && aliases.map(String).includes(String(a)));
 }
 
+// Posts are matched to a candidate group by group_id; only a post written
+// before group_id existed falls back to matching by group_url.
+// A candidate's `aliases` (its former slug id) match too: sameGroup.
+const postsForGroup = (posts, c) => posts.filter((p) => (p.group_id ? sameGroup(p.group_id, c.group_id, c.aliases) : p.group_url === c.url));
+const fpWithin = (g, iso) => g.now.getTime() - new Date(iso).getTime() < g.config.fingerprint_window_days * MS_DAY;
+// Why group `c` cannot take a post now — { why, until } — or null. nextSlot's
+// own rule, and what the campaign card shows (posting-campaign.explainGroups).
+// g: { now, posts (each with t, ms), pageId, fp, groupActivity, config }.
+function groupBlock(c, g) {
+  const { now, pageId, fp, config } = g;
+  const toGroup = postsForGroup(g.posts, c);
+  const lastOf = (ps) => Math.max(...ps.map((p) => p.t));
+  const recent = toGroup.filter((p) => now.getTime() - p.t < config.group_cooldown_days * MS_DAY);
+  if (recent.length) return { why: "cooldown", until: new Date(lastOf(recent) + config.group_cooldown_days * MS_DAY).toISOString() };
+  const same = toGroup.filter((p) => p.page_id === pageId && now.getTime() - p.t < config.property_group_cooldown_days * MS_DAY);
+  if (same.length) return { why: "property_cooldown", until: new Date(lastOf(same) + config.property_group_cooldown_days * MS_DAY).toISOString() };
+  // What OTHER Forly accounts did to this group (group_activity/{group_id}|{date}, Task 16).
+  const ga = (g.groupActivity || {})[c.group_id] || {};
+  if ((ga.posts_today || 0) >= config.group_global_daily_cap) return { why: "group_daily_cap", until: null };
+  const fps = ga.fingerprints || [];
+  // A null tier (missing inputs) never matches anything — it is skipped,
+  // not treated as a wildcard.
+  if (fp && fp.exact && fps.some((f) => f.exact === fp.exact && fpWithin(g, f.at))) return { why: "duplicate", until: null }; // exact: silent skip
+  if (fp && fp.strong && fps.some((f) => f.strong === fp.strong && fpWithin(g, f.at))) return { why: "duplicate_review", until: null }; // strong: skip + flag
+  return null;
+}
+const weakDuplicate = (c, g) => {
+  const fps = ((g.groupActivity || {})[c.group_id] || {}).fingerprints || [];
+  return !!(g.fp && g.fp.weak && fps.some((f) => f.weak === g.fp.weak && fpWithin(g, f.at)));
+};
+const withTimes = (account) => (account.posts || []).map((p) => ({ ...p, t: new Date(p.at).getTime() }));
+
 function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, groupActivity = {}, config = DEFAULTS, rand = Math.random }) {
   if (account.disabled_until_admin) return { at: null, reason: "disabled" };
   // Only a halt that actually disables or penalises (R5) counts toward the
@@ -283,7 +315,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
   if (isPenalised(account, now) && freshPenalisingHalt) return { at: null, reason: "penalty" };
 
   if (wantsBrowseSession(account, now, config)) return { at: null, reason: "browse_only" };
-  const posts = (account.posts || []).map((p) => ({ ...p, t: new Date(p.at).getTime() }));
+  const posts = withTimes(account);
   const countOnDate = (dateStr) => posts.filter((p) => localDate(new Date(p.t), config.timezone) === dateStr).length;
 
   const today = localDate(now, config.timezone);
@@ -292,27 +324,15 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
   if (countOnDate(today) >= Math.min(todayPlan.target, dailyCapFor(account, now, config))) return { at: null, reason: "daily_cap" };
   if (posts.filter((p) => now.getTime() - p.t < 7 * MS_DAY).length >= weeklyCapFor(account, now, config)) return { at: null, reason: "weekly_cap" };
 
-  // Posts are matched to a candidate group by group_id; only a post written
-  // before group_id existed falls back to matching by group_url.
-  // A candidate's `aliases` (its former slug id) match too: sameGroup.
-  const postsFor = (c) => posts.filter((p) => (p.group_id ? sameGroup(p.group_id, c.group_id, c.aliases) : p.group_url === c.url));
-  const within = (iso) => now.getTime() - new Date(iso).getTime() < config.fingerprint_window_days * MS_DAY;
+  const g = { now, posts, pageId, fp, groupActivity, config };
+  const postsFor = (c) => postsForGroup(posts, c);
   const duplicateReview = [];
   const weakDup = new Set();
 
   const eligible = candidates.filter((c) => {
-    const toGroup = postsFor(c);
-    if (toGroup.some((p) => now.getTime() - p.t < config.group_cooldown_days * MS_DAY)) return false;
-    if (toGroup.some((p) => p.page_id === pageId && now.getTime() - p.t < config.property_group_cooldown_days * MS_DAY)) return false;
-    // What OTHER Forly accounts did to this group (group_activity/{group_id}|{date}, Task 16).
-    const ga = groupActivity[c.group_id] || {};
-    if ((ga.posts_today || 0) >= config.group_global_daily_cap) return false;
-    const fps = ga.fingerprints || [];
-    // A null tier (missing inputs) never matches anything — it is skipped,
-    // not treated as a wildcard.
-    if (fp && fp.exact && fps.some((f) => f.exact === fp.exact && within(f.at))) return false; // exact: silent skip
-    if (fp && fp.strong && fps.some((f) => f.strong === fp.strong && within(f.at))) { duplicateReview.push(c.group_id); return false; } // strong: skip + flag
-    if (fp && fp.weak && fps.some((f) => f.weak === fp.weak && within(f.at))) weakDup.add(c.group_id); // weak: rank last, not a block
+    const b = groupBlock(c, g);
+    if (b) { if (b.why === "duplicate_review") duplicateReview.push(c.group_id); return false; }
+    if (weakDuplicate(c, g)) weakDup.add(c.group_id); // weak: rank last, not a block
     return true;
   });
   if (!eligible.length) {
@@ -358,7 +378,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 }
 
 module.exports = {
-  DEFAULTS, CALENDAR_OK, nextSlot, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
+  DEFAULTS, CALENDAR_OK, nextSlot, groupBlock, withTimes, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
   wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },
 };

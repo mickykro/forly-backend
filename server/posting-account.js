@@ -175,8 +175,11 @@ function eligibility(g, { conn, catalog, listingType, now }) {
   const cats = catalogEntriesFor(catalog, g, conn);
   const pens = (conn && conn.posting_group_penalties) || {};
   const pen = groupIdsOf(g, conn).map((id) => pens[id]).filter(Boolean).sort((a, b) => ms(b.until) - ms(a.until))[0];
+  // A "not a member" seen while posting holds until a groups sync sees the
+  // account in the group again, after it (the agent's resync lifts it).
+  const seenOut = g.blocked_code === "not_member" && !(m && ms(m.observed_at) > ms(g.blocked_at));
   return {
-    is_member: !!m && m.membership_state === "member" && g.blocked_code !== "not_member" && !isHidden(conn, g),
+    is_member: !!m && m.membership_state === "member" && !seenOut && !isHidden(conn, g),
     catalog_policy: !cats.some(policyDisallowed) && !DISALLOWED_POLICY.has(g.agent_policy) && !nameBarsAgents(g.name || (m && m.name)),
     listing_type_allowed: !cats.some((e) => typeExcluded(e, listingType)),
     posting_currently_available: !(pen && ms(pen.until) > now.getTime()) && g.blocked_code !== "group_blocked",

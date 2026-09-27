@@ -127,6 +127,13 @@ t("default picks: saved defaults first, at most five, never an unusable group", 
 t("timeline texts", () => {
   assert.strictEqual(U.statusText({ status: "skipped", error_code: "stopped" }), "בוטל בעצירה");
   assert.strictEqual(U.statusText({ status: "pending_approval" }), "ממתין לאישור שלכם");
+  assert.strictEqual(U.statusText({ status: "failed", error_code: "not_member" }), "לא עלה — פייסבוק הציגה \"הצטרפות לקבוצה\" — נראה שאינכם חברים בה");
+  assert.strictEqual(U.statusText({ status: "failed", error_code: "media_unavailable" }), "לא עלה — לא הצלחנו להוריד את סרטון הנכס");
+  assert.strictEqual(U.statusText({ status: "failed", error_code: "something_new" }), "לא עלה — תקלה טכנית", "an unknown code: never raw");
+  const W = require("./publish-campaign-why");
+  assert.strictEqual(W.whyText({ why: "cooldown", until: "2026-10-01T10:00:00Z" }, () => "יום ה׳"), "קיבלה מכם פוסט לאחרונה — שוב אפשר ביום ה׳");
+  assert.strictEqual(W.whyText({ why: "this_round" }, () => "x"), "כבר קיבלה פוסט בסבב הזה");
+  assert.strictEqual(W.whyText({ why: "<b>" }), "לא זמינה כרגע");
   const m = U.metricsText({ visits: 12, leads: 2, reactions: 5, comments: null, visibility: "confirmed_removed" });
   assert.match(m, /12 כניסות/); assert.match(m, /2 לידים/); assert.match(m, /5 לייקים/); assert.match(m, /הוסר/);
   assert.ok(!/תגובות ·|null/.test(m));

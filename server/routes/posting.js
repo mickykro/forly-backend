@@ -26,6 +26,7 @@ const LIVE = new Set(["running", "paused"]);
 const ENDED = new Set(["stopped", "completed"]);
 const PERMISSION_CURED = ["no_permission", "permission_scope"]; // this request's consent grants it
 const PLAN_WAIT_MS = 8000;
+const WHY_GROUPS = new Set(["no_eligible_group", "duplicate"]);
 const BUSY = new Set(["profile_busy", "login_open"]); // a tick that could not look: the card says why
 
 // Everything a route needs, resolved once. Tests pass fakes through ctx.deps
@@ -190,7 +191,11 @@ module.exports = function createPostingRouter(ctx) {
     if (!c) return;
     // Task 22: per-post metrics; a failed read leaves the card without them, never without the campaign.
     const metrics = await require("../posting-metrics").forCampaign(c, deps).catch(() => null);
-    return res.json({ campaign: publicView(c, { metrics }) });
+    // "No group available": which group, why, and until when — never a bare line.
+    const idle = c.status === "running" && !(c.posts || []).some((p) => A.OPEN_POST.has(p.status));
+    const blocked = idle && WHY_GROUPS.has(c.wait_reason) && campaigns.explainGroups
+      ? await campaigns.explainGroups(c, deps).catch(() => null) : null;
+    return res.json({ campaign: publicView(c, { metrics, blocked_groups: blocked }) });
   }));
 
   // Always allowed, whatever the switches say.

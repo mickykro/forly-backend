@@ -13,6 +13,7 @@
  */
 (function (root) {
   "use strict";
+  const Why = typeof module === "object" && module.exports ? require("./publish-campaign-why") : root.ForlyCampaignWhy;
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const when = (iso, opts) => {
     const d = iso ? new Date(iso) : null;
@@ -153,15 +154,7 @@
       || (c && /^posting_disabled:/.test(c.wait_reason || "")));
   }
 
-  const SKIPPED = {
-    stopped: "בוטל בעצירה", agent: "דילגתם", not_member: "אינכם חברים בקבוצה", group_blocked: "הקבוצה לא מאפשרת פרסום",
-    ineligible: "הקבוצה לא זמינה לפרסום", duplicate: "כבר פורסם שם לאחרונה", expired: "תקופת הפרסום הסתיימה",
-  };
-  const STATUS = {
-    scheduled: "מתוכנן", pending_approval: "ממתין לאישור שלכם", posting: "מפרסמים עכשיו…", posted: "פורסם",
-    pending_group_approval: "ממתין לאישור מנהלי הקבוצה", failed: "לא עלה", unknown: "בבדיקה",
-  };
-  const statusText = (p) => (p.status === "skipped" ? SKIPPED[p.error_code] || "דולג" : STATUS[p.status] || "בבדיקה");
+  const { statusText } = Why; // a failed post says why (publish-campaign-why.js)
   const VISIBILITY = { confirmed_removed: "הוסר ע״י מנהלי הקבוצה", pending_approval: "ממתין לאישור מנהלי הקבוצה", access_denied: "אין גישה לקבוצה" };
   const num = (v) => (Number.isInteger(v) && v >= 0 ? v : null);
   function metricsText(m) {
@@ -362,6 +355,9 @@
       const perm = (settings && settings.permission) || {};
       $("campAutoLine").hidden = !(perm.enabled && (perm.default_group_ids || []).length);
       fill($("campTimeline"), current, campaign);
+      const why = !next && !pending.length && Array.isArray(campaign.blocked_groups) ? campaign.blocked_groups : [];
+      $("campWhy").hidden = !why.length;
+      $("campWhy").innerHTML = why.map((b) => `<li><b>${U.esc(((campaign.groups || []).find((g) => g.group_id === b.group_id) || {}).name || "קבוצה")}</b>: ${U.esc(Why.whyText(b, U.fmt))}</li>`).join("");
       startPolling();
     }
 
