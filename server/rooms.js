@@ -68,4 +68,8 @@ function roomLabel(r) {
   return "";
 }
 
-module.exports = { roomLabel, ROOM_HE, ROOM_KEYWORDS };
+// Rooms that are classified but never labelled on the video: naming a toilet
+// or a hallway on screen draws the eye to the least flattering shots.
+const UNLABELLED_ROOMS = new Set(["חדר רחצה", "שירותים", "מקלחת", "מסדרון"]);
+
+module.exports = { roomLabel, ROOM_HE, ROOM_KEYWORDS, UNLABELLED_ROOMS };

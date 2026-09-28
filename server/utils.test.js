@@ -11,7 +11,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { INFRA_HOST, resolvePageBaseUrl, rehost, guessImageExt } = require("./utils");
+const { INFRA_HOST, resolvePageBaseUrl, rehost, guessImageExt, ownUploadedVideo } = require("./utils");
 
 // ── INFRA_HOST ────────────────────────────────────────────────────────────
 // Moved out of index.js so scripts can require it; these pin the behaviour so
@@ -133,6 +133,22 @@ const fakeFetch = (body) => async () => ({
   } finally {
     global.fetch = realFetch;
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── ownUploadedVideo: a page video may only be one of our own mp4 uploads ──
+  {
+    const bases = ["https://forly.example", "https://media.example/", null];
+    const ok = "https://forly.example/files/3f2a9c1e-1b2c-4d5e-8f90-123456789abc.mp4";
+    assert.equal(ownUploadedVideo(ok, bases), ok);
+    assert.equal(ownUploadedVideo("https://media.example/files/3f2a9c1e-1b2c-4d5e-8f90-123456789abc.mp4", bases),
+      "https://media.example/files/3f2a9c1e-1b2c-4d5e-8f90-123456789abc.mp4", "trailing slash on a base is fine");
+    assert.equal(ownUploadedVideo("https://evil.example/files/3f2a9c1e-1b2c-4d5e-8f90-123456789abc.mp4", bases), null, "foreign host");
+    assert.equal(ownUploadedVideo("https://forly.example.evil.com/files/a.mp4", bases), null, "host prefix trick");
+    assert.equal(ownUploadedVideo("https://forly.example/files/3f2a9c1e-1b2c-4d5e-8f90-123456789abc.jpg", bases), null, "not a video");
+    assert.equal(ownUploadedVideo("https://forly.example/files/../secret.mp4", bases), null, "path tricks");
+    assert.equal(ownUploadedVideo("https://forly.example/files/x.mp4?a=1", bases), null, "query string");
+    assert.equal(ownUploadedVideo("javascript:alert(1)//.mp4", bases), null);
+    assert.equal(ownUploadedVideo(null, bases), null);
   }
 
   console.log("all utils tests passed");

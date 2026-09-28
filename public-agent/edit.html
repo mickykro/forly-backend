@@ -152,6 +152,16 @@
         </div>
       </details>
 
+      <!-- Video -->
+      <div class="card">
+        <div class="sec-title">סרטון</div>
+        <video id="vidPreview" controls playsinline preload="metadata" hidden
+          style="width:100%;max-height:360px;border-radius:10px;background:#000"></video>
+        <input type="file" id="vidFile" accept="video/mp4,video/quicktime" hidden>
+        <button type="button" class="btn btn-ghost" id="vidBtn" style="margin-top:10px">החלפת סרטון</button>
+        <div class="hint">MP4 או MOV. הסרטון מוצג בדף ומתפרסם בקבוצות כמו שהוא. סרטוני iPhone מומרים אוטומטית לפורמט שמתנגן בכל דפדפן (עד כדקה).</div>
+      </div>
+
       <!-- Gallery -->
       <div class="card">
         <div class="sec-title">גלריה</div>
@@ -367,6 +377,7 @@
       var sections = d.sections || {};
       var gallery = d.gallery || {};
       var carousel = d.carousel || {};
+      showVideo(hero.video_url);
       // Template
       setActiveTpl((d.theme || {}).template || "original");
       // Agent
@@ -484,6 +495,36 @@
     });
     box.appendChild(add);
   }
+
+  // Video: upload a replacement, then point the page at it.
+  function showVideo(url) {
+    var v = $("#vidPreview");
+    if (url) { v.src = url; v.hidden = false; } else { v.removeAttribute("src"); v.hidden = true; }
+  }
+  $("#vidBtn").addEventListener("click", function () { $("#vidFile").click(); });
+  $("#vidFile").addEventListener("change", function () {
+    var file = (this.files || [])[0];
+    this.value = "";
+    if (!file) return;
+    if (!/^video\/(mp4|quicktime)$/.test(file.type)) { FLY.toast("ניתן להעלות סרטון MP4 / MOV בלבד"); return; }
+    var btn = $("#vidBtn");
+    btn.disabled = true;
+    btn.textContent = "מעלים... 0%";
+    FLY.uploadFiles([file], null, function (_, pct) { btn.textContent = "מעלים... " + pct + "%"; })
+      .then(function (urls) {
+        return FLY.req("/api/page/update", {
+          method: "POST",
+          body: { page_id: pageId, hero_video_url: urls[0] },
+        }).then(function () { return urls[0]; });
+      })
+      .then(function (url) {
+        showVideo(url);
+        $("#preview").src = "/p/" + pageId + "?t=" + Date.now();
+        FLY.toast("✓ הסרטון הוחלף");
+      })
+      .catch(function (e) { FLY.toast("שגיאה בהחלפת הסרטון — נסו שוב"); console.error(e); })
+      .finally(function () { btn.disabled = false; btn.textContent = "החלפת סרטון"; });
+  });
 
   var MAX_GALLERY = 12;
   $("#galFile").addEventListener("change", function () {

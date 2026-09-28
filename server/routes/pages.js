@@ -18,7 +18,7 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, storeBuffer, sendWhatsApp, ownUploadedVideo } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
@@ -173,6 +173,15 @@ module.exports = function createPagesRouter(ctx) {
       // landed here, which the captioning pass below reads back.
       const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl, rehostOpts);
       const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
+      // A clean overlay render (<id>.clean.mp4) has a titled sibling for
+      // publishing; keep both. Best-effort — the page stands on the clean one.
+      const promoSrc = promoVideoUrl(body.video_url);
+      const promoP = promoSrc
+        ? rehostFn(promoSrc, `${base}/promo.mp4`).catch((err) => {
+          console.warn("createPropertyPage: promo video rehost failed:", err.message);
+          return null;
+        })
+        : Promise.resolve(null);
       const posterSrc = body.poster_url || body.photos[0].url;
       const posterP = rehostFn(posterSrc, `${base}/poster.${guessImageExt(posterSrc)}`);
       const photoPs = body.photos.slice(0, 12).map((p, i) =>
@@ -184,6 +193,7 @@ module.exports = function createPagesRouter(ctx) {
         videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
       ]);
       const videoUrl = video.url;
+      const promo = await promoP;
       const posterUrl = poster.url;
       const photos = rest.slice(0, photoPs.length);
       const photoUrls = photos.map((r) => r.url);
@@ -274,7 +284,7 @@ module.exports = function createPagesRouter(ctx) {
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
-        hero: { phrase: body.hero_phrase || "", video_url: videoUrl, poster_url: posterUrl },
+        hero: { phrase: body.hero_phrase || "", video_url: videoUrl, promo_video_url: promo ? promo.url : null, poster_url: posterUrl },
         gallery: { images: galleryImages },
         carousel: { slides: (body.carousel_slides || []).slice(0, 6) },
         area: {
@@ -393,6 +403,22 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
+  // An uploaded page video that browsers may not play (iPhone HEVC, 4K) is
+  // re-encoded in the background; the page switches to the converted file
+  // once it is ready, unless the agent swapped the video again meanwhile.
+  function convertPageVideo(pageId, url) {
+    const store = (buf) => storeBuffer(buf, "mp4", uploadDir, baseUrl, rehostOpts).then((r) => r.url);
+    ensurePlayableVideo(url, store)
+      .then(async (converted) => {
+        if (!converted) return;
+        const cur = await db.getPage(pageId);
+        if (!cur || !cur.hero || cur.hero.video_url !== url) return;
+        await db.updatePage(pageId, { "hero.video_url": converted, updated_at: new Date() });
+        console.log(`page ${pageId}: video converted → ${converted}`);
+      })
+      .catch((err) => console.error(`page ${pageId}: video conversion failed:`, err.message));
+  }
+
   // ── POST /api/page/update — dashboard page editor (auth via session) ──
   // Owner-only (admins may edit any page). See page-auth.js for the rollout
   // switch and why both phone forms are normalized before comparing.
@@ -420,6 +446,14 @@ module.exports = function createPagesRouter(ctx) {
     try {
       const patch = { updated_at: new Date(), edit_count: (d.edit_count || 0) + 1 };
       if (body.hero_phrase != null) patch["hero.phrase"] = String(body.hero_phrase).slice(0, 120);
+      // Agent swaps the page video for one they uploaded. It is published
+      // as-is, so the generated titled cut is dropped with it.
+      if (body.hero_video_url != null) {
+        const video = ownUploadedVideo(body.hero_video_url, [uploadPublicBase, baseUrl, remoteUploadBase]);
+        if (!video) return res.status(400).json({ error: "bad_video_url" });
+        patch["hero.video_url"] = video;
+        patch["hero.promo_video_url"] = null;
+      }
       // Agent
       if (body.agent && typeof body.agent === "object") {
         if (body.agent.name != null) patch["agent.name"] = String(body.agent.name).slice(0, 60);
@@ -476,6 +510,7 @@ module.exports = function createPagesRouter(ctx) {
       const fresh = await db.getPage(pageId).catch(() => null);
       if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true });
+      if (patch["hero.video_url"]) convertPageVideo(pageId, patch["hero.video_url"]);
     } catch (err) {
       console.error("page/update failed:", err);
       res.status(500).json({ error: "internal" });
@@ -576,7 +611,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── video stitch + overlay ──
-  const { overlayVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
+  const { overlayVideo, promoVideoUrl, ensurePlayableVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
     // video_urls (ordered clips, stitched with a crossfade) is the current
@@ -597,8 +632,19 @@ module.exports = function createPagesRouter(ctx) {
         error: `1-${MAX_CLIPS} video urls (video_urls or video_url) and 1-${MAX_LINES} lines required`,
       });
     }
+    // Optional agent logo on the titled cut, looked up from the agent's phone.
+    let logoUrl = null;
+    const phone = body.phone ? normalizePhone(body.phone) : null;
+    if (phone) {
+      try {
+        const biz = await db.getBusiness(phone);
+        logoUrl = biz && /^https?:\/\//i.test(String(biz.logo_url || "")) ? biz.logo_url : null;
+      } catch (err) {
+        console.warn("video-overlay: business lookup failed, no logo:", err.message);
+      }
+    }
     try {
-      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);
