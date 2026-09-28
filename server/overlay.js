@@ -30,7 +30,7 @@
  * Seedance doesn't guarantee shot order/timing, so we look at what actually
  * rendered. The same call returns a short 1–2 word Hebrew descriptor per
  * frame ("מרווח ומואר"). Per-frame labels are smoothed into segments and
- * burned bottom-right (room name + descriptor beneath it, white text with a
+ * burned bottom-right (room name only, white text with a
  * black outline) over a vertical cream→transparent gradient composited by
  * ffmpeg. Room labels stop before the end-title window so the closing shot
  * stays clean. Vision failure is non-fatal: the video ships with titles only.
@@ -99,6 +99,7 @@ const CREAM_RGB = [0xF7, 0xF3, 0xEC];
 const GRADIENT_HEIGHT_FRAC = 0.22; // band height as a fraction of video height
 const GRADIENT_PEAK_ALPHA = 242; // ~95% opaque at the very bottom
 
+const BAND_SLIDE_SECONDS = 0.3; // band slide-in/out per room label
 const bandHeight = (videoHeight) => Math.round(videoHeight * GRADIENT_HEIGHT_FRAC);
 
 // ── minimal RGBA PNG encoder (no deps) ──
@@ -319,7 +320,6 @@ function buildAss({ width, height, duration }, lines, roomSegments = [], endStyl
   const titleMarginV = Math.round(height * 0.16);
   const subMarginV = Math.round(height * 0.105);
   const roomNameSize = Math.round(height * 0.040);
-  const roomDescSize = Math.round(height * 0.028);
   const roomOutline = Math.max(2, Math.round(height * 0.003));
   const roomMarginR = Math.round(width * 0.045);
   const roomMarginV = Math.round(height * 0.030);
@@ -396,14 +396,9 @@ function buildAss({ width, height, duration }, lines, roomSegments = [], endStyl
   const roomEvents = roomSegments
     .map((s) => ({ ...s, end: Math.min(s.end, cutoff) }))
     .filter((s) => s.end - s.start >= 0.5)
-    .map((s) => {
-    const name = sanitizeAss(s.label);
-    // Descriptor stacks under the name (smaller) via an inline \fs override.
-    const body = s.desc
-      ? `${name}\\N{\\fs${roomDescSize}}${sanitizeAss(s.desc)}`
-      : name;
-    return `Dialogue: 0,${assTime(s.start)},${assTime(s.end)},Room,,0,0,0,,{\\fad(150,150)}${body}`;
-  });
+    // Room name only; the vision descriptor (s.desc) stays in the API
+    // response for debugging but is not burned in.
+    .map((s) => `Dialogue: 0,${assTime(s.start)},${assTime(s.end)},Room,,0,0,0,,{\\fad(150,150)}${sanitizeAss(s.label)}`);
   return header.concat(events, roomEvents).join("\n") + "\n";
 }
 
@@ -759,7 +754,15 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
     const enable = roomSegments
       .map((s) => `between(t\\,${s.start.toFixed(2)}\\,${s.end.toFixed(2)})`)
       .join("+");
-    parts.push(`[${last}][${n}:v]overlay=x=0:y=${y}:enable=${enable}[bg]`);
+    // The band slides up from the bottom edge as each room starts and back
+    // down as it ends: offset 1 = fully below the frame, 0 = resting.
+    const D = BAND_SLIDE_SECONDS;
+    const slide = roomSegments.map((s) => {
+      const a = s.start.toFixed(2), b = s.end.toFixed(2);
+      return `between(t\\,${a}\\,${b})*max(clip(1-(t-${a})/${D}\\,0\\,1)\\,clip((t-${b}+${D})/${D}\\,0\\,1))`;
+    }).join("+");
+    const band = bandHeight(info.height);
+    parts.push(`[${last}][${n}:v]overlay=x=0:y=${y}+${band}*(${slide}):eval=frame:enable=${enable}[bg]`);
     last = "bg";
   }
   const logoIdx = n + (useGradient ? 1 : 0);

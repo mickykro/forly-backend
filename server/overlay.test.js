@@ -98,10 +98,10 @@ assert.equal(roomStyle[18], "3", "Alignment 3 (bottom-right)");
 // Room events
 assert.ok(ass.includes("Dialogue: 0,0:00:00.00,0:00:04.00,Room,"), "first room event timing");
 assert.ok(ass.includes("Dialogue: 0,0:00:04.00,0:00:07.00,Room,"), "second room event clamped to the title window");
-// descriptor stacks under the name via \N + \fs override (1280*0.028=36); RLM on both lines
-assert.ok(ass.includes("{\\fad(150,150)}‏סלון\\N{\\fs36}‏מרווח ומואר"), "name + descriptor line");
-// no-descriptor segment is a single line
-assert.ok(ass.includes("{\\fad(150,150)}‏מטבח\n"), "single-line room when no descriptor");
+// room name only — the descriptor is never rendered, even when vision returned one
+assert.ok(ass.includes("{\\fad(150,150)}‏סלון\n"), "name only, no descriptor line");
+assert.ok(!ass.includes("מרווח ומואר"), "descriptor dropped");
+assert.ok(ass.includes("{\\fad(150,150)}‏מטבח\n"), "single-line room");
 // end titles unchanged
 assert.ok(ass.includes("Dialogue: 0,0:00:07.00,0:00:11.00,Title,"), "title event unchanged");
 
@@ -173,7 +173,10 @@ assert.ok(li > 0, "filter_complex present with rooms");
 const filter = fc[li + 1];
 assert.ok(fc.includes("grad.png"), "gradient PNG is a second input");
 assert.ok(!fc.join(" ").includes("geq") && !fc.join(" ").includes("lavfi"), "no geq/lavfi gradient tricks");
-assert.ok(filter.includes("[vcat][1:v]overlay=x=0:y=998:"), "gradient overlaid at bottom (1280-282)");
+assert.ok(filter.includes("[vcat][1:v]overlay=x=0:y=998+282*("), "gradient rests at the bottom (1280-282), offset by a slide");
+assert.ok(filter.includes(":eval=frame:"), "y re-evaluated every frame");
+// slide: fully down (offset 1) at the segment start, up by +0.3s, down again by the end
+assert.ok(filter.includes("between(t\\,0.00\\,4.00)*max(clip(1-(t-0.00)/0.3\\,0\\,1)\\,clip((t-4.00+0.3)/0.3\\,0\\,1))"), "per-segment slide in/out");
 assert.ok(filter.includes("between(t\\,0.00\\,4.00)+between(t\\,4.00\\,7.25)"), "per-segment enable, escaped commas");
 assert.ok(/format=yuv420p,ass=t\.ass:fontsdir=.+assets[\\/]fonts\[v\]/.test(filter), "yuv420p then ass burn with fontsdir");
 assert.ok(fc.includes("0:a?"), "audio mapped optionally");
