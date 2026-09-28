@@ -18,7 +18,7 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp, ownUploadedVideo } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
@@ -430,6 +430,14 @@ module.exports = function createPagesRouter(ctx) {
     try {
       const patch = { updated_at: new Date(), edit_count: (d.edit_count || 0) + 1 };
       if (body.hero_phrase != null) patch["hero.phrase"] = String(body.hero_phrase).slice(0, 120);
+      // Agent swaps the page video for one they uploaded. It is published
+      // as-is, so the generated titled cut is dropped with it.
+      if (body.hero_video_url != null) {
+        const video = ownUploadedVideo(body.hero_video_url, [uploadPublicBase, baseUrl, remoteUploadBase]);
+        if (!video) return res.status(400).json({ error: "bad_video_url" });
+        patch["hero.video_url"] = video;
+        patch["hero.promo_video_url"] = null;
+      }
       // Agent
       if (body.agent && typeof body.agent === "object") {
         if (body.agent.name != null) patch["agent.name"] = String(body.agent.name).slice(0, 60);

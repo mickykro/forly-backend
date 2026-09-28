@@ -306,7 +306,19 @@ async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, ins
   return resp.json().catch(() => ({}));
 }
 
+// A page's hero video may only point at one of our own uploads — an mp4 with
+// the upload route's UUID filename under one of our public bases — never an
+// arbitrary URL. Returns the URL when it passes, else null.
+function ownUploadedVideo(url, bases) {
+  const s = String(url || "");
+  const m = /^(https?:\/\/[^/?#]+)\/files\/[0-9a-f-]{36}\.mp4$/i.exec(s);
+  if (!m) return null;
+  const hosts = (bases || []).filter(Boolean).map((b) => String(b).replace(/\/+$/, ""));
+  return hosts.includes(m[1]) ? s : null;
+}
+
 module.exports = {
+  ownUploadedVideo,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
   guessImageExt, rehost, sendWhatsApp, sendWhatsAppButtons,
