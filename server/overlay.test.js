@@ -7,7 +7,7 @@ const zlib = require("zlib");
 const { _test, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS } = require("./overlay");
 const { buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, modeOf, gradientPng,
         bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin, endStyleFor, swooshPath, wrapText, textWidth } = _test;
-const { promoVideoUrl } = require("./overlay");
+const { promoVideoUrl, needsConversion, conversionArgs } = require("./overlay");
 
 // ── roomLabel mapping ──
 assert.equal(roomLabel("living room"), "סלון");
@@ -333,5 +333,21 @@ assert.equal(promoVideoUrl("https://x/files/overlays/ab-1.clean.mp4"), "https://
 assert.equal(promoVideoUrl("https://x/files/overlays/ab-1.mp4"), null, "titled URL has no promo sibling");
 assert.equal(promoVideoUrl("https://cdn/other.clean.mp4"), null, "only our overlays folder");
 assert.equal(promoVideoUrl(null), null);
+
+// ── uploaded page videos: convert anything browsers may not play ──
+assert.equal(needsConversion({ codec_name: "h264", pix_fmt: "yuv420p" }), false, "plain H.264 plays everywhere");
+assert.equal(needsConversion({ codec_name: "hevc", pix_fmt: "yuv420p10le" }), true, "iPhone HEVC");
+assert.equal(needsConversion({ codec_name: "h264", pix_fmt: "yuv422p" }), true, "odd pixel format");
+assert.equal(needsConversion({ codec_name: "h264", pix_fmt: "yuv420p", width: 3840, height: 2160 }), true, "4K is shrunk");
+assert.equal(needsConversion(null), true, "unprobeable → convert");
+{
+  const a = conversionArgs("in.mov", "out.mp4");
+  const j = a.join(" ");
+  assert.ok(j.includes("-c:v libx264") && j.includes("-pix_fmt yuv420p") && j.includes("-c:a aac"));
+  assert.ok(j.includes("-movflags +faststart"), "streams before fully downloaded");
+  assert.ok(a.includes("0:a:0?"), "audio optional");
+  assert.ok(/scale=.*1920/.test(j), "long side capped at 1920");
+  assert.equal(a.at(-1), "out.mp4");
+}
 
 console.log("all overlay tests passed");

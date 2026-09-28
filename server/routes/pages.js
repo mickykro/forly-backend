@@ -18,7 +18,7 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsApp, ownUploadedVideo } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, storeBuffer, sendWhatsApp, ownUploadedVideo } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
@@ -403,6 +403,22 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
+  // An uploaded page video that browsers may not play (iPhone HEVC, 4K) is
+  // re-encoded in the background; the page switches to the converted file
+  // once it is ready, unless the agent swapped the video again meanwhile.
+  function convertPageVideo(pageId, url) {
+    const store = (buf) => storeBuffer(buf, "mp4", uploadDir, baseUrl, rehostOpts).then((r) => r.url);
+    ensurePlayableVideo(url, store)
+      .then(async (converted) => {
+        if (!converted) return;
+        const cur = await db.getPage(pageId);
+        if (!cur || !cur.hero || cur.hero.video_url !== url) return;
+        await db.updatePage(pageId, { "hero.video_url": converted, updated_at: new Date() });
+        console.log(`page ${pageId}: video converted → ${converted}`);
+      })
+      .catch((err) => console.error(`page ${pageId}: video conversion failed:`, err.message));
+  }
+
   // ── POST /api/page/update — dashboard page editor (auth via session) ──
   // Owner-only (admins may edit any page). See page-auth.js for the rollout
   // switch and why both phone forms are normalized before comparing.
@@ -494,6 +510,7 @@ module.exports = function createPagesRouter(ctx) {
       const fresh = await db.getPage(pageId).catch(() => null);
       if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true });
+      if (patch["hero.video_url"]) convertPageVideo(pageId, patch["hero.video_url"]);
     } catch (err) {
       console.error("page/update failed:", err);
       res.status(500).json({ error: "internal" });
@@ -594,7 +611,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── video stitch + overlay ──
-  const { overlayVideo, promoVideoUrl, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
+  const { overlayVideo, promoVideoUrl, ensurePlayableVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
     // video_urls (ordered clips, stitched with a crossfade) is the current

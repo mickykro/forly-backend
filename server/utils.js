@@ -211,8 +211,14 @@ async function rehost(url, destRel, uploadDir, baseUrl, opts = {}) {
   const resp = await fetch(safeUrl, { signal: AbortSignal.timeout(60000), redirect: "error" });
   if (!resp.ok) throw new Error(`fetch → ${resp.status}`);
   const buf = await readCapped(resp);
+  return storeBuffer(buf, String(destRel).split(".").pop().toLowerCase(), uploadDir, baseUrl, opts);
+}
 
-  const ext = String(destRel).split(".").pop().toLowerCase();
+// Write bytes into the public /files store (and the remote relay when one is
+// configured) under a fresh UUID name. Shared by rehost and server-side
+// renders such as video transcodes.
+async function storeBuffer(buf, ext, uploadDir, baseUrl, opts = {}) {
+  const { uploadPublicBase, remoteUploadBase, signUpload, fetchFn = fetch } = opts;
   const fname = `${crypto.randomUUID()}.${ext}`;
   const localPath = path.join(uploadDir, fname);
   fs.mkdirSync(path.dirname(localPath), { recursive: true });
@@ -321,6 +327,6 @@ module.exports = {
   ownUploadedVideo,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
-  guessImageExt, rehost, sendWhatsApp, sendWhatsAppButtons,
+  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons,
   assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
 };

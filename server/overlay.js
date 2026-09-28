@@ -821,6 +821,55 @@ function promoVideoUrl(url) {
   return m ? `${m[1]}.mp4` : null;
 }
 
+// ── agent-uploaded page videos ──
+// iPhones record HEVC (often 10-bit) and 4K; Chrome on Windows/Android can't
+// play HEVC. Anything that isn't plain 8-bit H.264 within 1920px is re-encoded.
+const MAX_VIDEO_SIDE = 1920;
+function needsConversion(v) {
+  if (!v) return true;
+  if (v.codec_name !== "h264" || v.pix_fmt !== "yuv420p") return true;
+  return Math.max(v.width || 0, v.height || 0) > MAX_VIDEO_SIDE;
+}
+
+function conversionArgs(input, output) {
+  // Long side capped at 1920, aspect kept, even dimensions; rotation metadata
+  // is applied by ffmpeg's autorotate, so portrait phone clips stay portrait.
+  const S = MAX_VIDEO_SIDE;
+  const scale = `scale=w='if(gte(iw\\,ih)\\,min(${S}\\,iw)\\,-2)':h='if(gte(iw\\,ih)\\,-2\\,min(${S}\\,ih))'`;
+  return [
+    "-y", "-i", input,
+    "-map", "0:v:0", "-map", "0:a:0?",
+    "-vf", scale,
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "128k",
+    "-movflags", "+faststart",
+    output,
+  ];
+}
+
+// Download `url`, and when it needs converting, re-encode it and hand the
+// bytes to `store(buf) → url`. Returns the new URL, or null if the original
+// already plays everywhere.
+async function ensurePlayableVideo(url, store) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "convert-"));
+  try {
+    const src = path.join(tmp, "src");
+    await download(url, src);
+    let v = null;
+    try {
+      const out = await run(FFPROBE, ["-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=codec_name,pix_fmt,width,height", "-of", "json", src], 30000);
+      v = (JSON.parse(out).streams || [])[0] || null;
+    } catch { v = null; }
+    if (!needsConversion(v)) return null;
+    const dst = path.join(tmp, "out.mp4");
+    await run(FFMPEG, conversionArgs(src, dst), 600000);
+    return await store(fs.readFileSync(dst));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl }) {
   const urls = (Array.isArray(videoUrls) && videoUrls.length ? videoUrls : [videoUrl])
     .filter((u) => typeof u === "string" && /^https?:\/\//.test(u));
@@ -916,7 +965,7 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
 }
 
 module.exports = {
-  overlayVideo, promoVideoUrl, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS,
+  overlayVideo, promoVideoUrl, needsConversion, conversionArgs, ensurePlayableVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS,
   _test: {
     buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
     modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin,
