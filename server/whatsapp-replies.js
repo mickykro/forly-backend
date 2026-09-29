@@ -5,12 +5,13 @@
  * same. Green API: max 3 buttons, 25 chars each (utils.sendWhatsAppButtons).
  */
 const { MIN_PHOTOS } = require("./property-draft");
+const { inPlace } = require("./utils");
 // "תמונה אחת" / "4 תמונות" — Hebrew nouns don't stay plural with 1.
 const count = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 const ils = (n) => `₪${Number(n).toLocaleString("en-US")}`;
 
 const LABELS = {
-  city: "עיר", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
+  city: "עיר", address: "כתובת", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
   floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב",
 };
 
@@ -52,7 +53,7 @@ function required(field) { return { text: `${LABELS[field]} הוא שדה חוב
 function headline(f) {
   const where = f.neighborhood || f.city;
   const parts = [];
-  if (f.rooms) parts.push(`${f.rooms} חד׳${where ? ` ב${where}` : ""}`);
+  if (f.rooms) parts.push(`${f.rooms} חד׳${where ? ` ${inPlace(where)}` : ""}`);
   else if (where) parts.push(where);
   if (f.price) parts.push(ils(f.price));
   return parts.join(", ");
@@ -123,6 +124,17 @@ function confirmChanges(changes, fields) {
   const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, fields[f])} ← ${show(f, v)}`).join("\n");
   return { text: `להחליף?\n${list}`, buttons: ["כן", "לא"] };
 }
+// Links to the page editor for an existing page (or a few, when the message named none).
+function editLinks(links) {
+  if (links.length === 1) {
+    return { text: `לעדכון ${links[0].title} — תמונות, סרטון, מחיר ופרטים — היכנסו לעורך הדף:\n${links[0].url}\nשם מחליפים תמונות ומעלים סרטון משלכם.` };
+  }
+  return { text: `איזה נכס לעדכן? כל קישור פותח את עורך הדף:\n${links.map((l) => `• ${l.title}\n${l.url}`).join("\n")}` };
+}
+function editHeld(links) {
+  const where = links.length === 1 ? links[0].url : links.map((l) => `• ${l.title}\n${l.url}`).join("\n");
+  return { text: `לא ערכתי את התמונות 🙂 תמונות לדף מעלים בעורך הדף:\n${where}` };
+}
 function kept() { return { text: "בסדר, השארתי כמו שהיה." }; }
 function priceOff(fields) {
   const as = fields.deal === "sale" ? "מכירה" : "שכירות";
@@ -167,7 +179,7 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

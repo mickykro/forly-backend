@@ -462,7 +462,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
 
   // ── intent: the agent's own words open a draft (the 972548018957 loop, 2026-09-29) ──
   let asked = [];
-  const intent = (yes) => deps({ wantsNewProperty: async (txt) => { asked.push(txt); return yes; },
+  const intent = (yes) => deps({ classifyIntent: async (txt) => { asked.push(txt); return yes ? "new" : null; },
     parseListing: extracted({ city: "סביון", rooms: 8, price: 32000000 }) });
   ({ d } = intent(true));
   t = await turn({ text: "בוקר טוב אני רוצה לבנותת דף נכס" }, d);
@@ -486,9 +486,54 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "תעשי שהדירה תיראה מוארת" }, d);
   t = await turn({ text: "היי מה שלומך" }, d);
   assert.deepEqual([t.handled, asked.length], [false, 2], "small talk never reaches the intent check");
-  ({ d } = deps({ wantsNewProperty: async () => { throw new Error("down"); } }));
+  ({ d } = deps({ classifyIntent: async () => { throw new Error("down"); } }));
   t = await turn({ text: "רוצה דף נכס בבקשה" }, d);
   assert.equal(t.handled, false, "a failed check falls through to n8n");
+
+  // ── 972546582548, 2026-09-28/29 ──
+  // "תראה תצוגה מקדימה" at the preview/create question is preview
+  const choosing = { ...D.newDraft(PHONE, "text", T0), fields: { ...FIELDS, description: "d" }, photos: ["a", "b", "c", "d"] };
+  t = await turn({ text: "תראה תצוגה מקדימה", draft: choosing }, deps().d);
+  assert.deepEqual([t.status, t.draft.mode], ["confirm", "preview"]);
+  t = await turn({ text: "תבני את הדף עכשיו", draft: choosing }, deps().d);
+  assert.equal(t.draft.mode, "create");
+
+  // pasted listing text is the description: not asked for again
+  t = await turn({ text: "למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת" }, deps().d);
+  assert.match(t.draft.fields.description, /משופצת/);
+  assert.notEqual(t.status, "asked:description");
+
+  // a street with the city: split by the extractor, not saved whole as the city
+  let seenPrompt = null;
+  ({ d } = deps({ parseListing: async (txt) => { seenPrompt = txt; return extracted({ city: "באר שבע", address: "נחל דליות 35" })(); } }));
+  const noCity = { ...D.newDraft(PHONE, "text", T0), fields: { ...D.newDraft(PHONE, "text", T0).fields, rooms: 4, price: 1470000 } };
+  t = await turn({ text: "נחל דליות 35 באר שבע", draft: noCity }, d);
+  assert.deepEqual([t.draft.fields.city, t.draft.fields.address], ["באר שבע", "נחל דליות 35"]);
+  assert.equal(seenPrompt, "נחל דליות 35 באר שבע", "no 'עיר:' label pushing it all into city");
+
+  // updating an existing page: editor link, and the photos after it are held, not edited
+  const page = (id, address, city) => ({ page_id: id, property: { title: `4 חד׳ ב${city}`, address, city, neighborhood: null } });
+  const pages = [page("P1", "נחשון 74", "באר שבע"), page("P2", "נחל דליות 35", "באר שבע")];
+  ({ d } = deps({ classifyIntent: async () => "update", listPages: async () => pages, editUrl: (id) => `https://agent/edit.html?id=${id}` }));
+  t = await turn({ text: "תעדכן את התמונות בדף הנכס של דליות 35 ." }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status], [true, "update_link", "updating"]);
+  assert.match(texts(t), /edit\.html\?id=P2/);
+  assert.doesNotMatch(texts(t), /P1/);
+  const updating = t.draft;
+  t = await turn({ fileUrls: ["https://green/1.jpg", "https://green/2.jpg"], draft: updating, now: new Date(T0.getTime() + 90000) }, d);
+  assert.deepEqual([t.handled, t.status], [true, "update_held"], "photos for the page never reach n8n's editing");
+  assert.match(texts(t), /לא ערכתי/);
+  t = await turn({ fileUrl: "https://green/3.jpg", draft: t.draft, now: new Date(T0.getTime() + 100000) }, d);
+  assert.deepEqual([t.handled, t.replies.length], [true, 0], "one reminder per burst");
+  t = await turn({ fileUrl: "https://green/4.jpg", draft: updating, now: new Date(T0.getTime() + 16 * 60000) }, d);
+  assert.equal(t.handled, false, "the hold ends after 15 quiet minutes");
+  ({ d } = deps({ classifyIntent: async () => null, listPages: async () => pages, editUrl: (id) => id }));
+  t = await turn({ text: "מה שלומך", draft: updating }, d);
+  assert.deepEqual([t.handled, t.del], [false, true], "other talk ends the hold and goes to n8n");
+  // no address named: a short list; an offer pending: the update wins over it
+  ({ d } = deps({ classifyIntent: async () => "update", listPages: async () => pages, editUrl: (id) => id }));
+  t = await turn({ text: "גם תיצור סרטון חדש ?", draft: offer4 }, d);
+  assert.deepEqual([t.status, t.draft.links.length], ["update_list", 2]);
 
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

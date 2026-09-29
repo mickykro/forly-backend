@@ -12,6 +12,7 @@
 const D = require("./property-draft");
 const R = require("./whatsapp-replies");
 const C = require("./draft-corrections");
+const { updatePage } = require("./page-update");
 
 const MAX_PHOTOS = 12;
 
@@ -85,7 +86,8 @@ async function openFromSource(phone, kind, text, deps, now) {
     return { handled: true, status: `source_error:${code}`, draft, replies: [R.sourceError(code, deps.createUrl), ...p.replies] };
   }
   for (const [k, v] of Object.entries(parsed.fields)) if (k in draft.fields && k !== "description" && v !== null) draft.fields[k] = v;
-  // ponytail: description left for user to provide in Q&A, not auto-filled from source
+  // A scraped page's text isn't the agent's; pasted listing text is, and it is the description.
+  if (kind === "text") draft.fields.description = D.parseAnswer("description", text);
   const extra = [];
   if (kind === "link") {
     // The agent's own words next to the link are newer than the listing: they win.
@@ -116,23 +118,42 @@ function openFromKeyword(phone, deps, now) {
 }
 
 async function openDraft(phone, kind, text, deps, now) {
+  if (kind === "update") return updatePage(phone, text, deps, now);
   if (kind === "intent") return openFromIntent(phone, text, deps, now);
   return kind === "keyword" ? openFromKeyword(phone, deps, now) : openFromSource(phone, kind, text, deps, now);
 }
 
 // Only a message that mentions a property or a listing detail is worth the
 // intent check's LLM call; photo edits and small talk go straight to n8n's bot.
-const PROPERTY_WORDS = /נכס|דירה|דירת|בית|וילה|פנטהאוז|קוטג|דופלקס|מגרש/;
-async function wantsNewProperty(text, deps) {
+const PROPERTY_WORDS = /נכס|דירה|דירת|בית|וילה|פנטהאוז|קוטג|דופלקס|מגרש|דף|סרטון|וידאו/;
+async function intentOf(text, deps) {
   const t = String(text || "").trim();
-  if (!deps.wantsNewProperty || !t || t.length > 300) return false;
-  if (!PROPERTY_WORDS.test(t) && !C.hintedFields(t).length) return false;
-  try { return await deps.wantsNewProperty(t); } catch (err) { return false; }
+  if (!deps.classifyIntent || !t || t.length > 300) return null;
+  if (!PROPERTY_WORDS.test(t) && !C.hintedFields(t).length) return null;
+  try { return await deps.classifyIntent(t); } catch (err) { return null; }
 }
 
-// Exact opener, else the intent check: "אני רוצה לבנות דף נכס" → "intent".
+// Exact opener, else the intent check: "אני רוצה לבנות דף נכס" → "intent",
+// "תעדכן את התמונות בדף של דליות 35" → "update".
 async function openerOf(text, deps) {
-  return D.openerKind(text) || ((await wantsNewProperty(text, deps)) ? "intent" : null);
+  const kind = D.openerKind(text);
+  if (kind) return kind;
+  const intent = await intentOf(text, deps);
+  return intent === "new" ? "intent" : intent;
+}
+
+async function updatingTurn(input, deps, draft, now) {
+  if (input.event) return notOurs("not_ours");
+  if (photoUrlsOf(input) || input.videoUrl) {
+    // One reminder per burst, not per webhook.
+    const quiet = now.getTime() - D.asMillis(draft.hinted_at) < 60000;
+    if (!quiet) draft.hinted_at = now;
+    draft.updated_at = now;
+    return { handled: true, status: "update_held", draft, replies: quiet ? [] : [R.editHeld(draft.links)] };
+  }
+  const kind = await openerOf(input.text, deps);
+  if (kind) return openDraft(draft.phone, kind, input.text, deps, now);
+  return { ...notOurs("not_ours"), del: true }; // talk about something else: the hold ends
 }
 
 // The same message may already carry details ("סביון, 8 חדרים, 32 מיליון"): they fill the draft.
@@ -256,7 +277,9 @@ async function offeredTurn(input, deps, draft, now) {
   const cmd = D.command(input.text);
   if (cmd === "no") return { handled: true, status: "declined", del: true, replies: [R.declined()] };
   // "כן", or in their own words: "אני רוצה לבנות דף נכס" / "סביון, 8 חדרים, 32 מיליון".
-  const intent = cmd !== "yes" && (await wantsNewProperty(input.text, deps));
+  const said = cmd === "yes" ? null : await intentOf(input.text, deps);
+  if (said === "update") return updatePage(draft.phone, input.text, deps, now);
+  const intent = said === "new";
   if (cmd !== "yes" && !intent) return notOurs("not_ours");
   draft.status = "active";
   const p = promptFor(draft, deps);
@@ -336,8 +359,12 @@ async function activeTurn(input, deps, draft, now) {
     return { handled: true, status: `photos_progress:${draft.photos.length}`, replies: [R.photosProgress(draft.photos.length)] };
   }
   if (step.kind === "choose") {
-    if (cmd !== "preview" && cmd !== "create") return { handled: true, status: "choose", replies: [R.choose()] };
-    draft.mode = cmd;
+    // "תראה תצוגה מקדימה", "תבני את הדף": the buttons' words inside a sentence count too.
+    const t = String(input.text || "");
+    const choice = cmd === "preview" || cmd === "create" ? cmd
+      : /תצוגה|מקדימה|לצפות/.test(t) ? "preview" : /ליצור|תיצור|לבנות|תבנה|תבני/.test(t) ? "create" : null;
+    if (!choice) return { handled: true, status: "choose", replies: [R.choose()] };
+    draft.mode = choice;
     const p = promptFor(draft, deps);
     return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
   }
@@ -371,7 +398,9 @@ function slashTurn(draft, slash, deps, now) {
 async function smartAnswer(draft, text, deps, now, asked) {
   // A bare place name means nothing to the extractor; "שכונה: הבורסה, …" does. Numeric
   // questions get no label: "חניות: רגע, המחיר…" makes it invent a parking count.
-  const prompt = asked === "city" || asked === "neighborhood" ? `${R.LABELS[asked]}: ${text}` : text;
+  // A city answer with a street number is an address line: unlabelled, so it splits.
+  const label = (asked === "city" && !/\d/.test(text)) || asked === "neighborhood";
+  const prompt = label ? `${R.LABELS[asked]}: ${text}` : text;
   let parsed;
   try { parsed = await deps.parseListing(prompt); } catch (err) { return null; }
   const { filled, proposed } = C.merge(draft, parsed.fields || {});
@@ -434,6 +463,7 @@ async function handleTurn(input, deps) {
     if (!kind) return withDrop(notOurs("not_ours"));
     return openDraft(phone, kind, input.text, deps, now);
   }
+  if (draft.status === "updating") return updatingTurn(input, deps, draft, now);
   if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
   if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
   if (draft.status === "building") {

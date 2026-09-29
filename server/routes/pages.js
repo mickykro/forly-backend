@@ -18,7 +18,7 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, storeBuffer, sendWhatsApp, ownUploadedVideo } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, storeBuffer, sendWhatsApp, ownUploadedVideo, inPlace } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
@@ -263,7 +263,7 @@ module.exports = function createPagesRouter(ctx) {
         agent2: agent2Doc,
         property: {
           title: (body.property && body.property.title) ||
-            `${(body.property && body.property.rooms) || ""} חד׳ ב${(body.property && (body.property.neighborhood || body.property.city)) || ""}`.trim(),
+            `${(body.property && body.property.rooms) || ""} חד׳ ${inPlace(body.property && (body.property.neighborhood || body.property.city))}`.trim(),
           listing_type: (body.property && body.property.listing_type) || (listing && listing.listing_type) || "sale",
           address: (body.property && body.property.address) || "",
           neighborhood: (body.property && body.property.neighborhood) || "",

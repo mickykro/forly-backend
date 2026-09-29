@@ -267,7 +267,9 @@ function listingBody(draft) {
 
 const silentFor = (draft, now) => now.getTime() - asMillis(draft.updated_at);
 function isPaused(draft, now = new Date()) { return draft.status === "active" && silentFor(draft, now) > PAUSE_MS; }
+const UPDATE_HOLD_MS = 15 * 60 * 1000;
 function isExpiredPrompt(draft, now = new Date()) {
+  if (draft.status === "updating") return silentFor(draft, now) > UPDATE_HOLD_MS;
   return (draft.status === "offered" || draft.status === "resume_prompt") && silentFor(draft, now) > PAUSE_MS;
 }
 

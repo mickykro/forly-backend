@@ -1,41 +1,52 @@
 /*
- * property-intent.js — does this WhatsApp message mean "start a property page"?
+ * property-intent.js — what does this WhatsApp message want with property pages?
  *
- * Exact keywords ("דף נכס") are caught for free by property-draft.openerKind;
- * this catches the way agents actually write it ("בוקר טוב, אני רוצה לבנות דף
- * נכס", "סביון, 8 חדרים, 32 מיליון"). One short LLM call through chat-provider;
- * any failure is a "no", so the message falls through to n8n's bot as before.
+ *   "new"    start a property page ("בוקר טוב, אני רוצה לבנות דף נכס",
+ *            "סביון, 8 חדרים, 32 מיליון")
+ *   "update" change a page that already exists ("תעדכן את התמונות בדף של
+ *            דליות 35", "תיצור סרטון חדש לנכס בנחל דליות")
+ *   null     anything else — the message goes on to n8n's bot
+ *
+ * Exact keywords ("דף נכס") are caught for free by property-draft.openerKind.
+ * One short LLM call through chat-provider; the caller treats a failure as null.
  */
 const { ask } = require("./chat-provider");
 
 const MODEL = process.env.PROPERTY_PARSE_MODEL || "claude-haiku-4-5-20251001";
 
 const SYSTEM = `A real-estate agent sent this WhatsApp message to Forly, an assistant that builds property listing pages and also edits photos and creates marketing content.
-Answer "yes" if the agent wants to start a new property page, or is giving the details of a property to list (city, rooms, price...).
-Answer "no" for anything else: photo edits, videos, posts, questions, small talk — even when they mention a property.
+Answer "new" if the agent wants to start a new property page, or is giving the details of a property to list (city, rooms, price...).
+Answer "update" if the agent wants to change a property page that already exists: its photos, video, price or details.
+Answer "no" for anything else: editing or enhancing photos, creating posts or videos not tied to an existing page, questions, small talk — even when they mention a property.
 Examples:
-"בוקר טוב אני רוצה לבנות דף נכס" → yes
-"סביון, 8 חדרים, 32 מיליון" → yes
-"יש לי דירה חדשה למכירה ברמת גן" → yes
+"בוקר טוב אני רוצה לבנות דף נכס" → new
+"סביון, 8 חדרים, 32 מיליון" → new
+"מעלה נכס חדש :" → new
+"יש לי דירה חדשה למכירה ברמת גן" → new
+"אני רוצה לעדכן תמונות לנכס בנחל דליות 35" → update
+"תיצור סרטון חדש לנכס בנחל דליות 35" → update
+"תוריד את המחיר בדף של הרצל 5 ל-2 מיליון" → update
 "תעשי את החלל הזה אחרי שיפוץ, זה אותו נכס" → no
 "תכיני פוסט לאינסטגרם על הנכס" → no
-Reply with one word: yes or no.`;
+"צריך לערוך את התמונות" → no
+Reply with one word: new, update or no.`;
 
-async function wantsNewProperty(text, { askFn = ask, model = MODEL, keys = process.env } = {}) {
+async function classify(text, { askFn = ask, model = MODEL, keys = process.env } = {}) {
   const reply = await askFn(model, SYSTEM, [{ role: "user", content: String(text).slice(0, 500) }], keys, { schema: null, maxOut: 5 });
-  return /^\W*yes/i.test((reply && reply.text) || "");
+  const m = /^\W*(new|update)\b/i.exec((reply && reply.text) || "");
+  return m ? m[1].toLowerCase() : null;
 }
 
-module.exports = { wantsNewProperty, SYSTEM };
+module.exports = { classify, SYSTEM };
 
 if (require.main === module) {
   (async () => {
     const assert = require("assert");
     const fake = (text) => async () => ({ text });
-    assert.equal(await wantsNewProperty("x", { askFn: fake("yes") }), true);
-    assert.equal(await wantsNewProperty("x", { askFn: fake(" Yes.") }), true);
-    assert.equal(await wantsNewProperty("x", { askFn: fake("no") }), false);
-    assert.equal(await wantsNewProperty("x", { askFn: fake("") }), false);
+    assert.equal(await classify("x", { askFn: fake("new") }), "new");
+    assert.equal(await classify("x", { askFn: fake(" Update.") }), "update");
+    assert.equal(await classify("x", { askFn: fake("no") }), null);
+    assert.equal(await classify("x", { askFn: fake("") }), null);
     console.log("property-intent.js ok");
   })().catch((e) => { console.error(e); process.exit(1); });
 }

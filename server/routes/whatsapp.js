@@ -36,7 +36,7 @@ const { isPaused, asMillis, touch } = require("../property-draft");
 const R = require("../whatsapp-replies");
 const { resolve } = require("../listing-sources");
 const { parseListing } = require("../listing-extract");
-const { wantsNewProperty } = require("../property-intent");
+const { classify } = require("../property-intent");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
 const { validateListing, createListing } = require("../listing-create");
@@ -123,7 +123,10 @@ module.exports = function createWhatsappRouter(ctx) {
 
   function depsFor(phone, business) {
     return {
-      business, resolve, parseListing, wantsNewProperty: (t) => wantsNewProperty(t),
+      business, resolve, parseListing, classifyIntent: (t) => classify(t),
+      listPages: async (p) => (await db.listPagesByPhone(p)).filter((pg) => pg.status === "active" && pg.property)
+        .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at)),
+      editUrl: (pageId) => `${baseUrl}/edit.html?id=${encodeURIComponent(pageId)}`,
       importPhoto: importPhotoFor(phone),
       importVideo: importPhotoFor(phone, { video: true }),
       createUrl: `${baseUrl}/create.html`,
@@ -254,6 +257,8 @@ module.exports = function createWhatsappRouter(ctx) {
           ` | draft after: ${turn.del ? "deleted" : turn.draft ? turn.draft.status : "unchanged"}` +
           ` | replies: ${turn.replies.length ? turn.replies.map((r) => JSON.stringify(r.text)).join(" | ") : "(none)"}`
         );
+        // An unclaimed message can still end a stale draft or an update hold.
+        if (!turn.handled && turn.del) await db.deleteDraft(phone);
         const replied = turn.handled ? await persistAndSend(phone, turn) : false;
         console.log(`[whatsapp] ${phone} → ${turn.status} replied=${replied}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
         return {

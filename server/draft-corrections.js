@@ -55,12 +55,14 @@ function hintedFields(text) {
  */
 function needsExtraction(asked, text) {
   if (asked === "description" || asked === "template") return false;
+  // "נחל דליות 35 באר שבע" to "which city?": a street came along, split it out.
+  if (asked === "city" && /\d/.test(text)) return true;
   const f = hintedFields(text);
   if (!asked) return f.length >= 1; // no question open (photos / choose / review): any field talk is a correction
   return f.length >= 2 || (f.length === 1 && f[0] !== asked);
 }
 
-const MERGEABLE = ["city", "neighborhood", "deal", "price", "rooms", "size_sqm", "floor", "parking"];
+const MERGEABLE = ["city", "address", "neighborhood", "deal", "price", "rooms", "size_sqm", "floor", "parking"];
 
 /*
  * Fold extracted fields into the draft. Empty (or skipped) fields are filled

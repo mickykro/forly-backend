@@ -323,8 +323,17 @@ function ownUploadedVideo(url, bases) {
   return hosts.includes(m[1]) ? s : null;
 }
 
+// "ב" + a place: ב + ה folds into ב ("בפארק", not "בהפארק"), except where the ה is
+// part of the name. ponytail: short exception list; add names as they show up.
+const HE_NAMES = ["הרצליה", "הוד השרון", "הדר", "הושעיה", "הגושרים", "הרדוף"];
+function inPlace(name) {
+  const s = String(name || "").trim();
+  if (!s) return "";
+  return "ב" + (s.startsWith("ה") && !HE_NAMES.some((n) => s.startsWith(n)) ? s.slice(1) : s);
+}
+
 module.exports = {
-  ownUploadedVideo,
+  ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
   guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons,
