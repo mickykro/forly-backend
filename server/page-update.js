@@ -84,7 +84,7 @@ async function updatePage(phone, text, deps, now, suspended = null) {
 // fresh ask or ends the hold. h: whatsapp-intake's openDraft / promptFor / resumePrompt.
 async function updatingTurn(input, deps, draft, now, h) {
   const back = draft.suspended ? D.touch(draft.suspended, now) : null;
-  const andBack = (replies) => (back ? [R.oneBubble([...replies, R.backToDraft(), ...h.promptFor(back).replies])] : replies);
+  const andBack = (replies) => (back ? [R.oneBubble([...replies, R.backToDraft(), ...h.promptFor(back, deps).replies])] : replies);
   if (input.event) return { handled: false, status: "not_ours", replies: [] };
   if ((input.fileUrls && input.fileUrls.length) || input.fileUrl || input.videoUrl) {
     // One reminder per burst, not per webhook.

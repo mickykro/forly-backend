@@ -286,5 +286,18 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.match(texts(t), /להחליף את 8 התמונות הקודמות ב-2 החדשות/);
   assert.equal(t.draft.photos.length, 10, "nothing replaced before the answer");
 
+  // staging e2e 09-29: the waiting draft was already at preview (its prompt needs deps.reviewLink)
+  const previewing = { ...ready8, mode: "preview" };
+  wrote = null;
+  ({ d } = deps({ classifyIntent: async () => "update", listPages: async () => [vatikim], editUrl: (id) => id,
+    parseListing: extracted({ price: 1150000 }), updatePageData: async (p) => { wrote = p; } }));
+  t = await turn({ text: "בנכס שיכון ותיקים אני רוצה לעדכן מחיר ל-1,150,000", draft: previewing }, d);
+  const waiting = t.draft;
+  t = await turn({ text: "לא", draft: waiting }, d);
+  assert.deepEqual([t.status, t.draft.status, wrote], ["page_kept", "active", null]);
+  assert.match(texts(t), /חוזרים לנכס שבטיפול[\s\S]*https:\/\/review/);
+  t = await turn({ text: "כן", draft: waiting }, d);
+  assert.deepEqual([t.status, t.draft.mode, wrote.pagePatch["property.price"]], ["page_updated", "preview", 1150000]);
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
