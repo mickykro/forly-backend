@@ -36,7 +36,7 @@ function fakePage(o = {}) {
     [S.identity]: NAME, [S.targetName]: GROUP_NAME, [S.composerTarget]: GROUP_NAME, [S.composerAuthor]: NAME,
     [S.editor]: (s) => s.editor, [S.postMessage]: COPY, [S.postAuthor]: NAME, [S.dialog]: "", [S.alert]: "",
   }, o.texts);
-  const counts = Object.assign({ [S.composer]: 1, [S.editor]: 1, [S.composerRoot]: 1, [S.joinGroup]: 0, [S.commentBox]: 1, [S.discard]: 1, [S.captchaFrame]: 0 }, o.counts);
+  const counts = Object.assign({ [S.composer]: 1, [S.editor]: 1, [S.composerRoot]: 1, [S.submit]: 1, [S.joinGroup]: 0, [S.commentBox]: 1, [S.discard]: 1, [S.captchaFrame]: 0 }, o.counts);
   const attrs = Object.assign({ [S.targetIdMeta]: "fb://group/111", [S.targetUrlMeta]: "" }, o.attrs);
   const feed = o.feed !== undefined ? o.feed : (s) => (s.submitted ? [{ href: `${PERMA}?__cft__=x`, author: NAME, text: COPY }] : []);
   const node = (sel) => {

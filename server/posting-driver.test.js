@@ -164,6 +164,21 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(h.submits(), 0);
     assert.ok(S.submit.includes(S.composerRoot) && S.composerTarget.includes(S.composerRoot) && S.composerAuthor.includes(S.composerRoot), "scoped to the composer root");
   }
+  // The Post button must exist exactly once and be enabled before submit_started.
+  // Otherwise nothing was attempted: this is a calibration failure, never an
+  // ambiguous click that needs reconciliation.
+  for (const [page, label] of [
+    [{ counts: { [S.submit]: 0 } }, "missing Post button"],
+    [{ attrs: { [S.submit]: "true" } }, "disabled Post button"],
+  ]) {
+    const h = harness({ page });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.error_code], ["verified_failed", "submit_unavailable"], label);
+    assert.equal(h.submits(), 0, `${label}: zero clicks`);
+    assert.ok(!h.states().includes("submit_started"), `${label}: never entered submit`);
+    assert.equal(h.transitions.at(-1).d.error_check, "submit_button");
+    assert.equal(require("./posting-halts").classOf("submit_unavailable"), "selector_failure");
+  }
   // M8: every keystroke goes through a locator (the editor, then the comment box) — never page.keyboard.type
   {
     const h = harness();

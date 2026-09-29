@@ -199,6 +199,17 @@ async function preSubmitSignal(page, x, known) {
   return null;
 }
 
+// The Post click is irreversible. Prove that exactly one enabled control is
+// inside the verified composer *before* submit_started: a missing/disabled
+// button is a selector or UI-state failure, not an ambiguous attempted post.
+async function submitReady(page, x) {
+  const count = await P.countOf(page, S.submit);
+  if (count !== 1) { x.diag = { expected: 1, found: count }; return false; }
+  const disabled = await page.locator(S.submit).first().getAttribute("aria-disabled").catch(() => null);
+  if (String(disabled || "").toLowerCase() === "true") { x.diag = { aria_disabled: true }; return false; }
+  return true;
+}
+
 async function drive(page, x, want, args) {
   const { attempt, kind } = x;
   x.page = page;
@@ -269,6 +280,8 @@ async function drive(page, x, want, args) {
   if (!proof.ok) { x.diag = { expected: proof.expected, found: proof.found }; return x.end("verified_failed", { error_code: proof.code, check: proof.check }, proof.code === "not_member" ? { membership: "left" } : {}); }
   if (x.resolvedId) x.extra.resolved_group_id = x.resolvedId; // the proof matched this id to the target
   x.author = kind === "group" ? P.norm(x.conn.facebook_identity_label) : await P.textOf(page, S.targetName);
+
+  if (!(await submitReady(page, x))) return x.end("verified_failed", { error_code: "submit_unavailable", check: "submit_button" });
 
   if (args.dryRun === true) {
     await page.keyboard.press("Escape").catch(() => {});
@@ -487,5 +500,5 @@ async function reconcile(attempt, deps = {}) {
 module.exports = {
   postToGroup, postToPage, reconcile, SELECTORS: S, POST_SESSION_S, RECHECK_SESSION_S,
   proveIdentityAndDestination: P.proveIdentityAndDestination,
-  _test: { preflight, humanType, guardOf },
+  _test: { preflight, humanType, guardOf, submitReady },
 };
