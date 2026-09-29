@@ -296,6 +296,7 @@ module.exports = function createWhatsappRouter(ctx) {
         );
         // An unclaimed message can still end a stale draft or an update hold.
         if (!turn.handled && turn.del) await db.deleteDraft(phone);
+        else if (!turn.handled && turn.draft) await db.saveDraft(turn.draft); // e.g. a draft back from an update
         const replied = turn.handled ? await persistAndSend(phone, turn) : false;
         console.log(`[whatsapp] ${phone} → ${turn.status} replied=${replied}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
         return {

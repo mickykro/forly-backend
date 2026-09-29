@@ -84,6 +84,11 @@ function progress(missingFields, photos) {
   if (photos < MIN_PHOTOS) need.push(`תמונות (יש ${photos}, צריך ${MIN_PHOTOS})`);
   return { text: need.length ? `עוד חסר: ${need.join(" · ")}. תמונות אפשר לשלוח בכל שלב 📸` : "יש לי הכול ✅" };
 }
+function swapPhotos(oldN, newN) {
+  return { text: `להחליף את ${oldN} התמונות הקודמות ב-${newN} החדשות, או להוסיף אותן?`, buttons: ["להחליף", "להוסיף"] };
+}
+function sendReplacements(n) { return { text: `שלחו את התמונות החדשות — הן יחליפו את ${n} הקיימות 📸` }; }
+function backToDraft() { return { text: "חוזרים לנכס שבטיפול:" }; }
 function noPages() { return { text: "עוד אין לך דפי נכס. לדף חדש מהתמונות ענו 1." }; }
 function stopped() { return { text: "עצרתי ✋ לא אערוך תמונות נוספות." }; }
 
@@ -214,7 +219,7 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

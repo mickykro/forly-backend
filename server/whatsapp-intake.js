@@ -114,8 +114,8 @@ function openFromKeyword(phone, deps, now) {
   return { handled: true, status: p.status, draft, replies: [R.opened("keyword"), ...p.replies] };
 }
 
-async function openDraft(phone, kind, text, deps, now) {
-  if (kind === "update") return updatePage(phone, text, deps, now);
+async function openDraft(phone, kind, text, deps, now, suspended = null) {
+  if (kind === "update") return updatePage(phone, text, deps, now, suspended);
   if (kind === "intent") return openFromIntent(phone, text, deps, now);
   return kind === "keyword" ? openFromKeyword(phone, deps, now) : openFromSource(phone, kind, text, deps, now);
 }
@@ -160,9 +160,12 @@ async function storePhoto(draft, fileUrlOrUrls, deps, now) {
   const seen = draft.photo_sources || [];
   const urls = [...new Set(raw)].filter((u) => !seen.includes(u));
   draft.photo_sources = seen.concat(urls);
+  if (draft.replace_next) { draft.photos = []; draft.replace_next = false; } // "תחליף את התמונות" came first
   const room = Math.max(0, MAX_PHOTOS - draft.photos.length);
   if (urls.length > room) draft.photos_dropped = (draft.photos_dropped || 0) + urls.length - room;
-  draft.photos.push(...(await importAll(urls.slice(0, room), deps.importPhoto)));
+  const added = await importAll(urls.slice(0, room), deps.importPhoto);
+  draft.photos.push(...added);
+  PC.noteBatch(draft, added, now);
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
 }
 
@@ -329,7 +332,17 @@ async function activeTurn(input, deps, draft, now) {
       return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble([first, ...C.withPriceCheck(draft, p.replies)])] };
     }
   }
+  const swap = PC.swapTurn(input, draft, now, (dr) => promptFor(dr, deps).replies);
+  if (swap) return swap;
   const step = D.nextStep(draft);
+  // "אני רוצה לעדכן מחיר בנכס בותיקים" mid-draft is about another page: the draft waits
+  // inside the update and comes back after it. Answers to a question are not checked
+  // unless they name a page/property ("בנכס", "בדף"), which a description may: skipped.
+  if (!cmd && step.field !== "description" && (step.kind !== "ask" || /(בנכס|בדף|לנכס|לדף)/.test(input.text || ""))) {
+    const kind = await openerOf(input.text, deps);
+    if (kind === "update") { const u = await updatePage(draft.phone, input.text, deps, now, draft); if (u.handled) return u; }
+    if (kind === "intent") return resumePrompt(draft, { text: input.text }, now);
+  }
   // "חסרים פרטים?" / "סיימת?" is a question, never the answer to the field being asked.
   // (Right after a failed answer, "מה זה?" is about that question: the retry example answers it.)
   if (step.kind === "ask" && !cmd && /\?\s*$/.test(String(input.text || "").trim()) && !C.hintedFields(input.text).length
@@ -374,7 +387,9 @@ async function handleTurn(input, deps) {
   const digit = /^\s*([1-3])\s*$/.exec(input.text || "");
   if (digit && draft && draft.last_buttons && draft.last_buttons[digit[1] - 1]) input = { ...input, text: draft.last_buttons[digit[1] - 1] };
   let dropped = false;
-  if (draft && D.isExpiredPrompt(draft, now)) { draft = null; dropped = true; }
+  if (draft && D.isExpiredPrompt(draft, now)) {
+    if (draft.suspended) draft = D.touch(draft.suspended, now); else { draft = null; dropped = true; }
+  }
   const withDrop = (t) => (dropped && !t.draft ? { ...t, del: true } : t);
 
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
@@ -430,7 +445,7 @@ async function handleTurn(input, deps) {
     if (input.event === "photo_timer") return PC.ask(draft);
     return PC.turn(input, deps, draft, now, { openDraft, openerOf, storePhoto, updatePage });
   }
-  if (draft.status === "updating") return updatingTurn(input, deps, draft, now, openDraft);
+  if (draft.status === "updating") return updatingTurn(input, deps, draft, now, { openDraft, promptFor, resumePrompt });
   if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
   if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
   if (draft.status === "building") {

@@ -69,4 +69,40 @@ function quotedEdit(input) {
   return { ...edit([input.quotedImageUrl], text), del: false, status: "edit_quoted" };
 }
 
-module.exports = { hold, ask, turn, quotedEdit };
+/*
+ * "תשנה את התמונות בנכס" in an open draft. Photos just sent (last batch, within
+ * 5 min) → ask before replacing: "להחליף את 8 התמונות ב-2 החדשות, או להוסיף?".
+ * Nothing new yet → the next photos replace the old ones (draft.replace_next,
+ * applied in whatsapp-intake's storePhoto). → null when the text isn't about it.
+ */
+const SWAP_RE = /(תשנה|תשני|תחליף|תחליפי|להחליף|לשנות|תעדכן|תעדכני|לעדכן)\s+(את\s+)?ה?תמונות/;
+const BATCH_MS = 5 * 60 * 1000;
+
+// storePhoto calls this: photos within a minute of each other are one batch.
+function noteBatch(draft, added, now) {
+  const b = draft.last_batch;
+  const same = b && now.getTime() - D.asMillis(b.at) < 60000;
+  draft.last_batch = { at: now, photos: (same ? b.photos : []).concat(added) };
+}
+
+function swapTurn(input, draft, now, promptReplies) {
+  const text = String(input.text || "").trim();
+  const done = (first) => ({ handled: true, status: "photos_swapped", draft: D.touch(draft, now), replies: [R.oneBubble([first, ...promptReplies(draft)])] });
+  if (draft.pending_swap) {
+    draft.pending_swap = false;
+    const fresh = (draft.last_batch && draft.last_batch.photos) || [];
+    if (/החלף|להחליף/.test(text)) { draft.photos = draft.photos.filter((p) => fresh.includes(p)); return done(R.photosSaved(draft.photos.length)); }
+    if (/הוסף|להוסיף/.test(text)) return done(R.photosSaved(draft.photos.length));
+  }
+  if (!SWAP_RE.test(text)) return null;
+  const b = draft.last_batch;
+  const recent = b && b.photos.length && now.getTime() - D.asMillis(b.at) < BATCH_MS && b.photos.length < draft.photos.length;
+  if (recent) {
+    draft.pending_swap = true;
+    return { handled: true, status: "swap_asked", draft: D.touch(draft, now), replies: [R.swapPhotos(draft.photos.length - b.photos.length, b.photos.length)] };
+  }
+  draft.replace_next = true;
+  return { handled: true, status: "replace_next", draft: D.touch(draft, now), replies: [R.sendReplacements(draft.photos.length)] };
+}
+
+module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn };
