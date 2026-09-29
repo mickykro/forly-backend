@@ -12,7 +12,7 @@
 const D = require("./property-draft");
 const R = require("./whatsapp-replies");
 const C = require("./draft-corrections");
-const { updatePage, updatingTurn } = require("./page-update");
+const { updatePage, updatingTurn, duplicateCheck, duplicateTurn } = require("./page-update");
 const { intentOf, openerOf } = require("./property-intent");
 const { recoverFromChat } = require("./chat-recover");
 const PC = require("./photo-choice");
@@ -300,6 +300,8 @@ async function activeTurn(input, deps, draft, now) {
   if (photoUrls) return storePhoto(draft, photoUrls, deps, now);
   const cmd = D.command(input.text);
   if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
+  const dup = duplicateTurn(input, draft, now, (dr) => promptFor(dr, deps));
+  if (dup) return dup;
   const slash = C.parseSlash(input.text);
   if (slash) return C.slashTurn(draft, slash, deps, now, promptFor);
   // A replacement was proposed last turn: כן applies it, anything else keeps the old values.
@@ -461,8 +463,8 @@ async function handleTurn(input, deps) {
   // A new link or "נכס חדש" while a draft is open is a different property: ask
   // instead of ignoring it. (Pasted listing text stays an answer — it fills fields.)
   const opener = D.openerKind(input.text);
-  if (draft.status === "active" && (opener === "link" || opener === "keyword")) return resumePrompt(draft, { text: input.text }, now);
-  const t = await activeTurn(input, deps, draft, now);
+  if (draft.status === "active" && !draft.dup_page && (opener === "link" || opener === "keyword")) return resumePrompt(draft, { text: input.text }, now);
+  const t = await duplicateCheck(await activeTurn(input, deps, draft, now), deps);
   return t.status === "create" ? build(t.draft || draft, deps, now) : t;
 }
 

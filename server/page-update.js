@@ -137,4 +137,50 @@ async function updatingTurn(input, deps, draft, now, h) {
   return back ? { handled: false, status: "not_ours", replies: [], draft: back } : { handled: false, status: "not_ours", replies: [], del: true };
 }
 
-module.exports = { updatePage, updatingTurn, matchPage, proposeChanges };
+/*
+ * A new draft at an address that already has a live page (972546582548 rebuilt
+ * "מבצע נחשון 74" — her page "נחשון 74"). Asked once, when the address is known:
+ * update the existing page (the draft's photos go to it, replace/add asked) or a
+ * new page after all.
+ */
+const addrWords = (s) => String(s || "").replace(/רחוב|שדרות|שד׳|[.,'"׳״-]/g, " ").split(/\s+/).filter(Boolean);
+function sameAddress(a, b) {
+  const x = addrWords(a), y = addrWords(b);
+  const nx = x.find((w) => /^\d+$/.test(w)), ny = y.find((w) => /^\d+$/.test(w));
+  if (!nx || nx !== ny) return false;
+  const wx = x.filter((w) => w !== nx), wy = y.filter((w) => w !== ny);
+  const [small, big] = wx.length <= wy.length ? [wx, wy] : [wy, wx];
+  return small.length > 0 && small.every((w) => big.includes(w));
+}
+async function duplicateCheck(t, deps) {
+  const d = t.draft;
+  if (!t.handled || !d || d.status !== "active" || d.dup_checked || !d.fields.address || !deps.listPages) return t;
+  d.dup_checked = true;
+  let pages = [];
+  try { pages = await deps.listPages(d.phone); } catch (err) { return t; }
+  const page = pages.find((p) => sameAddress(p.property.address, d.fields.address));
+  if (!page) return t;
+  const title = page.property.title || page.property.address;
+  d.dup_page = { page_id: page.page_id, listing_id: page.listing_id || null, title, url: deps.editUrl(page.page_id),
+    gallery: ((page.gallery || {}).images || []).slice(0, 12) };
+  return { ...t, status: "duplicate_asked", replies: [R.duplicatePage(title)] };
+}
+function duplicateTurn(input, draft, now, promptFor) {
+  const dup = draft.dup_page;
+  if (!dup) return null;
+  const text = String(input.text || "");
+  if (/לעדכן|קיים/.test(text)) {
+    const n = draft.photos.length;
+    const upd = { phone: draft.phone, status: "updating", links: [{ title: dup.title, url: dup.url }], created_at: now, updated_at: now, hinted_at: now,
+      page: { page_id: dup.page_id, listing_id: dup.listing_id, gallery: dup.gallery }, held_photos: draft.photos, pending_photos: n > 0 };
+    return { handled: true, status: "duplicate_update", draft: upd,
+      replies: [n ? R.pagePhotosAsk(dup.title, dup.gallery.length, n) : R.editLinks(upd.links)] };
+  }
+  if (/חדש/.test(text)) {
+    draft.dup_page = null;
+    return { handled: true, status: "duplicate_new", draft: D.touch(draft, now), replies: promptFor(draft).replies };
+  }
+  return { handled: true, status: "duplicate_asked", replies: [R.duplicatePage(dup.title)] };
+}
+
+module.exports = { updatePage, updatingTurn, matchPage, proposeChanges, duplicateCheck, duplicateTurn, sameAddress };

@@ -72,7 +72,7 @@ const PHOTO_BATCH_MS = 20000;
 const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
-  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage, getHistory,
+  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage, getHistory, adminPhones,
     uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
@@ -217,6 +217,12 @@ module.exports = function createWhatsappRouter(ctx) {
         }
         if (sendWhatsApp) await sendWhatsApp(phone, R.buildFailed(retry, l).text);
       });
+      // The operator hears of it right away: the agent was told the team is on it.
+      if (sendWhatsApp) {
+        for (const admin of adminPhones || []) {
+          await sendWhatsApp(admin, `⚠️ בניית דף לא הסתיימה תוך 20 דק׳ — ${phone} · ${l.address || ""} ${l.city || ""} · listing ${l.listing_id}`).catch(() => {});
+        }
+      }
       console.warn(`[whatsapp] ${phone} listing ${l.listing_id} build timed out → failed`);
     }
   }

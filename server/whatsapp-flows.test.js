@@ -361,5 +361,27 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "3.", draft: choice }, d);
   assert.equal(t.status, "edit_photos");
 
+  // ── 972546582548, 15:20: a new draft at "מבצע נחשון 74" — her live page is "נחשון 74" ──
+  const { sameAddress } = require("./page-update");
+  assert.equal(sameAddress("נחשון 74", "רחוב מבצע נחשון 74"), true);
+  assert.equal(sameAddress("נחשון 74", "נחשון 7"), false);
+  assert.equal(sameAddress("הרצל 5", "ז׳בוטינסקי 5"), false);
+  const nachshon = { page_id: "N74", listing_id: "LN", business_phone: PHONE, gallery: { images: [{ url: "g1" }, { url: "g2" }] },
+    property: { title: "5 חד׳ במגדלי נוף", address: "נחשון 74", city: "באר שבע", neighborhood: "מגדלי נוף", price: 1390000, rooms: 5 } };
+  ({ d } = deps({ listPages: async () => [nachshon], editUrl: (id) => `https://agent/edit.html?id=${id}`,
+    parseListing: extracted({ city: "באר שבע", address: "רחוב מבצע נחשון 74" }) }));
+  const fromPhotos = { ...D.newDraft(PHONE, "photos", T0), photos: ["p1", "p2", "p3", "p4", "p5", "p6"] };
+  t = await turn({ text: "באר שבע רחוב מבצע נחשון 74, ידוע גם כמגדלי נוף", draft: fromPhotos }, d);
+  assert.equal(t.status, "duplicate_asked");
+  assert.match(texts(t), /יש לך כבר דף לנכס הזה: 5 חד׳ במגדלי נוף/);
+  const dupAsked = t.draft;
+  t = await turn({ text: "1", draft: { ...structuredClone(dupAsked), last_buttons: ["לעדכן את הקיים", "דף חדש"] } }, d);
+  assert.deepEqual([t.status, t.draft.status, t.draft.held_photos.length], ["duplicate_update", "updating", 6]);
+  assert.match(texts(t), /להחליף את 2 התמונות הקיימות ב-6 החדשות/);
+  t = await turn({ text: "דף חדש", draft: structuredClone(dupAsked) }, d);
+  assert.deepEqual([t.status, t.draft.status, t.draft.dup_page], ["duplicate_new", "active", null]);
+  t = await turn({ text: "1,390,000", draft: t.draft }, d);
+  assert.notEqual(t.status, "duplicate_asked", "asked once only");
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
