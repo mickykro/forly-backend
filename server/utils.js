@@ -278,6 +278,31 @@ async function sendWhatsApp(phone, message, instance, token) {
   });
 }
 
+// The last `count` messages of a chat, newest first (Green API getChatHistory).
+async function getWhatsAppHistory(chatId, count, instance, token) {
+  if (!instance || !token) return [];
+  const r = await fetch(`https://api.green-api.com/waInstance${instance}/getChatHistory/${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatId, count }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const j = r.ok ? await r.json() : [];
+  return Array.isArray(j) ? j : [];
+}
+
+// One message of a chat, e.g. the image an agent replied to (its downloadUrl).
+async function getWhatsAppMessage(chatId, idMessage, instance, token) {
+  if (!instance || !token) return null;
+  const r = await fetch(`https://api.green-api.com/waInstance${instance}/getMessage/${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatId, idMessage }),
+    signal: AbortSignal.timeout(20000),
+  });
+  return r.ok ? r.json() : null;
+}
+
 /*
  * Interactive buttons (Green API sendInteractiveButtons).
  * Limits enforced here rather than trusted from call sites: at most 3
@@ -323,10 +348,19 @@ function ownUploadedVideo(url, bases) {
   return hosts.includes(m[1]) ? s : null;
 }
 
+// "ב" + a place: ב + ה folds into ב ("בפארק", not "בהפארק"), except where the ה is
+// part of the name. ponytail: short exception list; add names as they show up.
+const HE_NAMES = ["הרצליה", "הוד השרון", "הדר", "הושעיה", "הגושרים", "הרדוף"];
+function inPlace(name) {
+  const s = String(name || "").trim();
+  if (!s) return "";
+  return "ב" + (s.startsWith("ה") && !HE_NAMES.some((n) => s.startsWith(n)) ? s.slice(1) : s);
+}
+
 module.exports = {
-  ownUploadedVideo,
+  ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
-  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons,
+  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons, getWhatsAppMessage, getWhatsAppHistory,
   assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
 };

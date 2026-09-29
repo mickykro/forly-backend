@@ -22,7 +22,8 @@ const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "
 // Natural phrasings for the buttons above; button taps always send the exact
 // COMMANDS word, these cover what a person types instead of tapping.
 const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume",
-  "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create" };
+  "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create",
+  "לבטל": "cancel", "לבטל אותה": "cancel", "בטל": "cancel", "תבטל": "cancel", "תבטלי": "cancel" };
 
 // Page designs, in the order create.html's picker lists them (1-6). The first
 // alias is the Hebrew name shown there; create.html preselects the chosen one.
@@ -89,6 +90,9 @@ function spokenCommand(text) {
   }
   return best ? best.cmd : null;
 }
+// "עצור", "די", "אל תערוך שוב": stop the photo edits n8n is running.
+const STOP_RE = /^(עצור|עצרי|תעצור|תעצרי|די|מספיק|תפסיק|תפסיקי|stop)$|^אל (תערוך|תערכי|תמשיך|תמשיכי)/i;
+function isStop(text) { return STOP_RE.test(clean(text)); }
 function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
 function looksLikeListing(text) {
   const t = String(text || "");
@@ -179,10 +183,31 @@ function parseParking(t) { return /^(אין|ללא|לא)$/.test(clean(t)) ? 0 : 
 // Spoken answers keep the preposition: "בכפר סבא", "בתל אביב". Drop a leading ב unless
 // the city's own name starts with it.
 const B_CITIES = ["באר שבע", "באר יעקב", "בני ברק", "בת ים", "בית שמש", "בית שאן", "ביתר עילית", "בית דגן", "בנימינה", "בית ג'ן", "בועיינה", "בסמת טבעון", "באקה אל-גרבייה"];
+// Voice notes mishear cities ("בל שבע", "בר שבע" for באר שבע): a name within two
+// letters of a known city is that city. ponytail: the larger cities only; a small
+// town that isn't listed is kept exactly as said — add names as they show up.
+const CITIES = ["תל אביב", "ירושלים", "חיפה", "ראשון לציון", "פתח תקווה", "אשדוד", "נתניה", "באר שבע", "חולון", "בני ברק",
+  "רמת גן", "אשקלון", "רחובות", "בת ים", "בית שמש", "כפר סבא", "הרצליה", "חדרה", "מודיעין", "נצרת", "לוד", "רמלה",
+  "רעננה", "הוד השרון", "גבעתיים", "קריית גת", "נהריה", "עפולה", "קריית אתא", "יבנה", "אילת", "ראש העין", "עכו",
+  "אלעד", "רמת השרון", "טבריה", "קריית מוצקין", "קריית ים", "קריית ביאליק", "נס ציונה", "אור יהודה", "קריית שמונה",
+  "דימונה", "נתיבות", "שדרות", "אופקים", "יקנעם", "זכרון יעקב", "גבעת שמואל", "כרמיאל", "צפת", "מעלה אדומים",
+  "סביון", "קיסריה", "אבן יהודה", "כפר יונה", "טירת כרמל", "נשר", "מגדל העמק", "עראד", "יהוד", "גדרה", "קריית אונו"];
+function knownCity(s) {
+  if (CITIES.includes(s) || s.length < 4) return s;
+  let best = null;
+  for (const c of CITIES) {
+    const d = editDistance(s, c);
+    if (d <= 2 && (!best || d < best.d)) best = { c, d };
+  }
+  return best ? best.c : s;
+}
 function parseCity(t) {
-  const s = text(60)(t);
-  if (!s || !s.startsWith("ב") || B_CITIES.some((c) => s.startsWith(c))) return s;
-  return s.slice(1).trim() || s;
+  let s = text(60)(t);
+  if (s) s = s.replace(/^(ה?עיר|בעיר)\s*[:\-]?\s*/, "").trim() || s; // "עיר באר שבע", "העיר: חיפה"
+  if (!s) return s;
+  const whole = knownCity(s); // "בל שבע" is באר שבע misheard, not "ב" + "ל שבע"
+  if (whole !== s || !s.startsWith("ב") || B_CITIES.some((c) => s.startsWith(c))) return whole;
+  return knownCity(s.slice(1).trim() || s);
 }
 
 const PARSERS = {
@@ -234,6 +259,9 @@ function touch(draft, now = new Date()) {
   return draft;
 }
 
+// Fields still to ask, in order ("חסרים פרטים?" lists them).
+function missing(draft) { return ASK_ORDER.filter((f) => draft.fields[f] === null && !draft.skipped.includes(f)); }
+
 function nextStep(draft) {
   for (const f of ASK_ORDER) {
     if (draft.fields[f] === null && !draft.skipped.includes(f)) return { kind: "ask", field: f };
@@ -266,7 +294,12 @@ function listingBody(draft) {
 
 const silentFor = (draft, now) => now.getTime() - asMillis(draft.updated_at);
 function isPaused(draft, now = new Date()) { return draft.status === "active" && silentFor(draft, now) > PAUSE_MS; }
+const UPDATE_HOLD_MS = 15 * 60 * 1000;
+const CHOICE_HOLD_MS = 30 * 60 * 1000;
 function isExpiredPrompt(draft, now = new Date()) {
+  if (draft.status === "updating") return silentFor(draft, now) > UPDATE_HOLD_MS;
+  if (draft.status === "photo_choice") return silentFor(draft, now) > CHOICE_HOLD_MS;
+  if (draft.status === "edit_request") return silentFor(draft, now) > 10 * 60 * 1000;
   return (draft.status === "offered" || draft.status === "resume_prompt") && silentFor(draft, now) > PAUSE_MS;
 }
 
@@ -280,6 +313,6 @@ function summary(draft) {
 
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
-  findUrl, command, spokenCommand, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
-  newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
+  findUrl, command, spokenCommand, isStop, knownCity, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
+  newDraft, touch, nextStep, missing, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };

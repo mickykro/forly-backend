@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forly WhatsApp Review — 2026-09-29</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f27; --muted: #5b6472; --border: #e3e6ea;
+    --accent: #2563eb; --good: #15803d; --good-bg: #ecfdf3; --warn: #b45309; --warn-bg: #fffbeb;
+    --bad: #b91c1c; --bad-bg: #fef2f2; --info-bg: #eff6ff; --code-bg: #0f172a; --code-ink: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55; padding: 0 16px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { padding: 40px 0 20px; }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 0.82rem; color: var(--muted); }
+  .verdict {
+    margin: 22px 0 30px; padding: 20px 22px; border-radius: 14px; background: var(--info-bg);
+    border: 1px solid #bfdbfe;
+  }
+  .verdict h2 { margin: 0 0 8px; font-size: 1.05rem; }
+  .verdict p { margin: 0 0 8px; color: #1e3a5f; }
+  .verdict p:last-child { margin-bottom: 0; }
+  section { margin: 36px 0; }
+  h2.section-title { font-size: 1.2rem; border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 18px; }
+  .section-note { color: var(--muted); margin-top: -10px; margin-bottom: 18px; font-size: 0.92rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card h3 { margin: 0 0 4px; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .badge.fixed { background: var(--good-bg); color: var(--good); }
+  .badge.n8n { background: var(--warn-bg); color: var(--warn); }
+  .badge.watch { background: #f3f4f6; color: var(--muted); }
+  .badge.good { background: var(--good-bg); color: var(--good); }
+  .card .meta { color: var(--muted); font-size: 0.82rem; margin: 4px 0 12px; }
+  .card p { margin: 8px 0; }
+  .evidence {
+    background: #fafbfc; border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 0.86rem;
+  }
+  .evidence .line { margin: 3px 0; }
+  .evidence .bot { color: var(--accent); }
+  .evidence .bot::before { content: "🤖 "; }
+  .evidence .user { color: #374151; }
+  .evidence .user::before { content: "👤 "; }
+  code, .code-inline { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .commit-ref {
+    display: inline-block; margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem; background: var(--good-bg); color: var(--good); border-radius: 6px; padding: 4px 10px;
+  }
+  ul.plain { margin: 8px 0; padding-inline-start: 20px; }
+  ul.plain li { margin: 4px 0; }
+  .outbound-msg {
+    background: var(--bad-bg); border: 1px solid #fecaca; border-radius: 10px; padding: 14px 16px; margin-top: 10px;
+  }
+  .outbound-msg .to { font-size: 0.78rem; color: var(--bad); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+  footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --ink: #e5e7eb; --muted: #9199a8; --border: #262b34;
+      --info-bg: #142238; --good-bg: #0f2a1c; --warn-bg: #2a2110; --bad-bg: #2a1414; --code-bg: #05070c;
+    }
+    .verdict { border-color: #1e3a5f; }
+    .verdict p { color: #bcd4ee; }
+    .evidence { background: #12151c; }
+    code, .code-inline { background: #20242e; color: #dbe1ea; }
+    .outbound-msg { border-color: #4c1d1d; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Forly WhatsApp Review</h1>
+  <div class="subtitle">Weekly check on the agent-facing WhatsApp bot — what real conversations show about where it helps and where it trips people up.</div>
+  <div class="meta-row">
+    <span class="pill">Generated 2026-09-29</span>
+    <span class="pill">Source: Green API getChats / getChatHistory</span>
+    <span class="pill">36 conversations sampled, Aug 28 – Sep 29</span>
+    <span class="pill">Channel: waInstance7105422200</span>
+  </div>
+</header>
+
+<div class="verdict">
+  <h2>Bottom line</h2>
+  <p><strong>Every distinct bug this review turned up was already fixed on <code>staging</code> by the time this report was written</strong> — several of them during the review itself. Between roughly 12:39 and 14:26 today, 27 WhatsApp-related commits landed, each traceable to one of the exact conversations pulled below (the commit messages cite the same phone numbers). That's an unusually tight loop: live agent conversations → diagnosis → shipped fix, same day, same hour in a few cases.</p>
+  <p>Given that, this PR ships <strong>no code changes</strong> — anything this review would have proposed already exists on staging, generally in a more complete form than a first pass would produce. What follows is the review write-up: what was found, matched against the commit that closed it, plus the one item still open (an n8n workflow, out of this repo) and a couple of lower-priority notes.</p>
+</div>
+
+<section>
+  <h2 class="section-title">Found here, already fixed on staging</h2>
+  <p class="section-note">Matched by re-reading the current <code>staging</code> branch after pulling the transcripts. Each fix below directly addresses the conversation quoted.</p>
+
+  <div class="card">
+    <h3><span class="badge fixed">Fixed</span> Natural phrasing didn't open a new listing</h3>
+    <div class="meta">Tal Einan, 972548018957 — today, 06:31–06:33</div>
+    <p>The opener check only matched an exact string like "דף נכס" or "נכס חדש". A full sentence — "אני רוצה לבנות דף נכס" — didn't match, so no draft ever opened. Three different answers to "?באיזו עיר הנכס" got the identical opening prompt back, and the session was abandoned:</p>
+    <div class="evidence">
+      <div class="line user">בוקר טוב אני רוצה לבנותת דף נכס</div>
+      <div class="line bot">מתחילים דף נכס חדש 🏠 באיזו עיר הנכס?</div>
+      <div class="line user">סביון, 8 חדרים, 32 מיליון</div>
+      <div class="line bot">מתחילים דף נכס חדש 🏠 באיזו עיר הנכס? <em style="color:var(--bad)">(same message, repeated)</em></div>
+      <div class="line user">סביון</div>
+      <div class="line bot">מתחילים דף נכס חדש 🏠 באיזו עיר הנכס? <em style="color:var(--bad)">(again — session abandoned)</em></div>
+    </div>
+    <p>Staging now runs every unmatched opener through an LLM intent check (<code>server/property-intent.js</code>) — its own examples list are these exact two sentences, "בוקר טוב אני רוצה לבנות דף נכס" and "סביון, 8 חדרים, 32 מיליון", both → <code>new</code>.</p>
+    <span class="commit-ref">db457ae feat(whatsapp): detect the intent to start a property page</span>
+  </div>
+
+  <div class="card">
+    <h3><span class="badge fixed">Fixed</span> "לבטל אותה" (cancel it) wasn't recognized</h3>
+    <div class="meta">Tal Einan, 972548018957 — Sep 27, 06:49–06:52</div>
+    <p>The button sends the exact word <code>ביטול</code>; a person typing the verb — "לבטל", "לבטל אותה" — wasn't recognized, so the same "continue / new / cancel?" prompt looped twice before the agent gave up on a stuck draft.</p>
+    <div class="evidence">
+      <div class="line bot">יש לך טיוטה פתוחה: 4 חד׳ · נאות לון... להמשיך אותה, להתחיל נכס חדש, או לבטל?</div>
+      <div class="line user">לבטל אותה</div>
+      <div class="line bot">יש לך טיוטה פתוחה... <em style="color:var(--bad)">(same prompt, "cancel" not recognized)</em></div>
+    </div>
+    <p><code>COMMAND_ALIASES</code> now maps "לבטל", "לבטל אותה", "בטל", "תבטל", "תבטלי" → <code>cancel</code>, matching the spoken-form aliases resume already had.</p>
+    <span class="commit-ref">624c02d fix(whatsapp): open a draft from natural phrasing, accept 'לבטל אותה'</span>
+  </div>
+
+  <div class="card">
+    <h3><span class="badge fixed">Fixed</span> "1." wasn't accepted as option 1</h3>
+    <div class="meta">Tsach Ben-Basat, 972547221770 — today, 11:09</div>
+    <p>Replying to the "1 · כן / 2 · לא" page-build offer with "1." (trailing period, very ordinary phone-keyboard habit) matched nothing, and the fallback response felt off — the bot answered as if distracted rather than confirming the build:</p>
+    <div class="evidence">
+      <div class="line bot">ערכתי 12 תמונות ✨ לבנות מהן דף נכס?<br>1 · כן<br>2 · לא</div>
+      <div class="line user">1.</div>
+      <div class="line bot">אני על זה במלוא המרץ! 💪🎨 ... נמשיך לדבר מיד כשאסיים ✨😊</div>
+    </div>
+    <p>The numbered-option matcher now accepts a trailing "." or ")" — "1", "1.", "1)" all resolve the same way.</p>
+    <span class="commit-ref">bcf14a0 fix(whatsapp): '1.' / '3)' count as option numbers — commit message names this exact chat</span>
+  </div>
+
+  <div class="card">
+    <h3><span class="badge fixed">Fixed</span> Bot promised an auto-built page that doesn't exist</h3>
+    <div class="meta">Noy Harush (שמאות מקרקעין), 972546582548 — today, 10:14–11:23</div>
+    <p>Asked for a custom title ("תערכי איך שנראה לך לנכון..."), the reply committed to finishing and sending a page automatically. Forty minutes later a human had to step in with an apology and a manual link — no draft had actually opened, so nothing was building in the background:</p>
+    <div class="evidence">
+      <div class="line user">מעולה.  תשלחי לי בסיום</div>
+      <div class="line bot">בטח! 😊 אכין לך דף נכס מושקע... אשלח לך ברגע שיהיה מוכן!</div>
+      <div class="line bot" style="margin-top:6px">היי נופר, סליחה על הבלבול 🙏 הדף לא נבנה אוטומטית. הכנתי לך את הנכס... בדקי, תקני אם צריך ובני את הדף כאן: [link]</div>
+    </div>
+    <p>New: an unclaimed message with no open draft now looks back at the last 3 hours of the chat via <code>getChatHistory</code>; when it holds an ad or edited photos, it opens a draft from them instead of falling through unanswered. The commit message names this chat directly.</p>
+    <span class="commit-ref">0c20e31 feat(whatsapp): build a page from the chat when asked with no draft — "972546582548 sent the ad and had 8 photos edited... her 'תערכי איך שנראה לך' was not ours"</span>
+  </div>
+
+  <div class="card">
+    <h3><span class="badge fixed">Fixed</span> Updating a live listing by name: unreliable "כן/לא", needed two tries</h3>
+    <div class="meta">Dev/test account, +972542045280 — today, 10:18–10:24</div>
+    <p>This flow ("בנכס שיקון ותיקים אני רוצה לעדכן מחיר ל-...") didn't exist as a backend feature yet; it was being talked through by n8n's own fallback agent. A plain "לא" got a generic "didn't understand" reply, and "כן" had to be sent twice before the price actually changed:</p>
+    <div class="evidence">
+      <div class="line user">בנכס שיקון ותיקים אני רוצה לעדכן מחיר ל-2,950,000</div>
+      <div class="line bot">לעדכן בדף 4 חד׳ בשיקון ותיקים? מחיר ₪2,900,000 ← ₪2,950,000<br>1 · כן<br>2 · לא</div>
+      <div class="line user">לא</div>
+      <div class="line bot">לא הבנתי את הבקשה 🙏 תשאל/י שוב או שלח/י תמונה עם הוראות ואטפל בזה מיד</div>
+      <div class="line user">בנכס שיקון ותיקים אני רוצה לעדכן מחיר ל-2,950,000</div>
+      <div class="line bot">לעדכן בדף... <em style="color:var(--bad)">(same confirm again)</em></div>
+      <div class="line user">כן</div>
+      <div class="line bot">לעדכן בדף... <em style="color:var(--bad)">(asked a second time before it took)</em></div>
+    </div>
+    <p>Staging now has a dedicated <code>server/page-update.js</code>: it matches a named page against the agent's live listings, proposes the change, and confirms with the same <code>D.command()</code> yes/no parser the rest of the chat uses — reliably, in one round trip.</p>
+    <span class="commit-ref">5053b8e fix(whatsapp): fixes from the 972546582548 chat; update existing pages from chat<br>73d7762 fix(whatsapp): mid-draft, only a named page is updated; else it's the draft</span>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Still open — needs an n8n change</h2>
+  <p class="section-note">Outside this repo (n8n's own photo-edit workflow), so nothing here was changed. A WhatsApp message with the specifics was sent to +972542045280.</p>
+
+  <div class="card">
+    <h3><span class="badge n8n">n8n</span> Photo-batch progress messages: one text + one image per photo</h3>
+    <div class="meta">Seen in 4 of the sampled chats, e.g. Noy Harush &amp; Tal Eynan (Bar Ilan) — 8-photo batches today and Sep 27</div>
+    <p>Every photo in a batch gets its own status line repeating the same long fixed sentence, plus the edited image — 16 outbound messages for an 8-photo batch:</p>
+    <div class="evidence">
+      <div class="line bot">עובדת על תמונה 1 מתוך 8 — שפר את התמונה: תאורה טובה וטבעית, חדות גבוהה, הסרת אלמנטים מיותרים/עומס, מראה נקי ומזמין שמושך לפנות ולשאול על הנכס</div>
+      <div class="line bot">[image]</div>
+      <div class="line bot"><em>… repeats 8 times, identical caption each time</em></div>
+    </div>
+    <p>This text isn't anywhere in this repo — it's n8n's photo-edit workflow output, not this backend. Worth collapsing to one "working on your N photos ✨" message up front, then just the images as they land: roughly halves message volume and cuts exposure to WhatsApp/Green API rate limits (this review's own history-reading hit Green API's 429 throttling at a much lower request rate than a 12-photo burst sends at).</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Worth watching, not urgent</h2>
+  <div class="card">
+    <h3><span class="badge watch">Watch</span> Photo-edit instructions not visibly tailored to the request</h3>
+    <div class="meta">Tsach Ben-Basat, 972547221770 — today</div>
+    <p>The agent gave a specific brief — remove small objects, erase any watermark/text revealing the listing office, brighten and sharpen — and got the same generic per-photo caption every other batch gets. Can't confirm from message text alone whether the edit itself honored the brief (only captions are visible here, not the image diffs) — worth a spot-check next time a similarly specific request comes in.</p>
+  </div>
+  <div class="card">
+    <h3><span class="badge watch">Watch</span> Off-brand fallback reply (older, pattern awareness)</h3>
+    <div class="meta">Tal Eynan (Bar Ilan), 972543936352 — Jul 21</div>
+    <p>An ambiguous "משהו כזה" got back "חחחח תעני לי בפרטי" / "לא לפורלי" — breaks character and reads like it was meant for someone else. Same fallback path as the items above, now smaller since this backend claims far more turns than it used to; flagging in case it still surfaces.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Working well</h2>
+  <div class="card">
+    <h3><span class="badge good">Good</span> What held up across the sample</h3>
+    <ul class="plain">
+      <li>Lead-nurture drip (day 0 confirmation → day 1 "tried calling" → day 2 check-in → new-lead alert with buyer contact, budget, timing, financing and unanswered questions) fired cleanly across multiple agents.</li>
+      <li>Single-photo enhancement (as opposed to a batch) sends one clean status message, not a flood.</li>
+      <li>Login codes delivered reliably, every time they were requested.</li>
+      <li>The dev/test account (+972542045280) shows active hands-on testing catching issues in real time — several of the fixes above trace straight back to that account's own session today.</li>
+    </ul>
+  </div>
+</section>
+
+<div class="outbound-msg">
+  <div class="to">Sent via WhatsApp → +972542045280</div>
+  <p style="margin:0">A short message about the one remaining item — n8n's photo-batch message spam — was sent from the Forly number, per the standing instruction to flag n8n-workflow changes separately from this PR. No business-level (pricing/policy/offering) change was identified this cycle.</p>
+</div>
+
+<footer>
+  Methodology: pulled the full chat list via <code>getChats</code>, then <code>getChatHistory</code> (last ~40 messages) for the 36 most recently active 1:1 conversations plus the internal media-log group, spanning Aug 28 – Sep 29 2026. Media payloads (images/video binaries, thumbnails) were stripped before analysis; only message text, type, and timestamps were reviewed. <code>staging</code> was re-checked against <code>origin</code> immediately before writing this report (HEAD <code>5f2699e</code>) — several matching fixes landed on staging while this review was in progress, which this report cites by commit.
+</footer>
+
+</div>
+</body>
+</html>

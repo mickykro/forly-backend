@@ -9,7 +9,7 @@ const fs = require("fs");
 const db = require("../db");
 const { REVIEW_SCOPES } = require("../auth");
 const portalStream = require("../portal-stream");
-const { sendWhatsApp } = require("../utils");
+const { sendWhatsApp, inPlace } = require("../utils");
 const { portfolioSlug, normalizePortfolio, visiblePortfolioPages, nextPortfolioStatus } = require("../portfolio");
 const businessCache = require("../business-cache");
 
@@ -30,7 +30,7 @@ module.exports = function createDashboardRouter(ctx) {
       const page = l.page_id ? await db.getPage(l.page_id).catch(() => null) : null;
       properties.push({
         listing_id: l.listing_id,
-        title: `${l.rooms || ""} חד׳ ב${l.neighborhood || l.city || ""}`.trim(),
+        title: `${l.rooms || ""} חד׳ ${inPlace(l.neighborhood || l.city)}`.trim(),
         address: [l.address, l.city].filter(Boolean).join(", "),
         thumb_url: (l.photos_urls && l.photos_urls[0]) || null,
         page_id: l.page_id || null,

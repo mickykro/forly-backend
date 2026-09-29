@@ -55,7 +55,7 @@ Rules:
 - Numbers as JSON numbers, never strings. price in ILS: "2.9M" or "2.9 מיליון" → 2900000, "890 אלף" → 890000, "12,000 לחודש" → 12000.
 - deal: "rent" if the text is about renting (להשכרה, שכירות, לחודש), "sale" if about buying or selling (למכירה, מכירה, סוג עסקה: מכירה), else null.
 - size_sqm is the total/main area, from labels like "שטח", "מ״ר", or a bare "70 מ״ר" — "מ״ר בנוי" (built area) goes in sqm_built instead when both are given.
-- rooms may be fractional (3.5). floor is the apartment's floor, not the building height. parking is the number of spots (חניה = 1, "ללא" = 0).
+- rooms may be fractional (3.5). rooms (חדרים) is the Israeli room count, which includes the living room: "N חדרי שינה" (bedrooms) is NOT rooms — when only bedrooms are given, leave rooms null. floor is the apartment's floor, not the building height. parking is the number of spots (חניה = 1, "ללא" = 0).
 - elevator, shabbat_elevator, storage: true only if mentioned, otherwise null.
 - address is street and number only, when actually given; most scraped listings omit it — leave it null rather than using the city or neighborhood.
 No prose, no markdown fences.`;

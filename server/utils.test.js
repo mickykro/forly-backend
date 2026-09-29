@@ -151,5 +151,9 @@ const fakeFetch = (body) => async () => ({
     assert.equal(ownUploadedVideo(null, bases), null);
   }
 
+  // inPlace: ב + ה folds ("בפארק"), unless the ה is the name's own
+  const { inPlace } = require("./utils");
+  assert.deepEqual(["הפארק", "הרצליה", "באר שבע", ""].map(inPlace), ["בפארק", "בהרצליה", "בבאר שבע", ""]);
+
   console.log("all utils tests passed");
 })().catch((e) => { console.error(e); process.exit(1); });
