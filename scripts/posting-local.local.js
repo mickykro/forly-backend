@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /*
  * Starts the Forly server in watched local-posting mode.
- * No warm-up browser activity is allowed; every post needs explicit approval.
+ * Every post needs explicit approval. Its visible posting browser performs a
+ * short passive readiness preflight, then publishes from that same session.
  */
 const { spawn } = require("child_process");
 
@@ -12,6 +13,7 @@ Object.assign(process.env, {
   POSTING_ENABLED: "1",
   DRIVER_DEV_VIEW: "1",
 });
+const localMode = require("../server/posting-local");
 
 const portArg = Number(process.argv[2]);
 const port = Number.isInteger(portArg) && portArg > 0 && portArg < 65536
@@ -22,7 +24,8 @@ const monitor = `${base}/dev-driver.html`;
 console.log("\nLOCAL POSTING TEST MODE");
 console.log(`Browser monitor: ${monitor}`);
 console.log(`Campaigns:       ${base}/autopublish.html`);
-console.log("NOTE: warm-up and idle browsing are disabled.");
+console.log("NOTE: multi-day warm-up and separate idle browsing are disabled.");
+console.log(`NOTE: each approved posting browser starts with a ${localMode.sessionPreflightSeconds(process.env)}-second passive Facebook preflight in the same session.`);
 console.log("STICKY NOTE: every post waits for your approval before a browser opens and clicks Post.");
 console.log("STICKY NOTE: production safety gates, identity proof, destination proof, one-click semantics, cooldowns and stop controls remain active.\n");
 

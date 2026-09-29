@@ -30,7 +30,7 @@ const denied = (reason) => Object.assign(new Error("posting not allowed"), { cod
 
 function fakePage(o = {}) {
   const ev = o.ev || [];
-  const st = { url: "about:blank", submitted: false, editor: "", typed: [], clicks: [], visited: [], pressed: [] };
+  const st = { url: "about:blank", submitted: false, editor: "", typed: [], clicks: [], visited: [], pressed: [], waits: [] };
   const v = (x) => (typeof x === "function" ? x(st) : x);
   const texts = Object.assign({
     [S.identity]: NAME, [S.targetName]: GROUP_NAME, [S.composerTarget]: GROUP_NAME, [S.composerAuthor]: NAME,
@@ -64,7 +64,7 @@ function fakePage(o = {}) {
     keyboard: { type: async (t) => { st.keyboardTyped = (st.keyboardTyped || 0) + 1; }, press: async (k) => { st.pressed.push(k); } },
     mouse: { wheel: async () => {}, move: async () => {} },
     waitForLoadState: async () => {},
-    waitForTimeout: async () => {},
+    waitForTimeout: async (ms) => { st.waits.push(ms); },
     $$eval: async (sel) => (sel === S.feedPost ? v(feed) : []),
     // The driver's one in-page read (readInPage): the dialog/alert regions'
     // texts and the captcha-frame count. A region is { text (its chrome),

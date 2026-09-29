@@ -114,9 +114,12 @@ scheduled → reserved → session_started → composer_ready
    that destination is paused and surfaced to the agent and operator; it is not
    routed around.
 7. **Watched local testing.** `POSTING_LOCAL_TEST=1` is allowed only with
-   `FORLY_ENV=local`. It disables warm-up, idle browsing, feed dwell, likes and
-   stories; forces every post through exact per-post approval; and exposes the
-   live browser in the authenticated local developer monitor. Identity,
+   `FORLY_ENV=local`. It disables multi-day warm-up and separate idle browsing,
+   while each approved post starts with a short passive Facebook readiness
+   preflight and then publishes from that same visible browser session. The
+   preflight has no scrolling, post opening, likes, stories or synthetic input;
+   it forces every post through exact per-post approval and exposes the live
+   browser in the authenticated local developer monitor. Identity,
    destination, membership, copy, media, submit-readiness, cooldown, duplicate,
    one-click, reconciliation, and kill-switch controls remain active.
 
