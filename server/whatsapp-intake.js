@@ -12,7 +12,9 @@
 const D = require("./property-draft");
 const R = require("./whatsapp-replies");
 const C = require("./draft-corrections");
-const { updatePage } = require("./page-update");
+const { updatePage, updatingTurn } = require("./page-update");
+const { intentOf, openerOf } = require("./property-intent");
+const PC = require("./photo-choice");
 
 const MAX_PHOTOS = 12;
 
@@ -123,39 +125,6 @@ async function openDraft(phone, kind, text, deps, now) {
   return kind === "keyword" ? openFromKeyword(phone, deps, now) : openFromSource(phone, kind, text, deps, now);
 }
 
-// Only a message that mentions a property or a listing detail is worth the
-// intent check's LLM call; photo edits and small talk go straight to n8n's bot.
-const PROPERTY_WORDS = /נכס|דירה|דירת|בית|וילה|פנטהאוז|קוטג|דופלקס|מגרש|דף|סרטון|וידאו/;
-async function intentOf(text, deps) {
-  const t = String(text || "").trim();
-  if (!deps.classifyIntent || !t || t.length > 300) return null;
-  if (!PROPERTY_WORDS.test(t) && !C.hintedFields(t).length) return null;
-  try { return await deps.classifyIntent(t); } catch (err) { return null; }
-}
-
-// Exact opener, else the intent check: "אני רוצה לבנות דף נכס" → "intent",
-// "תעדכן את התמונות בדף של דליות 35" → "update".
-async function openerOf(text, deps) {
-  const kind = D.openerKind(text);
-  if (kind) return kind;
-  const intent = await intentOf(text, deps);
-  return intent === "new" ? "intent" : intent;
-}
-
-async function updatingTurn(input, deps, draft, now) {
-  if (input.event) return notOurs("not_ours");
-  if (photoUrlsOf(input) || input.videoUrl) {
-    // One reminder per burst, not per webhook.
-    const quiet = now.getTime() - D.asMillis(draft.hinted_at) < 60000;
-    if (!quiet) draft.hinted_at = now;
-    draft.updated_at = now;
-    return { handled: true, status: "update_held", draft, replies: quiet ? [] : [R.editHeld(draft.links)] };
-  }
-  const kind = await openerOf(input.text, deps);
-  if (kind) return openDraft(draft.phone, kind, input.text, deps, now);
-  return { ...notOurs("not_ours"), del: true }; // talk about something else: the hold ends
-}
-
 // The same message may already carry details ("סביון, 8 חדרים, 32 מיליון"): they fill the draft.
 async function withDetails(t, text, deps, now) {
   if (!C.hintedFields(text).length || !deps.extractAllowed(t.draft.phone)) return t;
@@ -230,9 +199,10 @@ function photoTimer(draft, deps, now) {
 
 /*
  * n8n just finished editing a photo → it may become a property page.
- * Business Handler2 edits photos one at a time (its burst output only warns),
- * so this arrives once per photo: pile them on a silent `offered` draft and ask
- * once, when the third lands. A batch path sending several at once still works.
+ * Business Handler edits photos one at a time, so this arrives once per photo:
+ * pile them on a silent `offered` draft; the photo timer asks once the batch
+ * has gone quiet, with the real count (offerTimer). A later batch after a sent
+ * offer starts a fresh one — never mixing photos of two properties.
  */
 async function photosEdited(input, deps, draft, now) {
   const { phone } = input;
@@ -251,14 +221,16 @@ async function photosEdited(input, deps, draft, now) {
     draft.pending_opener = { ...o, photos: (o.photos || []).concat(hosted).slice(0, MAX_PHOTOS) };
     return { handled: true, status: `resume_pending:${draft.pending_opener.photos.length}`, draft: D.touch(draft, now), replies: [] };
   }
-  const target = draft && draft.status === "offered" ? draft : offeredDraft(phone, now);
+  const target = draft && draft.status === "offered" && !draft.offer_sent ? draft : offeredDraft(phone, now);
   target.photos = target.photos.concat(hosted).slice(0, MAX_PHOTOS);
   D.touch(target, now);
-  if (target.photos.length < D.MIN_PHOTOS || target.offer_sent) {
-    return { handled: true, status: `offer_pending:${target.photos.length}`, draft: target, replies: [] };
-  }
-  target.offer_sent = true;
-  return { handled: true, status: "offered", draft: target, replies: [R.offer(target.photos.length)] };
+  return { handled: true, status: `offer_pending:${target.photos.length}`, draft: target, replies: [], armPhotoTimer: true };
+}
+
+function offerTimer(draft, now) {
+  if (draft.offer_sent || draft.photos.length < D.MIN_PHOTOS) return { handled: true, status: "offer_pending", replies: [] };
+  draft.offer_sent = true;
+  return { handled: true, status: "offered", draft: D.touch(draft, now), replies: [R.offer(draft.photos.length)] };
 }
 
 function offeredDraft(phone, now) {
@@ -273,18 +245,27 @@ function resumePrompt(draft, opener, now) {
   return { handled: true, status: "resume_prompt", draft: D.touch(draft, now), replies: [R.resumePrompt(D.summary(draft))] };
 }
 
+// "כן" — or a page asked for from these photos ("תבני מזה דף") — takes the
+// offered photos. "נכס חדש", a listing or "אני רוצה לבנות דף" is a property of
+// its own (the offered photos may be of another one): a fresh draft. Anything
+// else ignores the offer, which is dropped.
+const FROM_THESE = /מזה|מהן|מהם|מהתמונות|מאלה|איתן|איתם|עם התמונות|אותן/;
 async function offeredTurn(input, deps, draft, now) {
+  if (input.event === "photo_timer") return offerTimer(draft, now);
+  if (input.event) return notOurs("not_ours");
+  const photos = photoUrlsOf(input);
+  if (photos) return PC.hold(null, draft.phone, photos, now);
   const cmd = D.command(input.text);
   if (cmd === "no") return { handled: true, status: "declined", del: true, replies: [R.declined()] };
-  // "כן", or in their own words: "אני רוצה לבנות דף נכס" / "סביון, 8 חדרים, 32 מיליון".
-  const said = cmd === "yes" ? null : await intentOf(input.text, deps);
-  if (said === "update") return updatePage(draft.phone, input.text, deps, now);
-  const intent = said === "new";
-  if (cmd !== "yes" && !intent) return notOurs("not_ours");
-  draft.status = "active";
-  const p = promptFor(draft, deps);
-  const t = { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
-  return intent ? withDetails(t, input.text, deps, now) : t;
+  const kind = cmd === "yes" ? null : await openerOf(input.text, deps);
+  if (cmd === "yes" || (kind === "intent" && FROM_THESE.test(input.text))) {
+    draft.status = "active";
+    const p = promptFor(draft, deps);
+    const t = { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+    return kind ? withDetails(t, input.text, deps, now) : t;
+  }
+  if (kind) return openDraft(draft.phone, kind, input.text, deps, now);
+  return { ...notOurs("not_ours"), del: true };
 }
 
 async function resumeTurn(input, deps, draft, now) {
@@ -420,6 +401,9 @@ async function handleTurn(input, deps) {
   const { phone } = input;
   if (!deps.business) return notOurs("unknown_agent");
   let draft = input.draft || null;
+  // Options go out numbered (see the route's send): "2" is the second one.
+  const digit = /^\s*([1-3])\s*$/.exec(input.text || "");
+  if (digit && draft && draft.last_buttons && draft.last_buttons[digit[1] - 1]) input = { ...input, text: draft.last_buttons[digit[1] - 1] };
   let dropped = false;
   if (draft && D.isExpiredPrompt(draft, now)) { draft = null; dropped = true; }
   const withDrop = (t) => (dropped && !t.draft ? { ...t, del: true } : t);
@@ -451,6 +435,13 @@ async function handleTurn(input, deps) {
     if (t.handled && t.replies.length) t.replies[0] = { ...t.replies[0], text: `${R.heard(heard)}\n\n${t.replies[0].text}` };
     return t;
   }
+  // "עצור" / "אל תערוך שוב": n8n's edit loop checks the flag before each photo.
+  if (D.isStop(input.text) && !(draft && draft.status === "active")) {
+    if (deps.cancelEdits) await deps.cancelEdits(phone);
+    return { handled: true, status: "stopped", del: !!draft && draft.status === "photo_choice", replies: [R.stopped()] };
+  }
+  if (input.text && photoUrlsOf(input) && !input.event) return textThenPhotos(input, deps, draft);
+
   const open = draft && (draft.status === "active" || draft.status === "offered");
   if (input.messageType === "documentMessage" && open) {
     // Whatever step the draft is at, the question it's waiting on comes right after.
@@ -459,15 +450,21 @@ async function handleTurn(input, deps) {
   }
 
   if (!draft) {
+    if (photoUrlsOf(input) && !input.event) return PC.hold(null, phone, photoUrlsOf(input), now);
     const kind = await openerOf(input.text, deps);
     if (!kind) return withDrop(notOurs("not_ours"));
     return openDraft(phone, kind, input.text, deps, now);
   }
-  if (draft.status === "updating") return updatingTurn(input, deps, draft, now);
+  if (draft.status === "photo_choice") {
+    if (input.event === "photo_timer") return PC.ask(draft);
+    return PC.turn(input, deps, draft, now, { openDraft, openerOf, storePhoto, updatePage });
+  }
+  if (draft.status === "updating") return updatingTurn(input, deps, draft, now, openDraft);
   if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
   if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
   if (draft.status === "building") {
-    if (input.event || photoUrlsOf(input)) return notOurs("not_ours");
+    if (input.event) return notOurs("not_ours");
+    if (photoUrlsOf(input)) return PC.hold(null, phone, photoUrlsOf(input), now);
     const kind = await openerOf(input.text, deps);
     if (!kind) return notOurs("not_ours");
     return openDraft(phone, kind, input.text, deps, now);
@@ -483,6 +480,21 @@ async function handleTurn(input, deps) {
   if (draft.status === "active" && (opener === "link" || opener === "keyword")) return resumePrompt(draft, { text: input.text }, now);
   const t = await activeTurn(input, deps, draft, now);
   return t.status === "create" ? build(t.draft || draft, deps, now) : t;
+}
+
+/*
+ * Text that came in one webhook with a photo burst (the ad, an address): the
+ * text is a turn of its own, then the photos join whatever it opened. A text
+ * nobody claims is a caption: all of it goes on to n8n, which edits with it.
+ */
+async function textThenPhotos(input, deps, draft) {
+  const t1 = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft }, deps);
+  if (!t1.handled) return t1;
+  const after = t1.del ? null : (t1.draft || draft);
+  if (!after) return t1;
+  const t2 = await handleTurn({ ...input, text: "", draft: after }, deps);
+  if (!t2.handled) return t1;
+  return { ...t2, status: `${t1.status}+${t2.status}`, replies: [...t1.replies, ...t2.replies], draft: t2.draft || after };
 }
 
 module.exports = { handleTurn, _test: { promptFor, answerField } };

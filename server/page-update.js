@@ -4,6 +4,8 @@
  * that follow, see updatingTurn there).
  */
 const R = require("./whatsapp-replies");
+const D = require("./property-draft");
+const { openerOf } = require("./property-intent");
 
 // The page whose address / neighborhood / city / title shares the most words
 // with the message; null on no match or a tie.
@@ -34,4 +36,20 @@ async function updatePage(phone, text, deps, now) {
   return { handled: true, status: page ? "update_link" : "update_list", draft, replies: [R.editLinks(links)] };
 }
 
-module.exports = { updatePage, matchPage };
+// Photos while the hold lasts are the page's: held with a reminder. Text is a
+// fresh ask (openDraft, from whatsapp-intake) or ends the hold.
+async function updatingTurn(input, deps, draft, now, openDraft) {
+  if (input.event) return { handled: false, status: "not_ours", replies: [] };
+  if ((input.fileUrls && input.fileUrls.length) || input.fileUrl || input.videoUrl) {
+    // One reminder per burst, not per webhook.
+    const quiet = now.getTime() - D.asMillis(draft.hinted_at) < 60000;
+    if (!quiet) draft.hinted_at = now;
+    draft.updated_at = now;
+    return { handled: true, status: "update_held", draft, replies: quiet ? [] : [R.editHeld(draft.links)] };
+  }
+  const kind = await openerOf(input.text, deps);
+  if (kind) return openDraft(draft.phone, kind, input.text, deps, now);
+  return { handled: false, status: "not_ours", replies: [], del: true }; // talk about something else: the hold ends
+}
+
+module.exports = { updatePage, updatingTurn, matchPage };

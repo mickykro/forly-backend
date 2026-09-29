@@ -90,6 +90,9 @@ function spokenCommand(text) {
   }
   return best ? best.cmd : null;
 }
+// "עצור", "די", "אל תערוך שוב": stop the photo edits n8n is running.
+const STOP_RE = /^(עצור|עצרי|תעצור|תעצרי|די|מספיק|תפסיק|תפסיקי|stop)$|^אל (תערוך|תערכי|תמשיך|תמשיכי)/i;
+function isStop(text) { return STOP_RE.test(clean(text)); }
 function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
 function looksLikeListing(text) {
   const t = String(text || "");
@@ -268,8 +271,10 @@ function listingBody(draft) {
 const silentFor = (draft, now) => now.getTime() - asMillis(draft.updated_at);
 function isPaused(draft, now = new Date()) { return draft.status === "active" && silentFor(draft, now) > PAUSE_MS; }
 const UPDATE_HOLD_MS = 15 * 60 * 1000;
+const CHOICE_HOLD_MS = 30 * 60 * 1000;
 function isExpiredPrompt(draft, now = new Date()) {
   if (draft.status === "updating") return silentFor(draft, now) > UPDATE_HOLD_MS;
+  if (draft.status === "photo_choice") return silentFor(draft, now) > CHOICE_HOLD_MS;
   return (draft.status === "offered" || draft.status === "resume_prompt") && silentFor(draft, now) > PAUSE_MS;
 }
 
@@ -283,6 +288,6 @@ function summary(draft) {
 
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
-  findUrl, command, spokenCommand, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
+  findUrl, command, spokenCommand, isStop, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
   newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };

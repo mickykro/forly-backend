@@ -23,7 +23,7 @@
  * testable; the exported async helpers wrap them in Firestore transactions.
  */
 
-const KINDS = ["walkthroughs", "chat_image_edits", "chat_msgs", "carousels"];
+const KINDS = ["walkthroughs", "chat_image_edits", "chat_msgs", "carousels", "chat_videos"];
 
 // Hebrew labels for client-facing messages and the admin notification.
 const LABELS = {
@@ -31,12 +31,13 @@ const LABELS = {
   chat_image_edits: "עריכות תמונה בצ׳אט",
   chat_msgs: "הודעות צ׳אט בוט",
   carousels: "קרוסלות",
+  chat_videos: "סרטונים בצ׳אט",
 };
 
 // Starter bundle for a NEW signup (trial). Seeded once at profile completion;
 // never overwrites an existing ledger. walkthroughs:4 matches the historical
 // seed so nothing changes for the flow that already existed.
-const TRIAL_CAPS = { walkthroughs: 4, chat_image_edits: 0, chat_msgs: 200, carousels: 0 };
+const TRIAL_CAPS = { walkthroughs: 4, chat_image_edits: 0, chat_msgs: 200, carousels: 0, chat_videos: 0 };
 
 const ADMIN_NOTIFY_GAP_MS = 60 * 60 * 1000;
 // Big enough to hold a full replayable payload (image URL(s) + prompt for an

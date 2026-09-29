@@ -11,6 +11,8 @@
  * One short LLM call through chat-provider; the caller treats a failure as null.
  */
 const { ask } = require("./chat-provider");
+const D = require("./property-draft");
+const C = require("./draft-corrections");
 
 const MODEL = process.env.PROPERTY_PARSE_MODEL || "claude-haiku-4-5-20251001";
 
@@ -37,7 +39,26 @@ async function classify(text, { askFn = ask, model = MODEL, keys = process.env }
   return m ? m[1].toLowerCase() : null;
 }
 
-module.exports = { classify, SYSTEM };
+// Only a message that mentions a property or a listing detail is worth the
+// intent check's LLM call; photo edits and small talk go straight to n8n's bot.
+const PROPERTY_WORDS = /נכס|דירה|דירת|בית|וילה|פנטהאוז|קוטג|דופלקס|מגרש|דף|סרטון|וידאו/;
+async function intentOf(text, deps) {
+  const t = String(text || "").trim();
+  if (!deps.classifyIntent || !t || t.length > 300) return null;
+  if (!PROPERTY_WORDS.test(t) && !C.hintedFields(t).length) return null;
+  try { return await deps.classifyIntent(t); } catch (err) { return null; }
+}
+
+// Exact opener, else the intent check: "אני רוצה לבנות דף נכס" → "intent",
+// "תעדכן את התמונות בדף של דליות 35" → "update".
+async function openerOf(text, deps) {
+  const kind = D.openerKind(text);
+  if (kind) return kind;
+  const intent = await intentOf(text, deps);
+  return intent === "new" ? "intent" : intent;
+}
+
+module.exports = { classify, intentOf, openerOf, SYSTEM };
 
 if (require.main === module) {
   (async () => {

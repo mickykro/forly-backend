@@ -59,11 +59,27 @@ function headline(f) {
   return parts.join(", ");
 }
 
+// What was read, spelled out (address and city too) so a wrong field is caught here, not on the live page.
+function understood(f) {
+  const where = [f.address, f.neighborhood && f.city ? f.city : null].filter(Boolean);
+  return [headline(f), ...where].filter(Boolean).join(" · ");
+}
 function opened(kind, fields) {
   if (kind === "keyword") return { text: "מתחילים דף נכס חדש 🏠 אשאל כמה שאלות קצרות." };
-  const h = headline(fields || {});
-  return { text: h ? `קראתי את המודעה: ${h}. אשלים איתך את מה שחסר.` : "קראתי את המודעה אבל לא מצאתי בה פרטים ברורים. נשלים ביחד." };
+  const h = understood(fields || {});
+  if (!h) return { text: "קראתי את המודעה אבל לא מצאתי בה פרטים ברורים. נשלים ביחד." };
+  return { text: `קראתי את המודעה: ${h}.\nמשהו לא נכון? כתבו למשל ״/עיר באר שבע״. אשלים איתך את מה שחסר.` };
 }
+
+// Photos with no caption and no property open: ask once what they are for, instead of editing them all.
+function photoChoice(n) {
+  const all = n === 1 ? "לשפר את התמונה" : `לשפר את כל ${n} התמונות (${n} עריכות)`;
+  const lines = ["1 · דף נכס חדש", "2 · להוסיף לדף נכס קיים", `3 · ${all}`];
+  if (n > 3) lines.push("4 · לשפר 3 לדוגמה");
+  return { text: `קיבלתי ${n === 1 ? "תמונה" : `${n} תמונות`} 📸 מה לעשות?\n${lines.join("\n")}\nאו כתבו מה לשנות בתמונות.` };
+}
+function noPages() { return { text: "עוד אין לך דפי נכס. לדף חדש מהתמונות ענו 1." }; }
+function stopped() { return { text: "עצרתי ✋ לא אערוך תמונות נוספות." }; }
 
 function offer(n) { return { text: `ערכתי ${n} תמונות ✨ לבנות מהן דף נכס?`, buttons: ["כן", "לא"] }; }
 function askPhotos() { return { text: `עכשיו התמונות 📸 שלחו לפחות ${MIN_PHOTOS} תמונות של הנכס.` }; }
@@ -179,7 +195,7 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, editLinks, editHeld, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, photoChoice, noPages, stopped, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

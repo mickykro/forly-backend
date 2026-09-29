@@ -40,7 +40,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "היי" }, d);
   assert.deepEqual([t.handled, t.status], [false, "not_ours"]);
   t = await turn({ fileUrl: "https://green/1.jpg" }, d);
-  assert.equal(t.handled, false, "a photo with no draft goes to image editing");
+  assert.deepEqual([t.handled, t.draft.status, t.replies.length, t.armPhotoTimer], [true, "photo_choice", 0, true],
+    "a photo with no draft is held, not edited; the question waits for the burst to end");
 
   // ── link opener: extract, import photos, ask the first missing field ──
   let calls;
@@ -198,32 +199,37 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "ביטול", draft: ready }, d);
   assert.deepEqual([t.status, t.del], ["cancelled", true]);
 
-  // ── photos_edited: n8n sends one edited photo per call; offer once at 4 ──
+  // ── photos_edited: n8n sends one edited photo per call; the offer waits for the batch to end ──
   ({ d, calls } = deps());
   t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"] }, d);
-  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.photos.length, t.replies.length],
-    [true, "offer_pending:1", "offered", 1, 0], "the first edited photo is stored silently");
-  t = await turn({ event: "photos_edited", photos: ["https://fal/2.jpg"], draft: t.draft }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:2", 2, 0]);
-  t = await turn({ event: "photos_edited", photos: ["https://fal/3.jpg"], draft: t.draft }, d);
-  t = await turn({ event: "photos_edited", photos: ["https://fal/4.jpg"], draft: t.draft }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 4, true]);
+  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.photos.length, t.replies.length, t.armPhotoTimer],
+    [true, "offer_pending:1", "offered", 1, 0, true], "the first edited photo is stored silently");
+  for (const i of [2, 3, 4, 5]) t = await turn({ event: "photos_edited", photos: [`https://fal/${i}.jpg`], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:5", 5, 0], "no offer mid-batch");
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.offer_sent], ["offered", true]);
   assert.deepEqual(t.replies[0].buttons, ["כן", "לא"]);
-  assert.match(texts(t), /ערכתי 4 תמונות/);
-  const offered = t.draft;
-  t = await turn({ event: "photos_edited", photos: ["https://fal/5.jpg"], draft: offered }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:5", 5, 0], "the offer is never repeated");
+  assert.match(texts(t), /ערכתי 5 תמונות/, "the real count, once the batch is over");
   assert.equal(calls.imported.length, 5, "every edited photo is re-hosted on Forly");
-  // a future n8n batch path may send several at once: one call, one offer
+  const offered = t.draft;
+  t = await turn({ event: "photo_timer", draft: offered }, d);
+  assert.equal(t.replies.length, 0, "the offer is never repeated");
+  t = await turn({ event: "photos_edited", photos: ["https://fal/9.jpg"], draft: offered }, d);
+  assert.deepEqual([t.draft.photos.length, t.draft.offer_sent], [1, false], "a later batch is a new offer, not piled onto the old one");
   ({ d } = deps());
-  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg", "https://fal/4.jpg"] }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 4, true]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg"] }, d);
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
+  assert.deepEqual([t.status, t.replies.length], ["offer_pending", 0], "under 4 photos: no offer");
   t = await turn({ text: "בוקר טוב", draft: offered }, d);
-  assert.equal(t.handled, false, "an offered draft does not hijack unrelated chat");
+  assert.deepEqual([t.handled, t.del], [false, true], "unrelated chat is n8n's, and the ignored offer is dropped");
   t = await turn({ text: "לא", draft: offered }, d);
   assert.deepEqual([t.status, t.del], ["declined", true]);
   t = await turn({ text: "כן", draft: offered }, d);
   assert.deepEqual([t.status, t.draft.status, t.draft.source], ["asked:city", "active", "photos"]);
+  t = await turn({ text: "1", draft: { ...offered, last_buttons: ["כן", "לא"] } }, d);
+  assert.equal(t.draft.status, "active", "numbered options: 1 is the first button");
+  t = await turn({ text: "נכס חדש", draft: offered }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length], ["active", 0], "a new property does not take the offered photos");
   // offer older than 2h is dropped; the message is then judged on its own
   t = await turn({ text: "בוקר טוב", draft: offered, now: new Date(T0.getTime() + D.PAUSE_MS + 1) }, d);
   assert.deepEqual([t.handled, t.del], [false, true]);
@@ -526,7 +532,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ fileUrl: "https://green/3.jpg", draft: t.draft, now: new Date(T0.getTime() + 100000) }, d);
   assert.deepEqual([t.handled, t.replies.length], [true, 0], "one reminder per burst");
   t = await turn({ fileUrl: "https://green/4.jpg", draft: updating, now: new Date(T0.getTime() + 16 * 60000) }, d);
-  assert.equal(t.handled, false, "the hold ends after 15 quiet minutes");
+  assert.deepEqual([t.handled, t.draft.status], [true, "photo_choice"], "the hold ends after 15 quiet minutes: back to the choice");
   ({ d } = deps({ classifyIntent: async () => null, listPages: async () => pages, editUrl: (id) => id }));
   t = await turn({ text: "מה שלומך", draft: updating }, d);
   assert.deepEqual([t.handled, t.del], [false, true], "other talk ends the hold and goes to n8n");
@@ -534,6 +540,48 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d } = deps({ classifyIntent: async () => "update", listPages: async () => pages, editUrl: (id) => id }));
   t = await turn({ text: "גם תיצור סרטון חדש ?", draft: offer4 }, d);
   assert.deepEqual([t.status, t.draft.links.length], ["update_list", 2]);
+
+  // ── photos with no caption and nothing open: held, one question, only 3/4 edit ──
+  ({ d } = deps({ classifyIntent: async () => null }));
+  t = await turn({ fileUrls: ["https://green/1.jpg", "https://green/2.jpg"] }, d);
+  t = await turn({ fileUrl: "https://green/3.jpg", draft: t.draft }, d);
+  t = await turn({ fileUrls: ["https://green/2.jpg", "https://green/4.jpg", "https://green/5.jpg"], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.replies.length], ["photo_choice:5", 0], "the burst piles up silently, duplicates skipped");
+  const choice = t.draft;
+  t = await turn({ event: "photo_timer", draft: choice }, d);
+  assert.match(texts(t), /קיבלתי 5 תמונות[\s\S]*1 · דף נכס חדש[\s\S]*4 · לשפר 3 לדוגמה/);
+  t = await turn({ text: "3", draft: choice }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.edit_instruction, t.del], [false, "edit_photos", 5, "", true]);
+  t = await turn({ text: "4", draft: choice }, d);
+  assert.deepEqual(t.edit_photos, ["https://green/1.jpg", "https://green/2.jpg", "https://green/3.jpg"], "a sample of 3");
+  t = await turn({ text: "תעשי אותן מוארות", draft: choice }, d);
+  assert.deepEqual([t.handled, t.edit_instruction, t.edit_photos.length], [false, "תעשי אותן מוארות", 5], "a typed instruction edits with it");
+  t = await turn({ text: "היי", draft: choice }, d);
+  assert.deepEqual([t.handled, t.status], [true, "photo_choice_asked"], "one word asks again, nothing is edited");
+  t = await turn({ text: "1", draft: choice }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length, t.status], ["active", 5, "asked:city"], "1: a new page with these photos");
+  assert.match(texts(t), /שמרתי 5 תמונות/);
+  ({ d } = deps({ classifyIntent: async () => null, listPages: async () => [] }));
+  t = await turn({ text: "2", draft: choice }, d);
+  assert.match(texts(t), /עוד אין לך דפי נכס/);
+  t = await turn({ fileUrl: "https://green/9.jpg", draft: choice, now: new Date(T0.getTime() + 31 * 60000) }, d);
+  assert.deepEqual([t.draft.photos.length], [1], "a stale choice is dropped; the new photo starts over");
+  t = await turn({ fileUrl: "https://green/1.jpg", text: "תעשי שיפוץ" }, d);
+  assert.equal(t.handled, false, "a photo with a caption is an edit request: n8n's");
+
+  // ── text sent together with photos (09-29 10:39: the ad + 7 photos) ──
+  ({ d } = deps({ classifyIntent: async () => null }));
+  t = await turn({ text: "למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת", fileUrls: ["https://green/a.jpg", "https://green/b.jpg"] }, d);
+  assert.deepEqual([t.handled, t.draft.status], [true, "active"], "the ad opens the draft");
+  assert.ok(["https://files/a.jpg", "https://files/b.jpg"].every((u) => t.draft.photos.includes(u)), "and the photos sent with it join it");
+
+  // ── stop ──
+  let cancelled = null;
+  ({ d } = deps({ cancelEdits: async (p) => { cancelled = p; } }));
+  t = await turn({ text: "אל תערוך שוב" }, d);
+  assert.deepEqual([t.handled, t.status, cancelled], [true, "stopped", PHONE]);
+  t = await turn({ text: "די", draft: choice }, d);
+  assert.deepEqual([t.status, t.del], ["stopped", true], "stop also drops held photos");
 
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
