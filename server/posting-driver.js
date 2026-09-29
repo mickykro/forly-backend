@@ -216,10 +216,22 @@ async function drive(page, x, want, args) {
   x.page = page;
   const copy = args.copy;
   let done;
-  // Production/staging use the normal pre-post feed dwell. Watched local test
-  // mode goes straight to the approved destination: no warm-up, likes, stories,
-  // or unrelated feed activity, while every proof and halt check below remains.
-  if (!localMode.skipWarmup(x.deps.env || process.env)) {
+  const env = x.deps.env || process.env;
+  // Watched local tests open Facebook first, in the SAME browser session that
+  // will publish. This is a passive readiness/observation preflight only: no
+  // scrolling, post-opening, likes, stories or synthetic "human" actions. The
+  // separate calendar warm-up and idle browser sessions remain disabled.
+  if (localMode.enabled(env)) {
+    if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
+    done = await preSubmitSignal(page, x);
+    if (done) return done;
+    await x.guard("dwell");
+    const seconds = localMode.sessionPreflightSeconds(env);
+    if (seconds > 0) await page.waitForTimeout(seconds * 1000);
+    done = await preSubmitSignal(page, x);
+    if (done) return done;
+  } else {
+    // Production/staging keep their existing guarded social-dwell policy.
     if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
     done = await preSubmitSignal(page, x);
     if (done) return done;

@@ -12,6 +12,10 @@ assert.equal(L.problem(good), null);
 assert.equal(L.enabled(good), true);
 assert.equal(L.requireApproval(good), true);
 assert.equal(L.skipWarmup(good), true);
+assert.equal(L.sessionPreflightSeconds(good), 20);
+assert.equal(L.sessionPreflightSeconds({ ...good, POSTING_LOCAL_PREFLIGHT_SECONDS: "45" }), 45);
+assert.equal(L.sessionPreflightSeconds({ ...good, POSTING_LOCAL_PREFLIGHT_SECONDS: "0" }), 0);
+assert.equal(L.sessionPreflightSeconds({}), 0);
 
 for (const env of [
   { ...good, FORLY_ENV: "prod" },
@@ -20,6 +24,10 @@ for (const env of [
   { ...good, POSTING_SWEEPER: "0" },
   { ...good, POSTING_ENABLED: "0" },
   { ...good, DRIVER_DEV_VIEW: "0" },
+  { ...good, POSTING_LOCAL_PREFLIGHT_SECONDS: "-1" },
+  { ...good, POSTING_LOCAL_PREFLIGHT_SECONDS: "91" },
+  { ...good, POSTING_LOCAL_PREFLIGHT_SECONDS: "1.5" },
+  { ...good, POSTING_LOCAL_PREFLIGHT_SECONDS: "abc" },
 ]) {
   assert.ok(L.problem(env), JSON.stringify(env));
   assert.equal(L.enabled(env), false);

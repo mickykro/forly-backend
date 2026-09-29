@@ -45,17 +45,18 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(pd.phone, PHONE); assert.equal(pd.platform, "facebook"); assert.equal(pd.lockHeld, true);
   }
 
-  // ── watched local test: real visible browser, but no feed warm-up or social dwell ──
+  // ── watched local test: passive feed preflight, then publish in that same visible session ──
   {
     const h = harness();
     let dwelt = 0;
-    h.deps.env = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1" };
+    h.deps.env = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1", POSTING_LOCAL_PREFLIGHT_SECONDS: "12" };
     h.deps.socialDwell = async () => { dwelt++; return []; };
     const out = await PD.postToGroup(argsOf(), h.deps);
     assert.equal(out.state, "verified_posted");
-    assert.equal(h.page.st.visited[0], GROUP_URL, "opens the approved destination directly");
-    assert.ok(!h.page.st.visited.includes("https://www.facebook.com/"), "does not open the feed for warm-up");
-    assert.equal(dwelt, 0, "no social warm-up actions");
+    assert.deepEqual(h.page.st.visited.slice(0, 2), ["https://www.facebook.com/", GROUP_URL], "preflight and approved destination share one browser");
+    assert.equal(h.page.st.waits[0], 12000, "the configured passive observation hold runs before the destination");
+    assert.equal(dwelt, 0, "no social-dwell scrolling, post opening, likes or stories");
+    assert.equal(h.opened.length, 1, "preflight does not open a separate browser session");
     assert.equal(h.submits(), 1);
   }
 

@@ -8,7 +8,9 @@ Use this mode when testing a real Group post from the local Forly server.
 
 When started with `npm run posting:local`:
 
-- warm-up browsing and idle dwell sessions are disabled;
+- multi-day warm-up and separate idle dwell sessions are disabled;
+- after approval, the visible posting browser opens Facebook for a short passive readiness preflight, then opens the approved Group and publishes from that **same browser session**;
+- the preflight performs no scrolling, post opening, likes, stories, reactions, typing, or synthetic pointer activity;
 - campaign pacing is immediate locally, while duplicate, Group eligibility, cooldown, account, and fleet controls remain active;
 - every new post is forced into `per_post` mode;
 - an old unapproved scheduled local post is moved back to `pending_approval` before a browser can open;
@@ -51,13 +53,15 @@ npm run posting:local -- 8788
 4. In `/dev-driver.html`, press **Run sweep now**. The planner creates one `pending_approval` post; it does not open Facebook yet.
 5. Review the exact copy, media, destination strategy, and Group in the campaign page. Press **Approve and publish**.
 6. Return to `/dev-driver.html` and press **Run sweep now** again, or wait for the one-minute sweeper.
-7. Watch the live browser tile as Forly opens the Group, uploads the media, fills the composer, proves the target and copy, and clicks Post once.
+7. Watch the live browser tile as Forly opens Facebook for the passive readiness preflight, then opens the Group in the same session, uploads the media, fills the composer, proves the target and copy, and clicks Post once.
 8. Check the resulting permalink and campaign status. If Facebook requires moderator approval, the result is recorded separately.
 
 ## Notes
 
 - The local profile namespace is separate from production (`facebook-local-*`).
-- No warm-up, likes, stories, or background browsing occur in this mode.
+- No multi-day warm-up, separate background browsing, likes, stories, or synthetic engagement occur in this mode.
+- The passive preflight holds for 20 seconds by default. For supervised debugging it can be set to an explicit value from 0–90 seconds with `POSTING_LOCAL_PREFLIGHT_SECONDS`; it is never randomized to imitate a person.
+- If the embedded browser shows `ERR_SOCKS_CONNECTION_FAILED`, the custom proxy is unreachable or has the wrong scheme. Driver accepts `socks5://` or `socks5h://` URLs, not HTTP proxy URLs. Correct `DRIVER_PROXY_URL`, or remove it to use Driver's normal Israeli session egress, then restart the local server and reconnect Facebook. Never paste proxy credentials into logs or support messages.
 - Approval authorizes only the exact planned post. A changed property, media asset, or generated copy returns it to approval.
 - Stop/kill switches continue to apply immediately, including after approval and immediately before clicking Post.
 - This mode changes scheduling convenience only; it does not weaken Facebook signals, membership checks, domain handling, or account safety.

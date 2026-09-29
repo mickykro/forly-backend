@@ -381,6 +381,20 @@ function fakeGuard(reason) {
     assert.notEqual(connFail.facebook_profile_state, "active", "a failed createSession must not persist the reconnect");
   }
 
+  // ── a dead/mislocated custom proxy gets a specific recoverable error ──
+  {
+    const locks = fakeLocks({ maxSessions: 1 });
+    const failApp = makeApp({
+      driver: { createSession: async () => { throw Object.assign(new Error("proxy failed"), { code: "proxy_unavailable" }); }, stopSession: async () => {} },
+      db: fakeDb({}), locks,
+    });
+    const r = await call(failApp, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
+    assert.equal(r.status, 503);
+    assert.equal(r.body.error, "proxy_unavailable");
+    assert.equal(locks._isHeld(), false);
+    assert.equal(locks._sessions(), 0);
+  }
+
   // ── /start stops an already-open login session before starting a new one,
   //    so the same profile is never driven from two browsers at once ──
   {

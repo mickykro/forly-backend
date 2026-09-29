@@ -316,7 +316,7 @@ if (driverBoot.enabled) {
 // refuses DRIVER_DEV_VIEW=1 anywhere else.
 if (driverBoot.devView) {
   app.use("/api/dev/driver", require("./routes/dev-driver")({ requireAdmin, requireStepUp, posting: devPostingDeps ? { deps: devPostingDeps } : null }));
-  console.warn(`${postingLocal.enabled(process.env) ? "POSTING_LOCAL_TEST=1: no warm-up; every post needs approval;" : "FORLY_ENV=local:"} every Driver browser is shown at /dev-driver.html`);
+  console.warn(`${postingLocal.enabled(process.env) ? `POSTING_LOCAL_TEST=1: ${postingLocal.sessionPreflightSeconds(process.env)}s passive same-session preflight; every post needs approval;` : "FORLY_ENV=local:"} every Driver browser is shown at /dev-driver.html`);
 }
 
 // ── failed-post screenshots (posting-shots.js): local and staging only ──

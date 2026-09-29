@@ -23,7 +23,7 @@
     "",
     "RUNNING LOCALLY",
     "  npm run local          -> http://127.0.0.1:8787",
-    "  npm run posting:local  -> watched Facebook posting; no warm-up; every post needs approval",
+    "  npm run posting:local  -> watched Facebook posting; same-session passive preflight; every post needs approval",
     "  The live browser opens at /dev-driver.html; detailed flow: docs/distribution/local-posting-test.md",
     "  Fine for anything you drive yourself with curl, e.g. testing the stitch:",
     "    curl -X POST http://127.0.0.1:8787/api/video-overlay -H 'content-type: application/json' \\",

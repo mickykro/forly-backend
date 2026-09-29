@@ -57,7 +57,7 @@
 <div id="status">Loading…</div>
 <section id="posting" hidden>
   <h2>Posting &amp; warm-up browsing</h2>
-  <div id="localTestNote" class="sticky" hidden><b>Local posting test</b>No warm-up or idle browsing. Every post waits for your explicit approval; then its live browser appears below. All safety, target-proof, cooldown, and stop controls remain active.</div>
+  <div id="localTestNote" class="sticky" hidden><b>Local posting test</b>No multi-day warm-up or separate idle browsing. Every post waits for your explicit approval; then one visible browser performs a passive Facebook readiness preflight and publishes from that same session. No scrolling, likes, stories, or synthetic engagement. All safety, target-proof, cooldown, and stop controls remain active.</div>
   <dl id="postingDl"></dl>
   <button type="button" id="sweepNow">Run sweep now</button>
   <button type="button" id="browseNow">Browse now (my account)</button>
@@ -154,7 +154,7 @@
   // ── posting panel: why nothing is happening ──
   var OUTCOME = {
     browse_only: "warm-up day: only browsing (a browse runs at most every 20 h)",
-    local_test_no_warmup: "local test mode: warm-up and idle browsing are disabled",
+    local_test_no_warmup: "local test mode: multi-day warm-up and separate idle browsing are disabled",
     idle: "no running campaign on this account",
     day_skipped: "today is a rest day (random, 1 in 5)", daily_cap: "today's posts are done", weekly_cap: "this week's posts are done",
     penalty: "Facebook asked to slow down: waiting", disabled: "account disabled", no_eligible_group: "no group available right now",
@@ -177,7 +177,7 @@
       if (!b.enabled) { row("Posting", "Driver is off on this server (DRIVER_API_KEY / PROFILE_KEY / FORLY_ENV)", "bad"); return; }
       document.getElementById("localTestNote").hidden = !b.local_test;
       document.getElementById("browseNow").hidden = !!b.local_test;
-      row("Test mode", b.local_test ? "ON — approval required for every post; no warm-up" : "off", b.local_test ? "ok" : "");
+      row("Test mode", b.local_test ? "ON — approval required; " + b.local_preflight_seconds + "s passive same-session preflight" : "off", b.local_test ? "ok" : "");
       var sw = b.sweeper || {}, last = sw.last || {};
       row("Sweeper", sw.started ? "running, every minute" : "NOT started — set POSTING_SWEEPER=1 in server/.env and restart", sw.started ? "ok" : "bad");
       row("Last sweep", last.at ? when(last.at) + " · " + (last.result === "off" ? "skipped: " + (FLEET[last.reason] || last.reason) : last.result === "ticked" ? last.accounts + " account(s) ticked" : last.result + (last.code ? " (" + last.code + ")" : "")) : "none yet", last.result === "off" || last.result === "error" ? "bad" : "");
@@ -185,7 +185,7 @@
       var me = b.me || {};
       row("My account " + (me.phone || ""), (me.connected ? "Facebook connected" : "Facebook NOT connected") + " · " + me.running + " running, " + me.paused + " paused", me.connected && me.running ? "ok" : "bad");
       row("My last tick", me.last_tick ? when(me.last_tick.at) + " · " + (OUTCOME[me.last_tick.outcome] || me.last_tick.outcome) : (me.running ? "not ticked yet" : "— (no running campaign: switch a property on at /autopublish.html)"));
-      row("Browsing allowed", b.local_test ? "disabled by local posting test mode" : me.dwell_blocked ? "no — " + (FLEET[me.dwell_blocked] || me.dwell_blocked) : "yes", b.local_test || me.dwell_blocked ? "bad" : "ok");
+      row("Separate idle browsing", b.local_test ? "disabled; the approved posting session has its own passive preflight" : me.dwell_blocked ? "no — " + (FLEET[me.dwell_blocked] || me.dwell_blocked) : "yes", b.local_test || me.dwell_blocked ? "bad" : "ok");
       var ls = me.last_session, acts = ls && Object.keys(ls.actions || {}).filter(function (k) { return ls.actions[k]; })
         .map(function (k) { return ls.actions[k] + " " + k.replace(/_/g, " "); }).join(", ");
       row("Last browse", when(me.last_browse_at) + (ls ? " · " + (acts || "no actions recorded") + (ls.halt_related ? " · ended by a Facebook warning" : "") : ""), ls && ls.halt_related ? "bad" : "");

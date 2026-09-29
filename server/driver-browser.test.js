@@ -181,23 +181,30 @@ async function quiet(fn) {
   // ── a sticky proxy address per agent: the same agent always, never the phone itself ──
   {
     const P = D._test.proxyFor;
-    const env = { DRIVER_PROXY_URL: "http://user-session-{agent}:pw@proxy.example:7000", PROFILE_KEY: "k1" };
+    const env = { DRIVER_PROXY_URL: "socks5h://user-session-{agent}:pw@proxy.example:7000", PROFILE_KEY: "k1" };
     const a1 = P("972500000001", env).proxyUrl, a1again = P("972500000001", env).proxyUrl, a2 = P("972500000002", env).proxyUrl;
     assert.equal(a1, a1again, "the same agent, the same address");
     assert.notEqual(a1, a2, "another agent, another address");
-    assert.match(a1, /^http:\/\/user-session-[0-9a-f]{16}:pw@proxy\.example:7000$/);
+    assert.match(a1, /^socks5h:\/\/user-session-[0-9a-f]{16}:pw@proxy\.example:7000$/);
     assert.ok(!a1.includes("972500000001"), "never the phone");
     assert.notEqual(P("972500000001", Object.assign({}, env, { PROFILE_KEY: "k2" })).proxyUrl, a1, "keyed by PROFILE_KEY");
     const anon1 = P(null, env).proxyUrl, anon2 = P(null, env).proxyUrl;
     assert.ok(/user-session-anon[0-9a-f]{12}:/.test(anon1) && anon1 !== anon2, "no agent: a one-off name");
-    assert.deepEqual(P("972500000001", { DRIVER_PROXY_URL: "http://fixed:pw@h:1" }), { proxyUrl: "http://fixed:pw@h:1" }, "no placeholder: as given");
+    assert.deepEqual(P("972500000001", { DRIVER_PROXY_URL: "socks5://fixed:pw@h:1" }), { proxyUrl: "socks5://fixed:pw@h:1" }, "no placeholder: as given");
     assert.deepEqual(P("972500000001", {}), {}, "no proxy");
+    assert.throws(() => P("972500000001", { DRIVER_PROXY_URL: "http://fixed:pw@h:1" }), (e) => e.code === "invalid_proxy_config");
     // createSession uses the caller's phone.
     const saved = process.env.DRIVER_PROXY_URL, savedKey = process.env.PROFILE_KEY;
     Object.assign(process.env, env);
     let sent = null;
     await D.createSession({ duration: 60, profile: { name: "facebook-local-" + "a".repeat(20), persist: true } }, { phone: "972500000001", apiKey: "k", fetchFn: async (u, init) => { sent = JSON.parse(init.body); return ok({ sessionId: "px", status: "active", cdpUrl: "ws://p" }); }, sleep: async () => {} });
     assert.equal(sent.proxyUrl, a1);
+    assert.equal(sent.country, "IL");
+    assert.ok(!("timezone" in sent) && !("language" in sent), "Driver must geolocate/check the proxy before launch");
+    await assert.rejects(
+      D.createSession({}, { env, phone: "972500000001", apiKey: "k", fetchFn: async () => err(400, { error: "Could not determine SOCKS5 proxy egress location" }), sleep: async () => {} }),
+      (e) => e instanceof D.DriverError && e.status === 400 && e.code === "proxy_unavailable",
+    );
     if (saved === undefined) delete process.env.DRIVER_PROXY_URL; else process.env.DRIVER_PROXY_URL = saved;
     if (savedKey === undefined) delete process.env.PROFILE_KEY; else process.env.PROFILE_KEY = savedKey;
     // The session log line: no credentials, no profile name.
@@ -225,6 +232,8 @@ async function quiet(fn) {
   assert.ok(!red.includes("wss%3A"), red);
   assert.ok(!red.includes("0123456789abcdef0123"), red);
   assert.ok(red.includes("[cdp]") && red.includes("ws=[cdp]") && red.includes("[profile]"), red);
+  const redProxy = D.redact("proxy socks5h://alice:very-secret@proxy.example:1080 failed");
+  assert.ok(!redProxy.includes("alice") && !redProxy.includes("very-secret") && redProxy.includes("[credentials]@proxy.example"), redProxy);
 
   // ── stop failures are logged redacted, with the session id shortened ──
   const logged = [];
@@ -365,6 +374,7 @@ async function quiet(fn) {
   const saved = { k: process.env.DRIVER_API_KEY, p: process.env.PROFILE_KEY, e: process.env.FORLY_ENV };
   Object.assign(process.env, { DRIVER_API_KEY: "k", PROFILE_KEY: "p", FORLY_ENV: "local" });
   assert.equal(D.driverEnabled(), true);
+  assert.equal(D.driverEnabled({ DRIVER_API_KEY: "k", PROFILE_KEY: "p", FORLY_ENV: "local", DRIVER_PROXY_URL: "http://proxy:8000" }), false);
   process.env.FORLY_ENV = "production";
   assert.equal(D.driverEnabled(), false);
   process.env.FORLY_ENV = "prod"; delete process.env.PROFILE_KEY;
@@ -407,6 +417,8 @@ async function quiet(fn) {
   assert.equal(B({ DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).enabled, false);
   assert.deepEqual(B({ DRIVER_API_KEY: "k", PROFILE_KEY: "p", FORLY_ENV: "staging" }), { fatal: null, enabled: true, missing: [], devView: false });
   assert.equal(B({ PROFILE_KEY: "p", FORLY_ENV: "staging" }).enabled, false, "no key, no Driver");
+  assert.match(B({ FORLY_ENV: "local", DRIVER_API_KEY: "k", PROFILE_KEY: "p", DRIVER_PROXY_URL: "http://user:pw@proxy:8000" }).fatal, /socks5/);
+  assert.equal(B({ FORLY_ENV: "local", DRIVER_API_KEY: "k", PROFILE_KEY: "p", DRIVER_PROXY_URL: "socks5h://user:pw@proxy:1080" }).fatal, null);
 
   // ── no browser on a profile while the agent's login browser is live (same
   //    cookies from two IPs); withPage refuses before any session is created ──

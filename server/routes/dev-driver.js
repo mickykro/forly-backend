@@ -82,6 +82,7 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
     const mine = st.accounts.find((a) => a.phone === phone) || null;
     res.json({
       enabled: true, local_test: localMode.enabled(env),
+      local_preflight_seconds: localMode.sessionPreflightSeconds(env),
       sweeper: { started: st.started, last: st.last },
       fleet_off: fleet,
       accounts: st.accounts.map((a) => ({ phone: tail(a.phone), at: a.at, outcome: a.outcome })),
