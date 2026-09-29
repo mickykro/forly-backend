@@ -299,5 +299,18 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "כן", draft: waiting }, d);
   assert.deepEqual([t.status, t.draft.mode, wrote.pagePatch["property.price"]], ["page_updated", "preview", 1150000]);
 
+  // ── 972546582548, 13:02–13:13: after an edit batch, "אני רוצה להעלות נכס חדש…", the ad, "יש תמונות?" ──
+  const edited8 = { ...D.newDraft(PHONE, "photos", T0), status: "offered", offer_sent: true, photos: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"] };
+  ({ d } = deps({ classifyIntent: async () => "new", parseListing: extracted({ city: "באר שבע", rooms: 6, price: 1760000, deal: "sale", size_sqm: 136, floor: 2, parking: 2, neighborhood: "הפארק" }) }));
+  t = await turn({ text: "אני רוצה להעלות נכס חדש שתיצרי לי דף נכס .", draft: edited8 }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length, t.draft.offered_photos.length], ["active", 0, 8], "a new property; the edited photos kept on hand");
+  t = await turn({ text: "למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת", draft: t.draft }, d);
+  assert.match(texts(t), /להשתמש ב-8 התמונות שערכתי קודם לנכס הזה\?/, "at the photos step, asked about them");
+  t = await turn({ text: "כן", draft: t.draft }, d);
+  assert.deepEqual([t.draft.photos.length, t.status], [8, "choose"]);
+  // "כן תיצרי דף נכס" to the offer itself is a yes
+  t = await turn({ text: "כן תיצרי דף נכס", draft: edited8 }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length], ["active", 8]);
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

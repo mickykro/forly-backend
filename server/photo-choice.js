@@ -124,4 +124,31 @@ function editWith(draft, urls, now) {
   return { handled: false, status: "edit_requested", replies: [], draft, edit_photos: urls, edit_instruction: draft.text };
 }
 
-module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editWith };
+// ── moved from whatsapp-intake.js (promptFor is its next-question) ──
+// The agent's own video: re-hosted and used instead of a generated walkthrough.
+async function storeVideo(draft, url, deps, now, promptFor) {
+  let hosted = null;
+  try { hosted = await deps.importVideo(url); } catch (err) { console.warn("[whatsapp-intake] video import failed:", err.message); }
+  if (!hosted) return { handled: true, status: "video_failed", replies: [R.videoFailed()] };
+  draft.video_url = hosted;
+  const p = promptFor(draft, deps);
+  return { handled: true, status: "video_stored", draft: D.touch(draft, now), replies: [R.oneBubble([R.videoSaved(), ...p.replies])] };
+}
+
+// One bubble: the photo count and whatever comes next, so photos sent mid-questions
+// never look ignored. Reports (and clears) photos dropped over the 12 cap.
+function photoTimer(draft, deps, now, promptFor) {
+  const n = draft.photos.length;
+  const dropped = draft.photos_dropped || 0;
+  draft.photos_dropped = 0;
+  const done = dropped ? { draft: D.touch(draft, now) } : {};
+  if (D.nextStep(draft).kind === "photos") {
+    const r = [R.photosProgress(n)];
+    if (dropped) r.unshift(R.photosSaved(n, dropped));
+    return { handled: true, status: `photos_progress:${n}`, ...done, replies: [R.oneBubble(r)] };
+  }
+  const p = promptFor(draft, deps);
+  return { handled: true, status: p.status, ...done, replies: [R.oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
+}
+
+module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editWith, storeVideo, photoTimer };
