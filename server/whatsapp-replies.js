@@ -92,7 +92,7 @@ function backToDraft() { return { text: "חוזרים לנכס שבטיפול:" 
 function noPages() { return { text: "עוד אין לך דפי נכס. לדף חדש מהתמונות ענו 1." }; }
 function stopped() { return { text: "עצרתי ✋ לא אערוך תמונות נוספות." }; }
 
-function offer(n) { return { text: `ערכתי ${n} תמונות ✨ לבנות מהן דף נכס?`, buttons: ["כן", "לא"] }; }
+function offer(n) { return { text: n === 1 ? "ערכתי תמונה אחת ✨ לבנות ממנה דף נכס?" : `ערכתי ${n} תמונות ✨ לבנות מהן דף נכס?`, buttons: ["כן", "לא"] }; }
 function askPhotos() { return { text: `עכשיו התמונות 📸 שלחו לפחות ${MIN_PHOTOS} תמונות של הנכס.` }; }
 function photosProgress(n) {
   if (n < MIN_PHOTOS) return { text: `יש לי ${count(n, "תמונה אחת", "תמונות")}. צריך לפחות ${MIN_PHOTOS} — שלחו עוד.` };
