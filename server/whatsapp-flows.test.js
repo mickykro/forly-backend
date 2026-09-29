@@ -265,5 +265,11 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "מה שלומך היום" }, d);
   assert.equal(t.draft, undefined, "talk that isn't about editing photos leaves nothing behind");
 
+  // mid-draft, a price update that names no page is the draft's own price
+  ({ d } = deps({ classifyIntent: async () => "update", listPages: async () => [vatikim], editUrl: (id) => id, parseListing: extracted({}) }));
+  t = await turn({ text: "אני רוצה לעדכן מחיר בנכס", draft: ready8 }, d);
+  assert.deepEqual([t.handled, t.status, t.draft], [true, "field_list", undefined], "no live page touched, the draft stays open");
+  assert.match(texts(t), /\/מחיר/);
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

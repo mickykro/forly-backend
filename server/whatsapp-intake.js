@@ -361,6 +361,9 @@ async function activeTurn(input, deps, draft, now) {
   if (step.kind === "photos") {
     return { handled: true, status: `photos_progress:${draft.photos.length}`, replies: [R.photosProgress(draft.photos.length)] };
   }
+  if (step.kind === "choose" && !cmd && C.hintedFields(input.text).length) {
+    return { handled: true, status: "field_list", replies: [R.fieldList(draft.fields)] }; // "לעדכן מחיר": how to, here
+  }
   if (step.kind === "choose") {
     // "תראה תצוגה מקדימה", "תבני את הדף": the buttons' words inside a sentence count too.
     const t = String(input.text || "");
