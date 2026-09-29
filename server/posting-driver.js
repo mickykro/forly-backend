@@ -41,6 +41,7 @@
 const driver = require("./driver-browser");
 const guardLive = require("./posting-guard");
 const social = require("./social-dwell");
+const localMode = require("./posting-local");
 const { profileName } = require("./profile-name");
 const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
 const P = require("./posting-driver-proof");
@@ -214,16 +215,21 @@ async function drive(page, x, want, args) {
   const { attempt, kind } = x;
   x.page = page;
   const copy = args.copy;
-  // 1. the feed first, and a few minutes of being a person (Task 17)
-  if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
-  let done = await preSubmitSignal(page, x);
-  if (done) return done;
-  const allowVisible = await x.allows("like");
-  const socialDwell = x.deps.socialDwell || social.dwell;
-  const log = await socialDwell(page, { allowVisible, avoidGroupUrl: kind === "group" ? attempt.target_url : null, avoidGroupIds: kind === "group" ? want.ids : [] }, x.dwellDeps);
-  const halt = (Array.isArray(log) ? log : []).find((l) => l && l.action === "halt");
-  const dwellSig = halt && halt.detail && halt.detail.signal;
-  if (HALTING.has(dwellSig)) return x.end("verified_failed", { error_code: dwellSig }, { signal: dwellSig });
+  let done;
+  // Production/staging use the normal pre-post feed dwell. Watched local test
+  // mode goes straight to the approved destination: no warm-up, likes, stories,
+  // or unrelated feed activity, while every proof and halt check below remains.
+  if (!localMode.skipWarmup(x.deps.env || process.env)) {
+    if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
+    done = await preSubmitSignal(page, x);
+    if (done) return done;
+    const allowVisible = await x.allows("like");
+    const socialDwell = x.deps.socialDwell || social.dwell;
+    const log = await socialDwell(page, { allowVisible, avoidGroupUrl: kind === "group" ? attempt.target_url : null, avoidGroupIds: kind === "group" ? want.ids : [] }, x.dwellDeps);
+    const halt = (Array.isArray(log) ? log : []).find((l) => l && l.action === "halt");
+    const dwellSig = halt && halt.detail && halt.detail.signal;
+    if (HALTING.has(dwellSig)) return x.end("verified_failed", { error_code: dwellSig }, { signal: dwellSig });
+  }
 
   // 2. the destination: signals, membership, its canonical id
   if (!(await nav(page, x, attempt.target_url))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_group" });

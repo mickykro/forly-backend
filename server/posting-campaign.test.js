@@ -8,6 +8,7 @@ const S = require("./posting-sweeper");
 
 const { db, store, NOW, MIN, HOUR, DAY, iso, cfg, G, PERM, member, page, base, dueOf, setup } = K;
 const PH = "972500000001";
+const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1" };
 
 (async () => {
   // ── create: running at once (consent is the approval), idempotent, nothing scheduled yet ──
@@ -27,6 +28,31 @@ const PH = "972500000001";
     assert.equal(again.mode, "standing");
     assert.equal((await store.listPostingCampaignsByPhone(PH)).length, 1);
     await assert.rejects(C.create(base({ consent: null }), deps), (e) => e.code === "consent_required");
+  }
+
+  // ── watched local mode: every campaign/post requires approval before any browser opens ──
+  {
+    const { deps, at } = await setup();
+    deps.env = LOCAL_TEST;
+    let c = await C.create(base({ mode: "standing" }), deps);
+    assert.equal(c.mode, "per_post", "local test mode overrides standing permission");
+    c = await S.tick(c, deps, at(NOW));
+    assert.equal(c.posts[0].status, "pending_approval");
+    assert.equal(deps.post.calls.length, 0, "planning never opens the posting browser");
+    c = await C.approvePost(c.id, c.posts[0].id, deps);
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal(c.posts[0].status, "posted");
+    assert.equal(deps.post.calls.length, 1, "the approved post is uploaded once");
+  }
+  {
+    const { deps, at } = await setup();
+    let c = await C.create(base({ mode: "standing" }), deps);
+    c = await S.tick(c, deps, at(NOW));
+    assert.equal(c.posts[0].status, "scheduled");
+    deps.env = LOCAL_TEST;
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal(c.posts[0].status, "pending_approval", "an old unapproved standing post is stopped before the browser");
+    assert.equal(deps.post.calls.length, 0);
   }
 
   // ── the first tick schedules one post: copy built NOW from the page, no link in the body ──

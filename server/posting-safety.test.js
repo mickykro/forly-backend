@@ -405,6 +405,8 @@ assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("l
   assert.equal(slot({ FORLY_ENV: "prod" }).reason, "browse_only", "prod: day 1 only browses");
   assert.equal(slot({ FORLY_ENV: "staging" }).reason, "browse_only");
   assert.equal(slot({ FORLY_ENV: "local", POSTING_WARMUP: "1" }).reason, "browse_only", "kept on request");
+  const watched = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1", POSTING_WARMUP: "1" };
+  assert.notEqual(slot(watched).reason, "browse_only", "watched local posting always skips warm-up");
   assert.equal(slot({}).reason, "browse_only", "no env given: the warm-up stands");
   const local = slot({ FORLY_ENV: "local" });
   assert.notEqual(local.reason, "browse_only", "local: day 1 may post");

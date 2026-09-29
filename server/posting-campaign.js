@@ -21,6 +21,7 @@ const crypto = require("crypto");
 const safety = require("./posting-safety");
 const shareKit = require("./distribution/share-kit");
 const destinations = require("./posting-destination");
+const localMode = require("./posting-local");
 const { redact } = require("./driver-browser");
 const A = require("./posting-account");
 
@@ -62,10 +63,11 @@ async function create({ phone, page, groups, mode, days, repeat, consent, target
   const now = nowOf(deps, x);
   phone = String(phone);
   const conn = (await x.db.getConnection(phone)) || {};
+  const approvalOnly = localMode.requireApproval(deps.env || process.env);
   const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
   const c = {
     phone, page_id: String(page.page_id),
-    mode: mode === "per_post" ? "per_post" : "standing",
+    mode: approvalOnly || mode === "per_post" ? "per_post" : "standing",
     repeat: repeat === true,
     expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 30, 1), 30) * MS_DAY),
     consent_at: iso(consent.at), consent_version: consent.version || null,
@@ -437,6 +439,7 @@ async function schedulePost(decision, deps = {}, now) {
   const destination = destinations.choose({ page, campaign: c, target: { ...target, target: decision.target }, pagePostUrl, variantRound });
   const copy = buildCopy(page, c, target, destination.kind);
   const video = videoOf(page);
+  const approvalOnly = localMode.requireApproval(deps.env || process.env);
   const base = {
     id: crypto.randomUUID(), target: decision.target === "page" ? "page" : "group",
     group_id: target.group_id, group_url: target.url, group_name: target.name || "",
@@ -448,7 +451,7 @@ async function schedulePost(decision, deps = {}, now) {
   // Appended only while the campaign is still running (a STOP may have landed
   // since the read above); the mode is the committed one.
   const next = await mutate(x, c.id, (cur) => (cur.status !== "running" ? null : {
-    posts: cur.posts.concat([{ ...base, status: cur.mode === "per_post" ? "pending_approval" : "scheduled" }]),
+    posts: cur.posts.concat([{ ...base, status: approvalOnly || cur.mode === "per_post" ? "pending_approval" : "scheduled" }]),
     wait_reason: null, duplicate_review: decision.duplicate_review || null,
   }));
   const post = next && next.posts.find((p) => p.id === base.id);

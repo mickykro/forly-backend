@@ -21,6 +21,7 @@ const A = require("./posting-account");
 const C = require("./posting-campaign");
 const H = require("./posting-halts");
 const destinations = require("./posting-destination");
+const localMode = require("./posting-local");
 const { loginOpen } = require("./profile-lock");
 
 const { iso, tail, fail, ms, ctxOf, nowOf, configOf, mutate, say, tellOperator, MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST } = A;
@@ -169,6 +170,16 @@ function duplicateIn(ga, fp, now, config) {
 // ── a due post: re-check, reserve (R1), run ──
 async function runDue(c, post, st, deps, x, now) {
   const { phone, conn, config } = st;
+  // Local watched tests are approval-only even for a scheduled post left by an
+  // older standing campaign. This gate runs before opening any browser.
+  if (localMode.requireApproval(deps.env || process.env) && !post.approved_at) {
+    const next = await mutate(x, c.id, (cur) => ({
+      posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "pending_approval" } : p)),
+    }));
+    const pending = next && next.posts.find((p) => p.id === post.id && p.status === "pending_approval");
+    if (pending) await say(deps, phone, "approve", `📣 בדיקה מקומית: הפוסט מוכן לאישור ל${pending.target === "page" ? "דף העסקי" : `קבוצה "${pending.group_name || pending.group_url}"`} — הדפדפן לא ייפתח לפני האישור.\n──────────\n${pending.copy}\n──────────`, next, pending);
+    return "pending_approval";
+  }
   const page = await x.db.getPage(c.page_id);
   // Safety is re-checked at the moment of posting, not only at scheduling.
   if (!safety.isActiveTime(now, config)) return reschedule(x, c.id, post.id, safety.nextActiveTime(now, config), "inactive_time", false);
@@ -400,6 +411,7 @@ async function browse(phone, conn, deps, x, now) {
 async function warmIdle(phone, deps = {}, now) {
   const x = ctxOf(deps);
   now = now || nowOf(deps, x);
+  if (localMode.skipWarmup(deps.env || process.env)) return "local_test_no_warmup";
   if (typeof deps.dwell !== "function") return "no_driver";
   const conn = (await x.db.getConnection(phone)) || {};
   if (!conn.facebook_browser_connected_at) return "idle";

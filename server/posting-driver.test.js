@@ -45,6 +45,20 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(pd.phone, PHONE); assert.equal(pd.platform, "facebook"); assert.equal(pd.lockHeld, true);
   }
 
+  // ── watched local test: real visible browser, but no feed warm-up or social dwell ──
+  {
+    const h = harness();
+    let dwelt = 0;
+    h.deps.env = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1" };
+    h.deps.socialDwell = async () => { dwelt++; return []; };
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.equal(out.state, "verified_posted");
+    assert.equal(h.page.st.visited[0], GROUP_URL, "opens the approved destination directly");
+    assert.ok(!h.page.st.visited.includes("https://www.facebook.com/"), "does not open the feed for warm-up");
+    assert.equal(dwelt, 0, "no social warm-up actions");
+    assert.equal(h.submits(), 1);
+  }
+
   // ── the property's video: fetched before any browser, attached in the composer before the text, then posted ──
   {
     const VIDEO = { name: "property.mp4", mimeType: "video/mp4", buffer: Buffer.from("mp4") };

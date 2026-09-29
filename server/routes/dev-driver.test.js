@@ -160,6 +160,13 @@ function call(server, method, path, headers = {}) {
         assert.equal(st.me.next_browse_at, "2026-09-27T05:00:00.000Z", "20 h after the last browse (posting deps env is not local)");
         assert.ok(!JSON.stringify(st).includes(ADMIN_A), "phone tails only");
 
+        posting.deps.env = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1" };
+        const watched = (await call(s3, "GET", "/api/dev/driver/posting", headersFor(ADMIN_A))).body;
+        assert.equal(watched.local_test, true);
+        assert.equal(watched.me.next_browse_at, null);
+        assert.equal((await call(s3, "POST", "/api/dev/driver/posting/browse", headersFor(ADMIN_A))).body.error, "local_test_no_warmup");
+        posting.deps.env = {};
+
         const post = (path, who) => call(s3, "POST", `/api/dev/driver/posting/${path}`, headersFor(who));
         const r1 = await post("browse", ADMIN_A);
         assert.equal(r1.status, 409); assert.equal(r1.body.reason, "global_off"); assert.equal(dwellCalls.length, 0);

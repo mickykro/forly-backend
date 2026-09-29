@@ -71,5 +71,22 @@ const PH = "972500000001";
     await settle();
     assert.equal(calls.length, 2);
   }
+  // ── watched local posting: no warm-up or idle browsing at all ──
+  {
+    const { deps } = await K.setup(PH, { conn: fresh });
+    const calls = [];
+    Object.assign(deps, { dwell: dwellFor(calls, []), env: {
+      FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1",
+      POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1",
+    } });
+    assert.equal(await T.warmIdle(PH, deps, K.NOW), "local_test_no_warmup");
+    await settle();
+    assert.equal(calls.length, 0, "no warm-up browser opened");
+    await K.db.setSetting("posting", { enabled: true, platforms: { facebook: true } });
+    Sw._test.reset();
+    await Sw.sweep(deps, K.NOW);
+    await settle();
+    assert.equal(calls.length, 0, "the account-wide sweeper also skips idle browsing");
+  }
   console.log("posting-warmup.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

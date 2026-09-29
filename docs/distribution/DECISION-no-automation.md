@@ -113,6 +113,12 @@ scheduled → reserved → session_started → composer_ready
    bypass Facebook detection. If Facebook rejects or blocks the Forly domain,
    that destination is paused and surfaced to the agent and operator; it is not
    routed around.
+7. **Watched local testing.** `POSTING_LOCAL_TEST=1` is allowed only with
+   `FORLY_ENV=local`. It disables warm-up, idle browsing, feed dwell, likes and
+   stories; forces every post through exact per-post approval; and exposes the
+   live browser in the authenticated local developer monitor. Identity,
+   destination, membership, copy, media, submit-readiness, cooldown, duplicate,
+   one-click, reconciliation, and kill-switch controls remain active.
 
 ## Product metrics
 
