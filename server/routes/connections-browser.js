@@ -190,20 +190,48 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     if (existing && existing.session_id) {
       await viewer.close(hubKey(phone, platform), "replaced");
       await driver.stopSession(existing.session_id);
+      // Do not leave a stopped browser marked "open" if creating its
+      // replacement fails. Otherwise every later click resumes the same dead
+      // session forever instead of calling /start again.
+      await db.setConnection(phone, { [`browser_session_${platform}`]: null });
+      conn[`browser_session_${platform}`] = null;
     }
 
-    let session;
-    try {
-      session = await driver.createSession({
-        duration: SESSION_SECONDS,
-        url: spec.loginUrl,
-        profile: { name: profileName(platform, phone, gen), persist: true },
-        note: `forly-connect:${platform}`, // never the phone
-      }, { phone }); // the agent's sticky proxy address (driver-browser.proxyFor)
-    } catch (e) {
+    let session = null, launchError = null;
+    // A Driver-hosted exit can die between API acceptance and Chrome's first
+    // request. Stop it and try one fresh machine; never loop indefinitely.
+    for (let launch = 0; launch < 2; launch++) {
+      try {
+        session = await driver.createSession({
+          duration: SESSION_SECONDS,
+          url: spec.loginUrl,
+          profile: { name: profileName(platform, phone, gen), persist: true },
+          note: `forly-connect:${platform}`, // never the phone
+        }, { phone }); // the agent's sticky proxy address (driver-browser.proxyFor)
+        if (typeof driver.inspectInitialPage === "function") {
+          const failure = await driver.inspectInitialPage(session);
+          if (failure) {
+            const e = new Error(failure.browser_code || failure.error);
+            e.code = failure.error;
+            throw e;
+          }
+        }
+        launchError = null;
+        break;
+      } catch (e) {
+        if (session && session.sessionId) await driver.stopSession(session.sessionId);
+        session = null;
+        const network = e && ["proxy_unavailable", "browser_network_unavailable"].includes(e.code);
+        if (network && launch === 0) continue;
+        launchError = e;
+        break;
+      }
+    }
+    if (launchError || !session) {
+      const e = launchError || new Error("browser session did not start");
       console.error(driverLive.redact(`connections-browser start failed: ${driverLive.describeError(e)}`));
-      const proxy = e && ["proxy_unavailable", "invalid_proxy_config"].includes(e.code);
-      return { status: 503, body: { error: proxy ? "proxy_unavailable" : "extract_unavailable" } };
+      const network = ["proxy_unavailable", "browser_network_unavailable", "invalid_proxy_config"].includes(e.code);
+      return { status: 503, body: { error: network ? (e.code === "invalid_proxy_config" ? "proxy_unavailable" : e.code) : "extract_unavailable" } };
     }
 
     // Top-level keys, not a nested map: setConnection is a merge write, and a
@@ -366,7 +394,12 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     let hub;
     try { hub = await viewer.attach(hubKey(phone, platform), open.session_id); }
     catch (e) {
-      const code = ["session_expired", "driver_busy"].includes(e && e.code) ? e.code : "viewer_unavailable";
+      const code = ["session_expired", "driver_busy", "proxy_unavailable", "browser_network_unavailable"].includes(e && e.code) ? e.code : "viewer_unavailable";
+      if (["proxy_unavailable", "browser_network_unavailable"].includes(code)) {
+        await viewer.close(hubKey(phone, platform), code);
+        await driver.stopSession(open.session_id);
+        await db.setConnection(phone, { [`browser_session_${platform}`]: null });
+      }
       return res.status(code === "session_expired" ? 409 : 503).json({ error: code });
     }
     viewer.pipe(req, res, hub);

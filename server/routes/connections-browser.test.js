@@ -395,6 +395,26 @@ function fakeGuard(reason) {
     assert.equal(locks._sessions(), 0);
   }
 
+  // ── Driver can activate a browser that then lands on Chrome's SOCKS error
+  //    page; stop it and persist one healthy replacement instead ──
+  {
+    const stopped = []; let creates = 0, inspections = 0;
+    const conn = {};
+    const failApp = makeApp({
+      driver: {
+        createSession: async () => ({ sessionId: ++creates === 1 ? "sBroken" : "sHealthy", status: "active", cdpUrl: "ws://browser" }),
+        inspectInitialPage: async () => (++inspections === 1 ? { error: "proxy_unavailable", browser_code: "ERR_SOCKS_CONNECTION_FAILED" } : null),
+        stopSession: async (id) => { stopped.push(id); },
+      },
+      db: fakeDb(conn), locks: fakeLocks({ maxSessions: 1 }),
+    });
+    const r = await call(failApp, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
+    assert.equal(r.status, 200);
+    assert.equal(creates, 2, "exactly one replacement session");
+    assert.deepEqual(stopped, ["sBroken"]);
+    assert.equal(conn.browser_session_facebook.session_id, "sHealthy", "only the healthy replacement is saved");
+  }
+
   // ── /start stops an already-open login session before starting a new one,
   //    so the same profile is never driven from two browsers at once ──
   {
@@ -413,6 +433,24 @@ function fakeGuard(reason) {
     assert.equal(r.status, 200);
     assert.deepEqual(stoppedFirst, ["sOld"]);
     assert.equal(connOpen.browser_session_facebook.session_id, "sNew");
+  }
+
+  // ── if replacement creation fails, the stopped old session is not left
+  //    recorded as "open" for the UI to resume forever ──
+  {
+    const connOpen = { browser_session_facebook: { session_id: "sDead" } };
+    const stopped = [];
+    const app = makeApp({
+      driver: {
+        createSession: async () => { throw new Error("Driver unavailable"); },
+        stopSession: async (id) => { stopped.push(id); },
+      },
+      db: fakeDb(connOpen), locks: fakeLocks(),
+    });
+    const r = await call(app, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
+    assert.equal(r.status, 503);
+    assert.deepEqual(stopped, ["sDead"]);
+    assert.equal(connOpen.browser_session_facebook, null);
   }
 
   // ── finish: logged in → connected, and the session is stopped ──

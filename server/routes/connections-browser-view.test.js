@@ -36,8 +36,9 @@ function request(port, method, path, body) {
   const conn = { browser_session_madlan: { session_id: "sM" } };
   const db = { getConnection: async () => conn, setConnection: async (p, patch) => Object.assign(conn, patch) };
   const viewer = fakeViewer();
+  const stopped = [];
   const app = express(); app.use(express.json());
-  app.use("/api/connections/browser", createRouter({ requireAuth, authSecret: "s", db, viewer, driver: { stopSession: async () => {} } }));
+  app.use("/api/connections/browser", createRouter({ requireAuth, authSecret: "s", db, viewer, driver: { stopSession: async (id) => { stopped.push(id); } } }));
   const server = await listen(app);
   const port = server.address().port;
 
@@ -55,6 +56,12 @@ function request(port, method, path, body) {
   viewer.attachError = "something_else";
   r = await request(port, "GET", "/api/connections/browser/madlan/view");
   assert.deepEqual([r.status, r.body.error], [503, "viewer_unavailable"]);
+  viewer.attachError = "proxy_unavailable";
+  r = await request(port, "GET", "/api/connections/browser/madlan/view");
+  assert.deepEqual([r.status, r.body.error], [503, "proxy_unavailable"]);
+  assert.deepEqual(stopped, ["sM"]);
+  assert.equal(conn.browser_session_madlan, null, "the broken recorded session is forgotten");
+  conn.browser_session_madlan = { session_id: "sM" };
   viewer.attachError = null;
 
   // ── the stream: this phone's own session, SSE, frames then end ──

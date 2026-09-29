@@ -264,6 +264,7 @@
       consent_required: "סמנו את האישור שמעל הכפתור.",
       extract_unavailable: "לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע.",
       proxy_unavailable: "הדפדפן לא הצליח להתחבר לאינטרנט דרך הרשת שהוגדרה. מנהל המערכת צריך לבדוק את חיבור הפרוקסי ואז לנסות שוב.",
+      browser_network_unavailable: "הדפדפן נפתח בלי חיבור תקין לאינטרנט. פורלי תסגור אותו ותנסה לפתוח דפדפן חדש פעם אחת.",
       unavailable: "חיבור חשבונות עדיין לא זמין בשרת הזה.",
       network: "אין חיבור לשרת — בדקו את האינטרנט ונסו שוב.",
     })[code] || "משהו השתבש — נסו שוב בעוד רגע.";
@@ -296,15 +297,17 @@
   async function onViewerEnd(platform, code, gotFrame) {
     if (!bOpen || currentPlatform !== platform || code === "connected" || code === "replaced") return;
     const expired = ["session_ended", "session_expired", "no_open_session"].includes(code);
-    if (expired && !gotFrame && !restarted) {
+    const network = ["proxy_unavailable", "browser_network_unavailable"].includes(code);
+    if (((expired && !gotFrame) || network) && !restarted) {
       restarted = true;
-      bMsg.textContent = "הדפדפן הקודם נסגר — פותחים חדש…";
+      bMsg.textContent = network ? "הדפדפן נפתח בלי חיבור תקין — סוגרים ופותחים דפדפן חדש…" : "הדפדפן הקודם נסגר — פותחים חדש…";
       try { await api("/api/connections/browser/start", { method: "POST", body: JSON.stringify({ platform, consent: true }) }); openBrowser(platform); }
       catch (e) { bMsg.textContent = connectErrorText(e); }
       return;
     }
     bMsg.textContent = expired
       ? "עבר יותר מדי זמן והדפדפן נסגר. סגרו את החלון ולחצו שוב על חיבור החשבון."
+      : network ? connectErrorText({ code })
       : code === "driver_busy" ? connectErrorText({ code })
         : "לא הצלחנו להציג את הדפדפן — סגרו את החלון ונסו שוב בעוד רגע.";
   }
