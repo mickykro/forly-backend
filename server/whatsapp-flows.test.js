@@ -354,5 +354,12 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "תעשי איך שנראה לך" }, d);
   assert.deepEqual([t.handled, calls], [false, 0]);
 
+  // 972547221770 answered the offer with "1." — the dot doesn't make it something else
+  ({ d } = deps());
+  t = await turn({ text: "1.", draft: { ...edited8, last_buttons: ["כן", "לא"] } }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length], ["active", 8]);
+  t = await turn({ text: "3.", draft: choice }, d);
+  assert.equal(t.status, "edit_photos");
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

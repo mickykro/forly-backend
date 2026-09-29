@@ -38,7 +38,8 @@ async function turn(input, deps, draft, now, h) {
   const photos = input.fileUrls && input.fileUrls.length ? input.fileUrls : input.fileUrl ? [input.fileUrl] : null;
   if (photos) return hold(draft, draft.phone, photos, now);
   const text = String(input.text || "").trim();
-  const n = /^[1-4]$/.test(text) ? Number(text) : null;
+  const m = /^([1-4])\s*[.)]?$/.exec(text); // "3", "3.", "3)"
+  const n = m ? Number(m[1]) : null;
   if (n === 3) return edit(draft.photos, "");
   if (n === 4) return edit(draft.photos.slice(0, SAMPLE), "");
   const kind = n ? null : await h.openerOf(text, deps);

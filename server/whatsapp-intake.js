@@ -374,7 +374,7 @@ async function handleTurn(input, deps) {
   if (!deps.business) return notOurs("unknown_agent");
   let draft = input.draft || null;
   // Options go out numbered (see the route's send): "2" is the second one.
-  const digit = /^\s*([1-3])\s*$/.exec(input.text || "");
+  const digit = /^\s*([1-3])\s*[.)]?\s*$/.exec(input.text || ""); // "1", "1.", "1)"
   if (digit && draft && draft.last_buttons && draft.last_buttons[digit[1] - 1]) input = { ...input, text: draft.last_buttons[digit[1] - 1] };
   let dropped = false;
   if (draft && D.isExpiredPrompt(draft, now)) {
