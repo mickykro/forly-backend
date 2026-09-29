@@ -183,10 +183,31 @@ function parseParking(t) { return /^(אין|ללא|לא)$/.test(clean(t)) ? 0 : 
 // Spoken answers keep the preposition: "בכפר סבא", "בתל אביב". Drop a leading ב unless
 // the city's own name starts with it.
 const B_CITIES = ["באר שבע", "באר יעקב", "בני ברק", "בת ים", "בית שמש", "בית שאן", "ביתר עילית", "בית דגן", "בנימינה", "בית ג'ן", "בועיינה", "בסמת טבעון", "באקה אל-גרבייה"];
+// Voice notes mishear cities ("בל שבע", "בר שבע" for באר שבע): a name within two
+// letters of a known city is that city. ponytail: the larger cities only; a small
+// town that isn't listed is kept exactly as said — add names as they show up.
+const CITIES = ["תל אביב", "ירושלים", "חיפה", "ראשון לציון", "פתח תקווה", "אשדוד", "נתניה", "באר שבע", "חולון", "בני ברק",
+  "רמת גן", "אשקלון", "רחובות", "בת ים", "בית שמש", "כפר סבא", "הרצליה", "חדרה", "מודיעין", "נצרת", "לוד", "רמלה",
+  "רעננה", "הוד השרון", "גבעתיים", "קריית גת", "נהריה", "עפולה", "קריית אתא", "יבנה", "אילת", "ראש העין", "עכו",
+  "אלעד", "רמת השרון", "טבריה", "קריית מוצקין", "קריית ים", "קריית ביאליק", "נס ציונה", "אור יהודה", "קריית שמונה",
+  "דימונה", "נתיבות", "שדרות", "אופקים", "יקנעם", "זכרון יעקב", "גבעת שמואל", "כרמיאל", "צפת", "מעלה אדומים",
+  "סביון", "קיסריה", "אבן יהודה", "כפר יונה", "טירת כרמל", "נשר", "מגדל העמק", "עראד", "יהוד", "גדרה", "קריית אונו"];
+function knownCity(s) {
+  if (CITIES.includes(s) || s.length < 4) return s;
+  let best = null;
+  for (const c of CITIES) {
+    const d = editDistance(s, c);
+    if (d <= 2 && (!best || d < best.d)) best = { c, d };
+  }
+  return best ? best.c : s;
+}
 function parseCity(t) {
-  const s = text(60)(t);
-  if (!s || !s.startsWith("ב") || B_CITIES.some((c) => s.startsWith(c))) return s;
-  return s.slice(1).trim() || s;
+  let s = text(60)(t);
+  if (s) s = s.replace(/^(ה?עיר|בעיר)\s*[:\-]?\s*/, "").trim() || s; // "עיר באר שבע", "העיר: חיפה"
+  if (!s) return s;
+  const whole = knownCity(s); // "בל שבע" is באר שבע misheard, not "ב" + "ל שבע"
+  if (whole !== s || !s.startsWith("ב") || B_CITIES.some((c) => s.startsWith(c))) return whole;
+  return knownCity(s.slice(1).trim() || s);
 }
 
 const PARSERS = {
@@ -292,6 +313,6 @@ function summary(draft) {
 
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
-  findUrl, command, spokenCommand, isStop, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
+  findUrl, command, spokenCommand, isStop, knownCity, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
   newDraft, touch, nextStep, missing, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };

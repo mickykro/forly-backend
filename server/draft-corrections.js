@@ -43,7 +43,7 @@ const HINTS = {
   price: ["מחיר", "מיליון", "מליון", "אלף", "₪", "ש״ח", "ש\"ח", "שקל"],
   rooms: ["חדרים", "חד׳", "חד'"], size_sqm: ["מ״ר", "מ\"ר", "מטר"], floor: ["קומה"],
   parking: ["חניה", "חניות"], deal: ["למכירה", "להשכרה", "שכירות"], neighborhood: ["שכונת", "שכונה"],
-  address: ["כתובת", "רחוב"],
+  address: ["כתובת", "רחוב"], city: ["עיר"],
 };
 function hintedFields(text) {
   const s = String(text || "");
@@ -73,7 +73,7 @@ const MERGEABLE = ["city", "address", "neighborhood", "deal", "price", "rooms", 
 function merge(draft, extracted) {
   const filled = {}, proposed = {};
   for (const f of MERGEABLE) {
-    const v = extracted[f];
+    const v = f === "city" && extracted[f] ? D.knownCity(extracted[f]) : extracted[f];
     if (v === null || v === undefined) continue;
     const cur = draft.fields[f];
     if (cur === null) {
