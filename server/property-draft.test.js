@@ -25,6 +25,7 @@ assert.equal(D.openerKind("ליצור נכס"), "keyword");
 assert.equal(D.openerKind("ליצור נכס!"), "keyword");
 assert.equal(D.openerKind("דף נכס"), "keyword");
 assert.equal(D.openerKind("למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת"), "text");
+assert.equal(D.command("לבטל אותה"), "cancel");
 assert.equal(D.openerKind("היי מה שלומך"), null);
 assert.equal(D.openerKind("3 חדרים"), null, "too short to be a listing");
 

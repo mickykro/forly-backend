@@ -57,6 +57,36 @@ const { transcribe } = createWhatsappRouter;
   assert.match((await db.getListing(dev.listing_id)).own_video_url, /^https:\/\/srv\/files\/pages\/.+\/walkthrough\.mp4$/);
   assert.deepEqual(hooks, ["https://n8n/ww1", "https://n8n/pipe"], "prod generates (WW1), dev reuses the video (page pipeline)");
 
+  // ── intake: one numbered message per turn; unclaimed turns carry edit_photos + context; stop flag ──
+  {
+    const express = require("express");
+    db.getBusiness = async () => ({ phone: "P9" });
+    const out = [];
+    const app = express().use(express.json()).use("/w", createWhatsappRouter({
+      authSecret: "s", n8nSecret: "k", sweep: false, normalizeAuthPhone: (p) => p, signSession: auth.signSession,
+      sendWhatsApp: async (p, m) => out.push(m), baseUrl: "https://agent" }));
+    const server = app.listen(0);
+    const base = `http://127.0.0.1:${server.address().port}/w`;
+    const post = (body) => fetch(`${base}/intake`, { method: "POST", headers: { "content-type": "application/json", "x-forly-secret": "k" },
+      body: JSON.stringify({ phone: "P9", ...body }) }).then((r) => r.json());
+    await db.saveDraft({ phone: "P9", status: "offered", source: "photos", fields: {}, skipped: [], photos: ["a", "b", "c", "d"],
+      offer_sent: true, last_buttons: ["כן", "לא"], updated_at: new Date(), created_at: new Date() });
+    let r = await post({ message: "1" });
+    assert.equal(r.handled, true, "'1' answers the first option");
+    assert.equal(out.length, 1, "one WhatsApp message for the whole turn");
+    await db.saveDraft({ phone: "P9", status: "photo_choice", photos: ["https://g/1.jpg", "https://g/2.jpg"], updated_at: new Date(), created_at: new Date() });
+    r = await post({ message: "3" });
+    assert.deepEqual([r.handled, r.edit_photos, r.edit_instruction], [false, ["https://g/1.jpg", "https://g/2.jpg"], ""]);
+    assert.match(r.context, /דפי הנכס של הסוכן: אין/);
+    assert.equal(await db.getDraft("P9"), null, "the held photos are released to n8n");
+    const since = new Date(Date.now() - 1000).toISOString();
+    r = await post({ message: "עצור" });
+    assert.equal(r.status, "stopped");
+    const c = await fetch(`${base}/edit-cancel?phone=P9&since=${encodeURIComponent(since)}`, { headers: { "x-forly-secret": "k" } }).then((x) => x.json());
+    assert.equal(c.cancel, true);
+    server.close();
+  }
+
   console.log("routes/whatsapp.test.js ok");
   process.exit(0);
 })().catch((err) => { console.error(err); process.exit(1); });

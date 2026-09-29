@@ -36,6 +36,7 @@ const { isPaused, asMillis, touch } = require("../property-draft");
 const R = require("../whatsapp-replies");
 const { resolve } = require("../listing-sources");
 const { parseListing } = require("../listing-extract");
+const { classify } = require("../property-intent");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
 const { validateListing, createListing } = require("../listing-create");
@@ -71,7 +72,7 @@ const PHOTO_BATCH_MS = 20000;
 const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
-  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, sendButtons,
+  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage,
     uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
@@ -122,7 +123,16 @@ module.exports = function createWhatsappRouter(ctx) {
 
   function depsFor(phone, business) {
     return {
-      business, resolve, parseListing,
+      business, resolve, parseListing, classifyIntent: (t) => classify(t),
+      listPages: async (p) => (await db.listPagesByPhone(p)).filter((pg) => pg.status === "active" && pg.property)
+        .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at)),
+      editUrl: (pageId) => `${baseUrl}/edit.html?id=${encodeURIComponent(pageId)}`,
+      cancelEdits: (p) => db.setEditCancel(p),
+      // Approved in chat ("כן" to confirmPageChanges): the live page and its listing.
+      updatePageData: async ({ page_id, listing_id, pagePatch, listingPatch }) => {
+        await db.updatePage(page_id, { ...pagePatch, updated_at: new Date() });
+        if (listing_id) await db.updateListing(listing_id, listingPatch);
+      },
       importPhoto: importPhotoFor(phone),
       importVideo: importPhotoFor(phone, { video: true }),
       createUrl: `${baseUrl}/create.html`,
@@ -147,34 +157,25 @@ module.exports = function createWhatsappRouter(ctx) {
     };
   }
 
-  async function send(phone, reply) {
-    if (reply.buttons && sendButtons) {
-      try {
-        await sendButtons(phone, {
-          header: "Forly",
-          body: reply.text,
-          footer: "בחרו אפשרות",
-          buttons: reply.buttons.map((b, i) => ({ buttonId: String(i + 1), buttonText: b })),
-        });
-        return;
-      } catch (err) { console.warn("[whatsapp] buttons failed, sending plain:", err.message); }
-    }
-    await sendWhatsApp(phone, reply.text);
-  }
+  // Green API rejects interactive buttons on this instance (400 every time), so
+  // options go out numbered and the agent answers with the number or the word;
+  // handleTurn maps "2" back through draft.last_buttons.
+  const numbered = (reply) => (reply.buttons
+    ? `${reply.text}\n\n${reply.buttons.map((b, i) => `${i + 1} · ${b}`).join("\n")}` : reply.text);
 
+  // One turn, one WhatsApp message: separate sends can arrive out of order.
   async function persistAndSend(phone, turn) {
+    const reply = turn.replies.length ? {
+      text: turn.replies.map((r) => r.text).join("\n\n"),
+      buttons: turn.replies[turn.replies.length - 1].buttons || null,
+    } : null;
+    if (turn.draft && reply) turn.draft.last_buttons = reply.buttons;
     if (turn.del) await db.deleteDraft(phone);
     else if (turn.draft) await db.saveDraft(turn.draft);
     let replied = false;
-    if (turn.replies.length && sendWhatsApp) {
-      replied = true;
-      for (let i = 0; i < turn.replies.length; i++) {
-        try { await send(phone, turn.replies[i]); }
-        catch (err) {
-          replied = false;
-          console.warn(`[whatsapp] ${phone} reply ${i + 1}/${turn.replies.length} failed (${JSON.stringify(turn.replies[i].text)}):`, err.message);
-        }
-      }
+    if (reply && sendWhatsApp) {
+      try { await sendWhatsApp(phone, numbered(reply)); replied = true; }
+      catch (err) { console.warn(`[whatsapp] ${phone} reply failed (${JSON.stringify(reply.text)}):`, err.message); }
     }
     if (turn.armPhotoTimer) armTimer(phone);
     return replied;
@@ -221,6 +222,44 @@ module.exports = function createWhatsappRouter(ctx) {
     setInterval(() => sweepStuckBuilds().catch((err) => console.error("[whatsapp] build sweep failed:", err.message)), SWEEP_MS).unref();
   }
 
+  // For n8n's AI prompt (its {{ $json.forly_context }}): the agent's pages and
+  // what the chat can't do, so the bot never promises it or runs the property
+  // questions itself. One small Firestore read, on unclaimed messages only.
+  async function chatContext(phone, draft) {
+    let pages = [];
+    try {
+      pages = (await db.listPagesByPhone(phone)).filter((p) => p.status === "active" && p.property)
+        .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at)).slice(0, 5);
+    } catch (err) { console.warn("[whatsapp] context pages failed:", err.message); }
+    return [
+      `טיוטת דף נכס פתוחה: ${draft && draft.status === "active" ? "כן" : "לא"}`,
+      `דפי הנכס של הסוכן: ${pages.length ? pages.map((p) => `${p.property.title || p.property.address} — עורך: ${baseUrl}/edit.html?id=${p.page_id}`).join(" | ") : "אין"}`,
+      "דף נכס חדש: מתחיל כשהסוכן כותב ״דף נכס״ או שולח את פרטי הנכס. את לא שואלת את שאלות הדף בעצמך.",
+      "לא נתמך בצ׳אט: עדכון תמונות / מחיר / פרטים / סרטון של דף קיים (רק בעורך הדף בקישור למעלה), יצירה מחדש של סרטון הדף, מחיקת דף.",
+    ].join("\n");
+  }
+
+  // The image an agent replied to (n8n sends quoted_type/quoted_id, and the URL when the
+  // webhook has one); otherwise Green API's copy of that message.
+  async function quotedImage(body, phone) {
+    if (body.quoted_type !== "imageMessage") return null;
+    const url = typeof body.quoted_image_url === "string" && /^https:\/\//.test(body.quoted_image_url) ? body.quoted_image_url : null;
+    if (url || !getMessage || typeof body.quoted_id !== "string" || !phone) return url;
+    try {
+      const m = await getMessage(`${phone}@c.us`, body.quoted_id.slice(0, 100));
+      return m && /^https:\/\//.test(String(m.downloadUrl || "")) ? m.downloadUrl : null;
+    } catch (err) { console.warn("[whatsapp] quoted image lookup failed:", err.message); return null; }
+  }
+
+  // n8n's photo-edit loop, before each photo: did the agent write "עצור" since the batch began?
+  router.get("/edit-cancel", requireN8n, async (req, res) => {
+    const phone = normalizeAuthPhone(String(req.query.phone || ""));
+    const since = Date.parse(String(req.query.since || ""));
+    if (!phone || !Number.isFinite(since)) return res.status(400).json({ error: "invalid_input" });
+    const at = await db.getEditCancel(phone);
+    res.json({ cancel: !!at && asMillis(at) >= since });
+  });
+
   router.post("/intake", requireN8n, async (req, res) => {
     const body = req.body || {};
     const phone = normalizeAuthPhone(body.phone || "");
@@ -234,6 +273,7 @@ module.exports = function createWhatsappRouter(ctx) {
     const audioUrl = typeof body.audio_url === "string" && /^https:\/\//.test(body.audio_url) ? body.audio_url : null;
     const videoUrl = typeof body.video_url === "string" && /^https:\/\//.test(body.video_url) ? body.video_url : null;
     const messageType = typeof body.message_type === "string" ? body.message_type.slice(0, 40) : "";
+    const quotedImageUrl = await quotedImage(body, phone);
     if (!phone || (!text.trim() && !fileUrl && !fileUrls.length && !event && !audioUrl && !videoUrl && messageType !== "documentMessage")) {
       return res.status(400).json({ error: "invalid_input" });
     }
@@ -245,7 +285,7 @@ module.exports = function createWhatsappRouter(ctx) {
           `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : audioUrl ? "voice" : videoUrl ? "video" : messageType === "documentMessage" ? "document" : JSON.stringify(text)}` +
           ` | draft before: ${draft ? `${draft.status} (${draft.source}) ${describeAge(draft, now)}` : "none"}`
         );
-        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, videoUrl, messageType, draft }, depsFor(phone, business));
+        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, videoUrl, messageType, quotedImageUrl, draft }, depsFor(phone, business));
         // A text that ends a photo batch must not be followed by the timer's report too.
         if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
         console.log(
@@ -253,12 +293,18 @@ module.exports = function createWhatsappRouter(ctx) {
           ` | draft after: ${turn.del ? "deleted" : turn.draft ? turn.draft.status : "unchanged"}` +
           ` | replies: ${turn.replies.length ? turn.replies.map((r) => JSON.stringify(r.text)).join(" | ") : "(none)"}`
         );
+        // An unclaimed message can still end a stale draft or an update hold.
+        if (!turn.handled && turn.del) await db.deleteDraft(phone);
         const replied = turn.handled ? await persistAndSend(phone, turn) : false;
         console.log(`[whatsapp] ${phone} → ${turn.status} replied=${replied}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
         return {
           handled: turn.handled, status: turn.status,
           reply: turn.replies.map((r) => r.text).join("\n\n") || null,
           replied, listing_id: turn.listing_id || null,
+          // Unclaimed: n8n edits exactly these (the agent chose 3/4), with this instruction.
+          edit_photos: turn.edit_photos || null, edit_instruction: turn.edit_instruction ?? null,
+          // …and its bot gets what Forly knows, so it never contradicts or invents.
+          context: turn.handled ? null : await chatContext(phone, turn.del ? null : (turn.draft || draft)),
         };
       });
       res.json(result);

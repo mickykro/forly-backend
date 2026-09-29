@@ -464,6 +464,16 @@ async function saveLead(phone, lead) {
   else mem.leads.set(phone, { ...(mem.leads.get(phone) || {}), ...lead });
 }
 
+// "עצור" in the WhatsApp chat: n8n's photo-edit loop polls this before each photo.
+async function setEditCancel(phone, at = new Date()) {
+  if (db) await db.collection("edit_cancels").doc(phone).set({ phone, at });
+  else mem.editCancels = Object.assign(mem.editCancels || {}, { [phone]: at });
+}
+async function getEditCancel(phone) {
+  if (db) { const d = await db.collection("edit_cancels").doc(phone).get(); return d.exists ? d.data().at : null; }
+  return (mem.editCancels || {})[phone] || null;
+}
+
 async function addAdminMessage(entry) {
   if (db) await db.collection("admin_messages").add(entry);
   else mem.adminMessages.push(entry);
@@ -570,5 +580,5 @@ module.exports = {
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
   listShareSessionsByPhone, healGroups, addAdminMessage,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
-  getDraft, saveDraft, deleteDraft,
+  getDraft, saveDraft, deleteDraft, setEditCancel, getEditCancel,
 };

@@ -5,12 +5,13 @@
  * same. Green API: max 3 buttons, 25 chars each (utils.sendWhatsAppButtons).
  */
 const { MIN_PHOTOS } = require("./property-draft");
+const { inPlace } = require("./utils");
 // "תמונה אחת" / "4 תמונות" — Hebrew nouns don't stay plural with 1.
 const count = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 const ils = (n) => `₪${Number(n).toLocaleString("en-US")}`;
 
 const LABELS = {
-  city: "עיר", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
+  city: "עיר", address: "כתובת", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
   floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב",
 };
 
@@ -52,17 +53,39 @@ function required(field) { return { text: `${LABELS[field]} הוא שדה חוב
 function headline(f) {
   const where = f.neighborhood || f.city;
   const parts = [];
-  if (f.rooms) parts.push(`${f.rooms} חד׳${where ? ` ב${where}` : ""}`);
+  if (f.rooms) parts.push(`${f.rooms} חד׳${where ? ` ${inPlace(where)}` : ""}`);
   else if (where) parts.push(where);
   if (f.price) parts.push(ils(f.price));
   return parts.join(", ");
 }
 
+// What was read, spelled out (address and city too) so a wrong field is caught here, not on the live page.
+function understood(f) {
+  const where = [f.address, f.neighborhood && f.city ? f.city : null].filter(Boolean);
+  return [headline(f), ...where].filter(Boolean).join(" · ");
+}
 function opened(kind, fields) {
   if (kind === "keyword") return { text: "מתחילים דף נכס חדש 🏠 אשאל כמה שאלות קצרות." };
-  const h = headline(fields || {});
-  return { text: h ? `קראתי את המודעה: ${h}. אשלים איתך את מה שחסר.` : "קראתי את המודעה אבל לא מצאתי בה פרטים ברורים. נשלים ביחד." };
+  const h = understood(fields || {});
+  if (!h) return { text: "קראתי את המודעה אבל לא מצאתי בה פרטים ברורים. נשלים ביחד." };
+  return { text: `קראתי את המודעה: ${h}.\nמשהו לא נכון? כתבו למשל ״/עיר באר שבע״. אשלים איתך את מה שחסר.` };
 }
+
+// Photos with no caption and no property open: ask once what they are for, instead of editing them all.
+function photoChoice(n) {
+  const all = n === 1 ? "לשפר את התמונה" : `לשפר את כל ${n} התמונות (${n} עריכות)`;
+  const lines = ["1 · דף נכס חדש", "2 · להוסיף לדף נכס קיים", `3 · ${all}`];
+  if (n > 3) lines.push("4 · לשפר 3 לדוגמה");
+  return { text: `קיבלתי ${n === 1 ? "תמונה" : `${n} תמונות`} 📸 מה לעשות?\n${lines.join("\n")}\nאו כתבו מה לשנות בתמונות.` };
+}
+// "חסרים פרטים?" / "סיימת?" in the middle of the questions: where things stand.
+function progress(missingFields, photos) {
+  const need = missingFields.map((f) => LABELS[f]);
+  if (photos < MIN_PHOTOS) need.push(`תמונות (יש ${photos}, צריך ${MIN_PHOTOS})`);
+  return { text: need.length ? `עוד חסר: ${need.join(" · ")}. תמונות אפשר לשלוח בכל שלב 📸` : "יש לי הכול ✅" };
+}
+function noPages() { return { text: "עוד אין לך דפי נכס. לדף חדש מהתמונות ענו 1." }; }
+function stopped() { return { text: "עצרתי ✋ לא אערוך תמונות נוספות." }; }
 
 function offer(n) { return { text: `ערכתי ${n} תמונות ✨ לבנות מהן דף נכס?`, buttons: ["כן", "לא"] }; }
 function askPhotos() { return { text: `עכשיו התמונות 📸 שלחו לפחות ${MIN_PHOTOS} תמונות של הנכס.` }; }
@@ -123,6 +146,30 @@ function confirmChanges(changes, fields) {
   const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, fields[f])} ← ${show(f, v)}`).join("\n");
   return { text: `להחליף?\n${list}`, buttons: ["כן", "לא"] };
 }
+// Links to the page editor for an existing page (or a few, when the message named none).
+function editLinks(links) {
+  if (links.length === 1) {
+    return { text: `לעדכון ${links[0].title} — תמונות, סרטון, מחיר ופרטים — היכנסו לעורך הדף:\n${links[0].url}\nשם מחליפים תמונות ומעלים סרטון משלכם.` };
+  }
+  return { text: `איזה נכס לעדכן? כל קישור פותח את עורך הדף:\n${links.map((l) => `• ${l.title}\n${l.url}`).join("\n")}` };
+}
+function editHeld(links) {
+  const where = links.length === 1 ? links[0].url : links.map((l) => `• ${l.title}\n${l.url}`).join("\n");
+  return { text: `לא ערכתי את התמונות 🙂 תמונות לדף מעלים בעורך הדף:\n${where}` };
+}
+// A live page's change, approved before it is written.
+function confirmPageChanges(title, changes, current) {
+  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, current[f])} ← ${show(f, v)}`).join("\n");
+  return { text: `לעדכן בדף ${title}?\n${list}`, buttons: ["כן", "לא"] };
+}
+function pageUpdated(changes, editUrl) {
+  return { text: `${updated(changes).text}\nהדף מעודכן. לעוד שינויים: ${editUrl}` };
+}
+// Several replies as one WhatsApp bubble; the last one's buttons are kept.
+function oneBubble(replies) {
+  const last = replies[replies.length - 1];
+  return { text: replies.map((x) => x.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}) };
+}
 function kept() { return { text: "בסדר, השארתי כמו שהיה." }; }
 function priceOff(fields) {
   const as = fields.deal === "sale" ? "מכירה" : "שכירות";
@@ -167,7 +214,7 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };
