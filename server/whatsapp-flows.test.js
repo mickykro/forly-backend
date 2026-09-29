@@ -95,10 +95,9 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.doesNotMatch(texts(t), /P1/);
   const updating = t.draft;
   t = await turn({ fileUrls: ["https://green/1.jpg", "https://green/2.jpg"], draft: updating, now: new Date(T0.getTime() + 90000) }, d);
-  assert.deepEqual([t.handled, t.status], [true, "update_held"], "photos for the page never reach n8n's editing");
-  assert.match(texts(t), /לא ערכתי/);
+  assert.deepEqual([t.handled, t.status, t.replies.length], [true, "page_photos_held:2", 0], "photos for the page never reach n8n's editing");
   t = await turn({ fileUrl: "https://green/3.jpg", draft: t.draft, now: new Date(T0.getTime() + 100000) }, d);
-  assert.deepEqual([t.handled, t.replies.length], [true, 0], "one reminder per burst");
+  assert.deepEqual([t.handled, t.status, t.replies.length], [true, "page_photos_held:3", 0], "the rest of the burst joins silently");
   t = await turn({ fileUrl: "https://green/4.jpg", draft: updating, now: new Date(T0.getTime() + 16 * 60000) }, d);
   assert.deepEqual([t.handled, t.draft.status], [true, "photo_choice"], "the hold ends after 15 quiet minutes: back to the choice");
   ({ d } = deps({ classifyIntent: async () => null, listPages: async () => pages, editUrl: (id) => id }));
@@ -298,6 +297,39 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.match(texts(t), /חוזרים לנכס שבטיפול[\s\S]*https:\/\/review/);
   t = await turn({ text: "כן", draft: waiting }, d);
   assert.deepEqual([t.status, t.draft.mode, wrote.pagePatch["property.price"]], ["page_updated", "preview", 1150000]);
+
+  // ── 972546582548, 13:02–13:13: after an edit batch, "אני רוצה להעלות נכס חדש…", the ad, "יש תמונות?" ──
+  const edited8 = { ...D.newDraft(PHONE, "photos", T0), status: "offered", offer_sent: true, photos: ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8"] };
+  ({ d } = deps({ classifyIntent: async () => "new", parseListing: extracted({ city: "באר שבע", rooms: 6, price: 1760000, deal: "sale", size_sqm: 136, floor: 2, parking: 2, neighborhood: "הפארק" }) }));
+  t = await turn({ text: "אני רוצה להעלות נכס חדש שתיצרי לי דף נכס .", draft: edited8 }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length, t.draft.offered_photos.length], ["active", 0, 8], "a new property; the edited photos kept on hand");
+  t = await turn({ text: "למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת", draft: t.draft }, d);
+  assert.match(texts(t), /להשתמש ב-8 התמונות שערכתי קודם לנכס הזה\?/, "at the photos step, asked about them");
+  t = await turn({ text: "כן", draft: t.draft }, d);
+  assert.deepEqual([t.draft.photos.length, t.status], [8, "choose"]);
+  // "כן תיצרי דף נכס" to the offer itself is a yes
+  t = await turn({ text: "כן תיצרי דף נכס", draft: edited8 }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length], ["active", 8]);
+
+  // ── 972546582548, 09-29 10:04: "אני רוצה לעדכן תמונות לנכס בנחל דליות 35", then 10 photos ──
+  const dalyot = { page_id: "P2", listing_id: "L2", business_phone: PHONE, gallery: { images: [1, 2, 3, 4].map((i) => ({ url: `old${i}`, caption: "", description: "" })) },
+    property: { title: "4 חד׳ בפארק", address: "נחל דליות 35", city: "באר שבע", neighborhood: "הפארק", price: 1470000, rooms: 4 } };
+  let gal = null;
+  ({ d } = deps({ classifyIntent: async () => "update", listPages: async () => [dalyot], editUrl: (id) => `https://agent/edit.html?id=${id}`,
+    parseListing: extracted({}), updatePageData: async (p) => { gal = p; } }));
+  t = await turn({ text: "אני רוצה לעדכן תמונות לנכס בנחל דליות 35" }, d);
+  assert.match(texts(t), /שלחו כאן את התמונות החדשות/);
+  t = await turn({ fileUrls: ["https://green/a.jpg", "https://green/b.jpg"], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.replies.length, t.armPhotoTimer, gal], ["page_photos_held:2", 0, true, null], "held silently, never AI-edited");
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
+  assert.match(texts(t), /להחליף את 4 התמונות הקיימות ב-2 החדשות, או להוסיף אותן\?/);
+  const photosAsked = t.draft;
+  t = await turn({ text: "להחליף", draft: structuredClone(photosAsked) }, d);
+  assert.deepEqual(gal.pagePatch["gallery.images"].map((i) => i.url), ["https://files/a.jpg", "https://files/b.jpg"]);
+  assert.deepEqual(gal.listingPatch.photos_urls, ["https://files/a.jpg", "https://files/b.jpg"]);
+  assert.match(texts(t), /בדף יש עכשיו 2 תמונות/);
+  t = await turn({ text: "2", draft: { ...structuredClone(photosAsked), last_buttons: ["להחליף", "להוסיף"] } }, d);
+  assert.equal(gal.pagePatch["gallery.images"].length, 6, "added after the 4");
 
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

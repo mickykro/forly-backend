@@ -88,6 +88,13 @@ function swapPhotos(oldN, newN) {
   return { text: `להחליף את ${oldN} התמונות הקודמות ב-${newN} החדשות, או להוסיף אותן?`, buttons: ["להחליף", "להוסיף"] };
 }
 function sendReplacements(n) { return { text: `שלחו את התמונות החדשות — הן יחליפו את ${n} הקיימות 📸` }; }
+function useEdited(n) {
+  return { text: `להשתמש ב-${n === 1 ? "תמונה שערכתי" : `${n} התמונות שערכתי`} קודם לנכס הזה?`, buttons: ["כן", "לא"] };
+}
+function pagePhotosAsk(title, had, got) {
+  return { text: `לעדכן את התמונות בדף ${title}: להחליף את ${had} התמונות הקיימות ב-${got} החדשות, או להוסיף אותן?`, buttons: ["להחליף", "להוסיף"] };
+}
+function pagePhotosDone(n, editUrl) { return { text: `עדכנתי ✅ בדף יש עכשיו ${n} תמונות.\nלסידור או לשינויים נוספים: ${editUrl}` }; }
 function backToDraft() { return { text: "חוזרים לנכס שבטיפול:" }; }
 function noPages() { return { text: "עוד אין לך דפי נכס. לדף חדש מהתמונות ענו 1." }; }
 function stopped() { return { text: "עצרתי ✋ לא אערוך תמונות נוספות." }; }
@@ -154,7 +161,7 @@ function confirmChanges(changes, fields) {
 // Links to the page editor for an existing page (or a few, when the message named none).
 function editLinks(links) {
   if (links.length === 1) {
-    return { text: `לעדכון ${links[0].title} — תמונות, סרטון, מחיר ופרטים — היכנסו לעורך הדף:\n${links[0].url}\nשם מחליפים תמונות ומעלים סרטון משלכם.` };
+    return { text: `לעדכון ${links[0].title}: שלחו כאן את התמונות החדשות 📸, או כתבו מה לשנות (למשל ״מחיר 1.9 מיליון״).\nסרטון משלכם ושאר העריכה — בעורך הדף:\n${links[0].url}` };
   }
   return { text: `איזה נכס לעדכן? כל קישור פותח את עורך הדף:\n${links.map((l) => `• ${l.title}\n${l.url}`).join("\n")}` };
 }
@@ -219,7 +226,7 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

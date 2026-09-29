@@ -36,6 +36,7 @@ function photoUrlsOf(input) {
 function promptFor(draft, deps) {
   const step = D.nextStep(draft);
   if (step.kind === "ask") return { status: `asked:${step.field}`, replies: [R.ask(step.field)] };
+  if (step.kind === "photos" && (draft.offered_photos || []).length) return { status: "use_edited", replies: [R.useEdited(draft.offered_photos.length)] };
   if (step.kind === "photos") return { status: "photos", replies: [R.askPhotos()] };
   if (step.kind === "choose") return { status: "choose", replies: [R.choose()] };
   if (step.kind === "create") return { status: "create", replies: [] }; // handleTurn builds it
@@ -169,32 +170,6 @@ async function storePhoto(draft, fileUrlOrUrls, deps, now) {
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
 }
 
-// The agent's own video: re-hosted and used instead of a generated walkthrough.
-async function storeVideo(draft, url, deps, now) {
-  let hosted = null;
-  try { hosted = await deps.importVideo(url); } catch (err) { console.warn("[whatsapp-intake] video import failed:", err.message); }
-  if (!hosted) return { handled: true, status: "video_failed", replies: [R.videoFailed()] };
-  draft.video_url = hosted;
-  const p = promptFor(draft, deps);
-  return { handled: true, status: "video_stored", draft: D.touch(draft, now), replies: [oneBubble([R.videoSaved(), ...p.replies])] };
-}
-
-// One bubble: the photo count and whatever comes next, so photos sent mid-questions
-// never look ignored. Reports (and clears) photos dropped over the 12 cap.
-function photoTimer(draft, deps, now) {
-  const n = draft.photos.length;
-  const dropped = draft.photos_dropped || 0;
-  draft.photos_dropped = 0;
-  const done = dropped ? { draft: D.touch(draft, now) } : {};
-  if (D.nextStep(draft).kind === "photos") {
-    const r = [R.photosProgress(n)];
-    if (dropped) r.unshift(R.photosSaved(n, dropped));
-    return { handled: true, status: `photos_progress:${n}`, ...done, replies: [oneBubble(r)] };
-  }
-  const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, ...done, replies: [oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
-}
-
 /*
  * n8n just finished editing a photo → it may become a property page.
  * Business Handler edits photos one at a time, so this arrives once per photo:
@@ -264,13 +239,18 @@ async function offeredTurn(input, deps, draft, now) {
   const cmd = D.command(input.text);
   if (cmd === "no") return { handled: true, status: "declined", del: true, replies: [R.declined()] };
   const kind = cmd === "yes" ? null : await openerOf(input.text, deps);
-  if (cmd === "yes" || (kind === "intent" && FROM_THESE.test(input.text))) {
+  if (cmd === "yes" || /^כן([\s,.!]|$)/.test(String(input.text || "").trim()) || (kind === "intent" && FROM_THESE.test(input.text))) {
     draft.status = "active";
     const p = promptFor(draft, deps);
     const t = { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
     return kind ? withDetails(t, input.text, deps, now) : t;
   }
-  if (kind) return openDraft(draft.phone, kind, input.text, deps, now);
+  if (kind) {
+    // A new property right after an edit batch: the edited photos are offered again at the photos step.
+    const t = await openDraft(draft.phone, kind, input.text, deps, now);
+    if (t.draft && t.draft.status === "active" && !t.draft.photos.length) t.draft.offered_photos = draft.photos;
+    return t;
+  }
   return { ...notOurs("not_ours"), del: true };
 }
 
@@ -313,8 +293,8 @@ async function resumeTurn(input, deps, draft, now) {
 }
 
 async function activeTurn(input, deps, draft, now) {
-  if (input.event === "photo_timer") return photoTimer(draft, deps, now);
-  if (input.videoUrl) return storeVideo(draft, input.videoUrl, deps, now);
+  if (input.event === "photo_timer") return PC.photoTimer(draft, deps, now, promptFor);
+  if (input.videoUrl) return PC.storeVideo(draft, input.videoUrl, deps, now, promptFor);
   const photoUrls = photoUrlsOf(input);
   if (photoUrls) return storePhoto(draft, photoUrls, deps, now);
   const cmd = D.command(input.text);
@@ -357,6 +337,12 @@ async function activeTurn(input, deps, draft, now) {
     const r = answerField(draft, step.field, input.text, cmd, deps);
     if (r.draft && (step.field === "price" || step.field === "deal")) r.replies = C.withPriceCheck(r.draft, r.replies);
     return { handled: true, ...r, draft: r.draft ? D.touch(r.draft, now) : undefined };
+  }
+  if (step.kind === "photos" && (draft.offered_photos || []).length && (cmd === "yes" || cmd === "no")) {
+    if (cmd === "yes") draft.photos = draft.photos.concat(draft.offered_photos).slice(0, MAX_PHOTOS);
+    draft.offered_photos = null;
+    const p = promptFor(draft, deps);
+    return { handled: true, status: p.status, draft: D.touch(draft, now), replies: cmd === "yes" ? [oneBubble([R.photosSaved(draft.photos.length), ...p.replies])] : p.replies };
   }
   if (step.kind === "photos") {
     return { handled: true, status: `photos_progress:${draft.photos.length}`, replies: [R.photosProgress(draft.photos.length)] };

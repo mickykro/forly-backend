@@ -72,6 +72,8 @@ async function updatePage(phone, text, deps, now, suspended = null) {
     .map((p) => ({ title: p.property.title || p.property.address || p.page_id, url: deps.editUrl(p.page_id) }));
   // An open property draft waits inside the update (suspended) and comes back after it.
   const draft = { phone, status: "updating", links, created_at: now, updated_at: now, hinted_at: now, suspended };
+  // One page named: photos sent now can go straight into its gallery (after asking).
+  if (page) draft.page = { page_id: page.page_id, listing_id: page.listing_id || null, gallery: ((page.gallery || {}).images || []).slice(0, 12) };
   const pending = page ? await proposeChanges(page, String(text || ""), deps) : null;
   if (pending) {
     draft.pending_page = pending;
@@ -85,7 +87,32 @@ async function updatePage(phone, text, deps, now, suspended = null) {
 async function updatingTurn(input, deps, draft, now, h) {
   const back = draft.suspended ? D.touch(draft.suspended, now) : null;
   const andBack = (replies) => (back ? [R.oneBubble([...replies, R.backToDraft(), ...h.promptFor(back, deps).replies])] : replies);
+  // Photos for the named page: held, then (the burst over) replace or add — asked, written on the answer.
+  if (input.event === "photo_timer" && (draft.held_photos || []).length) {
+    draft.pending_photos = true;
+    return { handled: true, status: "page_photos_asked", draft, replies: [R.pagePhotosAsk(draft.links[0].title, draft.page.gallery.length, draft.held_photos.length)] };
+  }
   if (input.event) return { handled: false, status: "not_ours", replies: [] };
+  const incoming = input.fileUrls && input.fileUrls.length ? input.fileUrls : input.fileUrl ? [input.fileUrl] : null;
+  if (incoming && draft.page) {
+    const settled = await Promise.allSettled(incoming.map((u) => deps.importPhoto(u)));
+    const hosted = settled.filter((s) => s.status === "fulfilled" && s.value).map((s) => s.value);
+    draft.held_photos = [...new Set((draft.held_photos || []).concat(hosted))].slice(0, 12);
+    draft.updated_at = now;
+    return { handled: true, status: `page_photos_held:${draft.held_photos.length}`, draft, replies: [], armPhotoTimer: true };
+  }
+  if (draft.pending_photos) {
+    const text = String(input.text || "");
+    const replace = /החלף|להחליף/.test(text), add = /הוסף|להוסיף/.test(text);
+    if (replace || add) {
+      const fresh = draft.held_photos.map((url) => ({ url, caption: "", description: "" }));
+      const images = (replace ? fresh : draft.page.gallery.concat(fresh)).slice(0, 12);
+      await deps.updatePageData({ page_id: draft.page.page_id, listing_id: draft.page.listing_id,
+        pagePatch: { "gallery.images": images }, listingPatch: { photos_urls: images.map((i) => i.url) } });
+      draft.page.gallery = images; draft.held_photos = []; draft.pending_photos = false;
+      return { handled: true, status: "page_photos_updated", draft: back || draft, replies: andBack([R.pagePhotosDone(images.length, draft.links[0].url)]) };
+    }
+  }
   if ((input.fileUrls && input.fileUrls.length) || input.fileUrl || input.videoUrl) {
     // One reminder per burst, not per webhook.
     const quiet = now.getTime() - D.asMillis(draft.hinted_at) < 60000;
