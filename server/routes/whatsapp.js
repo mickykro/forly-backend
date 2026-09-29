@@ -72,7 +72,7 @@ const PHOTO_BATCH_MS = 20000;
 const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
-  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp,
+  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage,
     uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
@@ -128,6 +128,11 @@ module.exports = function createWhatsappRouter(ctx) {
         .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at)),
       editUrl: (pageId) => `${baseUrl}/edit.html?id=${encodeURIComponent(pageId)}`,
       cancelEdits: (p) => db.setEditCancel(p),
+      // Approved in chat ("כן" to confirmPageChanges): the live page and its listing.
+      updatePageData: async ({ page_id, listing_id, pagePatch, listingPatch }) => {
+        await db.updatePage(page_id, { ...pagePatch, updated_at: new Date() });
+        if (listing_id) await db.updateListing(listing_id, listingPatch);
+      },
       importPhoto: importPhotoFor(phone),
       importVideo: importPhotoFor(phone, { video: true }),
       createUrl: `${baseUrl}/create.html`,
@@ -234,6 +239,18 @@ module.exports = function createWhatsappRouter(ctx) {
     ].join("\n");
   }
 
+  // The image an agent replied to (n8n sends quoted_type/quoted_id, and the URL when the
+  // webhook has one); otherwise Green API's copy of that message.
+  async function quotedImage(body, phone) {
+    if (body.quoted_type !== "imageMessage") return null;
+    const url = typeof body.quoted_image_url === "string" && /^https:\/\//.test(body.quoted_image_url) ? body.quoted_image_url : null;
+    if (url || !getMessage || typeof body.quoted_id !== "string" || !phone) return url;
+    try {
+      const m = await getMessage(`${phone}@c.us`, body.quoted_id.slice(0, 100));
+      return m && /^https:\/\//.test(String(m.downloadUrl || "")) ? m.downloadUrl : null;
+    } catch (err) { console.warn("[whatsapp] quoted image lookup failed:", err.message); return null; }
+  }
+
   // n8n's photo-edit loop, before each photo: did the agent write "עצור" since the batch began?
   router.get("/edit-cancel", requireN8n, async (req, res) => {
     const phone = normalizeAuthPhone(String(req.query.phone || ""));
@@ -256,6 +273,7 @@ module.exports = function createWhatsappRouter(ctx) {
     const audioUrl = typeof body.audio_url === "string" && /^https:\/\//.test(body.audio_url) ? body.audio_url : null;
     const videoUrl = typeof body.video_url === "string" && /^https:\/\//.test(body.video_url) ? body.video_url : null;
     const messageType = typeof body.message_type === "string" ? body.message_type.slice(0, 40) : "";
+    const quotedImageUrl = await quotedImage(body, phone);
     if (!phone || (!text.trim() && !fileUrl && !fileUrls.length && !event && !audioUrl && !videoUrl && messageType !== "documentMessage")) {
       return res.status(400).json({ error: "invalid_input" });
     }
@@ -267,7 +285,7 @@ module.exports = function createWhatsappRouter(ctx) {
           `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : audioUrl ? "voice" : videoUrl ? "video" : messageType === "documentMessage" ? "document" : JSON.stringify(text)}` +
           ` | draft before: ${draft ? `${draft.status} (${draft.source}) ${describeAge(draft, now)}` : "none"}`
         );
-        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, videoUrl, messageType, draft }, depsFor(phone, business));
+        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, videoUrl, messageType, quotedImageUrl, draft }, depsFor(phone, business));
         // A text that ends a photo batch must not be followed by the timer's report too.
         if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
         console.log(

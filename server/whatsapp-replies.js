@@ -78,6 +78,12 @@ function photoChoice(n) {
   if (n > 3) lines.push("4 · לשפר 3 לדוגמה");
   return { text: `קיבלתי ${n === 1 ? "תמונה" : `${n} תמונות`} 📸 מה לעשות?\n${lines.join("\n")}\nאו כתבו מה לשנות בתמונות.` };
 }
+// "חסרים פרטים?" / "סיימת?" in the middle of the questions: where things stand.
+function progress(missingFields, photos) {
+  const need = missingFields.map((f) => LABELS[f]);
+  if (photos < MIN_PHOTOS) need.push(`תמונות (יש ${photos}, צריך ${MIN_PHOTOS})`);
+  return { text: need.length ? `עוד חסר: ${need.join(" · ")}. תמונות אפשר לשלוח בכל שלב 📸` : "יש לי הכול ✅" };
+}
 function noPages() { return { text: "עוד אין לך דפי נכס. לדף חדש מהתמונות ענו 1." }; }
 function stopped() { return { text: "עצרתי ✋ לא אערוך תמונות נוספות." }; }
 
@@ -151,6 +157,19 @@ function editHeld(links) {
   const where = links.length === 1 ? links[0].url : links.map((l) => `• ${l.title}\n${l.url}`).join("\n");
   return { text: `לא ערכתי את התמונות 🙂 תמונות לדף מעלים בעורך הדף:\n${where}` };
 }
+// A live page's change, approved before it is written.
+function confirmPageChanges(title, changes, current) {
+  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, current[f])} ← ${show(f, v)}`).join("\n");
+  return { text: `לעדכן בדף ${title}?\n${list}`, buttons: ["כן", "לא"] };
+}
+function pageUpdated(changes, editUrl) {
+  return { text: `${updated(changes).text}\nהדף מעודכן. לעוד שינויים: ${editUrl}` };
+}
+// Several replies as one WhatsApp bubble; the last one's buttons are kept.
+function oneBubble(replies) {
+  const last = replies[replies.length - 1];
+  return { text: replies.map((x) => x.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}) };
+}
 function kept() { return { text: "בסדר, השארתי כמו שהיה." }; }
 function priceOff(fields) {
   const as = fields.deal === "sale" ? "מכירה" : "שכירות";
@@ -195,7 +214,7 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, editLinks, editHeld, photoChoice, noPages, stopped, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

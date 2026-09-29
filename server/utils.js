@@ -278,6 +278,18 @@ async function sendWhatsApp(phone, message, instance, token) {
   });
 }
 
+// One message of a chat, e.g. the image an agent replied to (its downloadUrl).
+async function getWhatsAppMessage(chatId, idMessage, instance, token) {
+  if (!instance || !token) return null;
+  const r = await fetch(`https://api.green-api.com/waInstance${instance}/getMessage/${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatId, idMessage }),
+    signal: AbortSignal.timeout(20000),
+  });
+  return r.ok ? r.json() : null;
+}
+
 /*
  * Interactive buttons (Green API sendInteractiveButtons).
  * Limits enforced here rather than trusted from call sites: at most 3
@@ -336,6 +348,6 @@ module.exports = {
   ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
-  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons,
+  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons, getWhatsAppMessage,
   assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
 };

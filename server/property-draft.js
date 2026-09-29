@@ -238,6 +238,9 @@ function touch(draft, now = new Date()) {
   return draft;
 }
 
+// Fields still to ask, in order ("חסרים פרטים?" lists them).
+function missing(draft) { return ASK_ORDER.filter((f) => draft.fields[f] === null && !draft.skipped.includes(f)); }
+
 function nextStep(draft) {
   for (const f of ASK_ORDER) {
     if (draft.fields[f] === null && !draft.skipped.includes(f)) return { kind: "ask", field: f };
@@ -289,5 +292,5 @@ function summary(draft) {
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
   findUrl, command, spokenCommand, isStop, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
-  newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
+  newDraft, touch, nextStep, missing, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };

@@ -17,6 +17,7 @@ const { intentOf, openerOf } = require("./property-intent");
 const PC = require("./photo-choice");
 
 const MAX_PHOTOS = 12;
+const { oneBubble } = R;
 
 const notOurs = (status) => ({ handled: false, status, replies: [] });
 
@@ -39,12 +40,6 @@ function promptFor(draft, deps) {
   if (step.kind === "choose") return { status: "choose", replies: [R.choose()] };
   if (step.kind === "create") return { status: "create", replies: [] }; // handleTurn builds it
   return { status: "confirm", replies: [R.reviewReady(deps.reviewLink(draft.phone), draft.skipped)] };
-}
-
-// Several replies as one WhatsApp bubble; the last one's buttons are kept.
-function oneBubble(replies) {
-  const last = replies[replies.length - 1];
-  return { text: replies.map((r) => r.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}) };
 }
 
 // Build the page straight from the draft (the agent chose "ליצור"). On failure
@@ -128,7 +123,7 @@ async function openDraft(phone, kind, text, deps, now) {
 // The same message may already carry details ("סביון, 8 חדרים, 32 מיליון"): they fill the draft.
 async function withDetails(t, text, deps, now) {
   if (!C.hintedFields(text).length || !deps.extractAllowed(t.draft.phone)) return t;
-  const r = await smartAnswer(t.draft, text, deps, now, D.nextStep(t.draft).field || null);
+  const r = await C.smartAnswer(t.draft, text, deps, now, D.nextStep(t.draft).field || null, promptFor);
   return r ? { ...r, replies: [...t.replies.slice(0, -1), ...r.replies] } : t;
 }
 
@@ -314,7 +309,7 @@ async function activeTurn(input, deps, draft, now) {
   const cmd = D.command(input.text);
   if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
   const slash = C.parseSlash(input.text);
-  if (slash) return slashTurn(draft, slash, deps, now);
+  if (slash) return C.slashTurn(draft, slash, deps, now, promptFor);
   // A replacement was proposed last turn: כן applies it, anything else keeps the old values.
   if (draft.pending_changes) {
     const changes = draft.pending_changes;
@@ -323,17 +318,23 @@ async function activeTurn(input, deps, draft, now) {
       if (cmd === "yes") C.apply(draft, changes);
       const p = promptFor(draft, deps);
       const first = cmd === "yes" ? R.updated(changes) : R.kept();
-      return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble([first, ...withPriceCheck(draft, p.replies)])] };
+      return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble([first, ...C.withPriceCheck(draft, p.replies)])] };
     }
   }
   const step = D.nextStep(draft);
+  // "חסרים פרטים?" / "סיימת?" is a question, never the answer to the field being asked.
+  // (Right after a failed answer, "מה זה?" is about that question: the retry example answers it.)
+  if (step.kind === "ask" && !cmd && /\?\s*$/.test(String(input.text || "").trim()) && !C.hintedFields(input.text).length
+    && !(draft.retry && draft.retry.field === step.field)) {
+    return { handled: true, status: `question:${step.field}`, replies: [oneBubble([R.progress(D.missing(draft), draft.photos.length), ...promptFor(draft, deps).replies])] };
+  }
   if (!cmd && C.needsExtraction(step.field || null, input.text) && deps.extractAllowed(draft.phone)) {
-    const r = await smartAnswer(draft, input.text, deps, now, step.field);
+    const r = await C.smartAnswer(draft, input.text, deps, now, step.field, promptFor);
     if (r) return r;
   }
   if (step.kind === "ask") {
     const r = answerField(draft, step.field, input.text, cmd, deps);
-    if (r.draft && (step.field === "price" || step.field === "deal")) r.replies = withPriceCheck(r.draft, r.replies);
+    if (r.draft && (step.field === "price" || step.field === "deal")) r.replies = C.withPriceCheck(r.draft, r.replies);
     return { handled: true, ...r, draft: r.draft ? D.touch(r.draft, now) : undefined };
   }
   if (step.kind === "photos") {
@@ -354,46 +355,6 @@ async function activeTurn(input, deps, draft, now) {
   if (cmd === "create") return { handled: true, status: "preview_only", replies: [R.previewOnly(deps.reviewLink(draft.phone))] };
   const p = promptFor(draft, deps);
   return { handled: true, status: p.status, replies: p.replies };
-}
-
-// The price warning goes in front of the next question when price and deal disagree.
-function withPriceCheck(draft, replies) {
-  return D.priceLooksOff(draft.fields) ? [R.priceOff(draft.fields), ...replies] : replies;
-}
-
-// "/מחיר 2.1 מיליון", "/p 2.1m", or "/" alone for the list.
-function slashTurn(draft, slash, deps, now) {
-  if (slash.list) return { handled: true, status: "field_list", replies: [R.fieldList(draft.fields)] };
-  if (slash.unknown) return { handled: true, status: "field_unknown", replies: [R.unknownField(slash.unknown)] };
-  if (!C.setField(draft, slash.field, slash.value)) {
-    return { handled: true, status: `invalid:${slash.field}`, replies: [R.invalid(slash.field)] };
-  }
-  const p = promptFor(draft, deps);
-  const replies = withPriceCheck(draft, [R.updated({ [slash.field]: draft.fields[slash.field] }), ...p.replies]);
-  return { handled: true, status: `corrected:${slash.field}`, draft: D.touch(draft, now), replies: [oneBubble(replies)] };
-}
-
-// A reply that talks about other fields ("רגע, המחיר 2.1 מיליון", "חיפה, 3 חדרים, 1.9 מיליון"):
-// extract it like listing text, fill empty fields, and ask before replacing any.
-// null → nothing usable came out; the caller handles the text the ordinary way.
-async function smartAnswer(draft, text, deps, now, asked) {
-  // A bare place name means nothing to the extractor; "שכונה: הבורסה, …" does. Numeric
-  // questions get no label: "חניות: רגע, המחיר…" makes it invent a parking count.
-  // A city answer with a street number is an address line: unlabelled, so it splits.
-  const label = (asked === "city" && !/\d/.test(text)) || asked === "neighborhood";
-  const prompt = label ? `${R.LABELS[asked]}: ${text}` : text;
-  let parsed;
-  try { parsed = await deps.parseListing(prompt); } catch (err) { return null; }
-  const { filled, proposed } = C.merge(draft, parsed.fields || {});
-  if (!Object.keys(filled).length && !Object.keys(proposed).length) return null;
-  const replies = Object.keys(filled).length ? [R.updated(filled)] : [];
-  if (Object.keys(proposed).length) {
-    draft.pending_changes = proposed;
-    replies.push(R.confirmChanges(proposed, draft.fields));
-    return { handled: true, status: "confirm_changes", draft: D.touch(draft, now), replies: [oneBubble(replies)] };
-  }
-  const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble(withPriceCheck(draft, [...replies, ...p.replies]))] };
 }
 
 async function handleTurn(input, deps) {
@@ -440,6 +401,8 @@ async function handleTurn(input, deps) {
     if (deps.cancelEdits) await deps.cancelEdits(phone);
     return { handled: true, status: "stopped", del: !!draft && draft.status === "photo_choice", replies: [R.stopped()] };
   }
+  const quoted = PC.quotedEdit(input);
+  if (quoted) return quoted;
   if (input.text && photoUrlsOf(input) && !input.event) return textThenPhotos(input, deps, draft);
 
   const open = draft && (draft.status === "active" || draft.status === "offered");
@@ -482,11 +445,8 @@ async function handleTurn(input, deps) {
   return t.status === "create" ? build(t.draft || draft, deps, now) : t;
 }
 
-/*
- * Text that came in one webhook with a photo burst (the ad, an address): the
- * text is a turn of its own, then the photos join whatever it opened. A text
- * nobody claims is a caption: all of it goes on to n8n, which edits with it.
- */
+// Text sent with a photo burst (the ad, an address) is a turn of its own, then the photos
+// join whatever it opened. Unclaimed text is a caption: all of it goes to n8n's edit.
 async function textThenPhotos(input, deps, draft) {
   const t1 = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft }, deps);
   if (!t1.handled) return t1;

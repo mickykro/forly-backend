@@ -13,6 +13,7 @@
  * openerOf, storePhoto, updatePage) so the two files don't require each other.
  */
 const R = require("./whatsapp-replies");
+const D = require("./property-draft");
 
 const MAX_PHOTOS = 12;
 const SAMPLE = 3;
@@ -56,4 +57,16 @@ async function turn(input, deps, draft, now, h) {
   return ask(draft);
 }
 
-module.exports = { hold, ask, turn };
+/*
+ * A reply to an image with a comment ("תעשי אותה בהירה", quoting it): an edit of
+ * that one image, handed to n8n like choice 3. Thanks/praise ("יפה!"), one word
+ * and commands are not edit requests. → null when it isn't one.
+ */
+const PRAISE = /^(יפה|מהמם|מושלם|תודה|וואו|אהבתי|מעולה|אחלה|סבבה|מדהים|יופי|👍|❤️|🙏)/;
+function quotedEdit(input) {
+  const text = String(input.text || "").trim();
+  if (!input.quotedImageUrl || D.command(text) || PRAISE.test(text) || text.split(/\s+/).length < 2) return null;
+  return { ...edit([input.quotedImageUrl], text), del: false, status: "edit_quoted" };
+}
+
+module.exports = { hold, ask, turn, quotedEdit };
