@@ -116,7 +116,34 @@ function openFromKeyword(phone, deps, now) {
 }
 
 async function openDraft(phone, kind, text, deps, now) {
+  if (kind === "intent") return openFromIntent(phone, text, deps, now);
   return kind === "keyword" ? openFromKeyword(phone, deps, now) : openFromSource(phone, kind, text, deps, now);
+}
+
+// Only a message that mentions a property or a listing detail is worth the
+// intent check's LLM call; photo edits and small talk go straight to n8n's bot.
+const PROPERTY_WORDS = /נכס|דירה|דירת|בית|וילה|פנטהאוז|קוטג|דופלקס|מגרש/;
+async function wantsNewProperty(text, deps) {
+  const t = String(text || "").trim();
+  if (!deps.wantsNewProperty || !t || t.length > 300) return false;
+  if (!PROPERTY_WORDS.test(t) && !C.hintedFields(t).length) return false;
+  try { return await deps.wantsNewProperty(t); } catch (err) { return false; }
+}
+
+// Exact opener, else the intent check: "אני רוצה לבנות דף נכס" → "intent".
+async function openerOf(text, deps) {
+  return D.openerKind(text) || ((await wantsNewProperty(text, deps)) ? "intent" : null);
+}
+
+// The same message may already carry details ("סביון, 8 חדרים, 32 מיליון"): they fill the draft.
+async function withDetails(t, text, deps, now) {
+  if (!C.hintedFields(text).length || !deps.extractAllowed(t.draft.phone)) return t;
+  const r = await smartAnswer(t.draft, text, deps, now, D.nextStep(t.draft).field || null);
+  return r ? { ...r, replies: [...t.replies.slice(0, -1), ...r.replies] } : t;
+}
+
+async function openFromIntent(phone, text, deps, now) {
+  return withDetails(openFromKeyword(phone, deps, now), text, deps, now);
 }
 
 // One answer to the field currently being asked.
@@ -228,10 +255,13 @@ function resumePrompt(draft, opener, now) {
 async function offeredTurn(input, deps, draft, now) {
   const cmd = D.command(input.text);
   if (cmd === "no") return { handled: true, status: "declined", del: true, replies: [R.declined()] };
-  if (cmd !== "yes") return notOurs("not_ours");
+  // "כן", or in their own words: "אני רוצה לבנות דף נכס" / "סביון, 8 חדרים, 32 מיליון".
+  const intent = cmd !== "yes" && (await wantsNewProperty(input.text, deps));
+  if (cmd !== "yes" && !intent) return notOurs("not_ours");
   draft.status = "active";
   const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+  const t = { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+  return intent ? withDetails(t, input.text, deps, now) : t;
 }
 
 async function resumeTurn(input, deps, draft, now) {
@@ -400,15 +430,16 @@ async function handleTurn(input, deps) {
   }
 
   if (!draft) {
-    const kind = D.openerKind(input.text);
+    const kind = await openerOf(input.text, deps);
     if (!kind) return withDrop(notOurs("not_ours"));
     return openDraft(phone, kind, input.text, deps, now);
   }
   if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
   if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
   if (draft.status === "building") {
-    const kind = D.openerKind(input.text);
-    if (input.event || photoUrlsOf(input) || !kind) return notOurs("not_ours");
+    if (input.event || photoUrlsOf(input)) return notOurs("not_ours");
+    const kind = await openerOf(input.text, deps);
+    if (!kind) return notOurs("not_ours");
     return openDraft(phone, kind, input.text, deps, now);
   }
   // Paused: any message brings the open draft back up (המשך / חדש / ביטול).

@@ -36,6 +36,7 @@ const { isPaused, asMillis, touch } = require("../property-draft");
 const R = require("../whatsapp-replies");
 const { resolve } = require("../listing-sources");
 const { parseListing } = require("../listing-extract");
+const { wantsNewProperty } = require("../property-intent");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
 const { validateListing, createListing } = require("../listing-create");
@@ -122,7 +123,7 @@ module.exports = function createWhatsappRouter(ctx) {
 
   function depsFor(phone, business) {
     return {
-      business, resolve, parseListing,
+      business, resolve, parseListing, wantsNewProperty: (t) => wantsNewProperty(t),
       importPhoto: importPhotoFor(phone),
       importVideo: importPhotoFor(phone, { video: true }),
       createUrl: `${baseUrl}/create.html`,

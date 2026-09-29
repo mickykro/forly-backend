@@ -90,13 +90,7 @@ function spokenCommand(text) {
   }
   return best ? best.cmd : null;
 }
-// "בוקר טוב, אני רוצה לבנות דף נכס" is the keyword too: a short message naming one
-// with a verb of wanting/making. Without the verb, "נכס חדש מקבלן" stays a description.
-const WANT_RE = /(רוצה|צריך|צריכה|לבנות|ליצור|להקים|לפתוח|לעשות|תבני|תבנה|תעשי|תעשה|תיצרי|תיצור)/;
-function isKeyword(text) {
-  const c = clean(text);
-  return KEYWORDS.includes(c) || (c.length <= 60 && KEYWORDS.some((k) => c.includes(k)) && WANT_RE.test(c));
-}
+function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
 function looksLikeListing(text) {
   const t = String(text || "");
   return t.length >= 40 && LISTING_HINTS.filter((h) => t.includes(h)).length >= 2;

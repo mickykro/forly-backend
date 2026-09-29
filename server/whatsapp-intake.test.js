@@ -460,5 +460,35 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.draft.fields.price, 2500000);
   assert.match(texts(t), /קראתי את הקישור הראשון/);
 
+  // ── intent: the agent's own words open a draft (the 972548018957 loop, 2026-09-29) ──
+  let asked = [];
+  const intent = (yes) => deps({ wantsNewProperty: async (txt) => { asked.push(txt); return yes; },
+    parseListing: extracted({ city: "סביון", rooms: 8, price: 32000000 }) });
+  ({ d } = intent(true));
+  t = await turn({ text: "בוקר טוב אני רוצה לבנותת דף נכס" }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status], [true, "asked:city", "active"]);
+  assert.match(texts(t), /מתחילים דף נכס חדש/);
+  t = await turn({ text: "סביון, 8 חדרים, 32 מיליון" }, d);
+  assert.equal(t.handled, true, "details with no draft open one and fill it");
+  assert.deepEqual([t.draft.fields.city, t.draft.fields.rooms, t.draft.fields.price], ["סביון", 8, 32000000]);
+  assert.doesNotMatch(texts(t), /באיזו עיר/, "the city it just got is not asked again");
+
+  // an offer for edited photos: an own-words yes takes it
+  const offer4 = { ...D.newDraft(PHONE, "photos", T0), status: "offered", offer_sent: true, photos: ["a", "b", "c", "d"] };
+  t = await turn({ text: "יאללה תבני מזה דף נכס", draft: offer4 }, d);
+  assert.deepEqual([t.handled, t.draft.status, t.draft.photos.length], [true, "active", 4]);
+
+  // no: stays n8n's; nothing about a property: no LLM call at all
+  ({ d } = intent(false));
+  asked = [];
+  t = await turn({ text: "תעשי את החלל הזה אחרי שיפוץ, זה אותו נכס" }, d);
+  assert.deepEqual([t.handled, asked.length], [false, 1]);
+  t = await turn({ text: "תעשי שהדירה תיראה מוארת" }, d);
+  t = await turn({ text: "היי מה שלומך" }, d);
+  assert.deepEqual([t.handled, asked.length], [false, 2], "small talk never reaches the intent check");
+  ({ d } = deps({ wantsNewProperty: async () => { throw new Error("down"); } }));
+  t = await turn({ text: "רוצה דף נכס בבקשה" }, d);
+  assert.equal(t.handled, false, "a failed check falls through to n8n");
+
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
