@@ -104,9 +104,30 @@ const { transcribe } = createWhatsappRouter;
     ready.photos = ["a", "b", "c", "d"];
     await db.saveDraft(ready);
     const r = await post({ message: "תצוגה מקדימה" });
-    assert.match(r.reply, /https:\/\/prod\.example\/create\.html\?whatsapp=1/);
+    assert.match(r.reply, /https:\/\/prod\.example\/create\.html\?whatsapp=1/, "different signing key: the create form");
     assert.doesNotMatch(r.reply + out.join(" "), /staging\.example/, "no staging link reaches the agent");
     server.close();
+    // same NADLAN_JWT_SECRET on both (LINK_SHARES_SESSION=1): the one-tap review link, on production
+    const app2 = express().use(express.json()).use("/w", createWhatsappRouter({
+      authSecret: "s", n8nSecret: "k", sweep: false, normalizeAuthPhone: (p) => p, signSession: auth.signSession,
+      sendWhatsApp: async () => {}, baseUrl: "https://staging.example", linkBaseUrl: "https://prod.example", linkSharesSession: true }));
+    const server2 = app2.listen(0);
+    await db.saveDraft(ready);
+    const r2 = await fetch(`http://127.0.0.1:${server2.address().port}/w/intake`, { method: "POST",
+      headers: { "content-type": "application/json", "x-forly-secret": "k" }, body: JSON.stringify({ phone: "P8", message: "תצוגה מקדימה" }) }).then((x) => x.json());
+    assert.match(r2.reply, /https:\/\/prod\.example\/api\/whatsapp\/review\?t=/);
+    server2.close();
+  }
+
+  // ── staging + production sweep the same Firestore: a stuck build is reported once ──
+  {
+    const heard = [];
+    const mk = () => createWhatsappRouter({ authSecret: "s", sendWhatsApp: async (p, m) => heard.push(p), sweep: false,
+      normalizeAuthPhone: (p) => p, signSession: auth.signSession });
+    await db.saveListing({ listing_id: "DUP", source: "whatsapp", status: "active", page_id: null, business_phone: "P7",
+      created_at: new Date(Date.now() - 25 * 60 * 1000) });
+    await Promise.all([mk().sweepStuckBuilds(), mk().sweepStuckBuilds()]);
+    assert.equal(heard.filter((p) => p === "P7").length, 1, "two servers, one message");
   }
 
   console.log("routes/whatsapp.test.js ok");
