@@ -201,7 +201,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         note: `forly-connect:${platform}`, // never the phone
       }, { phone }); // the agent's sticky proxy address (driver-browser.proxyFor)
     } catch (e) {
-      return { status: 503, body: { error: "extract_unavailable" } };
+      console.error(driverLive.redact(`connections-browser start failed: ${driverLive.describeError(e)}`));
+      const proxy = e && ["proxy_unavailable", "invalid_proxy_config"].includes(e.code);
+      return { status: 503, body: { error: proxy ? "proxy_unavailable" : "extract_unavailable" } };
     }
 
     // Top-level keys, not a nested map: setConnection is a merge write, and a

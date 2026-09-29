@@ -25,6 +25,7 @@ const API = "https://api.driver.dev";
 const PROFILE_RE = /(facebook|yad2|madlan|instagram|tiktok|linkedin|x)-(prod|staging|local)-[0-9a-f]{20}(-r\d+)?/g;
 function redact(msg) {
   return String(msg)
+    .replace(/\b(socks5h?|https?):\/\/[^\s/@]+(?::[^\s/@]*)?@/gi, "$1://[credentials]@")
     .replace(PROFILE_RE, "[profile]")
     .replace(/wss?:\/\/\S+/g, "[cdp]")
     .replace(/ws=\S+/g, "ws=[cdp]");
@@ -50,7 +51,24 @@ function driverMissing(env) {
   if (!ENVS.includes(env.FORLY_ENV)) missing.push("FORLY_ENV");
   return missing;
 }
-const driverEnabled = (env = process.env) => !!env.DRIVER_API_KEY && driverMissing(env).length === 0;
+const driverEnabled = (env = process.env) => !!env.DRIVER_API_KEY && driverMissing(env).length === 0 && !proxyConfigProblem(env);
+
+// Driver accepts custom SOCKS5 endpoints, not HTTP proxies. Validate locally
+// without ever echoing the URL: it may contain credentials. Forly requires an
+// Israeli exit, so dedicated:// addresses (currently US/Canada) are not valid
+// for this application.
+function proxyConfigProblem(env = process.env) {
+  const raw = env && env.DRIVER_PROXY_URL;
+  if (!raw) return null;
+  let u;
+  try { u = new URL(String(raw).split("{agent}").join("agent")); }
+  catch (e) { return "DRIVER_PROXY_URL must be a valid socks5:// or socks5h:// URL"; }
+  if (!["socks5:", "socks5h:"].includes(u.protocol)) {
+    return "DRIVER_PROXY_URL must use socks5:// or socks5h://; Driver does not support HTTP proxies";
+  }
+  if (!u.hostname) return "DRIVER_PROXY_URL must include a proxy host";
+  return null;
+}
 
 // The dev browser monitor (/dev-driver.html): on by itself on a local box —
 // every browser this server opens is shown there — and never anywhere else.
@@ -70,6 +88,8 @@ function bootCheck(env = process.env) {
   const fatal = (msg) => Object.assign(out, { fatal: msg });
   if (env.FORLY_ENV !== undefined && !ENVS.includes(env.FORLY_ENV)) return fatal(`FORLY_ENV must be prod|staging|local (got "${env.FORLY_ENV}")`);
   const driverWanted = !!env.DRIVER_API_KEY || env.FORLY_ENV !== undefined;
+  const proxyProblem = driverWanted ? proxyConfigProblem(env) : null;
+  if (proxyProblem) return fatal(proxyProblem);
   if (env.NODE_ENV === "production" && env.FORLY_ENV !== "prod" && driverWanted) return fatal("NODE_ENV=production requires FORLY_ENV=prod");
   if (env.DRIVER_DEV_VIEW === "1") {
     if (env.FORLY_ENV !== "local" || env.NODE_ENV === "production") {
@@ -113,9 +133,10 @@ async function call(method, path, body, deps = {}) {
   return res.json();
 }
 
-// Our agents work from Israel, so every session does too: country, clock and
-// locale, on the create call, where Driver applies them — never patched in the
-// page, which is exactly what looks fake. Callers cannot override these.
+// Our agents work from Israel, so every session does too. Without a custom
+// proxy we set country, clock and locale explicitly. With a SOCKS endpoint we
+// pass only country=IL so Driver must first verify/geolocate the exit and then
+// derive a coherent timezone and language. Nothing is patched in the page.
 const SESSION_DEFAULTS = { country: "IL", timezone: "Asia/Jerusalem", language: "he-IL" };
 // Notes are scoped by environment HERE, in one place: callers pass
 // "forly-<kind>:<rest>", Driver sees "forly-<env>-<kind>:<rest>". Staging and
@@ -139,6 +160,8 @@ function scopeNote(note) {
 function proxyFor(phone, env = process.env) {
   const tpl = env.DRIVER_PROXY_URL;
   if (!tpl) return {};
+  const problem = proxyConfigProblem(env);
+  if (problem) { const e = new Error(problem); e.code = "invalid_proxy_config"; throw e; }
   if (!tpl.includes("{agent}")) return { proxyUrl: tpl };
   const id = phone
     ? crypto.createHmac("sha256", String(env.PROFILE_KEY || "")).update(`proxy|${phone}`).digest("hex").slice(0, 16)
@@ -220,7 +243,17 @@ function claim(usesProfile, profileNameToCheck, deps) {
 async function createSession(opts = {}, deps = {}) {
   const sleep = deps.sleep || sleepReal;
   const random = deps.random || Math.random;
-  const body = Object.assign({}, proxyFor(deps.phone || null), opts, SESSION_DEFAULTS);
+  const proxy = proxyFor(deps.phone || null, deps.env || process.env);
+  const body = Object.assign({}, opts, proxy);
+  if (body.proxyUrl) {
+    // Driver normally checks and geolocates a SOCKS endpoint before launch.
+    // Supplying BOTH timezone and language skips that check and lets a dead
+    // proxy launch as Chrome's ERR_SOCKS_CONNECTION_FAILED page. Keep only the
+    // required Israeli country so Driver rejects dead or non-Israeli exits.
+    body.country = SESSION_DEFAULTS.country;
+    delete body.timezone;
+    delete body.language;
+  } else Object.assign(body, SESSION_DEFAULTS);
   if (body.note) body.note = scopeNote(body.note);
   console.log("driver: creating browser session", sessionLogLine(body));
   let attempt = 0;
@@ -231,6 +264,7 @@ async function createSession(opts = {}, deps = {}) {
       return s;
     } catch (e) {
       if (!(e instanceof DriverError)) throw e;
+      if (body.proxyUrl && e.status === 400 && /proxy|egress|country/i.test(e.message)) e.code = "proxy_unavailable";
       attempt++;
       if (e.status === 503 && attempt <= 5) { await sleep(backoffMs(e.retryAfter || 2, attempt, random())); continue; }
       if ((e.status === 504 || e.status === 500) && attempt <= 1) continue;
@@ -378,6 +412,7 @@ module.exports = {
   DriverError, createSession, getSession, listSessions, stopSession,
   cleanupOrphans, waitForActive, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
   redact, describeError, driverEnabled, bootCheck, devViewOn, mintViewerGrant, consumeViewerGrant,
+  proxyConfigProblem,
   _test: {
     backoffMs, scopeNote, proxyFor, sessionLogLine,
     setDevView: (v) => { devView = v; live.clear(); grants.clear(); },

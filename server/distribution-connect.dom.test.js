@@ -68,6 +68,7 @@ function findChromium() {
     const cases = [
       [{ start: 404, status: 404 }, "חיבור החשבון", /לא זמין/],
       [{ start: 503, body: { error: "driver_busy" }, status: 500 }, "חיבור החשבון", /תפוסים/],
+      [{ start: 503, body: { error: "proxy_unavailable" }, status: 500 }, "חיבור החשבון", /פרוקסי/],
       [{ start: 409, body: { error: "posting_disabled", reason: "account_disabled" }, status: 500 }, "חיבור החשבון", /מושהה/],
       [{ start: "network", status: 500 }, "חיבור החשבון", /אין חיבור לשרת/],
       [{ start: 409, body: { error: "profile_busy" }, status: 200 }, "חיבור מחדש", /משתמשת בחשבון/],
