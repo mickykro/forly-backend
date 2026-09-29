@@ -270,6 +270,7 @@ module.exports = function createWhatsappRouter(ctx) {
     const fileUrls = Array.isArray(body.file_urls) ? body.file_urls.filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim()).slice(0, 12) : [];
     const event = body.event === "photos_edited" ? "photos_edited" : null;
     const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string").slice(0, 12) : [];
+    const batchDone = event === "photos_edited" && body.batch_done === true;
     const audioUrl = typeof body.audio_url === "string" && /^https:\/\//.test(body.audio_url) ? body.audio_url : null;
     const videoUrl = typeof body.video_url === "string" && /^https:\/\//.test(body.video_url) ? body.video_url : null;
     const messageType = typeof body.message_type === "string" ? body.message_type.slice(0, 40) : "";
@@ -285,7 +286,7 @@ module.exports = function createWhatsappRouter(ctx) {
           `[whatsapp] ${phone} ← ${event ? `event:${event} photos=${photos.length}` : fileUrls.length ? `photos(${fileUrls.length})` : fileUrl ? "photo" : audioUrl ? "voice" : videoUrl ? "video" : messageType === "documentMessage" ? "document" : JSON.stringify(text)}` +
           ` | draft before: ${draft ? `${draft.status} (${draft.source}) ${describeAge(draft, now)}` : "none"}`
         );
-        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, videoUrl, messageType, quotedImageUrl, draft }, depsFor(phone, business));
+        const turn = await handleTurn({ phone, text, fileUrl, fileUrls, event, photos, audioUrl, videoUrl, messageType, quotedImageUrl, batchDone, draft }, depsFor(phone, business));
         // A text that ends a photo batch must not be followed by the timer's report too.
         if (turn.handled && !turn.armPhotoTimer) { clearTimeout(timers.get(phone)); timers.delete(phone); }
         console.log(
@@ -295,6 +296,7 @@ module.exports = function createWhatsappRouter(ctx) {
         );
         // An unclaimed message can still end a stale draft or an update hold.
         if (!turn.handled && turn.del) await db.deleteDraft(phone);
+        else if (!turn.handled && turn.draft) await db.saveDraft(turn.draft); // e.g. a draft back from an update
         const replied = turn.handled ? await persistAndSend(phone, turn) : false;
         console.log(`[whatsapp] ${phone} → ${turn.status} replied=${replied}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
         return {

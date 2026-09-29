@@ -114,8 +114,8 @@ function openFromKeyword(phone, deps, now) {
   return { handled: true, status: p.status, draft, replies: [R.opened("keyword"), ...p.replies] };
 }
 
-async function openDraft(phone, kind, text, deps, now) {
-  if (kind === "update") return updatePage(phone, text, deps, now);
+async function openDraft(phone, kind, text, deps, now, suspended = null) {
+  if (kind === "update") return updatePage(phone, text, deps, now, suspended);
   if (kind === "intent") return openFromIntent(phone, text, deps, now);
   return kind === "keyword" ? openFromKeyword(phone, deps, now) : openFromSource(phone, kind, text, deps, now);
 }
@@ -160,9 +160,12 @@ async function storePhoto(draft, fileUrlOrUrls, deps, now) {
   const seen = draft.photo_sources || [];
   const urls = [...new Set(raw)].filter((u) => !seen.includes(u));
   draft.photo_sources = seen.concat(urls);
+  if (draft.replace_next) { draft.photos = []; draft.replace_next = false; } // "תחליף את התמונות" came first
   const room = Math.max(0, MAX_PHOTOS - draft.photos.length);
   if (urls.length > room) draft.photos_dropped = (draft.photos_dropped || 0) + urls.length - room;
-  draft.photos.push(...(await importAll(urls.slice(0, room), deps.importPhoto)));
+  const added = await importAll(urls.slice(0, room), deps.importPhoto);
+  draft.photos.push(...added);
+  PC.noteBatch(draft, added, now);
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
 }
 
@@ -215,6 +218,14 @@ async function photosEdited(input, deps, draft, now) {
     const o = draft.pending_opener || {};
     draft.pending_opener = { ...o, photos: (o.photos || []).concat(hosted).slice(0, MAX_PHOTOS) };
     return { handled: true, status: `resume_pending:${draft.pending_opener.photos.length}`, draft: D.touch(draft, now), replies: [] };
+  }
+  // n8n's batch edit reports once, at the end, with every photo: that batch is the offer, now.
+  if (input.batchDone) {
+    const fresh = offeredDraft(phone, now);
+    fresh.photos = hosted.slice(0, MAX_PHOTOS);
+    if (!fresh.photos.length) return { handled: true, status: "batch_empty", replies: [] };
+    fresh.offer_sent = true;
+    return { handled: true, status: "offered", draft: fresh, replies: [R.offer(fresh.photos.length)] };
   }
   const target = draft && draft.status === "offered" && !draft.offer_sent ? draft : offeredDraft(phone, now);
   target.photos = target.photos.concat(hosted).slice(0, MAX_PHOTOS);
@@ -321,7 +332,17 @@ async function activeTurn(input, deps, draft, now) {
       return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble([first, ...C.withPriceCheck(draft, p.replies)])] };
     }
   }
+  const swap = PC.swapTurn(input, draft, now, (dr) => promptFor(dr, deps).replies);
+  if (swap) return swap;
   const step = D.nextStep(draft);
+  // "אני רוצה לעדכן מחיר בנכס בותיקים" mid-draft is about another page: the draft waits
+  // inside the update and comes back after it. Answers to a question are not checked
+  // unless they name a page/property ("בנכס", "בדף"), which a description may: skipped.
+  if (!cmd && step.field !== "description" && (step.kind !== "ask" || /(בנכס|בדף|לנכס|לדף)/.test(input.text || ""))) {
+    const kind = await openerOf(input.text, deps);
+    if (kind === "update") { const u = await updatePage(draft.phone, input.text, deps, now, draft); if (u.handled) return u; }
+    if (kind === "intent") return resumePrompt(draft, { text: input.text }, now);
+  }
   // "חסרים פרטים?" / "סיימת?" is a question, never the answer to the field being asked.
   // (Right after a failed answer, "מה זה?" is about that question: the retry example answers it.)
   if (step.kind === "ask" && !cmd && /\?\s*$/.test(String(input.text || "").trim()) && !C.hintedFields(input.text).length
@@ -366,10 +387,16 @@ async function handleTurn(input, deps) {
   const digit = /^\s*([1-3])\s*$/.exec(input.text || "");
   if (digit && draft && draft.last_buttons && draft.last_buttons[digit[1] - 1]) input = { ...input, text: draft.last_buttons[digit[1] - 1] };
   let dropped = false;
-  if (draft && D.isExpiredPrompt(draft, now)) { draft = null; dropped = true; }
+  if (draft && D.isExpiredPrompt(draft, now)) {
+    if (draft.suspended) draft = D.touch(draft.suspended, now); else { draft = null; dropped = true; }
+  }
   const withDrop = (t) => (dropped && !t.draft ? { ...t, del: true } : t);
 
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
+  if (draft && draft.status === "edit_request") {
+    if (photoUrlsOf(input) && !input.text && !input.event) return PC.editWith(draft, photoUrlsOf(input), now);
+    if (!input.event) { draft = null; dropped = true; } // anything else ends the request; judged on its own
+  }
 
   // A turn that rejected the message ("invalid:price") or simply repeated
   // itself without storing anything ("choose") got nothing out of it.
@@ -415,14 +442,14 @@ async function handleTurn(input, deps) {
   if (!draft) {
     if (photoUrlsOf(input) && !input.event) return PC.hold(null, phone, photoUrlsOf(input), now);
     const kind = await openerOf(input.text, deps);
-    if (!kind) return withDrop(notOurs("not_ours"));
+    if (!kind) return withDrop(PC.editRequest(input.text, phone, now) || notOurs("not_ours"));
     return openDraft(phone, kind, input.text, deps, now);
   }
   if (draft.status === "photo_choice") {
     if (input.event === "photo_timer") return PC.ask(draft);
     return PC.turn(input, deps, draft, now, { openDraft, openerOf, storePhoto, updatePage });
   }
-  if (draft.status === "updating") return updatingTurn(input, deps, draft, now, openDraft);
+  if (draft.status === "updating") return updatingTurn(input, deps, draft, now, { openDraft, promptFor, resumePrompt });
   if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
   if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
   if (draft.status === "building") {

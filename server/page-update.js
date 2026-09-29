@@ -62,13 +62,14 @@ async function proposeChanges(page, text, deps) {
  * draft holds them (D.isExpiredPrompt ends the hold) instead of passing them on
  * to n8n, which would edit every one of them.
  */
-async function updatePage(phone, text, deps, now) {
+async function updatePage(phone, text, deps, now, suspended = null) {
   const pages = deps.listPages ? await deps.listPages(phone) : [];
   if (!pages.length) return { handled: false, status: "no_pages", replies: [] };
   const page = matchPage(pages, String(text || ""));
   const links = (page ? [page] : pages.slice(0, 5))
     .map((p) => ({ title: p.property.title || p.property.address || p.page_id, url: deps.editUrl(p.page_id) }));
-  const draft = { phone, status: "updating", links, created_at: now, updated_at: now, hinted_at: now };
+  // An open property draft waits inside the update (suspended) and comes back after it.
+  const draft = { phone, status: "updating", links, created_at: now, updated_at: now, hinted_at: now, suspended };
   const pending = page ? await proposeChanges(page, String(text || ""), deps) : null;
   if (pending) {
     draft.pending_page = pending;
@@ -78,8 +79,10 @@ async function updatePage(phone, text, deps, now) {
 }
 
 // Photos while the hold lasts are the page's: held with a reminder. Text is a
-// fresh ask (openDraft, from whatsapp-intake) or ends the hold.
-async function updatingTurn(input, deps, draft, now, openDraft) {
+// fresh ask or ends the hold. h: whatsapp-intake's openDraft / promptFor / resumePrompt.
+async function updatingTurn(input, deps, draft, now, h) {
+  const back = draft.suspended ? D.touch(draft.suspended, now) : null;
+  const andBack = (replies) => (back ? [R.oneBubble([...replies, R.backToDraft(), ...h.promptFor(back).replies])] : replies);
   if (input.event) return { handled: false, status: "not_ours", replies: [] };
   if ((input.fileUrls && input.fileUrls.length) || input.fileUrl || input.videoUrl) {
     // One reminder per burst, not per webhook.
@@ -94,13 +97,15 @@ async function updatingTurn(input, deps, draft, now, openDraft) {
     draft.pending_page = null;
     if (cmd === "yes") {
       await deps.updatePageData(pending);
-      return { handled: true, status: "page_updated", draft, replies: [R.pageUpdated(pending.changes, draft.links[0].url)] };
+      return { handled: true, status: "page_updated", draft: back || draft, replies: andBack([R.pageUpdated(pending.changes, draft.links[0].url)]) };
     }
-    if (cmd === "no") return { handled: true, status: "page_kept", draft, replies: [R.kept()] };
+    if (cmd === "no") return { handled: true, status: "page_kept", draft: back || draft, replies: andBack([R.kept()]) };
   }
   const kind = await openerOf(input.text, deps);
-  if (kind) return openDraft(draft.phone, kind, input.text, deps, now);
-  return { handled: false, status: "not_ours", replies: [], del: true }; // talk about something else: the hold ends
+  if (kind === "update" || (kind && !back)) return h.openDraft(draft.phone, kind, input.text, deps, now, back);
+  if (kind) return h.resumePrompt(back, { text: input.text }, now); // a new property, with a draft still open
+  // Talk about something else: the hold ends (the waiting draft is back, n8n answers).
+  return back ? { handled: false, status: "not_ours", replies: [], draft: back } : { handled: false, status: "not_ours", replies: [], del: true };
 }
 
 module.exports = { updatePage, updatingTurn, matchPage, proposeChanges };
