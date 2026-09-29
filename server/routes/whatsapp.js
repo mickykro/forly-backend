@@ -343,14 +343,16 @@ module.exports = function createWhatsappRouter(ctx) {
     if (!payload || !payload.userId) return res.status(401).type("html").send(EXPIRED_PAGE);
     // Already logged in as this agent: keep the full session, don't downgrade it to review scope.
     const current = verifySession(authSecret, readToken(req));
-    if (current && current.userId === payload.userId) return res.redirect(`${baseUrl}/create.html?whatsapp=1`);
+    // Relative: the form opens on the host the link used (nadlan.call4li.com or
+    // forly.srv…), which is where the session cookie below is set.
+    if (current && current.userId === payload.userId) return res.redirect("/create.html?whatsapp=1");
     res.cookie("forly_session", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: Math.max(0, payload.exp * 1000 - Date.now()),
     });
-    res.redirect(`${baseUrl}/create.html?whatsapp=1`);
+    res.redirect("/create.html?whatsapp=1");
   });
 
   // create.html reads this once signed in via /review, to prefill the form

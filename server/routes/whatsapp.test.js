@@ -130,6 +130,19 @@ const { transcribe } = createWhatsappRouter;
     assert.equal(heard.filter((p) => p === "P7").length, 1, "two servers, one message");
   }
 
+  // ── the review link signs in and stays on the host it was opened on (nadlan.call4li.com) ──
+  {
+    const express = require("express");
+    const app = express().use("/w", createWhatsappRouter({ authSecret: "s", sweep: false, normalizeAuthPhone: (p) => p,
+      signSession: auth.signSession, baseUrl: "https://forly.example" }));
+    const server = app.listen(0);
+    const t = auth.signSession("s", "972500000001", { scope: "review", ttlS: 60 });
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/w/review?t=${encodeURIComponent(t)}`, { redirect: "manual" });
+    assert.deepEqual([r.status, r.headers.get("location")], [302, "/create.html?whatsapp=1"]);
+    assert.match(r.headers.get("set-cookie") || "", /forly_session=/);
+    server.close();
+  }
+
   console.log("routes/whatsapp.test.js ok");
   process.exit(0);
 })().catch((err) => { console.error(err); process.exit(1); });
