@@ -202,5 +202,14 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת", draft: t.draft }, d);
   assert.match(t.draft.fields.description || "", /משופצת/);
 
+  // ── the batch edit ends: one event with every edited photo → the offer, right away ──
+  ({ d } = deps());
+  const stale = { ...D.newDraft(PHONE, "photos", T0), status: "offered", offer_sent: true, photos: ["x1", "x2"] };
+  t = await turn({ event: "photos_edited", batchDone: true, photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg"], draft: stale }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 3, true], "this batch only, even under 4 photos");
+  assert.match(texts(t), /ערכתי 3 תמונות ✨ לבנות מהן דף נכס\?/);
+  t = await turn({ text: "כן", draft: t.draft }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length, t.status], ["active", 3, "asked:city"]);
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

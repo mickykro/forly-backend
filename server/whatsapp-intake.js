@@ -216,6 +216,14 @@ async function photosEdited(input, deps, draft, now) {
     draft.pending_opener = { ...o, photos: (o.photos || []).concat(hosted).slice(0, MAX_PHOTOS) };
     return { handled: true, status: `resume_pending:${draft.pending_opener.photos.length}`, draft: D.touch(draft, now), replies: [] };
   }
+  // n8n's batch edit reports once, at the end, with every photo: that batch is the offer, now.
+  if (input.batchDone) {
+    const fresh = offeredDraft(phone, now);
+    fresh.photos = hosted.slice(0, MAX_PHOTOS);
+    if (!fresh.photos.length) return { handled: true, status: "batch_empty", replies: [] };
+    fresh.offer_sent = true;
+    return { handled: true, status: "offered", draft: fresh, replies: [R.offer(fresh.photos.length)] };
+  }
   const target = draft && draft.status === "offered" && !draft.offer_sent ? draft : offeredDraft(phone, now);
   target.photos = target.photos.concat(hosted).slice(0, MAX_PHOTOS);
   D.touch(target, now);
