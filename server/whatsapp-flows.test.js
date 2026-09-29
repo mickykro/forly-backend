@@ -331,5 +331,28 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "2", draft: { ...structuredClone(photosAsked), last_buttons: ["להחליף", "להוסיף"] } }, d);
   assert.equal(gal.pagePatch["gallery.images"].length, 6, "added after the 4");
 
+  // ── no draft, but the chat has the ad and edited photos: "תעשי איך שנראה לך" builds from them ──
+  const nowS = Math.floor(T0.getTime() / 1000);
+  const chat = [ // newest first, like Green API
+    { type: "outgoing", typeMessage: "textMessage", textMessage: "איזה כותרת תרצה לדף הנכס?", timestamp: nowS - 60 },
+    { type: "incoming", typeMessage: "textMessage", textMessage: "למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת", timestamp: nowS - 600 },
+    { type: "outgoing", typeMessage: "imageMessage", downloadUrl: "https://fal/e2.jpg", timestamp: nowS - 1200 },
+    { type: "outgoing", typeMessage: "imageMessage", downloadUrl: "https://fal/e1.jpg", timestamp: nowS - 1300 },
+    { type: "incoming", typeMessage: "imageMessage", downloadUrl: "https://green/o1.jpg", timestamp: nowS - 1500 },
+  ];
+  let ctxSeen = null;
+  ({ d } = deps({ recentChat: async () => chat, resolve: async ({ text }) => ({ source: "text", text, photos: [] }),
+    classifyIntent: async (txt, ctx) => { ctxSeen = ctx; return ctx ? "new" : null; } }));
+  t = await turn({ text: "תערכי איך שנראה לך לנכון שיהיה אמין" }, d);
+  assert.equal(t.status.startsWith("recovered:"), true);
+  assert.deepEqual([t.draft.fields.price, t.draft.offered_photos], [2900000, ["https://files/e1.jpg", "https://files/e2.jpg"]], "the ad's fields, the edited photos (not the original)");
+  assert.match(ctxSeen, /Forly: איזה כותרת/);
+  assert.match(texts(t), /אספתי מהשיחה את פרטי הנכס מהמודעה ו-2 תמונות/);
+  // nothing in the chat to build from: no LLM call at all
+  let calls = 0;
+  ({ d } = deps({ recentChat: async () => [{ type: "incoming", typeMessage: "textMessage", textMessage: "היי", timestamp: nowS - 60 }], classifyIntent: async () => { calls++; return "new"; } }));
+  t = await turn({ text: "תעשי איך שנראה לך" }, d);
+  assert.deepEqual([t.handled, calls], [false, 0]);
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -72,7 +72,7 @@ const PHOTO_BATCH_MS = 20000;
 const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
-  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage,
+  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage, getHistory,
     uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
@@ -123,7 +123,9 @@ module.exports = function createWhatsappRouter(ctx) {
 
   function depsFor(phone, business) {
     return {
-      business, resolve, parseListing, classifyIntent: (t) => classify(t),
+      business, resolve, parseListing, classifyIntent: (t, context) => classify(t, { context }),
+      // The chat so far (newest first), for a page asked for with no draft (chat-recover.js).
+      recentChat: getHistory ? (p) => getHistory(`${p}@c.us`, 30) : null,
       listPages: async (p) => (await db.listPagesByPhone(p)).filter((pg) => pg.status === "active" && pg.property)
         .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at)),
       editUrl: (pageId) => `${baseUrl}/edit.html?id=${encodeURIComponent(pageId)}`,
