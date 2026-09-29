@@ -278,6 +278,7 @@ const CHOICE_HOLD_MS = 30 * 60 * 1000;
 function isExpiredPrompt(draft, now = new Date()) {
   if (draft.status === "updating") return silentFor(draft, now) > UPDATE_HOLD_MS;
   if (draft.status === "photo_choice") return silentFor(draft, now) > CHOICE_HOLD_MS;
+  if (draft.status === "edit_request") return silentFor(draft, now) > 10 * 60 * 1000;
   return (draft.status === "offered" || draft.status === "resume_prompt") && silentFor(draft, now) > PAUSE_MS;
 }
 

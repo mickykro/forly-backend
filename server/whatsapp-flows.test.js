@@ -250,5 +250,20 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "תצוגה מקדימה", draft: { ...t.draft, updated_at: new Date(T0.getTime() - 20 * 60000), status: "updating", suspended: ready8 } }, d);
   assert.equal(t.status, "confirm", "an expired hold gives the draft back too");
 
+  // ── 972547221770: the edit request came first, the 12 photos after, with no caption ──
+  ({ d } = deps({ classifyIntent: async () => null }));
+  const ask12 = "היי פורלי, אני רוצה להעלות 12 תמונות וננקה אותם מעצמים קטנים, נמחק מלל שכתוב מאחורה";
+  t = await turn({ text: ask12 }, d);
+  assert.deepEqual([t.handled, t.draft.status], [false, "edit_request"], "n8n answers it; the request is remembered");
+  const req = t.draft;
+  t = await turn({ fileUrls: ["https://green/1.jpg", "https://green/2.jpg"], draft: req, now: new Date(T0.getTime() + 20000) }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.edit_instruction], [false, "edit_requested", 2, ask12], "edited with his instruction, no 1/2/3/4");
+  t = await turn({ fileUrl: "https://green/3.jpg", draft: req, now: new Date(T0.getTime() + 11 * 60000) }, d);
+  assert.equal(t.draft.status, "photo_choice", "10 quiet minutes later it's over");
+  t = await turn({ text: "היי", draft: req }, d);
+  assert.deepEqual([t.handled, t.del], [false, true], "other text ends it");
+  t = await turn({ text: "מה שלומך היום" }, d);
+  assert.equal(t.draft, undefined, "talk that isn't about editing photos leaves nothing behind");
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

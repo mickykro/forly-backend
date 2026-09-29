@@ -393,6 +393,10 @@ async function handleTurn(input, deps) {
   const withDrop = (t) => (dropped && !t.draft ? { ...t, del: true } : t);
 
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
+  if (draft && draft.status === "edit_request") {
+    if (photoUrlsOf(input) && !input.text && !input.event) return PC.editWith(draft, photoUrlsOf(input), now);
+    if (!input.event) { draft = null; dropped = true; } // anything else ends the request; judged on its own
+  }
 
   // A turn that rejected the message ("invalid:price") or simply repeated
   // itself without storing anything ("choose") got nothing out of it.
@@ -438,7 +442,7 @@ async function handleTurn(input, deps) {
   if (!draft) {
     if (photoUrlsOf(input) && !input.event) return PC.hold(null, phone, photoUrlsOf(input), now);
     const kind = await openerOf(input.text, deps);
-    if (!kind) return withDrop(notOurs("not_ours"));
+    if (!kind) return withDrop(PC.editRequest(input.text, phone, now) || notOurs("not_ours"));
     return openDraft(phone, kind, input.text, deps, now);
   }
   if (draft.status === "photo_choice") {

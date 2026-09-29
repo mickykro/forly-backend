@@ -105,4 +105,21 @@ function swapTurn(input, draft, now, promptReplies) {
   return { handled: true, status: "replace_next", draft: D.touch(draft, now), replies: [R.sendReplacements(draft.photos.length)] };
 }
 
-module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn };
+/*
+ * "אני רוצה להעלות 12 תמונות וננקה אותן, נמחק מלל…" and then the photos, with no
+ * caption: the request is remembered ("edit_request" draft, 10 min, see
+ * D.isExpiredPrompt) and the photos are edited with it — not asked 1/2/3/4, and
+ * not the default enhancement. Any other text ends it.
+ */
+const EDIT_VERB = /(תנקה|תנקי|לנקות|ננקה|תערוך|תערכי|לערוך|נערוך|תשפר|תשפרי|לשפר|נשפר|תבהיר|להבהיר|נבהיר|תחדד|לחדד|נחדד|תסיר|תסירי|להסיר|נסיר|תמחק|תמחקי|למחוק|נמחק|תעצב|תעצבי|לעצב)/;
+function editRequest(text, phone, now) {
+  const t = String(text || "").trim();
+  if (!/תמונ/.test(t) || !EDIT_VERB.test(t)) return null;
+  return { handled: false, status: "not_ours", replies: [], draft: { phone, status: "edit_request", text: t.slice(0, 1000), created_at: now, updated_at: now } };
+}
+function editWith(draft, urls, now) {
+  draft.updated_at = now; // the rest of the burst uses it too
+  return { handled: false, status: "edit_requested", replies: [], draft, edit_photos: urls, edit_instruction: draft.text };
+}
+
+module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, editRequest, editWith };
