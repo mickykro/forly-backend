@@ -87,6 +87,28 @@ const { transcribe } = createWhatsappRouter;
     server.close();
   }
 
+  // ── staging (LINK_BASE_URL = production): agents get production links, never staging's ──
+  {
+    const express = require("express");
+    const D = require("../property-draft");
+    db.getBusiness = async () => ({ phone: "P8" });
+    const out = [];
+    const app = express().use(express.json()).use("/w", createWhatsappRouter({
+      authSecret: "s", n8nSecret: "k", sweep: false, normalizeAuthPhone: (p) => p, signSession: auth.signSession,
+      sendWhatsApp: async (p, m) => out.push(m), baseUrl: "https://staging.example", linkBaseUrl: "https://prod.example" }));
+    const server = app.listen(0);
+    const post = (body) => fetch(`http://127.0.0.1:${server.address().port}/w/intake`, { method: "POST",
+      headers: { "content-type": "application/json", "x-forly-secret": "k" }, body: JSON.stringify({ phone: "P8", ...body }) }).then((r) => r.json());
+    const ready = D.newDraft("P8", "text");
+    Object.assign(ready.fields, { city: "חיפה", price: 2000000, rooms: 3, deal: "sale", size_sqm: 80, floor: 2, parking: 1, neighborhood: "כרמל", description: "d" });
+    ready.photos = ["a", "b", "c", "d"];
+    await db.saveDraft(ready);
+    const r = await post({ message: "תצוגה מקדימה" });
+    assert.match(r.reply, /https:\/\/prod\.example\/create\.html\?whatsapp=1/);
+    assert.doesNotMatch(r.reply + out.join(" "), /staging\.example/, "no staging link reaches the agent");
+    server.close();
+  }
+
   console.log("routes/whatsapp.test.js ok");
   process.exit(0);
 })().catch((err) => { console.error(err); process.exit(1); });
