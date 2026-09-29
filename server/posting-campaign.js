@@ -66,7 +66,7 @@ async function create({ phone, page, groups, mode, days, repeat, consent, target
     phone, page_id: String(page.page_id),
     mode: mode === "per_post" ? "per_post" : "standing",
     repeat: repeat === true,
-    expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 14, 1), 30) * MS_DAY),
+    expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 30, 1), 30) * MS_DAY),
     consent_at: iso(consent.at), consent_version: consent.version || null,
     groups: normalizeGroups(groups, ctx),
     targets: A.targetsFor(conn, targets),
@@ -127,7 +127,7 @@ async function enrollNewPage(page, deps = {}) {
     // itself (page_gone, expired) — never one the agent, a revoked permission
     // or an operator stopped, and never a finished pass.
     const c = await create({
-      phone, page, groups, mode: perm.auto_mode === "per_post" ? "per_post" : "standing", days: 14, repeat: false,
+      phone, page, groups, mode: perm.auto_mode === "per_post" ? "per_post" : "standing", days: 30, repeat: false,
       targets: perm.targets, consent: { at: perm.granted_at, version: perm.consent_version },
     }, deps, { restartWhen: (cur) => ENROLL_RESTARTABLE.has(cur.pause_reason) });
     if (page.posting_enroll_error && typeof x.db.updatePage === "function") await x.db.updatePage(page.page_id, { posting_enroll_error: null });
@@ -384,9 +384,20 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
 // Copy is built from the page AS IT IS NOW — a price cut yesterday must not
 // be advertised at the old price today. The link goes in the first comment,
 // with a per-attempt click id (R4) issued at reservation.
+function copyVariantRound(c, target) {
+  const id = String(target.group_id || A.groupIdFromUrl(target.url) || target.url || "");
+  // Open posts do not advance the round: scheduling and retries therefore
+  // rebuild the exact same text. Only a completed/failed prior slot for this
+  // target moves the next campaign pass to a new deterministic variation.
+  return (c.posts || []).filter((p) => p && String(p.group_id || p.group_url || "") === id && !OPEN_POST.has(p.status)).length;
+}
 function buildCopy(page, c, target) {
   // linkInComment: the body never carries a URL, so no page URL is passed.
-  return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, "", { variantSeed: c.page_id + target.url, linkInComment: true });
+  const targetKey = target.group_id || A.groupIdFromUrl(target.url) || target.url;
+  const variantSeed = `${c.page_id}|${targetKey}`;
+  return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, "", {
+    variantSeed, variantRound: copyVariantRound(c, target), linkInComment: true,
+  });
 }
 
 // The post's media: the property's own walkthrough video (the one its page
@@ -486,5 +497,5 @@ module.exports = {
   startSweeper: (...a) => require("./posting-sweeper").startSweeper(...a),
   liveDeps: (...a) => require("./posting-sweeper").liveDeps(...a),
   haltAccount: (...a) => require("./posting-halts").haltAccount(...a),
-  _test: { mutate, say, buildCopy, scoreOf, candidatesFor, accountBlocked, importedNotAgentCreated, sha },
+  _test: { mutate, say, buildCopy, copyVariantRound, scoreOf, candidatesFor, accountBlocked, importedNotAgentCreated, sha },
 };

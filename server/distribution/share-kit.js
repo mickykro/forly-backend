@@ -1,16 +1,17 @@
 /*
  * distribution/share-kit.js — pure Hebrew copy builders for distribution.
  *
- * Groups get a WhatsApp "share kit" instead of automated posting: Meta removed
- * the Groups publishing API in 2022 and browser automation was rejected as a
- * ban risk (spec §1). So this module builds (a) the post copy used for the
- * Facebook Page / Instagram post, and (b) a WhatsApp message that lets the
- * agent paste that copy into their groups in ~5 taps.
+ * Shared copy builders for the automatic browser publisher and the manual
+ * fallback queue. The facts stay exact; only framing, fact order and CTA vary.
+ * A seed plus round makes every variation deterministic, so retries type the
+ * exact same approved text while a later completed round gets fresh framing.
  *
  * Pure functions — no I/O. Unit-tested in share-kit.test.js.
  */
 
-const MAX_GROUPS = 20;
+// A 30-day campaign can cover this pool under the existing daily/weekly caps;
+// widening the pool increases reach without increasing posting frequency.
+const MAX_GROUPS = 40;
 
 // 972501234567 → 0501234567 for display; anything non-IL stays as-is.
 function localPhone(p) {
@@ -38,13 +39,43 @@ function trackedUrl(pageUrl, { session, group }) {
  * text rather than inventing a new one each time.
  */
 const OPENERS = ["🏠", "🔑", "🏡", "✨", "📍"];
-const CTAS = [
+const HEADLINES = [
+  ({ icon, title }) => `${icon} ${title}`,
+  ({ icon, title }) => `${icon} נכס שכדאי להכיר — ${title}`,
+  ({ icon, title }) => `${icon} פרטי הנכס: ${title}`,
+  ({ icon, title }) => `${icon} למי שמחפשים באזור — ${title}`,
+  ({ icon, title }) => `${icon} אפשרות מעניינת באזור: ${title}`,
+];
+const LINK_CTAS = [
   "לכל הפרטים, תמונות וסרטון ⬅️",
   "סרטון הליכה, תמונות ומידע מלא ⬅️",
   "כל הפרטים והסרטון כאן ⬅️",
   "לצפייה בסרטון ובפרטים המלאים ⬅️",
+  "לפרטים המלאים ולצפייה בנכס ⬅️",
+  "תמונות, סרטון וכל המידע מחכים כאן ⬅️",
 ];
-const CLOSERS = ["", "מוזמנים לפנות 🙂", "אשמח להעביר פרטים נוספים", "פתוח לשאלות"];
+const COMMENT_CTAS = [
+  "קישור לסרטון ולפרטים המלאים בתגובה הראשונה 👇",
+  "את התמונות, הסרטון וכל המידע תמצאו בתגובה הראשונה 👇",
+  "לצפייה בנכס ובפרטים המלאים — הקישור בתגובה הראשונה 👇",
+  "הוספתי קישור עם הסרטון וכל הפרטים בתגובה הראשונה 👇",
+  "הקישור לפרטים, לתמונות ולסרטון נמצא בתגובה הראשונה 👇",
+  "רוצים לראות את כל הנכס? הקישור מחכה בתגובה הראשונה 👇",
+];
+const RESPONSE_CTAS = [
+  "לפרטים נוספים ולתיאום ביקור, כתבו לי בפרטי.",
+  "רוצים לבדוק התאמה? שלחו הודעה ואחזור עם הפרטים.",
+  "לשאלות ולתיאום, אפשר לפנות אליי.",
+  "אשמח לשלוח מידע נוסף ולתאם ביקור.",
+  "מוזמנים לכתוב לי בפרטי לכל שאלה.",
+  "אפשר לשלוח הודעה ולקבל את כל הפרטים.",
+];
+const FACT_ORDERS = [
+  ["rooms", "sqm", "floor"],
+  ["sqm", "rooms", "floor"],
+  ["rooms", "floor", "sqm"],
+  ["floor", "rooms", "sqm"],
+];
 
 function variantIndex(seed, mod) {
   const s = String(seed || "");
@@ -56,16 +87,22 @@ function variantIndex(seed, mod) {
 function buildPostCopy(page, pageUrl, opts = {}) {
   const p = (page && page.property) || {};
   const a = (page && page.agent) || {};
-  const seed = opts.variantSeed || "";
-  const pick = (arr) => arr[seed ? variantIndex(seed + arr.length, arr.length) : 0];
+  const seed = String(opts.variantSeed || "");
+  const round = Number.isSafeInteger(opts.variantRound) && opts.variantRound >= 0 ? opts.variantRound : 0;
+  const pick = (arr, key) => {
+    const base = seed ? variantIndex(`${seed}|${key}`, arr.length) : 0;
+    return arr[(base + round) % arr.length];
+  };
   const lines = [];
-  lines.push(`${pick(OPENERS)} ${p.title || "נכס חדש"}`);
+  const headline = pick(HEADLINES, "headline");
+  lines.push(headline({ icon: pick(OPENERS, "icon"), title: p.title || "נכס חדש" }));
   const loc = [p.neighborhood, p.city].filter(Boolean).join(", ");
   if (loc) lines.push(`📍 ${loc}`);
-  const facts = [];
-  if (Number(p.rooms) > 0) facts.push(`${p.rooms} חדרים`);
-  if (Number(p.size_sqm) > 0) facts.push(`${p.size_sqm} מ"ר`);
-  if (Number(p.floor) > 0) facts.push(`קומה ${p.floor}`);
+  const byFact = {};
+  if (Number(p.rooms) > 0) byFact.rooms = `${p.rooms} חדרים`;
+  if (Number(p.size_sqm) > 0) byFact.sqm = `${p.size_sqm} מ"ר`;
+  if (Number(p.floor) > 0) byFact.floor = `קומה ${p.floor}`;
+  const facts = pick(FACT_ORDERS, "fact_order").map((k) => byFact[k]).filter(Boolean);
   if (facts.length) lines.push(facts.join(" · "));
   if (Number(p.price) > 0) {
     const verb = p.listing_type === "rent" ? "שכירות" : "מחיר";
@@ -76,16 +113,15 @@ function buildPostCopy(page, pageUrl, opts = {}) {
   // spam (and Facebook scores the domain for it). The agent posts the link
   // as the first comment instead — standard practice in these groups.
   if (opts.linkInComment) {
-    lines.push("קישור לסרטון ולפרטים המלאים בתגובה הראשונה 👇");
+    lines.push(pick(COMMENT_CTAS, "comment_cta"));
   } else {
-    lines.push(`${pick(CTAS)} ${pageUrl}`);
+    lines.push(`${pick(LINK_CTAS, "link_cta")} ${pageUrl}`);
   }
   if (a.name) {
     const phone = localPhone(a.phone);
     lines.push(`${a.name}${phone ? ` · ${phone}` : ""}`);
   }
-  const closer = pick(CLOSERS);
-  if (closer) lines.push(closer);
+  lines.push(pick(RESPONSE_CTAS, "response_cta"));
   return lines.join("\n");
 }
 
@@ -170,9 +206,9 @@ function buildQueueMessage({ title, groupCount, queueUrl, postUrl }) {
  * so the denominator is what the agent will actually be asked to do, not a
  * count that changes meaning once a queue opens.
  *
- * X counts ONLY groups the agent marked posted by hand. Forly does not post to
- * groups (docs/distribution/DECISION-no-automation.md), so copied/opened are
- * preparation and must never inflate this number.
+ * X counts ONLY confirmed queue completions. copied/opened are preparation and
+ * must never inflate this legacy manual-queue number; automatic campaign
+ * outcomes are tracked by the posting attempt ledger instead.
  */
 function groupProgress(session, fallbackGroups) {
   const groups = session && Array.isArray(session.groups) ? session.groups : null;

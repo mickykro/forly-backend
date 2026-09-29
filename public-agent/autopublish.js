@@ -228,7 +228,7 @@
       const unknown = members().some((g) => left.includes(String(g.group_id)) && g.agent_policy === "unknown");
       try {
         await post("/api/posting/campaigns", {
-          page_id: p.page_id, group_ids: left, mode: mode(), days: 14, repeat: false, targets, consent: true,
+          page_id: p.page_id, group_ids: left, mode: mode(), days: 30, repeat: false, targets, consent: true,
           consent_version: settings.consent_version, include_unknown: unknown,
           account_aged: $("apAged").checked, posted_manually: $("apManual").checked,
         });

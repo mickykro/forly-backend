@@ -41,7 +41,9 @@ attempt:
    override Group-level restrictions.
 3. **Campaign limits.** Per-account, per-Group, duplicate, and cooldown rules
    limit repeat distribution and prevent the same listing from being scheduled
-   into an ineligible or recently used Group.
+   into an ineligible or recently used Group. A one-pass campaign may contain
+   up to 40 selected Groups and remain open for up to 30 days, but widening
+   that pool never raises the daily, weekly, or per-Group posting limits.
 4. **Pre-submit proof.** Immediately before submitting, the publisher verifies
    the logged-in identity, destination Group, composer destination, approved
    copy hash, and exactly one enabled Post control. A mismatch or unavailable
@@ -58,6 +60,10 @@ attempt:
    that can be shown to the agent and support team.
 8. **Data lifecycle.** Browser profiles are tied to the connected account and
    must be quarantined or revoked when a relevant account signal requires it.
+9. **Truthful copy variation.** Group posts may rotate headline framing, fact
+   order, first-comment wording, and response CTA. The property facts never
+   change. The variation is deterministic per Group and completed round so a
+   retry uses the exact same approved copy.
 
 ## Delivery model
 
@@ -90,6 +96,10 @@ scheduled → reserved → session_started → composer_ready
 4. **Controlled rollout.** New selectors, media types, or scheduling changes
    should begin with dry-run coverage and a limited canary cohort before being
    enabled across all accounts.
+5. **Natural content, not disguised behavior.** Copy should be concise,
+   relevant, and varied for readers. The system must not raise posting rates or
+   weaken identity, Group-policy, cooldown, verification, or halt controls to
+   imitate human behavior.
 
 ## Product metrics
 

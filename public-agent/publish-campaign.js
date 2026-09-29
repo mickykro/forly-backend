@@ -187,8 +187,8 @@
   function planText(mode, n, withPage) {
     const where = `${n} ${n === 1 ? "קבוצה" : "קבוצות"}${withPage ? " ובדף העסקי" : ""}`;
     return mode === "standing"
-      ? `פורלי תפרסם פעם אחת ב-${where}, בקצב שלה במשך השבועיים הקרובים, ואז תעצור לבד.`
-      : `לפני כל פוסט (${where}) תקבלו וואטסאפ עם הטקסט לאישור. בלי אישור לא מפרסמים.`;
+      ? `פורלי תפרסם פעם אחת ב-${where}, בקצב בטוח במשך 30 הימים הקרובים, ואז תעצור לבד.`
+      : `במשך 30 הימים הקרובים, לפני כל פוסט (${where}) תקבלו וואטסאפ עם הטקסט לאישור. בלי אישור לא מפרסמים.`;
   }
   const chipText = (c) => (!c ? "" : c.status === "running" ? "פעיל" : c.status === "paused" ? "מושהה" : c.status === "stopped" ? "נעצר"
     : c.status === "completed" ? `הושלם — ${(c.posts || []).filter((p) => p.status === "posted").length} פוסטים עלו` : "");
@@ -404,7 +404,7 @@
       try {
         await put("/api/posting/settings", settingsBody(ids, $("campAutoEnroll").checked, targets));
         const j = await post("/api/posting/campaigns", {
-          page_id: pageId, group_ids: ids, mode: mode(), days: 14, repeat: false, targets, consent: true,
+          page_id: pageId, group_ids: ids, mode: mode(), days: 30, repeat: false, targets, consent: true,
           consent_version: settings.consent_version, include_unknown: unknown,
           account_aged: $("campAged").checked, posted_manually: $("campManual").checked,
         });

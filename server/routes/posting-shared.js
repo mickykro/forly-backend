@@ -14,14 +14,14 @@ const { escapeHtml: esc } = require("../utils");
 
 // The version of the consent text the card (Task 23) shows. Stored on the
 // permission and on every campaign; bump it when the text changes.
-const CONSENT_VERSION = "2026-09-v1";
+const CONSENT_VERSION = "2026-09-v2"; // 30-day one-pass window and up to 40 selected Groups
 const PRIVATE_NAME = "קבוצה פרטית";
 const PAGE_NAME = "הדף העסקי";
 const ACTIONS = new Set(["approve", "skip", "stop"]);
 const ACT_TTL_S = 72 * 3600; // a one-tap link works for 72 hours
 const TARGETS = ["page", "groups"];
 const DEFAULT_TARGETS = ["groups"]; // the Page is opt-in, by the agent's explicit choice
-const MAX_GROUP_IDS = 20; // share-kit MAX_GROUPS: a campaign keeps at most 20 groups
+const MAX_GROUP_IDS = 40; // share-kit MAX_GROUPS: posting frequency limits are unchanged
 // A Task 14 group id: numeric, or "slug:<vanity>" until the driver resolves it.
 const GROUP_ID_RE = /^(?:\d{1,30}|slug:[^\s/|?#:]{1,120})$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;

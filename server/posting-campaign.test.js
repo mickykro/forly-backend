@@ -78,6 +78,23 @@ const PH = "972500000001";
     assert.equal(c.status, "completed", "every group posted once; repeat=false");
   }
 
+  // ── copy rotation: Group-specific, retry-stable, new after a completed round ──
+  {
+    const target = { group_id: "111", url: G(111) };
+    const campaign = { page_id: "pg1", posts: [] };
+    const first = C.buildCopy(page(), campaign, target);
+    assert.equal(first, C.buildCopy(page(), campaign, target), "same open round rebuilds exactly for retries");
+    const open = { page_id: "pg1", posts: [{ group_id: "111", status: "scheduled" }] };
+    assert.equal(first, C.buildCopy(page(), open, target), "an open post does not advance copy rotation");
+    const next = C.buildCopy(page(), { page_id: "pg1", posts: [{ group_id: "111", status: "posted" }] }, target);
+    assert.notEqual(next, first, "a completed prior Group post advances the deterministic round");
+    for (const text of [first, next]) {
+      assert.ok(text.includes("חיפה") && text.includes("2,000,000"), "rotated copy preserves listing facts");
+      assert.ok(!/https?:\/\//.test(text), "the body still contains no external URL");
+      assert.ok(text.includes("תגובה הראשונה"), "the first-comment CTA remains explicit");
+    }
+  }
+
   // ── restart (controller ruling 4): create on a completed/stopped campaign
   //    reactivates it with the new terms; history stays; only future posts ──
   {
