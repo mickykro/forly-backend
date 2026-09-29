@@ -74,6 +74,11 @@ const MAX_TEXT = 4000;
 module.exports = function createWhatsappRouter(ctx) {
   const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage, getHistory, adminPhones,
     uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
+  // Links sent to agents (LINK_BASE_URL): staging sends production's, so a real agent
+  // testing on staging lands on the live site. Its signing key is production's alone,
+  // so there the review link is the live create form (the agent logs in; the draft,
+  // in the shared Firestore, still prefills it).
+  const linkBase = ctx.linkBaseUrl || baseUrl;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
   const timers = new Map();
@@ -128,7 +133,7 @@ module.exports = function createWhatsappRouter(ctx) {
       recentChat: getHistory ? (p) => getHistory(`${p}@c.us`, 30) : null,
       listPages: async (p) => (await db.listPagesByPhone(p)).filter((pg) => pg.status === "active" && pg.property)
         .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at)),
-      editUrl: (pageId) => `${baseUrl}/edit.html?id=${encodeURIComponent(pageId)}`,
+      editUrl: (pageId) => `${linkBase}/edit.html?id=${encodeURIComponent(pageId)}`,
       cancelEdits: (p) => db.setEditCancel(p),
       // Approved in chat ("כן" to confirmPageChanges): the live page and its listing.
       updatePageData: async ({ page_id, listing_id, pagePatch, listingPatch }) => {
@@ -137,13 +142,14 @@ module.exports = function createWhatsappRouter(ctx) {
       },
       importPhoto: importPhotoFor(phone),
       importVideo: importPhotoFor(phone, { video: true }),
-      createUrl: `${baseUrl}/create.html`,
+      createUrl: `${linkBase}/create.html`,
       extractAllowed: (p) => limit.take(p),
       // /review signs the agent straight into create.html (same trust as
       // importPhotoFor's server-side session above, just handed to their
       // browser instead) prefilled from their draft; they review, edit and
       // build the page themselves there — see the /review and /draft routes.
-      reviewLink: (p) => `${baseUrl}/api/whatsapp/review?t=${encodeURIComponent(signSession(authSecret, p, { scope: "review", ttlS: REVIEW_TTL_S }))}`,
+      reviewLink: (p) => (linkBase !== baseUrl ? `${linkBase}/create.html?whatsapp=1`
+        : `${baseUrl}/api/whatsapp/review?t=${encodeURIComponent(signSession(authSecret, p, { scope: "review", ttlS: REVIEW_TTL_S }))}`),
       // "ליצור" in chat: same validation and paid quota unit as the form's /properties/create.
       transcribe,
       createListing: async (body) => {
@@ -241,7 +247,7 @@ module.exports = function createWhatsappRouter(ctx) {
     } catch (err) { console.warn("[whatsapp] context pages failed:", err.message); }
     return [
       `טיוטת דף נכס פתוחה: ${draft && draft.status === "active" ? "כן" : "לא"}`,
-      `דפי הנכס של הסוכן: ${pages.length ? pages.map((p) => `${p.property.title || p.property.address} — עורך: ${baseUrl}/edit.html?id=${p.page_id}`).join(" | ") : "אין"}`,
+      `דפי הנכס של הסוכן: ${pages.length ? pages.map((p) => `${p.property.title || p.property.address} — עורך: ${linkBase}/edit.html?id=${p.page_id}`).join(" | ") : "אין"}`,
       "דף נכס חדש: מתחיל כשהסוכן כותב ״דף נכס״ או שולח את פרטי הנכס. את לא שואלת את שאלות הדף בעצמך.",
       "לא נתמך בצ׳אט: עדכון תמונות / מחיר / פרטים / סרטון של דף קיים (רק בעורך הדף בקישור למעלה), יצירה מחדש של סרטון הדף, מחיקת דף.",
     ].join("\n");
