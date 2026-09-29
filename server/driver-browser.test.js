@@ -80,6 +80,22 @@ async function quiet(fn) {
   await D.createSession({ country: "DE" }, { fetchFn: async (u, init) => { sent = JSON.parse(init.body); return ok({ sessionId: "s3", status: "active", cdpUrl: "ws://z" }); }, apiKey: "k", sleep: async () => {} });
   assert.equal(sent.country, "IL", "a caller cannot opt out of Israel");
 
+  // ── an active session whose first tab is Chrome's network-error page is not healthy ──
+  {
+    let closed = false;
+    const page = {
+      url: () => "chrome-error://chromewebdata/",
+      innerText: async () => "ERR_SOCKS_CONNECTION_FAILED",
+      waitForLoadState: async () => {}, waitForTimeout: async () => {},
+    };
+    assert.deepEqual(await D.browserNetworkFailure(page), { error: "proxy_unavailable", browser_code: "ERR_SOCKS_CONNECTION_FAILED" });
+    assert.deepEqual(await D.inspectInitialPage({ sessionId: "net1", status: "active", cdpUrl: "ws://net" }, {
+      connectOverCDP: async () => ({ contexts: () => [{ pages: () => [page] }], close: async () => { closed = true; } }),
+    }), { error: "proxy_unavailable", browser_code: "ERR_SOCKS_CONNECTION_FAILED" });
+    assert.equal(closed, true, "the health-check CDP connection is always closed");
+    assert.equal(await D.browserNetworkFailure({ url: () => "https://www.facebook.com/login", innerText: async () => "Facebook" }), null);
+  }
+
   // ── the dev registry knows every live session, and is empty when the flag is off ──
   D._test.setDevView(true);
   const seen = [];

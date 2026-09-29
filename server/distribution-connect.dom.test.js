@@ -50,6 +50,7 @@ function findChromium() {
   app.get("/api/connections/browser/:p/view", (q, r) => {
     seen.views++;
     if (mode.view === "expired") return r.status(409).json({ error: "session_expired" });
+    if (mode.view === "proxy") return r.status(503).json({ error: "proxy_unavailable" });
     r.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
     r.write(": open\n\n");
     r.write(`data: ${JSON.stringify({ t: "frame", d: JPEG, w: 800, h: 600, u: "https://www.madlan.co.il/" })}\n\n`);
@@ -162,6 +163,13 @@ function findChromium() {
     await page.click("#browserConnectBtn_madlan");
     await page.waitForSelector(".cv-img:not([hidden])", { timeout: 5000 });
     assert.equal(seen.starts, 1, "one fresh browser");
+    await page.click("#browserModalClose");
+
+    // ── an old browser on Chrome's SOCKS error page is also replaced once ──
+    reset({ status: "open", view: "proxy", start: 200, afterStart: { view: "ok" } });
+    await page.click("#browserConnectBtn_madlan");
+    await page.waitForSelector(".cv-img:not([hidden])", { timeout: 5000 });
+    assert.equal(seen.starts, 1, "one fresh browser after a proxy error");
     await page.click("#browserModalClose");
     console.log("distribution-connect.dom.test.js ok");
   } finally { await browser.close(); srv.close(); }

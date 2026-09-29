@@ -318,6 +318,41 @@ async function waitForActive(session, deps = {}) {
   return s;
 }
 
+// Chrome's internal network-error page can appear even after Driver accepted
+// and activated a session (for example when a hosted or custom SOCKS route
+// dies after launch). Classify only explicit Chromium error pages/codes; never
+// infer failure from Facebook's own content.
+const NETWORK_ERROR_RE = /\bERR_(SOCKS_CONNECTION_FAILED|PROXY_CONNECTION_FAILED|TUNNEL_CONNECTION_FAILED|INTERNET_DISCONNECTED|CONNECTION_TIMED_OUT|CONNECTION_REFUSED|NAME_NOT_RESOLVED|ADDRESS_UNREACHABLE|NETWORK_CHANGED)\b/;
+async function browserNetworkFailure(page) {
+  let url = "", text = "";
+  try { url = String(page && page.url ? page.url() : ""); } catch (e) { /* page changed */ }
+  try { text = String(page && page.innerText ? await page.innerText("body", { timeout: 2000 }) : "").slice(0, 5000); } catch (e) { /* unreadable error page */ }
+  const match = `${url}\n${text}`.match(NETWORK_ERROR_RE);
+  const internal = /^chrome-error:\/\//i.test(url);
+  if (!match && !internal) return null;
+  const browserCode = match ? match[0] : "CHROME_ERROR_PAGE";
+  const proxy = /SOCKS|PROXY|TUNNEL/.test(browserCode);
+  return { error: proxy ? "proxy_unavailable" : "browser_network_unavailable", browser_code: browserCode };
+}
+
+// Called immediately after createSession by a caller that already owns the
+// local session-budget slot. It joins the new browser, inspects its first tab,
+// and disconnects without stopping the Driver session.
+async function inspectInitialPage(session, deps = {}) {
+  const active = await waitForActive(session, deps);
+  const connect = deps.connectOverCDP || ((url) => require("patchright").chromium.connectOverCDP(url));
+  const browser = await connect(active.cdpUrl);
+  try {
+    const context = browser.contexts()[0] || (await browser.newContext());
+    const page = context.pages()[0] || (await context.newPage());
+    if (page.waitForLoadState) await page.waitForLoadState("domcontentloaded", { timeout: deps.initialPageTimeoutMs || 15000 }).catch(() => {});
+    if (page.waitForTimeout) await page.waitForTimeout(250);
+    return await browserNetworkFailure(page);
+  } finally {
+    await browser.close();
+  }
+}
+
 /*
  * The only way this module hands out a page. Reuses the browser's own context
  * and tab (a fresh context is itself an automation signal) and guarantees the
@@ -410,7 +445,7 @@ async function deleteProfile(name, deps = {}) {
 
 module.exports = {
   DriverError, createSession, getSession, listSessions, stopSession,
-  cleanupOrphans, waitForActive, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
+  cleanupOrphans, waitForActive, inspectInitialPage, browserNetworkFailure, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
   redact, describeError, driverEnabled, bootCheck, devViewOn, mintViewerGrant, consumeViewerGrant,
   proxyConfigProblem,
   _test: {

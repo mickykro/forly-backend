@@ -158,10 +158,15 @@ async function open(key, sessionId, deps) {
     hub.context = browser.contexts()[0] || (await browser.newContext());
     browser.on("disconnected", () => { if (hubs.get(key) === hub) close(key, "session_ended"); });
     followPages(hub);
-    await watch(hub, hub.context.pages()[0] || (await hub.context.newPage()));
+    const page = hub.context.pages()[0] || (await hub.context.newPage());
+    if (page.waitForLoadState) await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+    const failure = await driverLive.browserNetworkFailure(page);
+    if (failure) throw Object.assign(err(failure.error), { browserCode: failure.browser_code });
+    await watch(hub, page);
   } catch (e) {
     hub.closed = true;
     try { await browser.close(); } catch (x) { /* ignore */ }
+    if (["proxy_unavailable", "browser_network_unavailable"].includes(e && e.code)) throw e;
     throw unavailable("screencast", e);
   }
   return hub;

@@ -140,6 +140,19 @@ const driverOk = { getSession: async (id) => ({ sessionId: id, status: "active",
     await V.close("p4|yad2");
   }
 
+  // ── a recorded session already sitting on Chrome's proxy error is refused ──
+  {
+    const f = fakeBrowser();
+    f.page.url = () => "chrome-error://chromewebdata/";
+    f.page.innerText = async () => "לא ניתן לגשת לאתר הזה ERR_SOCKS_CONNECTION_FAILED";
+    await assert.rejects(
+      V.attach("p-error|facebook", "sError", { driver: driverOk, connectOverCDP: async () => f.browser }),
+      (e) => e.code === "proxy_unavailable",
+    );
+    assert.ok(f.calls.some((c) => c[0] === "close"));
+    assert.ok(!V._hubs.has("p-error|facebook"));
+  }
+
   // ── an ended session, a full house, a popup ──
   {
     const gone = { getSession: async () => ({ status: "completed" }), waitForActive: async () => { throw new Error("session ended"); } };
