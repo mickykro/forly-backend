@@ -5,7 +5,8 @@
  *
  * Never rendered: a wss:// or viewer URL, a profile name, a phone, a raw
  * error message (only Hebrew per error code). Every group name is escaped —
- * names come from Facebook. The only links out are https facebook.com URLs.
+ * names come from Facebook. A Group post's destination kind is shown as text;
+ * private WhatsApp/property destination URLs never leave the server here.
  *
  * The pure helpers are CampaignUI; under node it is module.exports
  * (publish-campaign.test.js). In the browser publish.js calls
@@ -165,7 +166,14 @@
     if (VISIBILITY[m.visibility]) parts.push(VISIBILITY[m.visibility]);
     return parts.join(" · ");
   }
-  const REACH_NOTE = "חשיפה (reach) לא זמינה בקבוצות — פייסבוק לא מוסרת אותה. סופרים כניסות ולידים מהקישור שבפוסט, ולייקים ותגובות שבודקים כיממה אחרי הפרסום.";
+  const REACH_NOTE = "חשיפה (reach) לא זמינה בקבוצות — פייסבוק לא מוסרת אותה. כניסות ולידים נספרים כשמצורף קישור ישיר של פורלי; לייקים ותגובות נבדקים כיממה אחרי הפרסום.";
+  const LINK_NOTICE = {
+    property: "קישור ישיר לדף הנכס של פורלי יצורף בתגובה הראשונה.",
+    whatsapp: "כדי לגוון את דרך הפנייה, קישור הנכס של פורלי לא יצורף. במקום זאת יצורף קישור לוואטסאפ שלכם כדי שמתעניינים יפנו ישירות.",
+    facebook_page: "כדי להוביל דרך תוכן שכבר פורסם בפייסבוק, קישור הנכס של פורלי לא יצורף. במקום זאת יצורף הפוסט הקיים בדף העסקי, שבו נמצא קישור הנכס.",
+    none: "כדי לשמור על פוסט קצר ללא קישור חיצוני, קישור הנכס של פורלי לא יצורף. הפוסט יזמין לפנות אליכם בפרטי; תוכלו לשלוח את דף הנכס בשיחה.",
+  };
+  const linkNotice = (kind) => LINK_NOTICE[kind] || "";
 
   const usable = (g) => !!g && g.membership_state === "member" && !DISALLOWED.has(g.agent_policy);
   function groupNote(g) {
@@ -203,7 +211,7 @@
 
   const CampaignUI = {
     esc, fmt, fbUrl, cardPages, errorText, disabledText, waitText, estimateText, haltInfo, approveBlocked, statusText, metricsText, usable, groupNote,
-    defaultPicks, planText, chipText, splitPasses, FIRST_WEEK, REACH_NOTE, HALT, ERRORS,
+    defaultPicks, planText, chipText, splitPasses, linkNotice, FIRST_WEEK, REACH_NOTE, HALT, ERRORS,
   };
   if (typeof module === "object" && module.exports) { module.exports = CampaignUI; return; }
   // ui: the same helpers for autopublish.js (the all-properties page).
@@ -285,9 +293,11 @@
       const link = p.status === "posted" && U.fbUrl(p.post_url);
       const m = c.metrics && c.metrics[p.id];
       const stats = U.metricsText(m);
+      const destination = U.linkNotice(p.link_kind);
       li.innerHTML = `<div class="l1"><span class="camp-gn">${U.esc(p.group_name)}</span><span class="st st-${U.esc(p.status)}">${U.esc(U.statusText(p))}</span></div>` +
         `<div class="l2">${U.esc(U.fmt(p.posted_at || p.scheduled_at))}${link ? ` · <a href="${U.esc(link)}" target="_blank" rel="noopener noreferrer">לפוסט ↗</a>` : ""}` +
-        `${stats ? ` · ${U.esc(stats)}` : ""}</div>${Why.failDetail(p) ? `<div class="l3 camp-small camp-muted">${U.esc(Why.failDetail(p))}</div>` : ""}`;
+        `${stats ? ` · ${U.esc(stats)}` : ""}</div>${destination ? `<div class="l3 camp-small camp-muted">${U.esc(destination)}</div>` : ""}` +
+        `${Why.failDetail(p) ? `<div class="l3 camp-small camp-muted">${U.esc(Why.failDetail(p))}</div>` : ""}`;
       if (p.status === "pending_approval") {
         if (typeof p.copy === "string") {
           const d = document.createElement("details"); d.open = true;

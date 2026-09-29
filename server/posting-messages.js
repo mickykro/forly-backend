@@ -21,6 +21,7 @@
  * privacy); otherwise it is "קבוצה" — never its URL.
  */
 const { actionLink } = require("./routes/posting-shared");
+const { notice: destinationNotice } = require("./posting-destination");
 
 const FENCE = "──────────";
 const GROUP = "קבוצה";
@@ -61,14 +62,14 @@ function build({ pageBaseUrl, authSecret }) {
   return {
     // A post is ready for a tap — the exact copy Forly will post under the agent's name.
     approve: (c, p) => msg(`פוסט מוכן ל${nameOf(p)}`,
-      `יעלה ${when(p.scheduled_at)} — אחרי האישור שלכם.\n${FENCE}\n${p.copy}\n`,
+      `יעלה ${when(p.scheduled_at)} — אחרי האישור שלכם.\n${destinationNotice(p.link_kind)}\n${FENCE}\n${p.copy}\n`,
       [btn("לאישור", link(c.id, p.id, "approve")),
         btn(p.target === "page" ? "לדילוג על הפוסט" : "לדילוג על הקבוצה", link(c.id, p.id, "skip")),
         ...stopBtn(c, p.id)],
       "לא מפרסמים בלי האישור שלכם"),
 
     // A post went out on its own (standing mode) — a stop button, no approval needed.
-    posted: (c, p) => msg("✅ הפוסט עלה", `הפוסט עלה ל${nameOf(p)}.`,
+    posted: (c, p) => msg("✅ הפוסט עלה", `הפוסט עלה ל${nameOf(p)}.\n${destinationNotice(p.link_kind)}`,
       [...(p && /^https:\/\//.test(p.post_url || "") ? [btn("לצפייה בפוסט", p.post_url)] : []), ...stopBtn(c)]),
 
     // Two posts in a row didn't land: Forly paused itself rather than keep guessing.

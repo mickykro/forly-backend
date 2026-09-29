@@ -62,6 +62,16 @@ const COMMENT_CTAS = [
   "הקישור לפרטים, לתמונות ולסרטון נמצא בתגובה הראשונה 👇",
   "רוצים לראות את כל הנכס? הקישור מחכה בתגובה הראשונה 👇",
 ];
+const WHATSAPP_COMMENT_CTAS = [
+  "לשיחה ישירה ולקבלת כל הפרטים — קישור לוואטסאפ בתגובה הראשונה 👇",
+  "רוצים לשאול או לתאם? קישור לוואטסאפ מחכה בתגובה הראשונה 👇",
+  "אפשר לדבר איתי ישירות דרך קישור הוואטסאפ בתגובה הראשונה 👇",
+];
+const PAGE_COMMENT_CTAS = [
+  "לפוסט המלא עם התמונות והקישור לנכס — התגובה הראשונה 👇",
+  "הפוסט בדף העסקי, כולל הקישור לכל הפרטים, נמצא בתגובה הראשונה 👇",
+  "לצפייה בפוסט המלא בדף העסקי — הקישור בתגובה הראשונה 👇",
+];
 const RESPONSE_CTAS = [
   "לפרטים נוספים ולתיאום ביקור, כתבו לי בפרטי.",
   "רוצים לבדוק התאמה? שלחו הודעה ואחזור עם הפרטים.",
@@ -113,7 +123,10 @@ function buildPostCopy(page, pageUrl, opts = {}) {
   // spam (and Facebook scores the domain for it). The agent posts the link
   // as the first comment instead — standard practice in these groups.
   if (opts.linkInComment) {
-    lines.push(pick(COMMENT_CTAS, "comment_cta"));
+    const destination = opts.destinationKind || "property";
+    if (destination === "whatsapp") lines.push(pick(WHATSAPP_COMMENT_CTAS, "whatsapp_comment_cta"));
+    else if (destination === "facebook_page") lines.push(pick(PAGE_COMMENT_CTAS, "page_comment_cta"));
+    else if (destination !== "none") lines.push(pick(COMMENT_CTAS, "comment_cta"));
   } else {
     lines.push(`${pick(LINK_CTAS, "link_cta")} ${pageUrl}`);
   }

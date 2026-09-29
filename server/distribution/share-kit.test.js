@@ -132,6 +132,13 @@ assert.ok(!qm0.includes("undefined"));
   assert.ok(!body.includes(url), "no external link in the post body");
   assert.ok(body.includes("בתגובה הראשונה"), "tells the reader where the link is");
   assert.ok(body.includes("₪4,200,000"), "facts still present");
+  const wa = buildPostCopy(page, url, { variantSeed: "wa", linkInComment: true, destinationKind: "whatsapp" });
+  assert.ok(wa.includes("וואטסאפ") && wa.includes("תגובה הראשונה"), "WhatsApp destination has an accurate CTA");
+  const fb = buildPostCopy(page, url, { variantSeed: "fb", linkInComment: true, destinationKind: "facebook_page" });
+  assert.ok(fb.includes("בדף העסקי") && fb.includes("תגובה הראשונה"), "Page-post destination has an accurate CTA");
+  const none = buildPostCopy(page, url, { variantSeed: "none", linkInComment: true, destinationKind: "none" });
+  assert.ok(!none.includes("תגובה הראשונה"), "CTA-only posts never promise a missing comment link");
+  assert.match(none, /כתבו|לכתוב|שלחו|לפנות|לתאם|הודעה/, "CTA-only post tells readers how to respond");
 }
 
 // ── group progress: X of Z, and X counts agent-confirmed posts ONLY ──

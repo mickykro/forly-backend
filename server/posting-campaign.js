@@ -20,6 +20,7 @@
 const crypto = require("crypto");
 const safety = require("./posting-safety");
 const shareKit = require("./distribution/share-kit");
+const destinations = require("./posting-destination");
 const { redact } = require("./driver-browser");
 const A = require("./posting-account");
 
@@ -391,12 +392,12 @@ function copyVariantRound(c, target) {
   // target moves the next campaign pass to a new deterministic variation.
   return (c.posts || []).filter((p) => p && String(p.group_id || p.group_url || "") === id && !OPEN_POST.has(p.status)).length;
 }
-function buildCopy(page, c, target) {
+function buildCopy(page, c, target, destinationKind = "property") {
   // linkInComment: the body never carries a URL, so no page URL is passed.
   const targetKey = target.group_id || A.groupIdFromUrl(target.url) || target.url;
   const variantSeed = `${c.page_id}|${targetKey}`;
   return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, "", {
-    variantSeed, variantRound: copyVariantRound(c, target), linkInComment: true,
+    variantSeed, variantRound: copyVariantRound(c, target), linkInComment: true, destinationKind,
   });
 }
 
@@ -431,13 +432,17 @@ async function schedulePost(decision, deps = {}, now) {
   const conn = (await x.db.getConnection(c.phone)) || {};
   const target = decision.target === "page" ? A.pageTarget(conn) : c.groups.find((g) => g.group_id === decision.group_id);
   if (!target) return c;
-  const copy = buildCopy(page, c, target);
+  const variantRound = copyVariantRound(c, target);
+  const pagePostUrl = decision.target === "page" ? null : await destinations.pagePostUrl(x.db, c.page_id);
+  const destination = destinations.choose({ page, campaign: c, target: { ...target, target: decision.target }, pagePostUrl, variantRound });
+  const copy = buildCopy(page, c, target, destination.kind);
   const video = videoOf(page);
   const base = {
     id: crypto.randomUUID(), target: decision.target === "page" ? "page" : "group",
     group_id: target.group_id, group_url: target.url, group_name: target.name || "",
     scheduled_at: iso(decision.at), created_at: iso(now), approved_at: null, posting_started_at: null, posted_at: null,
     post_url: null, error_code: null, attempt_key: null, retries: 0, copy, copy_hash: sha(copy),
+    link_kind: destination.kind, link_url: destination.url,
     video_url: video.video_url, poster_url: video.poster_url,
   };
   // Appended only while the campaign is still running (a STOP may have landed

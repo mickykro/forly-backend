@@ -14,13 +14,13 @@
  * state. Nothing at or past submit_started is ever submitted again: it goes
  * to outcome_unknown and reconciliation.
  */
-const { publicUrl } = require("./utils");
 const safety = require("./posting-safety");
 const { redact } = require("./driver-browser");
 const { profileName } = require("./profile-name");
 const A = require("./posting-account");
 const C = require("./posting-campaign");
 const H = require("./posting-halts");
+const destinations = require("./posting-destination");
 const { loginOpen } = require("./profile-lock");
 
 const { iso, tail, fail, ms, ctxOf, nowOf, configOf, mutate, say, tellOperator, MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST } = A;
@@ -200,7 +200,7 @@ async function runDue(c, post, st, deps, x, now) {
   // agent approved exact text — if the page changed since, ask again (text
   // the agent edited: when the text it was edited from is no longer current).
   // The video is part of what was approved: a new (or first) one asks again.
-  const fresh = C._test.buildCopy(page, c, target);
+  const fresh = C._test.buildCopy(page, c, target, post.link_kind || "property");
   const video = C.videoOf(page);
   const stale = post.copy_edited ? sha(fresh) !== post.base_hash : fresh !== post.copy;
   if (c.mode === "per_post" && (stale || (post.video_url || null) !== video.video_url)) {
@@ -296,7 +296,7 @@ async function runAttempt(attempt, st, deps, now) {
     return settle(attempt.key, null, null, st, deps, x, now);
   }
   const args = {
-    attempt, copy, comment: publicUrl(require("./posting-attribution").clickLink(deps.pageBaseUrl || "", c.page_id, attempt.click_id)), // never a local address
+    attempt, copy, comment: destinations.commentUrl(post, attempt, { pageBaseUrl: deps.pageBaseUrl || "", campaignId: c.id }),
     profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0),
     dryRun: deps.dryRun === true, campaignId: c.id, phone, videoUrl: (video && video.video_url) || null,
     [post.target === "page" ? "pageUrl" : "groupUrl"]: target.url,

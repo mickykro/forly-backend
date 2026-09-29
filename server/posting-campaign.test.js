@@ -42,6 +42,8 @@ const PH = "972500000001";
     assert.ok(!/https?:\/\//.test(p.copy), "no link in the body");
     assert.ok(/^[0-9a-f]{32}$/.test(p.copy_hash));
     assert.equal(p.group_token, undefined, "no s=/g= token on campaign posts (R4)");
+    assert.ok(["property", "whatsapp", "none"].includes(p.link_kind), "the real first-comment destination is stored with the post");
+    assert.equal(p.link_kind === "whatsapp", /^https:\/\/wa\.me\//.test(p.link_url || ""), "only WhatsApp stores its canonical URL here");
 
     // ── due: it posts; the copy is replaced by its hash; the attempt carries a click id (R4) ──
     c = await S.tick(c, deps, at(dueOf(c)));
@@ -53,7 +55,9 @@ const PH = "972500000001";
     assert.equal(a.state, "verified_posted");
     assert.equal(a.publisher, "browser");
     assert.equal(new Date(a.click_expires_at) - new Date(a.click_issued_at), 30 * DAY);
-    assert.equal(deps.post.calls[0].comment, `https://f.ly/p/pg1/${a.click_id}`, "the link carries only the click code");
+    if (p.link_kind === "property") assert.equal(deps.post.calls[0].comment, `https://f.ly/p/pg1/${a.click_id}`, "property links carry only the click code");
+    else if (p.link_kind === "whatsapp") assert.match(deps.post.calls[0].comment, /^https:\/\/wa\.me\//, "the stored WhatsApp destination is used");
+    else assert.equal(deps.post.calls[0].comment, null, "CTA-only posts do not create a link comment");
     assert.match(a.click_id, /^[a-hjkmnp-z2-9]{6}$/, "a short code");
     assert.equal(deps.post.calls[0].groupUrl, G(111));
     const ga = (await store.getGroupActivityFor(["111"], NOW))["111"];
@@ -220,7 +224,10 @@ const PH = "972500000001";
     await S.tick(c, Object.assign({}, deps, { pageBaseUrl: "http://127.0.0.1:8787" }), at(dueOf(await store.getPostingCampaign(c.id))));
     assert.equal(deps.post.calls.length, 1);
     assert.equal(deps.post.calls[0].videoUrl, V, "the driver attaches it");
-    assert.ok(deps.post.calls[0].comment.startsWith("https://nadlan.call4li.com/p/pg1/"), deps.post.calls[0].comment);
+    const planned = (await store.getPostingCampaign(c.id)).posts[0];
+    if (planned.link_kind === "property") assert.ok(deps.post.calls[0].comment.startsWith("https://nadlan.call4li.com/p/pg1/"), deps.post.calls[0].comment);
+    else if (planned.link_kind === "whatsapp") assert.match(deps.post.calls[0].comment, /^https:\/\/wa\.me\//);
+    else assert.equal(deps.post.calls[0].comment, null);
     assert.deepEqual(C.videoOf({ hero: { video_url: "javascript:x", poster_url: V } }), { video_url: null, poster_url: null }, "http(s) only");
     // Never a local dev address: the video and the first comment's link are the public ones.
     // The video is downloaded from where it lives, never from a rewritten address (a local upload 404'd on prod).

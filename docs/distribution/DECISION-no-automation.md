@@ -64,6 +64,13 @@ attempt:
    order, first-comment wording, and response CTA. The property facts never
    change. The variation is deterministic per Group and completed round so a
    retry uses the exact same approved copy.
+10. **Transparent destination variation.** A Group post may use the canonical
+    Forly property page, the agent's canonical WhatsApp link, an existing
+    Facebook Page post that already carries the property link, or no external
+    link with a direct-response CTA. The chosen destination is persisted with
+    the planned post and disclosed to the agent before approval, or in the
+    posted notice for standing mode. When the Forly property link is withheld,
+    the notice explains why and what replaces it.
 
 ## Delivery model
 
@@ -100,6 +107,12 @@ scheduled → reserved → session_started → composer_ready
    relevant, and varied for readers. The system must not raise posting rates or
    weaken identity, Group-policy, cooldown, verification, or halt controls to
    imitate human behavior.
+6. **No link cloaking or block evasion.** Destination variation uses only real,
+   canonical destinations. Forly must not rotate domains, create aliases, use
+   shorteners, build redirect chains, or otherwise conceal the property URL to
+   bypass Facebook detection. If Facebook rejects or blocks the Forly domain,
+   that destination is paused and surfaced to the agent and operator; it is not
+   routed around.
 
 ## Product metrics
 
