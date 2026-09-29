@@ -39,7 +39,7 @@ const { transcribe } = createWhatsappRouter;
   const d1 = await db.getDraft("P1");
   assert.deepEqual([d1.status, d1.mode, d1.listing_id], ["active", null, null], "the draft that built it can retry");
   assert.match(msgs.find(([p]) => p === "P1")[1], /ליצור/);
-  assert.match(msgs.find(([p]) => p === "P2")[1], /בניית הדף \(3 חד׳ בבאר שבע, ₪1,250,000\) נכשלה/, "names the property");
+  assert.match(msgs.find(([p]) => p === "P2")[1], /הדף \(3 חד׳ בבאר שבע, ₪1,250,000\) עדיין לא מוכן[\s\S]*צוות Forly בודק/, "names the property; the team takes it");
   msgs.length = 0;
   await router.sweepStuckBuilds(now);
   assert.equal(msgs.length, 0, "a failed listing is reported once");

@@ -120,9 +120,17 @@ function editRequest(text, phone, now) {
   if (!/תמונ/.test(t) || !EDIT_VERB.test(t)) return null;
   return { handled: false, status: "not_ours", replies: [], draft: { phone, status: "edit_request", text: t.slice(0, 1000), created_at: now, updated_at: now } };
 }
+// "אני רוצה לערוך עוד תמונות לנכס אחר" says to edit, not how: n8n's default enhancement then.
+const GENERIC_WORDS = new Set(["היי", "פורלי", "אני", "רוצה", "רוצים", "צריך", "צריכה", "בבקשה", "עוד", "את", "של", "גם", "כמה", "אלה", "האלה",
+  "תמונות", "התמונות", "תמונה", "לנכס", "נכס", "לדירה", "אחר", "אחרת", "חדש", "חדשה", "שלי", "לי", "ל", "ה", "ו"]);
+function instructionOf(text) {
+  const rest = String(text || "").replace(/[.,!?:;״"'׳()\-]/g, " ").split(/\s+/).filter(Boolean)
+    .filter((w) => !GENERIC_WORDS.has(w) && !EDIT_VERB.test(w));
+  return rest.length ? text : "";
+}
 function editWith(draft, urls, now) {
   draft.updated_at = now; // the rest of the burst uses it too
-  return { handled: false, status: "edit_requested", replies: [], draft, edit_photos: urls, edit_instruction: draft.text };
+  return { handled: false, status: "edit_requested", replies: [], draft, edit_photos: urls, edit_instruction: instructionOf(draft.text) };
 }
 
 // ── moved from whatsapp-intake.js (promptFor is its next-question) ──

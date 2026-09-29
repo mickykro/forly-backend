@@ -92,6 +92,9 @@ function recovered(hadAd, photos) {
   const what = [hadAd ? "את פרטי הנכס מהמודעה" : null, photos ? `${photos} תמונות` : null].filter(Boolean).join(" ו-");
   return { text: `בונים דף נכס 🏠 אספתי מהשיחה ${what}.` };
 }
+function duplicatePage(title) {
+  return { text: `יש לך כבר דף לנכס הזה: ${title}. לעדכן את הדף הקיים (תמונות ופרטים), או ליצור דף חדש?`, buttons: ["לעדכן את הקיים", "דף חדש"] };
+}
 function useEdited(n) {
   return { text: `להשתמש ב-${n === 1 ? "תמונה שערכתי" : `${n} התמונות שערכתי`} קודם לנכס הזה?`, buttons: ["כן", "לא"] };
 }
@@ -202,8 +205,9 @@ function listingPhotosFailed() { return { text: "מצאתי תמונות במו�
 function firstLinkOnly() { return { text: "קראתי את הקישור הראשון. את השני שלחו אחרי שנסיים עם הנכס הזה." }; }
 function buildFailed(retry, listing = {}) {
   const which = headline(listing);
-  const head = `בניית הדף${which ? ` (${which})` : ""} נכשלה 😕`;
-  return { text: retry ? `${head} כתבו ״ליצור״ כדי לנסות שוב.` : `${head} אפשר לשלוח שוב את הקישור או את טקסט המודעה, או לכתוב ״נכס חדש״.` };
+  // Resending the listing would only fail the same way (and cost again): the team looks at it.
+  const head = `הדף${which ? ` (${which})` : ""} עדיין לא מוכן — הייתה תקלה ביצירת הסרטון 😕 צוות Forly בודק ויחזור אליך בהקדם 🙏`;
+  return { text: retry ? `${head}\nאפשר גם לכתוב ״ליצור״ כדי לנסות שוב.` : head };
 }
 function outOfQuota(message) { return { text: message || "נגמרה המכסה שלך ליצירת דפים. כתבו לנו לחידוש החבילה." }; }
 function building(s) { return { text: `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).` }; }
@@ -230,7 +234,7 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, recovered, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, recovered, duplicatePage, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

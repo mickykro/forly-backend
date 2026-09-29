@@ -197,6 +197,7 @@ app.use("/api", createIntakeRouter({
 const createWhatsappRouter = require("./routes/whatsapp");
 app.use("/api/whatsapp", createWhatsappRouter({
   n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone, signSession, authSecret: AUTH_SECRET, quota,
+  adminPhones: ADMIN_PHONES,
   // null when Green API is unset so the response's `replied` is honest and n8n forwards `reply`.
   sendWhatsApp: GREENAPI_INSTANCE && GREENAPI_TOKEN
     ? (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
