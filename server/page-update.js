@@ -66,6 +66,8 @@ async function updatePage(phone, text, deps, now, suspended = null) {
   const pages = deps.listPages ? await deps.listPages(phone) : [];
   if (!pages.length) return { handled: false, status: "no_pages", replies: [] };
   const page = matchPage(pages, String(text || ""));
+  // Mid-draft, "לעדכן מחיר" that names no page is about the draft itself, not a live page.
+  if (suspended && !page) return { handled: false, status: "no_page_named", replies: [] };
   const links = (page ? [page] : pages.slice(0, 5))
     .map((p) => ({ title: p.property.title || p.property.address || p.page_id, url: deps.editUrl(p.page_id) }));
   // An open property draft waits inside the update (suspended) and comes back after it.
