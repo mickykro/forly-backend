@@ -23,6 +23,7 @@ const A = require("./posting-account");
 const T = require("./posting-tick");
 const H = require("./posting-halts");
 const R = require("./posting-recheck");
+const localMode = require("./posting-local");
 
 const { iso, tail, ms, ctxOf, tellOperator, MS_HOUR } = A;
 const SWEEP_MS = 60 * 1000;
@@ -178,11 +179,13 @@ async function sweep(deps = {}, now) {
     for (const phone of phones) state.accounts.set(phone, { at: stamp(), outcome: await T.tickAccount(phone, deps, at()) });
     // Connected accounts with nothing running still warm up — at most one new
     // browse per sweep, so a fleet of fresh connections is spread out.
-    const idle = (await x.store.listConnectedPhones("facebook").catch(() => [])).filter((p) => !phones.includes(p));
-    for (const phone of idle) {
-      const outcome = await T.warmIdle(phone, deps, at()).catch((e) => { console.error(redact(`posting warm-up ${tail(phone)}: ${code(e)}`)); return "error"; });
-      state.accounts.set(phone, { at: stamp(), outcome });
-      if (outcome === "browse_started") break;
+    if (!localMode.skipWarmup(deps.env || process.env)) {
+      const idle = (await x.store.listConnectedPhones("facebook").catch(() => [])).filter((p) => !phones.includes(p));
+      for (const phone of idle) {
+        const outcome = await T.warmIdle(phone, deps, at()).catch((e) => { console.error(redact(`posting warm-up ${tail(phone)}: ${code(e)}`)); return "error"; });
+        state.accounts.set(phone, { at: stamp(), outcome });
+        if (outcome === "browse_started") break;
+      }
     }
     state.last = { at: stamp(), result: "ticked", accounts: phones.length };
     return phones.length;

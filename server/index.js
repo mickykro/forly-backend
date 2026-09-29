@@ -23,6 +23,12 @@ const auth = require("./auth");
 })();
 
 // ── environment guards, before anything touches Driver ──
+const postingLocal = require("./posting-local");
+const localPostingProblem = postingLocal.problem(process.env);
+if (localPostingProblem) {
+  console.error(`FATAL: ${localPostingProblem}. Refusing to start.`);
+  process.exit(1);
+}
 // A wrong FORLY_ENV would mix prod and staging browser profiles; the dev
 // viewer must never exist off a local box. See driver-browser.js bootCheck.
 const driverBrowser = require("./driver-browser");
@@ -261,7 +267,7 @@ if (driverBoot.enabled) {
     // next sweep) wherever the sweeper may run. A short pause lets Driver finish
     // saving the profile the login browser just closed [Unverified: needed].
     onConnected: (phone, platform) => {
-      if (platform !== "facebook" || !devPostingDeps || !require("./posting-guard").postingEnvAllowed(process.env)) return;
+      if (platform !== "facebook" || postingLocal.skipWarmup(process.env) || !devPostingDeps || !require("./posting-guard").postingEnvAllowed(process.env)) return;
       const t = setTimeout(() => {
         require("./posting-tick").warmIdle(phone, devPostingDeps)
           .catch((e) => console.error(require("./driver-browser").redact(`warm-up on connect: ${(e && (e.code || e.name)) || "error"}`)));
@@ -310,7 +316,7 @@ if (driverBoot.enabled) {
 // refuses DRIVER_DEV_VIEW=1 anywhere else.
 if (driverBoot.devView) {
   app.use("/api/dev/driver", require("./routes/dev-driver")({ requireAdmin, requireStepUp, posting: devPostingDeps ? { deps: devPostingDeps } : null }));
-  console.warn("FORLY_ENV=local: every Driver browser is shown at /dev-driver.html (DRIVER_DEV_VIEW=0 turns it off)");
+  console.warn(`${postingLocal.enabled(process.env) ? "POSTING_LOCAL_TEST=1: no warm-up; every post needs approval;" : "FORLY_ENV=local:"} every Driver browser is shown at /dev-driver.html`);
 }
 
 // ── failed-post screenshots (posting-shots.js): local and staging only ──

@@ -16,7 +16,7 @@ const { db, store } = K;
     const { app } = await setup();
     const no = await call(app, "POST", "/api/posting/campaigns", { page_id: "pg1", group_ids: ["111"], mode: "standing" });
     assert.equal(no.status, 400); assert.equal(no.body.error, "consent_required");
-    for (const bad of [{ mode: "fast" }, { group_ids: "111" }, { group_ids: ["https://www.facebook.com/groups/111"] }, { page_id: "a/b" }, { days: 90 }, { group_ids: Array.from({ length: 21 }, (_, i) => String(i + 1)) }]) {
+    for (const bad of [{ mode: "fast" }, { group_ids: "111" }, { group_ids: ["https://www.facebook.com/groups/111"] }, { page_id: "a/b" }, { days: 90 }, { group_ids: Array.from({ length: 41 }, (_, i) => String(i + 1)) }]) {
       const r = await call(app, "POST", "/api/posting/campaigns", consented(bad));
       assert.equal(r.status, 400, JSON.stringify(bad)); assert.equal(r.body.error, "invalid_input");
     }

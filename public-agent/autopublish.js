@@ -41,7 +41,7 @@
   // The post preview: shown per property, and always once before a property
   // is first switched on (its confirm button is what switches it on).
   const previewOpen = new Set(), previewed = new Set(), confirming = new Set();
-  const previews = new Map(); // `${page_id}|${group_id}` → { copy, comment_link, author, group_name } | "loading" | "error"
+  const previews = new Map(); // `${page_id}|${group_id}` → exact copy + disclosed destination | "loading" | "error"
   function previewKey(p) { return `${p.page_id}|${[...groupsOf(p)][0] || ""}`; }
   function loadPreview(p) {
     const k = previewKey(p), gid = [...groupsOf(p)][0];
@@ -56,13 +56,17 @@
     if (!v || v === "loading") return '<div class="ap-preview"><p class="camp-muted">טוענים את הפוסט…</p></div>';
     if (v === "error") return '<div class="ap-preview"><p class="ap-note">לא הצלחנו להציג את הפוסט — נסו שוב.</p></div>';
     const who = U.esc(v.author || "החשבון שלכם");
+    const comment = v.comment_link
+      ? `<div class="ap-fb-comment"><b>${who}</b> <span dir="ltr">${U.esc(v.comment_link)}</span><small>תגובה ראשונה — היעד שנבחר לפוסט הזה</small></div>`
+      : '<div class="ap-fb-comment"><small>לא תפורסם תגובה עם קישור בפוסט הזה.</small></div>';
     return `<div class="ap-preview"><div class="ap-fb">
         <div class="ap-fb-head"><b>${who}</b> ◂ ${U.esc(v.group_name || "הקבוצה")}</div>
         <div class="ap-fb-body">${U.esc(v.copy)}</div>
         ${/^https?:\/\//.test(v.video_url || "") ? `<video class="ap-fb-video" controls playsinline preload="metadata" src="${U.esc(v.video_url)}"${/^https?:\/\//.test(v.poster_url || "") ? ` poster="${U.esc(v.poster_url)}"` : ""}></video>` : ""}
-        <div class="ap-fb-comment"><b>${who}</b> <span dir="ltr">${U.esc(v.comment_link)}</span><small>תגובה ראשונה — הקישור לדף הנכס</small></div>
+        ${comment}
       </div>
-      <p class="camp-muted camp-small">כך ייראה הפוסט. הנוסח משתנה מעט מקבוצה לקבוצה, והמחיר והפרטים נלקחים מדף הנכס ברגע הפרסום.</p>
+      <p class="ap-note">${U.esc(v.link_notice || U.linkNotice(v.link_kind))}</p>
+      <p class="camp-muted camp-small">כך ייראה הפוסט. הנוסח והיעד משתנים מקבוצה לקבוצה, והמחיר והפרטים נלקחים מדף הנכס ברגע הפרסום.</p>
       ${confirming.has(p.page_id) ? `<button type="button" class="btn btn-gold btn-sm" data-confirm="${id}">נראה טוב — הפעלת פרסום אוטומטי</button>` : ""}</div>`;
   }
   const busy = new Set(); // page_ids with a request in flight
@@ -228,7 +232,7 @@
       const unknown = members().some((g) => left.includes(String(g.group_id)) && g.agent_policy === "unknown");
       try {
         await post("/api/posting/campaigns", {
-          page_id: p.page_id, group_ids: left, mode: mode(), days: 14, repeat: false, targets, consent: true,
+          page_id: p.page_id, group_ids: left, mode: mode(), days: 30, repeat: false, targets, consent: true,
           consent_version: settings.consent_version, include_unknown: unknown,
           account_aged: $("apAged").checked, posted_manually: $("apManual").checked,
         });

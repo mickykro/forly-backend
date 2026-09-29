@@ -45,6 +45,20 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(pd.phone, PHONE); assert.equal(pd.platform, "facebook"); assert.equal(pd.lockHeld, true);
   }
 
+  // ── watched local test: real visible browser, but no feed warm-up or social dwell ──
+  {
+    const h = harness();
+    let dwelt = 0;
+    h.deps.env = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1" };
+    h.deps.socialDwell = async () => { dwelt++; return []; };
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.equal(out.state, "verified_posted");
+    assert.equal(h.page.st.visited[0], GROUP_URL, "opens the approved destination directly");
+    assert.ok(!h.page.st.visited.includes("https://www.facebook.com/"), "does not open the feed for warm-up");
+    assert.equal(dwelt, 0, "no social warm-up actions");
+    assert.equal(h.submits(), 1);
+  }
+
   // ── the property's video: fetched before any browser, attached in the composer before the text, then posted ──
   {
     const VIDEO = { name: "property.mp4", mimeType: "video/mp4", buffer: Buffer.from("mp4") };
@@ -163,6 +177,21 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.deepEqual([out.state, out.error_code], ["verified_failed", "destination_mismatch"]);
     assert.equal(h.submits(), 0);
     assert.ok(S.submit.includes(S.composerRoot) && S.composerTarget.includes(S.composerRoot) && S.composerAuthor.includes(S.composerRoot), "scoped to the composer root");
+  }
+  // The Post button must exist exactly once and be enabled before submit_started.
+  // Otherwise nothing was attempted: this is a calibration failure, never an
+  // ambiguous click that needs reconciliation.
+  for (const [page, label] of [
+    [{ counts: { [S.submit]: 0 } }, "missing Post button"],
+    [{ attrs: { [S.submit]: "true" } }, "disabled Post button"],
+  ]) {
+    const h = harness({ page });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.error_code], ["verified_failed", "submit_unavailable"], label);
+    assert.equal(h.submits(), 0, `${label}: zero clicks`);
+    assert.ok(!h.states().includes("submit_started"), `${label}: never entered submit`);
+    assert.equal(h.transitions.at(-1).d.error_check, "submit_button");
+    assert.equal(require("./posting-halts").classOf("submit_unavailable"), "selector_failure");
   }
   // M8: every keystroke goes through a locator (the editor, then the comment box) — never page.keyboard.type
   {

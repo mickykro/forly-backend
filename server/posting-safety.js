@@ -36,6 +36,7 @@
 const crypto = require("crypto");
 const { normalizeCity } = require("./distribution/city-normalize");
 const { classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS } = require("./posting-signals");
+const localMode = require("./posting-local");
 
 const DEFAULTS = {
   timezone: "Asia/Jerusalem",
@@ -177,8 +178,8 @@ function configFrom(settings, env = {}) {
   const out = structuredClone(DEFAULTS);
   const v = settings && settings.group_global_daily_cap;
   if (Number.isInteger(v) && v > 0) out.group_global_daily_cap = v;
-  if (env.FORLY_ENV === "local" && env.POSTING_WARMUP !== "1") out.warmup = [];
-  if (env.FORLY_ENV === "local" && env.POSTING_PACING !== "1") {
+  if (localMode.skipWarmup(env) || (env.FORLY_ENV === "local" && env.POSTING_WARMUP !== "1")) out.warmup = [];
+  if (localMode.enabled(env) || (env.FORLY_ENV === "local" && env.POSTING_PACING !== "1")) {
     Object.assign(out, LOCAL_PACING, { active_hours: { start: 0, end: 24 } });
   }
   return out;

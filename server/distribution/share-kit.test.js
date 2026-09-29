@@ -44,7 +44,7 @@ assert.deepEqual(sanitizeGroups([
   "https://www.facebook.com/groups/dira.bemerkaz",
 ]);
 assert.equal(sanitizeGroups(null).length, 0, "non-array ⇒ empty, not a crash");
-const many = Array.from({ length: 30 }, (_, i) => `https://www.facebook.com/groups/g${i}`);
+const many = Array.from({ length: 60 }, (_, i) => `https://www.facebook.com/groups/g${i}`);
 assert.equal(sanitizeGroups(many).length, MAX_GROUPS, "capped at MAX_GROUPS");
 
 // ── sharer link URL-encodes the page URL ──
@@ -106,12 +106,23 @@ assert.ok(!qm0.includes("undefined"));
   assert.equal(a, aAgain, "same seed ⇒ identical text (a retry must not rewrite the post)");
   const seeds = ["g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8"]
     .map((s) => buildPostCopy(page, url, { variantSeed: s }));
-  assert.ok(new Set(seeds).size > 1, "different groups get different phrasing");
+  assert.ok(new Set(seeds).size >= 5, "different groups get broad phrasing and CTA variation");
   // facts are never varied — only the framing is
   for (const text of [a, b, ...seeds]) {
     assert.ok(text.includes("₪4,200,000"), "price identical everywhere");
     assert.ok(text.includes("4 חדרים") && text.includes("105"), "facts identical everywhere");
     assert.ok(text.includes("4 חד׳ בבבלי"), "title identical everywhere");
+    assert.match(text, /כתבו|לכתוב|שלחו|לפנות|לתאם|הודעה/, "every variation has a response CTA");
+  }
+
+  const round0 = buildPostCopy(page, url, { variantSeed: "pg1|groupA", variantRound: 0, linkInComment: true });
+  const round1 = buildPostCopy(page, url, { variantSeed: "pg1|groupA", variantRound: 1, linkInComment: true });
+  assert.notEqual(round0, round1, "a later completed round rotates the description and CTA");
+  assert.equal(round1, buildPostCopy(page, url, { variantSeed: "pg1|groupA", variantRound: 1, linkInComment: true }), "same round is retry-stable");
+  for (const text of [round0, round1]) {
+    assert.ok(text.includes("₪4,200,000") && text.includes("4 חדרים") && text.includes("105"), "rounds preserve every property fact");
+    assert.ok(!text.includes(url), "rounds keep the external link out of the body");
+    assert.ok(text.includes("תגובה הראשונה"), "rounds point to the first-comment link");
   }
 }
 
@@ -121,6 +132,13 @@ assert.ok(!qm0.includes("undefined"));
   assert.ok(!body.includes(url), "no external link in the post body");
   assert.ok(body.includes("בתגובה הראשונה"), "tells the reader where the link is");
   assert.ok(body.includes("₪4,200,000"), "facts still present");
+  const wa = buildPostCopy(page, url, { variantSeed: "wa", linkInComment: true, destinationKind: "whatsapp" });
+  assert.ok(wa.includes("וואטסאפ") && wa.includes("תגובה הראשונה"), "WhatsApp destination has an accurate CTA");
+  const fb = buildPostCopy(page, url, { variantSeed: "fb", linkInComment: true, destinationKind: "facebook_page" });
+  assert.ok(fb.includes("בדף העסקי") && fb.includes("תגובה הראשונה"), "Page-post destination has an accurate CTA");
+  const none = buildPostCopy(page, url, { variantSeed: "none", linkInComment: true, destinationKind: "none" });
+  assert.ok(!none.includes("תגובה הראשונה"), "CTA-only posts never promise a missing comment link");
+  assert.match(none, /כתבו|לכתוב|שלחו|לפנות|לתאם|הודעה/, "CTA-only post tells readers how to respond");
 }
 
 // ── group progress: X of Z, and X counts agent-confirmed posts ONLY ──

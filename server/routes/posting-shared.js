@@ -14,14 +14,14 @@ const { escapeHtml: esc } = require("../utils");
 
 // The version of the consent text the card (Task 23) shows. Stored on the
 // permission and on every campaign; bump it when the text changes.
-const CONSENT_VERSION = "2026-09-v1";
+const CONSENT_VERSION = "2026-09-v3"; // disclosed destination rotation; no cloaking or alternate domains
 const PRIVATE_NAME = "קבוצה פרטית";
 const PAGE_NAME = "הדף העסקי";
 const ACTIONS = new Set(["approve", "skip", "stop"]);
 const ACT_TTL_S = 72 * 3600; // a one-tap link works for 72 hours
 const TARGETS = ["page", "groups"];
 const DEFAULT_TARGETS = ["groups"]; // the Page is opt-in, by the agent's explicit choice
-const MAX_GROUP_IDS = 20; // share-kit MAX_GROUPS: a campaign keeps at most 20 groups
+const MAX_GROUP_IDS = 40; // share-kit MAX_GROUPS: posting frequency limits are unchanged
 // A Task 14 group id: numeric, or "slug:<vanity>" until the driver resolves it.
 const GROUP_ID_RE = /^(?:\d{1,30}|slug:[^\s/|?#:]{1,120})$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -31,7 +31,7 @@ const SECRET_RE = /wss?:\/\/|viewer\.driver\.dev/i;
 const CAMPAIGN_FIELDS = ["id", "page_id", "mode", "repeat", "status", "pause_reason", "wait_reason", "expires_at",
   "consent_at", "consent_version", "targets", "restarted_at", "created_at", "updated_at"];
 const GROUP_FIELDS = ["group_id", "agent_policy", "is_member", "catalog_policy", "listing_type_allowed", "posting_currently_available"];
-const POST_FIELDS = ["id", "target", "group_id", "status", "scheduled_at", "approved_at", "posted_at", "error_code", "error_check", "failed_step"];
+const POST_FIELDS = ["id", "target", "group_id", "status", "scheduled_at", "approved_at", "posted_at", "error_code", "error_check", "failed_step", "link_kind"];
 
 // Task 22: per-post metrics (posting-metrics.forCampaign) — counts, a
 // visibility state and a time; never an attempt key, a click id or a person.

@@ -20,6 +20,8 @@
 const crypto = require("crypto");
 const safety = require("./posting-safety");
 const shareKit = require("./distribution/share-kit");
+const destinations = require("./posting-destination");
+const localMode = require("./posting-local");
 const { redact } = require("./driver-browser");
 const A = require("./posting-account");
 
@@ -61,12 +63,13 @@ async function create({ phone, page, groups, mode, days, repeat, consent, target
   const now = nowOf(deps, x);
   phone = String(phone);
   const conn = (await x.db.getConnection(phone)) || {};
+  const approvalOnly = localMode.requireApproval(deps.env || process.env);
   const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
   const c = {
     phone, page_id: String(page.page_id),
-    mode: mode === "per_post" ? "per_post" : "standing",
+    mode: approvalOnly || mode === "per_post" ? "per_post" : "standing",
     repeat: repeat === true,
-    expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 14, 1), 30) * MS_DAY),
+    expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 30, 1), 30) * MS_DAY),
     consent_at: iso(consent.at), consent_version: consent.version || null,
     groups: normalizeGroups(groups, ctx),
     targets: A.targetsFor(conn, targets),
@@ -127,7 +130,7 @@ async function enrollNewPage(page, deps = {}) {
     // itself (page_gone, expired) — never one the agent, a revoked permission
     // or an operator stopped, and never a finished pass.
     const c = await create({
-      phone, page, groups, mode: perm.auto_mode === "per_post" ? "per_post" : "standing", days: 14, repeat: false,
+      phone, page, groups, mode: perm.auto_mode === "per_post" ? "per_post" : "standing", days: 30, repeat: false,
       targets: perm.targets, consent: { at: perm.granted_at, version: perm.consent_version },
     }, deps, { restartWhen: (cur) => ENROLL_RESTARTABLE.has(cur.pause_reason) });
     if (page.posting_enroll_error && typeof x.db.updatePage === "function") await x.db.updatePage(page.page_id, { posting_enroll_error: null });
@@ -384,9 +387,20 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
 // Copy is built from the page AS IT IS NOW — a price cut yesterday must not
 // be advertised at the old price today. The link goes in the first comment,
 // with a per-attempt click id (R4) issued at reservation.
-function buildCopy(page, c, target) {
+function copyVariantRound(c, target) {
+  const id = String(target.group_id || A.groupIdFromUrl(target.url) || target.url || "");
+  // Open posts do not advance the round: scheduling and retries therefore
+  // rebuild the exact same text. Only a completed/failed prior slot for this
+  // target moves the next campaign pass to a new deterministic variation.
+  return (c.posts || []).filter((p) => p && String(p.group_id || p.group_url || "") === id && !OPEN_POST.has(p.status)).length;
+}
+function buildCopy(page, c, target, destinationKind = "property") {
   // linkInComment: the body never carries a URL, so no page URL is passed.
-  return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, "", { variantSeed: c.page_id + target.url, linkInComment: true });
+  const targetKey = target.group_id || A.groupIdFromUrl(target.url) || target.url;
+  const variantSeed = `${c.page_id}|${targetKey}`;
+  return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, "", {
+    variantSeed, variantRound: copyVariantRound(c, target), linkInComment: true, destinationKind,
+  });
 }
 
 // The post's media: the property's own walkthrough video (the one its page
@@ -420,19 +434,24 @@ async function schedulePost(decision, deps = {}, now) {
   const conn = (await x.db.getConnection(c.phone)) || {};
   const target = decision.target === "page" ? A.pageTarget(conn) : c.groups.find((g) => g.group_id === decision.group_id);
   if (!target) return c;
-  const copy = buildCopy(page, c, target);
+  const variantRound = copyVariantRound(c, target);
+  const pagePostUrl = decision.target === "page" ? null : await destinations.pagePostUrl(x.db, c.page_id);
+  const destination = destinations.choose({ page, campaign: c, target: { ...target, target: decision.target }, pagePostUrl, variantRound });
+  const copy = buildCopy(page, c, target, destination.kind);
   const video = videoOf(page);
+  const approvalOnly = localMode.requireApproval(deps.env || process.env);
   const base = {
     id: crypto.randomUUID(), target: decision.target === "page" ? "page" : "group",
     group_id: target.group_id, group_url: target.url, group_name: target.name || "",
     scheduled_at: iso(decision.at), created_at: iso(now), approved_at: null, posting_started_at: null, posted_at: null,
     post_url: null, error_code: null, attempt_key: null, retries: 0, copy, copy_hash: sha(copy),
+    link_kind: destination.kind, link_url: destination.url,
     video_url: video.video_url, poster_url: video.poster_url,
   };
   // Appended only while the campaign is still running (a STOP may have landed
   // since the read above); the mode is the committed one.
   const next = await mutate(x, c.id, (cur) => (cur.status !== "running" ? null : {
-    posts: cur.posts.concat([{ ...base, status: cur.mode === "per_post" ? "pending_approval" : "scheduled" }]),
+    posts: cur.posts.concat([{ ...base, status: approvalOnly || cur.mode === "per_post" ? "pending_approval" : "scheduled" }]),
     wait_reason: null, duplicate_review: decision.duplicate_review || null,
   }));
   const post = next && next.posts.find((p) => p.id === base.id);
@@ -486,5 +505,5 @@ module.exports = {
   startSweeper: (...a) => require("./posting-sweeper").startSweeper(...a),
   liveDeps: (...a) => require("./posting-sweeper").liveDeps(...a),
   haltAccount: (...a) => require("./posting-halts").haltAccount(...a),
-  _test: { mutate, say, buildCopy, scoreOf, candidatesFor, accountBlocked, importedNotAgentCreated, sha },
+  _test: { mutate, say, buildCopy, copyVariantRound, scoreOf, candidatesFor, accountBlocked, importedNotAgentCreated, sha },
 };

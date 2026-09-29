@@ -181,11 +181,15 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const gid = typeof req.query.group_id === "string" && req.query.group_id.length <= 120 ? req.query.group_id : null;
     const m = gid ? S_.findMember(conn, gid) : null;
     const cat = m ? S_.catalogLookup(await S.catalog(null))(m) : null;
-    const target = { group_id: m ? m.group_id : null, url: m ? S_.memberUrl(m) : `preview:${pageId}` };
+    const target = { target: "group", group_id: m ? m.group_id : null, url: m ? S_.memberUrl(m) : `preview:${pageId}` };
+    const D = require("../posting-destination");
+    const destination = D.choose({ page, campaign: { page_id: pageId, posts: [] }, target,
+      pagePostUrl: await D.pagePostUrl(db, pageId), variantRound: 0 });
     return res.json({
       ...(({ videoOf, videoView }) => videoView(videoOf(page)))(require("../posting-campaign")), // the post's video; the copy is its description
-      copy: campaigns.buildCopy(page, { page_id: pageId }, target),
-      comment_link: require("../utils").publicUrl(`${S.pageBaseUrl || deps.pageBaseUrl || ""}/p/${pageId}`),
+      copy: campaigns.buildCopy(page, { page_id: pageId, posts: [] }, target, destination.kind),
+      comment_link: D.previewUrl(destination, { pageBaseUrl: S.pageBaseUrl || deps.pageBaseUrl || "", pageId }),
+      link_kind: destination.kind, link_notice: D.notice(destination.kind),
       author: conn.facebook_identity_label || null,
       group_name: m ? m.name || (cat && cat.name) || null : null,
     });

@@ -8,6 +8,7 @@ const S = require("./posting-sweeper");
 
 const { db, store, NOW, MIN, HOUR, DAY, iso, cfg, G, PERM, member, page, base, dueOf, setup } = K;
 const PH = "972500000001";
+const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1" };
 
 (async () => {
   // ── create: running at once (consent is the approval), idempotent, nothing scheduled yet ──
@@ -29,6 +30,31 @@ const PH = "972500000001";
     await assert.rejects(C.create(base({ consent: null }), deps), (e) => e.code === "consent_required");
   }
 
+  // ── watched local mode: every campaign/post requires approval before any browser opens ──
+  {
+    const { deps, at } = await setup();
+    deps.env = LOCAL_TEST;
+    let c = await C.create(base({ mode: "standing" }), deps);
+    assert.equal(c.mode, "per_post", "local test mode overrides standing permission");
+    c = await S.tick(c, deps, at(NOW));
+    assert.equal(c.posts[0].status, "pending_approval");
+    assert.equal(deps.post.calls.length, 0, "planning never opens the posting browser");
+    c = await C.approvePost(c.id, c.posts[0].id, deps);
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal(c.posts[0].status, "posted");
+    assert.equal(deps.post.calls.length, 1, "the approved post is uploaded once");
+  }
+  {
+    const { deps, at } = await setup();
+    let c = await C.create(base({ mode: "standing" }), deps);
+    c = await S.tick(c, deps, at(NOW));
+    assert.equal(c.posts[0].status, "scheduled");
+    deps.env = LOCAL_TEST;
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal(c.posts[0].status, "pending_approval", "an old unapproved standing post is stopped before the browser");
+    assert.equal(deps.post.calls.length, 0);
+  }
+
   // ── the first tick schedules one post: copy built NOW from the page, no link in the body ──
   {
     const { deps, at } = await setup();
@@ -42,6 +68,8 @@ const PH = "972500000001";
     assert.ok(!/https?:\/\//.test(p.copy), "no link in the body");
     assert.ok(/^[0-9a-f]{32}$/.test(p.copy_hash));
     assert.equal(p.group_token, undefined, "no s=/g= token on campaign posts (R4)");
+    assert.ok(["property", "whatsapp", "none"].includes(p.link_kind), "the real first-comment destination is stored with the post");
+    assert.equal(p.link_kind === "whatsapp", /^https:\/\/wa\.me\//.test(p.link_url || ""), "only WhatsApp stores its canonical URL here");
 
     // ── due: it posts; the copy is replaced by its hash; the attempt carries a click id (R4) ──
     c = await S.tick(c, deps, at(dueOf(c)));
@@ -53,7 +81,9 @@ const PH = "972500000001";
     assert.equal(a.state, "verified_posted");
     assert.equal(a.publisher, "browser");
     assert.equal(new Date(a.click_expires_at) - new Date(a.click_issued_at), 30 * DAY);
-    assert.equal(deps.post.calls[0].comment, `https://f.ly/p/pg1/${a.click_id}`, "the link carries only the click code");
+    if (p.link_kind === "property") assert.equal(deps.post.calls[0].comment, `https://f.ly/p/pg1/${a.click_id}`, "property links carry only the click code");
+    else if (p.link_kind === "whatsapp") assert.match(deps.post.calls[0].comment, /^https:\/\/wa\.me\//, "the stored WhatsApp destination is used");
+    else assert.equal(deps.post.calls[0].comment, null, "CTA-only posts do not create a link comment");
     assert.match(a.click_id, /^[a-hjkmnp-z2-9]{6}$/, "a short code");
     assert.equal(deps.post.calls[0].groupUrl, G(111));
     const ga = (await store.getGroupActivityFor(["111"], NOW))["111"];
@@ -76,6 +106,23 @@ const PH = "972500000001";
     assert.equal(c.posts[1].status, "posted");
     c = await S.tick(c, deps, at(new Date(dueOf(c, 1).getTime() + MIN)));
     assert.equal(c.status, "completed", "every group posted once; repeat=false");
+  }
+
+  // ── copy rotation: Group-specific, retry-stable, new after a completed round ──
+  {
+    const target = { group_id: "111", url: G(111) };
+    const campaign = { page_id: "pg1", posts: [] };
+    const first = C.buildCopy(page(), campaign, target);
+    assert.equal(first, C.buildCopy(page(), campaign, target), "same open round rebuilds exactly for retries");
+    const open = { page_id: "pg1", posts: [{ group_id: "111", status: "scheduled" }] };
+    assert.equal(first, C.buildCopy(page(), open, target), "an open post does not advance copy rotation");
+    const next = C.buildCopy(page(), { page_id: "pg1", posts: [{ group_id: "111", status: "posted" }] }, target);
+    assert.notEqual(next, first, "a completed prior Group post advances the deterministic round");
+    for (const text of [first, next]) {
+      assert.ok(text.includes("חיפה") && text.includes("2,000,000"), "rotated copy preserves listing facts");
+      assert.ok(!/https?:\/\//.test(text), "the body still contains no external URL");
+      assert.ok(text.includes("תגובה הראשונה"), "the first-comment CTA remains explicit");
+    }
   }
 
   // ── restart (controller ruling 4): create on a completed/stopped campaign
@@ -203,7 +250,10 @@ const PH = "972500000001";
     await S.tick(c, Object.assign({}, deps, { pageBaseUrl: "http://127.0.0.1:8787" }), at(dueOf(await store.getPostingCampaign(c.id))));
     assert.equal(deps.post.calls.length, 1);
     assert.equal(deps.post.calls[0].videoUrl, V, "the driver attaches it");
-    assert.ok(deps.post.calls[0].comment.startsWith("https://nadlan.call4li.com/p/pg1/"), deps.post.calls[0].comment);
+    const planned = (await store.getPostingCampaign(c.id)).posts[0];
+    if (planned.link_kind === "property") assert.ok(deps.post.calls[0].comment.startsWith("https://nadlan.call4li.com/p/pg1/"), deps.post.calls[0].comment);
+    else if (planned.link_kind === "whatsapp") assert.match(deps.post.calls[0].comment, /^https:\/\/wa\.me\//);
+    else assert.equal(deps.post.calls[0].comment, null);
     assert.deepEqual(C.videoOf({ hero: { video_url: "javascript:x", poster_url: V } }), { video_url: null, poster_url: null }, "http(s) only");
     // Never a local dev address: the video and the first comment's link are the public ones.
     // The video is downloaded from where it lives, never from a rewritten address (a local upload 404'd on prod).

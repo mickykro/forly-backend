@@ -41,6 +41,7 @@
 const driver = require("./driver-browser");
 const guardLive = require("./posting-guard");
 const social = require("./social-dwell");
+const localMode = require("./posting-local");
 const { profileName } = require("./profile-name");
 const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
 const P = require("./posting-driver-proof");
@@ -199,20 +200,36 @@ async function preSubmitSignal(page, x, known) {
   return null;
 }
 
+// The Post click is irreversible. Prove that exactly one enabled control is
+// inside the verified composer *before* submit_started: a missing/disabled
+// button is a selector or UI-state failure, not an ambiguous attempted post.
+async function submitReady(page, x) {
+  const count = await P.countOf(page, S.submit);
+  if (count !== 1) { x.diag = { expected: 1, found: count }; return false; }
+  const disabled = await page.locator(S.submit).first().getAttribute("aria-disabled").catch(() => null);
+  if (String(disabled || "").toLowerCase() === "true") { x.diag = { aria_disabled: true }; return false; }
+  return true;
+}
+
 async function drive(page, x, want, args) {
   const { attempt, kind } = x;
   x.page = page;
   const copy = args.copy;
-  // 1. the feed first, and a few minutes of being a person (Task 17)
-  if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
-  let done = await preSubmitSignal(page, x);
-  if (done) return done;
-  const allowVisible = await x.allows("like");
-  const socialDwell = x.deps.socialDwell || social.dwell;
-  const log = await socialDwell(page, { allowVisible, avoidGroupUrl: kind === "group" ? attempt.target_url : null, avoidGroupIds: kind === "group" ? want.ids : [] }, x.dwellDeps);
-  const halt = (Array.isArray(log) ? log : []).find((l) => l && l.action === "halt");
-  const dwellSig = halt && halt.detail && halt.detail.signal;
-  if (HALTING.has(dwellSig)) return x.end("verified_failed", { error_code: dwellSig }, { signal: dwellSig });
+  let done;
+  // Production/staging use the normal pre-post feed dwell. Watched local test
+  // mode goes straight to the approved destination: no warm-up, likes, stories,
+  // or unrelated feed activity, while every proof and halt check below remains.
+  if (!localMode.skipWarmup(x.deps.env || process.env)) {
+    if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
+    done = await preSubmitSignal(page, x);
+    if (done) return done;
+    const allowVisible = await x.allows("like");
+    const socialDwell = x.deps.socialDwell || social.dwell;
+    const log = await socialDwell(page, { allowVisible, avoidGroupUrl: kind === "group" ? attempt.target_url : null, avoidGroupIds: kind === "group" ? want.ids : [] }, x.dwellDeps);
+    const halt = (Array.isArray(log) ? log : []).find((l) => l && l.action === "halt");
+    const dwellSig = halt && halt.detail && halt.detail.signal;
+    if (HALTING.has(dwellSig)) return x.end("verified_failed", { error_code: dwellSig }, { signal: dwellSig });
+  }
 
   // 2. the destination: signals, membership, its canonical id
   if (!(await nav(page, x, attempt.target_url))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_group" });
@@ -269,6 +286,8 @@ async function drive(page, x, want, args) {
   if (!proof.ok) { x.diag = { expected: proof.expected, found: proof.found }; return x.end("verified_failed", { error_code: proof.code, check: proof.check }, proof.code === "not_member" ? { membership: "left" } : {}); }
   if (x.resolvedId) x.extra.resolved_group_id = x.resolvedId; // the proof matched this id to the target
   x.author = kind === "group" ? P.norm(x.conn.facebook_identity_label) : await P.textOf(page, S.targetName);
+
+  if (!(await submitReady(page, x))) return x.end("verified_failed", { error_code: "submit_unavailable", check: "submit_button" });
 
   if (args.dryRun === true) {
     await page.keyboard.press("Escape").catch(() => {});
@@ -487,5 +506,5 @@ async function reconcile(attempt, deps = {}) {
 module.exports = {
   postToGroup, postToPage, reconcile, SELECTORS: S, POST_SESSION_S, RECHECK_SESSION_S,
   proveIdentityAndDestination: P.proveIdentityAndDestination,
-  _test: { preflight, humanType, guardOf },
+  _test: { preflight, humanType, guardOf, submitReady },
 };

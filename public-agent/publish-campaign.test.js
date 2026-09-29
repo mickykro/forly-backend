@@ -145,6 +145,7 @@ t("timeline texts", () => {
   assert.match(U.REACH_NOTE, /reach/);
   assert.match(U.planText("per_post", 3, false), /וואטסאפ/);
   assert.match(U.planText("standing", 1, true), /קבוצה ובדף העסקי/);
+  assert.match(U.planText("standing", 5, false), /30/, "standing campaigns have enough time to cover more eligible Groups without raising caps");
   assert.strictEqual(U.chipText({ status: "completed", posts: [{ status: "posted" }, { status: "skipped" }] }), "הושלם — 1 פוסטים עלו");
 });
 

@@ -14,6 +14,7 @@ const express = require("express");
 
 // The sweeper's own spacing between warm-up browses (20 h; minutes on a local box).
 const { browseEveryMs } = require("../posting-tick");
+const localMode = require("../posting-local");
 const tail = (p) => `…${String(p || "").slice(-4)}`;
 
 /*
@@ -69,6 +70,7 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
   };
   router.get("/posting", requireAdmin, async (req, res) => {
     if (!P) return res.json({ enabled: false });
+    const env = (P.deps && P.deps.env) || process.env;
     const phone = req.user.userId;
     const conn = (await P.db.getConnection(phone)) || {};
     const campaigns = await P.store.listPostingCampaignsByPhone(phone);
@@ -79,7 +81,7 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
     const lastBrowse = [conn.last_browse_at, conn.last_browse_attempt_at].map((v) => (v ? new Date(v).getTime() : 0)).reduce((a, b) => Math.max(a, b), 0);
     const mine = st.accounts.find((a) => a.phone === phone) || null;
     res.json({
-      enabled: true,
+      enabled: true, local_test: localMode.enabled(env),
       sweeper: { started: st.started, last: st.last },
       fleet_off: fleet,
       accounts: st.accounts.map((a) => ({ phone: tail(a.phone), at: a.at, outcome: a.outcome })),
@@ -88,7 +90,7 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
         running: campaigns.filter((c) => c.status === "running").length, paused: campaigns.filter((c) => c.status === "paused").length,
         last_tick: mine && { at: mine.at, outcome: mine.outcome },
         last_browse_at: conn.last_browse_at || null,
-        next_browse_at: lastBrowse ? new Date(lastBrowse + browseEveryMs((P.deps && P.deps.env) || process.env)).toISOString() : null,
+        next_browse_at: localMode.skipWarmup(env) ? null : lastBrowse ? new Date(lastBrowse + browseEveryMs(env)).toISOString() : null,
         dwell_blocked: await reasonOf(phone, "dwell"),
       },
     });
@@ -102,6 +104,7 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
   // The guard still applies to every step inside it; the profile lock too.
   router.post("/posting/browse", requireAdmin, async (req, res) => {
     if (!P) return res.status(404).json({ error: "posting_unavailable" });
+    if (localMode.skipWarmup((P.deps && P.deps.env) || process.env)) return res.status(409).json({ error: "local_test_no_warmup" });
     const phone = req.user.userId;
     const conn = (await P.db.getConnection(phone)) || {};
     if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });

@@ -50,7 +50,8 @@ const verify = (u, action, nowMs = Date.now()) =>
     shaped(m, "approve");
     // The agreed layout: header names the group; the body is when + the exact copy; three buttons.
     assert.equal(m.header, 'פוסט מוכן לקבוצה "דירות בחיפה"');
-    assert.ok(m.body.startsWith("יעלה ") && m.body.includes("— אחרי האישור שלכם.\n──────────\n" + post.copy));
+    assert.ok(m.body.startsWith("יעלה ") && m.body.includes("— אחרי האישור שלכם.\n") && m.body.includes("──────────\n" + post.copy));
+    assert.ok(m.body.includes("קישור ישיר לדף הנכס"), "the destination decision is disclosed before approval");
     assert.equal(m.footer, "לא מפרסמים בלי האישור שלכם");
     assert.deepEqual(m.buttons.map((b) => b.buttonText), ["לאישור", "לדילוג על הקבוצה", "לעצירת הפרסום"]);
     const approve = T(m);
@@ -70,6 +71,16 @@ const verify = (u, action, nowMs = Date.now()) =>
       const q2 = Object.fromEntries(links[a].searchParams); q2.a = other;
       assert.equal(readActionLink(q2, OPTS.authSecret, Date.now()).error, "invalid", `${a} link must not verify for ${other}`);
     }
+  }
+
+  // ── hiding the Forly property URL is always explained with the replacement ──
+  {
+    const wa = M.approve(camp, Object.assign({}, post, { link_kind: "whatsapp" }));
+    assert.ok(wa.body.includes("לא יצורף") && wa.body.includes("וואטסאפ"));
+    const pageLink = M.approve(camp, Object.assign({}, post, { link_kind: "facebook_page" }));
+    assert.ok(pageLink.body.includes("לא יצורף") && pageLink.body.includes("בדף העסקי"));
+    const noLink = M.posted(camp, Object.assign({}, post, { link_kind: "none" }));
+    assert.ok(noLink.body.includes("לא יצורף") && noLink.body.includes("בפרטי"));
   }
 
   // ── a group with no kept name shows "קבוצה", never a URL ──
