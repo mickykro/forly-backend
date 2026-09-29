@@ -22,7 +22,8 @@ const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "
 // Natural phrasings for the buttons above; button taps always send the exact
 // COMMANDS word, these cover what a person types instead of tapping.
 const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume",
-  "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create" };
+  "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create",
+  "לבטל": "cancel", "לבטל אותה": "cancel", "בטל": "cancel", "תבטל": "cancel", "תבטלי": "cancel" };
 
 // Page designs, in the order create.html's picker lists them (1-6). The first
 // alias is the Hebrew name shown there; create.html preselects the chosen one.
@@ -89,7 +90,13 @@ function spokenCommand(text) {
   }
   return best ? best.cmd : null;
 }
-function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
+// "בוקר טוב, אני רוצה לבנות דף נכס" is the keyword too: a short message naming one
+// with a verb of wanting/making. Without the verb, "נכס חדש מקבלן" stays a description.
+const WANT_RE = /(רוצה|צריך|צריכה|לבנות|ליצור|להקים|לפתוח|לעשות|תבני|תבנה|תעשי|תעשה|תיצרי|תיצור)/;
+function isKeyword(text) {
+  const c = clean(text);
+  return KEYWORDS.includes(c) || (c.length <= 60 && KEYWORDS.some((k) => c.includes(k)) && WANT_RE.test(c));
+}
 function looksLikeListing(text) {
   const t = String(text || "");
   return t.length >= 40 && LISTING_HINTS.filter((h) => t.includes(h)).length >= 2;
