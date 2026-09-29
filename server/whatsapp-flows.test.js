@@ -271,5 +271,14 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.handled, t.status, t.draft], [true, "field_list", undefined], "no live page touched, the draft stays open");
   assert.match(texts(t), /\/מחיר/);
 
+  // 972542045280, 12:49: "עיר באר שבע" while the price is asked corrects the city (after asking)
+  ({ d } = deps({ parseListing: extracted({ city: "בר שבע" }) }));
+  const atPrice = { ...D.newDraft(PHONE, "keyword", T0), fields: { ...D.newDraft(PHONE, "keyword", T0).fields, city: "בל שבע", rooms: 4, floor: 2 } };
+  t = await turn({ text: "עיר באר שבע", draft: atPrice }, d);
+  assert.equal(t.status, "confirm_changes", "not 'invalid:price'");
+  assert.match(texts(t), /עיר בל שבע ← באר שבע/);
+  t = await turn({ text: "כן", draft: t.draft }, d);
+  assert.deepEqual([t.draft.fields.city, t.status], ["באר שבע", "asked:price"]);
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

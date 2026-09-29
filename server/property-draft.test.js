@@ -26,6 +26,10 @@ assert.equal(D.openerKind("ליצור נכס!"), "keyword");
 assert.equal(D.openerKind("דף נכס"), "keyword");
 assert.equal(D.openerKind("למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת"), "text");
 assert.equal(D.command("לבטל אותה"), "cancel");
+// 972542045280, voice: "בל שבע" / "בר שבע" are באר שבע; "עיר באר שבע" is not a city named "עיר…"
+for (const heard of ["בל שבע", "בר שבע", "עיר באר שבע", "העיר: באר שבע", "בבאר שבע"]) assert.equal(D.parseAnswer("city", heard), "באר שבע", heard);
+assert.equal(D.parseAnswer("city", "מצפה רמון"), "מצפה רמון", "an unlisted town is kept as said");
+assert.equal(D.parseAnswer("city", "חיפה"), "חיפה");
 assert.equal(D.openerKind("היי מה שלומך"), null);
 assert.equal(D.openerKind("3 חדרים"), null, "too short to be a listing");
 
