@@ -61,6 +61,25 @@ async function updateListing(id, patch) {
   else Object.assign(mem.listings.get(id) || {}, patch);
 }
 
+// Staging and production share this Firestore and both run the sweepers: a job is
+// acted on only by the server that moves it out of `from` — the other sees false.
+async function claimStatus(collection, id, from, patch) {
+  if (db) {
+    const ref = db.collection(collection).doc(id);
+    return db.runTransaction(async (tx) => {
+      const d = await tx.get(ref);
+      if (!d.exists || d.data().status !== from) return false;
+      tx.update(ref, patch);
+      return true;
+    });
+  }
+  const store = collection === "listings" ? mem.listings : mem.distributions;
+  const d = store.get(id);
+  if (!d || d.status !== from) return false;
+  Object.assign(d, patch);
+  return true;
+}
+
 async function listListingsByPhone(phone) {
   if (db) {
     const snap = await db.collection("listings").where("business_phone", "==", phone).limit(100).get();
@@ -581,4 +600,5 @@ module.exports = {
   listShareSessionsByPhone, healGroups, addAdminMessage,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
   getDraft, saveDraft, deleteDraft, setEditCancel, getEditCancel,
+  claimStatus,
 };

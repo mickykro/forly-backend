@@ -633,8 +633,11 @@ async function runSweep(deps) {
   const queued = await deps.db.listQueuedDistributions(10);
   for (const dist of queued) {
     try {
-      await deps.db.updateDistribution(dist.id,
-        { status: "running", updated_at: deps.now() });
+      // Staging and production sweep the same queue: a job runs on the server that claims it.
+      const patch = { status: "running", updated_at: deps.now() };
+      if (deps.db.claimStatus) {
+        if (!(await deps.db.claimStatus("distributions", dist.id, "queued", patch))) continue;
+      } else await deps.db.updateDistribution(dist.id, patch);
       await executeJob(deps, dist);
     } catch (err) {
       // Per-job isolation: a malformed doc is terminal; anything else returns
@@ -649,9 +652,9 @@ async function runSweep(deps) {
   }
 }
 
-// In-process latch: overlapping sweeps are prevented per container. This is a
-// single-container deployment; a second container would need a Firestore
-// claim-with-precondition instead (documented limitation, spec §7).
+// In-process latch: overlapping sweeps are prevented per container; across
+// containers (staging + production share the queue) runSweep claims each job
+// with db.claimStatus, a Firestore transaction on status queued → running.
 let sweeping = false;
 function startSweeper(deps) {
   const t = setInterval(async () => {

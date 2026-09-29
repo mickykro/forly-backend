@@ -199,6 +199,7 @@ app.use("/api/whatsapp", createWhatsappRouter({
   n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone, signSession, authSecret: AUTH_SECRET, quota,
   adminPhones: ADMIN_PHONES,
   linkBaseUrl: (process.env.LINK_BASE_URL || "").trim().replace(/\/+$/, "") || BASE_URL,
+  linkSharesSession: process.env.LINK_SHARES_SESSION === "1", // LINK_BASE_URL's server has this NADLAN_JWT_SECRET
   // null when Green API is unset so the response's `replied` is honest and n8n forwards `reply`.
   sendWhatsApp: GREENAPI_INSTANCE && GREENAPI_TOKEN
     ? (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,

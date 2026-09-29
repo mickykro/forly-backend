@@ -74,11 +74,12 @@ const MAX_TEXT = 4000;
 module.exports = function createWhatsappRouter(ctx) {
   const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage, getHistory, adminPhones,
     uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
-  // Links sent to agents (LINK_BASE_URL): staging sends production's, so a real agent
-  // testing on staging lands on the live site. Its signing key is production's alone,
-  // so there the review link is the live create form (the agent logs in; the draft,
-  // in the shared Firestore, still prefills it).
+  // Links sent to agents (LINK_BASE_URL): staging sends production's, so its real
+  // customers land on the live site. The one-tap review link needs both servers to
+  // share NADLAN_JWT_SECRET (linkSharesSession); otherwise it is the live create form
+  // (the agent logs in; the draft, in the shared Firestore, still prefills it).
   const linkBase = ctx.linkBaseUrl || baseUrl;
+  const signedReview = linkBase === baseUrl || ctx.linkSharesSession;
   const router = express.Router();
   const limit = new DailyLimit(EXTRACT_CAP);
   const timers = new Map();
@@ -148,8 +149,9 @@ module.exports = function createWhatsappRouter(ctx) {
       // importPhotoFor's server-side session above, just handed to their
       // browser instead) prefilled from their draft; they review, edit and
       // build the page themselves there — see the /review and /draft routes.
-      reviewLink: (p) => (linkBase !== baseUrl ? `${linkBase}/create.html?whatsapp=1`
-        : `${baseUrl}/api/whatsapp/review?t=${encodeURIComponent(signSession(authSecret, p, { scope: "review", ttlS: REVIEW_TTL_S }))}`),
+      reviewLink: (p) => (signedReview
+        ? `${linkBase}/api/whatsapp/review?t=${encodeURIComponent(signSession(authSecret, p, { scope: "review", ttlS: REVIEW_TTL_S }))}`
+        : `${linkBase}/create.html?whatsapp=1`),
       // "ליצור" in chat: same validation and paid quota unit as the form's /properties/create.
       transcribe,
       createListing: async (body) => {
@@ -211,7 +213,8 @@ module.exports = function createWhatsappRouter(ctx) {
     for (const l of pending) {
       const age = now - asMillis(l.created_at);
       if (!(age > BUILD_TIMEOUT_MS)) continue;
-      await db.updateListing(l.listing_id, { status: "failed" });
+      // The other server's sweep may have taken it: only the claimer tells the agent.
+      if (!(await db.claimStatus("listings", l.listing_id, "active", { status: "failed" }))) continue;
       if (age > 24 * 60 * 60 * 1000) continue; // older than a day: close it quietly
       const phone = l.business_phone;
       await withLock(phone, async () => {
