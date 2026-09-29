@@ -280,5 +280,11 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "כן", draft: t.draft }, d);
   assert.deepEqual([t.draft.fields.city, t.status], ["באר שבע", "asked:price"]);
 
+  // his real timing: 2 photos + "תשנה את התמונות בנכס" 4 s apart = one n8n bundle → still asked
+  ({ d } = deps({ classifyIntent: async () => null }));
+  t = await turn({ text: "תשנה את התמונות בנכס", fileUrls: ["https://green/z1.jpg", "https://green/z2.jpg"], draft: ready8 }, d);
+  assert.match(texts(t), /להחליף את 8 התמונות הקודמות ב-2 החדשות/);
+  assert.equal(t.draft.photos.length, 10, "nothing replaced before the answer");
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

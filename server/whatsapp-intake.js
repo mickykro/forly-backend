@@ -478,6 +478,12 @@ async function handleTurn(input, deps) {
 // Text sent with a photo burst (the ad, an address) is a turn of its own, then the photos
 // join whatever it opened. Unclaimed text is a caption: all of it goes to n8n's edit.
 async function textThenPhotos(input, deps, draft) {
+  // "תשנה את התמונות" bundled with the new photos: photos first, so the swap can ask about them.
+  if (PC.isSwap(input.text) && draft && draft.status === "active") {
+    const p = await handleTurn({ ...input, text: "", draft }, deps);
+    const t = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft: p.draft || draft }, deps);
+    return { ...t, status: `${p.status}+${t.status}`, replies: [...p.replies, ...t.replies] };
+  }
   const t1 = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft }, deps);
   if (!t1.handled) return t1;
   const after = t1.del ? null : (t1.draft || draft);

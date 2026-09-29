@@ -85,6 +85,8 @@ function noteBatch(draft, added, now) {
   draft.last_batch = { at: now, photos: (same ? b.photos : []).concat(added) };
 }
 
+const isSwap = (text) => SWAP_RE.test(String(text || ""));
+
 function swapTurn(input, draft, now, promptReplies) {
   const text = String(input.text || "").trim();
   const done = (first) => ({ handled: true, status: "photos_swapped", draft: D.touch(draft, now), replies: [R.oneBubble([first, ...promptReplies(draft)])] });
@@ -122,4 +124,4 @@ function editWith(draft, urls, now) {
   return { handled: false, status: "edit_requested", replies: [], draft, edit_photos: urls, edit_instruction: draft.text };
 }
 
-module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, editRequest, editWith };
+module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editWith };
