@@ -14,6 +14,7 @@ const R = require("./whatsapp-replies");
 const C = require("./draft-corrections");
 const { updatePage, updatingTurn } = require("./page-update");
 const { intentOf, openerOf } = require("./property-intent");
+const { recoverFromChat } = require("./chat-recover");
 const PC = require("./photo-choice");
 
 const MAX_PHOTOS = 12;
@@ -431,7 +432,11 @@ async function handleTurn(input, deps) {
   if (!draft) {
     if (photoUrlsOf(input) && !input.event) return PC.hold(null, phone, photoUrlsOf(input), now);
     const kind = await openerOf(input.text, deps);
-    if (!kind) return withDrop(PC.editRequest(input.text, phone, now) || notOurs("not_ours"));
+    if (!kind) {
+      const back = input.text && !input.event ? await recoverFromChat(phone, input.text, deps, now, openDraft) : null;
+      if (back) return back;
+      return withDrop(PC.editRequest(input.text, phone, now) || notOurs("not_ours"));
+    }
     return openDraft(phone, kind, input.text, deps, now);
   }
   if (draft.status === "photo_choice") {

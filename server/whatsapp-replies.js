@@ -88,6 +88,10 @@ function swapPhotos(oldN, newN) {
   return { text: `להחליף את ${oldN} התמונות הקודמות ב-${newN} החדשות, או להוסיף אותן?`, buttons: ["להחליף", "להוסיף"] };
 }
 function sendReplacements(n) { return { text: `שלחו את התמונות החדשות — הן יחליפו את ${n} הקיימות 📸` }; }
+function recovered(hadAd, photos) {
+  const what = [hadAd ? "את פרטי הנכס מהמודעה" : null, photos ? `${photos} תמונות` : null].filter(Boolean).join(" ו-");
+  return { text: `בונים דף נכס 🏠 אספתי מהשיחה ${what}.` };
+}
 function useEdited(n) {
   return { text: `להשתמש ב-${n === 1 ? "תמונה שערכתי" : `${n} התמונות שערכתי`} קודם לנכס הזה?`, buttons: ["כן", "לא"] };
 }
@@ -226,7 +230,7 @@ function noLinkHint(createUrl) {
 
 module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, recovered, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

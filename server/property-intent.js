@@ -31,10 +31,12 @@ Examples:
 "תעשי את החלל הזה אחרי שיפוץ, זה אותו נכס" → no
 "תכיני פוסט לאינסטגרם על הנכס" → no
 "צריך לערוך את התמונות" → no
+When the conversation so far is given, judge the latest message in its light: "כן תיצרי" or "תעשי איך שנראה לך" answering a question about building a page is "new".
 Reply with one word: new, update or no.`;
 
-async function classify(text, { askFn = ask, model = MODEL, keys = process.env } = {}) {
-  const reply = await askFn(model, SYSTEM, [{ role: "user", content: String(text).slice(0, 500) }], keys, { schema: null, maxOut: 5 });
+async function classify(text, { askFn = ask, model = MODEL, keys = process.env, context = "" } = {}) {
+  const content = context ? `Conversation so far (oldest first):\n${String(context).slice(0, 3000)}\n\nLatest message: ${String(text).slice(0, 500)}` : String(text).slice(0, 500);
+  const reply = await askFn(model, SYSTEM, [{ role: "user", content }], keys, { schema: null, maxOut: 5 });
   const m = /^\W*(new|update)\b/i.exec((reply && reply.text) || "");
   return m ? m[1].toLowerCase() : null;
 }
