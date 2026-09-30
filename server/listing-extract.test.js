@@ -3,7 +3,7 @@
    the form and that `missing` is always computed here, never trusted. */
 const assert = require("assert");
 const { parseListing, REQUIRED, MAX_INPUT, _test } = require("./listing-extract");
-const { coerce, missingOf, parseReply, condense, SYSTEM, foreignPrice } = _test;
+const { coerce, missingOf, parseReply, condense, SYSTEM } = _test;
 
 // ── condense: markdown URLs must not crowd the facts out of the input budget ──
 const gallery = ("![](https://x.co/" + "a".repeat(300) + ".jpg)\n").repeat(10) + "מחיר:2,200,000 ₪\nקומה:2";
@@ -65,15 +65,10 @@ assert.match(SYSTEM, /"rent"/);
 assert.match(SYSTEM, /מכירה/);
 assert.match(SYSTEM, /מ״ר בנוי/);
 assert.match(SYSTEM, /most scraped listings omit it/);
-assert.match(SYSTEM, /leave price null/);
-
-// ── foreignPrice: a backstop that doesn't depend on the model actually following the rule above ──
-assert.equal(foreignPrice("285,000 אירו"), true);
-assert.equal(foreignPrice("285,000 €"), true);
-assert.equal(foreignPrice("$450,000"), true);
-assert.equal(foreignPrice("מחיר:2,200,000 ₪"), false);
-assert.equal(foreignPrice("₪285,000, גם € זה סימן שקל בקטלוניה"), false); // ₪ present: trust it
-assert.equal(foreignPrice("3 חדרים בתל אביב"), false);
+assert.match(SYSTEM, /never converted/);
+assert.match(SYSTEM, /currency/);
+assert.equal(coerce({ currency: "EUR" }).currency, "EUR");
+assert.equal(coerce({ currency: "GBP" }).currency, null, "only currencies a page can show");
 
 // ── parseListing: caps input, wires the stub, maps provider errors ──
 (async () => {
@@ -96,18 +91,17 @@ assert.equal(foreignPrice("3 חדרים בתל אביב"), false);
     parseListing("t", { askFn: async () => { throw new Error("ANTHROPIC_API_KEY is not set"); } }),
     (e) => e.code === "extract_unavailable");
 
-  // 972526003708, 2026-09-30: a Crete villa priced "285,000 אירו" came back as ₪285,000 on
-  // the real page — the model obeyed the old "price in ILS" instruction literally and
-  // relabeled a euro figure as shekels (roughly a quarter of its real value). Even if a
-  // model ever ignores the new prompt rule and returns the number anyway, foreignPrice
-  // must still null it out here.
-  const euroReply = async () => ({ text: '{"city":"כפר וליכאדה","price":285000,"rooms":3}' });
+  // 972526003708, 2026-09-30: a Crete villa priced "285,000 אירו" came back as ₪285,000.
+  // The price stays as stated and the property takes the currency the text names — even
+  // when the model leaves currency out or says ILS.
+  const euroReply = async () => ({ text: '{"city":"כפר וליכאדה","price":285000,"rooms":3,"currency":"ILS"}' });
   const euro = await parseListing("כפר וליכאדה, באי כרתים. המחיר הוא 285,000 אירו", { askFn: euroReply });
-  assert.equal(euro.fields.price, null);
-  assert.equal(euro.fields.city, "כפר וליכאדה");
-  assert.equal(euro.fields.rooms, 3);
-  // the same price, stated in ILS, is kept
+  assert.deepEqual([euro.fields.price, euro.fields.currency, euro.fields.city, euro.fields.rooms], [285000, "EUR", "כפר וליכאדה", 3]);
+  const usd = await parseListing("$450,000", { askFn: async () => ({ text: '{"price":450000}' }) });
+  assert.equal(usd.fields.currency, "USD");
   const ils = await parseListing("מחיר:285,000 ₪", { askFn: async () => ({ text: '{"price":285000}' }) });
-  assert.equal(ils.fields.price, 285000);
+  assert.deepEqual([ils.fields.price, ils.fields.currency], [285000, "ILS"]);
+  const none = await parseListing("3 חדרים, 2.9 מיליון", { askFn: async () => ({ text: '{"price":2900000}' }) });
+  assert.equal(none.fields.currency, null, "unstated stays null (read as ₪ downstream)");
   console.log("listing-extract.test.js ok");
 })();

@@ -32,6 +32,8 @@ function matchByBudget(pages, opts) {
     .filter((p) => (p.property.listing_type || "sale") === type)
     // 0 means "unknown" everywhere in the page schema, never a free listing.
     .filter((p) => Number(p.property.price) > 0)
+    // Budgets are asked in ₪: a €285,000 page is not "within 15%" of a ₪300,000 budget.
+    .filter((p) => (p.property.currency || "ILS") === "ILS")
     .filter((p) => inBand(Number(p.property.price)))
     .sort((a, b) => Math.abs(a.property.price - budget) - Math.abs(b.property.price - budget))
     .slice(0, limit)

@@ -96,7 +96,7 @@
 
 <div class="verdict">
   <h2>Bottom line</h2>
-  <p>One real, reproducible bug this cycle, and it's a money one: an agent pasted a listing for a villa in Crete, Greece priced <strong>"285,000 אירו"</strong> (euro) — the extractor always assumed shekels, so the draft (and nearly the published page) showed <strong>₪285,000</strong>, about a quarter of the actual asking price. Root cause was a hard "price in ILS" instruction in <code>server/listing-extract.js</code>'s prompt with no currency awareness at all. Fixed the prompt and added a deterministic backstop in code (never trust the model alone with money), plus a regression test built from this exact conversation.</p>
+  <p>One real, reproducible bug this cycle, and it's a money one: an agent pasted a listing for a villa in Crete, Greece priced <strong>"285,000 אירו"</strong> (euro) — the extractor always assumed shekels, so the draft (and nearly the published page) showed <strong>₪285,000</strong>, about a quarter of the actual asking price. Root cause was a hard "price in ILS" instruction in <code>server/listing-extract.js</code>'s prompt with no currency awareness at all. Properties now carry their own currency (₪/€/$): the bot keeps the number as given and records the currency it names — in a pasted listing, a direct answer, or a correction — and the page editor has a currency selector. Every public page design, share preview and portfolio card shows the property's own currency; existing pages stay ₪.</p>
   <p>Everything flagged in the last two reviews (2026-09-29, 2026-09-30 08:50) stayed fixed: no <code>trycloudflare.com</code> link leaks, and the "1"/"2" ignored after a photo batch didn't recur in any post-fix conversation. Two items stay open outside this repo: the photo-batch caption spam (still unresolved, third report in a row), and the competing n8n handler on the "build a page from these photos?" offer — now confirmed to also mis-fire on the <em>accept</em> path, not just decline, which is new evidence worth flagging with more urgency. One new business question came up: a real customer is already marketing an overseas property in euros through Forly, and the product has no notion of a non-ILS listing today.</p>
 </div>
 
@@ -104,7 +104,7 @@
   <h2 class="section-title">Found and fixed</h2>
 
   <div class="card">
-    <h3><span class="badge fixed">Fixed</span> A euro price silently became a shekel price — off by roughly 4×</h3>
+    <h3><span class="badge fixed">Fixed</span> A euro price silently became a shekel price — off by roughly 4× → properties now have a currency</h3>
     <div class="meta">Gal / "create vision", 972526003708 — Sep 30, 10:47–11:05</div>
     <p>The agent sent 7 photos of an old house plus a long free-text description, then when asked "which city?" pasted three marketing posts for a villa in <strong>Walichada, Crete (Greece)</strong>, stating <code>המחיר הוא 285,000 אירו</code> three times over. The extractor pulled the number out fine — and relabeled it in shekels:</p>
     <div class="evidence">
@@ -114,8 +114,14 @@
       <div class="line bot">לא הצלחתי להבין את הקומה. באיזו קומה? <em style="color:var(--bad)">(correction not understood — bot was asking about floor and stayed there)</em></div>
     </div>
     <p><code>listing-extract.js</code>'s system prompt told the model, unconditionally, "price in ILS" — with no branch for a stated foreign currency, so a Claude-Haiku extraction call that is otherwise honest about "never guess" had no way to say "this isn't shekels." A live property listing was about to go up at roughly a quarter of its real asking price. The agent's own correction ("it's not 285,000 shekels, it's euro") didn't help either: it doesn't hit any of <code>draft-corrections.js</code>'s price-related keywords, so it fell through to whatever field was currently being asked (floor) and got rejected as an invalid floor answer.</p>
-    <p>Reworded the prompt to leave <code>price</code> null when the text names a non-ILS currency (€/יורו/אירו, $/דולר/USD, GBP/לירה שטרלינג) instead of converting or mislabeling it — and added a deterministic code-level backstop (<code>foreignPrice()</code>) that nulls the price whenever the source text mentions a foreign-currency marker and no ₪, regardless of what the model actually returns. Money shouldn't depend on a model reliably following an instruction. New tests in <code>listing-extract.test.js</code> reproduce this exact conversation.</p>
-    <span class="commit-ref">fix(listing-extract): a price given in another currency is never shown as ₪</span>
+    <p>A property now has a <code>currency</code> (ILS/EUR/USD; missing = ILS, so every existing page is unchanged). Nothing is converted — the number is stored as the agent gave it, in the currency they named:</p>
+    <ul class="plain">
+      <li><strong>Chat:</strong> the currency named in the text is detected in code (<code>server/currency.js</code>), not left to the model. A pasted listing, a direct answer to "מה המחיר?" ("285,000 יורו"), a slash correction (<code>/מטבע €</code>) or a mid-flow correction like the agent's "וזה לא 285,000 שח, אלא € יורו" all set the property's currency — the last one now answers "עדכנתי: מטבע €" and goes back to the open question instead of "לא הצלחתי להבין את הקומה". Updating a live page from chat ("המחיר ביורו") changes that page's currency too.</li>
+      <li><strong>Page editor:</strong> a ₪/€/$ selector next to the price; switching it also updates the price box on the page when it still shows the auto-formatted price.</li>
+      <li><strong>Display:</strong> all 8 page designs, the share preview (OG), group-share text, the agent portfolio and the portal feed use the property's currency. Budget-based recommendations skip non-₪ pages, since visitor budgets are asked in ₪.</li>
+    </ul>
+    <p>Tests replay this exact conversation through the chat handler (pasted listing, correction, direct answer), and all 8 designs were rendered in a browser with a euro page (€285,000, €2,850/m², no ₪) and with an old page (still ₪).</p>
+    <span class="commit-ref">feat(currency): a property keeps its price in the currency the agent gave</span>
   </div>
 </section>
 
@@ -149,13 +155,13 @@
 </section>
 
 <section>
-  <h2 class="section-title">Worth a business decision</h2>
-  <p class="section-note">Not a bug — a product question. A WhatsApp message with the specifics below was sent to +972542045280.</p>
+  <h2 class="section-title">Business decision — resolved</h2>
+  <p class="section-note">Sent as a question to +972542045280; answered: support the currency per property (implemented above).</p>
 
   <div class="card">
-    <h3><span class="badge biz">Business</span> A real agent is already marketing a non-Israeli property through Forly, in euros</h3>
+    <h3><span class="badge biz">Business</span> A real agent is already marketing a non-Israeli property through Forly, in euros — now supported</h3>
     <div class="meta">Gal / "create vision", 972526003708 — Sep 30, 10:47–11:05</div>
-    <p>The fix above stops the bot from silently mislabeling a euro price as shekels, but it also means: right now, an agent who wants a page priced in euros simply <strong>can't get a price onto that page</strong> — the field stays null and Forly will keep asking "what's the price?" in a context that only understands ₪. This is a real, paying-adjacent use case (a villa in Crete, marketed the same way as any Israeli listing), not a hypothetical. Worth a product call: does Forly want to support a currency selector on a listing page (₪/€/$, display only — no conversion needed, since the agent already knows the number), or is this explicitly out of scope for now? Either answer is fine, but the current behavior (silently assume ₪ or, after today's fix, silently refuse the number) isn't a real answer either way.</p>
+    <p>A villa in Crete, marketed the same way as any Israeli listing — a real use case, not a hypothetical. Decision: each property keeps its own currency (₪/€/$), display only, no conversion. Implemented in this change; see "Found and fixed" above.</p>
   </div>
 </section>
 

@@ -16,7 +16,7 @@ const FIELDS = {
   city: ["c", "עיר"], price: ["p", "מחיר"], rooms: ["r", "חדרים", "מספר חדרים"],
   deal: ["d", "עסקה", "סוג עסקה"], size_sqm: ["s", "שטח", "מ״ר", "מ\"ר", "גודל"], floor: ["f", "קומה"],
   parking: ["k", "חניה", "חניות"], neighborhood: ["n", "שכונה"], description: ["t", "תיאור"],
-  template: ["x", "עיצוב", "תבנית"],
+  template: ["x", "עיצוב", "תבנית"], currency: ["u", "מטבע"],
 };
 const NAME_TO_FIELD = {};
 for (const [f, names] of Object.entries(FIELDS)) for (const n of names) NAME_TO_FIELD[n] = f;
@@ -40,7 +40,7 @@ function parseSlash(text) {
 
 // Words that say which field a free-text reply is about.
 const HINTS = {
-  price: ["מחיר", "מיליון", "מליון", "אלף", "₪", "ש״ח", "ש\"ח", "שקל"],
+  price: ["מחיר", "מיליון", "מליון", "אלף", "₪", "ש״ח", "ש\"ח", "שקל", "מטבע", "€", "יורו", "אירו", "$", "דולר"],
   rooms: ["חדרים", "חד׳", "חד'"], size_sqm: ["מ״ר", "מ\"ר", "מטר"], floor: ["קומה"],
   parking: ["חניה", "חניות"], deal: ["למכירה", "להשכרה", "שכירות"], neighborhood: ["שכונת", "שכונה"],
   address: ["כתובת", "רחוב"], city: ["עיר"],
@@ -64,7 +64,7 @@ function needsExtraction(asked, text) {
   return f.length >= 2 || (f.length === 1 && f[0] !== asked);
 }
 
-const MERGEABLE = ["city", "address", "neighborhood", "deal", "price", "rooms", "size_sqm", "floor", "parking"];
+const MERGEABLE = ["city", "address", "neighborhood", "deal", "price", "currency", "rooms", "size_sqm", "floor", "parking"];
 
 /*
  * Fold extracted fields into the draft. Empty (or skipped) fields are filled
@@ -75,7 +75,7 @@ function merge(draft, extracted) {
   for (const f of MERGEABLE) {
     const v = f === "city" && extracted[f] ? D.knownCity(extracted[f]) : extracted[f];
     if (v === null || v === undefined) continue;
-    const cur = draft.fields[f];
+    const cur = draft.fields[f] ?? null; // drafts saved before a field existed lack the key
     if (cur === null) {
       draft.fields[f] = v;
       draft.skipped = draft.skipped.filter((x) => x !== f);
@@ -98,6 +98,7 @@ function setField(draft, field, value) {
   const v = D.parseAnswer(field, value);
   if (v === null) return false;
   draft.fields[field] = v;
+  if (field === "price") D.noteCurrency(draft, value);
   draft.skipped = draft.skipped.filter((x) => x !== field);
   return true;
 }
@@ -116,7 +117,7 @@ function slashTurn(draft, slash, deps, now, promptFor) {
     return { handled: true, status: `invalid:${slash.field}`, replies: [R.invalid(slash.field)] };
   }
   const p = promptFor(draft, deps);
-  const replies = withPriceCheck(draft, [R.updated({ [slash.field]: draft.fields[slash.field] }), ...p.replies]);
+  const replies = withPriceCheck(draft, [R.updated({ [slash.field]: draft.fields[slash.field] }, draft.fields.currency), ...p.replies]);
   return { handled: true, status: `corrected:${slash.field}`, draft: D.touch(draft, now), replies: [R.oneBubble(replies)] };
 }
 
@@ -134,7 +135,7 @@ async function smartAnswer(draft, text, deps, now, asked, promptFor) {
   const { filled, proposed } = merge(draft, parsed.fields || {});
   if (D.openerKind(text) === "text" && draft.fields.description === null) draft.fields.description = D.parseAnswer("description", text);
   if (!Object.keys(filled).length && !Object.keys(proposed).length) return null;
-  const replies = Object.keys(filled).length ? [R.updated(filled)] : [];
+  const replies = Object.keys(filled).length ? [R.updated(filled, draft.fields.currency)] : [];
   if (Object.keys(proposed).length) {
     draft.pending_changes = proposed;
     replies.push(R.confirmChanges(proposed, draft.fields));

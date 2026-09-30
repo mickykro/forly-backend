@@ -62,6 +62,7 @@ function toCard(p, pageBaseUrl) {
     neighborhood: prop.neighborhood || "",
     city: prop.city || "",
     price: Number(prop.price) || 0,
+    currency: prop.currency || "ILS",
     rooms: Number(prop.rooms) || 0,
     size_sqm: Number(prop.size_sqm) || 0,
     floor: Number.isFinite(Number(prop.floor)) ? Number(prop.floor) : null,

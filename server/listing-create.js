@@ -10,6 +10,7 @@ const crypto = require("crypto");
 const db = require("./db");
 const { sanitizeTheme, sanitizeLang } = require("./utils");
 const { sanitizeTags } = require("./tags");
+const { normalizeCurrency } = require("./currency");
 
 const MAX_PHOTOS = 12;
 // ponytail: dev only (N8N_DEV_* webhooks set) — chat/review listings reuse the last
@@ -54,7 +55,8 @@ async function createListing(phone, body, agentOverride, deps) {
     neighborhood: String(body.neighborhood || "").slice(0, 60),
     city: String(body.city).slice(0, 60),
     listing_type: body.listing_type === "rent" ? "rent" : "sale",
-    price: Number(body.price) || 0, rooms: Number(body.rooms) || 0,
+    price: Number(body.price) || 0, currency: normalizeCurrency(body.currency) || "ILS",
+    rooms: Number(body.rooms) || 0,
     size_sqm: Number(body.size_sqm) || 0, floor: Number(body.floor) || 0,
     size_built: Number(body.size_built) || 0,
     size_balcony: Number(body.size_balcony) || 0,
@@ -99,7 +101,7 @@ async function createListing(phone, body, agentOverride, deps) {
     property_details: {
       listing_type: listing.listing_type,
       address: listing.address, neighborhood: listing.neighborhood, city: listing.city,
-      price: listing.price, rooms: listing.rooms, size_sqm: listing.size_sqm,
+      price: listing.price, currency: listing.currency, rooms: listing.rooms, size_sqm: listing.size_sqm,
       size_built: listing.size_built, size_balcony: listing.size_balcony,
       size_garden: listing.size_garden,
       floor: listing.floor, parking: listing.parking,

@@ -42,13 +42,15 @@
     document.body.classList.add("has-state", "state-" + state);
   }
 
-  function fmtPrice(n) {
+  // A property's currency; pages from before currencies existed are ₪.
+  function curSymbol(cur) { return ({ ILS: "₪", EUR: "€", USD: "$" })[cur] || "₪"; }
+  function fmtPrice(n, cur) {
     if (!n) return "";
     if (n >= 1e6) {
       var m = n / 1e6;
-      return "₪" + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + "M";
+      return curSymbol(cur) + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + "M";
     }
-    return "₪" + Number(n).toLocaleString("he-IL");
+    return curSymbol(cur) + Number(n).toLocaleString("he-IL");
   }
 
   function beacon(event) {
@@ -191,10 +193,10 @@
     var isRent = p.listing_type === "rent";
     var priceLabel = isRent ? TR("monthly_rent") : TR("asking_price");
     if (!isRent && p.price && p.size_sqm) {
-      priceLabel += " · ₪" + Math.round(p.price / p.size_sqm).toLocaleString("he-IL") + " " + TR("per_sqm");
+      priceLabel += " · " + curSymbol(p.currency) + Math.round(p.price / p.size_sqm).toLocaleString("he-IL") + " " + TR("per_sqm");
     }
     fillSpec(specs[0],
-      texts.spec1_v || fmtPrice(p.price) + (isRent && p.price ? " " + TR("per_month") : ""),
+      texts.spec1_v || fmtPrice(p.price, p.currency) + (isRent && p.price ? " " + TR("per_month") : ""),
       texts.spec1_l || priceLabel);
     fillSpec(specs[1],
       texts.spec2_v || (p.rooms ? p.rooms + " " + TR("rooms_short") : ""),

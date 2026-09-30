@@ -7,6 +7,7 @@
  */
 const { SCHEMA } = require("./listing-extract");
 const { asMillis } = require("./utils");
+const { detectCurrency } = require("./currency");
 
 const REQUIRED = ["city", "price", "rooms"];
 const OPTIONAL = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description"];
@@ -137,15 +138,9 @@ const num = (t) => { const s = spokenNumber(t); if (s !== null) return s; const 
 const int = (t) => { const n = num(t); return n === null ? null : Math.round(n); };
 const text = (max) => (t) => { const s = String(t || "").trim(); return s ? s.slice(0, max) : null; };
 
-// A number named in another currency is not a shekel figure, even when it's the
-// direct answer to "מה המחיר?" — matches the same guard in listing-extract.js so
-// "285,000 אירו" can't reach draft.fields.price as ₪285,000 through either path.
-const FOREIGN_CURRENCY = /€|\$|USD|EUR|GBP|יורו|אירו|דולר/;
 function parsePrice(t) {
-  const raw = String(t || "");
-  if (FOREIGN_CURRENCY.test(raw) && !raw.includes("₪")) return null;
-  // Currency marks carry no number: "2,350,000 ש״ח", "₪2.35M".
-  const s = raw.replace(/₪|ש["״']ח|שקלים|שקל|nis/gi, " ");
+  // Currency marks carry no number: "2,350,000 ש״ח", "₪2.35M", "285,000 אירו" (the currency is noted separately).
+  const s = String(t || "").replace(/₪|ש["״']ח|שקלים|שקל|nis|€|\$|יורו|אירו|דולר|eur|usd/gi, " ");
   // "2 מיליון ו-350 (אלף)" → 2,350,000. "מליון" (no yod) is how most people type it.
   const both = /(\d+(?:\.\d+)?)\s*(?:מיליון|מליון|מיל['׳]?|מ['׳])\s*ו-?\s*(\d+)/.exec(s);
   if (both) return Math.round(Number(both[1]) * 1e6 + Number(both[2]) * 1e3);
@@ -219,6 +214,7 @@ function parseCity(t) {
 const PARSERS = {
   city: parseCity, price: parsePrice, rooms: num, deal: parseDeal, size_sqm: num,
   floor: parseFloor, parking: parseParking, neighborhood: text(60), description: text(2000), template: parseTemplate,
+  currency: detectCurrency,
 };
 // An impossible value is a mishearing or typo ("ועשר מטר" → 10 m²): ask again instead.
 const RANGES = { rooms: [1, 20], size_sqm: [15, 2000], floor: [-3, 100], parking: [0, 20] };
@@ -228,6 +224,11 @@ function parseAnswer(field, t) {
   return v !== null && r && (v < r[0] || v > r[1]) ? null : v;
 }
 function isRequired(field) { return REQUIRED.includes(field); }
+// A price answer that names its currency ("285,000 אירו") sets the property's currency too.
+function noteCurrency(draft, text) {
+  const c = detectCurrency(text);
+  if (c) draft.fields.currency = c;
+}
 
 // ── draft state ──
 function emptyFields() {
@@ -287,7 +288,7 @@ function listingBody(draft) {
   return {
     listing_type: f.deal === "rent" ? "rent" : "sale",
     address: f.address, city: f.city, neighborhood: f.neighborhood,
-    price: f.price, rooms: f.rooms, size_sqm: f.size_sqm,
+    price: f.price, currency: f.currency || "ILS", rooms: f.rooms, size_sqm: f.size_sqm,
     size_built: f.sqm_built, size_balcony: f.sqm_balcony, size_garden: f.sqm_garden,
     floor: f.floor, parking: f.parking,
     storage: f.storage, elevator: f.elevator, shabbat_elevator: f.shabbat_elevator,
@@ -312,13 +313,13 @@ function isExpiredPrompt(draft, now = new Date()) {
 function summary(draft) {
   const f = draft.fields;
   return {
-    city: f.city, neighborhood: f.neighborhood, price: f.price, rooms: f.rooms, deal: f.deal,
+    city: f.city, neighborhood: f.neighborhood, price: f.price, currency: f.currency, rooms: f.rooms, deal: f.deal,
     size_sqm: f.size_sqm, floor: f.floor, parking: f.parking, photos: draft.photos.length,
   };
 }
 
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
-  findUrl, command, spokenCommand, isStop, knownCity, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
+  findUrl, command, spokenCommand, isStop, knownCity, CANONICAL, openerKind, parseAnswer, isRequired, noteCurrency, asMillis,
   newDraft, touch, nextStep, missing, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };

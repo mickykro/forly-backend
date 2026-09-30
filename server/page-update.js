@@ -10,7 +10,7 @@ const { openerOf } = require("./property-intent");
 const { inPlace } = require("./utils");
 
 // Chat field → the page's property field (and the listing's, same names but deal).
-const PAGE_FIELDS = { price: "price", rooms: "rooms", size_sqm: "size_sqm", floor: "floor", parking: "parking",
+const PAGE_FIELDS = { price: "price", currency: "currency", rooms: "rooms", size_sqm: "size_sqm", floor: "floor", parking: "parking",
   city: "city", address: "address", neighborhood: "neighborhood", deal: "listing_type" };
 const autoTitle = (p) => `${p.rooms || ""} חד׳ ${inPlace(p.neighborhood || p.city)}`.trim();
 
@@ -35,6 +35,7 @@ function matchPage(pages, text) {
  */
 async function proposeChanges(page, text, deps) {
   const named = new Set(C.hintedFields(text));
+  if (named.has("price")) named.add("currency"); // "המחיר ביורו" / "285,000 אירו" re-currencies the page
   if (/כתובת/.test(text)) named.add("address");
   if (/עיר/.test(text)) named.add("city");
   if (!named.size || !deps.parseListing || !deps.extractAllowed(page.business_phone || "")) return null;
@@ -43,10 +44,11 @@ async function proposeChanges(page, text, deps) {
   const current = {}, changes = {};
   for (const f of named) {
     const v = fields[f], now = page.property[PAGE_FIELDS[f]];
-    current[f] = f === "deal" ? (now === "rent" ? "rent" : "sale") : now;
+    current[f] = f === "deal" ? (now === "rent" ? "rent" : "sale") : f === "currency" ? (now || "ILS") : now;
     if (PAGE_FIELDS[f] && v !== null && v !== undefined && v !== current[f]) changes[f] = v;
   }
   if (!Object.keys(changes).length) return null;
+  current.currency = page.property.currency || "ILS"; // prices in the confirmation read in the page's currency
   const pagePatch = {}, listingPatch = {};
   for (const [f, v] of Object.entries(changes)) { pagePatch[`property.${PAGE_FIELDS[f]}`] = v; listingPatch[PAGE_FIELDS[f]] = v; }
   // An auto-built title ("4 חד׳ בפארק") follows its fields; a title the agent wrote stays.
@@ -126,7 +128,7 @@ async function updatingTurn(input, deps, draft, now, h) {
     draft.pending_page = null;
     if (cmd === "yes") {
       await deps.updatePageData(pending);
-      return { handled: true, status: "page_updated", draft: back || draft, replies: andBack([R.pageUpdated(pending.changes, draft.links[0].url)]) };
+      return { handled: true, status: "page_updated", draft: back || draft, replies: andBack([R.pageUpdated(pending.changes, draft.links[0].url, pending.current && pending.current.currency)]) };
     }
     if (cmd === "no") return { handled: true, status: "page_kept", draft: back || draft, replies: andBack([R.kept()]) };
   }
