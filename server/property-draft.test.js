@@ -45,6 +45,25 @@ assert.equal(D.parseAnswer("price", "12,000 לחודש"), 12000);
 assert.equal(D.parseAnswer("price", "לא יודע"), null);
 assert.equal(D.parseAnswer("price", "2.9"), null, "bare shorthand is re-asked, not stored as ₪3");
 assert.equal(D.parseAnswer("price", "3"), null);
+// 972526003708, 2026-09-30: a direct answer in another currency keeps its number; the
+// currency is recorded on the property (noteCurrency), never assumed to be ₪.
+assert.equal(D.parseAnswer("price", "285,000 אירו"), 285000);
+assert.equal(D.parseAnswer("price", "285,000 €"), 285000);
+assert.equal(D.parseAnswer("price", "$450,000"), 450000);
+assert.equal(D.parseAnswer("price", "285,000 ₪"), 285000);
+assert.equal(D.parseAnswer("currency", "יורו"), "EUR");
+assert.equal(D.parseAnswer("currency", "שקלים"), "ILS");
+assert.equal(D.parseAnswer("currency", "לא בשקלים, ביורו"), "EUR", "a correction names the old currency too");
+assert.equal(D.parseAnswer("currency", "לא ש״ח, דולר"), "USD");
+{
+  const dr = D.newDraft("972500000000", "keyword");
+  D.noteCurrency(dr, "285,000 אירו");
+  assert.equal(dr.fields.currency, "EUR");
+  D.noteCurrency(dr, "285,000");
+  assert.equal(dr.fields.currency, "EUR", "a bare number doesn't reset a named currency");
+  assert.equal(D.listingBody(dr).currency, "EUR");
+  assert.equal(D.listingBody(D.newDraft("972500000000", "keyword")).currency, "ILS");
+}
 assert.equal(D.parseAnswer("rooms", "3.5"), 3.5);
 assert.equal(D.parseAnswer("rooms", "4 חדרים"), 4);
 assert.equal(D.parseAnswer("rooms", "הרבה"), null);

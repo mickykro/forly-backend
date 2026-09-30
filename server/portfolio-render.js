@@ -2,6 +2,7 @@
  * portfolio-render.js — server-side portfolio HTML rendering for SEO.
  * ponytail: pure functions, no Firestore access.
  */
+const { symbol } = require("./currency");
 
 function escapeHtml(s) {
   return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -44,7 +45,7 @@ function renderPortfolioDocument(template, data) {
       ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.title)}" loading="lazy">` : ""}
       <h3>${escapeHtml(p.title)}</h3>
       <p>${escapeHtml(p.city)}${p.neighborhood ? `, ${escapeHtml(p.neighborhood)}` : ""}</p>
-      ${p.price ? `<p class="price">${formatPrice(p.price, p.listing_type)}</p>` : ""}
+      ${p.price ? `<p class="price">${formatPrice(p.price, p.listing_type, p.currency)}</p>` : ""}
     </a>
   `).join("");
 
@@ -75,10 +76,10 @@ function renderPortfolioDocument(template, data) {
     .replace("<!--PORTFOLIO_BODY-->", body);
 }
 
-function formatPrice(price, listingType) {
+function formatPrice(price, listingType, currency) {
   if (!price) return "";
-  const formatted = new Intl.NumberFormat("he-IL").format(price);
-  return listingType === "rent" ? `₪${formatted}/חודש` : `₪${formatted}`;
+  const formatted = `${symbol(currency)}${new Intl.NumberFormat("he-IL").format(price)}`;
+  return listingType === "rent" ? `${formatted}/חודש` : formatted;
 }
 
 /**

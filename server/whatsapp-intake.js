@@ -149,6 +149,7 @@ function answerField(draft, field, text, cmd, deps) {
   }
   draft.retry = null;
   draft.fields[field] = value;
+  if (field === "price") D.noteCurrency(draft, text);
   const p = promptFor(draft, deps);
   return { status: p.status, replies: p.replies, draft };
 }
@@ -311,7 +312,7 @@ async function activeTurn(input, deps, draft, now) {
     if (cmd === "yes" || cmd === "no") {
       if (cmd === "yes") C.apply(draft, changes);
       const p = promptFor(draft, deps);
-      const first = cmd === "yes" ? R.updated(changes) : R.kept();
+      const first = cmd === "yes" ? R.updated(changes, draft.fields.currency) : R.kept();
       return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble([first, ...C.withPriceCheck(draft, p.replies)])] };
     }
   }

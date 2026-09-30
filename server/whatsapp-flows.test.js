@@ -383,5 +383,43 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "1,390,000", draft: t.draft }, d);
   assert.notEqual(t.status, "duplicate_asked", "asked once only");
 
+  // ── currency: the property keeps the price as given, in the currency given (972526003708, 2026-09-30) ──
+  // The real extractor with a stubbed model that never mentions currency: detection is the code's job.
+  const { parseListing: realParse } = require("./listing-extract");
+  const modelSays = (json) => ({ parseListing: (txt) => realParse(txt, { askFn: async () => ({ text: JSON.stringify(json) }) }) });
+  const eurKeyword = { ...D.newDraft(PHONE, "keyword", T0) };
+  ({ d } = deps(modelSays({ city: "כפר וליכאדה", price: 285000, rooms: 3, deal: "sale" })));
+  t = await turn({ text: "הנכס בכפר וליכאדה, 3 חדרי שינה, 3 חדרים. המחיר הוא 285,000 אירו", draft: eurKeyword }, d);
+  assert.equal(t.draft.fields.price, 285000);
+  assert.equal(t.draft.fields.currency, "EUR");
+  assert.match(texts(t), /€285,000/);
+  assert.doesNotMatch(texts(t), /₪/);
+  assert.equal(D.listingBody(t.draft).currency, "EUR");
+
+  // "it's not shekels, it's euro" while another question is open: the property's currency changes
+  const eurAtFloor = { ...D.newDraft(PHONE, "keyword", T0) };
+  Object.assign(eurAtFloor.fields, { city: "כפר וליכאדה", price: 285000, rooms: 3, deal: "sale", size_sqm: 100 });
+  ({ d } = deps(modelSays({ price: 285000 })));
+  t = await turn({ text: "וזה לא 285,000 שח, אלא € יורו", draft: eurAtFloor }, d);
+  assert.equal(t.draft.fields.currency, "EUR");
+  assert.equal(t.draft.fields.price, 285000, "the number stays");
+  assert.match(texts(t), /מטבע €/);
+  assert.match(texts(t), /באיזו קומה/, "and the open question comes back");
+
+  // "100 מ״ר בנוי על מגרש של 400": built 100, plot 400 — the plot is never the main area (972526003708)
+  const eurPlot = { ...D.newDraft(PHONE, "keyword", T0) };
+  Object.assign(eurPlot.fields, { city: "כפר וליכאדה", price: 285000, rooms: 3 });
+  ({ d } = deps(modelSays({ size_sqm: 100, sqm_built: 100, sqm_plot: 400 })));
+  t = await turn({ text: "הווילה 100 מ״ר בנוי על מגרש של 400 מ״ר", draft: eurPlot }, d);
+  assert.deepEqual([t.draft.fields.size_sqm, t.draft.fields.sqm_built, t.draft.fields.sqm_plot], [100, 100, 400]);
+  assert.match(texts(t), /מגרש \(מ״ר\) 400/);
+  assert.equal(D.listingBody(t.draft).size_plot, 400);
+
+  // a direct answer to "מה המחיר?"
+  const eurAtPrice = { ...D.newDraft(PHONE, "keyword", T0) };
+  eurAtPrice.fields.city = "כפר וליכאדה";
+  t = await turn({ text: "285,000 יורו", draft: eurAtPrice }, d);
+  assert.deepEqual([t.draft.fields.price, t.draft.fields.currency], [285000, "EUR"]);
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

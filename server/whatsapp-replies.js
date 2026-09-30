@@ -6,13 +6,15 @@
  */
 const { MIN_PHOTOS } = require("./property-draft");
 const { inPlace } = require("./utils");
+const { symbol } = require("./currency");
 // "תמונה אחת" / "4 תמונות" — Hebrew nouns don't stay plural with 1.
 const count = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
-const ils = (n) => `₪${Number(n).toLocaleString("en-US")}`;
+// No currency on the draft/page means ILS (everything created before currencies existed).
+const money = (n, cur) => `${symbol(cur)}${Number(n).toLocaleString("en-US")}`;
 
 const LABELS = {
   city: "עיר", address: "כתובת", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
-  floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב",
+  floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב", currency: "מטבע", sqm_built: "מ״ר בנוי", sqm_plot: "מגרש (מ״ר)",
 };
 
 const QUESTIONS = {
@@ -55,7 +57,7 @@ function headline(f) {
   const parts = [];
   if (f.rooms) parts.push(`${f.rooms} חד׳${where ? ` ${inPlace(where)}` : ""}`);
   else if (where) parts.push(where);
-  if (f.price) parts.push(ils(f.price));
+  if (f.price) parts.push(money(f.price, f.currency));
   return parts.join(", ");
 }
 
@@ -120,7 +122,7 @@ function summaryLines(s) {
   const lines = [];
   if (s.rooms) lines.push(`${s.rooms} חד׳`);
   if (s.city) lines.push(s.neighborhood ? `${s.neighborhood}, ${s.city}` : s.city);
-  if (s.price) lines.push(ils(s.price));
+  if (s.price) lines.push(money(s.price, s.currency));
   if (s.deal) lines.push(s.deal === "rent" ? "להשכרה" : "למכירה");
   if (s.size_sqm) lines.push(`${s.size_sqm} מ״ר`);
   if (s.floor !== null && s.floor !== undefined) lines.push(`קומה ${s.floor}`);
@@ -143,26 +145,27 @@ function reviewReady(link, skipped = []) {
 function previewOnly(link) { return { text: `בחרתם תצוגה מקדימה — היצירה ממשיכה בדף:\n${link}` }; }
 
 // ── corrections ──
-const CODES = { city: "c", price: "p", rooms: "r", deal: "d", size_sqm: "s", floor: "f", parking: "k", neighborhood: "n", description: "t", template: "x" };
-function show(field, v) {
+const CODES = { city: "c", price: "p", currency: "u", rooms: "r", deal: "d", size_sqm: "s", floor: "f", parking: "k", neighborhood: "n", description: "t", template: "x" };
+function show(field, v, cur) {
+  if (field === "currency") return symbol(v); // unset is ₪
   if (v === null || v === undefined) return "—";
-  if (field === "price") return ils(v);
+  if (field === "price") return money(v, cur);
   if (field === "deal") return v === "rent" ? "להשכרה" : "למכירה";
   if (field === "description") return String(v).slice(0, 40) + (String(v).length > 40 ? "…" : "");
   return String(v);
 }
 function fieldList(fields) {
-  const lines = Object.keys(CODES).map((f) => `/${LABELS[f]} (/${CODES[f]}): ${show(f, fields[f])}`);
+  const lines = Object.keys(CODES).map((f) => `/${LABELS[f]} (/${CODES[f]}): ${show(f, fields[f], fields.currency)}`);
   return { text: `לתיקון כתבו / ושם השדה, למשל /מחיר 2.1 מיליון\n${lines.join("\n")}` };
 }
 function unknownField(name) { return { text: `לא מכירה את השדה ״${name}״. כתבו / לרשימת השדות.` }; }
-function updated(changes) {
+function updated(changes, cur = changes.currency) {
   // Parking reads as a phrase ("חניה אחת"), not "חניות 1".
-  const part = ([f, v]) => (f === "parking" && v ? count(v, "חניה אחת", "חניות") : `${LABELS[f]} ${show(f, v)}`);
+  const part = ([f, v]) => (f === "parking" && v ? count(v, "חניה אחת", "חניות") : `${LABELS[f]} ${show(f, v, cur)}`);
   return { text: `עדכנתי: ${Object.entries(changes).map(part).join(", ")} ✅` };
 }
 function confirmChanges(changes, fields) {
-  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, fields[f])} ← ${show(f, v)}`).join("\n");
+  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, fields[f], fields.currency)} ← ${show(f, v, changes.currency || fields.currency)}`).join("\n");
   return { text: `להחליף?\n${list}`, buttons: ["כן", "לא"] };
 }
 // Links to the page editor for an existing page (or a few, when the message named none).
@@ -178,11 +181,11 @@ function editHeld(links) {
 }
 // A live page's change, approved before it is written.
 function confirmPageChanges(title, changes, current) {
-  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, current[f])} ← ${show(f, v)}`).join("\n");
+  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, current[f], current.currency)} ← ${show(f, v, changes.currency || current.currency)}`).join("\n");
   return { text: `לעדכן בדף ${title}?\n${list}`, buttons: ["כן", "לא"] };
 }
-function pageUpdated(changes, editUrl) {
-  return { text: `${updated(changes).text}\nהדף מעודכן. לעוד שינויים: ${editUrl}` };
+function pageUpdated(changes, editUrl, cur) {
+  return { text: `${updated(changes, changes.currency || cur).text}\nהדף מעודכן. לעוד שינויים: ${editUrl}` };
 }
 // Several replies as one WhatsApp bubble; the last one's buttons are kept.
 function oneBubble(replies) {
@@ -192,7 +195,7 @@ function oneBubble(replies) {
 function kept() { return { text: "בסדר, השארתי כמו שהיה." }; }
 function priceOff(fields) {
   const as = fields.deal === "sale" ? "מכירה" : "שכירות";
-  return { text: `רגע ⚠️ ${ils(fields.price)} נראה חריג ל${as}. אם זו טעות: /מחיר … או /עסקה …` };
+  return { text: `רגע ⚠️ ${money(fields.price, fields.currency)} נראה חריג ל${as}. אם זו טעות: /מחיר … או /עסקה …` };
 }
 
 // ── input ──
