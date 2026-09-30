@@ -175,6 +175,26 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ fileUrls: ["https://green/burst1.jpg", "https://green/burst2.jpg", "https://green/burst3.jpg"], draft }, d);
   assert.equal(t.draft.photos.length, 3, "the same burst delivered twice is stored once");
 
+  // regression: the photo timer must return the draft even when nothing was
+  // dropped, or routes/whatsapp.js has no draft to hang last_buttons off of —
+  // the next "1"/"2" then resolves to nothing and repeats the same menu
+  // (seen live: נופר הרוש, 972546582548, 2026-09-29 18:16, "1" and "2" both ignored).
+  ({ d } = deps());
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  for (const [f, v] of [["city", "רמת גן"], ["price", "5,800,000"], ["rooms", "5"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
+  for (let i = 0; i < 8 && t.status.startsWith("asked:"); i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  t = await turn({ fileUrls: ["https://green/n1.jpg", "https://green/n2.jpg", "https://green/n3.jpg", "https://green/n4.jpg"], draft }, d);
+  draft = t.draft;
+  t = await turn({ event: "photo_timer", draft }, d);
+  assert.equal(t.status, "choose");
+  assert.notEqual(t.draft, undefined, "the draft must come back so last_buttons can be saved");
+  assert.deepEqual(t.replies[0].buttons, ["תצוגה מקדימה", "ליצור"]);
+  // what routes/whatsapp.js's persistAndSend does with that reply, then the agent's "1"
+  draft = t.draft;
+  draft.last_buttons = t.replies[0].buttons;
+  t = await turn({ text: "1", draft }, d);
+  assert.equal(t.status, "confirm", "numbered reply right after a photo batch resolves, not repeats the menu");
+
   // photo while a question is open: stored, timer prompt says saved + repeats the question
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;

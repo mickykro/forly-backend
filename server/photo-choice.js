@@ -150,14 +150,18 @@ function photoTimer(draft, deps, now, promptFor) {
   const n = draft.photos.length;
   const dropped = draft.photos_dropped || 0;
   draft.photos_dropped = 0;
-  const done = dropped ? { draft: D.touch(draft, now) } : {};
+  // The draft is always returned (even when nothing but the buttons changed):
+  // routes/whatsapp.js reads its reply's buttons off `turn.draft.last_buttons`
+  // to resolve the agent's next "1"/"2" — dropping the draft here left that
+  // stale, so a numbered reply to this exact message silently failed.
+  const touched = D.touch(draft, now);
   if (D.nextStep(draft).kind === "photos") {
     const r = [R.photosProgress(n)];
     if (dropped) r.unshift(R.photosSaved(n, dropped));
-    return { handled: true, status: `photos_progress:${n}`, ...done, replies: [R.oneBubble(r)] };
+    return { handled: true, status: `photos_progress:${n}`, draft: touched, replies: [R.oneBubble(r)] };
   }
   const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, ...done, replies: [R.oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
+  return { handled: true, status: p.status, draft: touched, replies: [R.oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
 }
 
 module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editWith, storeVideo, photoTimer };
