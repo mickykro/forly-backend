@@ -48,11 +48,13 @@
   function get(path) {
     return path.split(".").reduce(function (o, k) { return (o == null) ? null : o[k]; }, DATA);
   }
+  // The property's own currency; pages from before currencies existed are ₪.
+  var CUR = ({ ILS: "₪", EUR: "€", USD: "$" })[get("property.currency")] || "₪";
   function fmtPrice(n) {
     if (!n) return "";
     n = +n;
-    if (n >= 1e6) { var m = n / 1e6; return "₪" + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + "M"; }
-    return "₪" + n.toLocaleString("he-IL");
+    if (n >= 1e6) { var m = n / 1e6; return CUR + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + "M"; }
+    return CUR + n.toLocaleString("he-IL");
   }
   var each = function (sel, root, fn) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); };
 
@@ -306,7 +308,7 @@
   var ppmPrice = +get("property.price") || 0, ppmSqm = +get("property.size_sqm") || 0;
   each("[data-ppm]", document, function (el) {
     if (isRent || !ppmPrice || !ppmSqm) { el.remove(); return; }
-    el.textContent = "₪" + Math.round(ppmPrice / ppmSqm).toLocaleString("he-IL") + " " + T("per_sqm");
+    el.textContent = CUR + Math.round(ppmPrice / ppmSqm).toLocaleString("he-IL") + " " + T("per_sqm");
   });
 
   // ── amenities + area breakdown chips (parking, storage, elevator, sizes) ──

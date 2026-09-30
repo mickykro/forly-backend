@@ -10,6 +10,7 @@
  * Pure functions — no I/O. Unit-tested in share-kit.test.js.
  */
 
+const { symbol } = require("../currency");
 const MAX_GROUPS = 20;
 
 // 972501234567 → 0501234567 for display; anything non-IL stays as-is.
@@ -69,7 +70,7 @@ function buildPostCopy(page, pageUrl, opts = {}) {
   if (facts.length) lines.push(facts.join(" · "));
   if (Number(p.price) > 0) {
     const verb = p.listing_type === "rent" ? "שכירות" : "מחיר";
-    lines.push(`💰 ${verb}: ₪${Number(p.price).toLocaleString("en-US")}`);
+    lines.push(`💰 ${verb}: ${symbol(p.currency)}${Number(p.price).toLocaleString("en-US")}`);
   }
   lines.push("");
   // linkInComment: many groups treat an external link in the post body as

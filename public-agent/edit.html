@@ -119,7 +119,15 @@
         <div class="sec-title">פרטי הנכס</div>
         <div class="field"><label>כותרת הנכס</label><input id="fTitle" maxlength="80" data-live="property.title"></div>
         <div class="grid-3">
-          <div class="field"><label>מחיר (₪)</label><input id="fPrice" type="number" min="0" max="999999999"></div>
+          <div class="field">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+              <label for="fPrice">מחיר</label>
+              <select id="fCurrency" aria-label="מטבע" title="מטבע" style="width:auto;padding:0 4px;font-size:.8rem">
+                <option value="ILS">₪ שקל</option><option value="EUR">€ יורו</option><option value="USD">$ דולר</option>
+              </select>
+            </div>
+            <input id="fPrice" type="number" min="0" max="999999999">
+          </div>
           <div class="field"><label>חדרים</label><input id="fRooms" type="number" step="0.5" min="1" max="30"></div>
           <div class="field"><label>מ״ר</label><input id="fSqm" type="number" min="5" max="2000"></div>
         </div>
@@ -307,6 +315,7 @@
       property: {
         title: $("#fTitle").value,
         price: Number($("#fPrice").value) || 0,
+        currency: $("#fCurrency").value,
         rooms: Number($("#fRooms").value) || 0,
         size_sqm: Number($("#fSqm").value) || 0,
         floor: Number($("#fFloor").value) || 0,
@@ -354,9 +363,10 @@
   // All inputs trigger debounced preview refresh
   document.addEventListener("input", function (e) {
     var el = e.target;
-    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
       schedulePreviewRefresh();
     }
+    if (el.id === "fPrice" || el.id === "fCurrency") syncPriceSpec();
     if (el.id === "fPhrase") $("#phraseCount").textContent = el.value.length;
   });
   // Checkboxes use change event
@@ -365,6 +375,26 @@
       schedulePreviewRefresh();
     }
   });
+
+  var CURRENCY_SYMBOL = { ILS: "₪", EUR: "€", USD: "$" };
+  var priceSpecRent = false, priceSpecShown = null;
+  function fmtPrice(n, cur) {
+    if (!n) return "";
+    var sym = CURRENCY_SYMBOL[cur] || "₪";
+    if (n >= 1e6) return sym + (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    return sym + n.toLocaleString("he-IL");
+  }
+  function priceSpec(price, cur) {
+    if (price === undefined) { price = Number($("#fPrice").value) || 0; cur = $("#fCurrency").value; }
+    var s = fmtPrice(price, cur);
+    return s && priceSpecRent ? s + "/חודש" : s;
+  }
+  // The spec box is only rewritten while it still shows the auto-formatted price, never over the agent's own text.
+  function syncPriceSpec() {
+    var box = $("#fSpec1v");
+    if (priceSpecShown === null || box.value !== priceSpecShown) return;
+    box.value = priceSpecShown = priceSpec();
+  }
 
   function load() {
     FLY.req("/api/page?id=" + encodeURIComponent(pageId)).then(function (d) {
@@ -395,6 +425,7 @@
       // Property
       $("#fTitle").value = d.property.title || "";
       $("#fPrice").value = d.property.price || "";
+      $("#fCurrency").value = d.property.currency || "ILS";
       $("#fRooms").value = d.property.rooms || "";
       $("#fSqm").value = d.property.size_sqm || "";
       $("#fFloor").value = d.property.floor || "";
@@ -406,12 +437,10 @@
         (p.neighborhood ? p.neighborhood + ", " : "") + (p.city || "");
       $("#fEyebrow").value = texts.eyebrow || eyebrowDefault;
       // Specs - show computed defaults if not customized
-      var fmtPrice = function (n) {
-        if (!n) return "";
-        if (n >= 1e6) return "₪" + (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
-        return "₪" + n.toLocaleString("he-IL");
-      };
-      $("#fSpec1v").value = texts.spec1_v || fmtPrice(p.price) + (isRent ? "/חודש" : "");
+      priceSpecRent = isRent;
+      $("#fSpec1v").value = texts.spec1_v || priceSpec();
+      // Saved as text, so a price box that still reads like the old price/currency follows the new one.
+      if ($("#fSpec1v").value === priceSpec(p.price, p.currency)) priceSpecShown = $("#fSpec1v").value;
       $("#fSpec1l").value = texts.spec1_l || (isRent ? "שכירות חודשית" : "מחיר מבוקש");
       $("#fSpec2v").value = texts.spec2_v || (p.rooms ? p.rooms + " חד׳" : "");
       $("#fSpec2l").value = texts.spec2_l || (p.size_sqm ? p.size_sqm + " מ״ר" : "");
