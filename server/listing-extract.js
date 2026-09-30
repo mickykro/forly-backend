@@ -52,7 +52,7 @@ The text may be free-form prose, or a scraped listing page with short "label:val
 Return ONLY a JSON object with exactly these keys: ${Object.keys(SCHEMA).join(", ")}.
 Rules:
 - Use only what the text states explicitly. If a value is not stated, use null. Never guess.
-- Numbers as JSON numbers, never strings. price in ILS: "2.9M" or "2.9 מיליון" → 2900000, "890 אלף" → 890000, "12,000 לחודש" → 12000.
+- Numbers as JSON numbers, never strings. price is always ILS: "2.9M" or "2.9 מיליון" → 2900000, "890 אלף" → 890000, "12,000 לחודש" → 12000 — but only when no other currency is named. If the text states the price in another currency (€/יורו/אירו, $/דולר/USD, GBP/לירה שטרלינג), leave price null: never convert it or label it as שקלים.
 - deal: "rent" if the text is about renting (להשכרה, שכירות, לחודש), "sale" if about buying or selling (למכירה, מכירה, סוג עסקה: מכירה), else null.
 - size_sqm is the total/main area, from labels like "שטח", "מ״ר", or a bare "70 מ״ר" — "מ״ר בנוי" (built area) goes in sqm_built instead when both are given.
 - rooms may be fractional (3.5). rooms (חדרים) is the Israeli room count, which includes the living room: "N חדרי שינה" (bedrooms) is NOT rooms — when only bedrooms are given, leave rooms null. floor is the apartment's floor, not the building height. parking is the number of spots (חניה = 1, "ללא" = 0).
@@ -61,6 +61,12 @@ Rules:
 No prose, no markdown fences.`;
 
 function unavailable(msg) { const e = new Error(msg); e.code = "extract_unavailable"; return e; }
+
+// The prompt tells the model to leave price null for a non-ILS amount, but a model
+// isn't a guarantee: a price shown as ₪ when the agent wrote "285,000 אירו" is a
+// real listing published at roughly a quarter of its actual price. Deterministic backstop.
+const FOREIGN_CURRENCY = /€|\$|USD|EUR|GBP|יורו|אירו|דולר/;
+function foreignPrice(text) { return FOREIGN_CURRENCY.test(text) && !text.includes("₪"); }
 
 function coerce(raw) {
   const fields = {};
@@ -94,7 +100,8 @@ async function parseListing(text, { askFn = ask, model = MODEL, keys = process.e
   try { reply = await askFn(model, SYSTEM, [{ role: "user", content: input }], keys, { schema: null, maxOut: 700 }); }
   catch (err) { throw unavailable(err.message); }
   const fields = parseReply(reply && reply.text);
+  if (fields.price !== null && foreignPrice(input)) fields.price = null;
   return { fields, missing: missingOf(fields) };
 }
 
-module.exports = { parseListing, REQUIRED, MAX_INPUT, SCHEMA, _test: { coerce, missingOf, parseReply, condense, SYSTEM } };
+module.exports = { parseListing, REQUIRED, MAX_INPUT, SCHEMA, _test: { coerce, missingOf, parseReply, condense, SYSTEM, foreignPrice } };
