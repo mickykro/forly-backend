@@ -42,7 +42,7 @@ function parseSlash(text) {
 const HINTS = {
   price: ["מחיר", "מיליון", "מליון", "אלף", "₪", "ש״ח", "ש\"ח", "שקל", "מטבע", "€", "יורו", "אירו", "$", "דולר"],
   rooms: ["חדרים", "חד׳", "חד'"], size_sqm: ["מ״ר", "מ\"ר", "מטר"], floor: ["קומה"],
-  parking: ["חניה", "חניות"], deal: ["למכירה", "להשכרה", "שכירות"], neighborhood: ["שכונת", "שכונה"],
+  parking: ["חניה", "חניות"], deal: ["למכירה", "להשכרה", "שכירות"], neighborhood: ["שכונת", "שכונה"], sqm_plot: ["מגרש", "דונם"],
   address: ["כתובת", "רחוב"], city: ["עיר"],
 };
 function hintedFields(text) {
@@ -64,7 +64,7 @@ function needsExtraction(asked, text) {
   return f.length >= 2 || (f.length === 1 && f[0] !== asked);
 }
 
-const MERGEABLE = ["city", "address", "neighborhood", "deal", "price", "currency", "rooms", "size_sqm", "floor", "parking"];
+const MERGEABLE = ["city", "address", "neighborhood", "deal", "price", "currency", "rooms", "size_sqm", "sqm_built", "sqm_plot", "floor", "parking"];
 
 /*
  * Fold extracted fields into the draft. Empty (or skipped) fields are filled

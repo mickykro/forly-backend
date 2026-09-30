@@ -320,6 +320,7 @@
     if (+p.size_built) chips.push(T("built_area") + " · " + p.size_built + " " + T("sqm"));
     if (+p.size_balcony) chips.push(T("balconies") + " · " + p.size_balcony + " " + T("sqm"));
     if (+p.size_garden) chips.push(T("garden") + " · " + p.size_garden + " " + T("sqm"));
+    if (+p.size_plot) chips.push(T("plot") + " · " + p.size_plot + " " + T("sqm"));
     if (+p.parking) chips.push(p.parking + " " + T("parking"));
     if (p.storage) chips.push(T("storage"));
     if (p.shabbat_elevator) chips.push(T("shabbat_elevator"));
