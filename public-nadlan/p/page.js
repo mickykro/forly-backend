@@ -42,13 +42,14 @@
     document.body.classList.add("has-state", "state-" + state);
   }
 
+  var CUR = "₪"; // the agent's currency, set by render()
   function fmtPrice(n) {
     if (!n) return "";
     if (n >= 1e6) {
       var m = n / 1e6;
-      return "₪" + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + "M";
+      return CUR + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + "M";
     }
-    return "₪" + Number(n).toLocaleString("he-IL");
+    return CUR + Number(n).toLocaleString("he-IL");
   }
 
   function beacon(event) {
@@ -138,6 +139,7 @@
   // ── render ─────────────────────────────────
 
   function render(d) {
+    CUR = { ILS: "₪", USD: "$", EUR: "€" }[d.currency] || "₪";
     applyTheme(d.theme);
     CURLANG = d.language || "he";
     if (window.I18N) window.I18N.apply(document, CURLANG); // translate chrome + set <html lang/dir>
@@ -191,7 +193,7 @@
     var isRent = p.listing_type === "rent";
     var priceLabel = isRent ? TR("monthly_rent") : TR("asking_price");
     if (!isRent && p.price && p.size_sqm) {
-      priceLabel += " · ₪" + Math.round(p.price / p.size_sqm).toLocaleString("he-IL") + " " + TR("per_sqm");
+      priceLabel += " · " + CUR + Math.round(p.price / p.size_sqm).toLocaleString("he-IL") + " " + TR("per_sqm");
     }
     fillSpec(specs[0],
       texts.spec1_v || fmtPrice(p.price) + (isRent && p.price ? " " + TR("per_month") : ""),

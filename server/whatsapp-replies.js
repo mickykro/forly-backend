@@ -6,6 +6,7 @@
  */
 const { MIN_PHOTOS } = require("./property-draft");
 const { inPlace } = require("./utils");
+const Cur = require("./currency");
 // "תמונה אחת" / "4 תמונות" — Hebrew nouns don't stay plural with 1.
 const count = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
 const ils = (n) => `₪${Number(n).toLocaleString("en-US")}`;
@@ -217,6 +218,16 @@ function resumePrompt(s) {
   return { text: `יש לך טיוטה פתוחה: ${summaryLines(s)}.\nלהמשיך אותה, להתחיל נכס חדש, או לבטל?`, buttons: ["המשך", "חדש", "ביטול"] };
 }
 
+// ── settings ──
+const CURRENCY_OPTIONS = "״מטבע שקל״, ״מטבע דולר״ או ״מטבע יורו״";
+function currencySet(code) {
+  return { text: `עדכנתי ✅ המחירים בדפים שלך יוצגו מעכשיו ב${Cur.nameOf(code)} (${Cur.symbolOf(code)}).` };
+}
+function currencyAsk(code) {
+  return { text: `המטבע שלך כרגע: ${Cur.nameOf(code)} (${Cur.symbolOf(code)}).\nלשינוי כתבו ${CURRENCY_OPTIONS}.` };
+}
+function currencyUnknown() { return { text: `את המטבע הזה אני לא מכירה. אפשר לבחור ${CURRENCY_OPTIONS}.` }; }
+
 const SOURCE_ERRORS = {
   facebook_not_connected: "כדי לקרוא פוסטים מפייסבוק צריך קודם לחבר את עמוד הפייסבוק בפאנל.",
   page_unreadable: "את הקישור הזה אי אפשר לקרוא אוטומטית (האתר חוסם, או שהמודעה פרטית או הוסרה).",
@@ -236,5 +247,6 @@ module.exports = {
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, recovered, duplicatePage, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
+  currencySet, currencyAsk, currencyUnknown,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

@@ -356,7 +356,8 @@
   function formatPrice(price, type) {
     if (!price) return "";
     var f = new Intl.NumberFormat("he-IL").format(price);
-    return type === "rent" ? "₪ " + f + " <small>לחודש</small>" : "₪ " + f;
+    var cur = { ILS: "₪", USD: "$", EUR: "€" }[data && data.currency] || "₪";
+    return type === "rent" ? cur + " " + f + " <small>לחודש</small>" : cur + " " + f;
   }
 
   function esc(s) {

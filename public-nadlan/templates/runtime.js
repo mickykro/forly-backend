@@ -6,7 +6,7 @@
 
    Binding contract (attributes the templates use):
      data-bind="a.b.c"        → element.textContent = value at that path
-       data-fmt="price"       → format as ₪, add " / חודש" for rentals
+       data-fmt="price"       → format in the agent's currency (₪/$/€), add " / חודש" for rentals
      data-deal                → "למכירה" / "להשכרה" by listing_type
      data-price-label         → "מחיר מבוקש" / "שכר דירה חודשי"
      data-show="a.b"          → element removed if the value is empty
@@ -48,11 +48,12 @@
   function get(path) {
     return path.split(".").reduce(function (o, k) { return (o == null) ? null : o[k]; }, DATA);
   }
+  var CUR = { ILS: "₪", USD: "$", EUR: "€" }[DATA.currency] || "₪";
   function fmtPrice(n) {
     if (!n) return "";
     n = +n;
-    if (n >= 1e6) { var m = n / 1e6; return "₪" + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + "M"; }
-    return "₪" + n.toLocaleString("he-IL");
+    if (n >= 1e6) { var m = n / 1e6; return CUR + (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + "M"; }
+    return CUR + n.toLocaleString("he-IL");
   }
   var each = function (sel, root, fn) { Array.prototype.forEach.call((root || document).querySelectorAll(sel), fn); };
 
@@ -306,7 +307,7 @@
   var ppmPrice = +get("property.price") || 0, ppmSqm = +get("property.size_sqm") || 0;
   each("[data-ppm]", document, function (el) {
     if (isRent || !ppmPrice || !ppmSqm) { el.remove(); return; }
-    el.textContent = "₪" + Math.round(ppmPrice / ppmSqm).toLocaleString("he-IL") + " " + T("per_sqm");
+    el.textContent = CUR + Math.round(ppmPrice / ppmSqm).toLocaleString("he-IL") + " " + T("per_sqm");
   });
 
   // ── amenities + area breakdown chips (parking, storage, elevator, sizes) ──

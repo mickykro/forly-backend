@@ -612,7 +612,7 @@ footer a { color: rgba(255,255,255,.7); text-decoration: underline; }
     if (P.price) {
       var n = +P.price;
       var big = n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 2).replace(/\.?0+$/, "") + "M" : Math.round(n / 1000) + "K";
-      out.push({ big: big, unit: "₪", sub: isRent ? T("monthly_rent") : T("asking_price") });
+      out.push({ big: big, unit: { ILS: "₪", USD: "$", EUR: "€" }[DATA.currency] || "₪", sub: isRent ? T("monthly_rent") : T("asking_price") });
     }
     if (P.rooms) out.push({ big: P.rooms, unit: T("rooms"), sub: T("the_property") });
     if (P.floor) out.push({ big: P.floor, unit: T("floor"), sub: T("the_property") });

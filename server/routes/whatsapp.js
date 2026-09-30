@@ -41,6 +41,8 @@ const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
 const { validateListing, createListing } = require("../listing-create");
 const { verifySession, requireAuth, readToken, REVIEW_SCOPES } = require("../auth");
+const Cur = require("../currency");
+const businessCache = require("../business-cache");
 
 const REVIEW_TTL_S = 7 * 24 * 60 * 60;
 const EXPIRED_PAGE = `<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8">
@@ -136,6 +138,8 @@ module.exports = function createWhatsappRouter(ctx) {
         .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at)),
       editUrl: (pageId) => `${linkBase}/edit.html?id=${encodeURIComponent(pageId)}`,
       cancelEdits: (p) => db.setEditCancel(p),
+      // "מטבע דולר": the agent's display currency; pages resolve it through the cache.
+      setCurrency: async (code) => { await db.setBusiness(phone, { currency: code }); businessCache.invalidate(phone); },
       // Approved in chat ("כן" to confirmPageChanges): the live page and its listing.
       updatePageData: async ({ page_id, listing_id, pagePatch, listingPatch }) => {
         await db.updatePage(page_id, { ...pagePatch, updated_at: new Date() });
@@ -224,7 +228,8 @@ module.exports = function createWhatsappRouter(ctx) {
           Object.assign(draft, { status: "active", mode: null, listing_id: null });
           await db.saveDraft(touch(draft));
         }
-        if (sendWhatsApp) await sendWhatsApp(phone, R.buildFailed(retry, l).text);
+        const code = Cur.codeOf(await db.getBusiness(phone).catch(() => null));
+        if (sendWhatsApp) await sendWhatsApp(phone, Cur.localize(R.buildFailed(retry, l).text, code));
       });
       // The operator hears of it right away: the agent was told the team is on it.
       if (sendWhatsApp) {
@@ -252,6 +257,7 @@ module.exports = function createWhatsappRouter(ctx) {
       `טיוטת דף נכס פתוחה: ${draft && draft.status === "active" ? "כן" : "לא"}`,
       `דפי הנכס של הסוכן: ${pages.length ? pages.map((p) => `${p.property.title || p.property.address} — עורך: ${linkBase}/edit.html?id=${p.page_id}`).join(" | ") : "אין"}`,
       "דף נכס חדש: מתחיל כשהסוכן כותב ״דף נכס״ או שולח את פרטי הנכס. את לא שואלת את שאלות הדף בעצמך.",
+      "מטבע המחירים בדפים (שקל / דולר / יורו): הסוכן משנה בכתיבת ״מטבע דולר״ וכדומה.",
       "לא נתמך בצ׳אט: עדכון תמונות / מחיר / פרטים / סרטון של דף קיים (רק בעורך הדף בקישור למעלה), יצירה מחדש של סרטון הדף, מחיקת דף.",
     ].join("\n");
   }

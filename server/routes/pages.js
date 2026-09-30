@@ -24,6 +24,7 @@ const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
 const { propertySlug, parsePublicPath, visiblePortfolioPages } = require("../portfolio");
 const { renderPortfolioDocument, renderSitemap } = require("../portfolio-render");
+const Cur = require("../currency");
 
 // Portal era: pages no longer expire (the expiry scheduler is retired). New
 // pages get a far-future expires_at to keep the schema intact; /api/extend
@@ -77,13 +78,14 @@ module.exports = function createPagesRouter(ctx) {
   // `chatbot` is the PUBLIC half of the resolved config (see chatbot-config.js)
   // — never the model or the spend limits. Both callers pass it in rather than
   // this being async, since resolving needs an await on the business doc.
-  function pagePayload(id, d, chatbot) {
+  function pagePayload(id, d, chatbot, currency) {
     return {
       page_id: id, status: d.status, agent: d.agent, agent2: d.agent2 || null,
       property: d.property,
       hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
       cta: d.cta, sections: d.sections, theme: d.theme || null,
       language: d.language || "he",
+      currency: currency || Cur.DEFAULT,
       texts: d.texts || null,
       chatbot: chatbot || { enabled: false, greeting: null },
     };
@@ -92,7 +94,8 @@ module.exports = function createPagesRouter(ctx) {
   /** Resolve the chat bot for a page: agent entitlement + per-page override. */
   async function resolveChatbot(d) {
     const biz = await businessCache.get(d.business_phone);
-    return chatbotConfig.resolve(d, biz, process.env);
+    // The agent's display currency rides along: same business read.
+    return { ...chatbotConfig.resolve(d, biz, process.env), currency: Cur.codeOf(biz) };
   }
 
   // ── maintenance: backfill property.tags on pages created before tags existed.
@@ -357,7 +360,7 @@ module.exports = function createPagesRouter(ctx) {
     const editable = editableFor(req, id, d);
     res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
     const bot = await resolveChatbot(d);
-    res.json({ ...pagePayload(id, d, bot.public), ...(editable ? { editable: true } : {}) });
+    res.json({ ...pagePayload(id, d, bot.public, bot.currency), ...(editable ? { editable: true } : {}) });
   }
   router.get("/api/property-page", getPageHandler);
 
@@ -704,6 +707,7 @@ module.exports = function createPagesRouter(ctx) {
 
     return {
       portfolio: business.portfolio,
+      currency: Cur.codeOf(business),
       agent: {
         name: business.full_name || "",
         brand_name: business.business_name || "",
@@ -777,7 +781,7 @@ module.exports = function createPagesRouter(ctx) {
       const bot = await resolveChatbot(page);
       const editable = editableFor(req, page.page_id, page);
       const payload = {
-        ...pagePayload(page.page_id, page, bot.public),
+        ...pagePayload(page.page_id, page, bot.public, bot.currency),
         property_url: `/${reservation.current_slug}/${propSlug}`,
         ...(editable ? { editable: true } : {}),
       };
@@ -889,8 +893,9 @@ module.exports = function createPagesRouter(ctx) {
         try {
           const shell = fs.readFileSync(origShell, "utf8");
           res.set("Cache-Control", "public, max-age=60");
+          const biz = await businessCache.get(d.business_phone);
           return res.type("html").send(og.inject(shell, d, pageUrl,
-            { appId: process.env.META_APP_ID || null }));
+            { appId: process.env.META_APP_ID || null, currency: Cur.codeOf(biz) }));
         } catch (e) { /* fall through to sendFile */ }
       }
       return res.sendFile(origShell);
@@ -899,8 +904,8 @@ module.exports = function createPagesRouter(ctx) {
     if (!fs.existsSync(file)) return res.sendFile(origShell);
     let html = fs.readFileSync(file, "utf8");
     const bot = await resolveChatbot(d);
-    html = og.inject(html, d, pageUrl, { appId: process.env.META_APP_ID || null });
-    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public)).replace(/</g, "\\u003c")};</script>`;
+    html = og.inject(html, d, pageUrl, { appId: process.env.META_APP_ID || null, currency: bot.currency });
+    const inject = `<script>window.__PAGE__=${JSON.stringify(pagePayload(id, d, bot.public, bot.currency)).replace(/</g, "\\u003c")};</script>`;
     html = html.replace("</head>", inject + "</head>");
     res.set("Cache-Control", "public, max-age=60");
     res.type("html").send(html);

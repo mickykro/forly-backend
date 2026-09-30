@@ -8,13 +8,14 @@
  */
 
 const { escapeHtml: esc } = require("./utils");
+const { symbolOf } = require("./currency");
 
-function description(page) {
+function description(page, currency) {
   const p = (page && page.property) || {};
   const facts = [];
   if (Number(p.rooms) > 0) facts.push(`${p.rooms} חדרים`);
   if (Number(p.size_sqm) > 0) facts.push(`${p.size_sqm} מ"ר`);
-  if (Number(p.price) > 0) facts.push(`₪${Number(p.price).toLocaleString("en-US")}`);
+  if (Number(p.price) > 0) facts.push(`${symbolOf(currency)}${Number(p.price).toLocaleString("en-US")}`);
   const loc = [p.neighborhood, p.city].filter(Boolean).join(", ");
   const agent = (page.agent && page.agent.name) || "";
   return [loc, facts.join(" · "), agent].filter(Boolean).join(" | ");
@@ -51,7 +52,7 @@ function buildOgTags(page, pageUrl, opts = {}) {
   const lines = [
     tag("property", "og:type", "website"),
     tag("property", "og:title", title),
-    tag("property", "og:description", description(page)),
+    tag("property", "og:description", description(page, opts.currency)),
     tag("property", "og:url", pageUrl),
     tag("property", "og:locale", opts.locale || "he_IL"),
     opts.appId ? tag("property", "fb:app_id", opts.appId) : "",

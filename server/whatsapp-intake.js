@@ -16,6 +16,7 @@ const { updatePage, updatingTurn, duplicateCheck, duplicateTurn } = require("./p
 const { intentOf, openerOf } = require("./property-intent");
 const { recoverFromChat } = require("./chat-recover");
 const PC = require("./photo-choice");
+const Cur = require("./currency");
 
 const MAX_PHOTOS = 12;
 const { oneBubble } = R;
@@ -370,7 +371,7 @@ async function activeTurn(input, deps, draft, now) {
   return { handled: true, status: p.status, replies: p.replies };
 }
 
-async function handleTurn(input, deps) {
+async function turnOf(input, deps) {
   const now = input.now || new Date();
   const { phone } = input;
   if (!deps.business) return notOurs("unknown_agent");
@@ -403,18 +404,21 @@ async function handleTurn(input, deps) {
       return draft && draft.status === "active" ? { handled: true, status: "voice_failed", replies: [R.voiceFailed()] } : notOurs("not_ours");
     }
     const before = draft ? structuredClone(draft) : null;
-    let t = await handleTurn({ ...input, audioUrl: null, text: heard }, deps);
+    let t = await turnOf({ ...input, audioUrl: null, text: heard }, deps);
     // The transcription said nothing the turn could use. Before answering with
     // an error, see whether it was a mis-heard command: "דליק" for "דלג",
     // "תצאו גם מקדימה" for "תצוגה מקדימה". Only here, where the alternative is
     // a failure anyway, is a near match safe to act on.
     if (didNotLand(t)) {
       const cmd = D.spokenCommand(heard);
-      if (cmd) t = await handleTurn({ ...input, audioUrl: null, text: D.CANONICAL[cmd], draft: before }, deps);
+      if (cmd) t = await turnOf({ ...input, audioUrl: null, text: D.CANONICAL[cmd], draft: before }, deps);
     }
     if (t.handled && t.replies.length) t.replies[0] = { ...t.replies[0], text: `${R.heard(heard)}\n\n${t.replies[0].text}` };
     return t;
   }
+  // "מטבע דולר": an agent setting, answered whatever the draft is doing.
+  const cur = input.text && !input.event ? Cur.commandOf(input.text) : null;
+  if (cur) return withDrop(await currencyTurn(cur, deps, draft));
   // "עצור" / "אל תערוך שוב": n8n's edit loop checks the flag before each photo.
   if (D.isStop(input.text) && !(draft && draft.status === "active")) {
     if (deps.cancelEdits) await deps.cancelEdits(phone);
@@ -468,20 +472,42 @@ async function handleTurn(input, deps) {
   return t.status === "create" ? build(t.draft || draft, deps, now) : t;
 }
 
+// Shows the current currency, or sets it; an open draft's question follows.
+async function currencyTurn(cur, deps, draft) {
+  let status = "currency_ask", reply = R.currencyAsk(Cur.codeOf(deps.business));
+  if (cur.code && deps.setCurrency) {
+    await deps.setCurrency(cur.code);
+    deps.business.currency = cur.code; // this turn's replies already use it
+    status = "currency_set"; reply = R.currencySet(cur.code);
+  } else if (cur.arg) {
+    status = "currency_unknown"; reply = R.currencyUnknown();
+  }
+  const pending = draft && draft.status === "active" ? promptFor(draft, deps).replies : [];
+  return { handled: true, status, replies: [oneBubble([reply, ...pending])] };
+}
+
+// Replies are written in ₪; the agent sees their own currency.
+async function handleTurn(input, deps) {
+  const t = await turnOf(input, deps);
+  const code = Cur.codeOf(deps.business);
+  if (code === Cur.DEFAULT || !t.replies) return t;
+  return { ...t, replies: t.replies.map((r) => (r && typeof r.text === "string" ? { ...r, text: Cur.localize(r.text, code) } : r)) };
+}
+
 // Text sent with a photo burst (the ad, an address) is a turn of its own, then the photos
 // join whatever it opened. Unclaimed text is a caption: all of it goes to n8n's edit.
 async function textThenPhotos(input, deps, draft) {
   // "תשנה את התמונות" bundled with the new photos: photos first, so the swap can ask about them.
   if (PC.isSwap(input.text) && draft && draft.status === "active") {
-    const p = await handleTurn({ ...input, text: "", draft }, deps);
-    const t = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft: p.draft || draft }, deps);
+    const p = await turnOf({ ...input, text: "", draft }, deps);
+    const t = await turnOf({ ...input, fileUrl: null, fileUrls: [], draft: p.draft || draft }, deps);
     return { ...t, status: `${p.status}+${t.status}`, replies: [...p.replies, ...t.replies] };
   }
-  const t1 = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft }, deps);
+  const t1 = await turnOf({ ...input, fileUrl: null, fileUrls: [], draft }, deps);
   if (!t1.handled) return t1;
   const after = t1.del ? null : (t1.draft || draft);
   if (!after) return t1;
-  const t2 = await handleTurn({ ...input, text: "", draft: after }, deps);
+  const t2 = await turnOf({ ...input, text: "", draft: after }, deps);
   if (!t2.handled) return t1;
   return { ...t2, status: `${t1.status}+${t2.status}`, replies: [...t1.replies, ...t2.replies], draft: t2.draft || after };
 }

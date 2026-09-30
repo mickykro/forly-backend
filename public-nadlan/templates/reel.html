@@ -162,7 +162,8 @@
 <script>
 (function(){
   var D = window.__PAGE__ || window.__DEMO__ || {}, p = D.property || {};
-  function fp(n){ if(!n)return ""; n=+n; if(n>=1e6){var m=n/1e6;return "₪"+(m%1===0?m.toFixed(0):m.toFixed(1))+"M";} return "₪"+n.toLocaleString("he-IL"); }
+  var CUR = { ILS: "₪", USD: "$", EUR: "€" }[D.currency] || "₪";
+  function fp(n){ if(!n)return ""; n=+n; if(n>=1e6){var m=n/1e6;return CUR+(m%1===0?m.toFixed(0):m.toFixed(1))+"M";} return CUR+n.toLocaleString("he-IL"); }
   var rent = p.listing_type==="rent";
   var LANG = D.language || "he";
   function T(k){ return window.I18N ? window.I18N.t(LANG, k) : k; }
