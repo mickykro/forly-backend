@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Soleil: prototype v3</title>
+<link href="https://fonts.googleapis.com/css2?family=Suez+One&family=Assistant:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+/* 4 colors only: warm white · olive · terracotta · charcoal (alphas of these allowed) */
+:root{--sun:#FAF7F2;--olive:#5E6B4E;--terra:#C4673F;--char:#2F2C28;--pad:clamp(18px,5vw,80px);--display:'Suez One',serif;--sans:'Assistant',sans-serif;--arch:999px 999px 0 0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--char);color:var(--char);font:400 18px/1.6 var(--sans);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,figure{margin:0}h1,h2,h3{font-family:var(--display);font-weight:400;line-height:1.08}
+.num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
+button{font:inherit;cursor:pointer}
+
+/* fixed video layer */
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden;background:var(--char)}
+.bg video{width:100%;height:100%;object-fit:cover;display:block}
+.bg:after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(47,44,40,calc(.3 + var(--dim,0)*.5)),rgba(47,44,40,.05) 60%)}
+main{position:relative;z-index:1}
+.topbar{position:fixed;top:0;inset-inline:0;z-index:5;display:flex;justify-content:space-between;align-items:center;padding:16px var(--pad);color:var(--sun)}
+.brand{font:400 24px/1 var(--display)}
+.topbar a{color:var(--sun);text-decoration:none;font-size:14px;font-weight:700;background:var(--terra);padding:9px 18px}
+
+/* 1+2 · Arrival → Reveal */
+.pin{height:165vh;position:relative}
+.stage{position:sticky;top:0;height:100svh;display:flex;flex-direction:column;justify-content:flex-end;padding:0 var(--pad) clamp(28px,6vh,56px);color:var(--sun)}
+.phrase{position:absolute;bottom:clamp(28px,6vh,56px);inset-inline:var(--pad);max-width:28ch;font:400 clamp(20px,2.2vw,28px)/1.35 var(--display);transition:opacity .5s,transform .6s}
+.phrase.off{opacity:0;transform:translateY(-20px)}
+.cue{display:block;margin-top:14px;font:700 12px var(--sans);letter-spacing:.18em}
+.st{opacity:0;transform:translateY(20px);transition:opacity .55s ease,transform .7s cubic-bezier(.2,.7,.2,1)}.st.on{opacity:1;transform:none}
+.deal{align-self:flex-start;font:700 12px/1 var(--sans);letter-spacing:.14em;background:var(--terra);padding:9px 16px 7px;border-radius:var(--arch);margin-bottom:14px}
+.stage h1{font-size:clamp(40px,7vw,100px)}
+.addr{margin-top:6px;font-size:clamp(15px,1.5vw,19px);opacity:.9}
+.data{margin-top:clamp(16px,3vh,28px)}
+.price{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding-bottom:10px;border-bottom:2px solid var(--terra);align-self:flex-start}
+.price b{font:400 clamp(34px,5vw,62px)/1 var(--display)}.price small{font-size:14px;opacity:.8}
+.specs{display:flex;flex-wrap:wrap;gap:6px 0;margin-top:12px;font-size:clamp(15px,1.6vw,19px)}
+.specs span{white-space:nowrap}.specs span+span:before{content:'';display:inline-block;width:7px;height:9px;background:var(--terra);border-radius:var(--arch);margin:0 12px}
+.specs b{font-weight:700}
+
+/* panels */
+.gap{height:30vh}
+.panel{--p:1;position:relative;padding:clamp(64px,9vw,120px) var(--pad)}
+.p-sun{background:var(--sun)}.p-char{background:var(--char);color:var(--sun)}.p-olive{background:var(--olive);color:var(--sun)}
+h2{font-size:clamp(32px,4.6vw,68px);margin-bottom:16px}
+.p-sun h2{color:var(--olive)}
+.lede{max-width:44ch;font-size:clamp(17px,1.5vw,20px);opacity:.85}
+
+/* edge catalog (Passage: E-A…E-D) + Soleil: E-F terraces */
+[data-edge="E-B"]{clip-path:inset(0 calc((1 - var(--p))*14%) round calc((1 - var(--p))*50vw) calc((1 - var(--p))*50vw) 0 0)}
+[data-edge="E-D"]{clip-path:polygon(0 calc((1 - var(--p))*16vw),100% 0,100% 100%,0 100%)}
+/* E-F: four terraces stepping down; the steps flatten as the section lands */
+[data-edge="E-F"]{--s:calc((1 - var(--p))*28px);clip-path:polygon(0 calc(var(--s)*4),25% calc(var(--s)*4),25% calc(var(--s)*3),50% calc(var(--s)*3),50% calc(var(--s)*2),75% calc(var(--s)*2),75% var(--s),100% var(--s),100% 100%,0 100%)}
+[data-edge="E-F"][data-flip]{clip-path:polygon(0 var(--s),25% var(--s),25% calc(var(--s)*2),50% calc(var(--s)*2),50% calc(var(--s)*3),75% calc(var(--s)*3),75% calc(var(--s)*4),100% calc(var(--s)*4),100% 100%,0 100%)}
+
+/* 3 · Living — arch window + highlight list (auto every 2.5s, tap to pick) */
+.living-top{display:flex;justify-content:space-between;align-items:end;gap:5vw;flex-wrap:wrap;margin-bottom:36px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{background:var(--sun);color:var(--char);padding:8px 16px;font-size:14px;font-weight:700;box-shadow:0 1px 2px rgba(47,44,40,.08),0 6px 16px rgba(47,44,40,.12)}
+.story{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(24px,5vw,72px);align-items:center}
+.window{position:relative;aspect-ratio:4/5;max-height:70vh;border-radius:var(--arch);overflow:hidden;background:var(--olive)}
+.window img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transform:scale(1.06);transition:opacity .8s,transform 1.6s}
+.window img.on{opacity:1;transform:scale(1)}
+.window .tag{position:absolute;bottom:18px;right:50%;transform:translateX(50%);background:var(--sun);color:var(--terra);font-weight:700;font-size:13px;padding:6px 14px;border-radius:100px;white-space:nowrap}
+.hls{list-style:none;padding:0;margin:0}
+.hl{border-top:1px solid rgba(47,44,40,.15)}.hl:last-child{border-bottom:1px solid rgba(47,44,40,.15)}
+.hl button{display:flex;gap:16px;align-items:baseline;width:100%;background:none;border:0;padding:18px 0;text-align:right;color:var(--char)}
+.hl .n{font:400 16px var(--display);color:var(--terra);min-width:2ch}
+.hl h3{font-size:clamp(20px,2vw,28px);color:rgba(47,44,40,.45);transition:color .4s}
+.hl.on h3{color:var(--olive)}
+.hl .body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .6s cubic-bezier(.2,.7,.2,1)}.hl.on .body{grid-template-rows:1fr}
+.hl .body p{overflow:hidden;padding-inline-start:calc(2ch + 16px);font-size:16px;opacity:.8}
+.hl .bar{display:block;height:2px;background:var(--terra);width:0;margin-top:14px}.hl.on .bar{animation:bar 2.5s linear forwards}
+@keyframes bar{to{width:100%}}
+
+/* 4 · Inside — arch-framed stage + arch thumbnails, auto-swipe 2.5s */
+.g-main{position:relative;overflow:hidden;aspect-ratio:16/9;max-height:72vh;width:100%;background:var(--char);touch-action:pan-y}
+.g-track{display:flex;height:100%;direction:ltr;transition:transform .8s cubic-bezier(.65,0,.35,1)}
+.g-track figure{flex:0 0 100%;height:100%;position:relative}
+.g-track img{width:100%;height:100%;object-fit:cover;display:block}
+.g-cap{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font-size:15px}
+.g-cap b{font-weight:600}.g-cap span{font:400 15px var(--display);color:var(--terra);direction:ltr}
+.g-thumbs{display:flex;gap:10px;margin-top:14px;overflow-x:auto;scrollbar-width:none}
+.g-thumbs button{flex:0 0 clamp(64px,9vw,110px);aspect-ratio:1/1;padding:0;border:0;background:none;overflow:hidden;opacity:.45;transition:opacity .3s,transform .3s}
+.g-thumbs button.on{opacity:1;transform:translateY(-6px);box-shadow:0 3px 0 var(--terra)}
+.g-thumbs img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* 5 · Around — olive glass arch over the video */
+.over{color:var(--sun);padding:clamp(60px,10vw,140px) var(--pad)}
+.around{display:grid;grid-template-columns:1fr 1fr;gap:0 5vw;padding:clamp(56px,7vw,96px) clamp(24px,4vw,56px) clamp(24px,4vw,48px);background:rgba(94,107,78,.62);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-radius:clamp(90px,22vw,320px) clamp(90px,22vw,320px) 0 0;text-align:right}
+.around h2,.around .lede{grid-column:1/-1}.around h2{text-align:center}.around .lede{margin:0 auto 14px;text-align:center}
+.stops,.stats{list-style:none;padding:0;margin:0}
+.stops li,.stat{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:14px 0;border-bottom:1px solid rgba(250,247,242,.25)}
+.stops span,.stat span{font-size:15px;opacity:.85}
+.stat b{order:2;font:400 clamp(22px,2.4vw,30px)/1 var(--display)}
+
+/* 6 · Invitation */
+.invite{display:grid;grid-template-columns:1.1fr 1fr;gap:7vw;align-items:center}
+.agent{display:flex;gap:14px;align-items:center;margin-top:28px}.av{width:56px;height:56px;background:var(--sun);color:var(--olive);display:grid;place-items:center;font:400 22px var(--display)}
+form{display:grid;gap:14px;background:var(--sun);color:var(--char);padding:clamp(28px,4vw,48px) clamp(22px,3vw,40px);}
+label{font-size:14px;font-weight:600}
+input{display:block;width:100%;border:0;border-bottom:1.5px solid rgba(47,44,40,.25);background:transparent;color:inherit;padding:8px 0;font:inherit;font-size:19px}input:focus{outline:none;border-color:var(--terra)}
+form button{margin-top:8px;background:var(--terra);color:var(--sun);border:0;min-height:56px;font-weight:700;font-size:17px}
+footer{position:relative;z-index:1;padding:26px var(--pad) 40px;color:var(--sun);font-size:13px;display:flex;justify-content:space-between;background:var(--char)}
+
+.in-view{opacity:0;transform:translateY(24px);transition:opacity .7s,transform .8s cubic-bezier(.2,.7,.2,1)}.in-view.on{opacity:1;transform:none}
+
+@media(max-width:760px){
+  .story{grid-template-columns:1fr}.window{aspect-ratio:1/1;max-width:420px;width:100%;margin:0 auto}
+  .g-main{aspect-ratio:4/5}
+  .around,.invite{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important}.st,.in-view{opacity:1;transform:none}.panel{clip-path:none!important}}
+</style>
+</head>
+<body>
+<div class="bg"><video src="assets/tour.mp4" poster="assets/room.jpg" autoplay muted loop playsinline></video></div>
+<header class="topbar"><span class="brand">רוזנברג</span><a href="#invite">תיאום ביקור</a></header>
+
+<main>
+  <section class="pin" id="reveal">
+    <div class="stage">
+      <p class="phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד — נכס שמגיעים אליו פעם בעשור.<span class="cue">↓ גללו</span></p>
+      <span class="deal st" data-at=".08">למכירה</span>
+      <h1 class="st" data-at=".16">דירת 4 חדרים בדיזנגוף</h1>
+      <p class="addr st" data-at=".26">דיזנגוף 156 · הצפון הישן · תל אביב–יפו</p>
+      <div class="data">
+        <div class="price st" data-at=".38"><b class="num">₪8,400,000</b><small>מחיר מבוקש</small></div>
+        <div class="specs st" data-at=".5"><span><b class="num">140</b> מ״ר</span><span><b class="num">4</b> חדרים</span><span>קומה <b class="num">7</b></span><span><b class="num">3</b> חניות</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Living (plain scroll-over) -->
+  <section class="panel p-sun" data-edge="none">
+    <div class="living-top in-view">
+      <div><h2>מרחב לחיים. בקצב שלכם.</h2><p class="lede">ארבעה חדרים, מרחב מגורים פתוח ומרפסת שמש הפונה מערבה.</p></div>
+      <div class="chips"><span class="chip">מעלית</span><span class="chip">3 חניות</span><span class="chip">מחסן</span><span class="chip">ממ״ד</span><span class="chip">מיזוג VRF</span></div>
+    </div>
+    <div class="story in-view" id="story">
+      <div class="window"><img src="assets/view.jpg" alt=""><img src="assets/room.jpg" alt=""><img src="assets/detail.jpg" alt=""><img src="https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1200&q=70" alt=""><span class="tag"></span></div>
+      <ol class="hls">
+        <li class="hl" data-tag="חזית מערבית"><button><span class="n">01</span><h3>נוף שאי אפשר לשכפל</h3></button><div class="body"><p>קו ראשון לים מקומה גבוהה, מרפסת שמש הפונה מערבה. את השקיעה רואים מהסלון.<span class="bar"></span></p></div></li>
+        <li class="hl" data-tag="2023"><button><span class="n">02</span><h3>שיפוץ אדריכלי מהיסוד</h3></button><div class="body"><p>מטבח מעוצב עם אי מרכזי, סוויטת הורים עם רחצה צמוד, מיזוג VRF.<span class="bar"></span></p></div></li>
+        <li class="hl" data-tag="3 חניות בטאבו"><button><span class="n">03</span><h3>נדיר באזור</h3></button><div class="body"><p>שלוש חניות בטאבו ומחסן צמוד, בבניין מטופח עם מעלית ולובי משופץ.<span class="bar"></span></p></div></li>
+        <li class="hl" data-tag="ליווי מלא"><button><span class="n">04</span><h3>כניסה מיידית</h3></button><div class="body"><p>תהליך דיסקרטי, ליווי אישי עד למסירת מפתח.<span class="bar"></span></p></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- 4 · Inside (E-F terraces) -->
+  <section class="panel p-char" data-edge="E-F">
+    <div class="g in-view" id="gal">
+      <div class="g-main"><div class="g-track"></div></div>
+      <div class="g-cap"><b></b><span></span></div>
+      <div class="g-thumbs"></div>
+    </div>
+  </section>
+
+  <!-- 5 · Around (olive glass arch over the video) -->
+  <section class="over">
+    <div class="around in-view">
+      <h2>העיר קרובה. השקט נשאר.</h2><p class="lede">בין שדרות בן־גוריון לכיכר דיזנגוף — והים תמיד במרחק הליכה.</p>
+      <ul class="stops"><li><b>חוף גורדון</b><span>7 דק׳ הליכה</span></li><li><b>כיכר דיזנגוף</b><span>3 דק׳ הליכה</span></li><li><b>פארק הירקון</b><span>10 דק׳</span></li></ul>
+      <div class="stats"><div class="stat"><b class="num">+42%</b><span>עליית ערך ב-5 שנים</span></div><div class="stat"><b class="num">30+</b><span>מסעדות ב-500 מ׳</span></div><div class="stat"><b class="num">9.2</b><span>דירוג בתי ספר</span></div><div class="stat"><b>7 דק׳</b><span>לים</span></div></div>
+    </div>
+  </section>
+
+  <!-- 6 · Invitation (E-F mirrored) -->
+  <section class="panel p-olive" data-edge="E-F" data-flip id="invite">
+    <div class="invite">
+      <div class="in-view"><h2>התמונה הבאה? אתם, כאן.</h2><p class="lede">יש דברים שמרגישים רק כשנכנסים. נשמח לתאם ביקור אישי.</p>
+        <div class="agent"><div class="av">ש</div><div><b>שלום רוזנברג</b><br><small>רוזנברג נכסים · רישיון 3205419</small></div></div></div>
+      <form class="in-view" onsubmit="return false"><label>שם מלא<input></label><label>טלפון נייד<input type="tel"></label><button type="button">שלחו לי פרטים</button></form>
+    </div>
+  </section>
+</main>
+<footer><span>forly.</span><span>הדף נוצר אוטומטית ע״י Forly 🦉</span></footer>
+
+<script>
+(function(){
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches,root=document.documentElement;
+  var vid=document.querySelector('.bg video'),pin=document.getElementById('reveal'),st=pin.querySelectorAll('.st'),phrase=pin.querySelector('.phrase'),panels=document.querySelectorAll('.panel');
+  function clamp(v){return v<0?0:v>1?1:v}
+  var ticking=false;
+  function frame(){
+    var vh=innerHeight,r=pin.getBoundingClientRect(),p=clamp(-r.top/(r.height-vh));
+    phrase.classList.toggle('off',p>.04);
+    st.forEach(function(e){e.classList.toggle('on',reduce||p>=+e.dataset.at)});
+    root.style.setProperty('--dim',Math.min(1,p*1.6).toFixed(3));
+    panels.forEach(function(s){s.style.setProperty('--p',reduce?1:clamp((vh-s.getBoundingClientRect().top)/(vh*.7)).toFixed(3))});
+    if(vid.paused)vid.play().catch(function(){});
+    ticking=false;
+  }
+  addEventListener('scroll',function(){if(!ticking){ticking=true;requestAnimationFrame(frame)}},{passive:true});addEventListener('resize',frame);frame();
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target)}})},{threshold:.12});
+  document.querySelectorAll('.in-view').forEach(function(e){io.observe(e)});
+
+  // shared "auto-cycle" helper: step every 2.5s while visible; a pick restarts the timer
+  function cycle(el,n,show){
+    var i=0,t,vis=false;
+    function go(k){i=(k+n)%n;show(i)}
+    function restart(){clearInterval(t);if(!reduce&&vis)t=setInterval(function(){go(i+1)},2500)}
+    new IntersectionObserver(function(es){vis=es[0].isIntersecting;restart()},{threshold:.3}).observe(el);
+    go(0);
+    return {pick:function(k){go(k);restart()},step:function(d){go(i+d);restart()}};
+  }
+
+  // 3 · arch window + highlight list
+  var story=document.getElementById('story'),hls=[].slice.call(story.querySelectorAll('.hl')),imgs=story.querySelectorAll('.window img'),tag=story.querySelector('.tag');
+  var s3=cycle(story,hls.length,function(i){
+    hls.forEach(function(h,k){if(k===i){h.classList.remove('on');void h.offsetWidth}h.classList.toggle('on',k===i);h.querySelector('button').setAttribute('aria-expanded',k===i)});
+    [].forEach.call(imgs,function(im,k){im.classList.toggle('on',k===i)});tag.textContent=hls[i].dataset.tag;
+  });
+  hls.forEach(function(h,k){h.querySelector('button').addEventListener('click',function(){s3.pick(k)})});
+
+  // 4 · gallery
+  var photos=[['assets/room.jpg','הסלון'],['assets/view.jpg','המרפסת · נוף לים'],['assets/detail.jpg','סוויטת ההורים'],['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1400&q=70','פינת האוכל']];
+  var gal=document.getElementById('gal'),track=gal.querySelector('.g-track'),thumbs=gal.querySelector('.g-thumbs'),cap=gal.querySelector('.g-cap b'),cnt=gal.querySelector('.g-cap span');
+  photos.forEach(function(ph,i){
+    track.insertAdjacentHTML('beforeend','<figure><img src="'+ph[0]+'" alt="'+ph[1]+'" loading="lazy"></figure>');
+    var b=document.createElement('button');b.setAttribute('aria-label',ph[1]);b.innerHTML='<img src="'+ph[0]+'" alt="">';b.onclick=function(){s4.pick(i)};thumbs.appendChild(b);
+  });
+  var s4=cycle(gal,photos.length,function(i){track.style.transform='translateX('+(-i*100)+'%)';[].forEach.call(thumbs.children,function(t,k){t.classList.toggle('on',k===i)});cap.textContent=photos[i][1];cnt.textContent=(i+1)+' / '+photos.length});
+  var x0=null,m=gal.querySelector('.g-main');
+  m.addEventListener('pointerdown',function(e){x0=e.clientX});
+  m.addEventListener('pointerup',function(e){if(x0!==null&&Math.abs(e.clientX-x0)>40)s4.step(e.clientX<x0?1:-1);x0=null});
+})();
+</script>
+</body>
+</html>

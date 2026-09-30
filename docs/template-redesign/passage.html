@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Passage: prototype v6</title>
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;900&family=Heebo:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+/* 4 colors only: cream · white · gold · ink (alphas of these allowed) */
+:root{--cream:#F3EDE2;--white:#FFFFFF;--gold:#B8935A;--ink:#1E1C19;--pad:clamp(18px,5vw,80px);--display:'Frank Ruhl Libre',serif;--sans:'Heebo',sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--ink);font:400 17px/1.65 var(--sans);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,figure,dl,dd{margin:0}h1,h2,h3{font-family:var(--display);font-weight:700;line-height:1.02;letter-spacing:-.03em}
+.num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
+button{font:inherit;cursor:pointer}
+
+/* fixed video layer — the page scrolls over it */
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden;background:var(--ink)}
+.bg video{width:100%;height:100%;object-fit:cover;display:block}
+.bg:after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(30,28,25,calc(.25 + var(--dim,0)*.55)),rgba(30,28,25,.05) 60%)}
+main{position:relative;z-index:1}
+.topbar{position:fixed;top:0;inset-inline:0;z-index:5;display:flex;justify-content:space-between;align-items:center;padding:18px var(--pad);color:var(--white)}
+.brand{font:900 24px/1 var(--display)}.topbar a{color:inherit;text-decoration:none;font-size:14px;border-bottom:1px solid var(--gold);padding-bottom:3px}
+
+/* 1+2 · Arrival → Reveal (one short pin, data sits at the bottom of the video) */
+.pin{height:165vh;position:relative}
+.stage{position:sticky;top:0;height:100svh;display:flex;flex-direction:column;justify-content:flex-end;padding:0 var(--pad) clamp(28px,6vh,56px);color:var(--white)}
+.phrase{position:absolute;bottom:clamp(28px,6vh,56px);inset-inline:var(--pad);max-width:30ch;font:500 clamp(18px,2vw,24px)/1.4 var(--display);transition:opacity .5s,transform .6s}
+.phrase.off{opacity:0;transform:translateY(-20px)}
+.cue{display:block;margin-top:16px;font:500 12px var(--sans);letter-spacing:.2em;color:var(--gold)}
+.st{opacity:0;transform:translateY(20px);transition:opacity .55s ease,transform .7s cubic-bezier(.2,.7,.2,1)}.st.on{opacity:1;transform:none}
+.deal{font:700 11px/1 var(--sans);letter-spacing:.26em;color:var(--gold);margin-bottom:12px}
+.stage h1{font-size:clamp(40px,7vw,104px)}
+.addr{margin-top:8px;font-size:clamp(14px,1.5vw,18px);opacity:.85}
+.data{margin-top:clamp(18px,3vh,30px);border-top:1px solid rgba(255,255,255,.3);padding-top:clamp(14px,2vh,22px)}
+.price{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.price b{font:700 clamp(34px,5vw,64px)/1 var(--display);color:var(--gold)}.price small{font-size:13px;opacity:.75}
+.specs{display:flex;flex-wrap:wrap;gap:6px 0;margin-top:10px;font-size:clamp(15px,1.6vw,19px)}
+.specs span{white-space:nowrap}.specs span+span:before{content:'·';color:var(--gold);margin:0 12px}
+.specs b{font-weight:700}
+
+/* panels + gaps */
+.gap{height:30vh}
+.panel{--p:1;position:relative;padding:clamp(56px,9vw,120px) var(--pad)}
+.cream{background:var(--cream)}.white{background:var(--white)}.inkp{background:var(--ink);color:var(--cream)}
+h2{font-size:clamp(34px,5vw,76px);margin-bottom:18px}
+.lede{max-width:44ch;font-size:clamp(16px,1.5vw,19px);opacity:.8}
+
+/* edge catalog: E-A step · E-B arch · E-C iris · E-D slant */
+[data-edge="E-A"]{clip-path:polygon(0 calc((1 - var(--p))*80px),calc(20% + var(--p)*50%) calc((1 - var(--p))*80px),calc(20% + var(--p)*50%) 0,100% 0,100% 100%,0 100%)}
+[data-edge="E-B"]{clip-path:inset(0 calc((1 - var(--p))*14%) round calc((1 - var(--p))*50vw) calc((1 - var(--p))*50vw) 0 0)}
+[data-edge="E-C"]{clip-path:circle(calc(10% + var(--p)*120%) at 50% 25vh)}
+[data-edge="E-D"]{clip-path:polygon(0 calc((1 - var(--p))*16vw),100% 0,100% 100%,0 100%)}
+
+/* 3 · Living — interactive accordion of highlights */
+.living-head{display:flex;justify-content:space-between;align-items:end;gap:5vw;flex-wrap:wrap;margin-bottom:34px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{border:1px solid var(--gold);border-radius:100px;padding:6px 14px;font-size:13px}
+.acc{display:flex;gap:10px;height:min(62vh,560px)}
+.acc-i{position:relative;flex:1;min-width:0;overflow:hidden;border:0;padding:0;background:var(--ink);color:var(--white);text-align:right;transition:flex .7s cubic-bezier(.2,.7,.2,1)}
+.acc-i.on{flex:4.2}
+.acc-i img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.55;transform:scale(1.08);transition:opacity .7s,transform 1.2s}
+.acc-i.on img{opacity:.9;transform:scale(1)}
+.acc-i:after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(30,28,25,.85),transparent 60%)}
+.acc-n{position:absolute;top:18px;right:18px;z-index:1;font:700 14px var(--display);color:var(--gold)}
+.acc-t{position:absolute;bottom:22px;right:20px;left:20px;z-index:1}
+.acc-t h3{font-size:clamp(20px,2.2vw,32px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-t p,.acc-t .tag{max-height:0;opacity:0;overflow:hidden;transition:opacity .4s,max-height .6s}
+.acc-i.on .acc-t p{max-height:120px;opacity:.9;margin-top:8px;max-width:42ch;font-size:15px}
+.acc-i.on .acc-t .tag{max-height:30px;opacity:1;display:inline-block;margin-top:10px;font-size:12px;letter-spacing:.14em;color:var(--gold)}
+.acc-i:not(.on) .acc-t h3{writing-mode:vertical-rl;transform:rotate(180deg);position:absolute;bottom:0;right:0;white-space:nowrap}
+.acc-bar{position:absolute;top:0;right:0;height:3px;background:var(--gold);width:0;z-index:2}.acc-i.on .acc-bar{animation:bar 2.5s linear forwards}
+@keyframes bar{to{width:100%}}
+
+/* 4 · Inside — big image + thumbnails, auto-swipe every 2.5s */
+.g-main{position:relative;overflow:hidden;aspect-ratio:16/9;max-height:72vh;width:100%;background:var(--ink);touch-action:pan-y}
+.g-track{display:flex;height:100%;direction:ltr;transition:transform .8s cubic-bezier(.65,0,.35,1)}
+.g-track figure{flex:0 0 100%;height:100%;position:relative}
+.g-track img{width:100%;height:100%;object-fit:cover;display:block}
+.g-track figcaption{position:absolute;bottom:14px;right:18px;color:var(--white);font-size:14px;direction:rtl;text-shadow:0 1px 10px rgba(30,28,25,.9)}
+.g-count{position:absolute;top:14px;left:16px;color:var(--white);font:500 12px var(--sans);letter-spacing:.14em;direction:ltr}
+.g-thumbs{display:flex;gap:10px;margin-top:12px;overflow-x:auto;scrollbar-width:none}
+.g-thumbs button{flex:0 0 clamp(70px,11vw,130px);aspect-ratio:4/3;padding:0;border:2px solid transparent;background:none;opacity:.55;transition:opacity .3s,border-color .3s}
+.g-thumbs button.on{border-color:var(--gold);opacity:1}
+.g-thumbs img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* 5 · Around — styled like the reveal: straight over the video */
+.over{color:var(--white);padding:clamp(60px,10vw,140px) var(--pad)}
+.around{display:grid;grid-template-columns:1fr 1fr;gap:0 5vw;padding:clamp(24px,4vw,48px);background:rgba(30,28,25,.5);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid rgba(184,147,90,.35)}
+.around h2,.around .lede{grid-column:1/-1}.around .lede{margin-bottom:10px}
+.stops,.stats{list-style:none;padding:0;margin:0}
+.stops li,.stat{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.2)}
+.stops span,.stat span{font-size:14px;opacity:.8}
+.stat b{order:2;font:700 clamp(22px,2.4vw,30px)/1 var(--display);color:var(--gold)}
+/* 6 · Invitation */
+.invite{display:grid;grid-template-columns:1.1fr 1fr;gap:7vw}
+.agent{display:flex;gap:14px;align-items:center;margin-top:28px;padding-top:18px;border-top:1px solid rgba(184,147,90,.5)}.av{width:52px;height:52px;border:1px solid var(--gold);color:var(--gold);display:grid;place-items:center;font:700 20px var(--display)}
+form{display:grid;gap:20px;align-content:center}label{font-size:13px}
+input{display:block;width:100%;border:0;border-bottom:1px solid rgba(30,28,25,.3);background:transparent;color:inherit;padding:10px 0;font:inherit;font-size:19px}
+input:focus{outline:none;border-color:var(--gold)}
+form button{background:var(--gold);color:var(--white);border:0;min-height:56px;padding:0 20px;text-align:right;font-weight:700}
+footer{position:relative;z-index:1;padding:26px var(--pad) 40px;color:var(--cream);font-size:12px;display:flex;justify-content:space-between;background:var(--ink)}
+
+.in-view{opacity:0;transform:translateY(24px);transition:opacity .7s,transform .8s cubic-bezier(.2,.7,.2,1)}.in-view.on{opacity:1;transform:none}
+
+@media(max-width:760px){
+  .acc{flex-direction:column;height:auto;gap:8px}.acc-i,.acc-i.on{flex:none;height:68px;transition:height .7s cubic-bezier(.2,.7,.2,1)}.acc-i.on{height:min(340px,52svh)}
+  .acc-i:not(.on) .acc-t h3{writing-mode:horizontal-tb;transform:none;position:static}
+  .acc-i:not(.on) .acc-t{bottom:auto;top:22px;right:52px}
+  .g-main{aspect-ratio:4/5}.around,.invite{grid-template-columns:1fr}.stops li:last-child{border-bottom:1px solid rgba(255,255,255,.2)}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important}.st,.in-view{opacity:1;transform:none}.panel{clip-path:none!important}}
+
+/* preview-only control panel */
+.ctl{position:fixed;left:12px;bottom:12px;z-index:9;background:rgba(30,28,25,.85);color:var(--white);font:500 12px/1.4 var(--sans);padding:10px 12px;border-radius:8px;direction:ltr}
+.ctl b{display:block;margin-bottom:4px}.ctl label{display:flex;justify-content:space-between;gap:10px;font-size:12px;margin:3px 0}.ctl select{font:inherit}
+</style>
+</head>
+<body>
+<div class="bg"><video src="assets/tour.mp4" poster="assets/room.jpg" autoplay muted loop playsinline></video></div>
+<header class="topbar"><span class="brand">רוזנברג</span><a href="#invite">תיאום ביקור</a></header>
+
+<main>
+  <!-- 1+2 · Arrival → Reveal -->
+  <section class="pin" id="reveal">
+    <div class="stage">
+      <p class="phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד — נכס שמגיעים אליו פעם בעשור.<span class="cue">↓ גללו</span></p>
+      <span class="deal st" data-at=".08">למכירה</span>
+      <h1 class="st" data-at=".16">דירת 4 חדרים בדיזנגוף</h1>
+      <p class="addr st" data-at=".26">דיזנגוף 156 · הצפון הישן · תל אביב–יפו</p>
+      <div class="data">
+        <div class="price st" data-at=".38"><b class="num">₪8,400,000</b><small>מחיר מבוקש</small></div>
+        <div class="specs st" data-at=".5"><span><b class="num">140</b> מ״ר</span><span><b class="num">4</b> חדרים</span><span>קומה <b class="num">7</b></span><span><b class="num">3</b> חניות</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Living (plain scroll-over) -->
+  <section class="panel cream" data-edge="none" data-t="2→3">
+    <div class="living-head in-view">
+      <div><h2>מרחב לחיים. בקצב שלכם.</h2><p class="lede">ארבעה חדרים, מרחב מגורים פתוח ומרפסת שמש הפונה מערבה.</p></div>
+      <div class="chips"><span class="chip">מעלית</span><span class="chip">3 חניות</span><span class="chip">מחסן</span><span class="chip">ממ״ד</span><span class="chip">מיזוג VRF</span></div>
+    </div>
+    <div class="acc in-view" id="acc">
+      <button class="acc-i on"><img src="assets/view.jpg" alt=""><span class="acc-bar"></span><span class="acc-n">01</span><span class="acc-t"><h3>נוף שאי אפשר לשכפל</h3><p>קו ראשון לים מקומה גבוהה, מרפסת שמש הפונה מערבה. את השקיעה רואים מהסלון.</p><span class="tag">חזית מערבית</span></span></button>
+      <button class="acc-i"><img src="assets/room.jpg" alt=""><span class="acc-bar"></span><span class="acc-n">02</span><span class="acc-t"><h3>שיפוץ אדריכלי מהיסוד</h3><p>מטבח מעוצב עם אי מרכזי, סוויטת הורים עם רחצה צמוד, מיזוג VRF.</p><span class="tag">2023</span></span></button>
+      <button class="acc-i"><img src="assets/detail.jpg" alt=""><span class="acc-bar"></span><span class="acc-n">03</span><span class="acc-t"><h3>נדיר באזור</h3><p>שלוש חניות בטאבו ומחסן צמוד, בבניין מטופח עם מעלית ולובי משופץ.</p><span class="tag">3 חניות בטאבו</span></span></button>
+      <button class="acc-i"><img src="https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1200&q=70" alt=""><span class="acc-bar"></span><span class="acc-n">04</span><span class="acc-t"><h3>כניסה מיידית</h3><p>תהליך דיסקרטי, ליווי אישי עד למסירת מפתח.</p><span class="tag">ליווי מלא</span></span></button>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- 4 · Inside (E-B) -->
+  <section class="panel inkp" data-edge="E-B" data-t="3→4">
+    <div class="g in-view" id="gal">
+      <div class="g-main"><div class="g-track"></div><span class="g-count"></span></div>
+      <div class="g-thumbs"></div>
+    </div>
+  </section>
+
+  <!-- 5 · Around (over the video, like the reveal) -->
+  <section class="over" data-t="4→5">
+    <div class="around in-view">
+      <h2>העיר קרובה. השקט נשאר.</h2><p class="lede">בין שדרות בן־גוריון לכיכר דיזנגוף — והים תמיד במרחק הליכה.</p>
+        <ul class="stops"><li><b>חוף גורדון</b><span>7 דק׳ הליכה</span></li><li><b>כיכר דיזנגוף</b><span>3 דק׳ הליכה</span></li><li><b>פארק הירקון</b><span>10 דק׳</span></li></ul>
+      <div class="stats"><div class="stat"><b class="num">+42%</b><span>עליית ערך ב-5 שנים</span></div><div class="stat"><b class="num">30+</b><span>מסעדות ב-500 מ׳</span></div><div class="stat"><b class="num">9.2</b><span>דירוג בתי ספר</span></div><div class="stat"><b>7 דק׳</b><span>לים</span></div></div>
+    </div>
+  </section>
+
+  <!-- 6 · Invitation (E-D) -->
+  <section class="panel white" data-edge="E-D" data-t="5→6" id="invite">
+    <div class="invite">
+      <div class="in-view"><h2>התמונה הבאה? אתם, כאן.</h2><p class="lede">יש דברים שמרגישים רק כשנכנסים. נשמח לתאם ביקור אישי.</p>
+        <div class="agent"><div class="av">ש</div><div><b>שלום רוזנברג</b><br><small>רוזנברג נכסים · רישיון 3205419</small></div></div></div>
+      <form class="in-view" onsubmit="return false"><label>שם מלא<input></label><label>טלפון נייד<input type="tel"></label><button type="button">שלחו לי פרטים ↙</button></form>
+    </div>
+  </section>
+</main>
+<footer><span>forly.</span><span>הדף נוצר אוטומטית ע״י Forly 🦉</span></footer>
+
+<div class="ctl" hidden><b>Preview only</b><div id="ctl"></div></div>
+
+<script>
+(function(){
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches,root=document.documentElement;
+  var vid=document.querySelector('.bg video'),pin=document.getElementById('reveal'),st=pin.querySelectorAll('.st'),phrase=pin.querySelector('.phrase'),panels=document.querySelectorAll('.panel');
+  function clamp(v){return v<0?0:v>1?1:v}
+  var ticking=false;
+  function frame(){
+    var vh=innerHeight,r=pin.getBoundingClientRect(),p=clamp(-r.top/(r.height-vh));
+    phrase.classList.toggle('off',p>.04);
+    st.forEach(function(e){e.classList.toggle('on',reduce||p>=+e.dataset.at)});
+    root.style.setProperty('--dim',Math.min(1,p*1.6).toFixed(3));
+    panels.forEach(function(s){s.style.setProperty('--p',reduce?1:clamp((vh-s.getBoundingClientRect().top)/(vh*.7)).toFixed(3))});
+    if(vid.paused)vid.play().catch(function(){});
+    ticking=false;
+  }
+  addEventListener('scroll',function(){if(!ticking){ticking=true;requestAnimationFrame(frame)}},{passive:true});addEventListener('resize',frame);frame();
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add('on');io.unobserve(e.target)}})},{threshold:.12});
+  document.querySelectorAll('.in-view').forEach(function(e){io.observe(e)});
+
+  // 3 · accordion: first opens at once, next every 2.5s while on screen; tap opens + restarts the timer
+  var acc=document.getElementById('acc'),items=[].slice.call(acc.querySelectorAll('.acc-i')),ai=0,accT,accVis=false;
+  function openAcc(i){ai=(i+items.length)%items.length;items[ai].classList.remove('on');void items[ai].offsetWidth;items.forEach(function(b,k){b.classList.toggle('on',k===ai);b.setAttribute('aria-expanded',k===ai)})}
+  function accRestart(){clearInterval(accT);if(!reduce&&accVis)accT=setInterval(function(){openAcc(ai+1)},2500)}
+  items.forEach(function(b,i){b.addEventListener('click',function(){openAcc(i);accRestart()})});
+  new IntersectionObserver(function(es){accVis=es[0].isIntersecting;accRestart()},{threshold:.3}).observe(acc);
+  openAcc(0);
+
+  // 4 · gallery: big image + thumbs, auto-swipe left every 2.5s
+  var photos=[['assets/room.jpg','הסלון'],['assets/view.jpg','המרפסת · נוף לים'],['assets/detail.jpg','סוויטת ההורים'],['https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1400&q=70','פינת האוכל']];
+  var gal=document.getElementById('gal'),track=gal.querySelector('.g-track'),thumbs=gal.querySelector('.g-thumbs'),count=gal.querySelector('.g-count'),gi=0,gT,visible=false;
+  photos.forEach(function(ph,i){
+    track.insertAdjacentHTML('beforeend','<figure><img src="'+ph[0]+'" alt="'+ph[1]+'" loading="lazy"><figcaption>'+ph[1]+'</figcaption></figure>');
+    var b=document.createElement('button');b.setAttribute('aria-label',ph[1]);b.innerHTML='<img src="'+ph[0]+'" alt="">';b.onclick=function(){go(i);restart()};thumbs.appendChild(b);
+  });
+  function go(i){gi=(i+photos.length)%photos.length;track.style.transform='translateX('+(-gi*100)+'%)';[].forEach.call(thumbs.children,function(t,k){t.classList.toggle('on',k===gi)});count.textContent=(gi+1)+' / '+photos.length}
+  function restart(){clearInterval(gT);if(!reduce&&visible)gT=setInterval(function(){go(gi+1)},2500)}
+  new IntersectionObserver(function(es){visible=es[0].isIntersecting;restart()},{threshold:.3}).observe(gal);
+  var x0=null,m=gal.querySelector('.g-main');
+  m.addEventListener('pointerdown',function(e){x0=e.clientX});
+  m.addEventListener('pointerup',function(e){if(x0!==null&&Math.abs(e.clientX-x0)>40){go(gi+(e.clientX<x0?1:-1));restart()}x0=null});
+  go(0);
+
+  // preview-only: swap edges per transition
+  var ctl=document.getElementById('ctl');
+  panels.forEach(function(s){var l=document.createElement('label');l.innerHTML='<span>'+s.dataset.t+'</span>';var sel=document.createElement('select');
+    ['none','E-A','E-B','E-C','E-D'].forEach(function(o){var op=new Option(o,o);op.selected=o===s.dataset.edge;sel.add(op)});
+    sel.onchange=function(){s.dataset.edge=sel.value};l.appendChild(sel);ctl.appendChild(l)});
+})();
+</script>
+</body>
+</html>
