@@ -137,9 +137,15 @@ const num = (t) => { const s = spokenNumber(t); if (s !== null) return s; const 
 const int = (t) => { const n = num(t); return n === null ? null : Math.round(n); };
 const text = (max) => (t) => { const s = String(t || "").trim(); return s ? s.slice(0, max) : null; };
 
+// A number named in another currency is not a shekel figure, even when it's the
+// direct answer to "מה המחיר?" — matches the same guard in listing-extract.js so
+// "285,000 אירו" can't reach draft.fields.price as ₪285,000 through either path.
+const FOREIGN_CURRENCY = /€|\$|USD|EUR|GBP|יורו|אירו|דולר/;
 function parsePrice(t) {
+  const raw = String(t || "");
+  if (FOREIGN_CURRENCY.test(raw) && !raw.includes("₪")) return null;
   // Currency marks carry no number: "2,350,000 ש״ח", "₪2.35M".
-  const s = String(t || "").replace(/₪|ש["״']ח|שקלים|שקל|nis/gi, " ");
+  const s = raw.replace(/₪|ש["״']ח|שקלים|שקל|nis/gi, " ");
   // "2 מיליון ו-350 (אלף)" → 2,350,000. "מליון" (no yod) is how most people type it.
   const both = /(\d+(?:\.\d+)?)\s*(?:מיליון|מליון|מיל['׳]?|מ['׳])\s*ו-?\s*(\d+)/.exec(s);
   if (both) return Math.round(Number(both[1]) * 1e6 + Number(both[2]) * 1e3);
