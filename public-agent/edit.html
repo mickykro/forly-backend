@@ -135,6 +135,15 @@
           <div class="field"><label>קומה</label><input id="fFloor" type="number" min="-5" max="120"></div>
           <div class="field"><label>שכונה/עיר</label><input id="fEyebrow" maxlength="80" data-live="texts.eyebrow"></div>
         </div>
+        <div class="field" style="margin-bottom:4px"><label>פירוט שטחים (מ״ר)</label></div>
+        <div class="grid-2">
+          <div class="field"><label>בנוי</label><input id="fBuilt" type="number" min="0" max="5000"></div>
+          <div class="field"><label>מרפסות</label><input id="fBalcony" type="number" min="0" max="2000"></div>
+        </div>
+        <div class="grid-2">
+          <div class="field"><label>חצר / גינה</label><input id="fGarden" type="number" min="0" max="100000"></div>
+          <div class="field"><label>מגרש</label><input id="fPlot" type="number" min="0" max="1000000"></div>
+        </div>
       </div>
 
       <!-- Specs -->
@@ -279,7 +288,7 @@
   // The numeric fields carry min/max; anything out of range would land on the
   // live page and in the bot's fact sheet, so both save paths ask first.
   function badNumberField() {
-    return ["#fPrice", "#fRooms", "#fSqm", "#fFloor"].map($).filter(function (el) { return el && !el.checkValidity(); })[0] || null;
+    return ["#fPrice", "#fRooms", "#fSqm", "#fFloor", "#fBuilt", "#fBalcony", "#fGarden", "#fPlot"].map($).filter(function (el) { return el && !el.checkValidity(); })[0] || null;
   }
 
   // Quick save without UI feedback (for live preview)
@@ -318,6 +327,10 @@
         currency: $("#fCurrency").value,
         rooms: Number($("#fRooms").value) || 0,
         size_sqm: Number($("#fSqm").value) || 0,
+        size_built: Number($("#fBuilt").value) || 0,
+        size_balcony: Number($("#fBalcony").value) || 0,
+        size_garden: Number($("#fGarden").value) || 0,
+        size_plot: Number($("#fPlot").value) || 0,
         floor: Number($("#fFloor").value) || 0,
       },
       gallery_images: galleryState,
@@ -428,6 +441,10 @@
       $("#fCurrency").value = d.property.currency || "ILS";
       $("#fRooms").value = d.property.rooms || "";
       $("#fSqm").value = d.property.size_sqm || "";
+      $("#fBuilt").value = d.property.size_built || "";
+      $("#fBalcony").value = d.property.size_balcony || "";
+      $("#fGarden").value = d.property.size_garden || "";
+      $("#fPlot").value = d.property.size_plot || "";
       $("#fFloor").value = d.property.floor || "";
       // Property ref and listing type for computed defaults
       var p = d.property;

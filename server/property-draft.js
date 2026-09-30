@@ -289,7 +289,7 @@ function listingBody(draft) {
     listing_type: f.deal === "rent" ? "rent" : "sale",
     address: f.address, city: f.city, neighborhood: f.neighborhood,
     price: f.price, currency: f.currency || "ILS", rooms: f.rooms, size_sqm: f.size_sqm,
-    size_built: f.sqm_built, size_balcony: f.sqm_balcony, size_garden: f.sqm_garden,
+    size_built: f.sqm_built, size_balcony: f.sqm_balcony, size_garden: f.sqm_garden, size_plot: f.sqm_plot,
     floor: f.floor, parking: f.parking,
     storage: f.storage, elevator: f.elevator, shabbat_elevator: f.shabbat_elevator,
     description: f.description, photos_urls: draft.photos,

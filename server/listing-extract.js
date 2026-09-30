@@ -40,7 +40,7 @@ const deal = (v) => (v === "sale" || v === "rent" ? v : null);
 
 const SCHEMA = {
   address: str, city: str, neighborhood: str, deal,
-  price: num, currency: normalizeCurrency, rooms: num, size_sqm: num, sqm_built: num, sqm_balcony: num, sqm_garden: num,
+  price: num, currency: normalizeCurrency, rooms: num, size_sqm: num, sqm_built: num, sqm_balcony: num, sqm_garden: num, sqm_plot: num,
   floor: int, parking: int, elevator: bool, shabbat_elevator: bool, storage: bool,
 };
 // Scraped listing pages rarely disclose the exact street address (privacy) —
@@ -57,6 +57,7 @@ Rules:
 - currency is the price's currency: "ILS" (₪, ש״ח, שקל), "EUR" (€, יורו, אירו) or "USD" ($, דולר) — only when the text names it, else null.
 - deal: "rent" if the text is about renting (להשכרה, שכירות, לחודש), "sale" if about buying or selling (למכירה, מכירה, סוג עסקה: מכירה), else null.
 - size_sqm is the total/main area, from labels like "שטח", "מ״ר", or a bare "70 מ״ר" — "מ״ר בנוי" (built area) goes in sqm_built instead when both are given.
+- sqm_plot is the land/plot the property stands on ("מגרש", "שטח מגרש", "plot", "lot", "דונם" = 1000). A plot is never size_sqm: "100 מ״ר בנוי על מגרש של 400 מ״ר" → size_sqm 100, sqm_built 100, sqm_plot 400.
 - rooms may be fractional (3.5). rooms (חדרים) is the Israeli room count, which includes the living room: "N חדרי שינה" (bedrooms) is NOT rooms — when only bedrooms are given, leave rooms null. floor is the apartment's floor, not the building height. parking is the number of spots (חניה = 1, "ללא" = 0).
 - elevator, shabbat_elevator, storage: true only if mentioned, otherwise null.
 - address is street and number only, when actually given; most scraped listings omit it — leave it null rather than using the city or neighborhood.

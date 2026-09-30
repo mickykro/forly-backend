@@ -277,6 +277,7 @@ module.exports = function createPagesRouter(ctx) {
           size_built: propNum("size_built"),
           size_balcony: propNum("size_balcony"),
           size_garden: propNum("size_garden"),
+          size_plot: propNum("size_plot"),
           floor: Number(body.property && body.property.floor) || 0,
           storage: propBool("storage"),
           elevator: propBool("elevator") || propBool("shabbat_elevator"),
@@ -473,6 +474,13 @@ module.exports = function createPagesRouter(ctx) {
         }
         if (body.property.rooms != null) patch["property.rooms"] = Number(body.property.rooms) || 0;
         if (body.property.size_sqm != null) patch["property.size_sqm"] = Number(body.property.size_sqm) || 0;
+        // Area breakdown: built / balconies / garden, and the plot the property stands on.
+        for (const [k, max] of [["size_built", 5000], ["size_balcony", 2000], ["size_garden", 100000], ["size_plot", 1000000]]) {
+          if (body.property[k] == null) continue;
+          const v = Number(body.property[k]) || 0;
+          if (v < 0 || v > max) return res.status(400).json({ error: `bad_${k}` });
+          patch[`property.${k}`] = v;
+        }
         if (body.property.floor != null) patch["property.floor"] = Number(body.property.floor) || 0;
       }
       if (Array.isArray(body.gallery_images)) {

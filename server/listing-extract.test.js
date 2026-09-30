@@ -69,6 +69,10 @@ assert.match(SYSTEM, /never converted/);
 assert.match(SYSTEM, /currency/);
 assert.equal(coerce({ currency: "EUR" }).currency, "EUR");
 assert.equal(coerce({ currency: "GBP" }).currency, null, "only currencies a page can show");
+// the plot is not part of the built/balcony/garden breakdown, so it never trips the sum check
+const villa = coerce({ size_sqm: 100, sqm_built: 100, sqm_plot: 400 });
+assert.deepEqual([villa.size_sqm, villa.sqm_built, villa.sqm_plot], [100, 100, 400]);
+assert.match(SYSTEM, /sqm_plot 400/);
 
 // ── parseListing: caps input, wires the stub, maps provider errors ──
 (async () => {

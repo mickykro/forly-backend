@@ -406,6 +406,15 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.match(texts(t), /מטבע €/);
   assert.match(texts(t), /באיזו קומה/, "and the open question comes back");
 
+  // "100 מ״ר בנוי על מגרש של 400": built 100, plot 400 — the plot is never the main area (972526003708)
+  const eurPlot = { ...D.newDraft(PHONE, "keyword", T0) };
+  Object.assign(eurPlot.fields, { city: "כפר וליכאדה", price: 285000, rooms: 3 });
+  ({ d } = deps(modelSays({ size_sqm: 100, sqm_built: 100, sqm_plot: 400 })));
+  t = await turn({ text: "הווילה 100 מ״ר בנוי על מגרש של 400 מ״ר", draft: eurPlot }, d);
+  assert.deepEqual([t.draft.fields.size_sqm, t.draft.fields.sqm_built, t.draft.fields.sqm_plot], [100, 100, 400]);
+  assert.match(texts(t), /מגרש \(מ״ר\) 400/);
+  assert.equal(D.listingBody(t.draft).size_plot, 400);
+
   // a direct answer to "מה המחיר?"
   const eurAtPrice = { ...D.newDraft(PHONE, "keyword", T0) };
   eurAtPrice.fields.city = "כפר וליכאדה";

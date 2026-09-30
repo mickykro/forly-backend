@@ -14,7 +14,7 @@ const money = (n, cur) => `${symbol(cur)}${Number(n).toLocaleString("en-US")}`;
 
 const LABELS = {
   city: "עיר", address: "כתובת", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
-  floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב", currency: "מטבע",
+  floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב", currency: "מטבע", sqm_built: "מ״ר בנוי", sqm_plot: "מגרש (מ״ר)",
 };
 
 const QUESTIONS = {
