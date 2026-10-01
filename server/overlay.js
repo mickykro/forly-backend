@@ -22,7 +22,7 @@
  * semi-transparent band with a white title line and a gold sub-line, fading
  * in at (duration - 3s) and holding to the end.
  *
- * Room labels (optional): when the caller passes `rooms` (the Vision-Tagger
+ * Room labels: DISABLED — overlayVideo ignores `rooms`. When enabled, if the caller passes `rooms` (the Vision-Tagger
  * room types of the photos the video was generated from) and
  * ANTHROPIC_API_KEY is set, frames are sampled from the SOURCE clips (with
  * their timestamps mapped onto the stitched timeline, so no extra encode is
@@ -808,9 +808,7 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
 /**
  * Stitch the clips at `videoUrls` (ordered; `videoUrl` is accepted as a
  * single-clip shorthand), overlay `lines` on the last 3 seconds of the
- * result, and — when `rooms` is provided and ANTHROPIC_API_KEY is set —
- * vision-detected room-name labels (with a short descriptor, over a cream
- * gradient) on the segments where each room is on screen.
+ * result. Room-name labels are disabled (any `rooms` input is ignored).
  * Writes the result under `uploadDir`/overlays and returns its public URL.
  */
 // The clean render sits next to the titled one as <id>.clean.mp4. Given the
@@ -870,7 +868,7 @@ async function ensurePlayableVideo(url, store) {
   }
 }
 
-async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl }) {
+async function overlayVideo({ videoUrl, videoUrls, lines, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl }) {
   const urls = (Array.isArray(videoUrls) && videoUrls.length ? videoUrls : [videoUrl])
     .filter((u) => typeof u === "string" && /^https?:\/\//.test(u));
   if (!urls.length) throw new Error("no video url given");
@@ -894,25 +892,10 @@ async function overlayVideo({ videoUrl, videoUrls, lines, rooms, musicUrl, music
     // Geometry comes from the first clip; the rest are scaled to match it.
     const info = { width: probes[0].width, height: probes[0].height, fps: probes[0].fps, duration };
     const clips = inFiles.map((file, i) => ({ file, duration: durations[i], offset: offsets[i] }));
-    let roomSegments = [];
-    // room_debug surfaces WHY labels are/aren't present, right in the API
-    // response (visible in the n8n execution) instead of only in server logs.
-    let roomDebug = "no_rooms_requested";
-    if (Array.isArray(rooms) && rooms.length) {
-      if (!process.env.ANTHROPIC_API_KEY) {
-        roomDebug = "no_api_key";
-        console.warn("video-overlay: rooms given but ANTHROPIC_API_KEY unset; skipping room labels");
-      } else {
-        // Room labels are best-effort — a vision failure must not sink the video.
-        try {
-          roomSegments = await detectRoomSegments(clips, tmp, info, rooms.slice(0, MAX_ROOMS));
-          roomDebug = roomSegments.length ? "ok" : "no_segments_detected";
-        } catch (err) {
-          roomDebug = "error: " + err.message.slice(0, 200);
-          console.warn("video-overlay: room detection failed, continuing without:", err.message);
-        }
-      }
-    }
+    // Room-name labels are disabled: they appeared before their room was on
+    // screen. `rooms` from callers is ignored, so no labels or band are drawn.
+    const roomSegments = [];
+    const roomDebug = "disabled";
     // The titles sit on the last clip's closing frame; read its brightness there.
     const endStyle = endStyleFor(await endFrameLuma(inFiles[inFiles.length - 1]));
     fs.writeFileSync(assFile, buildAss(info, lines, roomSegments, endStyle), "utf8");
