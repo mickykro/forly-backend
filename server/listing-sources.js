@@ -18,6 +18,10 @@ const TIMEOUT_MS = 10000;
 // without a pause; 3s lets the listing and its photos load.
 const FIRECRAWL_WAIT_MS = 3000;
 const MAX_PHOTOS = 54; // walkthrough: up to 6 clips × 9 reference photos
+// Scraped listing pages also carry other listings' photos ("similar
+// properties"), and they come after the gallery — so a scrape keeps only the
+// first 12. A Facebook post's attachments are all the agent's own.
+const SCRAPE_MAX_PHOTOS = 12;
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/scrape";
 const FB_HOSTS = /(^|\.)(facebook\.com|fb\.com|fb\.watch)$/i;
 const IMAGE_EXT = /\.(jpe?g|png|webp)(\?|$)/i;
@@ -65,7 +69,7 @@ function listingImages(markdown) {
   const out = [];
   const re = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
   let m;
-  while ((m = re.exec(String(markdown || ""))) && out.length < MAX_PHOTOS) {
+  while ((m = re.exec(String(markdown || ""))) && out.length < SCRAPE_MAX_PHOTOS) {
     const src = m[1];
     if (!IMAGE_EXT.test(src) || NOT_LISTING.test(src) || out.includes(src)) continue;
     out.push(src);

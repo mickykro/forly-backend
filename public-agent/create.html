@@ -293,12 +293,12 @@
 
       <section class="wizard-panel" data-wizard-panel="2" hidden>
       <div class="section-intro"><span class="section-number">02</span><div><h2 data-i18n="panel2_h2">תמונות שמזמינות פנימה</h2><p data-i18n="panel2_p">כל תמונה הופכת לרגע קטן בסרטון הסיור שלכם.</p></div></div>
-      <span class="legacy-sec-title" data-i18n="sec_photos">תמונות הנכס (4–12)</span>
-      <div class="hint" data-i18n="hint_photos_video">כל תמונה הופכת לקטע וידאו של כ-2.5 שניות — עד 12 תמונות.</div>
+      <span class="legacy-sec-title" data-i18n="sec_photos">תמונות הנכס (4–54)</span>
+      <div class="hint" data-i18n="hint_photos_video">צלמו כל חדר מכמה זוויות — כך הסרטון מדויק יותר. עד 54 תמונות.</div>
       <div class="drop upload-zone" id="drop">
         <div class="upload-icon">⇧</div>
         <b data-i18n="drop_prompt">גררו לכאן תמונות או לחצו לבחירה</b>
-        <span data-i18n="drop_types">PNG, JPG או WEBP · עד 12 תמונות</span>
+        <span data-i18n="drop_types">PNG, JPG או WEBP · עד 54 תמונות</span>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden">
       </div>
       <div class="thumbs" id="thumbs"></div>
@@ -1012,11 +1012,12 @@
 
   // Photos upload the moment they're picked (progress on the thumb); removing a
   // photo also deletes the already-uploaded file from storage.
+  var MAX_PHOTOS = 54; // walkthrough: up to 6 clips × 9 reference photos (server: listing-create.js)
   function addFiles(list) {
     Array.prototype.slice.call(list).forEach(function (f) {
       if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { FLY.toast(f.name + FT("err_bad_type")); return; }
       if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + FT("err_too_big")); return; }
-      if (photos.length >= 12) { FLY.toast(FT("err_max_photos")); return; }
+      if (photos.length >= MAX_PHOTOS) { FLY.toast(FT("err_max_photos")); return; }
       var url = URL.createObjectURL(f);
       var t = FLY.el("div", "t",
         '<img src="' + url + '"><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
@@ -1141,7 +1142,7 @@
         headers: Object.assign({ "content-type": "application/json" }, uploadHeaders),
         body: JSON.stringify({ url: p.url }),
       }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-        if (!j || !j.url || photos.length >= 12) { FLY.toast(FT("err_photo_upload")); return; }
+        if (!j || !j.url || photos.length >= MAX_PHOTOS) { FLY.toast(FT("err_photo_upload")); return; }
         var t = FLY.el("div", "t", '<img src="' + j.url + '"><button class="x" type="button">✕</button>');
         var entry = { file: null, el: t, publicUrl: j.url, previewUrl: j.url, removed: false, failed: false, uploadPromise: Promise.resolve(j.url) };
         t.querySelector(".x").addEventListener("click", function () {
@@ -1724,7 +1725,7 @@
           $("#pDesc").value = String(data.fields.description).slice(0, 2000);
         }
         (data.photos || []).forEach(function (url) {
-          if (photos.length >= 12) return;
+          if (photos.length >= MAX_PHOTOS) return;
           var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
           var entry = { file: null, el: t, publicUrl: url, previewUrl: url, removed: false, failed: false, uploadPromise: Promise.resolve(url) };
           t.querySelector(".x").addEventListener("click", function () {

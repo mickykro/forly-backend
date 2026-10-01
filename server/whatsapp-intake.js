@@ -61,9 +61,21 @@ async function build(draft, deps, now) {
   return { handled: true, status: "building", draft: D.touch(draft, now), replies: [R.building(draft.fields)] };
 }
 
+// Up to IMPORT_CONCURRENCY downloads at a time: a 54-photo burst all at once
+// would hold every image in memory and hammer the rehost target together.
+const IMPORT_CONCURRENCY = 6;
 async function importAll(urls, importPhoto) {
-  const settled = await Promise.allSettled(urls.slice(0, MAX_PHOTOS).map((u) => importPhoto(u)));
-  return settled.filter((s) => s.status === "fulfilled" && s.value).map((s) => s.value);
+  const list = urls.slice(0, MAX_PHOTOS);
+  const out = new Array(list.length).fill(null);
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const i = next++;
+      try { out[i] = (await importPhoto(list[i])) || null; } catch (e) { out[i] = null; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(IMPORT_CONCURRENCY, list.length) }, worker));
+  return out.filter(Boolean);
 }
 
 // Link or listing text → fields + photos on a fresh draft. Errors keep the

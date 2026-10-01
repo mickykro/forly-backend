@@ -35,6 +35,10 @@ const MAX_PHOTOS = 54;
 // 2000px per-image limit that applies to requests with more than 20 images.
 const LONG_EDGE = 1000;
 const MAX_SHOWS = 6;
+// ~100 output tokens per photo (shows, quality, ids) plus links: 54 photos need
+// far more than 4k, and a cut-off reply is invalid JSON → silent fallback.
+const MAX_OUTPUT_TOKENS = 12000;
+const SHRINK_CONCURRENCY = 6;
 const TEXT_MAX = 60;
 // The Vision Tagger's room types; walkthrough-plan.js orders spaces by them.
 const TYPES = ["living_room", "open_plan", "kitchen", "dining_room", "bedroom", "master_bedroom", "kids_room",
@@ -173,7 +177,11 @@ async function mapSpaces(photos) {
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "space-map-"));
   try {
-    const images = await Promise.all(use.map((p, i) => fetchShrunk(p.url, tmp, i)));
+    // A few at a time: 54 parallel downloads would also mean 54 ffmpeg processes.
+    const images = new Array(use.length);
+    let next = 0;
+    const worker = async () => { while (next < use.length) { const i = next++; images[i] = await fetchShrunk(use[i].url, tmp, i); } };
+    await Promise.all(Array.from({ length: Math.min(SHRINK_CONCURRENCY, use.length) }, worker));
     const content = [];
     images.forEach((data, i) => {
       content.push({ type: "text", text: `Photo ${i + 1}:` });
@@ -187,7 +195,7 @@ async function mapSpaces(photos) {
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ model: MODEL, max_tokens: 4000, temperature: 0, messages: [{ role: "user", content }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: MAX_OUTPUT_TOKENS, temperature: 0, messages: [{ role: "user", content }] }),
       signal: AbortSignal.timeout(120000),
     });
     if (!resp.ok) throw new Error(`vision api ${resp.status}: ${(await resp.text()).slice(0, 200)}`);

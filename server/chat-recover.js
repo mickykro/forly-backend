@@ -31,7 +31,7 @@ function latestPhotos(chat) {
   if (edited.length) return edited.reverse().slice(0, 12);
   const own = [];
   for (const m of chat) { if (m.who === "agent" && m.image) own.push(m.image); else if (own.length) break; }
-  return own.reverse().slice(0, 12);
+  return own.reverse().slice(0, 54); // whatsapp-intake MAX_PHOTOS (bot edits above stay ≤12, photo-choice.js)
 }
 
 async function recoverFromChat(phone, text, deps, now, openDraft) {
