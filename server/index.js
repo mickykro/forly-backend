@@ -176,6 +176,9 @@ const createQuotaRouter = require("./routes/quota");
 app.use("/api/quota", createQuotaRouter({
   quota, requireAuth, authSecret: AUTH_SECRET, n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone,
 }));
+// ── walkthrough plan (n8n: space map → Seedance clips) ──
+const createWalkthroughRouter = require("./routes/walkthrough");
+app.use("/api/walkthrough", createWalkthroughRouter({ n8nSecret: N8N_WEBHOOK_SECRET }));
 
 app.use("/api", createIntakeRouter({
   requireAuth, normalizeAuthPhone, signSession,

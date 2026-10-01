@@ -284,7 +284,7 @@ module.exports = function createWhatsappRouter(ctx) {
     const fileUrl = typeof body.file_url === "string" && body.file_url.trim() ? body.file_url.trim() : null;
     // Main Router debounces a burst of photos sent together into one webhook
     // (file_urls); a single photo still arrives as file_url.
-    const fileUrls = Array.isArray(body.file_urls) ? body.file_urls.filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim()).slice(0, 12) : [];
+    const fileUrls = Array.isArray(body.file_urls) ? body.file_urls.filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim()).slice(0, 54) : [];
     const event = body.event === "photos_edited" ? "photos_edited" : null;
     const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string").slice(0, 12) : [];
     const batchDone = event === "photos_edited" && body.batch_done === true;

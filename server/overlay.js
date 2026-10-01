@@ -63,7 +63,7 @@ const VISION_MODEL = process.env.OVERLAY_VISION_MODEL || "claude-haiku-4-5-20251
 // clip and once at the head of the incoming one — so each join shortens the
 // total by exactly that much.
 const XFADE_SECONDS = 0.5;
-const MAX_CLIPS = 4;
+const MAX_CLIPS = 6;
 
 // Music bed laid over the finished video. Resolved in this order:
 //   1. an explicit `musicUrl` from the caller

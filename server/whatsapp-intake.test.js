@@ -424,15 +424,15 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.status, "preview_only");
   assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
 
-  // #6/#7 photo timer: one bubble with the count and the next question; over-12 reported
+  // #6/#7 photo timer: one bubble with the count and the next question; over-54 reported
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d);
-  const twelve = Array.from({ length: 14 }, (_, i) => `https://green/m${i}.jpg`);
-  t = await turn({ fileUrls: twelve, draft: t.draft }, d);
-  assert.deepEqual([t.draft.photos.length, t.draft.photos_dropped], [12, 2]);
+  const overCap = Array.from({ length: 56 }, (_, i) => `https://green/m${i}.jpg`);
+  t = await turn({ fileUrls: overCap, draft: t.draft }, d);
+  assert.deepEqual([t.draft.photos.length, t.draft.photos_dropped], [54, 2]);
   t = await turn({ event: "photo_timer", draft: t.draft }, d);
   assert.equal(t.replies.length, 1, "one bubble");
-  assert.match(texts(t), /שמרתי 12 תמונות לנכס. \(2 לא נשמרו/);
+  assert.match(texts(t), /שמרתי 54 תמונות לנכס. \(2 לא נשמרו — המקסימום הוא 54\)/);
   assert.match(texts(t), /באיזו עיר/);
   assert.equal(t.draft.photos_dropped, 0);
 

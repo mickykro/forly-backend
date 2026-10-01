@@ -145,7 +145,7 @@ async function storeVideo(draft, url, deps, now, promptFor) {
 }
 
 // One bubble: the photo count and whatever comes next, so photos sent mid-questions
-// never look ignored. Reports (and clears) photos dropped over the 12 cap.
+// never look ignored. Reports (and clears) photos dropped over the 54 cap.
 function photoTimer(draft, deps, now, promptFor) {
   const n = draft.photos.length;
   const dropped = draft.photos_dropped || 0;
