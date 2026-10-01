@@ -62,17 +62,19 @@ function best(spaces, ok, skip = []) {
 }
 
 /**
- * Attach the tagger's photos to the map: each space's photos sorted best-first,
+ * Attach the photos to the map: each space's photos sorted best-first,
  * low-quality and non-property photos removed, empty spaces dropped.
  */
 function buildSpaces(map, tags) {
-  const usable = (t) => t && t.is_real_estate !== false && (t.quality_score ?? MIN_QUALITY) >= MIN_QUALITY;
+  // Quality: the map's score, else the tag's (Vision Tagger callers), else unknown — kept.
+  const qualityOf = (p, t) => (Number.isFinite(p.quality) ? p.quality : Number.isFinite(t.quality_score) ? t.quality_score : null);
+  const usable = (p, t) => t && t.is_real_estate !== false && (qualityOf(p, t) ?? MIN_QUALITY) >= MIN_QUALITY;
   const unassigned = new Set(map.unassigned || []);
   const spaces = [];
   for (const s of map.spaces) {
     const photos = s.photos
-      .filter((p) => !unassigned.has(p.n) && usable(tags[p.n - 1]))
-      .map((p) => ({ ...p, url: tags[p.n - 1].url, quality: tags[p.n - 1].quality_score || 0 }))
+      .filter((p) => !unassigned.has(p.n) && usable(p, tags[p.n - 1]))
+      .map((p) => ({ ...p, url: tags[p.n - 1].url, quality: qualityOf(p, tags[p.n - 1]) ?? MIN_QUALITY }))
       .sort((a, b) => b.quality - a.quality);
     if (photos.length) spaces.push({ ...s, photos, score: photos[0].quality });
   }
@@ -215,8 +217,8 @@ function buildTitles(d = {}) {
 }
 
 /**
- * The whole plan: `map` from space-map.js, `tags` the Vision Tagger output in
- * the same order as the photos sent for mapping.
+ * The whole plan: `map` from space-map.js, `tags` the photos ([{url,
+ * room_type?, quality_score?, is_real_estate?}]) in the order sent for mapping.
  */
 function planWalkthrough(map, tags, details, maxClips = MAX_CLIPS) {
   const spaces = buildSpaces(map, tags);

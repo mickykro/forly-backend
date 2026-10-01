@@ -21,6 +21,12 @@ assert.deepEqual(m.spaces[2], { id: "S3", type: "balcony", contains: [], photos:
 assert.equal(m.forgotten, 1);
 assert.deepEqual(m.sees, [{ from: 3, to: 1, what: "kitchen island" }]);
 
+// quality 1-10 is kept per photo; anything else is dropped
+const q = normalizeMap({ spaces: [{ type: "kitchen", photos: [{ n: 1, quality: 8.4 }, { n: 2, quality: 0 }, { n: 3, quality: "x" }] }] }, 3);
+assert.deepEqual(q.spaces[0].photos, [{ n: 1, shows: [], quality: 8 }, { n: 2, shows: [] }, { n: 3, shows: [] }]);
+assert.ok(/"quality": 1-10 per photo/.test(buildPrompt(2, [])));
+assert.ok(/type: exactly one of living_room, open_plan/.test(buildPrompt(2, [])));
+
 // fallback = one space per photo (the old one-shot-per-photo plan)
 const f = fallbackMap(3, ["kitchen", "living_room"]);
 assert.deepEqual(f.spaces.map((s) => [s.type, s.photos[0].n]), [["kitchen", 1], ["living_room", 2], ["room", 3]]);

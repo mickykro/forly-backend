@@ -7,6 +7,9 @@
  * space and gets every photo of it as a reference. This module builds that map
  * with one vision call over all the photos:
  *
+ * It also replaces the n8n Vision Tagger: each photo gets a 1-10 quality score,
+ * and photos that are not of the property land in `unassigned`.
+ *
  *   spaces[]   which photos show the same physical space (an open-plan kitchen,
  *              dining area and lounge are one space when a photo shows them
  *              together), and what large objects each photo plainly shows —
@@ -33,6 +36,10 @@ const MAX_PHOTOS = 54;
 const LONG_EDGE = 1000;
 const MAX_SHOWS = 6;
 const TEXT_MAX = 60;
+// The Vision Tagger's room types; walkthrough-plan.js orders spaces by them.
+const TYPES = ["living_room", "open_plan", "kitchen", "dining_room", "bedroom", "master_bedroom", "kids_room",
+  "bathroom", "toilet", "balcony", "office", "entrance", "hallway", "mamad", "garden", "roof", "parking",
+  "storage", "laundry", "exterior", "view", "lobby", "pool", "gym", "other"];
 
 function run(cmd, args, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -71,12 +78,13 @@ function buildPrompt(count, types) {
     `- "unassigned": photos that are not of this property's spaces (floor plans, logos, ` +
     `close-ups of objects).\n` +
     `- Every photo number appears exactly once: in one space or in unassigned.\n` +
-    `- type: one lowercase word or snake_case room type (living_room, kitchen, open_plan, ` +
-    `bedroom, master_bedroom, bathroom, balcony, exterior, garden, ...).\n` +
+    `- "quality": 1-10 per photo — how usable it is in a property ad (sharp, well lit, the ` +
+    `space clearly visible = 7-10; blurry, dark, cluttered or an odd crop = 1-3).\n` +
+    `- type: exactly one of ${TYPES.join(", ")}.\n` +
     (hints.length ? `\nThe tagger's guesses, for reference only:\n${hints.join("\n")}\n` : "") +
     `\nReturn only this JSON:\n` +
     `{"spaces":[{"id":"S1","type":"open_plan","contains":["kitchen","living_room"],` +
-    `"photos":[{"n":1,"shows":["kitchen island","sofa"]}],"off_limits":["front door"]}],` +
+    `"photos":[{"n":1,"quality":8,"shows":["kitchen island","sofa"]}],"off_limits":["front door"]}],` +
     `"sees":[{"from":1,"to":3,"what":"kitchen island"}],"unassigned":[]}`
   );
 }
@@ -97,7 +105,8 @@ function normalizeMap(raw, count, types = []) {
       if (!valid(n) || taken.has(n)) continue;
       taken.add(n);
       const shows = (Array.isArray(p.shows) ? p.shows : []).map((x) => clean(x, 40)).filter(Boolean).slice(0, MAX_SHOWS);
-      photos.push({ n, shows });
+      const q = Math.round(Number(p.quality));
+      photos.push(q >= 1 && q <= 10 ? { n, shows, quality: q } : { n, shows });
     }
     if (!photos.length) continue;
     spaces.push({
@@ -152,7 +161,7 @@ async function fetchShrunk(url, dir, i) {
 }
 
 /**
- * Map `photos` ([{url, room_type}], in curated order). Returns
+ * Map `photos` ([{url, room_type?}], in upload order). Returns
  * { map, debug } — never throws; on any failure `map` is fallbackMap().
  */
 async function mapSpaces(photos) {
@@ -194,4 +203,4 @@ async function mapSpaces(photos) {
   }
 }
 
-module.exports = { mapSpaces, normalizeMap, fallbackMap, parseReply, buildPrompt, MAX_PHOTOS };
+module.exports = { mapSpaces, normalizeMap, fallbackMap, parseReply, buildPrompt, MAX_PHOTOS, TYPES };

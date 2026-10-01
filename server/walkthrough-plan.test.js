@@ -69,6 +69,16 @@ assert.ok(/from another angle/.test(plan.clips[0].prompt), "spare references are
 const weak = [tag("kitchen", 3, 1), tag("living_room", 9, 2), { ...tag("bedroom", 9, 3), is_real_estate: false }, tag("bedroom", 8, 4)];
 assert.throws(() => planWalkthrough(normalizeMap({}, 4, weak.map((t) => t.room_type)), weak, {}), (e) => e.code === "too_few_photos");
 
+// ── image_urls only (no Vision Tagger): the map's quality filters and orders ──
+const bare = [1, 2, 3, 4, 5].map((i) => ({ url: `https://f/${i}.jpg`, room_type: "", quality_score: null }));
+const bareMap = normalizeMap({ spaces: [
+  { type: "open_plan", photos: [{ n: 1, quality: 6 }, { n: 2, quality: 9 }, { n: 3, quality: 2 }] },
+  { type: "bedroom", photos: [{ n: 4, quality: 7 }, { n: 5 }] },
+] }, 5);
+plan = planWalkthrough(bareMap, bare, {});
+assert.deepEqual(plan.clips.map((c) => c.image_urls), [["https://f/2.jpg", "https://f/1.jpg"], ["https://f/4.jpg", "https://f/5.jpg"]],
+  "quality 2 dropped, best first, unscored photo kept");
+
 // ── targets ──
 const space = { type: "bedroom", contains: [], off_limits: ["en-suite bathroom"] };
 assert.equal(pickTarget({ shows: ["Doorway", "bathroom", "Bed!"] }, space, new Set()), "bed");
