@@ -12,7 +12,7 @@ const { sanitizeTheme, sanitizeLang } = require("./utils");
 const { sanitizeTags } = require("./tags");
 const { normalizeCurrency } = require("./currency");
 
-const MAX_PHOTOS = 12;
+const MAX_PHOTOS = 54; // walkthrough: up to 6 clips × 9 reference photos
 // ponytail: dev only (N8N_DEV_* webhooks set) — chat/review listings reuse the last
 // generated walkthrough (served from this server's /files) instead of paying for a
 // new one. Production never takes this path. An agent's own video still wins.

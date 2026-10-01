@@ -17,7 +17,7 @@ const { intentOf, openerOf } = require("./property-intent");
 const { recoverFromChat } = require("./chat-recover");
 const PC = require("./photo-choice");
 
-const MAX_PHOTOS = 12;
+const MAX_PHOTOS = 54; // walkthrough: up to 6 clips × 9 reference photos
 const { oneBubble } = R;
 
 const notOurs = (status) => ({ handled: false, status, replies: [] });

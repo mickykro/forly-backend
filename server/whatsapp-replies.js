@@ -115,7 +115,7 @@ function photosProgress(n) {
   return { text: `יש לי ${n} תמונות. עוד תמונות, או ממשיכים?`, buttons: ["ממשיכים"] };
 }
 function photosSaved(n, dropped = 0) {
-  return { text: `שמרתי ${count(n, "תמונה אחת", "תמונות")} לנכס.` + (dropped ? ` (${dropped} לא נשמרו — המקסימום הוא 12)` : "") };
+  return { text: `שמרתי ${count(n, "תמונה אחת", "תמונות")} לנכס.` + (dropped ? ` (${dropped} לא נשמרו — המקסימום הוא 54)` : "") };
 }
 
 function summaryLines(s) {
