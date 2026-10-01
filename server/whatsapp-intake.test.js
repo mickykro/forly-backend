@@ -356,6 +356,13 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "לא", draft: proposed }, d);
   assert.deepEqual([t.draft.fields.price, t.status], [1950000, "asked:parking"]);
   assert.match(texts(t), /השארתי כמו שהיה/);
+  // "1.כן" (972526003708, 2026-09-30): the agent names the number AND spells out
+  // the button — the change must still land, not get silently dropped.
+  t = await turn({ text: "1.כן", draft: { ...proposed, last_buttons: ["כן", "לא"] } }, d);
+  assert.deepEqual([t.draft.fields.price, t.draft.pending_changes, t.status], [2100000, null, "asked:parking"]);
+  // a number followed by unrelated text is not a button tap: never read as "כן"
+  t = await turn({ text: "1 תודה", draft: { ...proposed, last_buttons: ["כן", "לא"] } }, d);
+  assert.notEqual(t.draft.fields.price, 2100000, "unrelated trailing text after the digit must not be read as confirming the change");
 
   // the asked place name survives a reply that also talks about the price
   let seen;

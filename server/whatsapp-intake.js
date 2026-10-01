@@ -377,8 +377,15 @@ async function handleTurn(input, deps) {
   if (!deps.business) return notOurs("unknown_agent");
   let draft = input.draft || null;
   // Options go out numbered (see the route's send): "2" is the second one.
-  const digit = /^\s*([1-3])\s*[.)]?\s*$/.exec(input.text || ""); // "1", "1.", "1)"
-  if (digit && draft && draft.last_buttons && draft.last_buttons[digit[1] - 1]) input = { ...input, text: draft.last_buttons[digit[1] - 1] };
+  // An agent sometimes repeats the button's own word after the number
+  // ("1.כן") — only strip the number when what follows actually is that word,
+  // so a number with unrelated trailing text still falls through untouched.
+  const digit = /^\s*([1-3])\s*[.)]?\s*(.*)$/.exec(input.text || ""); // "1", "1.", "1) כן"
+  if (digit && draft && draft.last_buttons && draft.last_buttons[digit[1] - 1]) {
+    const label = draft.last_buttons[digit[1] - 1];
+    const rest = D.clean(digit[2]);
+    if (rest === "" || rest === D.clean(label)) input = { ...input, text: label };
+  }
   let dropped = false;
   if (draft && D.isExpiredPrompt(draft, now)) {
     if (draft.suspended) draft = D.touch(draft.suspended, now); else { draft = null; dropped = true; }
