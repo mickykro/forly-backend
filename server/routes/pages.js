@@ -626,7 +626,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── video stitch + overlay ──
-  const { overlayVideo, promoVideoUrl, ensurePlayableVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
+  const { overlayVideo, promoVideoUrl, ensurePlayableVideo, MAX_LINES, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
     // video_urls (ordered clips, stitched with a crossfade) is the current
@@ -636,8 +636,6 @@ module.exports = function createPagesRouter(ctx) {
       .filter((u) => /^https?:\/\//.test(u));
     const lines = Array.isArray(body.lines) ?
       body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
-    // Optional room labels: strings or {room_type} objects, in any order.
-    const rooms = Array.isArray(body.rooms) ? body.rooms.slice(0, MAX_ROOMS) : [];
     // Optional music: an explicit track wins, otherwise a bed is generated to
     // fit the stitched length. music_prompt tailors that generation per listing.
     const musicUrl = /^https?:\/\//.test(String(body.music_url || "")) ? String(body.music_url) : null;
@@ -659,7 +657,7 @@ module.exports = function createPagesRouter(ctx) {
       }
     }
     try {
-      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);
