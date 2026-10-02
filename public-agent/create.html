@@ -459,6 +459,13 @@
         <h3 style="font-family:var(--serif);margin-bottom:12px" data-i18n="done_title">✅ הדף באוויר!</h3>
         <a class="btn btn-gold" id="pageLink" target="_blank" href="#" data-i18n="done_view">צפייה בדף</a>
         <a class="btn btn-ghost" href="/" style="margin-top:8px" data-i18n="link_my_list">לרשימת הנכסים</a>
+        <!-- the last step: should Forly post this property to the agent's groups? (offerAutoPublish) -->
+        <div id="autoPubBox" class="hidden" style="margin-top:20px;padding:16px;border:1px solid rgba(185,138,47,.35);border-radius:16px;background:#FFFDF9;text-align:right">
+          <h3 style="font-family:var(--serif);font-size:1.05rem;margin-bottom:6px">פרסום ושיתוף</h3>
+          <p id="autoPubMsg" style="font-size:.88rem;color:var(--ink-soft,#5A5348);line-height:1.6"></p>
+          <div id="autoPubGroups" style="margin:10px 0;display:grid;gap:6px;font-size:.9rem"></div>
+          <div id="autoPubActions" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+        </div>
         <div id="editLinkRow" class="hidden" style="margin-top:18px;text-align:right">
           <p style="font-size:.85rem;color:var(--ink-soft,#5A5348);margin-bottom:6px" data-i18n="edit_link_hint">
             🔑 קישור לעריכת הטקסטים בדף — אישי, לא להעביר הלאה:</p>
@@ -1676,7 +1683,63 @@
     // End the build screen in a terminal state: "done" (page ready), "wait"
     // (timed out — WhatsApp fallback) or "fail" (pipeline reported failure).
     // ponytail: demo users redirect to dashboard after page is ready
-    function endBuilding(state, pageUrl, editUrl) {
+    // ── the last step: should Forly post this property to the agent's groups? ──
+    // Asked once the page is live (its id and the groups that suit its city
+    // exist only then). Nothing is switched on without the agent's click.
+    function offerAutoPublish(pageId) {
+      var box = $("#autoPubBox"), msg = $("#autoPubMsg"), list = $("#autoPubGroups"), actions = $("#autoPubActions");
+      if (!box || !pageId) return;
+      var get = function (u) { return fetch(u, { credentials: "include" }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }); };
+      var link = function (label) { return '<a class="btn btn-ghost" href="/autopublish.html">' + label + "</a>"; };
+      Promise.all([get("/api/posting/settings"), get("/api/posting/properties")]).then(function (v) {
+        var s = v[0], prop = (v[1].properties || []).filter(function (p) { return p.page_id === pageId; })[0];
+        if (!prop) return;
+        var perm = s.permission || {}, c = prop.campaign;
+        box.classList.remove("hidden");
+        if (c && (c.status === "running" || c.status === "paused")) {
+          msg.textContent = "הנכס כבר בפרסום אוטומטי ✓ הפוסטים לאישור שלכם מחכים בעמוד הפרסום האוטומטי.";
+          actions.innerHTML = link("לעמוד הפרסום האוטומטי"); return;
+        }
+        if (!s.connected || !perm.enabled || perm.consent_version !== s.consent_version) {
+          msg.textContent = "רוצים שפורלי תפרסם את הנכס בקבוצות הפייסבוק שלכם? מפעילים פעם אחת בעמוד הפרסום האוטומטי, ומאז כל נכס חדש יקבל את השאלה הזאת כאן.";
+          actions.innerHTML = link("להפעלת פרסום אוטומטי"); return;
+        }
+        var fit = {}, no = {}, NOT_ALLOWED = { forbidden: 1, disallowed: 1, not_allowed: 1, no_agents: 1 };
+        (prop.fit_group_ids || []).forEach(function (id) { fit[id] = 1; });
+        (prop.excluded_group_ids || []).forEach(function (id) { no[id] = 1; });
+        var groups = (s.member_groups || []).filter(function (g) {
+          return g && g.membership_state === "member" && fit[g.group_id] && !no[g.group_id] && !NOT_ALLOWED[g.agent_policy];
+        }).slice(0, 5);
+        if (!groups.length) {
+          msg.textContent = "לא מצאנו קבוצה שלכם שמתאימה לעיר של הנכס. אפשר לבחור קבוצות בעמוד הפרסום האוטומטי.";
+          actions.innerHTML = link("בחירת קבוצות"); return;
+        }
+        var perPost = perm.auto_mode !== "standing";
+        msg.textContent = "לפרסם את הנכס אוטומטית בקבוצות האלה? " + (perPost ? "כל פוסט יחכה לאישור שלכם לפני שיעלה." : "פורלי תפרסם לבד, בקצב של החשבון, עד שתעצרו.");
+        list.innerHTML = groups.map(function (g) {
+          return '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" checked value="' + String(g.group_id).replace(/"/g, "") + '"> <span></span></label>';
+        }).join("");
+        Array.prototype.forEach.call(list.querySelectorAll("span"), function (el, i) { el.textContent = groups[i].name; });
+        actions.innerHTML = '<button type="button" class="btn btn-gold" id="autoPubStart">הפעלת פרסום אוטומטי</button><button type="button" class="btn btn-ghost" id="autoPubSkip">לא עכשיו</button>';
+        $("#autoPubSkip").addEventListener("click", function () { box.classList.add("hidden"); });
+        $("#autoPubStart").addEventListener("click", function () {
+          var btn = this, ids = Array.prototype.map.call(list.querySelectorAll("input:checked"), function (i) { return i.value; });
+          if (!ids.length) { msg.textContent = "בחרו לפחות קבוצה אחת."; return; }
+          btn.disabled = true;
+          fetch("/api/posting/campaigns", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({
+            page_id: pageId, group_ids: ids, mode: perPost ? "per_post" : "standing", days: 30, repeat: false, targets: ["groups"],
+            consent: true, consent_version: s.consent_version,
+            include_unknown: groups.some(function (g) { return ids.indexOf(String(g.group_id)) >= 0 && g.agent_policy === "unknown"; }),
+          }) }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }).then(function () {
+            list.innerHTML = "";
+            msg.textContent = perPost ? "הופעל ✓ הפוסט הראשון מחכה לאישור שלכם: שם אפשר לערוך את הנוסח ולבחור מתי הוא יעלה." : "הופעל ✓ פורלי תפרסם את הנכס בקבוצות שבחרתם.";
+            actions.innerHTML = link(perPost ? "לאישור הפוסט" : "לעמוד הפרסום האוטומטי");
+          }).catch(function () { btn.disabled = false; msg.textContent = "לא הצלחנו להפעיל מכאן — אפשר להפעיל בעמוד הפרסום האוטומטי."; actions.innerHTML = link("לעמוד הפרסום האוטומטי"); });
+        });
+      }).catch(function () { /* not signed in, or posting is not available here: the step is simply not shown */ });
+    }
+
+    function endBuilding(state, pageUrl, editUrl, pageId) {
       clearInterval(iv);
       $("#buildSpin").classList.add("hidden");
       // the "keeps building in the background" note only holds while it is
@@ -1698,6 +1761,7 @@
           });
         }
         $("#doneBox").classList.remove("hidden");
+        offerAutoPublish(pageId);
         // auto-redirect demo users to dashboard after 3s
         if (demoLoggedIn) {
           setTimeout(function() { location.href = "/"; }, 3000);
@@ -1724,7 +1788,7 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.page_id && d.page_url) {
-            endBuilding("done", d.page_url, d.edit_url);
+            endBuilding("done", d.page_url, d.edit_url, d.page_id);
           } else if (d.status === "failed") {
             endBuilding("fail");
           }

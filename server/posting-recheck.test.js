@@ -54,6 +54,28 @@ function harness(deps, { results = {}, page = {}, openThrows = null, real = fals
 }
 
 (async () => {
+  // ── a posting account: checked inside its posting session, not in a session of its own ──
+  {
+    const { deps } = await setup();
+    await posted("111");
+    const C = require("./posting-campaign");
+    await C.create(K.base(), deps); // running: the account is posting
+    const h = harness(deps);
+    const later = new Date(NOW.getTime() + 25 * HOUR);
+    await R.recheckOne(h.d, later);
+    assert.deepEqual(h.ev.filter((e) => e === "open"), [], "no session of its own while it is posting");
+    // inside the posting session: the same page, no new session
+    const x = require("./posting-account").ctxOf(h.d);
+    assert.equal(await R.recheckDueFor(PH, h.d, x, later, h.pg), "rechecked");
+    assert.equal(h.seen.length, 1, "the post was looked at");
+    assert.equal(h.opened.length, 0, "on the page that was already open");
+    // and 36 hours past due with no posting session, it gets one after all
+    const h2 = harness(deps);
+    await posted("222", new Date(NOW.getTime() + HOUR));
+    await R.recheckOne(h2.d, new Date(NOW.getTime() + 64 * HOUR));
+    assert.equal(h2.opened.length, 1);
+  }
+
   // ── not due before 24 h; the reservation wrote the click doc and the due time ──
   {
     const { deps } = await setup();

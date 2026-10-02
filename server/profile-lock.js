@@ -36,6 +36,11 @@ function tryAcquire(phone, platform = "facebook") {
     if (cur && cur.owner === owner) held.delete(k);
   };
 }
+// A session posting several in a row (posting-chain) keeps its hold alive.
+function renew(phone, platform = "facebook") {
+  const cur = held.get(keyFor(phone, platform));
+  if (cur) cur.until = Date.now() + MAX_HOLD_MS;
+}
 function acquire(phone, platform = "facebook") {
   const release = tryAcquire(phone, platform);
   if (!release) { const e = new Error(`profile ${phone}/${platform} is busy`); e.code = "profile_busy"; throw e; }
@@ -64,4 +69,4 @@ const budget = () => Number(process.env.DRIVER_MAX_CONCURRENT || 2);
 function trySession() { if (sessions >= budget()) return null; sessions++; return () => { sessions = Math.max(0, sessions - 1); }; }
 function activeSessions() { return sessions; }
 
-module.exports = { tryAcquire, acquire, isHeld, trySession, activeSessions, loginOpen, LOGIN_SESSION_S, MAX_HOLD_MS, _test: { held, reset: () => { held.clear(); sessions = 0; } } };
+module.exports = { tryAcquire, renew, acquire, isHeld, trySession, activeSessions, loginOpen, LOGIN_SESSION_S, MAX_HOLD_MS, _test: { held, reset: () => { held.clear(); sessions = 0; } } };

@@ -7,7 +7,6 @@
  * The choice is stored on the campaign post. A retry therefore uses the same
  * destination; a later completed round may choose another one.
  */
-const { variantIndex } = require("./distribution/share-kit");
 const { normalizePhone, publicUrl } = require("./utils");
 const { clickLink } = require("./posting-attribution");
 
@@ -44,26 +43,19 @@ async function pagePostUrl(db, pageId) {
   catch { return null; }
 }
 
-function choose({ page, campaign, target, pagePostUrl, variantRound = 0 } = {}) {
-  // A Page post always points to the property; Page-to-Page and CTA-only
-  // variants are only useful for Group distribution.
-  if (target && target.target === "page") return { kind: "property", url: null };
-  const candidates = [{ kind: "property", url: null }];
-  const wa = whatsappUrl(page);
-  if (wa) candidates.push({ kind: "whatsapp", url: wa });
-  const fb = safeFacebookUrl(pagePostUrl);
-  if (fb) candidates.push({ kind: "facebook_page", url: fb });
-  candidates.push({ kind: "none", url: null });
-  const key = `${campaign && campaign.page_id}|${target && (target.group_id || target.url)}|destination`;
-  const round = Number.isSafeInteger(variantRound) && variantRound >= 0 ? variantRound : 0;
-  return candidates[(variantIndex(key, candidates.length) + round) % candidates.length];
+// Every post carries the property page's own link (in its first comment):
+// that link is what brings the buyer to the listing and what clicks and leads
+// are counted on. The WhatsApp / Page-post / no-link variants this used to
+// rotate through are still understood on posts stored before (commentUrl).
+function choose() {
+  return { kind: "property", url: null };
 }
 
 function notice(kind) {
   if (kind === "whatsapp") return "כדי לגוון את דרך הפנייה, קישור הנכס של פורלי לא יצורף לפוסט הזה. במקום זאת יצורף קישור לוואטסאפ שלכם, כדי שמתעניינים יפנו אליכם ישירות.";
   if (kind === "facebook_page") return "כדי להוביל דרך תוכן שכבר פורסם בפייסבוק, קישור הנכס של פורלי לא יצורף לפוסט הזה. במקום זאת יצורף הפוסט הקיים בדף העסקי, שבו כבר נמצא קישור הנכס.";
   if (kind === "none") return "כדי לשמור על פוסט קצר ללא קישור חיצוני, קישור הנכס של פורלי לא יצורף לפוסט הזה. הפוסט יזמין לפנות אליכם בפרטי; תוכלו לשלוח את דף הנכס בשיחה.";
-  return "קישור ישיר לדף הנכס של פורלי יצורף בתגובה הראשונה.";
+  return "קישור ישיר לדף הנכס של פורלי מופיע בטקסט הפוסט.";
 }
 
 function previewUrl(destination, { pageBaseUrl, pageId } = {}) {

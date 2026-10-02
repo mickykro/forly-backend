@@ -7,6 +7,7 @@
    No network. */
 process.env.PROFILE_KEY = "test-profile-key-16a";
 process.env.FORLY_ENV = "local";
+process.env.POSTING_CAPS = "1"; // these tests are about the caps a real environment keeps
 const assert = require("assert");
 const dbModule = require("./db");
 const S = require("./posting-store");

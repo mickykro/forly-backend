@@ -41,7 +41,8 @@ async function fetchVideo(url, deps = {}) {
   if (!buffer.length) throw fail("media_unavailable", { ...seen, why: "empty file" });
   if (buffer.length > MAX_BYTES) throw fail("media_too_large", { ...seen, bytes: buffer.length, why: "larger than the upload limit" });
   const mimeType = type.startsWith("video/") ? type : "video/mp4";
-  return { name: `property.${mimeType === "video/quicktime" ? "mov" : "mp4"}`, mimeType, buffer };
+  // Re-encoded light once per video (posting-video): every post uploads it, and Driver bills the bytes.
+  return require("./posting-video").shrink({ name: `property.${mimeType === "video/quicktime" ? "mov" : "mp4"}`, mimeType, buffer }, deps);
 }
 
 const countOf = (page, sel) => page.locator(sel).count().catch(() => 0);
@@ -73,8 +74,8 @@ async function attach(page, x, file) {
     }
     if (!done) { x.diag = { why: "no way to attach a video in the composer", counts: await mediaCounts(page) }; return "media_not_found"; }
   } catch (e) { x.diag = { why: `attaching threw (${(e && e.name) || "error"})`, counts: await mediaCounts(page) }; return "media_not_found"; }
-  const seen = await page.locator(S.mediaAttached).first().waitFor({ timeout: 30000 }).then(() => true, () => false);
-  if (!seen) x.diag = { why: "the file was handed over but no video preview appeared in 30 s", counts: await mediaCounts(page) };
+  const seen = await page.locator(S.mediaAttached).first().waitFor({ timeout: 120000 }).then(() => true, () => false); // the file travels to a remote browser first
+  if (!seen) x.diag = { why: "the file was handed over but no video preview appeared in 120 s", counts: await mediaCounts(page) };
   return seen ? null : "media_upload_failed";
 }
 

@@ -43,12 +43,18 @@ const driver = require("./driver-browser");
 const guardLive = require("./posting-guard");
 const { classifySignal } = require("./posting-safety");
 
+// 2 Oct 2026: no video is watched (autoplay is off on the account, and a
+// played video is most of a session's traffic — Driver bills every byte), no
+// story is opened (they are videos too), and one post is opened, not two (each
+// is a full page load). The time goes to reading instead: a text or image post
+// near the middle of the screen holds the scroll for a while; a video post is
+// scrolled past.
 const INTERACTION = {
   scrolls: [3, 6], scroll_pause_s: [4, 12],
-  open_posts: [1, 2], read_s: [8, 20],
-  video_watch_s: [10, 40],
+  open_posts: [1, 1], read_s: [8, 20],
+  read_text_s: [5, 12], read_image_s: [3, 8], past_video_s: [1, 2],
   like_probability: 0.5, likes_max: 2,
-  story_probability: 0.4, stories: [1, 3], story_watch_s: [3, 8],
+  story_probability: 0, stories: [1, 3], story_watch_s: [3, 8],
   min_reactions: 5,
 };
 
@@ -158,6 +164,31 @@ async function readFeed(page) {
   }).catch(() => []);
 }
 
+// The post nearest the middle of the screen: "video" | "image" | "text" | null,
+// and how much text it shows (for how long it is read). In-page, one read.
+async function centered(page) {
+  return Promise.resolve().then(() => page.evaluate((sel) => {
+    const mid = window.innerHeight / 2;
+    let best = null, bestD = Infinity;
+    for (const el of document.querySelectorAll(sel)) {
+      const r = el.getBoundingClientRect();
+      if (r.height < 80 || r.bottom < 0 || r.top > window.innerHeight) continue;
+      const d = Math.abs(r.top + r.height / 2 - mid);
+      if (d < bestD) { bestD = d; best = el; }
+    }
+    if (!best) return null;
+    const kind = best.querySelector("video") ? "video" : best.querySelector('img[src*="scontent"], img[src*="fbcdn"]') ? "image" : "text";
+    return { kind, chars: Math.min(2000, (best.innerText || "").length) };
+  }, SELECTORS.feedPost)).catch(() => null);
+}
+// How long to stay on what is in front of the reader, in ms.
+function readFor(post, r) {
+  if (!post) return secs(r, INTERACTION.scroll_pause_s);
+  if (post.kind === "video") return secs(r, INTERACTION.past_video_s);
+  const base = secs(r, post.kind === "image" ? INTERACTION.read_image_s : INTERACTION.read_text_s);
+  return base + Math.min(8000, post.chars * 25); // a longer text holds a little longer
+}
+
 // R2: called immediately before every visible action, and once before any
 // passive dwelling at all (the "dwell" action, which needs no permission —
 // only the fleet/account checks). `deps.guard` defaults to the real module.
@@ -231,9 +262,7 @@ async function dwell(page, opts = {}, deps = {}) {
   for (let i = 0; i < nScroll; i++) {
     await page.mouse.wheel(0, 300 + Math.floor(r() * 700)); note("scroll");
     feed = await readFeed(page);
-    const vid = feed.find((f) => f.hasVideo);
-    if (vid && i === Math.floor(nScroll / 2)) { await wait(secs(r, INTERACTION.video_watch_s)); note("watch_video"); }
-    await wait(secs(r, INTERACTION.scroll_pause_s));
+    await wait(readFor(await centered(page), r));
   }
 
   // Drawn WITHOUT replacement (fix round 1: with replacement, a small feed
@@ -359,6 +388,8 @@ async function browseSession({ phone, profileName, note } = {}, deps = {}) {
       await page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
       let signal = await readSignal(page);
       if (signal !== "ok") return { log: [], signal };
+      // Once per account: Facebook's own "Autoplay: Off" (posting-fbsettings) — videos are most of the traffic.
+      await require("./posting-fbsettings").ensureAutoplayOff(page, { phone, conn, db, env: deps.env, guard: async (action) => { if (!(await checkGuard(action, pageDeps))) throw Object.assign(new Error("denied"), { denied: true }); } });
       const log = await dwell(page, { allowVisible, recentlyLikedPostIds }, pageDeps);
       signal = await readSignal(page);
       return { log, signal };
@@ -421,4 +452,4 @@ async function recheckPost(page, postUrl, deps = {}) {
   return { state: "visible", reactions, comments };
 }
 
-module.exports = { dwell, browseSession, recheckPost, INTERACTION, SELECTORS, COMPETITOR_PATTERNS };
+module.exports = { dwell, browseSession, recheckPost, centered, readFor, INTERACTION, SELECTORS, COMPETITOR_PATTERNS };

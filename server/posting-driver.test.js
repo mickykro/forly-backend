@@ -39,10 +39,40 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(h.page.st.visited[0], "https://www.facebook.com/", "the feed comes first");
     assert.equal(h.page.st.visited[1], GROUP_URL);
     const { opts, pd } = h.opened[0];
-    assert.ok(opts.duration <= 14 * 60, "Driver duration at most 14 minutes");
+    assert.equal(opts.duration, 55 * 60, "a session long enough to post several in a row (POSTING_SESSION_MINUTES)");
     assert.equal(opts.note, "forly-post:c1");
     assert.deepEqual(opts.profile, { name: profileName("facebook", PHONE, 0), persist: true });
     assert.equal(pd.phone, PHONE); assert.equal(pd.platform, "facebook"); assert.equal(pd.lockHeld, true);
+  }
+
+  // ── several posts in one session: the next is prepared after a dwell, posted on the same page ──
+  {
+    const h = harness();
+    const second = attemptOf({ key: "fedcba9876543210fedcba9876543210", post_id: "p2" });
+    let asked = 0;
+    const next = async (out) => {
+      asked++;
+      if (asked > 1) { assert.equal(out.state, "verified_posted", "the second result is reported too"); return null; }
+      assert.equal(out.state, "verified_posted");
+      return async () => ({ kind: "group", args: argsOf({ attempt: second }), deps: Object.assign({}, h.deps, { next }) });
+    };
+    h.deps.next = next; h.deps.chainDwellMs = 0;
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.equal(out.chained, true);
+    assert.equal(h.opened.length, 1, "one browser session for both posts");
+    assert.equal(h.submits(), 2, "two posts");
+    assert.equal(asked, 2, "asked after each post");
+    const v = h.page.st.visited;
+    assert.deepEqual(v.slice(0, 2), ["https://www.facebook.com/", GROUP_URL], "the first: feed, then group");
+    assert.ok(v.lastIndexOf("https://www.facebook.com/") > 1 && v[v.length - 1].includes("/posts/") || v.includes(GROUP_URL), "the dwell back on the feed between posts");
+    assert.ok(h.transitions.some((t) => t.k === second.key && t.to === "verified_posted"), "the second attempt walked its own states");
+  }
+  // POSTING_CHAIN=0: one post, the old short session
+  {
+    const h = harness();
+    h.deps.env = { POSTING_CHAIN: "0" };
+    await PD.postToGroup(argsOf(), h.deps);
+    assert.ok(h.opened[0].opts.duration <= 14 * 60);
   }
 
   // ── watched local test: passive feed preflight, then publish in that same visible session ──
@@ -134,13 +164,43 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(h.transitions[3].d.clicked, false, "M9: recorded as not clicked");
   }
 
+  // ── a logged-in group page has no id <meta> (a real run): the address the browser landed on names the id ──
+  {
+    const h = harness({ page: { attrs: { [S.targetIdMeta]: "" } } });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.equal(out.state, "verified_posted", "the id from /groups/111, every other check unchanged");
+    const P = require("./posting-driver-proof");
+    const at = (url, meta, og) => ({ url: () => url, locator: (sel) => ({ first: () => ({ getAttribute: async () => (sel === S.targetIdMeta ? meta : og) || null }) }) });
+    assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/111/?ref=x", "", ""), "group"), "111");
+    assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/111/posts/9/", "", ""), "group"), "111");
+    assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/111", "fb://group/222", ""), "group"), null, "metadata and address disagree: no id");
+    assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/111", "", "https://www.facebook.com/groups/222/"), "group"), null);
+    assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/haifa.rent", "", ""), "group"), null, "a vanity address names no id");
+    assert.equal(await P.readTargetId(at("https://evil.example/groups/111", "", ""), "group"), null);
+    assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/111", "", ""), "page"), null, "never a Page's id");
+    // norm: invisible marks never make two equal names differ; visible text still must match exactly
+    assert.equal(P.norm("\u200fפורלי\u00a0- הבית\u200e \u2068של\u2069 המתווכים😇\ufe0f"), "פורלי - הבית של המתווכים😇");
+    assert.equal(P.norm("👨\u200d👩\u200d👧"), "👨\u200d👩\u200d👧", "the zero-width joiner of an emoji sequence stays");
+    assert.notEqual(P.norm("פורלי 😇"), P.norm("פורלי"));
+    assert.equal(P.fingerprint("❤\ufe0f דירה"), P.fingerprint("❤ דירה"));
+    assert.ok(P.isCutOf(`${COPY.slice(0, 30)}… ראו עוד`, COPY) && !P.isCutOf(`${COPY.slice(1, 30)}… ראו עוד`, COPY));
+    for (const bad of ["Facebook", " facebook ", "", null, "Log in to Facebook", "פייסבוק", "x".repeat(121)]) assert.equal(P.isPersonName(bad), false, String(bad));
+    assert.equal(P.isPersonName("Micky Kroitoro"), true);
+    // the bootstrap name is preferred; anything that is not a string falls back to the banner
+    const who = (ev) => P.readIdentity({ evaluate: ev, locator: () => ({ first: () => ({ innerText: async () => "Banner Name" }) }) });
+    assert.equal(await who(async () => " Dana\u00a0Cohen "), "Dana Cohen");
+    assert.equal(await who(async () => ""), "Banner Name");
+    assert.equal(await who(async () => { throw new Error("navigated"); }), "Banner Name");
+  }
+
   // ── R3: every mismatch fails closed as verified_failed with its code, zero clicks ──
   for (const [page, code, label] of [
     [{ texts: { [S.identity]: "Someone Else" } }, "identity_mismatch", "header identity"],
     [{ texts: { [S.identity]: "" } }, "identity_mismatch", "unreadable header"],
     [{ texts: { [S.composerAuthor]: "Someone Else" } }, "identity_mismatch", "composer author"],
     [{ attrs: { [S.targetIdMeta]: "fb://group/222" } }, "destination_mismatch", "canonical id"],
-    [{ attrs: { [S.targetIdMeta]: "" } }, "destination_mismatch", "no id on the page"],
+    [{ attrs: { [S.targetIdMeta]: "" }, redirect: (u) => (u === GROUP_URL ? "https://www.facebook.com/groups/some.slug" : null) }, "destination_mismatch", "no id on the page or in its address"],
+    [{ attrs: { [S.targetIdMeta]: "" }, redirect: (u) => (u === GROUP_URL ? "https://www.facebook.com/groups/222" : null) }, "destination_mismatch", "redirected to another group"],
     [{ texts: { [S.composerTarget]: "קבוצה אחרת" } }, "destination_mismatch", "composer names another group"],
     [{ texts: { [S.targetName]: "שם אחר" } }, "destination_mismatch", "group renamed / other group"],
     [{ texts: { [S.editor]: `${COPY} x` } }, "copy_mismatch", "editor text"],

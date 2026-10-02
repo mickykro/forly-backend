@@ -30,7 +30,8 @@ const SELECTORS = {
   targetIdMeta: 'meta[property="al:android:url"]', // [Unverified] fb://group/<id>, fb://page/<id>, fb://profile/<id>
   targetUrlMeta: 'meta[property="og:url"]', // [Unverified]
   joinGroup: 'div[role="main"] div[aria-label="Join group"][role="button"], div[role="main"] div[aria-label="הצטרפות לקבוצה"][role="button"]', // [Unverified]
-  composer: 'div[role="main"] [role="button"]:has-text("כתבו משהו"), div[role="main"] [role="button"]:has-text("Write something"), div[role="main"] [role="button"]:has-text("What\'s on your mind")', // [Unverified]
+  // "כאן כותבים" is what a live Hebrew group page showed (a failed run's screenshot); the rest are guesses.
+  composer: 'div[role="main"] [role="button"]:has-text("כאן כותבים"), div[role="main"] [role="button"]:has-text("כתבו משהו"), div[role="main"] [role="button"]:has-text("Write something"), div[role="main"] [role="button"]:has-text("What\'s on your mind")', // [Unverified]
   composerRoot: COMPOSER_ROOT,
   editor: `${COMPOSER_ROOT} ${EDITOR}`, // [Unverified]
   // Scoped to the composer root (fix round 1, M5): nothing outside our own
@@ -46,9 +47,13 @@ const SELECTORS = {
   chronoMarker: 'div[role="main"] [aria-label="New posts"], div[role="main"] [aria-label="פוסטים חדשים"]', // [Unverified] the group feed's "New posts" sort
   feedPostText: 'div[data-ad-preview="message"], div[data-ad-comet-preview="message"]', // [Unverified]
   feedPostLink: 'a[href*="/posts/"], a[href*="/permalink/"], a[href*="story_fbid="]', // [Unverified]
-  feedPostAuthor: 'h2 strong, h3 strong, h4 strong', // [Unverified]
+  // Calibrated 2 Oct 2026: the author's name sits in an <h2> marked profile_name, with no <strong>.
+  feedPostAuthor: '[data-ad-rendering-role="profile_name"], h2 strong, h3 strong, h4 strong',
   postMessage: 'div[role="main"] div[data-ad-preview="message"], div[role="main"] div[data-ad-comet-preview="message"]', // [Unverified] on a permalink page
-  postAuthor: 'div[role="main"] h2 strong, div[role="main"] h3 strong', // [Unverified]
+  // Calibrated 2 Oct 2026: a post opened from a group shows as a dialog over the feed ("הפוסט של …").
+  postDialogMessage: 'div[role="dialog"] div[data-ad-preview="message"], div[role="dialog"] div[data-ad-comet-preview="message"]',
+  postDialogAuthor: 'div[role="dialog"] [data-ad-rendering-role="profile_name"]',
+  postAuthor: 'div[role="main"] [data-ad-rendering-role="profile_name"], div[role="main"] h2 strong, div[role="main"] h3 strong',
   commentBox: 'div[aria-label^="כתיבת תגובה"], div[aria-label^="Write a comment"]', // [Unverified]
   commentSubmit: 'div[aria-label="תגובה"][role="button"], div[aria-label="Comment"][role="button"]', // [Unverified]
   // The post's video (posting-media.js), all inside our own composer: its
@@ -61,36 +66,173 @@ const SELECTORS = {
   mediaProgress: `${COMPOSER_ROOT} [role="progressbar"]`, // [Unverified]
 };
 
-const norm = (s) => (s === undefined || s === null ? "" : String(s)).normalize("NFC").replace(/\s+/g, " ").trim();
+// Invisible format characters are dropped before comparing: bidi marks and
+// isolates (Facebook wraps names in them on an RTL page), zero-width
+// space/non-joiner, word joiner, BOM, and the emoji variation selector
+// (U+FE0F: the same emoji is written with and without it). The zero-width
+// JOINER stays — it is part of an emoji sequence. Both sides of every
+// comparison go through this, so what is compared is still exact.
+const INVISIBLE = /[\u200b\u200c\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufe0f\ufeff]/g;
+const norm = (s) => (s === undefined || s === null ? "" : String(s)).normalize("NFC").replace(INVISIBLE, "").replace(/\s+/g, " ").trim();
 // The post's text fingerprint: the same hash as copy_hash, over the normalised text.
 const fingerprint = (s) => sha(norm(s));
 const FB_HOST = /^(www\.|m\.|web\.)?facebook\.com$/i;
 const SEG = /^[A-Za-z0-9._-]+$/;
 const POST_ID = /^[A-Za-z0-9]+$/;
 
-// [Unverified] (M6, Task 24): Facebook may render an emoji as <img alt>;
-// innerText drops it, so an editor holding the copy would read without the
-// emoji and the proof would fail closed (copy_mismatch). Calibrate there.
+// In the page. An element's text as innerText gives it — plus the emoji
+// Facebook renders as <img alt="😇">, which innerText drops (M6): a group
+// name, a post or an editor holding an emoji would otherwise read without it
+// and fail closed on a page that is right. Only an <img> whose alt is
+// nothing but emoji counts (never an avatar's alt, a name). With no such
+// image the result IS innerText; with one, the subtree is walked the way
+// innerText reads it (hidden parts skipped, a line break around each block).
+// readDom(el) → its text; readDom(els) → [{ href, text }] (a list of links);
+// readDom(els, { link, text, author }) → the first 15 feed posts.
+function readDom(target, s) {
+  const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component})+$/u, PICT = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u;
+  const text = (el) => {
+    const plain = el.innerText || el.textContent || "";
+    const imgs = new Set(Array.from(el.querySelectorAll("img[alt]")).filter((i) => EMOJI.test(i.alt) && PICT.test(i.alt)));
+    if (!imgs.size) return plain;
+    let t = "";
+    const walk = (n) => {
+      if (n.nodeType === 3) { if (!n.parentElement || getComputedStyle(n.parentElement).visibility !== "hidden") t += n.data; return; }
+      if (n.nodeType !== 1) return;
+      if (imgs.has(n)) { t += n.alt; return; }
+      if (n.tagName === "BR") { t += "\n"; return; }
+      const display = getComputedStyle(n).display;
+      if (display === "none") return;
+      const block = !/^(inline|contents)/.test(display);
+      if (block) t += "\n";
+      n.childNodes.forEach(walk);
+      if (block) t += "\n";
+    };
+    walk(el);
+    return t;
+  };
+  if (!Array.isArray(target)) return text(target);
+  if (!s) return target.map((a) => ({ href: a.href, text: text(a).trim() }));
+  return target.slice(0, 15).map((el) => {
+    const link = el.querySelector(s.link), msg = el.querySelector(s.text), au = el.querySelector(s.author);
+    return { href: link ? link.href : null, text: msg ? text(msg) : "", author: au ? text(au) : "" };
+  });
+}
+
+// The audience label a group's own composer shows under the author's name.
+const GROUP_AUDIENCE = new Set(["קבוצה ציבורית", "קבוצה פרטית", "Public group", "Private group"]);
+// In the page: every short text the composer dialog itself shows — its
+// heading, who posts, where to — never the editor's (the post's own words
+// can't name the group or the author). Emoji images count as their alt.
+function chromeTexts(root) {
+  const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component})+$/u, out = new Set();
+  for (const el of root.querySelectorAll('span, a, strong, h1, h2, h3, h4, [role="heading"], [role="button"]')) {
+    if (el.closest('[contenteditable="true"]')) continue;
+    let t = "";
+    const walk = (n) => {
+      if (n.nodeType === 3) t += n.data;
+      else if (n.nodeType === 1) { if (n.tagName === "IMG") { if (EMOJI.test(n.alt || "")) t += n.alt; } else n.childNodes.forEach(walk); }
+    };
+    walk(el);
+    if (t.trim() && t.length <= 160) out.add(t);
+  }
+  return [...out].slice(0, 300);
+}
+// → the normalised chrome texts of the one open composer ([] when unreadable).
+async function composerTexts(page) {
+  try {
+    const v = await page.locator(SELECTORS.composerRoot).first().evaluate(chromeTexts, null, { timeout: 5000 });
+    return Array.isArray(v) ? v.map(norm).filter(Boolean) : [];
+  } catch { return []; }
+}
+
+// The headings of every open dialog — an opened post's is "הפוסט של <author>".
+async function dialogHeadings(page) {
+  try {
+    const v = await page.locator('div[role="dialog"] h2, div[role="dialog"] [role="heading"]').evaluateAll((els) => els.map((e) => e.textContent || ""));
+    return Array.isArray(v) ? v.map(norm).filter(Boolean) : [];
+  } catch { return []; }
+}
+
 // ── reads (never throw; a failed read is "" / null / -1) ──
 async function textOf(page, sel) {
-  try { return norm(await page.locator(sel).first().innerText()); } catch { return ""; }
+  try {
+    const loc = page.locator(sel).first();
+    const plain = await loc.innerText({ timeout: 5000 }); // waits for the element, but not 30 s per missing one
+    const rich = await Promise.resolve().then(() => loc.evaluate(readDom, null, { timeout: 2000 })).catch(() => null);
+    return norm(typeof rich === "string" ? rich : plain);
+  } catch { return ""; }
 }
+// <meta> is in the served HTML or it is not: no 30 s wait for one that never comes.
 async function attrOf(page, sel, name) {
-  try { return String((await page.locator(sel).first().getAttribute(name)) || ""); } catch { return ""; }
+  try { return String((await page.locator(sel).first().getAttribute(name, { timeout: 2000 })) || ""); } catch { return ""; }
+}
+
+// In the page: the logged-in account's display name from Facebook's own
+// bootstrap data — the `CurrentUserInitialData` definition in a
+// <script type="application/json"> block. [Unverified] that the block is
+// still there; if it is not, this is "" and the banner is read instead.
+// Page-owned, not post content: each block is JSON.parse'd and only an ARRAY
+// whose first item is that module name counts — a post's text is a string
+// inside the JSON and can never become such an array. Two different names → "".
+function userNameInPage() {
+  const names = new Set();
+  const walk = (v) => {
+    if (Array.isArray(v) && v[0] === "CurrentUserInitialData") { if (v[2] && typeof v[2].NAME === "string") names.add(v[2].NAME); }
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  for (const sc of document.querySelectorAll('script[type="application/json"]')) {
+    const t = sc.textContent || "";
+    if (!t.includes('"CurrentUserInitialData"')) continue;
+    try { walk(JSON.parse(t)); } catch { /* not JSON: not evidence */ }
+  }
+  return names.size === 1 ? [...names][0] : "";
+}
+// Who is logged in: the bootstrap name, else the banner marker. The SAME read
+// at connect (routes/connections-browser.js stores it) and in the R3 proof,
+// so the two can match exactly. "" when neither says: fails closed.
+async function readIdentity(page) {
+  let name = "";
+  try { name = await page.evaluate(userNameInPage); } catch { name = ""; }
+  return (typeof name === "string" && norm(name)) || textOf(page, SELECTORS.identity);
+}
+// A stored identity label must be a person's name: never empty, never the
+// site's own name (a tab title read before the page filled in is "Facebook").
+const isPersonName = (s) => { const n = norm(s); return n.length > 0 && n.length <= 120 && !/facebook|פייסבוק/i.test(n); };
+
+// The numeric group id the browser's own address names (/groups/<digits>…),
+// or null. The address is the browser's, never page content.
+function urlGroupId(url) {
+  let u;
+  try { u = new URL(String(url)); } catch { return null; }
+  if (u.protocol !== "https:" || !FB_HOST.test(u.hostname)) return null;
+  const m = u.pathname.match(/^\/groups\/(\d+)(?:\/|$)/);
+  return m ? m[1] : null;
 }
 // -1 when the count itself could not be read: callers treat that as "not proven".
 async function countOf(page, sel) {
   try { const n = await page.locator(sel).count(); return Number.isInteger(n) ? n : -1; } catch { return -1; }
 }
 
-// The canonical numeric id from the page's own metadata, or null.
+// The canonical numeric id, or null: from the page's own metadata and — for
+// a group — from the address the browser landed on. A logged-in group page
+// carries neither <meta> (a real run: both absent, the page was right), so
+// the address is what is left: Facebook serves group <id> at /groups/<id>
+// and a redirect elsewhere changes it. Every source that speaks must say the
+// SAME id; two that disagree → null (fails closed). A vanity address names
+// no id: such a group still needs the metadata.
 async function readTargetId(page, kind) {
+  const ids = [];
   const app = await attrOf(page, SELECTORS.targetIdMeta, "content");
   const m = app.match(/^fb:\/\/(group|page|profile)\/(?:\?id=)?(\d+)/);
-  if (m && (kind === "group" ? m[1] === "group" : m[1] !== "group")) return m[2];
+  if (m && (kind === "group" ? m[1] === "group" : m[1] !== "group")) ids.push(m[2]);
   const og = await attrOf(page, SELECTORS.targetUrlMeta, "content");
   const g = kind === "group" ? og.match(/facebook\.com\/groups\/(\d+)(?:[/?#]|$)/) : og.match(/facebook\.com\/profile\.php\?id=(\d+)/);
-  return g ? g[1] : null;
+  if (g) ids.push(g[1]);
+  let landed = null;
+  try { landed = kind === "group" ? urlGroupId(page.url()) : null; } catch { landed = null; }
+  if (landed) ids.push(landed);
+  return ids.length && ids.every((i) => i === ids[0]) ? ids[0] : null;
 }
 
 // The first path segment after /groups/ (group) or the first segment (Page).
@@ -127,7 +269,7 @@ function permalinkOf(href, kind, ids) {
 // Feed text is often cut ("… See more"): a cut prefix only SELECTS a
 // candidate to open — it never verifies anything (the permalink page does).
 function isCutOf(text, copy) {
-  const t = norm(text).replace(/\s*(…|\.\.\.)?\s*(see more|ראה עוד|הצגת עוד|עוד)$/i, "").replace(/…$/, "").trim();
+  const t = norm(text).replace(/\s*(…|\.\.\.)?\s*(see more|ראו עוד|ראה עוד|הצגת עוד|הצג עוד|עוד)$/i, "").replace(/…$/, "").trim();
   return t.length >= 20 && norm(copy).startsWith(t);
 }
 
@@ -222,10 +364,7 @@ async function readSignal(page, copy) {
 }
 
 async function readFeedPosts(page) {
-  return page.$$eval(SELECTORS.feedPost, (els, s) => els.slice(0, 15).map((el) => {
-    const link = el.querySelector(s.link), msg = el.querySelector(s.text), au = el.querySelector(s.author);
-    return { href: link ? link.href : null, text: msg ? msg.innerText || msg.textContent || "" : "", author: au ? au.innerText || au.textContent || "" : "" };
-  }), { link: SELECTORS.feedPostLink, text: SELECTORS.feedPostText, author: SELECTORS.feedPostAuthor }).catch(() => []);
+  return page.$$eval(SELECTORS.feedPost, readDom, { link: SELECTORS.feedPostLink, text: SELECTORS.feedPostText, author: SELECTORS.feedPostAuthor }).catch(() => []);
 }
 
 // ── pure checks on the attempt and the connection, before any browser ──
@@ -275,7 +414,7 @@ async function proveIdentityAndDestination(page, attempt, conn, opts = {}) {
   // check: which check failed; expected/found go to the local failure note only (posting-diag).
   const no = (code, check, expected, found) => ({ ok: false, code, check, expected: expected ?? null, found: found ?? null });
   const label = norm(conn && conn.facebook_identity_label);
-  const header = await textOf(page, SELECTORS.identity);
+  const header = await readIdentity(page);
   if (!label || header !== label) return no("identity_mismatch", label ? "header_name" : "no_identity_label", label, header);
 
   const want = expectedTarget(attempt || {}, conn);
@@ -296,10 +435,20 @@ async function proveIdentityAndDestination(page, attempt, conn, opts = {}) {
     const join = await countOf(page, SELECTORS.joinGroup);
     if (join < 0) return no("markers_missing", "join_button_unreadable"); // unreadable is not evidence of leaving
     if (join > 0) return no("not_member", "join_button_in_composer", 0, join);
+    // The dialog names the group and the author somewhere in its own chrome
+    // (today: plain text under "יצירת פוסט", not the link/strong the
+    // selectors expected). Still exact: one of its texts IS the name.
+    const shown = await composerTexts(page);
     const target = await textOf(page, SELECTORS.composerTarget);
-    if (target !== name) return no("destination_mismatch", "composer_target_name", name, target);
-    if (author !== label) return no("identity_mismatch", "composer_author", label, author);
-  } else if (author !== name) return no("identity_mismatch", "composer_author", name, author); // it must post AS the Page
+    // Calibrated on the live page (2 Oct 2026): the group composer no longer
+    // names its group — it shows the audience ("קבוצה ציבורית") under the
+    // author. Which group is proven by the page it was opened on (its id and
+    // its header name, both checked above, and exactly one composer); the
+    // dialog must still say it posts to a group, or name the group itself.
+    const toGroup = target === name || shown.includes(name) || shown.some((t) => GROUP_AUDIENCE.has(t));
+    if (!toGroup) return no("destination_mismatch", "composer_target_name", name, target);
+    if (author !== label && !shown.includes(label)) return no("identity_mismatch", "composer_author", label, author);
+  } else if (author !== name && !(await composerTexts(page)).includes(name)) return no("identity_mismatch", "composer_author", name, author); // it must post AS the Page
 
   const copy = opts.copy;
   if (typeof copy !== "string" || !norm(copy) || sha(copy) !== attempt.copy_hash) return no("copy_mismatch", "copy_hash");
@@ -309,7 +458,8 @@ async function proveIdentityAndDestination(page, attempt, conn, opts = {}) {
 }
 
 module.exports = {
+  dialogHeadings, composerTexts,
   SELECTORS, norm, fingerprint, sha,
-  textOf, attrOf, countOf, readSignal, regionTexts, readTargetId, readFeedPosts, urlSegment, permalinkOf, findOwnPost, isCutOf,
+  textOf, attrOf, countOf, readDom, readIdentity, isPersonName, urlGroupId, readSignal, regionTexts, readTargetId, readFeedPosts, urlSegment, permalinkOf, findOwnPost, isCutOf,
   expectedTarget, proveIdentityAndDestination,
 };

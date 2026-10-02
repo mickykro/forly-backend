@@ -43,6 +43,7 @@ const RETRY_MS = 6 * MS_HOUR;
 const CONFIRM_GAP_MS = 24 * MS_HOUR;
 const DEFER_MS = 24 * MS_HOUR; // an account that may not be looked at now
 const GIVE_UP_MS = 7 * MS_DAY;
+const FOLD_GRACE_MS = 36 * MS_HOUR; // a posting account's checks wait this long for its next posting session
 const FINAL = new Set(["visible", "confirmed_removed"]);
 const GROUP_CLOSED = new Set(["not_member", "group_blocked"]);
 const HALTING = new Set([...safety.SIGNAL_DISABLES, ...safety.SIGNAL_PENALISES, "login_required"]);
@@ -178,15 +179,30 @@ async function recheckOne(deps = {}, now) {
     byPhone.get(a.phone).push(a);
   }
   for (const [phone, list] of byPhone) {
+    // An account that is posting gets its checks inside its next posting
+    // session (recheckDueFor): no session of their own, unless that has not
+    // happened for FOLD_GRACE_MS. Driver bills every session's page loads.
+    // (An account that may not be looked at at all is deferred by recheckPhone, as before.)
+    const fresh = now.getTime() - Math.min(...list.map((a) => ms(a.recheck_due_at) || now.getTime())) < FOLD_GRACE_MS;
+    if (fresh && !accountSkipped((await x.db.getConnection(phone)) || {}, now) && (await posting(x, phone))) continue;
+    const r = await recheckPhone(phone, list, deps, x, now);
+    if (r === "rechecked") return r;
+  }
+  return byPhone.size ? "skipped" : "none";
+}
+
+
+// The checks for one account. opts.lockHeld: the caller (a posting session) holds the profile.
+async function recheckPhone(phone, list, deps, x, now, opts = {}) {
     const batch = list.slice(0, MAX_POSTS);
     const defer = (d) => Promise.all(batch.map((a) => x.store.recordRecheck(a.key, { recheck_due_at: iso(now.getTime() + d) }, now)));
     const conn = (await x.db.getConnection(phone)) || {};
-    if (accountSkipped(conn, now)) { await defer(DEFER_MS); continue; }
-    if (loginOpen(conn, "facebook", now.getTime())) continue; // the agent is logging in on this profile: a later sweep
+    if (accountSkipped(conn, now)) { await defer(DEFER_MS); return "skipped"; }
+    if (loginOpen(conn, "facebook", now.getTime())) return "skipped"; // the agent is logging in on this profile: a later sweep
     try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "session" }, A.guardDeps(deps, x)); } // R2: before the session
-    catch (e) { if (e && e.code === "posting_disabled") { await defer(RETRY_MS); continue; } throw e; }
-    const release = x.locks.tryAcquire(phone, "facebook");
-    if (!release) continue; // a post or an extract has the profile: a later sweep
+    catch (e) { if (e && e.code === "posting_disabled") { await defer(RETRY_MS); return "skipped"; } throw e; }
+    const release = opts.lockHeld ? () => {} : x.locks.tryAcquire(phone, "facebook");
+    if (!release) return "skipped"; // a post or an extract has the profile: a later sweep
     let seen;
     try { seen = await visit(phone, batch, conn, deps, x); } finally { release(); }
     // A halting page halts the account (R5) FIRST, as reconcileOne does: no
@@ -204,7 +220,7 @@ async function recheckOne(deps = {}, now) {
         if (patch.visibility === "confirmed_removed") {
           // The penalty first: if it fails, the post stays due and is confirmed again.
           try { await H.haltAccount(phone, "confirmed_removed", deps, { campaignId: a.campaign_id, group_id: a.target_id }); }
-          catch (e) { console.error(redact(`posting recheck halt …${a.key.slice(-6)}: ${code(e)}`)); continue; }
+          catch (e) { console.error(redact(`posting recheck halt …${a.key.slice(-6)}: ${code(e)}`)); return "skipped"; }
         } else if (patch.visibility && patch.visibility !== "visible") anomalies[patch.visibility] = (anomalies[patch.visibility] || 0) + 1;
         await x.store.recordRecheck(a.key, patch, now);
       } catch (e) { console.error(redact(`posting recheck record …${a.key.slice(-6)}: ${code(e)}`)); } // the next one is still recorded
@@ -212,7 +228,15 @@ async function recheckOne(deps = {}, now) {
     await noteAnomalies(x, anomalies, now).catch((e) => console.error(redact(`posting recheck health: ${code(e)}`)));
     return "rechecked";
   }
-  return byPhone.size ? "skipped" : "none";
-}
 
-module.exports = { recheckOne, MAX_POSTS, SESSION_S, MAX_TRIES, _test: { classify, patchFor, accountSkipped, permalinkInGroup, groupState, haltingOf, HALTING } };
+// Inside a posting session that is still open (posting-driver → posting-tick):
+// the account's due checks, on the same page — no session of their own.
+async function recheckDueFor(phone, deps, x, now, page) {
+  const list = (await x.store.listRecheckDue(now, 50)).filter((a) => a && a.key && a.phone === phone && a.post_url && a.campaign_id
+    && now.getTime() - ms(a.finished_at || a.reserved_at) <= GIVE_UP_MS);
+  if (!list.length) return "none";
+  return recheckPhone(phone, list, Object.assign({}, deps, { withPage: (o, fn) => fn(page, {}) }), x, now, { lockHeld: true });
+}
+const posting = async (x, phone) => (await x.store.listPostingCampaignsByPhone(phone).catch(() => [])).some((c) => c.status === "running");
+
+module.exports = { recheckOne, recheckDueFor, MAX_POSTS, SESSION_S, MAX_TRIES, _test: { classify, patchFor, accountSkipped, permalinkInGroup, groupState, haltingOf, HALTING } };

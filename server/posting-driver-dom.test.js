@@ -126,6 +126,54 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
     assert.equal(await page.locator(S.submit).first().innerText(), "ours");
     assert.equal(await P.textOf(page, S.editor), P.norm(PLAIN));
 
+    // ── emoji rendered as <img alt> are part of the text (M6); nothing else in an <img> is ──
+    const EM = (e) => `<span><img alt="${e}" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></span>`;
+    await page.setContent(`<div role="banner"></div><div role="main"><h1><span>פורלי- הבית של המתווכים${EM("😇")}</span></h1></div>
+      <div role="dialog"><div contenteditable="true" role="textbox"><p>${EM("🏠")} דירה בחיפה</p><p>3 חדרים<span style="display:none">hidden</span></p><p>שורה<br>חדשה ${EM("👨‍👩‍👧")}</p></div>
+      <strong><img alt="Dana Cohen" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">Dana <span>Cohen</span></strong></div>`);
+    assert.equal(await P.textOf(page, S.targetName), P.norm("פורלי- הבית של המתווכים😇"), "the group name with its emoji");
+    assert.equal(await P.textOf(page, S.editor), P.norm("🏠 דירה בחיפה\n3 חדרים\nשורה\nחדשה 👨‍👩‍👧"), "the editor: emoji kept, blocks and <br> break words, hidden text not read");
+    assert.equal(await P.textOf(page, `${S.composerRoot} strong`), "Dana Cohen", "an avatar's alt is not text; inline spans do not split words");
+    await page.setContent(`<div role="feed"><div><h3><strong>Dana Cohen</strong></h3><a href="https://www.facebook.com/groups/111/posts/9/">x</a><div data-ad-preview="message">${EM("🏠")} דירה בחיפה 4 חדרים<div>מרפסת</div></div></div></div>`);
+    assert.deepEqual(await P.readFeedPosts(page), [{ href: "https://www.facebook.com/groups/111/posts/9/", text: "\n🏠 דירה בחיפה 4 חדרים\nמרפסת\n\n", author: "Dana Cohen" }]);
+    assert.deepEqual(await page.$$eval("a", P.readDom), [{ href: "https://www.facebook.com/groups/111/posts/9/", text: "x" }], "a list of links (facebook-groups-sync)");
+
+    // ── who is logged in: Facebook's own bootstrap data, never a post's text ──
+    const boot = (name) => `<script type="application/json">${JSON.stringify({ require: [["ScheduledServerJS", "handle", null, [{ __bbox: { define: [["CurrentUserInitialData", [], { NAME: name, SHORT_NAME: "M" }, 270]] } }]]] })}</script>`;
+    const fakePost = `<script type="application/json">${JSON.stringify({ story: { message: { text: '["CurrentUserInitialData",[],{"NAME":"Evil Twin"},1]' } } })}</script>`;
+    await page.setContent(`${boot("Micky Kroitoro")}${fakePost}<div role="banner"><a href="/me/"><span>Banner</span></a></div>`);
+    assert.equal(await P.readIdentity(page), "Micky Kroitoro", "a post quoting the structure is a string, not the structure");
+    await page.setContent(`${boot("Micky Kroitoro")}${boot("Someone Else")}<div role="banner"><a href="/me/"><span>Banner</span></a></div>`);
+    assert.equal(await P.readIdentity(page), "Banner", "two names: the bootstrap says nothing");
+    await page.setContent(`<script type="application/json">{broken "CurrentUserInitialData"</script>`);
+    page.setDefaultTimeout(1500); // no banner either: the read gives up, empty (fails closed)
+    assert.equal(await P.readIdentity(page), "");
+
+    // ── the failure note's markup facts: what calibration needs, nothing a person wrote ──
+    const diag = require("./posting-diag");
+    await page.setContent(`<html><head><meta property="og:url" content="https://www.facebook.com/groups/111/?token=SECRET"><meta property="al:android:url" content="fb://group/111">
+      <meta name="description" content="a post's private text"><link rel="canonical" href="https://www.facebook.com/groups/111/?x=SECRET"></head><body>${boot("Micky Kroitoro")}
+      <div role="banner"><div aria-label="הפרופיל שלך" role="button"></div></div>
+      <div role="main"><h1>G</h1><div role="button">הצטרפת</div><div role="button">כאן כותבים...</div><a href="https://www.facebook.com/groups/111/members/?t=SECRET">אנשים</a><a href="https://www.facebook.com/groups/111/user/999/">Other Person</a>
+        <div role="button">${"a card with a long text someone wrote ".repeat(3)}</div>
+        <div role="feed"><div role="article"><div role="button" aria-label="Actions for this post by Other Person"></div><div role="button">Other Person wrote this</div></div></div>
+        <div aria-label="כתיבת תגובה בתור Micky Kroitoro"></div><span>Micky Kroitoro</span></div>
+      <div role="dialog"><h2>יצירת פוסט</h2><strong>Micky Kroitoro</strong>${editor(PLAIN)}<div aria-label="פרסום" role="button"></div></div></body></html>`);
+    const facts = await diag.snapshot(page, { conn: { facebook_identity_label: "Facebook" }, attempt: { target_type: "group", target_id: "111" } });
+    const mk = facts.markup, flat = JSON.stringify(facts);
+    assert.deepEqual(mk.meta, ["og:url=www.facebook.com/groups/111/", "al:android:url=fb://group/111", "description (21)"]);
+    assert.equal(mk.canonical, "www.facebook.com/groups/111/");
+    assert.deepEqual(mk.main_buttons, ["הצטרפת", "כאן כותבים..."]);
+    assert.deepEqual(mk.main_group_links, ["www.facebook.com/groups/111/members/"]);
+    assert.deepEqual(mk.banner_labels, ["div[button] @הפרופיל שלך"]);
+    assert.deepEqual([mk.user_json, mk.name_at, mk.name_labels], [1, ["main: div[main]>span", "dialog: div[dialog]>strong"], ["main: div @כתיבת תגובה בתור Micky Kroitoro"]]);
+    const { texts, ...composerFacts } = mk.composer;
+    assert.deepEqual(composerFacts, { buttons: ["@פרסום"], headings: ["יצירת פוסט"], strong: ["Micky Kroitoro"], group_links: [], editor_emoji_imgs: 0 });
+    assert.ok(texts.includes("Micky Kroitoro") && texts.every((t) => t.length <= 40), "the dialog's own short labels, never the editor's text");
+    assert.deepEqual([facts.read.identity, facts.read.url_id, facts.read.header_identity], ["Micky Kroitoro", null, ""]);
+    for (const leak of ["SECRET", "Other Person", "private text", "long text someone wrote"]) assert.ok(!flat.includes(leak), `never in the note: ${leak}`);
+    page.setDefaultTimeout(30000);
+
     // ── M8: typing goes through the editor even when something steals focus between words ──
     await page.setContent(`<div role="dialog"><div contenteditable="true" role="textbox" id="ed"></div></div><input id="other">
       <script>document.getElementById("ed").addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") document.getElementById("other").focus(); });</script>`);

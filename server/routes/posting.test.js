@@ -193,6 +193,29 @@ const { db, store } = K;
     assert.equal(st.status, 409); assert.equal(st.body.error, "not_paused");
   }
 
+  // ── "every N days": 1–30, stored on the campaign and shown on its card ──
+  {
+    const { app } = await setup();
+    for (const bad of [0, 2, 31, 3.5, "4"]) assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ repeat_days: bad }))).status, 400, `repeat_days ${bad}`);
+    const r = await call(app, "POST", "/api/posting/campaigns", consented({ repeat_days: 7 }));
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.deepEqual([r.body.campaign.repeat, r.body.campaign.repeat_days], [true, 7]);
+  }
+
+  // ── approving from the card: the agent's own text and time go with it ──
+  {
+    const env = await setup();
+    const c = await pendingCampaign(env);
+    const at = K.iso(K.NOW.getTime() + 3 * K.DAY);
+    assert.equal((await call(env.app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`, { copy: "   " })).body.field, "copy");
+    assert.equal((await call(env.app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`, { scheduled_at: "soon" })).body.field, "scheduled_at");
+    assert.equal((await call(env.app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`, { scheduled_at: K.iso(K.NOW.getTime() + 40 * K.DAY) })).status, 400, "not more than 30 days ahead");
+    const r = await call(env.app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`, { copy: "דירה בחיפה — נוסח שלי", scheduled_at: at });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const p = (await store.getPostingCampaign(c.id)).posts[0];
+    assert.deepEqual([p.status, p.copy, p.copy_edited, p.scheduled_at], ["scheduled", "דירה בחיפה — נוסח שלי", true, at]);
+  }
+
   // ── another phone's campaign reads as missing, for every route ──
   {
     const env = await setup();

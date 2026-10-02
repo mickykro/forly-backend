@@ -194,5 +194,25 @@ function fullFacebookPage(groupLinks, o = {}) {
     }
   }
 
+  // ── the identity label is a person's name or nothing: never the site's name ──
+  // (a real connection once stored "Facebook": the title read before the profile page filled in)
+  {
+    const { identityLabel } = require("./connections-browser")._test;
+    const pg = (title, o = {}) => Object.assign({
+      title: async () => (typeof title === "function" ? title() : title),
+      evaluate: async () => o.json ?? { regions: [], count: 0 },
+      locator: () => ({ first: () => ({ innerText: async () => { if (o.banner) return o.banner; throw new Error("none"); } }) }),
+    }, o.wait ? { waitForFunction: o.wait } : {});
+    assert.equal(await identityLabel(pg("Facebook")), null, "the bare site name is never a label");
+    assert.equal(await identityLabel(pg("(2) Facebook")), null);
+    assert.equal(await identityLabel(pg("Log in to Facebook | Facebook")), null);
+    assert.equal(await identityLabel(pg("")), null);
+    assert.equal(await identityLabel(pg("Facebook", { banner: "Facebook" })), null, "nor from the banner");
+    assert.equal(await identityLabel(pg("Facebook", { json: "Micky Kroitoro" })), "Micky Kroitoro", "Facebook's own bootstrap name first");
+    assert.equal(await identityLabel(pg("Facebook", { banner: "Micky Kroitoro" })), "Micky Kroitoro");
+    let filled = false; // the title fills in while we wait for it
+    assert.equal(await identityLabel(pg(() => (filled ? "Micky Kroitoro | Facebook" : "Facebook"), { wait: async () => { filled = true; } })), "Micky Kroitoro");
+  }
+
   console.log("routes/connections-browser-groups.test.js ok");
 })();

@@ -3,6 +3,7 @@
    instants, never Date.now(). */
 process.env.PROFILE_KEY = "test-profile-key-16a";
 process.env.FORLY_ENV = "local";
+process.env.POSTING_CAPS = "1"; // these tests are about the caps a real environment keeps
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -88,10 +89,17 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.deepEqual(ga.fingerprints, []);
     assert.equal(S._test.maps.posting_dedup.size, 0);
     assert.equal(S._test.maps.posting_budget.get(`972500000001|2026-09-23`).count, 0);
-    // The same key is still taken (the attempt doc stays as the record), but
-    // budget, bucket and dedup are free: another group, and another page to this group, succeed.
+    // Released: the same key may be taken again the same day — a bounded
+    // number of times — and budget, bucket and dedup are free.
+    for (let n = 1; n <= require("./posting-attempts").MAX_SAME_DAY_RETRIES; n++) {
+      const again = await S.reserveAttempt(res({ limits: one }));
+      assert.equal(again.ok, true, `retry ${n}`);
+      assert.equal(again.attempt.retries, n);
+      assert.equal(again.attempt.prior.state, "cancelled");
+      await S.transition(again.attempt.key, "cancelled", { error_code: "posting_disabled" }, NOW);
+    }
     const taken = await S.reserveAttempt(res({ limits: one }));
-    assert.equal(taken.reason, "already_reserved");
+    assert.equal(taken.reason, "already_reserved", "one past the limit is refused");
     assert.equal(taken.attempt.state, "cancelled");
     assert.equal((await S.reserveAttempt(res({ limits: one, page_id: "pg2" }))).ok, true);
 
@@ -104,6 +112,22 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.equal(bf.failed_after_submit, undefined);
     assert.equal(S.isCounting(bf), false);
     assert.equal((await S.reserveAttempt(res({ limits: one, page_id: "pg2" }))).ok, true);
+
+    // No caps (a local box without POSTING_CAPS=1): a finished attempt does not
+    // hold the day's key — the next gets its own; one still open is never doubled.
+    S._test.reset();
+    delete process.env.POSTING_CAPS;
+    try {
+      const free = { daily_cap: 1e6, group_global_daily_cap: 1e6, dedup_days: 1 / 1440 };
+      const first = (await S.reserveAttempt(res({ limits: free }))).attempt;
+      assert.equal((await S.reserveAttempt(res({ limits: free }))).reason, "already_reserved", "an open attempt still holds the key");
+      await walk(first.key, ["session_started", "composer_ready", "submit_started", "verification_pending"]);
+      await S.transition(first.key, "verified_posted", { post_url: "https://www.facebook.com/groups/111/posts/1/" }, NOW);
+      const second = await S.reserveAttempt(res({ limits: free, now: new Date(NOW.getTime() + 120000) }));
+      assert.equal(second.ok, true, "posted, and the same property goes to the same group again");
+      assert.notEqual(second.attempt.key, first.key);
+      assert.equal((await S.getAttempt(first.key)).state, "verified_posted", "the first record stays");
+    } finally { process.env.POSTING_CAPS = "1"; }
 
     // verified_failed after submit_started keeps counting.
     S._test.reset();
@@ -247,15 +271,15 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
   {
     S._test.reset();
     const big = { daily_cap: 9, group_global_daily_cap: 9 };
-    await S.reserveAttempt(res({ page_id: "old", now: new Date(NOW.getTime() - 8 * DAY), fingerprint: fp("old"), limits: big }));
-    await S.reserveAttempt(res({ page_id: "wk", now: new Date(NOW.getTime() - 6 * DAY), fingerprint: fp("wk"), limits: big }));
+    await S.reserveAttempt(res({ page_id: "old", now: new Date(NOW.getTime() - 4 * DAY), fingerprint: fp("old"), limits: big }));
+    await S.reserveAttempt(res({ page_id: "wk", now: new Date(NOW.getTime() - 2 * DAY), fingerprint: fp("wk"), limits: big }));
     await S.reserveAttempt(res({ page_id: "t1", fingerprint: fp("t1"), limits: big }));
     await S.reserveAttempt(res({ page_id: "t2", fingerprint: fp("t2"), limits: big }));
     await S.reserveAttempt(res({ page_id: "nofp", fingerprint: null, limits: big }));
     await S.reserveAttempt(res({ page_id: "t1", target_id: "222", fingerprint: fp("t1"), limits: big }));
     const out = await S.getGroupActivityFor(["111", "222", "333"], NOW);
     assert.equal(out["111"].posts_today, 3);
-    assert.equal(out["111"].fingerprints.length, 3, "today's two + six days ago; eight days ago is outside the window");
+    assert.equal(out["111"].fingerprints.length, 3, "today's two + two days ago; four days ago is outside the 3-day window");
     assert.deepEqual(new Set(out["111"].fingerprints.map((f) => f.exact)), new Set([fp("t1").exact, fp("t2").exact, fp("wk").exact]));
     assert.equal(out["222"].posts_today, 1);
     assert.deepEqual(out["333"], { posts_today: 0, fingerprints: [] });

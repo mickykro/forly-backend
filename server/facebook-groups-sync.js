@@ -56,6 +56,13 @@ function groupName(text) {
 const NAV_SLUGS = new Set(["feed", "discover", "joins", "create", "notifications", "search", "you", "your_groups", "browse", "category", "invites", "requests", "manage", "settings", "suggested", "pending"]);
 const isNavSlug = (slug) => NAV_SLUGS.has(String(slug || "").toLowerCase());
 const slugOf = (url) => (String(url).match(/\/groups\/([^/?#]+)/) || [])[1] || null;
+// The group's own address, not something inside it: a notification ("X liked
+// your comment") links to /groups/<id>/posts/… or carries notif_* and was
+// being listed as a group named after the notification.
+function isGroupHome(href) {
+  try { const u = new URL(String(href)); return u.pathname.split("/").filter(Boolean).length === 2 && ![...u.searchParams.keys()].some((k) => /^notif/i.test(k)); }
+  catch { return false; }
+}
 const isNumeric = (slug) => /^\d+$/.test(String(slug || ""));
 const groupIdOf = (slug) => (isNumeric(slug) ? slug : `slug:${slug}`);
 
@@ -73,11 +80,12 @@ async function syncMembership(page, opts = {}) {
   const signal = await require("./posting-driver-proof").readSignal(page, "");
   if (signal !== "ok") throw Object.assign(new Error("groups page not readable"), { code: "sync_signal", signal });
   for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, 1200); await page.waitForTimeout(800); } // load the whole list
-  const raw = await page.$$eval(SELECTORS.groupLink, (els) => els.map((a) => ({ href: a.href, text: (a.innerText || a.textContent || "").trim() })));
+  // readDom: the link's text WITH its emoji (<img alt>), as the R3 proof reads the group's header — the two names must match exactly.
+  const raw = await page.$$eval(SELECTORS.groupLink, require("./posting-driver-proof").readDom);
   const out = new Map();
   for (const { href, text } of raw) {
     const slug = slugOf(href);
-    if (!slug || !text || out.has(slug) || isNavSlug(slug)) continue;
+    if (!slug || !text || out.has(slug) || isNavSlug(slug) || !isGroupHome(href)) continue;
     const url = shareKit.sanitizeGroups([href])[0] || `https://www.facebook.com/groups/${slug}`;
     const name = groupName(text);
     if (!name) continue;

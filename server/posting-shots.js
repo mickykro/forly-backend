@@ -24,12 +24,12 @@ const ID_RE = /^[0-9]{13}-[0-9a-f]{8}$/;
 const enabled = (env = process.env) => ["local", "staging"].includes(env.FORLY_ENV) && env.POSTING_SHOTS !== "0";
 const dirOf = (env = process.env) => env.POSTING_SHOTS_DIR || path.join(os.tmpdir(), "forly-driver-shots");
 let last = 0;
-// A diagnostic as plain JSON, every string clipped, at most ~8 KB — never a cycle or a Buffer.
+// A diagnostic as plain JSON, every string clipped, at most ~16 KB (posting-diag's markup facts) — never a cycle or a Buffer.
 function bounded(v) {
   if (v == null) return null;
   try {
     const s = JSON.stringify(v, (k, x) => (typeof x === "string" && x.length > 200 ? `${x.slice(0, 200)}…` : x));
-    return s && s.length <= 8192 ? JSON.parse(s) : { truncated: true };
+    return s && s.length <= 16384 ? JSON.parse(s) : { truncated: true };
   } catch { return null; }
 }
 const tail = (s, n = 6) => (s ? `…${String(s).slice(-n)}` : null);

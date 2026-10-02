@@ -211,7 +211,7 @@ async function runDue(c, post, st, deps, x, now) {
   // agent approved exact text — if the page changed since, ask again (text
   // the agent edited: when the text it was edited from is no longer current).
   // The video is part of what was approved: a new (or first) one asks again.
-  const fresh = C._test.buildCopy(page, c, target, post.link_kind || "property");
+  const fresh = C._test.buildCopy(page, c, target, post.link_kind || "property", deps.pageBaseUrl || "");
   const video = C.videoOf(page);
   const stale = post.copy_edited ? sha(fresh) !== post.base_hash : fresh !== post.copy;
   if (c.mode === "per_post" && (stale || (post.video_url || null) !== video.video_url)) {
@@ -235,14 +235,15 @@ async function runDue(c, post, st, deps, x, now) {
     fingerprint: fp, campaign_id: c.id, post_id: post.id, copy_hash: sha(copy),
     confirm_membership: A.needsMembershipCheck(conn, target, now),
     click_id: require("./posting-attempts").newClickCode(), // R4: this attempt's link code
-    limits: A.limitsFor(account, now, config, target.target), now,
+    // A repeating campaign's own rhythm is how long this property→group pair stays taken.
+    limits: Object.assign(A.limitsFor(account, now, config, target.target), c.repeat_days && target.target === "group" ? { dedup_days: Math.max(c.repeat_days - 1 / 24, config.property_group_cooldown_days || 1 / 1440) } : {}), now,
   });
-  if (r.ok) return startAttempt(r.attempt, { c, post, copy, target, conn, video, lock: st.lock }, deps, x, now);
+  if (r.ok) return startAttempt(r.attempt, { c, post, copy, target, conn, video, lock: st.lock, prepareOnly: st.prepareOnly }, deps, x, now);
 
   if (r.reason === "already_reserved" && r.attempt) {
     const a = r.attempt;
     const ours = a.campaign_id === c.id && a.post_id === post.id;
-    if (ours && a.state === "reserved" && a.copy_hash === sha(copy)) return startAttempt(a, { c, post, copy, target, conn, video, lock: st.lock }, deps, x, now);
+    if (ours && a.state === "reserved" && a.copy_hash === sha(copy)) return startAttempt(a, { c, post, copy, target, conn, video, lock: st.lock, prepareOnly: st.prepareOnly }, deps, x, now);
     if (ours && a.state !== "cancelled" && !a.released) {
       // An orphan of ours past `reserved`: adopt it; the reaper and the mirror finish it.
       await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "posting", attempt_key: a.key, posting_started_at: a.reserved_at } : p)) }));
@@ -270,6 +271,9 @@ async function startAttempt(attempt, st, deps, x, now) {
       .catch((e) => { if (!e || e.code !== "illegal_transition") A.noteCancelFailure(1); });
     return "stopped";
   }
+  // prepareOnly (posting-chain): reserved and marked posting, handed back to
+  // be run in the browser session that is already open.
+  if (st.prepareOnly) return { prepared: true, attempt, st: { ...st, c: next, post: p } };
   return runAttempt(attempt, { ...st, c: next, post: p }, deps, now);
 }
 
@@ -282,17 +286,17 @@ function codeOf(result, err) {
 }
 const isInfra = (err) => !!err && err.code !== "posting_disabled" && !H.classOf(err.code) && (typeof err.status === "number" || !err.code || err.code === "profile_busy");
 
-// Runs one reserved attempt through the injected driver (Task 18).
-async function runAttempt(attempt, st, deps, now) {
-  const x = ctxOf(deps);
+// The driver call for one reserved attempt, after the last looks (R2, a STOP
+// since it was reserved). → { fn, args, postDeps } | { settled: state } | { noDriver: true }.
+async function buildCall(attempt, st, deps, x, now) {
   const { c, post, copy, target, conn, video } = st;
   const phone = attempt.phone;
   const gd = A.guardDeps(deps, x);
   // R2: before creating a session.
   try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "session" }, gd); }
-  catch (e) { if (!e || e.code !== "posting_disabled") throw e; return settle(attempt.key, null, e, st, deps, x, now); }
+  catch (e) { if (!e || e.code !== "posting_disabled") throw e; return { settled: await settle(attempt.key, null, e, st, deps, x, now) }; }
   const fn = post.target === "page" ? deps.postToPage || deps.post : deps.post;
-  if (typeof fn !== "function") return "no_driver"; // stays reserved → the reaper cancels it → retried later
+  if (typeof fn !== "function") return { noDriver: true }; // stays reserved → the reaper cancels it → retried later
   // Last look before the driver: a STOP (or anything else) may have landed
   // since startAttempt committed `posting`. The driver runs only for an
   // attempt still `reserved` in a campaign still `running`. (Task 18 writes
@@ -304,10 +308,11 @@ async function runAttempt(attempt, st, deps, now) {
       await x.store.transition(attempt.key, "cancelled", { error_code: "stopped" }, x.clock())
         .catch((e) => { if (!e || e.code !== "illegal_transition") A.noteCancelFailure(1); });
     }
-    return settle(attempt.key, null, null, st, deps, x, now);
+    return { settled: await settle(attempt.key, null, null, st, deps, x, now) };
   }
   const args = {
-    attempt, copy, comment: destinations.commentUrl(post, attempt, { pageBaseUrl: deps.pageBaseUrl || "", campaignId: c.id }),
+    // The link is in the post's text now; a first comment only when it is not.
+    attempt, copy, comment: copy.includes(`/p/${c.page_id}`) ? null : destinations.commentUrl(post, attempt, { pageBaseUrl: deps.pageBaseUrl || "", campaignId: c.id }),
     profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0),
     dryRun: deps.dryRun === true, campaignId: c.id, phone, videoUrl: (video && video.video_url) || null,
     [post.target === "page" ? "pageUrl" : "groupUrl"]: target.url,
@@ -321,22 +326,75 @@ async function runAttempt(attempt, st, deps, now) {
     guard: (action) => x.guard.assertAllowed({ phone, platform: "facebook", action }, gd),
     lockHeld: true, phone, platform: "facebook", conn,
   };
+  return { fn, args, postDeps };
+}
+
+// Runs one reserved attempt through the injected driver (Task 18) — and, when
+// the account has more ready, the next ones in the same browser session
+// (posting-chain.js): the driver asks postDeps.next after each post, which
+// settles that post and hands back the next reserved one, or null.
+async function runAttempt(attempt, st, deps, now) {
+  const x = ctxOf(deps);
+  const call = await buildCall(attempt, st, deps, x, now);
+  if (call.settled !== undefined) return call.settled;
+  if (call.noDriver) return "no_driver";
   // A driver call that never returns must not hold the sweep (and the reaper)
-  // forever: past POST_TIMEOUT_MS it is settled like an infrastructure error —
-  // cancelled before submit, outcome_unknown after — and any late transition
-  // the driver still tries is refused by the attempt's edges.
-  // The profile lock, however, is NOT given back at the timeout: the driver
-  // may still hold the browser. It is released when the driver's promise
-  // finally settles (st.lock.defer), with profile-lock's MAX_HOLD_MS expiry as
-  // the backstop; meanwhile the phone's ticks see profile_busy.
-  let result = null, err = null, timer = null, timedOut = false;
-  const running = Promise.resolve().then(() => fn(args, postDeps));
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; reject(Object.assign(new Error("driver timeout"), { status: 504 })); }, deps.postTimeoutMs || POST_TIMEOUT_MS); });
+  // forever: past POST_TIMEOUT_MS — per post, re-armed for each chained one —
+  // it is settled like an infrastructure error: cancelled before submit,
+  // outcome_unknown after — and any late transition the driver still tries is
+  // refused by the attempt's edges. The profile lock, however, is NOT given
+  // back at the timeout: the driver may still hold the browser. It is released
+  // when the driver's promise finally settles (st.lock.defer), with
+  // profile-lock's MAX_HOLD_MS expiry as the backstop.
+  let result = null, err = null, timer = null, timedOut = false, failTimeout = null, last = null;
+  const timeout = new Promise((_, reject) => { failTimeout = reject; });
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = true; failTimeout(Object.assign(new Error("driver timeout"), { status: 504 })); }, deps.postTimeoutMs || POST_TIMEOUT_MS); };
+  let cur = { attempt, st }, done = false;
+  const chain = require("./posting-chain");
+  if (chain.enabled(deps)) {
+    const session = chain.session(attempt.phone, deps, x);
+    // next(result): settles the post just made; → null (the session ends) or
+    // prepare(), called by the driver after its dwell: → the next post's call, or null.
+    call.postDeps.next = async (res) => {
+      last = await settle(cur.attempt.key, res, null, cur.st, deps, x, x.clock());
+      await A.applyFindings(res, cur.st, x, x.clock());
+      done = true;
+      if (!session.more(last)) return null;
+      return async () => {
+        const nx = await session.prepare();
+        if (!nx) return null;
+        const c2 = await buildCall(nx.attempt, nx.st, deps, x, x.clock());
+        if (!c2.fn) return null;
+        c2.postDeps.next = call.postDeps.next;
+        cur = nx; done = false; arm();
+        return { kind: nx.st.post.target === "page" ? "page" : "group", args: c2.args, deps: c2.postDeps };
+      };
+    };
+  }
+  // Before the session closes: the account's due checks (yesterday's posts)
+  // and, when it is stale, its groups sync — on the same page, no session of
+  // their own. Never in the way of the posts: any failure is only logged.
+  call.postDeps.afterPosts = async (page) => {
+    const phone = attempt.phone;
+    // An account with no warm-up session (or whose warm-up could not do it): Facebook's "Autoplay: Off", once.
+    await require("./posting-fbsettings").ensureAutoplayOff(page, { phone, conn: (await x.db.getConnection(phone)) || {}, db: x.db, env: deps.env,
+      guard: (action) => x.guard.assertAllowed({ phone, platform: "facebook", action }, A.guardDeps(deps, x)) }).catch(() => {});
+    await require("./posting-recheck").recheckDueFor(phone, deps, x, x.clock(), page).catch((e) => console.error(redact(`posting in-session recheck ${tail(phone)}: ${code(e)}`)));
+    const sync = deps.groupsSync, conn = (await x.db.getConnection(phone)) || {};
+    if (sync && typeof sync.isStale === "function" && sync.isStale(conn, x.clock())) {
+      await x.db.setConnection(phone, { facebook_groups_sync_attempted_at: iso(x.clock()) });
+      await sync.runSync({ phone }, Object.assign({}, deps, { db: x.db, store: x.store, guard: x.guard, withPage: (o, fn) => fn(page, {}), lockHeld: true }))
+        .catch((e) => console.error(redact(`posting in-session groups sync ${tail(phone)}: ${code(e)}`)));
+    }
+  };
+  arm();
+  const running = Promise.resolve().then(() => call.fn(call.args, call.postDeps));
   try { result = await Promise.race([running, timeout]); } catch (e) { err = e; } finally { clearTimeout(timer); }
   if (timedOut && st.lock) st.lock.defer(running);
   if (result && result.noop === true) return "no_driver";
-  const state = await settle(attempt.key, result, err, st, deps, x, now);
-  await A.applyFindings(result, st, x, now);
+  if (done && !err) return last; // the chain settled every post itself
+  const state = await settle(cur.attempt.key, done ? null : result, err, cur.st, deps, x, now);
+  if (!done) await A.applyFindings(result, cur.st, x, now);
   return state;
 }
 
@@ -504,6 +562,6 @@ async function tick(campaign, deps = {}, now) {
 }
 
 module.exports = {
-  tick, tickAccount, warmIdle, browseEveryMs, runAttempt, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
+  tick, tickAccount, warmIdle, browseEveryMs, runAttempt, runDue, settle, mirrorPost, mirrorCtx, MAX_RETRIES, POST_TIMEOUT_MS,
   _test: { mirrorPost, mirrorOne, allDone, codeOf, isInfra, housekeep, duplicateIn },
 };

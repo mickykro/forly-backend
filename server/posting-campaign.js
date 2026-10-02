@@ -56,7 +56,7 @@ function normalizeGroups(groups, ctx) {
 // Default (Task 19's route, an explicit agent create): any stopped/completed
 // one. enrollNewPage passes a narrower rule (see there). Evaluated inside the
 // campaign transaction, so a STOP landing meanwhile is never overridden.
-async function create({ phone, page, groups, mode, days, repeat, consent, targets } = {}, deps = {}, opts = {}) {
+async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets } = {}, deps = {}, opts = {}) {
   const x = ctxOf(deps);
   if (!consent || !consent.at) throw fail("consent_required", "consent required");
   if (!page || !page.page_id || !phone) throw fail("invalid_input", "phone and page required");
@@ -68,7 +68,8 @@ async function create({ phone, page, groups, mode, days, repeat, consent, target
   const c = {
     phone, page_id: String(page.page_id),
     mode: approvalOnly || mode === "per_post" ? "per_post" : "standing",
-    repeat: repeat === true,
+    // repeat_days: "every N days" (1–30), the agent's choice — the property returns to its groups on that rhythm until expires_at.
+    repeat: repeat === true || Number(repeatDays) > 0, repeat_days: Number(repeatDays) > 0 ? Math.min(30, Math.max(3, Math.round(Number(repeatDays)))) : null,
     expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 30, 1), 30) * MS_DAY),
     consent_at: iso(consent.at), consent_version: consent.version || null,
     groups: normalizeGroups(groups, ctx),
@@ -86,7 +87,7 @@ async function create({ phone, page, groups, mode, days, repeat, consent, target
   // still see the old ones through their attempts).
   const fresh = {
     status: "running", pause_reason: null, wait_reason: null, restarted_at: c.created_at,
-    mode: c.mode, repeat: c.repeat, expires_at: c.expires_at, consent_at: c.consent_at, consent_version: c.consent_version,
+    mode: c.mode, repeat: c.repeat, repeat_days: c.repeat_days, expires_at: c.expires_at, consent_at: c.consent_at, consent_version: c.consent_version,
     groups: c.groups, targets: c.targets, consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
   };
   return mutate(x, campaign.id, (cur) => (may(cur) ? fresh : null));
@@ -258,13 +259,16 @@ async function approvePost(id, postId, deps = {}, opts = {}) {
   const account = await A.accountView(c.phone, conn, deps, now, { exclude: post.id });
   const cand = { group_id: post.group_id, url: post.group_url };
   const slot = safety.nextSlot({ now, account, candidates: [{ ...cand, aliases: A.groupIdsOf(cand, conn).slice(1) }], pageId: c.page_id, config, rand: x.rand });
-  const at = slot.at || A.nextDayStart(now, config, x.rand);
+  const earliest = slot.at || A.nextDayStart(now, config, x.rand);
+  // opts.at: the time the agent chose — never earlier than the account's own pacing allows.
+  const at = opts.at instanceof Date && opts.at > earliest ? opts.at : earliest;
   return mutate(x, id, (cur) => ({
     posts: cur.posts.map((p) => {
       if (p.id !== postId || p.status !== "pending_approval") return p;
       const edited = typeof opts.copy === "string" && opts.copy !== p.copy
         ? { copy: opts.copy, copy_hash: sha(opts.copy), copy_edited: true, base_hash: p.copy_edited ? p.base_hash : sha(p.copy) } : {};
-      return { ...p, ...edited, status: "scheduled", scheduled_at: iso(at), approved_at: iso(now) };
+      // not_before: the agent's own time — a session posting several in a row never takes it sooner.
+      return { ...p, ...edited, status: "scheduled", scheduled_at: iso(at), approved_at: iso(now), not_before: opts.at instanceof Date ? iso(at) : null };
     }),
   }));
 }
@@ -328,7 +332,7 @@ function candidatesFor(c, ctx) {
       const e = A.eligibility(g, ctx);
       // Every other id of this group (a resolved slug, Task 18) rides along,
       // so cooldowns and group buckets recorded under it still apply.
-      if (A.isEligible(e)) out.push({ ...g, ...e, target: "group", aliases: A.groupIdsOf(g, ctx.conn).slice(1) });
+      if (A.isEligible(e)) out.push({ ...g, ...e, target: "group", aliases: A.groupIdsOf(g, ctx.conn).slice(1), repeat_days: c.repeat_days || null });
     }
   }
   return out;
@@ -394,12 +398,16 @@ function copyVariantRound(c, target) {
   // target moves the next campaign pass to a new deterministic variation.
   return (c.posts || []).filter((p) => p && String(p.group_id || p.group_url || "") === id && !OPEN_POST.has(p.status)).length;
 }
-function buildCopy(page, c, target, destinationKind = "property") {
-  // linkInComment: the body never carries a URL, so no page URL is passed.
+// The property page's link goes in the post's own text (2 Oct 2026): as a
+// first comment it depended on finding and re-opening the post afterwards,
+// and a post that could not be confirmed went out with no link at all.
+// Without a base URL (nothing to link to) the old comment wording is kept.
+function buildCopy(page, c, target, destinationKind = "property", pageBaseUrl = "") {
   const targetKey = target.group_id || A.groupIdFromUrl(target.url) || target.url;
   const variantSeed = `${c.page_id}|${targetKey}`;
-  return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, "", {
-    variantSeed, variantRound: copyVariantRound(c, target), linkInComment: true, destinationKind,
+  const pageUrl = pageBaseUrl ? destinations.previewUrl({ kind: "property" }, { pageBaseUrl, pageId: c.page_id }) : "";
+  return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, pageUrl || "", {
+    variantSeed, variantRound: copyVariantRound(c, target), linkInComment: !pageUrl, destinationKind,
   });
 }
 
@@ -437,7 +445,7 @@ async function schedulePost(decision, deps = {}, now) {
   const variantRound = copyVariantRound(c, target);
   const pagePostUrl = decision.target === "page" ? null : await destinations.pagePostUrl(x.db, c.page_id);
   const destination = destinations.choose({ page, campaign: c, target: { ...target, target: decision.target }, pagePostUrl, variantRound });
-  const copy = buildCopy(page, c, target, destination.kind);
+  const copy = buildCopy(page, c, target, destination.kind, deps.pageBaseUrl || "");
   const video = videoOf(page);
   const approvalOnly = localMode.requireApproval(deps.env || process.env);
   const base = {

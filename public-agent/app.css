@@ -241,5 +241,26 @@ body.agent-page::before{content:"";position:fixed;inset:0;z-index:-1;pointer-eve
 .camp-timeline pre{white-space:pre-wrap;font:inherit;font-size:.82rem;background:rgba(23,20,15,.04);padding:8px;border-radius:8px;margin:6px 0 0}
 .camp-timeline summary{font-size:.78rem;cursor:pointer;color:var(--ink-soft);margin-top:4px}
 .camp-row-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.camp-copy{width:100%;box-sizing:border-box;font:inherit;line-height:1.6;padding:10px;border:1px solid rgba(23,20,15,.16);border-radius:10px;background:#fff;resize:vertical}
+.camp-when{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.camp-when input{font:inherit;padding:6px 8px;border:1px solid rgba(23,20,15,.16);border-radius:8px}
+/* the time picker: quiet presets, a week of days, the hours of a day */
+.when{margin-top:14px;padding:16px 16px 14px;border:1px solid rgba(185,138,47,.28);border-radius:16px;background:linear-gradient(180deg,#fffdf8,#fbf6ec)}
+.when-title{font-family:var(--serif);font-size:1.02rem;letter-spacing:.01em;margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.when-title::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(185,138,47,.5),transparent)}
+.when-chips,.when-strip{display:flex;gap:8px;flex-wrap:wrap}
+.when-strip{margin-top:10px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
+.when-chip,.when-day,.when-hour{font:inherit;font-size:.84rem;color:var(--ink);background:#fff;border:1px solid rgba(23,20,15,.14);border-radius:100px;padding:8px 16px;cursor:pointer;white-space:nowrap;transition:border-color .15s,background .15s,color .15s,box-shadow .15s}
+.when-chip:hover,.when-day:hover,.when-hour:hover{border-color:var(--gold)}
+.when-chip:focus-visible,.when-day:focus-visible,.when-hour:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.when-chip.on,.when-day.on,.when-hour.on{background:var(--dark);border-color:var(--dark);color:var(--gold-bright);box-shadow:0 6px 18px rgba(20,17,12,.18)}
+.when-day{border-radius:14px;padding:8px 14px;display:grid;justify-items:center;gap:1px;min-width:62px}
+.when-day small{font-size:.68rem;opacity:.7}.when-day b{font-family:var(--serif);font-size:1rem;font-weight:500}
+.when-hour{padding:7px 12px;font-variant-numeric:tabular-nums}
+.when-sum{margin-top:12px;font-size:.82rem;color:var(--ink-soft)}
+.ap-approve{margin-top:12px;padding:14px;border:1px solid rgba(185,138,47,.35);border-radius:16px;background:var(--paper)}
+.ap-approve-head{font-size:.86rem;color:var(--ink-soft);margin-bottom:8px}.ap-approve-head b{color:var(--ink)}
+.ap-recent{list-style:none;margin:10px 0 0;padding:0;font-size:.8rem;color:var(--ink-soft);display:grid;gap:3px}
+.ap-recent span{color:var(--ink)}
 .camp details summary{cursor:pointer}
 .camp-page-pick{display:block;font-size:.84rem;margin:-4px 0 10px;padding-inline-start:26px}

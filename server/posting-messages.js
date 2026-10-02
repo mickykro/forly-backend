@@ -69,8 +69,11 @@ function build({ pageBaseUrl, authSecret }) {
       "לא מפרסמים בלי האישור שלכם"),
 
     // A post went out on its own (standing mode) — a stop button, no approval needed.
-    posted: (c, p) => msg("✅ הפוסט עלה", `הפוסט עלה ל${nameOf(p)}.\n${destinationNotice(p.link_kind)}`,
-      [...(p && /^https:\/\//.test(p.post_url || "") ? [btn("לצפייה בפוסט", p.post_url)] : []), ...stopBtn(c)]),
+    // pending_group_approval: Facebook took it, but it is not live until a group admin approves.
+    posted: (c, p) => (p && p.status === "pending_group_approval"
+      ? msg("⏳ הפוסט ממתין לאישור", `הפוסט נשלח ל${nameOf(p)} וממתין לאישור מנהלי הקבוצה. הוא יופיע רק אחרי שיאשרו.`, stopBtn(c))
+      : msg("✅ הפוסט עלה", `הפוסט עלה ל${nameOf(p)}.\n${destinationNotice(p.link_kind)}`,
+      [...(p && /^https:\/\//.test(p.post_url || "") ? [btn("לצפייה בפוסט", p.post_url)] : []), ...stopBtn(c)])),
 
     // Two posts in a row didn't land: Forly paused itself rather than keep guessing.
     paused: (c) => msg("⏸ הפרסום הושהה",

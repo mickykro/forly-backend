@@ -56,19 +56,74 @@
     if (!v || v === "loading") return '<div class="ap-preview"><p class="camp-muted">טוענים את הפוסט…</p></div>';
     if (v === "error") return '<div class="ap-preview"><p class="ap-note">לא הצלחנו להציג את הפוסט — נסו שוב.</p></div>';
     const who = U.esc(v.author || "החשבון שלכם");
-    const comment = v.comment_link
-      ? `<div class="ap-fb-comment"><b>${who}</b> <span dir="ltr">${U.esc(v.comment_link)}</span><small>תגובה ראשונה — היעד שנבחר לפוסט הזה</small></div>`
-      : '<div class="ap-fb-comment"><small>לא תפורסם תגובה עם קישור בפוסט הזה.</small></div>';
+    // The link is part of the post's own text now; a separate comment only when it is not.
+    const comment = !v.comment_link || String(v.copy || "").includes(v.comment_link) ? ""
+      : `<div class="ap-fb-comment"><b>${who}</b> <span dir="ltr">${U.esc(v.comment_link)}</span><small>תגובה ראשונה</small></div>`;
     return `<div class="ap-preview"><div class="ap-fb">
         <div class="ap-fb-head"><b>${who}</b> ◂ ${U.esc(v.group_name || "הקבוצה")}</div>
-        <div class="ap-fb-body">${U.esc(v.copy)}</div>
+        ${confirming.has(p.page_id) && mode() === "per_post" ? copyBox(p.page_id, v.copy) : `<div class="ap-fb-body">${U.esc(v.copy)}</div>`}
         ${/^https?:\/\//.test(v.video_url || "") ? `<video class="ap-fb-video" controls playsinline preload="metadata" src="${U.esc(v.video_url)}"${/^https?:\/\//.test(v.poster_url || "") ? ` poster="${U.esc(v.poster_url)}"` : ""}></video>` : ""}
         ${comment}
       </div>
       <p class="ap-note">${U.esc(v.link_notice || U.linkNotice(v.link_kind))}</p>
-      <p class="camp-muted camp-small">כך ייראה הפוסט. הנוסח והיעד משתנים מקבוצה לקבוצה, והמחיר והפרטים נלקחים מדף הנכס ברגע הפרסום.</p>
-      ${confirming.has(p.page_id) ? `<button type="button" class="btn btn-gold btn-sm" data-confirm="${id}">נראה טוב — הפעלת פרסום אוטומטי</button>` : ""}</div>`;
+      <p class="camp-muted camp-small">כך ייראה הפוסט. הנוסח משתנה מעט מקבוצה לקבוצה, והמחיר והפרטים נלקחים מדף הנכס ברגע הפרסום.</p>
+      <p class="ap-note"><b>יפורסם בקבוצות (${groupsOf(p).size}):</b> ${members().filter((g) => groupsOf(p).has(String(g.group_id))).map((g) => U.esc(g.name)).join(" · ") || "—"}</p>
+      ${confirming.has(p.page_id) ? repeatHtml(p.page_id) : ""}
+      ${confirming.has(p.page_id) && mode() === "per_post" ? whenHtml(p.page_id)
+    + '<p class="camp-muted camp-small">האישור כאן הוא האישור של הפוסט הראשון. הפוסטים לשאר הקבוצות יופיעו כאן, בשורה של הנכס, לאישור שלכם.</p>' : ""}
+      ${confirming.has(p.page_id) ? `<button type="button" class="btn btn-gold btn-sm" data-confirm="${id}">אישור והפעלת פרסום אוטומטי</button>` : ""}</div>`;
   }
+  // What the agent typed or chose, kept across re-renders: the text of a post
+  // and when it should go out. Keyed by page_id (before starting) or page|post.
+  const drafts = new Map();
+  const draftOf = (k) => { if (!drafts.has(k)) drafts.set(k, { when: { k: "asap", day: 1, hour: 9 } }); return drafts.get(k); };
+  const DAY_NAMES = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+  const atHour = (dayOffset, hour) => { const d = new Date(); d.setDate(d.getDate() + dayOffset); d.setHours(hour, 0, 0, 0); return d; };
+  // → ISO for the chosen moment, or null for "as soon as possible" (and for a moment already past).
+  function whenIso(w) {
+    const d = w.k === "t19" ? atHour(0, 19) : w.k === "m09" ? atHour(1, 9) : w.k === "m19" ? atHour(1, 19) : w.k === "custom" ? atHour(w.day, w.hour) : null;
+    return d && d > new Date() ? d.toISOString() : null;
+  }
+  function whenHtml(key) {
+    const w = draftOf(key).when, k = U.esc(key);
+    const chip = (id, label) => `<button type="button" class="when-chip${w.k === id ? " on" : ""}" data-when="${k}" data-k="${id}">${label}</button>`;
+    let custom = "";
+    if (w.k === "custom") {
+      const days = Array.from({ length: 7 }, (_, i) => {
+        const d = atHour(i, 12);
+        return `<button type="button" class="when-day${w.day === i ? " on" : ""}" data-when="${k}" data-day="${i}"><small>${i === 0 ? "היום" : i === 1 ? "מחר" : `יום ${DAY_NAMES[d.getDay()]}`}</small><b>${d.getDate()}.${d.getMonth() + 1}</b></button>`;
+      }).join("");
+      const hours = Array.from({ length: 15 }, (_, i) => i + 8).map((h) =>
+        `<button type="button" class="when-hour${w.hour === h ? " on" : ""}" data-when="${k}" data-hour="${h}">${String(h).padStart(2, "0")}:00</button>`).join("");
+      custom = `<div class="when-strip">${days}</div><div class="when-strip">${hours}</div>`;
+    }
+    const iso = whenIso(w);
+    return `<div class="when"><div class="when-title">מתי לפרסם</div><div class="when-chips">` +
+      chip("asap", "בהקדם") + (new Date().getHours() < 19 ? chip("t19", "היום בערב") : "") + chip("m09", "מחר בבוקר") + chip("m19", "מחר בערב") + chip("custom", "מועד אחר") +
+      `</div>${custom}<div class="when-sum">${iso ? `יעלה ${U.esc(U.fmt(iso))}` : "יעלה בהקדם האפשרי, לפי הקצב של החשבון"}</div></div>`;
+  }
+  // How often the property returns to its groups: once, or every N days.
+  const repeatOf = (key) => { const d = draftOf(key); if (!d.repeat) d.repeat = { k: "once", n: 4 }; return d.repeat; };
+  const repeatDays = (key) => { const r = repeatOf(key); return r.k === "once" ? null : r.k === "custom" ? r.n : Number(r.k); };
+  const everyText = (n) => (n === 7 ? "כל שבוע" : n === 14 ? "כל שבועיים" : `כל ${n} ימים`);
+  function repeatHtml(key) {
+    const r = repeatOf(key), k = U.esc(key);
+    const chip = (id, label) => `<button type="button" class="when-chip${String(r.k) === String(id) ? " on" : ""}" data-repeat="${k}" data-k="${id}">${label}</button>`;
+    const custom = r.k !== "custom" ? "" : `<div class="when-strip">${[4, 5, 6, 10, 21, 30].map((n) =>
+      `<button type="button" class="when-hour${r.n === n ? " on" : ""}" data-repeat="${k}" data-n="${n}">${n} ימים</button>`).join("")}</div>`; // never under 3: the same property returns to a group only after 3 days
+    const n = repeatDays(key);
+    return `<div class="when"><div class="when-title">חזרה על הפרסום</div><div class="when-chips">` +
+      chip("once", "פעם אחת") + chip(3, "כל 3 ימים") + chip(7, "כל שבוע") + chip(14, "כל שבועיים") + chip("custom", "קצב אחר") +
+      `</div>${custom}<div class="when-sum">${n ? `הנכס יחזור לכל קבוצה ${everyText(n)}, עד 30 יום או עד שתעצרו.` : "הנכס יעלה פעם אחת בכל קבוצה."}</div></div>`;
+  }
+  const copyBox = (key, original) => `<textarea class="camp-copy" dir="auto" maxlength="3000" rows="${Math.min(14, String(original).split("\n").length + 2)}" data-draft="${U.esc(key)}">` +
+    `${U.esc(typeof draftOf(key).copy === "string" ? draftOf(key).copy : original)}</textarea>`;
+  const approveBody = (key, original) => {
+    const d = draftOf(key), body = {}, iso = whenIso(d.when);
+    if (typeof d.copy === "string" && d.copy.trim() && d.copy !== original) body.copy = d.copy;
+    if (iso) body.scheduled_at = iso;
+    return body;
+  };
   const busy = new Set(); // page_ids with a request in flight
   const live = (c) => !!c && (c.status === "running" || c.status === "paused");
   const members = () => (settings && settings.member_groups) || [];
@@ -97,11 +152,30 @@
     if (c.status === "paused" || /^posting_disabled:/.test(c.wait_reason || "")) return { cls: "warn", text: "מושהה" };
     const posts = Array.isArray(c.posts) ? c.posts : [];
     const pending = posts.filter((x) => x.status === "pending_approval");
-    if (pending.length) return { cls: "warn", text: `ממתין לאישור שלכם (${pending.length}) — בוואטסאפ או ב"פרטים ואישורים"` };
+    if (pending.length) return { cls: "warn", text: `ממתין לאישור שלכם (${pending.length}) — כאן למטה או בוואטסאפ` };
     const next = posts.filter((x) => x.status === "scheduled").sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))[0];
     const done = posts.filter((x) => x.status === "posted").length;
-    const head = `פעיל · ${done} פורסמו`;
+    const head = `פעיל · ${done} פורסמו${c.repeat_days ? ` · חוזר ${everyText(c.repeat_days)}` : ""}`;
     return { cls: "live", text: next ? `${head} · הבא: ${U.fmt(next.scheduled_at)}` : `${head} · ${U.waitText(c.wait_reason)}` };
+  }
+
+  // Posts waiting for the agent, right in the property's row: the text (editable), the time, approve or skip.
+  function approvalsHtml(p) {
+    if (!live(p.campaign)) return "";
+    return (p.campaign.posts || []).filter((x) => x.status === "pending_approval" && typeof x.copy === "string").map((x) => {
+      const key = `${p.page_id}|${x.id}`, k = U.esc(key);
+      return `<div class="ap-approve"><div class="ap-approve-head">לאישור שלכם · <b>${U.esc(x.group_name || "הקבוצה")}</b></div>${copyBox(key, x.copy)}${whenHtml(key)}` +
+        `<div class="camp-row-actions"><button type="button" class="btn btn-gold btn-sm" data-approve="${k}">אישור ופרסום</button>` +
+        `<button type="button" class="btn btn-ghost btn-sm" data-skip="${k}">דילוג</button></div></div>`;
+    }).join("");
+  }
+  // The last few posts that went out or did not: where, what happened, the link.
+  function recentHtml(p) {
+    const done = ((p.campaign && p.campaign.posts) || []).filter((x) => ["posted", "pending_group_approval", "failed", "unknown", "scheduled"].includes(x.status)).slice(-4).reverse();
+    if (!done.length) return "";
+    return `<ul class="ap-recent">${done.map((x) => `<li><span>${U.esc(x.group_name || "הקבוצה")}</span> · ${U.esc(U.statusText(x))}` +
+      `${x.status === "scheduled" ? ` · ${U.esc(U.fmt(x.scheduled_at))}` : ""}` +
+      `${/^https:\/\//.test(x.post_url || "") ? ` · <a href="${U.esc(x.post_url)}" target="_blank" rel="noopener noreferrer">לפוסט ↗</a>` : ""}</li>`).join("")}</ul>`;
   }
 
   function propHtml(p) {
@@ -126,14 +200,13 @@
       <div class="ap-top">${thumb}
         <div class="ap-main"><div class="ap-title">${U.esc(p.title || "נכס")}</div><div class="ap-meta">${where}</div>
           <div class="ap-status ${st.cls}">${U.esc(st.text)}</div></div>
-        <label class="ap-switch"><span>פרסום אוטומטי</span><span class="switch"><input type="checkbox" data-toggle="${id}"${on ? " checked" : ""}${busy.has(p.page_id) ? " disabled" : ""}><i></i></span></label>
+        <label class="ap-switch"><span>פרסום אוטומטי</span><span class="switch"><input type="checkbox" data-toggle="${id}"${on || confirming.has(p.page_id) || busy.has(p.page_id) ? " checked" : ""}${busy.has(p.page_id) ? " disabled" : ""}><i></i></span></label>
       </div>${none}
       <div class="ap-actions">
         <button type="button" class="btn btn-ghost btn-sm" data-groups="${id}">קבוצות (${ids.size})</button>
         <button type="button" class="btn btn-ghost btn-sm" data-preview="${id}">${previewOpen.has(p.page_id) ? "הסתרת התצוגה" : "תצוגה מקדימה של הפוסט"}</button>
         <a class="btn btn-ghost btn-sm" href="/publish.html?page=${encodeURIComponent(p.page_id)}">שיתוף ידני</a>
-        ${p.campaign ? `<a class="btn btn-ghost btn-sm" href="/publish.html?page=${encodeURIComponent(p.page_id)}#campaignCard">פרטים ואישורים</a>` : ""}
-      </div>${previewOpen.has(p.page_id) ? previewHtml(p) : ""}${panel}</div>`;
+      </div>${approvalsHtml(p)}${recentHtml(p)}${previewOpen.has(p.page_id) ? previewHtml(p) : ""}${panel}</div>`;
   }
 
   function renderProps() {
@@ -197,7 +270,12 @@
     props = p.properties || []; maxActive = p.max_active || 3;
   }
   async function refresh() {
-    try { await loadAll(); renderProps(); renderSettings(); } catch (e) { /* the next poll tries again */ }
+    try {
+      await loadAll();
+      const typing = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.draft;
+      if (!typing) renderProps(); // never pull the text box from under someone typing
+      renderSettings();
+    } catch (e) { /* the next poll tries again */ }
   }
 
   // The account-level choices, under the consent. Auto-enroll keeps every
@@ -232,7 +310,7 @@
       const unknown = members().some((g) => left.includes(String(g.group_id)) && g.agent_policy === "unknown");
       try {
         await post("/api/posting/campaigns", {
-          page_id: p.page_id, group_ids: left, mode: mode(), days: 30, repeat: false, targets, consent: true,
+          page_id: p.page_id, group_ids: left, mode: mode(), days: 30, repeat: !!repeatDays(p.page_id), repeat_days: repeatDays(p.page_id), targets, consent: true,
           consent_version: settings.consent_version, include_unknown: unknown,
           account_aged: $("apAged").checked, posted_manually: $("apManual").checked,
         });
@@ -270,11 +348,40 @@
       }
       if (pageOn() && !withPage()) { $("apSettings").open = true; toast("בחרו באיזה דף עסקי לפרסם, או בטלו את \"גם בדף העסקי\""); return renderProps(); }
       if (needConsent()) return renderProps();
-      return withBusy(p, async () => { toast(startedText(await start(p, ids))); open.delete(p.page_id); });
+      const original = (previews.get(previewKey(p)) || {}).copy, perPost = mode() === "per_post";
+      return withBusy(p, async () => {
+        const dropped = await start(p, ids);
+        // The agent has just read the post, maybe edited it, and chosen its time: that
+        // IS the approval of the first post — it is never asked for a second time.
+        const approved = perPost ? await approveFirst(p, original) : true;
+        toast(approved ? startedText(dropped) : "התחלנו ✓ הפוסט הראשון יופיע כאן לאישור בעוד רגע"); open.delete(p.page_id);
+      });
     }
     // STOP: always allowed, whatever the switches or halts say (routes/posting.js).
     if (!confirm("לעצור את הפרסום של הנכס הזה? מה שכבר עלה נשאר בקבוצות. אפשר להפעיל שוב מתי שתרצו.")) return renderProps();
     return withBusy(p, async () => { await post(`/api/posting/campaigns/${encodeURIComponent(p.campaign.id)}/stop`); toast("הפרסום של הנכס נעצר"); });
+  }
+
+  async function approveFirst(p, original) {
+    const body = approveBody(p.page_id, original);
+    for (let i = 0; i < 8; i++) try {
+      const c = ((await api(`/api/posting/campaigns?page_id=${encodeURIComponent(p.page_id)}`)).campaigns || []).find(live);
+      const first = c && (c.posts || []).find((x) => x.status === "pending_approval");
+      if (first) { await post(`/api/posting/campaigns/${encodeURIComponent(c.id)}/posts/${encodeURIComponent(first.id)}/approve`, body); drafts.delete(p.page_id); return true; }
+      if (c && (c.posts || []).some((x) => x.status === "scheduled")) return true; // nothing to approve
+      await new Promise((r) => setTimeout(r, 1500));
+    } catch (e) { break; } // the post then waits in the row, to be approved there
+    return false;
+  }
+  // Approve or skip a waiting post from its row. key: `${page_id}|${post_id}`.
+  async function decide(key, what) {
+    const [pageId, postId] = key.split("|"), p = byId(pageId);
+    const x = p && live(p.campaign) && (p.campaign.posts || []).find((q) => q.id === postId);
+    if (!x) return;
+    await withBusy(p, async () => {
+      await post(`/api/posting/campaigns/${encodeURIComponent(p.campaign.id)}/posts/${encodeURIComponent(postId)}/${what}`, what === "approve" ? approveBody(key, x.copy) : {});
+      drafts.delete(key); toast(what === "approve" ? "אושר ✓" : "דילגנו על הפוסט");
+    });
   }
 
   // A running property's groups change by starting a new pass with them:
@@ -302,8 +409,24 @@
       if (p && !live(p.campaign)) { const s = groupsOf(p); if (t.checked) s.add(t.dataset.group); else s.delete(t.dataset.group); renderProps(); }
     }
   });
+  $("apProps").addEventListener("input", (ev) => { const t = ev.target; if (t.dataset && t.dataset.draft) draftOf(t.dataset.draft).copy = t.value; });
   $("apProps").addEventListener("click", (ev) => {
     const b = ev.target.closest && ev.target.closest("button"); if (!b) return;
+    if (b.dataset.when) {
+      const w = draftOf(b.dataset.when).when;
+      if (b.dataset.k) w.k = b.dataset.k;
+      if (b.dataset.day) w.day = Number(b.dataset.day);
+      if (b.dataset.hour) w.hour = Number(b.dataset.hour);
+      return renderProps();
+    }
+    if (b.dataset.repeat) {
+      const r = repeatOf(b.dataset.repeat);
+      if (b.dataset.k) r.k = /^\d+$/.test(b.dataset.k) ? Number(b.dataset.k) : b.dataset.k;
+      if (b.dataset.n) r.n = Number(b.dataset.n);
+      return renderProps();
+    }
+    if (b.dataset.approve) return decide(b.dataset.approve, "approve");
+    if (b.dataset.skip) return decide(b.dataset.skip, "skip");
     if (b.dataset.groups) { if (open.has(b.dataset.groups)) open.delete(b.dataset.groups); else open.add(b.dataset.groups); renderProps(); }
     if (b.dataset.save && byId(b.dataset.save)) saveGroups(byId(b.dataset.save));
     if (b.dataset.preview && byId(b.dataset.preview)) {

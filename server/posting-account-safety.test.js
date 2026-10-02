@@ -52,9 +52,10 @@ const loginNow = (t) => ({ browser_session_facebook: { session_id: "login1", sta
     assert.deepEqual(opened, [], "no session after a revoke");
     const a = (await store.listAttemptsByPhone(PH))[0];
     assert.ok(Date.parse(a.recheck_due_at) >= t.getTime() + 23 * HOUR, "deferred, not looked at");
-    // consent given again: the re-check runs
+    // consent given again: the re-check runs (in a session of its own once the
+    // account's posting sessions have not picked it up for 36 hours)
     await db.setConnection(PH, { posting_permission: structuredClone(K.PERM) });
-    assert.equal(await R.recheckOne(recheckDeps(deps, opened), at(new Date(t.getTime() + 2 * DAY))), "rechecked");
+    assert.equal(await R.recheckOne(recheckDeps(deps, opened), at(new Date(t.getTime() + 3 * DAY))), "rechecked");
     assert.equal(opened.length, 1);
   }
 
@@ -101,7 +102,7 @@ const loginNow = (t) => ({ browser_session_facebook: { session_id: "login1", sta
   }
   {
     const { deps, at } = await postedCampaign();
-    const t = new Date(NOW.getTime() + 2 * DAY);
+    const t = new Date(NOW.getTime() + 3 * DAY); // past the 36 h a posting account's checks wait for its posting session
     await db.setConnection(PH, loginNow(new Date(t.getTime() - MIN)));
     const opened = [];
     assert.equal(await R.recheckOne(recheckDeps(deps, opened), at(t)), "skipped");

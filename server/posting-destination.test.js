@@ -20,18 +20,11 @@ const dists = [
 ];
 assert.equal(D.pagePostFrom(dists), fb, "latest real posted Page URL");
 
-const seen = new Set();
-for (let i = 0; i < 80; i++) {
-  const args = { page, campaign: { page_id: "pg1" }, target: { target: "group", group_id: String(i), url: `https://www.facebook.com/groups/${i}` }, pagePostUrl: fb };
-  const one = D.choose(args), retry = D.choose(args);
-  assert.deepEqual(retry, one, "same Group and round are stable");
-  seen.add(one.kind);
+// Every post, every group, every round: the property page's own link.
+for (let i = 0; i < 20; i++) {
+  const args = { page, campaign: { page_id: "pg1" }, target: { target: "group", group_id: String(i), url: `https://www.facebook.com/groups/${i}` }, pagePostUrl: fb, variantRound: i % 3 };
+  assert.deepEqual(D.choose(args), { kind: "property", url: null });
 }
-assert.deepEqual([...seen].sort(), ["facebook_page", "none", "property", "whatsapp"], "all real destination choices occur");
-
-const baseArgs = { page, campaign: { page_id: "pg1" }, target: { target: "group", group_id: "111" }, pagePostUrl: fb };
-const r0 = D.choose(baseArgs), r1 = D.choose({ ...baseArgs, variantRound: 1 });
-assert.notEqual(r0.kind, r1.kind, "a later completed round advances the destination");
 assert.deepEqual(D.choose({ page, campaign: { page_id: "pg1" }, target: { target: "page", group_id: "555" }, pagePostUrl: fb }), { kind: "property", url: null });
 
 for (const kind of D.KINDS) assert.ok(D.notice(kind).includes("קישור"), `${kind} is explained to the agent`);

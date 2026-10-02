@@ -65,7 +65,7 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(p.status, "scheduled");
     assert.equal(p.group_id, "111");
     assert.ok(p.copy.includes("חיפה"));
-    assert.ok(!/https?:\/\//.test(p.copy), "no link in the body");
+    assert.ok(p.copy.includes("https://f.ly/p/pg1"), "the property page's link is in the post's own text");
     assert.ok(/^[0-9a-f]{32}$/.test(p.copy_hash));
     assert.equal(p.group_token, undefined, "no s=/g= token on campaign posts (R4)");
     assert.ok(["property", "whatsapp", "none"].includes(p.link_kind), "the real first-comment destination is stored with the post");
@@ -81,7 +81,7 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(a.state, "verified_posted");
     assert.equal(a.publisher, "browser");
     assert.equal(new Date(a.click_expires_at) - new Date(a.click_issued_at), 30 * DAY);
-    if (p.link_kind === "property") assert.equal(deps.post.calls[0].comment, `https://f.ly/p/pg1/${a.click_id}`, "property links carry only the click code");
+    if (p.link_kind === "property") { assert.equal(deps.post.calls[0].comment, null, "the link is in the post's text: no link comment"); assert.ok(deps.post.calls[0].copy.includes("https://f.ly/p/pg1")); }
     else if (p.link_kind === "whatsapp") assert.match(deps.post.calls[0].comment, /^https:\/\/wa\.me\//, "the stored WhatsApp destination is used");
     else assert.equal(deps.post.calls[0].comment, null, "CTA-only posts do not create a link comment");
     assert.match(a.click_id, /^[a-hjkmnp-z2-9]{6}$/, "a short code");
@@ -246,14 +246,15 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(c.posts[0].video_url, V); assert.equal(c.posts[0].poster_url, "https://cdn.f.ly/files/pg1/poster.jpg");
     assert.equal(deps.post.calls.length, 0);
     c = await C.approvePost(c.id, c.posts[0].id, deps);
-    // Run from a local server: the first comment's link is still the public one.
-    await S.tick(c, Object.assign({}, deps, { pageBaseUrl: "http://127.0.0.1:8787" }), at(dueOf(await store.getPostingCampaign(c.id))));
+    await S.tick(c, deps, at(dueOf(await store.getPostingCampaign(c.id))));
     assert.equal(deps.post.calls.length, 1);
     assert.equal(deps.post.calls[0].videoUrl, V, "the driver attaches it");
     const planned = (await store.getPostingCampaign(c.id)).posts[0];
-    if (planned.link_kind === "property") assert.ok(deps.post.calls[0].comment.startsWith("https://nadlan.call4li.com/p/pg1/"), deps.post.calls[0].comment);
-    else if (planned.link_kind === "whatsapp") assert.match(deps.post.calls[0].comment, /^https:\/\/wa\.me\//);
-    else assert.equal(deps.post.calls[0].comment, null);
+    assert.equal(planned.link_kind, "property");
+    assert.ok(deps.post.calls[0].copy.includes("https://f.ly/p/pg1") && deps.post.calls[0].comment === null, "the link is in the text, not a comment");
+    // Built on a local server: the link in the text is still the public one.
+    assert.ok(C._test.buildCopy({ property: { title: "x" }, agent: {} }, { page_id: "pg1", posts: [] }, { group_id: "111" }, "property", "http://127.0.0.1:8787").includes("https://nadlan.call4li.com/p/pg1"));
+    assert.ok(!/https?:/.test(C._test.buildCopy({ property: { title: "x" }, agent: {} }, { page_id: "pg1", posts: [] }, { group_id: "111" })), "no base URL: no link, the comment wording stays");
     assert.deepEqual(C.videoOf({ hero: { video_url: "javascript:x", poster_url: V } }), { video_url: null, poster_url: null }, "http(s) only");
     // Never a local dev address: the video and the first comment's link are the public ones.
     // The video is downloaded from where it lives, never from a rewritten address (a local upload 404'd on prod).
@@ -501,17 +502,17 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     const { deps } = await setup();
     const c = await C.create(base(), deps);
     const [g1, g2] = c.groups.map((g) => g.group_id);
-    // g1: Facebook showed "Join group" on the last attempt; g2: posted to 2 days ago (7-day cooldown).
+    // g1: Facebook showed "Join group" on the last attempt; g2: THIS property posted there 2 days ago (3-day gap).
     await A.mutate(A.ctxOf(deps), c.id, (cur) => ({ groups: cur.groups.map((g) => (g.group_id === g1 ? { ...g, blocked_code: "not_member", blocked_at: iso(NOW) } : g)) }));
-    const r = await store.reserveAttempt({ phone: PH, page_id: "other", target_type: "group", target_id: g2, target_url: G(222), publisher: "browser",
+    const r = await store.reserveAttempt({ phone: PH, page_id: c.page_id, target_type: "group", target_id: g2, target_url: G(222), publisher: "browser",
       now: new Date(NOW.getTime() - 2 * DAY), limits: { daily_cap: 10, group_global_daily_cap: 10 } });
     await store.transition(r.attempt.key, "session_started"); await store.transition(r.attempt.key, "composer_ready");
     await store.transition(r.attempt.key, "submit_started"); await store.transition(r.attempt.key, "verification_pending");
     await store.transition(r.attempt.key, "verified_posted", { post_url: `${G(222)}/posts/1` });
     const cur = await store.getPostingCampaign(c.id);
     const why = await C.explainGroups(cur, deps);
-    assert.deepEqual(why.map((w) => [w.group_id, w.why]), [[g1, "seen_not_member"], [g2, "cooldown"]]);
-    assert.equal(why[1].until, new Date(NOW.getTime() - 2 * DAY + 7 * DAY).toISOString(), "until when");
+    assert.deepEqual(why.map((w) => [w.group_id, w.why]), [[g1, "seen_not_member"], [g2, "property_cooldown"]]);
+    assert.equal(why[1].until, new Date(NOW.getTime() - 2 * DAY + 3 * DAY).toISOString(), "until when");
     const plan = await C.planAccount(PH, deps);
     assert.equal(plan.reason, "no_eligible_group", "the card's reason and the explanation agree");
     // a later groups sync sees the account in g1 again → the block lifts

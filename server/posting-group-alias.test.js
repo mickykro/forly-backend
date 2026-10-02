@@ -53,10 +53,10 @@ async function runDays(deps, at, days, campaigns) {
     {
       const { deps, at } = await setup(PH, { post: resolvingDriver(), conn: slugConn });
       const c = await C.create(base({ groups: [{ url: SLUG_URL, agent_policy: "explicitly_allowed" }], repeat: true, days: 30 }), deps);
-      const postedOn = await runDays(deps, at, 16, [c.id]);
+      const postedOn = await runDays(deps, at, 8, [c.id]);
       assert.equal(postedOn[0], 0, "the first post goes out on day 0");
-      assert.ok(postedOn.slice(1).every((d) => d >= 14), `no second post within the 7- and 14-day windows (posted on days ${postedOn.join(",")})`);
-      assert.ok(postedOn.length === 2, "and the group is used again once the property→group cooldown is over");
+      assert.ok(postedOn.slice(1).every((d, i) => d - postedOn[i] >= 3), `the same property never twice within 3 days, whichever id (posted on days ${postedOn.join(",")})`);
+      assert.ok(postedOn.length >= 2, "and the group is used again once the property→group gap is over");
       const cur = await store.getPostingCampaign(c.id);
       assert.equal(cur.groups[0].group_id, "12345");
       assert.deepEqual(cur.groups[0].aliases, [SLUG], "the campaign group keeps the slug as an alias");
@@ -90,7 +90,7 @@ async function runDays(deps, at, days, campaigns) {
       assert.equal((await store.getGroupActivityFor(["12345"], NOW))["12345"].posts_today, 1, "the numeric id sees the slug's bucket");
     }
 
-    // ── a different listing to the same group within 7 days is refused, whichever id its campaign holds ──
+    // ── a different listing to the same group: no weekly hold any more (up to 3 a day per account), whichever id its campaign holds ──
     for (const createdAfterRemap of [false, true]) {
       const { deps, at } = await setup(PH, { post: resolvingDriver(), conn: slugConn });
       await db.savePage(page("pg2"));
@@ -113,7 +113,7 @@ async function runDays(deps, at, days, campaigns) {
         }
         if (deps.post.calls.length > before) later.push(d);
       }
-      assert.ok(later.length >= 1 && later[0] >= 7, `${createdAfterRemap ? "numeric" : "slug"} campaign: the other listing waits out the 7-day group cooldown (posted on day ${later.join(",")})`);
+      assert.equal(later[0], 1, `${createdAfterRemap ? "numeric" : "slug"} campaign: the other listing goes the next day (posted on day ${later.join(",")})`);
     }
 
     // ── reserveAttempt: the dedup doc and the group bucket under the alias still count ──

@@ -2,6 +2,7 @@
    a fake page that matches on the EXPORTED selectors, and a harness shaped
    like posting-tick's postDeps. Not a test itself. No network, no Driver. */
 process.env.FORLY_ENV = "local";
+process.env.POSTING_CAPS = "1"; // these tests are about the caps a real environment keeps
 process.env.PROFILE_KEY = "test-profile-key";
 process.env.POSTING_SHOTS = "0"; // tests never write into the dev page's screenshot folder (posting-shots.test.js opts in)
 const { sha } = require("./posting-campaign");
@@ -36,7 +37,7 @@ function fakePage(o = {}) {
     [S.identity]: NAME, [S.targetName]: GROUP_NAME, [S.composerTarget]: GROUP_NAME, [S.composerAuthor]: NAME,
     [S.editor]: (s) => s.editor, [S.postMessage]: COPY, [S.postAuthor]: NAME, [S.dialog]: "", [S.alert]: "",
   }, o.texts);
-  const counts = Object.assign({ [S.composer]: 1, [S.editor]: 1, [S.composerRoot]: 1, [S.submit]: 1, [S.joinGroup]: 0, [S.commentBox]: 1, [S.discard]: 1, [S.captchaFrame]: 0 }, o.counts);
+  const counts = Object.assign({ [S.composer]: 1, [S.editor]: 1, [S.composerRoot]: 1, [S.submit]: 1, [S.joinGroup]: 0, [S.commentBox]: 1, [S.commentSubmit]: 1, [S.discard]: 1, [S.captchaFrame]: 0 }, o.counts);
   const attrs = Object.assign({ [S.targetIdMeta]: "fb://group/111", [S.targetUrlMeta]: "" }, o.attrs);
   const feed = o.feed !== undefined ? o.feed : (s) => (s.submitted ? [{ href: `${PERMA}?__cft__=x`, author: NAME, text: COPY }] : []);
   const node = (sel) => {
@@ -59,6 +60,7 @@ function fakePage(o = {}) {
     goto: async (u) => { st.visited.push(u); ev.push("goto"); st.url = (o.redirect && o.redirect(u)) || u; },
     url: () => st.url,
     goBack: async () => { st.url = "https://www.facebook.com/"; },
+    reload: async () => { ev.push("reload"); },
     locator: node,
     innerText: async () => "",
     keyboard: { type: async (t) => { st.keyboardTyped = (st.keyboardTyped || 0) + 1; }, press: async (k) => { st.pressed.push(k); } },

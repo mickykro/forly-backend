@@ -79,7 +79,8 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   const halved = account({
     penalty_until: at(-day(5)),                              // still 5 days from ending
     halts: [{ at: at(day(3)), code: "rate_limited" }],        // 3 days old — past the day-one block
-    posts: [{ at: at(3600000), group_id: "a", group_url: "a", page_id: "p", ok: true }], // one post already today
+    // the halved cap's worth of posts already today, all within the last hour
+    posts: Array.from({ length: Math.floor(cfg.daily_cap / cfg.penalty_cap_divisor) }, (_, i) => ({ at: at((i + 1) * 300000), group_id: `a${i}`, group_url: `a${i}`, page_id: "p", ok: true })),
   });
   assert.equal(S._test.dailyCapFor(halved, NOW, cfgNoSkip), Math.floor(cfg.daily_cap / cfg.penalty_cap_divisor), "the daily cap is halved for the rest of the penalty window");
   const r = S.nextSlot({ now: NOW, account: halved, candidates: [ok("g")], pageId: "p", config: cfgNoSkip, rand: noRand });
@@ -157,7 +158,7 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
 // ── minimum gap, jitter only adds, and reservations from other campaigns count ──
 {
   const acct = account({ posts: [{ at: at(10 * 60000), group_id: "g0", group_url: "g0", page_id: "p0", ok: true }] });
-  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0, day_start_jitter_min: 0 });
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0, day_start_jitter_min: 0, long_break_probability: 0 });
   const slot = S.nextSlot({ now: NOW, account: acct, candidates: [ok("g1")], pageId: "p1", config: cfgNoSkip, rand: () => 0 });
   assert.ok((slot.at.getTime() - new Date(acct.posts[0].at).getTime()) / 60000 >= cfg.min_gap_minutes);
   assert.equal(slot.group_id, "g1");
@@ -169,14 +170,60 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.ok((r.at.getTime() - (NOW.getTime() + 5 * 60000)) / 60000 >= cfg.min_gap_minutes, "paced against the reservation");
 }
 
+// ── a repeating campaign returns to its group on the agent's own rhythm ──
+{
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
+  const posted = (hoursAgo) => account({ posts: [{ at: at(hoursAgo * 3600000), group_id: "g", group_url: "g", page_id: "p", ok: true }] });
+  const slot = (acct, cand, config = cfgNoSkip) => S.nextSlot({ now: NOW, account: acct, candidates: [cand], pageId: "p", config, rand: noRand });
+  assert.equal(slot(posted(60), ok("g")).at, null, "once: the same property waits out the 3 days");
+  assert.ok(slot(posted(73), ok("g")).at, "after 3 days it may go again");
+  assert.equal(slot(posted(100), Object.assign(ok("g"), { repeat_days: 7 })).at, null, "every week: not after 4 days");
+  assert.ok(slot(posted(7 * 24), Object.assign(ok("g"), { repeat_days: 7 })).at);
+  assert.equal(slot(posted(48), Object.assign(ok("g"), { repeat_days: 1 })).at, null, "never under 3 days, whatever the rhythm says");
+  const noCaps = S.configFrom(null, { FORLY_ENV: "local" });
+  assert.equal(slot(posted(100), Object.assign(ok("g"), { repeat_days: 7 }), noCaps).at, null, "the rhythm holds where caps are off");
+}
+
+// ── the operator's warm-up call: active = none, slow = the slower ramp ──
+{
+  const fresh = { first_connected_at: at(day(1)), posts: [], halts: [], account_aged: true, posted_manually: true };
+  assert.ok(S._test.warmupStage(fresh, NOW, cfg), "a day-2 account is warming up");
+  assert.equal(S._test.warmupStage(Object.assign({}, fresh, { warmup_mode: "active" }), NOW, cfg), null, "active: no warm-up");
+  assert.equal(S._test.dailyCapFor(Object.assign({}, fresh, { warmup_mode: "active" }), NOW, cfg), cfg.daily_cap);
+  const mid = Object.assign({}, fresh, { first_connected_at: at(day(4)) }); // day 5
+  assert.equal(S._test.warmupStage(mid, NOW, cfg).daily_post_cap, 1);
+  assert.equal(S._test.warmupStage(Object.assign({}, mid, { warmup_mode: "slow" }), NOW, cfg).daily_post_cap, 0, "slow: still browse-only on day 5");
+}
+
+// ── posting windows: 10–13 and 18–21; nothing in between, or outside ──
+{
+  const at = (iso) => new Date(iso);
+  assert.equal(S.isActiveTime(at("2026-09-23T11:00:00+03:00"), cfg), true, "Wednesday 11:00: the morning window");
+  assert.equal(S.isActiveTime(at("2026-09-23T15:00:00+03:00"), cfg), false, "15:00: between windows");
+  assert.equal(S.isActiveTime(at("2026-09-23T19:30:00+03:00"), cfg), true, "19:30: the evening window");
+  assert.equal(S.isActiveTime(at("2026-09-23T09:30:00+03:00"), cfg), false, "09:30: before the first");
+  assert.equal(S.nextActiveTime(at("2026-09-23T14:00:00+03:00"), cfg).toISOString(), at("2026-09-23T18:00:00+03:00").toISOString(), "the next window opens at 18:00");
+  assert.equal(S.isActiveTime(at("2026-09-23T15:00:00+03:00"), S.configFrom(null, { FORLY_ENV: "local" })), true, "a local box: no windows");
+}
+
+// ── per group: up to 3 posts a day from this account, any properties; other agents never count ──
+{
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0, min_gap_minutes: 1 });
+  const today = (n) => Array.from({ length: n }, (_, i) => ({ at: at((i + 1) * 600000), group_id: "g", group_url: "g", page_id: `other${i}`, ok: true }));
+  const slot = (posts, ga) => S.nextSlot({ now: NOW, account: account({ posts }), candidates: [ok("g")], pageId: "p", groupActivity: ga, config: cfgNoSkip, rand: noRand });
+  assert.ok(slot(today(2)).at, "a third property the same day: fine");
+  assert.equal(slot(today(3)).at, null, "a fourth: not today");
+  assert.ok(slot([], { g: { posts_today: 40, fingerprints: [] } }).at, "forty posts by other agents today change nothing");
+}
+
 // ── caps count attempts and reservations, not successes ──
 {
   const posts = [];
-  for (let i = 0; i < cfg.daily_cap; i++) posts.push({ at: at(3600000 * (i + 1)), group_id: `g${i}`, group_url: `g${i}`, page_id: "p", ok: i % 2 === 0 });
+  for (let i = 0; i < cfg.daily_cap; i++) posts.push({ at: at(60000 * (i + 1)), group_id: `g${i}`, group_url: `g${i}`, page_id: "p", ok: i % 2 === 0 });
   const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
   assert.equal(S.nextSlot({ now: NOW, account: account({ posts }), candidates: [ok("z")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "daily_cap");
   const week = [];
-  for (let i = 0; i < cfg.weekly_cap; i++) week.push({ at: at(day(1) + i * 3600000), group_id: `w${i}`, group_url: `w${i}`, page_id: "p", ok: true });
+  for (let i = 0; i < cfg.weekly_cap; i++) week.push({ at: at(day(1) + i * 60000), group_id: `w${i}`, group_url: `w${i}`, page_id: "p", ok: true });
   assert.equal(S.nextSlot({ now: NOW, account: account({ posts: week }), candidates: [ok("z")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "weekly_cap");
 }
 
@@ -187,11 +234,8 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   // 20:30, nothing posted today — but another campaign already reserved all
   // three of tomorrow's slots. The gap/jitter math would naturally push the
   // next post into tomorrow; tomorrow's own cap must still be honoured.
-  const reservedTomorrow = [
-    { at: "2026-09-24T10:00:00+03:00", group_id: "r0", group_url: "r0", page_id: "x", ok: null },
-    { at: "2026-09-24T13:00:00+03:00", group_id: "r1", group_url: "r1", page_id: "x", ok: null },
-    { at: "2026-09-24T18:00:00+03:00", group_id: "r2", group_url: "r2", page_id: "x", ok: null },
-  ];
+  const reservedTomorrow = Array.from({ length: cfg.daily_cap }, (_, i) => (
+    { at: new Date(IL("2026-09-24T10:00:00+03:00").getTime() + i * 20 * 60000).toISOString(), group_id: `r${i}`, group_url: `r${i}`, page_id: "x", ok: null }));
   const night = IL("2026-09-23T20:30:00+03:00");
   const r = S.nextSlot({ now: night, account: account({ posts: reservedTomorrow }), candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand });
   assert.ok(r.at, "a slot is still found");
@@ -327,15 +371,16 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.ok(degenResult.at, "no price/sqm on either side → no false duplicate");
 }
 
-// ── group cooldowns pick the other group; unknown-policy groups are eligible (the agent listed them) ──
+// ── a group that is full for today (or holds this property) picks the other group; unknown-policy groups are eligible ──
 {
-  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
-  const acct = account({ posts: [{ at: at(day(2)), group_id: "g1", group_url: "g1", page_id: "other", ok: true }] });
+  const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0, min_gap_minutes: 1 });
+  const three = [1, 2, 3].map((h) => ({ at: at(h * 600000), group_id: "g1", group_url: "g1", page_id: `other${h}`, ok: true }));
+  const acct = account({ posts: three });
   assert.equal(S.nextSlot({ now: NOW, account: acct, candidates: [ok("g1"), { url: "g2", group_id: "g2", agent_policy: "unknown" }], pageId: "p", config: cfgNoSkip, rand: noRand }).group_url, "g2");
   assert.equal(S.nextSlot({ now: NOW, account: acct, candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "no_eligible_group");
-  const old = account({ posts: [{ at: at(day(10)), group_id: "g1", group_url: "g1", page_id: "p", ok: true }] });
-  assert.equal(S.nextSlot({ now: NOW, account: old, candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "no_eligible_group", "same property → same group inside 14 days");
-  const legacy = account({ posts: [{ at: at(day(2)), group_url: "g1", page_id: "other", ok: true }] }); // no group_id — a post written before Task 14
+  const recent = account({ posts: [{ at: at(day(2)), group_id: "g1", group_url: "g1", page_id: "p", ok: true }] });
+  assert.equal(S.nextSlot({ now: NOW, account: recent, candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "no_eligible_group", "same property → same group inside 3 days");
+  const legacy = account({ posts: [{ at: at(day(2)), group_url: "g1", page_id: "p", ok: true }] }); // no group_id — a post written before Task 14
   assert.equal(S.nextSlot({ now: NOW, account: legacy, candidates: [ok("g1")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "no_eligible_group", "falls back to group_url when a post has no group_id");
 }
 
@@ -428,10 +473,15 @@ assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("l
   }
   const local = S.configFrom(null, { FORLY_ENV: "local" });
   assert.ok(S.isActiveTime(sukkot, local) && !S.isActiveTime(sukkot, S.configFrom(null, { FORLY_ENV: "staging" })));
-  assert.equal(local.group_cooldown_days, S.DEFAULTS.group_cooldown_days, "cooldowns stay");
-  assert.equal(local.daily_cap, S.DEFAULTS.daily_cap, "caps stay");
+  assert.equal(local.property_group_cooldown_days, 0, "local: no cooldowns");
+  assert.ok(local.group_daily_cap >= 1e6, "local: no per-group cap");
+  assert.ok(local.daily_cap >= 1e6 && local.weekly_cap >= 1e6 && local.group_global_daily_cap >= 1e6, "local: no caps");
+  const capped = S.configFrom(null, { FORLY_ENV: "local", POSTING_CAPS: "1" });
+  assert.equal(capped.property_group_cooldown_days, S.DEFAULTS.property_group_cooldown_days, "POSTING_CAPS=1 keeps the cooldowns");
+  assert.equal(capped.daily_cap, S.DEFAULTS.daily_cap, "POSTING_CAPS=1 keeps the caps");
+  for (const env of [{ FORLY_ENV: "prod" }, { FORLY_ENV: "staging" }, { FORLY_ENV: "local", NODE_ENV: "production" }, {}]) assert.equal(S.configFrom(null, env).daily_cap, S.DEFAULTS.daily_cap, "caps only ever come off on a local box");
   assert.equal(S.DEFAULTS.min_gap_minutes, 120, "DEFAULTS untouched");
-  // 5 minutes after the last post, not 2 hours
+  // 5 minutes after the last post, not 120
   const after = slot(night, { FORLY_ENV: "local" });
   const one = { ...acc, posts: [{ at: new Date(night.getTime() - 60000).toISOString(), group_id: "9", page_id: "q" }] };
   const next = S.nextSlot({ now: night, account: one, candidates: cand, pageId: "p", config: local, rand: () => 0.99 });

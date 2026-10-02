@@ -41,11 +41,16 @@ const localMode = require("./posting-local");
 const DEFAULTS = {
   timezone: "Asia/Jerusalem",
   active_hours: { start: 9, end: 21 },
-  min_gap_minutes: 120,
-  gap_jitter: 0.8,                  // adds up to +80% of the gap, never subtracts
-  long_break_probability: 0.25,     // sometimes the gap is 3–5 hours, like a person with a job
-  daily_cap: 3,
-  weekly_cap: 12,
+  // An account posts in windows, several posts per browser session
+  // (posting-chain): Driver bills every byte, and each session pays for
+  // loading Facebook once. Between sessions the gap below; inside one, the
+  // chain's 1.5–5.8-minute dwell. Friday's window ends at 15:00 anyway.
+  post_windows: [{ start: 10, end: 13 }, { start: 18, end: 21 }],
+  min_gap_minutes: 120,             // between sessions; posts inside a session are minutes apart
+  gap_jitter: 0.5,                  // adds up to +50% of the gap, never subtracts
+  long_break_probability: 0.05,     // now and then the gap is 3–5 hours, like a person with a job
+  daily_cap: 20,                    // per account, all groups together
+  weekly_cap: 100,
   day_start_jitter_min: 150,        // the first post of a day lands 0–150 min after active_hours.start
   skip_day_probability: 0.2,        // one active day in five, nothing at all
   // Explicit, inclusive day ranges counted from first_connected_at in Jerusalem
@@ -57,10 +62,14 @@ const DEFAULTS = {
   ],
   warmup_multiplier_if_unsure: 2,   // account_aged === false or posted_manually === false
   browse_sessions_per_day: 1,       // on browse-only days, and with p=0.5 on skipped days later
-  group_global_daily_cap: 3,        // across ALL Forly accounts, per group, per day
-  fingerprint_window_days: 7,       // another account posted the same listing to this group
-  group_cooldown_days: 7,
-  property_group_cooldown_days: 14,
+  // Per group, per account (2 Oct 2026): up to group_daily_cap posts a day,
+  // whichever properties; the SAME property again only after
+  // property_group_cooldown_days. Other agents' posts never count against an
+  // agent — group_global_daily_cap is off unless an operator sets it.
+  group_daily_cap: 3,
+  group_global_daily_cap: 1e6,
+  fingerprint_window_days: 3,       // the same listing (anyone's) to this group: not again within 3 days
+  property_group_cooldown_days: 3,
   penalty_days: 14,                 // after rate_limited / feature_blocked
   penalty_cap_divisor: 2,
   halts_window_days: 30,
@@ -120,6 +129,13 @@ function isHolidayEve(date, config) {
   return isYomTov(new Date(Date.UTC(y, m - 1, d, 12)), config.timezone);
 }
 
+// Inside one of the posting windows (when any are set).
+function inWindow(date, config) {
+  const ws = Array.isArray(config.post_windows) ? config.post_windows : [];
+  if (!ws.length) return true;
+  const lp = localParts(date, config.timezone), h = lp.hour + lp.minute / 60;
+  return ws.some((w) => h >= w.start && h < w.end);
+}
 function isActiveTime(date, config = DEFAULTS) {
   if (config.observe_calendar === false) { const h = localParts(date, config.timezone).hour; return h >= config.active_hours.start && h < config.active_hours.end; }
   if (!CALENDAR_OK) return false; // see CALENDAR_OK: an unverifiable calendar means no posting at all
@@ -127,7 +143,7 @@ function isActiveTime(date, config = DEFAULTS) {
   if (lp.dow === 6) return false; // Saturday: Shabbat, fully inactive all day (no fixed end-hour to get wrong)
   if (isYomTov(date, config.timezone)) return false;
   if ((lp.dow === 5 || isHolidayEve(date, config)) && lp.hour >= EVE_INACTIVE_HOUR) return false; // Erev Shabbat / Erev Yom Tov
-  return lp.hour >= config.active_hours.start && lp.hour < config.active_hours.end;
+  return lp.hour >= config.active_hours.start && lp.hour < config.active_hours.end && inWindow(date, config);
 }
 function nextActiveTime(from, config) {
   let t = new Date(from.getTime());
@@ -147,7 +163,7 @@ function seeded(str) {
 function dayPlan(localDay, config = DEFAULTS, _rand, seed = "") {
   const r = seeded(seed ? `${localDay}|${seed}` : String(localDay));
   if (r() < config.skip_day_probability) return { start_offset_min: 0, target: 0 };
-  return { start_offset_min: Math.floor(r() * config.day_start_jitter_min), target: 1 + Math.floor(r() * config.daily_cap) };
+  return { start_offset_min: Math.floor(r() * config.day_start_jitter_min), target: Math.ceil(config.daily_cap / 2) + Math.floor(r() * (Math.floor(config.daily_cap / 2) + 1)) }; // half the cap up to the cap
 }
 // Task 16 sets account.plan_seed = planSeed(phone): an HMAC, not the phone
 // itself, so the seed carries no PII into the schedule it shapes.
@@ -174,14 +190,23 @@ function jerusalemDate(date) { return localDate(new Date(date), DEFAULTS.timezon
 // no start jitter, no skipped days, no long breaks, a 5-minute gap —
 // POSTING_PACING=1 keeps it. Group cooldowns and caps stay: the account is
 // real. Only FORLY_ENV=local; prod and staging always pace and warm up.
+// A local box has no caps at all (POSTING_CAPS=1 keeps them): any number of
+// posts a day, the same group and the same property again at once, any
+// number of failures. What Facebook itself says (halts, penalties) still counts.
+const capsOff = (env = process.env) => !!env && env.FORLY_ENV === "local" && env.NODE_ENV !== "production" && env.POSTING_CAPS !== "1";
+const NO_CAPS = {
+  daily_cap: 1e6, weekly_cap: 1e6, group_global_daily_cap: 1e6, max_consecutive_failures: 1e6,
+  group_daily_cap: 1e6, property_group_cooldown_days: 0, fingerprint_window_days: 0,
+};
 function configFrom(settings, env = {}) {
   const out = structuredClone(DEFAULTS);
   const v = settings && settings.group_global_daily_cap;
   if (Number.isInteger(v) && v > 0) out.group_global_daily_cap = v;
   if (localMode.skipWarmup(env) || (env.FORLY_ENV === "local" && env.POSTING_WARMUP !== "1")) out.warmup = [];
   if (localMode.enabled(env) || (env.FORLY_ENV === "local" && env.POSTING_PACING !== "1")) {
-    Object.assign(out, LOCAL_PACING, { active_hours: { start: 0, end: 24 } });
+    Object.assign(out, LOCAL_PACING, { active_hours: { start: 0, end: 24 }, post_windows: [] });
   }
+  if (capsOff(env)) Object.assign(out, NO_CAPS);
   return out;
 }
 
@@ -241,7 +266,9 @@ function dayNumber(account, now, config) {
   return Math.round((Date.UTC(...d1.split("-").map(Number).map((x, i) => (i === 1 ? x - 1 : x))) - Date.UTC(...d0.split("-").map(Number).map((x, i) => (i === 1 ? x - 1 : x)))) / MS_DAY) + 1;
 }
 function warmupStage(account, now, config) {
-  const mult = (account.account_aged === false || account.posted_manually === false) ? config.warmup_multiplier_if_unsure : 1;
+  if (account.warmup_mode === "active") return null; // the operator cleared it: no warm-up at all
+  const slow = account.warmup_mode === "slow" || account.account_aged === false || account.posted_manually === false;
+  const mult = slow ? config.warmup_multiplier_if_unsure : 1;
   const day = dayNumber(account, now, config);
   return config.warmup.find((w) => day >= w.start_day * mult - (mult - 1) && day <= w.end_day * mult) || null;
 }
@@ -281,10 +308,16 @@ function groupBlock(c, g) {
   const { now, pageId, fp, config } = g;
   const toGroup = postsForGroup(g.posts, c);
   const lastOf = (ps) => Math.max(...ps.map((p) => p.t));
-  const recent = toGroup.filter((p) => now.getTime() - p.t < config.group_cooldown_days * MS_DAY);
-  if (recent.length) return { why: "cooldown", until: new Date(lastOf(recent) + config.group_cooldown_days * MS_DAY).toISOString() };
-  const same = toGroup.filter((p) => p.page_id === pageId && now.getTime() - p.t < config.property_group_cooldown_days * MS_DAY);
-  if (same.length) return { why: "property_cooldown", until: new Date(lastOf(same) + config.property_group_cooldown_days * MS_DAY).toISOString() };
+  // This account's posts to this group today (Jerusalem date): up to group_daily_cap.
+  const today = toGroup.filter((p) => localDate(new Date(p.t), config.timezone) === localDate(now, config.timezone));
+  if (today.length >= config.group_daily_cap) return { why: "group_daily_cap", until: null };
+  // A repeating campaign (c.repeat_days: the agent's own "every N days")
+  // returns on that rhythm — an hour short, so it does not creep later each
+  // round — and never sooner than property_group_cooldown_days (3).
+  const every = Number(c.repeat_days) > 0 ? Number(c.repeat_days) * MS_DAY - MS_HOUR : null;
+  const propMs = Math.max(every || 0, config.property_group_cooldown_days * MS_DAY);
+  const same = toGroup.filter((p) => p.page_id === pageId && now.getTime() - p.t < propMs);
+  if (same.length) return { why: "property_cooldown", until: new Date(lastOf(same) + propMs).toISOString() };
   // What OTHER Forly accounts did to this group (group_activity/{group_id}|{date}, Task 16).
   const ga = (g.groupActivity || {})[c.group_id] || {};
   if ((ga.posts_today || 0) >= config.group_global_daily_cap) return { why: "group_daily_cap", until: null };
@@ -379,6 +412,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 }
 
 module.exports = {
+  capsOff,
   DEFAULTS, CALENDAR_OK, nextSlot, groupBlock, withTimes, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
   wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },

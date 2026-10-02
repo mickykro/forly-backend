@@ -260,6 +260,9 @@ async function accountView(phone, conn, deps, now, opts = {}) {
     penalty_until: conn.posting_penalty_until || null,
     account_aged: conn.posting_account_aged === undefined ? null : conn.posting_account_aged,
     posted_manually: conn.posting_posted_manually === undefined ? null : conn.posting_posted_manually,
+    // The operator's call (admin): "active" — an account busy enough to post at once, no warm-up;
+    // "slow" — the slower warm-up whatever the agent answered; null — by the agent's answers.
+    warmup_mode: ["active", "slow"].includes(conn.posting_warmup_mode) ? conn.posting_warmup_mode : null,
     plan_seed: safety.planSeed(phone),
     posts,
   };
@@ -280,7 +283,7 @@ const PAGE_DEDUP_DAYS = 30;
 function limitsFor(account, at, config, targetType = "group") {
   return {
     daily_cap: safety.dailyCapFor(account, at, config), group_global_daily_cap: config.group_global_daily_cap,
-    dedup_days: targetType === "page" ? PAGE_DEDUP_DAYS : config.property_group_cooldown_days,
+    dedup_days: targetType === "page" ? PAGE_DEDUP_DAYS : config.property_group_cooldown_days || 1 / 1440, // 3 days; no cooldown (local): a minute
   };
 }
 

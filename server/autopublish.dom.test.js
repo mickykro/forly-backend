@@ -59,9 +59,18 @@ function findChromium() {
     // The server refuses h1 for a sale, like POST /campaigns does.
     if (q.body.page_id === "pgR" && q.body.group_ids.includes("h1")) { state.calls.push(["refused", q.body]); return r.status(422).json({ error: "listing_type_not_allowed", group_ids: ["h1"] }); }
     state.calls.push(["create", q.body]);
-    const c = { id: `c-${q.body.page_id}`, page_id: q.body.page_id, status: "running", mode: q.body.mode, groups: q.body.group_ids.map((g) => ({ group_id: g })), posts: [], wait_reason: "browse_only" };
+    const c = { id: `c-${q.body.page_id}`, page_id: q.body.page_id, status: "running", mode: q.body.mode, groups: q.body.group_ids.map((g) => ({ group_id: g })), wait_reason: "browse_only",
+      // per_post: the first post waits for the agent (the page approves it with the confirmation just given)
+      posts: q.body.mode === "per_post" && !state.campaigns[q.body.page_id] ? [{ id: "p1", status: "pending_approval", group_id: q.body.group_ids[0], group_name: "דירות בכפר סבא", copy: "🏡 דירה" }] : [] };
     state.campaigns[q.body.page_id] = c;
     r.status(201).json({ campaign: c });
+  });
+  app.get("/api/posting/campaigns", (q, r) => r.json({ campaigns: Object.values(state.campaigns).filter((c) => c.page_id === q.query.page_id) }));
+  app.post("/api/posting/campaigns/:id/posts/:post/approve", (q, r) => {
+    state.calls.push(["approve", q.params.post, q.body]);
+    const c = Object.values(state.campaigns).find((x) => x.id === q.params.id);
+    c.posts = c.posts.map((p) => (p.id === q.params.post ? { ...p, status: "scheduled", scheduled_at: new Date().toISOString(), copy: undefined } : p));
+    r.json({ campaign: c });
   });
   app.post("/api/posting/campaigns/:id/stop", (q, r) => {
     state.calls.push(["stop", q.params.id]);
@@ -92,7 +101,8 @@ function findChromium() {
     const card = await rows.nth(0).locator(".ap-fb").textContent();
     assert.ok(card.includes("🏡 דירה בpgK") && card.includes("מיקי") && card.includes("https://f.ly/p/pgK") && card.includes("דירות בכפר סבא"), card);
     assert.equal(await rows.nth(0).locator(".ap-fb video").getAttribute("src"), "https://cdn.f.ly/pgK.mp4", "the post's video");
-    assert.equal(await rows.nth(0).locator("[data-toggle]").isChecked(), false);
+    assert.equal(await rows.nth(0).locator("[data-toggle]").isChecked(), true, "the switch shows the choice at once; nothing has started");
+    assert.ok((await rows.nth(0).locator(".ap-preview").textContent()).includes("יפורסם בקבוצות ("), "the chosen groups are named before confirming");
     assert.deepEqual(state.calls.map((c) => c[0]), ["preview"]);
     assert.equal(state.calls[0][1].group_id, "k1", "previewed for the property's first group");
     // Confirmed without the consent: refused, the switch stays off, nothing sent.
@@ -113,7 +123,8 @@ function findChromium() {
     await page.waitForFunction(() => /פעיל/.test(document.querySelector(".ap-prop").textContent));
     state.calls = state.calls.filter((c) => c[0] !== "preview");
     await page.waitForFunction(() => /פעיל/.test(document.querySelector(".ap-prop").textContent));
-    const [put, create] = state.calls;
+    const [put, create, approve] = state.calls;
+    assert.deepEqual(approve, ["approve", "p1", {}], "confirming at the switch approved the first post: no second approval, text and time untouched");
     assert.equal(put[0], "put"); assert.equal(put[1].consent, true); assert.equal(put[1].consent_version, "v1");
     assert.equal(create[0], "create");
     assert.deepEqual([create[1].page_id, create[1].group_ids, create[1].mode, create[1].consent], ["pgK", ["k1"], "per_post", true]);
@@ -157,7 +168,7 @@ function findChromium() {
     await page.click('button[data-confirm="pgR"]');
     await page.waitForFunction(() => /הורדנו קבוצה אחת שלא מתאימה/.test(document.getElementById("msg").textContent));
     const kinds = state.calls.map((c) => c[0]).filter((k) => k !== "preview");
-    assert.deepEqual(kinds, ["put", "refused", "create"]);
+    assert.deepEqual(kinds, ["put", "refused", "create", "approve"]);
     assert.deepEqual(state.calls.find((c) => c[0] === "create")[1].group_ids, ["k1"]);
     console.log("autopublish.dom.test.js ok");
   } finally { await browser.close(); srv.close(); }

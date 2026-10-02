@@ -4,6 +4,7 @@
    time derives from NOW through a settable clock. Not a test itself. */
 process.env.PROFILE_KEY = process.env.PROFILE_KEY || "test-profile-key-16b";
 process.env.FORLY_ENV = "local";
+process.env.POSTING_CAPS = "1"; // these tests are about the caps a real environment keeps
 const db = require("./db");
 const store = require("./posting-store");
 const locks = require("./profile-lock");

@@ -299,9 +299,14 @@
         `${stats ? ` · ${U.esc(stats)}` : ""}</div>${destination ? `<div class="l3 camp-small camp-muted">${U.esc(destination)}</div>` : ""}` +
         `${Why.failDetail(p) ? `<div class="l3 camp-small camp-muted">${U.esc(Why.failDetail(p))}</div>` : ""}`;
       if (p.status === "pending_approval") {
+        // The text is the agent's to edit, and so is the time: both go with the approval.
+        let text = null, when = null;
         if (typeof p.copy === "string") {
           const d = document.createElement("details"); d.open = true;
-          d.innerHTML = "<summary>מה יפורסם</summary><pre></pre>"; d.querySelector("pre").textContent = p.copy; li.appendChild(d);
+          d.innerHTML = '<summary>מה יפורסם — אפשר לערוך</summary><textarea class="camp-copy" dir="auto" maxlength="3000"></textarea>' +
+            '<label class="camp-when camp-small">מתי לפרסם <input type="datetime-local"> <span class="camp-muted">ריק = בהקדם האפשרי</span></label>';
+          text = d.querySelector("textarea"); text.value = p.copy; text.rows = Math.min(18, p.copy.split("\n").length + 2);
+          when = d.querySelector("input"); li.appendChild(d);
         }
         const bar = document.createElement("div"); bar.className = "camp-row-actions";
         const b = (label, cls, path) => {
@@ -312,7 +317,16 @@
         if (U.approveBlocked(settings && settings.halt_state, c)) {
           const note = document.createElement("span"); note.className = "camp-muted camp-small"; note.textContent = "האישור יתאפשר כשהפרסום יחזור.";
           bar.append(b("דילוג", "btn-ghost", "skip"), note);
-        } else bar.append(b("אישור ופרסום", "btn-gold", "approve"), b("דילוג", "btn-ghost", "skip"));
+        } else {
+          const ok = document.createElement("button"); ok.type = "button"; ok.className = "btn btn-sm btn-gold"; ok.textContent = "אישור ופרסום";
+          ok.addEventListener("click", () => {
+            const body = {};
+            if (text && text.value.trim() && text.value !== p.copy) body.copy = text.value;
+            if (when && when.value) body.scheduled_at = new Date(when.value).toISOString(); // the browser's local time
+            act(`posts/${encodeURIComponent(p.id)}/approve`, ok, body);
+          });
+          bar.append(ok, b("דילוג", "btn-ghost", "skip"));
+        }
         li.appendChild(bar);
       }
       return li;
@@ -382,10 +396,10 @@
     function startPolling() { if (!timer) timer = setInterval(refresh, 30000); }
     function stopPolling() { clearInterval(timer); timer = null; }
 
-    async function act(path, btn) {
+    async function act(path, btn, body) {
       if (!campaign) return;
       if (btn) btn.disabled = true;
-      try { show((await post(`/api/posting/campaigns/${encodeURIComponent(campaign.id)}/${path}`)).campaign); return true; }
+      try { show((await post(`/api/posting/campaigns/${encodeURIComponent(campaign.id)}/${path}`, body)).campaign); return true; }
       catch (e) { say(U.errorText(e)); if (e && e.code === "needs_reconnect") refresh(); return false; }
       finally { if (btn) btn.disabled = false; }
     }

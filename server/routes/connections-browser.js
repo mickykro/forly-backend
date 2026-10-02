@@ -96,12 +96,20 @@ async function titleLabel(page) {
   const P = require("../posting-driver-proof");
   return P.norm(String(title || "").replace(/^\(\d+\+?\)\s*/, "").split("|")[0]).slice(0, 120) || null;
 }
-// The banner identity marker R3 compares against, else the title.
+// The identity R3 compares against (posting-driver-proof.readIdentity, the
+// very read the proof makes), else the profile page's title. Only ever a
+// person's name: a title read before the page filled in is just "Facebook" —
+// that was once stored as the label, and every post then failed its identity
+// proof. So the title is waited for, and anything that is not a name is null
+// (posting then fails closed with no_identity_label until a reconnect).
 async function identityLabel(page) {
   const P = require("../posting-driver-proof");
-  let header = "";
-  try { header = await P.textOf(page, P.SELECTORS.identity); } catch (e) { header = ""; }
-  return (header && header.length <= 120 ? header : null) || (await titleLabel(page));
+  let name = "";
+  try { name = await P.readIdentity(page); } catch (e) { name = ""; }
+  if (P.isPersonName(name)) return name;
+  try { await page.waitForFunction(() => document.title && !/^(\(\d+\+?\)\s*)?Facebook$/i.test(document.title.trim()), null, { timeout: 8000 }); } catch (e) { /* still bare: rejected below */ }
+  const title = await titleLabel(page);
+  return P.isPersonName(title) ? title : null;
 }
 
 module.exports = function createConnectionsBrowserRouter(ctx) {
@@ -304,10 +312,10 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         const text = await page.innerText("body");
         if (isLoginWall(page.url(), text)) return { loggedIn: false, label: null };
         // The profile's display name, so the campaign card can say "posting as …"
-        // — and the identity R3 proves before every post (I8): read from the
-        // same banner marker the driver's proof reads, normalised the same way,
-        // so the two can match exactly. Fallback: the tab title, without a
-        // "(3) " unread counter and the " | Facebook" suffix.
+        // — and the identity R3 proves before every post (I8): the same read
+        // the driver's proof makes, normalised the same way, so the two can
+        // match exactly. Fallback: the tab title, without a "(3) " unread
+        // counter and the " | Facebook" suffix — never the bare site name.
         const label = platform === "facebook" ? await identityLabel(page) : await titleLabel(page);
         // The Pages this account manages, each with its numeric id when its own
         // page says it (I4) — R3 proves a Page post against that id, so a Page

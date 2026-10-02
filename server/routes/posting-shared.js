@@ -28,7 +28,7 @@ const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const SECRET_RE = /wss?:\/\/|viewer\.driver\.dev/i;
 
 // ── the public view of a campaign ──
-const CAMPAIGN_FIELDS = ["id", "page_id", "mode", "repeat", "status", "pause_reason", "wait_reason", "expires_at",
+const CAMPAIGN_FIELDS = ["id", "page_id", "mode", "repeat", "repeat_days", "status", "pause_reason", "wait_reason", "expires_at",
   "consent_at", "consent_version", "targets", "restarted_at", "created_at", "updated_at"];
 const GROUP_FIELDS = ["group_id", "agent_policy", "is_member", "catalog_policy", "listing_type_allowed", "posting_currently_available"];
 const POST_FIELDS = ["id", "target", "group_id", "status", "scheduled_at", "approved_at", "posted_at", "error_code", "error_check", "failed_step", "link_kind"];
@@ -91,11 +91,12 @@ function actionLink({ campaignId, postId, action, now } = {}, { authSecret, page
 // → { c, p, a } when the link is genuine and unexpired; { error: "invalid" | "expired" } otherwise.
 function readActionLink(q, authSecret, nowMs) {
   const s = (k) => (typeof q[k] === "string" ? q[k] : "");
-  const c = s("c"), p = s("p"), a = s("a"), e = s("e"), t = s("t");
+  // Chat apps and copy-paste tack punctuation onto a URL's end ("…Mp0."); a token is base64url only.
+  const c = s("c"), p = s("p"), a = s("a"), e = s("e"), t = s("t").replace(/[^A-Za-z0-9_-]+$/, "");
   if (!ID_RE.test(c) || (p && !ID_RE.test(p)) || !ACTIONS.has(a) || !/^\d{1,12}$/.test(e) || !t || t.length > 128) return { error: "invalid" };
   if (!authSecret || !verifyActionToken([c, p, a, e], t, authSecret)) return { error: "invalid" };
   if (Number(e) * 1000 <= nowMs) return { error: "expired" };
-  return { c, p, a };
+  return { c, p, a, e, t };
 }
 
 const card = (title, body, extraHtml = "") => `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">` +

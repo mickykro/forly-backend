@@ -105,6 +105,10 @@ async function syncOneStale(deps, x, now) {
   for (const phone of await x.store.listConnectedPhones("facebook")) {
     const conn = (await x.db.getConnection(phone)) || {};
     if (!conn.posting_permission || conn.posting_permission.enabled !== true || !sync.isStale(conn, now)) continue;
+    // A posting account syncs inside its posting session (posting-tick's
+    // afterPosts) — a session of its own only once that is 3 days overdue.
+    const overdue = now.getTime() - (ms(conn.facebook_groups_synced_at) || 0) > 10 * 86400000;
+    if (!overdue && (await x.store.listPostingCampaignsByPhone(phone).catch(() => [])).some((c) => c.status === "running")) continue;
     if (now.getTime() - (ms(conn.facebook_groups_sync_attempted_at) || 0) < SYNC_RETRY_MS) continue;
     if (loginOpen(conn, "facebook", now.getTime())) continue; // the agent is logging in on this profile right now
     const release = x.locks.tryAcquire(phone, "facebook");
@@ -149,6 +153,34 @@ async function retryProfileDeletes(deps, x, now) {
 }
 
 let sweeping = false;
+// Accounts tick side by side, not one after another (2 Oct 2026: a single
+// account's post — ten minutes, longer with several in one session — held up
+// every other agent). At most DRIVER_MAX_CONCURRENT at once, the Driver
+// budget; an account still posting from an earlier sweep is not started
+// again, and the queue outlives the sweep that filled it.
+const inFlight = new Map(); // phone → its tick
+const queued = [];
+function startTicks(deps, at) {
+  const cap = Math.max(1, Number((deps.env || process.env).DRIVER_MAX_CONCURRENT || 2));
+  while (queued.length && inFlight.size < cap) {
+    const phone = queued.shift();
+    const run = Promise.resolve().then(() => T.tickAccount(phone, deps, at()))
+      .then((outcome) => { state.accounts.set(phone, { at: stamp(), outcome }); },
+        (e) => { console.error(redact(`posting tick ${tail(phone)}: ${code(e)}`)); state.accounts.set(phone, { at: stamp(), outcome: "error" }); })
+      .finally(() => { inFlight.delete(phone); startTicks(deps, at); });
+    inFlight.set(phone, run);
+  }
+}
+async function tickAll(phones, deps, at) {
+  for (const p of phones) if (!inFlight.has(p) && !queued.includes(p)) queued.push(p);
+  startTicks(deps, at);
+  // The quick ticks (housekeeping, planning) finish inside the sweep; a post
+  // in progress goes on in the background and frees its slot when it ends.
+  const until = Date.now() + (deps.sweepWaitMs === undefined ? 3000 : deps.sweepWaitMs);
+  while ((queued.length || inFlight.size) && Date.now() < until) {
+    await Promise.race([...inFlight.values(), new Promise((r) => setTimeout(r, 200))]);
+  }
+}
 // What the sweeper last did, for the local monitor (routes/dev-driver.js):
 // the last sweep's result and each account's last tick outcome. In memory.
 const state = { started: false, last: null, accounts: new Map() };
@@ -176,7 +208,7 @@ async function sweep(deps = {}, now) {
     // (a tick with nothing running does nothing else).
     const live = (await x.store.listPostingCampaignsByStatus("running", 500)).concat(await x.store.listPostingCampaignsByStatus("paused", 500));
     const phones = [...new Set(live.map((c) => c.phone))];
-    for (const phone of phones) state.accounts.set(phone, { at: stamp(), outcome: await T.tickAccount(phone, deps, at()) });
+    await tickAll(phones, deps, at);
     // Connected accounts with nothing running still warm up — at most one new
     // browse per sweep, so a fleet of fresh connections is spread out.
     if (!localMode.skipWarmup(deps.env || process.env)) {
@@ -246,5 +278,5 @@ module.exports = {
   sweep, startSweeper, liveDeps, SWEEP_MS,
   status: () => ({ started: state.started, last: state.last, accounts: [...state.accounts].map(([phone, v]) => Object.assign({ phone }, v)) }),
   tick: T.tick, tickAccount: T.tickAccount, runAttempt: T.runAttempt, haltAccount: H.haltAccount,
-  _test: { reap, writeHealth, fleetBreaker, syncOneStale, reconcileOne, retryProfileDeletes, optionalFn, reset: () => { sweeping = false; } },
+  _test: { reap, writeHealth, fleetBreaker, syncOneStale, reconcileOne, retryProfileDeletes, optionalFn, reset: () => { sweeping = false; inFlight.clear(); queued.length = 0; } },
 };

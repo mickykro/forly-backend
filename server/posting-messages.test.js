@@ -70,6 +70,9 @@ const verify = (u, action, nowMs = Date.now()) =>
       const other = a === "approve" ? "stop" : "approve";
       const q2 = Object.fromEntries(links[a].searchParams); q2.a = other;
       assert.equal(readActionLink(q2, OPTS.authSecret, Date.now()).error, "invalid", `${a} link must not verify for ${other}`);
+      // A sentence-ending "." pasted onto the link still verifies.
+      const q3 = Object.fromEntries(links[a].searchParams); q3.t += ".";
+      assert.equal(readActionLink(q3, OPTS.authSecret, Date.now()).a, a, `${a} link with a trailing dot`);
     }
   }
 

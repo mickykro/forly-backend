@@ -47,6 +47,7 @@ const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
 const P = require("./posting-driver-proof");
 const media = require("./posting-media");
 const shots = require("./posting-shots");
+const chain = require("./posting-chain");
 const diag = require("./posting-diag");
 
 const S = P.SELECTORS;
@@ -56,6 +57,7 @@ const FEED_URL = "https://www.facebook.com/";
 const POST_SESSION_S = 14 * 60;
 const RECHECK_SESSION_S = 5 * 60;
 const VERIFY_ROUNDS = 3;
+const VERIFY_ROUNDS_VIDEO = 10; // Facebook processes a video for minutes before the post shows
 const RECHECK_SCROLLS = 4;
 const MIN_FEED_FOR_ABSENT = 5; // posts read, each with text and author, before "absent" is definitive
 // [Unverified] the group feed sorted newest-first; Task 24 confirms the parameter.
@@ -153,7 +155,22 @@ async function nav(page, x, url) {
   await x.guard("navigate");
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-  } catch { return false; }
+  } catch (e) {
+    // The reason is kept (it used to be swallowed), and a goto that threw on a
+    // page that did arrive — the load event missed, or a redirect inside
+    // Facebook interrupting it — is not a failed navigation: the address and
+    // the document's own state decide. Every read after this still fails closed.
+    const first = String((e && e.message) || e).split("\n")[0].slice(0, 160);
+    const here = (() => { try { return new URL(page.url()); } catch { return null; } })();
+    const want = new URL(url);
+    const arrived = !!here && here.hostname === want.hostname && here.pathname.replace(/\/+$/, "").startsWith(want.pathname.replace(/\/+$/, ""));
+    const state = () => Promise.resolve().then(() => page.evaluate(() => document.readyState)).catch(() => "");
+    let ready = arrived && ["interactive", "complete"].includes(await state());
+    // At the right address and still loading (a remote session can take more than 45 s): one more minute.
+    if (arrived && !ready) ready = await page.waitForLoadState("domcontentloaded", { timeout: 60000 }).then(() => true, () => false);
+    console.warn(`posting nav …${String(x.attempt.key).slice(-6)}: ${first} (arrived=${arrived}, ready=${ready})`);
+    if (!ready) return false;
+  }
   await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
   return true;
 }
@@ -184,7 +201,11 @@ async function humanType(page, target, text, x) {
   for (const w of String(text).split(/(\s+)/)) {
     if (!w) continue;
     if (!(await target.evaluate(ensureFocus).catch(() => false))) throw fail("composer_focus_lost", "focus left the editor");
-    await target.pressSequentially(w, { delay: x.typingDelay() });
+    // A word at a time: over a remote browser every key is several round
+    // trips (a second a character, measured), and a post took five minutes
+    // to type. Line breaks stay real Enter presses.
+    if (/[\r\n]/.test(w) || typeof page.keyboard.insertText !== "function") await target.pressSequentially(w, { delay: x.typingDelay() });
+    else { await page.keyboard.insertText(w); await page.waitForTimeout(w.length * x.typingDelay()); }
     if (/\s/.test(w) && x.rand() < 0.06) await x.wait(page, 0.4, 1.5);
   }
 }
@@ -211,7 +232,7 @@ async function submitReady(page, x) {
   return true;
 }
 
-async function drive(page, x, want, args) {
+async function drive(page, x, want, args, opts = {}) {
   const { attempt, kind } = x;
   x.page = page;
   const copy = args.copy;
@@ -221,7 +242,8 @@ async function drive(page, x, want, args) {
   // will publish. This is a passive readiness/observation preflight only: no
   // scrolling, post-opening, likes, stories or synthetic "human" actions. The
   // separate calendar warm-up and idle browser sessions remain disabled.
-  if (localMode.enabled(env)) {
+  // opts.warm: a later post in the same session (posting-chain) — the feed and the dwell are already behind it.
+  if (opts.warm) { /* straight to the destination */ } else if (localMode.enabled(env)) {
     if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
     done = await preSubmitSignal(page, x);
     if (done) return done;
@@ -245,6 +267,19 @@ async function drive(page, x, want, args) {
 
   // 2. the destination: signals, membership, its canonical id
   if (!(await nav(page, x, attempt.target_url))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_group" });
+  // Facebook serves the header first and its splash screen stays up while the
+  // rest loads (a minute, on a slow session): the composer entry or the Join
+  // button is what says the page is really there. Not there in time → the
+  // checks below fail closed, as before.
+  // Seen stuck on the splash for good: then one reload, what anyone does with
+  // a page that will not load.
+  const there = () => page.locator(`${S.composer}, ${S.joinGroup}`).first().waitFor({ timeout: 45000 }).then(() => true, () => false);
+  if (!(await there()) && (await P.countOf(page, S.composer)) === 0 && (await P.countOf(page, S.joinGroup)) === 0) {
+    await x.guard("navigate");
+    console.warn(`posting nav …${String(attempt.key).slice(-6)}: destination still loading, reloading once`);
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+    await there();
+  }
   const landed = await P.readSignal(page, x.copy);
   done = await preSubmitSignal(page, x, landed);
   if (done) return done;
@@ -270,7 +305,18 @@ async function drive(page, x, want, args) {
   if ((await composer.count().catch(() => 0)) === 0) return x.end("verified_failed", { error_code: "composer_not_found", check: "composer_button" });
   await composer.click();
   const editor = page.locator(S.editor).first();
-  if (!(await editor.waitFor({ timeout: 10000 }).then(() => true, () => false))) return x.end("verified_failed", { error_code: "composer_not_found", check: "editor_did_not_open" });
+  const opened = () => editor.waitFor({ timeout: 45000 }).then(() => true, () => false);
+  if (!(await opened())) {
+    // Seen live: the dialog opens as an empty shell and its editor never
+    // arrives. Nothing is typed yet — close it and open it once more.
+    // Reopening the same dialog did not help when tried: the page is loaded afresh.
+    await x.guard("navigate");
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+    await composer.waitFor({ timeout: 60000 }).catch(() => {});
+    await x.wait(page, 2, 4);
+    await composer.click().catch(() => {});
+    if (!(await opened())) return x.end("verified_failed", { error_code: "composer_not_found", check: "editor_did_not_open" });
+  }
   // What the page says comes first (fix round 2): a restriction dialog that
   // opened around the composer is `restricted`, not a composer problem.
   done = await preSubmitSignal(page, x);
@@ -330,10 +376,18 @@ async function checkPermalink(page, x, found, copy) {
   const sig = await P.readSignal(page, copy);
   if (sig !== "ok") return { seen: "unread", signal: HALTING.has(sig) ? sig : undefined };
   const id = await P.readTargetId(page, x.kind);
-  const text = await P.textOf(page, S.postMessage);
-  const author = await P.textOf(page, S.postAuthor);
-  if (!id && !text && !author) return { seen: "unread" };
-  return { seen: id === x.targetId && P.fingerprint(text) === P.fingerprint(copy) && author === x.author ? "confirmed" : "contradicted" };
+  // The post's own dialog first (the feed behind it holds other posts), else the page.
+  const text = (await P.textOf(page, S.postDialogMessage)) || (await P.textOf(page, S.postMessage));
+  const author = (await P.textOf(page, S.postDialogAuthor)) || (await P.textOf(page, S.postAuthor));
+  // In a group the post's header names the GROUP where the author was expected;
+  // who wrote it is in the dialog's own title ("הפוסט של Micky Kroitoro").
+  const titled = (await P.dialogHeadings(page)).some((h) => h === `הפוסט של ${x.author}` || h.toLowerCase() === `${x.author}'s post`.toLowerCase());
+  const hit = { id: id === x.targetId, text: P.fingerprint(text) === P.fingerprint(copy), author: author === x.author || titled };
+  x.diag = { permalink_read: { id: !!id, id_ok: hit.id, text_chars: text.length, text_ok: hit.text, author_read: !!author, author_ok: hit.author } }; // names and lengths only
+  if (hit.id && hit.text && hit.author) return { seen: "confirmed" };
+  // Only what was actually read can contradict: an empty read is "could not read", not "different".
+  // (The target's id is the exception: a page whose content was read but whose id is missing or disputed is not ours.)
+  return { seen: (!hit.id && (id || text || author)) || (text && !hit.text) || (author && !hit.author) ? "contradicted" : "unread" };
 }
 
 // The link, as the first comment. Never throws; → null or a comment_error_code.
@@ -346,7 +400,9 @@ async function addComment(page, x, comment) {
     await humanType(page, box, comment, x);
     await x.wait(page, 1, 3);
     if (!(await x.allows("post"))) return "posting_disabled"; // R2: the last await before the click
-    await page.locator(S.commentSubmit).first().click();
+    // No send button under the box (today's Facebook): Enter sends a comment.
+    if ((await P.countOf(page, S.commentSubmit)) > 0) await page.locator(S.commentSubmit).first().click();
+    else await page.keyboard.press("Enter");
     await x.wait(page, 2, 4);
     return null;
   } catch { return "comment_failed"; }
@@ -354,7 +410,16 @@ async function addComment(page, x, comment) {
 
 async function verify(page, x, copy, comment, clickError) {
   const ids = x.want.ids;
-  for (let round = 0; round < VERIFY_ROUNDS; round++) {
+  const rounds = x.media ? VERIFY_ROUNDS_VIDEO : VERIFY_ROUNDS;
+  for (let round = 0; round < rounds; round++) {
+    // A post with a video is not in the feed until Facebook has processed it
+    // ("מעבד את הסרטון"), and the feed does not refresh itself: wait, and
+    // reload every fourth look — twice at most, each reload a full page of
+    // traffic. Only ever looking — never a second click.
+    if (x.media && round > 0) {
+      await x.wait(page, 12, 18);
+      if (round % 4 === 0 && (await x.allows("navigate"))) await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+    }
     await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
     await x.wait(page, 2, 5);
     const sig = await P.readSignal(page, copy); // never the composer, never the copy's own words
@@ -377,7 +442,8 @@ async function verify(page, x, copy, comment, clickError) {
       if (commentCode) { out.comment_error_code = commentCode; await x.annotate({ comment_error_code: commentCode }); }
       return out;
     }
-    if (sig === "pending_approval" && !x.pendingBefore) return x.end("submitted_for_approval", {});
+    // A failed click submitted nothing: a pending banner then is not ours either.
+    if (sig === "pending_approval" && !x.pendingBefore && !clickError) return x.end("submitted_for_approval", {});
   }
   return x.end("outcome_unknown", { error_code: clickError ? "click_error" : "not_verified" });
 }
@@ -414,10 +480,68 @@ async function run(kind, args = {}, deps = {}) {
       catch (e) { x.diag = (e && e.detail) || null; return await x.end("verified_failed", { error_code: /^media_/.test((e && e.code) || "") ? e.code : "media_unavailable", check: "video_download" }); }
     }
     const withPage = deps.withPage || driver.withPage;
-    return await withPage(sessionOpts(x, "forly-post:", POST_SESSION_S), (page) => drive(page, x, want, args), pageDepsOf(x));
+    const duration = chain.enabled(deps) ? Math.round(chain.SESSION_MS(deps.env) / 1000) : POST_SESSION_S;
+    return await withPage(sessionOpts(x, "forly-post:", duration), async (page) => {
+      let out;
+      try { out = await drive(page, x, want, args); } catch (e) { out = await settleError(x, e); }
+      return more(page, out, x, deps);
+    }, pageDepsOf(x));
   } catch (e) {
     return settleError(x, e);
   }
+}
+
+// The same session, the account's next ready post (posting-chain): the tick
+// settles the post just made (deps.next); the browser dwells on the feed for
+// 1.5–5.8 minutes; then the next one, prepared and reserved now, is posted
+// here — straight to its group, the feed already behind it.
+async function more(page, out, x0, deps) {
+  let next = typeof deps.next === "function" ? deps.next : null;
+  while (next) {
+    let prepare = null;
+    try { prepare = await next(out); } catch { prepare = null; }
+    if (!prepare) break;
+    if (!(await between(page, x0))) break;
+    let call = null;
+    try { call = await prepare(); } catch { call = null; }
+    if (!call) break;
+    const x = context(call.kind, call.args, call.deps);
+    x.page = page;
+    try {
+      await x.step("session_started");
+      const want = preflight(call.kind, x, call.args);
+      if (!want.ok) out = await x.end("verified_failed", { error_code: want.code, check: want.check || "preflight" });
+      else {
+        x.want = want;
+        await x.guard("session");
+        if (call.args.videoUrl) x.media = await media.fetchVideo(call.args.videoUrl, call.deps);
+        out = await drive(page, x, want, call.args, { warm: true });
+      }
+    } catch (e) { out = await settleError(x, e).catch(() => ({ state: null, error_code: "chain_error" })); }
+    next = call.deps.next;
+  }
+  // The session's housekeeping on the same page (posting-tick): yesterday's
+  // checks, a stale groups sync. Not after a halting page.
+  if (typeof deps.afterPosts === "function" && !(out && HALTING.has(out.signal))) {
+    try { await deps.afterPosts(page); } catch { /* never in the way of the posts */ }
+  }
+  if (next === null && typeof deps.next !== "function") return out;
+  return Object.assign({}, out, { chained: true });
+}
+
+// Between two posts: on the feed, reading, for 1.5–5.8 minutes. → false when
+// the page says stop (a halting signal) or the switches do.
+async function between(page, x) {
+  if (!(await x.allows("dwell")) || !(await nav(page, x, FEED_URL).catch(() => false))) return false;
+  const until = Date.now() + (typeof x.deps.chainDwellMs === "number" ? x.deps.chainDwellMs : chain.dwellMs(x.rand)); // tests: chainDwellMs
+  while (Date.now() < until) {
+    await page.mouse.wheel(0, Math.round(250 + x.rand() * 650)).catch(() => {});
+    // A video is scrolled past; a text or image post is read (social-dwell).
+    await page.waitForTimeout(social.readFor(await social.centered(page), x.rand));
+    const sig = await P.readSignal(page, "");
+    if (HALTING.has(sig) || sig === "login_required") return false;
+  }
+  return true;
 }
 
 // postToGroup / postToPage({ attempt, copy, comment, videoUrl, dryRun, groupUrl|pageUrl }, deps)

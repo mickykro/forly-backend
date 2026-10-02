@@ -66,6 +66,7 @@ function validCreate(b) {
   const t = S_.parseTargets(b.targets);
   if (g.error || t.error) return null;
   if (b.days !== undefined && !(Number.isFinite(b.days) && b.days >= 1 && b.days <= 30)) return null;
+  if (b.repeat_days !== undefined && b.repeat_days !== null && !(Number.isInteger(b.repeat_days) && b.repeat_days >= 3 && b.repeat_days <= 30)) return null; // never the same property to a group within 3 days
   for (const k of ["repeat", "include_unknown", "account_aged", "posted_manually"]) if (b[k] !== undefined && typeof b[k] !== "boolean") return null;
   return { ids: g.ids, targets: t.targets };
 }
@@ -152,7 +153,7 @@ module.exports = function createPostingRouter(ctx) {
     const page = await db.getPage(b.page_id);
     if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
     const others = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== page.page_id);
-    if (others.length >= MAX_ACTIVE_CAMPAIGNS) return res.status(409).json({ error: "too_many_campaigns" });
+    if (!require("../posting-safety").capsOff() && others.length >= MAX_ACTIVE_CAMPAIGNS) return res.status(409).json({ error: "too_many_campaigns" });
     const wanted = v.targets || S_.DEFAULT_TARGETS;
     if (wanted.includes("page") && !S_.pageConfirmed(conn)) return res.status(409).json({ error: "page_not_confirmed" });
     // Until connect has read the Page's numeric id, R3 could never prove it: refused (I4).
@@ -178,7 +179,7 @@ module.exports = function createPostingRouter(ctx) {
 
     const before = await store.getPostingCampaign(store.campaignId(phone, page.page_id));
     const c = await campaigns.create({
-      phone, page, groups, mode: b.mode, days: b.days, repeat: b.repeat === true, targets: v.targets || undefined,
+      phone, page, groups, mode: b.mode, days: b.days, repeat: b.repeat === true, repeatDays: b.repeat_days || null, targets: v.targets || undefined,
       consent: { at: A.iso(now), version: CONSENT_VERSION },
     }, deps);
     const existing = !!before && !ENDED.has(before.status);
@@ -260,7 +261,19 @@ module.exports = function createPostingRouter(ctx) {
     const postId = String(req.params.post_id);
     if (!(c.posts || []).some((p) => p && p.id === postId)) return res.status(404).json({ error: "post_not_found" });
     if (!(await allowed(S, c.phone, res))) return;
-    return res.json({ campaign: publicView(await campaigns.approvePost(c.id, postId, deps)) });
+    // The agent's own text and time, both optional: the text as edited on the
+    // card, and "not before" for when it goes out (now … 30 days ahead).
+    const b = req.body || {}, opts = {};
+    if (b.copy !== undefined && b.copy !== null) {
+      opts.copy = campaigns.cleanCopy(b.copy);
+      if (!opts.copy) return res.status(400).json({ error: "invalid_input", field: "copy" });
+    }
+    if (b.scheduled_at !== undefined && b.scheduled_at !== null && b.scheduled_at !== "") {
+      const t = new Date(String(b.scheduled_at)).getTime(), now = S.clock().getTime();
+      if (!Number.isFinite(t) || t > now + 30 * 86400000) return res.status(400).json({ error: "invalid_input", field: "scheduled_at" });
+      opts.at = new Date(Math.max(t, now));
+    }
+    return res.json({ campaign: publicView(await campaigns.approvePost(c.id, postId, deps, opts)) });
   }));
 
   // Always allowed, whatever the switches say.
@@ -296,7 +309,7 @@ module.exports = function createPostingRouter(ctx) {
     if (!camp) { send(404, "לא נמצא", "הקמפיין הזה כבר לא קיים."); return null; }
     const post = link.a === "stop" ? null : (camp.posts || []).find((p) => p && p.id === link.p);
     if (link.a !== "stop" && !post) { send(404, "לא נמצא", "הפוסט הזה כבר לא קיים בקמפיין."); return null; }
-    return { link: Object.assign(link, { e: String(req.query.e), t: String(req.query.t) }), camp, post, send };
+    return { link, camp, post, send };
   }
 
   router.get("/act", wrap("act.ask", async (req, res) => {

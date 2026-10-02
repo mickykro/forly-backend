@@ -328,6 +328,20 @@ module.exports = function createAdminPostingRouter({
     res.json({ ok: true, audited, phone_tail: tail(phone), class: verdict.cls, as });
   }));
 
+  // ── the account's warm-up: the operator decides (active | slow | auto) ──
+  router.post("/accounts/:account/warmup", ...guard, wrap(async (req, res) => {
+    const b = req.body || {};
+    if (!["active", "slow", "auto"].includes(b.mode)) return res.status(400).json({ error: "invalid_input", field: "mode" });
+    const reason = cleanReason(b.reason);
+    if (!reason) return res.status(400).json({ error: "reason_required" });
+    const phone = await resolveAccount(req.params.account, clock());
+    if (!phone || !(await db.getConnection(phone))) return res.status(404).json({ error: "not_found" });
+    await db.setConnection(phone, { posting_warmup_mode: b.mode === "auto" ? null : b.mode, posting_warmup_set_at: iso(clock()), posting_warmup_set_by: opTail(req) });
+    const audited = await audit(req, "warmup_mode", { phone, reason, detail: { mode: b.mode } });
+    console.log(`posting admin: account …${tail(phone)} warm-up ${b.mode} by …${opTail(req)}`);
+    res.json({ ok: true, audited, phone_tail: tail(phone), mode: b.mode });
+  }));
+
   // ── suspected compromise: revoke and delete the profile (R5) ──
   // The operator's judgement is itself the detection: an account not already
   // halted as suspected_compromise is halted as one (disabled, profile

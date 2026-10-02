@@ -183,6 +183,17 @@
       </div>
       <div class="stat-grid" id="postingCounts"></div>
       <section class="message-card" style="margin-bottom:18px">
+        <h2>חימום חשבון</h2>
+        <p class="posting-note">חשבון פעיל מספיק יכול לפרסם מיד. חשבון חדש או שקט — חימום איטי. "אוטומטי" — לפי מה שהסוכן ענה.</p>
+        <div class="posting-row" style="gap:8px;flex-wrap:wrap">
+          <input id="postingWarmPhone" inputmode="tel" placeholder="טלפון הסוכן (9725…)" style="padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px;direction:ltr">
+          <select id="postingWarmMode" style="padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px">
+            <option value="active">פעיל מיד — בלי חימום</option><option value="slow">חימום איטי</option><option value="auto">אוטומטי</option>
+          </select>
+          <button type="button" class="btn btn-gold btn-sm" id="postingWarmSave">שמירה</button>
+        </div>
+      </section>
+      <section class="message-card" style="margin-bottom:18px">
         <h2>חשבונות שנעצרו</h2>
         <p>כל שורה מציעה רק את הפעולה שמותרת לסוג העצירה.</p>
         <div class="table-wrap">

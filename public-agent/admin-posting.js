@@ -279,6 +279,17 @@
     if (b !== tab) b.addEventListener("click", function () { tab.classList.remove("on"); pane.classList.add("hidden"); });
   });
   $("#postingGlobal").addEventListener("change", function () { flip($("#postingGlobal"), "/switch"); });
+  $("#postingWarmSave").addEventListener("click", function () {
+    var btn = this, phone = ($("#postingWarmPhone").value || "").replace(/\D/g, "").replace(/^0/, "972");
+    if (!/^\d{9,15}$/.test(phone)) { FLY.toast("מספר טלפון לא תקין"); return; }
+    var reason = askReason("סיבה?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/accounts/" + encodeURIComponent(phone) + "/warmup", { mode: $("#postingWarmMode").value, reason: reason })
+      .then(function (d) { saved(d, "✅ החימום נשמר"); })
+      .catch(function (e) { handleError(e, e && e.status === 404 ? "לא נמצא חשבון מחובר למספר הזה" : "השמירה נכשלה"); })
+      .then(function () { btn.disabled = false; });
+  });
   $("#postingHalted").addEventListener("click", function (ev) {
     var btn = ev.target.closest("[data-posting-act]");
     if (btn) act(btn);

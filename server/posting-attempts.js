@@ -98,6 +98,8 @@ const EDGES = {
   outcome_unknown: ["verified_posted", "verified_failed"], // reconciliation only
 };
 const TERMINAL = new Set(["verified_posted", "submitted_for_approval", "verified_failed", "cancelled"]);
+// Of one property→target key, after released attempts only. A local box calibrating selectors needs more.
+const MAX_SAME_DAY_RETRIES = process.env.FORLY_ENV === "local" && process.env.NODE_ENV !== "production" ? 20 : 3;
 const PRE_SUBMIT = new Set(["reserved", "session_started", "composer_ready"]);
 const IN_FLIGHT = new Set(["submit_started", "verification_pending"]);
 // States whose reservation still counts against caps. A `verified_failed`
@@ -185,8 +187,13 @@ async function reserveAttempt(input = {}) {
   const aKey = target_type === "group" ? safety.activityKey(target_id, now) : null;
   const dKey = dedupKey(page_id, target_type, target_id);
 
+  const noCaps = safety.capsOff();
   return runTx(maps, async (tx) => {
-    const existing = await tx.get(ATT, key);
+    let k = key, existing = await tx.get(ATT, k);
+    // No caps (local): a finished attempt does not hold the day's key — the
+    // next one gets a key of its own and the old record stays. One still
+    // open is never doubled.
+    if (noCaps && existing && !PRE_SUBMIT.has(existing.state) && !IN_FLIGHT.has(existing.state)) { k = hmacHex(`${key}|${at}`, 32); existing = await tx.get(ATT, k); }
     const budget = await tx.get(BUD, bKey);
     const bucket = aKey ? await tx.get(ACT, aKey) : null;
     const dedup = await tx.get(DED, dKey);
@@ -205,16 +212,20 @@ async function reserveAttempt(input = {}) {
     for (let i = 0; click_id && (await tx.get(CLK, click_id)); i++) { if (i >= 5) throw fail("click_collision", "no free click code"); click_id = newClickCode(); }
     // The existing attempt comes back so the caller can resume, reconcile or
     // cancel an orphan left by a commit whose outcome it never saw.
-    if (existing) return { ok: false, reason: "already_reserved", attempt: existing };
+    // A released attempt (cancelled, or failed before anything was submitted)
+    // posted nothing and gave its budget back: the day's key may be taken
+    // again, a bounded number of times, instead of losing the day to it.
+    const retry = existing && existing.released === true && (existing.retries || 0) < MAX_SAME_DAY_RETRIES;
+    if (existing && !retry) return { ok: false, reason: "already_reserved", attempt: existing };
     if (((budget && budget.count) || 0) >= dailyCap) return { ok: false, reason: "daily_cap" };
     const aliasPosts = aliasBuckets.reduce((n, b) => n + ((b && b.posts) || 0), 0);
     if (aKey && ((bucket && bucket.posts) || 0) + aliasPosts >= groupCap) return { ok: false, reason: "group_cap" };
     const live = (d) => d && !d.released && !(typeof d.expires_at === "string" && d.expires_at <= at);
-    if (live(dedup) || aliasDedups.some(live)) return { ok: false, reason: "duplicate" };
+    if (!noCaps && (live(dedup) || aliasDedups.some(live))) return { ok: false, reason: "duplicate" };
 
     const fpEntry = aKey && fp ? { ...fp, at } : null;
     const attempt = {
-      key, state: "reserved", platform: "facebook", lease_until: new Date(now.getTime() + LEASE_MS).toISOString(),
+      key: k, state: "reserved", platform: "facebook", lease_until: new Date(now.getTime() + LEASE_MS).toISOString(),
       reserved_at: at, updated_at: at, date, phone, page_id,
       campaign_id, post_id, target_type, target_id, target_url, publisher,
       copy_hash, confirm_membership: input.confirm_membership === true,
@@ -222,10 +233,11 @@ async function reserveAttempt(input = {}) {
       fingerprint: fpEntry, budget_key: bKey, activity_key: aKey, dedup_key: dKey,
       history: [{ state: "reserved", at }],
     };
-    tx.set(ATT, key, attempt);
+    if (retry) Object.assign(attempt, { retries: (existing.retries || 0) + 1, prior: { state: existing.state, error_code: existing.error_code || null, at: existing.updated_at || null } });
+    tx.set(ATT, k, attempt);
     if (click_id) {
       tx.set(CLK, click_id, {
-        campaign_id, attempt_key: key, page_id, group_id: target_type === "group" ? target_id : `page:${target_id}`,
+        campaign_id, attempt_key: k, page_id, group_id: target_type === "group" ? target_id : `page:${target_id}`,
         issued_at: at, expires_at: attempt.click_expires_at, expire_at: new Date(now.getTime() + CLICK_TTL_MS), // a Date: the TTL policy's field
       });
     }
@@ -235,7 +247,7 @@ async function reserveAttempt(input = {}) {
       tx.set(ACT, aKey, { group_id: target_id, date, posts: ((bucket && bucket.posts) || 0) + 1, fingerprints: fps }, { merge: true });
     }
     // A full overwrite: an expired doc for this page→target is replaced, not merged.
-    tx.set(DED, dKey, { key, at, expires_at: dedupDays === null ? null : new Date(now.getTime() + dedupDays * 86400000).toISOString() });
+    tx.set(DED, dKey, { key: k, at, expires_at: dedupDays === null ? null : new Date(now.getTime() + dedupDays * 86400000).toISOString() });
     return { ok: true, attempt };
   });
 }
@@ -487,6 +499,7 @@ async function getClick(click_id) {
 function reset() { for (const m of Object.values(maps)) m.clear(); }
 
 module.exports = {
+  MAX_SAME_DAY_RETRIES,
   LEASE_MS, CLICK_RE, newClickCode, EDGES, countingStates, isCounting,
   attemptKey, reserveAttempt, transition, annotate, recordGroupAlias, groupIdsFor, reapExpired, cancelOpenAttempts,
   getAttempt, listAttemptsByPhone, listAttemptsByState, listOpenAttemptsByCampaign, getGroupActivityFor,

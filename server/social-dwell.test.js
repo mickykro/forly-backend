@@ -82,7 +82,7 @@ function cycleRand(seq) { let i = 0; return () => seq[i++ % seq.length]; }
     const kinds = log.map((l) => l.action);
     assert.ok(kinds.filter((k) => k === "scroll").length >= 3);
     assert.ok(kinds.includes("open_post"));
-    assert.ok(kinds.includes("watch_video"), "a video in view gets watched");
+    assert.ok(!kinds.includes("watch_video") && !kinds.includes("story"), "no video watched, no story opened: autoplay is off, and video is the traffic");
     assert.ok(kinds.filter((k) => k === "like").length <= SD.INTERACTION.likes_max);
     assert.ok(!page.visited.includes("https://www.facebook.com/groups/999/posts/100002"), "never opens the group we are about to post in");
     assert.equal(page.typed.length, 0, "never types anything");
@@ -224,7 +224,9 @@ function cycleRand(seq) { let i = 0; return () => seq[i++ % seq.length]; }
     let i = 0;
     const rand = () => { const v = Object.prototype.hasOwnProperty.call(overrides, i) ? overrides[i] : 0.01; i++; return v; };
     const page = fakePage({ feed }); // no likeState configured: aria-pressed reads as unreadable, always
-    const log = await SD.dwell(page, { allowVisible: true }, Object.assign({ rand, guard: ALLOW_GUARD }, fastWait));
+    const saved = SD.INTERACTION.open_posts;
+    SD.INTERACTION.open_posts = [1, 2]; // the dedup rule, exercised with two posts (the default opens one)
+    const log = await SD.dwell(page, { allowVisible: true }, Object.assign({ rand, guard: ALLOW_GUARD }, fastWait)).finally(() => { SD.INTERACTION.open_posts = saved; });
     assert.equal(log.filter((l) => l.action === "open_post").length, 2, "two distinct posts opened (drawn without replacement)");
     assert.equal(log.filter((l) => l.action === "like").length, 0, "aria-pressed never reads back confirmed, so every attempt is uncertain");
     assert.equal(log.filter((l) => l.action === "like_uncertain").length, 2);
@@ -290,12 +292,12 @@ function cycleRand(seq) { let i = 0; return () => seq[i++ % seq.length]; }
     for (const secret of ["facebook.com", "Ann", "Bob", "Cat", "facebook-prod-x"]) {
       assert.ok(!blob.includes(secret), `leaked "${secret}" into the saved dwell session`);
     }
-    assert.equal(setConnCalls.length, 1);
-    assert.equal(setConnCalls[0][0], "972500000009");
-    assert.ok(setConnCalls[0][1].last_browse_at);
-    assert.equal(setConnCalls[0][1].dwell_summary_7d.sessions, 2);
-    assert.equal(setConnCalls[0][1].dwell_summary_7d.scroll, 9);
-    assert.equal(setConnCalls[0][1].dwell_summary_7d.like, 1);
+    const browseCalls = setConnCalls.filter((c) => c[1].last_browse_at); // (the autoplay setting writes its own note)
+    assert.equal(browseCalls.length, 1);
+    assert.equal(browseCalls[0][0], "972500000009");
+    assert.equal(browseCalls[0][1].dwell_summary_7d.sessions, 2);
+    assert.equal(browseCalls[0][1].dwell_summary_7d.scroll, 9);
+    assert.equal(browseCalls[0][1].dwell_summary_7d.like, 1);
   }
 
   // ── browseSession: the "session" guard denies -> no session opened, ok signal ──

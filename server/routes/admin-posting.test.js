@@ -234,6 +234,16 @@ const noFullPhone = (raw, what) => {
     assert.equal(c.posting_disabled_until_admin, false); assert.equal(c.posting_owner_review_required, false, "owner re-enable clears both flags");
     assert.equal(c.posting_reenabled_as, "owner");
 
+    // ── the warm-up: the operator's call, with a reason, audited ──
+    assert.equal((await post(`/accounts/${P.fine}/warmup`, { mode: "fast", reason: "x" })).body.field, "mode");
+    assert.equal((await post(`/accounts/${P.fine}/warmup`, { mode: "active" })).body.error, "reason_required");
+    assert.equal((await post(`/accounts/972599999999/warmup`, { mode: "active", reason: "x" })).status, 404);
+    r = await post(`/accounts/${P.fine}/warmup`, { mode: "active", reason: "busy account, posts daily" });
+    assert.equal(r.status, 200, r.raw);
+    assert.equal((await db.getConnection(P.fine)).posting_warmup_mode, "active");
+    await post(`/accounts/${P.fine}/warmup`, { mode: "auto", reason: "back to default" });
+    assert.equal((await db.getConnection(P.fine)).posting_warmup_mode, null);
+
     // ── suspected compromise: the profile is revoked; the owner lifts it only after a reconnect ──
     r = await post(`/accounts/${P.compromised}/reenable`, { reason: "x" }, as(OWNER));
     assert.equal(r.status, 409); assert.equal(r.body.error, "reconnect_required", "before the reconnect, not even the owner");
@@ -296,7 +306,7 @@ const noFullPhone = (raw, what) => {
     // ── every mutation wrote an audit event, tails only, kept a year ──
     const events = await store.listAuditEvents({ limit: 100 });
     const actions = events.map((e) => e.action).sort();
-    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible"]);
+    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible", "warmup_mode", "warmup_mode"]);
     for (const e of events) {
       assert.ok(/^\d{4}$/.test(e.operator_tail), JSON.stringify(e));
       assert.ok(e.target_phone_tail === null || /^\d{4}$/.test(e.target_phone_tail));
@@ -312,7 +322,7 @@ const noFullPhone = (raw, what) => {
     const scRow = ov.body.halts_by_class.suspected_compromise.find((a) => a.phone_tail === "0011");
     assert.equal(scRow.needs_agent_confirmation, true); assert.equal(scRow.reconnected_after_halt, false);
     assert.equal((await call(server, "GET", "/api/admin/posting/overview", as(OWNER, false))).body.is_owner, true);
-    assert.equal(ov.body.recent_audit.length, 14);
+    assert.equal(ov.body.recent_audit.length, 16);
 
     // ── the overview degrades: a failing section is named in warnings, the rest loads, 200 ──
     {

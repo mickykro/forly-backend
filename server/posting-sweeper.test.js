@@ -145,14 +145,14 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
   }
 
   // ── a reservation refused (daily_cap, group_cap, duplicate) leaves the post scheduled for a later slot ──
-  for (const reason of ["daily_cap", "group_cap", "duplicate"]) {
+  for (const reason of ["daily_cap", "group_cap", "duplicate"]) { // group_cap: only where an operator turned the cross-account cap on
     const { deps, at } = await setup();
     let c = await C.create(base(), deps);
     c = await S.tick(c, deps, at(new Date("2026-09-23T07:00:00+03:00"))); // planned for 09:00
     const lim = { daily_cap: 9, group_global_daily_cap: 9 };
     if (reason === "daily_cap") await store.reserveAttempt({ phone: PH, page_id: "other", target_type: "group", target_id: "999", publisher: "browser", limits: lim, now: new Date("2026-09-23T06:30:00+03:00") });
-    if (reason === "group_cap") for (const ph of ["9725001", "9725002", "9725003"]) await store.reserveAttempt({ phone: ph, page_id: `p${ph}`, target_type: "group", target_id: "111", publisher: "browser", limits: lim, now: NOW });
-    if (reason === "duplicate") await store.reserveAttempt({ phone: PH, page_id: "pg1", target_type: "group", target_id: "111", publisher: "browser", limits: lim, now: new Date(NOW.getTime() - 20 * DAY) });
+    if (reason === "group_cap") { deps.config = Object.assign({}, deps.config || require("./posting-safety").DEFAULTS, { group_global_daily_cap: 3 }); for (const ph of ["9725001", "9725002", "9725003"]) await store.reserveAttempt({ phone: ph, page_id: `p${ph}`, target_type: "group", target_id: "111", publisher: "browser", limits: lim, now: NOW }); }
+    if (reason === "duplicate") await store.reserveAttempt({ phone: PH, page_id: "pg1", target_type: "group", target_id: "111", publisher: "browser", limits: lim, now: new Date(NOW.getTime() - 20 * DAY) }); // dedup with no expiry
     c = await S.tick(c, deps, at(dueOf(c)));
     assert.equal(c.posts[0].status, "scheduled", `${reason}: still scheduled, not failed`);
     assert.equal(c.posts[0].retries, 1);
@@ -369,6 +369,33 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     await db.setSetting("posting", { enabled: true });
     assert.equal(await S.sweep(deps, at(NOW)), 1);
     assert.equal((await store.getPostingCampaign(c.id)).posts.length, 1);
+  }
+
+  // ── accounts post side by side, up to DRIVER_MAX_CONCURRENT, and a long post does not hold the sweep ──
+  {
+    const { deps, at } = await setup();
+    const PH2 = "972500000002", PH3 = "972500000003";
+    for (const ph of [PH2, PH3]) {
+      await db.savePage(page(`pg-${ph}`, ph));
+      await db.setConnection(ph, Object.assign({}, await conn(PH), { posting_permission: structuredClone((await conn(PH)).posting_permission) }));
+    }
+    for (const [ph, pg] of [[PH, "pg1"], [PH2, `pg-${PH2}`], [PH3, `pg-${PH3}`]]) await C.create(base({ phone: ph, page: page(pg, ph) }), deps);
+    let running = 0, most = 0, gate;
+    const hold = new Promise((r) => { gate = r; });
+    const inner = fakePost();
+    const slow = async (args, d) => { running++; most = Math.max(most, running); await hold; try { return await inner(args, d); } finally { running--; } };
+    const d2 = with_(deps, { post: slow, sweepWaitMs: 100, env: Object.assign({}, deps.env, { DRIVER_MAX_CONCURRENT: "2" }) });
+    await S.sweep(with_(d2, { sweepWaitMs: 5000 }), at(new Date("2026-09-23T08:00:00+03:00"))); // plans each account's first post
+    const t0 = Date.now();
+    await S.sweep(d2, at(new Date("2026-09-23T12:00:00+03:00"))); // all three due
+    assert.ok(Date.now() - t0 < 2000, "the sweep returns while the posts are still running");
+    for (let i = 0; i < 40 && most < 2; i++) await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(most, 2, "two at once, not one after another, and never more than the budget");
+    gate();
+    for (let i = 0; i < 60 && inner.calls.length < 3; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(inner.calls.length, 3, "the third account posts as soon as a slot frees");
+    S._test.reset();
   }
 
   // ── the fleet breaker: three accounts disabled within the hour → the switch goes off (CAS) ──
