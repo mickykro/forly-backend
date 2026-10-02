@@ -120,7 +120,7 @@ const { db, store } = K;
     const conn = await db.getConnection(PH);
     const member = conn.facebook_groups_member.find((m) => m.group_id === "111");
     assert.equal(r.body.copy, C.buildCopy(page, { page_id: "pg2", posts: [] }, { url: member.canonical_url }, r.body.link_kind, "https://f.ly"), "exactly what the scheduler would write for that group and destination");
-    assert.ok(r.body.copy.includes("דירה בחיפה"));
+    assert.ok(r.body.copy.includes("חיפה"), "the property's facts are in the copy");
     assert.ok(r.body.copy.includes("https://f.ly/p/pg2"), "the property page's link is in the post's text");
     assert.ok(["property", "whatsapp", "none"].includes(r.body.link_kind));
     if (r.body.link_kind === "property") assert.equal(r.body.comment_link, "https://f.ly/p/pg2");

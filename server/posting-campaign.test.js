@@ -97,7 +97,7 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     await db.updatePage("pg1", { "property.price": 1900000 });
     c = await S.tick(c, deps, at(new Date(NOW.getTime() + DAY)));
     assert.equal(c.posts.length, 2);
-    assert.ok(c.posts[1].copy.includes("1,900,000"));
+    assert.match(c.posts[1].copy, /1,900,000|1\.9 מ'/);
     assert.equal(c.posts[1].group_url, G(222));
     assert.ok(new Date(c.posts[1].scheduled_at) - new Date(c.posts[0].posted_at) >= cfg.min_gap_minutes * MIN);
 

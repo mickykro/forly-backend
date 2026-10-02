@@ -15,12 +15,11 @@ const url = "https://forly.example/p/dana-abc12";
 
 // ── post copy carries the facts, the link, and the agent ──
 const copy = buildPostCopy(page, url);
-assert.ok(copy.includes("4 חד׳ בבבלי"), "title present");
-assert.ok(copy.includes("בבלי, תל אביב"), "location present");
-assert.ok(copy.includes("4 חדרים"), "rooms present");
+assert.ok(copy.includes("בבלי") && copy.includes("תל אביב"), "location present");
+assert.match(copy, /4 (חדרים|חד')/, "rooms present");
 assert.ok(copy.includes("105"), "sqm present");
 assert.ok(copy.includes("קומה 3"), "floor present");
-assert.ok(copy.includes("₪4,200,000"), "price formatted with separators");
+assert.ok(copy.includes('4,200,000 ש"ח'), "price formatted with separators");
 assert.ok(copy.includes(url), "page link present");
 assert.ok(copy.includes("דנה לוי"), "agent name present");
 assert.ok(copy.includes("0501234567"), "phone shown in local 05x form");
@@ -28,8 +27,9 @@ assert.ok(copy.includes("0501234567"), "phone shown in local 05x form");
 // ── missing fields drop their lines instead of printing zeros ──
 const bare = buildPostCopy({ property: { title: "נכס" }, agent: {} }, url);
 assert.ok(!bare.includes("קומה"), "no floor line when floor is 0/absent");
-assert.ok(!bare.includes("₪"), "no price line when price is 0/absent");
+assert.ok(!bare.includes('ש"ח'), "no price line when price is 0/absent");
 assert.ok(bare.includes(url));
+assert.ok(bare.includes("כתבו לי בפרטי"), "no agent contact: the post still says how to respond");
 
 // ── group sanitizer: facebook.com/groups/* only, normalized, deduped, capped ──
 assert.deepEqual(sanitizeGroups([
@@ -109,10 +109,11 @@ assert.ok(!qm0.includes("undefined"));
   assert.ok(new Set(seeds).size >= 5, "different groups get broad phrasing and CTA variation");
   // facts are never varied — only the framing is
   for (const text of [a, b, ...seeds]) {
-    assert.ok(text.includes("₪4,200,000"), "price identical everywhere");
-    assert.ok(text.includes("4 חדרים") && text.includes("105"), "facts identical everywhere");
-    assert.ok(text.includes("4 חד׳ בבבלי"), "title identical everywhere");
-    assert.match(text, /כתבו|לכתוב|שלחו|לפנות|לתאם|הודעה/, "every variation has a response CTA");
+    assert.match(text, /4,200,000 ש"ח|4\.2 מ' ש"ח/, "price identical everywhere");
+    assert.match(text, /4 (חדרים|חד')/, "rooms identical everywhere");
+    assert.ok(text.includes("105") && text.includes("קומה 3"), "facts identical everywhere");
+    assert.ok(text.includes("050"), "every variation carries the agent's phone");
+    assert.ok(!/[·—–]/.test(text), "no middle dots or long dashes");
   }
 
   const round0 = buildPostCopy(page, url, { variantSeed: "pg1|groupA", variantRound: 0, linkInComment: true });
@@ -120,9 +121,28 @@ assert.ok(!qm0.includes("undefined"));
   assert.notEqual(round0, round1, "a later completed round rotates the description and CTA");
   assert.equal(round1, buildPostCopy(page, url, { variantSeed: "pg1|groupA", variantRound: 1, linkInComment: true }), "same round is retry-stable");
   for (const text of [round0, round1]) {
-    assert.ok(text.includes("₪4,200,000") && text.includes("4 חדרים") && text.includes("105"), "rounds preserve every property fact");
+    assert.ok(/4,200,000 ש"ח|4\.2 מ' ש"ח/.test(text) && /4 (חדרים|חד')/.test(text) && text.includes("105"), "rounds preserve every property fact");
     assert.ok(!text.includes(url), "rounds keep the external link out of the body");
     assert.ok(text.includes("תגובה הראשונה"), "rounds point to the first-comment link");
+  }
+}
+
+// ── all ten templates rotate in; "חדש" only on a first round; rent wording ──
+{
+  const all = Array.from({ length: 10 }, (_, r) => buildPostCopy(page, url, { variantSeed: "pg1|g", variantRound: r }));
+  assert.equal(new Set(all).size, 10, "ten rounds give ten different posts");
+  assert.equal(buildPostCopy(page, url, { variantSeed: "pg1|g", variantRound: 10 }), all[0], "round 10 wraps to the first template");
+  const nth = (r) => buildPostCopy(page, url, { variantSeed: "pg1|g", variantRound: r });
+  const six = all.findIndex((t) => t.includes("אצלי בשיווק:"));
+  assert.ok(six >= 0 && nth(six + 10).includes("אצלי בשיווק:"), "the same template comes back after ten rounds");
+  assert.ok(!nth(six + 10).includes("חדש"), "a later round never calls the listing new");
+  const odd = { ...page, property: { ...page.property, price: 2925000 } };
+  for (let r = 0; r < 10; r++) assert.ok(buildPostCopy(odd, url, { variantSeed: "pg1|g", variantRound: r }).includes("2,925,000"), "a short price is never rounded");
+  const rent = { ...page, property: { ...page.property, listing_type: "rent", price: 6800 } };
+  for (let r = 0; r < 10; r++) {
+    const t = buildPostCopy(rent, url, { variantSeed: "pg1|g", variantRound: r });
+    assert.ok(!t.includes("למכירה") && !t.includes("מחיר שיווק"), "rent never reads as a sale");
+    assert.ok(t.includes('6,800 ש"ח'), "rent price shown in full");
   }
 }
 
@@ -131,14 +151,14 @@ assert.ok(!qm0.includes("undefined"));
   const body = buildPostCopy(page, url, { linkInComment: true });
   assert.ok(!body.includes(url), "no external link in the post body");
   assert.ok(body.includes("בתגובה הראשונה"), "tells the reader where the link is");
-  assert.ok(body.includes("₪4,200,000"), "facts still present");
+  assert.ok(body.includes("4,200,000"), "facts still present");
   const wa = buildPostCopy(page, url, { variantSeed: "wa", linkInComment: true, destinationKind: "whatsapp" });
   assert.ok(wa.includes("וואטסאפ") && wa.includes("תגובה הראשונה"), "WhatsApp destination has an accurate CTA");
   const fb = buildPostCopy(page, url, { variantSeed: "fb", linkInComment: true, destinationKind: "facebook_page" });
   assert.ok(fb.includes("בדף העסקי") && fb.includes("תגובה הראשונה"), "Page-post destination has an accurate CTA");
   const none = buildPostCopy(page, url, { variantSeed: "none", linkInComment: true, destinationKind: "none" });
   assert.ok(!none.includes("תגובה הראשונה"), "CTA-only posts never promise a missing comment link");
-  assert.match(none, /כתבו|לכתוב|שלחו|לפנות|לתאם|הודעה/, "CTA-only post tells readers how to respond");
+  assert.ok(none.includes("0501234567") || none.includes("050-1234567"), "CTA-only post tells readers how to respond");
 }
 
 // ── group progress: X of Z, and X counts agent-confirmed posts ONLY ──

@@ -33,58 +33,157 @@ function trackedUrl(pageUrl, { session, group }) {
 
 /*
  * Per-group phrasing. Identical text pasted into many groups is the classic
- * spam fingerprint — and it also reads like a bot to human members. The FACTS
- * never change (price, rooms, size, link); only the framing does, and the
- * variant is derived from the property+group so a retry reproduces the same
- * text rather than inventing a new one each time.
+ * spam fingerprint, and it also reads like a bot to human members. The FACTS
+ * never change (price, rooms, size, link); only the whole post's wording and
+ * order do. Ten templates, written the way a local agent types a group post:
+ * short fact lines, sparing "?" / "!", no emoji. The template is derived from
+ * the property+group so a retry reproduces the same text rather than
+ * inventing a new one each time. A template drops any line whose fact is
+ * missing.
  */
-const OPENERS = ["🏠", "🔑", "🏡", "✨", "📍"];
-const HEADLINES = [
-  ({ icon, title }) => `${icon} ${title}`,
-  ({ icon, title }) => `${icon} נכס שכדאי להכיר — ${title}`,
-  ({ icon, title }) => `${icon} פרטי הנכס: ${title}`,
-  ({ icon, title }) => `${icon} למי שמחפשים באזור — ${title}`,
-  ({ icon, title }) => `${icon} אפשרות מעניינת באזור: ${title}`,
-];
-const LINK_CTAS = [
-  "לכל הפרטים, תמונות וסרטון ⬅️",
-  "סרטון הליכה, תמונות ומידע מלא ⬅️",
-  "כל הפרטים והסרטון כאן ⬅️",
-  "לצפייה בסרטון ובפרטים המלאים ⬅️",
-  "לפרטים המלאים ולצפייה בנכס ⬅️",
-  "תמונות, סרטון וכל המידע מחכים כאן ⬅️",
-];
 const COMMENT_CTAS = [
-  "קישור לסרטון ולפרטים המלאים בתגובה הראשונה 👇",
-  "את התמונות, הסרטון וכל המידע תמצאו בתגובה הראשונה 👇",
-  "לצפייה בנכס ובפרטים המלאים — הקישור בתגובה הראשונה 👇",
-  "הוספתי קישור עם הסרטון וכל הפרטים בתגובה הראשונה 👇",
-  "הקישור לפרטים, לתמונות ולסרטון נמצא בתגובה הראשונה 👇",
-  "רוצים לראות את כל הנכס? הקישור מחכה בתגובה הראשונה 👇",
+  "הקישור לסרטון ולפרטים בתגובה הראשונה 👇",
+  "התמונות והסרטון בתגובה הראשונה 👇",
+  "הקישור לנכס בתגובה הראשונה 👇",
+  "הוספתי קישור עם הסרטון בתגובה הראשונה 👇",
+  "קישור לכל הפרטים בתגובה הראשונה 👇",
+  "רוצים לראות את הנכס? הקישור בתגובה הראשונה 👇",
 ];
 const WHATSAPP_COMMENT_CTAS = [
-  "לשיחה ישירה ולקבלת כל הפרטים — קישור לוואטסאפ בתגובה הראשונה 👇",
-  "רוצים לשאול או לתאם? קישור לוואטסאפ מחכה בתגובה הראשונה 👇",
-  "אפשר לדבר איתי ישירות דרך קישור הוואטסאפ בתגובה הראשונה 👇",
+  "קישור לוואטסאפ בתגובה הראשונה 👇",
+  "רוצים לשאול או לתאם? קישור לוואטסאפ בתגובה הראשונה 👇",
+  "אפשר לדבר איתי ישירות בוואטסאפ, הקישור בתגובה הראשונה 👇",
 ];
 const PAGE_COMMENT_CTAS = [
-  "לפוסט המלא עם התמונות והקישור לנכס — התגובה הראשונה 👇",
-  "הפוסט בדף העסקי, כולל הקישור לכל הפרטים, נמצא בתגובה הראשונה 👇",
-  "לצפייה בפוסט המלא בדף העסקי — הקישור בתגובה הראשונה 👇",
+  "הפוסט המלא בדף העסקי, קישור בתגובה הראשונה 👇",
+  "קישור לפוסט בדף העסקי בתגובה הראשונה 👇",
+  "לצפייה בפוסט בדף העסקי, הקישור בתגובה הראשונה 👇",
 ];
-const RESPONSE_CTAS = [
-  "לפרטים נוספים ולתיאום ביקור, כתבו לי בפרטי.",
-  "רוצים לבדוק התאמה? שלחו הודעה ואחזור עם הפרטים.",
-  "לשאלות ולתיאום, אפשר לפנות אליי.",
-  "אשמח לשלוח מידע נוסף ולתאם ביקור.",
-  "מוזמנים לכתוב לי בפרטי לכל שאלה.",
-  "אפשר לשלוח הודעה ולקבל את כל הפרטים.",
-];
-const FACT_ORDERS = [
-  ["rooms", "sqm", "floor"],
-  ["sqm", "rooms", "floor"],
-  ["rooms", "floor", "sqm"],
-  ["floor", "rooms", "sqm"],
+
+const join = (sep, ...xs) => xs.filter(Boolean).join(sep);
+const shekel = (n) => `${n.toLocaleString("en-US")} ש"ח`;
+// 0542045280 → 054-2045280, the way agents usually write it.
+const dashedPhone = (s) => (/^05\d{8}$/.test(s) ? `${s.slice(0, 3)}-${s.slice(3)}` : s);
+
+function postFacts(page) {
+  const p = (page && page.property) || {};
+  const a = (page && page.agent) || {};
+  const num = (v) => (Number(v) > 0 ? Number(v) : 0);
+  const rooms = num(p.rooms), sqm = num(p.size_sqm), floor = num(p.floor), price = num(p.price);
+  const rent = p.listing_type === "rent";
+  const hood = p.neighborhood || "", city = p.city || "";
+  return {
+    rooms, rent,
+    hood, city,
+    place: join(", ", hood, city),              // שיקון ותיקים, כפר סבא
+    placeIn: hood && city ? `${hood} ב${city}` : hood || city, // שיקון ותיקים בכפר סבא
+    deal: rent ? "להשכרה" : "למכירה",
+    priceLabel: rent ? "שכירות" : "מחיר",
+    apt: rooms ? `דירת ${rooms} חדרים` : p.title || "נכס",
+    roomsText: rooms ? `${rooms} חדרים` : "",
+    roomsShort: rooms ? `${rooms} חד'` : "",
+    sqm: sqm ? `${sqm} מ"ר` : "",
+    floor: floor ? `קומה ${floor}` : "",
+    price: price ? shekel(price) : "",
+    // 2,900,000 → 2.9 מ' ש"ח, only when that is exact (2,925,000 stays full).
+    priceShort: price >= 1e6 && price % 10000 === 0 ? `${price / 1e6} מ' ש"ח` : price ? shekel(price) : "",
+    name: a.name || "",
+    phone: localPhone(a.phone),
+  };
+}
+
+const at = (place) => (place ? ` ב${place}` : "");
+const sqmOnFloor = (f) => (f.sqm && f.floor ? `${f.sqm} ב${f.floor}` : f.sqm || f.floor);
+
+// Each template: (facts, link, round) → lines. link(label) is the label plus
+// the page URL, or the first-comment CTA, or null. Falsy lines are dropped.
+const TEMPLATES = [
+  (f, link) => [
+    `${f.deal}${at(f.place)}!`,
+    join(", ", f.apt, f.sqm),
+    f.floor,
+    f.price && `${f.priceLabel}: ${f.price}`,
+    link("סרטון מהדירה"),
+    (f.name || f.phone) && "לפרטים ותיאום:",
+    join("-", f.name, f.phone),
+  ],
+  (f, link) => [
+    `מחפשים ${f.roomsText || "דירה"}${at(f.city)}?`,
+    join(", ", f.hood, f.floor, f.sqm),
+    f.price,
+    link("סרטון מהדירה"),
+    join("-", f.name, f.phone),
+  ],
+  (f, link) => [
+    `${f.roomsShort || f.apt}${at(f.place)}`,
+    sqmOnFloor(f),
+    f.priceShort && (f.rent ? `שכירות: ${f.price}` : `מחיר שיווק: ${f.priceShort}`),
+    link("רוצים לראות לפני ביקור? יש סרטון מהדירה"),
+    join(" ", f.name, dashedPhone(f.phone)),
+  ],
+  (f, link) => [
+    join(", ", f.apt, f.sqm) + at(f.hood),
+    join(", ", f.city, f.floor),
+    f.price,
+    link("כל הפרטים+סרטון"),
+    "מוזמנים לתאם ביקור!",
+    join("-", f.name, f.phone),
+  ],
+  (f, link) => [
+    `${f.deal}${at(f.city)}`,
+    join(", ", f.hood, f.roomsText),
+    join(", ", f.sqm, f.floor),
+    f.price && `${f.priceLabel}: ${f.price}`,
+    (f.name || f.phone) && "שאלות? דברו איתי",
+    f.name,
+    f.phone,
+    link("לצפייה בסרטון"),
+  ],
+  // "חדש" is only claimed on a target's first round.
+  (f, link, round) => [
+    round === 0 ? "חדש אצלי בשיווק:" : "אצלי בשיווק:",
+    `${f.roomsText || f.apt}${at(f.place)}`,
+    join(", ", f.sqm, f.floor),
+    f.price,
+    link("הסרטון מהדירה"),
+    (f.name || f.phone) && `לתיאום: ${join("-", f.name, f.phone)}`,
+  ],
+  (f, link) => [
+    f.price ? `${f.price} ל${f.apt}${at(f.city)}` : `${f.apt}${at(f.city)}`,
+    f.hood && `שכונת ${f.hood}`,
+    sqmOnFloor(f),
+    link("לפרטים וסרטון"),
+    f.name,
+    dashedPhone(f.phone),
+  ],
+  (f, link) => {
+    const what = `${f.roomsText || f.apt}${f.sqm ? ` על ${f.sqm}` : ""}${f.floor ? `, ${f.floor}` : ""}`;
+    return [
+      f.rooms >= 3 ? "משפחה שצריכה עוד חדר?" : `מחפשים דירה${at(f.city)}?`,
+      f.placeIn ? `ב${f.placeIn} יש ${what}` : what,
+      f.price && `${f.priceLabel}: ${f.price}`,
+      link("אפשר לראות את הדירה בסרטון"),
+      join("-", f.name, f.phone),
+    ];
+  },
+  (f, link) => [
+    join(", ", f.city, f.hood),
+    join(", ", f.roomsShort, f.sqm, f.floor) || f.apt,
+    f.priceShort,
+    (f.name || f.phone) && "כתבו לי ואשלח פרטים!",
+    join("-", f.name, f.phone),
+    link("סרטון"),
+  ],
+  (f, link) => [
+    `${f.deal}:`,
+    f.apt + at(f.hood),
+    f.city,
+    f.sqm,
+    f.floor,
+    f.price && `${f.priceLabel} ${f.price}`,
+    link("מה דעתכם? הסרטון כאן"),
+    (f.name || f.phone) && `לפרטים: ${join(" ", f.name, f.phone)}`,
+  ],
 ];
 
 function variantIndex(seed, mod) {
@@ -95,46 +194,26 @@ function variantIndex(seed, mod) {
 }
 
 function buildPostCopy(page, pageUrl, opts = {}) {
-  const p = (page && page.property) || {};
-  const a = (page && page.agent) || {};
   const seed = String(opts.variantSeed || "");
   const round = Number.isSafeInteger(opts.variantRound) && opts.variantRound >= 0 ? opts.variantRound : 0;
   const pick = (arr, key) => {
-    const base = seed ? variantIndex(`${seed}|${key}`, arr.length) : 0;
+    const base = seed ? variantIndex(`${key}|${seed}`, arr.length) : 0;
     return arr[(base + round) % arr.length];
   };
-  const lines = [];
-  const headline = pick(HEADLINES, "headline");
-  lines.push(headline({ icon: pick(OPENERS, "icon"), title: p.title || "נכס חדש" }));
-  const loc = [p.neighborhood, p.city].filter(Boolean).join(", ");
-  if (loc) lines.push(`📍 ${loc}`);
-  const byFact = {};
-  if (Number(p.rooms) > 0) byFact.rooms = `${p.rooms} חדרים`;
-  if (Number(p.size_sqm) > 0) byFact.sqm = `${p.size_sqm} מ"ר`;
-  if (Number(p.floor) > 0) byFact.floor = `קומה ${p.floor}`;
-  const facts = pick(FACT_ORDERS, "fact_order").map((k) => byFact[k]).filter(Boolean);
-  if (facts.length) lines.push(facts.join(" · "));
-  if (Number(p.price) > 0) {
-    const verb = p.listing_type === "rent" ? "שכירות" : "מחיר";
-    lines.push(`💰 ${verb}: ₪${Number(p.price).toLocaleString("en-US")}`);
-  }
-  lines.push("");
+  const f = postFacts(page);
   // linkInComment: many groups treat an external link in the post body as
   // spam (and Facebook scores the domain for it). The agent posts the link
   // as the first comment instead — standard practice in these groups.
-  if (opts.linkInComment) {
+  const link = (label) => {
+    if (!opts.linkInComment) return pageUrl ? `${label}->${pageUrl}` : null;
     const destination = opts.destinationKind || "property";
-    if (destination === "whatsapp") lines.push(pick(WHATSAPP_COMMENT_CTAS, "whatsapp_comment_cta"));
-    else if (destination === "facebook_page") lines.push(pick(PAGE_COMMENT_CTAS, "page_comment_cta"));
-    else if (destination !== "none") lines.push(pick(COMMENT_CTAS, "comment_cta"));
-  } else {
-    lines.push(`${pick(LINK_CTAS, "link_cta")} ${pageUrl}`);
-  }
-  if (a.name) {
-    const phone = localPhone(a.phone);
-    lines.push(`${a.name}${phone ? ` · ${phone}` : ""}`);
-  }
-  lines.push(pick(RESPONSE_CTAS, "response_cta"));
+    if (destination === "whatsapp") return pick(WHATSAPP_COMMENT_CTAS, "whatsapp_comment_cta");
+    if (destination === "facebook_page") return pick(PAGE_COMMENT_CTAS, "page_comment_cta");
+    return destination === "none" ? null : pick(COMMENT_CTAS, "comment_cta");
+  };
+  const lines = pick(TEMPLATES, "template")(f, link, round).filter(Boolean);
+  // No name or phone: the reader still needs a way to respond.
+  if (!f.name && !f.phone) lines.push("לפרטים נוספים כתבו לי בפרטי.");
   return lines.join("\n");
 }
 
