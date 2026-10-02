@@ -30,22 +30,6 @@ function trackedUrl(pageUrl, { session, group }) {
   return u.toString();
 }
 
-/*
- * Per-group phrasing. Identical text pasted into many groups is the classic
- * spam fingerprint — and it also reads like a bot to human members. The FACTS
- * never change (price, rooms, size, link); only the framing does, and the
- * variant is derived from the property+group so a retry reproduces the same
- * text rather than inventing a new one each time.
- */
-const OPENERS = ["🏠", "🔑", "🏡", "✨", "📍"];
-const CTAS = [
-  "לכל הפרטים, תמונות וסרטון ⬅️",
-  "סרטון הליכה, תמונות ומידע מלא ⬅️",
-  "כל הפרטים והסרטון כאן ⬅️",
-  "לצפייה בסרטון ובפרטים המלאים ⬅️",
-];
-const CLOSERS = ["", "מוזמנים לפנות 🙂", "אשמח להעביר פרטים נוספים", "פתוח לשאלות"];
-
 function variantIndex(seed, mod) {
   const s = String(seed || "");
   let h = 0;
@@ -53,40 +37,104 @@ function variantIndex(seed, mod) {
   return h % mod;
 }
 
+// ponytail: no property_type field yet, so the title decides. Rooms + a title
+// that doesn't name another kind of property ⇒ "דירת N חדרים"; otherwise the
+// agent's own title is the noun.
+const NOT_APARTMENT = /בית|וילה|קוטג|משפחתי|פנטהאוז|מגרש|חנות|משרד|מחסן/;
+
+function postFacts(p, a, pageUrl, opts) {
+  const rooms = Number(p.rooms) > 0 ? p.rooms : 0;
+  const title = p.title || "נכס חדש";
+  const apt = Boolean(rooms) && !NOT_APARTMENT.test(title);
+  const rent = p.listing_type === "rent";
+  const size = Number(p.size_sqm) > 0 ? `${p.size_sqm} מ"ר` : "";
+  const floor = Number(p.floor) > 0 ? `קומה ${p.floor}` : "";
+  const price = Number(p.price) > 0
+    ? `₪${Number(p.price).toLocaleString("en-US")}${rent ? " לחודש" : ""}` : "";
+  const place = p.neighborhood && p.city ? `${p.neighborhood} ב${p.city}` : p.neighborhood || p.city || "";
+  const phone = localPhone(a.phone);
+  return {
+    rooms, apt, rent, size, floor, price, phone,
+    name: a.name || "",
+    city: p.city || "",
+    neighborhood: p.neighborhood || "",
+    noun: apt ? `דירת ${rooms} חדרים` : title,
+    the: apt ? "הדירה" : "הנכס",
+    it: apt ? "אותה" : "אותו",
+    deal: rent ? "להשכרה" : "למכירה",
+    inPlace: place ? ` ב${place}` : "",
+    loc: [p.neighborhood, p.city].filter(Boolean).join(", "),
+    specs: [size, floor && `ב${floor}`].filter(Boolean).join(" "),
+    contact: [a.name, phone].filter(Boolean).join(", "),
+    // linkInComment: many groups treat an external link in the post body as
+    // spam (and Facebook scores the domain for it). The agent posts the link
+    // as the first comment instead, standard practice in these groups.
+    link: opts.linkInComment ? "הקישור בתגובה הראשונה 👇" : pageUrl,
+  };
+}
+
+/*
+ * Per-group phrasing. Identical text pasted into many groups is the classic
+ * spam fingerprint, and it also reads like a bot to human members. Each
+ * template has its own order, voice and wording, but the FACTS never change
+ * (price, rooms, size, link) and none of them invents a feature we don't
+ * know. A template returns null when the property lacks what it needs. The
+ * variant is derived from the property+group, so a retry reproduces the same
+ * text rather than inventing a new one each time.
+ */
+const TEMPLATES = [
+  // a family that has outgrown its home
+  (f) => f.rooms >= 3 && [
+    `משפחה שגדלה ומחפשת חדר נוסף${f.city ? ` בלי לעזוב את ${f.city}` : ""}?`,
+    `${f.neighborhood ? `ב${f.neighborhood} ` : ""}יש ${f.noun} ${f.deal}${f.specs ? `, ${f.specs}` : ""}.`,
+    f.price && `${f.rent ? "שכירות" : "המחיר"}: ${f.price}`,
+    `יש סרטון הליכה ${f.apt ? "בדירה" : "בנכס"}, כך שאפשר לראות ${f.it} עוד לפני הביקור:`,
+    f.link,
+    f.name && [f.name, f.phone].filter(Boolean).join(" · "),
+  ],
+  // price first
+  (f) => f.price && [
+    `${f.price} ל${f.noun}${f.inPlace}.`,
+    [f.size, f.floor].filter(Boolean).join(", "),
+    `בסרטון אפשר לעבור על ${f.the} לפני שקובעים ביקור:`,
+    f.link,
+    f.contact && `לביקור: ${f.contact}`,
+  ],
+  // the agent in first person
+  (f) => f.name && [
+    `היי, כאן ${f.name} 👋`,
+    `קיבלתי לשיווק ${f.noun}${f.inPlace}${(() => {
+      const d = [f.size, f.floor, f.price && `${f.rent ? "בשכירות של" : "במחיר"} ${f.price}`].filter(Boolean);
+      return d.length ? `: ${d.join(", ")}` : "";
+    })()}.`,
+    "העליתי סרטון הליכה וכל הפרטים לכאן:",
+    f.link,
+    f.phone && `מי שרוצה לראות ${f.it} במציאות, אפשר להתקשר אליי: ${f.phone}`,
+  ],
+  // quick to scan, location last
+  (f) => [
+    `🏠 ${f.noun} ${f.deal}`,
+    [f.size, f.floor, f.price].filter(Boolean).join(" · "),
+    f.loc,
+    `בקישור יש סרטון של ${f.the}, ככה תדעו אם שווה לקבוע ביקור:`,
+    f.link,
+    [f.name, f.phone].filter(Boolean).join(" "),
+  ],
+  // from the reader's side
+  (f) => [
+    `לפני שנוסעים לראות ${f.apt ? "דירה" : "נכס"}, נוח לראות ${f.it} קודם בסרטון.`,
+    `אז הנה: ${[`${f.noun}${f.inPlace}`, f.specs, f.price && `${f.rent ? "בשכירות של" : "במחיר"} ${f.price}`].filter(Boolean).join(", ")}.`,
+    f.link,
+    f.contact && `לשאלות או לתיאום ביקור: ${f.contact}`,
+  ],
+];
+
 function buildPostCopy(page, pageUrl, opts = {}) {
-  const p = (page && page.property) || {};
-  const a = (page && page.agent) || {};
+  const f = postFacts((page && page.property) || {}, (page && page.agent) || {}, pageUrl, opts);
+  const fits = TEMPLATES.map((t) => t(f)).filter(Boolean);
   const seed = opts.variantSeed || "";
-  const pick = (arr) => arr[seed ? variantIndex(seed + arr.length, arr.length) : 0];
-  const lines = [];
-  lines.push(`${pick(OPENERS)} ${p.title || "נכס חדש"}`);
-  const loc = [p.neighborhood, p.city].filter(Boolean).join(", ");
-  if (loc) lines.push(`📍 ${loc}`);
-  const facts = [];
-  if (Number(p.rooms) > 0) facts.push(`${p.rooms} חדרים`);
-  if (Number(p.size_sqm) > 0) facts.push(`${p.size_sqm} מ"ר`);
-  if (Number(p.floor) > 0) facts.push(`קומה ${p.floor}`);
-  if (facts.length) lines.push(facts.join(" · "));
-  if (Number(p.price) > 0) {
-    const verb = p.listing_type === "rent" ? "שכירות" : "מחיר";
-    lines.push(`💰 ${verb}: ₪${Number(p.price).toLocaleString("en-US")}`);
-  }
-  lines.push("");
-  // linkInComment: many groups treat an external link in the post body as
-  // spam (and Facebook scores the domain for it). The agent posts the link
-  // as the first comment instead — standard practice in these groups.
-  if (opts.linkInComment) {
-    lines.push("קישור לסרטון ולפרטים המלאים בתגובה הראשונה 👇");
-  } else {
-    lines.push(`${pick(CTAS)} ${pageUrl}`);
-  }
-  if (a.name) {
-    const phone = localPhone(a.phone);
-    lines.push(`${a.name}${phone ? ` · ${phone}` : ""}`);
-  }
-  const closer = pick(CLOSERS);
-  if (closer) lines.push(closer);
-  return lines.join("\n");
+  const lines = fits[seed ? variantIndex(seed + fits.length, fits.length) : 0];
+  return lines.filter(Boolean).join("\n");
 }
 
 // facebook.com/groups/<slug> on facebook.com / www / m / web hosts only.

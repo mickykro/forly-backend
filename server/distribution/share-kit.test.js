@@ -15,8 +15,7 @@ const url = "https://forly.example/p/dana-abc12";
 
 // ── post copy carries the facts, the link, and the agent ──
 const copy = buildPostCopy(page, url);
-assert.ok(copy.includes("4 חד׳ בבבלי"), "title present");
-assert.ok(copy.includes("בבלי, תל אביב"), "location present");
+assert.ok(copy.includes("בבלי") && copy.includes("תל אביב"), "location present");
 assert.ok(copy.includes("4 חדרים"), "rooms present");
 assert.ok(copy.includes("105"), "sqm present");
 assert.ok(copy.includes("קומה 3"), "floor present");
@@ -111,8 +110,26 @@ assert.ok(!qm0.includes("undefined"));
   for (const text of [a, b, ...seeds]) {
     assert.ok(text.includes("₪4,200,000"), "price identical everywhere");
     assert.ok(text.includes("4 חדרים") && text.includes("105"), "facts identical everywhere");
-    assert.ok(text.includes("4 חד׳ בבבלי"), "title identical everywhere");
+    assert.ok(text.includes("בבלי") && text.includes("תל אביב"), "location everywhere");
+    assert.ok(text.includes(url), "link everywhere");
   }
+}
+
+// ── every template renders cleanly: no holes, no undefined, rent wording ──
+{
+  const seen = new Set();
+  for (let i = 0; i < 60; i++) {
+    for (const pg of [page, { ...page, property: { ...page.property, listing_type: "rent", price: 6500 } }]) {
+      const t = buildPostCopy(pg, url, { variantSeed: "s" + i });
+      seen.add(t.split("\n")[0]);
+      assert.ok(!/undefined|null|NaN|  |^\s*$/m.test(t), "no holes: " + t);
+    }
+  }
+  assert.ok(seen.size >= 5, "all five structures reachable");
+  const rent = buildPostCopy({ ...page, property: { ...page.property, listing_type: "rent", price: 6500 } }, url);
+  assert.ok(rent.includes("₪6,500 לחודש") && rent.includes("להשכרה"), "rent wording");
+  const house = buildPostCopy({ ...page, property: { ...page.property, title: "בית פרטי בבבלי" } }, url);
+  assert.ok(house.includes("בית פרטי בבבלי") && !house.includes("דירת"), "non-apartment keeps its title");
 }
 
 // ── link-in-first-comment keeps the domain out of the post body ──
