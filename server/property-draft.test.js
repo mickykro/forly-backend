@@ -32,6 +32,13 @@ assert.equal(D.parseAnswer("city", "מצפה רמון"), "מצפה רמון", "a
 assert.equal(D.parseAnswer("city", "חיפה"), "חיפה");
 assert.equal(D.openerKind("היי מה שלומך"), null);
 assert.equal(D.openerKind("3 חדרים"), null, "too short to be a listing");
+// 972546582548, Oct 1: an outbound video bounced the agent's own away-message back at us —
+// real-estate words and a digital-card link made it look like a listing on its own.
+assert.equal(D.openerKind(
+  "תודה שפניתם לנופר הרוש – שמאות מקרקעין ונדל״ן. 🌸\n\nכרגע איני זמינה, אך קיבלתי את הודעתכם ואחזור אליכם בהקדם האפשרי.\n\nכרטיס הביקור הדיגיטלי שלי:\nhttps://digitalcard1.co.il/nofar"
+), null, "a business's own away-message must not open a listing draft");
+assert.equal(D.openerKind("תודה שיצרת קשר עם קארין חביב- כבר תרגישו בבית! איך אפשר לעזור?"), null);
+assert.equal(D.openerKind("שלום, ותודה על פנייתך. איננו זמינים כעת, אך נשיב ברגע שנחזור."), null);
 
 // ── answer parsers ──
 assert.equal(D.parseAnswer("price", "2,900,000"), 2900000);
