@@ -1,0 +1,250 @@
+/*
+ * routes/admin-manual.js — the admin "פרסום ידני" tab (posting-manual).
+ *
+ * The queue of group posts the agents approved, a tick per group, and one
+ * live browser per agent on that agent's own saved Facebook profile, shown
+ * through connect-viewer (the cdpUrl never leaves the server). The admin
+ * drives it; helpers only do the tedious parts on request: open a group,
+ * type the approved text, and put the property's video into Facebook's file
+ * chooser the moment the admin opens it. The admin clicks Post themselves.
+ *
+ * Agents are addressed by an opaque ref (posting-manual.refOf), never a phone.
+ */
+const express = require("express");
+const M = require("../posting-manual");
+const A = require("../posting-account");
+
+const SESSION_S = 3600;      // Driver's limit
+const CHOOSER_FRESH_MS = 60000;
+const GROUP_URL = /^https:\/\/(www\.|m\.|web\.)?facebook\.com\/groups\/[^/?#\s]+\/?$/i;
+
+module.exports = function createAdminManualRouter({
+  requireAdmin, deps = {},
+  driver = require("../driver-browser"), viewer = require("../connect-viewer"),
+  media = require("../posting-media"), locks = require("../profile-lock"),
+}) {
+  const router = express.Router();
+  const x = A.ctxOf(deps);
+  const open = new Map(); // phone → { sessionId, release, timer, pageId, chooser }
+  const hooked = new WeakSet(); // pages whose file chooser we listen for
+  const key = (phone) => `manual|${phone}`;
+  const redact = (s) => (driver.redact ? driver.redact(s) : s);
+  const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
+    console.error(redact(`admin manual: ${(e && (e.code || e.name)) || "error"}`));
+    if (!res.headersSent) res.status(500).json({ error: "internal" });
+  });
+
+  // Every phone the tab may name: connected agents and those with campaigns.
+  async function phones() {
+    const connected = await x.store.listConnectedPhones("facebook").catch(() => []);
+    const running = (await x.store.listPostingCampaignsByStatus("running", 500)).map((c) => c.phone);
+    return [...new Set(connected.concat(running).map(String))];
+  }
+  async function phoneOf(ref) {
+    return (await phones()).find((p) => M.refOf(p) === String(ref)) || null;
+  }
+  async function cardOf(phone, pageId) {
+    const page = await x.db.getPage(String(pageId));
+    return page && page.business_phone === phone ? M.propertyCard(page, deps.pageBaseUrl) : null;
+  }
+  const hubPage = (phone) => { const h = viewer._hubs && viewer._hubs.get(key(phone)); return (h && !h.closed && h.page) || null; };
+
+  // Listen for Facebook's file chooser on every page of the agent's browser:
+  // with a listener on, Playwright intercepts it (no native dialog) and the
+  // tab can light up "העלאת הסרטון".
+  function hookChooser(phone) {
+    const h = viewer._hubs && viewer._hubs.get(key(phone));
+    if (!h || h.closed || !h.context) return;
+    const s = open.get(phone);
+    const hook = (p) => {
+      if (!p || hooked.has(p) || typeof p.on !== "function") return;
+      hooked.add(p);
+      p.on("filechooser", (fc) => { const cur = open.get(phone); if (cur) cur.chooser = { fc, at: Date.now() }; });
+    };
+    (h.context.pages ? h.context.pages() : []).forEach(hook);
+    if (!hooked.has(h.context)) { hooked.add(h.context); h.context.on("page", hook); }
+    if (s) s.hooked = true;
+  }
+
+  async function closeFor(phone, reason) {
+    const s = open.get(phone);
+    if (!s) return;
+    open.delete(phone);
+    clearTimeout(s.timer);
+    await viewer.close(key(phone), reason).catch(() => {});
+    await driver.stopSession(s.sessionId).catch(() => {});
+    s.release();
+  }
+
+  // ── the work list ──
+  router.get("/queue", requireAdmin, wrap(async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({ items: await M.queue(deps) });
+  }));
+
+  router.post("/campaigns/:id/groups/:gid/done", requireAdmin, wrap(async (req, res) => {
+    const status = req.body && req.body.status;
+    if (!["posted", "skipped"].includes(status)) return res.status(400).json({ error: "invalid_input" });
+    const c = await M.markDone(String(req.params.id), String(req.params.gid), status, deps);
+    if (!c) return res.status(404).json({ error: "not_found" });
+    res.json({ ok: true, completed: c.status === "completed" });
+  }));
+
+  // ── agents and their properties (no campaign needed) ──
+  router.get("/agents", requireAdmin, wrap(async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const q = await M.queue(deps);
+    const out = [];
+    for (const phone of await phones()) {
+      const conn = (await x.db.getConnection(phone)) || {};
+      if (!conn.facebook_browser_connected_at) continue;
+      const biz = (await x.db.getBusiness(phone).catch(() => null)) || {};
+      const ref = M.refOf(phone);
+      out.push({ ref, phone_tail: A.tail(phone), name: conn.facebook_identity_label || biz.name || biz.business_name || "", owed: q.filter((i) => i.ref === ref).length, open: open.has(phone) });
+    }
+    out.sort((a, b) => b.owed - a.owed || String(a.name).localeCompare(String(b.name)));
+    res.json({ agents: out });
+  }));
+
+  router.get("/agents/:ref/properties", requireAdmin, wrap(async (req, res) => {
+    const phone = await phoneOf(req.params.ref);
+    if (!phone) return res.status(404).json({ error: "not_found" });
+    const cards = [];
+    for (const l of await x.db.listListingsByPhone(phone)) {
+      if (!l || !l.page_id || l.status === "archived") continue;
+      const card = await cardOf(phone, l.page_id).catch(() => null);
+      if (card) cards.push(Object.assign(card, { thumb_url: (l.photos_urls && l.photos_urls[0]) || null }));
+    }
+    res.json({ properties: cards });
+  }));
+
+  // ── the agent's browser ──
+  router.post("/agents/:ref/browser", requireAdmin, wrap(async (req, res) => {
+    const phone = await phoneOf(req.params.ref);
+    if (!phone) return res.status(404).json({ error: "not_found" });
+    if (open.has(phone)) return res.json({ open: true });
+    const conn = (await x.db.getConnection(phone)) || {};
+    if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
+    const release = locks.tryAcquire(phone, "facebook");
+    if (!release) return res.status(409).json({ error: "profile_busy" });
+    try {
+      const { profileName } = require("../profile-name");
+      const s = await driver.createSession({
+        duration: SESSION_S, url: "https://www.facebook.com/",
+        profile: { name: profileName("facebook", phone, conn.facebook_profile_gen || 0), persist: true },
+        note: "forly-manual:facebook", // never the phone
+      }, { phone });
+      const timer = setTimeout(() => closeFor(phone, "expired"), SESSION_S * 1000);
+      if (timer.unref) timer.unref();
+      open.set(phone, { sessionId: s.sessionId, release, timer, pageId: null, chooser: null });
+      res.json({ open: true });
+    } catch (e) {
+      release();
+      console.error(redact(`admin manual browser ${A.tail(phone)}: ${(e && (e.code || e.name)) || "error"}`));
+      res.status(503).json({ error: "browser_unavailable" });
+    }
+  }));
+
+  // The routes below act on the agent's open browser.
+  const withBrowser = (fn) => wrap(async (req, res) => {
+    const phone = await phoneOf(req.params.ref);
+    if (!phone) return res.status(404).json({ error: "not_found" });
+    const s = open.get(phone);
+    if (!s) return res.status(409).json({ error: "no_open_browser" });
+    return fn(req, res, phone, s);
+  });
+
+  router.get("/agents/:ref/browser/view", requireAdmin, withBrowser(async (req, res, phone, s) => {
+    let hub;
+    try { hub = await viewer.attach(key(phone), s.sessionId); }
+    catch (e) {
+      const code = (e && e.code) || "viewer_unavailable";
+      if (code === "session_expired") await closeFor(phone, "expired");
+      return res.status(code === "session_expired" ? 409 : 503).json({ error: code });
+    }
+    hookChooser(phone);
+    viewer.pipe(req, res, hub);
+  }));
+
+  router.post("/agents/:ref/browser/view/input", requireAdmin, withBrowser(async (req, res, phone) => {
+    try { res.json(await viewer.input(key(phone), req.body)); }
+    catch (e) { res.status({ no_viewer: 409, invalid_input: 400, slow_down: 429 }[e && e.code] || 502).json({ error: (e && e.code) || "input_failed" }); }
+  }));
+
+  // The property this session is sharing: one of this agent's own.
+  router.post("/agents/:ref/browser/property", requireAdmin, withBrowser(async (req, res, phone, s) => {
+    const card = await cardOf(phone, (req.body && req.body.page_id) || "");
+    if (!card) return res.status(404).json({ error: "not_found" });
+    s.pageId = card.page_id;
+    res.json({ property: card });
+  }));
+
+  router.get("/agents/:ref/browser/state", requireAdmin, withBrowser(async (req, res, phone, s) => {
+    res.set("Cache-Control", "no-store");
+    hookChooser(phone);
+    const page = hubPage(phone);
+    let path = null;
+    try { path = page ? new URL(page.url()).pathname : null; } catch { path = null; }
+    res.json({
+      open: true, property: s.pageId ? await cardOf(phone, s.pageId) : null,
+      chooser_open: !!(s.chooser && Date.now() - s.chooser.at < CHOOSER_FRESH_MS), url_path: path,
+    });
+  }));
+
+  router.post("/agents/:ref/browser/goto", requireAdmin, withBrowser(async (req, res, phone) => {
+    const url = String((req.body && req.body.group_url) || "");
+    if (!GROUP_URL.test(url)) return res.status(400).json({ error: "invalid_input" });
+    const page = hubPage(phone);
+    if (!page) return res.status(409).json({ error: "no_viewer" });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+    res.json({ ok: true });
+  }));
+
+  // Types the text where the cursor is (the admin clicks the composer first):
+  // each line as text, Enter between lines — what the posting driver does.
+  router.post("/agents/:ref/browser/type", requireAdmin, withBrowser(async (req, res, phone) => {
+    const text = req.body && req.body.text;
+    if (typeof text !== "string" || !text.trim() || text.length > 5000) return res.status(400).json({ error: "invalid_input" });
+    const page = hubPage(phone);
+    if (!page) return res.status(409).json({ error: "no_viewer" });
+    const lines = text.replace(/\r\n?/g, "\n").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (i > 0) await page.keyboard.press("Enter");
+      if (lines[i]) await page.keyboard.insertText(lines[i]);
+    }
+    res.json({ ok: true });
+  }));
+
+  // The session property's video into Facebook: the file chooser the admin
+  // just opened ("תמונה/סרטון"), else the composer's own file input.
+  router.post("/agents/:ref/browser/video", requireAdmin, withBrowser(async (req, res, phone, s) => {
+    if (!s.pageId) return res.status(409).json({ error: "no_property" });
+    const page = await x.db.getPage(s.pageId);
+    const url = page && require("../posting-campaign").videoOf(page).video_url;
+    if (!url) return res.status(409).json({ error: "no_video" });
+    const chooser = s.chooser && Date.now() - s.chooser.at < CHOOSER_FRESH_MS ? s.chooser.fc : null;
+    const hp = hubPage(phone);
+    let input = null;
+    if (!chooser && hp) {
+      const { SELECTORS: S } = require("../posting-driver-proof");
+      const loc = hp.locator(S.mediaInput).first();
+      if ((await loc.count().catch(() => 0)) > 0) input = loc;
+    }
+    if (!chooser && !input) return res.status(409).json({ error: "chooser_not_open" });
+    let file;
+    try { file = await media.fetchVideo(url, deps); }
+    catch (e) { return res.status(502).json({ error: (e && e.code) || "media_unavailable" }); }
+    if (chooser) { await chooser.setFiles(file); s.chooser = null; }
+    else await input.setInputFiles(file);
+    res.json({ ok: true });
+  }));
+
+  router.delete("/agents/:ref/browser", requireAdmin, wrap(async (req, res) => {
+    const phone = await phoneOf(req.params.ref);
+    if (!phone) return res.status(404).json({ error: "not_found" });
+    await closeFor(phone, "closed");
+    res.json({ ok: true });
+  }));
+
+  return router;
+};
