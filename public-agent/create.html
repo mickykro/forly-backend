@@ -456,7 +456,7 @@
         <li id="st4"><span class="dot">🚀</span> <span data-i18n="step_live">הדף עולה לאוויר</span></li>
       </ul>
       <!-- choosing this property's Facebook groups while it builds (groups.html); shown only for a connected Facebook -->
-      <iframe id="groupsFrame" title="בחירת קבוצות" hidden style="width:100%;border:0;margin-top:18px;min-height:120px;text-align:right"></iframe>
+      <iframe id="groupsFrame" title="בחירת קבוצות" hidden style="width:100%;border:0;margin-top:18px;height:120px;text-align:right"></iframe>
       <div id="doneBox" class="hidden">
         <h3 style="font-family:var(--serif);margin-bottom:12px" data-i18n="done_title">✅ הדף באוויר!</h3>
         <a class="btn btn-gold" id="pageLink" target="_blank" href="#" data-i18n="done_view">צפייה בדף</a>
@@ -1683,7 +1683,7 @@
         if (e.origin !== location.origin || !e.data || !e.data.forlyGroups) return;
         var m = e.data.forlyGroups;
         gf.hidden = !m.connected;
-        if (m.h) gf.style.height = (m.h + 8) + "px";
+        if (m.h) gf.style.height = m.h + "px";
         if (m.chosen) groupsChosen = true;
       });
       gf.src = "/groups.html?embed=1&l=" + encodeURIComponent(listingId);

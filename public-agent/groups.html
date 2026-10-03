@@ -121,7 +121,9 @@
   // Inside create.html: whether to show this frame, its height, and whether a choice was made.
   function tell() {
     if (window.parent === window || !data) return;
-    window.parent.postMessage({ forlyGroups: { connected: !!data.connected, chosen: !!data.choice, h: document.documentElement.scrollHeight } }, location.origin);
+    // The content's own height: the frame's (documentElement.scrollHeight) never shrinks below the frame itself.
+    var h = Math.ceil(box.getBoundingClientRect().bottom + 12);
+    window.parent.postMessage({ forlyGroups: { connected: !!data.connected, chosen: !!data.choice, h: h } }, location.origin);
   }
   function approveTexts() {
     var copies = {};
