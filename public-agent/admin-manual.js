@@ -121,7 +121,10 @@
     if (!shown || !pageId) { detail = null; detailFor = null; renderDetail(); return; }
     detailFor = pageId;
     call("GET", "/agents/" + encodeURIComponent(shown) + "/properties/" + encodeURIComponent(pageId))
-      .then(function (j) { if (detailFor === pageId) { detail = j; renderDetail(); } }).catch(fail);
+      .then(function (j) { if (detailFor === pageId) { detail = j; renderDetail(); } })
+      .catch(function (e) {
+        $("#manualDetail").innerHTML = '<p class="manual-muted">לא הצלחנו לטעון את הקבוצות והטקסטים של הנכס (' + esc((e && (e.code || e.status)) || "שגיאה") + '). <button type="button" class="btn btn-ghost btn-sm" data-dt="retry">נסו שוב</button></p>';
+      });
   }
 
   // ── the browser column ──
@@ -133,11 +136,17 @@
         '<div><b>משתפים: ' + esc(p.title) + "</b>" + esc(p.address) +
         '<div class="manual-muted">' + [p.rooms ? p.rooms + " חדרים" : "", p.size_sqm ? p.size_sqm + " מ\"ר" : "", p.floor ? "קומה " + p.floor : "", price(p.price)].filter(Boolean).map(esc).join(", ") + "</div>" +
         '<a href="' + esc(p.page_url) + '" target="_blank" rel="noopener">דף הנכס ↗</a>' + (p.video_url ? "" : ' <span class="manual-muted">(אין סרטון)</span>') + "</div>";
-    var pick = $("#manualPropPick");
+    // The options are rebuilt only when the list changes: redrawing them on
+    // every poll closed the dropdown while it was open.
+    var pick = $("#manualPropPick"), list = JSON.stringify(props.map(function (x) { return x.page_id; }));
     pick.hidden = !shown;
-    pick.innerHTML = '<option value="">החלפת נכס…</option>' + props.map(function (x) {
-      return '<option value="' + esc(x.page_id) + '"' + (p && p.page_id === x.page_id ? " selected" : "") + ">" + esc(x.title) + (x.address ? ", " + esc(x.address) : "") + "</option>";
-    }).join("");
+    if (pick.dataset.list !== list) {
+      pick.dataset.list = list;
+      pick.innerHTML = '<option value="">החלפת נכס…</option>' + props.map(function (x) {
+        return '<option value="' + esc(x.page_id) + '">' + esc(x.title) + (x.address ? ", " + esc(x.address) : "") + "</option>";
+      }).join("");
+    }
+    if (document.activeElement !== pick) pick.value = (p && p.page_id) || "";
     var v = $("#manualVideo"), ready = !!(state && state.chooser_open);
     v.disabled = !(p && p.video_url);
     v.classList.toggle("ready", ready);
@@ -208,6 +217,7 @@
     var b = ev.target.closest("button[data-dt]");
     if (!b || !shown) return;
     var act = b.dataset.dt, t = texts[Number(b.dataset.i)];
+    if (act === "retry") { loadDetail(detailFor); return; }
     if (act === "tick") {
       // Every group the poster ticked: marked posted one by one. A mark cannot be undone, so ask first.
       var ids = [].slice.call($("#manualDetail").querySelectorAll("input[data-gid]:checked:not(:disabled)")).map(function (i) { return i.dataset.gid; });
