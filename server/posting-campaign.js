@@ -342,7 +342,9 @@ function candidatesFor(c, ctx) {
  * One phone, several running campaigns, one next slot: which property should
  * take it, and where? A price drop first, then a fresh listing, then one the
  * agent boosted, then one never posted; among equals the least recently
- * posted. Campaigns with an open post are not candidates.
+ * posted. Campaigns with an open post are not candidates, except one whose
+ * open posts all wait for the agent: it may prepare its next group too, so
+ * the agent approves a session's worth together (MAX_SESSION_POSTS open).
  * → { campaignId, groupUrl, group_id, target, at } — a slot;
  *   { campaignId: null, reason } — nothing now (posting-safety's reason);
  *   null — no running campaign without an open post.
@@ -353,7 +355,9 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
   const config = pre.config || (await configOf(deps, x));
   const conn = pre.conn || (await x.db.getConnection(phone)) || {};
   const campaigns = pre.campaigns || (await x.store.listPostingCampaignsByPhone(phone));
-  const ready = campaigns.filter((c) => c.status === "running" && !(c.posts || []).some((p) => OPEN_POST.has(p.status)));
+  const open = campaigns.reduce((n, c) => n + (c.posts || []).filter((p) => OPEN_POST.has(p.status)).length, 0);
+  if (open >= A.MAX_SESSION_POSTS) return null;
+  const ready = campaigns.filter((c) => c.status === "running" && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
   if (!ready.length) return null;
   const account = await A.accountView(phone, conn, deps, now, { campaigns });
   const catalog = await A.catalogIndex(x.db);

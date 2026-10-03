@@ -62,6 +62,14 @@ const FIXTURES = {
   assert.match((await M.fetchVideo(`${base}/page`).catch((e) => e.detail)).why, /not a video \(text\/html\)/);
   assert.equal(await codeOf(M.fetchVideo(`${base}/big`)), "media_too_large");
   assert.equal(await codeOf(M.fetchVideo("file:///etc/passwd")), "media_unavailable", "http(s) only");
+  // Our own /files/ upload is read from disk, whatever host it was stored under.
+  const up = fs.mkdtempSync(path.join(require("os").tmpdir(), "uploads-"));
+  fs.mkdirSync(path.join(up, "pages", "p1"), { recursive: true });
+  fs.writeFileSync(path.join(up, "pages", "p1", "walkthrough.mp4"), "own-mp4");
+  const own = await M.fetchVideo("https://gone-tunnel.trycloudflare.com/files/pages/p1/walkthrough.mp4", { uploadDir: up });
+  assert.deepEqual([own.mimeType, own.buffer.toString()], ["video/mp4", "own-mp4"], "dead host, file on disk: read locally");
+  assert.equal(await codeOf(M.fetchVideo(`${base}/files/pages/p1/missing.mp4`, { uploadDir: up })), "media_unavailable", "not on disk: fetched as usual");
+  assert.equal(await codeOf(M.fetchVideo(`${base}/files/..%2F..%2Fetc%2Fpasswd`, { uploadDir: up })), "media_unavailable", "never outside the uploads folder");
   srv.close();
 
   const exe = findChromium();

@@ -489,10 +489,24 @@ async function warmIdle(phone, deps = {}, now) {
   return "browse_started";
 }
 
+// A post that waits for the agent's approval does not hold the slot: the
+// planner keeps preparing the next groups' posts (up to MAX_SESSION_POSTS) so
+// the agent approves them together and one browser session posts them all.
+// They share the first one's slot: the session's dwell spaces them, and the
+// account's caps are re-checked at each post's reservation.
 async function planNext(phone, st, deps, x, now) {
-  const decision = await C.planAccount(phone, deps, now, { conn: st.conn, config: st.config, campaigns: st.campaigns });
+  let decision = await C.planAccount(phone, deps, now, { conn: st.conn, config: st.config, campaigns: st.campaigns });
   if (!decision) return "idle";
-  if (decision.campaignId) { await C.schedulePost(decision, deps, now); return "scheduled"; }
+  if (decision.campaignId) {
+    const at = decision.at;
+    for (let i = 0; i < A.MAX_SESSION_POSTS && decision && decision.campaignId; i++) {
+      const c = await C.schedulePost(Object.assign({}, decision, { at }), deps, now);
+      const post = c && (c.posts || []).find((p) => p.group_id === decision.group_id && OPEN_POST.has(p.status));
+      if (!post || post.status !== "pending_approval") break;
+      decision = await C.planAccount(phone, deps, now, { conn: st.conn, config: st.config });
+    }
+    return "scheduled";
+  }
   if (decision.reason === "browse_only" && !st.planOnly) await browse(phone, st.conn, deps, x, now);
   for (const c of st.campaigns) {
     if (c.status === "running" && !(c.posts || []).some((p) => OPEN_POST.has(p.status)) && c.wait_reason !== decision.reason) {

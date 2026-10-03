@@ -146,6 +146,18 @@ assert.ok(!qm0.includes("undefined"));
   }
 }
 
+// ── a neighborhood with the article never reads "בה…" ──
+{
+  const bursa = { ...page, property: { ...page.property, neighborhood: "הבורסה", city: "רמת גן" } };
+  for (let r = 0; r < 10; r++) {
+    const t = buildPostCopy(bursa, url, { variantSeed: "pg1|g", variantRound: r });
+    assert.ok(!t.includes("בהבורסה"), "no ב before the article");
+    assert.ok(t.includes("הבורסה"), "the neighborhood is still named");
+  }
+  const herz = buildPostCopy({ ...page, property: { ...page.property, neighborhood: "", city: "הרצליה" } }, url, { variantSeed: "x" });
+  assert.ok(!herz.includes("שכונת הרצליה"), "a city keeps its own ה");
+}
+
 // ── link-in-first-comment keeps the domain out of the post body ──
 {
   const body = buildPostCopy(page, url, { linkInComment: true });

@@ -13,6 +13,8 @@
  * composer: a selector failure), media_upload_failed (never finished).
  * Selectors live in posting-driver-proof SELECTORS, all [Unverified].
  */
+const fs = require("fs");
+const path = require("path");
 const { SELECTORS: S } = require("./posting-driver-proof");
 
 // Playwright's cap on an in-memory file is 50 MB; stay under it.
@@ -24,11 +26,32 @@ const UPLOAD_TIMEOUT_MS = 4 * 60 * 1000;
 const fail = (code, detail) => Object.assign(new Error(code), { code, detail: detail || null });
 const hostOf = (u) => { try { return new URL(u).host; } catch { return null; } };
 
+// A /files/ address is one of our own uploads (index.js serves UPLOAD_DIR
+// there). When this server holds the file it is read from disk: no egress,
+// and it survives the host it was stored under going away (a dev tunnel).
+function ownFile(url, deps = {}) {
+  let p;
+  try { p = decodeURIComponent(new URL(url).pathname); } catch { return null; }
+  if (!p.startsWith("/files/")) return null;
+  const root = path.resolve(deps.uploadDir || process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploads"));
+  const file = path.resolve(root, "." + p.slice("/files".length));
+  if (!file.startsWith(root + path.sep)) return null;
+  try { return fs.statSync(file).isFile() ? file : null; } catch { return null; }
+}
+
 // → { name, mimeType, buffer }. Throws { code } on anything short of a video.
 async function fetchVideo(url, deps = {}) {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url)) throw fail("media_unavailable", { why: "not an http(s) address" });
   if (typeof deps.fetchMedia === "function") return deps.fetchMedia(url);
   const host = hostOf(url);
+  const own = ownFile(url, deps);
+  if (own) {
+    const bytes = fs.statSync(own).size;
+    if (!bytes) throw fail("media_unavailable", { host, why: "empty file" });
+    if (bytes > MAX_BYTES) throw fail("media_too_large", { host, bytes, max_bytes: MAX_BYTES, why: "larger than the upload limit" });
+    const mov = /\.mov$/i.test(own);
+    return require("./posting-video").shrink({ name: `property.${mov ? "mov" : "mp4"}`, mimeType: mov ? "video/quicktime" : "video/mp4", buffer: fs.readFileSync(own) }, deps);
+  }
   let res;
   try { res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: "follow" }); }
   catch (e) { throw fail("media_unavailable", { host, why: `no response (${(e && (e.cause && e.cause.code || e.name)) || "error"})` }); }

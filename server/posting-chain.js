@@ -18,7 +18,7 @@ const C = require("./posting-campaign");
 const safety = require("./posting-safety");
 
 const { ms, MS_MIN, configOf } = A;
-const MAX_POSTS = 10;                         // per session, the first included (the time budget usually ends it first)
+const MAX_POSTS = A.MAX_SESSION_POSTS;        // per session, the first included
 const DWELL_S = [90, 348];                    // between posts: 1.5–5.8 minutes
 const POST_BUDGET_MS = 12 * MS_MIN;           // a dwell and a post must still fit in the session
 const SESSION_MS = (env) => Math.max(14, Number((env || process.env).POSTING_SESSION_MINUTES) || 55) * MS_MIN; // Driver's limit is 1 hour

@@ -545,6 +545,24 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
   for (const bad of [PHONE, "facebook.com", "f.ly", NAME, GROUP_NAME, PAGE_NAME, "דירה", "http", profileName("facebook", PHONE, 0)]) {
     assert.ok(!all.includes(bad), `a log line carries ${bad.slice(0, 6)}…`);
   }
+  // ── nav: arrived but stuck on the splash past the extra minute → one reload ──
+  {
+    const stuck = (reloadOk) => {
+      const pg = { reloads: 0, url: () => "https://www.facebook.com/", evaluate: async () => "loading",
+        goto: async () => { throw new Error("page.goto: Timeout 45000ms exceeded."); },
+        waitForLoadState: async (s) => { if (s === "domcontentloaded") throw new Error("timeout"); },
+        reload: async () => { pg.reloads++; if (!reloadOk) throw new Error("timeout"); } };
+      return pg;
+    };
+    const x = { guard: async () => {}, attempt: { key: "attempt-abcdef" } };
+    const ok = stuck(true);
+    assert.equal(await PD._test.nav(ok, x, "https://www.facebook.com/"), true, "the reload loaded it");
+    assert.equal(ok.reloads, 1, "exactly one reload");
+    const bad = stuck(false);
+    assert.equal(await PD._test.nav(bad, x, "https://www.facebook.com/"), false, "still stuck: navigation_failed as before");
+    assert.equal(bad.reloads, 1, "never a second reload");
+  }
+
   Object.assign(console, real);
   console.log("posting-driver.test.js ok");
 })().catch((e) => { Object.assign(console, real); console.error(e); process.exit(1); });

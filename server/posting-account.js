@@ -18,6 +18,9 @@ const LOOKBACK_DAYS = 30;
 const MEMBERSHIP_FRESH_MS = 48 * MS_HOUR; // older → the driver re-confirms membership (review §21)
 const ACTIVE_PAGE = new Set(["active", "expiring"]);
 const OPEN_POST = new Set(["pending_approval", "scheduled", "posting"]);
+// Posts one browser session publishes, and so the most posts the planner
+// prepares ahead for the agent to approve together.
+const MAX_SESSION_POSTS = 5;
 // Attempt state → campaign post status (the post mirrors its attempt).
 const POST_STATUS_OF = {
   verified_posted: "posted", submitted_for_approval: "pending_group_approval",
@@ -382,7 +385,7 @@ const drainCancelFailures = () => { const n = cancelFailures; cancelFailures = 0
 
 module.exports = {
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
-  MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, POST_STATUS_OF, ELIGIBILITY,
+  MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, MAX_SESSION_POSTS, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
   groupIdFromUrl, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY, fitsProperty, nameDealConflict, nameBarsAgents,
   memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,

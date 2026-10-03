@@ -72,11 +72,16 @@ function postFacts(page) {
   const rooms = num(p.rooms), sqm = num(p.size_sqm), floor = num(p.floor), price = num(p.price);
   const rent = p.listing_type === "rent";
   const hood = p.neighborhood || "", city = p.city || "";
+  // After ב the article drops (הבורסה → בבורסה), but a name can start with
+  // a root ה (הדר). "בשכונת הבורסה" is right either way. Only the
+  // neighborhood: a city keeps its own (בהרצליה).
+  const hoodAt = hood.startsWith("ה") ? `שכונת ${hood}` : hood;
   return {
     rooms, rent,
     hood, city,
-    place: join(", ", hood, city),              // שיקון ותיקים, כפר סבא
-    placeIn: hood && city ? `${hood} ב${city}` : hood || city, // שיקון ותיקים בכפר סבא
+    hoodAt,                                     // only ever printed after ב
+    place: join(", ", hoodAt, city),            // שיקון ותיקים, כפר סבא
+    placeIn: join(" ב", hoodAt, city),          // שיקון ותיקים בכפר סבא
     deal: rent ? "להשכרה" : "למכירה",
     priceLabel: rent ? "שכירות" : "מחיר",
     apt: rooms ? `דירת ${rooms} חדרים` : p.title || "נכס",
@@ -122,7 +127,7 @@ const TEMPLATES = [
     join(" ", f.name, dashedPhone(f.phone)),
   ],
   (f, link) => [
-    join(", ", f.apt, f.sqm) + at(f.hood),
+    join(", ", f.apt, f.sqm) + at(f.hoodAt),
     join(", ", f.city, f.floor),
     f.price,
     link("כל הפרטים+סרטון"),
@@ -176,7 +181,7 @@ const TEMPLATES = [
   ],
   (f, link) => [
     `${f.deal}:`,
-    f.apt + at(f.hood),
+    f.apt + at(f.hoodAt),
     f.city,
     f.sqm,
     f.floor,

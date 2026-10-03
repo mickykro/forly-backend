@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "posting-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "server", "run", "posting:local"],
+      "port": 8787
+    }
+  ]
+}

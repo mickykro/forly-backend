@@ -168,7 +168,15 @@ async function nav(page, x, url) {
     let ready = arrived && ["interactive", "complete"].includes(await state());
     // At the right address and still loading (a remote session can take more than 45 s): one more minute.
     if (arrived && !ready) ready = await page.waitForLoadState("domcontentloaded", { timeout: 60000 }).then(() => true, () => false);
-    console.warn(`posting nav …${String(x.attempt.key).slice(-6)}: ${first} (arrived=${arrived}, ready=${ready})`);
+    // Still on Facebook's splash after that: the request stalled, not the
+    // session (the next page loads fine). One reload of the same address.
+    let reloaded = false;
+    if (arrived && !ready) {
+      reloaded = true;
+      await x.guard("navigate");
+      ready = await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).then(() => true, () => false);
+    }
+    console.warn(`posting nav …${String(x.attempt.key).slice(-6)}: ${first} (arrived=${arrived}, ready=${ready}${reloaded ? ", after a reload" : ""})`);
     if (!ready) return false;
   }
   await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
@@ -642,5 +650,5 @@ async function reconcile(attempt, deps = {}) {
 module.exports = {
   postToGroup, postToPage, reconcile, SELECTORS: S, POST_SESSION_S, RECHECK_SESSION_S,
   proveIdentityAndDestination: P.proveIdentityAndDestination,
-  _test: { preflight, humanType, guardOf, submitReady },
+  _test: { preflight, humanType, guardOf, submitReady, nav },
 };

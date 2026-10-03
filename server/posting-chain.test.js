@@ -83,6 +83,26 @@ function chainingPost() {
     assert.ok(b.posts[0].not_before);
   }
 
+  // ── per-post: one tick prepares a session's worth (max 5) to approve together; one session posts them ──
+  {
+    const post = chainingPost();
+    const ids = ["111", "222", "333", "444", "555", "666", "777"];
+    const { deps, at } = await setup(undefined, { post, conn: { facebook_groups_member: ids.map((id) => K.member(id)) } });
+    let c = await C.create(base({ mode: "per_post", groups: ids.map((id) => ({ url: K.G(id), name: id, agent_policy: "explicitly_allowed" })) }), deps);
+    const t = new Date("2026-09-23T12:00:00+03:00");
+    c = await S.tick(c, deps, at(t));
+    assert.deepEqual(c.posts.map((p) => p.status), Array(5).fill("pending_approval"), "five planned at once, all waiting for the agent");
+    assert.equal(new Set(c.posts.map((p) => p.group_id)).size, 5, "each to its own group");
+    assert.equal(new Set(c.posts.map((p) => p.scheduled_at)).size, 1, "all in the first one's slot");
+    c = await S.tick(c, deps, at(new Date(t.getTime() + MIN)));
+    assert.equal(c.posts.length, 5, "no more than a session's worth open");
+    for (const p of c.posts) c = await C.approvePost(c.id, p.id, deps);
+    c = await S.tick(c, deps, at(new Date(c.posts[0].scheduled_at)));
+    assert.equal(post.sessions(), 1, "one browser session");
+    assert.equal(post.calls.length, 5, "all five posted in it");
+    assert.ok(c.posts.slice(0, 5).every((p) => p.status === "posted"));
+  }
+
   // ── a failed post ends the session: nothing is pushed after it ──
   {
     const inner = fakePost("verified_failed:composer_not_found");

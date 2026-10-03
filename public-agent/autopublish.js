@@ -458,12 +458,17 @@
     } catch (e) { toast(errorText(e)); }
     finally { this.disabled = false; renderSettings(); }
   });
-  $("apResync").addEventListener("click", async function () {
+  // Two buttons, one sync: the top one is in sight; the settings one sits
+  // with the group list it refreshes.
+  async function resync() {
+    const label = this.textContent;
     this.disabled = true; this.textContent = "מרעננים…";
     try { await post("/api/posting/groups/resync"); picks.clear(); await refresh(); toast("רשימת הקבוצות עודכנה"); }
     catch (e) { toast(errorText(e)); }
-    finally { this.disabled = false; this.textContent = "רענון"; }
-  });
+    finally { this.disabled = false; this.textContent = label; }
+  }
+  $("apResync").addEventListener("click", resync);
+  $("apResyncTop").addEventListener("click", resync);
   $("apSaveSettings").addEventListener("click", async function () {
     if (needConsent()) return;
     this.disabled = true;
