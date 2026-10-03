@@ -144,6 +144,25 @@ module.exports = function createWhatsappRouter(ctx) {
         }
         return createListing(phone, body, null, { ...pipelineDeps, source: "whatsapp" });
       },
+      // Choosing the property's Facebook groups (posting-listing-groups): only
+      // for an agent whose Facebook browser is connected; otherwise null and
+      // the chat says nothing about groups.
+      postingOffer: async (listingId) => {
+        const LG = require("../posting-listing-groups");
+        const offer = LG.offerOf((await db.getConnection(phone)) || {});
+        return offer.connected ? { ...offer, link: LG.link(baseUrl, authSecret, phone, listingId) } : null;
+      },
+      chooseDefault: async (listingId) => {
+        const LG = require("../posting-listing-groups");
+        const conn = (await db.getConnection(phone)) || {};
+        if (!LG.connected(conn)) return null;
+        const listing = listingId ? await db.getListing(listingId) : await LG.latestUnchosen(phone);
+        if (!listing) return null;
+        const count = LG.defaultIds(conn).length;
+        if (!count) return { ok: false, link: LG.link(baseUrl, authSecret, phone, listing.listing_id) };
+        const out = await LG.choose({ listing, phone, choice: LG.DEFAULT, consentVersion: require("./posting-shared").CONSENT_VERSION }, {});
+        return out.ok ? { ok: true, count } : null;
+      },
     };
   }
 

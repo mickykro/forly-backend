@@ -54,9 +54,24 @@ module.exports = function createPagesRouter(ctx) {
   // Automated posting (Task 16): a page that becomes active joins a campaign
   // when its account opted in. Fire-and-forget — enrollment never fails or
   // delays the page; its own failure is stored as posting_enroll_error.
-  const enrollPosting = (page) => {
+  // A listing whose groups the agent chose while it was building
+  // (posting-listing-groups) gets exactly that choice instead; a chosen list
+  // of groups also gets a WhatsApp link to approve each group's text.
+  const enrollPosting = (page, listing) => {
     if (!require("../posting-guard").postingEnvAllowed(process.env)) return; // C1: never from staging/local
-    Promise.resolve().then(() => require("../posting-campaign").enrollNewPage(page, ctx.postingDeps || {})).catch(() => null);
+    const LG = require("../posting-listing-groups");
+    const choice = listing && listing.posting_groups;
+    Promise.resolve().then(async () => {
+      if (!choice) return require("../posting-campaign").enrollNewPage(page, ctx.postingDeps || {});
+      const c = await LG.apply(page, listing, ctx.postingDeps || {});
+      if (c && Array.isArray(choice) && greenInstance && greenToken) {
+        await sendWhatsAppRich(page.business_phone, {
+          header: "דף הנכס מוכן ✅", footer: "",
+          body: "לפני שנפרסם בקבוצות שבחרתם, אשרו את הטקסט לכל קבוצה. אפשר לערוך כל אחד.",
+          buttons: [{ type: "url", buttonText: "לאישור הטקסטים", url: LG.link(baseUrl, authSecret, page.business_phone, listing.listing_id) }],
+        }, greenInstance, greenToken);
+      }
+    }).catch(() => null);
   };
 
   // Options every rehost() in this router shares. remoteUploadBase sends the
@@ -335,7 +350,7 @@ module.exports = function createPagesRouter(ctx) {
       // creation (spec §4). Entitlement + duplicate checks live in maybeOffer.
       distributionJobs.maybeOffer(distDeps, doc)
         .catch((e) => console.warn("distribution offer failed:", e && e.message));
-      enrollPosting(doc);
+      enrollPosting(doc, listing);
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);

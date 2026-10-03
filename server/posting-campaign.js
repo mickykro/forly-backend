@@ -361,7 +361,8 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
   const campaigns = pre.campaigns || (await x.store.listPostingCampaignsByPhone(phone));
   const open = campaigns.reduce((n, c) => n + (c.posts || []).filter((p) => OPEN_POST.has(p.status)).length, 0);
   if (open >= A.MAX_SESSION_POSTS) return null;
-  const ready = campaigns.filter((c) => c.status === "running" && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
+  // awaiting_texts: the agent has not approved the group texts yet (posting-listing-groups).
+  const ready = campaigns.filter((c) => c.status === "running" && !c.awaiting_texts && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
   if (!ready.length) return null;
   const account = await A.accountView(phone, conn, deps, now, { campaigns });
   const catalog = await A.catalogIndex(x.db);

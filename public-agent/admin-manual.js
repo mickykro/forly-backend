@@ -67,6 +67,7 @@
             ps.map(function (i) {
               var k = esc(i.campaign_id + "|" + i.group_id), on = picked === i.campaign_id + "|" + i.group_id;
               return '<div class="manual-item' + (on ? " on" : "") + '"><b>' + esc(i.group_name || "קבוצה") + "</b> " +
+                (i.awaiting_agent ? '<span class="manual-chip owed">הסוכן עוד לא אישר את הטקסט</span> ' : "") +
                 '<a href="' + esc(i.group_url) + '" target="_blank" rel="noopener">↗</a>' +
                 '<pre dir="auto">' + esc(i.copy) + '</pre><div class="manual-row">' +
                 '<button type="button" class="btn btn-gold btn-sm" data-act="pick" data-k="' + k + '">בחירה</button>' +

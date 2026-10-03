@@ -388,6 +388,7 @@ module.exports = function createPostingRouter(ctx) {
   }));
 
   require("./posting-settings")(router, S, auth);
+  require("./posting-listing-groups")(router, S, ctx);
   return router;
 };
 

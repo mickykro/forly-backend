@@ -75,7 +75,7 @@ async function queue(deps = {}) {
     if (!page) continue;
     for (const g of owed(c)) {
       out.push({
-        ref: refOf(c.phone), campaign_id: c.id, phone_tail: A.tail(c.phone),
+        ref: refOf(c.phone), campaign_id: c.id, phone_tail: A.tail(c.phone), awaiting_agent: c.awaiting_texts === true,
         agent_name: (page.agent && page.agent.name) || "", page_id: c.page_id,
         title: (page.property && page.property.title) || c.page_id, page_url: pageUrlOf(c.page_id, deps.pageBaseUrl),
         group_id: String(g.group_id), group_name: g.name || "", group_url: urlOf(g),

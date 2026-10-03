@@ -149,7 +149,23 @@ function outOfQuota(message) {
   const url = (text.match(/https?:\/\/\S+/) || [])[0];
   return url ? { text: text.replace(/:?\s*https?:\/\/\S+/, "").trim(), links: [{ text: "לרכישת חבילה", url }] } : { text };
 }
-function building(s) { return { text: `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).` }; }
+// offer (posting-listing-groups.offerOf + a link): only for an agent whose
+// Facebook browser is connected — otherwise the message says nothing about groups.
+function building(s, offer) {
+  const text = `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).`;
+  if (!offer || !offer.connected || !offer.link) return { text };
+  const def = offer.defaults > 0 ? `\nאו ענו "ברירת מחדל" כדי לפרסם בקבוצות ברירת המחדל שלכם (${offer.defaults}).` : "";
+  return {
+    text: `${text}\n\nבינתיים, באילו קבוצות בפייסבוק לפרסם את הנכס? בחרו בקישור.${def}`,
+    ...(offer.defaults > 0 ? { buttons: ["ברירת מחדל"] } : {}),
+    links: [{ text: "בחירת קבוצות", url: offer.link }],
+  };
+}
+function defaultChosen(n) { return { text: `מעולה ✅ הנכס יפורסם בקבוצות ברירת המחדל שלכם (${n}). בסוף הפרסום נשלח לכם הודעה עם הקבוצות.` }; }
+function defaultUnavailable(link) {
+  return link ? { text: "אין לכם קבוצות ברירת מחדל שמורות. אפשר לבחור קבוצות לנכס בקישור.", links: [{ text: "בחירת קבוצות", url: link }] }
+    : { text: "אין לכם קבוצות ברירת מחדל שמורות. אפשר לבחור אותן בעמוד הפרסום האוטומטי." };
+}
 function cancelled() { return { text: "ביטלתי את הטיוטה. אפשר להתחיל מחדש עם קישור, טקסט או ״נכס חדש״." }; }
 function declined() { return { text: "בסדר, לא בונים דף מהתמונות האלה." }; }
 function resumePrompt(s) {
@@ -173,7 +189,7 @@ function noLinkHint(createUrl) {
   return { text: "שלחו לי קישור למודעה (יד2, מדלן, פייסבוק), את טקסט המודעה, או כתבו ״נכס חדש״.\nאפשר גם ידנית.", links: manual(createUrl) };
 }
 
-module.exports = {
+module.exports = { defaultChosen, defaultUnavailable,
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>בחירת קבוצות — Forly</title>
+<meta name="robots" content="noindex">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;600&family=Heebo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+  body{background:#f7f3ec}
+  .gp{max-width:640px;margin:0 auto;padding:16px}
+  .gp.embed{padding:0;max-width:none}
+  .gp h1{font-size:1.25rem;margin:0 0 6px}
+  .gp .sub{color:#6b6257;font-size:.9rem;margin:0 0 14px}
+  .gp-card{background:#fff;border:1px solid rgba(23,20,15,.1);border-radius:12px;padding:14px;margin-bottom:12px}
+  .gp-list{list-style:none;margin:0;padding:0}
+  .gp-list li{padding:8px 0;border-bottom:1px solid rgba(23,20,15,.06)}
+  .gp-list label{display:flex;gap:8px;align-items:center;cursor:pointer}
+  .gp-list input{width:18px;height:18px}
+  .gp-list small{color:#8a8175}
+  .gp-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .gp textarea{width:100%;box-sizing:border-box;font:inherit;font-size:.95rem;padding:8px;border-radius:8px;border:1px solid rgba(23,20,15,.15);margin-top:6px}
+  .gp-consent{display:flex;gap:8px;align-items:flex-start;font-size:.85rem;color:#4b443b;margin-top:12px}
+  .gp-ok{color:#1f7a3a;font-weight:600}
+  .gp-msg{min-height:1.2em;font-size:.9rem;color:#a33;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="gp" id="gp"><p class="sub">טוענים…</p></div>
+<script>
+/* groups.html — the agent chooses a property's Facebook groups while its page
+   builds, then approves each group's text once the page exists
+   (/api/posting/listing-groups, posting-listing-groups.js). Opened from the
+   WhatsApp link, or inside create.html's building screen (?embed=1). */
+(function () {
+  "use strict";
+  var q = new URLSearchParams(location.search), id = q.get("l") || "", embed = q.get("embed") === "1";
+  var box = document.getElementById("gp"), data = null, poll = null, saved = false;
+  if (embed) box.classList.add("embed");
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+  var CONSENT = "הבנתי שפייסבוק לא אוהבת פרסום אוטומטי מחשבון אישי ולפעמים מגבילה חשבונות בגלל זה. פורלי מפרסמת לאט ובזהירות, ובכל פוסט מציגה מראש אם יצורף דף הנכס. אין הסוואת דומיין או קישור. אני רוצה להמשיך.";
+  function api(method, path, body) {
+    return fetch("/api/posting/listing-groups/" + encodeURIComponent(id) + (path || ""), {
+      method: method, credentials: "include", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined,
+    }).then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw Object.assign(new Error(j.error || r.status), { code: j.error, status: r.status }); return j; }); });
+  }
+  var ERR = { consent_required: "אשרו את התנאים כדי להמשיך.", invalid_groups: "בחרו לפחות קבוצה אחת.", no_defaults: "אין לכם קבוצות ברירת מחדל.",
+    facebook_not_connected: "חשבון הפייסבוק לא מחובר.", not_found: "הנכס לא נמצא בחשבון שלכם.", page_not_ready: "הדף עוד לא מוכן." };
+  var say = function (e) { var m = box.querySelector(".gp-msg"); if (m) m.textContent = ERR[e && e.code] || (e && e.status === 401 ? "הקישור פג תוקף. בקשו קישור חדש בוואטסאפ." : "משהו השתבש. נסו שוב."); };
+  var title = function () { return data.title ? " ל" + esc(data.title) : ""; };
+
+  function render() { draw(); tell(); }
+  function draw() {
+    if (!data.connected) { box.innerHTML = embed ? "" : '<p class="sub">חשבון הפייסבוק שלכם לא מחובר לפורלי.</p>'; return; }
+    var r = data.review;
+    // The page exists and the agent chose groups: approve each group's text.
+    if (r && r.awaiting) {
+      box.innerHTML = '<h1>הטקסט לכל קבוצה' + title() + '</h1><p class="sub">דף הנכס מוכן. זה הנוסח שיעלה לכל קבוצה, אפשר לערוך כל אחד. אחרי האישור נפרסם ובסוף נשלח לכם הודעה עם הקבוצות.</p>' +
+        r.groups.map(function (g) {
+          return '<div class="gp-card"><b>' + esc(g.name || "קבוצה") + '</b><textarea dir="auto" rows="' + Math.min(12, String(g.copy).split("\n").length + 1) + '" data-g="' + esc(g.group_id) + '">' + esc(g.copy) + "</textarea></div>";
+        }).join("") +
+        '<div class="gp-actions"><button type="button" class="btn btn-gold" id="gpTexts">אישור הטקסטים</button></div><p class="gp-msg"></p>';
+      document.getElementById("gpTexts").onclick = approveTexts;
+      return;
+    }
+    if (r && !r.awaiting) {
+      box.innerHTML = '<h1>הכל מוכן ✅</h1><p class="sub">הנכס יפורסם ב-' + r.groups.length + " קבוצות" + ": " + r.groups.map(function (g) { return esc(g.name || "קבוצה"); }).join(", ") + ". בסוף הפרסום נשלח לכם הודעה עם הקבוצות.</p>";
+      return;
+    }
+    if (data.choice && saved) {
+      box.innerHTML = '<p class="gp-ok">נשמר ✓</p><p class="sub">' + (data.choice === "default"
+        ? "הנכס יפורסם בקבוצות ברירת המחדל שלכם, כשהדף יהיה מוכן."
+        : "כשהדף יהיה מוכן נבקש לאשר את הטקסט לכל קבוצה" + (embed ? " כאן." : ".")) +
+        '</p><button type="button" class="btn btn-ghost btn-sm" id="gpChange">שינוי הבחירה</button>';
+      document.getElementById("gpChange").onclick = function () { saved = false; render(); };
+      return;
+    }
+    // Choosing the groups.
+    var chosen = Array.isArray(data.choice) ? data.choice : data.choice === "default" ? data.defaults
+      : data.groups.filter(function (g) { return g.fits !== false && data.defaults.indexOf(String(g.group_id)) >= 0; }).map(function (g) { return String(g.group_id); });
+    var groups = data.groups.slice().sort(function (a, b) { return (b.fits !== false) - (a.fits !== false); });
+    box.innerHTML = '<h1>באילו קבוצות לפרסם' + title() + "?</h1>" +
+      '<p class="sub">' + (data.page_ready ? "" : "בזמן שהדף נבנה, ") + "סמנו את הקבוצות. לפני הפרסום תראו ותאשרו את הטקסט לכל קבוצה.</p>" +
+      (groups.length ? '<div class="gp-card"><ul class="gp-list">' + groups.map(function (g) {
+        var gid = String(g.group_id);
+        return '<li><label><input type="checkbox" value="' + esc(gid) + '"' + (chosen.indexOf(gid) >= 0 ? " checked" : "") + "> <span>" + esc(g.name) +
+          (g.fits === false ? " <small>(לא בדיוק באזור או בסוג העסקה)</small>" : "") + "</span></label></li>";
+      }).join("") + "</ul></div>" : '<p class="sub">לא מצאנו קבוצות נדל״ן שאתם חברים בהן.</p>') +
+      (data.consent_given ? "" : '<label class="gp-consent"><input type="checkbox" id="gpConsent"> <span>' + esc(CONSENT) + "</span></label>") +
+      '<div class="gp-actions">' + (groups.length ? '<button type="button" class="btn btn-gold" id="gpSave">שמירת הקבוצות</button>' : "") +
+      (data.defaults.length ? '<button type="button" class="btn btn-ghost" id="gpDefault">ברירת מחדל (' + data.defaults.length + ")</button>" : "") +
+      '</div><p class="gp-msg"></p>';
+    var save = function (body) {
+      var c = document.getElementById("gpConsent");
+      if (c && !c.checked) { say({ code: "consent_required" }); return; }
+      api("PUT", "", Object.assign({ consent: true, consent_version: data.consent_version }, body))
+        .then(function (j) { data.choice = j.choice; saved = true; render(); load(); }).catch(say);
+    };
+    var s = document.getElementById("gpSave"), d = document.getElementById("gpDefault");
+    if (s) s.onclick = function () {
+      var ids = [].slice.call(box.querySelectorAll(".gp-list input:checked")).map(function (i) { return i.value; });
+      if (!ids.length) { say({ code: "invalid_groups" }); return; }
+      save({ group_ids: ids });
+    };
+    if (d) d.onclick = function () { save({ default: true }); };
+  }
+
+  // Inside create.html: whether to show this frame, its height, and whether a choice was made.
+  function tell() {
+    if (window.parent === window || !data) return;
+    window.parent.postMessage({ forlyGroups: { connected: !!data.connected, chosen: !!data.choice, h: document.documentElement.scrollHeight } }, location.origin);
+  }
+  function approveTexts() {
+    var copies = {};
+    [].slice.call(box.querySelectorAll("textarea[data-g]")).forEach(function (t) { copies[t.dataset.g] = t.value; });
+    var b = document.getElementById("gpTexts"); b.disabled = true;
+    api("PUT", "/texts", { copies: copies }).then(load).catch(function (e) { b.disabled = false; say(e); });
+  }
+
+  function load() {
+    return api("GET").then(function (j) {
+      var typing = document.activeElement && document.activeElement.tagName === "TEXTAREA";
+      var first = !data;
+      data = j;
+      if (first && j.choice) saved = true;
+      if (!typing) render();
+      // While the page builds, look again so the texts appear the moment it is ready.
+      clearTimeout(poll);
+      if (j.connected && !(j.review && !j.review.awaiting) && !(j.review && j.review.awaiting)) poll = setTimeout(load, 8000);
+      tell();
+    }).catch(function (e) {
+      if (e && e.status === 401 && !embed) { location.href = "/?next=" + encodeURIComponent(location.pathname + location.search); return; }
+      box.innerHTML = embed ? "" : '<p class="sub">' + esc(e && e.status === 404 ? ERR.not_found : "לא הצלחנו לטעון. נסו שוב.") + "</p>";
+    });
+  }
+  if (!id) { box.innerHTML = '<p class="sub">חסר מזהה נכס.</p>'; return; }
+  load();
+})();
+</script>
+</body>
+</html>

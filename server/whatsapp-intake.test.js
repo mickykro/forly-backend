@@ -63,6 +63,7 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   assert.equal(t.status, "choose", "fields and photos done: preview or create");
   assert.deepEqual(t.replies[0].buttons, ["תצוגה מקדימה", "ליצור"]);
   draft = t.draft;
+  const atChoose = structuredClone(t.draft); // reused by the groups-choice block below
   t = await turn({ text: "מה?", draft }, d);
   assert.deepEqual([t.status, t.draft], ["choose", undefined], "anything else repeats the choice");
   // preview: straight to the review link, no design question (it's picked on the page)
@@ -461,6 +462,43 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   t = await turn({ text: "המחיר ירד ל-2.5 מיליון https://www.yad2.co.il/item/abc https://www.yad2.co.il/item/def" }, d);
   assert.equal(t.draft.fields.price, 2500000);
   assert.match(texts(t), /קראתי את הקישור הראשון/);
+
+  // ── choosing the property's groups after "ליצור" (posting-listing-groups) ──
+  {
+    const build = async (d) => { const a = await turn({ text: "ליצור", draft: atChoose }, d); return turn({ text: "2", draft: a.draft }, d); };
+    // Facebook not connected: nothing about groups at all
+    ({ d } = deps({ postingOffer: async () => null }));
+    t = await build(d);
+    assert.equal(t.status, "building");
+    assert.ok(!/קבוצות/.test(texts(t)) && !t.replies[0].buttons && !t.replies[0].links, "no group options without a connected Facebook");
+    // connected with default groups: the picker link, and a "ברירת מחדל" button
+    ({ d } = deps({ postingOffer: async (id) => ({ connected: true, defaults: 3, link: `https://g/${id}` }) }));
+    t = await build(d);
+    assert.match(texts(t), /באילו קבוצות/);
+    assert.match(texts(t), /https:\/\/g\/L1/);
+    assert.deepEqual(t.replies[0].buttons, ["ברירת מחדל"]);
+    // connected, no default groups: only the link
+    ({ d } = deps({ postingOffer: async (id) => ({ connected: true, defaults: 0, link: `https://g/${id}` }) }));
+    t = await build(d);
+    assert.ok(!t.replies[0].buttons && /https:\/\/g\/L1/.test(texts(t)));
+
+    // "ברירת מחדל" while building, and after the draft is gone
+    const asked = [];
+    ({ d } = deps({ chooseDefault: async (id) => { asked.push(id); return { ok: true, count: 3 }; } }));
+    t = await turn({ text: "ברירת מחדל", draft: { ...ready, status: "building", listing_id: "L9" } }, d);
+    assert.deepEqual([t.handled, t.status], [true, "default:ok"]);
+    assert.match(texts(t), /ברירת המחדל שלכם \(3\)/);
+    t = await turn({ text: "ברירת מחדל" }, d);
+    assert.deepEqual([t.handled, asked], [true, ["L9", null]], "no draft: the newest property of the day");
+    // nothing to apply it to (or Facebook not connected): not ours, n8n answers
+    ({ d } = deps({ chooseDefault: async () => null }));
+    t = await turn({ text: "ברירת מחדל" }, d);
+    assert.equal(t.handled, false);
+    // no default groups saved: the picker link instead
+    ({ d } = deps({ chooseDefault: async () => ({ ok: false, link: "https://g/L9" }) }));
+    t = await turn({ text: "ברירת מחדל", draft: { ...ready, status: "building", listing_id: "L9" } }, d);
+    assert.match(texts(t), /https:\/\/g\/L9/);
+  }
 
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
