@@ -98,7 +98,15 @@ function build({ pageBaseUrl, authSecret }) {
     stopped: () => msg("✋ הפרסום נעצר", "מה שכבר פורסם נשאר בקבוצות. אפשר להתחיל שוב מתי שתרצו, מעמוד הפרסום.", [publishBtn]),
 
     // Every group (and the Page, if included) got its post — nothing left to schedule.
-    completed: () => msg("🎉 הפרסום הושלם", "פורלי סיימה לפרסם את הנכס בכל הקבוצות שבחרתם. אפשר להפעיל שוב אחרי שבועיים, מעמוד הפרסום.", [publishBtn]),
+    // The end of a campaign: where it went up, each group with its link.
+    completed: (c) => {
+      const since = c && c.restarted_at;
+      const done = ((c && c.posts) || []).filter((p) => p && p.status === "posted" && (!since || String(p.posted_at || "") >= since));
+      if (!done.length) return msg("🎉 הפרסום הושלם", "פורלי סיימה לפרסם את הנכס בכל הקבוצות שבחרתם. אפשר להפעיל שוב אחרי שבועיים, מעמוד הפרסום.", [publishBtn]);
+      const lines = done.slice(0, 10).map((p) => `• ${p.group_name || GROUP}${p.group_url ? `\n${p.group_url}` : ""}`);
+      const more = done.length > 10 ? `\nועוד ${done.length - 10} קבוצות.` : "";
+      return msg("🎉 הפרסום הושלם", `הנכס פורסם ב${done.length === 1 ? "קבוצה אחת" : `-${done.length} קבוצות`}:\n${lines.join("\n")}${more}`, [publishBtn]);
+    },
   };
 }
 

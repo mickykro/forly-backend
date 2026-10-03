@@ -531,5 +531,15 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.deepEqual([out.status, out.error_code, out.error_check, out.failed_step], ["failed", "composer_not_found", "composer_button", "session_started"]);
   }
 
+  // ── create: the agent's approved text per group is kept on the group ──
+  {
+    const { deps } = await setup();
+    const c = await C.create(base({ copies: { 111: "  טקסט שאושר לקבוצה A  ", 999: "לא בקמפיין" } }), deps);
+    const a = c.groups.find((g) => g.group_id === "111"), b = c.groups.find((g) => g.group_id === "222");
+    assert.equal(a.copy, "טקסט שאושר לקבוצה A", "trimmed, cleaned");
+    assert.equal(b.copy, undefined, "a group without approved text gets none");
+    assert.ok(!c.groups.some((g) => g.group_id === "999"), "a copy for a group not in the campaign adds nothing");
+  }
+
   console.log("posting-campaign.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

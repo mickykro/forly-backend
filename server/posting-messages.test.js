@@ -172,5 +172,16 @@ const verify = (u, action, nowMs = Date.now()) =>
   assert.ok(!/972\d{8,9}/.test(all), "no full phone number");
   assert.ok(!/wss?:\/\/|viewer\.driver\.dev/i.test(all), "no cdpUrl/viewer URL");
 
+  // ── completed: the groups it went up in, each with its link; a skipped one is not listed ──
+  {
+    const out = M.completed({ posts: [
+      { status: "posted", group_name: "A", group_url: "https://www.facebook.com/groups/111" },
+      { status: "skipped", group_name: "B", group_url: "https://www.facebook.com/groups/222" },
+    ] });
+    const body = T(out);
+    assert.ok(body.includes("A") && body.includes("https://www.facebook.com/groups/111"));
+    assert.ok(!body.includes("groups/222"));
+  }
+
   console.log("posting-messages.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

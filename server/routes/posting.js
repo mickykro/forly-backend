@@ -68,6 +68,9 @@ function validCreate(b) {
   if (b.days !== undefined && !(Number.isFinite(b.days) && b.days >= 1 && b.days <= 30)) return null;
   if (b.repeat_days !== undefined && b.repeat_days !== null && !(Number.isInteger(b.repeat_days) && b.repeat_days >= 3 && b.repeat_days <= 30)) return null; // never the same property to a group within 3 days
   for (const k of ["repeat", "include_unknown", "account_aged", "posted_manually"]) if (b[k] !== undefined && typeof b[k] !== "boolean") return null;
+  // The text the agent approved per group (manual posting): { group_id: text }.
+  if (b.copies !== undefined && b.copies !== null && (typeof b.copies !== "object" || Array.isArray(b.copies) || Object.keys(b.copies).length > 60
+    || Object.values(b.copies).some((t) => typeof t !== "string" || t.length > require("../posting-campaign").MAX_COPY))) return null;
   return { ids: g.ids, targets: t.targets };
 }
 
@@ -89,6 +92,7 @@ module.exports = function createPostingRouter(ctx) {
   // opts.throttle (the card's polling GET): at most once a minute per campaign.
   const planned = new Map();
   async function planNow(c, opts = {}) {
+    if (require("../posting-manual").enabled(ctx.env || deps.env || process.env)) return c; // manual posting: nothing is planned
     if (!c || c.status !== "running" || (c.posts || []).some((p) => A.OPEN_POST.has(p.status))) return c;
     if (c.wait_reason && !BUSY.has(c.wait_reason)) return c; // the planner already said why
     if (!postingEnvAllowed(ctx.env || deps.env || process.env)) return c;
@@ -146,7 +150,9 @@ module.exports = function createPostingRouter(ctx) {
     if (!v) return res.status(400).json({ error: "invalid_input" });
     // The consent is to the text the card showed: it must be this version.
     if (b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
-    if (!(await allowed(S, phone, res, PERMISSION_CURED))) return;
+    // Manual posting: an admin publishes by hand, so the automatic posting switch does not apply.
+    const manual = require("../posting-manual").enabled(deps.env || process.env);
+    if (!manual && !(await allowed(S, phone, res, PERMISSION_CURED))) return;
 
     const conn = (await db.getConnection(phone)) || {};
     if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
@@ -175,12 +181,12 @@ module.exports = function createPostingRouter(ctx) {
       if (!permActive(cur.posting_permission)) patch.posting_permission = campaignPermission(cur.posting_permission, now);
       return Object.keys(patch).length ? patch : null;
     });
-    if (!(await allowed(S, phone, res))) return;
+    if (!manual && !(await allowed(S, phone, res))) return;
 
     const before = await store.getPostingCampaign(store.campaignId(phone, page.page_id));
     const c = await campaigns.create({
       phone, page, groups, mode: b.mode, days: b.days, repeat: b.repeat === true, repeatDays: b.repeat_days || null, targets: v.targets || undefined,
-      consent: { at: A.iso(now), version: CONSENT_VERSION },
+      consent: { at: A.iso(now), version: CONSENT_VERSION }, copies: b.copies || null,
     }, deps);
     const existing = !!before && !ENDED.has(before.status);
     return res.status(existing ? 200 : 201).json({ campaign: publicView(await planNow(c)), existing });

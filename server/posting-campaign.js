@@ -56,7 +56,7 @@ function normalizeGroups(groups, ctx) {
 // Default (Task 19's route, an explicit agent create): any stopped/completed
 // one. enrollNewPage passes a narrower rule (see there). Evaluated inside the
 // campaign transaction, so a STOP landing meanwhile is never overridden.
-async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets } = {}, deps = {}, opts = {}) {
+async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets, copies } = {}, deps = {}, opts = {}) {
   const x = ctxOf(deps);
   if (!consent || !consent.at) throw fail("consent_required", "consent required");
   if (!page || !page.page_id || !phone) throw fail("invalid_input", "phone and page required");
@@ -72,7 +72,11 @@ async function create({ phone, page, groups, mode, days, repeat, repeatDays, con
     repeat: repeat === true || Number(repeatDays) > 0, repeat_days: Number(repeatDays) > 0 ? Math.min(30, Math.max(3, Math.round(Number(repeatDays)))) : null,
     expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 30, 1), 30) * MS_DAY),
     consent_at: iso(consent.at), consent_version: consent.version || null,
-    groups: normalizeGroups(groups, ctx),
+    // The text the agent approved for each group (manual posting), kept as written.
+    groups: normalizeGroups(groups, ctx).map((g) => {
+      const t = copies && typeof copies[g.group_id] === "string" ? cleanCopy(copies[g.group_id]) : "";
+      return t ? { ...g, copy: t } : g;
+    }),
     targets: A.targetsFor(conn, targets),
     status: "running", pause_reason: null, wait_reason: null,
     posts: [], consecutive_failures: 0, tick_errors: 0, selector_failures: 0,

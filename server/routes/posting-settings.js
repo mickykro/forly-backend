@@ -120,6 +120,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const est = await firstPost(phone, conn, now);
     return res.json({
       consent_version: CONSENT_VERSION,
+      manual: require("../posting-manual").enabled(deps.env || process.env),
       permission: S_.publicPermission(conn),
       member_groups: await publicMembers(conn, lookup, property),
       hidden_group_ids: hiddenList(conn).map((h) => h.ids[0]),
