@@ -230,10 +230,23 @@
       </div>${approvalsHtml(p)}${recentHtml(p)}${previewOpen.has(p.page_id) ? previewHtml(p) : ""}${panel}</div>`;
   }
 
+  // Properties in a live campaign always come first; within each part, the
+  // agent's chosen order (newest first by default, remembered on this device).
+  const SORTS = {
+    new: (a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")),
+    old: (a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")),
+    price_desc: (a, b) => (b.price || 0) - (a.price || 0),
+    price_asc: (a, b) => (a.price || Infinity) - (b.price || Infinity),
+    city: (a, b) => String(a.city || "").localeCompare(String(b.city || ""), "he"),
+  };
+  let sortBy = "new";
+  try { const s = localStorage.getItem("ap_sort"); if (SORTS[s]) sortBy = s; } catch (e) { /* storage off */ }
+  const sorted = () => props.slice().sort((a, b) => (live(b.campaign) - live(a.campaign)) || SORTS[sortBy](a, b) || SORTS.new(a, b));
+
   function renderProps() {
     const liveCount = props.filter((p) => live(p.campaign)).length;
     $("apCount").textContent = props.length ? `${liveCount} מתוך ${maxActive} נכסים בפרסום אוטומטי (אפשר עד ${maxActive} בו-זמנית)` : "";
-    $("apProps").innerHTML = props.map(propHtml).join("") ||
+    $("apProps").innerHTML = sorted().map(propHtml).join("") ||
       '<p class="camp-muted">עוד אין נכסים עם דף פעיל. <a href="/create.html">יצירת נכס חדש</a></p>';
     const h = U.haltInfo(settings && settings.halt_state, props.map((p) => p.campaign).find(live) || null);
     $("apHalt").hidden = !h;
@@ -465,6 +478,12 @@
       previewed.add(p.page_id); confirming.delete(p.page_id); previewOpen.delete(p.page_id);
       toggle(p, true);
     }
+  });
+  $("apSort").value = sortBy;
+  $("apSort").addEventListener("change", function () {
+    sortBy = SORTS[this.value] ? this.value : "new";
+    try { localStorage.setItem("ap_sort", sortBy); } catch (e) { /* storage off */ }
+    renderProps();
   });
   $("apMemberGroups").addEventListener("click", async (ev) => {
     const b = ev.target.closest && ev.target.closest("button[data-rm]"); if (!b) return;

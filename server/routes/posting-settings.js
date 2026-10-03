@@ -139,6 +139,11 @@ module.exports = function mountPostingSettings(router, S, auth) {
   // The publishing page's list, in one call: each active property of this
   // agent, its latest campaign (public view), and which member groups suit
   // it (A.fitsProperty — its city, its kind of deal). Group ids only.
+  // A stored date (ISO string, Date or Firestore Timestamp) as ISO, or null.
+  const isoOf = (t) => {
+    const d = t && typeof t.toDate === "function" ? t.toDate() : t ? new Date(t) : null;
+    return d && Number.isFinite(d.getTime()) ? d.toISOString() : null;
+  };
   router.get("/properties", auth, wrap("properties", async (req, res) => {
     const phone = req.user.userId;
     const conn = (await db.getConnection(phone)) || {};
@@ -160,6 +165,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
         city: property.city || null,
         listing_type: property.listing_type || "sale",
         thumb_url: (l.photos_urls && l.photos_urls[0]) || null,
+        created_at: isoOf(page.created_at || l.created_at),
+        price: Number(property.price) > 0 ? Number(property.price) : null,
         campaign: S_.publicView(latest(page.page_id)),
         fit_group_ids: members.filter((m) => A.fitsProperty(m, lookup.all(m), property)).map((m) => m.group_id),
         // Refused for this property (POST /campaigns: listing_type_not_allowed): never offered.

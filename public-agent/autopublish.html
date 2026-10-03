@@ -38,6 +38,10 @@
   .rules{font-size:.8rem;color:var(--ink-soft);background:rgba(185,138,47,.08);border-radius:12px;padding:10px 12px;margin-bottom:14px}
   #apSettings{margin:6px 0 14px}#apSettings summary{cursor:pointer;padding:6px 0}
   .ap-count{font-size:.82rem;color:var(--ink-soft);margin-bottom:6px}
+  .ap-sortbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+  .ap-sortbar .ap-count{margin-bottom:0}
+  .ap-sort{font-size:.82rem;color:var(--ink-soft);display:flex;align-items:center;gap:6px}
+  .ap-sort select{font:inherit;padding:4px 8px;border-radius:8px;border:1px solid rgba(23,20,15,.15);background:#fff}
   #msg{position:fixed;bottom:18px;right:50%;transform:translate(50%,0);background:var(--dark);
     color:#fff;border-radius:100px;padding:11px 22px;font-size:.88rem;display:none;z-index:50}
   @media (max-width:520px){.ap-top{flex-wrap:wrap}.ap-switch{width:100%;justify-content:flex-start}}
@@ -71,7 +75,18 @@
       · <button type="button" class="camp-link" id="apResyncTop">רענון רשימת הקבוצות</button>
       <span>(הצטרפתם לקבוצה חדשה? רעננו כדי שתופיע)</span></p>
     <h2>הנכסים שלכם</h2>
-    <p class="ap-count" id="apCount"></p>
+    <div class="ap-sortbar">
+      <p class="ap-count" id="apCount"></p>
+      <label class="ap-sort">מיון:
+        <select id="apSort">
+          <option value="new">החדשים קודם</option>
+          <option value="old">הישנים קודם</option>
+          <option value="price_desc">מחיר: מהגבוה לנמוך</option>
+          <option value="price_asc">מחיר: מהנמוך לגבוה</option>
+          <option value="city">לפי עיר</option>
+        </select>
+      </label>
+    </div>
     <p class="camp-est" id="apFirstPost"></p>
     <div class="ap-props" id="apProps"></div>
 
