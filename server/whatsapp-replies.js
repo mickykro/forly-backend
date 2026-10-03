@@ -6,13 +6,16 @@
  * same. Green API: max 3 buttons, 25 chars each (utils.sendWhatsAppButtons).
  */
 const { MIN_PHOTOS } = require("./property-draft");
+const { inPlace } = require("./utils");
+const { symbol } = require("./currency");
 // "תמונה אחת" / "4 תמונות" — Hebrew nouns don't stay plural with 1.
 const count = (n, one, many) => (n === 1 ? one : `${n} ${many}`);
-const ils = (n) => `₪${Number(n).toLocaleString("en-US")}`;
+// No currency on the draft/page means ILS (everything created before currencies existed).
+const money = (n, cur) => `${symbol(cur)}${Number(n).toLocaleString("en-US")}`;
 
 const LABELS = {
-  city: "עיר", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
-  floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב",
+  city: "עיר", address: "כתובת", price: "מחיר", rooms: "מספר חדרים", deal: "סוג עסקה", size_sqm: "שטח במ״ר",
+  floor: "קומה", parking: "חניות", neighborhood: "שכונה", description: "תיאור", template: "עיצוב", currency: "מטבע", sqm_built: "מ״ר בנוי", sqm_plot: "מגרש (מ״ר)",
 };
 
 const QUESTIONS = {
@@ -53,33 +56,74 @@ function required(field) { return { text: `${LABELS[field]} הוא שדה חוב
 function headline(f) {
   const where = f.neighborhood || f.city;
   const parts = [];
-  if (f.rooms) parts.push(`${f.rooms} חד׳${where ? ` ב${where}` : ""}`);
+  if (f.rooms) parts.push(`${f.rooms} חד׳${where ? ` ${inPlace(where)}` : ""}`);
   else if (where) parts.push(where);
-  if (f.price) parts.push(ils(f.price));
+  if (f.price) parts.push(money(f.price, f.currency));
   return parts.join(", ");
 }
 
+// What was read, spelled out (address and city too) so a wrong field is caught here, not on the live page.
+function understood(f) {
+  const where = [f.address, f.neighborhood && f.city ? f.city : null].filter(Boolean);
+  return [headline(f), ...where].filter(Boolean).join(" · ");
+}
 function opened(kind, fields) {
   if (kind === "keyword") return { text: "מתחילים דף נכס חדש 🏠 אשאל כמה שאלות קצרות." };
-  const h = headline(fields || {});
-  return { text: h ? `קראתי את המודעה: ${h}. אשלים איתך את מה שחסר.` : "קראתי את המודעה אבל לא מצאתי בה פרטים ברורים. נשלים ביחד." };
+  const h = understood(fields || {});
+  if (!h) return { text: "קראתי את המודעה אבל לא מצאתי בה פרטים ברורים. נשלים ביחד." };
+  return { text: `קראתי את המודעה: ${h}.\nמשהו לא נכון? כתבו למשל ״/עיר באר שבע״. אשלים איתך את מה שחסר.` };
 }
 
-function offer(n) { return { text: `ערכתי ${n} תמונות ✨ לבנות מהן דף נכס?`, buttons: ["כן", "לא"] }; }
+// Photos with no caption and no property open: ask once what they are for, instead of editing them all.
+function photoChoice(n) {
+  const all = n === 1 ? "לשפר את התמונה" : `לשפר את כל ${n} התמונות (${n} עריכות)`;
+  const lines = ["1 · דף נכס חדש", "2 · להוסיף לדף נכס קיים", `3 · ${all}`];
+  if (n > 3) lines.push("4 · לשפר 3 לדוגמה");
+  return { text: `קיבלתי ${n === 1 ? "תמונה" : `${n} תמונות`} 📸 מה לעשות?\n${lines.join("\n")}\nאו כתבו מה לשנות בתמונות.` };
+}
+// "חסרים פרטים?" / "סיימת?" in the middle of the questions: where things stand.
+function progress(missingFields, photos) {
+  const need = missingFields.map((f) => LABELS[f]);
+  if (photos < MIN_PHOTOS) need.push(`תמונות (יש ${photos}, צריך ${MIN_PHOTOS})`);
+  return { text: need.length ? `עוד חסר: ${need.join(" · ")}. תמונות אפשר לשלוח בכל שלב 📸` : "יש לי הכול ✅" };
+}
+function swapPhotos(oldN, newN) {
+  return { text: `להחליף את ${oldN} התמונות הקודמות ב-${newN} החדשות, או להוסיף אותן?`, buttons: ["להחליף", "להוסיף"] };
+}
+function sendReplacements(n) { return { text: `שלחו את התמונות החדשות — הן יחליפו את ${n} הקיימות 📸` }; }
+function recovered(hadAd, photos) {
+  const what = [hadAd ? "את פרטי הנכס מהמודעה" : null, photos ? `${photos} תמונות` : null].filter(Boolean).join(" ו-");
+  return { text: `בונים דף נכס 🏠 אספתי מהשיחה ${what}.` };
+}
+function duplicatePage(title) {
+  return { text: `יש לך כבר דף לנכס הזה: ${title}. לעדכן את הדף הקיים (תמונות ופרטים), או ליצור דף חדש?`, buttons: ["לעדכן את הקיים", "דף חדש"] };
+}
+function useEdited(n) {
+  return { text: `להשתמש ב-${n === 1 ? "תמונה שערכתי" : `${n} התמונות שערכתי`} קודם לנכס הזה?`, buttons: ["כן", "לא"] };
+}
+function pagePhotosAsk(title, had, got) {
+  return { text: `לעדכן את התמונות בדף ${title}: להחליף את ${had} התמונות הקיימות ב-${got} החדשות, או להוסיף אותן?`, buttons: ["להחליף", "להוסיף"] };
+}
+function pagePhotosDone(n, editUrl) { return { text: `עדכנתי ✅ בדף יש עכשיו ${n} תמונות.\nלסידור או לשינויים נוספים: ${editUrl}` }; }
+function backToDraft() { return { text: "חוזרים לנכס שבטיפול:" }; }
+function noPages() { return { text: "עוד אין לך דפי נכס. לדף חדש מהתמונות ענו 1." }; }
+function stopped() { return { text: "עצרתי ✋ לא אערוך תמונות נוספות." }; }
+
+function offer(n) { return { text: n === 1 ? "ערכתי תמונה אחת ✨ לבנות ממנה דף נכס?" : `ערכתי ${n} תמונות ✨ לבנות מהן דף נכס?`, buttons: ["כן", "לא"] }; }
 function askPhotos() { return { text: `עכשיו התמונות 📸 שלחו לפחות ${MIN_PHOTOS} תמונות של הנכס.` }; }
 function photosProgress(n) {
   if (n < MIN_PHOTOS) return { text: `יש לי ${count(n, "תמונה אחת", "תמונות")}. צריך לפחות ${MIN_PHOTOS} — שלחו עוד.` };
   return { text: `יש לי ${n} תמונות. עוד תמונות, או ממשיכים?`, buttons: ["ממשיכים"] };
 }
 function photosSaved(n, dropped = 0) {
-  return { text: `שמרתי ${count(n, "תמונה אחת", "תמונות")} לנכס.` + (dropped ? ` (${dropped} לא נשמרו — המקסימום הוא 12)` : "") };
+  return { text: `שמרתי ${count(n, "תמונה אחת", "תמונות")} לנכס.` + (dropped ? ` (${dropped} לא נשמרו — המקסימום הוא 54)` : "") };
 }
 
 function summaryLines(s) {
   const lines = [];
   if (s.rooms) lines.push(`${s.rooms} חד׳`);
   if (s.city) lines.push(s.neighborhood ? `${s.neighborhood}, ${s.city}` : s.city);
-  if (s.price) lines.push(ils(s.price));
+  if (s.price) lines.push(money(s.price, s.currency));
   if (s.deal) lines.push(s.deal === "rent" ? "להשכרה" : "למכירה");
   if (s.size_sqm) lines.push(`${s.size_sqm} מ״ר`);
   if (s.floor !== null && s.floor !== undefined) lines.push(`קומה ${s.floor}`);
@@ -102,32 +146,58 @@ function reviewReady(link, skipped = []) {
 function previewOnly(link) { return { text: "בחרתם תצוגה מקדימה — היצירה ממשיכה בדף.", links: [{ text: "להמשך בדף", url: link }] }; }
 
 // ── corrections ──
-const CODES = { city: "c", price: "p", rooms: "r", deal: "d", size_sqm: "s", floor: "f", parking: "k", neighborhood: "n", description: "t", template: "x" };
-function show(field, v) {
+const CODES = { city: "c", price: "p", currency: "u", rooms: "r", deal: "d", size_sqm: "s", floor: "f", parking: "k", neighborhood: "n", description: "t", template: "x" };
+function show(field, v, cur) {
+  if (field === "currency") return symbol(v); // unset is ₪
   if (v === null || v === undefined) return "—";
-  if (field === "price") return ils(v);
+  if (field === "price") return money(v, cur);
   if (field === "deal") return v === "rent" ? "להשכרה" : "למכירה";
   if (field === "description") return String(v).slice(0, 40) + (String(v).length > 40 ? "…" : "");
   return String(v);
 }
 function fieldList(fields) {
-  const lines = Object.keys(CODES).map((f) => `/${LABELS[f]} (/${CODES[f]}): ${show(f, fields[f])}`);
+  const lines = Object.keys(CODES).map((f) => `/${LABELS[f]} (/${CODES[f]}): ${show(f, fields[f], fields.currency)}`);
   return { text: `לתיקון כתבו / ושם השדה, למשל /מחיר 2.1 מיליון\n${lines.join("\n")}` };
 }
 function unknownField(name) { return { text: `לא מכירה את השדה ״${name}״. כתבו / לרשימת השדות.` }; }
-function updated(changes) {
+function updated(changes, cur = changes.currency) {
   // Parking reads as a phrase ("חניה אחת"), not "חניות 1".
-  const part = ([f, v]) => (f === "parking" && v ? count(v, "חניה אחת", "חניות") : `${LABELS[f]} ${show(f, v)}`);
+  const part = ([f, v]) => (f === "parking" && v ? count(v, "חניה אחת", "חניות") : `${LABELS[f]} ${show(f, v, cur)}`);
   return { text: `עדכנתי: ${Object.entries(changes).map(part).join(", ")} ✅` };
 }
 function confirmChanges(changes, fields) {
-  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, fields[f])} ← ${show(f, v)}`).join("\n");
+  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, fields[f], fields.currency)} ← ${show(f, v, changes.currency || fields.currency)}`).join("\n");
   return { text: `להחליף?\n${list}`, buttons: ["כן", "לא"] };
+}
+// Links to the page editor for an existing page (or a few, when the message named none).
+function editLinks(links) {
+  if (links.length === 1) {
+    return { text: `לעדכון ${links[0].title}: שלחו כאן את התמונות החדשות 📸, או כתבו מה לשנות (למשל ״מחיר 1.9 מיליון״).\nסרטון משלכם ושאר העריכה — בעורך הדף:\n${links[0].url}` };
+  }
+  return { text: `איזה נכס לעדכן? כל קישור פותח את עורך הדף:\n${links.map((l) => `• ${l.title}\n${l.url}`).join("\n")}` };
+}
+function editHeld(links) {
+  const where = links.length === 1 ? links[0].url : links.map((l) => `• ${l.title}\n${l.url}`).join("\n");
+  return { text: `לא ערכתי את התמונות 🙂 תמונות לדף מעלים בעורך הדף:\n${where}` };
+}
+// A live page's change, approved before it is written.
+function confirmPageChanges(title, changes, current) {
+  const list = Object.entries(changes).map(([f, v]) => `${LABELS[f]} ${show(f, current[f], current.currency)} ← ${show(f, v, changes.currency || current.currency)}`).join("\n");
+  return { text: `לעדכן בדף ${title}?\n${list}`, buttons: ["כן", "לא"] };
+}
+function pageUpdated(changes, editUrl, cur) {
+  return { text: `${updated(changes, changes.currency || cur).text}\nהדף מעודכן. לעוד שינויים: ${editUrl}` };
+}
+// Several replies as one WhatsApp bubble; the last one's buttons are kept.
+function oneBubble(replies) {
+  const last = replies[replies.length - 1];
+  const links = replies.flatMap((r) => r.links || []);
+  return { text: replies.map((x) => x.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}), ...(links.length ? { links } : {}) };
 }
 function kept() { return { text: "בסדר, השארתי כמו שהיה." }; }
 function priceOff(fields) {
   const as = fields.deal === "sale" ? "מכירה" : "שכירות";
-  return { text: `רגע ⚠️ ${ils(fields.price)} נראה חריג ל${as}. אם זו טעות: /מחיר … או /עסקה …` };
+  return { text: `רגע ⚠️ ${money(fields.price, fields.currency)} נראה חריג ל${as}. אם זו טעות: /מחיר … או /עסקה …` };
 }
 
 // ── input ──
@@ -140,8 +210,9 @@ function listingPhotosFailed() { return { text: "מצאתי תמונות במו�
 function firstLinkOnly() { return { text: "קראתי את הקישור הראשון. את השני שלחו אחרי שנסיים עם הנכס הזה." }; }
 function buildFailed(retry, listing = {}) {
   const which = headline(listing);
-  const head = `בניית הדף${which ? ` (${which})` : ""} נכשלה 😕`;
-  return { text: retry ? `${head} כתבו ״ליצור״ כדי לנסות שוב.` : `${head} אפשר לשלוח שוב את הקישור או את טקסט המודעה, או לכתוב ״נכס חדש״.` };
+  // Resending the listing would only fail the same way (and cost again): the team looks at it.
+  const head = `הדף${which ? ` (${which})` : ""} עדיין לא מוכן — הייתה תקלה ביצירת הסרטון 😕 צוות Forly בודק ויחזור אליך בהקדם 🙏`;
+  return { text: retry ? `${head}\nאפשר גם לכתוב ״ליצור״ כדי לנסות שוב.` : head };
 }
 // quota.blockedMessage spells out the payment link: it moves behind a button.
 function outOfQuota(message) {
@@ -191,7 +262,7 @@ function noLinkHint(createUrl) {
 
 module.exports = { defaultChosen, defaultUnavailable,
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, recovered, duplicatePage, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

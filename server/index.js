@@ -120,7 +120,7 @@ db.init();
 const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
-const { sendWhatsApp, sendWhatsAppButtons, sendWhatsAppRich } = require("./utils");
+const { sendWhatsApp, sendWhatsAppButtons, sendWhatsAppRich, getWhatsAppMessage, getWhatsAppHistory } = require("./utils");
 // A number that tries to log in but has no businesses/{phone} doc isn't a
 // Forly client yet — self-service signup off the login screen is gone (see
 // the issue this shipped with), so the OTP route forwards them here as a
@@ -205,6 +205,9 @@ const createQuotaRouter = require("./routes/quota");
 app.use("/api/quota", createQuotaRouter({
   quota, requireAuth, authSecret: AUTH_SECRET, n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone,
 }));
+// ── walkthrough plan (n8n: space map → Seedance clips) ──
+const createWalkthroughRouter = require("./routes/walkthrough");
+app.use("/api/walkthrough", createWalkthroughRouter({ n8nSecret: N8N_WEBHOOK_SECRET }));
 
 app.use("/api", createIntakeRouter({
   requireAuth, normalizeAuthPhone, signSession,
@@ -226,11 +229,18 @@ app.use("/api", createIntakeRouter({
 const createWhatsappRouter = require("./routes/whatsapp");
 app.use("/api/whatsapp", createWhatsappRouter({
   n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone, signSession, authSecret: AUTH_SECRET, quota,
+  adminPhones: ADMIN_PHONES,
+  linkBaseUrl: (process.env.LINK_BASE_URL || "").trim().replace(/\/+$/, "") || BASE_URL,
+  linkSharesSession: process.env.LINK_SHARES_SESSION === "1", // LINK_BASE_URL's server has this NADLAN_JWT_SECRET
   // null when Green API is unset so the response's `replied` is honest and n8n forwards `reply`.
   sendWhatsApp: GREENAPI_INSTANCE && GREENAPI_TOKEN
     ? (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
   sendButtons: GREENAPI_INSTANCE && GREENAPI_TOKEN
-    ? (phone, opts) => sendWhatsAppButtons(phone, opts, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+    ? (phone, payload) => sendWhatsAppButtons(phone, payload, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+  getMessage: GREENAPI_INSTANCE && GREENAPI_TOKEN
+    ? (chatId, id) => getWhatsAppMessage(chatId, id, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+  getHistory: GREENAPI_INSTANCE && GREENAPI_TOKEN
+    ? (chatId, count) => getWhatsAppHistory(chatId, count, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
   baseUrl: BASE_URL,
   pipelineDeps: {

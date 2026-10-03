@@ -41,7 +41,8 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   t = await turn({ text: "היי" }, d);
   assert.deepEqual([t.handled, t.status], [false, "not_ours"]);
   t = await turn({ fileUrl: "https://green/1.jpg" }, d);
-  assert.equal(t.handled, false, "a photo with no draft goes to image editing");
+  assert.deepEqual([t.handled, t.draft.status, t.replies.length, t.armPhotoTimer], [true, "photo_choice", 0, true],
+    "a photo with no draft is held, not edited; the question waits for the burst to end");
 
   // ── link opener: extract, import photos, ask the first missing field ──
   let calls;
@@ -177,6 +178,26 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   t = await turn({ fileUrls: ["https://green/burst1.jpg", "https://green/burst2.jpg", "https://green/burst3.jpg"], draft }, d);
   assert.equal(t.draft.photos.length, 3, "the same burst delivered twice is stored once");
 
+  // regression: the photo timer must return the draft even when nothing was
+  // dropped, or routes/whatsapp.js has no draft to hang last_buttons off of —
+  // the next "1"/"2" then resolves to nothing and repeats the same menu
+  // (seen live: נופר הרוש, 972546582548, 2026-09-29 18:16, "1" and "2" both ignored).
+  ({ d } = deps());
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  for (const [f, v] of [["city", "רמת גן"], ["price", "5,800,000"], ["rooms", "5"]]) { t = await turn({ text: v, draft }, d); draft = t.draft; }
+  for (let i = 0; i < 8 && t.status.startsWith("asked:"); i++) { t = await turn({ text: "דלג", draft }, d); draft = t.draft; }
+  t = await turn({ fileUrls: ["https://green/n1.jpg", "https://green/n2.jpg", "https://green/n3.jpg", "https://green/n4.jpg"], draft }, d);
+  draft = t.draft;
+  t = await turn({ event: "photo_timer", draft }, d);
+  assert.equal(t.status, "choose");
+  assert.notEqual(t.draft, undefined, "the draft must come back so last_buttons can be saved");
+  assert.deepEqual(t.replies[0].buttons, ["תצוגה מקדימה", "ליצור"]);
+  // what routes/whatsapp.js's persistAndSend does with that reply, then the agent's "1"
+  draft = t.draft;
+  draft.last_buttons = t.replies[0].buttons;
+  t = await turn({ text: "1", draft }, d);
+  assert.equal(t.status, "confirm", "numbered reply right after a photo batch resolves, not repeats the menu");
+
   // photo while a question is open: stored, timer prompt says saved + repeats the question
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
@@ -201,32 +222,37 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   t = await turn({ text: "ביטול", draft: ready }, d);
   assert.deepEqual([t.status, t.del], ["cancelled", true]);
 
-  // ── photos_edited: n8n sends one edited photo per call; offer once at 4 ──
+  // ── photos_edited: n8n sends one edited photo per call; the offer waits for the batch to end ──
   ({ d, calls } = deps());
   t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg"] }, d);
-  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.photos.length, t.replies.length],
-    [true, "offer_pending:1", "offered", 1, 0], "the first edited photo is stored silently");
-  t = await turn({ event: "photos_edited", photos: ["https://fal/2.jpg"], draft: t.draft }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:2", 2, 0]);
-  t = await turn({ event: "photos_edited", photos: ["https://fal/3.jpg"], draft: t.draft }, d);
-  t = await turn({ event: "photos_edited", photos: ["https://fal/4.jpg"], draft: t.draft }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 4, true]);
+  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.photos.length, t.replies.length, t.armPhotoTimer],
+    [true, "offer_pending:1", "offered", 1, 0, true], "the first edited photo is stored silently");
+  for (const i of [2, 3, 4, 5]) t = await turn({ event: "photos_edited", photos: [`https://fal/${i}.jpg`], draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:5", 5, 0], "no offer mid-batch");
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.offer_sent], ["offered", true]);
   assert.deepEqual(t.replies[0].buttons, ["כן", "לא"]);
-  assert.match(texts(t), /ערכתי 4 תמונות/);
-  const offered = t.draft;
-  t = await turn({ event: "photos_edited", photos: ["https://fal/5.jpg"], draft: offered }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.replies.length], ["offer_pending:5", 5, 0], "the offer is never repeated");
+  assert.match(texts(t), /ערכתי 5 תמונות/, "the real count, once the batch is over");
   assert.equal(calls.imported.length, 5, "every edited photo is re-hosted on Forly");
-  // a future n8n batch path may send several at once: one call, one offer
+  const offered = t.draft;
+  t = await turn({ event: "photo_timer", draft: offered }, d);
+  assert.equal(t.replies.length, 0, "the offer is never repeated");
+  t = await turn({ event: "photos_edited", photos: ["https://fal/9.jpg"], draft: offered }, d);
+  assert.deepEqual([t.draft.photos.length, t.draft.offer_sent], [1, false], "a later batch is a new offer, not piled onto the old one");
   ({ d } = deps());
-  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg", "https://fal/4.jpg"] }, d);
-  assert.deepEqual([t.status, t.draft.photos.length, t.draft.offer_sent], ["offered", 4, true]);
+  t = await turn({ event: "photos_edited", photos: ["https://fal/1.jpg", "https://fal/2.jpg", "https://fal/3.jpg"] }, d);
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
+  assert.deepEqual([t.status, t.replies.length], ["offer_pending", 0], "under 4 photos: no offer");
   t = await turn({ text: "בוקר טוב", draft: offered }, d);
-  assert.equal(t.handled, false, "an offered draft does not hijack unrelated chat");
+  assert.deepEqual([t.handled, t.del], [false, true], "unrelated chat is n8n's, and the ignored offer is dropped");
   t = await turn({ text: "לא", draft: offered }, d);
   assert.deepEqual([t.status, t.del], ["declined", true]);
   t = await turn({ text: "כן", draft: offered }, d);
   assert.deepEqual([t.status, t.draft.status, t.draft.source], ["asked:city", "active", "photos"]);
+  t = await turn({ text: "1", draft: { ...offered, last_buttons: ["כן", "לא"] } }, d);
+  assert.equal(t.draft.status, "active", "numbered options: 1 is the first button");
+  t = await turn({ text: "נכס חדש", draft: offered }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos.length], ["active", 0], "a new property does not take the offered photos");
   // offer older than 2h is dropped; the message is then judged on its own
   t = await turn({ text: "בוקר טוב", draft: offered, now: new Date(T0.getTime() + D.PAUSE_MS + 1) }, d);
   assert.deepEqual([t.handled, t.del], [false, true]);
@@ -333,6 +359,13 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   t = await turn({ text: "לא", draft: proposed }, d);
   assert.deepEqual([t.draft.fields.price, t.status], [1950000, "asked:parking"]);
   assert.match(texts(t), /השארתי כמו שהיה/);
+  // "1.כן" (972526003708, 2026-09-30): the agent names the number AND spells out
+  // the button — the change must still land, not get silently dropped.
+  t = await turn({ text: "1.כן", draft: { ...proposed, last_buttons: ["כן", "לא"] } }, d);
+  assert.deepEqual([t.draft.fields.price, t.draft.pending_changes, t.status], [2100000, null, "asked:parking"]);
+  // a number followed by unrelated text is not a button tap: never read as "כן"
+  t = await turn({ text: "1 תודה", draft: { ...proposed, last_buttons: ["כן", "לא"] } }, d);
+  assert.notEqual(t.draft.fields.price, 2100000, "unrelated trailing text after the digit must not be read as confirming the change");
 
   // the asked place name survives a reply that also talks about the price
   let seen;
@@ -394,15 +427,15 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   assert.equal(t.status, "preview_only");
   assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
 
-  // #6/#7 photo timer: one bubble with the count and the next question; over-12 reported
+  // #6/#7 photo timer: one bubble with the count and the next question; over-54 reported
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d);
-  const twelve = Array.from({ length: 14 }, (_, i) => `https://green/m${i}.jpg`);
-  t = await turn({ fileUrls: twelve, draft: t.draft }, d);
-  assert.deepEqual([t.draft.photos.length, t.draft.photos_dropped], [12, 2]);
+  const overCap = Array.from({ length: 56 }, (_, i) => `https://green/m${i}.jpg`);
+  t = await turn({ fileUrls: overCap, draft: t.draft }, d);
+  assert.deepEqual([t.draft.photos.length, t.draft.photos_dropped], [54, 2]);
   t = await turn({ event: "photo_timer", draft: t.draft }, d);
   assert.equal(t.replies.length, 1, "one bubble");
-  assert.match(texts(t), /שמרתי 12 תמונות לנכס. \(2 לא נשמרו/);
+  assert.match(texts(t), /שמרתי 54 תמונות לנכס. \(2 לא נשמרו — המקסימום הוא 54\)/);
   assert.match(texts(t), /באיזו עיר/);
   assert.equal(t.draft.photos_dropped, 0);
 

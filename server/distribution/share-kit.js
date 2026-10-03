@@ -9,6 +9,7 @@
  * Pure functions — no I/O. Unit-tested in share-kit.test.js.
  */
 
+const { symbol } = require("../currency");
 // A 30-day campaign can cover this pool under the existing daily/weekly caps;
 // widening the pool increases reach without increasing posting frequency.
 const MAX_GROUPS = 40;
@@ -62,6 +63,7 @@ const PAGE_COMMENT_CTAS = [
 
 const join = (sep, ...xs) => xs.filter(Boolean).join(sep);
 const shekel = (n) => `${n.toLocaleString("en-US")} ש"ח`;
+const priceText = (n, cur) => (!cur || cur === "ILS" ? shekel(n) : `${symbol(cur)}${n.toLocaleString("en-US")}`);
 // 0542045280 → 054-2045280, the way agents usually write it.
 const dashedPhone = (s) => (/^05\d{8}$/.test(s) ? `${s.slice(0, 3)}-${s.slice(3)}` : s);
 
@@ -89,9 +91,10 @@ function postFacts(page) {
     roomsShort: rooms ? `${rooms} חד'` : "",
     sqm: sqm ? `${sqm} מ"ר` : "",
     floor: floor ? `קומה ${floor}` : "",
-    price: price ? shekel(price) : "",
-    // 2,900,000 → 2.9 מ' ש"ח, only when that is exact (2,925,000 stays full).
-    priceShort: price >= 1e6 && price % 10000 === 0 ? `${price / 1e6} מ' ש"ח` : price ? shekel(price) : "",
+    price: price ? priceText(price, p.currency) : "",
+    // 2,900,000 → 2.9 מ' ש"ח, only when that is exact (2,925,000 stays full). ILS only.
+    priceShort: price && (!p.currency || p.currency === "ILS") && price >= 1e6 && price % 10000 === 0
+      ? `${price / 1e6} מ' ש"ח` : price ? priceText(price, p.currency) : "",
     name: a.name || "",
     phone: localPhone(a.phone),
   };

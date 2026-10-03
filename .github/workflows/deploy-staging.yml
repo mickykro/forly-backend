@@ -1,6 +1,17 @@
 # Always-on staging for the intake/pages server, at
 # https://staging.srv1173890.hstgr.cloud
 #
+# Staging now serves real customers (agents routed to it by n8n's Main Router):
+# it must behave as a fast-moving production. It shares Firestore with
+# production, and every link and file it gives a customer is production's:
+#   LINK_BASE_URL=https://forly.srv1173890.hstgr.cloud      (review/editor/create links)
+#   LINK_SHARES_SESSION=1                                   (one-tap review links)
+#   PAGE_BASE_URL=https://forly.srv1173890.hstgr.cloud      (page links)
+#   REMOTE_UPLOAD_BASE=https://forly.srv1173890.hstgr.cloud (files kept in prod's volume)
+# All four need NADLAN_JWT_SECRET identical to production's. Background jobs
+# (build sweep, distribution sweep) claim each job in Firestore, so running
+# them on both servers acts once.
+#
 # Exists so there is something to point n8n, a demo, or a 3am webhook retry at
 # when the laptop running the dev tunnel is closed. It is also where media
 # created on dev is stored: dev sets REMOTE_UPLOAD_BASE to this host, so the
@@ -38,10 +49,10 @@
 #    override this on staging (server/posting-guard.js postingEnvAllowed).
 #    Do not copy POSTING_* settings into staging.env expecting them to act.
 #
-#    Do NOT set REMOTE_UPLOAD_BASE here. Staging is always on, so the URLs it
-#    stamps are already durable; pointing it at itself is refused at boot
-#    (see resolveRemoteUploadBase in server/upload-relay.js) and pointing it at
-#    production would put staging's test media in prod's volume.
+#    REMOTE_UPLOAD_BASE points at production (see the top of this file): media
+#    staging creates for customers lives with production's, not in a volume
+#    that only this container serves. Pointing it at itself is refused at boot
+#    (see resolveRemoteUploadBase in server/upload-relay.js).
 #
 # 2. No DNS needed: *.srv1173890.hstgr.cloud is a wildcard onto this VPS, and
 #    Traefik issues the certificate on first request.

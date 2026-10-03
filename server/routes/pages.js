@@ -19,8 +19,9 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsAppRich } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsAppRich, storeBuffer, ownUploadedVideo, inPlace } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
+const { CURRENCIES, normalizeCurrency } = require("../currency");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
 const { propertySlug, parsePublicPath, visiblePortfolioPages } = require("../portfolio");
@@ -281,17 +282,20 @@ module.exports = function createPagesRouter(ctx) {
         agent2: agent2Doc,
         property: {
           title: (body.property && body.property.title) ||
-            `${(body.property && body.property.rooms) || ""} חד׳ ב${(body.property && (body.property.neighborhood || body.property.city)) || ""}`.trim(),
+            `${(body.property && body.property.rooms) || ""} חד׳ ${inPlace(body.property && (body.property.neighborhood || body.property.city))}`.trim(),
           listing_type: (body.property && body.property.listing_type) || (listing && listing.listing_type) || "sale",
           address: (body.property && body.property.address) || "",
           neighborhood: (body.property && body.property.neighborhood) || "",
           city: (body.property && body.property.city) || "",
           price: Number(body.property && body.property.price) || 0,
+          // The listing's currency: n8n forwards price but may not forward this.
+          currency: normalizeCurrency(listing && listing.currency) || normalizeCurrency(body.property && body.property.currency) || "ILS",
           rooms: Number(body.property && body.property.rooms) || 0,
           size_sqm: Number(body.property && body.property.size_sqm) || 0,
           size_built: propNum("size_built"),
           size_balcony: propNum("size_balcony"),
           size_garden: propNum("size_garden"),
+          size_plot: propNum("size_plot"),
           floor: Number(body.property && body.property.floor) || 0,
           storage: propBool("storage"),
           elevator: propBool("elevator") || propBool("shabbat_elevator"),
@@ -428,6 +432,22 @@ module.exports = function createPagesRouter(ctx) {
     }
   });
 
+  // An uploaded page video that browsers may not play (iPhone HEVC, 4K) is
+  // re-encoded in the background; the page switches to the converted file
+  // once it is ready, unless the agent swapped the video again meanwhile.
+  function convertPageVideo(pageId, url) {
+    const store = (buf) => storeBuffer(buf, "mp4", uploadDir, baseUrl, rehostOpts).then((r) => r.url);
+    ensurePlayableVideo(url, store)
+      .then(async (converted) => {
+        if (!converted) return;
+        const cur = await db.getPage(pageId);
+        if (!cur || !cur.hero || cur.hero.video_url !== url) return;
+        await db.updatePage(pageId, { "hero.video_url": converted, updated_at: new Date() });
+        console.log(`page ${pageId}: video converted → ${converted}`);
+      })
+      .catch((err) => console.error(`page ${pageId}: video conversion failed:`, err.message));
+  }
+
   // ── POST /api/page/update — dashboard page editor (auth via session) ──
   // Owner-only (admins may edit any page). See page-auth.js for the rollout
   // switch and why both phone forms are normalized before comparing.
@@ -455,6 +475,14 @@ module.exports = function createPagesRouter(ctx) {
     try {
       const patch = { updated_at: new Date(), edit_count: (d.edit_count || 0) + 1 };
       if (body.hero_phrase != null) patch["hero.phrase"] = String(body.hero_phrase).slice(0, 120);
+      // Agent swaps the page video for one they uploaded. It is published
+      // as-is, so the generated titled cut is dropped with it.
+      if (body.hero_video_url != null) {
+        const video = ownUploadedVideo(body.hero_video_url, [uploadPublicBase, baseUrl, remoteUploadBase]);
+        if (!video) return res.status(400).json({ error: "bad_video_url" });
+        patch["hero.video_url"] = video;
+        patch["hero.post_video_url"] = null;
+      }
       // Agent
       if (body.agent && typeof body.agent === "object") {
         if (body.agent.name != null) patch["agent.name"] = String(body.agent.name).slice(0, 60);
@@ -465,8 +493,19 @@ module.exports = function createPagesRouter(ctx) {
       if (body.property && typeof body.property === "object") {
         if (body.property.title != null) patch["property.title"] = String(body.property.title).slice(0, 80);
         if (body.property.price != null) patch["property.price"] = Number(body.property.price) || 0;
+        if (body.property.currency != null) {
+          if (!CURRENCIES.includes(body.property.currency)) return res.status(400).json({ error: "bad_currency" });
+          patch["property.currency"] = body.property.currency;
+        }
         if (body.property.rooms != null) patch["property.rooms"] = Number(body.property.rooms) || 0;
         if (body.property.size_sqm != null) patch["property.size_sqm"] = Number(body.property.size_sqm) || 0;
+        // Area breakdown: built / balconies / garden, and the plot the property stands on.
+        for (const [k, max] of [["size_built", 5000], ["size_balcony", 2000], ["size_garden", 100000], ["size_plot", 1000000]]) {
+          if (body.property[k] == null) continue;
+          const v = Number(body.property[k]) || 0;
+          if (v < 0 || v > max) return res.status(400).json({ error: `bad_${k}` });
+          patch[`property.${k}`] = v;
+        }
         if (body.property.floor != null) patch["property.floor"] = Number(body.property.floor) || 0;
       }
       if (Array.isArray(body.gallery_images)) {
@@ -511,6 +550,7 @@ module.exports = function createPagesRouter(ctx) {
       const fresh = await db.getPage(pageId).catch(() => null);
       if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true });
+      if (patch["hero.video_url"]) convertPageVideo(pageId, patch["hero.video_url"]);
     } catch (err) {
       console.error("page/update failed:", err);
       res.status(500).json({ error: "internal" });
@@ -615,7 +655,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── video stitch + overlay ──
-  const { overlayVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
+  const { overlayVideo, promoVideoUrl, ensurePlayableVideo, MAX_LINES, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
     // video_urls (ordered clips, stitched with a crossfade) is the current
@@ -625,8 +665,6 @@ module.exports = function createPagesRouter(ctx) {
       .filter((u) => /^https?:\/\//.test(u));
     const lines = Array.isArray(body.lines) ?
       body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
-    // Optional room labels: strings or {room_type} objects, in any order.
-    const rooms = Array.isArray(body.rooms) ? body.rooms.slice(0, MAX_ROOMS) : [];
     // Optional music: an explicit track wins, otherwise a bed is generated to
     // fit the stitched length. music_prompt tailors that generation per listing.
     const musicUrl = /^https?:\/\//.test(String(body.music_url || "")) ? String(body.music_url) : null;
@@ -636,8 +674,19 @@ module.exports = function createPagesRouter(ctx) {
         error: `1-${MAX_CLIPS} video urls (video_urls or video_url) and 1-${MAX_LINES} lines required`,
       });
     }
+    // Optional agent logo on the titled cut, looked up from the agent's phone.
+    let logoUrl = null;
+    const phone = body.phone ? normalizePhone(body.phone) : null;
+    if (phone) {
+      try {
+        const biz = await db.getBusiness(phone);
+        logoUrl = biz && /^https?:\/\//i.test(String(biz.logo_url || "")) ? biz.logo_url : null;
+      } catch (err) {
+        console.warn("video-overlay: business lookup failed, no logo:", err.message);
+      }
+    }
     try {
-      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);
@@ -716,6 +765,7 @@ module.exports = function createPagesRouter(ctx) {
         city: p.property?.city || "",
         neighborhood: p.property?.neighborhood || "",
         price: p.property?.price || 0,
+        currency: p.property?.currency || "ILS",
         rooms: p.property?.rooms || 0,
         size_sqm: p.property?.size_sqm || 0,
         image_url: (p.gallery?.images?.[0]?.url) || p.hero?.poster_url || null,

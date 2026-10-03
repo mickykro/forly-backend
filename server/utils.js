@@ -228,8 +228,14 @@ async function rehost(url, destRel, uploadDir, baseUrl, opts = {}) {
   const resp = await fetch(safeUrl, { signal: AbortSignal.timeout(60000), redirect: "error" });
   if (!resp.ok) throw new Error(`fetch → ${resp.status}`);
   const buf = await readCapped(resp);
+  return storeBuffer(buf, String(destRel).split(".").pop().toLowerCase(), uploadDir, baseUrl, opts);
+}
 
-  const ext = String(destRel).split(".").pop().toLowerCase();
+// Write bytes into the public /files store (and the remote relay when one is
+// configured) under a fresh UUID name. Shared by rehost and server-side
+// renders such as video transcodes.
+async function storeBuffer(buf, ext, uploadDir, baseUrl, opts = {}) {
+  const { uploadPublicBase, remoteUploadBase, signUpload, fetchFn = fetch } = opts;
   const fname = `${crypto.randomUUID()}.${ext}`;
   const localPath = path.join(uploadDir, fname);
   fs.mkdirSync(path.dirname(localPath), { recursive: true });
@@ -289,6 +295,31 @@ async function sendWhatsApp(phone, message, instance, token) {
   });
 }
 
+// The last `count` messages of a chat, newest first (Green API getChatHistory).
+async function getWhatsAppHistory(chatId, count, instance, token) {
+  if (!instance || !token) return [];
+  const r = await fetch(`https://api.green-api.com/waInstance${instance}/getChatHistory/${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatId, count }),
+    signal: AbortSignal.timeout(20000),
+  });
+  const j = r.ok ? await r.json() : [];
+  return Array.isArray(j) ? j : [];
+}
+
+// One message of a chat, e.g. the image an agent replied to (its downloadUrl).
+async function getWhatsAppMessage(chatId, idMessage, instance, token) {
+  if (!instance || !token) return null;
+  const r = await fetch(`https://api.green-api.com/waInstance${instance}/getMessage/${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chatId, idMessage }),
+    signal: AbortSignal.timeout(20000),
+  });
+  return r.ok ? r.json() : null;
+}
+
 /*
  * Interactive buttons (Green API sendInteractiveButtons).
  * Limits enforced here rather than trusted from call sites: at most 3
@@ -339,10 +370,31 @@ async function sendWhatsAppRich(phone, payload, instance, token) {
   return sendWhatsApp(phone, textOfButtons(payload), instance, token);
 }
 
+// A page's hero video may only point at one of our own uploads — an mp4 with
+// the upload route's UUID filename under one of our public bases — never an
+// arbitrary URL. Returns the URL when it passes, else null.
+function ownUploadedVideo(url, bases) {
+  const s = String(url || "");
+  const m = /^(https?:\/\/[^/?#]+)\/files\/[0-9a-f-]{36}\.mp4$/i.exec(s);
+  if (!m) return null;
+  const hosts = (bases || []).filter(Boolean).map((b) => String(b).replace(/\/+$/, ""));
+  return hosts.includes(m[1]) ? s : null;
+}
+
+// "ב" + a place: ב + ה folds into ב ("בפארק", not "בהפארק"), except where the ה is
+// part of the name. ponytail: short exception list; add names as they show up.
+const HE_NAMES = ["הרצליה", "הוד השרון", "הדר", "הושעיה", "הגושרים", "הרדוף"];
+function inPlace(name) {
+  const s = String(name || "").trim();
+  if (!s) return "";
+  return "ב" + (s.startsWith("ה") && !HE_NAMES.some((n) => s.startsWith(n)) ? s.slice(1) : s);
+}
+
 module.exports = {
   textOfButtons, sendWhatsAppRich, publicUrl, PUBLIC_BASE_URL,
+  ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
-  guessImageExt, rehost, sendWhatsApp, sendWhatsAppButtons,
+  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons, getWhatsAppMessage, getWhatsAppHistory,
   assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
 };

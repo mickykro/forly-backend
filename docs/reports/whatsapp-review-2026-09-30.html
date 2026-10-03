@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forly WhatsApp Review — 2026-09-30</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f27; --muted: #5b6472; --border: #e3e6ea;
+    --accent: #2563eb; --good: #15803d; --good-bg: #ecfdf3; --warn: #b45309; --warn-bg: #fffbeb;
+    --bad: #b91c1c; --bad-bg: #fef2f2; --info-bg: #eff6ff; --code-bg: #0f172a; --code-ink: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55; padding: 0 16px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { padding: 40px 0 20px; }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 0.82rem; color: var(--muted); }
+  .verdict {
+    margin: 22px 0 30px; padding: 20px 22px; border-radius: 14px; background: var(--info-bg);
+    border: 1px solid #bfdbfe;
+  }
+  .verdict h2 { margin: 0 0 8px; font-size: 1.05rem; }
+  .verdict p { margin: 0 0 8px; color: #1e3a5f; }
+  .verdict p:last-child { margin-bottom: 0; }
+  section { margin: 36px 0; }
+  h2.section-title { font-size: 1.2rem; border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 18px; }
+  .section-note { color: var(--muted); margin-top: -10px; margin-bottom: 18px; font-size: 0.92rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card h3 { margin: 0 0 4px; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .badge.fixed { background: var(--good-bg); color: var(--good); }
+  .badge.n8n { background: var(--warn-bg); color: var(--warn); }
+  .badge.watch { background: #f3f4f6; color: var(--muted); }
+  .badge.good { background: var(--good-bg); color: var(--good); }
+  .card .meta { color: var(--muted); font-size: 0.82rem; margin: 4px 0 12px; }
+  .card p { margin: 8px 0; }
+  .evidence {
+    background: #fafbfc; border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 0.86rem;
+  }
+  .evidence .line { margin: 3px 0; }
+  .evidence .bot { color: var(--accent); }
+  .evidence .bot::before { content: "🤖 "; }
+  .evidence .user { color: #374151; }
+  .evidence .user::before { content: "👤 "; }
+  code, .code-inline { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .commit-ref {
+    display: inline-block; margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem; background: var(--good-bg); color: var(--good); border-radius: 6px; padding: 4px 10px;
+  }
+  ul.plain { margin: 8px 0; padding-inline-start: 20px; }
+  ul.plain li { margin: 4px 0; }
+  .outbound-msg {
+    background: var(--bad-bg); border: 1px solid #fecaca; border-radius: 10px; padding: 14px 16px; margin-top: 10px;
+  }
+  .outbound-msg .to { font-size: 0.78rem; color: var(--bad); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+  footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --ink: #e5e7eb; --muted: #9199a8; --border: #262b34;
+      --info-bg: #142238; --good-bg: #0f2a1c; --warn-bg: #2a2110; --bad-bg: #2a1414; --code-bg: #05070c;
+    }
+    .verdict { border-color: #1e3a5f; }
+    .verdict p { color: #bcd4ee; }
+    .evidence { background: #12151c; }
+    code, .code-inline { background: #20242e; color: #dbe1ea; }
+    .outbound-msg { border-color: #4c1d1d; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Forly WhatsApp Review</h1>
+  <div class="subtitle">Daily check on the agent-facing WhatsApp bot — what real conversations show about where it helps and where it trips people up.</div>
+  <div class="meta-row">
+    <span class="pill">Generated 2026-09-30</span>
+    <span class="pill">Source: Green API getChats / getChatHistory</span>
+    <span class="pill">41 conversations sampled (40 most active 1:1 + media-log group), Jul 21 – Sep 30</span>
+    <span class="pill">Channel: waInstance7105422200</span>
+  </div>
+</header>
+
+<div class="verdict">
+  <h2>Bottom line</h2>
+  <p>One real, reproducible bug this cycle: right after a photo batch finishes and the bot asks "preview or create?", replying with the numbered option <strong>"1" or "2" was silently ignored</strong> — the same menu came back twice before the agent gave up and typed the literal word <code>ליצור</code>. Root cause found in <code>server/photo-choice.js</code>'s photo-batch timer, fixed, and covered by a new regression test; all existing suites still pass.</p>
+  <p>Everything else already flagged in the last two reviews (2026-09-29, 12:54 and 16:52) stayed fixed and did not recur in this sample — including the <code>trycloudflare.com</code> dev-link leak. One <strong>new</strong> n8n-side issue turned up (a decline on the "build from these photos?" offer sometimes gets answered by a message this codebase never sends), and the photo-batch caption-spam item from 09-29 is <strong>still open</strong> — it recurred in this sample too. No business-level (pricing/policy/offering) change was identified this cycle.</p>
+</div>
+
+<section>
+  <h2 class="section-title">Found and fixed</h2>
+
+  <div class="card">
+    <h3><span class="badge fixed">Fixed</span> "1" / "2" ignored right after a photo batch — the menu that follows had no idea buttons were sent</h3>
+    <div class="meta">נופר הרוש שמאות מקרקעין, 972546582548 — Sep 29, 18:15–18:17</div>
+    <p>Three images landed, bringing the draft to 7 photos and to the "preview or create?" question. The agent answered with the numbers on the buttons — exactly what every other numbered menu in this bot accepts — and got the identical question back twice, verbatim, before falling back to typing the word itself:</p>
+    <div class="evidence">
+      <div class="line bot">שמרתי 7 תמונות לנכס. ... 1 · תצוגה מקדימה | 2 · ליצור</div>
+      <div class="line user">1</div>
+      <div class="line bot">כל הפרטים והתמונות אצלי ✅ ... <em style="color:var(--bad)">(same menu, "1" not recognized)</em></div>
+      <div class="line user">2</div>
+      <div class="line bot">כל הפרטים והתמונות אצלי ✅ ... <em style="color:var(--bad)">(same menu again)</em></div>
+      <div class="line user">ליצור</div>
+      <div class="line bot">איזה עיצוב לדף? ...</div>
+    </div>
+    <p>Numbered replies are resolved by mapping "1"/"2" back through <code>draft.last_buttons</code>, which <code>routes/whatsapp.js</code> saves from whatever the previous reply's buttons were. The message that asks "preview or create?" right after a photo batch is built by <code>photoTimer()</code> in <code>server/photo-choice.js</code> — and that function only returned the updated <code>draft</code> when photos had been dropped for exceeding the 12-photo cap (the overwhelmingly rare case). Every ordinary batch got <code>draft: undefined</code> back, so nothing was saved — <code>last_buttons</code> stayed stale, the digit never resolved, and the agent's numbered answer landed as plain text that matched nothing.</p>
+    <p><code>photoTimer()</code> now always returns the touched draft, matching every other reply path in the file. Added a regression test in <code>whatsapp-intake.test.js</code> that reproduces this exact conversation (photos → <code>photo_timer</code> → "1") and fails without the fix.</p>
+    <span class="commit-ref">fix(whatsapp): photo timer must return the draft even when nothing was dropped</span>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Still open — needs an n8n change</h2>
+  <p class="section-note">Outside this repo. A WhatsApp message with the specifics was sent to +972542045280.</p>
+
+  <div class="card">
+    <h3><span class="badge n8n">n8n</span> Declining the "build from these photos?" offer sometimes gets an answer this codebase never sends</h3>
+    <div class="meta">נופר הרוש שמאות מקרקעין, 972546582548 — Sep 30, 05:25</div>
+    <p>The agent replied "2" (לא) to <code>ערכתי 7 תמונות ✨ לבנות מהן דף נכס?</code>. This backend's code for that exact case is <code>declined()</code>, which always answers <code>"בסדר, לא בונים דף מהתמונות האלה."</code> — that string doesn't exist anywhere in this repo. What the agent actually got back was:</p>
+    <div class="evidence">
+      <div class="line user">2</div>
+      <div class="line bot">בוחרת את סגנון אטלייה 🎨 עכשיו התמונות — שלח לפחות 4 תמונות של הנכס</div>
+    </div>
+    <p>"בוחרת" (feminine "choosing") and an unprompted template pick don't match any reply in <code>whatsapp-replies.js</code>. This backend does delete the draft on decline (<code>del: true</code>), so the most likely explanation is a separate n8n flow independently listening for the same "2" and answering on top of (or instead of) this backend — worth checking the Main Router for a competing handler that fires when there's no open draft right after a decline.</p>
+  </div>
+
+  <div class="card">
+    <h3><span class="badge n8n">n8n</span> Photo-batch progress messages: still one text + one image per photo</h3>
+    <div class="meta">Reported 2026-09-29 12:54, still unresolved — seen again in נופר הרוש (Sep 29, 18:21–18:26) and צח בן בסט (Sep 29, 10:56–11:04), 7–12 photo batches both times</div>
+    <p>The per-photo caption text changed slightly since the last report (no longer numbering "תמונה N מתוך M"), but the shape of the problem is identical — every edited photo still arrives as its own caption message plus its own image message:</p>
+    <div class="evidence">
+      <div class="line bot">עובדת על 7 התמונות ✨ כל אחת תגיע כשהיא מוכנה</div>
+      <div class="line bot">[image]</div>
+      <div class="line bot"><em>… repeats 7 times, identical caption every time</em></div>
+    </div>
+    <p>Not a new finding — flagging again since it recurred in this sample and the recommendation (one "working on your N photos" message up front, then just the images) doesn't appear to have shipped yet.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Worth watching, not urgent</h2>
+  <div class="card">
+    <h3><span class="badge watch">Watch</span> Internal media-log group: a photo count getting split across two lines</h3>
+    <div class="meta">Group "יצירות של פורלי" (internal, not customer-facing) — Sep 29, 18:21</div>
+    <p><code>📸 יצירה מ-רימקס (972546582548)\nבקשה: 3\n0 תמונות ↓</code> — looks like a two-digit count ("30") got a line break inserted between the digits. Internal-only (the media-log group, not a customer chat), and this text isn't generated by this repo either, so noting it for whoever owns that n8n node rather than raising it as its own alert.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Working well</h2>
+  <div class="card">
+    <h3><span class="badge good">Good</span> What held up across the sample</h3>
+    <ul class="plain">
+      <li>None of the three HIGH findings from the last two reviews recurred — the <code>trycloudflare.com</code> dev-link leak in particular did not reappear in any message sent after the 09-29 fix.</li>
+      <li>Lead-nurture drip (day 0 → day 1 → day 2 → day-N check-in) fired cleanly for every lead in the sample that reached it, even where the lead never replied.</li>
+      <li>Login codes delivered reliably, every time they were requested.</li>
+      <li>Draft cancel/resume, natural-language opener detection, and numbered replies to the ordinary yes/no menus (fixed in earlier cycles) all held up — the bug above is a gap in one specific menu's button-tracking, not a regression of those fixes.</li>
+    </ul>
+  </div>
+</section>
+
+<div class="outbound-msg">
+  <div class="to">Sent via WhatsApp → +972542045280</div>
+  <p style="margin:0">A message covering both n8n items above (the new stray reply-on-decline, and the still-open photo-batch caption spam) was sent from the Forly number. No business-level change was identified this cycle, so no business message was sent.</p>
+</div>
+
+<footer>
+  Methodology: pulled the full chat list via <code>getChats</code> (1,397 chats), then <code>getChatHistory</code> (last 40 messages) for the 40 most recently active 1:1 conversations plus the internal media-log group. Media payloads (images/video binaries, thumbnails) were stripped before analysis; only message text, type, and timestamps were reviewed. HEAD at review time: <code>b1f3e74</code>.
+</footer>
+
+</div>
+</body>
+</html>

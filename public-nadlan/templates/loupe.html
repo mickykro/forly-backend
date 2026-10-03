@@ -396,6 +396,7 @@ footer a { color: rgba(255,255,255,.7); text-decoration: underline; }
     <div class="spec reveal"><b class="num" data-bind="property.price" data-fmt="price">₪8,400,000</b><span data-price-label>מחיר מבוקש</span></div>
     <div class="spec reveal" data-delay="1" data-show="property.rooms"><b class="num" data-bind="property.rooms">4</b><span data-i18n="rooms">חדרים</span></div>
     <div class="spec reveal" data-delay="2" data-show="property.size_sqm"><b class="num"><span data-bind="property.size_sqm">140</span></b><span data-i18n="built_area">שטח בנוי</span></div>
+    <div class="spec reveal" data-delay="2" data-show="property.size_plot"><b class="num"><span data-bind="property.size_plot">400</span></b><span data-i18n="plot">מגרש</span></div>
     <div class="spec reveal" data-delay="3" data-show="property.floor"><b class="num" data-bind="property.floor">7</b><span data-i18n="floor">קומה</span></div>
     <div class="spec reveal" data-delay="3" data-show="property.parking"><b class="num" data-bind="property.parking">3</b><span data-i18n="parking">חניות</span></div>
   </div>
@@ -612,7 +613,7 @@ footer a { color: rgba(255,255,255,.7); text-decoration: underline; }
     if (P.price) {
       var n = +P.price;
       var big = n >= 1e6 ? (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 2).replace(/\.?0+$/, "") + "M" : Math.round(n / 1000) + "K";
-      out.push({ big: big, unit: "₪", sub: isRent ? T("monthly_rent") : T("asking_price") });
+      out.push({ big: big, unit: ({ EUR: "€", USD: "$" })[P.currency] || "₪", sub: isRent ? T("monthly_rent") : T("asking_price") });
     }
     if (P.rooms) out.push({ big: P.rooms, unit: T("rooms"), sub: T("the_property") });
     if (P.floor) out.push({ big: P.floor, unit: T("floor"), sub: T("the_property") });

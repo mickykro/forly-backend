@@ -17,6 +17,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const db = require("../db");
+const { inPlace } = require("../utils");
 const readiness = require("../chatbot-readiness");
 const chatbotConfig = require("../chatbot-config");
 const businessCache = require("../business-cache");
@@ -131,7 +132,7 @@ module.exports = function createAdminRouter(ctx) {
           business_phone: l.business_phone,
           agent_name: (biz && (biz.business_name || biz.full_name)) ||
             (l.agent && (l.agent.brand_name || l.agent.name)) || "—",
-          title: `${l.rooms || ""} חד׳ ב${l.neighborhood || l.city || ""}`.trim(),
+          title: `${l.rooms || ""} חד׳ ${inPlace(l.neighborhood || l.city)}`.trim(),
           address: [l.address, l.city].filter(Boolean).join(", "),
           city: l.city || "",
           price: l.price || 0,

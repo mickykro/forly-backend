@@ -185,7 +185,7 @@
               ' + (p.rooms ? '<span>' + p.rooms + ' חדרים</span>' : '') + '\
               ' + (p.size_sqm ? '<span>' + p.size_sqm + ' מ״ר</span>' : '') + '\
             </div>\
-            <p class="price">' + formatPrice(p.price, p.listing_type) + '</p>\
+            <p class="price">' + formatPrice(p.price, p.listing_type, p.currency) + '</p>\
           </div>\
         </a>\
       ';
@@ -353,10 +353,11 @@
     return types.join(" ו") || "";
   }
 
-  function formatPrice(price, type) {
+  function formatPrice(price, type, currency) {
     if (!price) return "";
     var f = new Intl.NumberFormat("he-IL").format(price);
-    return type === "rent" ? "₪ " + f + " <small>לחודש</small>" : "₪ " + f;
+    var sym = ({ EUR: "€", USD: "$" })[currency] || "₪";
+    return type === "rent" ? sym + " " + f + " <small>לחודש</small>" : sym + " " + f;
   }
 
   function esc(s) {

@@ -119,13 +119,30 @@
         <div class="sec-title">פרטי הנכס</div>
         <div class="field"><label>כותרת הנכס</label><input id="fTitle" maxlength="80" data-live="property.title"></div>
         <div class="grid-3">
-          <div class="field"><label>מחיר (₪)</label><input id="fPrice" type="number" min="0" max="999999999"></div>
+          <div class="field">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+              <label for="fPrice">מחיר</label>
+              <select id="fCurrency" aria-label="מטבע" title="מטבע" style="width:auto;padding:0 4px;font-size:.8rem">
+                <option value="ILS">₪ שקל</option><option value="EUR">€ יורו</option><option value="USD">$ דולר</option>
+              </select>
+            </div>
+            <input id="fPrice" type="number" min="0" max="999999999">
+          </div>
           <div class="field"><label>חדרים</label><input id="fRooms" type="number" step="0.5" min="1" max="30"></div>
           <div class="field"><label>מ״ר</label><input id="fSqm" type="number" min="5" max="2000"></div>
         </div>
         <div class="grid-2">
           <div class="field"><label>קומה</label><input id="fFloor" type="number" min="-5" max="120"></div>
           <div class="field"><label>שכונה/עיר</label><input id="fEyebrow" maxlength="80" data-live="texts.eyebrow"></div>
+        </div>
+        <div class="field" style="margin-bottom:4px"><label>פירוט שטחים (מ״ר)</label></div>
+        <div class="grid-2">
+          <div class="field"><label>בנוי</label><input id="fBuilt" type="number" min="0" max="5000"></div>
+          <div class="field"><label>מרפסות</label><input id="fBalcony" type="number" min="0" max="2000"></div>
+        </div>
+        <div class="grid-2">
+          <div class="field"><label>חצר / גינה</label><input id="fGarden" type="number" min="0" max="100000"></div>
+          <div class="field"><label>מגרש</label><input id="fPlot" type="number" min="0" max="1000000"></div>
         </div>
       </div>
 
@@ -151,6 +168,16 @@
           </div>
         </div>
       </details>
+
+      <!-- Video -->
+      <div class="card">
+        <div class="sec-title">סרטון</div>
+        <video id="vidPreview" controls playsinline preload="metadata" hidden
+          style="width:100%;max-height:360px;border-radius:10px;background:#000"></video>
+        <input type="file" id="vidFile" accept="video/mp4,video/quicktime" hidden>
+        <button type="button" class="btn btn-ghost" id="vidBtn" style="margin-top:10px">החלפת סרטון</button>
+        <div class="hint">MP4 או MOV. הסרטון מוצג בדף ומתפרסם בקבוצות כמו שהוא. סרטוני iPhone מומרים אוטומטית לפורמט שמתנגן בכל דפדפן (עד כדקה).</div>
+      </div>
 
       <!-- Gallery -->
       <div class="card">
@@ -261,7 +288,7 @@
   // The numeric fields carry min/max; anything out of range would land on the
   // live page and in the bot's fact sheet, so both save paths ask first.
   function badNumberField() {
-    return ["#fPrice", "#fRooms", "#fSqm", "#fFloor"].map($).filter(function (el) { return el && !el.checkValidity(); })[0] || null;
+    return ["#fPrice", "#fRooms", "#fSqm", "#fFloor", "#fBuilt", "#fBalcony", "#fGarden", "#fPlot"].map($).filter(function (el) { return el && !el.checkValidity(); })[0] || null;
   }
 
   // Quick save without UI feedback (for live preview)
@@ -297,8 +324,13 @@
       property: {
         title: $("#fTitle").value,
         price: Number($("#fPrice").value) || 0,
+        currency: $("#fCurrency").value,
         rooms: Number($("#fRooms").value) || 0,
         size_sqm: Number($("#fSqm").value) || 0,
+        size_built: Number($("#fBuilt").value) || 0,
+        size_balcony: Number($("#fBalcony").value) || 0,
+        size_garden: Number($("#fGarden").value) || 0,
+        size_plot: Number($("#fPlot").value) || 0,
         floor: Number($("#fFloor").value) || 0,
       },
       gallery_images: galleryState,
@@ -344,9 +376,10 @@
   // All inputs trigger debounced preview refresh
   document.addEventListener("input", function (e) {
     var el = e.target;
-    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
       schedulePreviewRefresh();
     }
+    if (el.id === "fPrice" || el.id === "fCurrency") syncPriceSpec();
     if (el.id === "fPhrase") $("#phraseCount").textContent = el.value.length;
   });
   // Checkboxes use change event
@@ -355,6 +388,26 @@
       schedulePreviewRefresh();
     }
   });
+
+  var CURRENCY_SYMBOL = { ILS: "₪", EUR: "€", USD: "$" };
+  var priceSpecRent = false, priceSpecShown = null;
+  function fmtPrice(n, cur) {
+    if (!n) return "";
+    var sym = CURRENCY_SYMBOL[cur] || "₪";
+    if (n >= 1e6) return sym + (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    return sym + n.toLocaleString("he-IL");
+  }
+  function priceSpec(price, cur) {
+    if (price === undefined) { price = Number($("#fPrice").value) || 0; cur = $("#fCurrency").value; }
+    var s = fmtPrice(price, cur);
+    return s && priceSpecRent ? s + "/חודש" : s;
+  }
+  // The spec box is only rewritten while it still shows the auto-formatted price, never over the agent's own text.
+  function syncPriceSpec() {
+    var box = $("#fSpec1v");
+    if (priceSpecShown === null || box.value !== priceSpecShown) return;
+    box.value = priceSpecShown = priceSpec();
+  }
 
   function load() {
     FLY.req("/api/page?id=" + encodeURIComponent(pageId)).then(function (d) {
@@ -367,6 +420,7 @@
       var sections = d.sections || {};
       var gallery = d.gallery || {};
       var carousel = d.carousel || {};
+      showVideo(hero.video_url);
       // Template
       setActiveTpl((d.theme || {}).template || "original");
       // Agent
@@ -384,8 +438,13 @@
       // Property
       $("#fTitle").value = d.property.title || "";
       $("#fPrice").value = d.property.price || "";
+      $("#fCurrency").value = d.property.currency || "ILS";
       $("#fRooms").value = d.property.rooms || "";
       $("#fSqm").value = d.property.size_sqm || "";
+      $("#fBuilt").value = d.property.size_built || "";
+      $("#fBalcony").value = d.property.size_balcony || "";
+      $("#fGarden").value = d.property.size_garden || "";
+      $("#fPlot").value = d.property.size_plot || "";
       $("#fFloor").value = d.property.floor || "";
       // Property ref and listing type for computed defaults
       var p = d.property;
@@ -395,12 +454,10 @@
         (p.neighborhood ? p.neighborhood + ", " : "") + (p.city || "");
       $("#fEyebrow").value = texts.eyebrow || eyebrowDefault;
       // Specs - show computed defaults if not customized
-      var fmtPrice = function (n) {
-        if (!n) return "";
-        if (n >= 1e6) return "₪" + (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
-        return "₪" + n.toLocaleString("he-IL");
-      };
-      $("#fSpec1v").value = texts.spec1_v || fmtPrice(p.price) + (isRent ? "/חודש" : "");
+      priceSpecRent = isRent;
+      $("#fSpec1v").value = texts.spec1_v || priceSpec();
+      // Saved as text, so a price box that still reads like the old price/currency follows the new one.
+      if ($("#fSpec1v").value === priceSpec(p.price, p.currency)) priceSpecShown = $("#fSpec1v").value;
       $("#fSpec1l").value = texts.spec1_l || (isRent ? "שכירות חודשית" : "מחיר מבוקש");
       $("#fSpec2v").value = texts.spec2_v || (p.rooms ? p.rooms + " חד׳" : "");
       $("#fSpec2l").value = texts.spec2_l || (p.size_sqm ? p.size_sqm + " מ״ר" : "");
@@ -484,6 +541,36 @@
     });
     box.appendChild(add);
   }
+
+  // Video: upload a replacement, then point the page at it.
+  function showVideo(url) {
+    var v = $("#vidPreview");
+    if (url) { v.src = url; v.hidden = false; } else { v.removeAttribute("src"); v.hidden = true; }
+  }
+  $("#vidBtn").addEventListener("click", function () { $("#vidFile").click(); });
+  $("#vidFile").addEventListener("change", function () {
+    var file = (this.files || [])[0];
+    this.value = "";
+    if (!file) return;
+    if (!/^video\/(mp4|quicktime)$/.test(file.type)) { FLY.toast("ניתן להעלות סרטון MP4 / MOV בלבד"); return; }
+    var btn = $("#vidBtn");
+    btn.disabled = true;
+    btn.textContent = "מעלים... 0%";
+    FLY.uploadFiles([file], null, function (_, pct) { btn.textContent = "מעלים... " + pct + "%"; })
+      .then(function (urls) {
+        return FLY.req("/api/page/update", {
+          method: "POST",
+          body: { page_id: pageId, hero_video_url: urls[0] },
+        }).then(function () { return urls[0]; });
+      })
+      .then(function (url) {
+        showVideo(url);
+        $("#preview").src = "/p/" + pageId + "?t=" + Date.now();
+        FLY.toast("✓ הסרטון הוחלף");
+      })
+      .catch(function (e) { FLY.toast("שגיאה בהחלפת הסרטון — נסו שוב"); console.error(e); })
+      .finally(function () { btn.disabled = false; btn.textContent = "החלפת סרטון"; });
+  });
 
   var MAX_GALLERY = 12;
   $("#galFile").addEventListener("change", function () {

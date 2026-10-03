@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forly WhatsApp — סקירת שיחות | 29.09.2026</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --text:#1c2128; --muted:#5b6472; --border:#e3e6ea;
+    --crit:#b3261e; --crit-bg:#fdecea;
+    --high:#a15c00; --high-bg:#fff3dc;
+    --med:#8a6d00;  --med-bg:#fff9db;
+    --low:#3a6b35;  --low-bg:#eaf6e8;
+    --accent:#2f5fda;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14171c; --panel:#1b1f26; --text:#e7e9ec; --muted:#9aa3af; --border:#2b3038;
+      --crit-bg:#3a1613; --high-bg:#3a2a0a; --med-bg:#332c07; --low-bg:#152c15;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14171c; --panel:#1b1f26; --text:#e7e9ec; --muted:#9aa3af; --border:#2b3038;
+    --crit-bg:#3a1613; --high-bg:#3a2a0a; --med-bg:#332c07; --low-bg:#152c15;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",Arial,Helvetica,sans-serif;line-height:1.55}
+  .wrap{max-width:920px;margin:0 auto;padding:28px 16px 64px}
+  header{padding:20px 0 10px}
+  h1{font-size:1.5rem;margin:0 0 4px}
+  .meta{color:var(--muted);font-size:.92rem}
+  .summary{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:18px 0}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px}
+  .stat{flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 14px;text-align:center}
+  .stat b{display:block;font-size:1.3rem}
+  .stat span{color:var(--muted);font-size:.8rem}
+  section{margin:28px 0}
+  h2{font-size:1.15rem;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+  .tag{display:inline-block;font-size:.72rem;font-weight:700;border-radius:999px;padding:3px 10px;margin-inline-end:6px}
+  .crit{color:var(--crit);background:var(--crit-bg)}
+  .high{color:var(--high);background:var(--high-bg)}
+  .med{color:var(--med);background:var(--med-bg)}
+  .low{color:var(--low);background:var(--low-bg)}
+  .card h3{margin:8px 0 6px;font-size:1rem}
+  .card p{margin:6px 0}
+  .evidence{background:var(--bg);border-inline-start:3px solid var(--accent);border-radius:6px;padding:8px 12px;margin:8px 0;font-size:.86rem;color:var(--muted);white-space:pre-line}
+  .rec{font-size:.9rem}
+  .rec b{color:var(--text)}
+  ul{margin:6px 0;padding-inline-start:20px}
+  table{width:100%;border-collapse:collapse;font-size:.88rem;margin-top:8px}
+  th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--border)}
+  th{color:var(--muted);font-weight:600}
+  .note{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:.88rem;color:var(--muted)}
+  footer{margin-top:36px;color:var(--muted);font-size:.8rem;text-align:center}
+  code{background:var(--bg);padding:1px 5px;border-radius:4px;font-size:.85em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Forly · סקירת שיחות וואטסאפ</h1>
+  <div class="meta">נוצר אוטומטית · 29 בספטמבר 2026 · מקור: Green API (waInstance7105422200)</div>
+</header>
+
+<div class="summary">
+  <p><b>מסקנה כללית:</b> אין צורך לעצור שום דבר — הזרימה המרכזית (תמונות ← עריכה ← דף נכס + סרטון) עובדת ומספקת ערך לסוכנים פעילים. עם זאת, נמצאו כמה תקלות חוזרות שפוגעות בחוויה ובעלות התפעול, ותבנית שיווק יוצא עם שיעור מענה אפסי בדגימה. פירוט למטה.</p>
+  <div class="stats">
+    <div class="stat"><b>1,394</b><span>שיחות פעילות בחשבון</span></div>
+    <div class="stat"><b>35</b><span>שיחות שנדגמו לעומק</span></div>
+    <div class="stat"><b>~340</b><span>הודעות שנסקרו</span></div>
+    <div class="stat"><b>8</b><span>ממצאים</span></div>
+  </div>
+</div>
+
+<section>
+<h2>ממצאים טכניים — הבנת הבוט ומניעת ג׳נרוצי&#8203;ות מיותרות</h2>
+
+<div class="card">
+  <span class="tag high">HIGH</span><span class="tag">באג</span>
+  <h3>1. לולאת "טיוטה פתוחה" לא מזהה ביטול בטקסט חופשי</h3>
+  <p>כשיש טיוטת נכס פתוחה, המשתמש מקבל תפריט עם אפשרויות ממוספרות (1·המשך 2·חדש 3·ביטול), אבל תשובה במילים ("לבטל אותה") לא מזוהה — הבוט חוזר על אותה הודעה שוב ושוב.</p>
+  <div class="evidence">טל עינן: "לבטל אותה" → הבוט חוזר על "יש לך טיוטה פתוחה... 1·המשך 2·חדש 3·ביטול" — פעמיים ברצף, בלי להתקדם.</div>
+  <p class="rec"><b>המלצה:</b> להוסיף זיהוי כוונה חופשי (״בטל/ביטול/לבטל״ → 3, ״חדש/נכס חדש״ → 2 וכו׳) לפני נפילה לתפריט הממוספר.</p>
+</div>
+
+<div class="card">
+  <span class="tag high">HIGH</span><span class="tag">באג</span>
+  <h3>2. תשובה עם כמה שדות בהודעה אחת לא נקלטת</h3>
+  <p>כשמשתמש עונה על כמה שאלות בבת אחת ("סביון, 8 חדרים, 32 מיליון") הבוט לא מפרסר את זה וחוזר על אותה שאלה כמה פעמים, עד שהמשתמש מוותר וכותב רק את המילה הראשונה.</p>
+  <div class="evidence">טל עינן, 06:31–06:33: 3 חזרות רצופות על "מתחילים דף נכס חדש 🏠 באיזו עיר הנכס?" בעוד שהעיר כבר נשלחה בהודעה הראשונה.</div>
+  <p class="rec"><b>המלצה:</b> להריץ את אותו parser שמשמש ל"עדכנתי: עיר X, מחיר Y" (נראה עובד היטב בשיחות אחרות) גם על התשובה הראשונה לשאלת העיר, לא רק על טקסט חופשי מאוחר יותר.</p>
+</div>
+
+<div class="card">
+  <span class="tag med">MEDIUM</span><span class="tag">UX</span>
+  <h3>3. תגובה (reply/ציטוט) להודעה קודמת לא מובנת</h3>
+  <div class="evidence">טל עינן שולח quotedMessage → הבוט: "לא בטוחה למה התכוונת 🙂 אפשר לכתוב במילים מה לעשות?"</div>
+  <p class="rec"><b>המלצה:</b> כשמגיעה הודעה עם ציטוט, למשוך את תוכן ההודעה המצוטטת כהקשר במקום להתעלם ממנה.</p>
+</div>
+
+<div class="card">
+  <span class="tag med">MEDIUM</span><span class="tag">אמינות</span>
+  <h3>4. כשל בבניית דף מחייב שליחה מחדש של הכל</h3>
+  <div class="evidence">נופר: "בניית הדף (6 חד׳ בהפארק, ₪1,760,000) נכשלה 😕 אפשר לשלוח שוב את הקישור או את טקסט המודעה, או לכתוב ״נכס חדש״."</div>
+  <p class="rec"><b>המלצה:</b> retry אוטומטי חד-פעמי לפני שמציגים כשל למשתמש; אם עדיין נכשל — לשמר את הנתונים שכבר נאספו (תמונות, שדות) כדי שלא יצטרכו להתחיל מאפס.</p>
+</div>
+
+<div class="card">
+  <span class="tag high">HIGH</span><span class="tag">אמון לקוח</span>
+  <h3>5. קישור dev/tunnel זמני נשלח ללקוחות לפני הקישור הרשמי</h3>
+  <p>בשתי שיחות שונות נשלח ללקוח קישור מתחום <code>trycloudflare.com</code> (מנהור פיתוח זמני), ורק דקה אחר כך תוקן ונשלח הקישור הרשמי <code>nadlan.call4li.com</code>. הקוד כבר כולל הגנה מפני זה (<code>INFRA_HOST</code> ב-<code>server/utils.js</code>) אבל יש כנראה מרוץ תזמון (race) שמאפשר להודעה הראשונה לצאת לפני שה-URL הרשמי מוכן.</p>
+  <div class="evidence">רועי לוי אריאל: nadlan.call4li.com/p/rvay-lvy-5z867 נשלח דקה אחרי pci-allow-charter-bias.trycloudflare.com/p/rvay-lvy-5z867 (אותו נכס).
+Ariel Kroitoro: אותה תבנית בדיוק, 26.09, הפרש של 2 דקות.</div>
+  <p class="rec"><b>המלצה:</b> לקוח שמקבל קישור עם דומיין אקראי-נראה יכול לחשוד בפישינג. לתקן את תנאי המרוץ כך שהודעה יוצאת רק אחרי שה-URL הסופי (הממותג) נפתר, או למחוק/לערוך את ההודעה השגויה.</p>
+</div>
+
+<div class="card">
+  <span class="tag med">MEDIUM</span><span class="tag">עלות / יעילות</span>
+  <h3>6. ג׳נרוצי&#8203;ות וידאו חוזרות לאותו ליד בחלון זמן קצר</h3>
+  <p>ללקוח אחד נוצרו 8 סרטונים ו-6 הודעות "🎉 דף הנכס שלך באוויר!" תוך פחות משעה. ייתכן שזה שימוש לגיטימי (עריכות חוזרות), אך אין שום מנגנון שמזהיר לפני ג׳נרציה חוזרת או מאחד כמה בקשות לריצה אחת — כל ריצה עולה זמן חישוב וקרדיט מודל.</p>
+  <div class="evidence">972508505321 (Itay), 28.09 12:00–13:01: 5 סרטונים חדשים + 4 הודעות "הדף שלך באוויר" עם אותו page id בסיסי.</div>
+  <p class="rec"><b>המלצה:</b> cooldown/דה-דופ (למשל: אם נוצר סרטון לאותה טיוטה ב-5 הדקות האחרונות, לשאול "לעדכן את הקיים או ליצור מחדש?" במקום ליצור אוטומטית).</p>
+</div>
+
+</section>
+
+<section>
+<h2>ממצאים עסקיים</h2>
+
+<div class="card">
+  <span class="tag high">HIGH</span><span class="tag">שיווק / סיכון לחשבון</span>
+  <h3>7. קמפיין הגעה קרה ("Signup Bot") — 0% מענה בדגימה</h3>
+  <p>רצף ההודעות האוטומטי לגיוס סוכנים חדשים (n8n → Main Router v2 → Signup Bot cold: "היי, תודה על הפרטים שלך" → "ניסיתי לתפוס אותך בטלפון" → "ראיתי שהשארת פרטים" → "רק רציתי לוודא שלא פספסתי אותך") נשלח לכ-15 אנשי קשר בדגימה — <b>אף אחד לא הגיב</b> אפילו פעם אחת. חלק מהנמענים הם עסקים שלא בתחום נדל"ן כלל (למשל קוסמטיקאית), מה שמרמז שרשימת היעד רחבה מדי.</p>
+  <div class="evidence">15/15 שיחות מסוג "ליד קר" בדגימה: אפס תגובות מהצד השני להודעות היזומות של טל ומיקי.</div>
+  <p class="rec"><b>המלצה:</b> (1) לבדוק אם יש בכלל opt-in לפני שליחת רצף יזום ל-WhatsApp — הודעות עסקיות יזומות ללא הסכמה מסתכנות בחסימת המספר על ידי Meta; זה מספר הליבה שדרכו גם כל שיחות הלקוחות הפעילים עוברות. (2) לצמצם את הרצף (2 מגעים במקום 4) ולעצור אותו ברגע שמתקבלת תגובה כלשהי, כולל "STOP". (3) למקד את הרשימה לפי תחום עיסוק נדל"ן בלבד.</p>
+</div>
+
+<div class="card">
+  <span class="tag low">LOW</span><span class="tag">חיכוך</span>
+  <h3>8. קוד כניסה (OTP) נשלח שוב ושוב באותו session</h3>
+  <div class="evidence">נופר קיבלה קוד כניסה פעמיים תוך דקה; טל עינן קיבל 4 קודים שונים על פני יומיים.</div>
+  <p class="rec"><b>המלצה:</b> להאריך תוקף session קיים כך שמשתמש פעיל לא יצטרך קוד חדש כל כמה דקות.</p>
+</div>
+
+</section>
+
+<section>
+<h2>מה עובד טוב</h2>
+<div class="note">
+  זרימת "שלח תמונות ← הבוט עורך כל תמונה ← בונה דף נכס + סרטון ← מנתב לידים חדשים לסוכן בוואטסאפ עם שם/טלפון/תקציב" עובדת מקצה לקצה אצל משתמשים פעילים (נופר, Itay, אלכס, מיכאל אטלן ועוד), כולל עריכות חוזרות לפי בקשה חופשית ("תעשי שהדחרה אחרי שיפוץ עם רהיטים"). הודעת "🔔 ליד חדש מדף הנכס" עובדת ומעבירה את כל הפרטים הרלוונטיים לסוכן.
+</div>
+</section>
+
+<section>
+<h2>סיכום המלצות לפי עדיפות</h2>
+<table>
+<tr><th>#</th><th>נושא</th><th>סוג</th><th>עדיפות</th></tr>
+<tr><td>5</td><td>קישור dev דולף ללקוחות</td><td>קוד</td><td class="high">גבוהה</td></tr>
+<tr><td>7</td><td>קמפיין קר ללא מענה / סיכון חסימה</td><td>עסקי + n8n</td><td class="high">גבוהה</td></tr>
+<tr><td>1</td><td>לולאת ביטול טיוטה</td><td>קוד</td><td class="high">גבוהה</td></tr>
+<tr><td>2</td><td>פרסור תשובה מרובת-שדות</td><td>קוד</td><td class="high">גבוהה</td></tr>
+<tr><td>4</td><td>כשל בניית דף ללא retry</td><td>קוד</td><td class="med">בינונית</td></tr>
+<tr><td>6</td><td>ג׳נרציות וידאו כפולות</td><td>קוד</td><td class="med">בינונית</td></tr>
+<tr><td>3</td><td>הודעת ציטוט לא מובנת</td><td>קוד</td><td class="med">בינונית</td></tr>
+<tr><td>8</td><td>OTP חוזר</td><td>קוד</td><td class="low">נמוכה</td></tr>
+</table>
+</section>
+
+<footer>
+  דגימה: 35 מתוך 1,394 שיחות פעילות (סנכרון אחרון של Green API, ~40 הודעות אחרונות לכל שיחה). דוח זה נוצר אוטומטית ואינו מחליף בדיקה ידנית.
+</footer>
+
+</div>
+</body>
+</html>

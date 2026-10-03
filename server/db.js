@@ -61,6 +61,25 @@ async function updateListing(id, patch) {
   else Object.assign(mem.listings.get(id) || {}, patch);
 }
 
+// Staging and production share this Firestore and both run the sweepers: a job is
+// acted on only by the server that moves it out of `from` — the other sees false.
+async function claimStatus(collection, id, from, patch) {
+  if (db) {
+    const ref = db.collection(collection).doc(id);
+    return db.runTransaction(async (tx) => {
+      const d = await tx.get(ref);
+      if (!d.exists || d.data().status !== from) return false;
+      tx.update(ref, patch);
+      return true;
+    });
+  }
+  const store = collection === "listings" ? mem.listings : mem.distributions;
+  const d = store.get(id);
+  if (!d || d.status !== from) return false;
+  Object.assign(d, patch);
+  return true;
+}
+
 async function listListingsByPhone(phone) {
   if (db) {
     const snap = await db.collection("listings").where("business_phone", "==", phone).limit(100).get();
@@ -602,6 +621,16 @@ async function saveLead(phone, lead) {
   else mem.leads.set(phone, { ...(mem.leads.get(phone) || {}), ...lead });
 }
 
+// "עצור" in the WhatsApp chat: n8n's photo-edit loop polls this before each photo.
+async function setEditCancel(phone, at = new Date()) {
+  if (db) await db.collection("edit_cancels").doc(phone).set({ phone, at });
+  else mem.editCancels = Object.assign(mem.editCancels || {}, { [phone]: at });
+}
+async function getEditCancel(phone) {
+  if (db) { const d = await db.collection("edit_cancels").doc(phone).get(); return d.exists ? d.data().at : null; }
+  return (mem.editCancels || {})[phone] || null;
+}
+
 async function addAdminMessage(entry) {
   if (db) await db.collection("admin_messages").add(entry);
   else mem.adminMessages.push(entry);
@@ -710,7 +739,8 @@ module.exports = {
   saveShareSession, getShareSession, updateShareSession, findOpenShareSession,
   listShareSessionsByPhone, healGroups, addAdminMessage,
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
-  getDraft, saveDraft, deleteDraft,
+  getDraft, saveDraft, deleteDraft, setEditCancel, getEditCancel,
+  claimStatus,
   saveExtractJob, getExtractJob, updateExtractJob, listExtractJobsByStatus,
   saveListingDraft, getListingDraft, updateListingDraft, listListingDraftsByPhone,
 };

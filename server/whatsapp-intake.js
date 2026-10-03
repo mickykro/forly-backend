@@ -12,8 +12,13 @@
 const D = require("./property-draft");
 const R = require("./whatsapp-replies");
 const C = require("./draft-corrections");
+const { updatePage, updatingTurn, duplicateCheck, duplicateTurn } = require("./page-update");
+const { intentOf, openerOf } = require("./property-intent");
+const { recoverFromChat } = require("./chat-recover");
+const PC = require("./photo-choice");
 
-const MAX_PHOTOS = 12;
+const MAX_PHOTOS = 54; // walkthrough: up to 6 clips × 9 reference photos
+const { oneBubble } = R;
 
 const notOurs = (status) => ({ handled: false, status, replies: [] });
 
@@ -32,17 +37,11 @@ function photoUrlsOf(input) {
 function promptFor(draft, deps) {
   const step = D.nextStep(draft);
   if (step.kind === "ask") return { status: `asked:${step.field}`, replies: [R.ask(step.field)] };
+  if (step.kind === "photos" && (draft.offered_photos || []).length) return { status: "use_edited", replies: [R.useEdited(draft.offered_photos.length)] };
   if (step.kind === "photos") return { status: "photos", replies: [R.askPhotos()] };
   if (step.kind === "choose") return { status: "choose", replies: [R.choose()] };
   if (step.kind === "create") return { status: "create", replies: [] }; // handleTurn builds it
   return { status: "confirm", replies: [R.reviewReady(deps.reviewLink(draft.phone), draft.skipped)] };
-}
-
-// Several replies as one WhatsApp bubble; the last one's buttons are kept.
-function oneBubble(replies) {
-  const last = replies[replies.length - 1];
-  const links = replies.flatMap((r) => r.links || []);
-  return { text: replies.map((r) => r.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}), ...(links.length ? { links } : {}) };
 }
 
 // Build the page straight from the draft (the agent chose "ליצור"). On failure
@@ -89,7 +88,8 @@ async function openFromSource(phone, kind, text, deps, now) {
     return { handled: true, status: `source_error:${code}`, draft, replies: [R.sourceError(code, deps.createUrl), ...p.replies] };
   }
   for (const [k, v] of Object.entries(parsed.fields)) if (k in draft.fields && k !== "description" && v !== null) draft.fields[k] = v;
-  // ponytail: description left for user to provide in Q&A, not auto-filled from source
+  // A scraped page's text isn't the agent's; pasted listing text is, and it is the description.
+  if (kind === "text") draft.fields.description = D.parseAnswer("description", text);
   const extra = [];
   if (kind === "link") {
     // The agent's own words next to the link are newer than the listing: they win.
@@ -119,8 +119,21 @@ function openFromKeyword(phone, deps, now) {
   return { handled: true, status: p.status, draft, replies: [R.opened("keyword"), ...p.replies] };
 }
 
-async function openDraft(phone, kind, text, deps, now) {
+async function openDraft(phone, kind, text, deps, now, suspended = null) {
+  if (kind === "update") return updatePage(phone, text, deps, now, suspended);
+  if (kind === "intent") return openFromIntent(phone, text, deps, now);
   return kind === "keyword" ? openFromKeyword(phone, deps, now) : openFromSource(phone, kind, text, deps, now);
+}
+
+// The same message may already carry details ("סביון, 8 חדרים, 32 מיליון"): they fill the draft.
+async function withDetails(t, text, deps, now) {
+  if (!C.hintedFields(text).length || !deps.extractAllowed(t.draft.phone)) return t;
+  const r = await C.smartAnswer(t.draft, text, deps, now, D.nextStep(t.draft).field || null, promptFor);
+  return r ? { ...r, replies: [...t.replies.slice(0, -1), ...r.replies] } : t;
+}
+
+async function openFromIntent(phone, text, deps, now) {
+  return withDetails(openFromKeyword(phone, deps, now), text, deps, now);
 }
 
 // One answer to the field currently being asked.
@@ -139,6 +152,7 @@ function answerField(draft, field, text, cmd, deps) {
   }
   draft.retry = null;
   draft.fields[field] = value;
+  if (field === "price") D.noteCurrency(draft, text);
   const p = promptFor(draft, deps);
   return { status: p.status, replies: p.replies, draft };
 }
@@ -152,43 +166,21 @@ async function storePhoto(draft, fileUrlOrUrls, deps, now) {
   const seen = draft.photo_sources || [];
   const urls = [...new Set(raw)].filter((u) => !seen.includes(u));
   draft.photo_sources = seen.concat(urls);
+  if (draft.replace_next) { draft.photos = []; draft.replace_next = false; } // "תחליף את התמונות" came first
   const room = Math.max(0, MAX_PHOTOS - draft.photos.length);
   if (urls.length > room) draft.photos_dropped = (draft.photos_dropped || 0) + urls.length - room;
-  draft.photos.push(...(await importAll(urls.slice(0, room), deps.importPhoto)));
+  const added = await importAll(urls.slice(0, room), deps.importPhoto);
+  draft.photos.push(...added);
+  PC.noteBatch(draft, added, now);
   return { handled: true, status: "photo_stored", draft: D.touch(draft, now), replies: [], armPhotoTimer: true };
-}
-
-// The agent's own video: re-hosted and used instead of a generated walkthrough.
-async function storeVideo(draft, url, deps, now) {
-  let hosted = null;
-  try { hosted = await deps.importVideo(url); } catch (err) { console.warn("[whatsapp-intake] video import failed:", err.message); }
-  if (!hosted) return { handled: true, status: "video_failed", replies: [R.videoFailed()] };
-  draft.video_url = hosted;
-  const p = promptFor(draft, deps);
-  return { handled: true, status: "video_stored", draft: D.touch(draft, now), replies: [oneBubble([R.videoSaved(), ...p.replies])] };
-}
-
-// One bubble: the photo count and whatever comes next, so photos sent mid-questions
-// never look ignored. Reports (and clears) photos dropped over the 12 cap.
-function photoTimer(draft, deps, now) {
-  const n = draft.photos.length;
-  const dropped = draft.photos_dropped || 0;
-  draft.photos_dropped = 0;
-  const done = dropped ? { draft: D.touch(draft, now) } : {};
-  if (D.nextStep(draft).kind === "photos") {
-    const r = [R.photosProgress(n)];
-    if (dropped) r.unshift(R.photosSaved(n, dropped));
-    return { handled: true, status: `photos_progress:${n}`, ...done, replies: [oneBubble(r)] };
-  }
-  const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, ...done, replies: [oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
 }
 
 /*
  * n8n just finished editing a photo → it may become a property page.
- * Business Handler2 edits photos one at a time (its burst output only warns),
- * so this arrives once per photo: pile them on a silent `offered` draft and ask
- * once, when the third lands. A batch path sending several at once still works.
+ * Business Handler edits photos one at a time, so this arrives once per photo:
+ * pile them on a silent `offered` draft; the photo timer asks once the batch
+ * has gone quiet, with the real count (offerTimer). A later batch after a sent
+ * offer starts a fresh one — never mixing photos of two properties.
  */
 async function photosEdited(input, deps, draft, now) {
   const { phone } = input;
@@ -207,14 +199,24 @@ async function photosEdited(input, deps, draft, now) {
     draft.pending_opener = { ...o, photos: (o.photos || []).concat(hosted).slice(0, MAX_PHOTOS) };
     return { handled: true, status: `resume_pending:${draft.pending_opener.photos.length}`, draft: D.touch(draft, now), replies: [] };
   }
-  const target = draft && draft.status === "offered" ? draft : offeredDraft(phone, now);
+  // n8n's batch edit reports once, at the end, with every photo: that batch is the offer, now.
+  if (input.batchDone) {
+    const fresh = offeredDraft(phone, now);
+    fresh.photos = hosted.slice(0, MAX_PHOTOS);
+    if (!fresh.photos.length) return { handled: true, status: "batch_empty", replies: [] };
+    fresh.offer_sent = true;
+    return { handled: true, status: "offered", draft: fresh, replies: [R.offer(fresh.photos.length)] };
+  }
+  const target = draft && draft.status === "offered" && !draft.offer_sent ? draft : offeredDraft(phone, now);
   target.photos = target.photos.concat(hosted).slice(0, MAX_PHOTOS);
   D.touch(target, now);
-  if (target.photos.length < D.MIN_PHOTOS || target.offer_sent) {
-    return { handled: true, status: `offer_pending:${target.photos.length}`, draft: target, replies: [] };
-  }
-  target.offer_sent = true;
-  return { handled: true, status: "offered", draft: target, replies: [R.offer(target.photos.length)] };
+  return { handled: true, status: `offer_pending:${target.photos.length}`, draft: target, replies: [], armPhotoTimer: true };
+}
+
+function offerTimer(draft, now) {
+  if (draft.offer_sent || draft.photos.length < D.MIN_PHOTOS) return { handled: true, status: "offer_pending", replies: [] };
+  draft.offer_sent = true;
+  return { handled: true, status: "offered", draft: D.touch(draft, now), replies: [R.offer(draft.photos.length)] };
 }
 
 function offeredDraft(phone, now) {
@@ -229,13 +231,32 @@ function resumePrompt(draft, opener, now) {
   return { handled: true, status: "resume_prompt", draft: D.touch(draft, now), replies: [R.resumePrompt(D.summary(draft))] };
 }
 
+// "כן" — or a page asked for from these photos ("תבני מזה דף") — takes the
+// offered photos. "נכס חדש", a listing or "אני רוצה לבנות דף" is a property of
+// its own (the offered photos may be of another one): a fresh draft. Anything
+// else ignores the offer, which is dropped.
+const FROM_THESE = /מזה|מהן|מהם|מהתמונות|מאלה|איתן|איתם|עם התמונות|אותן/;
 async function offeredTurn(input, deps, draft, now) {
+  if (input.event === "photo_timer") return offerTimer(draft, now);
+  if (input.event) return notOurs("not_ours");
+  const photos = photoUrlsOf(input);
+  if (photos) return PC.hold(null, draft.phone, photos, now);
   const cmd = D.command(input.text);
   if (cmd === "no") return { handled: true, status: "declined", del: true, replies: [R.declined()] };
-  if (cmd !== "yes") return notOurs("not_ours");
-  draft.status = "active";
-  const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+  const kind = cmd === "yes" ? null : await openerOf(input.text, deps);
+  if (cmd === "yes" || /^כן([\s,.!]|$)/.test(String(input.text || "").trim()) || (kind === "intent" && FROM_THESE.test(input.text))) {
+    draft.status = "active";
+    const p = promptFor(draft, deps);
+    const t = { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
+    return kind ? withDetails(t, input.text, deps, now) : t;
+  }
+  if (kind) {
+    // A new property right after an edit batch: the edited photos are offered again at the photos step.
+    const t = await openDraft(draft.phone, kind, input.text, deps, now);
+    if (t.draft && t.draft.status === "active" && !t.draft.photos.length) t.draft.offered_photos = draft.photos;
+    return t;
+  }
+  return { ...notOurs("not_ours"), del: true };
 }
 
 async function resumeTurn(input, deps, draft, now) {
@@ -277,14 +298,16 @@ async function resumeTurn(input, deps, draft, now) {
 }
 
 async function activeTurn(input, deps, draft, now) {
-  if (input.event === "photo_timer") return photoTimer(draft, deps, now);
-  if (input.videoUrl) return storeVideo(draft, input.videoUrl, deps, now);
+  if (input.event === "photo_timer") return PC.photoTimer(draft, deps, now, promptFor);
+  if (input.videoUrl) return PC.storeVideo(draft, input.videoUrl, deps, now, promptFor);
   const photoUrls = photoUrlsOf(input);
   if (photoUrls) return storePhoto(draft, photoUrls, deps, now);
   const cmd = D.command(input.text);
   if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
+  const dup = duplicateTurn(input, draft, now, (dr) => promptFor(dr, deps));
+  if (dup) return dup;
   const slash = C.parseSlash(input.text);
-  if (slash) return slashTurn(draft, slash, deps, now);
+  if (slash) return C.slashTurn(draft, slash, deps, now, promptFor);
   // A replacement was proposed last turn: כן applies it, anything else keeps the old values.
   if (draft.pending_changes) {
     const changes = draft.pending_changes;
@@ -292,26 +315,55 @@ async function activeTurn(input, deps, draft, now) {
     if (cmd === "yes" || cmd === "no") {
       if (cmd === "yes") C.apply(draft, changes);
       const p = promptFor(draft, deps);
-      const first = cmd === "yes" ? R.updated(changes) : R.kept();
-      return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble([first, ...withPriceCheck(draft, p.replies)])] };
+      const first = cmd === "yes" ? R.updated(changes, draft.fields.currency) : R.kept();
+      return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble([first, ...C.withPriceCheck(draft, p.replies)])] };
     }
   }
+  const swap = PC.swapTurn(input, draft, now, (dr) => promptFor(dr, deps).replies);
+  if (swap) return swap;
   const step = D.nextStep(draft);
+  // "אני רוצה לעדכן מחיר בנכס בותיקים" mid-draft is about another page: the draft waits
+  // inside the update and comes back after it. Answers to a question are not checked
+  // unless they name a page/property ("בנכס", "בדף"), which a description may: skipped.
+  if (!cmd && step.field !== "description" && (step.kind !== "ask" || /(בנכס|בדף|לנכס|לדף)/.test(input.text || ""))) {
+    const kind = await openerOf(input.text, deps);
+    if (kind === "update") { const u = await updatePage(draft.phone, input.text, deps, now, draft); if (u.handled) return u; }
+    if (kind === "intent") return resumePrompt(draft, { text: input.text }, now);
+  }
+  // "חסרים פרטים?" / "סיימת?" is a question, never the answer to the field being asked.
+  // (Right after a failed answer, "מה זה?" is about that question: the retry example answers it.)
+  if (step.kind === "ask" && !cmd && /\?\s*$/.test(String(input.text || "").trim()) && !C.hintedFields(input.text).length
+    && !(draft.retry && draft.retry.field === step.field)) {
+    return { handled: true, status: `question:${step.field}`, replies: [oneBubble([R.progress(D.missing(draft), draft.photos.length), ...promptFor(draft, deps).replies])] };
+  }
   if (!cmd && C.needsExtraction(step.field || null, input.text) && deps.extractAllowed(draft.phone)) {
-    const r = await smartAnswer(draft, input.text, deps, now, step.field);
+    const r = await C.smartAnswer(draft, input.text, deps, now, step.field, promptFor);
     if (r) return r;
   }
   if (step.kind === "ask") {
     const r = answerField(draft, step.field, input.text, cmd, deps);
-    if (r.draft && (step.field === "price" || step.field === "deal")) r.replies = withPriceCheck(r.draft, r.replies);
+    if (r.draft && (step.field === "price" || step.field === "deal")) r.replies = C.withPriceCheck(r.draft, r.replies);
     return { handled: true, ...r, draft: r.draft ? D.touch(r.draft, now) : undefined };
+  }
+  if (step.kind === "photos" && (draft.offered_photos || []).length && (cmd === "yes" || cmd === "no")) {
+    if (cmd === "yes") draft.photos = draft.photos.concat(draft.offered_photos).slice(0, MAX_PHOTOS);
+    draft.offered_photos = null;
+    const p = promptFor(draft, deps);
+    return { handled: true, status: p.status, draft: D.touch(draft, now), replies: cmd === "yes" ? [oneBubble([R.photosSaved(draft.photos.length), ...p.replies])] : p.replies };
   }
   if (step.kind === "photos") {
     return { handled: true, status: `photos_progress:${draft.photos.length}`, replies: [R.photosProgress(draft.photos.length)] };
   }
+  if (step.kind === "choose" && !cmd && C.hintedFields(input.text).length) {
+    return { handled: true, status: "field_list", replies: [R.fieldList(draft.fields)] }; // "לעדכן מחיר": how to, here
+  }
   if (step.kind === "choose") {
-    if (cmd !== "preview" && cmd !== "create") return { handled: true, status: "choose", replies: [R.choose()] };
-    draft.mode = cmd;
+    // "תראה תצוגה מקדימה", "תבני את הדף": the buttons' words inside a sentence count too.
+    const t = String(input.text || "");
+    const choice = cmd === "preview" || cmd === "create" ? cmd
+      : /תצוגה|מקדימה|לצפות/.test(t) ? "preview" : /ליצור|תיצור|לבנות|תבנה|תבני/.test(t) ? "create" : null;
+    if (!choice) return { handled: true, status: "choose", replies: [R.choose()] };
+    draft.mode = choice;
     const p = promptFor(draft, deps);
     return { handled: true, status: p.status, draft: D.touch(draft, now), replies: p.replies };
   }
@@ -322,54 +374,32 @@ async function activeTurn(input, deps, draft, now) {
   return { handled: true, status: p.status, replies: p.replies };
 }
 
-// The price warning goes in front of the next question when price and deal disagree.
-function withPriceCheck(draft, replies) {
-  return D.priceLooksOff(draft.fields) ? [R.priceOff(draft.fields), ...replies] : replies;
-}
-
-// "/מחיר 2.1 מיליון", "/p 2.1m", or "/" alone for the list.
-function slashTurn(draft, slash, deps, now) {
-  if (slash.list) return { handled: true, status: "field_list", replies: [R.fieldList(draft.fields)] };
-  if (slash.unknown) return { handled: true, status: "field_unknown", replies: [R.unknownField(slash.unknown)] };
-  if (!C.setField(draft, slash.field, slash.value)) {
-    return { handled: true, status: `invalid:${slash.field}`, replies: [R.invalid(slash.field)] };
-  }
-  const p = promptFor(draft, deps);
-  const replies = withPriceCheck(draft, [R.updated({ [slash.field]: draft.fields[slash.field] }), ...p.replies]);
-  return { handled: true, status: `corrected:${slash.field}`, draft: D.touch(draft, now), replies: [oneBubble(replies)] };
-}
-
-// A reply that talks about other fields ("רגע, המחיר 2.1 מיליון", "חיפה, 3 חדרים, 1.9 מיליון"):
-// extract it like listing text, fill empty fields, and ask before replacing any.
-// null → nothing usable came out; the caller handles the text the ordinary way.
-async function smartAnswer(draft, text, deps, now, asked) {
-  // A bare place name means nothing to the extractor; "שכונה: הבורסה, …" does. Numeric
-  // questions get no label: "חניות: רגע, המחיר…" makes it invent a parking count.
-  const prompt = asked === "city" || asked === "neighborhood" ? `${R.LABELS[asked]}: ${text}` : text;
-  let parsed;
-  try { parsed = await deps.parseListing(prompt); } catch (err) { return null; }
-  const { filled, proposed } = C.merge(draft, parsed.fields || {});
-  if (!Object.keys(filled).length && !Object.keys(proposed).length) return null;
-  const replies = Object.keys(filled).length ? [R.updated(filled)] : [];
-  if (Object.keys(proposed).length) {
-    draft.pending_changes = proposed;
-    replies.push(R.confirmChanges(proposed, draft.fields));
-    return { handled: true, status: "confirm_changes", draft: D.touch(draft, now), replies: [oneBubble(replies)] };
-  }
-  const p = promptFor(draft, deps);
-  return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [oneBubble(withPriceCheck(draft, [...replies, ...p.replies]))] };
-}
-
 async function handleTurn(input, deps) {
   const now = input.now || new Date();
   const { phone } = input;
   if (!deps.business) return notOurs("unknown_agent");
   let draft = input.draft || null;
+  // Options go out numbered (see the route's send): "2" is the second one.
+  // An agent sometimes repeats the button's own word after the number
+  // ("1.כן") — only strip the number when what follows actually is that word,
+  // so a number with unrelated trailing text still falls through untouched.
+  const digit = /^\s*([1-3])\s*[.)]?\s*(.*)$/.exec(input.text || ""); // "1", "1.", "1) כן"
+  if (digit && draft && draft.last_buttons && draft.last_buttons[digit[1] - 1]) {
+    const label = draft.last_buttons[digit[1] - 1];
+    const rest = D.clean(digit[2]);
+    if (rest === "" || rest === D.clean(label)) input = { ...input, text: label };
+  }
   let dropped = false;
-  if (draft && D.isExpiredPrompt(draft, now)) { draft = null; dropped = true; }
+  if (draft && D.isExpiredPrompt(draft, now)) {
+    if (draft.suspended) draft = D.touch(draft.suspended, now); else { draft = null; dropped = true; }
+  }
   const withDrop = (t) => (dropped && !t.draft ? { ...t, del: true } : t);
 
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
+  if (draft && draft.status === "edit_request") {
+    if (photoUrlsOf(input) && !input.text && !input.event) return PC.editWith(draft, photoUrlsOf(input), now);
+    if (!input.event) { draft = null; dropped = true; } // anything else ends the request; judged on its own
+  }
 
   // A turn that rejected the message ("invalid:price") or simply repeated
   // itself without storing anything ("choose") got nothing out of it.
@@ -396,6 +426,15 @@ async function handleTurn(input, deps) {
     if (t.handled && t.replies.length) t.replies[0] = { ...t.replies[0], text: `${R.heard(heard)}\n\n${t.replies[0].text}` };
     return t;
   }
+  // "עצור" / "אל תערוך שוב": n8n's edit loop checks the flag before each photo.
+  if (D.isStop(input.text) && !(draft && draft.status === "active")) {
+    if (deps.cancelEdits) await deps.cancelEdits(phone);
+    return { handled: true, status: "stopped", del: !!draft && draft.status === "photo_choice", replies: [R.stopped()] };
+  }
+  const quoted = PC.quotedEdit(input);
+  if (quoted) return quoted;
+  if (input.text && photoUrlsOf(input) && !input.event) return textThenPhotos(input, deps, draft);
+
   const open = draft && (draft.status === "active" || draft.status === "offered");
   if (input.messageType === "documentMessage" && open) {
     // Whatever step the draft is at, the question it's waiting on comes right after.
@@ -410,15 +449,27 @@ async function handleTurn(input, deps) {
     if (out) return { handled: true, status: `default:${out.ok ? "ok" : "unavailable"}`, replies: [out.ok ? R.defaultChosen(out.count) : R.defaultUnavailable(out.link)] };
   }
   if (!draft) {
-    const kind = D.openerKind(input.text);
-    if (!kind) return withDrop(notOurs("not_ours"));
+    if (photoUrlsOf(input) && !input.event) return PC.hold(null, phone, photoUrlsOf(input), now);
+    const kind = await openerOf(input.text, deps);
+    if (!kind) {
+      const back = input.text && !input.event ? await recoverFromChat(phone, input.text, deps, now, openDraft) : null;
+      if (back) return back;
+      return withDrop(PC.editRequest(input.text, phone, now) || notOurs("not_ours"));
+    }
     return openDraft(phone, kind, input.text, deps, now);
   }
+  if (draft.status === "photo_choice") {
+    if (input.event === "photo_timer") return PC.ask(draft);
+    return PC.turn(input, deps, draft, now, { openDraft, openerOf, storePhoto, updatePage });
+  }
+  if (draft.status === "updating") return updatingTurn(input, deps, draft, now, { openDraft, promptFor, resumePrompt });
   if (draft.status === "offered") return offeredTurn(input, deps, draft, now);
   if (draft.status === "resume_prompt") return resumeTurn(input, deps, draft, now);
   if (draft.status === "building") {
-    const kind = D.openerKind(input.text);
-    if (input.event || photoUrlsOf(input) || !kind) return notOurs("not_ours");
+    if (input.event) return notOurs("not_ours");
+    if (photoUrlsOf(input)) return PC.hold(null, phone, photoUrlsOf(input), now);
+    const kind = await openerOf(input.text, deps);
+    if (!kind) return notOurs("not_ours");
     return openDraft(phone, kind, input.text, deps, now);
   }
   // Paused: any message brings the open draft back up (המשך / חדש / ביטול).
@@ -429,9 +480,27 @@ async function handleTurn(input, deps) {
   // A new link or "נכס חדש" while a draft is open is a different property: ask
   // instead of ignoring it. (Pasted listing text stays an answer — it fills fields.)
   const opener = D.openerKind(input.text);
-  if (draft.status === "active" && (opener === "link" || opener === "keyword")) return resumePrompt(draft, { text: input.text }, now);
-  const t = await activeTurn(input, deps, draft, now);
+  if (draft.status === "active" && !draft.dup_page && (opener === "link" || opener === "keyword")) return resumePrompt(draft, { text: input.text }, now);
+  const t = await duplicateCheck(await activeTurn(input, deps, draft, now), deps);
   return t.status === "create" ? build(t.draft || draft, deps, now) : t;
+}
+
+// Text sent with a photo burst (the ad, an address) is a turn of its own, then the photos
+// join whatever it opened. Unclaimed text is a caption: all of it goes to n8n's edit.
+async function textThenPhotos(input, deps, draft) {
+  // "תשנה את התמונות" bundled with the new photos: photos first, so the swap can ask about them.
+  if (PC.isSwap(input.text) && draft && draft.status === "active") {
+    const p = await handleTurn({ ...input, text: "", draft }, deps);
+    const t = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft: p.draft || draft }, deps);
+    return { ...t, status: `${p.status}+${t.status}`, replies: [...p.replies, ...t.replies] };
+  }
+  const t1 = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft }, deps);
+  if (!t1.handled) return t1;
+  const after = t1.del ? null : (t1.draft || draft);
+  if (!after) return t1;
+  const t2 = await handleTurn({ ...input, text: "", draft: after }, deps);
+  if (!t2.handled) return t1;
+  return { ...t2, status: `${t1.status}+${t2.status}`, replies: [...t1.replies, ...t2.replies], draft: t2.draft || after };
 }
 
 module.exports = { handleTurn, _test: { promptFor, answerField } };

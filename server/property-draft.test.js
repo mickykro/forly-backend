@@ -25,8 +25,20 @@ assert.equal(D.openerKind("ליצור נכס"), "keyword");
 assert.equal(D.openerKind("ליצור נכס!"), "keyword");
 assert.equal(D.openerKind("דף נכס"), "keyword");
 assert.equal(D.openerKind("למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת"), "text");
+assert.equal(D.command("לבטל אותה"), "cancel");
+// 972542045280, voice: "בל שבע" / "בר שבע" are באר שבע; "עיר באר שבע" is not a city named "עיר…"
+for (const heard of ["בל שבע", "בר שבע", "עיר באר שבע", "העיר: באר שבע", "בבאר שבע"]) assert.equal(D.parseAnswer("city", heard), "באר שבע", heard);
+assert.equal(D.parseAnswer("city", "מצפה רמון"), "מצפה רמון", "an unlisted town is kept as said");
+assert.equal(D.parseAnswer("city", "חיפה"), "חיפה");
 assert.equal(D.openerKind("היי מה שלומך"), null);
 assert.equal(D.openerKind("3 חדרים"), null, "too short to be a listing");
+// 972546582548, Oct 1: an outbound video bounced the agent's own away-message back at us —
+// real-estate words and a digital-card link made it look like a listing on its own.
+assert.equal(D.openerKind(
+  "תודה שפניתם לנופר הרוש – שמאות מקרקעין ונדל״ן. 🌸\n\nכרגע איני זמינה, אך קיבלתי את הודעתכם ואחזור אליכם בהקדם האפשרי.\n\nכרטיס הביקור הדיגיטלי שלי:\nhttps://digitalcard1.co.il/nofar"
+), null, "a business's own away-message must not open a listing draft");
+assert.equal(D.openerKind("תודה שיצרת קשר עם קארין חביב- כבר תרגישו בבית! איך אפשר לעזור?"), null);
+assert.equal(D.openerKind("שלום, ותודה על פנייתך. איננו זמינים כעת, אך נשיב ברגע שנחזור."), null);
 
 // ── answer parsers ──
 assert.equal(D.parseAnswer("price", "2,900,000"), 2900000);
@@ -40,6 +52,25 @@ assert.equal(D.parseAnswer("price", "12,000 לחודש"), 12000);
 assert.equal(D.parseAnswer("price", "לא יודע"), null);
 assert.equal(D.parseAnswer("price", "2.9"), null, "bare shorthand is re-asked, not stored as ₪3");
 assert.equal(D.parseAnswer("price", "3"), null);
+// 972526003708, 2026-09-30: a direct answer in another currency keeps its number; the
+// currency is recorded on the property (noteCurrency), never assumed to be ₪.
+assert.equal(D.parseAnswer("price", "285,000 אירו"), 285000);
+assert.equal(D.parseAnswer("price", "285,000 €"), 285000);
+assert.equal(D.parseAnswer("price", "$450,000"), 450000);
+assert.equal(D.parseAnswer("price", "285,000 ₪"), 285000);
+assert.equal(D.parseAnswer("currency", "יורו"), "EUR");
+assert.equal(D.parseAnswer("currency", "שקלים"), "ILS");
+assert.equal(D.parseAnswer("currency", "לא בשקלים, ביורו"), "EUR", "a correction names the old currency too");
+assert.equal(D.parseAnswer("currency", "לא ש״ח, דולר"), "USD");
+{
+  const dr = D.newDraft("972500000000", "keyword");
+  D.noteCurrency(dr, "285,000 אירו");
+  assert.equal(dr.fields.currency, "EUR");
+  D.noteCurrency(dr, "285,000");
+  assert.equal(dr.fields.currency, "EUR", "a bare number doesn't reset a named currency");
+  assert.equal(D.listingBody(dr).currency, "EUR");
+  assert.equal(D.listingBody(D.newDraft("972500000000", "keyword")).currency, "ILS");
+}
 assert.equal(D.parseAnswer("rooms", "3.5"), 3.5);
 assert.equal(D.parseAnswer("rooms", "4 חדרים"), 4);
 assert.equal(D.parseAnswer("rooms", "הרבה"), null);

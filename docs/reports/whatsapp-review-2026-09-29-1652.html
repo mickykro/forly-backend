@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forly WhatsApp — סקירת מעקב | 29.09.2026 16:52</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --text:#1c2128; --muted:#5b6472; --border:#e3e6ea;
+    --crit:#b3261e; --crit-bg:#fdecea;
+    --high:#a15c00; --high-bg:#fff3dc;
+    --med:#8a6d00;  --med-bg:#fff9db;
+    --low:#3a6b35;  --low-bg:#eaf6e8;
+    --fixed:#1a7f4e; --fixed-bg:#e6f6ee;
+    --accent:#2f5fda;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#14171c; --panel:#1b1f26; --text:#e7e9ec; --muted:#9aa3af; --border:#2b3038;
+      --crit-bg:#3a1613; --high-bg:#3a2a0a; --med-bg:#332c07; --low-bg:#152c15; --fixed-bg:#0f2a1c;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14171c; --panel:#1b1f26; --text:#e7e9ec; --muted:#9aa3af; --border:#2b3038;
+    --crit-bg:#3a1613; --high-bg:#3a2a0a; --med-bg:#332c07; --low-bg:#152c15; --fixed-bg:#0f2a1c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",Arial,Helvetica,sans-serif;line-height:1.55}
+  .wrap{max-width:920px;margin:0 auto;padding:28px 16px 64px}
+  header{padding:20px 0 10px}
+  h1{font-size:1.5rem;margin:0 0 4px}
+  .meta{color:var(--muted);font-size:.92rem}
+  .summary{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:18px 0}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px}
+  .stat{flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px 14px;text-align:center}
+  .stat b{display:block;font-size:1.3rem}
+  .stat span{color:var(--muted);font-size:.8rem}
+  section{margin:28px 0}
+  h2{font-size:1.15rem;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+  .tag{display:inline-block;font-size:.72rem;font-weight:700;border-radius:999px;padding:3px 10px;margin-inline-end:6px}
+  .crit{color:var(--crit);background:var(--crit-bg)}
+  .high{color:var(--high);background:var(--high-bg)}
+  .med{color:var(--med);background:var(--med-bg)}
+  .low{color:var(--low);background:var(--low-bg)}
+  .fixed{color:var(--fixed);background:var(--fixed-bg)}
+  .card h3{margin:8px 0 6px;font-size:1rem}
+  .card p{margin:6px 0}
+  .evidence{background:var(--bg);border-inline-start:3px solid var(--accent);border-radius:6px;padding:8px 12px;margin:8px 0;font-size:.86rem;color:var(--muted);white-space:pre-line}
+  code{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:.85em;direction:ltr;display:inline-block}
+  .rec{font-size:.9rem}
+  .rec b{color:var(--text)}
+  ul{margin:6px 0;padding-inline-start:20px}
+  table{width:100%;border-collapse:collapse;font-size:.88rem;margin-top:8px}
+  th,td{border:1px solid var(--border);padding:6px 10px;text-align:right}
+  th{background:var(--bg)}
+  footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:30px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>🦉 Forly · סקירת מעקב שיחות וואטסאפ</h1>
+  <div class="meta">נוצר אוטומטית · 29 בספטמבר 2026, 16:52 (Asia/Jerusalem) · מקור: Green API (waInstance7105422200) · מעקב אחרי <a href="https://github.com/mickykro/forly-backend/pull/61">PR #61</a> (12:54)</div>
+</header>
+
+<div class="summary">
+  <b>מסקנה כללית:</b> זו בדיקת מעקב, כשעה אחרי הסקירה המלאה הקודמת (PR #61). כל שלושת הממצאים בעדיפות גבוהה
+  שהיא זיהתה כבר תוקנו בקוד — שניים מהם עוד לפני שה-PR עלה, והשלישי (קישור dev דולף) תוקן ממש בדקות האחרונות.
+  שני הממצאים שדרשו הודעה (עסקי + n8n) כבר נשלחו לוואטסאפ ב-12:55, ולא השתנה דבר מאז שיצדיק הודעה נוספת.
+  הפעילות בשעה האחרונה קטנה ותקינה. <b>אין ממצא חדש או דחוף לדווח עליו הפעם.</b>
+  <div class="stats">
+    <div class="stat"><b>1,394</b><span>שיחות פעילות בחשבון</span></div>
+    <div class="stat"><b>3/3</b><span>ממצאי HIGH מה-PR הקודם — מאומתים כמתוקנים</span></div>
+    <div class="stat"><b>~57 דק׳</b><span>מאז הבדיקה/ההודעה הקודמת</span></div>
+    <div class="stat"><b>0</b><span>ממצאים חדשים בחלון הזה</span></div>
+  </div>
+</div>
+
+<section>
+  <h2>מה נבדק</h2>
+  <p>
+    <code>getChats</code> — רשימת כל 1,394 השיחות הפעילות (ללא שינוי מובנה מהסקירה הקודמת).
+    <code>lastIncomingMessages</code> / <code>lastOutgoingMessages</code> (24 שעות) — כל ההודעות הנכנסות/היוצאות
+    בחשבון, כדי לתפוס כל שיחה שהייתה פעילה מאז 12:55 בלי לבצע מאות קריאות <code>getChatHistory</code> נפרדות.
+    בנוסף, אומתו שלושת הממצאים בעדיפות גבוהה מ-PR #61 ישירות מול הקוד הנוכחי ב-<code>staging</code> (לא רק מהתנהגות
+    שנצפתה בעבר בשיחה).
+  </p>
+</section>
+
+<section>
+  <h2>ממצאי PR #61 שנבדקו מחדש</h2>
+
+  <div class="card">
+    <span class="tag fixed">תוקן</span><span class="tag high">היה HIGH</span>
+    <h3>1. לולאת "טיוטה פתוחה" לא מזהה ביטול בטקסט חופשי</h3>
+    <p>נבדק ישירות מול <code>server/property-draft.js</code>: <code>command("לבטל אותה")</code> → <code>"cancel"</code>.
+    התיקון (<code>COMMAND_ALIASES</code>) נכנס בקומיט <code>624c02d</code> בשעה 09:39 — <b>לפני</b> שה-PR עם הממצא עלה ל-staging (12:54).
+    הראייה בדוח המקורי הייתה משיחה היסטורית שקדמה לתיקון.</p>
+    <div class="evidence">node -e 'require("./server/property-draft").command("לבטל אותה")' → cancel</div>
+  </div>
+
+  <div class="card">
+    <span class="tag fixed">תוקן</span><span class="tag high">היה HIGH</span>
+    <h3>2. תשובה עם כמה שדות בהודעה אחת לא נקלטת</h3>
+    <p>נבדק מול <code>server/draft-corrections.js</code>: <code>needsExtraction("city", "סביון, 8 חדרים, 32 מיליון")</code> → <code>true</code>
+    (שני רמזי שדה — "חדרים" ו"מיליון" — כבר מספיקים כדי להפעיל את ה-extractor המלא במקום הפרסר החד-שדי).
+    הכלל הזה קיים לפחות מאז קומיט <code>5053b8e</code> (10:29), לפני עליית PR #61.</p>
+    <div class="evidence">node -e 'require("./server/draft-corrections").needsExtraction("city","סביון, 8 חדרים, 32 מיליון")' → true</div>
+  </div>
+
+  <div class="card">
+    <span class="tag fixed">תוקן עכשיו</span><span class="tag high">היה HIGH</span>
+    <h3>5. קישור dev/tunnel זמני נשלח ללקוחות</h3>
+    <p>תוקן ממש בדקות האחרונות: קומיט <code>9bea03e</code> "LINK_BASE_URL — staging sends production links to agents"
+    (מוזג ב-<code>b45a667</code>), אחרי שכבר נשלחה עליו הודעת וואטסאפ ב-12:55. אין צורך בהודעה נוספת — הבעיה טופלה.</p>
+  </div>
+</section>
+
+<section>
+  <h2>הודעות שכבר נשלחו (לא נשלחות שוב)</h2>
+  <div class="card">
+    <p class="rec"><b>שינוי עסקי</b> — קישור dev שנשלח ללקוחות (סעיף 5 למעלה) — נשלח לוואטסאפ ב-12:55:18, ועכשיו גם תוקן בקוד.</p>
+    <p class="rec"><b>שינוי ב-n8n</b> — קמפיין "Signup Bot (cold)" עם 0% מענה בדגימה וסיכון לחסימת המספר המשותף — נשלח לוואטסאפ ב-12:55:19.
+    לא נבדק מחדש הפעם (זו החלטת מדיניות ב-n8n, לא קוד; אין אינדיקציה לשינוי מאז).</p>
+  </div>
+</section>
+
+<section>
+  <h2>פעילות בשעה האחרונה (מאז 12:55)</h2>
+  <div class="card">
+    <p>שיחה אחת פעילה: נופר הרוש (972546582548) עדכנה תמונות בדף קיים בהצלחה, שאלה "מה עם סרטון?",
+    והבוט הסביר נכון שסרטון נוצר אוטומטית רק עם דף נכס חדש ואיך לבקש אחד מתמונה קיימת. תקין, אין פעולה נדרשת.
+    בנוסף קוד כניסה (OTP) אחד נשלח — תואם את ממצא #8 הידוע (נמוך, כבר מתועד).</p>
+    <div class="evidence">16:48 נכנס: "מה עם סרטון?"
+16:48 יוצא: "סרטונים נוצרים אוטומטית רק עם דף נכס 😊 אם רצית לעשות סרטון מתמונה קיימת — תשלח/י לי אותה עם ההוראה 'תהפוך לסרטון' ואני אטפל בזה 🎬"</div>
+    <p>נסרקו כל ההודעות היוצאות ב-24 השעות האחרונות לחיפוש תבניות כשל ("לא הבנתי", "נכשל", "כשל", "שגיאה") — 5 התאמות,
+    כולן כבר מוכרות ומתועדות (כשל בניית דף עם retry תקין, קישור dev שכבר תוקן, ודיווחי המעקב עצמם).</p>
+  </div>
+</section>
+
+<section>
+  <h2>ממצאים פתוחים מהסקירה הקודמת (ללא שינוי, לא דחוף)</h2>
+  <table>
+    <tr><th>#</th><th>נושא</th><th>עדיפות</th><th>סטטוס</th></tr>
+    <tr><td>3</td><td>הודעת ציטוט (reply) לא מובנת</td><td>בינונית</td><td>פתוח — דורש שינוי עיצוב גדול יותר (משיכת ההודעה המצוטטת מה-webhook)</td></tr>
+    <tr><td>4</td><td>כשל בניית דף</td><td>בינונית</td><td>חלקית מטופל — "honest build timeout" (<code>fa8dd4b</code>) כבר שולח הודעה כנה ומאפשר retry בלי לאבד נתונים</td></tr>
+    <tr><td>6</td><td>ג׳נרציות וידאו כפולות</td><td>בינונית</td><td>פתוח — צד n8n, לא בריפו הזה</td></tr>
+    <tr><td>8</td><td>OTP חוזר</td><td>נמוכה</td><td>פתוח — נצפה שוב הפעם, לא דחוף</td></tr>
+  </table>
+</section>
+
+<footer>
+  דגימה: <code>getChats</code> מלא (1,394) + <code>lastIncomingMessages</code>/<code>lastOutgoingMessages</code> ב-24 השעות האחרונות,
+  עם התמקדות בחלון שמאז הבדיקה הקודמת (12:55–16:52). דוח זה נוצר אוטומטית ואינו מחליף בדיקה ידנית.
+</footer>
+</div>
+</body>
+</html>

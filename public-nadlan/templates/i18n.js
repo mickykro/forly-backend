@@ -31,7 +31,7 @@
       "wa_prefill": "שלום, ראיתי את {title} ואשמח לתאם ביקור.", "lead_wa_prefill": "שלום, אני {name} ({phone}) ואשמח לתאם ביקור ב{title}.",
       "expired_contact": "תוקף הדף הסתיים. לפרטים על הנכס אפשר לפנות ל{name}.",
       "trust_personal": "מענה אישי בתוך שעתיים בשעות הפעילות", "trust_scheduled": "ביקור מתואם אישית, בזמן שנוח לכם", "trust_private": "הפרטים שלכם נשארים אצלנו בלבד",
-      "parking": "חניות", "registered": "בטאבו", "storage": "מחסן", "elevator": "מעלית", "shabbat_elevator": "מעלית שבת", "balconies": "מרפסות", "garden": "חצר / גינה", "form_error": "משהו השתבש — נסו שוב או פנו בוואטסאפ", "form_bad_phone": "מספר נייד ישראלי לא תקין (למשל 050-1234567)", "here_area": "השכונה",
+      "parking": "חניות", "registered": "בטאבו", "storage": "מחסן", "elevator": "מעלית", "shabbat_elevator": "מעלית שבת", "balconies": "מרפסות", "garden": "חצר / גינה", "plot": "מגרש", "form_error": "משהו השתבש — נסו שוב או פנו בוואטסאפ", "form_bad_phone": "מספר נייד ישראלי לא תקין (למשל 050-1234567)", "here_area": "השכונה",
       "per_sqm": "למ״ר", "leave_details": "השאירו פרטים", "privacy_policy": "מדיניות פרטיות", "terms_of_use": "תנאי שימוש", "accessibility": "הצהרת נגישות",
       "personal_guidance": "ליווי אישי", "represented_by": "הנכס בליווי של", "video_mute": "השתקה", "video_fullscreen": "מסך מלא", "skip_to_content": "דילוג לתוכן", "photo_n_of_m": "תמונה {n} מתוך {m}"
     },
@@ -53,7 +53,7 @@
       "wa_prefill": "Hi, I saw {title} and I'd love to book a visit.", "lead_wa_prefill": "Hi, I'm {name} ({phone}) and I'd love to book a visit to {title}.",
       "expired_contact": "This page has expired. For details about the property, please contact {name}.",
       "trust_personal": "Personal reply within two hours during business hours", "trust_scheduled": "A visit arranged personally, at a time that suits you", "trust_private": "Your details stay with us alone",
-      "parking": "parking", "registered": "registered", "storage": "Storage", "elevator": "Elevator", "shabbat_elevator": "Shabbat elevator", "balconies": "Balconies", "garden": "Yard / garden", "form_error": "Something went wrong — try again or reach out on WhatsApp", "form_bad_phone": "Enter a valid Israeli mobile number (e.g. 050-1234567)", "here_area": "The area",
+      "parking": "parking", "registered": "registered", "storage": "Storage", "elevator": "Elevator", "shabbat_elevator": "Shabbat elevator", "balconies": "Balconies", "garden": "Yard / garden", "plot": "Plot", "form_error": "Something went wrong — try again or reach out on WhatsApp", "form_bad_phone": "Enter a valid Israeli mobile number (e.g. 050-1234567)", "here_area": "The area",
       "per_sqm": "per m²", "leave_details": "Leave your details", "privacy_policy": "Privacy policy", "terms_of_use": "Terms of use", "accessibility": "Accessibility statement",
       "personal_guidance": "Personal guidance", "represented_by": "This property is represented by", "video_mute": "Mute", "video_fullscreen": "Full screen", "skip_to_content": "Skip to content", "photo_n_of_m": "Photo {n} of {m}"
     },
@@ -75,7 +75,7 @@
       "wa_prefill": "مرحبًا، رأيت {title} ويسعدني تحديد موعد زيارة.", "lead_wa_prefill": "مرحبًا، أنا {name} ({phone}) ويسعدني تحديد موعد زيارة لـ{title}.",
       "expired_contact": "انتهت صلاحية هذه الصفحة. للحصول على تفاصيل العقار يمكنك التواصل مع {name}.",
       "trust_personal": "رد شخصي خلال ساعتين ضمن ساعات العمل", "trust_scheduled": "زيارة مرتّبة شخصيًا، في الوقت المناسب لك", "trust_private": "تبقى تفاصيلك لدينا وحدنا",
-      "parking": "مواقف", "registered": "مسجّلة", "storage": "مخزن", "elevator": "مصعد", "shabbat_elevator": "مصعد السبت", "balconies": "شرفات", "garden": "فناء / حديقة", "form_error": "حدث خطأ ما — حاول مرة أخرى أو تواصل عبر واتساب", "form_bad_phone": "أدخل رقم جوال إسرائيلي صالح (مثال 050-1234567)", "here_area": "الحي",
+      "parking": "مواقف", "registered": "مسجّلة", "storage": "مخزن", "elevator": "مصعد", "shabbat_elevator": "مصعد السبت", "balconies": "شرفات", "garden": "فناء / حديقة", "plot": "مساحة الأرض", "form_error": "حدث خطأ ما — حاول مرة أخرى أو تواصل عبر واتساب", "form_bad_phone": "أدخل رقم جوال إسرائيلي صالح (مثال 050-1234567)", "here_area": "الحي",
       "per_sqm": "للم²", "leave_details": "اترك تفاصيلك", "privacy_policy": "سياسة الخصوصية", "terms_of_use": "شروط الاستخدام", "accessibility": "بيان إمكانية الوصول",
       "personal_guidance": "مرافقة شخصية", "represented_by": "العقار بمرافقة", "video_mute": "كتم الصوت", "video_fullscreen": "ملء الشاشة", "skip_to_content": "تخطي إلى المحتوى", "photo_n_of_m": "صورة {n} من {m}"
     },
@@ -97,7 +97,7 @@
       "wa_prefill": "Здравствуйте, я видел {title} и хотел бы записаться на просмотр.", "lead_wa_prefill": "Здравствуйте, меня зовут {name} ({phone}), хотел бы записаться на просмотр {title}.",
       "expired_contact": "Срок действия страницы истёк. За информацией об объекте обращайтесь к {name}.",
       "trust_personal": "Личный ответ в течение двух часов в рабочее время", "trust_scheduled": "Просмотр, организованный лично, в удобное для вас время", "trust_private": "Ваши данные остаются только у нас",
-      "parking": "парковка", "registered": "в реестре", "storage": "Кладовая", "elevator": "Лифт", "shabbat_elevator": "Субботний лифт", "balconies": "Балконы", "garden": "Двор / сад", "form_error": "Что-то пошло не так — попробуйте ещё раз или напишите в WhatsApp", "form_bad_phone": "Введите корректный израильский мобильный номер (например 050-1234567)", "here_area": "Район",
+      "parking": "парковка", "registered": "в реестре", "storage": "Кладовая", "elevator": "Лифт", "shabbat_elevator": "Субботний лифт", "balconies": "Балконы", "garden": "Двор / сад", "plot": "Участок", "form_error": "Что-то пошло не так — попробуйте ещё раз или напишите в WhatsApp", "form_bad_phone": "Введите корректный израильский мобильный номер (например 050-1234567)", "here_area": "Район",
       "per_sqm": "за м²", "leave_details": "Оставьте контакты", "privacy_policy": "Политика конфиденциальности", "terms_of_use": "Условия использования", "accessibility": "Заявление о доступности",
       "personal_guidance": "Личное сопровождение", "represented_by": "Объект представляет", "video_mute": "Выключить звук", "video_fullscreen": "Во весь экран", "skip_to_content": "Перейти к содержимому", "photo_n_of_m": "Фото {n} из {m}"
     },
@@ -119,7 +119,7 @@
       "wa_prefill": "Hola, vi {title} y me encantaría agendar una visita.", "lead_wa_prefill": "Hola, soy {name} ({phone}) y me encantaría agendar una visita a {title}.",
       "expired_contact": "Esta página ha caducado. Para más información sobre el inmueble, puedes contactar con {name}.",
       "trust_personal": "Respuesta personal en menos de dos horas en horario laboral", "trust_scheduled": "Una visita organizada personalmente, a la hora que te convenga", "trust_private": "Tus datos se quedan solo con nosotros",
-      "parking": "plazas de garaje", "registered": "registradas", "storage": "Trastero", "elevator": "Ascensor", "shabbat_elevator": "Ascensor de Shabat", "balconies": "Balcones", "garden": "Patio / jardín", "form_error": "Algo salió mal — inténtalo de nuevo o escríbenos por WhatsApp", "form_bad_phone": "Introduce un móvil israelí válido (p. ej. 050-1234567)", "here_area": "La zona",
+      "parking": "plazas de garaje", "registered": "registradas", "storage": "Trastero", "elevator": "Ascensor", "shabbat_elevator": "Ascensor de Shabat", "balconies": "Balcones", "garden": "Patio / jardín", "plot": "Parcela", "form_error": "Algo salió mal — inténtalo de nuevo o escríbenos por WhatsApp", "form_bad_phone": "Introduce un móvil israelí válido (p. ej. 050-1234567)", "here_area": "La zona",
       "per_sqm": "por m²", "leave_details": "Deja tus datos", "privacy_policy": "Política de privacidad", "terms_of_use": "Términos de uso", "accessibility": "Declaración de accesibilidad",
       "personal_guidance": "Acompañamiento personal", "represented_by": "Propiedad representada por", "video_mute": "Silenciar", "video_fullscreen": "Pantalla completa", "skip_to_content": "Saltar al contenido", "photo_n_of_m": "Foto {n} de {m}"
     },
@@ -141,7 +141,7 @@
       "wa_prefill": "Bonjour, j'ai vu {title} et je serais ravi de planifier une visite.", "lead_wa_prefill": "Bonjour, je suis {name} ({phone}) et je serais ravi de planifier une visite de {title}.",
       "expired_contact": "Cette page a expiré. Pour des informations sur le bien, vous pouvez contacter {name}.",
       "trust_personal": "Réponse personnelle sous deux heures pendant les heures d'ouverture", "trust_scheduled": "Une visite organisée personnellement, à l'heure qui vous convient", "trust_private": "Vos coordonnées restent chez nous uniquement",
-      "parking": "places de parking", "registered": "enregistrées", "storage": "Débarras", "elevator": "Ascenseur", "shabbat_elevator": "Ascenseur de Shabbat", "balconies": "Balcons", "garden": "Cour / jardin", "form_error": "Une erreur s'est produite — réessayez ou contactez-nous sur WhatsApp", "form_bad_phone": "Saisissez un mobile israélien valide (ex. 050-1234567)", "here_area": "Le quartier",
+      "parking": "places de parking", "registered": "enregistrées", "storage": "Débarras", "elevator": "Ascenseur", "shabbat_elevator": "Ascenseur de Shabbat", "balconies": "Balcons", "garden": "Cour / jardin", "plot": "Terrain", "form_error": "Une erreur s'est produite — réessayez ou contactez-nous sur WhatsApp", "form_bad_phone": "Saisissez un mobile israélien valide (ex. 050-1234567)", "here_area": "Le quartier",
       "per_sqm": "par m²", "leave_details": "Laissez vos coordonnées", "privacy_policy": "Politique de confidentialité", "terms_of_use": "Conditions d'utilisation", "accessibility": "Déclaration d'accessibilité",
       "personal_guidance": "Accompagnement personnel", "represented_by": "Bien accompagné par", "video_mute": "Couper le son", "video_fullscreen": "Plein écran", "skip_to_content": "Aller au contenu", "photo_n_of_m": "Photo {n} sur {m}"
     }

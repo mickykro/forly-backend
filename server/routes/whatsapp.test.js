@@ -39,7 +39,7 @@ const { transcribe } = createWhatsappRouter;
   const d1 = await db.getDraft("P1");
   assert.deepEqual([d1.status, d1.mode, d1.listing_id], ["active", null, null], "the draft that built it can retry");
   assert.match(msgs.find(([p]) => p === "P1")[1], /ליצור/);
-  assert.match(msgs.find(([p]) => p === "P2")[1], /בניית הדף \(3 חד׳ בבאר שבע, ₪1,250,000\) נכשלה/, "names the property");
+  assert.match(msgs.find(([p]) => p === "P2")[1], /הדף \(3 חד׳ בבאר שבע, ₪1,250,000\) עדיין לא מוכן[\s\S]*צוות Forly בודק/, "names the property; the team takes it");
   msgs.length = 0;
   await router.sweepStuckBuilds(now);
   assert.equal(msgs.length, 0, "a failed listing is reported once");
@@ -73,6 +73,92 @@ const { transcribe } = createWhatsappRouter;
   assert.equal((await db.getListing(prod.listing_id)).own_video_url, null, "production never uses the test video");
   assert.match((await db.getListing(dev.listing_id)).own_video_url, /^https:\/\/srv\/files\/pages\/.+\/walkthrough\.mp4$/);
   assert.deepEqual(hooks, ["https://n8n/ww1", "https://n8n/pipe"], "prod generates (WW1), dev reuses the video (page pipeline)");
+
+  // ── intake: one numbered message per turn; unclaimed turns carry edit_photos + context; stop flag ──
+  {
+    const express = require("express");
+    db.getBusiness = async () => ({ phone: "P9" });
+    const out = [];
+    const app = express().use(express.json()).use("/w", createWhatsappRouter({
+      authSecret: "s", n8nSecret: "k", sweep: false, normalizeAuthPhone: (p) => p, signSession: auth.signSession,
+      sendWhatsApp: async (p, m) => out.push(m), baseUrl: "https://agent" }));
+    const server = app.listen(0);
+    const base = `http://127.0.0.1:${server.address().port}/w`;
+    const post = (body) => fetch(`${base}/intake`, { method: "POST", headers: { "content-type": "application/json", "x-forly-secret": "k" },
+      body: JSON.stringify({ phone: "P9", ...body }) }).then((r) => r.json());
+    await db.saveDraft({ phone: "P9", status: "offered", source: "photos", fields: {}, skipped: [], photos: ["a", "b", "c", "d"],
+      offer_sent: true, last_buttons: ["כן", "לא"], updated_at: new Date(), created_at: new Date() });
+    let r = await post({ message: "1" });
+    assert.equal(r.handled, true, "'1' answers the first option");
+    assert.equal(out.length, 1, "one WhatsApp message for the whole turn");
+    await db.saveDraft({ phone: "P9", status: "photo_choice", photos: ["https://g/1.jpg", "https://g/2.jpg"], updated_at: new Date(), created_at: new Date() });
+    r = await post({ message: "3" });
+    assert.deepEqual([r.handled, r.edit_photos, r.edit_instruction], [false, ["https://g/1.jpg", "https://g/2.jpg"], ""]);
+    assert.match(r.context, /דפי הנכס של הסוכן: אין/);
+    assert.equal(await db.getDraft("P9"), null, "the held photos are released to n8n");
+    const since = new Date(Date.now() - 1000).toISOString();
+    r = await post({ message: "עצור" });
+    assert.equal(r.status, "stopped");
+    const c = await fetch(`${base}/edit-cancel?phone=P9&since=${encodeURIComponent(since)}`, { headers: { "x-forly-secret": "k" } }).then((x) => x.json());
+    assert.equal(c.cancel, true);
+    server.close();
+  }
+
+  // ── staging (LINK_BASE_URL = production): agents get production links, never staging's ──
+  {
+    const express = require("express");
+    const D = require("../property-draft");
+    db.getBusiness = async () => ({ phone: "P8" });
+    const out = [];
+    const app = express().use(express.json()).use("/w", createWhatsappRouter({
+      authSecret: "s", n8nSecret: "k", sweep: false, normalizeAuthPhone: (p) => p, signSession: auth.signSession,
+      sendWhatsApp: async (p, m) => out.push(m), baseUrl: "https://staging.example", linkBaseUrl: "https://prod.example" }));
+    const server = app.listen(0);
+    const post = (body) => fetch(`http://127.0.0.1:${server.address().port}/w/intake`, { method: "POST",
+      headers: { "content-type": "application/json", "x-forly-secret": "k" }, body: JSON.stringify({ phone: "P8", ...body }) }).then((r) => r.json());
+    const ready = D.newDraft("P8", "text");
+    Object.assign(ready.fields, { city: "חיפה", price: 2000000, rooms: 3, deal: "sale", size_sqm: 80, floor: 2, parking: 1, neighborhood: "כרמל", description: "d" });
+    ready.photos = ["a", "b", "c", "d"];
+    await db.saveDraft(ready);
+    const r = await post({ message: "תצוגה מקדימה" });
+    assert.match(r.reply, /https:\/\/prod\.example\/create\.html\?whatsapp=1/, "different signing key: the create form");
+    assert.doesNotMatch(r.reply + out.join(" "), /staging\.example/, "no staging link reaches the agent");
+    server.close();
+    // same NADLAN_JWT_SECRET on both (LINK_SHARES_SESSION=1): the one-tap review link, on production
+    const app2 = express().use(express.json()).use("/w", createWhatsappRouter({
+      authSecret: "s", n8nSecret: "k", sweep: false, normalizeAuthPhone: (p) => p, signSession: auth.signSession,
+      sendWhatsApp: async () => {}, baseUrl: "https://staging.example", linkBaseUrl: "https://prod.example", linkSharesSession: true }));
+    const server2 = app2.listen(0);
+    await db.saveDraft(ready);
+    const r2 = await fetch(`http://127.0.0.1:${server2.address().port}/w/intake`, { method: "POST",
+      headers: { "content-type": "application/json", "x-forly-secret": "k" }, body: JSON.stringify({ phone: "P8", message: "תצוגה מקדימה" }) }).then((x) => x.json());
+    assert.match(r2.reply, /https:\/\/prod\.example\/api\/whatsapp\/review\?t=/);
+    server2.close();
+  }
+
+  // ── staging + production sweep the same Firestore: a stuck build is reported once ──
+  {
+    const heard = [];
+    const mk = () => createWhatsappRouter({ authSecret: "s", sendWhatsApp: async (p, m) => heard.push(p), sweep: false,
+      normalizeAuthPhone: (p) => p, signSession: auth.signSession });
+    await db.saveListing({ listing_id: "DUP", source: "whatsapp", status: "active", page_id: null, business_phone: "P7",
+      created_at: new Date(Date.now() - 25 * 60 * 1000) });
+    await Promise.all([mk().sweepStuckBuilds(), mk().sweepStuckBuilds()]);
+    assert.equal(heard.filter((p) => p === "P7").length, 1, "two servers, one message");
+  }
+
+  // ── the review link signs in and stays on the host it was opened on (nadlan.call4li.com) ──
+  {
+    const express = require("express");
+    const app = express().use("/w", createWhatsappRouter({ authSecret: "s", sweep: false, normalizeAuthPhone: (p) => p,
+      signSession: auth.signSession, baseUrl: "https://forly.example" }));
+    const server = app.listen(0);
+    const t = auth.signSession("s", "972500000001", { scope: "review", ttlS: 60 });
+    const r = await fetch(`http://127.0.0.1:${server.address().port}/w/review?t=${encodeURIComponent(t)}`, { redirect: "manual" });
+    assert.deepEqual([r.status, r.headers.get("location")], [302, "/create.html?whatsapp=1"]);
+    assert.match(r.headers.get("set-cookie") || "", /forly_session=/);
+    server.close();
+  }
 
   console.log("routes/whatsapp.test.js ok");
   process.exit(0);

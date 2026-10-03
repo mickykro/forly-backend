@@ -7,6 +7,7 @@
  */
 const { SCHEMA } = require("./listing-extract");
 const { asMillis } = require("./utils");
+const { detectCurrency } = require("./currency");
 
 const REQUIRED = ["city", "price", "rooms"];
 const OPTIONAL = ["deal", "size_sqm", "floor", "parking", "neighborhood", "description"];
@@ -23,7 +24,8 @@ const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "
 // COMMANDS word, these cover what a person types instead of tapping.
 const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume",
   "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create",
-  "ברירת המחדל": "default", "דיפולט": "default", "קבוצות ברירת מחדל": "default" };
+  "ברירת המחדל": "default", "דיפולט": "default", "קבוצות ברירת מחדל": "default",
+  "לבטל": "cancel", "לבטל אותה": "cancel", "בטל": "cancel", "תבטל": "cancel", "תבטלי": "cancel" };
 
 // Page designs, in the order create.html's picker lists them (1-6). The first
 // alias is the Hebrew name shown there; create.html preselects the chosen one.
@@ -90,12 +92,22 @@ function spokenCommand(text) {
   }
   return best ? best.cmd : null;
 }
+// "עצור", "די", "אל תערוך שוב": stop the photo edits n8n is running.
+const STOP_RE = /^(עצור|עצרי|תעצור|תעצרי|די|מספיק|תפסיק|תפסיקי|stop)$|^אל (תערוך|תערכי|תמשיך|תמשיכי)/i;
+function isStop(text) { return STOP_RE.test(clean(text)); }
 function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
 function looksLikeListing(text) {
   const t = String(text || "");
   return t.length >= 40 && LISTING_HINTS.filter((h) => t.includes(h)).length >= 2;
 }
+// A business's own WhatsApp away-message, bounced back at us by an outbound send (a demo
+// video, a cold-outreach note). It often carries a digital-card link and real-estate words
+// in its own right ("...שמאות מקרקעין ונדל״ן"), so it can satisfy findUrl/looksLikeListing
+// on its own — this must run before either, not patch their output after the fact.
+const AUTO_REPLY_RE = /תודה ש(יצרת קשר|פנ(ית|יתם|יתן))|אינ(י|נו|נה|ני) זמינ|לא זמינ(ה|ים)? כעת|נחזור אלי(ך|כם|כן)|נשיב ברגע שנחזור|קיבלנו את (הודעתכם|פנייתך|פנייתכם)/;
+function looksLikeAutoReply(text) { return AUTO_REPLY_RE.test(String(text || "")); }
 function openerKind(text) {
+  if (looksLikeAutoReply(text)) return null;
   if (findUrl(text)) return "link";
   if (isKeyword(text)) return "keyword";
   if (looksLikeListing(text)) return "text";
@@ -135,8 +147,8 @@ const int = (t) => { const n = num(t); return n === null ? null : Math.round(n);
 const text = (max) => (t) => { const s = String(t || "").trim(); return s ? s.slice(0, max) : null; };
 
 function parsePrice(t) {
-  // Currency marks carry no number: "2,350,000 ש״ח", "₪2.35M".
-  const s = String(t || "").replace(/₪|ש["״']ח|שקלים|שקל|nis/gi, " ");
+  // Currency marks carry no number: "2,350,000 ש״ח", "₪2.35M", "285,000 אירו" (the currency is noted separately).
+  const s = String(t || "").replace(/₪|ש["״']ח|שקלים|שקל|nis|€|\$|יורו|אירו|דולר|eur|usd/gi, " ");
   // "2 מיליון ו-350 (אלף)" → 2,350,000. "מליון" (no yod) is how most people type it.
   const both = /(\d+(?:\.\d+)?)\s*(?:מיליון|מליון|מיל['׳]?|מ['׳])\s*ו-?\s*(\d+)/.exec(s);
   if (both) return Math.round(Number(both[1]) * 1e6 + Number(both[2]) * 1e3);
@@ -180,15 +192,37 @@ function parseParking(t) { return /^(אין|ללא|לא)$/.test(clean(t)) ? 0 : 
 // Spoken answers keep the preposition: "בכפר סבא", "בתל אביב". Drop a leading ב unless
 // the city's own name starts with it.
 const B_CITIES = ["באר שבע", "באר יעקב", "בני ברק", "בת ים", "בית שמש", "בית שאן", "ביתר עילית", "בית דגן", "בנימינה", "בית ג'ן", "בועיינה", "בסמת טבעון", "באקה אל-גרבייה"];
+// Voice notes mishear cities ("בל שבע", "בר שבע" for באר שבע): a name within two
+// letters of a known city is that city. ponytail: the larger cities only; a small
+// town that isn't listed is kept exactly as said — add names as they show up.
+const CITIES = ["תל אביב", "ירושלים", "חיפה", "ראשון לציון", "פתח תקווה", "אשדוד", "נתניה", "באר שבע", "חולון", "בני ברק",
+  "רמת גן", "אשקלון", "רחובות", "בת ים", "בית שמש", "כפר סבא", "הרצליה", "חדרה", "מודיעין", "נצרת", "לוד", "רמלה",
+  "רעננה", "הוד השרון", "גבעתיים", "קריית גת", "נהריה", "עפולה", "קריית אתא", "יבנה", "אילת", "ראש העין", "עכו",
+  "אלעד", "רמת השרון", "טבריה", "קריית מוצקין", "קריית ים", "קריית ביאליק", "נס ציונה", "אור יהודה", "קריית שמונה",
+  "דימונה", "נתיבות", "שדרות", "אופקים", "יקנעם", "זכרון יעקב", "גבעת שמואל", "כרמיאל", "צפת", "מעלה אדומים",
+  "סביון", "קיסריה", "אבן יהודה", "כפר יונה", "טירת כרמל", "נשר", "מגדל העמק", "עראד", "יהוד", "גדרה", "קריית אונו"];
+function knownCity(s) {
+  if (CITIES.includes(s) || s.length < 4) return s;
+  let best = null;
+  for (const c of CITIES) {
+    const d = editDistance(s, c);
+    if (d <= 2 && (!best || d < best.d)) best = { c, d };
+  }
+  return best ? best.c : s;
+}
 function parseCity(t) {
-  const s = text(60)(t);
-  if (!s || !s.startsWith("ב") || B_CITIES.some((c) => s.startsWith(c))) return s;
-  return s.slice(1).trim() || s;
+  let s = text(60)(t);
+  if (s) s = s.replace(/^(ה?עיר|בעיר)\s*[:\-]?\s*/, "").trim() || s; // "עיר באר שבע", "העיר: חיפה"
+  if (!s) return s;
+  const whole = knownCity(s); // "בל שבע" is באר שבע misheard, not "ב" + "ל שבע"
+  if (whole !== s || !s.startsWith("ב") || B_CITIES.some((c) => s.startsWith(c))) return whole;
+  return knownCity(s.slice(1).trim() || s);
 }
 
 const PARSERS = {
   city: parseCity, price: parsePrice, rooms: num, deal: parseDeal, size_sqm: num,
   floor: parseFloor, parking: parseParking, neighborhood: text(60), description: text(2000), template: parseTemplate,
+  currency: detectCurrency,
 };
 // An impossible value is a mishearing or typo ("ועשר מטר" → 10 m²): ask again instead.
 const RANGES = { rooms: [1, 20], size_sqm: [15, 2000], floor: [-3, 100], parking: [0, 20] };
@@ -198,6 +232,11 @@ function parseAnswer(field, t) {
   return v !== null && r && (v < r[0] || v > r[1]) ? null : v;
 }
 function isRequired(field) { return REQUIRED.includes(field); }
+// A price answer that names its currency ("285,000 אירו") sets the property's currency too.
+function noteCurrency(draft, text) {
+  const c = detectCurrency(text);
+  if (c) draft.fields.currency = c;
+}
 
 // ── draft state ──
 function emptyFields() {
@@ -235,6 +274,9 @@ function touch(draft, now = new Date()) {
   return draft;
 }
 
+// Fields still to ask, in order ("חסרים פרטים?" lists them).
+function missing(draft) { return ASK_ORDER.filter((f) => draft.fields[f] === null && !draft.skipped.includes(f)); }
+
 function nextStep(draft) {
   for (const f of ASK_ORDER) {
     if (draft.fields[f] === null && !draft.skipped.includes(f)) return { kind: "ask", field: f };
@@ -254,8 +296,8 @@ function listingBody(draft) {
   return {
     listing_type: f.deal === "rent" ? "rent" : "sale",
     address: f.address, city: f.city, neighborhood: f.neighborhood,
-    price: f.price, rooms: f.rooms, size_sqm: f.size_sqm,
-    size_built: f.sqm_built, size_balcony: f.sqm_balcony, size_garden: f.sqm_garden,
+    price: f.price, currency: f.currency || "ILS", rooms: f.rooms, size_sqm: f.size_sqm,
+    size_built: f.sqm_built, size_balcony: f.sqm_balcony, size_garden: f.sqm_garden, size_plot: f.sqm_plot,
     floor: f.floor, parking: f.parking,
     storage: f.storage, elevator: f.elevator, shabbat_elevator: f.shabbat_elevator,
     description: f.description, photos_urls: draft.photos,
@@ -267,20 +309,25 @@ function listingBody(draft) {
 
 const silentFor = (draft, now) => now.getTime() - asMillis(draft.updated_at);
 function isPaused(draft, now = new Date()) { return draft.status === "active" && silentFor(draft, now) > PAUSE_MS; }
+const UPDATE_HOLD_MS = 15 * 60 * 1000;
+const CHOICE_HOLD_MS = 30 * 60 * 1000;
 function isExpiredPrompt(draft, now = new Date()) {
+  if (draft.status === "updating") return silentFor(draft, now) > UPDATE_HOLD_MS;
+  if (draft.status === "photo_choice") return silentFor(draft, now) > CHOICE_HOLD_MS;
+  if (draft.status === "edit_request") return silentFor(draft, now) > 10 * 60 * 1000;
   return (draft.status === "offered" || draft.status === "resume_prompt") && silentFor(draft, now) > PAUSE_MS;
 }
 
 function summary(draft) {
   const f = draft.fields;
   return {
-    city: f.city, neighborhood: f.neighborhood, price: f.price, rooms: f.rooms, deal: f.deal,
+    city: f.city, neighborhood: f.neighborhood, price: f.price, currency: f.currency, rooms: f.rooms, deal: f.deal,
     size_sqm: f.size_sqm, floor: f.floor, parking: f.parking, photos: draft.photos.length,
   };
 }
 
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
-  findUrl, command, spokenCommand, CANONICAL, openerKind, parseAnswer, isRequired, asMillis,
-  newDraft, touch, nextStep, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
+  findUrl, command, spokenCommand, isStop, knownCity, CANONICAL, openerKind, parseAnswer, isRequired, noteCurrency, asMillis,
+  newDraft, touch, nextStep, missing, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };

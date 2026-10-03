@@ -17,7 +17,7 @@ const TIMEOUT_MS = 10000;
 // Listing sites that render with JavaScript (mor-nadlan) scrape as "טוען נכס..."
 // without a pause; 3s lets the listing and its photos load.
 const FIRECRAWL_WAIT_MS = 3000;
-const MAX_PHOTOS = 12;
+const MAX_PHOTOS = 54; // walkthrough: up to 6 clips × 9 reference photos
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/scrape";
 const FB_HOSTS = /(^|\.)(facebook\.com|fb\.com|fb\.watch)$/i;
 // Sites a plain HTTP scrape cannot read: JS-rendered facts, bot defences, or a

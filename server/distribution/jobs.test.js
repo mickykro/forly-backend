@@ -290,6 +290,15 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.deepEqual(d.snapshot.groups, ["https://www.facebook.com/groups/g1"]);
     assert.ok(d.snapshot.copy.includes("דירה"), "copy frozen into the snapshot");
   }
+  {
+    // the page shows the clean video; publishing uses the titled marketing cut
+    const page = { ...PAGE, hero: { ...PAGE.hero, post_video_url: "https://x.test/v-promo.mp4" } };
+    const db = fakeDb(); seed(db, { page });
+    const { deps } = makeDeps({ db, metaMod: fakeMeta() });
+    const r = await jobs.maybeOffer(deps, page);
+    await jobs.enqueueFromConfirm(deps, db.dists.get(r.id), "confirm_link");
+    assert.equal(db.dists.get(r.id).snapshot.video_url, "https://x.test/v-promo.mp4");
+  }
 
   // ── IG posts after FB, audited, both links in the summary ──
   {
