@@ -37,6 +37,9 @@
   "use strict";
   var q = new URLSearchParams(location.search), id = q.get("l") || "", embed = q.get("embed") === "1";
   var box = document.getElementById("gp"), data = null, poll = null, saved = false;
+  // The agent's ticks while choosing: the source of truth until saved, so the
+  // 8-second refresh (waiting for the page) never resets them.
+  var picks = null, consentTicked = false;
   if (embed) box.classList.add("embed");
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
   var CONSENT = "הבנתי שפייסבוק לא אוהבת פרסום אוטומטי מחשבון אישי ולפעמים מגבילה חשבונות בגלל זה. פורלי מפרסמת לאט ובזהירות, ובכל פוסט מציגה מראש אם יצורף דף הנכס. אין הסוואת דומיין או קישור. אני רוצה להמשיך.";
@@ -73,21 +76,22 @@
         ? "הנכס יפורסם בקבוצות ברירת המחדל שלכם, כשהדף יהיה מוכן."
         : "כשהדף יהיה מוכן נבקש לאשר את הטקסט לכל קבוצה" + (embed ? " כאן." : ".")) +
         '</p><button type="button" class="btn btn-ghost btn-sm" id="gpChange">שינוי הבחירה</button>';
-      document.getElementById("gpChange").onclick = function () { saved = false; render(); };
+      document.getElementById("gpChange").onclick = function () { saved = false; picks = null; render(); };
       return;
     }
     // Choosing the groups.
     var chosen = Array.isArray(data.choice) ? data.choice : data.choice === "default" ? data.defaults
       : data.groups.filter(function (g) { return g.fits !== false && data.defaults.indexOf(String(g.group_id)) >= 0; }).map(function (g) { return String(g.group_id); });
+    if (!picks) picks = chosen.slice();
     var groups = data.groups.slice().sort(function (a, b) { return (b.fits !== false) - (a.fits !== false); });
     box.innerHTML = '<h1>באילו קבוצות לפרסם' + title() + "?</h1>" +
       '<p class="sub">' + (data.page_ready ? "" : "בזמן שהדף נבנה, ") + "סמנו את הקבוצות. לפני הפרסום תראו ותאשרו את הטקסט לכל קבוצה.</p>" +
       (groups.length ? '<div class="gp-card"><ul class="gp-list">' + groups.map(function (g) {
         var gid = String(g.group_id);
-        return '<li><label><input type="checkbox" value="' + esc(gid) + '"' + (chosen.indexOf(gid) >= 0 ? " checked" : "") + "> <span>" + esc(g.name) +
+        return '<li><label><input type="checkbox" value="' + esc(gid) + '"' + (picks.indexOf(gid) >= 0 ? " checked" : "") + "> <span>" + esc(g.name) +
           (g.fits === false ? " <small>(לא בדיוק באזור או בסוג העסקה)</small>" : "") + "</span></label></li>";
       }).join("") + "</ul></div>" : '<p class="sub">לא מצאנו קבוצות נדל״ן שאתם חברים בהן.</p>') +
-      (data.consent_given ? "" : '<label class="gp-consent"><input type="checkbox" id="gpConsent"> <span>' + esc(CONSENT) + "</span></label>") +
+      (data.consent_given ? "" : '<label class="gp-consent"><input type="checkbox" id="gpConsent"' + (consentTicked ? " checked" : "") + "> <span>" + esc(CONSENT) + "</span></label>") +
       '<div class="gp-actions">' + (groups.length ? '<button type="button" class="btn btn-gold" id="gpSave">שמירת הקבוצות</button>' : "") +
       (data.defaults.length ? '<button type="button" class="btn btn-ghost" id="gpDefault">ברירת מחדל (' + data.defaults.length + ")</button>" : "") +
       '</div><p class="gp-msg"></p>';
@@ -95,8 +99,16 @@
       var c = document.getElementById("gpConsent");
       if (c && !c.checked) { say({ code: "consent_required" }); return; }
       api("PUT", "", Object.assign({ consent: true, consent_version: data.consent_version }, body))
-        .then(function (j) { data.choice = j.choice; saved = true; render(); load(); }).catch(say);
+        .then(function (j) { data.choice = j.choice; saved = true; picks = null; render(); load(); }).catch(say);
     };
+    [].slice.call(box.querySelectorAll(".gp-list input")).forEach(function (i) {
+      i.onchange = function () {
+        picks = picks.filter(function (v) { return v !== i.value; });
+        if (i.checked) picks.push(i.value);
+      };
+    });
+    var cb = document.getElementById("gpConsent");
+    if (cb) cb.onchange = function () { consentTicked = cb.checked; };
     var s = document.getElementById("gpSave"), d = document.getElementById("gpDefault");
     if (s) s.onclick = function () {
       var ids = [].slice.call(box.querySelectorAll(".gp-list input:checked")).map(function (i) { return i.value; });
