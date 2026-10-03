@@ -78,6 +78,23 @@
   .posting-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-bottom:18px}
   .posting-audit{list-style:none;margin:0;padding:0;font-size:.8rem}
   .posting-audit li{padding:6px 0;border-bottom:1px solid rgba(23,20,15,.06)}
+  .manual-grid{display:grid;grid-template-columns:minmax(320px,1fr) minmax(480px,1.5fr);gap:18px;align-items:start}
+  @media(max-width:960px){.manual-grid{grid-template-columns:1fr}}
+  .manual-side{position:sticky;top:12px}
+  .manual-agentbar,.manual-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+  .manual-agentbar select,.manual-tools select{min-width:200px;padding:6px 8px}
+  .manual-help,.manual-muted{font-size:.85rem;color:#6b6257}
+  .manual-agent{border:1px solid rgba(23,20,15,.1);border-radius:10px;padding:12px;margin-bottom:12px;background:#fff}
+  .manual-agent h3{margin:0 0 8px;font-size:1rem}
+  .manual-item{border-top:1px solid rgba(23,20,15,.06);padding:10px 0}
+  .manual-item.on{background:#fff8e6;border-radius:8px;padding:10px}
+  .manual-item pre{white-space:pre-wrap;font:inherit;font-size:.9rem;background:#f7f5f1;padding:8px;border-radius:6px;margin:6px 0}
+  .manual-row{display:flex;flex-wrap:wrap;gap:6px}
+  .manual-prop{display:flex;gap:12px;align-items:center;border:1px solid rgba(23,20,15,.1);border-radius:10px;padding:10px;margin-bottom:10px;background:#fff}
+  .manual-prop img{width:84px;height:64px;object-fit:cover;border-radius:6px}
+  .manual-prop b{display:block}
+  .manual-browser{min-height:420px;border:1px solid rgba(23,20,15,.1);border-radius:10px;overflow:hidden;background:#fafafa}
+  #manualVideo.ready{background:#1f7a3a;color:#fff;border-color:#1f7a3a}
 </style>
 </head>
 <body class="agent-page admin-page">
@@ -122,7 +139,7 @@
     <button id="tabPortfolios">פורטפוליו</button>
     <button id="tabMessages">הודעות לסוכנים</button>
     <button id="tabPosting">פרסום אוטומטי</button>
-    <button id="tabPortfolios">פורטפוליו</button>
+    <button id="tabManual">פרסום ידני</button>
   </div>
 
   <!-- ── AGENT MESSAGES ── -->
@@ -229,6 +246,30 @@
         <section class="message-card"><h2>בריאות</h2><p id="postingHealth"></p></section>
         <section class="message-card"><h2>יומן פעולות</h2><ul class="posting-audit" id="postingAudit"></ul></section>
       </div>
+    </div>
+  </div>
+
+  <!-- ── MANUAL POSTING (admin-manual.js) ── -->
+  <div id="paneManual" class="hidden">
+    <div class="manual-grid">
+      <section class="manual-work">
+        <div class="manual-agentbar">
+          <select id="manualAgent" aria-label="סוכן"><option value="">בחרו סוכן…</option></select>
+          <button type="button" class="btn btn-gold btn-sm" id="manualOpen">פתיחת הפייסבוק של הסוכן</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualReload">רענון</button>
+        </div>
+        <p class="manual-help">לכל קבוצה: <b>בחירה</b>, <b>1. פתיחת הקבוצה</b>, לחיצה בדפדפן על "כתבו משהו", <b>2. הקלדת הטקסט</b>, לחיצה בפייסבוק על "תמונה/סרטון" ואז <b>העלאת הסרטון</b>. בסוף לוחצים "פרסום" בפייסבוק ומסמנים <b>פורסם ✓</b>.</p>
+        <div id="manualQueue"></div>
+      </section>
+      <section class="manual-side">
+        <div id="manualProp" class="manual-prop"><p class="manual-muted">אין דפדפן פתוח.</p></div>
+        <div class="manual-tools">
+          <select id="manualPropPick" aria-label="נכס" hidden></select>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualVideo" disabled>לחצו "תמונה/סרטון" בפייסבוק</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualClose" hidden>סגירת הדפדפן</button>
+        </div>
+        <div id="manualBrowser" class="manual-browser"></div>
+      </section>
     </div>
   </div>
 
@@ -432,6 +473,8 @@
 <script src="/api.js"></script>
 <script src="/admin.js"></script>
 <script src="/admin-posting.js"></script>
+<script src="/connect-viewer.js"></script>
+<script src="/admin-manual.js"></script>
 <footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

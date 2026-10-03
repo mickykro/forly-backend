@@ -44,14 +44,35 @@
   const previews = new Map(); // `${page_id}|${group_id}` → exact copy + disclosed destination | "loading" | "error"
   function previewKey(p) { return `${p.page_id}|${[...groupsOf(p)][0] || ""}`; }
   function loadPreview(p) {
-    const k = previewKey(p), gid = [...groupsOf(p)][0];
-    if (previews.has(k)) return;
-    previews.set(k, "loading");
-    api(`/api/posting/preview?page_id=${encodeURIComponent(p.page_id)}${gid ? `&group_id=${encodeURIComponent(gid)}` : ""}`)
-      .then((j) => previews.set(k, j), () => previews.set(k, "error"))
-      .then(renderProps);
+    // Manual posting: the agent approves every group's text, so every group is loaded.
+    const gids = settings && settings.manual ? [...groupsOf(p)] : [[...groupsOf(p)][0]];
+    for (const gid of gids) {
+      const k = `${p.page_id}|${gid || ""}`;
+      if (previews.has(k)) continue;
+      previews.set(k, "loading");
+      api(`/api/posting/preview?page_id=${encodeURIComponent(p.page_id)}${gid ? `&group_id=${encodeURIComponent(gid)}` : ""}`)
+        .then((j) => previews.set(k, j), () => previews.set(k, "error"))
+        .then(renderProps);
+    }
+  }
+  // Manual posting: one editable text per group, approved together.
+  function manualPreviewHtml(p) {
+    const name = (gid) => (members().find((g) => String(g.group_id) === gid) || {}).name || "קבוצה";
+    const cards = [...groupsOf(p)].map((gid) => {
+      const v = previews.get(`${p.page_id}|${gid}`);
+      if (!v || v === "loading") return `<div class="ap-fb"><p class="camp-muted">טוענים את הפוסט ל${U.esc(name(gid))}…</p></div>`;
+      if (v === "error") return `<div class="ap-fb"><p class="ap-note">לא הצלחנו להציג את הפוסט ל${U.esc(name(gid))}. נסו שוב.</p></div>`;
+      return `<div class="ap-fb"><div class="ap-fb-head"><b>${U.esc(v.author || "החשבון שלכם")}</b> ◂ ${U.esc(v.group_name || name(gid))}</div>${copyBox(`${p.page_id}|${gid}`, v.copy)}</div>`;
+    }).join("");
+    const v0 = previews.get(`${p.page_id}|${[...groupsOf(p)][0]}`);
+    const video = v0 && /^https?:\/\//.test(v0.video_url || "") ? `<video class="ap-fb-video" controls playsinline preload="metadata" src="${U.esc(v0.video_url)}"></video>` : "";
+    return `<div class="ap-preview">${cards}${video}
+      <p class="camp-muted camp-small">זה הנוסח שיעלה לכל קבוצה, עם הסרטון של הנכס. אפשר לערוך כל אחד. אחרי האישור לא נבקש אישור נוסף, ובסוף תקבלו הודעת וואטסאפ עם הקבוצות שבהן פורסם.</p>
+      ${repeatHtml(p.page_id)}
+      <button type="button" class="btn btn-gold btn-sm" data-confirm="${U.esc(p.page_id)}">אישור והתחלת הפרסום</button></div>`;
   }
   function previewHtml(p) {
+    if (settings && settings.manual && confirming.has(p.page_id)) return manualPreviewHtml(p);
     const v = previews.get(previewKey(p)), id = U.esc(p.page_id);
     if (!v || v === "loading") return '<div class="ap-preview"><p class="camp-muted">טוענים את הפוסט…</p></div>';
     if (v === "error") return '<div class="ap-preview"><p class="ap-note">לא הצלחנו להציג את הפוסט — נסו שוב.</p></div>';
@@ -312,6 +333,11 @@
         await post("/api/posting/campaigns", {
           page_id: p.page_id, group_ids: left, mode: mode(), days: 30, repeat: !!repeatDays(p.page_id), repeat_days: repeatDays(p.page_id), targets, consent: true,
           consent_version: settings.consent_version, include_unknown: unknown,
+          // Manual posting: the text the agent approved for each group (edited or as shown).
+          copies: settings.manual ? Object.fromEntries(left.map((gid) => {
+            const v = previews.get(`${p.page_id}|${gid}`), d = draftOf(`${p.page_id}|${gid}`).copy;
+            return [gid, typeof d === "string" && d.trim() ? d : (v && v.copy) || ""];
+          }).filter((e) => e[1])) : undefined,
           account_aged: $("apAged").checked, posted_manually: $("apManual").checked,
         });
         consentGiven = true;
@@ -353,7 +379,7 @@
         const dropped = await start(p, ids);
         // The agent has just read the post, maybe edited it, and chosen its time: that
         // IS the approval of the first post — it is never asked for a second time.
-        const approved = perPost ? await approveFirst(p, original) : true;
+        const approved = settings.manual ? true : perPost ? await approveFirst(p, original) : true;
         toast(approved ? startedText(dropped) : "התחלנו ✓ הפוסט הראשון יופיע כאן לאישור בעוד רגע"); open.delete(p.page_id);
       });
     }
