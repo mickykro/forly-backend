@@ -143,6 +143,18 @@ const quota = createQuota({
 });
 
 // ── app ──
+// Express 4 drops a rejected async handler on the floor and Node then exits:
+// one Firestore quota error on any route took the whole server down. Every
+// handler's rejection goes to next(err) instead (the final handler below).
+const Layer = require("express/lib/router/layer");
+const handleRequest = Layer.prototype.handle_request;
+Layer.prototype.handle_request = function (req, res, next) {
+  if (this.handle.length > 3) return handleRequest.call(this, req, res, next);
+  try {
+    const r = this.handle(req, res, next);
+    if (r && typeof r.catch === "function") r.catch(next);
+  } catch (e) { next(e); }
+};
 const app = express();
 // Behind the Cloud Run / hosting proxy: trust X-Forwarded-* so req.secure and
 // the rate limiter's client-IP keying are accurate.
@@ -434,6 +446,13 @@ app.use(createPagesRouter({
   verifySession, readToken, normalizeAuthPhone,
   adminPhones: ADMIN_PHONES,
 }));
+
+// Last stop for any route error (sync or async): log it, answer 500.
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  console.error(`route error ${req.method} ${req.path}: ${(err && (err.code || err.name)) || "error"} ${(err && err.message) || ""}`.slice(0, 300));
+  if (res.headersSent) return res.end();
+  res.status(err && err.status && err.status < 600 ? err.status : 500).json({ error: "internal" });
+});
 
 // ── start ──
 app.listen(PORT, () => {

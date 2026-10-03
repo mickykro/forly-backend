@@ -147,7 +147,7 @@
         var empty = grid.querySelector(".empty");
         if (!sessions.length && !empty) { var e = text("div", "No live browsers. They appear here as soon as the server opens one."); e.className = "empty"; grid.appendChild(e); }
         if (sessions.length && empty) empty.remove();
-        setStatus(sessions.length + " live · updated " + new Date().toLocaleTimeString() + " · refreshes every 5 s", false);
+        setStatus(sessions.length + " live · updated " + new Date().toLocaleTimeString() + " · reload the page to refresh", false);
       })
       .catch(function (e) { setStatus(e.message, true); });
   }
@@ -287,10 +287,9 @@
       }).catch(function () {});
   }
 
+  // Loads once per page load — reload to refresh. /posting reads Firestore on
+  // every call, and a polling tab left open burned the daily read quota.
   poll(); pollPosting(); pollShots();
-  setInterval(poll, 5000);
-  setInterval(pollPosting, 10000);
-  setInterval(pollShots, 30000);
 })();
 </script>
 </body>

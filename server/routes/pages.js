@@ -196,6 +196,10 @@ module.exports = function createPagesRouter(ctx) {
       // landed here, which the captioning pass below reads back.
       const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl, rehostOpts);
       const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
+      // The marketing cut (titles burned in) for posts and shares; the page
+      // itself plays the clean video. Optional: a failed copy only drops it.
+      const postVideoP = /^https?:\/\//.test(String(body.post_video_url || ""))
+        ? rehostFn(body.post_video_url, `${base}/post.mp4`).then((r) => r.url).catch(() => null) : null;
       const posterSrc = body.poster_url || body.photos[0].url;
       const posterP = rehostFn(posterSrc, `${base}/poster.${guessImageExt(posterSrc)}`);
       const photoPs = body.photos.slice(0, 12).map((p, i) =>
@@ -207,6 +211,7 @@ module.exports = function createPagesRouter(ctx) {
         videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
       ]);
       const videoUrl = video.url;
+      const postVideoUrl = await postVideoP;
       const posterUrl = poster.url;
       const photos = rest.slice(0, photoPs.length);
       const photoUrls = photos.map((r) => r.url);
@@ -297,7 +302,7 @@ module.exports = function createPagesRouter(ctx) {
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
-        hero: { phrase: body.hero_phrase || "", video_url: videoUrl, poster_url: posterUrl },
+        hero: { phrase: body.hero_phrase || "", video_url: videoUrl, poster_url: posterUrl, post_video_url: postVideoUrl },
         gallery: { images: galleryImages },
         carousel: { slides: (body.carousel_slides || []).slice(0, 6) },
         area: {

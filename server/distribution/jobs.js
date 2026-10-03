@@ -260,7 +260,7 @@ async function snapshotFor(deps, pageId, phone) {
   return {
     title: (page.property && page.property.title) || "",
     page_url: pageUrl,
-    video_url: publicMedia(deps, (page.hero && page.hero.video_url) || null),
+    video_url: publicMedia(deps, (page.hero && (page.hero.post_video_url || page.hero.video_url)) || null),
     poster_url: publicMedia(deps, (page.hero && page.hero.poster_url) || null),
     photo_urls: ((page.gallery && page.gallery.images) || [])
       .map((i) => publicMedia(deps, i.url)).slice(0, 10),

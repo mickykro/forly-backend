@@ -339,7 +339,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
       if (e instanceof DriverError && e.status === 429) { await unstamp(); return res.status(503).json({ error: "driver_busy", retry: true }); }
       if (e && e.code === "posting_disabled") { await unstamp(); return res.status(409).json({ error: "posting_disabled", reason: e.reason }); }
       const { redact } = require("../driver-browser");
-      console.error(redact(`posting groups resync failed: ${(e && (e.code || e.name)) || "error"}`));
+      console.error(redact(`posting groups resync failed: ${(e && (e.code || e.name)) || "error"} ${(e && (e.anomaly || e.signal)) || ""} ${String((e && e.message) || "").split("\n")[0].replace(/\S+:\/\/\S+/g, "<url>").slice(0, 200)}`));
       return res.status(503).json({ error: "sync_failed" });
     }
     const after = (await db.getConnection(phone)) || {};

@@ -433,7 +433,7 @@ function buildCopy(page, c, target, destinationKind = "property", pageBaseUrl = 
 function videoOf(page) {
   const h = (page && page.hero) || {};
   const ok = (u) => (typeof u === "string" && /^https?:\/\/[^\s]+$/i.test(u) ? u : null);
-  const video_url = ok(h.video_url);
+  const video_url = ok(h.post_video_url) || ok(h.video_url); // the marketing cut when the page has one
   return { video_url, poster_url: video_url ? ok(h.poster_url) : null };
 }
 // For a page shown in the agent's browser (the approval page, the preview): a
