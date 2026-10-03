@@ -2,8 +2,8 @@
  * distribution.js — backend-only Facebook and Group settings.
  *
  * A property is selected only from its dashboard card. This page stores the
- * optional Facebook Page connection and the manual/default Group links that a
- * new property workspace may use as its initial target list.
+ * optional Facebook Page connection and shows the agent's default groups —
+ * the same one list the auto-publish page edits (PUT /api/posting/default-groups).
  */
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -22,7 +22,6 @@
 
   let state = null;
   let catalog = [];
-  let selected = new Set();
   let toastTimer = null;
 
   function toast(text) {
@@ -33,17 +32,6 @@
     toastTimer = setTimeout(() => { el.style.display = "none"; }, 4200);
   }
 
-  function groupLines() {
-    return $("groupsBox").value.split("\n").map((value) => value.trim()).filter(Boolean);
-  }
-
-  function updateGroupCount(groups) {
-    const count = groups.length;
-    $("groupCount").textContent = count
-      ? `${count} קבוצות שמורות כברירת מחדל`
-      : "עדיין לא נשמרו קבוצות — אפשר לבחור מהקטלוג או להדביק קישורים";
-  }
-
   function sectionHead(text, color) {
     const head = document.createElement("div");
     head.textContent = text;
@@ -51,87 +39,86 @@
     return head;
   }
 
+  // ── default groups: ONE list, the same as the auto-publish page's ──
+  // (PUT /api/posting/default-groups). Member groups only: the catalog below
+  // is for finding groups to join; after joining, "רענון" brings them here.
+  let posting = null;
+  const escHtml = (t) => String(t == null ? "" : t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fbLink = (url) => (/^https:\/\/(www\.|m\.)?facebook\.com\/groups\//.test(url || "") ? url : null);
+
+  function updateGroupCount() {
+    const n = ((posting && posting.default_group_ids) || []).length;
+    $("groupCount").textContent = n ? `${n} קבוצות ברירת מחדל` : "עוד לא נבחרו קבוצות ברירת מחדל";
+  }
+
+  function renderMyGroups() {
+    const box = $("myGroups"), nm = $("nonMemberGroups");
+    if (!posting || !posting.connected) {
+      box.innerHTML = '<p class="muted small">כדי לבחור קבוצות, חברו קודם את חשבון הפייסבוק האישי שלכם (למטה, "חשבונות אישיים").</p>';
+      nm.innerHTML = ""; updateGroupCount(); return;
+    }
+    const defs = new Set((posting.default_group_ids || []).map(String));
+    const members = (posting.member_groups || []).filter((g) => g.membership_state === "member");
+    box.innerHTML = members.length ? members.map((g) =>
+      `<label class="grp-row"><input type="checkbox" data-def="${escHtml(g.group_id)}"${defs.has(String(g.group_id)) ? " checked" : ""}> <span>${escHtml(g.name)}</span></label>`).join("")
+      : '<p class="muted small">לא מצאנו קבוצות שאתם חברים בהן. הצטרפו לקבוצות מהקטלוג למטה ולחצו "רענון".</p>';
+    const links = (posting.non_member_groups || []).filter((g) => fbLink(g.url));
+    nm.innerHTML = links.length ? '<h3 style="font-size:.92rem;margin:12px 0 6px">שמרתם, אבל עוד לא הצטרפתם</h3>' +
+      links.map((g) => `<div class="grp-row"><span>${escHtml(g.name || g.url.replace(/^https?:\/\/(www\.)?/, ""))}</span> <a href="${escHtml(g.url)}" target="_blank" rel="noopener noreferrer">הצטרפות ↗</a></div>`).join("") : "";
+    updateGroupCount();
+  }
+
+  async function loadMyGroups() {
+    try { posting = await api("/api/posting/settings"); } catch (e) { posting = null; }
+    renderMyGroups();
+  }
+
   function catalogRow(group, showCity) {
-    const label = document.createElement("label");
-    label.style.cssText = "display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer;font-size:.9rem";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = selected.has(group.url);
-    checkbox.style.accentColor = "var(--gold)";
-    checkbox.onchange = () => {
-      if (checkbox.checked) selected.add(group.url); else selected.delete(group.url);
-      renderCatalog();
-    };
+    const row = document.createElement("div");
+    row.className = "grp-row";
     const text = document.createElement("span");
-    const policy = group.agent_policy === "explicitly_allowed"
-      ? " · פרסום מתווכים נתמך"
-      : " · בדקו את כללי הקבוצה";
-    text.textContent = group.name +
-      (showCity && group.city ? ` · ${group.city}` : "") +
+    const policy = group.agent_policy === "explicitly_allowed" ? " · פרסום מתווכים נתמך" : " · בדקו את כללי הקבוצה";
+    text.textContent = group.name + (showCity && group.city ? ` · ${group.city}` : "") +
       (group.members ? ` · ~${Math.round(group.members / 1000)}K חברים` : "") + policy;
-    label.append(checkbox, text);
-    return label;
+    row.appendChild(text);
+    if (fbLink(group.url)) {
+      const a = document.createElement("a");
+      a.href = group.url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = " הצטרפות ↗";
+      row.appendChild(a);
+    }
+    return row;
   }
 
   function renderCatalog() {
     const box = $("catalogList");
     box.textContent = "";
     const filter = ($("catalogFilter").value || "").trim().toLowerCase();
-    const matching = catalog.filter((group) => !filter ||
-      `${group.name || ""} ${group.city || ""}`.toLowerCase().includes(filter));
-    const bySize = (a, b) => (b.members || 0) - (a.members || 0);
-    const chosen = catalog.filter((group) => selected.has(group.url)).sort(bySize);
-    if (chosen.length) {
-      box.appendChild(sectionHead(`✓ קבוצות ברירת המחדל (${chosen.length})`, "#157A3F"));
-      chosen.forEach((group) => box.appendChild(catalogRow(group, true)));
-    }
+    const mine = new Set(((posting && posting.member_groups) || []).map((g) => String(g.group_id)));
+    const idOf = (url) => { const m = String(url || "").match(/\/groups\/([^/?#]+)/); return m ? m[1] : null; };
+    const matching = catalog.filter((group) => !mine.has(idOf(group.url)) && (!filter ||
+      `${group.name || ""} ${group.city || ""}`.toLowerCase().includes(filter)));
     const cities = new Map();
-    matching.filter((group) => !selected.has(group.url)).forEach((group) => {
+    matching.forEach((group) => {
       const city = group.city || "ארצי";
       if (!cities.has(city)) cities.set(city, []);
       cities.get(city).push(group);
     });
     for (const [city, groups] of cities) {
       box.appendChild(sectionHead(city, "var(--gold)"));
-      groups.sort(bySize).forEach((group) => box.appendChild(catalogRow(group, false)));
+      groups.sort((a, b) => (b.members || 0) - (a.members || 0)).forEach((group) => box.appendChild(catalogRow(group, false)));
     }
     if (!catalog.length) {
       const note = document.createElement("p");
       note.className = "muted";
-      note.textContent = "אין עדיין קבוצות בקטלוג. אפשר להדביק קישור לקבוצה ידנית.";
+      note.textContent = "אין עדיין קבוצות בקטלוג.";
       box.appendChild(note);
     }
-    updateGroupCount([...selected, ...groupLines()]);
   }
 
   async function loadCatalog() {
     const response = await api("/api/distribution/group-catalog");
     catalog = response.groups || [];
-    const saved = response.selected_groups || (state && state.groups) || [];
-    const catalogUrls = new Set(catalog.map((group) => group.url));
-    selected = new Set(saved.filter((url) => catalogUrls.has(url)));
-    $("groupsBox").value = saved.filter((url) => !catalogUrls.has(url)).join("\n");
     renderCatalog();
-  }
-
-  async function saveGroups(loud = true) {
-    const groups = [...selected, ...groupLines()];
-    try {
-      const response = await api("/api/distribution/groups", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ groups }),
-      });
-      state.groups = response.groups || [];
-      updateGroupCount(state.groups);
-      if (loud) toast("קבוצות ברירת המחדל נשמרו ✓");
-      return response.groups;
-    } catch (error) {
-      if (loud) toast(error.code === "invalid_group_url"
-        ? "אחד הקישורים אינו קישור לקבוצת Facebook"
-        : "שמירת הקבוצות נכשלה — נסו שוב.");
-      return null;
-    }
   }
 
   function renderConnection() {
@@ -161,25 +148,35 @@
 
   function bindGroupControls() {
     $("catalogFilter").oninput = renderCatalog;
-    $("groupsBox").oninput = () => updateGroupCount([...selected, ...groupLines()]);
-    $("saveGroups").onclick = () => saveGroups(true);
+    // The one default list, saved the moment a box is ticked.
+    $("myGroups").addEventListener("change", async (ev) => {
+      const box = ev.target && ev.target.dataset && ev.target.dataset.def ? ev.target : null;
+      if (!box) return;
+      const ids = [...$("myGroups").querySelectorAll("input[data-def]:checked")].map((i) => i.dataset.def);
+      box.disabled = true;
+      try {
+        const r = await api("/api/posting/default-groups", { method: "PUT", body: JSON.stringify({ group_ids: ids }) });
+        posting.default_group_ids = r.default_group_ids || ids;
+        toast("קבוצות ברירת המחדל נשמרו ✓");
+      } catch (error) { box.checked = !box.checked; toast("השמירה נכשלה, נסו שוב."); }
+      finally { box.disabled = false; updateGroupCount(); }
+    });
+    $("resyncGroups").onclick = async function () {
+      this.disabled = true; this.textContent = "מרעננים…";
+      try { await api("/api/posting/groups/resync", { method: "POST", body: "{}" }); await loadMyGroups(); renderCatalog(); toast("רשימת הקבוצות עודכנה"); }
+      catch (error) { toast("הרענון נכשל, נסו שוב בעוד כמה דקות."); }
+      finally { this.disabled = false; this.textContent = "רענון"; }
+    };
     $("suggestBtn").onclick = async () => {
       const url = $("suggestUrl").value.trim();
       if (!url) return;
       try {
-        const response = await api("/api/distribution/group-catalog/suggest", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ url }),
-        });
+        await api("/api/distribution/group-catalog/suggest", { method: "POST", body: JSON.stringify({ url }) });
         $("suggestUrl").value = "";
-        state.groups = response.groups || [];
-        await loadCatalog();
-        toast("הקבוצה נשמרה כברירת מחדל ונשלחה להצעת קטלוג.");
+        await loadMyGroups();
+        toast("הקבוצה נשמרה. אחרי שתצטרפו אליה ותלחצו רענון, אפשר לסמן אותה כברירת מחדל.");
       } catch (error) {
-        toast(error.code === "invalid_group_url"
-          ? "זה אינו קישור לקבוצת Facebook (facebook.com/groups/...)"
-          : "הוספת הקבוצה נכשלה.");
+        toast(error.code === "invalid_group_url" ? "זה אינו קישור לקבוצת Facebook (facebook.com/groups/...)" : "הוספת הקבוצה נכשלה.");
       }
     };
     $("fbSearchBtn").onclick = () => {
@@ -195,10 +192,8 @@
     renderConnection();
     $("groupsCard").hidden = false;
     bindGroupControls();
-    await loadCatalog().catch(() => {
-      $("groupsBox").value = (state.groups || []).join("\n");
-      updateGroupCount(state.groups || []);
-    });
+    await loadMyGroups();
+    await loadCatalog().catch(() => {});
     if (new URLSearchParams(location.search).get("connected") === "1") {
       toast("החיבור לפייסבוק הושלם ✓");
       history.replaceState(null, "", location.pathname + location.hash);

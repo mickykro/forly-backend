@@ -221,6 +221,7 @@ function publicPermission(conn) {
   const page = pageByStored(conn, p.page_id);
   return {
     enabled: p.enabled === true, consent_version: p.consent_version || null, consent_current: p.consent_version === CONSENT_VERSION,
+    auto_enroll: p.auto_enroll === true || (p.auto_enroll === undefined && (p.default_group_ids || []).length > 0),
     granted_at: p.granted_at || null, targets: Array.isArray(p.targets) ? p.targets : [],
     default_group_ids: Array.isArray(p.default_group_ids) ? p.default_group_ids : [],
     page_id: page ? pageKey(page) : null, auto_mode: p.auto_mode === "per_post" ? "per_post" : "standing",

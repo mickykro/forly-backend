@@ -265,11 +265,17 @@
 
   function renderSettings() {
     const ms = members();
+    const defs = new Set((settings.default_group_ids || []).map(String));
     $("apMemberGroups").innerHTML = ms.map((g) => {
       const id = U.esc(g.group_id);
       return `<div class="camp-g${U.usable(g) ? "" : " off"}"><span class="camp-gn">${U.esc(g.name)}</span> <small>${U.esc(U.groupNote(g))}</small>` +
+        ` <label class="ap-def"><input type="checkbox" data-def="${id}"${defs.has(String(g.group_id)) ? " checked" : ""}${U.usable(g) ? "" : " disabled"}> ברירת מחדל</label>` +
         `<button type="button" class="camp-x" data-rm="${id}" title="הסרה מהרשימה" aria-label="הסרת הקבוצה מהרשימה">×</button></div>`;
     }).join("") || '<p class="camp-muted">לא מצאנו קבוצות בחשבון. הצטרפו לכמה מהקבוצות למטה ולחצו "רענון".</p>';
+    const nm = (settings.non_member_groups || []).filter((g) => U.fbUrl(g.url));
+    $("apNonMemberWrap").hidden = !nm.length;
+    $("apNonMember").innerHTML = nm.map((g) => `<div class="camp-s"><span>${U.esc(g.name || g.url.replace(/^https?:\/\/(www\.)?/, ""))}</span> ` +
+      `<a href="${U.esc(U.fbUrl(g.url))}" target="_blank" rel="noopener noreferrer">הצטרפות ↗</a></div>`).join("");
     const hidden = settings.hidden_group_ids || [];
     $("apUnhide").hidden = !hidden.length;
     $("apUnhide").textContent = `החזרת ${hidden.length === 1 ? "קבוצה אחת" : `${hidden.length} קבוצות`} שהסרתם`;
@@ -318,7 +324,8 @@
     const auto = $("apAutoEnroll").checked, targets = withPage() ? ["page", "groups"] : ["groups"];
     const b = {
       enabled: true, consent: true, consent_version: settings.consent_version, auto_mode: mode(),
-      default_group_ids: auto ? usableIds() : [], targets: auto ? targets : ["groups"], allows_visible_interactions: $("apVisible").checked,
+      // The default groups are their own list (PUT /default-groups); this saves the auto-enroll choice only.
+      auto_enroll: auto, targets: auto ? targets : ["groups"], allows_visible_interactions: $("apVisible").checked,
     };
     const sel = pageOn() && $("apPageSelect");
     if (sel && sel.value) b.page_id = sel.value;
@@ -485,6 +492,16 @@
     try { localStorage.setItem("ap_sort", sortBy); } catch (e) { /* storage off */ }
     renderProps();
   });
+  // The one list of default groups, saved the moment a box is ticked.
+  $("apMemberGroups").addEventListener("change", async (ev) => {
+    const box = ev.target && ev.target.dataset && ev.target.dataset.def ? ev.target : null;
+    if (!box) return;
+    const ids = [...$("apMemberGroups").querySelectorAll("input[data-def]:checked")].map((i) => i.dataset.def);
+    box.disabled = true;
+    try { settings.default_group_ids = (await put("/api/posting/default-groups", { group_ids: ids })).default_group_ids || ids; toast("קבוצות ברירת המחדל נשמרו ✓"); }
+    catch (e) { box.checked = !box.checked; toast(errorText(e)); }
+    finally { box.disabled = false; renderSettings(); }
+  });
   $("apMemberGroups").addEventListener("click", async (ev) => {
     const b = ev.target.closest && ev.target.closest("button[data-rm]"); if (!b) return;
     if (!confirm("להסיר את הקבוצה מהרשימה? פורלי לא תפרסם בה בשום נכס. אפשר להחזיר אותה אחר כך.")) return;
@@ -542,7 +559,7 @@
       return;
     }
     const perm = settings.permission || {};
-    $("apAutoEnroll").checked = perm.enabled === true && (perm.default_group_ids || []).length > 0;
+    $("apAutoEnroll").checked = perm.enabled === true && perm.auto_enroll === true;
     $("apVisible").checked = perm.allows_visible_interactions === true;
     const m = document.querySelector(`input[name="apMode"][value="${perm.auto_mode === "standing" ? "standing" : "per_post"}"]`); if (m) m.checked = true;
     renderPages(perm.page_id);

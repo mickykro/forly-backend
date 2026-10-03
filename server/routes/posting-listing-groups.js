@@ -53,7 +53,7 @@ module.exports = function mountListingGroups(router, S, ctx) {
     const property = { city: listing.city, neighborhood: listing.neighborhood, listing_type: listing.listing_type || "sale" };
     const find = S_.catalogLookup(await S.catalog(property.listing_type));
     const all = (m) => (find.all ? find.all(m) : [find(m)]);
-    const defaults = new Set(LG.defaultIds(conn));
+    const defaults = new Set(LG.defaultIds(conn, await db.getBusiness(req.user.userId).catch(() => null)));
     const groups = S_.memberList(conn).filter((m) => m.membership_state === "member" && isRealEstateGroup(m, all(m)))
       .map((m) => Object.assign(S_.publicMember(m, find(m), defaults), { fits: A.fitsProperty(m, all(m), property) }))
       .filter((g) => !g.private);

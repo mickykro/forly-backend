@@ -272,5 +272,48 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.ok(all.length > 1);
   }
 
+  // ── one list of default groups (auto-publish and the distribution page) ──
+  {
+    const { app } = await setup({ noPermission: true });
+    // The in-memory db keeps no business docs: a small store for this block.
+    const bizStore = new Map(), realGet = db.getBusiness, realSet = db.setBusiness;
+    db.getBusiness = async (ph) => bizStore.get(ph) || null;
+    db.setBusiness = async (ph, d) => { bizStore.set(ph, Object.assign({}, bizStore.get(ph) || {}, d)); };
+    await db.setBusiness(PH, { distribution: { groups: [G(111), "https://www.facebook.com/groups/4444"] } });
+    // before any save: the member groups among the distribution page's links
+    let s = (await call(app, "GET", "/api/posting/settings")).body;
+    assert.deepEqual(s.default_group_ids, ["111"], "the distribution page's member groups are the defaults");
+    assert.deepEqual(s.non_member_groups.map((g) => g.url), ["https://www.facebook.com/groups/4444"], "a linked group the agent is not in");
+    assert.ok(s.member_groups.find((g) => g.group_id === "111").is_default);
+    // saving the list: member groups only, mirrored to the distribution links (keeping the not-joined one)
+    assert.equal((await call(app, "PUT", "/api/posting/default-groups", { group_ids: ["333"] })).status, 422);
+    const ok = await call(app, "PUT", "/api/posting/default-groups", { group_ids: ["222"] });
+    assert.deepEqual(ok.body, { ok: true, default_group_ids: ["222"] });
+    s = (await call(app, "GET", "/api/posting/settings")).body;
+    assert.deepEqual(s.default_group_ids, ["222"], "a saved list wins over the old links");
+    const links = (await db.getBusiness(PH)).distribution.groups;
+    assert.ok(links.some((u) => /groups\/222/.test(u)) && links.includes("https://www.facebook.com/groups/4444") && !links.some((u) => /groups\/111/.test(u)));
+    // an empty saved list stays empty (no fallback to the old links)
+    await call(app, "PUT", "/api/posting/default-groups", { group_ids: [] });
+    assert.deepEqual((await call(app, "GET", "/api/posting/settings")).body.default_group_ids, []);
+    await call(app, "PUT", "/api/posting/default-groups", { group_ids: ["222"] });
+
+    // the permission no longer carries the list: enabling without one keeps it, switching off keeps it
+    assert.equal((await put(app, { enabled: true, consent: true, consent_version: createRouter.CONSENT_VERSION, auto_enroll: false })).status, 200);
+    let perm = (await db.getConnection(PH)).posting_permission;
+    assert.deepEqual([perm.default_group_ids, perm.auto_enroll], [["222"], false]);
+    await put(app, { enabled: false });
+    perm = (await db.getConnection(PH)).posting_permission;
+    assert.deepEqual([perm.enabled, perm.default_group_ids], [false, ["222"]], "switching off keeps the default groups");
+    // auto_enroll is its own choice
+    await put(app, { enabled: true, consent: true, consent_version: createRouter.CONSENT_VERSION, auto_enroll: true });
+    assert.equal((await call(app, "GET", "/api/posting/settings")).body.permission.auto_enroll, true);
+    // an older client sending the list still works: a non-empty list meant "auto"
+    await put(app, enable({ default_group_ids: ["111"] }));
+    perm = (await db.getConnection(PH)).posting_permission;
+    assert.deepEqual([perm.default_group_ids, perm.auto_enroll], [["111"], true]);
+    db.getBusiness = realGet; db.setBusiness = realSet;
+  }
+
   console.log("routes/posting-settings.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -38,6 +38,7 @@
   .rules{font-size:.8rem;color:var(--ink-soft);background:rgba(185,138,47,.08);border-radius:12px;padding:10px 12px;margin-bottom:14px}
   #apSettings{margin:6px 0 14px}#apSettings summary{cursor:pointer;padding:6px 0}
   .ap-count{font-size:.82rem;color:var(--ink-soft);margin-bottom:6px}
+  .ap-def{font-size:.78rem;color:var(--ink-soft);display:inline-flex;gap:4px;align-items:center;margin-inline-start:6px;cursor:pointer}
   .ap-sortbar{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
   .ap-sortbar .ap-count{margin-bottom:0}
   .ap-sort{font-size:.82rem;color:var(--ink-soft);display:flex;align-items:center;gap:6px}
@@ -94,9 +95,14 @@
       <summary><strong>הגדרות לכל הנכסים</strong> <span class="camp-muted camp-small">— מצב פרסום, אישור, הקבוצות שלכם</span></summary>
 
       <h3>הקבוצות שלכם <button type="button" class="btn btn-ghost btn-sm" id="apResync">רענון</button></h3>
-      <p class="camp-muted camp-small">פורלי מפרסמת רק בקבוצות שאתם חברים בהן. הסירו כאן קבוצה שלא מתאימה לאף נכס.</p>
+      <p class="camp-muted camp-small">פורלי מפרסמת רק בקבוצות שאתם חברים בהן. סמנו "ברירת מחדל" על הקבוצות שבהן תרצו לפרסם בדרך כלל: זו אותה רשימה כמו בעמוד ההפצה, ובה משתמשים "ברירת מחדל" בוואטסאפ ובבניית נכס. הסירו קבוצה שלא מתאימה לאף נכס.</p>
       <div id="apMemberGroups" class="camp-groups"></div>
       <button type="button" class="camp-link" id="apUnhide" hidden></button>
+      <div id="apNonMemberWrap" hidden>
+        <h3>קבוצות מעמוד ההפצה שעוד לא הצטרפתם אליהן</h3>
+        <p class="camp-muted camp-small">אי אפשר לפרסם בקבוצה בלי להיות חברים בה. הצטרפו, לחצו "רענון" למעלה, והן יופיעו ברשימה.</p>
+        <div id="apNonMember" class="camp-groups"></div>
+      </div>
 
       <h3>קבוצות פופולריות באזור שלכם</h3>
       <p class="camp-muted camp-small">עוד לא חברים? הצטרפו בעצמכם, ואחרי רענון הן יופיעו למעלה.</p>

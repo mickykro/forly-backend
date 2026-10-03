@@ -41,8 +41,9 @@ module.exports = function mountPostingSettings(router, S, auth) {
   // pick) and whether a campaign for it would be refused (excluded — the
   // catalog's listing types leave its kind of deal out, as POST /campaigns
   // answers listing_type_not_allowed), so the card never offers one.
-  async function publicMembers(conn, lookup, property) {
-    const defaults = new Set(((conn.posting_permission || {}).default_group_ids || []).map(String));
+  // biz: the business doc, for the default groups' older source (A.defaultGroupIds).
+  async function publicMembers(conn, lookup, property, biz) {
+    const defaults = new Set(A.defaultGroupIds(conn, biz));
     const find = lookup || S_.catalogLookup(await S.catalog(null));
     const all = (m) => (find.all ? find.all(m) : [find(m)]);
     // Real-estate groups only, and only with a real name — never "קבוצה פרטית".
@@ -122,7 +123,11 @@ module.exports = function mountPostingSettings(router, S, auth) {
       consent_version: CONSENT_VERSION,
       manual: require("../posting-manual").enabled(deps.env || process.env),
       permission: S_.publicPermission(conn),
-      member_groups: await publicMembers(conn, lookup, property),
+      member_groups: await publicMembers(conn, lookup, property, biz),
+      // The one list of default groups, and the distribution page's older
+      // links the account is not a member of (shown as "join to publish").
+      default_group_ids: A.defaultGroupIds(conn, biz),
+      non_member_groups: A.nonMemberLinks(conn, biz).map((url) => { const cat = lookup({ group_id: A.groupIdFromUrl(url), url }); return { url, name: (cat && cat.name) || null }; }),
       hidden_group_ids: hiddenList(conn).map((h) => h.ids[0]),
       suggested_groups: suggested,
       // available: this Page's numeric id is known, so it can be a campaign target (I4).
@@ -212,7 +217,12 @@ module.exports = function mountPostingSettings(router, S, auth) {
     // revocation (R2) runs before the response: pre-submit attempts are
     // cancelled and running campaigns leave planning.
     if (b.enabled === false) {
-      await store.mutateConnection(phone, () => ({ posting_permission: { enabled: false, revoked_at: A.iso(now) } }));
+      // The default groups are the agent's list, not part of the permission: kept.
+      await store.mutateConnection(phone, (cur) => {
+        const prev = (cur && cur.posting_permission) || {};
+        const keep = Array.isArray(prev.default_group_ids) ? { default_group_ids: prev.default_group_ids, defaults_set: prev.defaults_set === true } : {};
+        return { posting_permission: Object.assign({ enabled: false, revoked_at: A.iso(now) }, keep) };
+      });
       const revoked = await campaigns.revokePermission(phone, deps);
       const conn = (await db.getConnection(phone)) || {};
       return res.json({ ok: true, permission: S_.publicPermission(conn), revoked });
@@ -225,7 +235,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const badMode = b.auto_mode !== undefined && !["per_post", "standing"].includes(b.auto_mode);
     const badVis = b.allows_visible_interactions !== undefined && typeof b.allows_visible_interactions !== "boolean";
     const badPage = b.page_id !== undefined && b.page_id !== null && (typeof b.page_id !== "string" || b.page_id.length > 64);
-    if (g.error || t.error || badMode || badVis || badPage) return res.status(400).json({ error: "invalid_input" });
+    const badAuto = b.auto_enroll !== undefined && typeof b.auto_enroll !== "boolean";
+    if (g.error || t.error || badMode || badVis || badPage || badAuto) return res.status(400).json({ error: "invalid_input" });
     if (b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
     if (!(await allowed(S, phone, res, PERMISSION_CURED))) return;
 
@@ -248,16 +259,48 @@ module.exports = function mountPostingSettings(router, S, auth) {
 
     // granted_at is when THIS consent (this text version) was given.
     const renewed = prev.enabled === true && prev.consent_version === CONSENT_VERSION && prev.granted_at;
-    const perm = {
+    // The default groups are their own list (PUT /default-groups); an older
+    // client that still sends default_group_ids sets it here, and its "auto"
+    // meant a non-empty list.
+    const sentList = b.default_group_ids !== undefined;
+    const list = sentList ? { default_group_ids: gate.entries.map((m) => m.group_id), defaults_set: true }
+      : { default_group_ids: Array.isArray(prev.default_group_ids) ? prev.default_group_ids : [], defaults_set: prev.defaults_set === true };
+    const autoEnroll = typeof b.auto_enroll === "boolean" ? b.auto_enroll
+      : sentList ? g.ids.length > 0 : prev.auto_enroll === true || (prev.auto_enroll === undefined && (prev.default_group_ids || []).length > 0);
+    const perm = Object.assign({
       enabled: true, consent_version: CONSENT_VERSION, granted_at: renewed ? prev.granted_at : A.iso(now),
-      platforms: ["facebook"], targets, default_group_ids: gate.entries.map((m) => m.group_id), page_id: pageId,
+      platforms: ["facebook"], targets, auto_enroll: autoEnroll, page_id: pageId,
       auto_mode: b.auto_mode || (prev.auto_mode === "per_post" ? "per_post" : "standing"),
       allows_dwell: true,
       allows_visible_interactions: typeof b.allows_visible_interactions === "boolean" ? b.allows_visible_interactions : prev.allows_visible_interactions === true,
       revoked_at: null,
-    };
+    }, list);
     const saved = await store.mutateConnection(phone, () => ({ posting_permission: perm }));
     return res.json({ ok: true, permission: S_.publicPermission(saved || { posting_permission: perm }) });
+  }));
+
+  // The agent's default groups: one list, saved from auto-publish or the
+  // distribution page. Member groups only. Mirrored to the distribution
+  // page's older list of links (the share kit reads it), keeping the links of
+  // groups the agent has not joined yet.
+  router.put("/default-groups", auth, wrap("default_groups.put", async (req, res) => {
+    const phone = req.user.userId;
+    const g = S_.parseGroupIds(req.body && req.body.group_ids);
+    if (g.error) return res.status(400).json({ error: "invalid_input" });
+    const conn = (await db.getConnection(phone)) || {};
+    const gate = S_.memberGate(conn, g.ids);
+    if (gate.notMember) return res.status(422).json({ error: "not_member", group_ids: gate.notMember });
+    const ids = gate.entries.map((m) => m.group_id);
+    const saved = await store.mutateConnection(phone, (cur) => ({
+      posting_permission: Object.assign({}, (cur && cur.posting_permission) || {}, { default_group_ids: ids, defaults_set: true }),
+    }));
+    const biz = await db.getBusiness(phone).catch(() => null);
+    const links = gate.entries.map((m) => S_.memberUrl(m)).filter(Boolean)
+      .concat(A.nonMemberLinks(saved || conn, biz));
+    await db.setBusiness(phone, { distribution: Object.assign({}, (biz && biz.distribution) || {}, { groups: require("../distribution/share-kit").sanitizeGroups(links) }) });
+    if (deps.businessCache && typeof deps.businessCache.invalidate === "function") deps.businessCache.invalidate(phone);
+    else { try { require("../business-cache").invalidate(phone); } catch (e) { /* no cache */ } }
+    return res.json({ ok: true, default_group_ids: ids });
   }));
 
   router.post("/groups/resync", auth, wrap("groups.resync", async (req, res) => {
@@ -300,7 +343,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
       return res.status(503).json({ error: "sync_failed" });
     }
     const after = (await db.getConnection(phone)) || {};
-    return res.json({ member_groups: await publicMembers(after), groups_synced_at: after.facebook_groups_synced_at || null });
+    return res.json({ member_groups: await publicMembers(after, undefined, undefined, await db.getBusiness(phone).catch(() => null)), groups_synced_at: after.facebook_groups_synced_at || null });
   }));
 
   // Forgets one membership entry (every id it is known by), drops it from the

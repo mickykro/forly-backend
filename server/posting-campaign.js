@@ -118,6 +118,8 @@ async function enrollNewPage(page, deps = {}) {
     const conn = (await x.db.getConnection(phone)) || {};
     const perm = conn.posting_permission || {};
     if (perm.enabled !== true || !perm.granted_at || !(perm.platforms || []).includes("facebook") || !conn.facebook_browser_connected_at) return null;
+    // "Publish new properties automatically" (auto_enroll); before the flag, a non-empty default list meant it.
+    if (!(perm.auto_enroll === true || (perm.auto_enroll === undefined && (perm.default_group_ids || []).length > 0))) return null;
     if (await importedNotAgentCreated(page, x.db)) return null;
     const member = new Map((conn.facebook_groups_member || []).filter((g) => g && g.membership_state === "member").map((g) => [g.group_id, g]));
     // The account's pool (default_group_ids), narrowed to the groups that
@@ -127,7 +129,8 @@ async function enrollNewPage(page, deps = {}) {
       const m = member.get(id);
       return A.fitsProperty(m, A.catalogEntriesFor(catalog, { group_id: id, aliases: m.aliases, url: m.canonical_url || m.url }, conn), page.property);
     };
-    const groups = (perm.default_group_ids || []).map(String).filter((id) => member.has(id) && fits(id))
+    const biz = typeof x.db.getBusiness === "function" ? await x.db.getBusiness(phone).catch(() => null) : null;
+    const groups = A.defaultGroupIds(conn, biz).filter((id) => member.has(id) && fits(id))
       .map((id) => ({ group_id: id, url: member.get(id).canonical_url || member.get(id).url, name: member.get(id).name || "" }));
     const targets = A.targetsFor(conn, perm.targets);
     if (!groups.length && !targets.includes("page")) return null;

@@ -6,7 +6,7 @@
  * The choice rides on the listing (posting_groups: "default" | [group ids])
  * until the page exists; createPropertyPage then applies it:
  *   "default" → the account's default groups that suit the property
- *               (posting-campaign.enrollNewPage), texts generated, no review;
+ *               (A.defaultGroupIds), texts generated, no review;
  *   [ids]     → a campaign on exactly those groups, held (awaiting_texts)
  *               until the agent approves each group's text.
  * A choice made after the page exists is applied at once.
@@ -22,14 +22,10 @@ const LIVE = new Set(["running", "paused"]);
 const connected = (conn) => !!(conn && conn.facebook_browser_connected_at);
 const memberMap = (conn) => new Map(((conn && conn.facebook_groups_member) || [])
   .filter((g) => g && g.membership_state === "member").map((g) => [String(g.group_id), g]));
-// The account's default groups it is still a member of (what "ברירת מחדל" means).
-function defaultIds(conn) {
-  const perm = (conn && conn.posting_permission) || {};
-  if (perm.enabled !== true) return [];
-  const member = memberMap(conn);
-  return (perm.default_group_ids || []).map(String).filter((id) => member.has(id));
-}
-const offerOf = (conn) => ({ connected: connected(conn), defaults: connected(conn) ? defaultIds(conn).length : 0 });
+// The account's default groups (what "ברירת מחדל" means): the one list, A.defaultGroupIds.
+const defaultIds = (conn, biz) => A.defaultGroupIds(conn, biz);
+const offerOf = (conn, biz) => ({ connected: connected(conn), defaults: connected(conn) ? defaultIds(conn, biz).length : 0 });
+const businessOf = (x, phone) => (typeof x.db.getBusiness === "function" ? x.db.getBusiness(String(phone)).catch(() => null) : null);
 
 const campaignOf = (x, phone, pageId) => x.store.getPostingCampaign(x.store.campaignId(phone, pageId)).catch(() => null);
 
@@ -37,13 +33,19 @@ const campaignOf = (x, phone, pageId) => x.store.getPostingCampaign(x.store.camp
 async function apply(page, listing, deps = {}) {
   const choice = listing && listing.posting_groups;
   if (!choice || !page || !page.page_id) return null;
-  if (choice === DEFAULT) return C.enrollNewPage(page, deps);
   const x = A.ctxOf(deps);
   const phone = String(page.business_phone);
   const conn = (await x.db.getConnection(phone)) || {};
   if (!connected(conn)) return null;
   const member = memberMap(conn);
-  const groups = choice.map(String).filter((id) => member.has(id))
+  // "default": the default groups that suit this property (its city, its deal).
+  let ids = choice === DEFAULT ? defaultIds(conn, await businessOf(x, phone)) : choice.map(String);
+  if (choice === DEFAULT) {
+    const catalog = await A.catalogIndex(x.db);
+    ids = ids.filter((id) => member.has(id) && A.fitsProperty(member.get(id),
+      A.catalogEntriesFor(catalog, { group_id: id, aliases: member.get(id).aliases, url: member.get(id).canonical_url || member.get(id).url }, conn), page.property));
+  }
+  const groups = ids.filter((id) => member.has(id))
     .map((id) => ({ group_id: id, url: member.get(id).canonical_url || member.get(id).url, name: member.get(id).name || "" }));
   if (!groups.length) return null;
   const cur = await campaignOf(x, phone, page.page_id);
@@ -55,7 +57,7 @@ async function apply(page, listing, deps = {}) {
     c = await C.create({ phone, page, groups, mode: perm.auto_mode === "per_post" ? "per_post" : "standing", days: 30, repeat: false, targets: ["groups"], consent }, deps,
       { restartWhen: () => true });
   }
-  if (!c) return null;
+  if (!c || choice === DEFAULT) return c; // default groups: generated texts, no review
   // Held until the agent approves each group's text (approveTexts).
   return A.mutate(x, c.id, (cur) => (cur.awaiting_texts ? null : { awaiting_texts: true }));
 }
@@ -68,7 +70,7 @@ async function choose({ listing, phone, choice, consentVersion }, deps = {}) {
   if (!connected(conn)) return { error: "facebook_not_connected" };
   let value;
   if (choice === DEFAULT) {
-    if (!defaultIds(conn).length) return { error: "no_defaults" };
+    if (!defaultIds(conn, await businessOf(x, phone)).length) return { error: "no_defaults" };
     value = DEFAULT;
   } else {
     const ids = [...new Set((Array.isArray(choice) ? choice : []).map(String))];
@@ -139,4 +141,4 @@ function link(baseUrl, authSecret, phone, listingId) {
   return `${String(baseUrl || "").replace(/\/+$/, "")}/api/posting/groups-link?t=${encodeURIComponent(t)}&l=${encodeURIComponent(listingId)}`;
 }
 
-module.exports = { DEFAULT, LINK_TTL_S, link, connected, defaultIds, offerOf, apply, choose, review, approveTexts, latestUnchosen };
+module.exports = { DEFAULT, LINK_TTL_S, link, businessOf, connected, defaultIds, offerOf, apply, choose, review, approveTexts, latestUnchosen };

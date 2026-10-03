@@ -40,6 +40,8 @@
   .prop-row .t .sub{font-size:.78rem;color:var(--ink-soft);font-weight:300}
   .prop-row .t a{color:var(--gold);font-size:.8rem}
   .prop-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--gold)}
+  .grp-row{display:flex;gap:8px;align-items:center;padding:4px 0;font-size:.9rem}
+  .grp-row input{accent-color:var(--gold)}
   textarea#groupsBox{width:100%;min-height:90px;border:1px solid rgba(23,20,15,.14);
     border-radius:12px;padding:10px;font:inherit;direction:ltr;text-align:left;background:var(--bg)}
   .inline-row{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
@@ -110,22 +112,23 @@
   </div>
 
   <div class="card dist-card" id="groupsCard" hidden>
-    <h2>קבוצות ברירת מחדל</h2>
-    <p class="muted">אפשר לבחור קבוצות ברירת מחדל. בכל נכס אפשר לאשר או לשנות את הקבוצות בעמוד הפרסום שלו —
+    <h2>קבוצות ברירת מחדל <button class="btn btn-ghost btn-sm" id="resyncGroups">רענון</button></h2>
+    <p class="muted">אותה רשימה כמו בעמוד הפרסום האוטומטי. אפשר לבחור רק קבוצות שאתם חברים בהן, כי מפרסמים מהחשבון שלכם. "ברירת מחדל" בוואטסאפ ובבניית נכס מפרסם בקבוצות שתסמנו כאן שמתאימות לנכס —
       <span id="groupCount"></span></p>
+    <div id="myGroups"></div>
+    <div id="nonMemberGroups"></div>
+    <h3 style="font-size:.92rem;margin:16px 0 6px">קבוצות להצטרפות</h3>
+    <p class="muted small">הצטרפו בפייסבוק, ואחרי "רענון" הקבוצה תופיע למעלה ותוכלו לסמן אותה.</p>
     <input id="catalogFilter" placeholder="סינון לפי עיר או שם קבוצה…">
     <div id="catalogList"></div>
-    <h3 style="font-size:.92rem;margin:0 0 6px">קבוצות נוספות שלי</h3>
-    <textarea id="groupsBox" placeholder="https://www.facebook.com/groups/..."></textarea>
     <div class="inline-row">
       <input id="suggestUrl" placeholder="קישור לקבוצה להוספה" style="direction:ltr">
-      <button class="btn btn-ghost btn-sm" id="suggestBtn">הוספה + הצעה לקטלוג</button>
+      <button class="btn btn-ghost btn-sm" id="suggestBtn">שמירה + הצעה לקטלוג</button>
     </div>
     <div class="inline-row">
       <input id="fbSearchBox" placeholder="לא מוצאים קבוצה? חפשו בפייסבוק">
       <button class="btn btn-ghost btn-sm" id="fbSearchBtn">חיפוש בפייסבוק</button>
     </div>
-    <button class="btn btn-ghost" id="saveGroups">שמירת קבוצות</button>
   </div>
 
 </div>

@@ -91,6 +91,33 @@ function memberOf(conn, g) {
 }
 // Every id `g` is known by: its own, its aliases, and those of its
 // membership entry. → [group_id, ...aliases], group_id first.
+/*
+ * The agent's default groups: ONE list, whatever page sets it (auto-publish,
+ * the distribution page, "ברירת מחדל" on WhatsApp). Member groups only — a
+ * group the account is not in cannot be posted to.
+ *   once saved (posting_permission.defaults_set, or a non-empty
+ *   default_group_ids from the older auto-publish save): that list;
+ *   before that: the member groups among the distribution page's older list
+ *   of group links (business.distribution.groups).
+ * → [group_id], in the membership list's order.
+ */
+function defaultGroupIds(conn, biz) {
+  const members = ((conn && conn.facebook_groups_member) || []).filter((m) => m && m.membership_state === "member");
+  const perm = (conn && conn.posting_permission) || {};
+  const saved = Array.isArray(perm.default_group_ids) && (perm.defaults_set === true || perm.default_group_ids.length > 0);
+  const want = new Set(saved ? perm.default_group_ids.map(String)
+    : (((biz && biz.distribution && biz.distribution.groups) || []).map(groupIdFromUrl).filter(Boolean)));
+  return members.filter((m) => [m.group_id, ...(Array.isArray(m.aliases) ? m.aliases : [])].some((id) => want.has(String(id)))).map((m) => String(m.group_id));
+}
+
+// The distribution page's older group links the account is NOT a member of:
+// shown on auto-publish as "join to publish". → [url]
+function nonMemberLinks(conn, biz) {
+  const ids = new Set(((conn && conn.facebook_groups_member) || []).filter((m) => m && m.membership_state === "member")
+    .flatMap((m) => [m.group_id, ...(Array.isArray(m.aliases) ? m.aliases : [])].map(String)));
+  return (((biz && biz.distribution && biz.distribution.groups) || [])).filter((u) => { const id = groupIdFromUrl(u); return id && !ids.has(id); });
+}
+
 function groupIdsOf(g, conn) {
   const ids = new Set([g.group_id, ...aliasesOf(g)].filter(Boolean).map(String));
   const m = g.group_id ? memberOf(conn, g) : null;
@@ -389,7 +416,7 @@ module.exports = {
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
   MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, MAX_SESSION_POSTS, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
-  groupIdFromUrl, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY, fitsProperty, nameDealConflict, nameBarsAgents,
+  groupIdFromUrl, defaultGroupIds, nonMemberLinks, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY, fitsProperty, nameDealConflict, nameBarsAgents,
   memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,
   pageTarget, pageTargetAvailable, numericPageId, targetsFor, accountView, currentPosts, limitsFor, nextDayStart,
 };

@@ -149,7 +149,7 @@ module.exports = function createWhatsappRouter(ctx) {
       // the chat says nothing about groups.
       postingOffer: async (listingId) => {
         const LG = require("../posting-listing-groups");
-        const offer = LG.offerOf((await db.getConnection(phone)) || {});
+        const offer = LG.offerOf((await db.getConnection(phone)) || {}, business);
         return offer.connected ? { ...offer, link: LG.link(baseUrl, authSecret, phone, listingId) } : null;
       },
       chooseDefault: async (listingId) => {
@@ -158,7 +158,7 @@ module.exports = function createWhatsappRouter(ctx) {
         if (!LG.connected(conn)) return null;
         const listing = listingId ? await db.getListing(listingId) : await LG.latestUnchosen(phone);
         if (!listing) return null;
-        const count = LG.defaultIds(conn).length;
+        const count = LG.defaultIds(conn, business).length;
         if (!count) return { ok: false, link: LG.link(baseUrl, authSecret, phone, listing.listing_id) };
         const out = await LG.choose({ listing, phone, choice: LG.DEFAULT, consentVersion: require("./posting-shared").CONSENT_VERSION }, {});
         return out.ok ? { ok: true, count } : null;

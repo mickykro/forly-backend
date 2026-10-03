@@ -541,5 +541,14 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.ok(!c.groups.some((g) => g.group_id === "999"), "a copy for a group not in the campaign adds nothing");
   }
 
+  // ── enrollment follows "publish new properties automatically" (auto_enroll), not the default list ──
+  {
+    const { deps } = await setup();
+    await K.db.setConnection("972500000001", { posting_permission: Object.assign({}, K.PERM, { auto_enroll: false }) });
+    assert.equal(await C.enrollNewPage(page(), deps), null, "defaults kept, auto-enroll off: nothing");
+    await K.db.setConnection("972500000001", { posting_permission: Object.assign({}, K.PERM, { auto_enroll: true }) });
+    assert.ok(await C.enrollNewPage(page(), deps), "auto-enroll on: enrolled on the default groups");
+  }
+
   console.log("posting-campaign.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
