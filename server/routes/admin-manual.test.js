@@ -109,6 +109,16 @@ function call(server, method, path, body) {
     assert.equal((await call(server, "POST", `/api/admin/manual/campaigns/${c.id}/groups/111/done`, { status: "posted" })).status, 404);
     assert.equal((await call(server, "POST", `/api/admin/manual/campaigns/${c.id}/groups/222/done`, { status: "nope" })).status, 400);
 
+    // ── one property in full: every text version, the agent's groups and where each stands ──
+    const full = await call(server, "GET", `/api/admin/manual/agents/${REF}/properties/pg1`);
+    assert.equal(full.status, 200);
+    assert.equal(full.body.versions.length, require("../distribution/share-kit").TEMPLATE_COUNT);
+    assert.equal(new Set(full.body.versions).size, full.body.versions.length, "every version differs");
+    assert.ok(full.body.versions.every((t) => t.includes("https://f.ly/p/pg1")), "each carries the property link");
+    assert.deepEqual(full.body.groups.map((g) => [g.group_id, g.status]), [["111", "posted"], ["222", "owed"]]);
+    assert.equal(full.body.groups[0].copy, "שורה ראשונה\nשורה שנייה", "the approved text rides with its group");
+    assert.equal((await call(server, "GET", `/api/admin/manual/agents/${REF}/properties/other`)).status, 404, "another agent's property");
+
     // ── close ──
     assert.equal((await call(server, "DELETE", B)).status, 200);
     assert.deepEqual(stopped, ["s1"]);

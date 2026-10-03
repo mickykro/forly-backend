@@ -118,6 +118,20 @@ module.exports = function createAdminManualRouter({
     res.json({ properties: cards });
   }));
 
+  // One property in full: every version of its text, and the groups the agent
+  // picked for it with where each stands (its campaign, when there is one).
+  router.get("/agents/:ref/properties/:pageId", requireAdmin, wrap(async (req, res) => {
+    const phone = await phoneOf(req.params.ref);
+    const page = phone && (await x.db.getPage(String(req.params.pageId)));
+    if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
+    const c = await x.store.getPostingCampaign(x.store.campaignId(phone, page.page_id)).catch(() => null);
+    res.set("Cache-Control", "no-store");
+    res.json({
+      property: M.propertyCard(page, deps.pageBaseUrl), versions: M.versions(page, deps.pageBaseUrl),
+      campaign: c ? { id: c.id, status: c.status } : null, groups: M.groupsOf(c),
+    });
+  }));
+
   // ── the agent's browser ──
   router.post("/agents/:ref/browser", requireAdmin, wrap(async (req, res) => {
     const phone = await phoneOf(req.params.ref);

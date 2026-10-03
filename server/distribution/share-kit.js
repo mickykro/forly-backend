@@ -318,5 +318,5 @@ function groupProgress(session, fallbackGroups) {
   return { posted: 0, total: sanitizeGroups(fallbackGroups).length };
 }
 
-module.exports = { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink,
+module.exports = { MAX_GROUPS, TEMPLATE_COUNT: TEMPLATES.length, buildPostCopy, sanitizeGroups, sharerLink,
   buildShareKitMessage, buildQueueMessage, trackedUrl, variantIndex, groupProgress };

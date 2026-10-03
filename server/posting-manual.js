@@ -38,6 +38,32 @@ function propertyCard(page, base) {
   };
 }
 
+// Every version of the post text for a property, in template order (the
+// manual tab offers them all next to the browser). The link is the same one
+// the campaign's own text carries.
+function versions(page, base) {
+  const shareKit = require("./distribution/share-kit");
+  const url = base ? require("./posting-destination").previewUrl({ kind: "property" }, { pageBaseUrl: base, pageId: page.page_id }) : "";
+  const out = [];
+  for (let r = 0; r < shareKit.TEMPLATE_COUNT; r++) {
+    out.push(shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, url, { variantRound: r, linkInComment: !url }));
+  }
+  return out;
+}
+
+// The groups the agent picked for a property, each with where it stands in
+// the current pass: owed, posted or skipped (with the approved text, if any).
+function groupsOf(c) {
+  if (!c) return [];
+  const last = new Map();
+  for (const p of A.currentPosts(c)) if (p && p.group_id) last.set(String(p.group_id), p);
+  return (c.groups || []).map((g) => {
+    const p = last.get(String(g.group_id));
+    const status = p && DONE.has(p.status) ? (p.status === "skipped" ? "skipped" : "posted") : "owed";
+    return { group_id: String(g.group_id), name: g.name || "", url: urlOf(g), status, copy: g.copy || null };
+  });
+}
+
 // The admin's work list: one item per group still owed, oldest campaign first.
 async function queue(deps = {}) {
   const x = A.ctxOf(deps);
@@ -84,4 +110,4 @@ async function markDone(campaignId, groupId, status, deps = {}) {
   return next;
 }
 
-module.exports = { enabled, refOf, owed, propertyCard, queue, markDone };
+module.exports = { enabled, refOf, owed, propertyCard, versions, groupsOf, queue, markDone };

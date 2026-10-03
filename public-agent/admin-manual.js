@@ -14,6 +14,8 @@
   var shown = null;      // the ref whose browser is on screen
   var picked = null;     // "campaign_id|group_id" of the queue item being worked on
   var state = null, viewer = null, poll = null;
+  var detail = null, detailFor = null; // the session property in full: its groups and every text version
+  var texts = [];                      // what the type/copy buttons in the detail panel refer to, by index
 
   var ERR = {
     profile_busy: "הפרופיל של הסוכן תפוס כרגע (פרסום אוטומטי או התחברות). נסו שוב בעוד דקה.",
@@ -85,6 +87,43 @@
     }).catch(fail);
   }
 
+  // ── the session property in full: the agent's groups and every text version ──
+  var STATUS = { owed: "לפרסום", posted: "פורסם ✓", skipped: "דולג" };
+  function renderDetail() {
+    var box = $("#manualDetail");
+    if (!shown || !detail) { box.innerHTML = ""; return; }
+    texts = [];
+    var tx = function (t) { texts.push(t); return texts.length - 1; };
+    var btns = function (i) {
+      return '<button type="button" class="btn btn-ghost btn-sm" data-dt="type" data-i="' + i + '">הקלדה בדפדפן</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-dt="copy" data-i="' + i + '">העתקה</button>';
+    };
+    var c = detail.campaign;
+    var groups = detail.groups.length ? '<ul class="manual-groups">' + detail.groups.map(function (g) {
+      var tickable = g.status === "owed" && c && c.status === "running";
+      return '<li><label class="name"><input type="checkbox" data-gid="' + esc(g.group_id) + '"' + (g.status === "posted" ? " checked" : "") + (tickable ? "" : " disabled") + "> " +
+        "<b>" + esc(g.name || "קבוצה") + '</b></label> <a href="' + esc(g.url) + '" target="_blank" rel="noopener">↗</a>' +
+        '<span class="manual-chip ' + esc(g.status) + '">' + STATUS[g.status] + "</span>" +
+        '<button type="button" class="btn btn-ghost btn-sm" data-dt="goto" data-url="' + esc(g.url) + '">פתיחה בדפדפן</button>' +
+        (g.copy ? btns(tx(g.copy)).replace("הקלדה בדפדפן", "הקלדת הטקסט שאושר") : "") +
+        "</li>";
+    }).join("") + "</ul>" +
+      (c && c.status === "running" ? '<button type="button" class="btn btn-gold btn-sm" data-dt="tick">סימון הקבוצות המסומנות כ"פורסם"</button>' : "")
+      : '<p class="manual-muted">לנכס הזה אין קבוצות שהסוכן בחר.</p>';
+    var versions = '<div class="manual-versions">' + detail.versions.map(function (t, n) {
+      return "<details" + (n === 0 ? " open" : "") + "><summary>גרסה " + (n + 1) + ": " + esc(t.split("\n")[0]) + '</summary><pre dir="auto">' + esc(t) + '</pre><div class="manual-row">' + btns(tx(t)) + "</div></details>";
+    }).join("") + "</div>";
+    box.innerHTML = '<div class="manual-detail"><h3 class="manual-h">הקבוצות שהסוכן בחר (' + detail.groups.length + ")" +
+      (c ? ' <small class="manual-muted">קמפיין: ' + esc(c.status) + "</small>" : "") + "</h3>" + groups +
+      '<h3 class="manual-h">כל גרסאות הטקסט (' + detail.versions.length + ")</h3>" + versions + "</div>";
+  }
+  function loadDetail(pageId) {
+    if (!shown || !pageId) { detail = null; detailFor = null; renderDetail(); return; }
+    detailFor = pageId;
+    call("GET", "/agents/" + encodeURIComponent(shown) + "/properties/" + encodeURIComponent(pageId))
+      .then(function (j) { if (detailFor === pageId) { detail = j; renderDetail(); } }).catch(fail);
+  }
+
   // ── the browser column ──
   function renderSide() {
     var p = state && state.property;
@@ -108,13 +147,18 @@
 
   function refresh() {
     if (!shown) return;
-    call("GET", B(shown) + "/state").then(function (s) { state = s; renderSide(); })
+    call("GET", B(shown) + "/state").then(function (s) {
+      state = s; renderSide();
+      var pid = s.property && s.property.page_id;
+      if ((pid || null) !== detailFor) loadDetail(pid);
+    })
       .catch(function (e) { if (e && e.status === 409) closed(); });
   }
   function closed() {
     clearInterval(poll); poll = null;
     if (viewer) viewer.unmount();
-    viewer = null; shown = null; state = null; props = [];
+    viewer = null; shown = null; state = null; props = []; detail = null; detailFor = null;
+    renderDetail();
     $("#manualBrowser").innerHTML = "";
     renderSide(); load();
   }
@@ -136,7 +180,7 @@
     });
   }
   var setProperty = function (pageId) {
-    return call("POST", B(shown) + "/property", { page_id: pageId }).then(function (j) { state = Object.assign({}, state, { property: j.property }); renderSide(); });
+    return call("POST", B(shown) + "/property", { page_id: pageId }).then(function (j) { state = Object.assign({}, state, { property: j.property }); renderSide(); loadDetail(pageId); });
   };
 
   // ── events ──
@@ -160,6 +204,39 @@
       .catch(fail).then(function () { b.disabled = false; });
   });
 
+  $("#manualDetail").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-dt]");
+    if (!b || !shown) return;
+    var act = b.dataset.dt, t = texts[Number(b.dataset.i)];
+    if (act === "tick") {
+      // Every group the poster ticked: marked posted one by one. A mark cannot be undone, so ask first.
+      var ids = [].slice.call($("#manualDetail").querySelectorAll("input[data-gid]:checked:not(:disabled)")).map(function (i) { return i.dataset.gid; });
+      if (!ids.length) { FLY.toast("סמנו את הקבוצות שבהן פרסמתם"); return; }
+      if (!confirm("לסמן " + ids.length + " קבוצות כ\"פורסם\"? אי אפשר לבטל.")) return;
+      b.disabled = true;
+      var cid = detail.campaign.id, last = null;
+      ids.reduce(function (p, gid) {
+        return p.then(function () { return call("POST", "/campaigns/" + encodeURIComponent(cid) + "/groups/" + encodeURIComponent(gid) + "/done", { status: "posted" }).then(function (j) { last = j; }); });
+      }, Promise.resolve())
+        .then(function () { FLY.toast(last && last.completed ? "הקמפיין הושלם, הסוכן קיבל הודעה" : "סומנו " + ids.length + " קבוצות ✓"); })
+        .catch(fail).then(function () { b.disabled = false; loadDetail(detailFor); load(); });
+      return;
+    }
+    if (act === "copy") { navigator.clipboard.writeText(t).then(function () { FLY.toast("הטקסט הועתק"); }, function () { FLY.toast("ההעתקה נכשלה"); }); return; }
+    b.disabled = true;
+    var req = act === "type" ? call("POST", B(shown) + "/type", { text: t })
+      : call("POST", B(shown) + "/goto", { group_url: b.dataset.url });
+    req.then(function () { FLY.toast(act === "type" ? "הטקסט הוקלד" : "הקבוצה נפתחה"); }).catch(fail).then(function () { b.disabled = false; });
+  });
+  $("#manualBig").addEventListener("click", function () {
+    var big = $(".manual-grid").classList.toggle("big");
+    this.textContent = big ? "⤡ הקטנה" : "⤢ הגדלה";
+  });
+  $("#manualFull").addEventListener("click", function () {
+    var el = $("#manualBrowser");
+    if (document.fullscreenElement) document.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen().catch(function () { FLY.toast("מסך מלא לא זמין בדפדפן הזה"); });
+  });
+
   $("#manualQueue").addEventListener("click", function (ev) {
     var b = ev.target.closest("button[data-act]");
     if (!b) return;
@@ -173,7 +250,7 @@
       if (act === "skipped" && !confirm("לדלג על הקבוצה הזו? היא לא תופיע בהודעה לסוכן.")) return;
       b.disabled = true;
       call("POST", "/campaigns/" + encodeURIComponent(item.campaign_id) + "/groups/" + encodeURIComponent(item.group_id) + "/done", { status: act })
-        .then(function (j) { FLY.toast(j.completed ? "הקמפיין הושלם, הסוכן קיבל הודעה" : "סומן ✓"); if (picked === b.dataset.k) picked = null; return load(); })
+        .then(function (j) { FLY.toast(j.completed ? "הקמפיין הושלם, הסוכן קיבל הודעה" : "סומן ✓"); if (picked === b.dataset.k) picked = null; if (detailFor) loadDetail(detailFor); return load(); })
         .catch(function (e) { b.disabled = false; fail(e); });
       return;
     }

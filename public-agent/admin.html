@@ -88,12 +88,26 @@
   .manual-agent h3{margin:0 0 8px;font-size:1rem}
   .manual-item{border-top:1px solid rgba(23,20,15,.06);padding:10px 0}
   .manual-item.on{background:#fff8e6;border-radius:8px;padding:10px}
-  .manual-item pre{white-space:pre-wrap;font:inherit;font-size:.9rem;background:#f7f5f1;padding:8px;border-radius:6px;margin:6px 0}
+  .manual-detail pre,.manual-item pre{white-space:pre-wrap;font:inherit;font-size:.9rem;background:#f7f5f1;padding:8px;border-radius:6px;margin:6px 0}
   .manual-row{display:flex;flex-wrap:wrap;gap:6px}
   .manual-prop{display:flex;gap:12px;align-items:center;border:1px solid rgba(23,20,15,.1);border-radius:10px;padding:10px;margin-bottom:10px;background:#fff}
   .manual-prop img{width:84px;height:64px;object-fit:cover;border-radius:6px}
   .manual-prop b{display:block}
   .manual-browser{min-height:420px;border:1px solid rgba(23,20,15,.1);border-radius:10px;overflow:hidden;background:#fafafa}
+  .manual-grid.big{grid-template-columns:minmax(300px,380px) 1fr}
+  .manual-grid.big .manual-browser{min-height:82vh}
+  .manual-grid.big .manual-browser .cv-screen{max-height:none}
+  .manual-browser:fullscreen{background:#000;overflow:auto}
+  .manual-h{font-size:.95rem;margin:14px 0 8px}
+  .manual-detail{border:1px solid rgba(23,20,15,.12);border-radius:10px;padding:12px;margin-bottom:14px;background:#fffdf8}
+  .manual-groups{list-style:none;margin:0 0 10px;padding:0}
+  .manual-groups li{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(23,20,15,.06)}
+  .manual-groups li .name{flex:1;min-width:140px;display:flex;gap:6px;align-items:center;cursor:pointer}
+  .manual-groups li .name input{width:18px;height:18px}
+  .manual-chip{font-size:.75rem;padding:2px 8px;border-radius:999px;background:#eee}
+  .manual-chip.owed{background:#fff1c7}.manual-chip.posted{background:#d8f2df}.manual-chip.skipped{background:#eee;color:#777}
+  .manual-versions details{border-top:1px solid rgba(23,20,15,.06);padding:6px 0}
+  .manual-versions summary{cursor:pointer;font-size:.9rem}
   #manualVideo.ready{background:#1f7a3a;color:#fff;border-color:#1f7a3a}
 </style>
 </head>
@@ -259,6 +273,8 @@
           <button type="button" class="btn btn-ghost btn-sm" id="manualReload">רענון</button>
         </div>
         <p class="manual-help">לכל קבוצה: <b>בחירה</b>, <b>1. פתיחת הקבוצה</b>, לחיצה בדפדפן על "כתבו משהו", <b>2. הקלדת הטקסט</b>, לחיצה בפייסבוק על "תמונה/סרטון" ואז <b>העלאת הסרטון</b>. בסוף לוחצים "פרסום" בפייסבוק ומסמנים <b>פורסם ✓</b>.</p>
+        <div id="manualDetail"></div>
+        <h3 class="manual-h">כל הפוסטים שמחכים</h3>
         <div id="manualQueue"></div>
       </section>
       <section class="manual-side">
@@ -266,6 +282,8 @@
         <div class="manual-tools">
           <select id="manualPropPick" aria-label="נכס" hidden></select>
           <button type="button" class="btn btn-ghost btn-sm" id="manualVideo" disabled>לחצו "תמונה/סרטון" בפייסבוק</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualBig">⤢ הגדלה</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualFull">מסך מלא</button>
           <button type="button" class="btn btn-ghost btn-sm" id="manualClose" hidden>סגירת הדפדפן</button>
         </div>
         <div id="manualBrowser" class="manual-browser"></div>
