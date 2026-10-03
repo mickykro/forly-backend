@@ -39,7 +39,7 @@ const md = `# דירה
 ![](https://img.yad2.co.il/Pic/1.jpg)
 ![](https://img.yad2.co.il/Pic/2.jpeg?w=800)`;
 assert.deepEqual(listingImages(md), ["https://img.yad2.co.il/Pic/1.jpg", "https://img.yad2.co.il/Pic/2.jpeg?w=800"]);
-assert.equal(listingImages(Array.from({ length: 30 }, (_, i) => `![](https://c/${i}.jpg)`).join("\n")).length, 12);
+assert.equal(listingImages(Array.from({ length: 60 }, (_, i) => `![](https://c/${i}.jpg)`).join("\n")).length, 54);
 
 (async () => {
   // ── plain text ──

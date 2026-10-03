@@ -99,7 +99,14 @@ function looksLikeListing(text) {
   const t = String(text || "");
   return t.length >= 40 && LISTING_HINTS.filter((h) => t.includes(h)).length >= 2;
 }
+// A business's own WhatsApp away-message, bounced back at us by an outbound send (a demo
+// video, a cold-outreach note). It often carries a digital-card link and real-estate words
+// in its own right ("...שמאות מקרקעין ונדל״ן"), so it can satisfy findUrl/looksLikeListing
+// on its own — this must run before either, not patch their output after the fact.
+const AUTO_REPLY_RE = /תודה ש(יצרת קשר|פנ(ית|יתם|יתן))|אינ(י|נו|נה|ני) זמינ|לא זמינ(ה|ים)? כעת|נחזור אלי(ך|כם|כן)|נשיב ברגע שנחזור|קיבלנו את (הודעתכם|פנייתך|פנייתכם)/;
+function looksLikeAutoReply(text) { return AUTO_REPLY_RE.test(String(text || "")); }
 function openerKind(text) {
+  if (looksLikeAutoReply(text)) return null;
   if (findUrl(text)) return "link";
   if (isKeyword(text)) return "keyword";
   if (looksLikeListing(text)) return "text";

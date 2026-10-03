@@ -259,7 +259,7 @@ assert.equal(pickAudioUrl(null), null);
 assert.equal(pickAudioUrl("nope"), null);
 
 assert.equal(MAX_ROOMS, 12);
-assert.equal(MAX_CLIPS, 4);
+assert.equal(MAX_CLIPS, 6);
 // ── endStyleFor: last-frame brightness picks the title palette ──
 assert.equal(endStyleFor(181), "light");
 assert.equal(endStyleFor(136), "light");
