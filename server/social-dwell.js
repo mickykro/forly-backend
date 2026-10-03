@@ -388,8 +388,6 @@ async function browseSession({ phone, profileName, note } = {}, deps = {}) {
       await page.goto("https://www.facebook.com/", { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
       let signal = await readSignal(page);
       if (signal !== "ok") return { log: [], signal };
-      // Once per account: Facebook's own "Autoplay: Off" (posting-fbsettings) — videos are most of the traffic.
-      await require("./posting-fbsettings").ensureAutoplayOff(page, { phone, conn, db, env: deps.env, guard: async (action) => { if (!(await checkGuard(action, pageDeps))) throw Object.assign(new Error("denied"), { denied: true }); } });
       const log = await dwell(page, { allowVisible, recentlyLikedPostIds }, pageDeps);
       signal = await readSignal(page);
       return { log, signal };

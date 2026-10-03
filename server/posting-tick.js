@@ -376,9 +376,6 @@ async function runAttempt(attempt, st, deps, now) {
   // their own. Never in the way of the posts: any failure is only logged.
   call.postDeps.afterPosts = async (page) => {
     const phone = attempt.phone;
-    // An account with no warm-up session (or whose warm-up could not do it): Facebook's "Autoplay: Off", once.
-    await require("./posting-fbsettings").ensureAutoplayOff(page, { phone, conn: (await x.db.getConnection(phone)) || {}, db: x.db, env: deps.env,
-      guard: (action) => x.guard.assertAllowed({ phone, platform: "facebook", action }, A.guardDeps(deps, x)) }).catch(() => {});
     await require("./posting-recheck").recheckDueFor(phone, deps, x, x.clock(), page).catch((e) => console.error(redact(`posting in-session recheck ${tail(phone)}: ${code(e)}`)));
     const sync = deps.groupsSync, conn = (await x.db.getConnection(phone)) || {};
     if (sync && typeof sync.isStale === "function" && sync.isStale(conn, x.clock())) {
