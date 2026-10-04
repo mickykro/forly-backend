@@ -189,8 +189,16 @@ const two2 = buildFfmpegArgs({
 });
 const twoFilter = two2[two2.indexOf("-filter_complex") + 1];
 assert.equal(two2.filter((a) => a === "-i").length, 2, "one -i per clip");
-assert.ok(twoFilter.includes("[0:v]scale=720:1280,setsar=1,fps=30,format=yuv420p[v0]"), "clip 0 normalized");
-assert.ok(twoFilter.includes("[1:v]scale=720:1280,setsar=1,fps=30,format=yuv420p[v1]"), "clip 1 normalized");
+assert.ok(twoFilter.includes("[0:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30,format=yuv420p[v0]"), "clip 0 normalized");
+// probe reports the displayed size: a 90°-rotated 1280x720 stream is portrait
+{
+  const { probeResult } = require("./overlay")._test;
+  const base = { format: { duration: "5" } };
+  assert.deepEqual([probeResult({ ...base, streams: [{ width: 1280, height: 720, side_data_list: [{ rotation: -90 }] }] })].map((p) => [p.width, p.height]), [[720, 1280]]);
+  assert.deepEqual([probeResult({ ...base, streams: [{ width: 1280, height: 720, tags: { rotate: "270" } }] })].map((p) => [p.width, p.height]), [[720, 1280]]);
+  assert.deepEqual([probeResult({ ...base, streams: [{ width: 720, height: 1280, side_data_list: [{ rotation: 180 }] }] })].map((p) => [p.width, p.height]), [[720, 1280]]);
+}
+assert.ok(twoFilter.includes("[1:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30,format=yuv420p[v1]"), "clip 1 normalized");
 assert.ok(twoFilter.includes("[v0][v1]xfade=transition=fade:duration=0.5:offset=14.500[vcat]"), "join at 14.5s");
 assert.ok(!two2.includes("0:a?"), "no per-clip audio carried across a join");
 

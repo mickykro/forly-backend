@@ -195,16 +195,30 @@ async function probe(file) {
   const out = await run(FFPROBE, [
     "-v", "error",
     "-select_streams", "v:0",
-    "-show_entries", "stream=width,height,r_frame_rate:format=duration",
+    "-show_entries", "stream=width,height,r_frame_rate:stream_tags=rotate:stream_side_data=rotation:format=duration",
     "-of", "json", file,
   ], 30000);
-  const j = JSON.parse(out);
+  return probeResult(JSON.parse(out));
+}
+
+// Width/height as the clip is SHOWN. ffmpeg auto-rotates a clip carrying a
+// rotation (display matrix or legacy `rotate` tag), so a 1280x720 stream marked
+// 90° reaches the filtergraph as 720x1280; taking the coded size instead made
+// the stitch squash it into the wrong shape.
+function probeResult(j) {
   const s = (j.streams && j.streams[0]) || {};
   const duration = Number(j.format && j.format.duration);
   if (!s.width || !s.height || !isFinite(duration) || duration <= 0) {
     throw new Error("could not probe video dimensions/duration");
   }
-  return { width: s.width, height: s.height, duration, fps: parseFps(s.r_frame_rate) };
+  const side = (s.side_data_list || []).find((d) => d && d.rotation != null);
+  const rotation = Number(side ? side.rotation : (s.tags && s.tags.rotate) || 0) || 0;
+  const quarter = Math.abs(Math.round(rotation / 90)) % 2 === 1;
+  return {
+    width: quarter ? s.height : s.width,
+    height: quarter ? s.width : s.height,
+    duration, fps: parseFps(s.r_frame_rate),
+  };
 }
 
 // Where each clip starts on the stitched timeline, and how long the result is.
@@ -728,7 +742,10 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
   }
 
   const parts = [];
-  const norm = `scale=${info.width}:${info.height},setsar=1,fps=${info.fps},format=yuv420p`;
+  // Fill the frame and crop the overflow: a clip of another shape (Seedance can
+  // return a different aspect than asked for) is never stretched to fit.
+  const norm = `scale=${info.width}:${info.height}:force_original_aspect_ratio=increase,` +
+    `crop=${info.width}:${info.height},setsar=1,fps=${info.fps},format=yuv420p`;
   if (n === 1) {
     parts.push(`[0:v]${norm}[vcat]`);
   } else {
@@ -889,7 +906,7 @@ async function overlayVideo({ videoUrl, videoUrls, lines, musicUrl, musicPrompt,
     }
     const durations = probes.map((p) => p.duration);
     const { offsets, duration } = stitchTimeline(durations);
-    // Geometry comes from the first clip; the rest are scaled to match it.
+    // Geometry comes from the first clip; the rest are scaled (aspect kept) and cropped to match it.
     const info = { width: probes[0].width, height: probes[0].height, fps: probes[0].fps, duration };
     const clips = inFiles.map((file, i) => ({ file, duration: durations[i], offset: offsets[i] }));
     // Room-name labels are disabled: they appeared before their room was on
@@ -952,6 +969,6 @@ module.exports = {
   _test: {
     buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
     modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin,
-    endStyleFor, endFrameLuma, swooshPath, wrapText, textWidth,
+    endStyleFor, endFrameLuma, swooshPath, wrapText, textWidth, probeResult,
   },
 };
