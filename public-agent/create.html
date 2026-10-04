@@ -26,6 +26,7 @@
   .tpl-card:hover{border-color:var(--gold-bright,#d9b15c)}
   .tpl-card.selected{border-color:var(--gold,#b98a2f);box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.28))}
   .tpl-frame{position:relative;aspect-ratio:16/11;overflow:hidden;background:#0c0a09}
+  .tpl-shot{object-position:top}
   .tpl-frame iframe{position:absolute;top:0;right:0;width:1280px;height:880px;border:0;transform-origin:top right;pointer-events:none}
   .tpl-check{position:absolute;top:10px;inset-inline-start:10px;z-index:4;width:26px;height:26px;border-radius:50%;background:var(--gold,#b98a2f);color:#fff;display:none;place-items:center;font-size:.85rem;box-shadow:0 2px 8px rgba(0,0,0,.4)}
   .tpl-card.selected .tpl-check{display:grid}
@@ -332,7 +333,7 @@
         <div class="tpl-grid" id="tplGrid">
           <div class="tpl-card selected" data-tpl="original">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/original.html" title="Classic" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-original.webp" alt="" loading="lazy"><iframe data-src="/tpl/original.html" title="Classic" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_classic">קלאסי</span><small data-i18n="tpl_desc_classic">בהיר, חם, נצחי</small><button type="button" class="tpl-full" data-src="/tpl/original.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="nocturne">
@@ -342,27 +343,27 @@
           </div>
           <div class="tpl-card" data-tpl="reel">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/reel.html" title="Reel" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-reel.webp" alt="" loading="lazy"><iframe data-src="/tpl/reel.html" title="Reel" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_reel">ריל</span><small data-i18n="tpl_desc_reel">תנועה, קצבי, מודרני</small><button type="button" class="tpl-full" data-src="/tpl/reel.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="movie">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/movie.html" title="Movie" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-movie.webp" alt="" loading="lazy"><iframe data-src="/tpl/movie.html" title="Movie" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_movie">מוביי</span><small data-i18n="tpl_desc_movie">קולנועי, זורם, נקי</small><button type="button" class="tpl-full" data-src="/tpl/movie.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="atelier">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/atelier.html" title="Atelier" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-atelier.webp" alt="" loading="lazy"><iframe data-src="/tpl/atelier.html" title="Atelier" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_atelier">אטלייה · קולנועי</span><button type="button" class="tpl-full" data-src="/tpl/atelier.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="loupe">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/loupe.html" title="Loupe" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-loupe.webp" alt="" loading="lazy"><iframe data-src="/tpl/loupe.html" title="Loupe" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_loupe">לופה · אינטראקטיבי</span><button type="button" class="tpl-full" data-src="/tpl/loupe.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="orbite">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/orbite.html" title="Orbite" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-orbite.webp" alt="" loading="lazy"><iframe data-src="/tpl/orbite.html" title="Orbite" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_orbite">אורביט · חללים</span><button type="button" class="tpl-full" data-src="/tpl/orbite.html">⛶</button></div>
           </div>
         <input type="hidden" id="thTemplate" value="original">
@@ -1020,6 +1021,37 @@
   });
   input.addEventListener("change", function () { addFiles(input.files); input.value = ""; });
 
+  // iOS Safari kills a tab that holds too much decoded image memory and reloads
+  // it — the "page refreshes after adding photos" bug. A 12MP camera photo shown
+  // through a blob URL costs ~48MB once decoded, so a few picks blew the limit.
+  // Thumbs show a small canvas-made copy instead, made one full-size decode at a
+  // time; the original file is still what uploads. Resolves a blob URL or null.
+  var THUMB_MAX = 800;
+  var thumbQueue = Promise.resolve();
+  function makeThumb(file) {
+    var job = thumbQueue.then(function () {
+      return new Promise(function (resolve) {
+        var src = URL.createObjectURL(file), img = new Image();
+        img.onload = function () {
+          var s = Math.min(1, THUMB_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(img.naturalWidth * s));
+          c.height = Math.max(1, Math.round(img.naturalHeight * s));
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(src); img.removeAttribute("src");
+          c.toBlob(function (b) {
+            c.width = c.height = 0; // free the backing store now, not at GC
+            resolve(b ? URL.createObjectURL(b) : null);
+          }, "image/jpeg", 0.82);
+        };
+        img.onerror = function () { URL.revokeObjectURL(src); resolve(null); };
+        img.src = src;
+      });
+    });
+    thumbQueue = job;
+    return job;
+  }
+
   // Photos upload the moment they're picked (progress on the thumb); removing a
   // photo also deletes the already-uploaded file from storage.
   function addFiles(list) {
@@ -1027,10 +1059,16 @@
       if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { FLY.toast(f.name + FT("err_bad_type")); return; }
       if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + FT("err_too_big")); return; }
       if (photos.length >= 12) { FLY.toast(FT("err_max_photos")); return; }
-      var url = URL.createObjectURL(f);
       var t = FLY.el("div", "t",
-        '<img src="' + url + '"><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
-      var entry = { file: f, el: t, publicUrl: null, previewUrl: url, removed: false, failed: false };
+        '<img alt=""><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
+      var entry = { file: f, el: t, publicUrl: null, previewUrl: null, removed: false, failed: false };
+      makeThumb(f).then(function (url) {
+        if (!url) return;
+        if (entry.removed) { URL.revokeObjectURL(url); return; }
+        entry.previewUrl = url;
+        t.querySelector("img").src = url;
+        updateLivePreview();
+      });
       entry.uploadPromise = FLY.uploadFiles([f], uploadHeaders, function (_i, pct) {
         var bar = t.querySelector(".bar i");
         if (bar) bar.style.width = pct + "%";
@@ -1049,6 +1087,7 @@
         entry.removed = true;
         photos = photos.filter(function (p) { return p.el !== t; });
         t.remove();
+        if (entry.previewUrl && entry.file) URL.revokeObjectURL(entry.previewUrl);
         if (entry.publicUrl) FLY.deleteUpload(entry.publicUrl, uploadHeaders);
         updateLivePreview();
       });
@@ -1325,6 +1364,28 @@
   }
   addEventListener("resize", scaleFrames);
   scaleFrames();
+  // Each preview is a whole live template (autoplaying videos, animation loops,
+  // canvases), so on desktop an iframe is only loaded while its card is on
+  // screen and blanked again once it scrolls away or the design step is hidden.
+  (function () {
+    var frames = document.querySelectorAll(".tpl-frame iframe[data-src]");
+    // Touch screens get the static screenshot under each iframe only — loading
+    // the live templates there is when iPhones reload the page. ⛶ still opens
+    // the live one, a single template at a time.
+    if (!matchMedia("(hover:hover) and (pointer:fine)").matches) return;
+    function show(ifr, on) {
+      var want = on ? ifr.getAttribute("data-src") : "about:blank";
+      if (ifr.getAttribute("src") !== want && (on || ifr.getAttribute("src"))) ifr.setAttribute("src", want);
+    }
+    if (!window.IntersectionObserver) {
+      Array.prototype.forEach.call(frames, function (ifr) { show(ifr, true); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { show(e.target, e.isIntersecting); });
+    }, { rootMargin: "200px 0px" });
+    Array.prototype.forEach.call(frames, function (ifr) { io.observe(ifr); });
+  })();
   setTimeout(scaleFrames, 300); // after fonts/layout settle
   ["#pAddress", "#pCity", "#pHood", "#pRooms", "#pSqm", "#pFloor", "#pParking", "#pDesc"].forEach(function (id) {
     $(id).addEventListener("input", updateLivePreview);

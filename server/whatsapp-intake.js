@@ -15,7 +15,7 @@ const C = require("./draft-corrections");
 const { updatePage, updatingTurn, duplicateCheck, duplicateTurn } = require("./page-update");
 const { intentOf, openerOf } = require("./property-intent");
 const { recoverFromChat } = require("./chat-recover");
-const PC = require("./photo-choice");
+const PC = require("./photo-choice"), { offerTimer, offeredDraft } = PC;
 
 const MAX_PHOTOS = 54; // walkthrough: up to 6 clips × 9 reference photos
 const { oneBubble } = R;
@@ -185,8 +185,12 @@ async function storePhoto(draft, fileUrlOrUrls, deps, now) {
 async function photosEdited(input, deps, draft, now) {
   const { phone } = input;
   const hosted = await importAll(input.photos || [], deps.importPhoto);
+  if (draft && draft.status === "edit_request" && draft.suspended && !draft.keep_apart) draft = draft.suspended;
   if (draft && draft.status === "active" && !D.isPaused(draft, now)) {
     draft.photos = draft.photos.concat(hosted).slice(0, MAX_PHOTOS);
+    // Edits asked from inside the draft: one message when the last one is back, not one each.
+    if (draft.editing > 0 && (draft.editing -= hosted.length) > 0) return { handled: true, status: `edits_pending:${draft.editing}`, draft: D.touch(draft, now), replies: [] };
+    draft.editing = 0;
     const p = promptFor(draft, deps);
     return { handled: true, status: p.status, draft: D.touch(draft, now), replies: [R.photosSaved(draft.photos.length), ...p.replies] };
   }
@@ -211,18 +215,6 @@ async function photosEdited(input, deps, draft, now) {
   target.photos = target.photos.concat(hosted).slice(0, MAX_PHOTOS);
   D.touch(target, now);
   return { handled: true, status: `offer_pending:${target.photos.length}`, draft: target, replies: [], armPhotoTimer: true };
-}
-
-function offerTimer(draft, now) {
-  if (draft.offer_sent || draft.photos.length < D.MIN_PHOTOS) return { handled: true, status: "offer_pending", replies: [] };
-  draft.offer_sent = true;
-  return { handled: true, status: "offered", draft: D.touch(draft, now), replies: [R.offer(draft.photos.length)] };
-}
-
-function offeredDraft(phone, now) {
-  const d = D.newDraft(phone, "photos", now);
-  d.status = "offered";
-  return d;
 }
 
 function resumePrompt(draft, opener, now) {
@@ -286,7 +278,9 @@ async function resumeTurn(input, deps, draft, now) {
       fresh.offer_sent = true;
       return { handled: true, status: "offered", draft: fresh, replies: [R.offer(fresh.photos.length)] };
     }
-    // Whatever the paused message was, "חדש" starts a new property from it (or empty).
+    const ed = o.text && !o.file_urls && PC.editRequest(o.text, draft.phone, now);
+    if (ed) return { ...ed, handled: true, status: "edit_request", replies: [R.sendForEdit()] };
+    // Whatever else the paused message was, "חדש" starts a new property from it (or empty).
     const t = await openDraft(draft.phone, D.openerKind(o.text) || "keyword", o.text, deps, now);
     if (o.file_urls && t.draft) {
       const s = await storePhoto(t.draft, o.file_urls, deps, now);
@@ -303,7 +297,10 @@ async function activeTurn(input, deps, draft, now) {
   const photoUrls = photoUrlsOf(input);
   if (photoUrls) return storePhoto(draft, photoUrls, deps, now);
   const cmd = D.command(input.text);
-  if (cmd === "cancel") return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
+  if (cmd === "cancel" || D.isRestart(input.text)) return { handled: true, status: "cancelled", del: true, replies: [R.cancelled()] };
+  if (cmd === "new") return openDraft(draft.phone, "keyword", "", deps, now); // never an answer to the question
+  const edit = PC.editInDraft(draft, input.text, now, false);
+  if (edit) return edit;
   const dup = duplicateTurn(input, draft, now, (dr) => promptFor(dr, deps));
   if (dup) return dup;
   const slash = C.parseSlash(input.text);
@@ -391,14 +388,19 @@ async function handleTurn(input, deps) {
   }
   let dropped = false;
   if (draft && D.isExpiredPrompt(draft, now)) {
-    if (draft.suspended) draft = D.touch(draft.suspended, now); else { draft = null; dropped = true; }
+    draft = PC.resumeAfterEdit(draft, now); dropped = !draft;
   }
   const withDrop = (t) => (dropped && !t.draft ? { ...t, del: true } : t);
 
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
   if (draft && draft.status === "edit_request") {
     if (photoUrlsOf(input) && !input.text && !input.event) return PC.editWith(draft, photoUrlsOf(input), now);
-    if (!input.event) { draft = null; dropped = true; } // anything else ends the request; judged on its own
+    // Anything else ends it, judged on its own — against the draft that waited, if one did.
+    const back = input.event ? draft : PC.resumeAfterEdit(draft, now);
+    if (!back) { draft = null; dropped = true; } else if (back !== draft) {
+      const t = await handleTurn({ ...input, draft: back }, deps);
+      return t.draft || t.del ? t : { ...t, draft: back };
+    }
   }
 
   // A turn that rejected the message ("invalid:price") or simply repeated
@@ -475,7 +477,7 @@ async function handleTurn(input, deps) {
   // Paused: any message brings the open draft back up (המשך / חדש / ביטול).
   if (D.isPaused(draft, now)) {
     if (input.event) return notOurs("not_ours");
-    return resumePrompt(draft, { text: input.text || null, file_urls: photoUrlsOf(input) }, now);
+    return PC.editInDraft(draft, input.text, now, true) || resumePrompt(draft, { text: input.text || null, file_urls: photoUrlsOf(input) }, now);
   }
   // A new link or "נכס חדש" while a draft is open is a different property: ask
   // instead of ignoring it. (Pasted listing text stays an answer — it fills fields.)
