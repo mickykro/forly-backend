@@ -425,5 +425,59 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "285,000 יורו", draft: eurAtPrice }, d);
   assert.deepEqual([t.draft.fields.price, t.draft.fields.currency], [285000, "EUR"]);
 
+  // ── 972546582548, 2026-10-04: "edit my photos" never reached the edit ──
+  ({ d } = deps({ classifyIntent: async () => null }));
+  const at = (min) => new Date(T0.getTime() + min * 60000);
+  // An old draft, idle for hours: the edit request is taken, not set aside behind המשך/חדש/ביטול.
+  const idle = { ...D.newDraft(PHONE, "keyword", at(-300)), photos: ["https://files/old.jpg"] };
+  idle.fields.city = "❤";
+  t = await turn({ text: "אני רוצה שתעכי לי תמונות :", draft: idle }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.keep_apart], [true, "edit_request", "edit_request", true]);
+  assert.match(texts(t), /שלחו את התמונות לעריכה/);
+  const waitingEdit = t.draft;
+  t = await turn({ fileUrls: ["https://green/a.jpg", "https://green/b.jpg"], draft: waitingEdit, now: at(1) }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos], [false, "edit_requested", ["https://green/a.jpg", "https://green/b.jpg"]], "the photos are edited");
+  t = await turn({ event: "photos_edited", photos: ["https://n8n/a.jpg"], batchDone: true, draft: t.draft, now: at(4) }, d);
+  assert.deepEqual([t.status, t.draft.photos], ["offered", ["https://files/a.jpg"]], "kept apart from the idle draft's photos");
+  t = await turn({ text: "היי", draft: waitingEdit, now: at(1) }, d);
+  assert.deepEqual([t.status, t.draft.status], ["resume_prompt", "resume_prompt"], "no photos came: the idle draft is offered back");
+
+  // "חדש" to a set-aside edit request edits, it doesn't open a property.
+  const paused = { ...idle, updated_at: T0, status: "resume_prompt", pending_opener: { text: "תערכי לי תמונות בבקשה" } };
+  t = await turn({ text: "חדש", draft: paused }, d);
+  assert.deepEqual([t.handled, t.draft.status], [true, "edit_request"]);
+
+  // Mid-questions: "תערכי את התמונות" edits the photos just sent — never the city.
+  const asking = D.newDraft(PHONE, "keyword", T0);
+  t = await turn({ fileUrls: ["https://green/1.jpg", "https://green/2.jpg"], draft: asking }, d);
+  t = await turn({ text: "תערכי את התמונות", draft: t.draft, now: at(8) }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos, t.draft.fields.city, t.draft.photos.length, t.draft.editing],
+    [false, "edit_draft_photos", ["https://files/1.jpg", "https://files/2.jpg"], null, 0, 2]);
+  t = await turn({ event: "photos_edited", photos: ["https://n8n/e1.jpg"], draft: t.draft, now: at(10) }, d);
+  assert.deepEqual([t.status, t.replies.length, t.draft.editing], ["edits_pending:1", 0, 1], "quiet until the last one");
+  t = await turn({ event: "photos_edited", photos: ["https://n8n/e2.jpg"], draft: t.draft, now: at(11) }, d);
+  assert.deepEqual([t.draft.photos, t.draft.editing], [["https://files/e1.jpg", "https://files/e2.jpg"], 0]);
+  assert.match(texts(t), /שמרתי 2 תמונות[\s\S]*באיזו עיר/, "then one message, and the question again");
+
+  t = await turn({ text: "תמחקי את התמונות", draft: asking }, d);
+  assert.notEqual(t.status, "edit_request", "removing the photos is not a paid edit");
+  // No photos yet: the next ones are edited and come back into the draft.
+  t = await turn({ text: "תערכי את התמונות", draft: asking }, d);
+  assert.deepEqual([t.handled, t.draft.status, t.draft.suspended.status], [true, "edit_request", "active"]);
+  t = await turn({ fileUrl: "https://green/9.jpg", draft: t.draft, now: at(1) }, d);
+  assert.equal(t.draft.suspended.editing, 1);
+  t = await turn({ event: "photos_edited", photos: ["https://n8n/9.jpg"], draft: t.draft, now: at(3) }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos], ["active", ["https://files/9.jpg"]]);
+  t = await turn({ text: "רמת גן", draft: (await turn({ text: "תערכי את התמונות", draft: asking }, d)).draft, now: at(1) }, d);
+  assert.deepEqual([t.draft.status, t.draft.fields.city], ["active", "רמת גן"], "other text: the draft is back and answered");
+
+  // "חדש" / "בואי נתחיל מההתחלה" mid-question: never a price.
+  const priceStep = { ...D.newDraft(PHONE, "keyword", T0) };
+  priceStep.fields.city = "באר שבע";
+  t = await turn({ text: "חדש", draft: priceStep }, d);
+  assert.deepEqual([t.status, t.draft.fields.city], ["asked:city", null], "a fresh property");
+  t = await turn({ text: "לא משנה.  בואי נתחיל מההתחלה", draft: priceStep }, d);
+  assert.deepEqual([t.status, t.del], ["cancelled", true]);
+
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

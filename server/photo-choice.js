@@ -114,7 +114,7 @@ function swapTurn(input, draft, now, promptReplies) {
  * D.isExpiredPrompt) and the photos are edited with it — not asked 1/2/3/4, and
  * not the default enhancement. Any other text ends it.
  */
-const EDIT_VERB = /(תנקה|תנקי|לנקות|ננקה|תערוך|תערכי|לערוך|נערוך|תשפר|תשפרי|לשפר|נשפר|תבהיר|להבהיר|נבהיר|תחדד|לחדד|נחדד|תסיר|תסירי|להסיר|נסיר|תמחק|תמחקי|למחוק|נמחק|תעצב|תעצבי|לעצב)/;
+const EDIT_VERB = /(תעכי|תערכו|עריכת|תנקה|תנקי|לנקות|ננקה|תערוך|תערכי|לערוך|נערוך|תשפר|תשפרי|לשפר|נשפר|תבהיר|להבהיר|נבהיר|תחדד|לחדד|נחדד|תסיר|תסירי|להסיר|נסיר|תמחק|תמחקי|למחוק|נמחק|תעצב|תעצבי|לעצב)/;
 function editRequest(text, phone, now) {
   const t = String(text || "").trim();
   if (!/תמונ/.test(t) || !EDIT_VERB.test(t)) return null;
@@ -130,7 +130,50 @@ function instructionOf(text) {
 }
 function editWith(draft, urls, now) {
   draft.updated_at = now; // the rest of the burst uses it too
+  if (draft.suspended && !draft.keep_apart) draft.suspended.editing = (draft.suspended.editing || 0) + urls.length;
   return { handled: false, status: "edit_requested", replies: [], draft, edit_photos: urls, edit_instruction: instructionOf(draft.text) };
+}
+
+/*
+ * "תערכי את התמונות" with a draft open: an edit, never an answer to its question
+ * (972546582548's "תערכי את התמונות" was saved as the city). Active draft: its last
+ * photo batch is edited now and comes back into it (draft.editing counts the photos
+ * home, see whatsapp-intake's photosEdited). No batch yet, or an idle draft (its
+ * photos are old): the next photos are edited; the draft waits (suspended). An idle
+ * one is kept apart: the edited photos become an offer of their own, not its photos.
+ * → null when the text isn't an edit request.
+ */
+function editInDraft(draft, text, now, idle) {
+  const t = String(text || "").trim();
+  // "תמחקי את התמונות" removes them, "תחליף את התמונות" swaps them: neither is an edit.
+  const remove = /^(תמחק|תמחקי|למחוק|תסיר|תסירי|להסיר)\s+(את\s+)?(כל\s+)?ה?תמונות\W*$/.test(t);
+  const r = t.split(/\s+/).length <= 12 && !remove && !isSwap(t) ? editRequest(t, draft.phone, now) : null;
+  if (!r) return null;
+  const batch = idle ? [] : ((draft.last_batch && draft.last_batch.photos) || []).filter((p) => draft.photos.includes(p));
+  if (!batch.length) {
+    Object.assign(r.draft, { suspended: idle ? draft : D.touch(draft, now), keep_apart: !!idle });
+    return { ...r, handled: true, status: "edit_request", replies: [R.sendForEdit()] };
+  }
+  draft.photos = draft.photos.filter((p) => !batch.includes(p));
+  draft.editing = (draft.editing || 0) + batch.length;
+  return { handled: false, status: "edit_draft_photos", replies: [], draft: D.touch(draft, now), edit_photos: batch, edit_instruction: instructionOf(t) };
+}
+
+// The edit_request is over (expired, or other text came): the waiting draft is back.
+// An idle one stays idle, so it is offered back (המשך / חדש / ביטול), not answered.
+const resumeAfterEdit = (draft, now) => (draft.suspended ? (draft.keep_apart ? draft.suspended : D.touch(draft.suspended, now)) : null);
+
+// ── moved from whatsapp-intake.js (n8n's edited photos, offered as a page) ──
+function offerTimer(draft, now) {
+  if (draft.offer_sent || draft.photos.length < D.MIN_PHOTOS) return { handled: true, status: "offer_pending", replies: [] };
+  draft.offer_sent = true;
+  return { handled: true, status: "offered", draft: D.touch(draft, now), replies: [R.offer(draft.photos.length)] };
+}
+
+function offeredDraft(phone, now) {
+  const d = D.newDraft(phone, "photos", now);
+  d.status = "offered";
+  return d;
 }
 
 // ── moved from whatsapp-intake.js (promptFor is its next-question) ──
@@ -164,4 +207,4 @@ function photoTimer(draft, deps, now, promptFor) {
   return { handled: true, status: p.status, draft: touched, replies: [R.oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
 }
 
-module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editWith, storeVideo, photoTimer };
+module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editWith, editInDraft, resumeAfterEdit, offerTimer, offeredDraft, storeVideo, photoTimer };
