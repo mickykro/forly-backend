@@ -76,7 +76,7 @@ const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
 // fall back to an ephemeral random key (never the old public constant) so the
 // app still runs but sessions reset on restart. NADLAN_JWT_SECRET is the
 // canonical env var; FORLY_JWT_SECRET is accepted for back-compat.
-const { resolveAuthSecret, resolveRemoteUploadBase } = require("./upload-relay");
+const { resolveAuthSecret, resolveRemoteUploadBase, uploadTokenParts } = require("./upload-relay");
 const authSecretInfo = resolveAuthSecret(process.env,
   () => require("crypto").randomBytes(32).toString("base64url"));
 if (authSecretInfo.ephemeral) {
@@ -207,7 +207,13 @@ app.use("/api/quota", createQuotaRouter({
 }));
 // ── walkthrough plan (n8n: space map → Seedance clips) ──
 const createWalkthroughRouter = require("./routes/walkthrough");
-app.use("/api/walkthrough", createWalkthroughRouter({ n8nSecret: N8N_WEBHOOK_SECRET }));
+app.use("/api/walkthrough", createWalkthroughRouter({
+  n8nSecret: N8N_WEBHOOK_SECRET, uploadDir: UPLOAD_DIR, baseUrl: BASE_URL,
+  storeOpts: {
+    uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
+    signUpload: (fname) => signActionToken(uploadTokenParts(fname), AUTH_SECRET),
+  },
+}));
 
 app.use("/api", createIntakeRouter({
   requireAuth, normalizeAuthPhone, signSession,
