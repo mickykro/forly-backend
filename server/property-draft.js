@@ -91,8 +91,9 @@ function spokenCommand(text) {
   }
   return best ? best.cmd : null;
 }
-// "עצור", "די", "אל תערוך שוב": stop the photo edits n8n is running.
-const STOP_RE = /^(עצור|עצרי|תעצור|תעצרי|די|מספיק|תפסיק|תפסיקי|stop)$|^אל (תערוך|תערכי|תמשיך|תמשיכי)/i;
+// "עצור", "די", "אל תערוך שוב", "סגור": stop the photo edits n8n is running.
+// "סגור"/"תסגרי" is a stop-synonym here, distinct from "בטל" (COMMANDS, cancels the draft itself).
+const STOP_RE = /^(עצור|עצרי|תעצור|תעצרי|די|מספיק|תפסיק|תפסיקי|סגור|תסגור|תסגרי|stop)$|^אל (תערוך|תערכי|תמשיך|תמשיכי)/i;
 function isStop(text) { return STOP_RE.test(clean(text)); }
 // "לא משנה, בואי נתחיל מההתחלה": the draft is dropped, like ביטול. Short messages only.
 const RESTART_RE = /(מההתחלה|להתחיל מחדש|נתחיל מחדש|מתחילים מחדש|לבטל הכל)/;
