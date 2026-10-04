@@ -70,6 +70,7 @@ function fakeLocks({ maxSessions = Infinity } = {}) {
   let sessions = 0;
   return {
     tryAcquire: () => { if (held) return null; held = true; return () => { held = false; }; },
+    holdLogin: () => {},
     trySession: () => { if (sessions >= maxSessions) return null; sessions++; return () => { sessions--; }; },
     _isHeld: () => held,
     _sessions: () => sessions,

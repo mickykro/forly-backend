@@ -126,5 +126,42 @@ function chainingPost() {
     c = await S.tick(c, deps, at(new Date(c.posts[0].scheduled_at)));
     assert.equal(post.calls.length, 1);
   }
+  // ── the watchdog: the dwell gets its own window; past it the chain stops ──
+  {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const dwelling = (postMs, dwellMs) => {
+      const one = fakePost();
+      let clk = null;
+      const fn = async (args, d) => {
+        await sleep(postMs);
+        let out = await one(args, d), deps = d;
+        while (typeof deps.next === "function") {
+          const prepare = await deps.next(out);
+          if (!prepare) break;
+          await sleep(dwellMs);
+          clk.t = new Date(clk.t.getTime() + 3 * MIN);
+          const call = await prepare();
+          if (!call) break;
+          await sleep(postMs);
+          out = await one(call.args, call.deps); deps = call.deps;
+        }
+        return out;
+      };
+      fn.calls = one.calls;
+      fn.useClock = (c) => { clk = c; };
+      return fn;
+    };
+    const run = async (post) => {
+      const { deps, at } = await setup(undefined, { post });
+      deps.postTimeoutMs = 60;
+      let c = await C.create(base(), deps);
+      c = await S.tick(c, deps, at(new Date("2026-09-23T12:00:00+03:00")));
+      await S.tick(c, deps, at(new Date(c.posts[0].scheduled_at)));
+      await sleep(250); // a timed-out browser would go on posting in the background
+      return post.calls.length;
+    };
+    assert.equal(await run(dwelling(40, 40)), 2, "post + dwell past one window: still within each own");
+    assert.equal(await run(dwelling(10, 100)), 1, "timed out in the dwell: no post after it");
+  }
   console.log("posting-chain.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

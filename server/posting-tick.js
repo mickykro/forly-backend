@@ -339,7 +339,8 @@ async function runAttempt(attempt, st, deps, now) {
   if (call.settled !== undefined) return call.settled;
   if (call.noDriver) return "no_driver";
   // A driver call that never returns must not hold the sweep (and the reaper)
-  // forever: past POST_TIMEOUT_MS — per post, re-armed for each chained one —
+  // forever: past POST_TIMEOUT_MS — per post, re-armed for each chained one and
+  // for the dwell between them —
   // it is settled like an infrastructure error: cancelled before submit,
   // outcome_unknown after — and any late transition the driver still tries is
   // refused by the attempt's edges. The profile lock, however, is NOT given
@@ -352,15 +353,20 @@ async function runAttempt(attempt, st, deps, now) {
   let cur = { attempt, st }, done = false;
   const chain = require("./posting-chain");
   if (chain.enabled(deps)) {
-    const session = chain.session(attempt.phone, deps, x);
+    const session = chain.session(attempt.phone, deps, x, st.lock);
     // next(result): settles the post just made; → null (the session ends) or
     // prepare(), called by the driver after its dwell: → the next post's call, or null.
     call.postDeps.next = async (res) => {
       last = await settle(cur.attempt.key, res, null, cur.st, deps, x, x.clock());
       await A.applyFindings(res, cur.st, x, x.clock());
       done = true;
-      if (!session.more(last)) return null;
+      // Timed out: the tick already gave this browser up — it posts nothing more.
+      if (timedOut || !session.more(last)) return null;
+      // Renewed before the dwell too: post (≤ timeout) + dwell can outlast one hold.
+      if (st.lock && st.lock.renew && !st.lock.renew()) return null;
+      arm(); // the dwell gets its own window, not what is left of the post's
       return async () => {
+        if (timedOut) return null;
         const nx = await session.prepare();
         if (!nx) return null;
         const c2 = await buildCall(nx.attempt, nx.st, deps, x, x.clock());
@@ -546,7 +552,7 @@ async function tickAccount(phone, deps = {}, now, opts = {}) {
   if (!release) return "profile_busy"; // an extract, the login browser or a hung post has the profile: next sweep
   // A timed-out driver call defers the release until its promise settles.
   let pending = null;
-  const lock = { defer: (p) => { pending = p; } };
+  const lock = { defer: (p) => { pending = p; }, renew: () => (release.renew ? release.renew() : true) };
   try { return await tickLocked(phone, deps, x, now, lock, opts); }
   catch (e) {
     console.error(redact(`posting tick ${tail(phone)}: ${code(e)}`));

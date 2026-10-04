@@ -281,6 +281,7 @@ const listSessions = (status, deps) => call("GET", `/v1/browser/sessions?pageSiz
 // error already in flight would hide what actually went wrong.
 async function stopSession(id, deps = {}) {
   live.delete(id);
+  profileLock.endLogin(id); // a login browser's Driver slot
   try {
     const r = await call("DELETE", `/v1/browser/session?sessionId=${encodeURIComponent(id)}`, null, deps);
     if (!r || r.success !== true) logError(`driver: stop of ${shortId(id)} did not succeed: response=${JSON.stringify(r)}`);

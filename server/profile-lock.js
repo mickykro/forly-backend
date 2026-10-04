@@ -31,15 +31,19 @@ function tryAcquire(phone, platform = "facebook") {
   if (entry && entry.until > now) return null;
   const owner = crypto.randomBytes(8).toString("hex");
   held.set(k, { until: now + MAX_HOLD_MS, owner });
-  return () => {
+  const release = () => {
     const cur = held.get(k);
     if (cur && cur.owner === owner) held.delete(k);
   };
-}
-// A session posting several in a row (posting-chain) keeps its hold alive.
-function renew(phone, platform = "facebook") {
-  const cur = held.get(keyFor(phone, platform));
-  if (cur) cur.until = Date.now() + MAX_HOLD_MS;
+  // A session posting several in a row (posting-chain) keeps its hold alive —
+  // only its own: false once the hold expired and someone else took the key.
+  release.renew = () => {
+    const cur = held.get(k);
+    if (!cur || cur.owner !== owner) return false;
+    cur.until = Date.now() + MAX_HOLD_MS;
+    return true;
+  };
+  return release;
 }
 function acquire(phone, platform = "facebook") {
   const release = tryAcquire(phone, platform);
@@ -66,7 +70,26 @@ function loginOpen(conn, platform = "facebook", nowMs = Date.now()) {
 }
 
 const budget = () => Number(process.env.DRIVER_MAX_CONCURRENT || 2);
-function trySession() { if (sessions >= budget()) return null; sessions++; return () => { sessions = Math.max(0, sessions - 1); }; }
-function activeSessions() { return sessions; }
+// Login browsers outlive the request that opened them, so they hold a slot by
+// session id until driver-browser.stopSession or their duration ends. A
+// restart forgets them, and boot's cleanupOrphans stops them, so both agree.
+const logins = new Map(); // sessionId → until
+function holdLogin(id, nowMs = Date.now()) { if (id) logins.set(id, nowMs + LOGIN_SESSION_S * 1000); }
+function endLogin(id) { logins.delete(id); }
+function liveLogins(except, nowMs = Date.now()) {
+  let n = 0;
+  for (const [id, until] of logins) {
+    if (until <= nowMs) logins.delete(id);
+    else if (id !== except) n++;
+  }
+  return n;
+}
+// opts.except: a login session the caller is about to replace — not counted.
+function trySession(opts = {}) {
+  if (sessions + liveLogins(opts.except) >= budget()) return null;
+  sessions++;
+  return () => { sessions = Math.max(0, sessions - 1); };
+}
+function activeSessions() { return sessions + liveLogins(); }
 
-module.exports = { tryAcquire, renew, acquire, isHeld, trySession, activeSessions, loginOpen, LOGIN_SESSION_S, MAX_HOLD_MS, _test: { held, reset: () => { held.clear(); sessions = 0; } } };
+module.exports = { tryAcquire, acquire, isHeld, trySession, activeSessions, holdLogin, endLogin, loginOpen, LOGIN_SESSION_S, MAX_HOLD_MS, _test: { held, reset: () => { held.clear(); logins.clear(); sessions = 0; } } };

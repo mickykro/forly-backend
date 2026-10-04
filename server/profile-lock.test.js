@@ -52,6 +52,35 @@ const L = require("./profile-lock");
   assert.ok(!L.isHeld("05v", "yad2"));
   relDefault();
 
+  // ── renew is owner-bound: a lapsed hold cannot extend its successor's ──
+  {
+    const old = L.tryAcquire("05r", "facebook");
+    assert.equal(old.renew(), true);
+    L._test.held.get("05r|facebook").until = Date.now() - 1;
+    const next = L.tryAcquire("05r", "facebook");
+    const until = L._test.held.get("05r|facebook").until;
+    assert.equal(old.renew(), false, "the old owner cannot renew");
+    assert.equal(L._test.held.get("05r|facebook").until, until);
+    next();
+  }
+
+  // ── login browsers hold a Driver slot until stopped or expired ──
+  {
+    L._test.reset();
+    process.env.DRIVER_MAX_CONCURRENT = "2";
+    L.holdLogin("A"); L.holdLogin("B");
+    assert.equal(L.trySession(), null, "two live logins fill a budget of 2");
+    assert.ok(L.trySession({ except: "A" }), "replacing login A frees its slot");
+    L._test.reset();
+    L.holdLogin("A"); L.holdLogin("B");
+    L.endLogin("A");
+    assert.ok(L.trySession(), "a stopped login frees its slot");
+    L._test.reset();
+    L.holdLogin("A", Date.now() - L.LOGIN_SESSION_S * 1000); L.holdLogin("B", Date.now() - L.LOGIN_SESSION_S * 1000);
+    assert.ok(L.trySession(), "an expired login frees its slot");
+    delete process.env.DRIVER_MAX_CONCURRENT;
+  }
+
   L._test.reset();
   console.log("profile-lock.test.js ok");
 })();

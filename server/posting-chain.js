@@ -55,7 +55,7 @@ async function prepareNext(phone, deps, x, now) {
 }
 
 // One per browser session: how many it posted, since when.
-function session(phone, deps, x) {
+function session(phone, deps, x, lock) {
   const started = Date.now();
   let posts = 1;
   const budget = SESSION_MS(deps.env) - POST_BUDGET_MS;
@@ -63,7 +63,7 @@ function session(phone, deps, x) {
     more: (state) => OK.has(state) && posts < MAX_POSTS && Date.now() - started < budget,
     prepare: async () => {
       if (Date.now() - started >= budget) return null;
-      if (x.locks && typeof x.locks.renew === "function") x.locks.renew(phone, "facebook");
+      if (lock && lock.renew && !lock.renew()) return null; // our hold lapsed: the profile is someone else's
       const nx = await prepareNext(phone, deps, x, x.clock()).catch(() => null);
       if (nx) posts++;
       return nx;

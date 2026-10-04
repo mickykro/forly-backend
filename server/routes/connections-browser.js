@@ -242,6 +242,10 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       return { status: 503, body: { error: network ? (e.code === "invalid_proxy_config" ? "proxy_unavailable" : e.code) : "extract_unavailable" } };
     }
 
+    // The login browser keeps its Driver slot past this request, until it is
+    // stopped (driver-browser.stopSession) or its duration ends.
+    locks.holdLogin(session.sessionId);
+
     // Top-level keys, not a nested map: setConnection is a merge write, and a
     // merge cannot delete a nested key — finish/disconnect need to clear this.
     await db.setConnection(phone, Object.assign({
@@ -264,9 +268,11 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     // Held only for the duration of this request: the embedded login session
     // itself is long-lived, but its purpose here is to refuse to open a login
     // browser while a post/extract/sweep is using the profile right now.
+    // A login being replaced (startFlow stops it) does not count against the budget.
+    const prev = ((await db.getConnection(phone)) || {})[`browser_session_${platform}`];
     const releaseProfile = locks.tryAcquire(phone, platform);
     if (!releaseProfile) return res.status(409).json({ error: "profile_busy" });
-    const releaseSession = locks.trySession();
+    const releaseSession = locks.trySession({ except: prev && prev.session_id });
     if (!releaseSession) { releaseProfile(); return res.status(503).json({ error: "driver_busy", retry: true }); }
 
     let result;
