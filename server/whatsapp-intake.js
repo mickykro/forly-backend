@@ -447,12 +447,12 @@ async function handleTurn(input, deps) {
     if (!kind) {
       const back = input.text && !input.event ? await recoverFromChat(phone, input.text, deps, now, openDraft) : null;
       if (back) return back;
-      return withDrop(PC.editRequest(input.text, phone, now) || notOurs("not_ours"));
+      return withDrop((await PC.editRequestNow(input.text, phone, deps, now)) || notOurs("not_ours"));
     }
     return openDraft(phone, kind, input.text, deps, now);
   }
   if (draft.status === "photo_choice") {
-    if (input.event === "photo_timer") return PC.ask(draft);
+    if (input.event === "photo_timer") return PC.ask(draft, true);
     return PC.turn(input, deps, draft, now, { openDraft, openerOf, storePhoto, updatePage });
   }
   if (draft.status === "updating") return updatingTurn(input, deps, draft, now, { openDraft, promptFor, resumePrompt });
