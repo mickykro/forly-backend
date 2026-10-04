@@ -66,6 +66,11 @@ const { db, store } = K;
     // 111 (named Haifa, catalog Haifa), 777 (catalog Haifa), 222 (named Haifa by the kit, catalog Krayot) — never 555 (left) or 999 (no name, not in the catalog).
     assert.deepEqual(p.fit_group_ids.slice().sort(), ["111", "222", "777"]);
     assert.ok(!JSON.stringify(r.body).includes(G(111)), "no group URL leaves");
+    assert.equal(p.chosen_group_ids, null, "no groups chosen while it was built");
+    // Chosen while it was built: exactly those groups are offered first, not the city's matches.
+    await db.saveListing(L("l2", "pg2", { posting_groups: ["555", "222"] }));
+    const chosen = (await call(app, "GET", "/api/posting/properties")).body.properties[0];
+    assert.deepEqual(chosen.chosen_group_ids, ["555", "222"]);
   }
   // ── a group that says "no agents" in its own name is barred everywhere ──
   {

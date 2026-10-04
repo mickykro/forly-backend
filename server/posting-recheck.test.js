@@ -39,6 +39,7 @@ function harness(deps, { results = {}, page = {}, openThrows = null, real = fals
   };
   const pg = F.fakePage(Object.assign({ attrs: { [require("./posting-driver-proof").SELECTORS.targetIdMeta]: "fb://group/111" } }, page));
   const d = Object.assign({}, deps, {
+    env: Object.assign({}, deps.env, { POSTING_RECHECK: "1" }),
     guard,
     withPage: async (opts, fn, pd) => { ev.push("open"); opened.push({ opts, pd }); if (openThrows) throw openThrows; try { return await fn(pg, { sessionId: "s" }); } finally { ev.push("close"); } },
     recheckPost: async (p, url, rd) => {
@@ -62,6 +63,11 @@ function harness(deps, { results = {}, page = {}, openThrows = null, real = fals
     await C.create(K.base(), deps); // running: the account is posting
     const h = harness(deps);
     const later = new Date(NOW.getTime() + 25 * HOUR);
+    // Off unless POSTING_RECHECK=1: neither path opens or reads anything.
+    const off = Object.assign({}, h.d, { env: {} });
+    assert.equal(await R.recheckOne(off, later), "disabled");
+    assert.equal(await R.recheckDueFor(PH, off, require("./posting-account").ctxOf(off), later, h.pg), "disabled");
+    assert.deepEqual(h.ev, [], "nothing opened while off");
     await R.recheckOne(h.d, later);
     assert.deepEqual(h.ev.filter((e) => e === "open"), [], "no session of its own while it is posting");
     // inside the posting session: the same page, no new session

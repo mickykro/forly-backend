@@ -260,8 +260,8 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     // The video is downloaded from where it lives, never from a rewritten address (a local upload 404'd on prod).
     assert.equal(C.videoOf({ hero: { video_url: "http://127.0.0.1:8787/files/v.mp4" } }).video_url, "http://127.0.0.1:8787/files/v.mp4");
     assert.equal(C.videoOf({ hero: { video_url: "https://staging.srv1173890.hstgr.cloud/files/v.mp4" } }).video_url, "https://staging.srv1173890.hstgr.cloud/files/v.mp4");
-    assert.equal(C.videoOf({ hero: { video_url: "https://x.test/clean.mp4", post_video_url: "https://x.test/post.mp4" } }).video_url, "https://x.test/post.mp4", "the marketing cut wins");
-    assert.equal(C.videoOf({ hero: { video_url: "https://x.test/clean.mp4", post_video_url: "javascript:x" } }).video_url, "https://x.test/clean.mp4", "a bad marketing url falls back");
+    assert.equal(C.videoOf({ hero: { video_url: "https://x.test/clean.mp4", promo_video_url: "https://x.test/post.mp4" } }).video_url, "https://x.test/post.mp4", "the marketing cut wins");
+    assert.equal(C.videoOf({ hero: { video_url: "https://x.test/clean.mp4", promo_video_url: "javascript:x" } }).video_url, "https://x.test/clean.mp4", "a bad marketing url falls back");
     // Shown to the agent: a loopback address becomes a path on the server showing the page.
     assert.deepEqual(C.videoView({ video_url: "http://127.0.0.1:8787/files/v.mp4", poster_url: "http://localhost:8787/files/p.jpg" }), { video_url: "/files/v.mp4", poster_url: "/files/p.jpg" });
     assert.deepEqual(C.videoView({ video_url: V, poster_url: null }), { video_url: V, poster_url: null });

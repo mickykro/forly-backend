@@ -38,7 +38,7 @@ async function unknownCampaign() {
   assert.equal((await store.getAttempt(key)).state, "outcome_unknown");
   return Object.assign(w, { c, key, later });
 }
-const recheckDeps = (deps, opened) => with_(deps, { withPage: async (o, fn) => { opened.push(o.note); return fn({}); }, recheckPost: async () => ({ state: "visible", reactions: 1, comments: 0, signal: "ok" }) });
+const recheckDeps = (deps, opened) => with_(deps, { env: Object.assign({}, deps.env, { POSTING_RECHECK: "1" }), withPage: async (o, fn) => { opened.push(o.note); return fn({}); }, recheckPost: async () => ({ state: "visible", reactions: 1, comments: 0, signal: "ok" }) });
 const loginNow = (t) => ({ browser_session_facebook: { session_id: "login1", started_at: iso(t) } });
 
 (async () => {

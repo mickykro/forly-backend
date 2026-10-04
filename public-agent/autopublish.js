@@ -160,13 +160,17 @@
   const DEAL = { sale: "למכירה", rent: "להשכרה" };
 
   // The groups a property posts to: its campaign's while it runs; otherwise
-  // what the agent ticked here, first the server's picks (up to five).
+  // what the agent ticked here, first the groups chosen for it when it was
+  // built (chosen_group_ids), and only without a choice the server's picks
+  // for its city (up to five).
   function groupsOf(p) {
     if (live(p.campaign)) return new Set((p.campaign.groups || []).map((g) => String(g.group_id)));
     if (!picks.has(p.page_id)) {
       const ok = new Set(usableIds());
       const no = new Set((p.excluded_group_ids || []).map(String));
-      picks.set(p.page_id, new Set((p.fit_group_ids || []).map(String).filter((id) => ok.has(id) && !no.has(id)).slice(0, 5)));
+      const chosen = Array.isArray(p.chosen_group_ids);
+      const ids = (chosen ? p.chosen_group_ids : p.fit_group_ids || []).map(String).filter((id) => ok.has(id) && !no.has(id));
+      picks.set(p.page_id, new Set(chosen ? ids : ids.slice(0, 5)));
     }
     return picks.get(p.page_id);
   }

@@ -156,6 +156,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const members = S_.memberList(conn).filter((m) => m.membership_state === "member" && isRealEstateGroup(m, lookup.all(m)) && (m.name || (lookup(m) || {}).name));
     const listings = typeof db.listListingsByPhone === "function" ? await db.listListingsByPhone(phone) : [];
     const camps = await store.listPostingCampaignsByPhone(phone);
+    const biz = await db.getBusiness(phone).catch(() => null);
     const latest = (pageId) => camps.filter((c) => c.page_id === pageId)
       .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0] || null;
     const out = [];
@@ -164,6 +165,12 @@ module.exports = function mountPostingSettings(router, S, auth) {
       const page = await db.getPage(l.page_id).catch(() => null);
       if (!page || page.business_phone !== phone || !A.ACTIVE_PAGE.has(page.status || "active")) continue;
       const property = Object.assign({ city: l.city, listing_type: l.listing_type || "sale" }, page.property || {});
+      const fits = members.filter((m) => A.fitsProperty(m, lookup.all(m), property)).map((m) => m.group_id);
+      // The groups chosen for this property while it was built (posting-listing-groups):
+      // exactly those, or "default" = the default groups that suit it. null: no choice made.
+      const choice = l.posting_groups;
+      const chosen = Array.isArray(choice) ? choice.map(String)
+        : choice === "default" ? A.defaultGroupIds(conn, biz).map(String).filter((id) => fits.includes(id)) : null;
       out.push({
         page_id: page.page_id,
         title: `${property.rooms || l.rooms || ""} חד׳ ב${property.neighborhood || l.neighborhood || property.city || ""}`.trim(),
@@ -173,7 +180,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
         created_at: isoOf(page.created_at || l.created_at),
         price: Number(property.price) > 0 ? Number(property.price) : null,
         campaign: S_.publicView(latest(page.page_id)),
-        fit_group_ids: members.filter((m) => A.fitsProperty(m, lookup.all(m), property)).map((m) => m.group_id),
+        fit_group_ids: fits,
+        chosen_group_ids: chosen,
         // Refused for this property (POST /campaigns: listing_type_not_allowed): never offered.
         excluded_group_ids: members.filter((m) => lookup.all(m).some((e) => e && A.typeExcluded(e, property.listing_type))).map((m) => m.group_id),
       });

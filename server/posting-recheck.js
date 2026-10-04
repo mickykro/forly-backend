@@ -167,7 +167,14 @@ async function visit(phone, due, conn, deps, x) {
 }
 
 // → "rechecked" | "skipped" | "none". Never throws for one account's trouble.
+// Off unless POSTING_RECHECK=1 (4 Oct 2026): every check came back
+// selector_failure on today's Facebook, and the in-session ones kept a post's
+// browser open ~6 minutes past its post, to Driver's 14-minute limit.
+// Turn back on once the selectors are recalibrated.
+const enabled = (deps = {}) => (deps.env || process.env).POSTING_RECHECK === "1";
+
 async function recheckOne(deps = {}, now) {
+  if (!enabled(deps)) return "disabled";
   const x = A.ctxOf(deps);
   now = now || A.nowOf(deps, x);
   const due = (await x.store.listRecheckDue(now, 50)).filter((a) => a && a.key && a.phone);
@@ -232,6 +239,7 @@ async function recheckPhone(phone, list, deps, x, now, opts = {}) {
 // Inside a posting session that is still open (posting-driver → posting-tick):
 // the account's due checks, on the same page — no session of their own.
 async function recheckDueFor(phone, deps, x, now, page) {
+  if (!enabled(deps)) return "disabled";
   const list = (await x.store.listRecheckDue(now, 50)).filter((a) => a && a.key && a.phone === phone && a.post_url && a.campaign_id
     && now.getTime() - ms(a.finished_at || a.reserved_at) <= GIVE_UP_MS);
   if (!list.length) return "none";
@@ -239,4 +247,4 @@ async function recheckDueFor(phone, deps, x, now, page) {
 }
 const posting = async (x, phone) => (await x.store.listPostingCampaignsByPhone(phone).catch(() => [])).some((c) => c.status === "running");
 
-module.exports = { recheckOne, recheckDueFor, MAX_POSTS, SESSION_S, MAX_TRIES, _test: { classify, patchFor, accountSkipped, permalinkInGroup, groupState, haltingOf, HALTING } };
+module.exports = { enabled, recheckOne, recheckDueFor, MAX_POSTS, SESSION_S, MAX_TRIES, _test: { classify, patchFor, accountSkipped, permalinkInGroup, groupState, haltingOf, HALTING } };

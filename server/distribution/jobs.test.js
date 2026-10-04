@@ -292,7 +292,7 @@ async function queuedDist(deps, { force = false } = {}) {
   }
   {
     // the page shows the clean video; publishing uses the titled marketing cut
-    const page = { ...PAGE, hero: { ...PAGE.hero, post_video_url: "https://x.test/v-promo.mp4" } };
+    const page = { ...PAGE, hero: { ...PAGE.hero, promo_video_url: "https://x.test/v-promo.mp4" } };
     const db = fakeDb(); seed(db, { page });
     const { deps } = makeDeps({ db, metaMod: fakeMeta() });
     const r = await jobs.maybeOffer(deps, page);
