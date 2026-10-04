@@ -17,6 +17,7 @@ const map = normalizeMap({
   sees: [{ from: 3, to: 1, what: "kitchen island" }],
 }, 5, tags.map((t) => t.room_type));
 let plan = planWalkthrough(map, tags, { rooms: 6, neighborhood: "הפארק", city: "באר שבע", size_sqm: 150, floor: 2, parking: 2 });
+assert.ok(plan.clips.every((c) => /perfectly level/.test(c.prompt) && /no roll, tilt, rotation or dutch angle/.test(c.prompt)), "every clip asks for a level camera");
 assert.equal(plan.clip_count, 2, "one clip per space");
 assert.equal(plan.opener_group, "lounge");
 const [open, bed] = plan.clips;

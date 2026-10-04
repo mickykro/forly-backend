@@ -184,7 +184,11 @@ function buildClip(group, index, openerGroup) {
   const scope = packed
     ? "Each shot is in a different room and opens directly inside it: never show a door frame, doorway or passage between shots."
     : "Every shot stays inside this one room.";
-  const camera = "The camera is at eye height, moves slowly forward, never turns or pans, and stops well before its target.";
+  // Seedance rolled the camera in interiors (walls and windows leaning 15-25°,
+  // tilting as it moved) when only turns and pans were ruled out: say level.
+  const camera = "The camera is at eye height, moves slowly forward, never turns or pans, and stops well before its target. " +
+    "It stays perfectly level the whole time, as on a gimbal: the horizon is flat and walls, door frames and windows stay " +
+    "vertical, with no roll, tilt, rotation or dutch angle, even if a reference photo was taken at an angle.";
   const prompt = [head, scope, camera, ...lines, ...extras].join(" ") + TAIL;
   return {
     clip_index: index,
