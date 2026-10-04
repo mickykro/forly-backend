@@ -39,7 +39,7 @@ const { parseListing } = require("../listing-extract");
 const { classify } = require("../property-intent");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
-const { validateListing, createListing } = require("../listing-create");
+const { validateListing, createListing, lastAttemptMs } = require("../listing-create");
 const { verifySession, requireAuth, readToken, REVIEW_SCOPES } = require("../auth");
 
 const REVIEW_TTL_S = 7 * 24 * 60 * 60;
@@ -258,7 +258,8 @@ module.exports = function createWhatsappRouter(ctx) {
   async function sweepStuckBuilds(now = Date.now()) {
     const pending = await db.listPendingListings("whatsapp");
     for (const l of pending) {
-      const age = now - asMillis(l.created_at);
+      // A dashboard retry restarts the clock (retried_at), or it would re-fail at once.
+      const age = now - lastAttemptMs(l);
       if (!(age > BUILD_TIMEOUT_MS)) continue;
       // The other server's sweep may have taken it: only the claimer tells the agent.
       if (!(await db.claimStatus("listings", l.listing_id, "active", { status: "failed" }))) continue;

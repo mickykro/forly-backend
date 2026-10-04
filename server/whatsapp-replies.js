@@ -107,6 +107,7 @@ function pagePhotosAsk(title, had, got) {
 function pagePhotosDone(n, editUrl) { return { text: `עדכנתי ✅ בדף יש עכשיו ${n} תמונות.\nלסידור או לשינויים נוספים: ${editUrl}` }; }
 function backToDraft() { return { text: "חוזרים לנכס שבטיפול:" }; }
 function noPages() { return { text: "עוד אין לך דפי נכס. לדף חדש מהתמונות ענו 1." }; }
+function noUpdate() { return { text: "בסדר, לא מעדכנת כלום 🙂" }; }
 function sendForEdit() { return { text: "בשמחה ✨ שלחו את התמונות לעריכה 📸" }; }
 function stopped() { return { text: "עצרתי ✋ לא אערוך תמונות נוספות." }; }
 
@@ -263,7 +264,7 @@ function noLinkHint(createUrl) {
 
 module.exports = { defaultChosen, defaultUnavailable,
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
-  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, recovered, duplicatePage, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, sendForEdit, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
+  reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, recovered, duplicatePage, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, sendForEdit, noUpdate, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,
   heard, voiceFailed, sendAsImage, firstLinkOnly, listingPhotosFailed, buildFailed, outOfQuota, videoSaved, videoFailed,
 };

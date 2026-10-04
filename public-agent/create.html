@@ -1844,7 +1844,29 @@
           setTimeout(function() { location.href = "/"; }, 3000);
         }
       } else if (state === "fail") {
-        $("#retryLink").href = location.pathname + location.search;
+        // The listing keeps every detail and photo, so "try again" reruns the
+        // build from it rather than sending the agent back to an empty form.
+        // That fresh form stays the fallback (e.g. an admin demo, not the owner).
+        var retry = $("#retryLink");
+        retry.href = location.pathname + location.search;
+        retry.onclick = function (e) {
+          e.preventDefault();
+          if (retry.dataset.busy) return;
+          retry.dataset.busy = "1";
+          FLY.req("/api/properties/retry", { method: "POST", body: { listing_id: listingId }, noRedirect: true })
+            .then(function () {
+              $("#failBox").classList.add("hidden");
+              $("#buildSpin").classList.remove("hidden");
+              $(".build-another-note").classList.remove("hidden");
+              ["st2", "st3", "st4"].forEach(function (id) { $("#" + id).classList.remove("now", "done"); });
+              startBuildingScreen(listingId, demoLoggedIn);
+            })
+            .catch(function (err) {
+              if (err && err.code === "retry_limit") { FLY.toast(FT("fail_sub")); return; }
+              location.href = retry.href;
+            })
+            .finally(function () { delete retry.dataset.busy; });
+        };
         $("#failBox").classList.remove("hidden");
       } else {
         // demo users should go to dashboard even on timeout

@@ -171,6 +171,7 @@ module.exports = function createPagesRouter(ctx) {
       // listing here (this is what kept uploaded logos off the page).
       const listing = await db.getListing(body.listing_id).catch(() => null);
       const theme = sanitizeTheme(body.theme || (listing && listing.theme));
+      const archivedListing = !!listing && listing.status === "archived";
       const listingAgent = (listing && listing.agent) || {};
       const agentIn = body.agent || {};
       const agentField = (k) => String(agentIn[k] || listingAgent[k] || "");
@@ -267,7 +268,9 @@ module.exports = function createPagesRouter(ctx) {
       const now = new Date();
       const doc = {
         page_id: pageId, listing_id: body.listing_id, business_phone: body.business_phone,
-        status: "active",
+        // Archived while still building: the page is born archived, so it stays
+        // off the portal and portfolio until the agent restores it.
+        status: archivedListing ? "archived" : "active",
         created_at: reusable ? reusable.created_at : now,
         updated_at: now,
         expires_at: reusable ? reusable.expires_at : daysFromNow(PAGE_LIFESPAN_DAYS),
@@ -357,14 +360,16 @@ module.exports = function createPagesRouter(ctx) {
         db.updateListingDraft(listing.listing_draft_id, { status: "created", page_id: pageId, updated_at: new Date().toISOString() })
           .catch((e) => console.warn("listing-draft mark-created failed:", e && e.message));
       }
-      // Realtime: the portal shows the listing the moment it exists.
-      portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
-        portalStream.toCard(doc, pageBaseUrl));
-      // Distribution hook: fire-and-forget — never delays or fails page
-      // creation (spec §4). Entitlement + duplicate checks live in maybeOffer.
-      distributionJobs.maybeOffer(distDeps, doc)
-        .catch((e) => console.warn("distribution offer failed:", e && e.message));
-      enrollPosting(doc, listing);
+      if (!archivedListing) {
+        // Realtime: the portal shows the listing the moment it exists.
+        portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
+          portalStream.toCard(doc, pageBaseUrl));
+        // Distribution hook: fire-and-forget — never delays or fails page
+        // creation (spec §4). Entitlement + duplicate checks live in maybeOffer.
+        distributionJobs.maybeOffer(distDeps, doc)
+          .catch((e) => console.warn("distribution offer failed:", e && e.message));
+        enrollPosting(doc, listing);
+      }
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
@@ -494,6 +499,18 @@ module.exports = function createPagesRouter(ctx) {
         if (body.agent.brand_name != null) patch["agent.brand_name"] = String(body.agent.brand_name).slice(0, 60);
         if (body.agent.tagline != null) patch["agent.tagline"] = String(body.agent.tagline).slice(0, 120);
       }
+      // Co-listing agent: name + WhatsApp number (leads go to both). Both blank
+      // removes it; a half-filled pair is skipped, since the editor autosaves
+      // mid-typing and must not wipe the saved agent on every keystroke.
+      let agent2Patch;
+      if (body.agent2 !== undefined) {
+        const a2 = body.agent2 && typeof body.agent2 === "object" ? body.agent2 : {};
+        const name = String(a2.name || "").trim().slice(0, 60);
+        const rawPhone = String(a2.phone || "").trim();
+        if (!name && !rawPhone) agent2Patch = null;
+        else if (name && normalizeAuthPhone(rawPhone)) agent2Patch = { name, phone: normalizeAuthPhone(rawPhone) };
+        if (agent2Patch !== undefined) patch.agent2 = agent2Patch;
+      }
       // Property
       if (body.property && typeof body.property === "object") {
         if (body.property.title != null) patch["property.title"] = String(body.property.title).slice(0, 80);
@@ -552,6 +569,10 @@ module.exports = function createPagesRouter(ctx) {
         patch["sections.area"] = !!body.sections.area;
       }
       await db.updatePage(pageId, patch);
+      // The listing keeps it too: a rebuild of the page reads agent2 from there.
+      if (agent2Patch !== undefined && d.listing_id) {
+        await db.updateListing(d.listing_id, { agent2: agent2Patch }).catch((e) => console.warn("listing agent2 sync failed:", e.message));
+      }
       const fresh = await db.getPage(pageId).catch(() => null);
       if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true });

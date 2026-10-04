@@ -14,20 +14,25 @@
  */
 const R = require("./whatsapp-replies");
 const D = require("./property-draft");
+const { readChat } = require("./chat-recover");
 
 const MAX_PHOTOS = 12;
 const SAMPLE = 3;
 
 function hold(draft, phone, urls, now) {
-  const d = draft && draft.status === "photo_choice" ? draft : { phone, status: "photo_choice", photos: [], created_at: now };
+  const d = draft && draft.status === "photo_choice" ? draft : { phone, status: "photo_choice", photos: [], created_at: now, unasked: true };
   d.photos = [...new Set(d.photos.concat(urls))].slice(0, MAX_PHOTOS);
   d.updated_at = now;
   return { handled: true, status: `photo_choice:${d.photos.length}`, draft: d, replies: [], armPhotoTimer: true };
 }
 
-// The photo timer: the burst is over, ask with the real count.
-function ask(draft) {
-  return { handled: true, status: "photo_choice_asked", replies: [R.photoChoice(draft.photos.length)] };
+// The photo timer: the burst is over, ask with the real count — once per count, since
+// a number typed before it already asked (see turn).
+function ask(draft, fromTimer) {
+  if (fromTimer && !draft.unasked && draft.asked_count === draft.photos.length) return { handled: true, status: "photo_choice_asked", replies: [] };
+  delete draft.unasked;
+  draft.asked_count = draft.photos.length;
+  return { handled: true, status: "photo_choice_asked", draft, replies: [R.photoChoice(draft.photos.length)] };
 }
 
 const edit = (photos, instruction) =>
@@ -40,6 +45,9 @@ async function turn(input, deps, draft, now, h) {
   const text = String(input.text || "").trim();
   const m = /^([1-4])\s*[.)]?$/.exec(text); // "3", "3.", "3)"
   const n = m ? Number(m[1]) : null;
+  // A number before the 1/2/3/4 menu went out answers the question still on screen
+  // (972546582548's "2" — "no" to the page offer — added her photos to a page): ask now.
+  if (n && draft.unasked) return ask(draft);
   if (n === 3) return edit(draft.photos, "");
   if (n === 4) return edit(draft.photos.slice(0, SAMPLE), "");
   const kind = n ? null : await h.openerOf(text, deps);
@@ -117,7 +125,9 @@ function swapTurn(input, draft, now, promptReplies) {
 const EDIT_VERB = /(תעכי|תערכו|עריכת|תנקה|תנקי|לנקות|ננקה|תערוך|תערכי|לערוך|נערוך|תשפר|תשפרי|לשפר|נשפר|תבהיר|להבהיר|נבהיר|תחדד|לחדד|נחדד|תסיר|תסירי|להסיר|נסיר|תמחק|תמחקי|למחוק|נמחק|תעצב|תעצבי|לעצב)/;
 function editRequest(text, phone, now) {
   const t = String(text || "").trim();
-  if (!/תמונ/.test(t) || !EDIT_VERB.test(t)) return null;
+  // "לשפר" / "תערכי אותן" alone (the photos are implied) counts too; "למחוק נכס" doesn't.
+  const bare = /^\S+(\s+(אותן|אותם|אותה|אותו|לי|בבקשה|שוב))?[.!?]*$/.test(t);
+  if (!EDIT_VERB.test(t) || !(/תמונ/.test(t) || bare)) return null;
   return { handled: false, status: "not_ours", replies: [], draft: { phone, status: "edit_request", text: t.slice(0, 1000), created_at: now, updated_at: now } };
 }
 // "אני רוצה לערוך עוד תמונות לנכס אחר" says to edit, not how: n8n's default enhancement then.
@@ -128,6 +138,39 @@ function instructionOf(text) {
     .filter((w) => !GENERIC_WORDS.has(w) && !EDIT_VERB.test(w));
   return rest.length ? text : "";
 }
+
+// The agent's own newest photos that nothing answered (no edit since), last 20 min:
+// "לשפר תמונה" quoting an album (no image in the quote) after the photos were let go.
+async function unansweredPhotos(phone, deps, now) {
+  let history = [];
+  try { history = deps.recentChat ? (await deps.recentChat(phone)) || [] : []; } catch (err) { return []; }
+  const nowS = now.getTime() / 1000, own = [];
+  for (const m of readChat(history.filter((h) => nowS - h.timestamp < 20 * 60), nowS)) {
+    if (m.who === "bot" && m.image) break; // edited since
+    if (m.who === "agent" && m.image) own.push(m.image); else if (own.length) break;
+  }
+  return own.reverse().slice(0, MAX_PHOTOS);
+}
+// An edit request with no draft: the photos just sent are edited now; none → wait for them.
+async function editRequestNow(text, phone, deps, now) {
+  const r = editRequest(text, phone, now);
+  if (!r) return null;
+  const photos = await unansweredPhotos(phone, deps, now);
+  // None yet: the code answers, not n8n's bot (it agreed to edits it never ran).
+  return photos.length ? { ...edit(photos, instructionOf(text)), status: "edit_recent" } : { ...r, handled: true, status: "edit_request", replies: [R.sendForEdit()] };
+}
+// While an edit request waits: "כן" / "לשפר" again edits the photos just sent, or asks for them.
+async function waitingTurn(input, draft, deps, now) {
+  const t = String(input.text || "").trim();
+  if (input.event || photosOf(input) || !(D.command(t) === "yes" || editRequest(t, draft.phone, now))) return null;
+  const photos = await unansweredPhotos(draft.phone, deps, now);
+  draft.updated_at = now;
+  if (!photos.length) return { handled: true, status: "edit_request", draft, replies: [R.sendForEdit()] };
+  const back = resumeAfterEdit(draft, now);
+  return { ...edit(photos, instructionOf(draft.text)), status: "edit_recent", del: !back, draft: back || undefined };
+}
+const photosOf = (input) => (input.fileUrls && input.fileUrls.length) || input.fileUrl;
+
 function editWith(draft, urls, now) {
   draft.updated_at = now; // the rest of the burst uses it too
   if (draft.suspended && !draft.keep_apart) draft.suspended.editing = (draft.suspended.editing || 0) + urls.length;
@@ -207,4 +250,4 @@ function photoTimer(draft, deps, now, promptFor) {
   return { handled: true, status: p.status, draft: touched, replies: [R.oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
 }
 
-module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editWith, editInDraft, resumeAfterEdit, offerTimer, offeredDraft, storeVideo, photoTimer };
+module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editRequestNow, waitingTurn, editWith, editInDraft, resumeAfterEdit, offerTimer, offeredDraft, storeVideo, photoTimer };

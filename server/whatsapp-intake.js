@@ -10,7 +10,7 @@
  * Spec: docs/superpowers/specs/2026-09-12-whatsapp-property-chat-design.md
  */
 const D = require("./property-draft");
-const R = require("./whatsapp-replies");
+const R = require("./whatsapp-replies"), { oneBubble } = R;
 const C = require("./draft-corrections");
 const { updatePage, updatingTurn, duplicateCheck, duplicateTurn } = require("./page-update");
 const { intentOf, openerOf } = require("./property-intent");
@@ -18,7 +18,6 @@ const { recoverFromChat } = require("./chat-recover");
 const PC = require("./photo-choice"), { offerTimer, offeredDraft } = PC;
 
 const MAX_PHOTOS = 54; // walkthrough: up to 6 clips × 9 reference photos
-const { oneBubble } = R;
 
 const notOurs = (status) => ({ handled: false, status, replies: [] });
 
@@ -395,6 +394,7 @@ async function handleTurn(input, deps) {
   if (input.event === "photos_edited") return withDrop(await photosEdited(input, deps, draft, now));
   if (draft && draft.status === "edit_request") {
     if (photoUrlsOf(input) && !input.text && !input.event) return PC.editWith(draft, photoUrlsOf(input), now);
+    { const w = await PC.waitingTurn(input, draft, deps, now); if (w) return w; }
     // Anything else ends it, judged on its own — against the draft that waited, if one did.
     const back = input.event ? draft : PC.resumeAfterEdit(draft, now);
     if (!back) { draft = null; dropped = true; } else if (back !== draft) {
@@ -456,12 +456,12 @@ async function handleTurn(input, deps) {
     if (!kind) {
       const back = input.text && !input.event ? await recoverFromChat(phone, input.text, deps, now, openDraft) : null;
       if (back) return back;
-      return withDrop(PC.editRequest(input.text, phone, now) || notOurs("not_ours"));
+      return withDrop((await PC.editRequestNow(input.text, phone, deps, now)) || notOurs("not_ours"));
     }
     return openDraft(phone, kind, input.text, deps, now);
   }
   if (draft.status === "photo_choice") {
-    if (input.event === "photo_timer") return PC.ask(draft);
+    if (input.event === "photo_timer") return PC.ask(draft, true);
     return PC.turn(input, deps, draft, now, { openDraft, openerOf, storePhoto, updatePage });
   }
   if (draft.status === "updating") return updatingTurn(input, deps, draft, now, { openDraft, promptFor, resumePrompt });

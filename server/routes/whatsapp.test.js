@@ -32,10 +32,13 @@ const { transcribe } = createWhatsappRouter;
   await db.saveListing({ listing_id: "B", source: "whatsapp", status: "active", page_id: null, business_phone: "P2", created_at: old,
     city: "באר שבע", rooms: 3, price: 1250000 });
   await db.saveListing({ listing_id: "C", source: "whatsapp", status: "active", page_id: null, business_phone: "P3", created_at: new Date(now) });
+  // retried from the dashboard: the clock restarts at retried_at
+  await db.saveListing({ listing_id: "D", source: "whatsapp", status: "active", page_id: null, business_phone: "P4", created_at: old, retried_at: new Date(now) });
   await db.saveDraft({ phone: "P1", status: "building", mode: "create", listing_id: "A", fields: {}, skipped: [], photos: [] });
   await router.sweepStuckBuilds(now);
   assert.deepEqual([(await db.getListing("A")).status, (await db.getListing("B")).status, (await db.getListing("C")).status],
     ["failed", "failed", "active"], "only listings past the timeout fail");
+  assert.equal((await db.getListing("D")).status, "active", "a fresh retry is not re-failed off created_at");
   const d1 = await db.getDraft("P1");
   assert.deepEqual([d1.status, d1.mode, d1.listing_id], ["active", null, null], "the draft that built it can retry");
   assert.match(msgs.find(([p]) => p === "P1")[1], /ליצור/);
