@@ -94,6 +94,9 @@ function spokenCommand(text) {
 // "עצור", "די", "אל תערוך שוב": stop the photo edits n8n is running.
 const STOP_RE = /^(עצור|עצרי|תעצור|תעצרי|די|מספיק|תפסיק|תפסיקי|stop)$|^אל (תערוך|תערכי|תמשיך|תמשיכי)/i;
 function isStop(text) { return STOP_RE.test(clean(text)); }
+// "לא משנה, בואי נתחיל מההתחלה": the draft is dropped, like ביטול. Short messages only.
+const RESTART_RE = /(מההתחלה|להתחיל מחדש|נתחיל מחדש|מתחילים מחדש|לבטל הכל)/;
+function isRestart(text) { const t = String(text || "").trim(); return t.split(/\s+/).length <= 8 && RESTART_RE.test(t); }
 function isKeyword(text) { return KEYWORDS.includes(clean(text)); }
 function looksLikeListing(text) {
   const t = String(text || "");
@@ -327,6 +330,6 @@ function summary(draft) {
 
 module.exports = {
   REQUIRED, OPTIONAL, ASK_ORDER, PAUSE_MS, MIN_PHOTOS, SCHEMA, TEMPLATES, TEMPLATE_KEYS,
-  findUrl, command, spokenCommand, isStop, knownCity, CANONICAL, openerKind, parseAnswer, isRequired, noteCurrency, asMillis,
+  findUrl, command, spokenCommand, isStop, isRestart, knownCity, CANONICAL, openerKind, parseAnswer, isRequired, noteCurrency, asMillis,
   newDraft, touch, nextStep, missing, isPaused, isExpiredPrompt, summary, listingBody, priceLooksOff, clean,
 };
