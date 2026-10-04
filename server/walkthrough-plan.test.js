@@ -91,4 +91,25 @@ assert.deepEqual(chunk([1, 2, 3, 4, 5], 2), [[1, 2, 3], [4, 5]]);
 assert.deepEqual(buildTitles({}), { title_1: "דירה", title_2: "" });
 assert.equal(buildTitles({ rooms: 3.5, neighborhood: "שכונת רמות", parking: 1 }).title_1, "דירת 3.5 חדרים בשכונת רמות");
 
+// ── an unfurnished apartment: the empty middle rooms share one clip ──
+{
+  const types = ["living_room", "bedroom", "bedroom", "bedroom", "bathroom", "kitchen", "balcony"];
+  const et = types.map((t, i) => tag(t, 8, i + 1));
+  const emap = normalizeMap({ spaces: types.map((t, i) => ({ type: t, empty: t !== "kitchen", photos: [{ n: i + 1, shows: ["window"] }] })) }, types.length, types);
+  const ep = planWalkthrough(emap, et, {});
+  const shared = ep.clips.filter((c) => c.packed);
+  assert.equal(shared.length, 1, "one clip for the empty rooms");
+  assert.equal(shared[0].spaces.length, 4, "bedrooms + bathroom (+ the empty lounge) up to MAX_SHOTS shots");
+  assert.ok(ep.clips.some((c) => !c.packed && c.spaces.length === 1 && emap.spaces.find((x) => x.id === c.spaces[0]).type === "kitchen"),
+    "the furnished kitchen keeps its own clip");
+  assert.ok(ep.clip_count < types.length, "fewer Seedance calls than rooms");
+  assert.ok(/Each shot is in a different room/.test(shared[0].prompt));
+  // the same rooms furnished: one clip each, as before
+  const fmap = normalizeMap({ spaces: types.map((t, i) => ({ type: t, empty: false, photos: [{ n: i + 1, shows: ["window"] }] })) }, types.length, types);
+  assert.ok(planWalkthrough(fmap, et, {}).clips.filter((c) => c.packed).every((c) => c.spaces.length <= 2), "furnished rooms are not packed to fit");
+  // a single empty room has nothing to join
+  const one = normalizeMap({ spaces: types.slice(0, 5).map((t, i) => ({ type: t, empty: i === 1, photos: [{ n: i + 1, shows: ["window"] }] })) }, 5, types.slice(0, 5));
+  assert.ok(planWalkthrough(one, et.slice(0, 5), {}).clips.every((c) => !c.packed));
+}
+
 console.log("walkthrough-plan: all tests passed");
