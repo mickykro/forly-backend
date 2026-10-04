@@ -21,6 +21,16 @@ function withOrientation(jpeg, value, le = true) {
 }
 
 (async () => {
+  // The parser needs no ffmpeg: a bare SOI + EOI "JPEG" is enough to carry the flag.
+  const bare = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+  assert.equal(exifOrientation(bare), 1);
+  assert.equal(exifOrientation(withOrientation(bare, 6)), 6);
+  assert.equal(exifOrientation(withOrientation(bare, 3, false)), 3, "big-endian TIFF");
+  assert.equal(exifOrientation(Buffer.from("not a jpeg")), 1);
+  // Re-encoding does: the production image ships ffmpeg, a bare CI runner may not.
+  try { execFileSync("ffmpeg", ["-version"], { stdio: "ignore" }); }
+  catch { console.log("photo-orient.test.js ok (ffmpeg not installed: pixel checks skipped)"); return; }
+
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "orient-test-"));
   try {
     // 400x200, left half red, right half blue: stored "landscape".
