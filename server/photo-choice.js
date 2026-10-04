@@ -125,7 +125,9 @@ function swapTurn(input, draft, now, promptReplies) {
 const EDIT_VERB = /(תעכי|תערכו|עריכת|תנקה|תנקי|לנקות|ננקה|תערוך|תערכי|לערוך|נערוך|תשפר|תשפרי|לשפר|נשפר|תבהיר|להבהיר|נבהיר|תחדד|לחדד|נחדד|תסיר|תסירי|להסיר|נסיר|תמחק|תמחקי|למחוק|נמחק|תעצב|תעצבי|לעצב)/;
 function editRequest(text, phone, now) {
   const t = String(text || "").trim();
-  if (!/תמונ/.test(t) || !EDIT_VERB.test(t)) return null;
+  // "לשפר" / "תערכי אותן" alone (the photos are implied) counts too; "למחוק נכס" doesn't.
+  const bare = /^\S+(\s+(אותן|אותם|אותה|אותו|לי|בבקשה|שוב))?[.!?]*$/.test(t);
+  if (!EDIT_VERB.test(t) || !(/תמונ/.test(t) || bare)) return null;
   return { handled: false, status: "not_ours", replies: [], draft: { phone, status: "edit_request", text: t.slice(0, 1000), created_at: now, updated_at: now } };
 }
 // "אני רוצה לערוך עוד תמונות לנכס אחר" says to edit, not how: n8n's default enhancement then.
@@ -154,8 +156,20 @@ async function editRequestNow(text, phone, deps, now) {
   const r = editRequest(text, phone, now);
   if (!r) return null;
   const photos = await unansweredPhotos(phone, deps, now);
-  return photos.length ? { ...edit(photos, instructionOf(text)), status: "edit_recent" } : r;
+  // None yet: the code answers, not n8n's bot (it agreed to edits it never ran).
+  return photos.length ? { ...edit(photos, instructionOf(text)), status: "edit_recent" } : { ...r, handled: true, status: "edit_request", replies: [R.sendForEdit()] };
 }
+// While an edit request waits: "כן" / "לשפר" again edits the photos just sent, or asks for them.
+async function waitingTurn(input, draft, deps, now) {
+  const t = String(input.text || "").trim();
+  if (input.event || photosOf(input) || !(D.command(t) === "yes" || editRequest(t, draft.phone, now))) return null;
+  const photos = await unansweredPhotos(draft.phone, deps, now);
+  draft.updated_at = now;
+  if (!photos.length) return { handled: true, status: "edit_request", draft, replies: [R.sendForEdit()] };
+  const back = resumeAfterEdit(draft, now);
+  return { ...edit(photos, instructionOf(draft.text)), status: "edit_recent", del: !back, draft: back || undefined };
+}
+const photosOf = (input) => (input.fileUrls && input.fileUrls.length) || input.fileUrl;
 
 function editWith(draft, urls, now) {
   draft.updated_at = now; // the rest of the burst uses it too
@@ -236,4 +250,4 @@ function photoTimer(draft, deps, now, promptFor) {
   return { handled: true, status: p.status, draft: touched, replies: [R.oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
 }
 
-module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editRequestNow, editWith, editInDraft, resumeAfterEdit, offerTimer, offeredDraft, storeVideo, photoTimer };
+module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editRequestNow, waitingTurn, editWith, editInDraft, resumeAfterEdit, offerTimer, offeredDraft, storeVideo, photoTimer };
