@@ -85,6 +85,28 @@ const { buildFailed, retryBlocked, retryListing, BUILD_STUCK_MS, MAX_RETRIES } =
   assert.deepEqual(hooks.map((h) => h[1].listing_id), ["L2"]);
   assert.equal((await post("/properties/retry", { listing_id: "L1" })).status, 409, "a built listing has nothing to retry");
 
+  // ── admin retry: any listing without a page, no agent cap, admins only ──
+  const createAdminRouter = require("./routes/admin");
+  let adminSession = { userId: "A1" };
+  app.use("/api/admin", createAdminRouter({ verifySession: () => adminSession, readToken: () => "t", authSecret: "s",
+    normalizeAuthPhone: (p) => p, adminPhones: ["A1"], pageBaseUrl: "https://pg", uploadDir: "/tmp",
+    pipelineDeps: { n8nWw1Webhook: base.replace(/\/api$/, "/hook") } }));
+  await db.saveListing({ listing_id: "AD1", business_phone: "P9", status: "failed", page_id: null, created_at: old,
+    retry_count: MAX_RETRIES, city: "חיפה", rooms: 3, photos_urls: ["q"] });
+  await db.saveListing({ listing_id: "AD2", business_phone: "P9", status: "active", page_id: null, created_at: new Date(now), city: "חיפה", rooms: 2, photos_urls: ["w"] });
+  const props = (await (await fetch(base + "/admin/properties")).json()).properties;
+  assert.deepEqual(["AD1", "AD2"].map((id) => props.find((p) => p.listing_id === id).page_status), ["failed", "building"]);
+  adminSession = { userId: "P9" };
+  assert.equal((await post("/admin/properties/retry", { listing_id: "AD1" })).status, 403, "agents cannot use the admin retry");
+  adminSession = { userId: "A1" };
+  hooks.length = 0;
+  assert.equal((await post("/admin/properties/retry", { listing_id: "AD1" })).status, 200, "past the agent's cap");
+  assert.equal((await post("/admin/properties/retry", { listing_id: "AD2" })).status, 200, "still building: allowed (the panel asks first)");
+  assert.equal((await post("/admin/properties/retry", { listing_id: "L1" })).status, 409, "a built listing has nothing to retry");
+  for (let i = 0; i < 50 && hooks.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(hooks.map((h) => h[1].listing_id).sort(), ["AD1", "AD2"]);
+  assert.equal((await db.getListing("AD1")).retry_count, MAX_RETRIES + 1);
+
   server.close();
   console.log("listing-create.test.js ok");
 })().catch((err) => { console.error(err); process.exit(1); });

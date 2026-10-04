@@ -387,6 +387,11 @@ app.use("/api/admin", createAdminRouter({
   adminPhones: ADMIN_PHONES,
   sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
   quota,
+  pipelineDeps: {
+    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+    n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
+    isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL,
+  },
 }));
 
 // ── distribution routes (Meta OAuth, one-tap confirm, publish, groups) ──
