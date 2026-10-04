@@ -33,7 +33,7 @@ const todayKey = () => new Date().toISOString().slice(0, 10);
 // Canonical form lives in utils.js so ownership checks and their tests can
 // reach it without loading Express. Aliased here to keep call sites unchanged.
 const normalizeAny = require("./utils").normalizeAuthPhone;
-const { decideLoginLead, leadMessage } = require("./login-leads");
+const { decideLoginLead, leadMessage, leadButtons } = require("./login-leads");
 
 // ── crypto ──
 const hashCode = (secret, phone, code) =>
@@ -41,6 +41,8 @@ const hashCode = (secret, phone, code) =>
 
 // scope "session" is a full login; "review" is the WhatsApp review link, which
 // only the routes that opt in (requireAuth(secret, REVIEW_SCOPES)) accept.
+const STEPUP_TTL_S = 600;
+
 function signSession(secret, phone, { scope = "session", ttlS = SESSION_TTL_S } = {}) {
   const payload = { userId: phone, scope, exp: Math.floor(Date.now() / 1000) + ttlS };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -86,7 +88,7 @@ function readToken(req) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, salesLeadPhone }) {
+module.exports = function createAuthRouter({ db, mem, sendWhatsApp, sendWhatsAppRich, secret, salesLeadPhone }) {
   const router = express.Router();
   if (!secret) throw new Error("auth: FORLY_JWT_SECRET is required");
   if (mem && !mem.otps) mem.otps = new Map();
@@ -130,7 +132,10 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
       const now = new Date();
       const { notify, doc } = decideLoginLead(prev, now);
       await saveLoginLead(phone, { phone, ...doc });
-      if (notify && salesLeadPhone) await sendWhatsApp(salesLeadPhone, leadMessage(phone));
+      if (notify && salesLeadPhone) {
+        if (sendWhatsAppRich) await sendWhatsAppRich(salesLeadPhone, leadButtons(phone));
+        else await sendWhatsApp(salesLeadPhone, leadMessage(phone));
+      }
     } catch (err) {
       console.error("not-a-client lead notice failed:", err.message);
     }
@@ -219,7 +224,15 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
         sameSite: "lax",
         maxAge: SESSION_TTL_S * 1000,
       });
-      return res.json({ ok: true, token, userId: phone, expires_in: SESSION_TTL_S });
+      // A fresh OTP login IS the step-up (admin-auth.js makeStepUpGuard): a
+      // short-lived, separately-scoped token that no session route accepts.
+      res.cookie("forly_stepup", signSession(secret, phone, { scope: "stepup", ttlS: STEPUP_TTL_S }), {
+        httpOnly: true,
+        secure: cookieSecure(req),
+        sameSite: "lax",
+        maxAge: STEPUP_TTL_S * 1000,
+      });
+      return res.json({ ok: true, token, userId: phone, expires_in: SESSION_TTL_S, stepup_expires_in: STEPUP_TTL_S });
     } catch (err) {
       console.error("auth/otp/verify failed:", err);
       return res.status(500).json({ ok: false, error: "otp_verify_failed" });
@@ -298,6 +311,7 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
   // ── POST /api/auth/logout ──
   router.post("/logout", (req, res) => {
     res.clearCookie("forly_session");
+    res.clearCookie("forly_stepup");
     return res.json({ ok: true });
   });
 

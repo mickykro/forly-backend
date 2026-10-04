@@ -43,4 +43,12 @@ function leadMessage(phone) {
   return `🔔 ליד חדש: מספר ניסה להתחבר לפורלי ואינו רשום כלקוח\n${phone}\nhttps://wa.me/${phone}`;
 }
 
-module.exports = { NOTICE_COOLDOWN_MS, decideLoginLead, leadMessage };
+// The same notice with the wa.me link behind a button.
+function leadButtons(phone) {
+  return {
+    header: "🔔 ליד חדש", body: `מספר ניסה להתחבר לפורלי ואינו רשום כלקוח\n${phone}`, footer: "",
+    buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${phone}` }],
+  };
+}
+
+module.exports = { NOTICE_COOLDOWN_MS, decideLoginLead, leadMessage, leadButtons };

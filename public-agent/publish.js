@@ -384,5 +384,7 @@
     $("facebookConnectCancel").onclick = () => $("facebookConnectDialog").close();
     render();
     refreshPagePublish(0);
+    // Automatic group posting (publish-campaign.js); it stays hidden for a signed-out share link.
+    if (window.ForlyCampaign && session.page_id) window.ForlyCampaign.mount({ pageId: session.page_id, toast });
   })();
 })();

@@ -1,0 +1,186 @@
+/*
+ * The campaign card's pure helpers (publish-campaign.js, Task 23).
+ *
+ * The invariants under test: nothing the card renders can carry a live
+ * browser (a viewer or wss:// URL) or a raw error message; every error code
+ * has Hebrew; the first-post estimate never reads as a promise; the halt box
+ * follows the account's halt class, and the defaults tick at most five usable groups.
+ *
+ * Run: node public-agent/publish-campaign.test.js
+ */
+const assert = require("node:assert");
+const U = require("./publish-campaign.js");
+
+let n = 0;
+const t = (name, fn) => { fn(); n++; };
+
+t("esc escapes every HTML metacharacter in a Facebook group name", () => {
+  assert.strictEqual(U.esc(`<img src=x onerror="a('b')">&`), "&lt;img src=x onerror=&quot;a(&#39;b&#39;)&quot;&gt;&amp;");
+  assert.strictEqual(U.esc(null), "");
+});
+
+t("fbUrl keeps https facebook.com links only", () => {
+  assert.strictEqual(U.fbUrl("https://www.facebook.com/groups/123/posts/456"), "https://www.facebook.com/groups/123/posts/456");
+  for (const bad of ["wss://connect.driver.dev/x", "https://viewer.driver.dev/s/1", "javascript:alert(1)", "http://www.facebook.com/groups/1",
+    "https://evil.com/?https://www.facebook.com/", "https://www.facebook.com/groups/1\"onmouseover=x", "https://www.facebook.com/x?u=wss://h", null, 5]) {
+    assert.strictEqual(U.fbUrl(bad), null, String(bad));
+  }
+});
+
+t("every API error code has Hebrew, and a raw message never shows", () => {
+  const codes = ["not_member", "unknown_group", "group_disallowed", "listing_type_not_allowed", "needs_reconnect", "page_not_confirmed",
+    "profile_busy", "driver_busy", "consent_outdated", "consent_required", "facebook_not_connected", "too_many_campaigns", "unknown_page"];
+  for (const code of codes) {
+    const s = U.errorText({ code, message: "Error: wss://secret" });
+    assert.ok(/[֐-׿]/.test(s) && !/wss|Error/.test(s), code);
+    assert.notStrictEqual(s, U.errorText({ code: "something_else" }), `${code} has its own text`);
+  }
+  assert.match(U.errorText({ code: "too_soon", body: { retry_after_s: 290 } }), /5 דק/);
+  assert.strictEqual(U.errorText(new Error("boom")), "משהו השתבש — נסו שוב.");
+});
+
+t("posting_disabled is worded by its reason", () => {
+  const off = U.errorText({ code: "posting_disabled", body: { reason: "global_off" } });
+  assert.match(off, /כבוי כרגע אצלנו/);
+  assert.notStrictEqual(U.errorText({ code: "posting_disabled", body: { reason: "account_disabled" } }), off);
+  assert.match(U.errorText({ code: "posting_disabled", body: { reason: "no_permission" } }), /לאשר מחדש/);
+  assert.match(U.waitText("posting_disabled:platform_off"), /בפייסבוק כבוי/);
+});
+
+t("the first-post estimate says it is an estimate", () => {
+  const s = U.estimateText("2026-10-01T08:30:00Z", null);
+  assert.match(s, /בערך/);
+  assert.match(s, /הערכה/);
+  assert.ok(!/מובטח|בוודאות/.test(s));
+  assert.match(U.estimateText(null, "browse_only"), /רק גוללת/);
+  assert.strictEqual(U.estimateText(null, "unavailable"), "");
+  assert.match(U.FIRST_WEEK, /1–3/);
+  assert.match(U.FIRST_WEEK, /פוסט אחד ביום/);
+});
+
+t("halt boxes: one class per account state, strongest first", () => {
+  const running = { status: "running" };
+  assert.strictEqual(U.haltInfo({ owner_review_required: true, disabled_until_admin: true }, running).cls, "owner");
+  const team = U.haltInfo({ disabled_until_admin: true, needs_reconnect: true }, running);
+  assert.strictEqual(team.cls, "team"); assert.ok(!team.verify && !team.reconnect && !team.resume, "unknown class: no action offered");
+  const rc = U.haltInfo({ needs_reconnect: true }, { status: "paused", pause_reason: "account" });
+  assert.strictEqual(rc.cls, "reconnect"); assert.ok(rc.reconnect && !rc.resume);
+  assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "account" }).resume, "a lifted halt lets the agent resume");
+  assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "consecutive_failures" }).resume);
+  // R5: an internal (selector_failure) pause is the team's to lift — no resume, and the box says the team is fixing it
+  const internal = U.haltInfo({}, { status: "paused", pause_reason: "internal" });
+  assert.ok(!internal.resume && !internal.reconsent && !internal.reconnect, "no action for the agent");
+  assert.ok(/מתקן/.test(internal.text) && !/אפשר לנסות להמשיך/.test(internal.text));
+  assert.ok(/מתקן/.test(U.errorText({ code: "needs_developer" })));
+  assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "permission" }).reconsent);
+  assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:global_off" }).cls, "off");
+  assert.strictEqual(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z" }, running).cls, "penalty");
+  assert.strictEqual(U.haltInfo({}, running), null);
+  assert.strictEqual(U.haltInfo(null, null), null);
+  // Worded like posting-messages.js.
+  assert.match(U.HALT.reconnect, /החיבור לחשבון הפייסבוק פג/);
+  assert.match(U.HALT.consecutive_failures, /שני פוסטים ברצף לא עלו/);
+});
+
+t("halt boxes: the disabled class picks the text and the one action", () => {
+  const box = (cls) => U.haltInfo({ disabled_until_admin: true, disabled_class: cls }, { status: "paused", pause_reason: "account" });
+  for (const cls of ["captcha", "checkpoint"]) {
+    const b = box(cls);
+    assert.strictEqual(b.cls, "checkpoint"); assert.ok(b.verify && !b.reconnect && !b.resume);
+    assert.match(b.text, /תשלימו את האימות בפורלי/); assert.match(b.text, /הצוות שלנו יפעיל אותו מחדש/);
+  }
+  const r = box("restricted");
+  assert.strictEqual(r.cls, "restricted"); assert.ok(!r.verify && !r.reconnect && !r.resume, "restricted: nothing for the agent to do");
+  assert.match(r.text, /הצוות שלנו כבר בודק ויחזור אליכם/);
+  const sc = box("suspected_compromise");
+  assert.strictEqual(sc.cls, "suspected_compromise"); assert.ok(sc.reconnect && !sc.verify && !sc.resume);
+  assert.match(sc.text, /חברו את החשבון מחדש/); assert.match(sc.text, /יחד איתכם/);
+  assert.strictEqual(box("something_else").cls, "team");
+  assert.strictEqual(U.haltInfo({ owner_review_required: true, disabled_until_admin: true, disabled_class: "checkpoint" }, null).cls, "owner");
+  assert.match(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z", penalty_class: "feature_blocked" }, null).text, /חסמה זמנית/);
+  assert.match(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z", penalty_class: null }, null).text, /ביקשה להאט/);
+  assert.strictEqual(U.haltInfo({ posting_off: "global_off" }, null).cls, "off");
+});
+
+t("approve is hidden while nothing may post; otherwise shown", () => {
+  for (const h of [{ disabled_until_admin: true }, { owner_review_required: true }, { needs_reconnect: true }, { penalty_blocks_posts: true }, { posting_off: "env_off" }]) {
+    assert.strictEqual(U.approveBlocked(h, { status: "running" }), true, JSON.stringify(h));
+  }
+  assert.strictEqual(U.approveBlocked({}, { status: "running", wait_reason: "posting_disabled:global_off" }), true);
+  assert.strictEqual(U.approveBlocked({ penalty_until: "2026-10-09T00:00:00Z", penalty_blocks_posts: false }, { status: "running" }), false, "a penalty after day one only slows");
+  assert.strictEqual(U.approveBlocked({}, { status: "paused", pause_reason: "agent" }), false);
+  assert.strictEqual(U.approveBlocked(null, null), false);
+});
+
+t("default picks: saved defaults first, at most five, never an unusable group", () => {
+  const g = (id, extra) => Object.assign({ group_id: id, membership_state: "member", agent_policy: "unknown", in_catalog: false }, extra);
+  const list = [g("1"), g("2", { agent_policy: "explicitly_allowed", in_catalog: true }), g("3", { agent_policy: "no_agents" }),
+    g("4", { membership_state: "left" }), g("5"), g("6"), g("7"), g("8")];
+  const d = U.defaultPicks(list);
+  assert.strictEqual(d.length, 5);
+  assert.strictEqual(d[0], "2");
+  assert.ok(!d.includes("3") && !d.includes("4"));
+  assert.deepStrictEqual(U.defaultPicks(list.map((x) => (x.group_id === "5" || x.group_id === "3" ? Object.assign({}, x, { is_default: true }) : x))), ["5"]);
+  assert.deepStrictEqual(U.defaultPicks(undefined), []);
+});
+
+t("timeline texts", () => {
+  assert.strictEqual(U.statusText({ status: "skipped", error_code: "stopped" }), "בוטל בעצירה");
+  assert.strictEqual(U.statusText({ status: "pending_approval" }), "ממתין לאישור שלכם");
+  assert.strictEqual(U.statusText({ status: "failed", error_code: "not_member" }), "לא עלה — פייסבוק הציגה \"הצטרפות לקבוצה\" — נראה שאינכם חברים בה");
+  assert.strictEqual(U.statusText({ status: "failed", error_code: "media_unavailable" }), "לא עלה — לא הצלחנו להוריד את סרטון הנכס");
+  assert.strictEqual(U.statusText({ status: "failed", error_code: "something_new" }), "לא עלה — תקלה טכנית", "an unknown code: never raw");
+  const W = require("./publish-campaign-why");
+  assert.strictEqual(W.whyText({ why: "cooldown", until: "2026-10-01T10:00:00Z" }, () => "יום ה׳"), "קיבלה מכם פוסט לאחרונה — שוב אפשר ביום ה׳");
+  assert.strictEqual(W.whyText({ why: "this_round" }, () => "x"), "כבר קיבלה פוסט בסבב הזה");
+  assert.strictEqual(W.whyText({ why: "<b>" }), "לא זמינה כרגע");
+  assert.strictEqual(W.failDetail({ status: "failed", error_check: "composer_button", failed_step: "session_started" }),
+    "לא נמצא בקבוצה הכפתור \"כתבו משהו\". ייתכן שבקבוצה הזו רק מנהלים מפרסמים. נעצר אחרי שנפתח הדפדפן, לפני חלון הכתיבה.");
+  assert.strictEqual(W.failDetail({ status: "posted", error_check: "composer_button" }), "", "only a failed post");
+  assert.strictEqual(W.failDetail({ status: "failed", error_check: "<b>", failed_step: "x" }), "", "unknown names: nothing");
+  const m = U.metricsText({ visits: 12, leads: 2, reactions: 5, comments: null, visibility: "confirmed_removed" });
+  assert.match(m, /12 כניסות/); assert.match(m, /2 לידים/); assert.match(m, /5 לייקים/); assert.match(m, /הוסר/);
+  assert.ok(!/תגובות ·|null/.test(m));
+  assert.strictEqual(U.metricsText(null), "");
+  assert.match(U.REACH_NOTE, /reach/);
+  assert.match(U.planText("per_post", 3, false), /וואטסאפ/);
+  assert.match(U.planText("standing", 1, true), /קבוצה ובדף העסקי/);
+  assert.match(U.planText("standing", 5, false), /30/, "standing campaigns have enough time to cover more eligible Groups without raising caps");
+  assert.strictEqual(U.chipText({ status: "completed", posts: [{ status: "posted" }, { status: "skipped" }] }), "הושלם — 1 פוסטים עלו");
+});
+
+t("a restarted campaign's earlier posts are history", () => {
+  const c = { restarted_at: "2026-09-20T00:00:00Z", posts: [
+    { id: "a", status: "posted", posted_at: "2026-09-10T10:00:00Z" },
+    { id: "b", status: "skipped", error_code: "stopped", scheduled_at: "2026-09-21T10:00:00Z" },
+    { id: "c", status: "scheduled", scheduled_at: "2026-09-22T10:00:00Z" }] };
+  const { current, earlier } = U.splitPasses(c);
+  assert.deepStrictEqual(current.map((p) => p.id), ["c"]);
+  assert.deepStrictEqual(earlier.map((p) => p.id), ["a", "b"]);
+  assert.strictEqual(U.splitPasses({ posts: [{ id: "x" }] }).current.length, 1);
+});
+
+t("the Page option is hidden until the server can target a Page (I4)", () => {
+  const pages = [{ id: "u:abc", name: "No id", available: false }, { id: "61550000000000", name: "Dana", available: true }];
+  assert.deepStrictEqual(U.cardPages({ pages, page_target_available: false }), [], "no numeric Page id yet: no Page option");
+  assert.deepStrictEqual(U.cardPages({ pages }), []);
+  assert.deepStrictEqual(U.cardPages({ pages, page_target_available: true }).map((p) => p.name), ["Dana"], "only the Pages with an id");
+  assert.deepStrictEqual(U.cardPages(null), []);
+  assert.ok(/חברו מחדש/.test(U.errorText({ code: "page_target_unavailable" })));
+});
+
+t("more groups: only the agent's own, fitting groups not in the campaign yet", () => {
+  const M = require("./publish-campaign-more");
+  const settings = { member_groups: [
+    { group_id: "1", membership_state: "member", agent_policy: "explicitly_allowed" },
+    { group_id: "2", membership_state: "member", agent_policy: "unknown" },
+    { group_id: "3", membership_state: "left" },
+    { group_id: "4", membership_state: "member", excluded: true },
+    { group_id: "5", membership_state: "member", fits: false },
+    { group_id: "6", membership_state: "member", agent_policy: "no_agents" },
+  ] };
+  assert.deepStrictEqual(M.addable(settings, { groups: [{ group_id: "1" }] }).map((g) => g.group_id), ["2"]);
+  assert.deepStrictEqual(M.addable(null, null), []);
+});
+
+console.log(`publish-campaign.test.js: ${n} passed`);

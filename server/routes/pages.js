@@ -14,11 +14,12 @@ const pageEdit = require("../edit");
 const pageAuth = require("../page-auth");
 const chatbotConfig = require("../chatbot-config");
 const { submitLead } = require("../leads");
+const attribution = require("../posting-attribution"); // R4: ?c= and fly_ref, server-side
 const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, storeBuffer, sendWhatsApp, ownUploadedVideo, inPlace } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsAppRich, storeBuffer, ownUploadedVideo, inPlace } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { CURRENCIES, normalizeCurrency } = require("../currency");
 const { roomLabel } = require("../rooms");
@@ -51,6 +52,28 @@ module.exports = function createPagesRouter(ctx) {
           uploadPublicBase, remoteUploadBase, signActionToken,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
   const { constantTimeEqual } = require("../security");
+  // Automated posting (Task 16): a page that becomes active joins a campaign
+  // when its account opted in. Fire-and-forget — enrollment never fails or
+  // delays the page; its own failure is stored as posting_enroll_error.
+  // A listing whose groups the agent chose while it was building
+  // (posting-listing-groups) gets exactly that choice instead; a chosen list
+  // of groups also gets a WhatsApp link to approve each group's text.
+  const enrollPosting = (page, listing) => {
+    if (!require("../posting-guard").postingEnvAllowed(process.env)) return; // C1: never from staging/local
+    const LG = require("../posting-listing-groups");
+    const choice = listing && listing.posting_groups;
+    Promise.resolve().then(async () => {
+      if (!choice) return require("../posting-campaign").enrollNewPage(page, ctx.postingDeps || {});
+      const c = await LG.apply(page, listing, ctx.postingDeps || {});
+      if (c && Array.isArray(choice) && greenInstance && greenToken) {
+        await sendWhatsAppRich(page.business_phone, {
+          header: "דף הנכס מוכן ✅", footer: "",
+          body: "לפני שנפרסם בקבוצות שבחרתם, אשרו את הטקסט לכל קבוצה. אפשר לערוך כל אחד.",
+          buttons: [{ type: "url", buttonText: "לאישור הטקסטים", url: LG.link(baseUrl, authSecret, page.business_phone, listing.listing_id) }],
+        }, greenInstance, greenToken);
+      }
+    }).catch(() => null);
+  };
 
   // Options every rehost() in this router shares. remoteUploadBase sends the
   // bytes to the always-on instance; signUpload is the credential for that hop,
@@ -328,6 +351,12 @@ module.exports = function createPagesRouter(ctx) {
           .then((d) => d && d.listing_id === body.listing_id && db.deleteDraft(body.business_phone))
           .catch((e) => console.warn("draft cleanup failed:", e && e.message));
       }
+      // A listing built from create.html?draft=<id> (Yad2/Madlan sweep): mark
+      // that draft created, carrying the page_id, so it drops off the list.
+      if (listing && listing.listing_draft_id) {
+        db.updateListingDraft(listing.listing_draft_id, { status: "created", page_id: pageId, updated_at: new Date().toISOString() })
+          .catch((e) => console.warn("listing-draft mark-created failed:", e && e.message));
+      }
       // Realtime: the portal shows the listing the moment it exists.
       portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
         portalStream.toCard(doc, pageBaseUrl));
@@ -335,6 +364,7 @@ module.exports = function createPagesRouter(ctx) {
       // creation (spec §4). Entitlement + duplicate checks live in maybeOffer.
       distributionJobs.maybeOffer(distDeps, doc)
         .catch((e) => console.warn("distribution offer failed:", e && e.message));
+      enrollPosting(doc, listing);
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
@@ -543,6 +573,8 @@ module.exports = function createPagesRouter(ctx) {
       extension_count: (page.extension_count || 0) + 1,
       reminder_sent_at: null, updated_at: new Date(),
     });
+    // An expired page coming back is a page becoming active again.
+    if (page.status !== "active" && page.status !== "expiring") enrollPosting({ ...page, status: "active" });
     return expiresAt;
   }
 
@@ -591,14 +623,16 @@ module.exports = function createPagesRouter(ctx) {
     db.mem.throttle.set(prospectPhone, { windowStart: count === 0 ? now : t.windowStart, count: count + 1 });
 
     try {
-      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [] });
+      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [], attribution: await attribution.attributionFor(req, page.page_id) });
 
       // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
       if (!n8nLeadWebhook) {
-        sendWhatsApp(page.business_phone,
-          `🔔 ליד חדש מדף הנכס "${page.property.address}, ${page.property.city}"!\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
-          `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
-          greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
+        sendWhatsAppRich(page.business_phone, {
+          header: "🔔 ליד חדש",
+          body: `מדף הנכס "${page.property.address}, ${page.property.city}"\n👤 ${name}\n📞 0${prospectPhone.slice(3)}`,
+          footer: "",
+          buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${prospectPhone}` }],
+        }, greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
       }
 
       if (n8nLeadWebhook) {
@@ -920,12 +954,22 @@ module.exports = function createPagesRouter(ctx) {
     res.type("html").send(html);
   }
 
+  // R4: a campaign post's link, /p/:id/<code>: the click is consumed like ?c=
+  // (visit + fly_ref), then a 302 to the page itself — so is an unknown code.
+  router.get("/p/:id/:code", async (req, res, next) => {
+    if (!/^[a-z0-9]{6}$/.test(req.params.code)) return next();
+    await attribution.consumeClick(req, res, req.params.id, {}, req.params.code);
+    return res.redirect(302, attribution.withoutClick(`/p/${encodeURIComponent(req.params.id)}`, req.query));
+  });
+
   // ── legacy /p/:id redirect to nested URL ──
   router.get("/p/:id", async (req, res) => {
     const id = req.params.id;
     let d = null;
     try { d = await db.getPage(id); } catch (e) { /* fall back */ }
     const pageUrl = `${pageBaseUrl}/p/${id}`;
+    // R4: a campaign link's ?c= is consumed here (visit + fly_ref); then a 302 without it.
+    const tracked = await attribution.consumeClick(req, res, id);
     // Group-share attribution (?src=fb_group&s=&g=): record which sharing
     // session/group sent this visitor. Best-effort and fire-and-forget — the
     // canonical og:url stays undecorated so Facebook aggregates shares.
@@ -934,7 +978,7 @@ module.exports = function createPagesRouter(ctx) {
         type: "group_visit", page_id: id,
         listing_id: d.listing_id || null, business_phone: d.business_phone || null,
         share_session: String(req.query.s || "").slice(0, 64),
-        group_token: String(req.query.g).slice(0, 24),
+        group_token: String(req.query.g).slice(0, 64),
       }).catch(() => { /* never block a page render on analytics */ });
     }
     // Portfolio pages live at /:portfolioSlug/:pageSlug — 301 the legacy URL.
@@ -944,14 +988,16 @@ module.exports = function createPagesRouter(ctx) {
         if (business?.portfolio?.slug) {
           const qs = new URLSearchParams(req.query);
           qs.delete("edit_token");
+          qs.delete("c");
           const qsStr = qs.toString();
           // Host-relative so a preview host (tunnel, staging) keeps its own origin;
           // only the canonical og:url is pinned to pageBaseUrl.
           const nested = `/${business.portfolio.slug}/${d.public_slug}`;
-          return res.redirect(301, qsStr ? `${nested}?${qsStr}` : nested);
+          return res.redirect(tracked ? 302 : 301, qsStr ? `${nested}?${qsStr}` : nested);
         }
       } catch (e) { /* fall through to the legacy shell */ }
     }
+    if (tracked) return res.redirect(302, attribution.withoutClick(`/p/${encodeURIComponent(id)}`, req.query));
     renderPropertyPage(res, id, d, pageUrl, { classic: req.query.view === "classic" });
   });
 

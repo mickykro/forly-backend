@@ -29,7 +29,7 @@ function deps(over = {}) {
 }
 // handleTurn mutates the draft it is given; clone so a test can branch from one draft.
 const turn = (input, d) => handleTurn({ phone: PHONE, now: T0, ...input, draft: input.draft ? structuredClone(input.draft) : null }, d);
-const texts = (t) => t.replies.map((r) => r.text).join("\n");
+const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) => l.url)].join("\n")).join("\n");
 
 (async () => {
   let d, t;

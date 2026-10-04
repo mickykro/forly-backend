@@ -1,17 +1,18 @@
 /*
  * distribution/share-kit.js — pure Hebrew copy builders for distribution.
  *
- * Groups get a WhatsApp "share kit" instead of automated posting: Meta removed
- * the Groups publishing API in 2022 and browser automation was rejected as a
- * ban risk (spec §1). So this module builds (a) the post copy used for the
- * Facebook Page / Instagram post, and (b) a WhatsApp message that lets the
- * agent paste that copy into their groups in ~5 taps.
+ * Shared copy builders for the automatic browser publisher and the manual
+ * fallback queue. The facts stay exact; only framing, fact order and CTA vary.
+ * A seed plus round makes every variation deterministic, so retries type the
+ * exact same approved text while a later completed round gets fresh framing.
  *
  * Pure functions — no I/O. Unit-tested in share-kit.test.js.
  */
 
 const { symbol } = require("../currency");
-const MAX_GROUPS = 20;
+// A 30-day campaign can cover this pool under the existing daily/weekly caps;
+// widening the pool increases reach without increasing posting frequency.
+const MAX_GROUPS = 40;
 
 // 972501234567 → 0501234567 for display; anything non-IL stays as-is.
 function localPhone(p) {
@@ -33,19 +34,165 @@ function trackedUrl(pageUrl, { session, group }) {
 
 /*
  * Per-group phrasing. Identical text pasted into many groups is the classic
- * spam fingerprint — and it also reads like a bot to human members. The FACTS
- * never change (price, rooms, size, link); only the framing does, and the
- * variant is derived from the property+group so a retry reproduces the same
- * text rather than inventing a new one each time.
+ * spam fingerprint, and it also reads like a bot to human members. The FACTS
+ * never change (price, rooms, size, link); only the whole post's wording and
+ * order do. Ten templates, written the way a local agent types a group post:
+ * short fact lines, sparing "?" / "!", no emoji. The template is derived from
+ * the property+group so a retry reproduces the same text rather than
+ * inventing a new one each time. A template drops any line whose fact is
+ * missing.
  */
-const OPENERS = ["🏠", "🔑", "🏡", "✨", "📍"];
-const CTAS = [
-  "לכל הפרטים, תמונות וסרטון ⬅️",
-  "סרטון הליכה, תמונות ומידע מלא ⬅️",
-  "כל הפרטים והסרטון כאן ⬅️",
-  "לצפייה בסרטון ובפרטים המלאים ⬅️",
+const COMMENT_CTAS = [
+  "הקישור לפרטים המלאים בתגובה הראשונה 👇",
+  "כל הפרטים והתמונות בתגובה הראשונה 👇",
+  "הקישור לנכס בתגובה הראשונה 👇",
+  "הוספתי קישור עם כל הפרטים בתגובה הראשונה 👇",
+  "קישור לכל הפרטים בתגובה הראשונה 👇",
+  "רוצים לראות את הנכס? הקישור בתגובה הראשונה 👇",
 ];
-const CLOSERS = ["", "מוזמנים לפנות 🙂", "אשמח להעביר פרטים נוספים", "פתוח לשאלות"];
+const WHATSAPP_COMMENT_CTAS = [
+  "קישור לוואטסאפ בתגובה הראשונה 👇",
+  "רוצים לשאול או לתאם? קישור לוואטסאפ בתגובה הראשונה 👇",
+  "אפשר לדבר איתי ישירות בוואטסאפ, הקישור בתגובה הראשונה 👇",
+];
+const PAGE_COMMENT_CTAS = [
+  "הפוסט המלא בדף העסקי, קישור בתגובה הראשונה 👇",
+  "קישור לפוסט בדף העסקי בתגובה הראשונה 👇",
+  "לצפייה בפוסט בדף העסקי, הקישור בתגובה הראשונה 👇",
+];
+
+const join = (sep, ...xs) => xs.filter(Boolean).join(sep);
+const shekel = (n) => `${n.toLocaleString("en-US")} ש"ח`;
+const priceText = (n, cur) => (!cur || cur === "ILS" ? shekel(n) : `${symbol(cur)}${n.toLocaleString("en-US")}`);
+// 0542045280 → 054-2045280, the way agents usually write it.
+const dashedPhone = (s) => (/^05\d{8}$/.test(s) ? `${s.slice(0, 3)}-${s.slice(3)}` : s);
+
+function postFacts(page) {
+  const p = (page && page.property) || {};
+  const a = (page && page.agent) || {};
+  const num = (v) => (Number(v) > 0 ? Number(v) : 0);
+  const rooms = num(p.rooms), sqm = num(p.size_sqm), floor = num(p.floor), price = num(p.price);
+  const rent = p.listing_type === "rent";
+  const hood = p.neighborhood || "", city = p.city || "";
+  // After ב the article drops (הבורסה → בבורסה), but a name can start with
+  // a root ה (הדר). "בשכונת הבורסה" is right either way. Only the
+  // neighborhood: a city keeps its own (בהרצליה).
+  const hoodAt = hood.startsWith("ה") ? `שכונת ${hood}` : hood;
+  return {
+    rooms, rent,
+    hood, city,
+    hoodAt,                                     // only ever printed after ב
+    place: join(", ", hoodAt, city),            // שיקון ותיקים, כפר סבא
+    placeIn: join(" ב", hoodAt, city),          // שיקון ותיקים בכפר סבא
+    deal: rent ? "להשכרה" : "למכירה",
+    priceLabel: rent ? "שכירות" : "מחיר",
+    apt: rooms ? `דירת ${rooms} חדרים` : p.title || "נכס",
+    roomsText: rooms ? `${rooms} חדרים` : "",
+    roomsShort: rooms ? `${rooms} חד'` : "",
+    sqm: sqm ? `${sqm} מ"ר` : "",
+    floor: floor ? `קומה ${floor}` : "",
+    price: price ? priceText(price, p.currency) : "",
+    // 2,900,000 → 2.9 מ' ש"ח, only when that is exact (2,925,000 stays full). ILS only.
+    priceShort: price && (!p.currency || p.currency === "ILS") && price >= 1e6 && price % 10000 === 0
+      ? `${price / 1e6} מ' ש"ח` : price ? priceText(price, p.currency) : "",
+    name: a.name || "",
+    phone: localPhone(a.phone),
+  };
+}
+
+const at = (place) => (place ? ` ב${place}` : "");
+const sqmOnFloor = (f) => (f.sqm && f.floor ? `${f.sqm} ב${f.floor}` : f.sqm || f.floor);
+
+// Each template: (facts, link, round) → lines. link(label) is the label plus
+// the page URL, or the first-comment CTA, or null. Falsy lines are dropped.
+const TEMPLATES = [
+  (f, link) => [
+    `${f.deal}${at(f.place)}!`,
+    join(", ", f.apt, f.sqm),
+    f.floor,
+    f.price && `${f.priceLabel}: ${f.price}`,
+    link("כל הפרטים על הנכס"),
+    (f.name || f.phone) && "לפרטים ותיאום:",
+    join("-", f.name, f.phone),
+  ],
+  (f, link) => [
+    `מחפשים ${f.roomsText || "דירה"}${at(f.city)}?`,
+    join(", ", f.hood, f.floor, f.sqm),
+    f.price,
+    link("פרטים נוספים ותמונות"),
+    join("-", f.name, f.phone),
+  ],
+  (f, link) => [
+    `${f.roomsShort || f.apt}${at(f.place)}`,
+    sqmOnFloor(f),
+    f.priceShort && (f.rent ? `שכירות: ${f.price}` : `מחיר שיווק: ${f.priceShort}`),
+    link("רוצים לדעת עוד לפני ביקור? כל הפרטים כאן"),
+    join(" ", f.name, dashedPhone(f.phone)),
+  ],
+  (f, link) => [
+    join(", ", f.apt, f.sqm) + at(f.hoodAt),
+    join(", ", f.city, f.floor),
+    f.price,
+    link("כל הפרטים על הדירה"),
+    "מוזמנים לתאם ביקור!",
+    join("-", f.name, f.phone),
+  ],
+  (f, link) => [
+    `${f.deal}${at(f.city)}`,
+    join(", ", f.hood, f.roomsText),
+    join(", ", f.sqm, f.floor),
+    f.price && `${f.priceLabel}: ${f.price}`,
+    (f.name || f.phone) && "שאלות? דברו איתי",
+    f.name,
+    f.phone,
+    link("לפרטים נוספים"),
+  ],
+  // "חדש" is only claimed on a target's first round.
+  (f, link, round) => [
+    round === 0 ? "חדש אצלי בשיווק:" : "אצלי בשיווק:",
+    `${f.roomsText || f.apt}${at(f.place)}`,
+    join(", ", f.sqm, f.floor),
+    f.price,
+    link("כל הפרטים והתמונות"),
+    (f.name || f.phone) && `לתיאום: ${join("-", f.name, f.phone)}`,
+  ],
+  (f, link) => [
+    f.price ? `${f.price} ל${f.apt}${at(f.city)}` : `${f.apt}${at(f.city)}`,
+    f.hood && `שכונת ${f.hood}`,
+    sqmOnFloor(f),
+    link("לפרטים נוספים על הנכס"),
+    f.name,
+    dashedPhone(f.phone),
+  ],
+  (f, link) => {
+    const what = `${f.roomsText || f.apt}${f.sqm ? ` על ${f.sqm}` : ""}${f.floor ? `, ${f.floor}` : ""}`;
+    return [
+      f.rooms >= 3 ? "משפחה שצריכה עוד חדר?" : `מחפשים דירה${at(f.city)}?`,
+      f.placeIn ? `ב${f.placeIn} יש ${what}` : what,
+      f.price && `${f.priceLabel}: ${f.price}`,
+      link("כל המידע על הדירה כאן"),
+      join("-", f.name, f.phone),
+    ];
+  },
+  (f, link) => [
+    join(", ", f.city, f.hood),
+    join(", ", f.roomsShort, f.sqm, f.floor) || f.apt,
+    f.priceShort,
+    (f.name || f.phone) && "כתבו לי ואשלח פרטים!",
+    join("-", f.name, f.phone),
+    link("פרטים מלאים"),
+  ],
+  (f, link) => [
+    `${f.deal}:`,
+    f.apt + at(f.hoodAt),
+    f.city,
+    f.sqm,
+    f.floor,
+    f.price && `${f.priceLabel} ${f.price}`,
+    link("מה דעתכם? כל הפרטים כאן"),
+    (f.name || f.phone) && `לפרטים: ${join(" ", f.name, f.phone)}`,
+  ],
+];
 
 function variantIndex(seed, mod) {
   const s = String(seed || "");
@@ -55,38 +202,26 @@ function variantIndex(seed, mod) {
 }
 
 function buildPostCopy(page, pageUrl, opts = {}) {
-  const p = (page && page.property) || {};
-  const a = (page && page.agent) || {};
-  const seed = opts.variantSeed || "";
-  const pick = (arr) => arr[seed ? variantIndex(seed + arr.length, arr.length) : 0];
-  const lines = [];
-  lines.push(`${pick(OPENERS)} ${p.title || "נכס חדש"}`);
-  const loc = [p.neighborhood, p.city].filter(Boolean).join(", ");
-  if (loc) lines.push(`📍 ${loc}`);
-  const facts = [];
-  if (Number(p.rooms) > 0) facts.push(`${p.rooms} חדרים`);
-  if (Number(p.size_sqm) > 0) facts.push(`${p.size_sqm} מ"ר`);
-  if (Number(p.floor) > 0) facts.push(`קומה ${p.floor}`);
-  if (facts.length) lines.push(facts.join(" · "));
-  if (Number(p.price) > 0) {
-    const verb = p.listing_type === "rent" ? "שכירות" : "מחיר";
-    lines.push(`💰 ${verb}: ${symbol(p.currency)}${Number(p.price).toLocaleString("en-US")}`);
-  }
-  lines.push("");
+  const seed = String(opts.variantSeed || "");
+  const round = Number.isSafeInteger(opts.variantRound) && opts.variantRound >= 0 ? opts.variantRound : 0;
+  const pick = (arr, key) => {
+    const base = seed ? variantIndex(`${key}|${seed}`, arr.length) : 0;
+    return arr[(base + round) % arr.length];
+  };
+  const f = postFacts(page);
   // linkInComment: many groups treat an external link in the post body as
   // spam (and Facebook scores the domain for it). The agent posts the link
   // as the first comment instead — standard practice in these groups.
-  if (opts.linkInComment) {
-    lines.push("קישור לסרטון ולפרטים המלאים בתגובה הראשונה 👇");
-  } else {
-    lines.push(`${pick(CTAS)} ${pageUrl}`);
-  }
-  if (a.name) {
-    const phone = localPhone(a.phone);
-    lines.push(`${a.name}${phone ? ` · ${phone}` : ""}`);
-  }
-  const closer = pick(CLOSERS);
-  if (closer) lines.push(closer);
+  const link = (label) => {
+    if (!opts.linkInComment) return pageUrl ? `${label}->${pageUrl}` : null;
+    const destination = opts.destinationKind || "property";
+    if (destination === "whatsapp") return pick(WHATSAPP_COMMENT_CTAS, "whatsapp_comment_cta");
+    if (destination === "facebook_page") return pick(PAGE_COMMENT_CTAS, "page_comment_cta");
+    return destination === "none" ? null : pick(COMMENT_CTAS, "comment_cta");
+  };
+  const lines = pick(TEMPLATES, "template")(f, link, round).filter(Boolean);
+  // No name or phone: the reader still needs a way to respond.
+  if (!f.name && !f.phone) lines.push("לפרטים נוספים כתבו לי בפרטי.");
   return lines.join("\n");
 }
 
@@ -171,9 +306,9 @@ function buildQueueMessage({ title, groupCount, queueUrl, postUrl }) {
  * so the denominator is what the agent will actually be asked to do, not a
  * count that changes meaning once a queue opens.
  *
- * X counts ONLY groups the agent marked posted by hand. Forly does not post to
- * groups (docs/distribution/DECISION-no-automation.md), so copied/opened are
- * preparation and must never inflate this number.
+ * X counts ONLY confirmed queue completions. copied/opened are preparation and
+ * must never inflate this legacy manual-queue number; automatic campaign
+ * outcomes are tracked by the posting attempt ledger instead.
  */
 function groupProgress(session, fallbackGroups) {
   const groups = session && Array.isArray(session.groups) ? session.groups : null;
@@ -186,5 +321,5 @@ function groupProgress(session, fallbackGroups) {
   return { posted: 0, total: sanitizeGroups(fallbackGroups).length };
 }
 
-module.exports = { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink,
+module.exports = { MAX_GROUPS, TEMPLATE_COUNT: TEMPLATES.length, buildPostCopy, sanitizeGroups, sharerLink,
   buildShareKitMessage, buildQueueMessage, trackedUrl, variantIndex, groupProgress };

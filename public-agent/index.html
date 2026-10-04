@@ -104,6 +104,11 @@
     </div>
     <a href="/portfolio.html" class="btn" style="background:#ffc107;color:#000;font-weight:600;border:none">יצירת דף</a>
   </div>
+  <!-- Yad2/Madlan sweep drafts -->
+  <div id="listingDraftsCard" class="card hidden" style="padding:16px 20px;margin-bottom:18px">
+    <b style="display:block;margin-bottom:10px">נכסים שמצאנו ביד2 / מדלן</b>
+    <div id="listingDraftsList" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
   <div class="agent-hero page-head">
     <div>
       <h1>הנכסים שלי</h1>
@@ -111,6 +116,7 @@
     </div>
     <div style="display:flex;gap:8px">
       <a class="btn btn-ghost" href="/distribution.html">חיבורים וקבוצות</a>
+      <a class="btn btn-ghost" href="/autopublish.html">פרסום</a>
       <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
     </div>
   </div>
@@ -259,9 +265,6 @@
     if (p.page_url && (p.page_status === "active" || p.page_status === "expiring")) {
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" href="' + p.page_url + '">צפייה</a>');
       actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + p.page_id + '">עריכה</a>');
-      // Publishing is property-first. The workspace receives this page ID and
-      // contains the supported Page publish action plus manual Group sharing.
-      actions.push('<a class="btn btn-gold btn-sm" href="/publish.html?page=' + p.page_id + '">פרסום</a>');
     }
     if (p.page_id && p.page_status !== "building") {
     }
@@ -555,6 +558,7 @@
     }
     loadList();
     checkProfile(); // ponytail: check if profile needs completion
+    loadListingDrafts();
   }
 
   // ponytail: check profile completion and portfolio status
@@ -579,6 +583,45 @@
         }
       })
       .catch(function() { /* ignore errors */ });
+  }
+
+  // ponytail: Yad2/Madlan sweep drafts — no auto-sweep trigger here, the
+  // agent connects on distribution.html and the server sweeps on its own
+  // schedule; this just shows whatever drafts already exist.
+  function draftRowHtml(d) {
+    var f = (d.extract && d.extract.fields) || {};
+    var title = f.address || f.city || d.title || "נכס";
+    var price = f.price || d.price;
+    return '<div class="row" id="draft-' + esc(d.id) + '" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid rgba(0,0,0,.06)">' +
+      '<div style="flex:1 1 auto;min-width:120px">' + esc(title) +
+      (price ? ' <span style="color:var(--ink-soft)">· ₪' + Number(price).toLocaleString() + '</span>' : '') +
+      '</div>' +
+      '<a class="btn btn-sm btn-gold" href="/create.html?draft=' + encodeURIComponent(d.id) + '">יצירת דף</a>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-dismiss="' + esc(d.id) + '">התעלמות</button>' +
+      '</div>';
+  }
+  function loadListingDrafts() {
+    fetch("/api/listing-drafts", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var drafts = (d && d.drafts) || [];
+        if (!drafts.length) { $("#listingDraftsCard").classList.add("hidden"); return; }
+        $("#listingDraftsList").innerHTML = drafts.map(draftRowHtml).join("");
+        $("#listingDraftsCard").classList.remove("hidden");
+        $("#listingDraftsList").querySelectorAll("[data-dismiss]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-dismiss");
+            fetch("/api/listing-drafts/" + encodeURIComponent(id) + "/dismiss", { method: "POST", credentials: "same-origin" })
+              .then(function () {
+                var row = document.getElementById("draft-" + id);
+                if (row) row.remove();
+                if (!$("#listingDraftsList").children.length) $("#listingDraftsCard").classList.add("hidden");
+              })
+              .catch(function () { /* leave the row, agent can retry */ });
+          });
+        });
+      })
+      .catch(function () { /* ignore errors */ });
   }
 
   // ── demo dashboard: after a demo page is created (no account yet), show a
@@ -646,6 +689,7 @@
         // Every page load lands here; loadList() only after login/extend.
         loadDistTags();
         checkProfile(); // ponytail: check if profile needs completion
+        loadListingDrafts();
       };
     })
     .catch(function () {

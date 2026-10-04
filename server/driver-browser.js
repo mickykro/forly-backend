@@ -1,0 +1,481 @@
+/*
+ * driver-browser.js — hosted real-Chrome sessions from driver.dev.
+ *
+ * Three calls: POST to create, connectOverCDP to use, DELETE to stop. The
+ * DELETE is not optional — browser.close() only drops our websocket, and an
+ * unstopped session holds a concurrency slot until its `duration` runs out.
+ *
+ * Retry policy is deliberately asymmetric (docs.driver.dev/docs/sessions/errors):
+ * 402 (no credits) and 403 (over the plan limit) are conditions a PERSON has to
+ * fix, so looping only burns time; 503 is capacity, which time does fix.
+ *
+ * Every function takes `deps` so the tests drive the whole lifecycle with fakes.
+ *
+ * A session's cdpUrl is full remote control of a browser that may hold an
+ * agent's logged-in cookies. It never leaves this module except through
+ * consumeViewerGrant() (one operator, one use, five minutes), and nothing
+ * logged here carries it, a viewer URL, or a profile name — see redact().
+ */
+const crypto = require("crypto");
+const profileLock = require("./profile-lock");
+const profileNames = require("./profile-name");
+
+const API = "https://api.driver.dev";
+
+const PROFILE_RE = /(facebook|yad2|madlan|instagram|tiktok|linkedin|x)-(prod|staging|local)-[0-9a-f]{20}(-r\d+)?/g;
+function redact(msg) {
+  return String(msg)
+    .replace(/\b(socks5h?|https?):\/\/[^\s/@]+(?::[^\s/@]*)?@/gi, "$1://[credentials]@")
+    .replace(PROFILE_RE, "[profile]")
+    .replace(/wss?:\/\/\S+/g, "[cdp]")
+    .replace(/ws=\S+/g, "ws=[cdp]");
+}
+const shortId = (id) => `…${String(id || "").slice(-6)}`;
+const logError = (msg) => console.error(redact(msg));
+// A DriverError already carries status/code/retryAfter separate from its
+// message; any other error is a JS-side failure (network, coding) with a
+// name/stack worth keeping. One line either way, so a log never just says
+// "failed" with nothing to act on.
+function describeError(e) {
+  if (e instanceof DriverError) return `status=${e.status} code=${e.code || "none"} retryAfter=${e.retryAfter ?? "none"} message=${e.message}`;
+  return `${e && e.name}: ${e && e.message}${e && e.stack ? `\n${e.stack}` : ""}`;
+}
+
+// Driver features need all three: the API key, the key that makes profile
+// names unguessable, and an environment to keep prod and staging profiles
+// apart. index.js and routes/extract.js both ask here, so they cannot disagree.
+const ENVS = ["prod", "staging", "local"];
+function driverMissing(env) {
+  const missing = [];
+  if (!env.PROFILE_KEY) missing.push("PROFILE_KEY");
+  if (!ENVS.includes(env.FORLY_ENV)) missing.push("FORLY_ENV");
+  return missing;
+}
+const driverEnabled = (env = process.env) => !!env.DRIVER_API_KEY && driverMissing(env).length === 0 && !proxyConfigProblem(env);
+
+// Driver accepts custom SOCKS5 endpoints, not HTTP proxies. Validate locally
+// without ever echoing the URL: it may contain credentials. Forly requires an
+// Israeli exit, so dedicated:// addresses (currently US/Canada) are not valid
+// for this application.
+function proxyConfigProblem(env = process.env) {
+  const raw = env && env.DRIVER_PROXY_URL;
+  if (!raw) return null;
+  let u;
+  try { u = new URL(String(raw).split("{agent}").join("agent")); }
+  catch (e) { return "DRIVER_PROXY_URL must be a valid socks5:// or socks5h:// URL"; }
+  if (!["socks5:", "socks5h:"].includes(u.protocol)) {
+    return "DRIVER_PROXY_URL must use socks5:// or socks5h://; Driver does not support HTTP proxies";
+  }
+  if (!u.hostname) return "DRIVER_PROXY_URL must include a proxy host";
+  return null;
+}
+
+// The dev browser monitor (/dev-driver.html): on by itself on a local box —
+// every browser this server opens is shown there — and never anywhere else.
+// DRIVER_DEV_VIEW=0 turns it off locally; =1 outside local is refused at boot.
+function devViewOn(env = process.env) {
+  return env.DRIVER_DEV_VIEW !== "0" && env.FORLY_ENV === "local" && env.NODE_ENV !== "production";
+}
+
+// index.js's boot decision, as a pure function: `fatal` → refuse to start.
+// An unset FORLY_ENV still boots (profileName refuses when called; Driver
+// stays off); a wrong one does not. NODE_ENV=production without
+// FORLY_ENV=prod is fatal only when Driver could be on — DRIVER_API_KEY or a
+// FORLY_ENV is set (I12): a production box with neither simply runs without
+// Driver. The dev viewer exists only on a local, non-production box.
+function bootCheck(env = process.env) {
+  const out = { fatal: null, enabled: false, missing: [], devView: false };
+  const fatal = (msg) => Object.assign(out, { fatal: msg });
+  if (env.FORLY_ENV !== undefined && !ENVS.includes(env.FORLY_ENV)) return fatal(`FORLY_ENV must be prod|staging|local (got "${env.FORLY_ENV}")`);
+  const driverWanted = !!env.DRIVER_API_KEY || env.FORLY_ENV !== undefined;
+  const proxyProblem = driverWanted ? proxyConfigProblem(env) : null;
+  if (proxyProblem) return fatal(proxyProblem);
+  if (env.NODE_ENV === "production" && env.FORLY_ENV !== "prod" && driverWanted) return fatal("NODE_ENV=production requires FORLY_ENV=prod");
+  if (env.DRIVER_DEV_VIEW === "1") {
+    if (env.FORLY_ENV !== "local" || env.NODE_ENV === "production") {
+      return fatal("DRIVER_DEV_VIEW=1 is allowed only with FORLY_ENV=local and NODE_ENV not production — unset it");
+    }
+  }
+  out.devView = devViewOn(env);
+  if (env.DRIVER_API_KEY) {
+    out.missing = driverMissing(env);
+    out.enabled = out.missing.length === 0;
+  }
+  return out;
+}
+
+class DriverError extends Error {
+  constructor(status, message, code, retryAfter) {
+    super(`Driver ${status}: ${message}`);
+    this.status = status;
+    this.code = code;
+    this.retryAfter = retryAfter;
+  }
+}
+
+const sleepReal = (ms) => new Promise((r) => setTimeout(r, ms));
+const backoffMs = (base, attempt, rnd) => base * 1000 * attempt + rnd * 1000;
+
+async function call(method, path, body, deps = {}) {
+  const fetchFn = deps.fetchFn || fetch;
+  const apiKey = deps.apiKey || process.env.DRIVER_API_KEY;
+  if (!apiKey) throw new DriverError(401, "DRIVER_API_KEY is not set");
+  const res = await fetchFn(`${API}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    const ra = Number(res.headers.get("retry-after")) || undefined;
+    throw new DriverError(res.status, e.error || res.statusText, e.code, ra);
+  }
+  return res.json();
+}
+
+// Our agents work from Israel, so every session does too. Without a custom
+// proxy we set country, clock and locale explicitly. With a SOCKS endpoint we
+// pass only country=IL so Driver must first verify/geolocate the exit and then
+// derive a coherent timezone and language. Nothing is patched in the page.
+const SESSION_DEFAULTS = { country: "IL", timezone: "Asia/Jerusalem", language: "he-IL" };
+// Notes are scoped by environment HERE, in one place: callers pass
+// "forly-<kind>:<rest>", Driver sees "forly-<env>-<kind>:<rest>". Staging and
+// prod may share a Driver account, and cleanupOrphans matches on the note —
+// unscoped, a staging boot would stop every prod session. An invalid
+// FORLY_ENV leaves the note as is (Driver is disabled then anyway).
+function scopeNote(note) {
+  if (typeof note !== "string") return note;
+  const m = note.match(/^forly-([a-z]+):/);
+  if (!m) return note; // not ours, or already scoped
+  let env;
+  try { env = profileNames.ENV(); } catch (e) { return note; }
+  return `forly-${env}-${m[1]}:${note.slice(m[0].length)}`;
+}
+
+// DRIVER_PROXY_URL may carry "{agent}" (e.g. http://user-session-{agent}:pass@host:port):
+// each agent then always leaves through the same residential address — the
+// provider's sticky session — so Facebook sees one steady home network per
+// agent. The name is an HMAC of the phone under PROFILE_KEY, never the phone.
+// A session with no agent (an anonymous listing read) gets a one-off name.
+function proxyFor(phone, env = process.env) {
+  const tpl = env.DRIVER_PROXY_URL;
+  if (!tpl) return {};
+  const problem = proxyConfigProblem(env);
+  if (problem) { const e = new Error(problem); e.code = "invalid_proxy_config"; throw e; }
+  if (!tpl.includes("{agent}")) return { proxyUrl: tpl };
+  const id = phone
+    ? crypto.createHmac("sha256", String(env.PROFILE_KEY || "")).update(`proxy|${phone}`).digest("hex").slice(0, 16)
+    : `anon${crypto.randomBytes(6).toString("hex")}`;
+  return { proxyUrl: tpl.split("{agent}").join(id) };
+}
+// What a session request may say in a log line: never the proxy's credentials,
+// the profile name or a phone.
+const sessionLogLine = (b) => ({ note: b.note || null, duration: b.duration || null, type: b.type || null, country: b.country || null,
+  url_host: (() => { try { return b.url ? new URL(b.url).host : null; } catch (e) { return null; } })(),
+  profile: b.profile ? "set" : "none", proxy: b.proxyUrl ? "set" : "none" });
+
+// Dev-only: a registry of live sessions, so a developer can watch every
+// browser the server opens (routes/dev-driver.js). Never on in production
+// (index.js refuses to boot with the flag outside FORLY_ENV=local). The list
+// carries no cdpUrl — watching one takes a viewer grant.
+let devView = devViewOn(process.env);
+const live = new Map();
+const platformOfNote = (note) => {
+  const m = String(note || "").match(/^forly-(?:(?:prod|staging|local)-)?[a-z]+:(.+)$/);
+  return m ? m[1] : null;
+};
+const liveSessions = () => (devView ? [...live.values()].map((s) => ({
+  sessionId: s.sessionId, note: s.note, platform: platformOfNote(s.note), startedAt: s.startedAt, viewer_available: true,
+})) : []);
+
+// Viewer grants: an operator asks for one (step-up protected), then spends it
+// on a redirect. Five minutes, one use, bound to the operator who minted it.
+const GRANT_TTL_MS = 5 * 60 * 1000;
+const grants = new Map();
+let nowFn = () => Date.now();
+function mintViewerGrant(sessionId, { operator, mode = "view" } = {}) {
+  if (!live.has(sessionId) || !operator) return null;
+  const now = nowFn();
+  for (const [k, g] of grants) if (g.expiresAt <= now) grants.delete(k);
+  const id = crypto.randomBytes(16).toString("hex");
+  const expiresAt = now + GRANT_TTL_MS;
+  grants.set(id, { sessionId, operator, mode, expiresAt });
+  return { id, expiresAt };
+}
+// The one place the cdpUrl is read back out.
+function consumeViewerGrant(id, operator) {
+  const g = grants.get(id);
+  grants.delete(id);
+  if (!g || g.expiresAt <= nowFn() || g.operator !== operator) return null;
+  const s = live.get(g.sessionId);
+  if (!s || !s.cdpUrl) return null;
+  return `https://viewer.driver.dev?ws=${encodeURIComponent(s.cdpUrl)}`;
+}
+
+/*
+ * Everything a page-handing call must hold before it opens a browser. With a
+ * profile: the caller says whose (deps.phone + deps.platform), the name must be
+ * that phone's current one (withPage only — attachPage has no opts.profile),
+ * and the profile lock is taken here unless the caller already holds it
+ * (deps.lockHeld). A new browser (not attachPage: its session already holds
+ * one): one slot of the local concurrency budget. Returns one release for both.
+ */
+function claim(usesProfile, profileNameToCheck, deps, newSession = true) {
+  const locks = deps.locks || profileLock;
+  const names = deps.names || profileNames;
+  let releaseProfile = () => {};
+  if (usesProfile) {
+    if (!deps.phone || !deps.platform) {
+      const e = new Error("a profile needs deps.phone and deps.platform"); e.code = "invalid_input"; throw e;
+    }
+    if (profileNameToCheck !== undefined) names.assertOwnership(profileNameToCheck, deps.phone, deps.platform, deps.conn || null);
+    if (deps.lockHeld !== true) {
+      const r = locks.tryAcquire(deps.phone, deps.platform);
+      if (!r) { const e = new Error("profile is busy"); e.code = "profile_busy"; throw e; }
+      releaseProfile = r;
+    }
+  }
+  const releaseSession = newSession ? locks.trySession() : () => {};
+  if (!releaseSession) { releaseProfile(); throw new DriverError(429, "local concurrency budget"); }
+  return () => { releaseSession(); releaseProfile(); };
+}
+
+// No new browser until boot's cleanupOrphans has SUCCEEDED: the last
+// process's browsers are invisible to this one's locks until they are
+// stopped. A create waits a little for it, then is refused (503) — fail closed.
+let bootDone = true, bootGate = Promise.resolve();
+const holdCreatesUntil = (p) => {
+  bootDone = false;
+  bootGate = Promise.resolve(p).then(() => { bootDone = true; });
+  bootGate.catch(() => {}); // a rejected cleanup keeps creates refused, it is not a crash
+};
+const BOOT_WAIT_MS = 30000;
+
+async function createSession(opts = {}, deps = {}) {
+  if (!bootDone) {
+    let t;
+    await Promise.race([bootGate.catch(() => {}), new Promise((r) => { t = setTimeout(r, deps.bootWaitMs || BOOT_WAIT_MS); })]);
+    clearTimeout(t);
+    if (!bootDone) throw new DriverError(503, "orphan cleanup not confirmed yet", "driver_starting");
+  }
+  const sleep = deps.sleep || sleepReal;
+  const random = deps.random || Math.random;
+  const proxy = proxyFor(deps.phone || null, deps.env || process.env);
+  const body = Object.assign({}, opts, proxy);
+  if (body.proxyUrl) {
+    // Driver normally checks and geolocates a SOCKS endpoint before launch.
+    // Supplying BOTH timezone and language skips that check and lets a dead
+    // proxy launch as Chrome's ERR_SOCKS_CONNECTION_FAILED page. Keep only the
+    // required Israeli country so Driver rejects dead or non-Israeli exits.
+    body.country = SESSION_DEFAULTS.country;
+    delete body.timezone;
+    delete body.language;
+  } else Object.assign(body, SESSION_DEFAULTS);
+  if (body.note) body.note = scopeNote(body.note);
+  console.log("driver: creating browser session", sessionLogLine(body));
+  let attempt = 0;
+  for (;;) {
+    try {
+      const s = await call("POST", "/v1/browser/session", body, deps);
+      if (devView && s && s.sessionId) live.set(s.sessionId, { sessionId: s.sessionId, note: body.note || null, cdpUrl: s.cdpUrl, startedAt: new Date().toISOString() });
+      return s;
+    } catch (e) {
+      if (!(e instanceof DriverError)) throw e;
+      if (body.proxyUrl && e.status === 400 && /proxy|egress|country/i.test(e.message)) e.code = "proxy_unavailable";
+      attempt++;
+      if (e.status === 503 && attempt <= 5) { await sleep(backoffMs(e.retryAfter || 2, attempt, random())); continue; }
+      if ((e.status === 504 || e.status === 500) && attempt <= 1) continue;
+      if (e.status === 429 && attempt <= 3) { await sleep(backoffMs(2, attempt, random())); continue; }
+      throw e; // 400, 401, 402, 403, or out of attempts: a person has to act
+    }
+  }
+}
+
+const getSession = (id, deps) => call("GET", `/v1/browser/session?sessionId=${encodeURIComponent(id)}`, null, deps);
+const listSessions = (status, deps) => call("GET", `/v1/browser/sessions?pageSize=50${status ? `&status=${status}` : ""}`, null, deps);
+
+// Idempotent, and never throws: called from a finally, where replacing the
+// error already in flight would hide what actually went wrong. → true once
+// Driver confirms the session is gone (or never knew it); false otherwise —
+// the browser may still be up, so a login keeps its slot until it expires.
+async function stopSession(id, deps = {}) {
+  let gone = false;
+  try {
+    const r = await call("DELETE", `/v1/browser/session?sessionId=${encodeURIComponent(id)}`, null, deps);
+    gone = !!r && r.success === true;
+    if (!gone) logError(`driver: stop of ${shortId(id)} did not succeed: response=${JSON.stringify(r)}`);
+  } catch (e) {
+    gone = e instanceof DriverError && e.status === 404;
+    if (!gone) logError(`driver: stop of ${shortId(id)} failed: ${describeError(e)}`);
+  }
+  if (gone) { live.delete(id); profileLock.endLogin(id); }
+  return gone;
+}
+
+// A crash before the finally leaves a session running until its duration. Every
+// session we create carries a note; at boot we stop the ones that are ours.
+async function cleanupOrphans(notePrefix, deps = {}) {
+  notePrefix = scopeNote(notePrefix); // this environment's sessions only
+  // Fails closed: a list that cannot be read, or a stop Driver did not
+  // confirm, throws — "no orphans" must be shown, never assumed.
+  let stopped = 0, failed = 0;
+  for (const status of ["active", "starting"]) {
+    const r = await listSessions(status, deps);
+    for (const s of (r && r.sessions) || []) {
+      if (!String(s.note || "").startsWith(notePrefix)) continue;
+      if (await stopSession(s.sessionId, deps)) stopped++; else failed++;
+    }
+  }
+  if (failed) { const e = new Error(`${failed} orphaned session(s) not stopped`); e.code = "orphan_cleanup_failed"; throw e; }
+  return stopped;
+}
+
+async function waitForActive(session, deps = {}) {
+  const sleep = deps.sleep || sleepReal;
+  const deadline = Date.now() + (deps.timeoutMs || 60000);
+  let s = session;
+  while (!(s.status === "active" && s.cdpUrl)) {
+    if (s.status === "completed" || s.status === "error") throw new DriverError(500, `session ended: ${s.status}`);
+    if (Date.now() > deadline) throw new DriverError(504, "timed out waiting for the browser");
+    await sleep(1000);
+    s = await getSession(s.sessionId, deps);
+  }
+  return s;
+}
+
+// Chrome's internal network-error page can appear even after Driver accepted
+// and activated a session (for example when a hosted or custom SOCKS route
+// dies after launch). Classify only explicit Chromium error pages/codes; never
+// infer failure from Facebook's own content.
+const NETWORK_ERROR_RE = /\bERR_(SOCKS_CONNECTION_FAILED|PROXY_CONNECTION_FAILED|TUNNEL_CONNECTION_FAILED|INTERNET_DISCONNECTED|CONNECTION_TIMED_OUT|CONNECTION_REFUSED|NAME_NOT_RESOLVED|ADDRESS_UNREACHABLE|NETWORK_CHANGED)\b/;
+async function browserNetworkFailure(page) {
+  let url = "", text = "";
+  try { url = String(page && page.url ? page.url() : ""); } catch (e) { /* page changed */ }
+  try { text = String(page && page.innerText ? await page.innerText("body", { timeout: 2000 }) : "").slice(0, 5000); } catch (e) { /* unreadable error page */ }
+  const match = `${url}\n${text}`.match(NETWORK_ERROR_RE);
+  const internal = /^chrome-error:\/\//i.test(url);
+  if (!match && !internal) return null;
+  const browserCode = match ? match[0] : "CHROME_ERROR_PAGE";
+  const proxy = /SOCKS|PROXY|TUNNEL/.test(browserCode);
+  return { error: proxy ? "proxy_unavailable" : "browser_network_unavailable", browser_code: browserCode };
+}
+
+// Called immediately after createSession by a caller that already owns the
+// local session-budget slot. It joins the new browser, inspects its first tab,
+// and disconnects without stopping the Driver session.
+async function inspectInitialPage(session, deps = {}) {
+  const active = await waitForActive(session, deps);
+  const connect = deps.connectOverCDP || ((url) => require("patchright").chromium.connectOverCDP(url));
+  const browser = await connect(active.cdpUrl);
+  try {
+    const context = browser.contexts()[0] || (await browser.newContext());
+    const page = context.pages()[0] || (await context.newPage());
+    if (page.waitForLoadState) await page.waitForLoadState("domcontentloaded", { timeout: deps.initialPageTimeoutMs || 15000 }).catch(() => {});
+    if (page.waitForTimeout) await page.waitForTimeout(250);
+    return await browserNetworkFailure(page);
+  } finally {
+    await browser.close();
+  }
+}
+
+/*
+ * The only way this module hands out a page. Reuses the browser's own context
+ * and tab (a fresh context is itself an automation signal) and guarantees the
+ * DELETE, whatever fn does. With opts.profile, deps must say whose profile it
+ * is (phone, platform, optional conn) — see claim().
+ */
+async function withPage(opts, fn, deps = {}) {
+  const profile = opts && opts.profile;
+  // The agent's login browser holds no lock once /start returns; never open the
+  // same profile (same cookies, another IP) while it is live. Every caller that
+  // passes conn — posting, extract, listing-sweep — gets this for free.
+  if (profile && deps.conn && deps.platform && profileLock.loginOpen(deps.conn, deps.platform)) {
+    const e = new Error("profile is busy: login in progress"); e.code = "profile_busy"; throw e;
+  }
+  const release = claim(!!profile, profile ? profile.name : undefined, deps);
+  let session = null;
+  try {
+    session = await createSession(opts, deps);
+    const active = await waitForActive(session, deps);
+    const connect = deps.connectOverCDP || ((url) => require("patchright").chromium.connectOverCDP(url));
+    const browser = await connect(active.cdpUrl);
+    try {
+      const context = browser.contexts()[0] || (await browser.newContext());
+      const page = context.pages()[0] || (await context.newPage());
+      // Local monitor: this browser is watched over this same connection.
+      if (devView) { try { require("./connect-viewer").adopt(`dev|${active.sessionId || session.sessionId}`, active.sessionId || session.sessionId, browser, context); } catch (e) { /* watching never breaks the work */ } }
+      return await fn(page, active);
+    } finally {
+      await browser.close(); // our connection only; the session is still up
+    }
+  } finally {
+    if (session) await stopSession(session.sessionId, deps);
+    release();
+  }
+}
+
+/*
+ * Join a session that is ALREADY running and leave it running. This is the
+ * embedded-login case: the agent is typing into that browser right now, so the
+ * finally that withPage guarantees would be exactly wrong here. With
+ * deps.phone the profile lock is taken for the attach (unless deps.lockHeld).
+ */
+async function attachPage(sessionId, fn, deps = {}) {
+  const release = claim(!!deps.phone, undefined, deps, false);
+  try {
+    const session = await waitForActive(await getSession(sessionId, deps), deps);
+    const connect = deps.connectOverCDP || ((url) => require("patchright").chromium.connectOverCDP(url));
+    const browser = await connect(session.cdpUrl);
+    try {
+      const context = browser.contexts()[0] || (await browser.newContext());
+      const page = context.pages()[0] || (await context.newPage());
+      return await fn(page, session);
+    } finally {
+      await browser.close(); // our connection only — the agent's session stays up
+    }
+  } finally {
+    release();
+  }
+}
+
+// Deletes a persisted profile at Driver — used on disconnect and by
+// profile-lifecycle.js's revoke()/retryDeletes(), so the cookies do not
+// outlive the agent's consent. Like stopSession, never throws (called from a
+// route handler that has already committed to answering 200); instead it
+// returns { ok: true } or { ok: false, error } so a caller that DOES need to
+// know (revoke() records `<platform>_profile_delete_error` for the sweeper to
+// retry) can. Never logs the profile name — only the platform, which is its
+// first "-"-separated segment.
+async function deleteProfile(name, deps = {}) {
+  const platform = String(name || "").split("-")[0] || "unknown";
+  try {
+    const r = await call("DELETE", `/v1/browser/profiles/${encodeURIComponent(name)}`, null, deps);
+    if (r && r.success === false) {
+      logError(`driver: delete of ${platform} profile did not succeed`);
+      return { ok: false, error: "did not succeed" };
+    }
+    return { ok: true };
+  } catch (e) {
+    // A delete can succeed at Driver while its response is lost (timeout,
+    // dropped connection, …); every retry after that sees a 404, because the
+    // profile really is already gone. That is success, not failure — logged
+    // as an error and retried forever, it would escalate a delete that
+    // already happened. Nothing worth logging: a 404 here is expected, not
+    // noteworthy.
+    if (e instanceof DriverError && e.status === 404) return { ok: true, already_gone: true };
+    logError(`driver: delete of ${platform} profile failed: ${describeError(e)}`);
+    return { ok: false, error: e.message, status: e instanceof DriverError ? e.status : undefined };
+  }
+}
+
+module.exports = {
+  DriverError, holdCreatesUntil, createSession, getSession, listSessions, stopSession,
+  cleanupOrphans, waitForActive, inspectInitialPage, browserNetworkFailure, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
+  redact, describeError, driverEnabled, bootCheck, devViewOn, mintViewerGrant, consumeViewerGrant,
+  proxyConfigProblem,
+  _test: {
+    backoffMs, scopeNote, proxyFor, sessionLogLine,
+    setDevView: (v) => { devView = v; live.clear(); grants.clear(); },
+    setNow: (fn) => { nowFn = fn || (() => Date.now()); },
+  },
+};

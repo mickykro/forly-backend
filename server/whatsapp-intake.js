@@ -58,7 +58,10 @@ async function build(draft, deps, now) {
   }
   draft.status = "building";
   draft.listing_id = res.listing_id;
-  return { handled: true, status: "building", draft: D.touch(draft, now), replies: [R.building(draft.fields)] };
+  // The groups for this property can be chosen while it builds (posting-listing-groups).
+  let offer = null;
+  try { offer = deps.postingOffer ? await deps.postingOffer(res.listing_id) : null; } catch (err) { offer = null; }
+  return { handled: true, status: "building", draft: D.touch(draft, now), replies: [R.building(draft.fields, offer)] };
 }
 
 async function importAll(urls, importPhoto) {
@@ -441,6 +444,12 @@ async function handleTurn(input, deps) {
     return { handled: true, status: "document", replies: [oneBubble([R.sendAsImage(), ...pending])] };
   }
 
+  // "ברירת מחדל": this property (or, once its page is built and the chat draft
+  // is gone, the newest one of the last day) goes to the default groups.
+  if (!input.event && D.command(input.text) === "default" && deps.chooseDefault && (!draft || draft.status === "building")) {
+    const out = await deps.chooseDefault(draft ? draft.listing_id : null);
+    if (out) return { handled: true, status: `default:${out.ok ? "ok" : "unavailable"}`, replies: [out.ok ? R.defaultChosen(out.count) : R.defaultUnavailable(out.link)] };
+  }
   if (!draft) {
     if (photoUrlsOf(input) && !input.event) return PC.hold(null, phone, photoUrlsOf(input), now);
     const kind = await openerOf(input.text, deps);
