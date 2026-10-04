@@ -8,6 +8,10 @@
  * linked spaces (one photo shows the other) together first — and those clips
  * carry an explicit no-passage rule.
  *
+ * Empty (unfurnished) rooms look alike and give Seedance little to show, so
+ * the middle ones share a clip (one shot each, up to MAX_SHOTS per clip)
+ * instead of spending a clip apiece; an empty lounge loses its own clip too.
+ *
  * Prompts are written here, not by a model: every camera target comes from the
  * map's "shows" list for that exact photo, with doors, corridors and anything
  * the map marked off-limits filtered out.
@@ -122,23 +126,38 @@ function groupSpaces(spaces, sees, maxClips = MAX_CLIPS) {
   const closer = best(spaces, (s) => is(s, order[0]), [opener]) || best(spaces, (s) => is(s, order[1]), [opener])
     || best(spaces, edgeOk, [opener]);
   const fixed = [opener, closer].filter(Boolean);
-  const main = fixed.some((s) => is(s, LOUNGE)) ? null : best(spaces, (s) => is(s, LOUNGE), fixed);
+  const main = fixed.some((s) => is(s, LOUNGE)) ? null : best(spaces, (s) => is(s, LOUNGE) && !s.empty, fixed);
   if (main) fixed.push(main);
 
-  let middle = spaces.filter((s) => !fixed.includes(s))
+  const ranked = spaces.filter((s) => !fixed.includes(s))
     .map((s, i) => [s, i])
     .sort((a, b) => rank(a[0]) - rank(b[0]) || b[0].photos.length - a[0].photos.length || b[0].score - a[0].score || a[1] - b[1])
     .map(([s]) => s);
-  const slots = Math.max(1, maxClips - fixed.length);
+  let slots = Math.max(1, maxClips - fixed.length);
   let dropped = [];
-  let middleGroups;
-  if (middle.length <= slots) {
+  // Two or more empty rooms: as few shared clips as hold them; the furnished
+  // rooms then get the slots that are left, exactly as before.
+  const empties = ranked.filter((s) => s.empty);
+  let middle = ranked;
+  let emptyGroups = [];
+  if (empties.length > 1) {
+    middle = ranked.filter((s) => !s.empty);
+    const room = middle.length ? Math.max(1, slots - 1) : slots;
+    const n = Math.min(Math.ceil(empties.length / MAX_SHOTS), room);
+    dropped = empties.slice(n * MAX_SHOTS).map((s) => s.id);
+    emptyGroups = chunk(linkOrder(empties.slice(0, n * MAX_SHOTS), sees), n);
+    slots = Math.max(1, slots - emptyGroups.length);
+  }
+  let middleGroups = [];
+  if (middle.length && middle.length <= slots) {
     middleGroups = middle.map((s) => [s]);
-  } else {
-    dropped = middle.slice(slots * MAX_SHOTS).map((s) => s.id);
+  } else if (middle.length) {
+    dropped = dropped.concat(middle.slice(slots * MAX_SHOTS).map((s) => s.id));
     middle = linkOrder(middle.slice(0, slots * MAX_SHOTS), sees);
     middleGroups = chunk(middle, slots);
   }
+  // Each group sits where its first room ranks.
+  middleGroups = middleGroups.concat(emptyGroups).sort((a, b) => ranked.indexOf(a[0]) - ranked.indexOf(b[0]));
   const groups = [[opener], ...(main ? [[main]] : []), ...middleGroups, ...(closer ? [[closer]] : [])];
   return { groups, opener_group: openerGroup, dropped };
 }
