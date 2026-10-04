@@ -11,6 +11,7 @@
  *   GET  /api/admin/properties         → every property + agent + page stats
  *   POST /api/admin/page/extend        → extend ANY page by 30 days
  *   POST /api/admin/properties/delete  → archive/delete ANY listing
+ *   POST /api/admin/properties/retry   → rerun the page build of ANY listing with no page
  */
 
 const express = require("express");
@@ -22,6 +23,7 @@ const readiness = require("../chatbot-readiness");
 const chatbotConfig = require("../chatbot-config");
 const businessCache = require("../business-cache");
 const { deliverAgentMessage, MAX_RECIPIENTS } = require("../admin-messages");
+const { buildFailed, retryListing } = require("../listing-create");
 
 const PAGE_LIFESPAN_DAYS = 30;
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
@@ -29,7 +31,7 @@ const asMillis = (v) => { const d = asDate(v); return d ? d.getTime() : 0; };
 
 module.exports = function createAdminRouter(ctx) {
   const { verifySession, readToken, authSecret, normalizeAuthPhone, pageBaseUrl,
-          uploadDir, adminPhones, sendWhatsApp, quota } = ctx;
+          uploadDir, adminPhones, sendWhatsApp, quota, pipelineDeps = {} } = ctx;
 
   const router = express.Router();
 
@@ -122,7 +124,8 @@ module.exports = function createAdminRouter(ctx) {
         const expires = page ? asDate(page.expires_at) : null;
         const views = (page && page.view_count) || 0;
         const leads = (page && page.lead_count) || 0;
-        const pageStatus = page ? page.status : "building";
+        // No page 20 min after the last attempt (or marked failed) reads "failed".
+        const pageStatus = page ? page.status : buildFailed(l) ? "failed" : "building";
         totalViews += views;
         totalLeads += leads;
         if (pageStatus === "active" || pageStatus === "expiring") activePages += 1;
@@ -145,6 +148,7 @@ module.exports = function createAdminRouter(ctx) {
           view_count: views,
           lead_count: leads,
           created_at: asMillis(l.created_at) || null,
+          retry_count: l.retry_count || 0,
           // {page: true|false|null(inherit), effective, reason} — drives the
           // per-page selector. No extra read: page and biz are already loaded.
           chatbot: page ? chatbotConfig.adminState(page, biz, process.env) : null,
@@ -453,6 +457,27 @@ module.exports = function createAdminRouter(ctx) {
       res.json({ ok: true });
     } catch (err) {
       console.error("admin/properties/delete failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── retry ANY listing's page build ──
+  // Replays the n8n pipeline from the stored listing, like the agent's retry,
+  // but without the agent's 3-attempt cap, and also for a build that is not
+  // yet past the 20-min failure mark (the panel asks first: it may still land
+  // and the retry is a second paid generation). Never consumes the agent's quota.
+  router.post("/properties/retry", requireAdmin, async (req, res) => {
+    const listingId = String((req.body && req.body.listing_id) || "");
+    if (!listingId) return res.status(400).json({ error: "listing_id required" });
+    const listing = await db.getListing(listingId);
+    if (!listing) return res.status(404).json({ error: "not found" });
+    if (listing.page_id) return res.status(409).json({ error: "already_built" });
+    if (listing.status === "archived" || listing.status === "deleted") return res.status(409).json({ error: "not_active" });
+    try {
+      const patch = await retryListing(listing, pipelineDeps);
+      res.json({ ok: true, retry_count: patch.retry_count });
+    } catch (err) {
+      console.error("admin/properties/retry failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });

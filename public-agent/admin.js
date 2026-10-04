@@ -8,7 +8,7 @@
 
   var STATUS_LABELS = {
     active: "פעיל", expiring: "עומד לפוג", expired: "פג תוקף",
-    archived: "בארכיון", building: "בבנייה",
+    archived: "בארכיון", building: "בבנייה", failed: "הבנייה נכשלה",
   };
 
   var all = [];   // full property list from the server
@@ -63,6 +63,13 @@
     if (p.page_id && p.page_status !== "building") {
       actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + esc(p.page_id) + '&from=admin">עריכה</a>');
       actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + esc(p.page_id) + '">+30</button>');
+    }
+    // A build with no page — failed, or still "building" — can be rerun from
+    // the stored listing. The server takes no agent cap here.
+    if (!p.page_id && (p.page_status === "failed" || p.page_status === "building") &&
+        p.listing_status !== "archived" && p.listing_status !== "deleted") {
+      actions.push('<button class="btn btn-gold btn-sm" data-retry="' + esc(p.listing_id) + '" data-retry-status="' +
+        esc(p.page_status) + '" title="ניסיונות קודמים: ' + esc(p.retry_count || 0) + '">↻ נסו שוב</button>');
     }
     if (p.listing_status !== "archived") {
       actions.push('<button class="btn btn-ghost btn-sm" data-archive="' + esc(p.listing_id) + '">ארכיון</button>');
@@ -156,6 +163,21 @@
         FLY.req("/api/admin/properties/delete", { method: "POST", body: { listing_id: b.dataset.archive, mode: "archive" }, noRedirect: true })
           .then(function () { FLY.toast("הנכס הועבר לארכיון"); load(); })
           .catch(function () { FLY.toast("שגיאה"); b.disabled = false; });
+      });
+    });
+    document.querySelectorAll("[data-retry]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var msg = b.dataset.retryStatus === "building"
+          ? "הדף עדיין בבנייה (פחות מ-20 דק׳ מהניסיון האחרון). להריץ שוב בכל זאת? זה ייצור סרטון נוסף בתשלום."
+          : "להריץ מחדש את בניית הדף מהנתונים השמורים? זה ייצור סרטון חדש בתשלום.";
+        if (!confirm(msg)) return;
+        b.disabled = true;
+        FLY.req("/api/admin/properties/retry", { method: "POST", body: { listing_id: b.dataset.retry }, noRedirect: true })
+          .then(function () { FLY.toast("↻ הבנייה הופעלה מחדש"); load(); })
+          .catch(function (e) {
+            FLY.toast(e && e.code === "already_built" ? "לנכס כבר יש דף" : "שגיאה בהפעלה מחדש");
+            b.disabled = false;
+          });
       });
     });
     document.querySelectorAll("[data-cb]").forEach(function (sel) {

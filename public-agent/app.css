@@ -69,6 +69,7 @@ a{color:inherit}
 .chip.expiring{background:rgba(217,177,92,.18);color:#8A6A1E}
 .chip.expired,.chip.archived{background:rgba(23,20,15,.08);color:var(--ink-soft)}
 .chip.building{background:rgba(52,110,235,.1);color:#2A56B8}
+.chip.failed{background:rgba(192,57,43,.1);color:var(--red)}
 .meta-row{display:flex;gap:14px;font-size:.78rem;color:var(--ink-soft);margin:10px 0 14px}
 .meta-row b{color:var(--ink)}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
