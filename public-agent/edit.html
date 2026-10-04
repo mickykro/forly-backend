@@ -96,6 +96,11 @@
         <div class="field"><label>שם המותג</label><input id="fAgentBrand" maxlength="60" data-live="agent.brand_name"></div>
         <div class="field"><label>תיאור קצר</label><input id="fAgentTagline" maxlength="120" data-live="agent.tagline"></div>
         <div class="field"><label>פרטי רישיון</label><input id="fAgentMeta" maxlength="160" data-live="texts.agent_meta"></div>
+        <div class="grid-2">
+          <div class="field"><label for="fAgent2Name">סוכן נוסף — שם</label><input id="fAgent2Name" maxlength="60" autocomplete="off"></div>
+          <div class="field"><label for="fAgent2Phone">סוכן נוסף — נייד (וואטסאפ)</label><input id="fAgent2Phone" type="tel" inputmode="tel" maxlength="20" placeholder="050-0000000" dir="ltr" autocomplete="off"></div>
+        </div>
+        <div class="hint">אופציונלי. השם מופיע בדף לצד שמכם. לביטול — מחקו את שני השדות.</div>
       </div>
 
       <!-- Hero -->
@@ -321,6 +326,8 @@
         brand_name: $("#fAgentBrand").value,
         tagline: $("#fAgentTagline").value,
       },
+      // The server ignores a half-filled pair (autosave runs mid-typing).
+      agent2: { name: $("#fAgent2Name").value.trim(), phone: $("#fAgent2Phone").value.trim() },
       property: {
         title: $("#fTitle").value,
         price: Number($("#fPrice").value) || 0,
@@ -428,6 +435,9 @@
       $("#fAgentBrand").value = agent.brand_name || "";
       $("#fAgentTagline").value = agent.tagline || "";
       $("#fAgentMeta").value = texts.agent_meta || "";
+      var agent2 = d.agent2 || {};
+      $("#fAgent2Name").value = agent2.name || "";
+      $("#fAgent2Phone").value = localPhone(agent2.phone);
       // Hero
       $("#fPhrase").value = hero.phrase || "";
       $("#phraseCount").textContent = (hero.phrase || "").length;
@@ -611,6 +621,25 @@
     });
   }
 
+  // Same rules as the server's normalizeAuthPhone: Israeli mobile or international.
+  function agent2PhoneOk(raw) {
+    var p = String(raw || "").replace(/\D/g, "").replace(/^00/, "");
+    return /^0?5\d{8}$/.test(p) || (p.length >= 9 && p.length <= 15 && p.charAt(0) !== "0");
+  }
+  // 972501234567 → 050-1234567 for display; other countries stay international.
+  function localPhone(p) {
+    p = String(p || "");
+    return /^9725\d{8}$/.test(p) ? "0" + p.slice(3, 5) + "-" + p.slice(5) : p ? "+" + p : "";
+  }
+  // A half-filled second agent would be silently skipped by the server — say so.
+  function badAgent2() {
+    var name = $("#fAgent2Name").value.trim(), phone = $("#fAgent2Phone").value.trim();
+    if (!name && !phone) return null;
+    if (!name) return { el: $("#fAgent2Name"), msg: "חסר שם לסוכן הנוסף" };
+    if (!agent2PhoneOk(phone)) return { el: $("#fAgent2Phone"), msg: "מספר הנייד של הסוכן הנוסף אינו תקין" };
+    return null;
+  }
+
   // Template picker: switch presentation, keep all content
   function setActiveTpl(name) {
     Array.prototype.forEach.call(document.querySelectorAll("#tplPick button"), function (b) {
@@ -638,6 +667,8 @@
     // the inputs carry min/max and the browser phrases the complaint
     var bad = badNumberField();
     if (bad) { bad.reportValidity(); return; }
+    var bad2 = badAgent2();
+    if (bad2) { FLY.toast(bad2.msg); bad2.el.focus(); return; }
     var btn = this;
     btn.disabled = true;
     $("#saveMsg").textContent = "שומרים...";
