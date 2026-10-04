@@ -413,6 +413,24 @@ async function quiet(fn) {
     done();
     assert.equal((await p).sessionId, "sg");
   }
+  // …and a failed cleanup keeps them refused: never "assume no orphans"
+  {
+    let fetched = false;
+    const fetchFn = async () => { fetched = true; return ok({ sessionId: "sx" }); };
+    D.holdCreatesUntil(Promise.reject(new Error("list 503")));
+    await assert.rejects(D.createSession({}, { apiKey: "k", sleep: async () => {}, bootWaitMs: 5, fetchFn }), (e) => e.code === "driver_starting");
+    D.holdCreatesUntil(new Promise(() => {})); // still running
+    await assert.rejects(D.createSession({}, { apiKey: "k", sleep: async () => {}, bootWaitMs: 5, fetchFn }), (e) => e.status === 503);
+    assert.equal(fetched, false, "no POST /browser/session");
+    D.holdCreatesUntil(Promise.resolve());
+  }
+  // ── cleanupOrphans fails closed: an unreadable list, or an unconfirmed stop ──
+  {
+    const list = (sessions) => async (url, init) => ((init && init.method) === "DELETE" ? err(503, {}) : ok({ sessions }));
+    await quiet(() => assert.rejects(D.cleanupOrphans("forly-post:", { apiKey: "k", sleep: async () => {}, fetchFn: async () => err(503, {}) })));
+    await quiet(() => assert.rejects(D.cleanupOrphans("forly-post:", { apiKey: "k", sleep: async () => {}, fetchFn: list([{ sessionId: "o1", note: "forly-local-post:x" }]) }),
+      (e) => e.code === "orphan_cleanup_failed"));
+  }
 
   // ── driverEnabled: all three secrets, and a valid FORLY_ENV ──
   const saved = { k: process.env.DRIVER_API_KEY, p: process.env.PROFILE_KEY, e: process.env.FORLY_ENV };

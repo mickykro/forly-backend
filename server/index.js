@@ -274,11 +274,20 @@ let devPostingDeps = null;
 if (driverBoot.enabled) {
   const extractJobs = require("./extract-jobs");
   const ORPHAN_NOTES = ["forly-extract:", "forly-connect:", "forly-sweep:", "forly-post:", "forly-dwell:", "forly-recheck:", "forly-sync:"];
+  // Retried until it succeeds; until then no new Driver browser (fail closed).
   driverBrowser.holdCreatesUntil((async () => {
-    let n = 0;
-    for (const prefix of ORPHAN_NOTES) n += await driverBrowser.cleanupOrphans(prefix);
-    if (n) console.log(`driver: stopped ${n} orphaned session(s) at boot`);
-  })().catch((e) => console.warn(`driver: orphan cleanup failed: ${driverBrowser.redact(e.message)}`)));
+    for (let wait = 5000; ; wait = Math.min(wait * 2, 5 * 60000)) {
+      try {
+        let n = 0;
+        for (const prefix of ORPHAN_NOTES) n += await driverBrowser.cleanupOrphans(prefix);
+        if (n) console.log(`driver: stopped ${n} orphaned session(s) at boot`);
+        return;
+      } catch (e) {
+        console.warn(`driver: orphan cleanup failed, new browsers held; retry in ${wait / 1000}s: ${driverBrowser.redact(e.message)}`);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+  })());
   extractJobs.startSweeper(extractJobs.liveDeps());
   console.log("driver: extract sweeper started");
 

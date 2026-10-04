@@ -240,13 +240,24 @@ function claim(usesProfile, profileNameToCheck, deps, newSession = true) {
   return () => { releaseSession(); releaseProfile(); };
 }
 
-// No new browser until boot's cleanupOrphans is done: the last process's
-// browsers are invisible to this one's locks until they are stopped.
-let bootGate = Promise.resolve();
-const holdCreatesUntil = (p) => { bootGate = Promise.resolve(p).catch(() => {}); };
+// No new browser until boot's cleanupOrphans has SUCCEEDED: the last
+// process's browsers are invisible to this one's locks until they are
+// stopped. A create waits a little for it, then is refused (503) — fail closed.
+let bootDone = true, bootGate = Promise.resolve();
+const holdCreatesUntil = (p) => {
+  bootDone = false;
+  bootGate = Promise.resolve(p).then(() => { bootDone = true; });
+  bootGate.catch(() => {}); // a rejected cleanup keeps creates refused, it is not a crash
+};
+const BOOT_WAIT_MS = 30000;
 
 async function createSession(opts = {}, deps = {}) {
-  await bootGate;
+  if (!bootDone) {
+    let t;
+    await Promise.race([bootGate.catch(() => {}), new Promise((r) => { t = setTimeout(r, deps.bootWaitMs || BOOT_WAIT_MS); })]);
+    clearTimeout(t);
+    if (!bootDone) throw new DriverError(503, "orphan cleanup not confirmed yet", "driver_starting");
+  }
   const sleep = deps.sleep || sleepReal;
   const random = deps.random || Math.random;
   const proxy = proxyFor(deps.phone || null, deps.env || process.env);
@@ -305,15 +316,17 @@ async function stopSession(id, deps = {}) {
 // session we create carries a note; at boot we stop the ones that are ours.
 async function cleanupOrphans(notePrefix, deps = {}) {
   notePrefix = scopeNote(notePrefix); // this environment's sessions only
-  let stopped = 0;
+  // Fails closed: a list that cannot be read, or a stop Driver did not
+  // confirm, throws — "no orphans" must be shown, never assumed.
+  let stopped = 0, failed = 0;
   for (const status of ["active", "starting"]) {
-    const r = await listSessions(status, deps).catch(() => ({ sessions: [] }));
+    const r = await listSessions(status, deps);
     for (const s of (r && r.sessions) || []) {
       if (!String(s.note || "").startsWith(notePrefix)) continue;
-      await stopSession(s.sessionId, deps);
-      stopped++;
+      if (await stopSession(s.sessionId, deps)) stopped++; else failed++;
     }
   }
+  if (failed) { const e = new Error(`${failed} orphaned session(s) not stopped`); e.code = "orphan_cleanup_failed"; throw e; }
   return stopped;
 }
 
