@@ -13,8 +13,49 @@ const db = require("../db");
 const { constantTimeEqual } = require("../security");
 const { mapSpaces, MAX_PHOTOS } = require("../space-map");
 const { planWalkthrough } = require("../walkthrough-plan");
+const { exifOrientation, uprightJpeg } = require("../photo-orient");
+const { assertPublicHttpUrl, storeBuffer } = require("../utils");
 
-module.exports = function createWalkthroughRouter({ n8nSecret }) {
+const HEAD_BYTES = 128 * 1024; // EXIF sits at the start of a JPEG
+const MAX_PHOTO_BYTES = 25 * 1024 * 1024;
+
+async function fetchBytes(url, range) {
+  const safe = await assertPublicHttpUrl(url);
+  const resp = await fetch(safe, { signal: AbortSignal.timeout(30000), redirect: "error",
+    headers: range ? { Range: `bytes=0-${HEAD_BYTES - 1}` } : {} });
+  if (!resp.ok) throw new Error(`photo fetch ${resp.status}`);
+  const buf = Buffer.from(await resp.arrayBuffer());
+  if (buf.length > MAX_PHOTO_BYTES) throw new Error("photo too large");
+  return { buf, partial: resp.status === 206 };
+}
+
+/*
+ * Seedance reads raw pixels and ignores a JPEG's EXIF rotation, so a phone
+ * photo stored sideways-plus-flag became a sideways room in the video. Photos
+ * uploaded since the fix are already upright (PUT /upload); this covers older
+ * ones and outside URLs. A photo that cannot be checked is used as it is.
+ * → number of photos replaced. `store(buf)` hosts the copy and returns its URL.
+ */
+async function uprightPhotos(tags, store, get = fetchBytes) {
+  let fixed = 0;
+  const one = async (t) => {
+    try {
+      let { buf, partial } = await get(t.url, true);
+      if (exifOrientation(buf) === 1) return;
+      if (partial) buf = (await get(t.url, false)).buf;
+      const up = await uprightJpeg(buf);
+      if (!up) return;
+      t.url = await store(up.buffer);
+      fixed++;
+    } catch (err) {
+      console.warn("walkthrough: upright check failed, photo used as is:", err.message);
+    }
+  };
+  for (let i = 0; i < tags.length; i += 6) await Promise.all(tags.slice(i, i + 6).map(one));
+  return fixed;
+}
+
+module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUrl, storeOpts = {} }) {
   const router = express.Router();
 
   function requireN8n(req, res, next) {
@@ -46,6 +87,9 @@ module.exports = function createWalkthroughRouter({ n8nSecret }) {
     const details = body.property_details && typeof body.property_details === "object" ? body.property_details : {};
     const listingId = typeof body.listing_id === "string" ? body.listing_id.slice(0, 100) : "";
 
+    const uprighted = uploadDir
+      ? await uprightPhotos(tags, (buf) => storeBuffer(buf, "jpg", uploadDir, baseUrl, storeOpts).then((r) => r.url))
+      : 0;
     const { map, debug } = await mapSpaces(tags);
     let plan;
     try {
@@ -65,8 +109,9 @@ module.exports = function createWalkthroughRouter({ n8nSecret }) {
         console.warn("walkthrough: saving space map failed:", err.message);
       }
     }
-    res.json({ ...plan, space_map: map, map_debug: debug });
+    res.json({ ...plan, space_map: map, map_debug: debug, uprighted_photos: uprighted });
   });
 
   return router;
 };
+module.exports.uprightPhotos = uprightPhotos;

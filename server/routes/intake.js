@@ -18,6 +18,7 @@ const { REVIEW_SCOPES } = require("../auth");
 const { validateListing, createListing: createListingShared, buildFailed, retryBlocked, retryListing,
   MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
 const { makeAdminGuard } = require("../admin-auth");
+const { uprightJpeg } = require("../photo-orient");
 
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mp4" };
@@ -113,15 +114,22 @@ module.exports = function createIntakeRouter(ctx) {
     if (!sniffMatchesExt(req.body, ext)) {
       return res.status(400).json({ error: "content does not match file type" });
     }
+    // Phone photos are often landscape pixels + an EXIF "rotate" flag. Browsers
+    // honour it, Seedance does not (rooms came out sideways), so store upright.
+    let body = req.body;
+    if (ext === "jpg") {
+      const up = await uprightJpeg(body).catch((err) => { console.warn("upright photo failed (kept as is):", err.message); return null; });
+      if (up) body = up.buffer;
+    }
     if (remoteUploadBase) {
       const out = await relayUpload({
-        fetch, base: remoteUploadBase, fname, req, body: req.body,
+        fetch, base: remoteUploadBase, fname, req, body,
         contentType: req.headers["content-type"],
       });
       if (out.status !== 200) console.error("upload relay:", out.body.error);
       return res.status(out.status).json(out.body);
     }
-    fs.writeFileSync(path.join(uploadDir, fname), req.body);
+    fs.writeFileSync(path.join(uploadDir, fname), body);
     res.json({ ok: true });
   });
 

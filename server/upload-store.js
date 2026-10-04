@@ -8,8 +8,14 @@
 const fs = require("fs");
 const path = require("path");
 const { relayUpload } = require("./upload-relay");
+const { uprightJpeg } = require("./photo-orient");
 
 async function storeBuffer({ fname, buffer, contentType }, { uploadDir, remoteUploadBase, req, fetchFn = fetch }) {
+  // A phone photo's EXIF rotation goes into the pixels: Seedance ignores the flag.
+  if (/\.jpe?g$/i.test(fname)) {
+    const up = await uprightJpeg(buffer).catch((err) => { console.warn("upright photo failed (kept as is):", err.message); return null; });
+    if (up) buffer = up.buffer;
+  }
   if (remoteUploadBase) {
     const out = await relayUpload({ fetch: fetchFn, base: remoteUploadBase, fname, req, body: buffer, contentType });
     if (out.status !== 200) { const e = new Error(out.body.error); e.status = out.status; throw e; }
