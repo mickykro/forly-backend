@@ -60,12 +60,14 @@ function groupsOf(c) {
   return (c.groups || []).map((g) => {
     const p = last.get(String(g.group_id));
     const status = p && DONE.has(p.status) ? (p.status === "skipped" ? "skipped" : "posted") : "owed";
-    return { group_id: String(g.group_id), name: g.name || "", url: urlOf(g), status, copy: g.copy || null };
+    return { group_id: String(g.group_id), name: g.name || "", url: urlOf(g), status, copy: g.copy || null, posted_at: status === "posted" ? p.posted_at || null : null };
   });
 }
 
-// The admin's work list: one item per group still owed, oldest campaign first.
-async function queue(deps = {}) {
+// The admin's checklist: every running campaign (oldest first) with ALL its
+// groups and where each stands, so nothing is missed. Owed groups carry the
+// text to post (the approved one, else the campaign's own).
+async function checklist(deps = {}) {
   const x = A.ctxOf(deps);
   const running = (await x.store.listPostingCampaignsByStatus("running", 500))
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
@@ -73,18 +75,31 @@ async function queue(deps = {}) {
   for (const c of running) {
     const page = await x.db.getPage(c.page_id);
     if (!page) continue;
-    for (const g of owed(c)) {
-      out.push({
-        ref: refOf(c.phone), campaign_id: c.id, phone_tail: A.tail(c.phone), awaiting_agent: c.awaiting_texts === true,
-        agent_name: (page.agent && page.agent.name) || "", page_id: c.page_id,
-        title: (page.property && page.property.title) || c.page_id, page_url: pageUrlOf(c.page_id, deps.pageBaseUrl),
-        group_id: String(g.group_id), group_name: g.name || "", group_url: urlOf(g),
-        copy: g.copy || C.buildCopy(page, c, { ...g, target: "group" }, "property", deps.pageBaseUrl || ""),
-      });
+    const byId = new Map((c.groups || []).map((g) => [String(g.group_id), g]));
+    out.push({
+      ref: refOf(c.phone), campaign_id: c.id, phone_tail: A.tail(c.phone), awaiting_agent: c.awaiting_texts === true,
+      agent_name: (page.agent && page.agent.name) || "", page_id: c.page_id,
+      title: (page.property && page.property.title) || c.page_id, page_url: pageUrlOf(c.page_id, deps.pageBaseUrl),
+      groups: groupsOf(c).map((g) => (g.status !== "owed" || g.copy ? g
+        : { ...g, copy: C.buildCopy(page, c, { ...byId.get(g.group_id), target: "group" }, "property", deps.pageBaseUrl || "") })),
+    });
+  }
+  return out;
+}
+
+// The work list: one item per group still owed, from the checklist.
+function queueOf(list) {
+  const out = [];
+  for (const c of list) {
+    for (const g of c.groups) {
+      if (g.status !== "owed") continue;
+      const { groups, ...head } = c; // eslint-disable-line no-unused-vars
+      out.push({ ...head, group_id: g.group_id, group_name: g.name, group_url: g.url, copy: g.copy });
     }
   }
   return out;
 }
+const queue = async (deps = {}) => queueOf(await checklist(deps));
 
 // One group done by hand: "posted" or "skipped". → the campaign, or null when
 // that group is not owed (not in the campaign, already done, campaign over).
@@ -110,4 +125,4 @@ async function markDone(campaignId, groupId, status, deps = {}) {
   return next;
 }
 
-module.exports = { enabled, refOf, owed, propertyCard, versions, groupsOf, queue, markDone };
+module.exports = { enabled, refOf, owed, propertyCard, versions, groupsOf, checklist, queueOf, queue, markDone };

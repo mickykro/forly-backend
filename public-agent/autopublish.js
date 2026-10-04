@@ -100,9 +100,13 @@
   const draftOf = (k) => { if (!drafts.has(k)) drafts.set(k, { when: { k: "asap", day: 1, hour: 9 } }); return drafts.get(k); };
   const DAY_NAMES = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
   const atHour = (dayOffset, hour) => { const d = new Date(); d.setDate(d.getDate() + dayOffset); d.setHours(hour, 0, 0, 0); return d; };
+  // Before 06:00 the agent's "tomorrow" is the coming morning, not the day after
+  // (a post approved at 00:04 Sunday for "tomorrow morning" went up on Monday).
+  const night = () => new Date().getHours() < 6;
+  const tomorrow = () => (night() ? 0 : 1);
   // → ISO for the chosen moment, or null for "as soon as possible" (and for a moment already past).
   function whenIso(w) {
-    const d = w.k === "t19" ? atHour(0, 19) : w.k === "m09" ? atHour(1, 9) : w.k === "m19" ? atHour(1, 19) : w.k === "custom" ? atHour(w.day, w.hour) : null;
+    const d = w.k === "t19" ? atHour(0, 19) : w.k === "m09" ? atHour(tomorrow(), 9) : w.k === "m19" ? atHour(tomorrow(), 19) : w.k === "custom" ? atHour(w.day, w.hour) : null;
     return d && d > new Date() ? d.toISOString() : null;
   }
   function whenHtml(key) {
@@ -120,7 +124,7 @@
     }
     const iso = whenIso(w);
     return `<div class="when"><div class="when-title">מתי לפרסם</div><div class="when-chips">` +
-      chip("asap", "בהקדם") + (new Date().getHours() < 19 ? chip("t19", "היום בערב") : "") + chip("m09", "מחר בבוקר") + chip("m19", "מחר בערב") + chip("custom", "מועד אחר") +
+      chip("asap", "בהקדם") + (!night() && new Date().getHours() < 19 ? chip("t19", "היום בערב") : "") + chip("m09", "מחר בבוקר") + chip("m19", "מחר בערב") + chip("custom", "מועד אחר") +
       `</div>${custom}<div class="when-sum">${iso ? `יעלה ${U.esc(U.fmt(iso))}` : "יעלה בהקדם האפשרי, לפי הקצב של החשבון"}</div></div>`;
   }
   // How often the property returns to its groups: once, or every N days.

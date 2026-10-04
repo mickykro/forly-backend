@@ -43,10 +43,10 @@ function trackedUrl(pageUrl, { session, group }) {
  * missing.
  */
 const COMMENT_CTAS = [
-  "הקישור לסרטון ולפרטים בתגובה הראשונה 👇",
-  "התמונות והסרטון בתגובה הראשונה 👇",
+  "הקישור לפרטים המלאים בתגובה הראשונה 👇",
+  "כל הפרטים והתמונות בתגובה הראשונה 👇",
   "הקישור לנכס בתגובה הראשונה 👇",
-  "הוספתי קישור עם הסרטון בתגובה הראשונה 👇",
+  "הוספתי קישור עם כל הפרטים בתגובה הראשונה 👇",
   "קישור לכל הפרטים בתגובה הראשונה 👇",
   "רוצים לראות את הנכס? הקישור בתגובה הראשונה 👇",
 ];
@@ -111,7 +111,7 @@ const TEMPLATES = [
     join(", ", f.apt, f.sqm),
     f.floor,
     f.price && `${f.priceLabel}: ${f.price}`,
-    link("סרטון מהדירה"),
+    link("כל הפרטים על הנכס"),
     (f.name || f.phone) && "לפרטים ותיאום:",
     join("-", f.name, f.phone),
   ],
@@ -119,21 +119,21 @@ const TEMPLATES = [
     `מחפשים ${f.roomsText || "דירה"}${at(f.city)}?`,
     join(", ", f.hood, f.floor, f.sqm),
     f.price,
-    link("סרטון מהדירה"),
+    link("פרטים נוספים ותמונות"),
     join("-", f.name, f.phone),
   ],
   (f, link) => [
     `${f.roomsShort || f.apt}${at(f.place)}`,
     sqmOnFloor(f),
     f.priceShort && (f.rent ? `שכירות: ${f.price}` : `מחיר שיווק: ${f.priceShort}`),
-    link("רוצים לראות לפני ביקור? יש סרטון מהדירה"),
+    link("רוצים לדעת עוד לפני ביקור? כל הפרטים כאן"),
     join(" ", f.name, dashedPhone(f.phone)),
   ],
   (f, link) => [
     join(", ", f.apt, f.sqm) + at(f.hoodAt),
     join(", ", f.city, f.floor),
     f.price,
-    link("כל הפרטים+סרטון"),
+    link("כל הפרטים על הדירה"),
     "מוזמנים לתאם ביקור!",
     join("-", f.name, f.phone),
   ],
@@ -145,7 +145,7 @@ const TEMPLATES = [
     (f.name || f.phone) && "שאלות? דברו איתי",
     f.name,
     f.phone,
-    link("לצפייה בסרטון"),
+    link("לפרטים נוספים"),
   ],
   // "חדש" is only claimed on a target's first round.
   (f, link, round) => [
@@ -153,14 +153,14 @@ const TEMPLATES = [
     `${f.roomsText || f.apt}${at(f.place)}`,
     join(", ", f.sqm, f.floor),
     f.price,
-    link("הסרטון מהדירה"),
+    link("כל הפרטים והתמונות"),
     (f.name || f.phone) && `לתיאום: ${join("-", f.name, f.phone)}`,
   ],
   (f, link) => [
     f.price ? `${f.price} ל${f.apt}${at(f.city)}` : `${f.apt}${at(f.city)}`,
     f.hood && `שכונת ${f.hood}`,
     sqmOnFloor(f),
-    link("לפרטים וסרטון"),
+    link("לפרטים נוספים על הנכס"),
     f.name,
     dashedPhone(f.phone),
   ],
@@ -170,7 +170,7 @@ const TEMPLATES = [
       f.rooms >= 3 ? "משפחה שצריכה עוד חדר?" : `מחפשים דירה${at(f.city)}?`,
       f.placeIn ? `ב${f.placeIn} יש ${what}` : what,
       f.price && `${f.priceLabel}: ${f.price}`,
-      link("אפשר לראות את הדירה בסרטון"),
+      link("כל המידע על הדירה כאן"),
       join("-", f.name, f.phone),
     ];
   },
@@ -180,7 +180,7 @@ const TEMPLATES = [
     f.priceShort,
     (f.name || f.phone) && "כתבו לי ואשלח פרטים!",
     join("-", f.name, f.phone),
-    link("סרטון"),
+    link("פרטים מלאים"),
   ],
   (f, link) => [
     `${f.deal}:`,
@@ -189,7 +189,7 @@ const TEMPLATES = [
     f.sqm,
     f.floor,
     f.price && `${f.priceLabel} ${f.price}`,
-    link("מה דעתכם? הסרטון כאן"),
+    link("מה דעתכם? כל הפרטים כאן"),
     (f.name || f.phone) && `לפרטים: ${join(" ", f.name, f.phone)}`,
   ],
 ];

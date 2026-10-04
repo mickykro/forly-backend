@@ -77,9 +77,12 @@ module.exports = function createAdminManualRouter({
   }
 
   // ── the work list ──
+  // The checklist (every running campaign, all its groups) and, from it, the
+  // groups still owed.
   router.get("/queue", requireAdmin, wrap(async (req, res) => {
     res.set("Cache-Control", "no-store");
-    res.json({ items: await M.queue(deps) });
+    const campaigns = await M.checklist(deps);
+    res.json({ campaigns, items: M.queueOf(campaigns) });
   }));
 
   router.post("/campaigns/:id/groups/:gid/done", requireAdmin, wrap(async (req, res) => {
@@ -90,7 +93,7 @@ module.exports = function createAdminManualRouter({
     res.json({ ok: true, completed: c.status === "completed" });
   }));
 
-  // ── agents and their properties (no campaign needed) ──
+  // ── agents and their properties ──
   router.get("/agents", requireAdmin, wrap(async (req, res) => {
     res.set("Cache-Control", "no-store");
     const q = await M.queue(deps);
@@ -109,11 +112,12 @@ module.exports = function createAdminManualRouter({
   router.get("/agents/:ref/properties", requireAdmin, wrap(async (req, res) => {
     const phone = await phoneOf(req.params.ref);
     if (!phone) return res.status(404).json({ error: "not_found" });
+    // Only properties with a running campaign: nothing else is to be posted.
     const cards = [];
-    for (const l of await x.db.listListingsByPhone(phone)) {
-      if (!l || !l.page_id || l.status === "archived") continue;
-      const card = await cardOf(phone, l.page_id).catch(() => null);
-      if (card) cards.push(Object.assign(card, { thumb_url: (l.photos_urls && l.photos_urls[0]) || null }));
+    for (const c of await x.store.listPostingCampaignsByStatus("running", 500)) {
+      if (String(c.phone) !== phone) continue;
+      const card = await cardOf(phone, c.page_id).catch(() => null);
+      if (card) cards.push(card);
     }
     res.json({ properties: cards });
   }));
@@ -133,10 +137,14 @@ module.exports = function createAdminManualRouter({
   }));
 
   // ── the agent's browser ──
+  // group_url (optional): the browser starts on that group instead of the
+  // home feed — at_group says it did (an already open browser does not move).
   router.post("/agents/:ref/browser", requireAdmin, wrap(async (req, res) => {
     const phone = await phoneOf(req.params.ref);
     if (!phone) return res.status(404).json({ error: "not_found" });
-    if (open.has(phone)) return res.json({ open: true });
+    const groupUrl = String((req.body && req.body.group_url) || "");
+    if (groupUrl && !GROUP_URL.test(groupUrl)) return res.status(400).json({ error: "invalid_input" });
+    if (open.has(phone)) return res.json({ open: true, at_group: false });
     const conn = (await x.db.getConnection(phone)) || {};
     if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
     const release = locks.tryAcquire(phone, "facebook");
@@ -144,14 +152,14 @@ module.exports = function createAdminManualRouter({
     try {
       const { profileName } = require("../profile-name");
       const s = await driver.createSession({
-        duration: SESSION_S, url: "https://www.facebook.com/",
+        duration: SESSION_S, url: groupUrl || "https://www.facebook.com/",
         profile: { name: profileName("facebook", phone, conn.facebook_profile_gen || 0), persist: true },
         note: "forly-manual:facebook", // never the phone
       }, { phone });
       const timer = setTimeout(() => closeFor(phone, "expired"), SESSION_S * 1000);
       if (timer.unref) timer.unref();
       open.set(phone, { sessionId: s.sessionId, release, timer, pageId: null, chooser: null });
-      res.json({ open: true });
+      res.json({ open: true, at_group: !!groupUrl });
     } catch (e) {
       release();
       console.error(redact(`admin manual browser ${A.tail(phone)}: ${(e && (e.code || e.name)) || "error"}`));

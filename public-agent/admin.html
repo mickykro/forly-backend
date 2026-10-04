@@ -105,6 +105,12 @@
   .manual-groups li .name{flex:1;min-width:140px;display:flex;gap:6px;align-items:center;cursor:pointer}
   .manual-groups li .name input{width:18px;height:18px}
   .manual-chip{font-size:.75rem;padding:2px 8px;border-radius:999px;background:#eee}
+  .manual-check{border-top:1px solid rgba(23,20,15,.08);padding:10px 0}
+  .manual-check-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-weight:600}
+  .manual-bar{height:6px;border-radius:999px;background:#f0ece4;margin:6px 0 4px;overflow:hidden}
+  .manual-bar i{display:block;height:100%;background:#3a9a5b}
+  .manual-groups li.on{background:#fff8e6;border-radius:8px}
+  .manual-text{flex-basis:100%}
   .manual-chip.owed{background:#fff1c7}.manual-chip.posted{background:#d8f2df}.manual-chip.skipped{background:#eee;color:#777}
   .manual-versions details{border-top:1px solid rgba(23,20,15,.06);padding:6px 0}
   .manual-versions summary{cursor:pointer;font-size:.9rem}
@@ -272,10 +278,10 @@
           <button type="button" class="btn btn-gold btn-sm" id="manualOpen">פתיחת הפייסבוק של הסוכן</button>
           <button type="button" class="btn btn-ghost btn-sm" id="manualReload">רענון</button>
         </div>
-        <p class="manual-help">לכל קבוצה: <b>בחירה</b>, <b>1. פתיחת הקבוצה</b>, לחיצה בדפדפן על "כתבו משהו", <b>2. הקלדת הטקסט</b>, לחיצה בפייסבוק על "תמונה/סרטון" ואז <b>העלאת הסרטון</b>. בסוף לוחצים "פרסום" בפייסבוק ומסמנים <b>פורסם ✓</b>.</p>
-        <div id="manualDetail"></div>
-        <h3 class="manual-h">כל הפוסטים שמחכים</h3>
+        <p class="manual-help">לכל קבוצה: <b>פתיחה בקבוצה</b>, לחיצה בדפדפן על "כתבו משהו", <b>הקלדת הטקסט</b>, לחיצה בפייסבוק על "תמונה/סרטון" ואז <b>העלאת הסרטון</b>. בסוף לוחצים "פרסום" בפייסבוק ומסמנים את הקבוצה ✓. נכס יוצא מהרשימה כשכל הקבוצות שלו סומנו.</p>
+        <h3 class="manual-h">רשימת הפרסום <small class="manual-muted" id="manualSummary"></small></h3>
         <div id="manualQueue"></div>
+        <div id="manualDetail"></div>
       </section>
       <section class="manual-side">
         <div id="manualProp" class="manual-prop"><p class="manual-muted">אין דפדפן פתוח.</p></div>

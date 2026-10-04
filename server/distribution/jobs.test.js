@@ -108,7 +108,7 @@ async function queuedDist(deps, { force = false } = {}) {
     const pub = db.actions.find((a) => a.action === "published");
     assert.equal(pub.post_id, "V1");
     assert.equal(pub.content.media_type, "video");
-    assert.ok(pub.content.copy.includes("דירה"), "exact copy audited");
+    assert.ok(pub.content.copy.includes("3 חדרים"), "exact copy audited");
     assert.equal(pub.trigger, "dashboard");
     // the agent gets ONE message: the post link + a deep link into the queue
     const queueMsg = sent.find((s) => s.msg.includes("/share.html?s="));
@@ -288,7 +288,7 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.ok(d.confirmed_at);
     assert.equal(d.snapshot.video_url, "https://x.test/v.mp4");
     assert.deepEqual(d.snapshot.groups, ["https://www.facebook.com/groups/g1"]);
-    assert.ok(d.snapshot.copy.includes("דירה"), "copy frozen into the snapshot");
+    assert.ok(d.snapshot.copy.includes("3 חדרים"), "copy frozen into the snapshot");
   }
   {
     // the page shows the clean video; publishing uses the titled marketing cut
@@ -411,7 +411,7 @@ async function queuedDist(deps, { force = false } = {}) {
     const offer = rich.find((r) => r.payload.buttons.some((b) => b.buttonId === "confirm"));
     assert.ok(offer, "confirm offer sent as buttons");
     assert.ok(offer.payload.buttons[0].url.includes("/api/distribution/confirm?d="));
-    assert.ok(offer.payload.body.includes("דירה"), "post preview in the body");
+    assert.ok(offer.payload.body.includes("3 חדרים"), "post preview in the body");
     assert.equal(sent.length, 0, "no plain-text duplicate when buttons succeed");
     // every button obeys Green API limits: ≤3 buttons, ≤25 chars of text
     for (const r of rich) {
