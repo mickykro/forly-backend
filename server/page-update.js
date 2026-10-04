@@ -132,6 +132,10 @@ async function updatingTurn(input, deps, draft, now, h) {
     }
     if (cmd === "no") return { handled: true, status: "page_kept", draft: back || draft, replies: andBack([R.kept()]) };
   }
+  // "לא" / "לא לעדכן": answered here, not left to n8n's bot.
+  if (D.command(input.text) === "no" || /^לא\s+(לעדכן|צריך|תעדכן|תעדכני)/.test(String(input.text || "").trim())) {
+    return { handled: true, status: "update_declined", ...(back ? { draft: back } : { del: true }), replies: andBack([R.noUpdate()]) };
+  }
   const kind = await openerOf(input.text, deps);
   if (kind === "update" || (kind && !back)) return h.openDraft(draft.phone, kind, input.text, deps, now, back);
   if (kind) return h.resumePrompt(back, { text: input.text }, now); // a new property, with a draft still open

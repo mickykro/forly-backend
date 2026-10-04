@@ -24,7 +24,7 @@ const COMMANDS = { "ביטול": "cancel", "דלג": "skip", "ממשיכים": "
 // COMMANDS word, these cover what a person types instead of tapping.
 const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "resume", "תמשיך": "resume", "נמשיך": "resume",
   "תצוגה": "preview", "לצפות": "preview", "צור": "create", "צרו": "create", "ליצור עכשיו": "create", "תיצור": "create",
-  "לבטל": "cancel", "לבטל אותה": "cancel", "בטל": "cancel", "תבטל": "cancel", "תבטלי": "cancel" };
+  "מחק": "cancel", "מחקי": "cancel", "תמחק": "cancel", "תמחקי": "cancel", "לבטל": "cancel", "לבטל אותה": "cancel", "בטל": "cancel", "תבטל": "cancel", "תבטלי": "cancel" };
 
 // Page designs, in the order create.html's picker lists them (1-6). The first
 // alias is the Hebrew name shown there; create.html preselects the chosen one.

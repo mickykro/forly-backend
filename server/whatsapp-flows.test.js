@@ -114,8 +114,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ fileUrl: "https://green/3.jpg", draft: t.draft }, d);
   t = await turn({ fileUrls: ["https://green/2.jpg", "https://green/4.jpg", "https://green/5.jpg"], draft: t.draft }, d);
   assert.deepEqual([t.status, t.replies.length], ["photo_choice:5", 0], "the burst piles up silently, duplicates skipped");
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
   const choice = t.draft;
-  t = await turn({ event: "photo_timer", draft: choice }, d);
   assert.match(texts(t), /קיבלתי 5 תמונות[\s\S]*1 · דף נכס חדש[\s\S]*4 · לשפר 3 לדוגמה/);
   t = await turn({ text: "3", draft: choice }, d);
   assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.edit_instruction, t.del], [false, "edit_photos", 5, "", true]);
@@ -253,7 +253,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d } = deps({ classifyIntent: async () => null }));
   const ask12 = "היי פורלי, אני רוצה להעלות 12 תמונות וננקה אותם מעצמים קטנים, נמחק מלל שכתוב מאחורה";
   t = await turn({ text: ask12 }, d);
-  assert.deepEqual([t.handled, t.draft.status], [false, "edit_request"], "n8n answers it; the request is remembered");
+  assert.deepEqual([t.handled, t.draft.status], [true, "edit_request"], "the code answers it (not n8n's bot); the request is remembered");
+  assert.match(texts(t), /שלחו את התמונות לעריכה/);
   const req = t.draft;
   t = await turn({ fileUrls: ["https://green/1.jpg", "https://green/2.jpg"], draft: req, now: new Date(T0.getTime() + 20000) }, d);
   assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.edit_instruction], [false, "edit_requested", 2, ask12], "edited with his instruction, no 1/2/3/4");
@@ -473,6 +474,47 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "חדש", draft: priceStep }, d);
   assert.deepEqual([t.status, t.draft.fields.city], ["asked:city", null], "a fresh property");
   t = await turn({ text: "לא משנה.  בואי נתחיל מההתחלה", draft: priceStep }, d);
+  assert.deepEqual([t.status, t.del], ["cancelled", true]);
+
+  // ── 972546582548 after the 2026-10-04 merge ──
+  // "2" ("no" to the page offer) typed before the photo menu went out: the menu, not "add to a page".
+  ({ d } = deps({ classifyIntent: async () => null, listPages: async () => [{ page_id: "p1", property: { title: "x" } }], editUrl: (id) => id }));
+  t = await turn({ fileUrls: ["https://green/n1.jpg", "https://green/n2.jpg"] }, d);
+  t = await turn({ text: "2", draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length], ["photo_choice_asked", 2]);
+  assert.match(texts(t), /קיבלתי 2 תמונות/);
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
+  assert.equal(t.replies.length, 0, "the timer doesn't ask twice");
+  // "לשפר תמונה" quoting an album, nothing open: the photos she just sent are edited now.
+  const albumS = T0.getTime() / 1000;
+  const albumChat = [
+    { type: "incoming", timestamp: albumS - 30, typeMessage: "textMessage", textMessage: "לא לעדכן" },
+    { type: "incoming", timestamp: albumS - 60, typeMessage: "imageMessage", downloadUrl: "https://green/a2.jpg" },
+    { type: "incoming", timestamp: albumS - 60, typeMessage: "imageMessage", downloadUrl: "https://green/a1.jpg" },
+    { type: "outgoing", timestamp: albumS - 70, typeMessage: "imageMessage", downloadUrl: "https://bot/edited.jpg" },
+  ];
+  ({ d } = deps({ classifyIntent: async () => null, recentChat: async () => albumChat }));
+  t = await turn({ text: "לשפר תמונה" }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos], [false, "edit_recent", ["https://green/a1.jpg", "https://green/a2.jpg"]]);
+  ({ d } = deps({ classifyIntent: async () => null, recentChat: async () => albumChat.slice(0, 1) }));
+  t = await turn({ text: "לשפר תמונה" }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status], [true, "edit_request", "edit_request"], "no fresh photos: asked for, by the code");
+  const waitReq = t.draft;
+  t = await turn({ text: "כן", draft: waitReq }, d);
+  assert.deepEqual([t.handled, t.status], [true, "edit_request"], "כן while waiting: asked again, never n8n's 'מעולה!'");
+  ({ d } = deps({ classifyIntent: async () => null, recentChat: async () => albumChat }));
+  t = await turn({ text: "כן", draft: waitReq }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.del], [false, "edit_recent", 2, true], "כן with fresh photos: edited");
+  t = await turn({ text: "לשפר" }, d);
+  assert.deepEqual([t.status, t.edit_photos.length], ["edit_recent", 2], "a bare 'לשפר' is an edit request");
+  t = await turn({ text: "למחוק נכס" }, d);
+  assert.notEqual(t.status, "edit_recent", "deleting a property is not a photo edit");
+  // "לא לעדכן" to the page list: the code answers.
+  t = await turn({ text: "לא לעדכן", draft: { phone: PHONE, status: "updating", links: [{ title: "x", url: "u" }], created_at: T0, updated_at: T0, hinted_at: T0 } }, d);
+  assert.deepEqual([t.handled, t.status, t.del], [true, "update_declined", true]);
+  assert.match(texts(t), /לא מעדכנת/);
+  // "מחק" mid-question cancels, never a price.
+  t = await turn({ text: "מחק", draft: { ...D.newDraft(PHONE, "keyword", T0), fields: { ...D.newDraft(PHONE, "keyword", T0).fields, city: "באר שבע" } } }, d);
   assert.deepEqual([t.status, t.del], ["cancelled", true]);
 
   console.log("whatsapp-flows.test.js ok");
