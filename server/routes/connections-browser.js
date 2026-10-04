@@ -197,7 +197,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     const existing = conn[`browser_session_${platform}`];
     if (existing && existing.session_id) {
       await viewer.close(hubKey(phone, platform), "replaced");
-      await driver.stopSession(existing.session_id);
+      // Unconfirmed stop: the old browser may still be up on this profile —
+      // never a second one beside it. Its record stays; it expires on its own.
+      if ((await driver.stopSession(existing.session_id)) === false) return { status: 503, body: { error: "driver_busy", retry: true } };
       // Do not leave a stopped browser marked "open" if creating its
       // replacement fails. Otherwise every later click resumes the same dead
       // session forever instead of calling /start again.
@@ -248,11 +250,16 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     // Top-level keys, not a nested map: setConnection is a merge write, and a
     // merge cannot delete a nested key — finish/disconnect need to clear this.
-    await db.setConnection(phone, Object.assign({
-      [`browser_session_${platform}`]: { session_id: session.sessionId, started_at: new Date().toISOString() },
-      browser_consent_at: new Date().toISOString(),
-      browser_consent_version: CONSENT_VERSION,
-    }, statePatch));
+    try {
+      await db.setConnection(phone, Object.assign({
+        [`browser_session_${platform}`]: { session_id: session.sessionId, started_at: new Date().toISOString() },
+        browser_consent_at: new Date().toISOString(),
+        browser_consent_version: CONSENT_VERSION,
+      }, statePatch));
+    } catch (e) {
+      await driver.stopSession(session.sessionId); // unrecorded, nobody could ever resume it
+      throw e;
+    }
 
     // No cdpUrl and no viewer address: the page watches it via /:platform/view.
     return { status: 200, body: { platform, expires_in: SESSION_SECONDS } };

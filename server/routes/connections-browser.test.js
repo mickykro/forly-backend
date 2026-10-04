@@ -436,6 +436,22 @@ function fakeGuard(reason) {
     assert.equal(connOpen.browser_session_facebook.session_id, "sNew");
   }
 
+  // ── an unconfirmed stop of the old login: no new browser beside it ──
+  {
+    const connOpen = { browser_session_facebook: { session_id: "sAlive" } };
+    let made = false;
+    const app = makeApp({
+      driver: { createSession: async () => { made = true; return { sessionId: "sNew2", status: "active", cdpUrl: "wss://n/x" }; }, stopSession: async () => false },
+      db: fakeDb(connOpen),
+      locks: fakeLocks(),
+    });
+    const r = await call(app, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
+    assert.equal(r.status, 503);
+    assert.equal(r.body.error, "driver_busy");
+    assert.equal(made, false, "never a second browser on the profile");
+    assert.equal(connOpen.browser_session_facebook.session_id, "sAlive", "the live one stays recorded");
+  }
+
   // ── if replacement creation fails, the stopped old session is not left
   //    recorded as "open" for the UI to resume forever ──
   {

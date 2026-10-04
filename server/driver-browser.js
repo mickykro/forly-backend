@@ -217,10 +217,10 @@ function consumeViewerGrant(id, operator) {
  * profile: the caller says whose (deps.phone + deps.platform), the name must be
  * that phone's current one (withPage only — attachPage has no opts.profile),
  * and the profile lock is taken here unless the caller already holds it
- * (deps.lockHeld). Always: one slot of the local concurrency budget. Returns
- * one release for both.
+ * (deps.lockHeld). A new browser (not attachPage: its session already holds
+ * one): one slot of the local concurrency budget. Returns one release for both.
  */
-function claim(usesProfile, profileNameToCheck, deps) {
+function claim(usesProfile, profileNameToCheck, deps, newSession = true) {
   const locks = deps.locks || profileLock;
   const names = deps.names || profileNames;
   let releaseProfile = () => {};
@@ -235,12 +235,18 @@ function claim(usesProfile, profileNameToCheck, deps) {
       releaseProfile = r;
     }
   }
-  const releaseSession = locks.trySession();
+  const releaseSession = newSession ? locks.trySession() : () => {};
   if (!releaseSession) { releaseProfile(); throw new DriverError(429, "local concurrency budget"); }
   return () => { releaseSession(); releaseProfile(); };
 }
 
+// No new browser until boot's cleanupOrphans is done: the last process's
+// browsers are invisible to this one's locks until they are stopped.
+let bootGate = Promise.resolve();
+const holdCreatesUntil = (p) => { bootGate = Promise.resolve(p).catch(() => {}); };
+
 async function createSession(opts = {}, deps = {}) {
+  await bootGate;
   const sleep = deps.sleep || sleepReal;
   const random = deps.random || Math.random;
   const proxy = proxyFor(deps.phone || null, deps.env || process.env);
@@ -278,16 +284,21 @@ const getSession = (id, deps) => call("GET", `/v1/browser/session?sessionId=${en
 const listSessions = (status, deps) => call("GET", `/v1/browser/sessions?pageSize=50${status ? `&status=${status}` : ""}`, null, deps);
 
 // Idempotent, and never throws: called from a finally, where replacing the
-// error already in flight would hide what actually went wrong.
+// error already in flight would hide what actually went wrong. → true once
+// Driver confirms the session is gone (or never knew it); false otherwise —
+// the browser may still be up, so a login keeps its slot until it expires.
 async function stopSession(id, deps = {}) {
-  live.delete(id);
-  profileLock.endLogin(id); // a login browser's Driver slot
+  let gone = false;
   try {
     const r = await call("DELETE", `/v1/browser/session?sessionId=${encodeURIComponent(id)}`, null, deps);
-    if (!r || r.success !== true) logError(`driver: stop of ${shortId(id)} did not succeed: response=${JSON.stringify(r)}`);
+    gone = !!r && r.success === true;
+    if (!gone) logError(`driver: stop of ${shortId(id)} did not succeed: response=${JSON.stringify(r)}`);
   } catch (e) {
-    logError(`driver: stop of ${shortId(id)} failed: ${describeError(e)}`);
+    gone = e instanceof DriverError && e.status === 404;
+    if (!gone) logError(`driver: stop of ${shortId(id)} failed: ${describeError(e)}`);
   }
+  if (gone) { live.delete(id); profileLock.endLogin(id); }
+  return gone;
 }
 
 // A crash before the finally leaves a session running until its duration. Every
@@ -397,7 +408,7 @@ async function withPage(opts, fn, deps = {}) {
  * deps.phone the profile lock is taken for the attach (unless deps.lockHeld).
  */
 async function attachPage(sessionId, fn, deps = {}) {
-  const release = claim(!!deps.phone, undefined, deps);
+  const release = claim(!!deps.phone, undefined, deps, false);
   try {
     const session = await waitForActive(await getSession(sessionId, deps), deps);
     const connect = deps.connectOverCDP || ((url) => require("patchright").chromium.connectOverCDP(url));
@@ -445,7 +456,7 @@ async function deleteProfile(name, deps = {}) {
 }
 
 module.exports = {
-  DriverError, createSession, getSession, listSessions, stopSession,
+  DriverError, holdCreatesUntil, createSession, getSession, listSessions, stopSession,
   cleanupOrphans, waitForActive, inspectInitialPage, browserNetworkFailure, withPage, attachPage, deleteProfile, liveSessions, SESSION_DEFAULTS,
   redact, describeError, driverEnabled, bootCheck, devViewOn, mintViewerGrant, consumeViewerGrant,
   proxyConfigProblem,

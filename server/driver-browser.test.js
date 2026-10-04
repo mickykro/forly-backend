@@ -51,6 +51,21 @@ async function quiet(fn) {
   // ── stopSession never throws, so a finally cannot mask the real error ──
   await quiet(() => D.stopSession("s1", { fetchFn: async () => err(500, {}), apiKey: "k", sleep: async () => {} }));
 
+  // ── a login's Driver slot is freed only once Driver confirms the stop ──
+  {
+    const L = require("./profile-lock");
+    const stop = (id, res) => quiet(() => D.stopSession(id, { fetchFn: async () => res, apiKey: "k", sleep: async () => {} }));
+    L._test.reset();
+    L.holdLogin("lA"); L.holdLogin("lB"); L.holdLogin("lC");
+    assert.equal(await stop("lA", err(500, {})), false, "failed DELETE: maybe still up");
+    assert.equal(await stop("lB", ok({ success: false })), false);
+    assert.equal(L.activeSessions(), 3, "unconfirmed stops keep their slots");
+    assert.equal(await stop("lA", ok({ success: true })), true);
+    assert.equal(await stop("lC", err(404, {})), true, "already gone counts as stopped");
+    assert.equal(L.activeSessions(), 1);
+    L._test.reset();
+  }
+
   // ── withPage stops the session even when fn throws ──
   const stopped = [];
   const deps = {
@@ -375,7 +390,10 @@ async function quiet(fn) {
   })), (e) => e.status === 429);
   assert.ok(profileReleased);
 
-  // ── attachPage: with a phone it takes the profile lock (unless held) and the budget ──
+  // ── attachPage rides a session that already holds its slot: no second one ──
+  assert.equal(await D.attachPage("s9", async (p) => p.marker, Object.assign({}, attachDeps, { locks: { trySession: () => null } })), "live");
+
+  // ── attachPage: with a phone it takes the profile lock (unless held) ──
   const busyHolder = locksReal.acquire(PH, "yad2");
   await assert.rejects(D.attachPage("s9", async () => 1, Object.assign({}, attachDeps, { phone: PH, platform: "yad2" })), (e) => e.code === "profile_busy");
   assert.equal(await D.attachPage("s9", async (p) => p.marker, Object.assign({}, attachDeps, { phone: PH, platform: "yad2", lockHeld: true })), "live");
@@ -384,7 +402,17 @@ async function quiet(fn) {
   await assert.rejects(D.attachPage("s9", async () => { throw new Error("boom3"); }, Object.assign({}, attachDeps, { phone: PH, platform: "yad2" })), /boom3/);
   assert.equal(locksReal.isHeld(PH, "yad2"), false);
   assert.equal(locksReal.activeSessions(), 0);
-  await assert.rejects(D.attachPage("s9", async () => 1, Object.assign({}, attachDeps, { locks: noBudget })), (e) => e.status === 429);
+
+  // ── no new browser until boot's orphan cleanup is done ──
+  {
+    let done, fetched = false;
+    D.holdCreatesUntil(new Promise((r) => { done = r; }));
+    const p = D.createSession({}, { apiKey: "k", sleep: async () => {}, fetchFn: async () => { fetched = true; return ok({ sessionId: "sg" }); } });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(fetched, false, "held behind the cleanup");
+    done();
+    assert.equal((await p).sessionId, "sg");
+  }
 
   // ── driverEnabled: all three secrets, and a valid FORLY_ENV ──
   const saved = { k: process.env.DRIVER_API_KEY, p: process.env.PROFILE_KEY, e: process.env.FORLY_ENV };
