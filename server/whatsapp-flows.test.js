@@ -29,7 +29,7 @@ function deps(over = {}) {
 }
 // handleTurn mutates the draft it is given; clone so a test can branch from one draft.
 const turn = (input, d) => handleTurn({ phone: PHONE, now: T0, ...input, draft: input.draft ? structuredClone(input.draft) : null }, d);
-const texts = (t) => t.replies.map((r) => r.text).join("\n");
+const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) => l.url)].join("\n")).join("\n");
 
 (async () => {
   let d, t;
@@ -149,6 +149,10 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.handled, t.status, cancelled], [true, "stopped", PHONE]);
   t = await turn({ text: "די", draft: choice }, d);
   assert.deepEqual([t.status, t.del], ["stopped", true], "stop also drops held photos");
+  // "סגור" (972547221770, 2026-09-30) used to fall through to n8n's generic fallback
+  cancelled = null;
+  t = await turn({ text: "סגור" }, d);
+  assert.deepEqual([t.handled, t.status, cancelled], [true, "stopped", PHONE]);
 
   // ── a reply to an image with a comment edits that image; praise does not ──
   ({ d } = deps());

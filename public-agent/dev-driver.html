@@ -1,0 +1,296 @@
+<!doctype html>
+<!--
+  dev-driver.html — local only: every Driver browser this server has open,
+  shown live. Served only on a local box (driver-browser.devViewOn: 404
+  anywhere else); the API behind it exists only there too. Each browser is
+  shown in the page through connect-viewer.js — its address never reaches
+  the page. "Open externally" asks for a single-use viewer grant (needs an
+  OTP login in the last 10 minutes) and opens Driver's own viewer in a tab.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Driver browsers (local)</title>
+<link rel="stylesheet" href="/app.css">
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; color: #1a1a1a; background: #f4f2ee; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  #status { color: #666; margin-bottom: 12px; min-height: 1.4em; }
+  #status.err { color: #b00020; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; }
+  .tile { background: #fff; border: 1px solid #e0dcd4; border-radius: 10px; padding: 8px; display: flex; flex-direction: column; height: 380px; }
+  .tile.big { grid-column: 1 / -1; height: 80vh; }
+  .tile header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .tile header b { font-size: 13px; }
+  .tile header span { color: #777; font-size: 12px; }
+  .tile header .sp { flex: 1; }
+  .tile header button { font: inherit; font-size: 12px; padding: 3px 9px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 6px; }
+  .tile .view { flex: 1; min-height: 0; }
+  .tile .msg { color: #b00020; font-size: 12px; min-height: 1em; }
+  .empty { color: #888; padding: 24px 0; }
+  #posting { background: #fff; border: 1px solid #e0dcd4; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; max-width: 900px; }
+  #posting h2, #shots h2 { font-size: 15px; margin: 0 0 6px; }
+  #shots ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  #shots li { display: grid; grid-template-columns: 160px 1fr; gap: 10px; align-items: start; }
+  #shots img { width: 160px; border: 1px solid #ccc; border-radius: 4px; display: block; }
+  #shots .why { font-weight: 600; }
+  #shots .kv { font-size: 12px; margin-top: 2px; word-break: break-word; }
+  #shots .kv.bad { color: #a4231a; }
+  #shots pre { font-size: 11px; white-space: pre-wrap; word-break: break-word; background: #f6f6f6; padding: 6px; border-radius: 4px; max-height: 260px; overflow: auto; }
+  #shots .noimg { width: 160px; font-size: 12px; color: #777; border: 1px dashed #ccc; border-radius: 4px; padding: 8px; box-sizing: border-box; }
+  @media (max-width: 480px) { #shots li { grid-template-columns: 1fr; } #shots img { width: 100%; } }
+  #posting dl { display: grid; grid-template-columns: 170px 1fr; gap: 3px 10px; margin: 0 0 8px; font-size: 13px; }
+  #posting dt { color: #666; }
+  #posting .bad { color: #b00020; } #posting .ok { color: #157a3f; }
+  #posting button { font: inherit; font-size: 13px; padding: 4px 10px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 6px; margin-inline-end: 6px; }
+  #posting a.action { display: inline-block; color: inherit; font-size: 13px; padding: 4px 10px; border: 1px solid #ccc; background: #fff; border-radius: 6px; text-decoration: none; }
+  .sticky { background: #fff4b8; border: 1px solid #dcc55f; border-inline-start: 6px solid #c8a600; border-radius: 7px; padding: 9px 11px; margin: 8px 0; box-shadow: 0 2px 5px #0001; }
+  .sticky b { display: block; margin-bottom: 3px; }
+  #postingMsg { font-size: 12px; color: #555; margin-top: 6px; min-height: 1em; }
+  @media (max-width: 480px) { #grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>Driver browsers (local)</h1>
+<div id="status">Loading…</div>
+<section id="posting" hidden>
+  <h2>Posting &amp; warm-up browsing</h2>
+  <div id="localTestNote" class="sticky" hidden><b>Local posting test</b>No multi-day warm-up or separate idle browsing. Every post waits for your explicit approval; then one visible browser performs a passive Facebook readiness preflight and publishes from that same session. No scrolling, likes, stories, or synthetic engagement. All safety, target-proof, cooldown, and stop controls remain active.</div>
+  <dl id="postingDl"></dl>
+  <button type="button" id="sweepNow">Run sweep now</button>
+  <button type="button" id="browseNow">Browse now (my account)</button>
+  <a class="action" href="/autopublish.html">Review / approve posts</a>
+  <div id="postingMsg"></div>
+</section>
+<section id="shots" hidden>
+  <h2>Failed posts — what the page looked like (local and staging only, kept 3 days)</h2>
+  <div id="shotsMsg"></div>
+  <ul id="shotsList"></ul>
+</section>
+<div id="grid"></div>
+<script src="/connect-viewer.js"></script>
+<script src="/publish-campaign-why.js"></script>
+<script>
+(function () {
+  var grid = document.getElementById("grid");
+  var statusEl = document.getElementById("status");
+  var tiles = {}; // sessionId → { el, viewer }
+  var liveCount = 0;
+  function setStatus(msg, isErr) { statusEl.textContent = msg; statusEl.className = isErr ? "err" : ""; }
+  function text(tag, t) { var e = document.createElement(tag); e.textContent = t == null ? "—" : String(t); return e; }
+
+  function openExternally(s, msg, btn) {
+    btn.disabled = true; msg.textContent = "";
+    fetch("/api/dev/driver/sessions/" + encodeURIComponent(s.sessionId) + "/grant", { method: "POST", credentials: "same-origin" })
+      .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
+      .then(function (res) {
+        if (res.status === 401 && res.body.error === "stepup_required") msg.textContent = "Step-up required: log in again with an OTP (valid 10 minutes), then retry.";
+        else if (res.status !== 200) msg.textContent = "Could not get a viewer grant (" + (res.body.error || res.status) + ").";
+        else window.open(res.body.open_url, "_blank", "noopener");
+      })
+      .catch(function () { msg.textContent = "Network error while requesting a grant."; })
+      .then(function () { btn.disabled = false; });
+  }
+
+  function addTile(s) {
+    var el = document.createElement("div"); el.className = "tile";
+    var head = document.createElement("header");
+    head.appendChild(text("b", s.note));
+    head.appendChild(text("span", (s.platform || "") + " · " + (s.startedAt ? new Date(s.startedAt).toLocaleTimeString() : "")));
+    var sp = document.createElement("span"); sp.className = "sp"; head.appendChild(sp);
+    var big = text("button", "Enlarge"); big.type = "button";
+    big.addEventListener("click", function () { el.classList.toggle("big"); big.textContent = el.classList.contains("big") ? "Shrink" : "Enlarge"; });
+    var ext = text("button", "Open externally"); ext.type = "button"; ext.disabled = !s.viewer_available;
+    var msg = document.createElement("div"); msg.className = "msg";
+    ext.addEventListener("click", function () { openExternally(s, msg, ext); });
+    head.appendChild(big); head.appendChild(ext);
+    var view = document.createElement("div"); view.className = "view";
+    el.appendChild(head); el.appendChild(msg); el.appendChild(view);
+    grid.appendChild(el);
+    var t = tiles[s.sessionId] = { el: el, viewer: null, tries: 0 };
+    function mount() {
+      t.viewer = window.ForlyViewer.create(view, "/api/dev/driver/sessions/" + encodeURIComponent(s.sessionId) + "/view", {
+        onEnd: function (code, gotFrame, detail) {
+          // Not shown yet: try again a few times while the browser is still listed.
+          if (!gotFrame && code === "viewer_unavailable" && t.tries < 3 && tiles[s.sessionId] === t) {
+            t.tries++; msg.textContent = "Connecting… (" + (detail || code) + ")";
+            setTimeout(function () { if (tiles[s.sessionId] === t) { t.viewer.unmount(); mount(); } }, 2000);
+            return;
+          }
+          msg.textContent = (gotFrame ? "Browser ended (" : "Could not show this browser (") + code + ")" + (detail ? ": " + detail : "") + ".";
+        },
+        onFrame: function () { msg.textContent = ""; },
+      });
+    }
+    mount();
+  }
+  function removeTile(id) {
+    var t = tiles[id]; if (!t) return;
+    t.viewer.unmount(); t.el.remove(); delete tiles[id];
+  }
+
+  function poll() {
+    fetch("/api/dev/driver/sessions", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) {
+        if (r.status === 401) throw new Error("Not logged in.");
+        if (r.status === 403) throw new Error("Not an admin.");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (b) {
+        var sessions = b.sessions || [], live = {};
+        liveCount = sessions.length;
+        sessions.forEach(function (s) { live[s.sessionId] = true; if (!tiles[s.sessionId]) addTile(s); });
+        Object.keys(tiles).forEach(function (id) { if (!live[id]) removeTile(id); });
+        var empty = grid.querySelector(".empty");
+        if (!sessions.length && !empty) { var e = text("div", "No live browsers. They appear here as soon as the server opens one."); e.className = "empty"; grid.appendChild(e); }
+        if (sessions.length && empty) empty.remove();
+        setStatus(sessions.length + " live · updated " + new Date().toLocaleTimeString() + " · reload the page to refresh", false);
+      })
+      .catch(function (e) { setStatus(e.message, true); });
+  }
+  // ── posting panel: why nothing is happening ──
+  var OUTCOME = {
+    browse_only: "warm-up day: only browsing (a browse runs at most every 20 h)",
+    local_test_no_warmup: "local test mode: multi-day warm-up and separate idle browsing are disabled",
+    idle: "no running campaign on this account",
+    day_skipped: "today is a rest day (random, 1 in 5)", daily_cap: "today's posts are done", weekly_cap: "this week's posts are done",
+    penalty: "Facebook asked to slow down: waiting", disabled: "account disabled", no_eligible_group: "no group available right now",
+    login_open: "the login browser is open on this profile", account_blocked: "account blocked (halt)", in_flight: "a post is being published",
+    profile_busy: "another browser holds this profile", scheduled: "a post was scheduled", error: "the tick failed (see server log)",
+    no_slot_in_horizon: "no posting slot soon (night, Shabbat/holiday or caps)", guard: "stopped by the kill switch", no_driver: "the posting driver is missing"
+  };
+  var FLEET = { env_off: "POSTING_ENABLED is not 1 in server/.env", global_off: "the main switch in admin → posting is off",
+    platform_off: "the Facebook switch in admin → posting is off", visible_off: "likes/stories are off for the fleet",
+    account_disabled: "this account is disabled (a halt)", account_penalty: "Facebook asked this account to slow down",
+    no_permission: "no posting consent yet — switch a property on at /autopublish.html", permission_scope: "the consent does not cover Facebook", profile_revoked: "the Facebook connection was removed — reconnect" };
+  var dl = document.getElementById("postingDl"), pmsg = document.getElementById("postingMsg");
+  function row(k, v, cls) { var dt = text("dt", k), dd = text("dd", v); if (cls) dd.className = cls; dl.appendChild(dt); dl.appendChild(dd); }
+  function when(iso) { return iso ? new Date(iso).toLocaleString() : "—"; }
+  function pollPosting() {
+    fetch("/api/dev/driver/posting", { credentials: "same-origin", cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (b) {
+      var box = document.getElementById("posting");
+      if (!b) return;
+      box.hidden = false; dl.textContent = "";
+      if (!b.enabled) { row("Posting", "Driver is off on this server (DRIVER_API_KEY / PROFILE_KEY / FORLY_ENV)", "bad"); return; }
+      document.getElementById("localTestNote").hidden = !b.local_test;
+      document.getElementById("browseNow").hidden = !!b.local_test;
+      row("Test mode", b.local_test ? "ON — approval required; " + b.local_preflight_seconds + "s passive same-session preflight" : "off", b.local_test ? "ok" : "");
+      var sw = b.sweeper || {}, last = sw.last || {};
+      row("Sweeper", sw.started ? "running, every minute" : "NOT started — set POSTING_SWEEPER=1 in server/.env and restart", sw.started ? "ok" : "bad");
+      row("Last sweep", last.at ? when(last.at) + " · " + (last.result === "off" ? "skipped: " + (FLEET[last.reason] || last.reason) : last.result === "ticked" ? last.accounts + " account(s) ticked" : last.result + (last.code ? " (" + last.code + ")" : "")) : "none yet", last.result === "off" || last.result === "error" ? "bad" : "");
+      row("Main switch", b.fleet_off ? "OFF — " + (FLEET[b.fleet_off] || b.fleet_off) : "on", b.fleet_off ? "bad" : "ok");
+      var me = b.me || {};
+      row("My account " + (me.phone || ""), (me.connected ? "Facebook connected" : "Facebook NOT connected") + " · " + me.running + " running, " + me.paused + " paused", me.connected && me.running ? "ok" : "bad");
+      row("My last tick", me.last_tick ? when(me.last_tick.at) + " · " + (OUTCOME[me.last_tick.outcome] || me.last_tick.outcome) : (me.running ? "not ticked yet" : "— (no running campaign: switch a property on at /autopublish.html)"));
+      row("Separate idle browsing", b.local_test ? "disabled; the approved posting session has its own passive preflight" : me.dwell_blocked ? "no — " + (FLEET[me.dwell_blocked] || me.dwell_blocked) : "yes", b.local_test || me.dwell_blocked ? "bad" : "ok");
+      var ls = me.last_session, acts = ls && Object.keys(ls.actions || {}).filter(function (k) { return ls.actions[k]; })
+        .map(function (k) { return ls.actions[k] + " " + k.replace(/_/g, " "); }).join(", ");
+      row("Last browse", when(me.last_browse_at) + (ls ? " · " + (acts || "no actions recorded") + (ls.halt_related ? " · ended by a Facebook warning" : "") : ""), ls && ls.halt_related ? "bad" : "");
+      var nextAt = me.next_browse_at ? new Date(me.next_browse_at) : null;
+      row("Now", liveCount ? liveCount + " browser(s) running — below" : b.local_test
+        ? "nothing running · review/approve a post, then run a sweep to watch its browser"
+        : (nextAt && nextAt > new Date()
+          ? "nothing running · warm-up browses once a day; the next is due from " + nextAt.toLocaleString() + " · press “Browse now” to watch one now"
+          : "nothing running · press “Browse now” to start one"));
+      row("Next browse (earliest)", b.local_test ? "none — disabled" : me.next_browse_at ? when(me.next_browse_at) : "as soon as the planner says it's a browse day");
+    }).catch(function () {});
+  }
+  function act(path, btn, done) {
+    btn.disabled = true; pmsg.textContent = "…";
+    fetch("/api/dev/driver/posting/" + path, { method: "POST", credentials: "same-origin" })
+      .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
+      .then(function (res) { pmsg.textContent = done(res); pollPosting(); poll(); })
+      .catch(function () { pmsg.textContent = "Network error."; })
+      .then(function () { btn.disabled = false; });
+  }
+  document.getElementById("sweepNow").addEventListener("click", function () {
+    act("sweep", this, function (res) { return res.status === 200 ? "Sweep done: " + res.body.ticked + " account(s) ticked." : "Failed: " + (res.body.error || res.status); });
+  });
+  document.getElementById("browseNow").addEventListener("click", function () {
+    act("browse", this, function (res) {
+      if (res.status === 202) return "Browsing started — its browser appears below within a few seconds.";
+      if (res.body.error === "posting_disabled") return "Not allowed: " + (FLEET[res.body.reason] || res.body.reason);
+      return "Not started: " + (res.body.error || res.status);
+    });
+  });
+
+  // ── failed posts: the screenshot, the reason and the step reached (posting-shots.js) ──
+  var STEPS = { reserved: "before opening the browser", session_started: "browser open, before the group's composer",
+    composer_ready: "composer open, before clicking Post", submit_started: "while clicking Post", verification_pending: "after Post, while confirming" };
+  // The failure's full diagnostic (posting-diag): the check, what was expected
+  // and found, what the page had. Everything is text — never HTML from the page.
+  function kv(label, value, bad) {
+    var d = document.createElement("div"); d.className = "kv" + (bad ? " bad" : "");
+    var b = document.createElement("b"); b.textContent = label + ": "; d.appendChild(b);
+    d.appendChild(document.createTextNode(value == null || value === "" ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value)));
+    return d;
+  }
+  function detailsOf(s) {
+    var out = [], W = window.ForlyCampaignWhy || {}, f = s.facts || {}, g = s.diag || {};
+    if (s.check) out.push(kv("Check", s.check + (W.CHECKS && W.CHECKS[s.check] ? " — " + W.CHECKS[s.check] : ""), true));
+    if (g.why) out.push(kv("What happened", g.why, true));
+    if ("expected" in g || "found" in g) { out.push(kv("Expected", g.expected)); out.push(kv("Found on the page", g.found, true)); }
+    ["host", "http", "type", "bytes", "max_bytes", "post_disabled"].forEach(function (k) { if (g[k] != null) out.push(kv(k, g[k])); });
+    if (g.counts) out.push(kv("Video controls found", g.counts));
+    if (f.where || f.title) out.push(kv("Page", (f.where || "?") + (f.title ? " · \"" + f.title + "\"" : "")));
+    if (f.counts) {
+      var n = [];
+      Object.keys(f.counts).forEach(function (k) { n.push(k + "=" + (f.counts[k] == null ? "?" : f.counts[k])); });
+      out.push(kv("Elements on the page", n.join(" · ")));
+    }
+    var r = f.read || {}, e = f.expected || {};
+    if (Object.keys(r).length) {
+      out.push(kv("Name at the top (expected " + (e.identity || "?") + ")", r.header_identity, e.identity && r.header_identity !== e.identity));
+      out.push(kv("Group id on the page (expected " + (e.target_id || "?") + ")", r.target_id, e.target_id && r.target_id && r.target_id !== String(e.target_id).replace(/^slug:/, "")));
+      out.push(kv("Group name on the page", r.group_name));
+      out.push(kv("Composer posts to / as", (r.composer_target || "—") + " / " + (r.composer_author || "—")));
+      out.push(kv("Text in the editor", r.editor_chars == null ? null : r.editor_chars + " chars (expected " + (e.copy_chars == null ? "?" : e.copy_chars) + ")", s.check === "editor_text")); // typing may not have started yet at other checks
+    }
+    if (f.page_text && f.page_text.length) out.push(kv("Dialogs / alerts on the page", f.page_text.join(" | "), true));
+    var raw = document.createElement("details"); var sum = document.createElement("summary"); sum.textContent = "Raw diagnostic";
+    var pre = document.createElement("pre"); pre.textContent = JSON.stringify({ check: s.check, step: s.step, diag: s.diag, facts: s.facts }, null, 2);
+    raw.appendChild(sum); raw.appendChild(pre); out.push(raw);
+    return out;
+  }
+
+  function pollShots() {
+    fetch("/api/dev/driver-shots/", { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (b) { return { status: r.status, body: b }; }); })
+      .then(function (res) {
+        var sec = document.getElementById("shots"), list = document.getElementById("shotsList"), msg = document.getElementById("shotsMsg");
+        if (res.status === 404) { sec.hidden = true; return; } // not local/staging
+        sec.hidden = false;
+        if (res.status === 401 && res.body.error === "stepup_required") { msg.textContent = "Step-up required: log in again with an OTP (valid 10 minutes)."; return; }
+        if (res.status !== 200) { msg.textContent = "Could not load (" + (res.body.error || res.status) + ")."; return; }
+        var shots = res.body.shots || [];
+        msg.textContent = shots.length ? "" : "No failed post yet.";
+        list.textContent = "";
+        shots.forEach(function (s) {
+          var li = document.createElement("li");
+          var a;
+          if (s.image === false) { a = text("div", "No screenshot: it failed before the browser opened."); a.className = "noimg"; }
+          else {
+            a = document.createElement("a"); a.href = "/api/dev/driver-shots/" + encodeURIComponent(s.id) + ".jpg"; a.target = "_blank"; a.rel = "noopener";
+            var img = document.createElement("img"); img.loading = "lazy"; img.alt = "screenshot"; img.src = a.href; a.appendChild(img);
+          }
+          var info = document.createElement("div");
+          var why = window.ForlyCampaignWhy ? window.ForlyCampaignWhy.failedText(s.error_code) : "";
+          info.appendChild(text("div", new Date(s.at).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }) + " · " + (s.kind || "post")));
+          var w = text("div", (why ? why + " " : "") + "(" + (s.error_code || "?") + ")"); w.className = "why"; info.appendChild(w);
+          info.appendChild(text("div", "Stopped " + (STEPS[s.step] || s.step || "?") + " · attempt " + (s.key_tail || "?") + " · account " + (s.phone_tail || "?")));
+          detailsOf(s).forEach(function (row) { info.appendChild(row); });
+          li.appendChild(a); li.appendChild(info); list.appendChild(li);
+        });
+      }).catch(function () {});
+  }
+
+  // Loads once per page load — reload to refresh. /posting reads Firestore on
+  // every call, and a polling tab left open burned the daily read quota.
+  poll(); pollPosting(); pollShots();
+})();
+</script>
+</body>
+</html>

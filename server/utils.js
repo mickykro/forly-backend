@@ -93,6 +93,23 @@ const INFRA_HOST = /(hstgr\.cloud|trycloudflare\.com|ngrok(-free)?\.(io|app|dev)
  * back to them rather than to production. Unset means the guard is on, so a
  * deployment that forgets is protected rather than exposed.
  */
+// A link that leaves this machine — a Facebook post's video, its first
+// comment — never points at a local dev server: a loopback origin becomes the
+// public one, the path kept. Any other URL is returned as is.
+const PUBLIC_BASE_URL = "https://nadlan.call4li.com";
+// A link that leaves the machine (a Facebook post, a WhatsApp button) never
+// carries a local, staging, tunnel or raw-IP origin: that origin becomes the
+// public one, path and query kept. Matched on the parsed hostname, so
+// "127.0.0.1.evil.com" or "staging-news.com" is left alone.
+const NON_PUBLIC_HOST = /^(localhost|0\.0\.0\.0|\[::1\]|\d+\.\d+\.\d+\.\d+)$|^staging\.|\.staging\.|(^|\.)(hstgr\.cloud|trycloudflare\.com|ngrok(-free)?\.(io|app|dev)|loca\.lt)$/i;
+function publicUrl(url) {
+  if (typeof url !== "string") return url;
+  let u;
+  try { u = new URL(url); } catch { return url; }
+  if (!/^https?:$/.test(u.protocol) || !NON_PUBLIC_HOST.test(u.hostname)) return url;
+  return PUBLIC_BASE_URL + u.pathname + u.search + u.hash;
+}
+
 function resolvePageBaseUrl({ pageBaseUrl, baseUrl, publicBaseUrl, allowInfra }) {
   const isLocalBase = /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:|$)/
     .test(baseUrl || "");
@@ -311,7 +328,8 @@ async function getWhatsAppMessage(chatId, idMessage, instance, token) {
  * Throws on a non-2xx so callers can fall back to a plain text send.
  */
 async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, instance, token) {
-  console.log("[whatsapp] sendWhatsAppButtons", { phone, header, body, footer, buttons });
+  // Never the phone, the body or the links: a link may be a signed one-tap token.
+  console.log(`[whatsapp] buttons → …${String(phone || "").slice(-4)} (${(buttons || []).length})`);
   if (!instance || !token) return;
   const clean = (buttons || []).slice(0, 3).map((b, i) => ({
     ...b,
@@ -324,9 +342,9 @@ async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, ins
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chatId: `${phone}@c.us`,
-        header: header || " ",
+        header: String(header || " ").slice(0, 60),
         body: String(body || ""),
-        footer: footer || " ",
+        footer: String(footer || " ").slice(0, 60),
         buttons: clean,
       }),
       signal: AbortSignal.timeout(20000),
@@ -335,6 +353,21 @@ async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, ins
     throw new Error(`sendInteractiveButtons ${resp.status}`);
   }
   return resp.json().catch(() => ({}));
+}
+
+// The same message as plain text: header, body, each link spelled out, footer.
+// What a rejected interactive send falls back to — the link is never lost.
+function textOfButtons({ header, body, footer, buttons } = {}) {
+  const links = (buttons || []).filter((b) => b && b.url).map((b) => `${String(b.buttonText || "").trim()}: ${b.url}`);
+  return [String(header || "").trim(), String(body || "").trim(), links.join("\n"), String(footer || "").trim()]
+    .filter(Boolean).join("\n\n");
+}
+
+// Links go behind buttons: the interactive message first, its text on any failure.
+async function sendWhatsAppRich(phone, payload, instance, token) {
+  try { return await sendWhatsAppButtons(phone, payload, instance, token); }
+  catch (e) { console.warn(`[whatsapp] buttons failed (${e && e.message}), sending text`); }
+  return sendWhatsApp(phone, textOfButtons(payload), instance, token);
 }
 
 // A page's hero video may only point at one of our own uploads — an mp4 with
@@ -358,6 +391,7 @@ function inPlace(name) {
 }
 
 module.exports = {
+  textOfButtons, sendWhatsAppRich, publicUrl, PUBLIC_BASE_URL,
   ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
