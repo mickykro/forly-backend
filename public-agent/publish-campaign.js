@@ -29,9 +29,11 @@
   const cardPages = (settings) => (settings && settings.page_target_available === true && Array.isArray(settings.pages)
     ? settings.pages.filter((p) => p && p.available === true) : []);
 
-  const OFF_FOR_ALL = "הפרסום האוטומטי כבוי כרגע אצלנו, לכל החשבונות. נחזור בקרוב — לא צריך לעשות כלום. אפשר תמיד לעצור.";
+  // Posting switched off for everyone (env or global kill switch) is not
+  // announced: no box, and the card reads like any quiet wait.
+  const SILENT_OFF = new Set(["env_off", "global_off"]);
+  const QUIET_WAIT = "אין פוסט מתוכנן כרגע — פורלי תתזמן את הבא בחלון הקרוב.";
   const DISABLED = {
-    env_off: OFF_FOR_ALL, global_off: OFF_FOR_ALL,
     platform_off: "הפרסום האוטומטי בפייסבוק כבוי כרגע אצלנו. נחזור בקרוב — לא צריך לעשות כלום. אפשר תמיד לעצור.",
     account_disabled: "הפרסום מהחשבון שלכם מושהה עד שהצוות שלנו יבדוק אותו — נחזור אליכם.",
     account_penalty: "פייסבוק ביקשה להאט, אז היום פורלי לא מפרסמת. ממשיכים בקצב איטי יותר.",
@@ -39,7 +41,8 @@
     no_permission: "ההרשאה לפורלי לפרסם בשמכם לא בתוקף. צריך לאשר מחדש כדי להמשיך.",
     permission_scope: "ההרשאה לפורלי לפרסם בשמכם לא בתוקף. צריך לאשר מחדש כדי להמשיך.",
   };
-  const disabledText = (reason) => DISABLED[reason] || "הפרסום האוטומטי כבוי כרגע. אפשר תמיד לעצור.";
+  const silentOff = (waitReason) => typeof waitReason === "string" && SILENT_OFF.has(waitReason.replace(/^posting_disabled:/, ""));
+  const disabledText = (reason) => SILENT_OFF.has(reason) ? QUIET_WAIT : DISABLED[reason] || "הפרסום האוטומטי כבוי כרגע. אפשר תמיד לעצור.";
 
   const ERRORS = {
     not_member: "אתם כבר לא חברים באחת הקבוצות שסימנתם — הורדנו אותה מהבחירה. רעננו את הרשימה ונסו שוב.",
@@ -136,14 +139,14 @@
       return Object.assign({ text: HALT[box.cls] }, box);
     }
     if (h.needs_reconnect) return { cls: "reconnect", text: HALT.reconnect, reconnect: true };
-    if (h.posting_off) return { cls: "off", text: disabledText(h.posting_off) };
+    if (h.posting_off && !SILENT_OFF.has(h.posting_off)) return { cls: "off", text: disabledText(h.posting_off) };
     if (c && c.status === "paused") {
       const r = c.pause_reason;
       if (r === "permission") return { cls: "paused", text: HALT.permission, reconsent: true };
       if (r === "internal") return { cls: "paused", text: HALT.internal }; // R5: the team resumes it, not the agent
       return { cls: "paused", text: HALT[r] || HALT.agent, resume: true };
     }
-    if (c && c.status === "running" && /^posting_disabled:/.test(c.wait_reason || "")) return { cls: "off", text: waitText(c.wait_reason) };
+    if (c && c.status === "running" && /^posting_disabled:/.test(c.wait_reason || "") && !silentOff(c.wait_reason)) return { cls: "off", text: waitText(c.wait_reason) };
     if (h.penalty_until) return { cls: "penalty", text: penaltyText(h.penalty_until, h.penalty_class) };
     return null;
   }
@@ -210,7 +213,7 @@
   }
 
   const CampaignUI = {
-    esc, fmt, fbUrl, cardPages, errorText, disabledText, waitText, estimateText, haltInfo, approveBlocked, statusText, metricsText, usable, groupNote,
+    esc, fmt, fbUrl, cardPages, errorText, disabledText, silentOff, waitText, estimateText, haltInfo, approveBlocked, statusText, metricsText, usable, groupNote,
     defaultPicks, planText, chipText, splitPasses, linkNotice, FIRST_WEEK, REACH_NOTE, HALT, ERRORS,
   };
   if (typeof module === "object" && module.exports) { module.exports = CampaignUI; return; }

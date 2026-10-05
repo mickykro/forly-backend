@@ -41,7 +41,9 @@ t("every API error code has Hebrew, and a raw message never shows", () => {
 
 t("posting_disabled is worded by its reason", () => {
   const off = U.errorText({ code: "posting_disabled", body: { reason: "global_off" } });
-  assert.match(off, /כבוי כרגע אצלנו/);
+  assert.ok(!/כבוי/.test(off), "a switch-off for everyone is not announced");
+  assert.strictEqual(U.waitText("posting_disabled:env_off"), U.waitText(""));
+  assert.ok(U.silentOff("posting_disabled:global_off") && !U.silentOff("posting_disabled:platform_off"));
   assert.notStrictEqual(U.errorText({ code: "posting_disabled", body: { reason: "account_disabled" } }), off);
   assert.match(U.errorText({ code: "posting_disabled", body: { reason: "no_permission" } }), /לאשר מחדש/);
   assert.match(U.waitText("posting_disabled:platform_off"), /בפייסבוק כבוי/);
@@ -73,7 +75,8 @@ t("halt boxes: one class per account state, strongest first", () => {
   assert.ok(/מתקן/.test(internal.text) && !/אפשר לנסות להמשיך/.test(internal.text));
   assert.ok(/מתקן/.test(U.errorText({ code: "needs_developer" })));
   assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "permission" }).reconsent);
-  assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:global_off" }).cls, "off");
+  assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:global_off" }), null);
+  assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:platform_off" }).cls, "off");
   assert.strictEqual(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z" }, running).cls, "penalty");
   assert.strictEqual(U.haltInfo({}, running), null);
   assert.strictEqual(U.haltInfo(null, null), null);
@@ -99,7 +102,8 @@ t("halt boxes: the disabled class picks the text and the one action", () => {
   assert.strictEqual(U.haltInfo({ owner_review_required: true, disabled_until_admin: true, disabled_class: "checkpoint" }, null).cls, "owner");
   assert.match(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z", penalty_class: "feature_blocked" }, null).text, /חסמה זמנית/);
   assert.match(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z", penalty_class: null }, null).text, /ביקשה להאט/);
-  assert.strictEqual(U.haltInfo({ posting_off: "global_off" }, null).cls, "off");
+  assert.strictEqual(U.haltInfo({ posting_off: "global_off" }, null), null);
+  assert.strictEqual(U.haltInfo({ posting_off: "platform_off" }, null).cls, "off");
 });
 
 t("approve is hidden while nothing may post; otherwise shown", () => {
