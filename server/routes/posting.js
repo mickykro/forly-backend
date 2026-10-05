@@ -135,6 +135,9 @@ module.exports = function createPostingRouter(ctx) {
     }) };
   }
 
+  // Manual posting: an admin publishes by hand, so the automatic posting switch does not apply.
+  const manualOn = () => require("../posting-manual").enabled(deps.env || process.env);
+
   async function owned(req, res) {
     const id = String(req.params.id || "");
     const c = S_.ID_RE.test(id) ? await store.getPostingCampaign(id) : null;
@@ -150,8 +153,7 @@ module.exports = function createPostingRouter(ctx) {
     if (!v) return res.status(400).json({ error: "invalid_input" });
     // The consent is to the text the card showed: it must be this version.
     if (b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
-    // Manual posting: an admin publishes by hand, so the automatic posting switch does not apply.
-    const manual = require("../posting-manual").enabled(deps.env || process.env);
+    const manual = manualOn();
     if (!manual && !(await allowed(S, phone, res, PERMISSION_CURED))) return;
 
     const conn = (await db.getConnection(phone)) || {};
@@ -225,7 +227,7 @@ module.exports = function createPostingRouter(ctx) {
   router.post("/campaigns/:id/resume", auth, wrap("resume", async (req, res) => {
     const c = await owned(req, res);
     if (!c) return;
-    if (!(await allowed(S, c.phone, res))) return;
+    if (!manualOn() && !(await allowed(S, c.phone, res))) return;
     if (c.status === "running") return res.json({ campaign: publicView(c) });
     if (c.status !== "paused") return res.status(409).json({ error: "not_paused", status: c.status });
     // R5: an internal pause (selector failures, tick errors) is lifted by the
@@ -251,7 +253,7 @@ module.exports = function createPostingRouter(ctx) {
     const g = S_.parseGroupIds(b.group_ids, { required: true });
     if (g.error || !g.ids.length || (b.include_unknown !== undefined && typeof b.include_unknown !== "boolean")) return res.status(400).json({ error: "invalid_input" });
     if (!LIVE.has(c.status)) return res.status(409).json({ error: "not_live", status: c.status });
-    if (!(await allowed(S, c.phone, res))) return;
+    if (!manualOn() && !(await allowed(S, c.phone, res))) return;
     const page = await db.getPage(c.page_id);
     if (!page || page.business_phone !== c.phone) return res.status(404).json({ error: "not_found" });
     const vet = await vetGroups((await db.getConnection(c.phone)) || {}, page, g.ids, b.include_unknown === true);

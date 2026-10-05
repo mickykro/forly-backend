@@ -87,6 +87,19 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal((await put(env.app, enable())).status, 200);
   }
 
+  // Manual posting: an admin posts by hand, so saving is not blocked by the
+  // automatic posting switches (fleet or env); without it, it still is.
+  {
+    const env = await setup();
+    const app = (e) => R.makeApp({ deps: Object.assign({}, env.deps, { env: Object.assign({}, env.deps.env, e) }) });
+    globalOff();
+    assert.equal((await put(app({ POSTING_MANUAL: "1" }), enable())).status, 200, "fleet switch off");
+    globalOn();
+    assert.equal((await put(app({ POSTING_MANUAL: "1", POSTING_ENABLED: "0" }), enable())).status, 200, "env switch off");
+    const auto = await put(app({ POSTING_ENABLED: "0" }), enable());
+    assert.equal(auto.status, 409); assert.equal(auto.body.reason, "env_off");
+  }
+
   // ── GET: member groups (hashed ones nameless, no URLs), suggestions, halt state, estimate ──
   {
     // db.js has no memory path for businesses: this one answers getBusiness.
