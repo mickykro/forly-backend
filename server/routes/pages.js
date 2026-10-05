@@ -283,8 +283,9 @@ module.exports = function createPagesRouter(ctx) {
           brand_name: agentField("brand_name") || agentField("name"),
           logo_url: logoUrl,
           tagline: agentField("tagline"),
-          phone: agentField("phone") || body.business_phone,
-          phone2: agentField("phone2") || null,
+          // The phones the agent picked on create win; otherwise as before.
+          phone: (listing && listing.agent_phones && listing.agent_phones.phone) || agentField("phone") || body.business_phone,
+          phone2: listing && listing.agent_phones ? listing.agent_phones.phone2 || null : agentField("phone2") || null,
           license: agentField("license"),
         },
         agent2: agent2Doc,
