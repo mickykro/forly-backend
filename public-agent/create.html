@@ -427,8 +427,8 @@
 
       <!-- logged-in agents with additional phones: which numbers the page shows -->
       <div id="phonePick" class="hidden" style="margin:6px 0 16px">
-        <div class="sec-title">טלפונים בדף</div>
-        <p style="color:var(--ink-soft);font-size:.9rem;margin:4px 0 8px">בחרו אילו מספרים יופיעו בדף הנכס (עד 2).</p>
+        <div class="sec-title" data-i18n="sec_page_phones">טלפונים בדף</div>
+        <p style="color:var(--ink-soft);font-size:.9rem;margin:4px 0 8px" data-i18n="page_phones_hint">בחרו אילו מספרים יופיעו בדף הנכס (עד 2).</p>
         <div id="phonePickList" style="display:flex;flex-direction:column;gap:6px"></div>
       </div>
 
@@ -888,8 +888,16 @@
       });
       row.appendChild(box);
       var span = document.createElement("span");
-      span.dir = "ltr"; span.textContent = fmt(p) + (i === 0 ? "  (ראשי)" : "");
+      span.dir = "ltr"; span.textContent = fmt(p);
       row.appendChild(span);
+      if (i === 0) { // "(main)", translated and re-translated on a language switch
+        var main = document.createElement("small");
+        main.setAttribute("data-i18n", "page_phone_main");
+        main.textContent = FT("page_phone_main");
+        row.appendChild(document.createTextNode(" ("));
+        row.appendChild(main);
+        row.appendChild(document.createTextNode(")"));
+      }
       list.appendChild(row);
     });
     $("#phonePick").classList.remove("hidden");
