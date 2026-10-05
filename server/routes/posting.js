@@ -160,8 +160,7 @@ module.exports = function createPostingRouter(ctx) {
     if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
     const page = await db.getPage(b.page_id);
     if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
-    const others = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== page.page_id);
-    if (!require("../posting-safety").capsOff() && others.length >= MAX_ACTIVE_CAMPAIGNS) return res.status(409).json({ error: "too_many_campaigns" });
+    // No cap on live campaigns per agent for now (MAX_ACTIVE_CAMPAIGNS is not enforced).
     const wanted = v.targets || S_.DEFAULT_TARGETS;
     if (wanted.includes("page") && !S_.pageConfirmed(conn)) return res.status(409).json({ error: "page_not_confirmed" });
     // Until connect has read the Page's numeric id, R3 could never prove it: refused (I4).

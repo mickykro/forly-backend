@@ -128,7 +128,7 @@ function findChromium() {
     assert.equal(put[0], "put"); assert.equal(put[1].consent, true); assert.equal(put[1].consent_version, "v1");
     assert.equal(create[0], "create");
     assert.deepEqual([create[1].page_id, create[1].group_ids, create[1].mode, create[1].consent], ["pgK", ["k1"], "per_post", true]);
-    assert.ok((await page.textContent("#apCount")).includes("1 מתוך 3"));
+    assert.ok((await page.textContent("#apCount")).includes("נכס אחד בפרסום אוטומטי"));
 
     // Eilat: switching on with no group opens its panel instead of starting.
     await rows.nth(1).locator(".switch i").click();

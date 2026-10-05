@@ -129,4 +129,19 @@ const full = () => ({
     ["אילת"]);
 }
 
+// ── editing a completed profile: office name and ID kept; plan, payment and consent untouched ──
+{
+  const { buildUpdateDoc } = require("./profile-onboarding");
+  const p = sanitizeProfile({ ...full(), business_name: "  כהן נדל״ן ", id_number: "123456789" });
+  assert.equal(p.business_name, "כהן נדל״ן");
+  assert.equal(p.id_number, "123456789");
+  const doc = buildUpdateDoc(p, new Date(0));
+  assert.equal(doc.business_name, "כהן נדל״ן");
+  assert.equal(doc.id_number, "123456789");
+  for (const k of ["plan", "paid", "onboarding_state", "privacy_consent", "privacy_consent_at", "created_at", "phone"]) {
+    assert.ok(!(k in doc), `an edit must not write ${k}`);
+  }
+  assert.equal(readProfile({ business_name: "משרד", id_number: "1" }).business_name, "משרד");
+}
+
 console.log("profile-onboarding: all tests passed");

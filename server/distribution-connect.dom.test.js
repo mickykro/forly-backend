@@ -67,7 +67,7 @@ function findChromium() {
     await page.goto(`http://127.0.0.1:${srv.address().port}/distribution.html`);
     await page.waitForSelector("#browserConnectBtn_facebook");
     const cases = [
-      [{ start: 404, status: 404 }, "חיבור החשבון", /לא זמין/],
+      [{ start: 404, status: 404 }, "חיבור החשבון", null], // no account connection on this server: not announced
       [{ start: 503, body: { error: "driver_busy" }, status: 500 }, "חיבור החשבון", /תפוסים/],
       [{ start: 503, body: { error: "proxy_unavailable" }, status: 500 }, "חיבור החשבון", /פרוקסי/],
       [{ start: 409, body: { error: "posting_disabled", reason: "account_disabled" }, status: 500 }, "חיבור החשבון", /מושהה/],
@@ -82,7 +82,8 @@ function findChromium() {
         await page.waitForFunction((id) => !document.getElementById(id).disabled && !/פותחים/.test(document.getElementById(id).textContent), `browserConnectBtn_${p}`, { timeout: 5000 });
         await page.waitForTimeout(150); // the status refresh settles the label
         assert.equal((await page.textContent(`#browserConnectBtn_${p}`)).trim(), label, `${p} ${JSON.stringify(m)}`);
-        assert.ok(msg.test(await page.textContent("#msg")), `${p} ${JSON.stringify(m)} shows its reason`);
+        if (msg) assert.ok(msg.test(await page.textContent("#msg")), `${p} ${JSON.stringify(m)} shows its reason`);
+        else assert.ok(!/זמין|השתבש/.test(await page.textContent("#msg")), `${p} ${JSON.stringify(m)} says nothing`);
       }
     }
     // fresh page: the earlier "connected" case taught the page that state

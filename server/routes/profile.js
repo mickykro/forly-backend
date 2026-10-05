@@ -1,6 +1,7 @@
 /*
  * routes/profile.js — the agent profile completion form's backend.
- * Handles: /api/onboarding (GET), /api/onboarding/save, /api/onboarding/complete
+ * Handles: /api/onboarding (GET), /api/onboarding/save, /api/onboarding/complete,
+ * /api/onboarding/update (edits after completion)
  *
  * Replaces the signupGet / signupSave / signupComplete / signupUpload Cloud
  * Functions. The phone is taken from the session cookie, never from the body,
@@ -81,6 +82,27 @@ module.exports = function createProfileRouter(ctx) {
       res.json({ ok: true, onboarding_pct: onboarding.completenessPct(profile) });
     } catch (err) {
       console.error("onboarding complete failed:", err);
+      res.status(500).json({ error: "save failed" });
+    }
+  });
+
+  // ── edit a completed profile ──
+  // Only the profile fields change: completing again would reset the plan and
+  // re-seed the quota, so a completed agent edits through here instead.
+  router.post("/onboarding/update", requireAuth(authSecret), async (req, res) => {
+    const phone = req.user.userId;
+    const profile = onboarding.sanitizeProfile(req.body && req.body.profile);
+    if (!profile.privacy_consent) return res.status(400).json({ error: "privacy_consent_required" });
+    const missing = onboarding.missingEssentials(profile);
+    if (missing.length) return res.status(400).json({ error: "missing_required_fields", need: missing });
+    try {
+      const existing = await db.getBusiness(phone);
+      if (!existing || existing.onboarding_state !== "complete") return res.status(409).json({ error: "not_complete" });
+      await db.setBusiness(phone, onboarding.buildUpdateDoc(profile, new Date()));
+      require("../business-cache").invalidate(phone);
+      res.json({ ok: true, onboarding_pct: onboarding.completenessPct(profile) });
+    } catch (err) {
+      console.error("onboarding update failed:", err);
       res.status(500).json({ error: "save failed" });
     }
   });

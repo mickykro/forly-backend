@@ -29,20 +29,21 @@
   const cardPages = (settings) => (settings && settings.page_target_available === true && Array.isArray(settings.pages)
     ? settings.pages.filter((p) => p && p.available === true) : []);
 
-  // Posting switched off for everyone (env or global kill switch) is not
-  // announced: no box, and the card reads like any quiet wait.
-  const SILENT_OFF = new Set(["env_off", "global_off"]);
+  // Posting switched off by a system switch (env, global or platform kill
+  // switch, or any reason not about the agent's own account) is not
+  // announced: no box, no error, and the card reads like any quiet wait.
   const QUIET_WAIT = "אין פוסט מתוכנן כרגע — פורלי תתזמן את הבא בחלון הקרוב.";
   const DISABLED = {
-    platform_off: "הפרסום האוטומטי בפייסבוק כבוי כרגע אצלנו. נחזור בקרוב — לא צריך לעשות כלום. אפשר תמיד לעצור.",
     account_disabled: "הפרסום מהחשבון שלכם מושהה עד שהצוות שלנו יבדוק אותו — נחזור אליכם.",
     account_penalty: "פייסבוק ביקשה להאט, אז היום פורלי לא מפרסמת. ממשיכים בקצב איטי יותר.",
     profile_revoked: "החיבור לחשבון הפייסבוק האישי שלכם נותק. חברו אותו מחדש מעמוד ההפצה כדי להמשיך.",
     no_permission: "ההרשאה לפורלי לפרסם בשמכם לא בתוקף. צריך לאשר מחדש כדי להמשיך.",
     permission_scope: "ההרשאה לפורלי לפרסם בשמכם לא בתוקף. צריך לאשר מחדש כדי להמשיך.",
   };
-  const silentOff = (waitReason) => typeof waitReason === "string" && SILENT_OFF.has(waitReason.replace(/^posting_disabled:/, ""));
-  const disabledText = (reason) => SILENT_OFF.has(reason) ? QUIET_WAIT : DISABLED[reason] || "הפרסום האוטומטי כבוי כרגע. אפשר תמיד לעצור.";
+  const silentOff = (reason) => !DISABLED[String(reason || "").replace(/^posting_disabled:/, "")];
+  const disabledText = (reason) => DISABLED[reason] || QUIET_WAIT;
+  // Errors that are a system switch, never the agent's doing: no message at all.
+  const SILENT_ERRORS = new Set(["posting_unavailable_in_env"]);
 
   const ERRORS = {
     not_member: "אתם כבר לא חברים באחת הקבוצות שסימנתם — הורדנו אותה מהבחירה. רעננו את הרשימה ונסו שוב.",
@@ -68,6 +69,7 @@
   };
   function errorText(e) {
     const code = e && e.code, body = (e && e.body) || {};
+    if (SILENT_ERRORS.has(code) || (code === "posting_disabled" && silentOff(body.reason))) return "";
     if (code === "posting_disabled") return disabledText(body.reason);
     if (code === "too_soon") {
       const min = Math.max(1, Math.ceil((Number(body.retry_after_s) || 600) / 60));
@@ -139,7 +141,7 @@
       return Object.assign({ text: HALT[box.cls] }, box);
     }
     if (h.needs_reconnect) return { cls: "reconnect", text: HALT.reconnect, reconnect: true };
-    if (h.posting_off && !SILENT_OFF.has(h.posting_off)) return { cls: "off", text: disabledText(h.posting_off) };
+    if (h.posting_off && !silentOff(h.posting_off)) return { cls: "off", text: disabledText(h.posting_off) };
     if (c && c.status === "paused") {
       const r = c.pause_reason;
       if (r === "permission") return { cls: "paused", text: HALT.permission, reconsent: true };
@@ -151,11 +153,13 @@
     return null;
   }
   // Approving is pointless while nothing may post: a disabled account, day one
-  // of a penalty, a pending reconnect, or posting switched off. Skip and STOP stay.
+  // of a penalty, a pending reconnect, or the account's posting off. A system
+  // switch never hides the buttons. Skip and STOP stay.
   function approveBlocked(h, c) {
     h = h || {};
-    return !!(h.disabled_until_admin || h.owner_review_required || h.needs_reconnect || h.penalty_blocks_posts || h.posting_off
-      || (c && /^posting_disabled:/.test(c.wait_reason || "")));
+    return !!(h.disabled_until_admin || h.owner_review_required || h.needs_reconnect || h.penalty_blocks_posts
+      || (h.posting_off && !silentOff(h.posting_off))
+      || (c && /^posting_disabled:/.test(c.wait_reason || "") && !silentOff(c.wait_reason)));
   }
 
   const { statusText } = Why; // a failed post says why (publish-campaign-why.js)
@@ -224,7 +228,7 @@
   function mount(U, { pageId, toast }) {
     const $ = (id) => document.getElementById(id);
     if (!$("campaignCard") || !pageId) return;
-    const say = typeof toast === "function" ? toast : () => {};
+    const say = (t) => { if (t && typeof toast === "function") toast(t); }; // an empty text (a silent error) says nothing
     const api = (path, opts) => fetch(path, Object.assign({ credentials: "include", headers: { "content-type": "application/json" } }, opts))
       .then(async (r) => {
         const j = await r.json().catch(() => ({}));
@@ -371,7 +375,7 @@
       const pending = current.filter((p) => p.status === "pending_approval");
       const next = pending[0] || current.filter((p) => p.status === "scheduled")
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))[0];
-      const off = /^posting_disabled:/.test(campaign.wait_reason || "");
+      const off = /^posting_disabled:/.test(campaign.wait_reason || "") && !U.silentOff(campaign.wait_reason);
       $("campNext").textContent = campaign.status === "paused" || off ? "הפרסום מושהה כרגע — ההסבר למעלה."
         : pending.length ? `ממתין לאישור שלכם: ${pending[0].group_name}`
           : next ? `הפוסט הבא מתוכנן ל${U.fmt(next.scheduled_at)} · ${next.group_name}` : U.waitText(campaign.wait_reason);
@@ -442,7 +446,7 @@
         const bad = (e && e.body && e.body.group_ids) || [];
         bad.forEach((id) => picked.delete(String(id)));
         if (e && e.code === "consent_outdated") { await loadSettings().catch(() => null); consentGiven = false; $("campConsent").checked = false; }
-        if (e && e.code === "posting_disabled") { $("campSetupNote").textContent = U.errorText(e); $("campSetupNote").hidden = false; }
+        if (e && e.code === "posting_disabled" && U.errorText(e)) { $("campSetupNote").textContent = U.errorText(e); $("campSetupNote").hidden = false; }
         renderSetup(); say(U.errorText(e));
       } finally { btn.disabled = false; btn.textContent = "התחלת פרסום"; }
     }

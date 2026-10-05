@@ -57,6 +57,8 @@ function sanitizeProfile(raw) {
   const p = raw || {};
   return {
     full_name: str(p.full_name, 60),
+    business_name: str(p.business_name, 60), // office name
+    id_number: str(p.id_number, 20),         // ת.ז. / ח.פ.
     activity_areas: areas(p.activity_areas),
     specialty: str(p.specialty, 60),
     license_number: str(p.license_number, 40),
@@ -132,6 +134,8 @@ function readProfile(business) {
   const pick = (k) => (d[k] != null && d[k] !== "" ? d[k] : partial[k]);
   return sanitizeProfile({
     full_name: pick("full_name"),
+    business_name: pick("business_name"),
+    id_number: pick("id_number"),
     activity_areas: d.activity_areas && d.activity_areas.length ? d.activity_areas : partial.activity_areas,
     specialty: pick("specialty"),
     license_number: pick("license_number"),
@@ -149,8 +153,15 @@ function readProfile(business) {
   });
 }
 
+/* An edit after completion: the profile fields only — never the plan, the
+   payment state, the quota or the consent record. */
+function buildUpdateDoc(p, now) {
+  const { privacy_consent: _consent, ...fields } = p;
+  return { ...fields, onboarding_pct: completenessPct(p), updated_at: now };
+}
+
 module.exports = {
   TONE_VALUES, GENDER_VALUES, ESSENTIALS, OPTIONAL_COUNT, MAX_AREAS, MAX_COLORS,
   sanitizeProfile, missingEssentials, completenessPct,
-  buildPartialDoc, buildCompleteDoc, readProfile,
+  buildPartialDoc, buildCompleteDoc, buildUpdateDoc, readProfile,
 };

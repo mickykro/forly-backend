@@ -73,7 +73,7 @@ module.exports = function createDashboardRouter(ctx) {
           logo_url: d.logo_url || null,
           onboarding_state: state,
           onboarding_pct: d.onboarding_pct || 0,
-          portfolio_enabled: !!(d.features && d.features.portfolio),
+          portfolio_enabled: true, // every agent has a portfolio (no admin approval)
           portfolio_url: d.portfolio?.status === "open" ? `/${d.portfolio.slug}` : null,
           portfolio_status: d.portfolio?.status || null,
         },
@@ -183,9 +183,9 @@ module.exports = function createDashboardRouter(ctx) {
   });
 
   // ── portfolio management ──
-  // Entitlement lives on the business doc (businesses/{phone}.features.portfolio)
-  // and is flipped from the admin panel, same shape as features.chatbot.
-  const portfolioEnabled = (business) => !!(business && business.features && business.features.portfolio);
+  // Every agent may build a portfolio: no admin approval. The admin panel's
+  // features.portfolio switch is no longer read.
+  const portfolioEnabled = () => true;
 
   router.get("/my-portfolio", requireAuth(authSecret), async (req, res) => {
     const phone = req.user.userId;
