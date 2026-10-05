@@ -9,9 +9,10 @@ const fs = require("fs");
 const db = require("../db");
 const { REVIEW_SCOPES } = require("../auth");
 const portalStream = require("../portal-stream");
-const { sendWhatsApp, inPlace } = require("../utils");
+const { sendWhatsAppRich, PUBLIC_BASE_URL, inPlace } = require("../utils");
 const { portfolioSlug, normalizePortfolio, visiblePortfolioPages, nextPortfolioStatus } = require("../portfolio");
 const businessCache = require("../business-cache");
+const { buildFailed, retryBlocked } = require("../listing-create");
 
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
 
@@ -21,21 +22,27 @@ module.exports = function createDashboardRouter(ctx) {
   const router = express.Router();
 
   // ── properties list ──
+  // Archived listings come back separately: the dashboard shows them under an
+  // archive tab (with restore), never in the main list. Deleted ones are gone.
   router.get("/properties", requireAuth(authSecret), async (req, res) => {
     const listings = await db.listListingsByPhone(req.user.userId);
     listings.sort((a, b) => (asDate(b.created_at) || 0) - (asDate(a.created_at) || 0));
-    const properties = [];
+    const properties = [], archived = [];
     for (const l of listings) {
-      if (l.status === "archived") continue;
+      if (l.status === "deleted") continue;
+      const isArchived = l.status === "archived";
       const page = l.page_id ? await db.getPage(l.page_id).catch(() => null) : null;
-      properties.push({
+      (isArchived ? archived : properties).push({
         listing_id: l.listing_id,
         title: `${l.rooms || ""} חד׳ ${inPlace(l.neighborhood || l.city)}`.trim(),
         address: [l.address, l.city].filter(Boolean).join(", "),
         thumb_url: (l.photos_urls && l.photos_urls[0]) || null,
         page_id: l.page_id || null,
         page_url: l.page_id ? `${pageBaseUrl}/p/${l.page_id}` : null,
-        page_status: page ? page.status : "building",
+        // A build that never produced a page reads "failed" (the card offers a
+        // retry) instead of "building" forever.
+        page_status: isArchived ? "archived" : page ? page.status : buildFailed(l) ? "failed" : "building",
+        can_retry: !isArchived && !page && !retryBlocked(l),
         // Drives group matching on the distribution page: a sale listing must
         // not be pushed at rental-only groups.
         listing_type: (page && page.property && page.property.listing_type) ||
@@ -46,7 +53,7 @@ module.exports = function createDashboardRouter(ctx) {
         lead_count: (page && page.lead_count) || 0,
       });
     }
-    res.json({ properties });
+    res.json({ properties, archived });
   });
 
   // ── profile (for completion check) ──
@@ -89,7 +96,10 @@ module.exports = function createDashboardRouter(ctx) {
     if (!listing) return res.status(404).json({ error: "not found" });
     if (listing.business_phone !== req.user.userId) return res.status(403).json({ error: "not_owner" });
     try {
-      await db.updateListing(listingId, { status: mode === "archive" ? "archived" : "deleted" });
+      // archived_from: restore puts a failed build back as failed, not active.
+      await db.updateListing(listingId, mode === "archive"
+        ? { status: "archived", archived_from: listing.status === "archived" ? (listing.archived_from || "active") : listing.status, archived_at: new Date() }
+        : { status: "deleted" });
       if (listing.page_id) {
         await db.updatePage(listing.page_id, { status: "archived" });
         // Realtime: pull the card off the public portal immediately.
@@ -101,6 +111,30 @@ module.exports = function createDashboardRouter(ctx) {
       res.json({ ok: true });
     } catch (err) {
       console.error("deleteProperty failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── restore an archived property (owner only) ──
+  // The page goes live again: dashboard, public page, portal and portfolio.
+  router.post("/properties/restore", requireAuth(authSecret), async (req, res) => {
+    const listingId = String((req.body && req.body.listing_id) || "");
+    if (!listingId) return res.status(400).json({ error: "listing_id required" });
+    const listing = await db.getListing(listingId);
+    if (!listing) return res.status(404).json({ error: "not found" });
+    if (listing.business_phone !== req.user.userId) return res.status(403).json({ error: "not_owner" });
+    if (listing.status !== "archived") return res.status(409).json({ error: "not_archived" });
+    try {
+      const back = listing.archived_from === "failed" ? "failed" : "active";
+      await db.updateListing(listingId, { status: back, archived_from: null, archived_at: null });
+      if (listing.page_id) {
+        await db.updatePage(listing.page_id, { status: "active", updated_at: new Date() });
+        const fresh = await db.getPage(listing.page_id).catch(() => null);
+        if (fresh) portalStream.broadcast("listing_added", portalStream.toCard(fresh, pageBaseUrl));
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("restoreProperty failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });
@@ -132,11 +166,14 @@ module.exports = function createDashboardRouter(ctx) {
       businessCache.invalidate(phone);
       // Welcome message is best-effort — a WhatsApp outage must not fail signup.
       try {
-        await sendWhatsApp(phone,
-          `ברוכים הבאים לפורלי 🦉\n${fullName}, החשבון של ${businessName} מוכן!\n\n` +
-          `מה עכשיו? נכנסים ל-nadlan.call4li.com, פותחים נכס ראשון — ` +
-          `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
-          greenInstance, greenToken);
+        await sendWhatsAppRich(phone, {
+          header: "ברוכים הבאים לפורלי 🦉",
+          body: `${fullName}, החשבון של ${businessName} מוכן!\n\n` +
+            `מה עכשיו? נכנסים לפורלי, פותחים נכס ראשון — ` +
+            `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
+          footer: "",
+          buttons: [{ type: "url", buttonText: "לכניסה לפורלי", url: PUBLIC_BASE_URL }],
+        }, greenInstance, greenToken);
       } catch (err) { console.error("welcome send failed (signup still ok):", err.message); }
       res.json({ ok: true });
     } catch (err) {
@@ -156,7 +193,8 @@ module.exports = function createDashboardRouter(ctx) {
       const business = await db.getBusiness(phone);
       if (!portfolioEnabled(business)) return res.status(403).json({ error: "feature_disabled" });
       if (!business) return res.json({ profile: { business_name: "", full_name: "", city: "", license_number: "", logo_url: null }, portfolio: null, pages: [] });
-      const pages = await db.listPagesByPhone(phone, 100);
+      // Archived pages are out of the portfolio until restored — not even listed here.
+      const pages = (await db.listPagesByPhone(phone, 100)).filter((p) => p.status !== "archived");
       const portfolio = business.portfolio || null;
       res.json({
         profile: {

@@ -64,13 +64,41 @@
   }
 
   function errorKey(status, code) {
+    if (code === "social_login_required") return "ext_err_social_login";
     if (code === "facebook_not_connected") return "ext_err_fb_connect";
     if (code === "page_unreadable") return "ext_err_unreadable";
     if (code === "extract_limit") return "ext_err_limit";
     return "ext_err_unavailable";
   }
 
-  var api = { FIELD_MAP: FIELD_MAP, isUrl: isUrl, formatPrice: formatPrice, fillFields: fillFields, missingFor: missingFor, errorKey: errorKey };
+  // A browser scrape is queued, not answered inline: POST gives a job id, this
+  // asks for it until it settles. Fixed interval, hard deadline — a job that
+  // never finishes must surface as an error, not as a spinner forever.
+  function pollJob(jobId, opts) {
+    var o = opts || {};
+    var fetchFn = o.fetchFn || (typeof fetch === "function" ? fetch : null);
+    var sleep = o.sleep || function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+    var interval = o.intervalMs == null ? 2000 : o.intervalMs;
+    // Long enough for a queued job to wait for a slot and run every attempt:
+    // cap-2 queue + 3 × (60s start + 45s goto + LLM). Giving up earlier discards
+    // a result Driver has already been paid for.
+    var deadline = Date.now() + (o.timeoutMs == null ? 300000 : o.timeoutMs);
+    function step() {
+      return fetchFn("/api/properties/extract/" + encodeURIComponent(jobId), {
+        credentials: "include", headers: o.headers || {},
+      }).then(function (r) {
+        if (!r.ok) throw new Error("poll failed: " + r.status);
+        return r.json();
+      }).then(function (j) {
+        if (j.status === "done" || j.status === "failed") return j;
+        if (Date.now() > deadline) throw new Error("poll timeout");
+        return sleep(interval).then(step);
+      });
+    }
+    return step();
+  }
+
+  var api = { FIELD_MAP: FIELD_MAP, isUrl: isUrl, formatPrice: formatPrice, fillFields: fillFields, missingFor: missingFor, errorKey: errorKey, pollJob: pollJob };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.FlyExtract = api;
 })(typeof window !== "undefined" ? window : this);

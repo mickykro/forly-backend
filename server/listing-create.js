@@ -71,6 +71,9 @@ async function createListing(phone, body, agentOverride, deps) {
     photos_urls: body.photos_urls.slice(0, MAX_PHOTOS),
     own_video_url: body.own_video_url || null,
     status: "active", page_id: null,
+    // Set when create.html?draft=<id> submits — lets the page-creation
+    // handler (routes/pages.js) mark the listing-sweep draft "created".
+    listing_draft_id: body.listing_draft_id ? String(body.listing_draft_id).slice(0, 200) : null,
     agent: agentOverride ? {
       name: String(agentOverride.name || ""),
       brand_name: String(agentOverride.brand_name || agentOverride.name || ""),
@@ -91,7 +94,15 @@ async function createListing(phone, body, agentOverride, deps) {
     created_at: new Date(),
   };
   await db.saveListing(listing);
+  kickPipeline(listing, { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl, fetchFn });
+  return { listing_id: listingId };
+}
 
+// Fire the n8n page pipeline for a saved listing. Everything it needs lives on
+// the listing doc, so a retry replays exactly what the first attempt sent.
+function kickPipeline(listing, deps) {
+  const { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl, fetchFn = fetch } = deps;
+  const listingId = listing.listing_id, phone = listing.business_phone;
   const webhook = listing.own_video_url ? n8nPipelineWebhook : n8nWw1Webhook;
   const payload = listing.own_video_url ? {
     listing_id: listingId, business_phone: phone, video_url: listing.own_video_url,
@@ -118,7 +129,38 @@ async function createListing(phone, body, agentOverride, deps) {
     }).then((r) => console.log(`pipeline webhook → ${r.status}`))
       .catch((err) => console.error("pipeline webhook failed:", err.message));
   }
-  return { listing_id: listingId };
 }
 
-module.exports = { validateListing, createListing, MAX_PHOTOS, MIN_PHOTOS };
+/*
+ * Retry a build that never produced a page. The listing (details, photos,
+ * agent, theme) is all still stored, so this replays the same pipeline call —
+ * no new upload, no new quota unit. Capped, since each run costs real money.
+ */
+const BUILD_STUCK_MS = 20 * 60 * 1000; // no page this long after an attempt = failed
+const MAX_RETRIES = 3;
+const asMs = (v) => (v && v.toMillis ? v.toMillis() : v ? new Date(v).getTime() : 0);
+const lastAttemptMs = (l) => asMs(l.retried_at || l.created_at);
+
+function buildFailed(l, now = Date.now()) {
+  if (!l || l.page_id) return false;
+  if (l.status === "failed") return true;
+  return l.status === "active" && now - lastAttemptMs(l) > BUILD_STUCK_MS;
+}
+
+function retryBlocked(l, now = Date.now()) {
+  if (!l) return "not_found";
+  if (l.page_id) return "already_built";
+  if (!buildFailed(l, now)) return "still_building";
+  if ((l.retry_count || 0) >= MAX_RETRIES) return "retry_limit";
+  return null;
+}
+
+async function retryListing(listing, deps, now = new Date()) {
+  const patch = { status: "active", retried_at: now, retry_count: (listing.retry_count || 0) + 1 };
+  await db.updateListing(listing.listing_id, patch);
+  kickPipeline({ ...listing, ...patch }, deps);
+  return patch;
+}
+
+module.exports = { validateListing, createListing, kickPipeline, buildFailed, retryBlocked, retryListing,
+  lastAttemptMs, MAX_PHOTOS, MIN_PHOTOS, MAX_RETRIES, BUILD_STUCK_MS };

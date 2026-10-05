@@ -32,10 +32,13 @@ const { transcribe } = createWhatsappRouter;
   await db.saveListing({ listing_id: "B", source: "whatsapp", status: "active", page_id: null, business_phone: "P2", created_at: old,
     city: "באר שבע", rooms: 3, price: 1250000 });
   await db.saveListing({ listing_id: "C", source: "whatsapp", status: "active", page_id: null, business_phone: "P3", created_at: new Date(now) });
+  // retried from the dashboard: the clock restarts at retried_at
+  await db.saveListing({ listing_id: "D", source: "whatsapp", status: "active", page_id: null, business_phone: "P4", created_at: old, retried_at: new Date(now) });
   await db.saveDraft({ phone: "P1", status: "building", mode: "create", listing_id: "A", fields: {}, skipped: [], photos: [] });
   await router.sweepStuckBuilds(now);
   assert.deepEqual([(await db.getListing("A")).status, (await db.getListing("B")).status, (await db.getListing("C")).status],
     ["failed", "failed", "active"], "only listings past the timeout fail");
+  assert.equal((await db.getListing("D")).status, "active", "a fresh retry is not re-failed off created_at");
   const d1 = await db.getDraft("P1");
   assert.deepEqual([d1.status, d1.mode, d1.listing_id], ["active", null, null], "the draft that built it can retry");
   assert.match(msgs.find(([p]) => p === "P1")[1], /ליצור/);
@@ -43,6 +46,23 @@ const { transcribe } = createWhatsappRouter;
   msgs.length = 0;
   await router.sweepStuckBuilds(now);
   assert.equal(msgs.length, 0, "a failed listing is reported once");
+
+  // ── a reply's links go as URL buttons; the plain fallback spells them out ──
+  {
+    const rich = [], plain = [];
+    const r2 = createWhatsappRouter({ authSecret: "s", sweep: false, normalizeAuthPhone: (p) => p, signSession: auth.signSession,
+      sendWhatsApp: async (p, m) => plain.push(m), sendButtons: async (p, payload) => rich.push(payload) });
+    await r2.sendReply("P9", { text: "מלאו ידנית.", links: [{ text: "למילוי ידני", url: "https://a/create.html" }] });
+    assert.equal(plain.length, 0);
+    assert.equal(rich[0].body, "מלאו ידנית.");
+    assert.deepEqual(rich[0].buttons, [{ type: "url", buttonText: "למילוי ידני", url: "https://a/create.html", buttonId: "1" }]);
+    const r3 = createWhatsappRouter({ authSecret: "s", sweep: false, normalizeAuthPhone: (p) => p, signSession: auth.signSession,
+      sendWhatsApp: async (p, m) => plain.push(m), sendButtons: async () => { throw new Error("rejected"); } });
+    const warn = console.warn; console.warn = () => {};
+    try { await r3.sendReply("P9", { text: "מלאו ידנית.", links: [{ text: "למילוי ידני", url: "https://a/create.html" }] }); }
+    finally { console.warn = warn; }
+    assert.equal(plain[0], "מלאו ידנית.\nלמילוי ידני: https://a/create.html", "the link is never lost");
+  }
 
   // ── dev-only test video: production chat listings still get a generated walkthrough ──
   const { createListing } = require("../listing-create");

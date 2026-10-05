@@ -70,6 +70,51 @@
   .message-meta{font-size:.76rem;color:var(--ink-soft)}
   .customer-check{width:16px;height:16px;accent-color:var(--gold)}
   @media(max-width:760px){.message-grid{grid-template-columns:1fr}}
+  /* automated posting tab (admin-posting.js) */
+  .posting-row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
+  .posting-row .switch{display:inline-block;vertical-align:middle}
+  .posting-note{font-size:.78rem;color:var(--ink-soft);font-weight:300;margin:4px 0 0}
+  .posting-warn{font-size:.82rem;color:#9a2f25;background:rgba(190,60,50,.08);border:1px solid rgba(190,60,50,.25);border-radius:12px;padding:10px 14px;margin-bottom:14px}
+  .posting-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-bottom:18px}
+  .posting-audit{list-style:none;margin:0;padding:0;font-size:.8rem}
+  .posting-audit li{padding:6px 0;border-bottom:1px solid rgba(23,20,15,.06)}
+  .manual-grid{display:grid;grid-template-columns:minmax(320px,1fr) minmax(480px,1.5fr);gap:18px;align-items:start}
+  @media(max-width:960px){.manual-grid{grid-template-columns:1fr}}
+  .manual-side{position:sticky;top:12px}
+  .manual-agentbar,.manual-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+  .manual-agentbar select,.manual-tools select{min-width:200px;padding:6px 8px}
+  .manual-help,.manual-muted{font-size:.85rem;color:#6b6257}
+  .manual-agent{border:1px solid rgba(23,20,15,.1);border-radius:10px;padding:12px;margin-bottom:12px;background:#fff}
+  .manual-agent h3{margin:0 0 8px;font-size:1rem}
+  .manual-item{border-top:1px solid rgba(23,20,15,.06);padding:10px 0}
+  .manual-item.on{background:#fff8e6;border-radius:8px;padding:10px}
+  .manual-detail pre,.manual-item pre{white-space:pre-wrap;font:inherit;font-size:.9rem;background:#f7f5f1;padding:8px;border-radius:6px;margin:6px 0}
+  .manual-row{display:flex;flex-wrap:wrap;gap:6px}
+  .manual-prop{display:flex;gap:12px;align-items:center;border:1px solid rgba(23,20,15,.1);border-radius:10px;padding:10px;margin-bottom:10px;background:#fff}
+  .manual-prop img{width:84px;height:64px;object-fit:cover;border-radius:6px}
+  .manual-prop b{display:block}
+  .manual-browser{min-height:420px;border:1px solid rgba(23,20,15,.1);border-radius:10px;overflow:hidden;background:#fafafa}
+  .manual-grid.big{grid-template-columns:minmax(300px,380px) 1fr}
+  .manual-grid.big .manual-browser{min-height:82vh}
+  .manual-grid.big .manual-browser .cv-screen{max-height:none}
+  .manual-browser:fullscreen{background:#000;overflow:auto}
+  .manual-h{font-size:.95rem;margin:14px 0 8px}
+  .manual-detail{border:1px solid rgba(23,20,15,.12);border-radius:10px;padding:12px;margin-bottom:14px;background:#fffdf8}
+  .manual-groups{list-style:none;margin:0 0 10px;padding:0}
+  .manual-groups li{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(23,20,15,.06)}
+  .manual-groups li .name{flex:1;min-width:140px;display:flex;gap:6px;align-items:center;cursor:pointer}
+  .manual-groups li .name input{width:18px;height:18px}
+  .manual-chip{font-size:.75rem;padding:2px 8px;border-radius:999px;background:#eee}
+  .manual-check{border-top:1px solid rgba(23,20,15,.08);padding:10px 0}
+  .manual-check-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-weight:600}
+  .manual-bar{height:6px;border-radius:999px;background:#f0ece4;margin:6px 0 4px;overflow:hidden}
+  .manual-bar i{display:block;height:100%;background:#3a9a5b}
+  .manual-groups li.on{background:#fff8e6;border-radius:8px}
+  .manual-text{flex-basis:100%}
+  .manual-chip.owed{background:#fff1c7}.manual-chip.posted{background:#d8f2df}.manual-chip.skipped{background:#eee;color:#777}
+  .manual-versions details{border-top:1px solid rgba(23,20,15,.06);padding:6px 0}
+  .manual-versions summary{cursor:pointer;font-size:.9rem}
+  #manualVideo.ready{background:#1f7a3a;color:#fff;border-color:#1f7a3a}
 </style>
 </head>
 <body class="agent-page admin-page">
@@ -113,7 +158,8 @@
     <button id="tabAgents">סוכנים ופיצ׳רים</button>
     <button id="tabPortfolios">פורטפוליו</button>
     <button id="tabMessages">הודעות לסוכנים</button>
-    <button id="tabPortfolios">פורטפוליו</button>
+    <button id="tabPosting">פרסום אוטומטי</button>
+    <button id="tabManual">פרסום ידני</button>
   </div>
 
   <!-- ── AGENT MESSAGES ── -->
@@ -148,6 +194,105 @@
           </table>
           <div class="empty hidden" id="customerEmpty">לא נמצאו סוכנים תואמים.</div>
         </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ── AUTOMATED POSTING (admin-posting.js) ── -->
+  <div id="panePosting" class="hidden">
+    <div class="posting-warn hidden" id="postingStepUp">נדרש אימות מחדש — התחברו שוב</div>
+    <div class="posting-warn hidden" id="postingWarnings"></div>
+    <div class="empty hidden" id="postingUnavailable">פרסום אוטומטי לא פעיל בשרת הזה.</div>
+    <div id="postingBody" class="hidden">
+      <div class="posting-grid">
+        <section class="message-card">
+          <h2>מתג ראשי</h2>
+          <p>כיבוי עוצר את כל הפרסום האוטומטי של כל הסוכנים לפני הפעולה הבאה.</p>
+          <div class="posting-warn hidden" id="postingEnvNote">POSTING_ENABLED אינו 1 בסביבה — הפרסום כבוי, והמתג הזה לא יכול להדליק אותו.</div>
+          <div class="posting-row"><label class="switch"><input type="checkbox" id="postingGlobal"><i></i></label> <b id="postingGlobalLabel"></b></div>
+          <p class="posting-note" id="postingLastChange"></p>
+        </section>
+        <section class="message-card">
+          <h2>מתגים נוספים</h2>
+          <p>כל שינוי דורש סיבה ונרשם ביומן.</p>
+          <div id="postingSwitches"></div>
+        </section>
+      </div>
+      <div class="stat-grid" id="postingCounts"></div>
+      <section class="message-card" style="margin-bottom:18px">
+        <h2>חימום חשבון</h2>
+        <p class="posting-note">חשבון פעיל מספיק יכול לפרסם מיד. חשבון חדש או שקט — חימום איטי. "אוטומטי" — לפי מה שהסוכן ענה.</p>
+        <div class="posting-row" style="gap:8px;flex-wrap:wrap">
+          <input id="postingWarmPhone" inputmode="tel" placeholder="טלפון הסוכן (9725…)" style="padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px;direction:ltr">
+          <select id="postingWarmMode" style="padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px">
+            <option value="active">פעיל מיד — בלי חימום</option><option value="slow">חימום איטי</option><option value="auto">אוטומטי</option>
+          </select>
+          <button type="button" class="btn btn-gold btn-sm" id="postingWarmSave">שמירה</button>
+        </div>
+      </section>
+      <section class="message-card" style="margin-bottom:18px">
+        <h2>חשבונות שנעצרו</h2>
+        <p>כל שורה מציעה רק את הפעולה שמותרת לסוג העצירה.</p>
+        <div class="table-wrap">
+          <table class="admin" style="min-width:640px">
+            <thead><tr><th>סוג</th><th>סוכן</th><th>מתי</th><th>מצב</th><th>פעולות</th></tr></thead>
+            <tbody id="postingHalted"></tbody>
+          </table>
+          <div class="empty hidden" id="postingHaltedEmpty">אין חשבונות עצורים.</div>
+        </div>
+      </section>
+      <section class="message-card" style="margin-bottom:18px">
+        <h2>פוסטים בתוצאה לא ידועה</h2>
+        <p id="postingUnknownSummary">כל פוסט כזה נבדק עד 3 פעמים. אחרי זה — בדקו בקבוצה ידנית וסמנו אם עלה. שום דבר לא מתפרסם מכאן.</p>
+        <div class="table-wrap">
+          <table class="admin" style="min-width:640px">
+            <thead><tr><th>סוכן</th><th>מאז</th><th>בדיקות</th><th>הערה</th><th>הכרעה</th></tr></thead>
+            <tbody id="postingUnknown"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="message-card" style="margin-bottom:18px">
+        <h2>קמפיינים שנעצרו בגלל תקלה אצלנו</h2>
+        <p>הסוכן לא יכול להמשיך אותם בעצמו. אחרי התיקון — המשיכו מכאן.</p>
+        <div class="table-wrap">
+          <table class="admin" style="min-width:480px">
+            <thead><tr><th>סוכן</th><th>עודכן</th><th>תקלות</th><th>פעולה</th></tr></thead>
+            <tbody id="postingInternal"></tbody>
+          </table>
+          <div class="empty hidden" id="postingInternalEmpty">אין קמפיינים שנעצרו בגלל תקלה.</div>
+        </div>
+      </section>
+      <div class="posting-grid">
+        <section class="message-card"><h2>בריאות</h2><p id="postingHealth"></p></section>
+        <section class="message-card"><h2>יומן פעולות</h2><ul class="posting-audit" id="postingAudit"></ul></section>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MANUAL POSTING (admin-manual.js) ── -->
+  <div id="paneManual" class="hidden">
+    <div class="manual-grid">
+      <section class="manual-work">
+        <div class="manual-agentbar">
+          <select id="manualAgent" aria-label="סוכן"><option value="">בחרו סוכן…</option></select>
+          <button type="button" class="btn btn-gold btn-sm" id="manualOpen">פתיחת הפייסבוק של הסוכן</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualReload">רענון</button>
+        </div>
+        <p class="manual-help">לכל קבוצה: <b>פתיחה בקבוצה</b>, לחיצה בדפדפן על "כתבו משהו", <b>הקלדת הטקסט</b>, לחיצה בפייסבוק על "תמונה/סרטון" ואז <b>העלאת הסרטון</b>. בסוף לוחצים "פרסום" בפייסבוק ומסמנים את הקבוצה ✓. נכס יוצא מהרשימה כשכל הקבוצות שלו סומנו.</p>
+        <h3 class="manual-h">רשימת הפרסום <small class="manual-muted" id="manualSummary"></small></h3>
+        <div id="manualQueue"></div>
+        <div id="manualDetail"></div>
+      </section>
+      <section class="manual-side">
+        <div id="manualProp" class="manual-prop"><p class="manual-muted">אין דפדפן פתוח.</p></div>
+        <div class="manual-tools">
+          <select id="manualPropPick" aria-label="נכס" hidden></select>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualVideo" disabled>לחצו "תמונה/סרטון" בפייסבוק</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualBig">⤢ הגדלה</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualFull">מסך מלא</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="manualClose" hidden>סגירת הדפדפן</button>
+        </div>
+        <div id="manualBrowser" class="manual-browser"></div>
       </section>
     </div>
   </div>
@@ -225,6 +370,7 @@
       <option value="expiring">עומד לפוג</option>
       <option value="expired">פג תוקף</option>
       <option value="building">בבנייה</option>
+      <option value="failed">הבנייה נכשלה</option>
       <option value="archived">בארכיון</option>
     </select>
     <select id="sortBy">
@@ -351,6 +497,9 @@
 
 <script src="/api.js"></script>
 <script src="/admin.js"></script>
+<script src="/admin-posting.js"></script>
+<script src="/connect-viewer.js"></script>
+<script src="/admin-manual.js"></script>
 <footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

@@ -26,6 +26,7 @@
   .tpl-card:hover{border-color:var(--gold-bright,#d9b15c)}
   .tpl-card.selected{border-color:var(--gold,#b98a2f);box-shadow:0 0 0 3px var(--gold-faint,rgba(185,138,47,.28))}
   .tpl-frame{position:relative;aspect-ratio:16/11;overflow:hidden;background:#0c0a09}
+  .tpl-shot{object-position:top}
   .tpl-frame iframe{position:absolute;top:0;right:0;width:1280px;height:880px;border:0;transform-origin:top right;pointer-events:none}
   .tpl-check{position:absolute;top:10px;inset-inline-start:10px;z-index:4;width:26px;height:26px;border-radius:50%;background:var(--gold,#b98a2f);color:#fff;display:none;place-items:center;font-size:.85rem;box-shadow:0 2px 8px rgba(0,0,0,.4)}
   .tpl-card.selected .tpl-check{display:grid}
@@ -161,6 +162,7 @@
           <button type="button" class="link-btn" id="extractManual" data-i18n="ext_manual">או מלאו את הטופס ידנית</button>
         </div>
         <p class="form-err" id="extractErr"></p>
+        <p class="hint" id="extractStage"></p>
       </div>
       <div id="extractCard" class="extract-card hidden">
         <div class="sec-title" id="extractCardTitle" data-i18n="ext_missing_title">פורלי צריכה עוד כמה פרטים</div>
@@ -331,7 +333,7 @@
         <div class="tpl-grid" id="tplGrid">
           <div class="tpl-card selected" data-tpl="original">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/original.html" title="Classic" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-original.webp" alt="" loading="lazy"><iframe data-src="/tpl/original.html" title="Classic" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_classic">קלאסי</span><small data-i18n="tpl_desc_classic">בהיר, חם, נצחי</small><button type="button" class="tpl-full" data-src="/tpl/original.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="nocturne">
@@ -341,27 +343,27 @@
           </div>
           <div class="tpl-card" data-tpl="reel">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/reel.html" title="Reel" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-reel.webp" alt="" loading="lazy"><iframe data-src="/tpl/reel.html" title="Reel" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_reel">ריל</span><small data-i18n="tpl_desc_reel">תנועה, קצבי, מודרני</small><button type="button" class="tpl-full" data-src="/tpl/reel.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="movie">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/movie.html" title="Movie" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-movie.webp" alt="" loading="lazy"><iframe data-src="/tpl/movie.html" title="Movie" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_name_movie">מוביי</span><small data-i18n="tpl_desc_movie">קולנועי, זורם, נקי</small><button type="button" class="tpl-full" data-src="/tpl/movie.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="atelier">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/atelier.html" title="Atelier" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-atelier.webp" alt="" loading="lazy"><iframe data-src="/tpl/atelier.html" title="Atelier" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_atelier">אטלייה · קולנועי</span><button type="button" class="tpl-full" data-src="/tpl/atelier.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="loupe">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/loupe.html" title="Loupe" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-loupe.webp" alt="" loading="lazy"><iframe data-src="/tpl/loupe.html" title="Loupe" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_loupe">לופה · אינטראקטיבי</span><button type="button" class="tpl-full" data-src="/tpl/loupe.html">⛶</button></div>
           </div>
           <div class="tpl-card" data-tpl="orbite">
             <div class="tpl-check">✓</div>
-            <div class="tpl-frame"><iframe src="/tpl/orbite.html" title="Orbite" loading="lazy" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-orbite.webp" alt="" loading="lazy"><iframe data-src="/tpl/orbite.html" title="Orbite" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_orbite">אורביט · חללים</span><button type="button" class="tpl-full" data-src="/tpl/orbite.html">⛶</button></div>
           </div>
         <input type="hidden" id="thTemplate" value="original">
@@ -454,10 +456,19 @@
         <li id="st3"><span class="dot">✍️</span> <span data-i18n="step_writing">כותבים את הדף וחוקרים את השכונה</span></li>
         <li id="st4"><span class="dot">🚀</span> <span data-i18n="step_live">הדף עולה לאוויר</span></li>
       </ul>
+      <!-- choosing this property's Facebook groups while it builds (groups.html); shown only for a connected Facebook -->
+      <iframe id="groupsFrame" title="בחירת קבוצות" hidden style="width:100%;border:0;margin-top:18px;height:120px;text-align:right"></iframe>
       <div id="doneBox" class="hidden">
         <h3 style="font-family:var(--serif);margin-bottom:12px" data-i18n="done_title">✅ הדף באוויר!</h3>
         <a class="btn btn-gold" id="pageLink" target="_blank" href="#" data-i18n="done_view">צפייה בדף</a>
         <a class="btn btn-ghost" href="/" style="margin-top:8px" data-i18n="link_my_list">לרשימת הנכסים</a>
+        <!-- the last step: should Forly post this property to the agent's groups? (offerAutoPublish) -->
+        <div id="autoPubBox" class="hidden" style="margin-top:20px;padding:16px;border:1px solid rgba(185,138,47,.35);border-radius:16px;background:#FFFDF9;text-align:right">
+          <h3 style="font-family:var(--serif);font-size:1.05rem;margin-bottom:6px">פרסום ושיתוף</h3>
+          <p id="autoPubMsg" style="font-size:.88rem;color:var(--ink-soft,#5A5348);line-height:1.6"></p>
+          <div id="autoPubGroups" style="margin:10px 0;display:grid;gap:6px;font-size:.9rem"></div>
+          <div id="autoPubActions" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+        </div>
         <div id="editLinkRow" class="hidden" style="margin-top:18px;text-align:right">
           <p style="font-size:.85rem;color:var(--ink-soft,#5A5348);margin-bottom:6px" data-i18n="edit_link_hint">
             🔑 קישור לעריכת הטקסטים בדף — אישי, לא להעביר הלאה:</p>
@@ -1010,6 +1021,37 @@
   });
   input.addEventListener("change", function () { addFiles(input.files); input.value = ""; });
 
+  // iOS Safari kills a tab that holds too much decoded image memory and reloads
+  // it — the "page refreshes after adding photos" bug. A 12MP camera photo shown
+  // through a blob URL costs ~48MB once decoded, so a few picks blew the limit.
+  // Thumbs show a small canvas-made copy instead, made one full-size decode at a
+  // time; the original file is still what uploads. Resolves a blob URL or null.
+  var THUMB_MAX = 800;
+  var thumbQueue = Promise.resolve();
+  function makeThumb(file) {
+    var job = thumbQueue.then(function () {
+      return new Promise(function (resolve) {
+        var src = URL.createObjectURL(file), img = new Image();
+        img.onload = function () {
+          var s = Math.min(1, THUMB_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+          var c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(img.naturalWidth * s));
+          c.height = Math.max(1, Math.round(img.naturalHeight * s));
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(src); img.removeAttribute("src");
+          c.toBlob(function (b) {
+            c.width = c.height = 0; // free the backing store now, not at GC
+            resolve(b ? URL.createObjectURL(b) : null);
+          }, "image/jpeg", 0.82);
+        };
+        img.onerror = function () { URL.revokeObjectURL(src); resolve(null); };
+        img.src = src;
+      });
+    });
+    thumbQueue = job;
+    return job;
+  }
+
   // Photos upload the moment they're picked (progress on the thumb); removing a
   // photo also deletes the already-uploaded file from storage.
   function addFiles(list) {
@@ -1017,10 +1059,16 @@
       if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { FLY.toast(f.name + FT("err_bad_type")); return; }
       if (f.size > 10 * 1024 * 1024) { FLY.toast(f.name + FT("err_too_big")); return; }
       if (photos.length >= 12) { FLY.toast(FT("err_max_photos")); return; }
-      var url = URL.createObjectURL(f);
       var t = FLY.el("div", "t",
-        '<img src="' + url + '"><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
-      var entry = { file: f, el: t, publicUrl: null, previewUrl: url, removed: false, failed: false };
+        '<img alt=""><button class="x" type="button">✕</button><div class="bar"><i></i></div>');
+      var entry = { file: f, el: t, publicUrl: null, previewUrl: null, removed: false, failed: false };
+      makeThumb(f).then(function (url) {
+        if (!url) return;
+        if (entry.removed) { URL.revokeObjectURL(url); return; }
+        entry.previewUrl = url;
+        t.querySelector("img").src = url;
+        updateLivePreview();
+      });
       entry.uploadPromise = FLY.uploadFiles([f], uploadHeaders, function (_i, pct) {
         var bar = t.querySelector(".bar i");
         if (bar) bar.style.width = pct + "%";
@@ -1039,6 +1087,7 @@
         entry.removed = true;
         photos = photos.filter(function (p) { return p.el !== t; });
         t.remove();
+        if (entry.previewUrl && entry.file) URL.revokeObjectURL(entry.previewUrl);
         if (entry.publicUrl) FLY.deleteUpload(entry.publicUrl, uploadHeaders);
         updateLivePreview();
       });
@@ -1053,6 +1102,7 @@
   var importedPhotos = []; // {url, el, skip}
   var canSkipPhotos = false;   // scrape found more photos than a page needs
   var fromWhatsappDraft = false; // prefilled from the WhatsApp chat draft (see the prefill block at the end)
+  var fromListingDraftId = null; // prefilled from a Yad2/Madlan sweep draft (?draft=<id>)
   var extractedFromUrl = false;   // link/Facebook scrape, not pasted text or manual entry
   function revealManual() { $("#manualFields").classList.remove("hidden"); }
   function showExtractErr(key) {
@@ -1167,6 +1217,32 @@
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) { return { status: r.status, ok: r.ok, body: j }; });
     }).then(function (res) {
+      if (res.status === 202 && res.body.job_id) {
+        // The button keeps the short "working" label (a sentence in a gold
+        // button wraps on a phone); a muted line under it advances so 60–90s
+        // reads as progress, and the manual path stays one tap away.
+        var stage = $("#extractStage");
+        var stages = [[0, "ext_stage_open"], [15000, "ext_stage_read"], [35000, "ext_stage_photos"], [60000, "ext_stage_slow"]];
+        var timers = stages.map(function (st) { return setTimeout(function () { stage.textContent = FT(st[1]); }, st[0]); });
+        return X.pollJob(res.body.job_id, { headers: uploadHeaders }).then(function (j) {
+          timers.forEach(clearTimeout); stage.textContent = "";
+          if (j.status === "failed") {
+            hideMissingCard();
+            showExtractErr(X.errorKey(409, j.error_code));
+            revealManual();
+            return null;
+          }
+          return { status: 200, ok: true, body: j };
+        }).catch(function () {
+          timers.forEach(clearTimeout); stage.textContent = "";
+          hideMissingCard();
+          showExtractErr("ext_err_unavailable"); revealManual();
+          return null;
+        });
+      }
+      return res;
+    }).then(function (res) {
+      if (!res) return;
       if (!res.ok) {
         // a card left over from an earlier run would contradict this error
         hideMissingCard();
@@ -1178,7 +1254,7 @@
         if (res.status === 422 || res.status === 409) $("#extractInput").focus();
         return;
       }
-      if (res.body.source === "scrape" || res.body.source === "facebook") extractedFromUrl = true;
+      if (res.body.source === "scrape" || res.body.source === "facebook" || res.body.source === "driver") extractedFromUrl = true;
       X.fillFields(res.body.fields, $);
       syncDealButtons(); updatePriceLabel(); renderPriceChips();
       if (!$("#pDesc").value.trim()) $("#pDesc").value = String(res.body.description || "").slice(0, 2000);
@@ -1288,6 +1364,28 @@
   }
   addEventListener("resize", scaleFrames);
   scaleFrames();
+  // Each preview is a whole live template (autoplaying videos, animation loops,
+  // canvases), so on desktop an iframe is only loaded while its card is on
+  // screen and blanked again once it scrolls away or the design step is hidden.
+  (function () {
+    var frames = document.querySelectorAll(".tpl-frame iframe[data-src]");
+    // Touch screens get the static screenshot under each iframe only — loading
+    // the live templates there is when iPhones reload the page. ⛶ still opens
+    // the live one, a single template at a time.
+    if (!matchMedia("(hover:hover) and (pointer:fine)").matches) return;
+    function show(ifr, on) {
+      var want = on ? ifr.getAttribute("data-src") : "about:blank";
+      if (ifr.getAttribute("src") !== want && (on || ifr.getAttribute("src"))) ifr.setAttribute("src", want);
+    }
+    if (!window.IntersectionObserver) {
+      Array.prototype.forEach.call(frames, function (ifr) { show(ifr, true); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { show(e.target, e.isIntersecting); });
+    }, { rootMargin: "200px 0px" });
+    Array.prototype.forEach.call(frames, function (ifr) { io.observe(ifr); });
+  })();
   setTimeout(scaleFrames, 300); // after fonts/layout settle
   ["#pAddress", "#pCity", "#pHood", "#pRooms", "#pSqm", "#pFloor", "#pParking", "#pDesc"].forEach(function (id) {
     $(id).addEventListener("input", updateLivePreview);
@@ -1545,6 +1643,9 @@
         // Tells the server this page comes from the chat draft, so it can
         // clear the draft once the listing exists (routes/intake.js).
         if (fromWhatsappDraft) body.whatsapp_draft = true;
+        // Tells the server which listing-sweep draft to mark "created" once
+        // the page exists (routes/pages.js).
+        if (fromListingDraftId) body.listing_draft_id = fromListingDraftId;
         btn.textContent = FT("status_creating");
         $("#vLoaderMsg").textContent = FT("status_creating");
         var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
@@ -1635,6 +1736,19 @@
     $("#createAnother").href = location.pathname + location.search;
     $("#st1").classList.add("done");
     $("#st2").classList.add("now");
+    // The groups for this property, chosen while it builds (groups.html says
+    // whether the agent's Facebook is connected; otherwise it stays hidden).
+    var groupsChosen = false, gf = $("#groupsFrame");
+    if (gf && listingId) {
+      window.addEventListener("message", function (e) {
+        if (e.origin !== location.origin || !e.data || !e.data.forlyGroups) return;
+        var m = e.data.forlyGroups;
+        gf.hidden = !m.connected;
+        if (m.h) gf.style.height = m.h + "px";
+        if (m.chosen) groupsChosen = true;
+      });
+      gf.src = "/groups.html?embed=1&l=" + encodeURIComponent(listingId);
+    }
     var stage = 2;
     var startedAt = Date.now();
 
@@ -1645,7 +1759,63 @@
     // End the build screen in a terminal state: "done" (page ready), "wait"
     // (timed out — WhatsApp fallback) or "fail" (pipeline reported failure).
     // ponytail: demo users redirect to dashboard after page is ready
-    function endBuilding(state, pageUrl, editUrl) {
+    // ── the last step: should Forly post this property to the agent's groups? ──
+    // Asked once the page is live (its id and the groups that suit its city
+    // exist only then). Nothing is switched on without the agent's click.
+    function offerAutoPublish(pageId) {
+      var box = $("#autoPubBox"), msg = $("#autoPubMsg"), list = $("#autoPubGroups"), actions = $("#autoPubActions");
+      if (!box || !pageId) return;
+      var get = function (u) { return fetch(u, { credentials: "include" }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }); };
+      var link = function (label) { return '<a class="btn btn-ghost" href="/autopublish.html">' + label + "</a>"; };
+      Promise.all([get("/api/posting/settings"), get("/api/posting/properties")]).then(function (v) {
+        var s = v[0], prop = (v[1].properties || []).filter(function (p) { return p.page_id === pageId; })[0];
+        if (!prop) return;
+        var perm = s.permission || {}, c = prop.campaign;
+        box.classList.remove("hidden");
+        if (c && (c.status === "running" || c.status === "paused")) {
+          msg.textContent = "הנכס כבר בפרסום אוטומטי ✓ הפוסטים לאישור שלכם מחכים בעמוד הפרסום האוטומטי.";
+          actions.innerHTML = link("לעמוד הפרסום האוטומטי"); return;
+        }
+        if (!s.connected || !perm.enabled || perm.consent_version !== s.consent_version) {
+          msg.textContent = "רוצים שפורלי תפרסם את הנכס בקבוצות הפייסבוק שלכם? מפעילים פעם אחת בעמוד הפרסום האוטומטי, ומאז כל נכס חדש יקבל את השאלה הזאת כאן.";
+          actions.innerHTML = link("להפעלת פרסום אוטומטי"); return;
+        }
+        var fit = {}, no = {}, NOT_ALLOWED = { forbidden: 1, disallowed: 1, not_allowed: 1, no_agents: 1 };
+        (prop.fit_group_ids || []).forEach(function (id) { fit[id] = 1; });
+        (prop.excluded_group_ids || []).forEach(function (id) { no[id] = 1; });
+        var groups = (s.member_groups || []).filter(function (g) {
+          return g && g.membership_state === "member" && fit[g.group_id] && !no[g.group_id] && !NOT_ALLOWED[g.agent_policy];
+        }).slice(0, 5);
+        if (!groups.length) {
+          msg.textContent = "לא מצאנו קבוצה שלכם שמתאימה לעיר של הנכס. אפשר לבחור קבוצות בעמוד הפרסום האוטומטי.";
+          actions.innerHTML = link("בחירת קבוצות"); return;
+        }
+        var perPost = perm.auto_mode !== "standing";
+        msg.textContent = "לפרסם את הנכס אוטומטית בקבוצות האלה? " + (perPost ? "כל פוסט יחכה לאישור שלכם לפני שיעלה." : "פורלי תפרסם לבד, בקצב של החשבון, עד שתעצרו.");
+        list.innerHTML = groups.map(function (g) {
+          return '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" checked value="' + String(g.group_id).replace(/"/g, "") + '"> <span></span></label>';
+        }).join("");
+        Array.prototype.forEach.call(list.querySelectorAll("span"), function (el, i) { el.textContent = groups[i].name; });
+        actions.innerHTML = '<button type="button" class="btn btn-gold" id="autoPubStart">הפעלת פרסום אוטומטי</button><button type="button" class="btn btn-ghost" id="autoPubSkip">לא עכשיו</button>';
+        $("#autoPubSkip").addEventListener("click", function () { box.classList.add("hidden"); });
+        $("#autoPubStart").addEventListener("click", function () {
+          var btn = this, ids = Array.prototype.map.call(list.querySelectorAll("input:checked"), function (i) { return i.value; });
+          if (!ids.length) { msg.textContent = "בחרו לפחות קבוצה אחת."; return; }
+          btn.disabled = true;
+          fetch("/api/posting/campaigns", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({
+            page_id: pageId, group_ids: ids, mode: perPost ? "per_post" : "standing", days: 30, repeat: false, targets: ["groups"],
+            consent: true, consent_version: s.consent_version,
+            include_unknown: groups.some(function (g) { return ids.indexOf(String(g.group_id)) >= 0 && g.agent_policy === "unknown"; }),
+          }) }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }).then(function () {
+            list.innerHTML = "";
+            msg.textContent = perPost ? "הופעל ✓ הפוסט הראשון מחכה לאישור שלכם: שם אפשר לערוך את הנוסח ולבחור מתי הוא יעלה." : "הופעל ✓ פורלי תפרסם את הנכס בקבוצות שבחרתם.";
+            actions.innerHTML = link(perPost ? "לאישור הפוסט" : "לעמוד הפרסום האוטומטי");
+          }).catch(function () { btn.disabled = false; msg.textContent = "לא הצלחנו להפעיל מכאן — אפשר להפעיל בעמוד הפרסום האוטומטי."; actions.innerHTML = link("לעמוד הפרסום האוטומטי"); });
+        });
+      }).catch(function () { /* not signed in, or posting is not available here: the step is simply not shown */ });
+    }
+
+    function endBuilding(state, pageUrl, editUrl, pageId) {
       clearInterval(iv);
       $("#buildSpin").classList.add("hidden");
       // the "keeps building in the background" note only holds while it is
@@ -1667,12 +1837,36 @@
           });
         }
         $("#doneBox").classList.remove("hidden");
+        // Groups already chosen above: the texts are approved there, not here.
+        if (!groupsChosen) offerAutoPublish(pageId);
         // auto-redirect demo users to dashboard after 3s
         if (demoLoggedIn) {
           setTimeout(function() { location.href = "/"; }, 3000);
         }
       } else if (state === "fail") {
-        $("#retryLink").href = location.pathname + location.search;
+        // The listing keeps every detail and photo, so "try again" reruns the
+        // build from it rather than sending the agent back to an empty form.
+        // That fresh form stays the fallback (e.g. an admin demo, not the owner).
+        var retry = $("#retryLink");
+        retry.href = location.pathname + location.search;
+        retry.onclick = function (e) {
+          e.preventDefault();
+          if (retry.dataset.busy) return;
+          retry.dataset.busy = "1";
+          FLY.req("/api/properties/retry", { method: "POST", body: { listing_id: listingId }, noRedirect: true })
+            .then(function () {
+              $("#failBox").classList.add("hidden");
+              $("#buildSpin").classList.remove("hidden");
+              $(".build-another-note").classList.remove("hidden");
+              ["st2", "st3", "st4"].forEach(function (id) { $("#" + id).classList.remove("now", "done"); });
+              startBuildingScreen(listingId, demoLoggedIn);
+            })
+            .catch(function (err) {
+              if (err && err.code === "retry_limit") { FLY.toast(FT("fail_sub")); return; }
+              location.href = retry.href;
+            })
+            .finally(function () { delete retry.dataset.busy; });
+        };
         $("#failBox").classList.remove("hidden");
       } else {
         // demo users should go to dashboard even on timeout
@@ -1693,7 +1887,7 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.page_id && d.page_url) {
-            endBuilding("done", d.page_url, d.edit_url);
+            endBuilding("done", d.page_url, d.edit_url, d.page_id);
           } else if (d.status === "failed") {
             endBuilding("fail");
           }
@@ -1739,6 +1933,37 @@
         updateLivePreview();
       })
       .catch(function () { /* no draft, or the link expired — a plain empty form is a fine fallback */ });
+  }
+
+  // ── listing-sweep draft prefill ──
+  // The drafts card on index.html links here as /create.html?draft=<id>.
+  // The draft's `extract` field is the same {fields, description, photos}
+  // shape runExtract()'s success branch already builds (extract-jobs.js
+  // writes it there once the non-authenticated extract job finishes) — so
+  // it goes through the exact same fill path.
+  var draftIdParam = (location.search.match(/[?&]draft=([^&]+)/) || [])[1];
+  if (draftIdParam) {
+    fromListingDraftId = decodeURIComponent(draftIdParam);
+    fetch("/api/listing-drafts/" + encodeURIComponent(fromListingDraftId), { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        // ponytail: no poll here — if the sweep's own extract job is still
+        // running, the agent lands on an empty (but draft-linked) form and
+        // can fill in manually or come back from the card in a minute.
+        if (!data || !data.extract) { revealManual(); return; }
+        extractedFromUrl = true;
+        X.fillFields(data.extract.fields, $);
+        syncDealButtons(); updatePriceLabel(); renderPriceChips();
+        if (data.extract.description && !$("#pDesc").value.trim()) {
+          $("#pDesc").value = String(data.extract.description).slice(0, 2000);
+        }
+        (data.extract.photos || []).forEach(function (p) { addImportedPhoto(p.url); });
+        showMissingCard(X.missingFor(data.extract.missing, $, isDemo));
+        revealManual();
+        setWizardStage(1, false);
+        updateLivePreview();
+      })
+      .catch(function () { revealManual(); });
   }
 })();
 </script>

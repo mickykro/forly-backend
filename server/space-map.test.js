@@ -14,10 +14,11 @@ let m = normalizeMap({
 assert.deepEqual(m.spaces.map((s) => s.id), ["S1", "S2", "S3"]);
 assert.equal(m.spaces[0].type, "open_plan");
 assert.deepEqual(m.spaces[0].contains, ["kitchen", "living_room"]);
+assert.equal(normalizeMap({ spaces: [{ type: "bedroom", empty: true, photos: [{ n: 1 }] }, { type: "bath", empty: "yes", photos: [{ n: 2 }] }] }, 2).spaces.map((x) => x.empty).join(), "true,false", "empty only when the model says true");
 assert.deepEqual(m.spaces[0].photos, [{ n: 1, shows: ["kitchen island", "sofa"] }, { n: 3, shows: [] }]);
 assert.deepEqual(m.spaces[1].photos.map((p) => p.n), [2], "photo 3 already claimed by S1");
 assert.deepEqual(m.unassigned, [4], "duplicates and already-placed photos are not unassigned");
-assert.deepEqual(m.spaces[2], { id: "S3", type: "balcony", contains: [], photos: [{ n: 5, shows: [] }], off_limits: [] }, "forgotten photo 5 gets its own space with the tagger's type");
+assert.deepEqual(m.spaces[2], { id: "S3", type: "balcony", contains: [], photos: [{ n: 5, shows: [] }], off_limits: [], empty: false }, "forgotten photo 5 gets its own space with the tagger's type");
 assert.equal(m.forgotten, 1);
 assert.deepEqual(m.sees, [{ from: 3, to: 1, what: "kitchen island" }]);
 

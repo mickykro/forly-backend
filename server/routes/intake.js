@@ -1,7 +1,8 @@
 /*
  * routes/intake.js — demo form uploads + property creation
  * Handles: /api/upload-urls, /api/upload/:fname, /api/properties/demo-create,
- *          /api/properties/create, /api/demo-save-agent, /api/listing-status
+ *          /api/properties/create, /api/properties/retry, /api/demo-save-agent,
+ *          /api/listing-status
  */
 
 const express = require("express");
@@ -14,8 +15,10 @@ const businessCache = require("../business-cache");
 const pageEdit = require("../edit");
 const { sniffMatchesExt } = require("../utils");
 const { REVIEW_SCOPES } = require("../auth");
-const { validateListing, createListing: createListingShared, MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
+const { validateListing, createListing: createListingShared, buildFailed, retryBlocked, retryListing,
+  MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
 const { makeAdminGuard } = require("../admin-auth");
+const { uprightJpeg } = require("../photo-orient");
 
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mp4" };
@@ -111,15 +114,22 @@ module.exports = function createIntakeRouter(ctx) {
     if (!sniffMatchesExt(req.body, ext)) {
       return res.status(400).json({ error: "content does not match file type" });
     }
+    // Phone photos are often landscape pixels + an EXIF "rotate" flag. Browsers
+    // honour it, Seedance does not (rooms came out sideways), so store upright.
+    let body = req.body;
+    if (ext === "jpg") {
+      const up = await uprightJpeg(body).catch((err) => { console.warn("upright photo failed (kept as is):", err.message); return null; });
+      if (up) body = up.buffer;
+    }
     if (remoteUploadBase) {
       const out = await relayUpload({
-        fetch, base: remoteUploadBase, fname, req, body: req.body,
+        fetch, base: remoteUploadBase, fname, req, body,
         contentType: req.headers["content-type"],
       });
       if (out.status !== 200) console.error("upload relay:", out.body.error);
       return res.status(out.status).json(out.body);
     }
-    fs.writeFileSync(path.join(uploadDir, fname), req.body);
+    fs.writeFileSync(path.join(uploadDir, fname), body);
     res.json({ ok: true });
   });
 
@@ -233,6 +243,27 @@ module.exports = function createIntakeRouter(ctx) {
     res.json({ ...result, status: "building" });
   });
 
+  // ── retry a failed build (owner only) ──
+  // The listing still holds every detail and photo URL, so this re-runs the
+  // whole pipeline from the stored data. No quota unit: the original creation
+  // paid for a page it never got. retryBlocked caps the attempts.
+  router.post("/properties/retry", requireAuth(authSecret, REVIEW_SCOPES), async (req, res) => {
+    const listingId = String((req.body && req.body.listing_id) || "");
+    if (!listingId) return res.status(400).json({ error: "listing_id required" });
+    const listing = await db.getListing(listingId);
+    if (!listing) return res.status(404).json({ error: "not found" });
+    if (listing.business_phone !== req.user.userId) return res.status(403).json({ error: "not_owner" });
+    const blocked = retryBlocked(listing);
+    if (blocked) return res.status(409).json({ error: blocked });
+    try {
+      await retryListing(listing, pipelineDeps);
+      res.json({ ok: true, listing_id: listingId, status: "building" });
+    } catch (err) {
+      console.error("retry listing failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
   // ── listing-status ──
   router.get("/listing-status", async (req, res) => {
     const id = typeof req.query.id === "string" ? req.query.id : "";
@@ -257,7 +288,7 @@ module.exports = function createIntakeRouter(ctx) {
       page_id: listing.page_id || null,
       page_url: listing.page_id ? `${pageBaseUrl}/p/${listing.page_id}` : null,
       edit_url: editUrl,
-      status: listing.page_id ? "ready" : (listing.status === "failed" ? "failed" : "building"),
+      status: listing.page_id ? "ready" : (buildFailed(listing) ? "failed" : "building"),
     });
   });
 

@@ -30,6 +30,12 @@
      last known figure rather than a live read — see distribution/metrics.js. */
   .dist-stats{flex-basis:100%;font-size:.76rem;color:var(--ink-soft);
     font-variant-numeric:tabular-nums;display:flex;gap:10px;flex-wrap:wrap}
+  /* Active / archive switch — shown only once something is archived. */
+  .list-tabs{display:flex;gap:6px;margin-bottom:18px;border-bottom:1px solid rgba(23,20,15,.09)}
+  .list-tabs button{font-family:var(--sans);font-size:.9rem;font-weight:600;color:var(--ink-soft);background:none;border:0;
+    border-bottom:2px solid transparent;padding:10px 14px;cursor:pointer}
+  .list-tabs button.on{color:var(--ink);border-bottom-color:var(--gold)}
+  .prop-card.is-archived .thumb{filter:grayscale(1);opacity:.7}
 </style>
 </head>
 <body class="agent-page dashboard-page">
@@ -104,6 +110,11 @@
     </div>
     <a href="/portfolio.html" class="btn" style="background:#ffc107;color:#000;font-weight:600;border:none">יצירת דף</a>
   </div>
+  <!-- Yad2/Madlan sweep drafts -->
+  <div id="listingDraftsCard" class="card hidden" style="padding:16px 20px;margin-bottom:18px">
+    <b style="display:block;margin-bottom:10px">נכסים שמצאנו ביד2 / מדלן</b>
+    <div id="listingDraftsList" style="display:flex;flex-direction:column;gap:8px"></div>
+  </div>
   <div class="agent-hero page-head">
     <div>
       <h1>הנכסים שלי</h1>
@@ -111,10 +122,16 @@
     </div>
     <div style="display:flex;gap:8px">
       <a class="btn btn-ghost" href="/distribution.html">חיבורים וקבוצות</a>
+      <a class="btn btn-ghost" href="/autopublish.html">פרסום</a>
       <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
     </div>
   </div>
+  <div class="list-tabs hidden" id="listTabs" role="tablist">
+    <button type="button" role="tab" id="tabActive" class="on" aria-selected="true">נכסים</button>
+    <button type="button" role="tab" id="tabArchive" aria-selected="false">ארכיון <span id="archiveCount"></span></button>
+  </div>
   <div class="prop-grid" id="propGrid"></div>
+  <div class="card center hidden" id="archiveEmpty" style="padding:40px 24px;color:var(--ink-soft)">אין נכסים בארכיון</div>
   <div class="card center hidden" id="emptyState" style="padding:56px 24px">
     <div style="font-size:2.4rem;margin-bottom:8px">🏠</div>
     <h3 style="font-family:var(--serif);margin-bottom:6px">עוד אין נכסים</h3>
@@ -247,7 +264,7 @@
 
   // ── property list ──
   function chipFor(status) {
-    var labels = { active: "פעיל", expiring: "עומד לפוג", expired: "פג תוקף", archived: "בארכיון", building: "בבנייה" };
+    var labels = { active: "פעיל", expiring: "עומד לפוג", expired: "פג תוקף", archived: "בארכיון", building: "בבנייה", failed: "הבנייה נכשלה" };
     return '<span class="chip ' + status + '">' + (labels[status] || status) + "</span>";
   }
 
@@ -259,13 +276,13 @@
     if (p.page_url && (p.page_status === "active" || p.page_status === "expiring")) {
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" href="' + p.page_url + '">צפייה</a>');
       actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + p.page_id + '">עריכה</a>');
-      // Publishing is property-first. The workspace receives this page ID and
-      // contains the supported Page publish action plus manual Group sharing.
-      actions.push('<a class="btn btn-gold btn-sm" href="/publish.html?page=' + p.page_id + '">פרסום</a>');
     }
-    if (p.page_id && p.page_status !== "building") {
+    // The listing still holds every detail and photo, so a failed build reruns
+    // the whole pipeline from it — nothing to fill in again.
+    if (p.page_status === "failed" && p.can_retry) {
+      actions.push('<button class="btn btn-gold btn-sm" data-retry="' + esc(p.listing_id) + '">↻ נסו שוב</button>');
     }
-    actions.push('<button class="btn btn-danger btn-sm" data-archive="' + p.listing_id + '">ארכיון</button>');
+    actions.push('<button class="btn btn-danger btn-sm" data-archive="' + esc(p.listing_id) + '">ארכיון</button>');
     return '<div class="prop-card">' +
       (p.thumb_url ? '<img class="thumb" src="' + p.thumb_url + '" alt="" loading="lazy">' :
         '<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.4)">🏗️</div>') +
@@ -278,6 +295,51 @@
       '<div class="actions">' + actions.join("") + "</div>" +
       "</div></div>";
   }
+
+  // Archived: hidden from the public, the portal and the portfolio; restore
+  // brings the page back live with its stats intact.
+  function archivedCardHtml(p) {
+    return '<div class="prop-card is-archived">' +
+      (p.thumb_url ? '<img class="thumb" src="' + esc(p.thumb_url) + '" alt="" loading="lazy">' :
+        '<div class="thumb" style="display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.4)">🗄️</div>') +
+      '<div class="body">' +
+      '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px"><h3>' + esc(p.title) + "</h3>" + chipFor("archived") + "</div>" +
+      '<div class="addr">' + esc(p.address) + "</div>" +
+      '<div class="meta-row"><span>👁 <b>' + p.view_count + "</b> צפיות</span><span>🔔 <b>" + p.lead_count + "</b> לידים</span></div>" +
+      '<div class="actions"><button class="btn btn-gold btn-sm" data-restore="' + esc(p.listing_id) + '">שחזור מהארכיון</button></div>' +
+      "</div></div>";
+  }
+
+  // Both lists arrive together; the tab only decides which one is on screen.
+  var lists = { active: [], archived: [] };
+  var tab = "active";
+  function renderList(d) {
+    lists.active = d.properties || [];
+    lists.archived = d.archived || [];
+    // Nothing archived → no tab bar at all, the dashboard looks as it always did.
+    if (!lists.archived.length) tab = "active";
+    $("#listTabs").classList.toggle("hidden", !lists.archived.length);
+    $("#archiveCount").textContent = lists.archived.length ? "(" + lists.archived.length + ")" : "";
+    $("#tabActive").classList.toggle("on", tab === "active");
+    $("#tabArchive").classList.toggle("on", tab === "archived");
+    $("#tabActive").setAttribute("aria-selected", tab === "active");
+    $("#tabArchive").setAttribute("aria-selected", tab === "archived");
+    var items = lists[tab];
+    $("#countLine").textContent = lists.active.length ? lists.active.length + " נכסים" : "";
+    $("#propGrid").innerHTML = items.map(tab === "archived" ? archivedCardHtml : cardHtml).join("");
+    $("#emptyState").classList.toggle("hidden", tab !== "active" || items.length > 0);
+    $("#archiveEmpty").classList.toggle("hidden", tab !== "archived" || items.length > 0);
+    bindActions();
+  }
+
+  function switchTab(next) {
+    if (tab === next) return;
+    tab = next;
+    renderList({ properties: lists.active, archived: lists.archived });
+    if (tab === "active") loadDistTags(); else stopDist();
+  }
+  $("#tabActive").addEventListener("click", function () { switchTab("active"); });
+  $("#tabArchive").addEventListener("click", function () { switchTab("archived"); });
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
@@ -297,12 +359,8 @@
     FLY.loaderShow("טוענים את הנכסים…");
     $("#viewList").classList.add("hidden");
     FLY.req("/api/properties", { noRedirect: true }).then(function (d) {
-      var items = d.properties || [];
-      $("#countLine").textContent = items.length ? items.length + " נכסים" : "";
-      $("#propGrid").innerHTML = items.map(cardHtml).join("");
-      $("#emptyState").classList.toggle("hidden", items.length > 0);
-      bindActions();
-      loadDistTags();
+      renderList(d);
+      if (tab === "active") loadDistTags();
     }).finally(function () {
       FLY.loaderHide(function () { $("#viewList").classList.remove("hidden"); });
     });
@@ -538,10 +596,31 @@
   function bindActions() {
     document.querySelectorAll("[data-archive]").forEach(function (b) {
       b.addEventListener("click", function () {
-        if (!confirm("להעביר את הנכס לארכיון? הדף יוסתר מהציבור.")) return;
+        if (!confirm("להעביר את הנכס לארכיון? הדף יוסתר מהציבור ומדף הנכסים שלכם. אפשר לשחזר בכל עת מלשונית הארכיון.")) return;
         FLY.req("/api/properties/delete", { method: "POST", body: { listing_id: b.dataset.archive, mode: "archive" } })
           .then(function () { FLY.toast("הנכס הועבר לארכיון"); loadList(); })
           .catch(function () { FLY.toast("שגיאה"); });
+      });
+    });
+    document.querySelectorAll("[data-restore]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.disabled = true;
+        FLY.req("/api/properties/restore", { method: "POST", body: { listing_id: b.dataset.restore } })
+          .then(function () { FLY.toast("הנכס שוחזר ✓"); loadList(); })
+          .catch(function () { b.disabled = false; FLY.toast("השחזור נכשל — נסו שוב"); });
+      });
+    });
+    document.querySelectorAll("[data-retry]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        b.disabled = true;
+        b.textContent = "⏳";
+        FLY.req("/api/properties/retry", { method: "POST", body: { listing_id: b.dataset.retry } })
+          .then(function () { FLY.toast("בונים את הדף מחדש — נעדכן בוואטסאפ כשיהיה מוכן"); loadList(); })
+          .catch(function (e) {
+            FLY.toast(e && e.code === "retry_limit" ? "הגעתם למספר הניסיונות המרבי — כתבו לנו בוואטסאפ ונטפל בזה"
+              : e && e.code === "still_building" ? "הדף עדיין בבנייה" : "שגיאה — נסו שוב בעוד רגע");
+            loadList();
+          });
       });
     });
   }
@@ -555,6 +634,7 @@
     }
     loadList();
     checkProfile(); // ponytail: check if profile needs completion
+    loadListingDrafts();
   }
 
   // ponytail: check profile completion and portfolio status
@@ -579,6 +659,45 @@
         }
       })
       .catch(function() { /* ignore errors */ });
+  }
+
+  // ponytail: Yad2/Madlan sweep drafts — no auto-sweep trigger here, the
+  // agent connects on distribution.html and the server sweeps on its own
+  // schedule; this just shows whatever drafts already exist.
+  function draftRowHtml(d) {
+    var f = (d.extract && d.extract.fields) || {};
+    var title = f.address || f.city || d.title || "נכס";
+    var price = f.price || d.price;
+    return '<div class="row" id="draft-' + esc(d.id) + '" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid rgba(0,0,0,.06)">' +
+      '<div style="flex:1 1 auto;min-width:120px">' + esc(title) +
+      (price ? ' <span style="color:var(--ink-soft)">· ₪' + Number(price).toLocaleString() + '</span>' : '') +
+      '</div>' +
+      '<a class="btn btn-sm btn-gold" href="/create.html?draft=' + encodeURIComponent(d.id) + '">יצירת דף</a>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-dismiss="' + esc(d.id) + '">התעלמות</button>' +
+      '</div>';
+  }
+  function loadListingDrafts() {
+    fetch("/api/listing-drafts", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var drafts = (d && d.drafts) || [];
+        if (!drafts.length) { $("#listingDraftsCard").classList.add("hidden"); return; }
+        $("#listingDraftsList").innerHTML = drafts.map(draftRowHtml).join("");
+        $("#listingDraftsCard").classList.remove("hidden");
+        $("#listingDraftsList").querySelectorAll("[data-dismiss]").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var id = btn.getAttribute("data-dismiss");
+            fetch("/api/listing-drafts/" + encodeURIComponent(id) + "/dismiss", { method: "POST", credentials: "same-origin" })
+              .then(function () {
+                var row = document.getElementById("draft-" + id);
+                if (row) row.remove();
+                if (!$("#listingDraftsList").children.length) $("#listingDraftsCard").classList.add("hidden");
+              })
+              .catch(function () { /* leave the row, agent can retry */ });
+          });
+        });
+      })
+      .catch(function () { /* ignore errors */ });
   }
 
   // ── demo dashboard: after a demo page is created (no account yet), show a
@@ -634,11 +753,7 @@
   var reveal;
   FLY.req("/api/properties", { noRedirect: true })
     .then(function (d) {
-      var items = d.properties || [];
-      $("#countLine").textContent = items.length ? items.length + " נכסים" : "";
-      $("#propGrid").innerHTML = items.map(cardHtml).join("");
-      $("#emptyState").classList.toggle("hidden", items.length > 0);
-      bindActions();
+      renderList(d);
       reveal = function () {
         $("#viewLogin").classList.add("hidden");
         $("#viewList").classList.remove("hidden");
@@ -646,6 +761,7 @@
         // Every page load lands here; loadList() only after login/extend.
         loadDistTags();
         checkProfile(); // ponytail: check if profile needs completion
+        loadListingDrafts();
       };
     })
     .catch(function () {

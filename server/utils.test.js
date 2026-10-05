@@ -135,6 +135,47 @@ const fakeFetch = (body) => async () => ({
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── publicUrl: a loopback origin becomes the public one; anything else is untouched ──
+  {
+    const { publicUrl } = require("./utils");
+    assert.strictEqual(publicUrl("http://127.0.0.1:8787/files/a.mp4"), "https://nadlan.call4li.com/files/a.mp4");
+    assert.strictEqual(publicUrl("http://localhost:8787/p/x?c=1"), "https://nadlan.call4li.com/p/x?c=1");
+    assert.strictEqual(publicUrl("https://cdn.example.com/files/a.mp4"), "https://cdn.example.com/files/a.mp4");
+    assert.strictEqual(publicUrl("http://127.0.0.1.evil.com/x"), "http://127.0.0.1.evil.com/x");
+    // staging, hosting and tunnel origins never reach a buyer either
+    assert.strictEqual(publicUrl("https://staging.srv1173890.hstgr.cloud/p/krvytvrv-nksym-632dd?c=ab"), "https://nadlan.call4li.com/p/krvytvrv-nksym-632dd?c=ab");
+    assert.strictEqual(publicUrl("https://srv1173890.hstgr.cloud/files/a.mp4"), "https://nadlan.call4li.com/files/a.mp4");
+    assert.strictEqual(publicUrl("https://abc.trycloudflare.com/p/x"), "https://nadlan.call4li.com/p/x");
+    assert.strictEqual(publicUrl("http://10.0.0.5:8787/p/x#top"), "https://nadlan.call4li.com/p/x#top");
+    assert.strictEqual(publicUrl("https://staging-news.com/p/x"), "https://staging-news.com/p/x");
+    assert.strictEqual(publicUrl("https://nadlan.call4li.com/p/x"), "https://nadlan.call4li.com/p/x");
+    assert.strictEqual(publicUrl("not a url"), "not a url");
+    assert.strictEqual(publicUrl(null), null);
+  }
+
+  // ── buttons: links behind buttons; a rejected interactive send falls back to text with the links ──
+  {
+    const { textOfButtons, sendWhatsAppRich } = require("./utils");
+    const payload = { header: "כותרת", body: "גוף", footer: "תחתית", buttons: [{ type: "url", buttonText: "לאישור", url: "https://x.test/a?t=1" }] };
+    assert.strictEqual(textOfButtons(payload), "כותרת\n\nגוף\n\nלאישור: https://x.test/a?t=1\n\nתחתית");
+    const realFetch = global.fetch, realLog = console.log, realWarn = console.warn;
+    const sent = [], logs = [];
+    console.log = (...a) => logs.push(a.join(" ")); console.warn = () => {};
+    try {
+      global.fetch = async (url, o) => { sent.push([url, JSON.parse(o.body)]); return { ok: true, json: async () => ({}) }; };
+      await sendWhatsAppRich("972500000001", payload, "7105422200", "tok");
+      assert.ok(sent[0][0].endsWith("/waInstance7105422200/sendInteractiveButtons/tok"));
+      assert.deepEqual(sent[0][1].buttons, [{ type: "url", buttonText: "לאישור", url: "https://x.test/a?t=1", buttonId: "1" }]);
+      assert.strictEqual(sent[0][1].chatId, "972500000001@c.us");
+      assert.ok(!logs.join("\n").includes("972500000001") && !logs.join("\n").includes("t=1"), "no phone or link logged");
+      sent.length = 0;
+      global.fetch = async (url, o) => { sent.push([url, JSON.parse(o.body)]); return url.includes("sendInteractiveButtons") ? { ok: false, status: 400 } : { ok: true }; };
+      await sendWhatsAppRich("972500000001", payload, "7105422200", "tok");
+      assert.ok(sent[1][0].includes("/sendMessage/"));
+      assert.strictEqual(sent[1][1].message, textOfButtons(payload), "the text fallback keeps the link");
+    } finally { global.fetch = realFetch; console.log = realLog; console.warn = realWarn; }
+  }
+
   // ── ownUploadedVideo: a page video may only be one of our own mp4 uploads ──
   {
     const bases = ["https://forly.example", "https://media.example/", null];

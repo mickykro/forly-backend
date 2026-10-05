@@ -39,7 +39,7 @@ const { parseListing } = require("../listing-extract");
 const { classify } = require("../property-intent");
 const { importImage, DailyLimit } = require("./extract");
 const { storeBuffer } = require("../upload-store");
-const { validateListing, createListing } = require("../listing-create");
+const { validateListing, createListing, lastAttemptMs } = require("../listing-create");
 const { verifySession, requireAuth, readToken, REVIEW_SCOPES } = require("../auth");
 
 const REVIEW_TTL_S = 7 * 24 * 60 * 60;
@@ -72,7 +72,7 @@ const PHOTO_BATCH_MS = 20000;
 const MAX_TEXT = 4000;
 
 module.exports = function createWhatsappRouter(ctx) {
-  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, getMessage, getHistory, adminPhones,
+  const { n8nSecret, normalizeAuthPhone, signSession, authSecret, sendWhatsApp, sendButtons, getMessage, getHistory, adminPhones,
     uploadDir, uploadPublicBase, remoteUploadBase, baseUrl, quota, pipelineDeps } = ctx;
   // Links sent to agents (LINK_BASE_URL): staging sends production's, so its real
   // customers land on the live site. The one-tap review link needs both servers to
@@ -164,20 +164,67 @@ module.exports = function createWhatsappRouter(ctx) {
         }
         return createListing(phone, body, null, { ...pipelineDeps, source: "whatsapp" });
       },
+      // Choosing the property's Facebook groups (posting-listing-groups): only
+      // for an agent whose Facebook browser is connected; otherwise null and
+      // the chat says nothing about groups.
+      postingOffer: async (listingId) => {
+        const LG = require("../posting-listing-groups");
+        const offer = LG.offerOf((await db.getConnection(phone)) || {}, business);
+        return offer.connected ? { ...offer, link: LG.link(baseUrl, authSecret, phone, listingId) } : null;
+      },
+      chooseDefault: async (listingId) => {
+        const LG = require("../posting-listing-groups");
+        const conn = (await db.getConnection(phone)) || {};
+        if (!LG.connected(conn)) return null;
+        const listing = listingId ? await db.getListing(listingId) : await LG.latestUnchosen(phone);
+        if (!listing) return null;
+        const count = LG.defaultIds(conn, business).length;
+        if (!count) return { ok: false, link: LG.link(baseUrl, authSecret, phone, listing.listing_id) };
+        const out = await LG.choose({ listing, phone, choice: LG.DEFAULT, consentVersion: require("./posting-shared").CONSENT_VERSION }, {});
+        return out.ok ? { ok: true, count } : null;
+      },
     };
   }
 
+  // Quick-reply words and links (URL buttons) go as one button message; the
+  // plain fallback spells the links out, so a link is never lost. Exposed as
+  // sendReply for callers outside the chat turn loop (e.g. the stuck-build sweep).
+  async function send(phone, reply) {
+    const links = (reply.links || []).filter((l) => l && l.url);
+    if ((reply.buttons || links.length) && sendButtons) {
+      try {
+        await sendButtons(phone, {
+          header: "Forly",
+          body: reply.text,
+          footer: reply.buttons ? "בחרו אפשרות" : " ",
+          buttons: [
+            ...(reply.buttons || []).map((b) => ({ buttonText: b })),
+            ...links.map((l) => ({ type: "url", buttonText: l.text, url: l.url })),
+          ].slice(0, 3).map((b, i) => ({ ...b, buttonId: String(i + 1) })),
+        });
+        return;
+      } catch (err) { console.warn("[whatsapp] buttons failed, sending plain:", err.message); }
+    }
+    await sendWhatsApp(phone, [reply.text, ...links.map((l) => `${l.text}: ${l.url}`)].join("\n"));
+  }
+
   // Green API rejects interactive buttons on this instance (400 every time), so
-  // options go out numbered and the agent answers with the number or the word;
-  // handleTurn maps "2" back through draft.last_buttons.
-  const numbered = (reply) => (reply.buttons
-    ? `${reply.text}\n\n${reply.buttons.map((b, i) => `${i + 1} · ${b}`).join("\n")}` : reply.text);
+  // chat-turn options go out numbered and the agent answers with the number or
+  // the word; handleTurn maps "2" back through draft.last_buttons. Any links
+  // ride along as plain text too — a link is never lost to the same rejection.
+  const numbered = (reply) => {
+    const links = (reply.links || []).filter((l) => l && l.url);
+    const body = reply.buttons
+      ? `${reply.text}\n\n${reply.buttons.map((b, i) => `${i + 1} · ${b}`).join("\n")}` : reply.text;
+    return [body, ...links.map((l) => `${l.text}: ${l.url}`)].join("\n");
+  };
 
   // One turn, one WhatsApp message: separate sends can arrive out of order.
   async function persistAndSend(phone, turn) {
     const reply = turn.replies.length ? {
       text: turn.replies.map((r) => r.text).join("\n\n"),
       buttons: turn.replies[turn.replies.length - 1].buttons || null,
+      links: turn.replies.flatMap((r) => r.links || []),
     } : null;
     if (turn.draft && reply) turn.draft.last_buttons = reply.buttons;
     if (turn.del) await db.deleteDraft(phone);
@@ -211,7 +258,8 @@ module.exports = function createWhatsappRouter(ctx) {
   async function sweepStuckBuilds(now = Date.now()) {
     const pending = await db.listPendingListings("whatsapp");
     for (const l of pending) {
-      const age = now - asMillis(l.created_at);
+      // A dashboard retry restarts the clock (retried_at), or it would re-fail at once.
+      const age = now - lastAttemptMs(l);
       if (!(age > BUILD_TIMEOUT_MS)) continue;
       // The other server's sweep may have taken it: only the claimer tells the agent.
       if (!(await db.claimStatus("listings", l.listing_id, "active", { status: "failed" }))) continue;
@@ -318,7 +366,8 @@ module.exports = function createWhatsappRouter(ctx) {
         console.log(`[whatsapp] ${phone} → ${turn.status} replied=${replied}${turn.listing_id ? ` ${turn.listing_id}` : ""}`);
         return {
           handled: turn.handled, status: turn.status,
-          reply: turn.replies.map((r) => r.text).join("\n\n") || null,
+          reply: turn.replies.length ? [turn.replies.map((r) => r.text).join("\n\n"),
+            ...turn.replies.flatMap((r) => r.links || []).map((l) => `${l.text}: ${l.url}`)].join("\n") : null,
           replied, listing_id: turn.listing_id || null,
           // Unclaimed: n8n edits exactly these (the agent chose 3/4), with this instruction.
           edit_photos: turn.edit_photos || null, edit_instruction: turn.edit_instruction ?? null,
@@ -364,6 +413,7 @@ module.exports = function createWhatsappRouter(ctx) {
   });
 
   router.sweepStuckBuilds = sweepStuckBuilds; // exposed for tests
+  router.sendReply = send; // exposed for tests
   return router;
 };
 module.exports.transcribe = transcribe;

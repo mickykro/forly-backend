@@ -68,4 +68,12 @@ assert.equal(NOTICE_COOLDOWN_MS, 24 * 60 * 60 * 1000);
   assert.ok(msg.includes("https://wa.me/972501234567"));
 }
 
+// ── the button version: the link behind a button, not in the text ──
+{
+  const { leadButtons } = require("./login-leads");
+  const b = leadButtons("972501234567");
+  assert.ok(b.body.includes("972501234567") && !b.body.includes("https://"));
+  assert.equal(b.buttons[0].url, "https://wa.me/972501234567");
+}
+
 console.log("login-leads: all tests passed");

@@ -8,7 +8,7 @@ const tokenVault = require("./distribution/token-vault");
 
 let db = null;
 let FieldValue = null;
-const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map() };
+const mem = { listings: new Map(), pages: new Map(), leads: new Map(), leadSubmissions: [], adminMessages: [], throttle: new Map(), otps: new Map(), portalEvents: [], connections: new Map(), distributions: new Map(), postActions: [], groupCatalog: [], shareSessions: new Map(), propertyGroups: new Map(), drafts: new Map(), extractJobs: new Map(), listingDrafts: new Map(), profileDeletes: new Map(), settings: new Map() };
 
 // A personal `gcloud auth application-default login` file works until Google
 // demands a re-login ("invalid_rapt"), and every Firestore call then fails for
@@ -307,6 +307,91 @@ async function setConnection(phone, patch) {
   mem.connections.set(phone, deepMerge(mem.connections.get(phone) || {}, sealed));
 }
 
+// posting_attempts live in posting-store.js (lazy require: no load cycle).
+// profile-lifecycle.js's revoke()/quarantine() call it so a revoked/quarantined
+// profile's reserved/session_started/composer_ready attempts stop instead of
+// running against a profile that assertOwnership now refuses.
+const cancelOpenAttempts = (...a) => require("./posting-store").cancelOpenAttempts(...a);
+// Campaigns live in posting-store.js too; routes/connections-browser.js's
+// DELETE (which holds only db.js) lists the phone's campaigns through here.
+const listPostingCampaignsByPhone = (...a) => require("./posting-store").listPostingCampaignsByPhone(...a);
+
+// ── operator settings (compare-and-set) ──
+// One doc per key (e.g. "posting"), read by posting-guard.js on every
+// assertAllowed() call — nothing is cached there, so a flipped switch here is
+// seen at once. expectVersion lets an operator UI refuse to clobber a
+// concurrent edit; a missing doc counts as version 0.
+async function getSetting(key) {
+  if (db) { const d = await db.collection("settings").doc(key).get(); return d.exists ? d.data() : null; }
+  return mem.settings.get(key) || null;
+}
+
+function versionConflict() {
+  const e = new Error("stale settings version"); e.code = "version_conflict"; return e;
+}
+
+async function setSetting(key, value, { expectVersion } = {}) {
+  if (db) {
+    return db.runTransaction(async (tx) => {
+      const ref = db.collection("settings").doc(key);
+      const snap = await tx.get(ref);
+      const current = snap.exists ? snap.data() : {};
+      if (expectVersion !== undefined && (current.version || 0) !== expectVersion) throw versionConflict();
+      const next = Object.assign({}, current, value, { version: (current.version || 0) + 1, updated_at: new Date().toISOString() });
+      tx.set(ref, next);
+      return next;
+    });
+  }
+  const current = mem.settings.get(key) || {};
+  if (expectVersion !== undefined && (current.version || 0) !== expectVersion) throw versionConflict();
+  const next = Object.assign({}, current, value, { version: (current.version || 0) + 1, updated_at: new Date().toISOString() });
+  mem.settings.set(key, next);
+  return next;
+}
+
+// ── profile deletes (pending Driver profile deletions) ──
+// profile-lifecycle.js's revoke()/quarantine() write a row here when the
+// Driver delete fails; retryDeletes() reads this collection itself (rather
+// than being handed a list) so the daily sweeper only has to call it. Not
+// hashed — the phone is already stored in plain text on this same phone's
+// connection doc, so this adds no new exposure.
+//
+// `gen`: the profile generation this row's failed delete belongs to, and
+// part of the row's key (`${platform}:${phone}:${gen}`) — a reconnect can
+// bump `<platform>_profile_gen` while a delete for the OLD generation is
+// still pending, and without a per-generation key a second failed delete
+// (for the new generation) would overwrite the still-open row for the old
+// one under the same bare `${platform}:${phone}` id, losing it. `gen` is
+// optional only for a pre-existing row written before this field existed —
+// such a row keeps living under the bare id, listed/retried/cleared exactly
+// as before (profile-lifecycle.js's retryDeletes() treats `gen === undefined`
+// as that legacy case).
+function pendingDeleteId(platform, phone, gen) {
+  return gen === undefined ? `${platform}:${phone}` : `${platform}:${phone}:${gen}`;
+}
+
+async function savePendingDelete({ phone, platform, since, attempts = 0, last_error = null, gen }) {
+  const id = pendingDeleteId(platform, phone, gen);
+  const rec = { id, phone: String(phone), platform, since, attempts, last_error };
+  if (gen !== undefined) rec.gen = gen;
+  if (db) { await db.collection("profile_deletes").doc(id).set(rec); return; }
+  mem.profileDeletes.set(id, rec);
+}
+
+async function listPendingDeletes(limit = 100) {
+  if (db) {
+    const snap = await db.collection("profile_deletes").limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.profileDeletes.values()].slice(0, limit);
+}
+
+async function clearPendingDelete(phone, platform, gen) {
+  const id = pendingDeleteId(platform, phone, gen);
+  if (db) { await db.collection("profile_deletes").doc(id).delete(); return; }
+  mem.profileDeletes.delete(id);
+}
+
 // ── distribution: publish jobs ──
 async function saveDistribution(d) {
   if (db) await db.collection("distributions").doc(d.id).set(d);
@@ -349,6 +434,59 @@ async function listQueuedDistributions(limit = 10) {
     return snap.docs.map((d) => d.data());
   }
   return [...mem.distributions.values()].filter((d) => d.status === "queued").slice(0, limit);
+}
+
+// ── extract jobs (browser-backed listing scrapes) ──
+// Same shape as distributions: doc-per-job, dot-path patches, single-field
+// where so no composite index is needed.
+async function saveExtractJob(j) {
+  if (db) await db.collection("extract_jobs").doc(j.id).set(j);
+  else mem.extractJobs.set(j.id, JSON.parse(JSON.stringify(j)));
+}
+
+async function getExtractJob(id) {
+  if (db) { const d = await db.collection("extract_jobs").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.extractJobs.get(id) || null;
+}
+
+async function updateExtractJob(id, patch) {
+  if (db) { await db.collection("extract_jobs").doc(id).update(patch); return; }
+  const j = mem.extractJobs.get(id);
+  if (j) Object.assign(j, patch);
+}
+
+async function listExtractJobsByStatus(status, limit = 10) {
+  if (db) {
+    const snap = await db.collection("extract_jobs").where("status", "==", status).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.extractJobs.values()].filter((j) => j.status === status).slice(0, limit);
+}
+
+// ── listing drafts (Yad2/Madlan sweep results, awaiting the agent's review) ──
+// Same shape as extract jobs: doc-per-draft, dot-path patches.
+async function saveListingDraft(d) {
+  if (db) await db.collection("listing_drafts").doc(d.id).set(d);
+  else mem.listingDrafts.set(d.id, JSON.parse(JSON.stringify(d)));
+}
+
+async function getListingDraft(id) {
+  if (db) { const d = await db.collection("listing_drafts").doc(id).get(); return d.exists ? d.data() : null; }
+  return mem.listingDrafts.get(id) || null;
+}
+
+async function updateListingDraft(id, patch) {
+  if (db) { await db.collection("listing_drafts").doc(id).update(patch); return; }
+  const d = mem.listingDrafts.get(id);
+  if (d) Object.assign(d, patch);
+}
+
+async function listListingDraftsByPhone(phone, limit = 50) {
+  if (db) {
+    const snap = await db.collection("listing_drafts").where("phone", "==", String(phone)).limit(limit).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listingDrafts.values()].filter((d) => d.phone === String(phone)).slice(0, limit);
 }
 
 // ── distribution: curated group catalog ──
@@ -592,7 +730,9 @@ module.exports = {
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
   getPortfolioSlugReservation, reservePortfolioSlug,
-  getConnection, setConnection,
+  getConnection, setConnection, cancelOpenAttempts, listPostingCampaignsByPhone,
+  getSetting, setSetting,
+  savePendingDelete, listPendingDeletes, clearPendingDelete,
   saveDistribution, getDistribution, updateDistribution,
   listDistributionsByPage, listQueuedDistributions, addPostAction,
   listGroupCatalog, addGroupCatalogEntry,
@@ -601,4 +741,6 @@ module.exports = {
   getPropertyGroups, savePropertyGroups, listPropertyGroupsByPhone,
   getDraft, saveDraft, deleteDraft, setEditCancel, getEditCancel,
   claimStatus,
+  saveExtractJob, getExtractJob, updateExtractJob, listExtractJobsByStatus,
+  saveListingDraft, getListingDraft, updateListingDraft, listListingDraftsByPhone,
 };

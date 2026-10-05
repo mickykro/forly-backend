@@ -80,10 +80,13 @@ function buildPrompt(count, types) {
     `- Every photo number appears exactly once: in one space or in unassigned.\n` +
     `- "quality": 1-10 per photo — how usable it is in a property ad (sharp, well lit, the ` +
     `space clearly visible = 7-10; blurry, dark, cluttered or an odd crop = 1-3).\n` +
+    `- "empty": true when the space has no movable furniture or decor (an unfurnished new ` +
+    `apartment: bare floor and walls). Built-in cabinets, bathroom fixtures and appliances do ` +
+    `not count as furniture. false when any photo of it shows furniture.\n` +
     `- type: exactly one of ${TYPES.join(", ")}.\n` +
     (hints.length ? `\nThe tagger's guesses, for reference only:\n${hints.join("\n")}\n` : "") +
     `\nReturn only this JSON:\n` +
-    `{"spaces":[{"id":"S1","type":"open_plan","contains":["kitchen","living_room"],` +
+    `{"spaces":[{"id":"S1","type":"open_plan","contains":["kitchen","living_room"],"empty":false,` +
     `"photos":[{"n":1,"quality":8,"shows":["kitchen island","sofa"]}],"off_limits":["front door"]}],` +
     `"sees":[{"from":1,"to":3,"what":"kitchen island"}],"unassigned":[]}`
   );
@@ -115,6 +118,7 @@ function normalizeMap(raw, count, types = []) {
       contains: (Array.isArray(s.contains) ? s.contains : []).map(typeKey).filter(Boolean).slice(0, 6),
       photos,
       off_limits: (Array.isArray(s.off_limits) ? s.off_limits : []).map((x) => clean(x)).filter(Boolean).slice(0, 6),
+      empty: s.empty === true,
     });
   }
   const unassigned = [];
@@ -126,7 +130,7 @@ function normalizeMap(raw, count, types = []) {
   for (let n = 1; n <= count; n++) {
     if (taken.has(n)) continue;
     forgotten++;
-    spaces.push({ id: `S${spaces.length + 1}`, type: typeKey(types[n - 1]) || "room", contains: [], photos: [{ n, shows: [] }], off_limits: [] });
+    spaces.push({ id: `S${spaces.length + 1}`, type: typeKey(types[n - 1]) || "room", contains: [], photos: [{ n, shows: [] }], off_limits: [], empty: false });
   }
   const sees = [];
   for (const l of Array.isArray(raw && raw.sees) ? raw.sees : []) {

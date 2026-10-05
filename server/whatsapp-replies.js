@@ -1,6 +1,7 @@
 /*
  * whatsapp-replies.js — every message the property chat sends, in one place.
- * Each function returns { text, buttons? }. Button texts ARE the command words
+ * Each function returns { text, buttons?, links? }: links ({ text, url }) are
+ * sent as URL buttons, never in the text (routes/whatsapp.js send()). Button texts ARE the command words
  * property-draft.command() understands, so a tap and a typed word behave the
  * same. Green API: max 3 buttons, 25 chars each (utils.sendWhatsAppButtons).
  */
@@ -142,9 +143,9 @@ function choose() {
 function reviewReady(link, skipped = []) {
   const names = skipped.filter((f) => LABELS[f]).map((f) => LABELS[f]);
   const note = names.length ? `\nדילגתם על: ${names.join(", ")}. אפשר להשלים בדף, או כאן — למשל /${LABELS[skipped[0]]} …` : "";
-  return { text: `כל הפרטים מוכנים ✅\nבדקו, ערכו אם צריך ובנו את דף הנכס כאן:\n${link}${note}` };
+  return { text: `כל הפרטים מוכנים ✅\nבדקו, ערכו אם צריך ובנו את דף הנכס — בכפתור.${note}`, links: [{ text: "לבדיקה ובנייה", url: link }] };
 }
-function previewOnly(link) { return { text: `בחרתם תצוגה מקדימה — היצירה ממשיכה בדף:\n${link}` }; }
+function previewOnly(link) { return { text: "בחרתם תצוגה מקדימה — היצירה ממשיכה בדף.", links: [{ text: "להמשך בדף", url: link }] }; }
 
 // ── corrections ──
 const CODES = { city: "c", price: "p", currency: "u", rooms: "r", deal: "d", size_sqm: "s", floor: "f", parking: "k", neighborhood: "n", description: "t", template: "x" };
@@ -192,7 +193,8 @@ function pageUpdated(changes, editUrl, cur) {
 // Several replies as one WhatsApp bubble; the last one's buttons are kept.
 function oneBubble(replies) {
   const last = replies[replies.length - 1];
-  return { text: replies.map((x) => x.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}) };
+  const links = replies.flatMap((r) => r.links || []);
+  return { text: replies.map((x) => x.text).join("\n\n"), ...(last && last.buttons ? { buttons: last.buttons } : {}), ...(links.length ? { links } : {}) };
 }
 function kept() { return { text: "בסדר, השארתי כמו שהיה." }; }
 function priceOff(fields) {
@@ -214,13 +216,36 @@ function buildFailed(retry, listing = {}) {
   const head = `הדף${which ? ` (${which})` : ""} עדיין לא מוכן — הייתה תקלה ביצירת הסרטון 😕 צוות Forly בודק ויחזור אליך בהקדם 🙏`;
   return { text: retry ? `${head}\nאפשר גם לכתוב ״ליצור״ כדי לנסות שוב.` : head };
 }
-function outOfQuota(message) { return { text: message || "נגמרה המכסה שלך ליצירת דפים. כתבו לנו לחידוש החבילה." }; }
-function building(s) { return { text: `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).` }; }
+// quota.blockedMessage spells out the payment link: it moves behind a button.
+function outOfQuota(message) {
+  const text = message || "נגמרה המכסה שלך ליצירת דפים. כתבו לנו לחידוש החבילה.";
+  const url = (text.match(/https?:\/\/\S+/) || [])[0];
+  return url ? { text: text.replace(/:?\s*https?:\/\/\S+/, "").trim(), links: [{ text: "לרכישת חבילה", url }] } : { text };
+}
+// offer (posting-listing-groups.offerOf + a link): only for an agent whose
+// Facebook browser is connected — otherwise the message says nothing about groups.
+function building(s, offer) {
+  const text = `קיבלתי! 🏠 ${headline(s)}\nאני בונה את דף הנכס — אשלח לך קישור כשהוא מוכן (כמה דקות).`;
+  if (!offer || !offer.connected || !offer.link) return { text };
+  const def = offer.defaults > 0 ? `\nאו ענו "ברירת מחדל" כדי לפרסם בקבוצות ברירת המחדל שלכם (${offer.defaults}).` : "";
+  return {
+    text: `${text}\n\nבינתיים, באילו קבוצות בפייסבוק לפרסם את הנכס? בחרו בקישור.${def}`,
+    ...(offer.defaults > 0 ? { buttons: ["ברירת מחדל"] } : {}),
+    links: [{ text: "בחירת קבוצות", url: offer.link }],
+  };
+}
+function defaultChosen(n) { return { text: `מעולה ✅ הנכס יפורסם בקבוצות ברירת המחדל שלכם (${n}). בסוף הפרסום נשלח לכם הודעה עם הקבוצות.` }; }
+function defaultUnavailable(link) {
+  return link ? { text: "אין לכם קבוצות ברירת מחדל שמורות. אפשר לבחור קבוצות לנכס בקישור.", links: [{ text: "בחירת קבוצות", url: link }] }
+    : { text: "אין לכם קבוצות ברירת מחדל שמורות. אפשר לבחור אותן בעמוד הפרסום האוטומטי." };
+}
 function cancelled() { return { text: "ביטלתי את הטיוטה. אפשר להתחיל מחדש עם קישור, טקסט או ״נכס חדש״." }; }
 function declined() { return { text: "בסדר, לא בונים דף מהתמונות האלה." }; }
 function resumePrompt(s) {
   return { text: `יש לך טיוטה פתוחה: ${summaryLines(s)}.\nלהמשיך אותה, להתחיל נכס חדש, או לבטל?`, buttons: ["המשך", "חדש", "ביטול"] };
 }
+
+const manual = (createUrl) => (createUrl ? [{ text: "למילוי ידני", url: createUrl }] : []);
 
 const SOURCE_ERRORS = {
   facebook_not_connected: "כדי לקרוא פוסטים מפייסבוק צריך קודם לחבר את עמוד הפייסבוק בפאנל.",
@@ -229,15 +254,15 @@ const SOURCE_ERRORS = {
 };
 function sourceError(code, createUrl) {
   const why = SOURCE_ERRORS[code] || SOURCE_ERRORS.page_unreadable;
-  return { text: `${why}\nאפשר להדביק כאן את טקסט המודעה, לשלוח תמונות, או למלא ידנית: ${createUrl}` };
+  return { text: `${why}\nאפשר להדביק כאן את טקסט המודעה, לשלוח תמונות, או למלא ידנית.`, links: manual(createUrl) };
 }
-function extractLimit(createUrl) { return { text: `הגעת למכסת הקישורים היומית. נסו מחר, או מלאו ידנית: ${createUrl}` }; }
-function createFailed(createUrl) { return { text: `משהו השתבש ביצירת הדף. נסו שוב, או מלאו ידנית: ${createUrl}` }; }
+function extractLimit(createUrl) { return { text: "הגעת למכסת הקישורים היומית. נסו מחר, או מלאו ידנית.", links: manual(createUrl) }; }
+function createFailed(createUrl) { return { text: "משהו השתבש ביצירת הדף. נסו שוב, או מלאו ידנית.", links: manual(createUrl) }; }
 function noLinkHint(createUrl) {
-  return { text: `שלחו לי קישור למודעה (יד2, מדלן, פייסבוק), את טקסט המודעה, או כתבו ״נכס חדש״.\nאפשר גם ידנית: ${createUrl}` };
+  return { text: "שלחו לי קישור למודעה (יד2, מדלן, פייסבוק), את טקסט המודעה, או כתבו ״נכס חדש״.\nאפשר גם ידנית.", links: manual(createUrl) };
 }
 
-module.exports = {
+module.exports = { defaultChosen, defaultUnavailable,
   LABELS, ask, invalid, required, opened, offer, askPhotos, photosProgress, photosSaved, choose,
   reviewReady, editLinks, editHeld, confirmPageChanges, pageUpdated, photoChoice, progress, swapPhotos, sendReplacements, recovered, duplicatePage, useEdited, pagePhotosAsk, pagePhotosDone, backToDraft, noPages, stopped, sendForEdit, noUpdate, oneBubble, building, cancelled, declined, resumePrompt, sourceError, extractLimit, createFailed, noLinkHint,
   previewOnly, fieldList, unknownField, updated, confirmChanges, kept, priceOff,

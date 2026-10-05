@@ -1,0 +1,503 @@
+/* driver-browser.js — session lifecycle and the error policy. No network:
+   fetch and connectOverCDP are stubbed. */
+process.env.FORLY_ENV = "local"; // notes are scoped by it; pin it
+const assert = require("assert");
+const D = require("./driver-browser");
+
+const ok = (body) => ({ ok: true, status: 200, json: async () => body, headers: { get: () => null } });
+const err = (status, body, retryAfter) => ({
+  ok: false, status, statusText: "e", json: async () => body || {},
+  headers: { get: (h) => (h.toLowerCase() === "retry-after" && retryAfter ? String(retryAfter) : null) },
+});
+
+// Expected failure logs, kept off the test output.
+async function quiet(fn) {
+  const orig = console.error;
+  console.error = () => {};
+  try { return await fn(); } finally { console.error = orig; }
+}
+
+(async () => {
+  // ── 402 and 403 are reported immediately, never retried ──
+  for (const status of [402, 403]) {
+    let calls = 0;
+    const fetchFn = async () => { calls++; return err(status, { error: "nope", code: "x" }); };
+    await assert.rejects(
+      D.createSession({}, { fetchFn, apiKey: "k", sleep: async () => {} }),
+      (e) => e instanceof D.DriverError && e.status === status,
+    );
+    assert.equal(calls, 1, `${status} must not loop`);
+  }
+
+  // ── 503 backs off, capped at 5 attempts, then reports ──
+  let calls503 = 0; const slept = [];
+  const fetch503 = async () => { calls503++; return err(503, { code: "browser_capacity_unavailable" }, 2); };
+  await assert.rejects(
+    D.createSession({}, { fetchFn: fetch503, apiKey: "k", sleep: async (ms) => slept.push(ms), random: () => 0 }),
+    (e) => e.status === 503,
+  );
+  assert.equal(calls503, 6, "1 initial + 5 retries");
+  assert.deepEqual(slept, [2000, 4000, 6000, 8000, 10000]);
+
+  // ── 504 and 500 retry exactly once, then succeed ──
+  for (const status of [504, 500]) {
+    let n = 0;
+    const fetchFn = async () => (++n === 1 ? err(status, {}) : ok({ sessionId: "s1", status: "active", cdpUrl: "ws://x" }));
+    const s = await D.createSession({}, { fetchFn, apiKey: "k", sleep: async () => {} });
+    assert.equal(s.sessionId, "s1");
+    assert.equal(n, 2);
+  }
+
+  // ── stopSession never throws, so a finally cannot mask the real error ──
+  await quiet(() => D.stopSession("s1", { fetchFn: async () => err(500, {}), apiKey: "k", sleep: async () => {} }));
+
+  // ── a login's Driver slot is freed only once Driver confirms the stop ──
+  {
+    const L = require("./profile-lock");
+    const stop = (id, res) => quiet(() => D.stopSession(id, { fetchFn: async () => res, apiKey: "k", sleep: async () => {} }));
+    L._test.reset();
+    L.holdLogin("lA"); L.holdLogin("lB"); L.holdLogin("lC");
+    assert.equal(await stop("lA", err(500, {})), false, "failed DELETE: maybe still up");
+    assert.equal(await stop("lB", ok({ success: false })), false);
+    assert.equal(L.activeSessions(), 3, "unconfirmed stops keep their slots");
+    assert.equal(await stop("lA", ok({ success: true })), true);
+    assert.equal(await stop("lC", err(404, {})), true, "already gone counts as stopped");
+    assert.equal(L.activeSessions(), 1);
+    L._test.reset();
+  }
+
+  // ── withPage stops the session even when fn throws ──
+  const stopped = [];
+  const deps = {
+    apiKey: "k", sleep: async () => {}, random: () => 0,
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { stopped.push(url); return ok({ success: true }); }
+      if ((init && init.method) === "POST") return ok({ sessionId: "s2", status: "active", cdpUrl: "ws://y" });
+      return ok({ sessionId: "s2", status: "completed", cdpUrl: null, bandwidthBytes: 10 });
+    },
+    connectOverCDP: async () => ({
+      contexts: () => [{ pages: () => [{ marker: "page" }] }],
+      close: async () => {},
+    }),
+  };
+  await assert.rejects(D.withPage({}, async () => { throw new Error("boom"); }, deps), /boom/);
+  assert.equal(stopped.length, 1);
+  assert.ok(stopped[0].includes("sessionId=s2"));
+
+  // ── withPage reuses the first context and page, and returns fn's value ──
+  const got = await D.withPage({}, async (page) => page.marker, deps);
+  assert.equal(got, "page");
+
+  // ── every session is Israeli, whatever the caller passed ──
+  let sent = null;
+  await D.createSession({ duration: 60 }, { fetchFn: async (u, init) => { sent = JSON.parse(init.body); return ok({ sessionId: "s3", status: "active", cdpUrl: "ws://z" }); }, apiKey: "k", sleep: async () => {} });
+  assert.equal(sent.country, "IL"); assert.equal(sent.timezone, "Asia/Jerusalem"); assert.equal(sent.language, "he-IL");
+  await D.createSession({ country: "DE" }, { fetchFn: async (u, init) => { sent = JSON.parse(init.body); return ok({ sessionId: "s3", status: "active", cdpUrl: "ws://z" }); }, apiKey: "k", sleep: async () => {} });
+  assert.equal(sent.country, "IL", "a caller cannot opt out of Israel");
+
+  // ── an active session whose first tab is Chrome's network-error page is not healthy ──
+  {
+    let closed = false;
+    const page = {
+      url: () => "chrome-error://chromewebdata/",
+      innerText: async () => "ERR_SOCKS_CONNECTION_FAILED",
+      waitForLoadState: async () => {}, waitForTimeout: async () => {},
+    };
+    assert.deepEqual(await D.browserNetworkFailure(page), { error: "proxy_unavailable", browser_code: "ERR_SOCKS_CONNECTION_FAILED" });
+    assert.deepEqual(await D.inspectInitialPage({ sessionId: "net1", status: "active", cdpUrl: "ws://net" }, {
+      connectOverCDP: async () => ({ contexts: () => [{ pages: () => [page] }], close: async () => { closed = true; } }),
+    }), { error: "proxy_unavailable", browser_code: "ERR_SOCKS_CONNECTION_FAILED" });
+    assert.equal(closed, true, "the health-check CDP connection is always closed");
+    assert.equal(await D.browserNetworkFailure({ url: () => "https://www.facebook.com/login", innerText: async () => "Facebook" }), null);
+  }
+
+  // ── the dev registry knows every live session, and is empty when the flag is off ──
+  D._test.setDevView(true);
+  const seen = [];
+  await D.withPage({ note: "forly-connect:facebook" }, async () => {
+    const list = D.liveSessions();
+    seen.push(list.map((x) => x.sessionId));
+    assert.ok(!JSON.stringify(list).includes("ws://"), "liveSessions never carries the cdpUrl");
+    assert.ok(!list.some((x) => "cdpUrl" in x));
+    assert.equal(list[0].platform, "facebook", "parsed from the env-scoped note");
+    assert.equal(list[0].note, "forly-local-connect:facebook");
+    assert.equal(list[0].viewer_available, true);
+    return 1;
+  }, deps);
+  assert.deepEqual(seen, [["s2"]]);
+  assert.deepEqual(D.liveSessions(), [], "removed after stop");
+  D._test.setDevView(false);
+  await D.withPage({}, async () => { seen.push(D.liveSessions()); }, deps);
+  assert.deepEqual(seen[1], [], "no registry when the flag is off");
+
+  // ── every note is scoped by FORLY_ENV at create time; callers never see it ──
+  let sentNote = null;
+  const noteFetch = async (u, init) => { sentNote = JSON.parse(init.body).note; return ok({ sessionId: "n1", status: "active", cdpUrl: "ws://n" }); };
+  await D.createSession({ note: "forly-extract:job-9" }, { fetchFn: noteFetch, apiKey: "k", sleep: async () => {} });
+  assert.equal(sentNote, "forly-local-extract:job-9");
+  await D.createSession({ note: "forly-local-extract:job-9" }, { fetchFn: noteFetch, apiKey: "k", sleep: async () => {} });
+  assert.equal(sentNote, "forly-local-extract:job-9", "already scoped → unchanged");
+  await D.createSession({ note: "someone-else" }, { fetchFn: noteFetch, apiKey: "k", sleep: async () => {} });
+  assert.equal(sentNote, "someone-else");
+  process.env.FORLY_ENV = "bogus";
+  await D.createSession({ note: "forly-extract:job-9" }, { fetchFn: noteFetch, apiKey: "k", sleep: async () => {} });
+  assert.equal(sentNote, "forly-extract:job-9", "invalid env → unscoped (Driver is off then anyway)");
+  process.env.FORLY_ENV = "local";
+
+  // ── a staging boot's cleanup never touches prod's (or unscoped) sessions ──
+  process.env.FORLY_ENV = "staging";
+  const envDeleted = [];
+  const envDeps = {
+    apiKey: "k", sleep: async () => {},
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { envDeleted.push(url); return ok({ success: true }); }
+      if (!url.includes("status=active")) return ok({ sessions: [] });
+      return ok({ sessions: [
+        { sessionId: "prod1", note: "forly-prod-connect:facebook" },
+        { sessionId: "stg1", note: "forly-staging-connect:facebook" },
+        { sessionId: "old1", note: "forly-connect:facebook" },
+        { sessionId: "stgx", note: "forly-staging-extract:1" },
+      ] });
+    },
+  };
+  assert.equal(await D.cleanupOrphans("forly-connect:", envDeps), 1);
+  assert.equal(envDeleted.length, 1);
+  assert.ok(envDeleted[0].includes("sessionId=stg1"));
+  process.env.FORLY_ENV = "local";
+
+  // ── cleanupOrphans stops only our own notes ──
+  const deleted = [];
+  const cleanupDeps = {
+    apiKey: "k", sleep: async () => {},
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { deleted.push(url); return ok({ success: true }); }
+      if (url.includes("status=active")) return ok({ sessions: [{ sessionId: "a", note: "forly-local-extract:1" }, { sessionId: "b", note: "someone-else" }] });
+      return ok({ sessions: [{ sessionId: "c", note: "forly-local-extract:2" }] });
+    },
+  };
+  assert.equal(await D.cleanupOrphans("forly-extract:", cleanupDeps), 2);
+  assert.ok(deleted.some((u) => u.includes("sessionId=a")));
+  assert.ok(deleted.some((u) => u.includes("sessionId=c")));
+  assert.ok(!deleted.some((u) => u.includes("sessionId=b")));
+
+  // ── attachPage joins a RUNNING session and must not stop it ──
+  const stops = [];
+  const attachDeps = {
+    apiKey: "k", sleep: async () => {},
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") { stops.push(url); return ok({ success: true }); }
+      return ok({ sessionId: "s9", status: "active", cdpUrl: "ws://z" });
+    },
+    connectOverCDP: async () => ({ contexts: () => [{ pages: () => [{ marker: "live" }] }], close: async () => {} }),
+  };
+  assert.equal(await D.attachPage("s9", async (p) => p.marker, attachDeps), "live");
+  assert.equal(stops.length, 0, "attachPage must leave the session running");
+
+  // ── on a local box, every browser withPage drives is watchable over its own connection ──
+  {
+    const { EventEmitter } = require("events");
+    const V = require("./connect-viewer");
+    const mk = () => { const b = new EventEmitter(); const ctx = new EventEmitter(); ctx.pages = () => [{ marker: "p" }]; b.contexts = () => [ctx]; b.close = async () => { b.emit("disconnected"); }; return b; };
+    const wdeps = { apiKey: "k", sleep: async () => {}, fetchFn: async (u, init) => ok((init && init.method) === "DELETE" ? { success: true } : { sessionId: "w1", status: "active", cdpUrl: "ws://w" }), connectOverCDP: async () => mk() };
+    D._test.setDevView(true);
+    let during = null;
+    await D.withPage({ duration: 60 }, async () => { during = V._hubs.get("dev|w1"); }, wdeps);
+    assert.ok(during && during.adopted === true, "adopted while it works");
+    assert.ok(!V._hubs.has("dev|w1"), "gone when it ends");
+    D._test.setDevView(false);
+    await D.withPage({ duration: 60 }, async () => { during = V._hubs.get("dev|w1"); }, wdeps);
+    assert.equal(during, undefined, "never outside the local monitor");
+  }
+
+  // ── a sticky proxy address per agent: the same agent always, never the phone itself ──
+  {
+    const P = D._test.proxyFor;
+    const env = { DRIVER_PROXY_URL: "socks5h://user-session-{agent}:pw@proxy.example:7000", PROFILE_KEY: "k1" };
+    const a1 = P("972500000001", env).proxyUrl, a1again = P("972500000001", env).proxyUrl, a2 = P("972500000002", env).proxyUrl;
+    assert.equal(a1, a1again, "the same agent, the same address");
+    assert.notEqual(a1, a2, "another agent, another address");
+    assert.match(a1, /^socks5h:\/\/user-session-[0-9a-f]{16}:pw@proxy\.example:7000$/);
+    assert.ok(!a1.includes("972500000001"), "never the phone");
+    assert.notEqual(P("972500000001", Object.assign({}, env, { PROFILE_KEY: "k2" })).proxyUrl, a1, "keyed by PROFILE_KEY");
+    const anon1 = P(null, env).proxyUrl, anon2 = P(null, env).proxyUrl;
+    assert.ok(/user-session-anon[0-9a-f]{12}:/.test(anon1) && anon1 !== anon2, "no agent: a one-off name");
+    assert.deepEqual(P("972500000001", { DRIVER_PROXY_URL: "socks5://fixed:pw@h:1" }), { proxyUrl: "socks5://fixed:pw@h:1" }, "no placeholder: as given");
+    assert.deepEqual(P("972500000001", {}), {}, "no proxy");
+    assert.throws(() => P("972500000001", { DRIVER_PROXY_URL: "http://fixed:pw@h:1" }), (e) => e.code === "invalid_proxy_config");
+    // createSession uses the caller's phone.
+    const saved = process.env.DRIVER_PROXY_URL, savedKey = process.env.PROFILE_KEY;
+    Object.assign(process.env, env);
+    let sent = null;
+    await D.createSession({ duration: 60, profile: { name: "facebook-local-" + "a".repeat(20), persist: true } }, { phone: "972500000001", apiKey: "k", fetchFn: async (u, init) => { sent = JSON.parse(init.body); return ok({ sessionId: "px", status: "active", cdpUrl: "ws://p" }); }, sleep: async () => {} });
+    assert.equal(sent.proxyUrl, a1);
+    assert.equal(sent.country, "IL");
+    assert.ok(!("timezone" in sent) && !("language" in sent), "Driver must geolocate/check the proxy before launch");
+    await assert.rejects(
+      D.createSession({}, { env, phone: "972500000001", apiKey: "k", fetchFn: async () => err(400, { error: "Could not determine SOCKS5 proxy egress location" }), sleep: async () => {} }),
+      (e) => e instanceof D.DriverError && e.status === 400 && e.code === "proxy_unavailable",
+    );
+    if (saved === undefined) delete process.env.DRIVER_PROXY_URL; else process.env.DRIVER_PROXY_URL = saved;
+    if (savedKey === undefined) delete process.env.PROFILE_KEY; else process.env.PROFILE_KEY = savedKey;
+    // The session log line: no credentials, no profile name.
+    const line = JSON.stringify(D._test.sessionLogLine({ note: "forly-local-post:facebook", proxyUrl: a1, profile: { name: "facebook-local-" + "a".repeat(20) }, url: "https://www.facebook.com/x?y=1" }));
+    assert.ok(!line.includes("pw@") && !line.includes("facebook-local-a") && line.includes("www.facebook.com") && line.includes('"proxy":"set"'), line);
+  }
+
+  // ── deleteProfile never throws, and reports ok/error so revoke() can record it ──
+  const okDel = await D.deleteProfile("facebook-local-aaaa", { apiKey: "k", fetchFn: async () => ok({ success: true }) });
+  assert.deepEqual(okDel, { ok: true });
+  const failDel = await quiet(() => D.deleteProfile("facebook-local-aaaa", { apiKey: "k", fetchFn: async () => err(503, { error: "busy" }) }));
+  assert.equal(failDel.ok, false);
+  assert.ok(failDel.error);
+
+  // ── a 404 (already deleted — e.g. a prior delete succeeded but its
+  //    response was lost) is success, not a failure to retry forever ──
+  const goneDel = await D.deleteProfile("facebook-local-aaaa", { apiKey: "k", fetchFn: async () => err(404, { error: "not found" }) });
+  assert.equal(goneDel.ok, true);
+  assert.equal(goneDel.already_gone, true);
+
+  // ── redact masks cdp urls, viewer params and profile names ──
+  const PROFILE = "facebook-prod-0123456789abcdef0123";
+  const red = D.redact(`a wss://node/abc b ws://x/y c https://viewer.driver.dev?ws=wss%3A%2F%2Fn d ${PROFILE}-r2 e yad2-local-0123456789abcdef0123`);
+  assert.ok(!/wss?:\/\//.test(red), red);
+  assert.ok(!red.includes("wss%3A"), red);
+  assert.ok(!red.includes("0123456789abcdef0123"), red);
+  assert.ok(red.includes("[cdp]") && red.includes("ws=[cdp]") && red.includes("[profile]"), red);
+  const redProxy = D.redact("proxy socks5h://alice:very-secret@proxy.example:1080 failed");
+  assert.ok(!redProxy.includes("alice") && !redProxy.includes("very-secret") && redProxy.includes("[credentials]@proxy.example"), redProxy);
+
+  // ── stop failures are logged redacted, with the session id shortened ──
+  const logged = [];
+  const origErr = console.error;
+  console.error = (m) => logged.push(String(m));
+  try {
+    await D.stopSession("session-abcdef123456", { apiKey: "k", fetchFn: async () => err(500, { error: `gone wss://node/zz ${PROFILE}` }) });
+  } finally { console.error = origErr; }
+  assert.equal(logged.length, 1);
+  assert.ok(!logged[0].includes("session-abcdef"), logged[0]);
+  assert.ok(logged[0].includes("123456"), logged[0]);
+  assert.ok(!logged[0].includes("wss://") && !logged[0].includes(PROFILE), logged[0]);
+
+  // ── viewer grants: single use, operator-bound, 5-minute expiry ──
+  process.env.FORLY_ENV = "local";
+  D._test.setDevView(true);
+  let clock = 1_000_000;
+  D._test.setNow(() => clock);
+  const liveCdp = "wss://node/live-1";
+  const liveDeps = Object.assign({}, deps, {
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "DELETE") return ok({ success: true });
+      return ok({ sessionId: "live1", status: "active", cdpUrl: liveCdp });
+    },
+  });
+  let grantChecks = null;
+  await D.withPage({ note: "forly-extract:job" }, async () => {
+    assert.equal(D.mintViewerGrant("nope", { operator: "972500000001" }), null, "not live → null");
+    const g = D.mintViewerGrant("live1", { operator: "972500000001" });
+    assert.ok(/^[0-9a-f]{32}$/.test(g.id));
+    assert.equal(g.expiresAt, clock + 5 * 60 * 1000);
+    assert.ok(!JSON.stringify(g).includes("wss"), "the grant itself carries no url");
+    const url = D.consumeViewerGrant(g.id, "972500000001");
+    assert.equal(url, "https://viewer.driver.dev?ws=" + encodeURIComponent(liveCdp));
+    assert.equal(D.consumeViewerGrant(g.id, "972500000001"), null, "single use");
+
+    const other = D.mintViewerGrant("live1", { operator: "972500000001" });
+    assert.equal(D.consumeViewerGrant(other.id, "972500000002"), null, "another operator cannot use it");
+    assert.equal(D.consumeViewerGrant(other.id, "972500000001"), null, "and the attempt burns it");
+
+    const late = D.mintViewerGrant("live1", { operator: "972500000001" });
+    clock += 5 * 60 * 1000 + 1;
+    assert.equal(D.consumeViewerGrant(late.id, "972500000001"), null, "expired");
+    grantChecks = D.mintViewerGrant("live1", { operator: "972500000001" });
+  }, liveDeps);
+  assert.equal(D.consumeViewerGrant(grantChecks.id, "972500000001"), null, "session no longer live");
+  D._test.setNow(null);
+  D._test.setDevView(false);
+
+  // ── withPage with a profile: phone/platform, ownership, the profile lock, the budget ──
+  const locksReal = require("./profile-lock");
+  const names = require("./profile-name");
+  locksReal._test.reset();
+  const PH = "972500000009";
+  const own = names.profileName("facebook", PH);
+  let created = 0;
+  const countDeps = (extra) => Object.assign({}, deps, {
+    fetchFn: async (url, init) => {
+      if ((init && init.method) === "POST") created++;
+      return deps.fetchFn(url, init);
+    },
+  }, extra);
+  const prof = { profile: { name: own, persist: true } };
+
+  await assert.rejects(D.withPage(prof, async () => 1, countDeps({})), (e) => e.code === "invalid_input");
+  await assert.rejects(D.withPage(prof, async () => 1, countDeps({ phone: PH })), (e) => e.code === "invalid_input");
+  await assert.rejects(
+    D.withPage({ profile: { name: names.profileName("facebook", "972500000008"), persist: true } }, async () => 1, countDeps({ phone: PH, platform: "facebook" })),
+    (e) => e.code === "profile_ownership",
+  );
+  await assert.rejects(
+    D.withPage(prof, async () => 1, countDeps({ phone: PH, platform: "facebook", conn: { facebook_profile_state: "revoked" } })),
+    (e) => e.code === "profile_ownership",
+  );
+  assert.equal(created, 0, "refused before any session is created");
+
+  const holder = locksReal.acquire(PH, "facebook");
+  await assert.rejects(D.withPage(prof, async () => 1, countDeps({ phone: PH, platform: "facebook" })), (e) => e.code === "profile_busy");
+  assert.equal(created, 0);
+  // lockHeld: the caller already holds it — no acquire, ownership still asserted
+  assert.equal(await D.withPage(prof, async () => "ok", countDeps({ phone: PH, platform: "facebook", lockHeld: true })), "ok");
+  assert.ok(locksReal.isHeld(PH, "facebook"), "the caller's lock is not released by withPage");
+  await assert.rejects(
+    D.withPage({ profile: { name: "facebook-local-ffffffffffffffffffff", persist: true } }, async () => 1, countDeps({ phone: PH, platform: "facebook", lockHeld: true })),
+    (e) => e.code === "profile_ownership",
+  );
+  holder();
+
+  // lock and budget are released even when fn throws
+  await assert.rejects(D.withPage(prof, async () => {
+    assert.ok(locksReal.isHeld(PH, "facebook"));
+    assert.equal(locksReal.activeSessions(), 1);
+    throw new Error("boom2");
+  }, countDeps({ phone: PH, platform: "facebook" })), /boom2/);
+  assert.equal(locksReal.isHeld(PH, "facebook"), false);
+  assert.equal(locksReal.activeSessions(), 0);
+
+  // lock and budget are released when the session cannot even be created
+  await assert.rejects(D.withPage(prof, async () => 1, Object.assign({}, deps, { phone: PH, platform: "facebook", fetchFn: async () => err(402, {}) })),
+    (e) => e.status === 402);
+  assert.equal(locksReal.isHeld(PH, "facebook"), false);
+  assert.equal(locksReal.activeSessions(), 0);
+
+  // injected fakes: lockHeld never touches tryAcquire
+  let acquired = 0;
+  const fakeLocks = { tryAcquire: () => { acquired++; return () => {}; }, trySession: () => () => {} };
+  const fakeNames = { assertOwnership: () => {} };
+  await D.withPage({ profile: { name: "x" } }, async () => 1, countDeps({ phone: PH, platform: "facebook", lockHeld: true, locks: fakeLocks, names: fakeNames }));
+  assert.equal(acquired, 0);
+  await D.withPage({ profile: { name: "x" } }, async () => 1, countDeps({ phone: PH, platform: "facebook", locks: fakeLocks, names: fakeNames }));
+  assert.equal(acquired, 1);
+
+  // the local concurrency budget: exhausted → DriverError 429, before any session
+  const before = created;
+  const noBudget = { tryAcquire: () => () => {}, trySession: () => null };
+  await assert.rejects(D.withPage({}, async () => 1, countDeps({ locks: noBudget })), (e) => e instanceof D.DriverError && e.status === 429);
+  assert.equal(created, before);
+  // …and the profile lock taken before it is given back
+  let profileReleased = false;
+  await assert.rejects(D.withPage(prof, async () => 1, countDeps({
+    phone: PH, platform: "facebook", names: fakeNames,
+    locks: { tryAcquire: () => () => { profileReleased = true; }, trySession: () => null },
+  })), (e) => e.status === 429);
+  assert.ok(profileReleased);
+
+  // ── attachPage rides a session that already holds its slot: no second one ──
+  assert.equal(await D.attachPage("s9", async (p) => p.marker, Object.assign({}, attachDeps, { locks: { trySession: () => null } })), "live");
+
+  // ── attachPage: with a phone it takes the profile lock (unless held) ──
+  const busyHolder = locksReal.acquire(PH, "yad2");
+  await assert.rejects(D.attachPage("s9", async () => 1, Object.assign({}, attachDeps, { phone: PH, platform: "yad2" })), (e) => e.code === "profile_busy");
+  assert.equal(await D.attachPage("s9", async (p) => p.marker, Object.assign({}, attachDeps, { phone: PH, platform: "yad2", lockHeld: true })), "live");
+  busyHolder();
+  await assert.rejects(D.attachPage("s9", async () => 1, Object.assign({}, attachDeps, { phone: PH })), (e) => e.code === "invalid_input");
+  await assert.rejects(D.attachPage("s9", async () => { throw new Error("boom3"); }, Object.assign({}, attachDeps, { phone: PH, platform: "yad2" })), /boom3/);
+  assert.equal(locksReal.isHeld(PH, "yad2"), false);
+  assert.equal(locksReal.activeSessions(), 0);
+
+  // ── no new browser until boot's orphan cleanup is done ──
+  {
+    let done, fetched = false;
+    D.holdCreatesUntil(new Promise((r) => { done = r; }));
+    const p = D.createSession({}, { apiKey: "k", sleep: async () => {}, fetchFn: async () => { fetched = true; return ok({ sessionId: "sg" }); } });
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(fetched, false, "held behind the cleanup");
+    done();
+    assert.equal((await p).sessionId, "sg");
+  }
+  // …and a failed cleanup keeps them refused: never "assume no orphans"
+  {
+    let fetched = false;
+    const fetchFn = async () => { fetched = true; return ok({ sessionId: "sx" }); };
+    D.holdCreatesUntil(Promise.reject(new Error("list 503")));
+    await assert.rejects(D.createSession({}, { apiKey: "k", sleep: async () => {}, bootWaitMs: 5, fetchFn }), (e) => e.code === "driver_starting");
+    D.holdCreatesUntil(new Promise(() => {})); // still running
+    await assert.rejects(D.createSession({}, { apiKey: "k", sleep: async () => {}, bootWaitMs: 5, fetchFn }), (e) => e.status === 503);
+    assert.equal(fetched, false, "no POST /browser/session");
+    D.holdCreatesUntil(Promise.resolve());
+  }
+  // ── cleanupOrphans fails closed: an unreadable list, or an unconfirmed stop ──
+  {
+    const list = (sessions) => async (url, init) => ((init && init.method) === "DELETE" ? err(503, {}) : ok({ sessions }));
+    await quiet(() => assert.rejects(D.cleanupOrphans("forly-post:", { apiKey: "k", sleep: async () => {}, fetchFn: async () => err(503, {}) })));
+    await quiet(() => assert.rejects(D.cleanupOrphans("forly-post:", { apiKey: "k", sleep: async () => {}, fetchFn: list([{ sessionId: "o1", note: "forly-local-post:x" }]) }),
+      (e) => e.code === "orphan_cleanup_failed"));
+  }
+
+  // ── driverEnabled: all three secrets, and a valid FORLY_ENV ──
+  const saved = { k: process.env.DRIVER_API_KEY, p: process.env.PROFILE_KEY, e: process.env.FORLY_ENV };
+  Object.assign(process.env, { DRIVER_API_KEY: "k", PROFILE_KEY: "p", FORLY_ENV: "local" });
+  assert.equal(D.driverEnabled(), true);
+  assert.equal(D.driverEnabled({ DRIVER_API_KEY: "k", PROFILE_KEY: "p", FORLY_ENV: "local", DRIVER_PROXY_URL: "http://proxy:8000" }), false);
+  process.env.FORLY_ENV = "production";
+  assert.equal(D.driverEnabled(), false);
+  process.env.FORLY_ENV = "prod"; delete process.env.PROFILE_KEY;
+  assert.equal(D.driverEnabled(), false);
+  process.env.PROFILE_KEY = "p"; delete process.env.DRIVER_API_KEY;
+  assert.equal(D.driverEnabled(), false);
+  for (const [k, v] of [["DRIVER_API_KEY", saved.k], ["PROFILE_KEY", saved.p], ["FORLY_ENV", saved.e]]) {
+    if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+
+  // ── bootCheck: what index.js refuses to boot with, and whether Driver is on ──
+  const B = D.bootCheck;
+  assert.deepEqual(B({}), { fatal: null, enabled: false, missing: [], devView: false }, "unset FORLY_ENV still boots");
+  assert.ok(B({ FORLY_ENV: "production" }).fatal);
+  assert.ok(B({ FORLY_ENV: "" }).fatal);
+  // I12: production without FORLY_ENV boots when Driver could not be on anyway (no key, no FORLY_ENV) — Driver stays off
+  assert.deepEqual(B({ NODE_ENV: "production" }), { fatal: null, enabled: false, missing: [], devView: false }, "no Driver key, no FORLY_ENV: boots, Driver off");
+  assert.deepEqual(B({ NODE_ENV: "production", PROFILE_KEY: "p" }), { fatal: null, enabled: false, missing: [], devView: false });
+  assert.ok(B({ NODE_ENV: "production", DRIVER_API_KEY: "k" }).fatal, "a Driver key in production needs FORLY_ENV=prod");
+  assert.ok(B({ NODE_ENV: "production", DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).fatal);
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "staging" }).fatal, "a FORLY_ENV other than prod in production");
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "local" }).fatal);
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "staging", DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).fatal);
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "production" }).fatal, "an invalid FORLY_ENV stays fatal");
+  assert.ok(B({ NODE_ENV: "production", FORLY_ENV: "" }).fatal);
+  assert.equal(B({ NODE_ENV: "production", FORLY_ENV: "prod" }).fatal, null);
+  assert.deepEqual(B({ NODE_ENV: "production", FORLY_ENV: "prod", DRIVER_API_KEY: "k", PROFILE_KEY: "p" }), { fatal: null, enabled: true, missing: [], devView: false });
+  assert.ok(B({ DRIVER_DEV_VIEW: "1" }).fatal, "the viewer needs FORLY_ENV=local");
+  assert.ok(B({ DRIVER_DEV_VIEW: "1", FORLY_ENV: "staging" }).fatal);
+  assert.ok(B({ DRIVER_DEV_VIEW: "1", FORLY_ENV: "local", NODE_ENV: "production" }).fatal);
+  assert.deepEqual(B({ DRIVER_DEV_VIEW: "1", FORLY_ENV: "local" }), { fatal: null, enabled: false, missing: [], devView: true });
+  assert.equal(B({ FORLY_ENV: "local" }).devView, true, "local shows every browser by itself");
+  assert.equal(B({ FORLY_ENV: "local", DRIVER_DEV_VIEW: "0" }).devView, false, "unless turned off");
+  assert.equal(B({ FORLY_ENV: "prod", NODE_ENV: "production", DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).devView, false);
+  assert.equal(B({ FORLY_ENV: "staging" }).devView, false);
+  assert.equal(B({ DRIVER_DEV_VIEW: "0", FORLY_ENV: "staging" }).devView, false);
+  assert.deepEqual(B({ DRIVER_API_KEY: "k" }).missing, ["PROFILE_KEY", "FORLY_ENV"]);
+  assert.deepEqual(B({ DRIVER_API_KEY: "k", FORLY_ENV: "local" }).missing, ["PROFILE_KEY"]);
+  assert.deepEqual(B({ DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).missing, ["FORLY_ENV"]);
+  assert.equal(B({ DRIVER_API_KEY: "k", PROFILE_KEY: "p" }).enabled, false);
+  assert.deepEqual(B({ DRIVER_API_KEY: "k", PROFILE_KEY: "p", FORLY_ENV: "staging" }), { fatal: null, enabled: true, missing: [], devView: false });
+  assert.equal(B({ PROFILE_KEY: "p", FORLY_ENV: "staging" }).enabled, false, "no key, no Driver");
+  assert.match(B({ FORLY_ENV: "local", DRIVER_API_KEY: "k", PROFILE_KEY: "p", DRIVER_PROXY_URL: "http://user:pw@proxy:8000" }).fatal, /socks5/);
+  assert.equal(B({ FORLY_ENV: "local", DRIVER_API_KEY: "k", PROFILE_KEY: "p", DRIVER_PROXY_URL: "socks5h://user:pw@proxy:1080" }).fatal, null);
+
+  // ── no browser on a profile while the agent's login browser is live (same
+  //    cookies from two IPs); withPage refuses before any session is created ──
+  {
+    const D = require("./driver-browser");
+    const { profileName } = require("./profile-name");
+    let created = 0;
+    const fetchStub = async () => { created++; throw new Error("must not be called"); };
+    const conn = { browser_session_facebook: { session_id: "s1", started_at: new Date().toISOString() } };
+    const name = profileName("facebook", "972500000009", 0);
+    await assert.rejects(
+      D.withPage({ profile: { name, persist: true }, note: "forly-extract:x" }, async () => 1, { phone: "972500000009", platform: "facebook", conn, fetch: fetchStub }),
+      (e) => e.code === "profile_busy");
+    assert.equal(created, 0, "no Driver call while the login browser is live");
+    const old = { browser_session_facebook: { session_id: "s1", started_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString() } };
+    assert.equal(require("./profile-lock").loginOpen(old, "facebook"), false, "an old login session no longer blocks");
+  }
+
+  console.log("driver-browser.test.js ok");
+})().catch((e) => { console.error(e); process.exit(1); });
