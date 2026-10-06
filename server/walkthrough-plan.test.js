@@ -131,15 +131,28 @@ assert.equal(buildTitles({ rooms: 3.5, neighborhood: "שכונת רמות", park
     assert.ok(SUPPORTED.includes(c.duration));
     assert.ok(c.prompt.length < 5000);
   }
-  assert.ok(/walks into the frame/.test(pres.clips[0].prompt), "she enters in the opener");
+  // she is already in the room: "walks into the frame" made Seedance invent a doorway
+  assert.ok(/already standing in the room/.test(pres.clips[0].prompt), "she welcomes in the opener");
+  assert.ok(pres.clips.every((c) => !/walks into the frame/.test(c.prompt)));
   assert.ok(/inviting gesture/.test(pres.clips[pres.clips.length - 1].prompt), "she invites in the closer");
   assert.ok(pres.clips.reduce((n, c) => n + c.duration, 0) >= plain.clips.reduce((n, c) => n + c.duration, 0), "she gets time");
-  // a solo room keeps 8 of its photos (1 slot goes to her)
+  // gestures vary: the opener and the next clip do not open with the same move
+  const move = (c) => (c.prompt.split("The presenter:")[1].match(/she (sweeps|points|frames|steps beside|turns her body)/) || [])[1];
+  assert.notEqual(move(pres.clips[0]), move(pres.clips[1]));
+  // a solo room keeps 8 of its photos (1 slot goes to her) and is ONE continuous shot
   const big = Array.from({ length: 9 }, (_, i) => tag("living_room", 8, i + 1));
-  const bigMap = normalizeMap({ spaces: [{ type: "living_room", photos: big.map((_, i) => ({ n: i + 1, shows: ["sofa"] })) }] }, 9, big.map((t) => t.room_type));
+  const bigMap = normalizeMap({ spaces: [{ type: "living_room", photos: big.map((_, i) => ({ n: i + 1, shows: i === 0 ? ["sofa", "window", "tv", "rug"] : ["sofa"] })) }] }, 9, big.map((t) => t.room_type));
   const solo = planWalkthrough(bigMap, big, {}, MAX_CLIPS, { presenter }).clips[0];
   assert.equal(solo.image_urls.length, MAX_REFS);
   assert.equal(solo.image_urls.filter((u) => u.startsWith("https://f/")).length, MAX_REFS - 1);
+  assert.equal((solo.prompt.match(/Shot \d/g) || []).length, 1, "one shot per room, no cuts inside it");
+  assert.ok(/one continuous shot inside this one room, with no cuts/.test(solo.prompt));
+  assert.ok(/no door frame, doorway or threshold/.test(solo.prompt), "opens already inside the room");
+  assert.ok(/the sofa/.test(solo.prompt) && /the window/.test(solo.prompt) && /the tv/.test(solo.prompt) && !/the rug/.test(solo.prompt),
+    "she presents up to three things in the room");
+  assert.ok(/glances back at the camera/.test(solo.prompt));
+  // the plain plan still cuts between a room's photos
+  assert.ok((planWalkthrough(bigMap, big, {}).clips[0].prompt.match(/Shot \d/g) || []).length > 1);
   // empty presenter → plain plan
   assert.equal(planWalkthrough(manyMap, many, {}, MAX_CLIPS, { presenter: { image_urls: [] } }).presenter, undefined);
 }

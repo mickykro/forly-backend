@@ -22,9 +22,14 @@
  * Presenter mode (opts.presenter, 6 Oct 2026): one fixed character — the same
  * woman in every listing — walks the rooms and presents them. Her reference
  * photos go last in every clip (they take reference slots from the rooms), she
- * welcomes in the opener, points out each shot's target and invites in the
- * closer. She never speaks: Seedance's speech is gibberish, not Hebrew. Shots
- * are longer so she has time to move. Without opts.presenter nothing changes.
+ * welcomes in the opener, presents what each room shows and invites in the
+ * closer. She never speaks: Seedance's speech is gibberish, not Hebrew.
+ * Each room is ONE continuous, longer shot (its other photos only keep it
+ * accurate) — two cuts inside one kitchen read as two kitchens — and every
+ * clip opens already inside its room: "walks into the frame" made Seedance
+ * invent a doorway for her to come through. Her gestures rotate through a set
+ * of specific moves; one generic open hand looked robotic. Without
+ * opts.presenter nothing changes.
  */
 
 const SUPPORTED = [4, 5, 6, 8, 10, 12, 15]; // seedance durations, seconds
@@ -36,9 +41,10 @@ const SECONDS_PER_SOLO_SHOT = 2;
 const SECONDS_PER_PACKED_SHOT = 3.5;
 const MIN_PHOTOS = 4;
 const MIN_QUALITY = 4;
-const SECONDS_PER_PRESENTER_SHOT = 3;
+const SECONDS_PER_PRESENTER_ROOM = 6; // one continuous shot per room
 const SECONDS_PER_PACKED_PRESENTER_SHOT = 4;
-const PRESENTER_EDGE_SECONDS = 2; // her entrance (opener) and invitation (closer)
+const PRESENTER_EDGE_SECONDS = 2; // her welcome (opener) and invitation (closer)
+const PRESENTER_TARGETS = 3; // things she presents in one room
 const PRESENTER_DESCRIPTION = "a woman in her early thirties with long straight dark hair, a black blazer over a black top, " +
   "cream wide-leg trousers and black heels";
 
@@ -53,9 +59,17 @@ const MOVES = ["glides slowly forward", "pushes in slowly", "moves gently forwar
 const TAIL = " Cut on movement between shots, no morphing or blending. Everything stays exactly as in the photos: " +
   "nothing is added, removed, moved or restyled. No people, hands or shadows of the camera operator. " +
   "Clean frame with no text, logos or watermarks.";
-const PRESENTER_TAIL = " Cut on movement between shots, no morphing or blending. The rooms stay exactly as in the photos: " +
+const PRESENTER_TAIL = " No morphing or blending. The rooms stay exactly as in the photos: " +
   "nothing is added, removed, moved or restyled. The presenter is the only person in the video: no other people, " +
   "no hands or shadows of the camera operator. Clean frame with no text, logos or watermarks.";
+// Her moves, rotated so neighbouring targets and clips differ. `t` is "the <thing>".
+const GESTURES = [
+  (t) => `sweeps her open palm in a slow, wide arc across ${t}, as if unveiling it`,
+  (t) => `points toward ${t} with her index finger`,
+  (t) => `frames ${t} between both hands, palms facing each other`,
+  (t) => `steps beside ${t} and presents it with both hands, palms up`,
+  (t) => `turns her body toward ${t} and extends her arm fully toward it, palm up`,
+];
 
 const kinds = (s) => [s.type, ...(s.contains || [])];
 const is = (s, list) => kinds(s).some((k) => list.some((l) => k.includes(l)));
@@ -205,7 +219,7 @@ function buildClip(group, index, openerGroup, opts = {}) {
     const refs = space.photos.slice(0, perSpace);
     const first = image_urls.length + 1;
     refs.forEach((p) => image_urls.push(p.url));
-    const shotCount = packed ? 1 : Math.min(refs.length, MAX_SHOTS);
+    const shotCount = packed || presenter ? 1 : Math.min(refs.length, MAX_SHOTS);
     for (let i = 0; i < shotCount; i++) shots.push({ space, photo: refs[i], idx: first + i });
     const spare = refs.slice(shotCount).map((_, i) => `@image${first + shotCount + i}`);
     if (spare.length) extras.push(`${spare.join(", ")} ${spare.length > 1 ? "show" : "shows"} the same room as @image${first} from another angle: use ${spare.length > 1 ? "them" : "it"} only to keep that room exactly as it is.`);
@@ -213,16 +227,16 @@ function buildClip(group, index, openerGroup, opts = {}) {
   const first = index === 0;
   const last = !!opts.last;
   const seconds = presenter
-    ? shots.length * (packed ? SECONDS_PER_PACKED_PRESENTER_SHOT : SECONDS_PER_PRESENTER_SHOT) + (first ? PRESENTER_EDGE_SECONDS : 0) + (last ? PRESENTER_EDGE_SECONDS : 0)
+    ? shots.length * (packed ? SECONDS_PER_PACKED_PRESENTER_SHOT : SECONDS_PER_PRESENTER_ROOM) + (first ? PRESENTER_EDGE_SECONDS : 0) + (last ? PRESENTER_EDGE_SECONDS : 0)
     : shots.length * (packed ? SECONDS_PER_PACKED_SHOT : SECONDS_PER_SOLO_SHOT);
   const duration = fit(seconds);
   const per = (duration / shots.length).toFixed(1);
   const used = new Set();
   const lines = shots.map((s, k) => {
+    if (presenter) return presenterShot(s, k, shots.length, per, { first, last, packed, index, used });
     const target = pickTarget(s.photo, s.space, used);
     if (target) used.add(target);
-    const line = `Shot ${k + 1} (${per}s): @image${s.idx}, the camera ${MOVES[k % MOVES.length]} toward the ${target || "center of the frame"}.`;
-    return presenter ? `${line} ${presenterAction(k, shots.length, first, last, target)}` : line;
+    return `Shot ${k + 1} (${per}s): @image${s.idx}, the camera ${MOVES[k % MOVES.length]} toward the ${target || "center of the frame"}.`;
   });
   const presenterIdx = presenterRefs.map((_, i) => image_urls.length + 1 + i);
   presenterRefs.forEach((u) => image_urls.push(u));
@@ -231,7 +245,11 @@ function buildClip(group, index, openerGroup, opts = {}) {
     : "A smooth, stabilized cinematic walkthrough of a property for sale, inside the room shown in @image1.";
   const scope = packed
     ? "Each shot is in a different room and opens directly inside it: never show a door frame, doorway or passage between shots."
-    : "Every shot stays inside this one room.";
+    : presenter
+      ? "The whole clip is one continuous shot inside this one room, with no cuts. It opens already inside the room, " +
+        "framed exactly like @image1: the first frame shows no door frame, doorway or threshold, and the camera never " +
+        "passes through one."
+      : "Every shot stays inside this one room.";
   // Seedance rolled the camera in interiors (walls and windows leaning 15-25°,
   // tilting as it moved) when only turns and pans were ruled out: say level.
   const camera = "The camera is at eye height, moves slowly forward, never turns or pans, and stops well before its target. " +
@@ -258,18 +276,45 @@ function presenterIntro(presenter, idx) {
     `${which} her as a character sheet from several angles (front, sides, back): it is one single woman, not several ` +
     `people. Use ${refs.length > 1 ? "them" : "it"} only for her face, hair, body and clothes; ignore the sheet's background, ` +
     "labels, angle numbers and the line under her feet, and never show text or more than one of her. Keep her exactly " +
-    "like that in every shot. She moves naturally and " +
-    "calmly, smiles, and is a guide, not the subject: she stays to one side and never covers more than a third of the " +
+    "like that in every shot. She moves naturally, smiles, and talks with her hands like a real-estate agent showing " +
+    "a home to a buyer: clear, deliberate, varied gestures, never a stiff pose. She is a guide, not the subject: she " +
+    "stays to one side and never covers more than a third of the " +
     "frame or blocks the thing she presents. She never speaks and her lips do not move: no dialogue, voice or narration, " +
     "only soft ambient sound.";
 }
 
-// What she does in one shot: welcome first, present the target, invite last.
-function presenterAction(k, count, first, last, target) {
-  const thing = target ? `the ${target}` : "the room";
-  if (first && k === 0) return `The presenter walks into the frame from the side, turns to the camera with a warm smile and a welcoming open-hand gesture, then gestures toward ${thing}.`;
-  if (last && k === count - 1) return `The presenter stands beside ${thing}, turns to the camera, smiles and opens her hand toward the room in an inviting gesture.`;
-  return `The presenter walks a few steps ahead of the camera to one side and gestures with an open hand toward ${thing}.`;
+// Up to `n` safe camera targets across a space's photos, best photo first.
+function roomTargets(space, photos, used, n) {
+  const out = [];
+  for (const p of photos) {
+    while (out.length < n) {
+      const t = pickTarget(p, space, used);
+      if (!t || used.has(t)) break;
+      used.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+// One presenter shot: a solo room is one long take in which she presents up
+// to PRESENTER_TARGETS things; a packed room is one short shot. She welcomes
+// in the opener's first shot and invites in the closer's last.
+function presenterShot(s, k, count, per, { first, last, packed, index, used }) {
+  const photos = packed ? [s.photo] : s.space.photos;
+  const targets = roomTargets(s.space, photos, used, packed ? 1 : PRESENTER_TARGETS);
+  const things = targets.length ? targets.map((t) => `the ${t}`) : ["the room"];
+  const moves = things.map((t, i) => GESTURES[(index * 2 + k + i) % GESTURES.length](t));
+  const presents = moves.reduce((acc, m) => `${acc}, glances back at the camera, then ${m}`);
+  const camera = packed
+    ? `the camera ${MOVES[k % MOVES.length]} toward ${things[0]}`
+    : `one continuous take: the camera glides slowly forward through the room, keeping her in frame`;
+  const parts = [];
+  if (first && k === 0) parts.push("She is already standing in the room as the shot begins; she turns to the camera with a warm smile and a small wave");
+  parts.push(`she ${presents}`);
+  if (last && k === count - 1) parts.push("finally she turns back to the camera, opens both arms toward the room in an inviting gesture and beckons the viewer in with one hand");
+  const action = parts.join("; ");
+  return `Shot ${k + 1} (${per}s): @image${s.idx}, ${camera}. The presenter: ${action}.`;
 }
 
 const MAX_PRESENTER_REFS = 2;
