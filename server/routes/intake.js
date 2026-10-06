@@ -169,9 +169,11 @@ module.exports = function createIntakeRouter(ctx) {
     const result = await createListing(agentPhone, body, { ...(body.agent || {}), phone: agentPhone });
     if (result.error) return res.status(result.code).json({ error: result.error });
 
-    // ensure partial business exists
+    // ensure partial business exists. A real client (an operator creating a
+    // property in their name) keeps their account untouched: only a missing
+    // doc or an earlier demo one is (re)written as a demo account.
     const existing = await db.getBusiness(agentPhone);
-    if (!existing || existing.onboarding_state !== "complete") {
+    if (!existing || (existing.source === "demo" && existing.onboarding_state !== "complete")) {
       const now = new Date();
       await db.setBusiness(agentPhone, {
         phone: agentPhone,

@@ -231,7 +231,9 @@
     var demo = a.is_demo ? '<span class="tag-demo">demo</span>' : "";
     return "<tr>" +
       '<td class="agent"><div class="agent-name">' + esc(a.name) + demo + "</div>" +
-        '<div class="p-addr num" dir="ltr">' + esc(a.phone) + "</div></td>" +
+        '<div class="p-addr num" dir="ltr">' + esc(a.phone) + "</div>" +
+        // A property in this client's name, their saved details prefilled.
+        '<a class="p-addr" href="/create.html?key=admin&agent=' + encodeURIComponent(a.phone) + '">+ יצירת נכס ללקוח</a></td>' +
       '<td class="num">' + esc(a.active_pages) + "</td>" +
       '<td class="num">' + Number(a.views || 0).toLocaleString("he-IL") + "</td>" +
       '<td class="num">' + Number(a.leads || 0).toLocaleString("he-IL") + "</td>" +
