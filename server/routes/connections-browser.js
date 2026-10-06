@@ -29,7 +29,7 @@ const CONSENT_VERSION = "2026-09-24";
 // Disabling halt classes R5 resolves with a reconnect (see startFlow).
 const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
 const FLEET_REASONS = new Set(["env_off", "global_off", "platform_off", "visible_off"]);
-const { profileName } = require("../profile-name");
+const { profileName, labelOf } = require("../profile-name");
 
 // Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
 // read — see listing-sweep.js). Add a platform here when a feature needs it.
@@ -193,6 +193,15 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       statePatch[`${platform}_profile_quarantine_class`] = null;
     }
 
+    // The agent's name goes into the profile name, fixed at the first connect:
+    // renaming the agent later must not move them to a new, empty profile.
+    let label = conn[`${platform}_profile_label`] || "";
+    if (!label && typeof db.getBusiness === "function") {
+      const business = await db.getBusiness(phone).catch(() => null);
+      label = labelOf((business && (business.full_name || business.business_name)) || "");
+      if (label) statePatch[`${platform}_profile_label`] = label;
+    }
+
     // Never open a second login browser on this profile while one is recorded.
     const existing = conn[`browser_session_${platform}`];
     if (existing && existing.session_id) {
@@ -215,7 +224,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         session = await driver.createSession({
           duration: SESSION_SECONDS,
           url: spec.loginUrl,
-          profile: { name: profileName(platform, phone, gen), persist: true },
+          profile: { name: profileName(platform, phone, gen, label), persist: true },
           note: `forly-connect:${platform}`, // never the phone
         }, { phone }); // the agent's sticky proxy address (driver-browser.proxyFor)
         if (typeof driver.inspectInitialPage === "function") {

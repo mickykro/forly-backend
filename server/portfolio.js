@@ -157,6 +157,7 @@ function nextPortfolioStatus(current, activeCount) {
 }
 
 module.exports = {
+  transliterate,
   portfolioSlug,
   propertySlug,
   parsePublicPath,

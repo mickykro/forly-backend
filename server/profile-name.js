@@ -3,8 +3,11 @@
  *
  * One persisted browser profile per agent per platform. The agent logs in once
  * through the embedded browser (or an extract falls back to it); the cookies
- * live in the profile, never here. The name is an HMAC of the phone: the
- * Driver key alone must not be able to enumerate customers.
+ * live in the profile, never here. The name ends in an HMAC of the phone —
+ * never the phone itself — and carries the agent's name (transliterated) so
+ * an operator can find it in Driver's dashboard. The name is fixed once, at
+ * the first connect (`<platform>_profile_label` on the connection): an agent
+ * who later edits their name must not lose their saved login.
  *
  * FORLY_ENV is read at CALL time, not load time — profileName must see a
  * value set by the caller (e.g. a test) after this module was required, and
@@ -16,6 +19,7 @@
  * reads back as logged out.
  */
 const crypto = require("crypto");
+const { transliterate } = require("./portfolio");
 
 const SOCIAL = /(^|\.)(facebook\.com|instagram\.com|tiktok\.com|linkedin\.com|x\.com|twitter\.com)$/i;
 
@@ -40,14 +44,32 @@ function platformOf(urlOrPlatform) {
   return name === "twitter" ? "x" : name;
 }
 
+// The agent's name as a profile-name segment: Latin a-z0-9 and hyphens, at
+// most 24 characters, "" when nothing usable is left.
+function labelOf(name) {
+  return transliterate(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    .slice(0, 24).replace(/-+$/g, "");
+}
+
 // gen: the profile "generation" for this phone+platform. 0 (the default) is
 // the original profile; quarantine bumps it so a reconnect gets a fresh
 // Driver profile name instead of reusing the one under suspicion.
-function profileName(urlOrPlatform, phone, gen = 0) {
+// label: the connection's stored `<platform>_profile_label` ("" → none).
+function profileName(urlOrPlatform, phone, gen = 0, label = "") {
   const platform = platformOf(urlOrPlatform);
   if (!platform) return null;
   const tag = crypto.createHmac("sha256", String(process.env.PROFILE_KEY || "dev")).update(String(phone)).digest("hex").slice(0, 20);
-  return `${platform}-${ENV()}-${tag}${gen ? `-r${gen}` : ""}`;
+  const named = labelOf(label);
+  return `${platform}-${ENV()}-${named ? `${named}-` : ""}${tag}${gen ? `-r${gen}` : ""}`;
+}
+
+// The connection's current profile name: its generation and stored label.
+// Every caller that has the connection goes through here.
+function profileNameFor(urlOrPlatform, phone, conn) {
+  const platform = platformOf(urlOrPlatform);
+  if (!platform) return null;
+  const c = conn || {};
+  return profileName(platform, phone, c[`${platform}_profile_gen`] || 0, c[`${platform}_profile_label`] || "");
 }
 
 // Every code path that passes a `profile` option to Driver derives it through
@@ -58,11 +80,12 @@ function profileName(urlOrPlatform, phone, gen = 0) {
 function assertOwnership(name, phone, platform, conn = null) {
   const gen = conn ? (conn[`${platform}_profile_gen`] || 0) : 0;
   const state = conn ? conn[`${platform}_profile_state`] : null;
-  if (name !== profileName(platform, phone, gen) || ["revoked", "quarantined"].includes(state)) {
+  const label = conn ? (conn[`${platform}_profile_label`] || "") : "";
+  if (name !== profileName(platform, phone, gen, label) || ["revoked", "quarantined"].includes(state)) {
     const e = new Error("profile ownership");
     e.code = "profile_ownership";
     throw e;
   }
 }
 
-module.exports = { profileName, assertOwnership, ENV };
+module.exports = { profileName, profileNameFor, labelOf, assertOwnership, ENV };

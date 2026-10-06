@@ -22,7 +22,7 @@ const profileNames = require("./profile-name");
 
 const API = "https://api.driver.dev";
 
-const PROFILE_RE = /(facebook|yad2|madlan|instagram|tiktok|linkedin|x)-(prod|staging|local)-[0-9a-f]{20}(-r\d+)?/g;
+const PROFILE_RE = /(facebook|yad2|madlan|instagram|tiktok|linkedin|x)-(prod|staging|local)-(?:[a-z0-9-]+-)?[0-9a-f]{20}(-r\d+)?/g;
 function redact(msg) {
   return String(msg)
     .replace(/\b(socks5h?|https?):\/\/[^\s/@]+(?::[^\s/@]*)?@/gi, "$1://[credentials]@")

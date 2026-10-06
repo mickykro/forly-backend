@@ -99,7 +99,7 @@ async function attemptDelete(phone, platform, conn, deps, opts = {}) {
   const currentGen = conn[`${platform}_profile_gen`] || 0;
   const gen = opts.gen !== undefined ? opts.gen : currentGen;
   const staleGen = gen !== currentGen;
-  const name = profileName(platform, phone, gen);
+  const name = profileName(platform, phone, gen, conn[`${platform}_profile_label`] || "");
   const rowGen = legacy ? undefined : gen;
   const release = (deps.locks || locksLive).tryAcquire(phone, platform);
   if (!release) {
