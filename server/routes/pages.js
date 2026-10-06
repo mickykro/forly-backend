@@ -157,9 +157,11 @@ module.exports = function createPagesRouter(ctx) {
   // ── page builder (called by n8n) ──
   router.post("/createPropertyPage", async (req, res) => {
     const body = req.body || {};
-    if (!body.listing_id || !body.business_phone || !body.video_url ||
+    // video_url is optional: a build whose video failed still gets its page
+    // (build-fallback.js), with the first photo as the hero instead.
+    if (!body.listing_id || !body.business_phone ||
         !Array.isArray(body.photos) || body.photos.length < 1) {
-      return res.status(400).json({ error: "listing_id, business_phone, video_url and photos are required" });
+      return res.status(400).json({ error: "listing_id, business_phone and photos are required" });
     }
     try {
       const reusable = await db.findActivePageByListing(body.listing_id);
@@ -197,10 +199,10 @@ module.exports = function createPagesRouter(ctx) {
       // (the relay host when one is configured), localPath is where the bytes
       // landed here, which the captioning pass below reads back.
       const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl, rehostOpts);
-      const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
+      const videoP = body.video_url ? rehostFn(body.video_url, `${base}/walkthrough.mp4`) : Promise.resolve(null);
       // A clean overlay render (<id>.clean.mp4) has a titled sibling for
       // publishing; keep both. Best-effort — the page stands on the clean one.
-      const promoSrc = promoVideoUrl(body.video_url);
+      const promoSrc = body.video_url ? promoVideoUrl(body.video_url) : null;
       const promoP = promoSrc
         ? rehostFn(promoSrc, `${base}/promo.mp4`).catch((err) => {
           console.warn("createPropertyPage: promo video rehost failed:", err.message);
@@ -217,7 +219,7 @@ module.exports = function createPagesRouter(ctx) {
       const [video, poster, ...rest] = await Promise.all([
         videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
       ]);
-      const videoUrl = video.url;
+      const videoUrl = video ? video.url : null;
       const promo = await promoP;
       const posterUrl = poster.url;
       const photos = rest.slice(0, photoPs.length);

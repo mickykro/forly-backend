@@ -495,6 +495,12 @@ app.listen(PORT, () => {
   console.log("  agent auth:  enabled");
   // Expiry scheduler retired: property pages no longer expire — the public
   // portal (call4li.com) lists every live page until the agent archives it.
+  // A build whose video never came still gets its page, photo instead of video.
+  // Dev runs (N8N_DEV_*) leave it off: their page builder is a separate workflow.
+  require("./build-fallback").startPhotoFallback({
+    pageBuilderWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL ? "" : N8N_PIPELINE_WEBHOOK_URL,
+    baseUrl: BASE_URL,
+  });
   distributionJobs.startSweeper(distributionJobs.liveDeps({
     greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN,
     pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
