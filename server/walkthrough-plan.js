@@ -24,7 +24,7 @@
  * photos go last in every clip (they take reference slots from the rooms), she
  * welcomes in the opener, presents what each room shows and invites in the
  * closer. She never speaks: Seedance's speech is gibberish, not Hebrew.
- * Each room is ONE continuous, longer shot (its other photos only keep it
+ * Each room is ONE continuous shot (its other photos only keep it
  * accurate) — two cuts inside one kitchen read as two kitchens — and every
  * clip opens already inside its room: "walks into the frame" made Seedance
  * invent a doorway for her to come through. Her gestures rotate through a set
@@ -41,10 +41,11 @@ const SECONDS_PER_SOLO_SHOT = 2;
 const SECONDS_PER_PACKED_SHOT = 3.5;
 const MIN_PHOTOS = 4;
 const MIN_QUALITY = 4;
-const SECONDS_PER_PRESENTER_ROOM = 6; // one continuous shot per room
-const SECONDS_PER_PACKED_PRESENTER_SHOT = 4;
-const PRESENTER_EDGE_SECONDS = 2; // her welcome (opener) and invitation (closer)
-const PRESENTER_TARGETS = 3; // things she presents in one room
+// Seedance bills per second: kept so a presenter video costs no more than the
+// plain one (6s rooms made a 3-room listing 24s instead of 16s).
+const SECONDS_PER_PRESENTER_ROOM = 4; // one continuous shot per room
+const SECONDS_PER_PACKED_PRESENTER_SHOT = 2.5;
+const PRESENTER_TARGETS = 2; // things she presents in a middle room; 1 where she welcomes or invites
 const PRESENTER_DESCRIPTION = "a woman in her early thirties with long straight dark hair, a black blazer over a black top, " +
   "cream wide-leg trousers and black heels";
 
@@ -227,7 +228,7 @@ function buildClip(group, index, openerGroup, opts = {}) {
   const first = index === 0;
   const last = !!opts.last;
   const seconds = presenter
-    ? shots.length * (packed ? SECONDS_PER_PACKED_PRESENTER_SHOT : SECONDS_PER_PRESENTER_ROOM) + (first ? PRESENTER_EDGE_SECONDS : 0) + (last ? PRESENTER_EDGE_SECONDS : 0)
+    ? shots.length * (packed ? SECONDS_PER_PACKED_PRESENTER_SHOT : SECONDS_PER_PRESENTER_ROOM)
     : shots.length * (packed ? SECONDS_PER_PACKED_SHOT : SECONDS_PER_SOLO_SHOT);
   const duration = fit(seconds);
   const per = (duration / shots.length).toFixed(1);
@@ -297,12 +298,14 @@ function roomTargets(space, photos, used, n) {
   return out;
 }
 
-// One presenter shot: a solo room is one long take in which she presents up
-// to PRESENTER_TARGETS things; a packed room is one short shot. She welcomes
+// One presenter shot: a solo room is one take in which she presents up to
+// PRESENTER_TARGETS things (one where she also welcomes or invites); a packed
+// room is one short shot. She welcomes
 // in the opener's first shot and invites in the closer's last.
 function presenterShot(s, k, count, per, { first, last, packed, index, used }) {
   const photos = packed ? [s.photo] : s.space.photos;
-  const targets = roomTargets(s.space, photos, used, packed ? 1 : PRESENTER_TARGETS);
+  const edge = (first && k === 0) || (last && k === count - 1);
+  const targets = roomTargets(s.space, photos, used, packed || edge ? 1 : PRESENTER_TARGETS);
   const things = targets.length ? targets.map((t) => `the ${t}`) : ["the room"];
   const moves = things.map((t, i) => GESTURES[(index * 2 + k + i) % GESTURES.length](t));
   const presents = moves.reduce((acc, m) => `${acc}, glances back at the camera, then ${m}`);

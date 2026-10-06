@@ -135,7 +135,10 @@ assert.equal(buildTitles({ rooms: 3.5, neighborhood: "שכונת רמות", park
   assert.ok(/already standing in the room/.test(pres.clips[0].prompt), "she welcomes in the opener");
   assert.ok(pres.clips.every((c) => !/walks into the frame/.test(c.prompt)));
   assert.ok(/inviting gesture/.test(pres.clips[pres.clips.length - 1].prompt), "she invites in the closer");
-  assert.ok(pres.clips.reduce((n, c) => n + c.duration, 0) >= plain.clips.reduce((n, c) => n + c.duration, 0), "she gets time");
+  // Seedance bills per second: the presenter video never costs more than the plain one
+  const total = (p) => p.clips.reduce((n, c) => n + c.duration, 0);
+  assert.ok(total(pres) <= total(plain), `presenter ${total(pres)}s ≤ plain ${total(plain)}s`);
+  assert.ok(pres.clips.every((c) => c.duration <= 5), "no clip longer than 5s");
   // gestures vary: the opener and the next clip do not open with the same move
   const move = (c) => (c.prompt.split("The presenter:")[1].match(/she (sweeps|points|frames|steps beside|turns her body)/) || [])[1];
   assert.notEqual(move(pres.clips[0]), move(pres.clips[1]));
@@ -148,9 +151,19 @@ assert.equal(buildTitles({ rooms: 3.5, neighborhood: "שכונת רמות", park
   assert.equal((solo.prompt.match(/Shot \d/g) || []).length, 1, "one shot per room, no cuts inside it");
   assert.ok(/one continuous shot inside this one room, with no cuts/.test(solo.prompt));
   assert.ok(/no door frame, doorway or threshold/.test(solo.prompt), "opens already inside the room");
-  assert.ok(/the sofa/.test(solo.prompt) && /the window/.test(solo.prompt) && /the tv/.test(solo.prompt) && !/the rug/.test(solo.prompt),
-    "she presents up to three things in the room");
-  assert.ok(/glances back at the camera/.test(solo.prompt));
+  // the only clip is both opener and closer: welcome + one thing + invitation
+  assert.ok(/the sofa/.test(solo.prompt) && !/the window/.test(solo.prompt), "one thing where she also welcomes or invites");
+  // a middle room: two things, a glance at the camera between them
+  const mid = Array.from({ length: 4 }, (_, i) => tag(["living_room", "kitchen", "bedroom", "balcony"][i], 8, i + 1));
+  const midMap = normalizeMap({ spaces: [
+    { type: "living_room", photos: [{ n: 1, shows: ["sofa"] }] },
+    { type: "kitchen", photos: [{ n: 2, shows: ["kitchen island", "oven", "fridge"] }] },
+    { type: "bedroom", photos: [{ n: 3, shows: ["bed"] }] },
+    { type: "balcony", photos: [{ n: 4, shows: ["table"] }] }] }, 4, mid.map((t) => t.room_type));
+  const kitchen = planWalkthrough(midMap, mid, {}, MAX_CLIPS, { presenter }).clips.find((c) => /kitchen island/.test(c.prompt));
+  assert.ok(/the oven/.test(kitchen.prompt) && !/the fridge/.test(kitchen.prompt), "two things in a middle room");
+  assert.ok(/glances back at the camera/.test(kitchen.prompt));
+  assert.equal(kitchen.duration, 4);
   // the plain plan still cuts between a room's photos
   assert.ok((planWalkthrough(bigMap, big, {}).clips[0].prompt.match(/Shot \d/g) || []).length > 1);
   // empty presenter → plain plan
