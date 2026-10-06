@@ -193,6 +193,18 @@ module.exports = function createIntakeRouter(ctx) {
       businessCache.invalidate(agentPhone);
     }
 
+    // Recreated from a failed listing (create.html?from_listing=): the old one
+    // never got a page and now never will, so it leaves every list. Only a
+    // page-less listing of the same client is retired.
+    const replacesId = typeof body.replaces_listing_id === "string" ? body.replaces_listing_id : "";
+    if (replacesId && replacesId !== result.listing_id) {
+      const old = await db.getListing(replacesId).catch(() => null);
+      if (old && !old.page_id && old.business_phone === agentPhone) {
+        await db.updateListing(replacesId, { status: "deleted", replaced_by: result.listing_id })
+          .catch((err) => console.warn("retire replaced listing failed:", err.message));
+      }
+    }
+
     // The admin stays logged in as themselves so they can create the next
     // demo; the agent signs in later with their own phone (OTP).
     res.json({ ...result, status: "building", logged_in: false });

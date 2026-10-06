@@ -13,6 +13,7 @@
  *   POST /api/admin/properties/delete  → archive/delete ANY listing
  *   POST /api/admin/properties/retry   → rerun the page build of ANY listing with no page
  *   GET  /api/admin/agent-profile      → one agent's saved details, to prefill create.html
+ *   GET  /api/admin/listing            → one listing's details + photos, to reopen it in create.html
  */
 
 const express = require("express");
@@ -476,6 +477,31 @@ module.exports = function createAdminRouter(ctx) {
       business_name: b.business_name || "",
       license_number: b.license_number || "",
       logo_url: b.logo_url || null,
+    });
+  });
+
+  // ── one listing, in the create form's field names (create.html?from_listing=<id>) ──
+  // A build that keeps failing is reopened in the create form: same details and
+  // photos, which the operator can change before creating it again.
+  router.get("/listing", requireAdmin, async (req, res) => {
+    const id = String(req.query.id || "");
+    const l = id ? await db.getListing(id) : null;
+    if (!l) return res.status(404).json({ error: "not_found" });
+    res.json({
+      listing_id: l.listing_id,
+      business_phone: l.business_phone,
+      has_page: !!l.page_id,
+      fields: {
+        deal: l.listing_type === "rent" ? "rent" : "sale",
+        address: l.address || null, city: l.city || null, neighborhood: l.neighborhood || null,
+        price: l.price || null, rooms: l.rooms || null, size_sqm: l.size_sqm || null,
+        floor: l.floor || null, parking: l.parking || null,
+        sqm_built: l.size_built || null, sqm_balcony: l.size_balcony || null, sqm_garden: l.size_garden || null,
+        elevator: !!l.elevator, shabbat_elevator: !!l.shabbat_elevator, storage: !!l.storage,
+      },
+      description: l.description || "",
+      photos: Array.isArray(l.photos_urls) ? l.photos_urls : [],
+      template: (l.theme && l.theme.template) || null,
     });
   });
 

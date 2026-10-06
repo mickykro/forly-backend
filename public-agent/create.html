@@ -557,6 +557,10 @@
   // their logo is reused, and nothing is autosaved back into their account.
   var agentMatch = location.search.match(/[?&]agent=(\d{9,15})(&|$)/);
   var clientPhone = isDemo && agentMatch ? agentMatch[1] : null;
+  // ?from_listing=<id> (admin → a failed property): reopen it with its details
+  // and photos; creating it again retires the old listing.
+  var fromListingMatch = location.search.match(/[?&]from_listing=([0-9a-f-]{36})(&|$)/);
+  var fromListingId = isDemo && fromListingMatch ? fromListingMatch[1] : null;
   var clientLogoUrl = null;
 
   // ── functional three-stage creation wizard ──
@@ -859,7 +863,9 @@
     // standalone demo — not for signed-in users: hide the "my properties" nav
     var myProps = $("#navMyProps");
     if (myProps) myProps.style.display = "none";
-    if (clientPhone) {
+    if (fromListingId) {
+      reopenListing(fromListingId);
+    } else if (clientPhone) {
       prefillClient(clientPhone);
     } else {
       // ponytail: autosave agent fields on blur during demo
@@ -901,6 +907,40 @@
         setClientPhone(phone);
         FLY.toast("לא נמצא פרופיל שמור ללקוח — מלאו את פרטי הסוכן");
       });
+  }
+
+  function reopenListing(id) {
+    FLY.req("/api/admin/listing?id=" + encodeURIComponent(id), { noRedirect: true })
+      .then(function (d) {
+        if (d.has_page) { FLY.toast("לנכס הזה כבר יש דף — אין מה לפתוח מחדש"); fromListingId = null; return; }
+        clientPhone = d.business_phone;
+        prefillClient(d.business_phone);
+        X.fillFields(d.fields, $);
+        if (d.template && document.querySelector('.tpl-card[data-tpl="' + d.template + '"]')) selectTemplate(d.template);
+        syncDealButtons(); updatePriceLabel(); renderPriceChips();
+        if (d.description && !$("#pDesc").value.trim()) $("#pDesc").value = String(d.description).slice(0, 2000);
+        // The saved photos come back as already-hosted entries. Removing one only
+        // drops it from this listing: the file stays (the old listing points at it).
+        (d.photos || []).forEach(function (url) {
+          if (photos.length >= 12) return;
+          var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
+          var entry = { file: null, el: t, publicUrl: url, previewUrl: url, removed: false, failed: false, uploadPromise: Promise.resolve(url) };
+          t.querySelector(".x").addEventListener("click", function () {
+            entry.removed = true;
+            photos = photos.filter(function (q) { return q.el !== t; });
+            t.remove(); updateLivePreview();
+          });
+          $("#thumbs").appendChild(t); photos.push(entry);
+        });
+        var note = $("#demoWorkspaceNote");
+        note.querySelector("strong").textContent = "פתיחה מחדש של נכס שלא נבנה.";
+        note.querySelector(".demo-index").nextElementSibling.querySelector("span").textContent =
+          " הפרטים והתמונות נטענו — אפשר להסיר, להוסיף ולתקן. יצירה תחליף את הנכס הישן.";
+        revealManual();
+        setWizardStage(1, false);
+        updateLivePreview();
+      })
+      .catch(function () { FLY.toast("לא הצלחנו לטעון את הנכס"); fromListingId = null; });
   }
 
   // ponytail: autosave agent fields during demo — writes to businesses/{phone}
@@ -1687,6 +1727,7 @@
         // Tells the server which listing-sweep draft to mark "created" once
         // the page exists (routes/pages.js).
         if (fromListingDraftId) body.listing_draft_id = fromListingDraftId;
+        if (fromListingId) body.replaces_listing_id = fromListingId;
         btn.textContent = FT("status_creating");
         $("#vLoaderMsg").textContent = FT("status_creating");
         var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
