@@ -135,6 +135,9 @@ module.exports = function createPostingRouter(ctx) {
     }) };
   }
 
+  // Manual posting: an admin publishes by hand, so the automatic posting switch does not apply.
+  const manualOn = () => require("../posting-manual").enabled(deps.env || process.env);
+
   async function owned(req, res) {
     const id = String(req.params.id || "");
     const c = S_.ID_RE.test(id) ? await store.getPostingCampaign(id) : null;
@@ -150,16 +153,14 @@ module.exports = function createPostingRouter(ctx) {
     if (!v) return res.status(400).json({ error: "invalid_input" });
     // The consent is to the text the card showed: it must be this version.
     if (b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
-    // Manual posting: an admin publishes by hand, so the automatic posting switch does not apply.
-    const manual = require("../posting-manual").enabled(deps.env || process.env);
+    const manual = manualOn();
     if (!manual && !(await allowed(S, phone, res, PERMISSION_CURED))) return;
 
     const conn = (await db.getConnection(phone)) || {};
     if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
     const page = await db.getPage(b.page_id);
     if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
-    const others = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== page.page_id);
-    if (!require("../posting-safety").capsOff() && others.length >= MAX_ACTIVE_CAMPAIGNS) return res.status(409).json({ error: "too_many_campaigns" });
+    // No cap on live campaigns per agent for now (MAX_ACTIVE_CAMPAIGNS is not enforced).
     const wanted = v.targets || S_.DEFAULT_TARGETS;
     if (wanted.includes("page") && !S_.pageConfirmed(conn)) return res.status(409).json({ error: "page_not_confirmed" });
     // Until connect has read the Page's numeric id, R3 could never prove it: refused (I4).
@@ -225,7 +226,7 @@ module.exports = function createPostingRouter(ctx) {
   router.post("/campaigns/:id/resume", auth, wrap("resume", async (req, res) => {
     const c = await owned(req, res);
     if (!c) return;
-    if (!(await allowed(S, c.phone, res))) return;
+    if (!manualOn() && !(await allowed(S, c.phone, res))) return;
     if (c.status === "running") return res.json({ campaign: publicView(c) });
     if (c.status !== "paused") return res.status(409).json({ error: "not_paused", status: c.status });
     // R5: an internal pause (selector failures, tick errors) is lifted by the
@@ -251,7 +252,7 @@ module.exports = function createPostingRouter(ctx) {
     const g = S_.parseGroupIds(b.group_ids, { required: true });
     if (g.error || !g.ids.length || (b.include_unknown !== undefined && typeof b.include_unknown !== "boolean")) return res.status(400).json({ error: "invalid_input" });
     if (!LIVE.has(c.status)) return res.status(409).json({ error: "not_live", status: c.status });
-    if (!(await allowed(S, c.phone, res))) return;
+    if (!manualOn() && !(await allowed(S, c.phone, res))) return;
     const page = await db.getPage(c.page_id);
     if (!page || page.business_phone !== c.phone) return res.status(404).json({ error: "not_found" });
     const vet = await vetGroups((await db.getConnection(c.phone)) || {}, page, g.ids, b.include_unknown === true);

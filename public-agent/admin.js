@@ -242,8 +242,6 @@
       "<td>" + readinessPills(a.readiness) + "</td>" +
       '<td><label class="switch"><input type="checkbox" data-chatbot="' + esc(a.phone) + '"' +
         (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
-      '<td><label class="switch"><input type="checkbox" data-portfolio-feature="' + esc(a.phone) + '"' +
-        (a.portfolio_enabled ? " checked" : "") + "><i></i></label></td>" +
       '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
         (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
       "<td>" + quotaCellHtml(a) + "</td>" +
@@ -491,12 +489,10 @@
     document.querySelectorAll("[data-quota]").forEach(function (btn) {
       btn.addEventListener("click", function () { openQuotaEditor(btn.dataset.quota); });
     });
-    // Portfolio + distribution entitlements share one shape: flip a feature
+    // Feature entitlements share one shape: flip a feature
     // flag on the business, keep the local row in step, toast the result.
     // (Distribution arms the WhatsApp publish offer for FUTURE pages.)
     [
-      { attr: "portfolioFeature", sel: "[data-portfolio-feature]", feature: "portfolio", key: "portfolio_enabled",
-        on: "✅ דף נכסים הופעל לסוכן", off: "דף נכסים כובה" },
       { attr: "distribution", sel: "[data-distribution]", feature: "distribution", key: "distribution_enabled",
         on: "✅ הפצה הופעלה — נכסים חדשים יקבלו הצעת פרסום בוואטסאפ", off: "הפצה כובתה לסוכן" },
     ].forEach(function (f) {

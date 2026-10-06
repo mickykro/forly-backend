@@ -238,8 +238,8 @@ module.exports = function createIntakeRouter(ctx) {
     const phone = req.user.userId;
     const invalid = validateListing(body);
     if (invalid) return res.status(invalid.code).json({ error: invalid.error });
+    const business = await db.getBusiness(phone).catch(() => null);
     if (quota) {
-      const business = await db.getBusiness(phone).catch(() => null);
       const q = await quota.consume(phone, "walkthroughs", 1, {
         source: "dashboard", business,
         request: { address: body.address, city: body.city, price: body.price, rooms: body.rooms,
@@ -251,7 +251,9 @@ module.exports = function createIntakeRouter(ctx) {
     // source and clear the draft: otherwise the agent's next message would
     // keep re-sending the review link for a page that already exists.
     const fromDraft = body.whatsapp_draft === true;
-    const result = await createListing(phone, body, null, fromDraft ? { source: "whatsapp" } : null);
+    // The phones the agent picked for this page (main and/or additional ones).
+    const agentPhones = require("../profile-onboarding").pagePhones(body.agent_phones, phone, business && business.extra_phones);
+    const result = await createListing(phone, body, null, { ...(fromDraft ? { source: "whatsapp" } : {}), agentPhones });
     if (result.error) return res.status(result.code).json({ error: result.error });
     if (fromDraft) await db.deleteDraft(phone).catch((err) => console.warn("whatsapp draft cleanup failed:", err.message));
     res.json({ ...result, status: "building" });

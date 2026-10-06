@@ -41,12 +41,16 @@ t("every API error code has Hebrew, and a raw message never shows", () => {
 
 t("posting_disabled is worded by its reason", () => {
   const off = U.errorText({ code: "posting_disabled", body: { reason: "global_off" } });
-  assert.ok(!/כבוי/.test(off), "a switch-off for everyone is not announced");
-  assert.strictEqual(U.waitText("posting_disabled:env_off"), U.waitText(""));
-  assert.ok(U.silentOff("posting_disabled:global_off") && !U.silentOff("posting_disabled:platform_off"));
+  assert.strictEqual(off, "", "a system switch-off is not announced");
+  for (const r of ["env_off", "global_off", "platform_off", "something_new"]) {
+    assert.strictEqual(U.errorText({ code: "posting_disabled", body: { reason: r } }), "", r);
+    assert.strictEqual(U.waitText(`posting_disabled:${r}`), U.waitText(""), r);
+    assert.ok(U.silentOff(`posting_disabled:${r}`), r);
+  }
+  assert.strictEqual(U.errorText({ code: "posting_unavailable_in_env" }), "", "the env guard is not announced");
+  assert.ok(!U.silentOff("posting_disabled:account_disabled"));
   assert.notStrictEqual(U.errorText({ code: "posting_disabled", body: { reason: "account_disabled" } }), off);
   assert.match(U.errorText({ code: "posting_disabled", body: { reason: "no_permission" } }), /לאשר מחדש/);
-  assert.match(U.waitText("posting_disabled:platform_off"), /בפייסבוק כבוי/);
 });
 
 t("the first-post estimate says it is an estimate", () => {
@@ -76,7 +80,8 @@ t("halt boxes: one class per account state, strongest first", () => {
   assert.ok(/מתקן/.test(U.errorText({ code: "needs_developer" })));
   assert.ok(U.haltInfo({}, { status: "paused", pause_reason: "permission" }).reconsent);
   assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:global_off" }), null);
-  assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:platform_off" }).cls, "off");
+  assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:platform_off" }), null);
+  assert.strictEqual(U.haltInfo({}, { status: "running", wait_reason: "posting_disabled:account_disabled" }).cls, "off");
   assert.strictEqual(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z" }, running).cls, "penalty");
   assert.strictEqual(U.haltInfo({}, running), null);
   assert.strictEqual(U.haltInfo(null, null), null);
@@ -103,14 +108,17 @@ t("halt boxes: the disabled class picks the text and the one action", () => {
   assert.match(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z", penalty_class: "feature_blocked" }, null).text, /חסמה זמנית/);
   assert.match(U.haltInfo({ penalty_until: "2026-10-09T00:00:00Z", penalty_class: null }, null).text, /ביקשה להאט/);
   assert.strictEqual(U.haltInfo({ posting_off: "global_off" }, null), null);
-  assert.strictEqual(U.haltInfo({ posting_off: "platform_off" }, null).cls, "off");
+  assert.strictEqual(U.haltInfo({ posting_off: "platform_off" }, null), null);
+  assert.strictEqual(U.haltInfo({ posting_off: "account_disabled" }, null).cls, "off");
 });
 
 t("approve is hidden while nothing may post; otherwise shown", () => {
-  for (const h of [{ disabled_until_admin: true }, { owner_review_required: true }, { needs_reconnect: true }, { penalty_blocks_posts: true }, { posting_off: "env_off" }]) {
+  for (const h of [{ disabled_until_admin: true }, { owner_review_required: true }, { needs_reconnect: true }, { penalty_blocks_posts: true }, { posting_off: "account_disabled" }]) {
     assert.strictEqual(U.approveBlocked(h, { status: "running" }), true, JSON.stringify(h));
   }
-  assert.strictEqual(U.approveBlocked({}, { status: "running", wait_reason: "posting_disabled:global_off" }), true);
+  // A system switch never hides the approve buttons.
+  assert.strictEqual(U.approveBlocked({ posting_off: "env_off" }, { status: "running" }), false);
+  assert.strictEqual(U.approveBlocked({}, { status: "running", wait_reason: "posting_disabled:global_off" }), false);
   assert.strictEqual(U.approveBlocked({ penalty_until: "2026-10-09T00:00:00Z", penalty_blocks_posts: false }, { status: "running" }), false, "a penalty after day one only slows");
   assert.strictEqual(U.approveBlocked({}, { status: "paused", pause_reason: "agent" }), false);
   assert.strictEqual(U.approveBlocked(null, null), false);

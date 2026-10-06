@@ -42,7 +42,7 @@ function validateListing(body) {
  */
 async function createListing(phone, body, agentOverride, deps) {
   const { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl,
-    source = "dashboard", fetchFn = fetch } = deps;
+    source = "dashboard", fetchFn = fetch, agentPhones = null } = deps;
   const invalid = validateListing(body);
   if (invalid) return invalid;
   if ((isDevRun || isDevPipelineRun) && source === "whatsapp" && !body.own_video_url && baseUrl) {
@@ -85,6 +85,9 @@ async function createListing(phone, body, agentOverride, deps) {
         : null,
       license: String(agentOverride.license || ""),
     } : null,
+    // The phones the agent picked on create ({ phone, phone2 }); wins over
+    // whatever agent block n8n forwards when the page is built.
+    agent_phones: agentPhones,
     agent2: body.agent2 && body.agent2.name && body.agent2.phone ? {
       name: String(body.agent2.name).slice(0, 60),
       phone: String(body.agent2.phone).replace(/\D/g, "").slice(0, 15),

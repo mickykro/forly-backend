@@ -246,7 +246,9 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const badAuto = b.auto_enroll !== undefined && typeof b.auto_enroll !== "boolean";
     if (g.error || t.error || badMode || badVis || badPage || badAuto) return res.status(400).json({ error: "invalid_input" });
     if (b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
-    if (!(await allowed(S, phone, res, PERMISSION_CURED))) return;
+    // Manual posting: an admin publishes by hand, so the automatic posting switch does not apply.
+    const manual = require("../posting-manual").enabled(deps.env || process.env);
+    if (!manual && !(await allowed(S, phone, res, PERMISSION_CURED))) return;
 
     const conn = (await db.getConnection(phone)) || {};
     const gate = S_.memberGate(conn, g.ids);

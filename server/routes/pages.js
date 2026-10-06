@@ -104,7 +104,8 @@ module.exports = function createPagesRouter(ctx) {
   function pagePayload(id, d, chatbot) {
     return {
       page_id: id, status: d.status, agent: d.agent, agent2: d.agent2 || null,
-      property: d.property,
+      // Place names in the page language when they were translated (page-translate.js).
+      property: d.place_i18n ? { ...d.property, ...d.place_i18n } : d.property,
       hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
       cta: d.cta, sections: d.sections, theme: d.theme || null,
       language: d.language || "he",
@@ -285,8 +286,9 @@ module.exports = function createPagesRouter(ctx) {
           brand_name: agentField("brand_name") || agentField("name"),
           logo_url: logoUrl,
           tagline: agentField("tagline"),
-          phone: agentField("phone") || body.business_phone,
-          phone2: agentField("phone2") || null,
+          // The phones the agent picked on create win; otherwise as before.
+          phone: (listing && listing.agent_phones && listing.agent_phones.phone) || agentField("phone") || body.business_phone,
+          phone2: listing && listing.agent_phones ? listing.agent_phones.phone2 || null : agentField("phone2") || null,
           license: agentField("license"),
         },
         agent2: agent2Doc,
@@ -347,6 +349,10 @@ module.exports = function createPagesRouter(ctx) {
       };
 
       if (!doc.property.tags.length) doc.property.tags = deriveTags(doc.property, listing && listing.description);
+      // Every visible text in the page's chosen language, whatever the input was.
+      // Fail-open: a failed translation leaves the page as built.
+      const tr = await require("../page-translate").translatePage(doc);
+      if (tr.translated) console.log(`[page-translate] ${pageId} → ${doc.language}: ${tr.translated} fields`);
       await db.savePage(doc);
       await db.setListingPageId(body.listing_id, pageId);
       // A listing built from chat: its draft is done. Only that draft — the agent
