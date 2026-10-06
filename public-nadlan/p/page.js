@@ -181,9 +181,12 @@
     text(".hero-copy p.sub", buildSubline(p));
     var vid = $("#walkthrough");
     vid.poster = d.hero.poster_url || "";
-    vid.src = d.hero.video_url;
-    vid.load();
-    var pp = vid.play(); if (pp && pp.catch) pp.catch(function () {});
+    // No video (its generation failed): the poster stays up as a still hero.
+    if (d.hero.video_url) {
+      vid.src = d.hero.video_url;
+      vid.load();
+      var pp = vid.play(); if (pp && pp.catch) pp.catch(function () {});
+    }
     var heroBg = $(".hero-bg");
     if (heroBg && d.hero.poster_url) heroBg.style.backgroundImage = "url('" + d.hero.poster_url + "')";
 
