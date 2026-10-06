@@ -7,9 +7,10 @@
  * per clip — plus the end titles. n8n-only (x-forly-secret): it spends a vision
  * call per request.
  *
- * `presenter: true` (WW1 Walkthrough Presenter) adds the fixed presenter
- * character to every clip, using the reference photos served from /presenter/
- * (public-agent/presenter); `presenter_image_urls` overrides them.
+ * POST /api/walkthrough/presenter-plan (WW1 Walkthrough Presenter) takes the
+ * same body and adds the fixed presenter character to every clip, using the
+ * reference photos served from /presenter/ (public-agent/presenter);
+ * `presenter_image_urls` overrides them.
  */
 
 const express = require("express");
@@ -70,7 +71,16 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
     next();
   }
 
-  router.post("/plan", requireN8n, async (req, res) => {
+  // /plan: the plain walkthrough. /presenter-plan: the same, with the presenter
+  // in every clip (WW1 Walkthrough Presenter).
+  router.post("/plan", requireN8n, (req, res) => plan(req, res, null));
+  router.post("/presenter-plan", requireN8n, (req, res) => {
+    const presenter = presenterFrom(req.body || {}, baseUrl);
+    if (!presenter) return res.status(503).json({ error: "presenter_images_unavailable" });
+    return plan(req, res, presenter);
+  });
+
+  async function plan(req, res, presenter) {
     const body = req.body || {};
     // image_urls: plain strings, {url} or Firestore {stringValue}. `tags` (the
     // old Vision Tagger output) is still accepted; its scores are used only
@@ -95,9 +105,9 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
       ? await uprightPhotos(tags, (buf) => storeBuffer(buf, "jpg", uploadDir, baseUrl, storeOpts).then((r) => r.url))
       : 0;
     const { map, debug } = await mapSpaces(tags);
-    let plan;
+    let result;
     try {
-      plan = planWalkthrough(map, tags, details, MAX_CLIPS, { presenter: presenterFrom(body, baseUrl) });
+      result = planWalkthrough(map, tags, details, MAX_CLIPS, { presenter });
     } catch (err) {
       if (err.code === "too_few_photos") return res.status(422).json({ error: err.message, map_debug: debug });
       console.error("walkthrough plan failed:", err.message);
@@ -113,8 +123,8 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
         console.warn("walkthrough: saving space map failed:", err.message);
       }
     }
-    res.json({ ...plan, space_map: map, map_debug: debug, uprighted_photos: uprighted });
-  });
+    res.json({ ...result, space_map: map, map_debug: debug, uprighted_photos: uprighted });
+  }
 
   return router;
 };

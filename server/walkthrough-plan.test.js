@@ -146,8 +146,8 @@ assert.equal(buildTitles({ rooms: 3.5, neighborhood: "שכונת רמות", park
 // ── route: which presenter a request gets ──
 {
   const { presenterFrom } = require("./walkthrough-plan");
-  assert.equal(presenterFrom({}, "https://x.com"), null);
-  assert.deepEqual(presenterFrom({ presenter: true }, "https://x.com/").image_urls,
+  assert.equal(presenterFrom({}, ""), null, "no base URL, no files to point at");
+  assert.deepEqual(presenterFrom({}, "https://x.com/").image_urls,
     ["https://x.com/presenter/front.jpg", "https://x.com/presenter/side.jpg"]);
   assert.deepEqual(presenterFrom({ presenter_image_urls: ["https://a/1.jpg", "http://b/2.jpg", "https://c/3.jpg", "https://d/4.jpg"] }, "").image_urls,
     ["https://a/1.jpg", "https://c/3.jpg"], "https only, at most two");

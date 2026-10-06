@@ -274,15 +274,15 @@ const MAX_PRESENTER_REFS = 2;
 const PRESENTER_FILES = ["presenter/front.jpg", "presenter/side.jpg"]; // public-agent/presenter
 
 /**
- * The presenter a /plan request asks for, or null: `presenter_image_urls`
- * (https, at most two) win; else `presenter: true` uses our own files under `baseUrl`.
+ * The presenter for a /presenter-plan request, or null: `presenter_image_urls`
+ * (https, at most two) win; else our own files under `baseUrl`.
  */
 function presenterFrom(body = {}, baseUrl = "") {
   const given = Array.isArray(body.presenter_image_urls)
     ? body.presenter_image_urls.map((u) => String(u || "").trim()).filter((u) => /^https:\/\/\S+$/.test(u)).slice(0, MAX_PRESENTER_REFS)
     : [];
   if (given.length) return { image_urls: given };
-  if (body.presenter !== true || !baseUrl) return null;
+  if (!baseUrl) return null;
   return { image_urls: PRESENTER_FILES.map((f) => `${String(baseUrl).replace(/\/+$/, "")}/${f}`) };
 }
 
