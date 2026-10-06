@@ -255,8 +255,10 @@ function presenterIntro(presenter, idx) {
   const refs = idx.map((i) => `@image${i}`);
   const which = refs.length > 1 ? `${refs.slice(0, -1).join(", ")} and ${refs[refs.length - 1]} show` : `${refs[0]} shows`;
   return `A real-estate presenter appears in the video: ${presenter.description || PRESENTER_DESCRIPTION}. ` +
-    `${which} her from the front and the side; use ${refs.length > 1 ? "them" : "it"} only for her face, hair, body and ` +
-    "clothes, never for the room or background, and keep her exactly like that in every shot. She moves naturally and " +
+    `${which} her as a character sheet from several angles (front, sides, back): it is one single woman, not several ` +
+    `people. Use ${refs.length > 1 ? "them" : "it"} only for her face, hair, body and clothes; ignore the sheet's background, ` +
+    "labels, angle numbers and the line under her feet, and never show text or more than one of her. Keep her exactly " +
+    "like that in every shot. She moves naturally and " +
     "calmly, smiles, and is a guide, not the subject: she stays to one side and never covers more than a third of the " +
     "frame or blocks the thing she presents. She never speaks and her lips do not move: no dialogue, voice or narration, " +
     "only soft ambient sound.";
@@ -271,7 +273,7 @@ function presenterAction(k, count, first, last, target) {
 }
 
 const MAX_PRESENTER_REFS = 2;
-const PRESENTER_FILES = ["presenter/front.jpg", "presenter/side.jpg"]; // public-agent/presenter
+const PRESENTER_FILES = ["presenter/sheet.jpg"]; // public-agent/presenter: her 360° character sheet
 
 /**
  * The presenter for a /presenter-plan request, or null: `presenter_image_urls`
