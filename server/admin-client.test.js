@@ -51,6 +51,30 @@ const { normalizeAuthPhone } = require("./utils");
   const demo = await db.getBusiness(NEW);
   assert.deepEqual([demo.source, demo.onboarding_state, demo.plan], ["demo", "demo_partial", "trial"]);
 
+  // ── reopen a failed listing: read it back, recreate it, the old one is retired ──
+  await db.saveListing({ listing_id: "11111111-1111-4111-8111-111111111111", business_phone: CLIENT, status: "failed", page_id: null,
+    listing_type: "sale", city: "פתח תקווה", address: "העצמאות 95", rooms: 5, price: 3000000, size_sqm: 149, elevator: true,
+    photos_urls: ["https://f/1.jpg", "https://f/2.jpg", "https://f/3.jpg"], description: "דירה", theme: { template: "atelier" } });
+  const old = await (await get("/admin/listing?id=11111111-1111-4111-8111-111111111111")).json();
+  assert.equal(old.business_phone, CLIENT);
+  assert.deepEqual([old.fields.city, old.fields.rooms, old.fields.size_sqm, old.fields.elevator, old.fields.deal, old.template],
+    ["פתח תקווה", 5, 149, true, "sale", "atelier"]);
+  assert.deepEqual(old.photos, ["https://f/1.jpg", "https://f/2.jpg", "https://f/3.jpg"]);
+  assert.equal((await get("/admin/listing?id=nope")).status, 404);
+
+  const re = await post("/properties/demo-create", { ...body, replaces_listing_id: "11111111-1111-4111-8111-111111111111" });
+  const newId = (await re.json()).listing_id;
+  const retired = await db.getListing("11111111-1111-4111-8111-111111111111");
+  assert.deepEqual([retired.status, retired.replaced_by], ["deleted", newId], "the failed listing leaves the lists");
+
+  // never retires a listing with a page, or another client's
+  await db.saveListing({ listing_id: "22222222-2222-4222-8222-222222222222", business_phone: CLIENT, status: "active", page_id: "pg1" });
+  await db.saveListing({ listing_id: "33333333-3333-4333-8333-333333333333", business_phone: NEW, status: "failed", page_id: null });
+  await post("/properties/demo-create", { ...body, replaces_listing_id: "22222222-2222-4222-8222-222222222222" });
+  await post("/properties/demo-create", { ...body, replaces_listing_id: "33333333-3333-4333-8333-333333333333" });
+  assert.equal((await db.getListing("22222222-2222-4222-8222-222222222222")).status, "active");
+  assert.equal((await db.getListing("33333333-3333-4333-8333-333333333333")).status, "failed");
+
   server.close();
   console.log("admin-client.test.js ok");
 })().catch((err) => { console.error(err); process.exit(1); });
