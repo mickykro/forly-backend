@@ -18,6 +18,7 @@ const OPTIONAL_COUNT = 11;
 
 const MAX_AREAS = 12;
 const MAX_COLORS = 3;
+const MAX_EXTRA_PHONES = 3;
 
 const str = (v, max) => String(v == null ? "" : v).trim().slice(0, max);
 
@@ -46,6 +47,20 @@ function colors(v) {
     .slice(0, MAX_COLORS);
 }
 
+// Additional phones the agent may show on a page. The main phone is the login
+// (businesses/{phone}) and never changes here. Canonical digits, deduped.
+function extraPhones(v) {
+  if (!Array.isArray(v)) return [];
+  const { normalizeAuthPhone } = require("./utils");
+  const out = [];
+  for (const raw of v) {
+    const p = normalizeAuthPhone(raw);
+    if (p && !out.includes(p)) out.push(p);
+    if (out.length === MAX_EXTRA_PHONES) break;
+  }
+  return out;
+}
+
 function years(v) {
   const n = Math.trunc(Number(v));
   return Number.isFinite(n) && n > 0 ? Math.min(n, 60) : 0;
@@ -57,6 +72,8 @@ function sanitizeProfile(raw) {
   const p = raw || {};
   return {
     full_name: str(p.full_name, 60),
+    business_name: str(p.business_name, 60), // office name
+    extra_phones: extraPhones(p.extra_phones),
     activity_areas: areas(p.activity_areas),
     specialty: str(p.specialty, 60),
     license_number: str(p.license_number, 40),
@@ -132,6 +149,8 @@ function readProfile(business) {
   const pick = (k) => (d[k] != null && d[k] !== "" ? d[k] : partial[k]);
   return sanitizeProfile({
     full_name: pick("full_name"),
+    business_name: pick("business_name"),
+    extra_phones: pick("extra_phones"),
     activity_areas: d.activity_areas && d.activity_areas.length ? d.activity_areas : partial.activity_areas,
     specialty: pick("specialty"),
     license_number: pick("license_number"),
@@ -149,8 +168,30 @@ function readProfile(business) {
   });
 }
 
+/* The phones a new page shows, as the agent picked them on create: only the
+   main phone or one of the profile's additional phones, at most two (a page
+   has phone and phone2). → { phone, phone2 } or null (nothing valid picked:
+   the page keeps its default, the main phone). */
+function pagePhones(picked, mainPhone, extras) {
+  const { normalizeAuthPhone } = require("./utils");
+  const allowed = new Set([mainPhone, ...(Array.isArray(extras) ? extras : [])].filter(Boolean));
+  const out = [];
+  for (const raw of Array.isArray(picked) ? picked : []) {
+    const p = normalizeAuthPhone(raw);
+    if (p && allowed.has(p) && !out.includes(p)) out.push(p);
+  }
+  return out.length ? { phone: out[0], phone2: out[1] || null } : null;
+}
+
+/* An edit after completion: the profile fields only — never the plan, the
+   payment state, the quota or the consent record. */
+function buildUpdateDoc(p, now) {
+  const { privacy_consent: _consent, ...fields } = p;
+  return { ...fields, onboarding_pct: completenessPct(p), updated_at: now };
+}
+
 module.exports = {
-  TONE_VALUES, GENDER_VALUES, ESSENTIALS, OPTIONAL_COUNT, MAX_AREAS, MAX_COLORS,
+  TONE_VALUES, GENDER_VALUES, ESSENTIALS, OPTIONAL_COUNT, MAX_AREAS, MAX_COLORS, MAX_EXTRA_PHONES,
   sanitizeProfile, missingEssentials, completenessPct,
-  buildPartialDoc, buildCompleteDoc, readProfile,
+  buildPartialDoc, buildCompleteDoc, buildUpdateDoc, readProfile, pagePhones,
 };

@@ -1,6 +1,7 @@
 /*
  * routes/profile.js — the agent profile completion form's backend.
- * Handles: /api/onboarding (GET), /api/onboarding/save, /api/onboarding/complete
+ * Handles: /api/onboarding (GET), /api/onboarding/save, /api/onboarding/complete,
+ * /api/onboarding/update (edits after completion)
  *
  * Replaces the signupGet / signupSave / signupComplete / signupUpload Cloud
  * Functions. The phone is taken from the session cookie, never from the body,
@@ -13,6 +14,7 @@ const express = require("express");
 
 const db = require("../db");
 const onboarding = require("../profile-onboarding");
+const { portfolioSlug } = require("../portfolio");
 
 module.exports = function createProfileRouter(ctx) {
   const { requireAuth, authSecret } = ctx;
@@ -24,10 +26,12 @@ module.exports = function createProfileRouter(ctx) {
     const phone = req.user.userId;
     try {
       const business = await db.getBusiness(phone);
+      const slug = business && business.portfolio && business.portfolio.slug;
       res.json({
         phone,
         already_complete: !!business && business.onboarding_state === "complete",
         profile: onboarding.readProfile(business),
+        portfolio_slug: slug || null,
       });
     } catch (err) {
       console.error("onboarding read failed:", err);
@@ -57,6 +61,7 @@ module.exports = function createProfileRouter(ctx) {
     if (!profile.privacy_consent) return res.status(400).json({ error: "privacy_consent_required" });
     const missing = onboarding.missingEssentials(profile);
     if (missing.length) return res.status(400).json({ error: "missing_required_fields", need: missing });
+    profile.extra_phones = profile.extra_phones.filter((p) => p !== phone);
 
     const now = new Date();
     try {
@@ -81,6 +86,44 @@ module.exports = function createProfileRouter(ctx) {
       res.json({ ok: true, onboarding_pct: onboarding.completenessPct(profile) });
     } catch (err) {
       console.error("onboarding complete failed:", err);
+      res.status(500).json({ error: "save failed" });
+    }
+  });
+
+  // ── edit a completed profile ──
+  // Only the profile fields change: completing again would reset the plan and
+  // re-seed the quota, so a completed agent edits through here instead.
+  router.post("/onboarding/update", requireAuth(authSecret), async (req, res) => {
+    const phone = req.user.userId;
+    const profile = onboarding.sanitizeProfile(req.body && req.body.profile);
+    if (!profile.privacy_consent) return res.status(400).json({ error: "privacy_consent_required" });
+    const missing = onboarding.missingEssentials(profile);
+    if (missing.length) return res.status(400).json({ error: "missing_required_fields", need: missing });
+    // The main phone is the login and is never an "additional" one.
+    profile.extra_phones = profile.extra_phones.filter((p) => p !== phone);
+    try {
+      const existing = await db.getBusiness(phone);
+      if (!existing || existing.onboarding_state !== "complete") return res.status(409).json({ error: "not_complete" });
+      const doc = onboarding.buildUpdateDoc(profile, new Date());
+      // The portfolio's address: a new one is reserved and the old one keeps
+      // redirecting to it (portfolio_slugs), so shared links still work.
+      const portfolio = existing.portfolio || null;
+      const asked = req.body && typeof req.body.portfolio_slug === "string" ? req.body.portfolio_slug : null;
+      let slug = portfolio && portfolio.slug;
+      if (portfolio && portfolio.slug && asked !== null) {
+        const next = portfolioSlug(asked);
+        if (next !== portfolio.slug) {
+          await db.reservePortfolioSlug(phone, next, portfolio.slug);
+          doc.portfolio = { ...portfolio, slug: next };
+          slug = next;
+        }
+      }
+      await db.setBusiness(phone, doc);
+      require("../business-cache").invalidate(phone);
+      res.json({ ok: true, onboarding_pct: onboarding.completenessPct(profile), portfolio_slug: slug || null });
+    } catch (err) {
+      if (err && err.message === "slug_taken") return res.status(409).json({ error: "slug_taken" });
+      console.error("onboarding update failed:", err);
       res.status(500).json({ error: "save failed" });
     }
   });

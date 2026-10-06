@@ -425,6 +425,13 @@
         </div>
       </div>
 
+      <!-- logged-in agents with additional phones: which numbers the page shows -->
+      <div id="phonePick" class="hidden" style="margin:6px 0 16px">
+        <div class="sec-title" data-i18n="sec_page_phones">טלפונים בדף</div>
+        <p style="color:var(--ink-soft);font-size:.9rem;margin:4px 0 8px" data-i18n="page_phones_hint">בחרו אילו מספרים יופיעו בדף הנכס (עד 2).</p>
+        <div id="phonePickList" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+
       <div class="creation-promise"><div><span class="promise-mark">✦</span><span data-i18n="promise_title">מה יקרה אחרי הלחיצה?</span></div><p data-i18n="promise_body">התמונות יהפכו לסרטון, הפרטים ייכתבו לסיפור, ודף נכס אישי יהיה מוכן לשליחה.</p></div>
       <div class="wizard-actions form-actions split"><button type="button" class="btn btn-ghost secondary-action" id="prevStage3">→ חזרה לתמונות</button><button class="btn btn-gold primary-action create-action" id="submitBtn" data-i18n="btn_submit">✦ צרו לי דף נכס</button></div>
       </section>
@@ -859,7 +866,45 @@
     // Real (non-demo) create is session-gated, but nothing checked that on
     // load — a logged-out user could fill the whole form before the 401
     // surfaced on submit. FLY.req redirects to login on 401 by default.
-    FLY.req("/api/profile").catch(function () {});
+    FLY.req("/api/profile").then(function (d) { renderPhonePick(d && d.profile); }).catch(function () {});
+  }
+
+  // ── the page's phones: the main one and/or the profile's additional ones (max 2) ──
+  function renderPhonePick(profile) {
+    var extras = (profile && profile.extra_phones) || [];
+    if (!profile || !profile.phone || !extras.length) return; // only the main phone: nothing to pick
+    var fmt = function (p) { return /^972\d{9}$/.test(p) ? "0" + p.slice(3, 5) + "-" + p.slice(5) : p; };
+    var list = $("#phonePickList");
+    [profile.phone].concat(extras).forEach(function (p, i) {
+      var row = document.createElement("label");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;cursor:pointer";
+      var box = document.createElement("input");
+      box.type = "checkbox"; box.value = p; box.checked = i === 0;
+      box.setAttribute("data-page-phone", "");
+      box.addEventListener("change", function () {
+        var on = document.querySelectorAll("[data-page-phone]:checked");
+        if (on.length > 2) box.checked = false;
+        if (!document.querySelectorAll("[data-page-phone]:checked").length) box.checked = true; // at least one
+      });
+      row.appendChild(box);
+      var span = document.createElement("span");
+      span.dir = "ltr"; span.textContent = fmt(p);
+      row.appendChild(span);
+      if (i === 0) { // "(main)", translated and re-translated on a language switch
+        var main = document.createElement("small");
+        main.setAttribute("data-i18n", "page_phone_main");
+        main.textContent = FT("page_phone_main");
+        row.appendChild(document.createTextNode(" ("));
+        row.appendChild(main);
+        row.appendChild(document.createTextNode(")"));
+      }
+      list.appendChild(row);
+    });
+    $("#phonePick").classList.remove("hidden");
+  }
+  function pickedPagePhones() {
+    var on = document.querySelectorAll("[data-page-phone]:checked");
+    return on.length ? Array.prototype.map.call(on, function (b) { return b.value; }) : null;
   }
 
   // ponytail: autosave agent fields during demo — writes to businesses/{phone}
@@ -1639,6 +1684,8 @@
             logo_url: logoUrl,
           };
           if (agent2) body.agent2 = agent2;
+        } else if (pickedPagePhones()) {
+          body.agent_phones = pickedPagePhones();
         }
         // Tells the server this page comes from the chat draft, so it can
         // clear the draft once the listing exists (routes/intake.js).

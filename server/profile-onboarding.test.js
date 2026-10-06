@@ -129,4 +129,33 @@ const full = () => ({
     ["אילת"]);
 }
 
+// ── editing a completed profile: office name and extra phones kept; plan, payment and consent untouched ──
+{
+  const { buildUpdateDoc } = require("./profile-onboarding");
+  const p = sanitizeProfile({ ...full(), business_name: "  כהן נדל״ן ", extra_phones: ["050-1234567", "0501234567", "abc", "+44 20 7946 0958", "052-1111111", "053-2222222"] });
+  assert.equal(p.business_name, "כהן נדל״ן");
+  assert.deepEqual(p.extra_phones, ["972501234567", "442079460958", "972521111111"], "normalized, deduped, junk dropped, at most 3");
+  const doc = buildUpdateDoc(p, new Date(0));
+  assert.equal(doc.business_name, "כהן נדל״ן");
+  assert.deepEqual(doc.extra_phones, p.extra_phones);
+  for (const k of ["plan", "paid", "onboarding_state", "privacy_consent", "privacy_consent_at", "created_at", "phone", "id_number"]) {
+    assert.ok(!(k in doc), `an edit must not write ${k}`);
+  }
+  assert.equal(readProfile({ business_name: "משרד" }).business_name, "משרד");
+  assert.deepEqual(readProfile({ extra_phones: ["972501234567"] }).extra_phones, ["972501234567"]);
+}
+
+// ── the phones a new page shows: only the agent's own, at most two ──
+{
+  const { pagePhones } = require("./profile-onboarding");
+  const main = "972500000000", extras = ["972501111111", "972502222222"];
+  assert.deepEqual(pagePhones(["0501111111", "972500000000"], main, extras), { phone: "972501111111", phone2: "972500000000" }, "order kept, input normalized");
+  assert.deepEqual(pagePhones(["972502222222"], main, extras), { phone: "972502222222", phone2: null }, "the main phone may be left off");
+  assert.deepEqual(pagePhones(["972509999999", "972500000000"], main, extras), { phone: "972500000000", phone2: null }, "a phone not on the profile is dropped");
+  assert.deepEqual(pagePhones([main, ...extras], main, extras), { phone: main, phone2: "972501111111" }, "at most two");
+  assert.equal(pagePhones([], main, extras), null);
+  assert.equal(pagePhones(undefined, main, extras), null);
+  assert.equal(pagePhones(["972509999999"], main, extras), null, "nothing valid: the page keeps its default");
+}
+
 console.log("profile-onboarding: all tests passed");

@@ -69,9 +69,9 @@
 <div class="agent-shell hidden" id="view">
   <div class="page-head">
     <div>
-      <span class="agent-kicker">Complete your profile</span>
-      <h1>בואו נשלים את הפרופיל שלך</h1>
-      <p>שדות עם <span class="req">*</span> הם חובה, השאר לא. הכל נשמר אוטומטית.</p>
+      <span class="agent-kicker" id="headKicker">Complete your profile</span>
+      <h1 id="headTitle">בואו נשלים את הפרופיל שלך</h1>
+      <p id="headSub">שדות עם <span class="req">*</span> הם חובה, השאר לא. הכל נשמר אוטומטית.</p>
     </div>
   </div>
 
@@ -85,6 +85,31 @@
     </div>
 
     <div class="field"><label for="fullName">שם מלא <span class="req">*</span></label><input id="fullName" maxlength="60" autocomplete="name" placeholder="למשל: שיראל כהן"></div>
+
+    <div class="grid-2">
+      <div class="field"><label for="businessName">שם המשרד</label><input id="businessName" maxlength="60" autocomplete="organization" placeholder="למשל: כהן נדל״ן"></div>
+      <div class="field"><label for="licenseNumber">מספר רישיון</label><input id="licenseNumber" maxlength="40" placeholder="מספר רישיון תיווך"></div>
+    </div>
+
+    <div class="field">
+      <label for="phoneView">טלפון ראשי</label>
+      <input id="phoneView" dir="ltr" readonly disabled style="max-width:260px">
+      <div id="extraPhones" style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0"></div>
+      <div class="areas-row" style="max-width:360px">
+        <input id="phoneInput" type="tel" dir="ltr" placeholder="050-0000000">
+        <button class="btn btn-ghost" type="button" id="phoneAdd">+ מספר נוסף</button>
+      </div>
+      <p class="form-err" id="errPhone">מספר הטלפון לא תקין.</p>
+    </div>
+
+    <div class="field hidden" id="portfolioField">
+      <label for="portfolioSlug">כתובת דף הנכסים (פורטפוליו)</label>
+      <div class="areas-row" style="max-width:480px" dir="ltr">
+        <span id="portfolioHost" style="align-self:center;white-space:nowrap"></span>
+        <input id="portfolioSlug" maxlength="60" dir="ltr" placeholder="my-office">
+      </div>
+      <p class="form-err" id="errSlug">הכתובת הזו כבר תפוסה — נסו כתובת אחרת.</p>
+    </div>
 
     <div class="field">
       <label for="areaInput">אזורי פעילות <span class="req">*</span></label>
@@ -117,10 +142,7 @@
       </div>
     </div>
 
-    <div class="grid-2">
-      <div class="field"><label for="specialty">התמחות</label><input id="specialty" maxlength="60" placeholder="דירות יוקרה, נכסים מסחריים…"></div>
-      <div class="field"><label for="licenseNumber">מספר רישיון</label><input id="licenseNumber" maxlength="40" placeholder="מספר רישיון תיווך"></div>
-    </div>
+    <div class="field"><label for="specialty">התמחות</label><input id="specialty" maxlength="60" placeholder="דירות יוקרה, נכסים מסחריים…"></div>
     <div class="field"><label for="slogan">סלוגן (עד 80 תווים)</label><input id="slogan" maxlength="80" placeholder="המשפט שמייצג אותך"></div>
 
     <div class="field">
@@ -224,14 +246,16 @@
 (function () {
   "use strict";
   var $ = function (s) { return document.getElementById(s); };
-  var TEXT_FIELDS = ["fullName", "specialty", "licenseNumber", "slogan", "yearsExperience",
+  var TEXT_FIELDS = ["fullName", "businessName", "specialty", "licenseNumber", "slogan", "yearsExperience",
                      "site", "instagram", "facebook"];
-  var state = { areas: [], tone: "", gender_pref: "", portrait_url: "", logo_url: "", brand_colors: [] };
+  var state = { areas: [], tone: "", gender_pref: "", portrait_url: "", logo_url: "", brand_colors: [], extra_phones: [] };
 
   // ── the profile the server speaks ──
   function collect() {
     return {
       full_name: $("fullName").value.trim(),
+      business_name: $("businessName").value.trim(),
+      extra_phones: state.extra_phones,
       activity_areas: state.areas,
       specialty: $("specialty").value.trim(),
       license_number: $("licenseNumber").value.trim(),
@@ -264,7 +288,36 @@
 
   // ── autosave (debounced; nothing leaves the page before consent) ──
   var saveTimer = null;
+  // A completed profile is edited, not onboarded: saved by the button only
+  // (the autosave writes the onboarding draft, which a completed profile no longer reads).
+  var editing = false, slugShown = "";
+  function saveEdit() {
+    var p = collect();
+    $("errEssentials").classList.remove("show");
+    $("errSlug").classList.remove("show");
+    if (!p.full_name || !p.activity_areas.length || !p.portrait_url) {
+      $("saveNote").textContent = "";
+      $("errEssentials").classList.add("show");
+      return Promise.resolve(false);
+    }
+    var body = { profile: p };
+    var slug = $("portfolioSlug").value.trim();
+    if (slugShown && slug && slug !== slugShown) body.portfolio_slug = slug;
+    $("saveNote").textContent = "שומר…";
+    return FLY.req("/api/onboarding/update", { method: "POST", body: body })
+      .then(function (data) {
+        if (data.portfolio_slug) { slugShown = data.portfolio_slug; $("portfolioSlug").value = slugShown; }
+        $("saveNote").textContent = "נשמר ✓";
+        return true;
+      })
+      .catch(function (e) {
+        if (e && e.code === "slug_taken") { $("errSlug").classList.add("show"); $("portfolioSlug").value = slugShown; }
+        $("saveNote").textContent = "השמירה נכשלה — נסו שוב";
+        return false;
+      });
+  }
   function autosave() {
+    if (editing) { clearTimeout(saveTimer); saveTimer = setTimeout(saveEdit, 300); return; }
     if (!$("privacyOk").checked) { $("saveNote").textContent = ""; return; }
     $("saveNote").textContent = "שומר…";
     clearTimeout(saveTimer);
@@ -354,6 +407,43 @@
     $(id).addEventListener("input", repaintPct);
     $(id).addEventListener("blur", touched);
   });
+  $("portfolioSlug").addEventListener("blur", function () { if (editing) autosave(); });
+
+  // ── additional phones (the main phone is the login and stays as it is) ──
+  function normPhone(raw) {
+    var d = String(raw || "").replace(/\D/g, "");
+    if (d.indexOf("00") === 0) d = d.slice(2);
+    if (/^05\d{8}$/.test(d)) return "972" + d.slice(1);
+    if (/^5\d{8}$/.test(d)) return "972" + d;
+    return d.length >= 9 && d.length <= 15 ? d : "";
+  }
+  function showPhone(p) { return /^972\d{9}$/.test(p) ? "0" + p.slice(3, 5) + "-" + p.slice(5) : p; }
+  function renderPhones() {
+    var box = $("extraPhones");
+    box.innerHTML = "";
+    state.extra_phones.forEach(function (p, i) {
+      var tag = FLY.el("div", "area-tag");
+      tag.appendChild(document.createTextNode(showPhone(p)));
+      var x = FLY.el("button", null, "✕");
+      x.type = "button";
+      x.setAttribute("aria-label", "הסרת " + showPhone(p));
+      x.addEventListener("click", function () { state.extra_phones.splice(i, 1); renderPhones(); touched(); });
+      tag.appendChild(x);
+      box.appendChild(tag);
+    });
+    $("phoneInput").parentNode.style.display = state.extra_phones.length >= 3 ? "none" : "";
+  }
+  function addPhone() {
+    var p = normPhone($("phoneInput").value);
+    $("errPhone").classList.remove("show");
+    if (!p) { $("errPhone").classList.add("show"); return; }
+    if (p !== $("phoneView").dataset.main && state.extra_phones.indexOf(p) === -1) state.extra_phones.push(p);
+    $("phoneInput").value = "";
+    renderPhones();
+    touched();
+  }
+  $("phoneAdd").addEventListener("click", addPhone);
+  $("phoneInput").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addPhone(); } });
   $("privacyOk").addEventListener("change", function () {
     $("errPrivacy").classList.remove("show");
     if ($("privacyOk").checked) autosave();
@@ -362,6 +452,9 @@
   // ── prefill ──
   function fill(p) {
     $("fullName").value = p.full_name || "";
+    $("businessName").value = p.business_name || "";
+    state.extra_phones = Array.isArray(p.extra_phones) ? p.extra_phones.slice() : [];
+    renderPhones();
     $("specialty").value = p.specialty || "";
     $("licenseNumber").value = p.license_number || "";
     $("slogan").value = p.slogan || "";
@@ -420,6 +513,10 @@
     btn.disabled = true;
     var label = btn.textContent;
     btn.textContent = "שומר…";
+    if (editing) {
+      saveEdit().then(function () { btn.disabled = false; btn.textContent = label; });
+      return;
+    }
     FLY.req("/api/onboarding/complete", { method: "POST", body: { profile: p } })
       .then(function (data) { showDone(data.onboarding_pct); })
       .catch(function (e) {
@@ -434,7 +531,22 @@
   // ── boot ──
   FLY.loaderShow();
   FLY.req("/api/onboarding").then(function (data) {
-    if (data.already_complete) { fill(data.profile || {}); return showDone(); }
+    $("phoneView").value = showPhone(data.phone || "");
+    $("phoneView").dataset.main = data.phone || "";
+    if (data.already_complete) {
+      // A completed profile opens for editing (name, office, ID, logo …).
+      editing = true;
+      $("headKicker").textContent = "My profile";
+      $("headTitle").textContent = "הפרופיל שלי";
+      $("headSub").innerHTML = "שדות עם <span class=\"req\">*</span> הם חובה. כל שינוי נשמר אוטומטית.";
+      $("submitBtn").textContent = "שמירה";
+      if (data.portfolio_slug) {
+        slugShown = data.portfolio_slug;
+        $("portfolioHost").textContent = location.host + "/";
+        $("portfolioSlug").value = slugShown;
+        $("portfolioField").classList.remove("hidden");
+      }
+    }
     fill(data.profile || {});
     FLY.loaderHide(function () { $("view").classList.remove("hidden"); });
   }).catch(function () {
