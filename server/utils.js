@@ -236,7 +236,9 @@ async function rehost(url, destRel, uploadDir, baseUrl, opts = {}) {
 // renders such as video transcodes.
 async function storeBuffer(buf, ext, uploadDir, baseUrl, opts = {}) {
   const { uploadPublicBase, remoteUploadBase, signUpload, fetchFn = fetch } = opts;
-  const fname = `${crypto.randomUUID()}.${ext}`;
+  // opts.fname: a caller-chosen name (UUID-shaped, as PUT /upload requires) for
+  // a file that is the same every time, so it can be reused instead of re-made.
+  const fname = opts.fname || `${crypto.randomUUID()}.${ext}`;
   const localPath = path.join(uploadDir, fname);
   fs.mkdirSync(path.dirname(localPath), { recursive: true });
   fs.writeFileSync(localPath, buf);

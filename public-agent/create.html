@@ -559,6 +559,16 @@
   var keyMatch = location.search.match(/[?&]key=([^&]*)/);
   var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
   var isDemo = !!demoKey;
+  // ?agent=<phone> (admin panel → "create for client"): a real client's
+  // property, created by an operator. Their saved profile fills the agent block,
+  // their logo is reused, and nothing is autosaved back into their account.
+  var agentMatch = location.search.match(/[?&]agent=(\d{9,15})(&|$)/);
+  var clientPhone = isDemo && agentMatch ? agentMatch[1] : null;
+  // ?from_listing=<id> (admin → a failed property): reopen it with its details
+  // and photos; creating it again retires the old listing.
+  var fromListingMatch = location.search.match(/[?&]from_listing=([0-9a-f-]{36})(&|$)/);
+  var fromListingId = isDemo && fromListingMatch ? fromListingMatch[1] : null;
+  var clientLogoUrl = null;
 
   // ── functional three-stage creation wizard ──
   // The inputs and APIs stay exactly as they were; panels only decide when each
@@ -860,8 +870,14 @@
     // standalone demo — not for signed-in users: hide the "my properties" nav
     var myProps = $("#navMyProps");
     if (myProps) myProps.style.display = "none";
-    // ponytail: autosave agent fields on blur during demo
-    initDemoAutosave();
+    if (fromListingId) {
+      reopenListing(fromListingId);
+    } else if (clientPhone) {
+      prefillClient(clientPhone);
+    } else {
+      // ponytail: autosave agent fields on blur during demo
+      initDemoAutosave();
+    }
   } else {
     // Real (non-demo) create is session-gated, but nothing checked that on
     // load — a logged-out user could fill the whole form before the 401
@@ -905,6 +921,71 @@
   function pickedPagePhones() {
     var on = document.querySelectorAll("[data-page-phone]:checked");
     return on.length ? Array.prototype.map.call(on, function (b) { return b.value; }) : null;
+  }
+
+  // 972501234567 → +972 / 050-1234567; another country picks its own code.
+  function setClientPhone(full) {
+    var opt = Array.prototype.filter.call($("#agCC").options, function (o) {
+      return full.indexOf(o.value.replace(/\D/g, "")) === 0;
+    }).sort(function (a, b) { return b.value.length - a.value.length; })[0];
+    var cc = opt ? opt.value.replace(/\D/g, "") : "";
+    if (opt) $("#agCC").value = opt.value;
+    var rest = cc ? full.slice(cc.length) : full;
+    $("#agPhone").value = cc === "972" ? "0" + rest : rest;
+  }
+
+  function prefillClient(phone) {
+    var note = $("#demoWorkspaceNote");
+    note.querySelector(".demo-index").textContent = "CLIENT";
+    note.querySelector("strong").textContent = "יוצרים נכס בשם הלקוח.";
+    note.querySelector("span[data-i18n]").textContent = " הדף יופיע אצל הלקוח, עם הפרטים השמורים שלו.";
+    ["strong", "span[data-i18n]"].forEach(function (s) { note.querySelector(s).removeAttribute("data-i18n"); });
+    FLY.req("/api/admin/agent-profile?phone=" + encodeURIComponent(phone), { noRedirect: true })
+      .then(function (p) {
+        $("#agName").value = p.full_name || "";
+        $("#agBrand").value = p.business_name || "";
+        $("#agLicense").value = p.license_number || "";
+        setClientPhone(p.phone);
+        clientLogoUrl = p.logo_url || null;
+      })
+      .catch(function () {
+        setClientPhone(phone);
+        FLY.toast("לא נמצא פרופיל שמור ללקוח — מלאו את פרטי הסוכן");
+      });
+  }
+
+  function reopenListing(id) {
+    FLY.req("/api/admin/listing?id=" + encodeURIComponent(id), { noRedirect: true })
+      .then(function (d) {
+        if (d.has_page) { FLY.toast("לנכס הזה כבר יש דף — אין מה לפתוח מחדש"); fromListingId = null; return; }
+        clientPhone = d.business_phone;
+        prefillClient(d.business_phone);
+        X.fillFields(d.fields, $);
+        if (d.template && document.querySelector('.tpl-card[data-tpl="' + d.template + '"]')) selectTemplate(d.template);
+        syncDealButtons(); updatePriceLabel(); renderPriceChips();
+        if (d.description && !$("#pDesc").value.trim()) $("#pDesc").value = String(d.description).slice(0, 2000);
+        // The saved photos come back as already-hosted entries. Removing one only
+        // drops it from this listing: the file stays (the old listing points at it).
+        (d.photos || []).forEach(function (url) {
+          if (photos.length >= 12) return;
+          var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
+          var entry = { file: null, el: t, publicUrl: url, previewUrl: url, removed: false, failed: false, uploadPromise: Promise.resolve(url) };
+          t.querySelector(".x").addEventListener("click", function () {
+            entry.removed = true;
+            photos = photos.filter(function (q) { return q.el !== t; });
+            t.remove(); updateLivePreview();
+          });
+          $("#thumbs").appendChild(t); photos.push(entry);
+        });
+        var note = $("#demoWorkspaceNote");
+        note.querySelector("strong").textContent = "פתיחה מחדש של נכס שלא נבנה.";
+        note.querySelector(".demo-index").nextElementSibling.querySelector("span").textContent =
+          " הפרטים והתמונות נטענו — אפשר להסיר, להוסיף ולתקן. יצירה תחליף את הנכס הישן.";
+        revealManual();
+        setWizardStage(1, false);
+        updateLivePreview();
+      })
+      .catch(function () { FLY.toast("לא הצלחנו לטעון את הנכס"); fromListingId = null; });
   }
 
   // ponytail: autosave agent fields during demo — writes to businesses/{phone}
@@ -1648,7 +1729,7 @@
         if (photoUrls.length < photos.length) throw new Error(FT("err_photo_upload"));
         var extra = res[1], cursor = 0;
         var videoUrl = videoFile ? extra[cursor++] : null;
-        var logoUrl = logoFile ? extra[cursor++] : null;
+        var logoUrl = logoFile ? extra[cursor++] : clientLogoUrl;
         var fontUrl = fontFile ? extra[cursor++] : null;
         if (fontUrl) theme.font_url = fontUrl;
 
@@ -1693,6 +1774,7 @@
         // Tells the server which listing-sweep draft to mark "created" once
         // the page exists (routes/pages.js).
         if (fromListingDraftId) body.listing_draft_id = fromListingDraftId;
+        if (fromListingId) body.replaces_listing_id = fromListingId;
         btn.textContent = FT("status_creating");
         $("#vLoaderMsg").textContent = FT("status_creating");
         var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
@@ -1724,7 +1806,7 @@
     }).then(function (d) {
       // Remember demo listings locally so the dashboard can show a "logged in"
       // view with just this property (used when there's no account yet).
-      if (isDemo) {
+      if (isDemo && !clientPhone) {
         try {
           var rec = {
             listing_id: d.listing_id,

@@ -159,7 +159,8 @@ function retryBlocked(l, now = Date.now()) {
 }
 
 async function retryListing(listing, deps, now = new Date()) {
-  const patch = { status: "active", retried_at: now, retry_count: (listing.retry_count || 0) + 1 };
+  // photo_fallback_at reset: if this attempt fails too, it may fall back again.
+  const patch = { status: "active", retried_at: now, retry_count: (listing.retry_count || 0) + 1, photo_fallback_at: null };
   await db.updateListing(listing.listing_id, patch);
   kickPipeline({ ...listing, ...patch }, deps);
   return patch;

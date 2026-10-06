@@ -70,6 +70,8 @@
         p.listing_status !== "archived" && p.listing_status !== "deleted") {
       actions.push('<button class="btn btn-gold btn-sm" data-retry="' + esc(p.listing_id) + '" data-retry-status="' +
         esc(p.page_status) + '" title="ניסיונות קודמים: ' + esc(p.retry_count || 0) + '">↻ נסו שוב</button>');
+      // Retry keeps failing → reopen it in the create form to swap photos or fix details.
+      actions.push('<a class="btn btn-ghost btn-sm" href="/create.html?key=admin&from_listing=' + encodeURIComponent(p.listing_id) + '">✎ פתיחה מחדש</a>');
     }
     if (p.listing_status !== "archived") {
       actions.push('<button class="btn btn-ghost btn-sm" data-archive="' + esc(p.listing_id) + '">ארכיון</button>');
@@ -231,7 +233,9 @@
     var demo = a.is_demo ? '<span class="tag-demo">demo</span>' : "";
     return "<tr>" +
       '<td class="agent"><div class="agent-name">' + esc(a.name) + demo + "</div>" +
-        '<div class="p-addr num" dir="ltr">' + esc(a.phone) + "</div></td>" +
+        '<div class="p-addr num" dir="ltr">' + esc(a.phone) + "</div>" +
+        // A property in this client's name, their saved details prefilled.
+        '<a class="p-addr" href="/create.html?key=admin&agent=' + encodeURIComponent(a.phone) + '">+ יצירת נכס ללקוח</a></td>' +
       '<td class="num">' + esc(a.active_pages) + "</td>" +
       '<td class="num">' + Number(a.views || 0).toLocaleString("he-IL") + "</td>" +
       '<td class="num">' + Number(a.leads || 0).toLocaleString("he-IL") + "</td>" +

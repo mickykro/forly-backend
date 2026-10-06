@@ -98,6 +98,34 @@ async function listPendingListings(source) {
   return [...mem.listings.values()].filter((l) => l.source === source && l.status === "active" && !l.page_id);
 }
 
+// Listings with no page in one status (equality filters only: no composite index).
+async function listPagelessListings(status) {
+  if (db) {
+    const snap = await db.collection("listings").where("status", "==", status)
+      .where("page_id", "==", null).limit(200).get();
+    return snap.docs.map((d) => d.data());
+  }
+  return [...mem.listings.values()].filter((l) => l.status === status && !l.page_id);
+}
+
+// Set `field` once: the server that writes it first gets true, every later
+// caller false (staging and production share Firestore and both sweep).
+async function claimField(collection, id, field, value) {
+  if (db) {
+    const ref = db.collection(collection).doc(id);
+    return db.runTransaction(async (tx) => {
+      const d = await tx.get(ref);
+      if (!d.exists || d.data()[field] != null) return false;
+      tx.update(ref, { [field]: value });
+      return true;
+    });
+  }
+  const d = mem.listings.get(id);
+  if (!d || d[field] != null) return false;
+  d[field] = value;
+  return true;
+}
+
 // ── admin: full-collection reads (no phone filter) ──
 async function listAllListings(limit = 1000) {
   if (db) {
@@ -726,6 +754,7 @@ module.exports = {
   get mem() { return mem; },
   shortCode,
   saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listPendingListings, listAllListings,
+  listPagelessListings, claimField,
   savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone, findPageBySlug,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,

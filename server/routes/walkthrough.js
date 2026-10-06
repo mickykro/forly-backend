@@ -13,7 +13,10 @@ const db = require("../db");
 const { constantTimeEqual } = require("../security");
 const { mapSpaces, MAX_PHOTOS } = require("../space-map");
 const { planWalkthrough } = require("../walkthrough-plan");
-const { exifOrientation, uprightJpeg } = require("../photo-orient");
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const { videoRef, REF_MAX_SIDE } = require("../photo-orient");
 const { assertPublicHttpUrl, storeBuffer } = require("../utils");
 
 const HEAD_BYTES = 128 * 1024; // EXIF sits at the start of a JPEG
@@ -30,29 +33,37 @@ async function fetchBytes(url, range) {
 }
 
 /*
- * Seedance reads raw pixels and ignores a JPEG's EXIF rotation, so a phone
- * photo stored sideways-plus-flag became a sideways room in the video. Photos
- * uploaded since the fix are already upright (PUT /upload); this covers older
- * ones and outside URLs. A photo that cannot be checked is used as it is.
- * → number of photos replaced. `store(buf)` hosts the copy and returns its URL.
+ * Seedance gets its own copy of every photo: upright (it ignores EXIF rotation,
+ * which made rooms come out sideways), the long side at most 1280 px, a plain
+ * JPEG. The page gallery keeps the originals. The copy's name is derived from
+ * the source URL, so a re-plan reuses it instead of making it again; a photo
+ * that cannot be fetched or converted is sent as it is.
+ * → { refs, uprighted }. store(buf, fname) hosts a copy and returns its URL;
+ * existing(fname) returns the URL of an already-made copy, or null.
  */
-async function uprightPhotos(tags, store, get = fetchBytes) {
-  let fixed = 0;
+const refName = (url) => {
+  const h = crypto.createHash("sha1").update(`${url}|${REF_MAX_SIDE}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}.jpg`;
+};
+
+async function shrinkPhotos(tags, { store, existing = () => null, get = fetchBytes }) {
+  let refs = 0, uprighted = 0;
   const one = async (t) => {
     try {
-      let { buf, partial } = await get(t.url, true);
-      if (exifOrientation(buf) === 1) return;
-      if (partial) buf = (await get(t.url, false)).buf;
-      const up = await uprightJpeg(buf);
-      if (!up) return;
-      t.url = await store(up.buffer);
-      fixed++;
+      const fname = refName(t.url);
+      const have = existing(fname);
+      if (have) { t.url = have; refs++; return; }
+      const { buf } = await get(t.url, false);
+      const ref = await videoRef(buf);
+      t.url = await store(ref.buffer, fname);
+      refs++;
+      if (ref.orientation !== 1) uprighted++;
     } catch (err) {
-      console.warn("walkthrough: upright check failed, photo used as is:", err.message);
+      console.warn("walkthrough: video copy failed, photo used as is:", err.message);
     }
   };
   for (let i = 0; i < tags.length; i += 6) await Promise.all(tags.slice(i, i + 6).map(one));
-  return fixed;
+  return { refs, uprighted };
 }
 
 module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUrl, storeOpts = {} }) {
@@ -65,6 +76,27 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
     }
     next();
   }
+
+  // Where the Seedance copies live: this server's /files (relayed to the shared
+  // store when one is configured, like every upload).
+  const publicBase = (storeOpts.remoteUploadBase && storeOpts.uploadPublicBase) || baseUrl;
+  const refStore = {
+    store: (buf, fname) => storeBuffer(buf, "jpg", uploadDir, baseUrl, { ...storeOpts, fname }).then((r) => r.url),
+    existing: (fname) => (fs.existsSync(path.join(uploadDir, fname)) ? `${publicBase}/files/${fname}` : null),
+  };
+
+  // ── POST /refs: Seedance copies for a workflow that plans its own clips (V2) ──
+  // { image_urls: [...] } → { image_urls: [...] }, same order; a photo that
+  // cannot be converted comes back unchanged.
+  router.post("/refs", requireN8n, async (req, res) => {
+    const urls = (Array.isArray(req.body && req.body.image_urls) ? req.body.image_urls : [])
+      .map((u) => String(u || "").trim()).filter((u) => /^https?:\/\//.test(u)).slice(0, MAX_PHOTOS);
+    if (!urls.length) return res.status(400).json({ error: "image_urls required" });
+    if (!uploadDir) return res.json({ image_urls: urls, ref_photos: 0 });
+    const tags = urls.map((url) => ({ url }));
+    const shrunk = await shrinkPhotos(tags, refStore);
+    res.json({ image_urls: tags.map((t) => t.url), ref_photos: shrunk.refs, uprighted_photos: shrunk.uprighted });
+  });
 
   router.post("/plan", requireN8n, async (req, res) => {
     const body = req.body || {};
@@ -87,9 +119,7 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
     const details = body.property_details && typeof body.property_details === "object" ? body.property_details : {};
     const listingId = typeof body.listing_id === "string" ? body.listing_id.slice(0, 100) : "";
 
-    const uprighted = uploadDir
-      ? await uprightPhotos(tags, (buf) => storeBuffer(buf, "jpg", uploadDir, baseUrl, storeOpts).then((r) => r.url))
-      : 0;
+    const shrunk = uploadDir ? await shrinkPhotos(tags, refStore) : { refs: 0, uprighted: 0 };
     const { map, debug } = await mapSpaces(tags);
     let plan;
     try {
@@ -109,9 +139,10 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
         console.warn("walkthrough: saving space map failed:", err.message);
       }
     }
-    res.json({ ...plan, space_map: map, map_debug: debug, uprighted_photos: uprighted });
+    res.json({ ...plan, space_map: map, map_debug: debug, ref_photos: shrunk.refs, uprighted_photos: shrunk.uprighted });
   });
 
   return router;
 };
-module.exports.uprightPhotos = uprightPhotos;
+module.exports.shrinkPhotos = shrinkPhotos;
+module.exports.refName = refName;

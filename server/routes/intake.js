@@ -169,9 +169,11 @@ module.exports = function createIntakeRouter(ctx) {
     const result = await createListing(agentPhone, body, { ...(body.agent || {}), phone: agentPhone });
     if (result.error) return res.status(result.code).json({ error: result.error });
 
-    // ensure partial business exists
+    // ensure partial business exists. A real client (an operator creating a
+    // property in their name) keeps their account untouched: only a missing
+    // doc or an earlier demo one is (re)written as a demo account.
     const existing = await db.getBusiness(agentPhone);
-    if (!existing || existing.onboarding_state !== "complete") {
+    if (!existing || (existing.source === "demo" && existing.onboarding_state !== "complete")) {
       const now = new Date();
       await db.setBusiness(agentPhone, {
         phone: agentPhone,
@@ -189,6 +191,18 @@ module.exports = function createIntakeRouter(ctx) {
         created_at: now, updated_at: now,
       });
       businessCache.invalidate(agentPhone);
+    }
+
+    // Recreated from a failed listing (create.html?from_listing=): the old one
+    // never got a page and now never will, so it leaves every list. Only a
+    // page-less listing of the same client is retired.
+    const replacesId = typeof body.replaces_listing_id === "string" ? body.replaces_listing_id : "";
+    if (replacesId && replacesId !== result.listing_id) {
+      const old = await db.getListing(replacesId).catch(() => null);
+      if (old && !old.page_id && old.business_phone === agentPhone) {
+        await db.updateListing(replacesId, { status: "deleted", replaced_by: result.listing_id })
+          .catch((err) => console.warn("retire replaced listing failed:", err.message));
+      }
     }
 
     // The admin stays logged in as themselves so they can create the next

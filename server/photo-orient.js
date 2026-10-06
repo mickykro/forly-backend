@@ -98,4 +98,28 @@ async function uprightJpeg(buf) {
   }
 }
 
-module.exports = { exifOrientation, uprightJpeg, FILTERS };
+/*
+ * The copy Seedance gets as a reference: upright, the long side at most
+ * `maxSide` px (the video is 720p; more pixels only make the download heavier),
+ * re-saved as a plain baseline JPEG with no metadata. Any JPEG/PNG/WebP in.
+ * → { buffer, orientation }
+ */
+const REF_MAX_SIDE = 1280;
+async function videoRef(buf, maxSide = REF_MAX_SIDE) {
+  const orientation = exifOrientation(buf);
+  const turn = FILTERS[orientation];
+  const fit = `scale='if(gte(iw,ih),min(iw,${maxSide}),-2)':'if(gte(iw,ih),-2,min(ih,${maxSide}))'`;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ref-"));
+  try {
+    const src = path.join(tmp, "src");
+    const out = path.join(tmp, "ref.jpg");
+    fs.writeFileSync(src, buf);
+    await run(["-y", "-v", "error", "-noautorotate", "-i", src, "-vf", (turn ? turn + "," : "") + fit + ",format=yuvj420p",
+      "-map_metadata", "-1", "-frames:v", "1", "-q:v", "3", out]);
+    return { buffer: fs.readFileSync(out), orientation };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+module.exports = { exifOrientation, uprightJpeg, videoRef, FILTERS, REF_MAX_SIDE };
