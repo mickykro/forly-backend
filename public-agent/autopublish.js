@@ -178,7 +178,7 @@
   function statusOf(p) {
     const c = p.campaign;
     if (!live(c)) return { cls: "", text: c && c.status === "completed" ? "כבוי · הסבב הקודם הושלם" : "כבוי" };
-    if (c.status === "paused" || /^posting_disabled:/.test(c.wait_reason || "")) return { cls: "warn", text: "מושהה" };
+    if (c.status === "paused" || (/^posting_disabled:/.test(c.wait_reason || "") && !U.silentOff(c.wait_reason))) return { cls: "warn", text: "מושהה" };
     const posts = Array.isArray(c.posts) ? c.posts : [];
     const pending = posts.filter((x) => x.status === "pending_approval");
     if (pending.length) return { cls: "warn", text: `ממתין לאישור שלכם (${pending.length}) — כאן למטה או בוואטסאפ` };
