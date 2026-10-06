@@ -63,24 +63,55 @@ function withOrientation(jpeg, value, le = true) {
     fs.writeFileSync(out, (await uprightJpeg(withOrientation(plain, 8))).buffer);
     const [r3] = px(350);
     assert.ok(r3 > 200, "orientation 8: bottom is red");
-    // The walkthrough planner swaps a flagged photo for a hosted upright copy;
-    // an upright one and an unreachable one are used as they are.
-    const { uprightPhotos } = require("./routes/walkthrough");
+    // Seedance copies: every photo gets an upright, ≤1280px plain JPEG; a copy
+    // already made is reused without fetching; an unreachable photo is sent as is.
+    const { videoRef, REF_MAX_SIDE } = require("./photo-orient");
+    const { shrinkPhotos, refName } = require("./routes/walkthrough");
+    const big = path.join(tmp, "big.jpg");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "color=green:s=3000x2000", "-frames:v", "1", big]);
+    const bigRef = await videoRef(withOrientation(fs.readFileSync(big), 6));
+    fs.writeFileSync(out, bigRef.buffer);
+    assert.equal(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", out]).toString().trim(),
+      `${2 * Math.round(2000 * REF_MAX_SIDE / 3000 / 2)},${REF_MAX_SIDE}`, "turned upright, then the long side capped");
+    assert.equal(exifOrientation(bigRef.buffer), 1);
+    const small = await videoRef(plain);
+    fs.writeFileSync(out, small.buffer);
+    assert.equal(execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", out]).toString().trim(), "400,200", "never enlarged");
+
     const flagged = withOrientation(plain, 6);
-    const calls = [];
-    const get = async (url, range) => {
-      calls.push([url, range]);
-      if (url === "https://x/broken.jpg") throw new Error("404");
-      const full = url === "https://x/side.jpg" ? flagged : plain;
-      return range ? { buf: full.subarray(0, 64), partial: true } : { buf: full, partial: false };
-    };
-    const stored = [];
-    const tags = [{ url: "https://x/side.jpg" }, { url: "https://x/up.jpg" }, { url: "https://x/broken.jpg" }];
-    const n = await uprightPhotos(tags, async (buf) => { stored.push(buf); return "https://forly/files/fixed.jpg"; }, get);
-    assert.equal(n, 1);
-    assert.deepEqual(tags.map((t) => t.url), ["https://forly/files/fixed.jpg", "https://x/up.jpg", "https://x/broken.jpg"]);
-    assert.equal(exifOrientation(stored[0]), 1);
-    assert.deepEqual(calls.filter(([, r]) => !r).map(([u]) => u), ["https://x/side.jpg"], "only the flagged photo is fetched in full");
+    const fetched = [], stored = [];
+    const get = async (url) => { fetched.push(url); if (url === "https://x/broken.jpg") throw new Error("404"); return { buf: url === "https://x/side.jpg" ? flagged : plain }; };
+    const done = { [refName("https://x/done.jpg")]: "https://forly/files/done-ref.jpg" };
+    const tags = [{ url: "https://x/side.jpg" }, { url: "https://x/up.jpg" }, { url: "https://x/broken.jpg" }, { url: "https://x/done.jpg" }];
+    const res = await shrinkPhotos(tags, {
+      get, existing: (f) => done[f] || null,
+      store: async (buf, fname) => { stored.push([fname, buf]); return "https://forly/files/" + fname; },
+    });
+    assert.deepEqual(res, { refs: 3, uprighted: 1 });
+    assert.deepEqual(tags.map((t) => t.url), ["https://forly/files/" + refName("https://x/side.jpg"), "https://forly/files/" + refName("https://x/up.jpg"),
+      "https://x/broken.jpg", "https://forly/files/done-ref.jpg"]);
+    assert.ok(!fetched.includes("https://x/done.jpg"), "an existing copy is reused without fetching");
+    assert.match(refName("https://x/up.jpg"), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/, "the shape PUT /upload accepts");
+    assert.equal(refName("https://x/up.jpg"), refName("https://x/up.jpg"), "same photo, same name");
+    assert.equal(exifOrientation(stored[0][1]), 1);
+
+    // POST /api/walkthrough/refs (V2's hook): n8n secret, same order, existing copies reused.
+    {
+      const express = require("express");
+      const app = express(); app.use(express.json());
+      app.use("/api/walkthrough", require("./routes/walkthrough")({ n8nSecret: "sec", uploadDir: tmp, baseUrl: "https://srv" }));
+      const server = app.listen(0);
+      const u = `http://127.0.0.1:${server.address().port}/api/walkthrough/refs`;
+      const call = (body, secret = "sec") => fetch(u, { method: "POST", headers: { "Content-Type": "application/json", "x-forly-secret": secret }, body: JSON.stringify(body) });
+      fs.writeFileSync(path.join(tmp, refName("https://x/made.jpg")), "x");
+      assert.equal((await call({ image_urls: ["https://x/made.jpg"] }, "nope")).status, 403);
+      assert.equal((await call({ image_urls: [] })).status, 400);
+      const d = await (await call({ image_urls: ["https://x/made.jpg", "http://127.0.0.1/private.jpg"] })).json();
+      server.close();
+      assert.deepEqual(d.image_urls, ["https://srv/files/" + refName("https://x/made.jpg"), "http://127.0.0.1/private.jpg"],
+        "made copy reused; a photo it may not fetch comes back unchanged");
+    }
+
     // PUT /api/upload stores the upright copy.
     const express = require("express");
     const createIntakeRouter = require("./routes/intake");
