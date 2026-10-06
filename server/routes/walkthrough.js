@@ -6,13 +6,17 @@
  * call) and returns the Seedance clips — prompt, reference images and duration
  * per clip — plus the end titles. n8n-only (x-forly-secret): it spends a vision
  * call per request.
+ *
+ * `presenter: true` (WW1 Walkthrough Presenter) adds the fixed presenter
+ * character to every clip, using the reference photos served from /presenter/
+ * (public-agent/presenter); `presenter_image_urls` overrides them.
  */
 
 const express = require("express");
 const db = require("../db");
 const { constantTimeEqual } = require("../security");
 const { mapSpaces, MAX_PHOTOS } = require("../space-map");
-const { planWalkthrough } = require("../walkthrough-plan");
+const { planWalkthrough, presenterFrom, MAX_CLIPS } = require("../walkthrough-plan");
 const { exifOrientation, uprightJpeg } = require("../photo-orient");
 const { assertPublicHttpUrl, storeBuffer } = require("../utils");
 
@@ -93,7 +97,7 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
     const { map, debug } = await mapSpaces(tags);
     let plan;
     try {
-      plan = planWalkthrough(map, tags, details);
+      plan = planWalkthrough(map, tags, details, MAX_CLIPS, { presenter: presenterFrom(body, baseUrl) });
     } catch (err) {
       if (err.code === "too_few_photos") return res.status(422).json({ error: err.message, map_debug: debug });
       console.error("walkthrough plan failed:", err.message);

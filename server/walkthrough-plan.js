@@ -18,6 +18,13 @@
  *
  * Ordering follows scripts/n8n/walkthrough-order.js: outdoor (else the lounge)
  * opens, a lounge or balcony closes, bedrooms and bathrooms never at the edges.
+ *
+ * Presenter mode (opts.presenter, 6 Oct 2026): one fixed character — the same
+ * woman in every listing — walks the rooms and presents them. Her reference
+ * photos go last in every clip (they take reference slots from the rooms), she
+ * welcomes in the opener, points out each shot's target and invites in the
+ * closer. She never speaks: Seedance's speech is gibberish, not Hebrew. Shots
+ * are longer so she has time to move. Without opts.presenter nothing changes.
  */
 
 const SUPPORTED = [4, 5, 6, 8, 10, 12, 15]; // seedance durations, seconds
@@ -29,6 +36,11 @@ const SECONDS_PER_SOLO_SHOT = 2;
 const SECONDS_PER_PACKED_SHOT = 3.5;
 const MIN_PHOTOS = 4;
 const MIN_QUALITY = 4;
+const SECONDS_PER_PRESENTER_SHOT = 3;
+const SECONDS_PER_PACKED_PRESENTER_SHOT = 4;
+const PRESENTER_EDGE_SECONDS = 2; // her entrance (opener) and invitation (closer)
+const PRESENTER_DESCRIPTION = "a woman in her early thirties with long straight dark hair, a black blazer over a black top, " +
+  "cream wide-leg trousers and black heels";
 
 const OUTDOOR = ["exterior", "garden", "roof", "pool", "view", "yard", "facade", "building"];
 const LOUNGE = ["living_room", "open_plan", "lounge", "salon", "living_dining"];
@@ -41,6 +53,9 @@ const MOVES = ["glides slowly forward", "pushes in slowly", "moves gently forwar
 const TAIL = " Cut on movement between shots, no morphing or blending. Everything stays exactly as in the photos: " +
   "nothing is added, removed, moved or restyled. No people, hands or shadows of the camera operator. " +
   "Clean frame with no text, logos or watermarks.";
+const PRESENTER_TAIL = " Cut on movement between shots, no morphing or blending. The rooms stay exactly as in the photos: " +
+  "nothing is added, removed, moved or restyled. The presenter is the only person in the video: no other people, " +
+  "no hands or shadows of the camera operator. Clean frame with no text, logos or watermarks.";
 
 const kinds = (s) => [s.type, ...(s.contains || [])];
 const is = (s, list) => kinds(s).some((k) => list.some((l) => k.includes(l)));
@@ -173,10 +188,16 @@ function pickTarget(photo, space, used) {
   return ok.find((t) => !used.has(t)) || ok[0] || null;
 }
 
-/** Build one clip from a group of spaces. `index` is its position in the video. */
-function buildClip(group, index, openerGroup) {
+/**
+ * Build one clip from a group of spaces. `index` is its position in the video.
+ * opts: { presenter: { image_urls, description? }, last } — see presenter mode above.
+ */
+function buildClip(group, index, openerGroup, opts = {}) {
+  const presenter = opts.presenter || null;
+  const presenterRefs = presenter ? presenter.image_urls : [];
+  const roomRefs = MAX_REFS - presenterRefs.length;
   const packed = group.length > 1;
-  const perSpace = packed ? Math.max(1, Math.floor(MAX_REFS / group.length)) : MAX_REFS;
+  const perSpace = packed ? Math.max(1, Math.floor(roomRefs / group.length)) : roomRefs;
   const image_urls = [];
   const shots = [];
   const extras = [];
@@ -189,14 +210,22 @@ function buildClip(group, index, openerGroup) {
     const spare = refs.slice(shotCount).map((_, i) => `@image${first + shotCount + i}`);
     if (spare.length) extras.push(`${spare.join(", ")} ${spare.length > 1 ? "show" : "shows"} the same room as @image${first} from another angle: use ${spare.length > 1 ? "them" : "it"} only to keep that room exactly as it is.`);
   }
-  const duration = packed ? fit(shots.length * SECONDS_PER_PACKED_SHOT) : fit(shots.length * SECONDS_PER_SOLO_SHOT);
+  const first = index === 0;
+  const last = !!opts.last;
+  const seconds = presenter
+    ? shots.length * (packed ? SECONDS_PER_PACKED_PRESENTER_SHOT : SECONDS_PER_PRESENTER_SHOT) + (first ? PRESENTER_EDGE_SECONDS : 0) + (last ? PRESENTER_EDGE_SECONDS : 0)
+    : shots.length * (packed ? SECONDS_PER_PACKED_SHOT : SECONDS_PER_SOLO_SHOT);
+  const duration = fit(seconds);
   const per = (duration / shots.length).toFixed(1);
   const used = new Set();
   const lines = shots.map((s, k) => {
     const target = pickTarget(s.photo, s.space, used);
     if (target) used.add(target);
-    return `Shot ${k + 1} (${per}s): @image${s.idx}, the camera ${MOVES[k % MOVES.length]} toward the ${target || "center of the frame"}.`;
+    const line = `Shot ${k + 1} (${per}s): @image${s.idx}, the camera ${MOVES[k % MOVES.length]} toward the ${target || "center of the frame"}.`;
+    return presenter ? `${line} ${presenterAction(k, shots.length, first, last, target)}` : line;
   });
+  const presenterIdx = presenterRefs.map((_, i) => image_urls.length + 1 + i);
+  presenterRefs.forEach((u) => image_urls.push(u));
   const head = index === 0 && openerGroup === "outdoor"
     ? "A smooth, stabilized cinematic walkthrough of a property for sale, starting outside and moving toward the house."
     : "A smooth, stabilized cinematic walkthrough of a property for sale, inside the room shown in @image1.";
@@ -208,7 +237,8 @@ function buildClip(group, index, openerGroup) {
   const camera = "The camera is at eye height, moves slowly forward, never turns or pans, and stops well before its target. " +
     "It stays perfectly level the whole time, as on a gimbal: the horizon is flat and walls, door frames and windows stay " +
     "vertical, with no roll, tilt, rotation or dutch angle, even if a reference photo was taken at an angle.";
-  const prompt = [head, scope, camera, ...lines, ...extras].join(" ") + TAIL;
+  const cast = presenter ? [presenterIntro(presenter, presenterIdx)] : [];
+  const prompt = [head, scope, camera, ...cast, ...lines, ...extras].join(" ") + (presenter ? PRESENTER_TAIL : TAIL);
   return {
     clip_index: index,
     duration,
@@ -216,7 +246,44 @@ function buildClip(group, index, openerGroup) {
     spaces: group.map((s) => s.id),
     image_urls,
     prompt,
+    ...(presenter ? { presenter: true } : {}),
   };
+}
+
+// Who she is and how she behaves, once per clip.
+function presenterIntro(presenter, idx) {
+  const refs = idx.map((i) => `@image${i}`);
+  const which = refs.length > 1 ? `${refs.slice(0, -1).join(", ")} and ${refs[refs.length - 1]} show` : `${refs[0]} shows`;
+  return `A real-estate presenter appears in the video: ${presenter.description || PRESENTER_DESCRIPTION}. ` +
+    `${which} her from the front and the side; use ${refs.length > 1 ? "them" : "it"} only for her face, hair, body and ` +
+    "clothes, never for the room or background, and keep her exactly like that in every shot. She moves naturally and " +
+    "calmly, smiles, and is a guide, not the subject: she stays to one side and never covers more than a third of the " +
+    "frame or blocks the thing she presents. She never speaks and her lips do not move: no dialogue, voice or narration, " +
+    "only soft ambient sound.";
+}
+
+// What she does in one shot: welcome first, present the target, invite last.
+function presenterAction(k, count, first, last, target) {
+  const thing = target ? `the ${target}` : "the room";
+  if (first && k === 0) return `The presenter walks into the frame from the side, turns to the camera with a warm smile and a welcoming open-hand gesture, then gestures toward ${thing}.`;
+  if (last && k === count - 1) return `The presenter stands beside ${thing}, turns to the camera, smiles and opens her hand toward the room in an inviting gesture.`;
+  return `The presenter walks a few steps ahead of the camera to one side and gestures with an open hand toward ${thing}.`;
+}
+
+const MAX_PRESENTER_REFS = 2;
+const PRESENTER_FILES = ["presenter/front.jpg", "presenter/side.jpg"]; // public-agent/presenter
+
+/**
+ * The presenter a /plan request asks for, or null: `presenter_image_urls`
+ * (https, at most two) win; else `presenter: true` uses our own files under `baseUrl`.
+ */
+function presenterFrom(body = {}, baseUrl = "") {
+  const given = Array.isArray(body.presenter_image_urls)
+    ? body.presenter_image_urls.map((u) => String(u || "").trim()).filter((u) => /^https:\/\/\S+$/.test(u)).slice(0, MAX_PRESENTER_REFS)
+    : [];
+  if (given.length) return { image_urls: given };
+  if (body.presenter !== true || !baseUrl) return null;
+  return { image_urls: PRESENTER_FILES.map((f) => `${String(baseUrl).replace(/\/+$/, "")}/${f}`) };
 }
 
 const num = (v) => Number(v) || 0;
@@ -243,7 +310,7 @@ function buildTitles(d = {}) {
  * The whole plan: `map` from space-map.js, `tags` the photos ([{url,
  * room_type?, quality_score?, is_real_estate?}]) in the order sent for mapping.
  */
-function planWalkthrough(map, tags, details, maxClips = MAX_CLIPS) {
+function planWalkthrough(map, tags, details, maxClips = MAX_CLIPS, opts = {}) {
   const spaces = buildSpaces(map, tags);
   const photoCount = spaces.reduce((n, s) => n + s.photos.length, 0);
   if (photoCount < MIN_PHOTOS) {
@@ -252,11 +319,12 @@ function planWalkthrough(map, tags, details, maxClips = MAX_CLIPS) {
     throw err;
   }
   const { groups, opener_group, dropped } = groupSpaces(spaces, map.sees || [], maxClips);
-  const clips = groups.map((g, i) => buildClip(g, i, opener_group));
-  return { clips, clip_count: clips.length, opener_group, dropped, ...buildTitles(details) };
+  const presenter = opts.presenter && opts.presenter.image_urls && opts.presenter.image_urls.length ? opts.presenter : null;
+  const clips = groups.map((g, i) => buildClip(g, i, opener_group, { presenter, last: i === groups.length - 1 }));
+  return { clips, clip_count: clips.length, opener_group, dropped, ...buildTitles(details), ...(presenter ? { presenter: true } : {}) };
 }
 
 module.exports = {
-  planWalkthrough, buildSpaces, groupSpaces, buildClip, buildTitles, pickTarget, chunk,
-  MAX_CLIPS, MAX_REFS, MIN_PHOTOS,
+  planWalkthrough, buildSpaces, groupSpaces, buildClip, buildTitles, pickTarget, chunk, presenterFrom,
+  MAX_CLIPS, MAX_REFS, MIN_PHOTOS, MAX_PRESENTER_REFS,
 };

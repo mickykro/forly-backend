@@ -112,4 +112,45 @@ assert.equal(buildTitles({ rooms: 3.5, neighborhood: "שכונת רמות", park
   assert.ok(planWalkthrough(one, et.slice(0, 5), {}).clips.every((c) => !c.packed));
 }
 
+// ── presenter mode: her refs last in every clip, welcome / present / invite, silent ──
+{
+  const presenter = { image_urls: ["https://s/presenter/front.jpg", "https://s/presenter/side.jpg"] };
+  const plain = planWalkthrough(manyMap, many, {});
+  const pres = planWalkthrough(manyMap, many, {}, MAX_CLIPS, { presenter });
+  assert.equal(pres.presenter, true);
+  assert.equal(plain.presenter, undefined, "no presenter unless asked");
+  assert.ok(plain.clips.every((c) => /No people/.test(c.prompt) && !/presenter/i.test(c.prompt)), "plain prompts unchanged");
+  assert.equal(pres.clip_count, plain.clip_count, "same clips");
+  for (const c of pres.clips) {
+    const n = c.image_urls.length;
+    assert.ok(n <= MAX_REFS, "presenter refs fit the reference limit");
+    assert.deepEqual(c.image_urls.slice(-2), presenter.image_urls, "her photos go last");
+    assert.ok(c.prompt.includes(`@image${n - 1} and @image${n} show her`), "her refs are named by their slots");
+    assert.ok(/never speaks/.test(c.prompt) && /only person/.test(c.prompt) && !/No people/.test(c.prompt));
+    assert.ok(SUPPORTED.includes(c.duration));
+    assert.ok(c.prompt.length < 5000);
+  }
+  assert.ok(/walks into the frame/.test(pres.clips[0].prompt), "she enters in the opener");
+  assert.ok(/inviting gesture/.test(pres.clips[pres.clips.length - 1].prompt), "she invites in the closer");
+  assert.ok(pres.clips.reduce((n, c) => n + c.duration, 0) >= plain.clips.reduce((n, c) => n + c.duration, 0), "she gets time");
+  // a solo room keeps 7 of its photos (2 slots go to her)
+  const big = Array.from({ length: 9 }, (_, i) => tag("living_room", 8, i + 1));
+  const bigMap = normalizeMap({ spaces: [{ type: "living_room", photos: big.map((_, i) => ({ n: i + 1, shows: ["sofa"] })) }] }, 9, big.map((t) => t.room_type));
+  const solo = planWalkthrough(bigMap, big, {}, MAX_CLIPS, { presenter }).clips[0];
+  assert.equal(solo.image_urls.length, MAX_REFS);
+  assert.equal(solo.image_urls.filter((u) => u.startsWith("https://f/")).length, MAX_REFS - 2);
+  // empty presenter → plain plan
+  assert.equal(planWalkthrough(manyMap, many, {}, MAX_CLIPS, { presenter: { image_urls: [] } }).presenter, undefined);
+}
+
+// ── route: which presenter a request gets ──
+{
+  const { presenterFrom } = require("./walkthrough-plan");
+  assert.equal(presenterFrom({}, "https://x.com"), null);
+  assert.deepEqual(presenterFrom({ presenter: true }, "https://x.com/").image_urls,
+    ["https://x.com/presenter/front.jpg", "https://x.com/presenter/side.jpg"]);
+  assert.deepEqual(presenterFrom({ presenter_image_urls: ["https://a/1.jpg", "http://b/2.jpg", "https://c/3.jpg", "https://d/4.jpg"] }, "").image_urls,
+    ["https://a/1.jpg", "https://c/3.jpg"], "https only, at most two");
+}
+
 console.log("walkthrough-plan: all tests passed");
