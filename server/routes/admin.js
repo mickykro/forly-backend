@@ -12,6 +12,7 @@
  *   POST /api/admin/page/extend        → extend ANY page by 30 days
  *   POST /api/admin/properties/delete  → archive/delete ANY listing
  *   POST /api/admin/properties/retry   → rerun the page build of ANY listing with no page
+ *   GET  /api/admin/agent-profile      → one agent's saved details, to prefill create.html
  */
 
 const express = require("express");
@@ -459,6 +460,23 @@ module.exports = function createAdminRouter(ctx) {
       console.error("admin/properties/delete failed:", err);
       res.status(500).json({ error: "internal" });
     }
+  });
+
+  // ── one agent's saved details (create.html?key=admin&agent=<phone>) ──
+  // Prefills the agent block when an operator creates a property for a client,
+  // so the page carries the client's own name, office, licence and logo.
+  router.get("/agent-profile", requireAdmin, async (req, res) => {
+    const phone = normalizeAuthPhone(req.query.phone);
+    if (!phone) return res.status(400).json({ error: "valid phone required" });
+    const b = await db.getBusiness(phone).catch(() => null);
+    if (!b) return res.status(404).json({ error: "not_found" });
+    res.json({
+      phone,
+      full_name: b.full_name || "",
+      business_name: b.business_name || "",
+      license_number: b.license_number || "",
+      logo_url: b.logo_url || null,
+    });
   });
 
   // ── retry ANY listing's page build ──

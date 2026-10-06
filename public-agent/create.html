@@ -552,6 +552,12 @@
   var keyMatch = location.search.match(/[?&]key=([^&]*)/);
   var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
   var isDemo = !!demoKey;
+  // ?agent=<phone> (admin panel → "create for client"): a real client's
+  // property, created by an operator. Their saved profile fills the agent block,
+  // their logo is reused, and nothing is autosaved back into their account.
+  var agentMatch = location.search.match(/[?&]agent=(\d{9,15})(&|$)/);
+  var clientPhone = isDemo && agentMatch ? agentMatch[1] : null;
+  var clientLogoUrl = null;
 
   // ── functional three-stage creation wizard ──
   // The inputs and APIs stay exactly as they were; panels only decide when each
@@ -853,13 +859,48 @@
     // standalone demo — not for signed-in users: hide the "my properties" nav
     var myProps = $("#navMyProps");
     if (myProps) myProps.style.display = "none";
-    // ponytail: autosave agent fields on blur during demo
-    initDemoAutosave();
+    if (clientPhone) {
+      prefillClient(clientPhone);
+    } else {
+      // ponytail: autosave agent fields on blur during demo
+      initDemoAutosave();
+    }
   } else {
     // Real (non-demo) create is session-gated, but nothing checked that on
     // load — a logged-out user could fill the whole form before the 401
     // surfaced on submit. FLY.req redirects to login on 401 by default.
     FLY.req("/api/profile").catch(function () {});
+  }
+
+  // 972501234567 → +972 / 050-1234567; another country picks its own code.
+  function setClientPhone(full) {
+    var opt = Array.prototype.filter.call($("#agCC").options, function (o) {
+      return full.indexOf(o.value.replace(/\D/g, "")) === 0;
+    }).sort(function (a, b) { return b.value.length - a.value.length; })[0];
+    var cc = opt ? opt.value.replace(/\D/g, "") : "";
+    if (opt) $("#agCC").value = opt.value;
+    var rest = cc ? full.slice(cc.length) : full;
+    $("#agPhone").value = cc === "972" ? "0" + rest : rest;
+  }
+
+  function prefillClient(phone) {
+    var note = $("#demoWorkspaceNote");
+    note.querySelector(".demo-index").textContent = "CLIENT";
+    note.querySelector("strong").textContent = "יוצרים נכס בשם הלקוח.";
+    note.querySelector("span[data-i18n]").textContent = " הדף יופיע אצל הלקוח, עם הפרטים השמורים שלו.";
+    ["strong", "span[data-i18n]"].forEach(function (s) { note.querySelector(s).removeAttribute("data-i18n"); });
+    FLY.req("/api/admin/agent-profile?phone=" + encodeURIComponent(phone), { noRedirect: true })
+      .then(function (p) {
+        $("#agName").value = p.full_name || "";
+        $("#agBrand").value = p.business_name || "";
+        $("#agLicense").value = p.license_number || "";
+        setClientPhone(p.phone);
+        clientLogoUrl = p.logo_url || null;
+      })
+      .catch(function () {
+        setClientPhone(phone);
+        FLY.toast("לא נמצא פרופיל שמור ללקוח — מלאו את פרטי הסוכן");
+      });
   }
 
   // ponytail: autosave agent fields during demo — writes to businesses/{phone}
@@ -1603,7 +1644,7 @@
         if (photoUrls.length < photos.length) throw new Error(FT("err_photo_upload"));
         var extra = res[1], cursor = 0;
         var videoUrl = videoFile ? extra[cursor++] : null;
-        var logoUrl = logoFile ? extra[cursor++] : null;
+        var logoUrl = logoFile ? extra[cursor++] : clientLogoUrl;
         var fontUrl = fontFile ? extra[cursor++] : null;
         if (fontUrl) theme.font_url = fontUrl;
 
@@ -1677,7 +1718,7 @@
     }).then(function (d) {
       // Remember demo listings locally so the dashboard can show a "logged in"
       // view with just this property (used when there's no account yet).
-      if (isDemo) {
+      if (isDemo && !clientPhone) {
         try {
           var rec = {
             listing_id: d.listing_id,
