@@ -25,6 +25,7 @@
   let toastTimer = null;
 
   function toast(text) {
+    if (!text) return; // a silent error says nothing
     const el = $("msg");
     el.textContent = text;
     el.style.display = "block";
@@ -253,16 +254,17 @@
         ? "החשבון הזה מושהה אצלנו כרגע, ולכן אי אפשר לחבר אותו. הצוות שלנו יחזור אליכם."
         : "אי אפשר לחבר את החשבון כרגע — נסו שוב מאוחר יותר.";
     }
-    return ({
+    const text = ({
       profile_busy: "פורלי משתמשת בחשבון הזה ממש עכשיו — נסו שוב בעוד כמה דקות.",
       driver_busy: "כל הדפדפנים שלנו תפוסים כרגע — נסו שוב בעוד דקה.",
       consent_required: "סמנו את האישור שמעל הכפתור.",
       extract_unavailable: "לא הצלחנו לפתוח דפדפן כרגע — נסו שוב בעוד רגע.",
       proxy_unavailable: "הדפדפן לא הצליח להתחבר לאינטרנט דרך הרשת שהוגדרה. מנהל המערכת צריך לבדוק את חיבור הפרוקסי ואז לנסות שוב.",
       browser_network_unavailable: "הדפדפן נפתח בלי חיבור תקין לאינטרנט. פורלי תסגור אותו ותנסה לפתוח דפדפן חדש פעם אחת.",
-      unavailable: "חיבור חשבונות עדיין לא זמין בשרת הזה.",
+      unavailable: "", // the server has no account connection: not announced
       network: "אין חיבור לשרת — בדקו את האינטרנט ונסו שוב.",
-    })[code] || "משהו השתבש — נסו שוב בעוד רגע.";
+    })[code];
+    return text !== undefined ? text : "משהו השתבש — נסו שוב בעוד רגע.";
   }
 
   // The login browser shows inside the modal (connect-viewer.js): the server

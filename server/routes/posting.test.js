@@ -115,8 +115,8 @@ const { db, store } = K;
       await db.savePage(K.page(`pg${i}`, PH));
       assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ page_id: `pg${i}` }))).status, 201);
     }
-    const busy = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2" }));
-    assert.equal(busy.status, 409); assert.equal(busy.body.error, "too_many_campaigns");
+    // No cap on live campaigns: a fourth one starts too.
+    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2" }))).status, 201);
     assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg3" }))).status, 200, "its own page's campaign does not count against it");
   }
 

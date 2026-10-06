@@ -20,6 +20,7 @@
 
   let toastTimer = null;
   function toast(text) {
+    if (!text) return; // a silent error says nothing
     const el = $("msg"); el.textContent = text; el.style.display = "block";
     clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.style.display = "none"; }, 4200);
   }
@@ -35,7 +36,7 @@
   const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
   const errorText = (e) => (e && e.code === "network" ? "אין חיבור לשרת — בדקו את האינטרנט ונסו שוב." : U.errorText(e));
 
-  let settings = null, props = [], maxActive = 3, consentGiven = false, timer = null;
+  let settings = null, props = [], consentGiven = false, timer = null;
   const picks = new Map(); // page_id → Set of group ids, for properties not posting yet
   const open = new Set(); // page_ids whose group panel is open
   // The post preview: shown per property, and always once before a property
@@ -253,7 +254,7 @@
 
   function renderProps() {
     const liveCount = props.filter((p) => live(p.campaign)).length;
-    $("apCount").textContent = props.length ? `${liveCount} מתוך ${maxActive} נכסים בפרסום אוטומטי (אפשר עד ${maxActive} בו-זמנית)` : "";
+    $("apCount").textContent = props.length ? (liveCount === 1 ? "נכס אחד בפרסום אוטומטי" : `${liveCount} נכסים בפרסום אוטומטי`) : "";
     $("apProps").innerHTML = sorted().map(propHtml).join("") ||
       '<p class="camp-muted">עוד אין נכסים עם דף פעיל. <a href="/create.html">יצירת נכס חדש</a></p>';
     const h = U.haltInfo(settings && settings.halt_state, props.map((p) => p.campaign).find(live) || null);
@@ -315,7 +316,7 @@
   async function loadAll() {
     const [s, p] = await Promise.all([api("/api/posting/settings"), api("/api/posting/properties")]);
     applySettings(s);
-    props = p.properties || []; maxActive = p.max_active || 3;
+    props = p.properties || [];
   }
   async function refresh() {
     try {
@@ -563,7 +564,7 @@
   (async () => {
     try { await loadAll(); }
     catch (e) {
-      $("loading").innerHTML = `<p class="sub">${U.esc(e && e.code === "http_404" ? "הפרסום האוטומטי עדיין לא זמין בשרת הזה." : errorText(e))}</p>`;
+      $("loading").innerHTML = `<p class="sub">${U.esc(e && e.code === "http_404" ? "" : errorText(e))}</p>`;
       return;
     }
     const perm = settings.permission || {};

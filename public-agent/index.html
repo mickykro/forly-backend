@@ -123,6 +123,7 @@
     <div style="display:flex;gap:8px">
       <a class="btn btn-ghost" href="/distribution.html">חיבורים וקבוצות</a>
       <a class="btn btn-ghost" href="/autopublish.html">פרסום</a>
+      <a class="btn btn-ghost" href="/profile">הפרופיל שלי</a>
       <a class="btn btn-gold" href="/create.html">+ נכס חדש</a>
     </div>
   </div>
@@ -646,9 +647,7 @@
           $("#profileBanner").classList.remove("hidden");
         }
         // Portfolio banners
-        if (d.profile && !d.profile.portfolio_enabled) {
-          // feature not granted by admin — no banners at all
-        } else if (d.profile && d.profile.portfolio_url) {
+        if (d.profile && d.profile.portfolio_url) {
           $("#portfolioBanner").classList.remove("hidden");
           var url = d.profile.portfolio_url.replace(/^https?:\/\/[^/]+/, "");
           $("#portfolioUrl").href = url;

@@ -199,7 +199,6 @@ module.exports = function createAdminRouter(ctx) {
           onboarding_state: b.onboarding_state || "",
           is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
           chatbot_enabled: !!(b.features && b.features.chatbot),
-          portfolio_enabled: !!(b.features && b.features.portfolio),
           portfolio_status: b.portfolio?.status || null,
           portfolio_url: b.portfolio?.status === "open" ? `/${b.portfolio.slug}` : null,
           distribution_enabled: !!(b.features && b.features.distribution),
@@ -251,7 +250,7 @@ module.exports = function createAdminRouter(ctx) {
   // Flipping "distribution" arms the page-ready hook for every future page
   // that agent creates (resolved live, like chatbot). Off by default —
   // pilots first (spec §2 "Rollout").
-  const FEATURES = new Set(["chatbot", "portfolio", "distribution"]);
+  const FEATURES = new Set(["chatbot", "distribution"]);
 
   router.post("/business/features", requireAdmin, async (req, res) => {
     const body = req.body || {};

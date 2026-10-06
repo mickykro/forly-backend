@@ -143,8 +143,9 @@ module.exports = function createDistributionRouter(ctx) {
     const missing = missingMetaEnv();
     if (missing.length) {
       console.warn("[distribution] oauth/start blocked — missing env:", missing.join(", "));
-      return res.status(503).type("html").send(card("החיבור לפייסבוק אינו זמין",
-        "התצורה בשרת חסרה. פנו לתמיכה — אין צורך לנסות שוב."));
+      // Not announced to the agent: back to where they came from, no message.
+      const back = publishWorkspacePath(req.query.page_id);
+      return res.redirect(back ? back.replace("&connected=1", "") : "/distribution.html");
     }
     const state = meta.makeState({
       phone: req.user.userId,

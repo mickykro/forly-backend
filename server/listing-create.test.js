@@ -107,6 +107,17 @@ const { buildFailed, retryBlocked, retryListing, BUILD_STUCK_MS, MAX_RETRIES } =
   assert.deepEqual(hooks.map((h) => h[1].listing_id).sort(), ["AD1", "AD2"]);
   assert.equal((await db.getListing("AD1")).retry_count, MAX_RETRIES + 1);
 
+  // ── the phones the agent picked on create are stored on the listing ──
+  {
+    const { createListing } = require("./listing-create");
+    const body = { city: "חיפה", price: 1, rooms: 3, photos_urls: ["a", "b", "c", "d"] };
+    const quiet = { ...deps, fetchFn: async () => ({ status: 200 }) };
+    const picked = await createListing("P9", body, null, { ...quiet, agentPhones: { phone: "972501111111", phone2: null } });
+    assert.deepEqual((await db.getListing(picked.listing_id)).agent_phones, { phone: "972501111111", phone2: null });
+    const plain = await createListing("P9", body, null, quiet);
+    assert.equal((await db.getListing(plain.listing_id)).agent_phones, null, "nothing picked: the page keeps its default");
+  }
+
   server.close();
   console.log("listing-create.test.js ok");
 })().catch((err) => { console.error(err); process.exit(1); });
