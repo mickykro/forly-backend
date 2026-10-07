@@ -72,6 +72,11 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     assert.ok(!JSON.stringify(list).includes(AGENT), "no full phone in the list");
 
     // ── edit: version, remove, text ──
+    for (const bad of [{ days: 5 }, { version: "", days: 5 }]) {
+      const r = await call(server, "PATCH", `/campaigns/${row.id}`, bad);
+      assert.equal(r.status, 400); assert.equal(r.body.error, "invalid_input");
+    }
+    assert.equal((await call(server, "GET", `/campaigns?agent=${REF}`, undefined, false)).body.campaigns[0].version, row.version, "refused edits leave the campaign unchanged");
     const stale = await call(server, "PATCH", `/campaigns/${row.id}`, { version: "old", days: 5 });
     assert.equal(stale.status, 409); assert.equal(stale.body.error, "stale_version");
     const edited = await call(server, "PATCH", `/campaigns/${row.id}`, { version: row.version, remove_group_ids: ["222"], copies: { 111: "שלום" } });

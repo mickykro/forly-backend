@@ -154,7 +154,7 @@ module.exports = function createAdminCampaignsRouter({
     const t = b.targets === undefined ? { targets: undefined } : S_.parseTargets(b.targets);
     const probe = PC.validCreate({ page_id: c.page_id, mode: b.mode || "standing", group_ids: ["1"], days: b.days, copies: b.copies,
       repeat_days: b.repeat_days === 0 ? undefined : b.repeat_days });
-    if (add.error || remove.error || t.error || !probe || typeof b.version !== "string") return res.status(400).json({ error: "invalid_input" });
+    if (add.error || remove.error || t.error || !probe || typeof b.version !== "string" || !b.version) return res.status(400).json({ error: "invalid_input" });
     if (b.repeat_days !== undefined && b.repeat_days !== 0 && !(b.repeat_days >= 3 && b.repeat_days <= 30)) return res.status(400).json({ error: "invalid_input" });
     const edit = {};
     if (add.ids.length) {
