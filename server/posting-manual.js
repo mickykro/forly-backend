@@ -74,9 +74,9 @@ async function checklist(deps = {}) {
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   const config = await A.configOf(deps, x);
   const now = x.clock();
-  const byPhone = new Map(); // the agent's campaigns, for their manual posts
-  const campaignsOf = async (phone) => {
-    if (!byPhone.has(phone)) byPhone.set(phone, await x.store.listPostingCampaignsByPhone(phone).catch(() => []));
+  const byPhone = new Map(); // the agent's campaigns, connection and other posts, for the group limits
+  const agentOf = async (phone) => {
+    if (!byPhone.has(phone)) byPhone.set(phone, L.agentPosts(phone, deps, x, now));
     return byPhone.get(phone);
   };
   const out = [];
@@ -84,7 +84,8 @@ async function checklist(deps = {}) {
   for (const [i, c] of running.entries()) {
     const page = pages[i];
     if (!page) continue;
-    const limits = L.limitsFor(c, await campaignsOf(c.phone), now, config);
+    const agent = await agentOf(c.phone);
+    const limits = L.limitsFor(c, agent.campaigns, now, config, agent);
     const byId = new Map((c.groups || []).map((g) => [String(g.group_id), g]));
     out.push({
       ref: refOf(c.phone), campaign_id: c.id, phone_tail: A.tail(c.phone), awaiting_agent: c.awaiting_texts === true,

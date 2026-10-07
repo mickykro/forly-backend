@@ -33,6 +33,14 @@ module.exports = function createAdminManualRouter({
   const hooked = new WeakSet(); // pages whose file chooser we listen for
   const key = (phone) => `manual|${phone}`;
   const redact = (s) => (driver.redact ? driver.redact(s) : s);
+  const doneChain = new Map();
+  function oneAtATime(key, fn) {
+    const run = (doneChain.get(key) || Promise.resolve()).then(fn, fn);
+    const tail = run.catch(() => {});
+    doneChain.set(key, tail);
+    tail.then(() => { if (doneChain.get(key) === tail) doneChain.delete(key); });
+    return run;
+  }
   const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
     console.error(redact(`admin manual: ${(e && (e.code || e.name)) || "error"}`));
     if (!res.headersSent) res.status(500).json({ error: "internal" });
@@ -97,24 +105,32 @@ module.exports = function createAdminManualRouter({
     if (!["posted", "skipped"].includes(status)) return res.status(400).json({ error: "invalid_input" });
     const override = req.body && typeof req.body.override_reason === "string" ? req.body.override_reason.trim() : null;
     if (override !== null && (override.length < 3 || override.length > 200)) return res.status(400).json({ error: "invalid_input" });
-    if (status === "posted") {
+    const head = await x.store.getPostingCampaign(String(req.params.id));
+    if (!head) return res.status(404).json({ error: "not_found" });
+    // The limit check and the record are one step per agent, so two tabs at
+    // 2/3 cannot both pass. In-process: the server runs as one container.
+    return oneAtATime(String(head.phone), async () => {
       const cur = await x.store.getPostingCampaign(String(req.params.id));
-      if (cur && M.owed(cur).some((g) => String(g.group_id) === String(req.params.gid))) {
-        const config = await A.configOf(deps, x);
-        const lim = L.limitsFor(cur, await x.store.listPostingCampaignsByPhone(cur.phone), x.clock(), config)[String(req.params.gid)];
-        if (lim && lim.block && !override) return res.status(409).json({ error: "group_limit", why: lim.block.why, until: lim.block.until });
-        if (lim && lim.block) {
-          // store-facing tails are digits only (A.tail's "…" prefix is display-only). Fail closed: no audit, no override.
-          const dtail = (p) => String(p || "").replace(/\D/g, "").slice(-4);
-          const audited = await x.store.addAuditEvent({ operator_tail: dtail(req.user && req.user.userId), action: "manual_limit_override", target_phone_tail: dtail(cur.phone),
-            reason: override, detail: { why: lim.block.why, campaign_tail: String(cur.id).slice(-6) } }, x.clock()).then(() => true, () => false);
-          if (!audited) return res.status(500).json({ error: "internal" });
+      if (status === "posted") {
+        if (cur && M.owed(cur).some((g) => String(g.group_id) === String(req.params.gid))) {
+          const config = await A.configOf(deps, x);
+          const now = x.clock();
+          const agent = await L.agentPosts(cur.phone, deps, x, now);
+          const lim = L.limitsFor(cur, agent.campaigns, now, config, agent)[String(req.params.gid)];
+          if (lim && lim.block && !override) return res.status(409).json({ error: "group_limit", why: lim.block.why, until: lim.block.until });
+          if (lim && lim.block) {
+            // store-facing tails are digits only (A.tail's "…" prefix is display-only). Fail closed: no audit, no override.
+            const dtail = (p) => String(p || "").replace(/\D/g, "").slice(-4);
+            const audited = await x.store.addAuditEvent({ operator_tail: dtail(req.user && req.user.userId), action: "manual_limit_override", target_phone_tail: dtail(cur.phone),
+              reason: override, detail: { why: lim.block.why, campaign_tail: String(cur.id).slice(-6) } }, x.clock()).then(() => true, () => false);
+            if (!audited) return res.status(500).json({ error: "internal" });
+          }
         }
       }
-    }
-    const c = await M.markDone(String(req.params.id), String(req.params.gid), status, deps);
-    if (!c) return res.status(404).json({ error: "not_found" });
-    res.json({ ok: true, completed: c.status === "completed" });
+      const c = await M.markDone(String(req.params.id), String(req.params.gid), status, deps);
+      if (!c) return res.status(404).json({ error: "not_found" });
+      res.json({ ok: true, completed: c.status === "completed" });
+    });
   }));
 
   // ── agents and their properties ──

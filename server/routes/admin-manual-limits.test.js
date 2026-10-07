@@ -69,6 +69,15 @@ function call(server, method, path, body) {
     const dump = JSON.stringify(rows);
     assert.ok(!dump.includes(AGENT) && !dump.includes(ADMIN), "no full phone in the audit row");
     assert.ok(!(await call(server, "GET", "/queue")).body.items.some((i) => i.campaign_id === ids[0]), "the campaign is done");
+
+    // two tabs at 2/3 at once: one passes, the other is refused (4/3 never recorded)
+    assert.equal((await done(ids[1], "222", { status: "posted" })).status, 200); // 222 at 2/3 today
+    const list = K.store.listPostingCampaignsByPhone; // a slow read: both requests are past it before either records
+    K.store.listPostingCampaignsByPhone = async (...a) => { const r = await list.apply(K.store, a); await new Promise((ok) => setTimeout(ok, 50)); return r; };
+    let both;
+    try { both = await Promise.all([done(ids[2], "222", { status: "posted" }), done(ids[3], "222", { status: "posted" })]); }
+    finally { K.store.listPostingCampaignsByPhone = list; }
+    assert.deepEqual(both.map((r) => r.status).sort(), [200, 409], "the limit check and the record are one step");
     console.log("routes/admin-manual-limits.test.js ok");
   } finally { server.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

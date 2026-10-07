@@ -37,6 +37,21 @@ const L = require("./posting-limits");
   const norep = camp("c1", "pg1", [old]);
   assert.equal(L.limitsFor(norep, [norep], now, config)["222"].block, null, "no repeat: the 3-day rule has passed");
 
+  // a group known by a resolved slug: history under the slug counts (alias via the membership entry)
+  const slugPosts = [camp("c2", "pg2", [{ group_id: "slug:foo", status: "posted", posted_at: at(1) }]),
+    camp("c3", "pg3", [{ group_id: "slug:foo", status: "posted", posted_at: at(2) }]),
+    camp("c4", "pg4", [{ group_id: "slug:foo", status: "posted", posted_at: at(3) }])];
+  const slugConn = { facebook_groups_member: [{ group_id: "111", aliases: ["slug:foo"], membership_state: "member" }] };
+  const limA = L.limitsFor(c1, [c1].concat(slugPosts), now, config, { conn: slugConn });
+  assert.equal(limA["111"].today, 3); assert.equal(limA["111"].block.why, "group_daily_cap");
+
+  // posts outside a manual campaign post (attempts, share-kit) count; one in both counts once
+  const acct = [{ at: at(1), group_id: "111", page_id: "pgX", ok: true }, { at: at(2), group_id: "111", page_id: "pgY", ok: null, attempt_key: "k1" }];
+  const withAuto = camp("c5", "pgY", [{ group_id: "111", status: "posted", posted_at: at(2), attempt_key: "k1" }]);
+  const limB = L.limitsFor(c1, [c1, withAuto], now, config, { accountPosts: acct });
+  assert.equal(limB["111"].today, 2, "the share-kit post counts; the automatic one is not counted twice");
+  assert.equal(L.limitsFor(c1, [c1], now, config, { accountPosts: [{ at: at(1), group_id: "111", ok: false }] })["111"].today, 0, "a failed attempt does not count");
+
   // estimate: an established account, 200 posts → about 3 weeks, fits 30 days
   const { deps } = await K.setup();
   const conn = await K.db.getConnection("972500000001");
