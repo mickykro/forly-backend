@@ -29,6 +29,9 @@
     media_unavailable: "לא הצלחנו להביא את הסרטון של הנכס.",
     not_found: "לא נמצא. אולי הקבוצה כבר סומנה או שהקמפיין הסתיים.",
     invalid_input: "הבקשה לא תקינה.",
+    driver_busy: "הדפדפנים תפוסים כרגע. נסו שוב בעוד דקה.",
+    cannot_verify_login: "לא הצלחנו לוודא את ההתחברות. נסו שוב בעוד רגע.",
+    verify_failed: "הבדיקה נכשלה. נסו שוב.",
   };
   var fail = function (e) { FLY.toast(ERR[e && e.code] || "הפעולה נכשלה"); };
   function call(method, path, body) {
@@ -244,6 +247,28 @@
     show(ref).catch(fail).then(function () { b.disabled = false; });
   });
   $("#manualReload").addEventListener("click", load);
+
+  // ── agents who logged in but never pressed done: check the saved login ──
+  function loadUnconnected() {
+    var box = $("#manualUnconnectedList");
+    return call("GET", "/unconnected").then(function (j) {
+      var list = j.agents || [];
+      box.innerHTML = !list.length ? '<p class="manual-muted">אין סוכנים כאלה.</p>' : list.map(function (a) {
+        return '<div class="manual-item"><b>' + esc(a.name || "סוכן") + '</b> <span class="manual-muted">' + esc(a.phone_tail || "") + " · התחיל התחברות " + esc(when(a.started_at)) + "</span> " +
+          '<button type="button" class="btn btn-ghost btn-sm" data-verify="' + esc(a.ref) + '">בדיקת התחברות</button></div>';
+      }).join("");
+    }).catch(function (e) { box.innerHTML = '<p class="manual-muted">לא הצלחנו לטעון את הרשימה.</p>'; fail(e); });
+  }
+  $("#manualUnconnected").addEventListener("toggle", function () { if (this.open) loadUnconnected(); });
+  $("#manualUnconnectedList").addEventListener("click", function (ev) {
+    var btn = ev.target.closest("[data-verify]");
+    if (!btn) return;
+    btn.disabled = true; btn.textContent = "בודקים…";
+    call("POST", "/unconnected/" + encodeURIComponent(btn.getAttribute("data-verify")) + "/verify").then(function (r) {
+      if (r.state === "connected") { FLY.toast("הסוכן מחובר ✓" + (r.identity_label ? " (" + r.identity_label + ")" : "")); load(); loadUnconnected(); }
+      else { FLY.toast("הפרופיל השמור לא מחובר — הסוכן צריך להתחבר מחדש."); btn.disabled = false; btn.textContent = "בדיקת התחברות"; }
+    }).catch(function (e) { fail(e); btn.disabled = false; btn.textContent = "בדיקת התחברות"; });
+  });
   $("#manualAgent").addEventListener("change", renderQueue);
   $("#manualPropPick").addEventListener("change", function () { if (this.value) setProperty(this.value).catch(fail); });
   $("#manualClose").addEventListener("click", function () {

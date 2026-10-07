@@ -109,6 +109,35 @@ module.exports = function createAdminManualRouter({
     res.json({ agents: out });
   }));
 
+  // ── agents who started a Facebook login but are not marked connected ──
+  // (logged in, then closed the window instead of pressing done). One read
+  // per agent, only when the admin opens this list.
+  async function unconnected() {
+    const out = [];
+    for (const b of await x.db.listAllBusinesses().catch(() => [])) {
+      if (!b || !b.phone) continue;
+      const conn = (await x.db.getConnection(String(b.phone)).catch(() => null)) || {};
+      if (!conn.browser_consent_at || conn.facebook_browser_connected_at) continue;
+      if (["revoked", "quarantined"].includes(conn.facebook_profile_state)) continue;
+      out.push({ phone: String(b.phone), name: b.full_name || b.business_name || "", started_at: conn.browser_consent_at });
+    }
+    return out;
+  }
+  router.get("/unconnected", requireAdmin, wrap(async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const list = await unconnected();
+    res.json({ agents: list.map((a) => ({ ref: M.refOf(a.phone), phone_tail: A.tail(a.phone), name: a.name, started_at: a.started_at })) });
+  }));
+  // Opens the agent's saved profile, checks the login, and marks the agent
+  // connected only when it is logged in (login-verify.js).
+  router.post("/unconnected/:ref/verify", requireAdmin, wrap(async (req, res) => {
+    const hit = (await unconnected()).find((a) => M.refOf(a.phone) === String(req.params.ref));
+    if (!hit) return res.status(404).json({ error: "not_found" });
+    const r = await (deps.verifySaved || require("../login-verify").verifySaved)(hit.phone, "facebook", { db: x.db, driver });
+    if (r.error) return res.status(r.error === "profile_busy" || r.error === "driver_busy" ? 409 : 502).json({ error: r.error });
+    res.json(r);
+  }));
+
   router.get("/agents/:ref/properties", requireAdmin, wrap(async (req, res) => {
     const phone = await phoneOf(req.params.ref);
     if (!phone) return res.status(404).json({ error: "not_found" });

@@ -112,6 +112,72 @@ async function identityLabel(page) {
   return P.isPersonName(title) ? title : null;
 }
 
+// The login check behind /finish and login-verify.js's saved-login check: on
+// the given page (the agent's own profile), is the account logged in, and as
+// whom. Never throws for a scrape that goes wrong past the login itself.
+async function readLogin(page, platform, spec, conn, db) {
+  const resp = await page.goto(spec.checkUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+  // A check page that is itself missing or broken proves nothing — a 404
+  // page is long and has no login wall, so it would read as "logged in".
+  // Fail closed: the account is not connected until the page answers.
+  const status = resp && typeof resp.status === "function" ? resp.status() : 200;
+  if (status >= 400) return { loggedIn: false, label: null, unverifiable: status };
+  const text = await page.innerText("body");
+  if (isLoginWall(page.url(), text)) return { loggedIn: false, label: null };
+  // The profile's display name, so the campaign card can say "posting as …"
+  // — and the identity R3 proves before every post (I8): the same read
+  // the driver's proof makes, normalised the same way, so the two can
+  // match exactly. Fallback: the tab title, without a "(3) " unread
+  // counter and the " | Facebook" suffix — never the bare site name.
+  const label = platform === "facebook" ? await identityLabel(page) : await titleLabel(page);
+  // The Pages this account manages, each with its numeric id when its own
+  // page says it (I4) — R3 proves a Page post against that id, so a Page
+  // without one is never a target. Yad2/Madlan have no equivalent.
+  let pages = [];
+  let groups = {};
+  if (platform === "facebook") {
+    try {
+      await page.goto(process.env.FB_PAGES_PAGE || "https://www.facebook.com/pages/?category=your_pages", { waitUntil: "domcontentloaded", timeout: 30000 });
+      const links = await page.$$eval('a[href*="facebook.com/"][role="link"]', (els) => els.map((a) => ({ href: a.href, name: (a.textContent || "").trim() })));
+      pages = await withPageIds(page, pageLinks(links));
+    } catch (e) { pages = []; }
+    // Which groups this account is actually a member of (Task 14): the
+    // campaign gate later posts only there. A scrape failure must not
+    // fail the connect — store nothing for groups and move on.
+    try {
+      // An empty or collapsed scrape (a slow render, a login wall) is
+      // never trusted (I3): the stored list stays as it is.
+      const scraped = await groupsSync.syncMembership(page);
+      const anomaly = groupsSync.scrapeAnomaly(conn.facebook_groups_member, scraped);
+      if (anomaly) console.error(`connections-browser: facebook group sync not trusted: ${anomaly}`);
+      else {
+        const merged = groupsSync.mergeMembership(conn.facebook_groups_member || [], scraped, {
+          now: new Date(), catalog: await db.listGroupCatalog(500), selected: [], hidden: groupsSync.hiddenIds(conn),
+        });
+        groups = { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() };
+      }
+    } catch (e) {
+      // Never e.message here: a scrape failure could in principle throw
+      // with scraped text (a group name/URL) inside it. Only a fixed
+      // string plus the error's code/name — never data — is safe to log.
+      console.error(driverLive.redact(`connections-browser: facebook group sync failed: ${e.code || e.name}`));
+    }
+  }
+  return { loggedIn: true, label, pages, groups };
+}
+
+// What a confirmed login writes on the connection.
+function connectedPatch(conn, platform, { label, pages, groups }) {
+  const first = conn[`${platform}_browser_first_connected_at`] || new Date().toISOString();
+  return Object.assign({
+    [`${platform}_browser_connected_at`]: new Date().toISOString(),
+    [`${platform}_browser_first_connected_at`]: first, // warm-up counts from here, not from every reconnect
+    [`${platform}_identity_label`]: label,
+    [`${platform}_pages`]: pages,
+    [`browser_session_${platform}`]: null,
+  }, groups || {});
+}
+
 module.exports = function createConnectionsBrowserRouter(ctx) {
   const { requireAuth, authSecret } = ctx;
   const driver = ctx.driver || driverLive;
@@ -324,56 +390,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     let loggedIn = false, label = null, pages = [], groups = {}, unverifiable = null;
     try {
-      ({ loggedIn, label, pages, groups, unverifiable } = await driver.attachPage(open.session_id, async (page) => {
-        const resp = await page.goto(spec.checkUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-        // A check page that is itself missing or broken proves nothing — a 404
-        // page is long and has no login wall, so it would read as "logged in".
-        // Fail closed: the account is not connected until the page answers.
-        const status = resp && typeof resp.status === "function" ? resp.status() : 200;
-        if (status >= 400) return { loggedIn: false, label: null, unverifiable: status };
-        const text = await page.innerText("body");
-        if (isLoginWall(page.url(), text)) return { loggedIn: false, label: null };
-        // The profile's display name, so the campaign card can say "posting as …"
-        // — and the identity R3 proves before every post (I8): the same read
-        // the driver's proof makes, normalised the same way, so the two can
-        // match exactly. Fallback: the tab title, without a "(3) " unread
-        // counter and the " | Facebook" suffix — never the bare site name.
-        const label = platform === "facebook" ? await identityLabel(page) : await titleLabel(page);
-        // The Pages this account manages, each with its numeric id when its own
-        // page says it (I4) — R3 proves a Page post against that id, so a Page
-        // without one is never a target. Yad2/Madlan have no equivalent.
-        let pages = [];
-        let groups = {};
-        if (platform === "facebook") {
-          try {
-            await page.goto(process.env.FB_PAGES_PAGE || "https://www.facebook.com/pages/?category=your_pages", { waitUntil: "domcontentloaded", timeout: 30000 });
-            const links = await page.$$eval('a[href*="facebook.com/"][role="link"]', (els) => els.map((a) => ({ href: a.href, name: (a.textContent || "").trim() })));
-            pages = await withPageIds(page, pageLinks(links));
-          } catch (e) { pages = []; }
-          // Which groups this account is actually a member of (Task 14): the
-          // campaign gate later posts only there. A scrape failure must not
-          // fail the connect — store nothing for groups and move on.
-          try {
-            // An empty or collapsed scrape (a slow render, a login wall) is
-            // never trusted (I3): the stored list stays as it is.
-            const scraped = await groupsSync.syncMembership(page);
-            const anomaly = groupsSync.scrapeAnomaly(conn.facebook_groups_member, scraped);
-            if (anomaly) console.error(`connections-browser: facebook group sync not trusted: ${anomaly}`);
-            else {
-              const merged = groupsSync.mergeMembership(conn.facebook_groups_member || [], scraped, {
-                now: new Date(), catalog: await db.listGroupCatalog(500), selected: [], hidden: groupsSync.hiddenIds(conn),
-              });
-              groups = { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() };
-            }
-          } catch (e) {
-            // Never e.message here: a scrape failure could in principle throw
-            // with scraped text (a group name/URL) inside it. Only a fixed
-            // string plus the error's code/name — never data — is safe to log.
-            console.error(driverLive.redact(`connections-browser: facebook group sync failed: ${e.code || e.name}`));
-          }
-        }
-        return { loggedIn: true, label, pages, groups };
-      }));
+      ({ loggedIn, label, pages, groups, unverifiable } = await driver.attachPage(open.session_id, (page) => readLogin(page, platform, spec, conn, db)));
     } catch (e) {
       // Our own browser budget is full (driver-browser claim()): the agent's
       // login browser is fine, so say "busy, retry" — "expired" would send
@@ -396,14 +413,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     await viewer.close(hubKey(phone, platform), "connected");
     await driver.stopSession(open.session_id);
-    const first = conn[`${platform}_browser_first_connected_at`] || new Date().toISOString();
-    await db.setConnection(phone, Object.assign({
-      [`${platform}_browser_connected_at`]: new Date().toISOString(),
-      [`${platform}_browser_first_connected_at`]: first, // warm-up counts from here, not from every reconnect
-      [`${platform}_identity_label`]: label,
-      [`${platform}_pages`]: pages,
-      [`browser_session_${platform}`]: null,
-    }, groups));
+    await db.setConnection(phone, connectedPatch(conn, platform, { label, pages, groups }));
     // Warm-up starts now, not at the next sweep (index.js: the first browse,
     // under the same guard and profile lock). Never delays or fails the connect.
     if (typeof ctx.onConnected === "function") { try { ctx.onConnected(phone, platform); } catch (e) { /* the sweep will start it */ } }
@@ -476,4 +486,6 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 };
 
 module.exports.PLATFORMS = PLATFORMS;
+module.exports.readLogin = readLogin;
+module.exports.connectedPatch = connectedPatch;
 module.exports._test = { pageLinks, withPageIds, titleLabel, identityLabel };
