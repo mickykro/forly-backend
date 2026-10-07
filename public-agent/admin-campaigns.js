@@ -10,6 +10,7 @@
   var esc = FLY.esc;
   var API = "/api/admin/campaigns";
   var rows = [], agents = [], editing = null; // editing: the row being edited, or null for a new campaign
+  var manual = false; // POSTING_MANUAL=1 on the server: groups by hand, one pass, no Page
   var STATUS = { running: "פעיל", paused: "מושהה", stopped: "נעצר", completed: "הסתיים" };
   var ERR = {
     consent_note_required: "חובה לבחור איך הסוכן הסכים ולכתוב הערה.",
@@ -27,6 +28,8 @@
     not_found: "לא נמצא.",
     invalid_input: "הנתונים לא תקינים.",
     posting_unavailable_in_env: "בשרת הזה אי אפשר לשנות קמפיינים.",
+    manual_unsupported: "בפרסום ידני אין פרסום בדף העסקי ואין חזרה.",
+    audit_unavailable: "לא ניתן לרשום את הפעולה ביומן — לא בוצע שינוי. נסו שוב.",
   };
   var fmt = function (v) { var d = new Date(v); return isNaN(d) ? "—" : d.toLocaleDateString("he-IL"); };
 
@@ -56,7 +59,7 @@
     var q = [];
     if ($("#campStatus").value) q.push("status=" + encodeURIComponent($("#campStatus").value));
     if ($("#campAgent").value) q.push("agent=" + encodeURIComponent($("#campAgent").value));
-    return req("GET", "/campaigns" + (q.length ? "?" + q.join("&") : "")).then(function (d) { rows = d.campaigns || []; render(); }).catch(fail);
+    return req("GET", "/campaigns" + (q.length ? "?" + q.join("&") : "")).then(function (d) { rows = d.campaigns || []; manual = d.manual === true; render(); }).catch(fail);
   }
   function loadAgents() {
     return req("GET", "/agents").then(function (d) {
@@ -88,15 +91,20 @@
   function showEstimate() {
     var el = $("#campFormEstimate"), my = seq, agent = $("#campFormAgent").value;
     if (!agent || restarting) { el.textContent = ""; return; }
-    req("POST", "/estimate", { agent: agent, page_id: $("#campFormProperty").value, group_ids: chosenGroups(), days: Number($("#campFormDays").value) || 30 }).then(function (e) {
+    var repeat = Number($("#campFormRepeat").value) || 0;
+    req("POST", "/estimate", { agent: agent, page_id: $("#campFormProperty").value, group_ids: chosenGroups(), days: Number($("#campFormDays").value) || 30,
+      repeat_days: repeat >= 3 ? repeat : undefined, targets: $("#campFormPage").checked ? ["groups", "page"] : ["groups"] }).then(function (e) {
       if (my !== seq) return;
       if (e.days === null || e.days === undefined) { el.textContent = "הערכה: אי אפשר להעריך כרגע — החשבון מושהה או מוגבל."; return; }
       el.textContent = "הערכה: " + e.posts + " פוסטים לסוכן, כ-" + e.per_week + " בשבוע לפי המגבלות היום ← כ-" + e.days + " ימים" +
         (e.fits ? "." : ". ⚠️ יותר מ-" + e.days_left + " ימים — חלק מהפוסטים לא יספיקו לצאת.") + (e.warmup ? " החשבון עדיין בחימום, הקצב יעלה בהמשך." : "");
     }).catch(function () { if (my === seq) el.textContent = ""; });
   }
-  function setMain(show) { // the campaign fields vs. the consent-only restart form
+  function setMain(show) { // the campaign fields vs. the restart form (consent and days)
     Array.prototype.forEach.call(document.querySelectorAll("#campForm > label, #campForm > fieldset:not(#campFormConsent)"), function (el) { el.hidden = !show; });
+    $("#campFormDays").closest("label").hidden = false;
+    // Manual posting publishes groups once, by hand: no repeat, no Page, no approval mode.
+    ["#campFormRepeat", "#campFormMode", "#campFormPage"].forEach(function (s) { if (manual) $(s).closest("label").hidden = true; });
   }
   function closeForm() { seq++; editing = null; restarting = null; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; }
   function validNote() {
@@ -137,6 +145,7 @@
     $("#campFormTitle").textContent = "הפעלה מחדש — הסכמת הסוכן";
     $("#campFormConsent").hidden = false;
     $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
+    $("#campFormDays").value = String(row.run_days || 30); // as long as the run it repeats
     $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = "";
     $("#campForm").hidden = false;
   }
@@ -149,11 +158,11 @@
     if (restarting) {
       var rn = validNote(); if (!rn) return;
       var rid = restarting.id;
-      return settle(req("POST", "/campaigns/" + encodeURIComponent(rid) + "/start", { consent: { method: $("#campFormConsentMethod").value, note: rn } })
+      return settle(req("POST", "/campaigns/" + encodeURIComponent(rid) + "/start", { consent: { method: $("#campFormConsentMethod").value, note: rn }, days: Number($("#campFormDays").value) || 30 })
         .then(function () { closeForm(); FLY.toast("הקמפיין פעיל"); load(); }).catch(failClose));
     }
-    var targets = $("#campFormPage").checked ? ["groups", "page"] : ["groups"];
-    var repeat = Number($("#campFormRepeat").value) || 0;
+    var targets = $("#campFormPage").checked && !manual ? ["groups", "page"] : ["groups"];
+    var repeat = manual ? 0 : Number($("#campFormRepeat").value) || 0;
     if (!editing) {
       var note = validNote(); if (!note) return;
       return settle(req("POST", "/campaigns", {
@@ -199,6 +208,8 @@
   $("#campFormGroups").addEventListener("change", showEstimate);
   $("#campFormDays").addEventListener("change", showEstimate);
   $("#campFormProperty").addEventListener("change", showEstimate);
+  $("#campFormRepeat").addEventListener("change", showEstimate);
+  $("#campFormPage").addEventListener("change", showEstimate);
   $("#campFormSave").addEventListener("click", save);
   $("#campFormCancel").addEventListener("click", closeForm);
   $("#campList").addEventListener("click", function (ev) {

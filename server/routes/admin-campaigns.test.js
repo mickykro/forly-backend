@@ -129,6 +129,53 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     assert.ok(est.body.posts >= 2); assert.equal(typeof est.body.days, "number"); assert.equal(typeof est.body.fits, "boolean");
     assert.equal((await call(server, "POST", "/estimate", { agent: "acct_nope", group_ids: [] }, false)).status, 400);
 
+    // ── the estimate counts every repeat pass and the Page ──
+    const est3 = await call(server, "POST", "/estimate", { agent: REF, page_id: "pgNew", group_ids: ["111", "222"], days: 30, repeat_days: 3 }, false);
+    assert.equal(est3.body.posts - est.body.posts, 2 * 9, "two groups every 3 days over 30 days: 10 passes, not 1");
+
+    // ── a restart runs as long as the run it repeats; counts are this pass only ──
+    await K.db.setConnection(AGENT, { posting_disabled_until_admin: false });
+    await K.store.mutatePostingCampaign(row.id, () => ({ status: "stopped", restarted_at: null,
+      created_at: K.iso(K.NOW.getTime() - 10 * K.DAY), expires_at: K.iso(K.NOW.getTime() - 3 * K.DAY),
+      posts: [{ id: "old1", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY) }] }));
+    const listed = (await call(server, "GET", "/campaigns", undefined, false)).body;
+    assert.equal(listed.campaigns.find((c) => c.id === row.id).run_days, 7);
+    const again7 = await call(server, "POST", `/campaigns/${row.id}/start`, { consent: CONSENT });
+    assert.equal(again7.status, 200);
+    assert.equal(new Date(again7.body.campaign.expires_at).getTime(), K.NOW.getTime() + 7 * K.DAY, "7-day run → 7 days, not 30");
+    assert.deepEqual(again7.body.campaign.counts, { owed: 2, posted: 0, skipped: 0 }, "the previous run's post is history");
+
+    // ── no audit row, no change ──
+    const realAudit = K.store.addAuditEvent;
+    K.store.addAuditEvent = async () => { throw new Error("audit down"); };
+    try {
+      const nStop = notes.length;
+      const r = await call(server, "POST", `/campaigns/${row.id}/stop`, {});
+      assert.equal(r.status, 503); assert.equal(r.body.error, "audit_unavailable");
+      assert.equal((await K.store.getPostingCampaign(row.id)).status, "running", "the campaign is untouched");
+      assert.equal(notes.length, nStop, "nothing sent");
+    } finally { K.store.addAuditEvent = realAudit; }
+
+    // ── the admin's consent is on the posting permission too ──
+    await K.db.setConnection(AGENT, { posting_permission: null });
+    await K.store.mutatePostingCampaign(row.id, () => ({ status: "stopped" }));
+    assert.equal((await call(server, "POST", `/campaigns/${row.id}/start`, { consent: CONSENT })).status, 200);
+    const perm = (await K.db.getConnection(AGENT)).posting_permission;
+    assert.deepEqual([perm.consent_by.by, perm.consent_by.method, perm.consent_by.note], ["admin", "phone", CONSENT.note]);
+
+    // ── manual posting: no Page, no repeat ──
+    const mApp = express(); mApp.use(express.json());
+    mApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: Object.assign({}, deps.env, { POSTING_MANUAL: "1" }), catalog: CATALOG }));
+    const mServer = mApp.listen(0);
+    try {
+      assert.equal((await call(mServer, "GET", "/campaigns", undefined, false)).body.manual, true);
+      const mBody = Object.assign({}, body, { page_id: "pg3" });
+      assert.equal((await call(mServer, "POST", "/campaigns", Object.assign({}, mBody, { targets: ["groups", "page"] }))).body.error, "manual_unsupported");
+      assert.equal((await call(mServer, "POST", "/campaigns", Object.assign({}, mBody, { repeat_days: 7 }))).body.error, "manual_unsupported");
+      const cur = await K.store.getPostingCampaign(row.id);
+      assert.equal((await call(mServer, "PATCH", `/campaigns/${row.id}`, { version: cur.updated_at, repeat_days: 7 })).body.error, "manual_unsupported");
+    } finally { mServer.close(); }
+
     // ── staging never changes campaigns ──
     const sApp = express(); sApp.use(express.json());
     sApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: { FORLY_ENV: "staging" }, catalog: CATALOG }));

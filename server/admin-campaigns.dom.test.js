@@ -26,7 +26,7 @@ function findChromium() {
   catch { console.log("admin-campaigns.dom.test.js skipped (launch failed)"); return; }
 
   const ROW = { id: "c1", ref: "acct_1", phone_tail: "…0001", agent_name: "דנה לוי", page_id: "pg1", page_title: "דירה בחיפה", status: "running",
-    pause_reason: null, mode: "standing", repeat: false, repeat_days: null, targets: ["groups"], expires_at: new Date(Date.now() + 5 * 86400000 - 3600000).toISOString(),
+    pause_reason: null, mode: "standing", repeat: false, repeat_days: null, targets: ["groups"], expires_at: new Date(Date.now() + 5 * 86400000 - 3600000).toISOString(), run_days: 7,
     groups: [{ group_id: "111", name: "A" }], counts: { owed: 1, posted: 0, skipped: 0 }, created_by: "agent", consent_by: { by: "agent" }, version: "v1" };
   const seen = { creates: [], patches: [], starts: [], stops: 0 };
   let cur = ROW;
@@ -143,7 +143,7 @@ function findChromium() {
     await page.click("#campFormSave");
     await page.waitForFunction(() => document.querySelector("#campForm").hidden);
     assert.equal(seen.starts.length, 1);
-    assert.deepEqual(seen.starts[0], { consent: { method: "whatsapp", note: "אישר בוואטסאפ" } });
+    assert.deepEqual(seen.starts[0], { consent: { method: "whatsapp", note: "אישר בוואטסאפ" }, days: 7 }, "a restart runs as long as the run it repeats");
     console.log("admin-campaigns.dom.test.js ok");
   } finally { server.close(); await browser.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

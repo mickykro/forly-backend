@@ -13,13 +13,16 @@ const MODES = new Set(["per_post", "standing"]);
 // A permission created by a campaign's own consent covers campaign posting
 // only: no default groups and groups-only targets, so it never auto-enrolls
 // new listings (posting-campaign.enrollNewPage) — that is PUT /settings' job.
-// grantedBy: the admin's phone tail when an admin recorded the consent.
-function campaignPermission(prev, now, grantedBy = null) {
+// adminConsent: the consent an admin recorded ({ admin_tail, method, note }),
+// kept on the permission as on the campaign; null when the agent agreed.
+function campaignPermission(prev, now, adminConsent = null) {
+  const a = adminConsent && typeof adminConsent === "object" ? adminConsent : null;
   return {
     enabled: true, consent_version: CONSENT_VERSION, granted_at: A.iso(now), platforms: ["facebook"],
     targets: ["groups"], default_group_ids: [], page_id: (prev && prev.page_id) || null,
     auto_mode: "standing", allows_dwell: true, allows_visible_interactions: false, revoked_at: null,
-    granted_by: grantedBy,
+    granted_by: a ? a.admin_tail || null : null,
+    consent_by: a ? { by: "admin", admin_tail: a.admin_tail || null, method: a.method || null, note: a.note || null } : { by: "agent" },
   };
 }
 const permActive = (p) => !!p && p.enabled === true && Array.isArray(p.platforms) && p.platforms.includes("facebook");

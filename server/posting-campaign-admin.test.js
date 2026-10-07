@@ -103,5 +103,59 @@ const A_ = require("./posting-account");
     assert.ok(M.admin_created({ id: "c1", groups: [{}, {}] }).body.includes("2"));
     assert.ok(M.admin_stopped({ id: "c1" }).header.length > 0);
   }
+  // ── targets and mode reconcile the posts already planned ──
+  {
+    const { deps, notes } = await K.setup();
+    const c = await C.create(K.base(), deps);
+    await K.store.mutatePostingCampaign(c.id, () => ({ targets: ["groups", "page"], posts: [
+      { id: "pg", target: "page", group_id: "page:1", status: "scheduled", scheduled_at: K.iso(K.NOW) },
+      { id: "g1", target: "group", group_id: "111", status: "scheduled", scheduled_at: K.iso(K.NOW), copy: "טקסט", approved_at: null },
+    ] }));
+    let cur = await K.store.getPostingCampaign(c.id);
+    // the Page unchecked: its planned post never goes out
+    cur = await CA.update(c.id, { targets: ["groups"] }, deps, { version: cur.updated_at });
+    assert.deepEqual([cur.posts[0].status, cur.posts[0].error_code], ["skipped", "target_removed"]);
+    assert.equal(cur.posts[1].status, "scheduled");
+    // standing → per_post: an unapproved scheduled post goes to the agent for approval
+    cur = await CA.update(c.id, { mode: "per_post" }, deps, { version: cur.updated_at });
+    assert.equal(cur.posts[1].status, "pending_approval");
+    assert.equal(notes.length, 1, "the agent is asked to approve it");
+    // per_post → standing: a post waiting for approval is scheduled
+    cur = await CA.update(c.id, { mode: "standing" }, deps, { version: cur.updated_at });
+    assert.equal(cur.posts[1].status, "scheduled");
+    assert.ok(new Date(cur.posts[1].scheduled_at).getTime() >= K.NOW.getTime());
+  }
+  {
+    const { deps } = await K.setup();
+    const c = await C.create(K.base(), deps);
+    await K.store.mutatePostingCampaign(c.id, () => ({ targets: ["groups", "page"], posts: [{ id: "pg", target: "page", group_id: "page:1", status: "posting" }] }));
+    const cur = await K.store.getPostingCampaign(c.id);
+    await assert.rejects(CA.update(c.id, { targets: ["groups"] }, deps, { version: cur.updated_at }), (e) => e.code === "busy", "a Page post on its way refuses the edit");
+  }
+
+  // ── runDue: the campaign as it is now decides (edits that bypassed update) ──
+  {
+    const S = require("./posting-sweeper");
+    const { deps, at } = await K.setup();
+    let c = await C.create(K.base(), deps);
+    c = await S.tick(c, deps, at(K.NOW));
+    assert.equal(c.posts[0].status, "scheduled");
+    await K.store.mutatePostingCampaign(c.id, () => ({ mode: "per_post" }));
+    c = await S.tick(await K.store.getPostingCampaign(c.id), deps, at(K.dueOf(c)));
+    assert.equal(c.posts[0].status, "pending_approval", "per_post: an unapproved post is never published");
+    assert.equal(deps.post.calls.length, 0);
+  }
+  {
+    const S = require("./posting-sweeper");
+    const { deps, at } = await K.setup();
+    let c = await C.create(K.base(), deps);
+    c = await S.tick(c, deps, at(K.NOW));
+    assert.equal(c.posts[0].target, "group");
+    await K.store.mutatePostingCampaign(c.id, () => ({ targets: ["page"] }));
+    c = await S.tick(await K.store.getPostingCampaign(c.id), deps, at(K.dueOf(c)));
+    assert.deepEqual([c.posts[0].status, c.posts[0].error_code], ["skipped", "target_removed"]);
+    assert.equal(deps.post.calls.length, 0);
+  }
+
   console.log("posting-campaign-admin.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

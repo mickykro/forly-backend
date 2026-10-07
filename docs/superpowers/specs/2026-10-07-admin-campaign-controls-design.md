@@ -25,24 +25,25 @@ Agents can create, edit, pause, stop and resume their own campaigns (`server/rou
 ## 4. API
 
 All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-enable), and an `audit_events` row: action, admin, campaign id ending, changed field names. Never texts, never the full phone.
+- The audit row is written before the change. If it cannot be written, nothing changes and the request fails `503 audit_unavailable`. A change refused after its row was written (stale version, busy) leaves a row for a change that did not happen; a change never happens without a row.
 - Audit rows store digits-only phone tails (the audit store requires 0–4 digits); the consent's `admin_tail` is digits-only too.
 - `say()` sends `admin_created` and `admin_stopped` also when `POSTING_MANUAL=1` (it drops other kinds there); an admin stop sends `admin_stopped` instead of the agent's `stopped`.
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/campaigns?status=&agent=` | `requireAdmin` only. Rows: agent name and phone ending, property, status and pause reason, groups owed/posted/skipped, `expires_at`, repeat, targets, mode, `created_by`, `version`. |
+| GET | `/campaigns?status=&agent=` | `requireAdmin` only. Rows: agent name and phone ending, property, status and pause reason, groups owed/posted/skipped in the current pass (`posting-manual.groupsOf`; a restart's older posts are history), `expires_at`, `run_days`, repeat, targets, mode, `created_by`, `version`. |
 | GET | `/agents` and `/agents/:ref/properties` | Agent picker and that agent's pages (opaque ref, as admin-manual). |
 | GET | `/agents/:ref/groups` | The agent's member groups, vetted as in the agent flow. |
 | POST | `/campaigns` | Create. Body: agent ref, page id, group ids, copies, days, repeat_days, targets, mode, `consent: { method, note }`. |
 | PATCH | `/campaigns/:id` | Edit. Body: `version` plus any of: add/remove group ids, copies, days, repeat_days, targets, mode. |
 | POST | `/campaigns/:id/stop` | `campaigns.stop(id, deps, "admin")`. |
-| POST | `/campaigns/:id/start` | Paused → `resume`. Stopped/completed → restart through `create` with a fresh admin-recorded consent (body carries `consent`). |
+| POST | `/campaigns/:id/start` | Paused → `resume`. Stopped/completed → restart through `create` with a fresh admin-recorded consent (body carries `consent`, optional `days`). |
 
 ## 5. Rules
 
 **Create**
 - Same checks as the agent flow: Facebook connected (`facebook_browser_connected_at`), the page belongs to the agent, Page confirmed and Page id read when the Page is a target, groups vetted (`vetGroups`).
-- `consent = { by: "admin", admin: <operator id>, method, note, at, version: CONSENT_VERSION }`. Note required (1–300 chars). Posting permission recorded the same way when none is in force.
+- `consent = { by: "admin", admin: <operator id>, method, note, at, version: CONSENT_VERSION }`. Note required (1–300 chars). Posting permission recorded the same way when none is in force (`posting_permission.consent_by`, plus `granted_by` = the admin tail).
 - An existing running/paused campaign for the same agent+property is returned unchanged with `existing: true` (200), as the agent API does; the tab then offers it for editing.
 - `consent.admin_tail` is digits-only.
 - `created_by: "admin"`.
@@ -53,25 +54,26 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 - Texts: editable through the API (`copies`); the tab has no text editor yet. Same validation as the agent texts screen (string, at most `MAX_COPY`, at most 60).
 - End date 1–30 days from now; repeat 3–30 days or off (existing limits).
 - Targets and mode re-checked against the connection, as on create.
+- Targets and mode reconcile the posts already planned, in the same transaction: a scheduled or pending post to a target no longer wanted → `skipped`, `target_removed` (one already `posting` there → `409 busy`); standing → per_post sends unapproved scheduled posts to the agent for approval (`pending_approval`, WhatsApp); per_post → standing schedules posts waiting for approval. `posting-tick.runDue` checks the same at posting time: a post whose target the campaign no longer has is skipped, and a per_post campaign's post without `approved_at` goes to approval.
 - PATCH requires a non-empty `version` (400 otherwise).
 - Editing sends end date, repeat, mode and targets only when the admin changed them; `days` on PATCH means "end N days from now".
 - `last_changed_by: { by: "admin"|"agent", at }` written by admin edits.
 
 **Stop / start**
 - Stop cancels open posts as today.
-- Restarting a stopped or completed campaign reuses its stored groups as they are (not re-vetted) — a decision by the owner — and asks the admin for the consent method and note.
+- Restarting a stopped or completed campaign reuses its stored groups as they are (not re-vetted) — a decision by the owner — and asks the admin for the consent method and note, and for its days, prefilled with the length of the run it repeats (`run_days`).
 - Start refuses with `409 account_halted` when the account is disabled or under owner review; the tab links to the existing re-enable control. Starting a campaign never lifts an account halt.
 
 ## 6. Interactions
 
-- Prod (`POSTING_MANUAL=1`): admin campaigns appear in the manual posting list like any other.
+- Prod (`POSTING_MANUAL=1`): admin campaigns appear in the manual posting list like any other. The manual flow publishes groups once, by hand: a Page target or repeat is refused there (`400 manual_unsupported`), a restart drops them, and the tab hides repeat, mode and Page (`GET /campaigns` returns `manual`).
 - Local: automated posting picks them up on local's own data.
 - Profiles spec: campaigns refer to agents by phone; profile names come from the resolver. No dependency.
 - The agent keeps full control of their campaign in their own screens.
 
 ## 7. Errors
 
-`invalid_input`, `not_found`, `facebook_not_connected`, `page_not_confirmed`, `page_target_unavailable`, `consent_note_required`, `stale_version`, `busy`, `account_halted`, `stepup_required`. Each has a Hebrew message in the tab.
+`invalid_input`, `not_found`, `facebook_not_connected`, `page_not_confirmed`, `page_target_unavailable`, `consent_note_required`, `stale_version`, `busy`, `account_halted`, `stepup_required`, `manual_unsupported`, `audit_unavailable`. Each has a Hebrew message in the tab.
 
 ## 8. Tests
 
@@ -83,6 +85,6 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 
 ## 9. Group limits in manual posting, and a duration estimate
 
-- The manual tab shows, per owed group, the agent's posts there today (`n/3`) and whether automatic posting's rules would block a post now (`posting-safety.groupBlock`: 3 a day per group; the same property not within 3 days or the repeat interval).
-- Marking a blocked group "posted" is refused (`409 group_limit`) unless the admin gives a reason (3–200 chars); the override is audited (`manual_limit_override`). Skipping is never blocked.
-- The campaigns form shows an estimate at today's limits: posts, posts per week, days, and a warning when it does not fit the campaign's days (`posting-limits.estimate`).
+- The manual tab shows, per owed group, the agent's posts there today (`n/3`: manual campaign posts plus everything `accountView` counts — attempts, share-kit posts — matched by every id the group is known by) and whether automatic posting's rules would block a post now (`posting-safety.groupBlock`: 3 a day per group; the same property not within 3 days or the repeat interval).
+- Marking a blocked group "posted" is refused (`409 group_limit`) unless the admin gives a reason (3–200 chars); the override is audited (`manual_limit_override`). Skipping is never blocked. The limit check and the record run one at a time per agent (in-process; the server is one container).
+- The campaigns form shows an estimate at today's limits: posts, posts per week, days, and a warning when it does not fit the campaign's days (`posting-limits.estimate`). It counts every repeat pass within the days and one Page post.

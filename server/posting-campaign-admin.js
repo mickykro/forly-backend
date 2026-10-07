@@ -7,6 +7,11 @@
  * overwritten. Removing a group drops its not-yet-started posts (skipped,
  * error_code "removed") and keeps its history; a group with an attempt past
  * reservation is refused (busy) — that post is already on its way.
+ * Targets and mode reconcile the posts already planned: a post to a target
+ * no longer wanted is skipped (target_removed; one already posting refuses
+ * the edit, busy); standing → per_post sends unapproved scheduled posts back
+ * to the agent (pending_approval); per_post → standing schedules the posts
+ * still waiting for approval.
  */
 const A = require("./posting-account");
 const C = require("./posting-campaign");
@@ -16,6 +21,7 @@ const localMode = require("./posting-local");
 const { iso, fail, ctxOf, nowOf, MS_DAY } = A;
 const LIVE = new Set(["running", "paused"]);
 const NOT_STARTED = new Set(["scheduled", "pending_approval"]);
+const kindOf = (p) => (p.target === "page" ? "page" : "groups");
 
 function withCopy(g, text) {
   const t = C.cleanCopy(text);
@@ -41,8 +47,9 @@ async function update(id, edit = {}, deps = {}, { version, by = "admin" } = {}) 
   const added = Array.isArray(edit.add_groups) && edit.add_groups.length ? C.normalizeGroups(edit.add_groups, ctx) : [];
   const env = deps.env || process.env;
 
-  let refused = null;
+  let refused = null, sentBack = [];
   const out = await A.mutate(x, id, (cur) => {
+    sentBack = [];
     if (!LIVE.has(cur.status)) { refused = "not_live"; return null; }
     if (version && cur.updated_at !== version) { refused = "stale_version"; return null; }
     if ((cur.posts || []).some((p) => p.status === "posting" && remove.has(String(p.group_id)))) { refused = "busy"; return null; }
@@ -69,9 +76,30 @@ async function update(id, edit = {}, deps = {}, { version, by = "admin" } = {}) 
     }
     if (Array.isArray(edit.targets)) patch.targets = A.targetsFor(conn, edit.targets);
     if (edit.mode) patch.mode = localMode.requireApproval(env) || edit.mode === "per_post" ? "per_post" : "standing";
+    const targets = patch.targets || cur.targets || ["groups"];
+    const mode = patch.mode || cur.mode;
+    const posts = patch.posts || cur.posts || [];
+    if (posts.some((p) => p.status === "posting" && !targets.includes(kindOf(p)))) { refused = "busy"; return null; }
+    const toApprove = mode === "per_post" && cur.mode !== "per_post";
+    const toSchedule = mode !== "per_post" && cur.mode === "per_post";
+    if (patch.targets || toApprove || toSchedule) {
+      patch.posts = posts.map((p) => {
+        if (!NOT_STARTED.has(p.status)) return p;
+        if (!targets.includes(kindOf(p))) return { ...p, status: "skipped", error_code: "target_removed", copy: undefined };
+        if (toApprove && p.status === "scheduled" && !p.approved_at) { sentBack.push(p.id); return { ...p, status: "pending_approval" }; }
+        if (toSchedule && p.status === "pending_approval") return { ...p, status: "scheduled", scheduled_at: iso(Math.max(now.getTime(), new Date(p.scheduled_at).getTime() || 0)) };
+        return p;
+      });
+    }
     return patch;
   });
   if (refused) throw fail(refused);
+  // Posts sent back for approval: the agent gets each one, as the planner sends them.
+  for (const p of (out && out.posts) || []) {
+    if (p.status === "pending_approval" && sentBack.includes(p.id)) {
+      await A.say(deps, out.phone, "approve", `📣 פוסט מוכן לאישור ל${p.target === "page" ? "דף העסקי" : `קבוצה "${p.group_name || p.group_url}"`}:\n──────────\n${p.copy}\n──────────`, out, p);
+    }
+  }
   return out;
 }
 

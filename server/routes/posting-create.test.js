@@ -21,9 +21,11 @@ const PC = require("./posting-create");
   assert.equal(ok.groups[0].group_id, "111");
 
   // campaignPermission / permActive
-  const p = PC.campaignPermission(null, K.NOW, "0009");
+  const p = PC.campaignPermission(null, K.NOW, { admin_tail: "0009", method: "phone", note: "אישר בטלפון" });
   assert.equal(PC.permActive(p), true);
   assert.equal(p.granted_by, "0009");
+  assert.deepEqual(p.consent_by, { by: "admin", admin_tail: "0009", method: "phone", note: "אישר בטלפון" }, "the admin's consent is on the permission too");
+  assert.deepEqual(PC.campaignPermission(null, K.NOW).consent_by, { by: "agent" });
   assert.equal(PC.permActive(null), false);
   console.log("routes/posting-create.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
