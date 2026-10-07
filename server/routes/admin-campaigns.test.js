@@ -66,6 +66,11 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     const again = await call(server, "POST", "/campaigns", body);
     assert.equal(again.status, 200); assert.equal(again.body.existing, true);
 
+    await K.db.savePage(K.page("pg2", AGENT));
+    // ── create: no groups and no Page target is refused ──
+    const nothing = await call(server, "POST", "/campaigns", Object.assign({}, body, { page_id: "pg2", group_ids: [], targets: ["groups"] }));
+    assert.equal(nothing.status, 400); assert.equal(nothing.body.error, "invalid_input");
+
     // ── list ──
     const list = (await call(server, "GET", `/campaigns?agent=${REF}`, undefined, false)).body.campaigns;
     assert.equal(list.length, 1); assert.equal(list[0].agent_name, "דנה לוי");
@@ -98,6 +103,20 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     const halted = await call(server, "POST", `/campaigns/${row.id}/start`, {});
     assert.equal(halted.status, 409); assert.equal(halted.body.error, "account_halted");
     assert.equal(notes.length, 2, "starts are silent");
+
+    // ── create on a halted account: 409, nothing created or sent ──
+    const nBefore = notes.length, aBefore = (await audits()).length;
+    const haltedNew = await call(server, "POST", "/campaigns", Object.assign({}, body, { page_id: "pg2" }));
+    assert.equal(haltedNew.status, 409); assert.equal(haltedNew.body.error, "account_halted");
+    assert.equal(await K.store.getPostingCampaign(K.store.campaignId(AGENT, "pg2")), null, "no campaign");
+    assert.equal(notes.length, nBefore, "nothing sent"); assert.equal((await audits()).length, aBefore, "no audit");
+
+    // ── stopping a completed campaign sends nothing ──
+    await K.store.mutatePostingCampaign(row.id, () => ({ status: "completed" }));
+    const nDone = notes.length;
+    const stopDone = await call(server, "POST", `/campaigns/${row.id}/stop`, {});
+    assert.equal(stopDone.status, 200);
+    assert.equal(notes.length, nDone, "no admin_stopped for a campaign that was not live");
 
     // ── audit rows: one per change, no phone, no text ──
     const rows = await audits();

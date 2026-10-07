@@ -203,7 +203,10 @@
   $("#campFormCancel").addEventListener("click", closeForm);
   $("#campList").addEventListener("click", function (ev) {
     var b = ev.target.closest("[data-act]"); if (!b) return;
-    act(b.closest("[data-camp]").getAttribute("data-camp"), b.getAttribute("data-act"));
+    if (b.disabled) return;
+    b.disabled = true; // until the request settles: no double stop/start
+    var done = function () { b.disabled = false; };
+    Promise.resolve(act(b.closest("[data-camp]").getAttribute("data-camp"), b.getAttribute("data-act"))).then(done, done);
   });
 
   // ── tab wiring (like admin-posting.js) ──

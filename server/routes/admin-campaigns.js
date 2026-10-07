@@ -146,6 +146,8 @@ module.exports = function createAdminCampaignsRouter({
     if (!phone) return res.status(404).json({ error: "not_found" });
     const g = await gates(phone, b.page_id, v.targets);
     if (g.error) return res.status(g.status).json({ error: g.error });
+    if (campaigns._test.accountBlocked(g.conn)) return res.status(409).json({ error: "account_halted" });
+    if (!v.ids.length && !((v.targets || S_.DEFAULT_TARGETS).includes("page") && A.pageTarget(g.conn))) return res.status(400).json({ error: "invalid_input" });
     const vet = await PC.vetGroups(catalogFn, g.conn, g.page, v.ids, b.include_unknown === true);
     if (vet.error) return res.status(422).json(vet);
     const before = await store.getPostingCampaign(store.campaignId(phone, g.page.page_id));
@@ -197,7 +199,7 @@ module.exports = function createAdminCampaignsRouter({
     if (!c) return res.status(404).json({ error: "not_found" });
     const was = c.status;
     const out = await campaigns.stop(c.id, deps, "admin");
-    if (was !== "stopped") await A.say(notifyDeps, c.phone, "admin_stopped", "✋ הצוות עצר את הקמפיין. מה שכבר פורסם נשאר.", out);
+    if (LIVE.has(was)) await A.say(notifyDeps, c.phone, "admin_stopped", "✋ הצוות עצר את הקמפיין. מה שכבר פורסם נשאר.", out);
     const audited = await audit(req, "stop_campaign", c.phone, { campaign_tail: c.id.slice(-6) });
     res.json({ campaign: await rowOf(out), audited });
   }));

@@ -11,7 +11,7 @@ Agents can create, edit, pause, stop and resume their own campaigns (`server/rou
 | Question | Decision |
 |---|---|
 | Consent when an admin creates | The admin records it: who agreed, how (phone, in person, WhatsApp), a required note. Stored on the campaign and the posting permission, with an audit row. The campaign starts at once. |
-| What can be edited | Everything except the property: groups (add and remove), per-group texts, end date, repeat, targets, mode. |
+| What can be edited | Everything except the property: groups (add and remove), per-group texts, end date, repeat, targets, mode. Per-group texts are editable through the API (`copies`); the tab has no text editor yet. |
 | Where | A new "קמפיינים" tab in the admin panel. |
 | Agent notifications | WhatsApp on create and on stop by admin. Edits and starts are silent. |
 
@@ -50,12 +50,12 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 **Edit**
 - Every edit runs in `store.mutatePostingCampaign` and carries the `version` the admin loaded. A different stored version → `409 stale_version`.
 - Remove groups: owed posts for those groups are dropped; posted and skipped history stays. If an attempt for a removed group is in progress (reserved, session started, composer ready) → `409 busy`, nothing changed.
-- Texts: same validation as the agent texts screen (string, at most `MAX_COPY`, at most 60).
+- Texts: editable through the API (`copies`); the tab has no text editor yet. Same validation as the agent texts screen (string, at most `MAX_COPY`, at most 60).
 - End date 1–30 days from now; repeat 3–30 days or off (existing limits).
 - Targets and mode re-checked against the connection, as on create.
 - PATCH requires a non-empty `version` (400 otherwise).
 - Editing sends end date, repeat, mode and targets only when the admin changed them; `days` on PATCH means "end N days from now".
-- `last_changed_by: { by: "admin"|"agent", at }` written on every change by either side.
+- `last_changed_by: { by: "admin"|"agent", at }` written by admin edits.
 
 **Stop / start**
 - Stop cancels open posts as today.
@@ -71,7 +71,7 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 
 ## 7. Errors
 
-`invalid_input`, `not_found`, `facebook_not_connected`, `page_not_confirmed`, `page_target_unavailable`, `consent_note_required`, `stale_version`, `busy`, `account_halted`, `step_up_required`. Each has a Hebrew message in the tab.
+`invalid_input`, `not_found`, `facebook_not_connected`, `page_not_confirmed`, `page_target_unavailable`, `consent_note_required`, `stale_version`, `busy`, `account_halted`, `stepup_required`. Each has a Hebrew message in the tab.
 
 ## 8. Tests
 

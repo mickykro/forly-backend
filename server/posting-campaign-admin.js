@@ -55,6 +55,12 @@ async function update(id, edit = {}, deps = {}, { version, by = "admin" } = {}) 
       patch.posts = (cur.posts || []).map((p) => (remove.has(String(p.group_id)) && NOT_STARTED.has(p.status)
         ? { ...p, status: "skipped", error_code: "removed", copy: undefined } : p));
     }
+    // A re-added group is owed again: its "removed" posts of this pass would read as done.
+    const readded = new Set(added.map((g) => String(g.group_id)).filter((id) => !(cur.groups || []).some((g) => String(g.group_id) === id)));
+    if (readded.size) {
+      const stale = new Set(A.currentPosts(cur).filter((p) => p.error_code === "removed" && readded.has(String(p.group_id))).map((p) => p.id));
+      if (stale.size) patch.posts = (patch.posts || cur.posts || []).filter((p) => !stale.has(p.id));
+    }
     if (edit.days !== undefined) patch.expires_at = iso(now.getTime() + Math.min(Math.max(Number(edit.days) || 30, 1), 30) * MS_DAY);
     if (edit.repeat_days !== undefined) {
       const n = Number(edit.repeat_days) || 0;

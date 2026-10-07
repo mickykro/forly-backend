@@ -21,9 +21,9 @@ const PC = require("./posting-create");
   assert.equal(ok.groups[0].group_id, "111");
 
   // campaignPermission / permActive
-  const p = PC.campaignPermission(null, K.NOW, "…0009");
+  const p = PC.campaignPermission(null, K.NOW, "0009");
   assert.equal(PC.permActive(p), true);
-  assert.equal(p.granted_by, "…0009");
+  assert.equal(p.granted_by, "0009");
   assert.equal(PC.permActive(null), false);
   console.log("routes/posting-create.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -11,8 +11,8 @@ const A_ = require("./posting-account");
   // ── create records who consented ──
   {
     const { deps } = await K.setup();
-    const c = await C.create(K.base({ consent: { at: K.iso(K.NOW), version: "v", by: "admin", admin_tail: "…0009", method: "phone", note: "דיברנו" } }), deps);
-    assert.deepEqual(c.consent_by, { by: "admin", admin_tail: "…0009", method: "phone", note: "דיברנו" });
+    const c = await C.create(K.base({ consent: { at: K.iso(K.NOW), version: "v", by: "admin", admin_tail: "0009", method: "phone", note: "דיברנו" } }), deps);
+    assert.deepEqual(c.consent_by, { by: "admin", admin_tail: "0009", method: "phone", note: "דיברנו" });
     assert.equal(c.created_by, "admin");
     const { deps: d2 } = await K.setup();
     const a = await C.create(K.base(), d2);
@@ -44,6 +44,27 @@ const A_ = require("./posting-account");
     // repeat off
     const off = await CA.update(c.id, { repeat_days: 0 }, deps, { version: out.updated_at });
     assert.equal(off.repeat, false); assert.equal(off.repeat_days, null);
+  }
+
+  // ── a removed group that is re-added is owed again ──
+  {
+    const { deps } = await K.setup();
+    const c = await C.create(K.base(), deps);
+    await K.store.mutatePostingCampaign(c.id, () => ({ posts: [
+      { id: "p1", target: "group", group_id: "111", status: "scheduled" },
+      { id: "p9", target: "group", group_id: "222", status: "posted" },
+    ] }));
+    let cur = await K.store.getPostingCampaign(c.id);
+    cur = await CA.update(c.id, { remove_group_ids: ["111"] }, deps, { version: cur.updated_at });
+    assert.equal(cur.posts.find((p) => p.id === "p1").error_code, "removed");
+    const g111 = (await K.store.getPostingCampaign(c.id)).groups;
+    cur = await CA.update(c.id, { add_groups: [{ group_id: "111", name: "א", url: "https://www.facebook.com/groups/111" }] }, deps, { version: cur.updated_at });
+    assert.ok(cur.groups.some((g) => g.group_id === "111"));
+    assert.ok(!A_.currentPosts(cur).some((p) => p.group_id === "111" && p.error_code === "removed"), "the removed post is dropped");
+    assert.ok(cur.posts.some((p) => p.id === "p9" && p.status === "posted"), "other history stays");
+    assert.equal(require("./posting-manual").groupsOf(cur).find((g) => String(g.group_id) === "111").status, "owed");
+    const ids = C._test.candidatesFor(cur, { conn: (await K.db.getConnection(cur.phone)) || {}, now: K.NOW, catalog: await A_.catalogIndex(K.db) }).map((t) => t.group_id);
+    assert.ok(ids.includes("111"), "the planner offers it again");
   }
 
   // ── update: stale version, busy, ended, missing ──
