@@ -378,6 +378,8 @@ app.use("/api", createDashboardRouter({
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
 }));
+// ── admin edits an agent's portfolio (same editor, ?agent=) ──
+app.use("/api/admin", require("./routes/admin-portfolio")({ requireAdmin, normalizeAuthPhone }));
 // ── admin routes (all-agent property management, allowlist-gated) ──
 const createAdminRouter = require("./routes/admin");
 app.use("/api/admin", createAdminRouter({

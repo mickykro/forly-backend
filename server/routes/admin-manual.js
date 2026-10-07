@@ -17,6 +17,9 @@ const L = require("../posting-limits");
 
 const SESSION_S = 3600;      // Driver's limit
 const CHOOSER_FRESH_MS = 60000;
+// The admin flips between the list and the browser: keep the viewer connected
+// that long rather than reconnecting (CDP + checks) after 20s without a watcher.
+const VIEW_IDLE_MS = 10 * 60000;
 const GROUP_URL = /^https:\/\/(www\.|m\.|web\.)?facebook\.com\/groups\/[^/?#\s]+\/?$/i;
 
 module.exports = function createAdminManualRouter({
@@ -42,8 +45,11 @@ module.exports = function createAdminManualRouter({
     return [...new Set(connected.concat(running).map(String))];
   }
   async function phoneOf(ref) {
+    // An open browser answers from memory: /state polls every 1.5s.
+    for (const p of open.keys()) if (M.refOf(p) === String(ref)) return p;
     return (await phones()).find((p) => M.refOf(p) === String(ref)) || null;
   }
+  const attachView = (phone, sessionId) => viewer.attach(key(phone), sessionId, { idleMs: VIEW_IDLE_MS });
   async function cardOf(phone, pageId) {
     const page = await x.db.getPage(String(pageId));
     return page && page.business_phone === phone ? M.propertyCard(page, deps.pageBaseUrl) : null;
@@ -114,15 +120,15 @@ module.exports = function createAdminManualRouter({
   // ── agents and their properties ──
   router.get("/agents", requireAdmin, wrap(async (req, res) => {
     res.set("Cache-Control", "no-store");
-    const q = await M.queue(deps);
-    const out = [];
-    for (const phone of await phones()) {
+    const [q, all] = await Promise.all([M.queue(deps), phones()]);
+    const rows = await Promise.all(all.map(async (phone) => {
       const conn = (await x.db.getConnection(phone)) || {};
-      if (!conn.facebook_browser_connected_at) continue;
+      if (!conn.facebook_browser_connected_at) return null;
       const biz = (await x.db.getBusiness(phone).catch(() => null)) || {};
       const ref = M.refOf(phone);
-      out.push({ ref, phone_tail: A.tail(phone), name: conn.facebook_identity_label || biz.name || biz.business_name || "", owed: q.filter((i) => i.ref === ref).length, open: open.has(phone) });
-    }
+      return { ref, phone_tail: A.tail(phone), name: conn.facebook_identity_label || biz.name || biz.business_name || "", owed: q.filter((i) => i.ref === ref).length, open: open.has(phone) };
+    }));
+    const out = rows.filter(Boolean);
     out.sort((a, b) => b.owed - a.owed || String(a.name).localeCompare(String(b.name)));
     res.json({ agents: out });
   }));
@@ -207,6 +213,9 @@ module.exports = function createAdminManualRouter({
       if (timer.unref) timer.unref();
       open.set(phone, { sessionId: s.sessionId, release, timer, pageId: null, chooser: null });
       res.json({ open: true, at_group: !!groupUrl });
+      // Connect the viewer now, while the admin's screen mounts: the first
+      // frame no longer waits for Driver + CDP after the view is asked for.
+      attachView(phone, s.sessionId).then(() => hookChooser(phone)).catch(() => {});
     } catch (e) {
       release();
       console.error(redact(`admin manual browser ${A.tail(phone)}: ${(e && (e.code || e.name)) || "error"}`));
@@ -225,7 +234,7 @@ module.exports = function createAdminManualRouter({
 
   router.get("/agents/:ref/browser/view", requireAdmin, withBrowser(async (req, res, phone, s) => {
     let hub;
-    try { hub = await viewer.attach(key(phone), s.sessionId); }
+    try { hub = await attachView(phone, s.sessionId); }
     catch (e) {
       const code = (e && e.code) || "viewer_unavailable";
       if (code === "session_expired") await closeFor(phone, "expired");
@@ -245,6 +254,7 @@ module.exports = function createAdminManualRouter({
     const card = await cardOf(phone, (req.body && req.body.page_id) || "");
     if (!card) return res.status(404).json({ error: "not_found" });
     s.pageId = card.page_id;
+    prefetchVideo(s);
     res.json({ property: card });
   }));
 
@@ -284,13 +294,30 @@ module.exports = function createAdminManualRouter({
     res.json({ ok: true });
   }));
 
+  // The property's video, downloaded (and shrunk) as soon as the property is
+  // picked, so "העלאת הסרטון" only hands Facebook the bytes. A failed fetch is
+  // retried on the click.
+  function videoFor(s, page) {
+    const url = page && require("../posting-campaign").videoOf(page).video_url;
+    if (!url) return null;
+    if (!s.video || s.video.url !== url) {
+      const promise = media.fetchVideo(url, deps);
+      s.video = { url, promise };
+      promise.catch(() => { if (s.video && s.video.promise === promise) s.video = null; });
+    }
+    return s.video.promise;
+  }
+  function prefetchVideo(s) {
+    const pageId = s.pageId;
+    x.db.getPage(pageId).then((page) => { if (s.pageId === pageId) { const p = videoFor(s, page); if (p) p.catch(() => {}); } }).catch(() => {});
+  }
+
   // The session property's video into Facebook: the file chooser the admin
   // just opened ("תמונה/סרטון"), else the composer's own file input.
   router.post("/agents/:ref/browser/video", requireAdmin, withBrowser(async (req, res, phone, s) => {
     if (!s.pageId) return res.status(409).json({ error: "no_property" });
     const page = await x.db.getPage(s.pageId);
-    const url = page && require("../posting-campaign").videoOf(page).video_url;
-    if (!url) return res.status(409).json({ error: "no_video" });
+    if (!(page && require("../posting-campaign").videoOf(page).video_url)) return res.status(409).json({ error: "no_video" });
     const chooser = s.chooser && Date.now() - s.chooser.at < CHOOSER_FRESH_MS ? s.chooser.fc : null;
     const hp = hubPage(phone);
     let input = null;
@@ -301,7 +328,7 @@ module.exports = function createAdminManualRouter({
     }
     if (!chooser && !input) return res.status(409).json({ error: "chooser_not_open" });
     let file;
-    try { file = await media.fetchVideo(url, deps); }
+    try { file = await videoFor(s, page); }
     catch (e) { return res.status(502).json({ error: (e && e.code) || "media_unavailable" }); }
     if (chooser) { await chooser.setFiles(file); s.chooser = null; }
     else await input.setInputFiles(file);

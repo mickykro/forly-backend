@@ -80,8 +80,9 @@ async function checklist(deps = {}) {
     return byPhone.get(phone);
   };
   const out = [];
-  for (const c of running) {
-    const page = await x.db.getPage(c.page_id);
+  const pages = await Promise.all(running.map((c) => x.db.getPage(c.page_id)));
+  for (const [i, c] of running.entries()) {
+    const page = pages[i];
     if (!page) continue;
     const limits = L.limitsFor(c, await campaignsOf(c.phone), now, config);
     const byId = new Map((c.groups || []).map((g) => [String(g.group_id), g]));

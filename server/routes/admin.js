@@ -198,7 +198,6 @@ module.exports = function createAdminRouter(ctx) {
           plan: b.plan || "",
           onboarding_state: b.onboarding_state || "",
           is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
-          chatbot_enabled: !!(b.features && b.features.chatbot),
           portfolio_status: b.portfolio?.status || null,
           portfolio_url: b.portfolio?.status === "open" ? `/${b.portfolio.slug}` : null,
           distribution_enabled: !!(b.features && b.features.distribution),
@@ -229,14 +228,7 @@ module.exports = function createAdminRouter(ctx) {
 
       const agents = [...byPhone.values()]
         .sort((a, b) => (b.active_pages - a.active_pages) || a.name.localeCompare(b.name, "he"));
-      res.json({
-        agents,
-        stats: {
-          total_agents: agents.length,
-          chatbot_agents: agents.filter((a) => a.chatbot_enabled).length,
-          chatbot_pages: agents.reduce((n, a) => n + (a.chatbot_enabled ? a.active_pages : 0), 0),
-        },
-      });
+      res.json({ agents, stats: { total_agents: agents.length } });
     } catch (err) {
       console.error("admin/agents failed:", err);
       res.status(500).json({ error: "internal" });
@@ -244,13 +236,11 @@ module.exports = function createAdminRouter(ctx) {
   });
 
   // ── grant/revoke a premium feature for one agent ──
-  // Flipping this on turns the bot on for every page that agent owns, old ones
-  // included: entitlement is resolved live from the business, never stamped
-  // onto the page. Revoking is immediate in the same way.
+  // (The chat bot is no longer one: it is on for every agent, see chatbot-config.js.)
   // Flipping "distribution" arms the page-ready hook for every future page
   // that agent creates (resolved live, like chatbot). Off by default —
   // pilots first (spec §2 "Rollout").
-  const FEATURES = new Set(["chatbot", "distribution"]);
+  const FEATURES = new Set(["distribution"]);
 
   router.post("/business/features", requireAdmin, async (req, res) => {
     const body = req.body || {};
@@ -397,9 +387,8 @@ module.exports = function createAdminRouter(ctx) {
           business_phone: phone,
           agent_name: (biz && (biz.business_name || biz.full_name)) ||
             (p.agent && (p.agent.brand_name || p.agent.name)) || "—",
-          // Entitlement as it stands today. Flipping this on the business turns
-          // the bot on for every page that agent owns, this one included.
-          chatbot_enabled: !!(biz && biz.features && biz.features.chatbot),
+          // Whether the bot answers on this page today (on unless switched off).
+          chatbot_enabled: chatbotConfig.resolve(p, biz, process.env).enabled,
           verdict,
           signals,
           gaps,

@@ -371,12 +371,13 @@
   var tab = $("#tabManual"), pane = $("#paneManual");
   if (!tab || !pane) return;
   tab.addEventListener("click", function () {
+    $("#viewAdmin").classList.add("wide");
     document.querySelectorAll(".tabs button").forEach(function (b) { b.classList.toggle("on", b === tab); });
     document.querySelectorAll("#viewAdmin [id^='pane']").forEach(function (p) { p.classList.toggle("hidden", p !== pane); });
     load();
   });
   document.querySelectorAll(".tabs button").forEach(function (b) {
-    if (b !== tab) b.addEventListener("click", function () { tab.classList.remove("on"); pane.classList.add("hidden"); });
+    if (b !== tab) b.addEventListener("click", function () { tab.classList.remove("on"); pane.classList.add("hidden"); $("#viewAdmin").classList.remove("wide"); });
   });
   renderSide();
 })();

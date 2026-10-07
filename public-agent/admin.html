@@ -78,7 +78,9 @@
   .posting-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-bottom:18px}
   .posting-audit{list-style:none;margin:0;padding:0;font-size:.8rem}
   .posting-audit li{padding:6px 0;border-bottom:1px solid rgba(23,20,15,.06)}
-  .manual-grid{display:grid;grid-template-columns:minmax(320px,1fr) minmax(480px,1.5fr);gap:18px;align-items:start}
+  /* Manual posting: the page goes full width and the browser gets most of it. */
+  #viewAdmin.wide{width:100%}
+  .manual-grid{display:grid;grid-template-columns:minmax(300px,400px) minmax(0,1fr);gap:18px;align-items:start}
   @media(max-width:960px){.manual-grid{grid-template-columns:1fr}}
   .manual-side{position:sticky;top:12px}
   .manual-agentbar,.manual-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
@@ -93,10 +95,12 @@
   .manual-prop{display:flex;gap:12px;align-items:center;border:1px solid rgba(23,20,15,.1);border-radius:10px;padding:10px;margin-bottom:10px;background:#fff}
   .manual-prop img{width:84px;height:64px;object-fit:cover;border-radius:6px}
   .manual-prop b{display:block}
-  .manual-browser{min-height:420px;border:1px solid rgba(23,20,15,.1);border-radius:10px;overflow:hidden;background:#fafafa}
-  .manual-grid.big{grid-template-columns:minmax(300px,380px) 1fr}
-  .manual-grid.big .manual-browser{min-height:82vh}
-  .manual-grid.big .manual-browser .cv-screen{max-height:none}
+  /* A definite height, so the frame scales to the box instead of to a narrow width. */
+  .manual-browser{height:calc(100vh - 120px);min-height:480px;border:1px solid rgba(23,20,15,.1);border-radius:10px;overflow:hidden;background:#fafafa;padding:6px}
+  /* הגדלה: the browser alone across the page, the list below it. */
+  .manual-grid.big{grid-template-columns:minmax(0,1fr)}
+  .manual-grid.big .manual-side{order:-1;position:static}
+  .manual-grid.big .manual-browser{height:calc(100vh - 80px)}
   .manual-browser:fullscreen{background:#000;overflow:auto}
   .manual-h{font-size:.95rem;margin:14px 0 8px}
   .manual-detail{border:1px solid rgba(23,20,15,.12);border-radius:10px;padding:12px;margin-bottom:14px;background:#fffdf8}
@@ -349,7 +353,6 @@
             <th class="num">צפיות</th>
             <th class="num">לידים</th>
             <th>מוכנות לצ׳אט</th>
-            <th>צ׳אט בוט</th>
             <th>הפצה</th>
             <th title="מה הלקוח שילם עליו: נוצל/מכסה">מכסות</th>
           </tr>
@@ -359,7 +362,7 @@
       <div class="empty hidden" id="agentEmpty">לא נמצאו סוכנים תואמים.</div>
     </div>
     <p style="font-size:.78rem;color:var(--ink-soft);margin-top:12px;font-weight:300">
-      הפעלת צ׳אט בוט חלה על <b>כל</b> הדפים של הסוכן — כולל דפים ישנים — ומתעדכנת תוך דקה.
+      הצ׳אט בוט פעיל לכל הסוכנים (אפשר לכבות דף בודד בטבלת הנכסים).
       עמודת המוכנות מראה כמה מידע יש לבוט לענות ממנו בכל דף: ירוק = מלא, אדום = דל.
     </p>
   </div>
