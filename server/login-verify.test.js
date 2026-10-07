@@ -6,7 +6,7 @@ process.env.FORLY_ENV = "local";
 process.env.PROFILE_KEY = "k";
 const assert = require("assert");
 const { verifySaved } = require("./login-verify");
-const { profileNameFor } = require("./profile-name");
+const { profileName } = require("./profile-name");
 
 const PHONE = "0500000000";
 function fakeDb(conn) {
@@ -28,7 +28,7 @@ function fakeDriver(page, seen) {
     const r = await verifySaved(PHONE, "yad2", { db, driver: fakeDriver(fakePage(), seen) });
     assert.equal(r.state, "connected");
     assert.equal(seen.length, 1);
-    assert.equal(seen[0].opts.profile.name, profileNameFor("yad2", PHONE, { yad2_profile_gen: 1 }));
+    assert.equal(seen[0].opts.profile.name, profileName("yad2", PHONE, 1));
     assert.equal(seen[0].opts.profile.persist, true);
     assert.equal(seen[0].deps.phone, PHONE, "withPage gets the owner, so it takes the profile lock");
     assert.ok(db.conn.yad2_browser_connected_at, "marked connected");

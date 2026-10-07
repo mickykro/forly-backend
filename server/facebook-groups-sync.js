@@ -24,7 +24,7 @@
  */
 const crypto = require("crypto");
 const driver = require("./driver-browser");
-const { profileNameFor } = require("./profile-name");
+const { profileName } = require("./profile-name");
 const postingGuard = require("./posting-guard");
 const dbLive = require("./db");
 const shareKit = require("./distribution/share-kit");
@@ -292,12 +292,13 @@ async function runSync({ phone }, deps = {}) {
   await guard.assertAllowed({ phone, platform: "facebook", action: "session" }, deps);
   const conn = (await db.getConnection(phone)) || {};
   if (profileLock.loginOpen(conn, "facebook")) throw Object.assign(new Error("login browser open"), { code: "profile_busy" });
+  const gen = conn.facebook_profile_gen || 0;
   const pageDeps = Object.assign({}, deps, { phone, platform: "facebook", conn });
   const navGuard = (action) => guard.assertAllowed({ phone, platform: "facebook", action }, deps);
   let scraped;
   try {
     scraped = await withPage(
-      { duration: 300, note: "forly-sync:groups", profile: { name: profileNameFor("facebook", phone, conn), persist: true } },
+      { duration: 300, note: "forly-sync:groups", profile: { name: profileName("facebook", phone, gen), persist: true } },
       (page) => syncMembership(page, { guard: navGuard }),
       pageDeps,
     );

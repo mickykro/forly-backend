@@ -102,7 +102,7 @@ async function runJobLocked(job, deps) {
     if (profileName) {
       conn = (await deps.db.getConnection(job.phone)) || {};
       const platform = String(profileName).split("-")[0];
-      profileName = require("./profile-name").profileNameFor(platform, job.phone, conn);
+      profileName = require("./profile-name").profileName(platform, job.phone, conn[`${platform}_profile_gen`] || 0);
     }
     const source = await deps.resolve(
       { url: job.url, userId: job.phone },

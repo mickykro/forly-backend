@@ -14,7 +14,7 @@
  */
 const driverLive = require("./driver-browser");
 const dbLive = require("./db");
-const { profileNameFor } = require("./profile-name");
+const { profileName } = require("./profile-name");
 
 const VERIFY_SECONDS = 180;
 
@@ -33,7 +33,7 @@ async function verifySaved(phone, platform, deps = {}) {
   let r;
   try {
     r = await driver.withPage(
-      { duration: VERIFY_SECONDS, note: `forly-connect:verify-${platform}`, profile: { name: profileNameFor(platform, phone, conn), persist: true } },
+      { duration: VERIFY_SECONDS, note: `forly-connect:verify-${platform}`, profile: { name: profileName(platform, phone, conn[`${platform}_profile_gen`] || 0), persist: true } },
       (page) => CB.readLogin(page, platform, spec, conn, db),
       { phone, platform, conn },
     );

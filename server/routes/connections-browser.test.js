@@ -152,29 +152,6 @@ function fakeGuard(reason) {
     assert.ok(created2.url.includes(platform === "yad2" ? "yad2.co.il" : "madlan.co.il"));
   }
 
-  // ── the agent's name goes into the profile name, fixed at the first connect ──
-  {
-    let createdN = null;
-    const dbN = Object.assign(fakeDb({}), { getBusiness: async () => ({ full_name: "Dana Levi", business_name: "Levi Homes" }) });
-    const appN = makeApp({
-      driver: { createSession: async (o) => { createdN = o; return { sessionId: "sn", status: "active", cdpUrl: "wss://n/n" }; } },
-      db: dbN, locks: fakeLocks(),
-    });
-    const r = await call(appN, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
-    assert.equal(r.status, 200);
-    assert.equal(createdN.profile.name, profileName("facebook", PHONE, 0, "dana-levi"));
-    assert.equal(dbN.conn.facebook_profile_label, "dana-levi", "the label is stored on the connection");
-    // A later rename does not move the agent to a new, empty profile.
-    dbN.getBusiness = async () => ({ full_name: "Dana Cohen" });
-    dbN.conn.browser_session_facebook = null;
-    const appN2 = makeApp({
-      driver: { createSession: async (o) => { createdN = o; return { sessionId: "sn2", status: "active", cdpUrl: "wss://n/n2" }; }, stopSession: async () => true },
-      db: dbN, locks: fakeLocks(),
-    });
-    await call(appN2, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true });
-    assert.equal(createdN.profile.name, profileName("facebook", PHONE, 0, "dana-levi"));
-  }
-
   // ── finish for a read-only platform skips Pages discovery entirely ──
   {
     let wentToPages = false;

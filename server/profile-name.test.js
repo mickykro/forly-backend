@@ -3,7 +3,7 @@
    FORLY_ENV validation, the generation suffix, and assertOwnership. */
 process.env.FORLY_ENV = "local"; // set AFTER require would still work: read at call time
 const assert = require("assert");
-const { profileName, profileNameFor, labelOf, assertOwnership, ENV } = require("./profile-name");
+const { profileName, assertOwnership, ENV } = require("./profile-name");
 
 process.env.PROFILE_KEY = "k";
 
@@ -68,20 +68,5 @@ for (const state of ["revoked", "quarantined"]) {
   const c = { [state]: true, facebook_profile_state: state };
   assert.throws(() => assertOwnership(profileName("facebook", "05x"), "05x", "facebook", c), (e) => e.code === "profile_ownership", state);
 }
-
-// ── the agent's name in the profile name, fixed by the connection ──
-assert.equal(labelOf("דני כהן"), "dny-khn", "Hebrew transliterated");
-assert.equal(labelOf("  Dana  Levi!! "), "dana-levi");
-assert.equal(labelOf(""), "");
-assert.ok(labelOf("Very Long Agent Name Realty Group Ltd").length <= 24);
-assert.ok(/^facebook-local-dana-levi-[0-9a-f]{20}$/.test(profileName("facebook", "05x", 0, "Dana Levi")));
-assert.ok(/^facebook-local-dana-levi-[0-9a-f]{20}-r1$/.test(profileName("facebook", "05x", 1, "dana-levi")));
-assert.equal(profileName("facebook", "05x", 0, ""), profileName("facebook", "05x"), "no label → the old name");
-const named = { facebook_profile_gen: 1, facebook_profile_label: "dana-levi" };
-assert.equal(profileNameFor("facebook", "05x", named), profileName("facebook", "05x", 1, "dana-levi"));
-assert.equal(profileNameFor("facebook", "05x", null), profileName("facebook", "05x"));
-assert.doesNotThrow(() => assertOwnership(profileNameFor("facebook", "05x", named), "05x", "facebook", named));
-assert.throws(() => assertOwnership(profileName("facebook", "05x", 1), "05x", "facebook", named), (e) => e.code === "profile_ownership", "unlabelled name refused once the connection has a label");
-assert.notEqual(profileName("facebook", "05x", 0, "dana"), profileName("facebook", "05y", 0, "dana"), "same name, different agents → different profiles");
 
 console.log("profile-name.test.js ok");
