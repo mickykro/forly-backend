@@ -72,6 +72,10 @@ async function create({ phone, page, groups, mode, days, repeat, repeatDays, con
     repeat: repeat === true || Number(repeatDays) > 0, repeat_days: Number(repeatDays) > 0 ? Math.min(30, Math.max(3, Math.round(Number(repeatDays)))) : null,
     expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 30, 1), 30) * MS_DAY),
     consent_at: iso(consent.at), consent_version: consent.version || null,
+    consent_by: consent.by === "admin"
+      ? { by: "admin", admin_tail: consent.admin_tail || null, method: consent.method || null, note: consent.note || null }
+      : { by: "agent" },
+    created_by: consent.by === "admin" ? "admin" : "agent",
     // The text the agent approved for each group (manual posting), kept as written.
     groups: normalizeGroups(groups, ctx).map((g) => {
       const t = copies && typeof copies[g.group_id] === "string" ? cleanCopy(copies[g.group_id]) : "";
@@ -91,7 +95,7 @@ async function create({ phone, page, groups, mode, days, repeat, repeatDays, con
   // still see the old ones through their attempts).
   const fresh = {
     status: "running", pause_reason: null, wait_reason: null, restarted_at: c.created_at,
-    mode: c.mode, repeat: c.repeat, repeat_days: c.repeat_days, expires_at: c.expires_at, consent_at: c.consent_at, consent_version: c.consent_version,
+    mode: c.mode, repeat: c.repeat, repeat_days: c.repeat_days, expires_at: c.expires_at, consent_at: c.consent_at, consent_version: c.consent_version, consent_by: c.consent_by,
     groups: c.groups, targets: c.targets, consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
   };
   return mutate(x, campaign.id, (cur) => (may(cur) ? fresh : null));
@@ -235,7 +239,7 @@ async function stop(id, deps = {}, reason = "agent") {
       return posts.some((p, i) => p !== cur.posts[i]) ? { posts } : null;
     })
     : out;
-  if (was !== "stopped") await say(deps, out.phone, "stopped", "הפרסום נעצר. מה שכבר פורסם נשאר.", final);
+  if (was !== "stopped" && reason !== "admin") await say(deps, out.phone, "stopped", "הפרסום נעצר. מה שכבר פורסם נשאר.", final); // an admin stop: the route sends admin_stopped
   return final;
 }
 
@@ -516,7 +520,7 @@ async function explainGroups(c, deps = {}, now) {
 }
 
 module.exports = {
-  explainGroups, addGroups,
+  explainGroups, addGroups, normalizeGroups,
   create, enrollNewPage, pause, resume, stop, approvePost, cleanCopy, MAX_COPY, videoView, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.
