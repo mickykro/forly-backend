@@ -45,7 +45,7 @@
       return '<div class="manual-agent" data-camp="' + esc(r.id) + '">' +
         "<h3>" + esc(r.agent_name || r.phone_tail) + " · " + esc(r.page_title) + " <small>" + esc(STATUS[r.status] || r.status) + "</small></h3>" +
         '<div class="manual-muted">' + r.groups.length + " קבוצות · פורסם " + r.counts.posted + " · עד " + fmt(r.expires_at) +
-        (r.repeat ? " · חזרה כל " + r.repeat_days + " ימים" : "") + " · נוצר על ידי " + (r.created_by === "admin" ? "הצוות" : "הסוכן") + "</div>" +
+        (r.repeat ? " · חזרה כל " + esc(r.repeat_days) + " ימים" : "") + " · נוצר על ידי " + (r.created_by === "admin" ? "הצוות" : "הסוכן") + "</div>" +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="edit">עריכה</button>' : "") +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="stop">עצירה</button>' : "") +
         (r.status !== "running" ? '<button type="button" class="btn btn-ghost btn-sm" data-act="start">הפעלה</button>' : "") +
@@ -66,47 +66,105 @@
       $("#campFormAgent").innerHTML = '<option value="">בחרו סוכן…</option>' + opts;
     }).catch(fail);
   }
+  var seq = 0;           // bumps whenever the form is (re)opened or its agent changes; stale async fills compare against it
+  var restarting = null; // the stopped/completed row being restarted, or null
+  var initial = null;    // prefilled values of the row being edited
   function loadAgentChoices(ref, checked) {
-    if (!ref) { $("#campFormProperty").innerHTML = ""; $("#campFormGroups").innerHTML = ""; return Promise.resolve(); }
+    var my = ++seq;
+    if (!ref) { $("#campFormProperty").innerHTML = ""; $("#campFormGroups").innerHTML = ""; return Promise.resolve(false); }
     return Promise.all([req("GET", "/agents/" + encodeURIComponent(ref) + "/properties"), req("GET", "/agents/" + encodeURIComponent(ref) + "/groups")]).then(function (r) {
+      if (my !== seq) return false;
       $("#campFormProperty").innerHTML = (r[0].properties || []).map(function (p) { return '<option value="' + esc(p.page_id) + '">' + esc(p.title) + "</option>"; }).join("");
       $("#campFormGroups").innerHTML = (r[1].groups || []).map(function (g) {
         var on = checked && checked.indexOf(g.group_id) >= 0 ? " checked" : "";
         return '<label><input type="checkbox" value="' + esc(g.group_id) + '"' + on + "> " + esc(g.name || g.group_id) + "</label>";
       }).join("");
-    }).catch(fail);
+      return true;
+    }).catch(function (e) { if (my === seq) fail(e); return false; });
   }
   function chosenGroups() { return Array.prototype.map.call(document.querySelectorAll("#campFormGroups input:checked"), function (i) { return i.value; }); }
+  function setMain(show) { // the campaign fields vs. the consent-only restart form
+    Array.prototype.forEach.call(document.querySelectorAll("#campForm > label, #campForm > fieldset:not(#campFormConsent)"), function (el) { el.hidden = !show; });
+  }
+  function closeForm() { seq++; editing = null; restarting = null; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; }
+  function validNote() {
+    var n = $("#campFormConsentNote").value.trim();
+    if (!n || n.length > 300) { FLY.toast("חובה לכתוב הערת הסכמה של 1 עד 300 תווים."); return null; }
+    return n;
+  }
 
   function openForm(row) {
-    editing = row || null;
+    var my = ++seq;
+    editing = row || null; restarting = null;
+    setMain(true);
     $("#campFormTitle").textContent = row ? "עריכת קמפיין" : "קמפיין חדש";
     $("#campFormAgent").disabled = !!row; $("#campFormProperty").disabled = !!row;
     $("#campFormConsent").hidden = !!row;
-    $("#campFormDays").value = "14";
-    $("#campFormRepeat").value = row && row.repeat ? String(row.repeat_days) : "0";
-    $("#campFormMode").value = row ? row.mode : "standing";
-    $("#campFormPage").checked = !!(row && row.targets.indexOf("page") >= 0);
-    $("#campFormConsentNote").value = "";
+    $("#campFormAgent").value = ""; $("#campFormProperty").innerHTML = ""; $("#campFormGroups").innerHTML = "";
+    $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
+    $("#campFormSave").disabled = false;
+    if (row) {
+      var left = Math.min(30, Math.max(1, Math.ceil((Date.parse(row.expires_at) - Date.now()) / 86400000)) || 1);
+      initial = { days: String(left), repeat: row.repeat ? String(row.repeat_days) : "0", mode: row.mode, page: row.targets.indexOf("page") >= 0 };
+      $("#campFormDays").value = initial.days; $("#campFormRepeat").value = initial.repeat;
+      $("#campFormMode").value = initial.mode; $("#campFormPage").checked = initial.page;
+    } else {
+      initial = null;
+      $("#campFormDays").value = "14"; $("#campFormRepeat").value = "0"; $("#campFormMode").value = "standing"; $("#campFormPage").checked = false;
+    }
     $("#campForm").hidden = false;
-    if (row) { $("#campFormAgent").value = row.ref; loadAgentChoices(row.ref, row.groups.map(function (g) { return g.group_id; })).then(function () { $("#campFormProperty").value = row.page_id; }); }
+    if (row) {
+      $("#campFormAgent").value = row.ref;
+      loadAgentChoices(row.ref, row.groups.map(function (g) { return g.group_id; })).then(function (ok) { if (ok && my + 1 === seq) $("#campFormProperty").value = row.page_id; });
+    }
+  }
+  function openRestart(row) {
+    seq++;
+    editing = null; restarting = row;
+    setMain(false);
+    $("#campFormTitle").textContent = "הפעלה מחדש — הסכמת הסוכן";
+    $("#campFormConsent").hidden = false;
+    $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
+    $("#campFormSave").disabled = false;
+    $("#campForm").hidden = false;
+  }
+  function settle(p) { // one request in flight per save click
+    $("#campFormSave").disabled = true;
+    return p.then(function () { $("#campFormSave").disabled = false; }, function () { $("#campFormSave").disabled = false; });
   }
   function save() {
+    if ($("#campFormSave").disabled) return;
+    if (restarting) {
+      var rn = validNote(); if (!rn) return;
+      var rid = restarting.id;
+      return settle(req("POST", "/campaigns/" + encodeURIComponent(rid) + "/start", { consent: { method: $("#campFormConsentMethod").value, note: rn } })
+        .then(function () { closeForm(); FLY.toast("הקמפיין פעיל"); load(); }).catch(failClose));
+    }
     var targets = $("#campFormPage").checked ? ["groups", "page"] : ["groups"];
     var repeat = Number($("#campFormRepeat").value) || 0;
     if (!editing) {
-      return req("POST", "/campaigns", {
+      var note = validNote(); if (!note) return;
+      return settle(req("POST", "/campaigns", {
         agent: $("#campFormAgent").value, page_id: $("#campFormProperty").value, group_ids: chosenGroups(),
         days: Number($("#campFormDays").value) || 14, repeat_days: repeat || undefined, mode: $("#campFormMode").value, targets: targets,
-        consent: { method: $("#campFormConsentMethod").value, note: $("#campFormConsentNote").value.trim() },
-      }).then(function (d) { $("#campForm").hidden = true; FLY.toast(d.existing ? "לנכס הזה כבר יש קמפיין — פתחו אותו לעריכה" : "הקמפיין נפתח והסוכן קיבל הודעה"); load(); }).catch(fail);
+        consent: { method: $("#campFormConsentMethod").value, note: note },
+      }).then(function (d) { closeForm(); FLY.toast(d.existing ? "לנכס הזה כבר יש קמפיין — פתחו אותו לעריכה" : "הקמפיין נפתח והסוכן קיבל הודעה"); load(); }).catch(failClose));
     }
     var before = editing.groups.map(function (g) { return g.group_id; }), now = chosenGroups();
-    return req("PATCH", "/campaigns/" + encodeURIComponent(editing.id), {
-      version: editing.version, days: Number($("#campFormDays").value) || 14, repeat_days: repeat, mode: $("#campFormMode").value, targets: targets,
-      add_group_ids: now.filter(function (g) { return before.indexOf(g) < 0; }).length ? now.filter(function (g) { return before.indexOf(g) < 0; }) : undefined,
-      remove_group_ids: before.filter(function (g) { return now.indexOf(g) < 0; }).length ? before.filter(function (g) { return now.indexOf(g) < 0; }) : undefined,
-    }).then(function () { $("#campForm").hidden = true; FLY.toast("נשמר"); load(); }).catch(fail);
+    var add = now.filter(function (g) { return before.indexOf(g) < 0; }), rem = before.filter(function (g) { return now.indexOf(g) < 0; });
+    var body = { version: editing.version };
+    if ($("#campFormDays").value !== initial.days) body.days = Number($("#campFormDays").value) || 14;
+    if ($("#campFormRepeat").value !== initial.repeat) body.repeat_days = repeat;
+    if ($("#campFormMode").value !== initial.mode) body.mode = $("#campFormMode").value;
+    if ($("#campFormPage").checked !== initial.page) body.targets = targets;
+    if (add.length) body.add_group_ids = add;
+    if (rem.length) body.remove_group_ids = rem;
+    return settle(req("PATCH", "/campaigns/" + encodeURIComponent(editing.id), body)
+      .then(function () { closeForm(); FLY.toast("נשמר"); load(); }).catch(failClose));
+  }
+  function failClose(e) { // a stale version closes the form: the reload brings the fresh row to edit
+    if (e && e.code === "stale_version") closeForm();
+    fail(e);
   }
   function act(id, what) {
     var row = rows.filter(function (r) { return r.id === id; })[0];
@@ -117,13 +175,8 @@
       return req("POST", "/campaigns/" + encodeURIComponent(id) + "/stop", {}).then(function () { FLY.toast("הקמפיין נעצר"); load(); }).catch(fail);
     }
     if (what === "start") {
-      var body = {};
-      if (row.status === "stopped" || row.status === "completed") {
-        var note = window.prompt("הפעלה מחדש צריכה הסכמה של הסוכן. מה הסוכן אישר, ומתי?");
-        if (!note || !note.trim()) { FLY.toast("בוטל — חובה לכתוב הערה"); return; }
-        body.consent = { method: "phone", note: note.trim() };
-      }
-      return req("POST", "/campaigns/" + encodeURIComponent(id) + "/start", body).then(function () { FLY.toast("הקמפיין פעיל"); load(); }).catch(fail);
+      if (row.status === "stopped" || row.status === "completed") return openRestart(row);
+      return req("POST", "/campaigns/" + encodeURIComponent(id) + "/start", {}).then(function () { FLY.toast("הקמפיין פעיל"); load(); }).catch(fail);
     }
   }
 
@@ -132,7 +185,7 @@
   $("#campNew").addEventListener("click", function () { openForm(null); });
   $("#campFormAgent").addEventListener("change", function () { loadAgentChoices($("#campFormAgent").value, null); });
   $("#campFormSave").addEventListener("click", save);
-  $("#campFormCancel").addEventListener("click", function () { $("#campForm").hidden = true; });
+  $("#campFormCancel").addEventListener("click", closeForm);
   $("#campList").addEventListener("click", function (ev) {
     var b = ev.target.closest("[data-act]"); if (!b) return;
     act(b.closest("[data-camp]").getAttribute("data-camp"), b.getAttribute("data-act"));

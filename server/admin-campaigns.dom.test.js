@@ -26,19 +26,21 @@ function findChromium() {
   catch { console.log("admin-campaigns.dom.test.js skipped (launch failed)"); return; }
 
   const ROW = { id: "c1", ref: "acct_1", phone_tail: "…0001", agent_name: "דנה לוי", page_id: "pg1", page_title: "דירה בחיפה", status: "running",
-    pause_reason: null, mode: "standing", repeat: false, repeat_days: null, targets: ["groups"], expires_at: "2026-10-20T10:00:00.000Z",
+    pause_reason: null, mode: "standing", repeat: false, repeat_days: null, targets: ["groups"], expires_at: new Date(Date.now() + 5 * 86400000 - 3600000).toISOString(),
     groups: [{ group_id: "111", name: "A" }], counts: { owed: 1, posted: 0, skipped: 0 }, created_by: "agent", consent_by: { by: "agent" }, version: "v1" };
-  const seen = { creates: [], stops: 0 };
+  const seen = { creates: [], patches: [], starts: [], stops: 0 };
+  let cur = ROW;
   let editAnswer = { status: 409, body: { error: "stale_version" } };
   const app = express(); app.use(express.json());
   app.get("/api/admin/me", (q, r) => r.json({ ok: true }));
-  app.get("/api/admin/campaigns/campaigns", (q, r) => r.json({ campaigns: [ROW] }));
+  app.get("/api/admin/campaigns/campaigns", (q, r) => r.json({ campaigns: [cur] }));
   app.get("/api/admin/campaigns/agents", (q, r) => r.json({ agents: [{ ref: "acct_1", phone_tail: "…0001", name: "דנה לוי" }] }));
   app.get("/api/admin/campaigns/agents/:ref/properties", (q, r) => r.json({ properties: [{ page_id: "pg1", title: "דירה בחיפה" }] }));
-  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111" }] }));
+  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111" }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222" }] }));
   app.post("/api/admin/campaigns/campaigns", (q, r) => { seen.creates.push(q.body); r.status(201).json({ campaign: ROW }); });
-  app.patch("/api/admin/campaigns/campaigns/c1", (q, r) => r.status(editAnswer.status).json(editAnswer.body));
-  app.post("/api/admin/campaigns/campaigns/c1/stop", (q, r) => { seen.stops++; r.json({ campaign: Object.assign({}, ROW, { status: "stopped" }) }); });
+  app.patch("/api/admin/campaigns/campaigns/c1", (q, r) => { seen.patches.push(q.body); r.status(editAnswer.status).json(editAnswer.body); });
+  app.post("/api/admin/campaigns/campaigns/c1/start", (q, r) => { seen.starts.push(q.body); cur = ROW; r.json({ campaign: ROW }); });
+  app.post("/api/admin/campaigns/campaigns/c1/stop", (q, r) => { seen.stops++; cur = Object.assign({}, ROW, { status: "stopped" }); r.json({ campaign: cur }); });
   app.use("/api", (q, r) => r.json({}));
   app.use(express.static(path.join(__dirname, "..", "public-agent")));
   const server = app.listen(0);
@@ -65,17 +67,72 @@ function findChromium() {
     assert.equal(seen.creates.length, 1);
     assert.deepEqual(seen.creates[0].consent, { method: "phone", note: "אישר בטלפון" });
     assert.deepEqual(seen.creates[0].group_ids, ["111"]);
+    assert.equal(seen.creates[0].days, 14);
+    assert.equal(seen.creates[0].mode, "standing");
+    assert.deepEqual(seen.creates[0].targets, ["groups"]);
 
-    // a refused edit shows its reason
+    // a refused edit (stale version) shows its reason, sends the row's version and the changed days, and closes the form
     await page.click("[data-camp='c1'] [data-act='edit']");
+    await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
+    assert.equal(await page.inputValue("#campFormDays"), "5", "edit prefills the remaining days, not 14");
     await page.fill("#campFormDays", "7");
     await page.click("#campFormSave");
     await page.waitForFunction(() => /השתנה/.test(document.body.innerText));
+    assert.equal(seen.patches.length, 1);
+    assert.equal(seen.patches[0].version, "v1");
+    assert.equal(seen.patches[0].days, 7);
+    await page.waitForFunction(() => document.querySelector("#campForm").hidden);
 
-    // stop asks, then stops
+    // a successful edit of only the groups sends the group diff and no days/repeat/mode/targets
+    editAnswer = { status: 200, body: { campaign: ROW } };
+    await page.click("[data-camp='c1'] [data-act='edit']");
+    await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
+    await page.check("#campFormGroups input[value='222']");
+    await page.uncheck("#campFormGroups input[value='111']");
+    await page.click("#campFormSave");
+    await page.waitForFunction(() => /נשמר/.test((document.getElementById("toast") || {}).textContent || ""));
+    assert.equal(seen.patches.length, 2);
+    const p2 = seen.patches[1];
+    assert.deepEqual(p2.add_group_ids, ["222"]);
+    assert.deepEqual(p2.remove_group_ids, ["111"]);
+    for (const k of ["days", "repeat_days", "mode", "targets"]) assert.ok(!(k in p2), k + " must not be sent when unchanged");
+    await page.waitForFunction(() => document.querySelector("#campForm").hidden);
+
+    // a new campaign after an edit starts clean
+    await page.click("#campNew");
+    assert.equal(await page.inputValue("#campFormAgent"), "");
+    assert.equal(await page.inputValue("#campFormDays"), "14");
+    assert.equal(await page.locator("#campFormGroups input").count(), 0);
+    assert.equal(await page.isDisabled("#campFormAgent"), false);
+    await page.click("#campFormCancel");
+
+    // a 401 stepup_required shows the banner
+    editAnswer = { status: 401, body: { error: "stepup_required" } };
+    await page.click("[data-camp='c1'] [data-act='edit']");
+    await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
+    await page.fill("#campFormDays", "9");
+    await page.click("#campFormSave");
+    await page.waitForFunction(() => !document.getElementById("campStepUp").classList.contains("hidden"));
+    await page.click("#campFormCancel");
+
+    // stop asks (dialog accepted), then really stops
     await page.click("[data-camp='c1'] [data-act='stop']");
-    await page.waitForFunction(() => document.body.innerText.includes("נעצר"));
+    await page.waitForFunction(() => /הקמפיין נעצר/.test((document.getElementById("toast") || {}).textContent || ""));
     assert.equal(seen.stops, 1);
+
+    // restart of a stopped campaign records the chosen consent method and note
+    await page.waitForSelector("[data-camp='c1'] [data-act='start']");
+    await page.click("[data-camp='c1'] [data-act='start']");
+    await page.selectOption("#campFormConsentMethod", "whatsapp");
+    await page.fill("#campFormConsentNote", "   ");
+    await page.click("#campFormSave");
+    await page.waitForFunction(() => /חובה לכתוב/.test((document.getElementById("toast") || {}).textContent || ""));
+    assert.equal(seen.starts.length, 0, "an empty note is refused client-side");
+    await page.fill("#campFormConsentNote", "אישר בוואטסאפ");
+    await page.click("#campFormSave");
+    await page.waitForFunction(() => document.querySelector("#campForm").hidden);
+    assert.equal(seen.starts.length, 1);
+    assert.deepEqual(seen.starts[0], { consent: { method: "whatsapp", note: "אישר בוואטסאפ" } });
     console.log("admin-campaigns.dom.test.js ok");
   } finally { server.close(); await browser.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });
