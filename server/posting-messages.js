@@ -5,7 +5,7 @@
  * which calls deps.messages[kind](...args) with exactly the arguments the
  * call sites pass — grep `say(` across posting-*.js for the ground truth.
  * The kinds in use today: approve, posted, paused, halted, penalty,
- * reconnect, removed, stopped, completed.
+ * reconnect, removed, stopped, completed, admin_created, admin_stopped.
  *
  * Each is a button message { header, body, footer, buttons } (Green API
  * sendInteractiveButtons): links sit behind buttons, never in the text;
@@ -96,6 +96,13 @@ function build({ pageBaseUrl, authSecret }) {
 
     // The agent (or a one-tap link) stopped the campaign.
     stopped: () => msg("✋ הפרסום נעצר", "מה שכבר פורסם נשאר בקבוצות. אפשר להתחיל שוב מתי שתרצו, מעמוד הפרסום.", [publishBtn]),
+
+    // The team (not the agent) opened or stopped the campaign from the admin side.
+    admin_created: (c) => {
+      const n = ((c && c.groups) || []).length;
+      return msg("📣 פורלי פתחה לכם קמפיין", `הצוות שלנו פתח קמפיין פרסום לנכס שלכם ב-${n} ${n === 1 ? "קבוצה" : "קבוצות"}. אפשר לראות ולעצור אותו בכל רגע מעמוד הפרסום.`, [publishBtn]);
+    },
+    admin_stopped: () => msg("✋ הצוות עצר את הפרסום", "הצוות שלנו עצר את הקמפיין. מה שכבר פורסם נשאר בקבוצות.", [publishBtn]),
 
     // Every group (and the Page, if included) got its post — nothing left to schedule.
     // The end of a campaign: where it went up, each group with its link.

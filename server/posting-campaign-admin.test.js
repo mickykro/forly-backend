@@ -5,6 +5,7 @@ const assert = require("assert");
 const K = require("./posting-testkit");
 const C = require("./posting-campaign");
 const CA = require("./posting-campaign-admin");
+const A_ = require("./posting-account");
 
 (async () => {
   // ── create records who consented ──
@@ -68,6 +69,18 @@ const CA = require("./posting-campaign-admin");
     const c2 = await C.create(K.base(), d2);
     await C.stop(c2.id, d2);
     assert.equal(n2.length, 1, "an agent stop still tells the agent");
+  }
+  // ── admin messages go out in manual mode too; other kinds do not ──
+  {
+    const sent = [];
+    const deps = { env: { POSTING_MANUAL: "1" }, notify: async (ph, m) => sent.push(m) };
+    await A_.say(deps, "972500000001", "admin_created", "נפתח קמפיין");
+    await A_.say(deps, "972500000001", "admin_stopped", "נעצר");
+    await A_.say(deps, "972500000001", "paused", "הושהה");
+    assert.deepEqual(sent, ["נפתח קמפיין", "נעצר"]);
+    const M = require("./posting-messages").build({ pageBaseUrl: "https://f.ly", authSecret: "s" });
+    assert.ok(M.admin_created({ id: "c1", groups: [{}, {}] }).body.includes("2"));
+    assert.ok(M.admin_stopped({ id: "c1" }).header.length > 0);
   }
   console.log("posting-campaign-admin.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
