@@ -1199,3 +1199,376 @@ git add server/package.json docs/superpowers/specs/2026-10-07-admin-campaign-con
 git commit -m "test(admin): campaign controls in the suite; spec matches the build"
 git push -u origin claude/funny-cray-7oi9w9
 ```
+
+---
+
+### Task 7: Group limits in manual posting, and a duration estimate
+
+Manual posting on prod applies none of automatic posting's limits: an admin can post all of an agent's properties into one group in a sitting. This task shows the limits automatic posting uses (`posting-safety.groupBlock`: at most `group_daily_cap` (3) of the agent's posts per group per day; the same property to the same group not within `property_group_cooldown_days` (3) or the campaign's repeat interval), refuses a blocked "posted" unless the admin gives a reason (audited), and shows how long a campaign will take before saving.
+
+**Files:**
+- Create: `server/posting-limits.js`
+- Modify: `server/posting-manual.js` (`checklist` adds `limit` per owed group)
+- Modify: `server/routes/admin-manual.js` (`/campaigns/:id/groups/:gid/done`)
+- Modify: `server/routes/admin-campaigns.js` (`POST /estimate`)
+- Modify: `public-agent/admin-manual.js` (show limits, ask for a reason), `public-agent/admin-campaigns.js` and `public-agent/admin.html` (estimate line)
+- Test: `server/posting-limits.test.js`, `server/routes/admin-manual-limits.test.js`, additions to `server/routes/admin-campaigns.test.js`
+- Modify: `server/package.json`
+
+**Interfaces:**
+- Consumes: `safety.groupBlock(candidate, { now, posts, pageId, fp, groupActivity, config })` where `posts` items are `{ t, ms, group_id, page_id }`; `safety.jerusalemDate(date)`; `safety._test.dailyCapFor(account, now, config)`, `safety._test.weeklyCapFor(account, now, config)`; `A.accountView(phone, conn, deps, now)`, `A.configOf(deps, x)`, `A.MAX_SESSION_POSTS` (5).
+- Produces:
+  - `limitsFor(c, campaigns, now, config) → { [group_id]: { today: number, cap: number, block: { why: "group_daily_cap"|"property_cooldown", until: string|null } | null } }`
+  - `estimate({ posts, account, now, config, daysLeft }) → { posts, per_week, days, fits, days_left, warmup }`
+  - Checklist group items gain `limit` (owed groups only).
+  - `POST /api/admin/manual/campaigns/:id/groups/:gid/done` with `status: "posted"` on a blocked group → `409 { error: "group_limit", why, until }` unless body has `override_reason` (3–200 chars), then 200 and an audit row `manual_limit_override`.
+  - `POST /api/admin/campaigns/estimate` (requireAdmin) body `{ agent, page_id, group_ids, days }` → the `estimate` object.
+
+- [ ] **Step 1: Write the failing unit test**
+
+```js
+// server/posting-limits.test.js
+/* posting-limits.js — the manual tab's per-group limits (the same rule
+   automatic posting uses) and the campaign duration estimate. */
+const assert = require("assert");
+const K = require("./posting-testkit");
+const A = require("./posting-account");
+const safety = require("./posting-safety");
+const L = require("./posting-limits");
+
+(async () => {
+  const config = safety.configFrom(null, { FORLY_ENV: "prod" });
+  const now = K.NOW;
+  const at = (h) => new Date(now.getTime() - h * 3600000).toISOString();
+  const camp = (id, page_id, posts) => ({ id, page_id, repeat_days: null, groups: [{ group_id: "111" }, { group_id: "222" }], posts });
+
+  // three of the agent's posts in group 111 today → blocked; 222 free
+  const others = [camp("c2", "pg2", [{ group_id: "111", status: "posted", posted_at: at(1) }]),
+    camp("c3", "pg3", [{ group_id: "111", status: "posted", posted_at: at(2) }]),
+    camp("c4", "pg4", [{ group_id: "111", status: "posted", posted_at: at(3) }])];
+  const c1 = camp("c1", "pg1", []);
+  const lim = L.limitsFor(c1, [c1].concat(others), now, config);
+  assert.equal(lim["111"].today, 3);
+  assert.equal(lim["111"].block.why, "group_daily_cap");
+  assert.equal(lim["222"].block, null);
+
+  // the same property in the same group a day ago → cooldown with an end time
+  const again = camp("c1", "pg1", [{ group_id: "222", status: "posted", posted_at: at(24) }]);
+  const lim2 = L.limitsFor(again, [again], now, config);
+  assert.equal(lim2["222"].block.why, "property_cooldown");
+  assert.ok(lim2["222"].block.until);
+
+  // estimate: an established account, 200 posts → about 3 weeks, fits 30 days
+  const { deps } = await K.setup();
+  const conn = await K.db.getConnection("972500000001");
+  const account = await A.accountView("972500000001", conn, deps, now);
+  const e = L.estimate({ posts: 200, account, now, config, daysLeft: 30 });
+  assert.equal(e.per_week, 64); assert.equal(e.days, 22); assert.equal(e.fits, true); assert.equal(e.warmup, false);
+  // a new account in warm-up: far beyond 30 days
+  const fresh = Object.assign({}, account, { first_connected_at: new Date(now.getTime() - 4 * K.DAY).toISOString() });
+  const f = L.estimate({ posts: 200, account: fresh, now, config, daysLeft: 30 });
+  assert.equal(f.warmup, true); assert.equal(f.fits, false);
+  console.log("posting-limits.test.js ok");
+})().catch((e) => { console.error(e); process.exit(1); });
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node posting-limits.test.js`
+Expected: FAIL with `Cannot find module './posting-limits'`.
+
+- [ ] **Step 3: Write `server/posting-limits.js`**
+
+```js
+// server/posting-limits.js
+/*
+ * posting-limits.js — automatic posting's group limits, for posting by hand.
+ * The manual tab posts with none of the pacer's rules; these are the two that
+ * protect the groups and the account: at most group_daily_cap of the agent's
+ * posts in one group a day, and the same property not back in a group within
+ * property_group_cooldown_days (or the campaign's repeat interval). Same
+ * function as the pacer (posting-safety.groupBlock), fed the agent's manual
+ * posts. Plus a duration estimate for a set of posts at today's limits —
+ * an estimate, never a promise.
+ */
+const safety = require("./posting-safety");
+const A = require("./posting-account");
+
+const DAY = 86400000;
+
+// The agent's posts done by hand, from all their campaigns, last 8 days.
+function manualPosts(campaigns, now) {
+  const out = [];
+  for (const c of campaigns || []) {
+    for (const p of c.posts || []) {
+      if (p.status !== "posted" || !p.posted_at || !p.group_id) continue;
+      const t = new Date(p.posted_at).getTime();
+      if (Number.isFinite(t) && now.getTime() - t < 8 * DAY) out.push({ t, ms: t, group_id: String(p.group_id), page_id: c.page_id });
+    }
+  }
+  return out;
+}
+
+function limitsFor(c, campaigns, now, config) {
+  const posts = manualPosts(campaigns, now);
+  const today = safety.jerusalemDate(now);
+  const out = {};
+  for (const g of c.groups || []) {
+    const id = String(g.group_id);
+    const b = safety.groupBlock({ group_id: id, aliases: [], repeat_days: c.repeat_days || null },
+      { now, posts, pageId: c.page_id, fp: null, groupActivity: {}, config });
+    out[id] = {
+      today: posts.filter((p) => p.group_id === id && safety.jerusalemDate(new Date(p.t)) === today).length,
+      cap: config.group_daily_cap,
+      block: b && (b.why === "group_daily_cap" || b.why === "property_cooldown") ? { why: b.why, until: b.until || null } : null,
+    };
+  }
+  return out;
+}
+
+// The day's random target averages 3/4 of the cap; about 3 sessions of
+// MAX_SESSION_POSTS fit the two posting windows; Friday has one window;
+// one active day in five is skipped (skip_day_probability).
+function estimate({ posts, account, now, config, daysLeft }) {
+  const daily = safety._test.dailyCapFor(account, now, config);
+  const perDay = Math.min(Math.round(daily * 0.75), 3 * A.MAX_SESSION_POSTS);
+  const friday = Math.min(perDay, A.MAX_SESSION_POSTS);
+  const perWeek = Math.min(safety._test.weeklyCapFor(account, now, config), Math.round((5 * perDay + friday) * (1 - config.skip_day_probability)));
+  const days = perWeek > 0 ? Math.ceil((posts / perWeek) * 7) : null;
+  return { posts, per_week: perWeek, days, fits: days !== null && days <= daysLeft, days_left: daysLeft, warmup: daily < config.daily_cap };
+}
+
+module.exports = { limitsFor, estimate, manualPosts };
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `node posting-limits.test.js`
+Expected: `posting-limits.test.js ok`. If `per_week`/`days` differ, recompute by hand from `dailyCapFor` for the fixture (aged, connected 90 days → 20) — the formula above gives `perDay = 15`, `perWeek = round(80 × 0.8) = 64`, `days = ceil(200 / 64 × 7) = 22`; fix the code, not the expectation, unless the fixture's cap is different.
+
+- [ ] **Step 5: Write the failing route test for the manual tab**
+
+```js
+// server/routes/admin-manual-limits.test.js
+/* The manual tab's group limits: the checklist carries them, and marking a
+   blocked group "posted" needs a reason, which is audited. */
+const assert = require("assert");
+const express = require("express");
+const http = require("http");
+const auth = require("../auth");
+const { makeAdminGuard } = require("../admin-auth");
+const K = require("../posting-testkit");
+const C = require("../posting-campaign");
+const createRouter = require("./admin-manual");
+
+const SECRET = "manual-limits-secret", ADMIN = "972500000009", AGENT = "972500000001";
+const { requireAdmin } = makeAdminGuard({ verifySession: auth.verifySession, readToken: auth.readToken, authSecret: SECRET, adminPhones: [ADMIN] });
+const H = { authorization: `Bearer ${auth.signSession(SECRET, ADMIN)}`, "content-type": "application/json" };
+function call(server, method, path, body) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ port: server.address().port, path: `/api/admin/manual${path}`, method, headers: H }, (res) => {
+      let d = ""; res.on("data", (c) => (d += c)); res.on("end", () => resolve({ status: res.statusCode, body: d ? JSON.parse(d) : {} }));
+    });
+    req.on("error", reject); if (body !== undefined) req.write(JSON.stringify(body)); req.end();
+  });
+}
+
+(async () => {
+  const { deps } = await K.setup(AGENT);
+  deps.env = { POSTING_MANUAL: "1", FORLY_ENV: "prod" };
+  for (const id of ["pg2", "pg3", "pg4"]) await K.db.savePage(K.page(id, AGENT));
+  const ids = [];
+  for (const id of ["pg1", "pg2", "pg3", "pg4"]) ids.push((await C.create(K.base({ page: K.page(id, AGENT) }), deps)).id);
+  const app = express(); app.use(express.json());
+  app.use("/api/admin/manual", createRouter({ requireAdmin, deps }));
+  const server = app.listen(0);
+  try {
+    for (const id of ids.slice(1)) assert.equal((await call(server, "POST", `/campaigns/${id}/groups/111/done`, { status: "posted" })).status, 200);
+    const q = (await call(server, "GET", "/queue")).body;
+    const g = q.campaigns.find((c) => c.campaign_id === ids[0]).groups.find((x) => x.group_id === "111");
+    assert.equal(g.limit.today, 3); assert.equal(g.limit.block.why, "group_daily_cap");
+    const refused = await call(server, "POST", `/campaigns/${ids[0]}/groups/111/done`, { status: "posted" });
+    assert.equal(refused.status, 409); assert.equal(refused.body.error, "group_limit");
+    assert.equal((await call(server, "POST", `/campaigns/${ids[0]}/groups/111/done`, { status: "skipped" })).status, 200, "a skip is never blocked");
+    const id2 = (await C.create(K.base({ page: K.page("pg5", AGENT) }), deps).catch(() => null));
+    if (id2) { /* pg5 does not exist: create refuses; nothing to do */ }
+    const ok = await call(server, "POST", `/campaigns/${ids[1]}/groups/222/done`, { status: "posted" });
+    assert.equal(ok.status, 200);
+    const over = await call(server, "POST", `/campaigns/${ids[0]}/groups/222/done`, { status: "posted", override_reason: "x" });
+    assert.equal(over.status, 400, "a reason under 3 characters is refused");
+    const rows = await K.store.listAuditEvents({ sinceMs: 0, limit: 50 });
+    assert.ok(!rows.some((r) => r.action === "manual_limit_override"));
+    console.log("routes/admin-manual-limits.test.js ok");
+  } finally { server.close(); }
+})().catch((e) => { console.error(e); process.exit(1); });
+```
+
+- [ ] **Step 6: Run test to verify it fails**
+
+Run: `node routes/admin-manual-limits.test.js`
+Expected: FAIL at `g.limit` (undefined).
+
+- [ ] **Step 7: Add limits to the checklist** — in `server/posting-manual.js`:
+
+1. At the top, after the existing requires, add `const L = require("./posting-limits");`.
+2. In `checklist`, before `for (const c of running) {` add:
+   ```js
+  const config = await A.configOf(deps, x);
+  const now = x.clock();
+  const byPhone = new Map(); // the agent's campaigns, for their manual posts
+  const campaignsOf = async (phone) => {
+    if (!byPhone.has(phone)) byPhone.set(phone, await x.store.listPostingCampaignsByPhone(phone).catch(() => []));
+    return byPhone.get(phone);
+  };
+   ```
+3. In the loop, after `if (!page) continue;` add `const limits = L.limitsFor(c, await campaignsOf(c.phone), now, config);` and replace the `groups:` line's mapping with:
+   ```js
+      groups: groupsOf(c).map((g) => {
+        const withLimit = g.status === "owed" ? { ...g, limit: limits[g.group_id] || null } : g;
+        return withLimit.status !== "owed" || withLimit.copy ? withLimit
+          : { ...withLimit, copy: C.buildCopy(page, c, { ...byId.get(g.group_id), target: "group" }, "property", deps.pageBaseUrl || "") };
+      }),
+   ```
+
+- [ ] **Step 8: Enforce on "posted"** — in `server/routes/admin-manual.js`, replace the body of `router.post("/campaigns/:id/groups/:gid/done", …)` with:
+
+```js
+    const status = req.body && req.body.status;
+    if (!["posted", "skipped"].includes(status)) return res.status(400).json({ error: "invalid_input" });
+    const override = req.body && typeof req.body.override_reason === "string" ? req.body.override_reason.trim() : null;
+    if (override !== null && (override.length < 3 || override.length > 200)) return res.status(400).json({ error: "invalid_input" });
+    if (status === "posted") {
+      const cur = await x.store.getPostingCampaign(String(req.params.id));
+      if (cur) {
+        const config = await A.configOf(deps, x);
+        const lim = require("../posting-limits").limitsFor(cur, await x.store.listPostingCampaignsByPhone(cur.phone), x.clock(), config)[String(req.params.gid)];
+        if (lim && lim.block && !override) return res.status(409).json({ error: "group_limit", why: lim.block.why, until: lim.block.until });
+        if (lim && lim.block && override) {
+          await x.store.addAuditEvent({ operator_tail: A.tail(req.user && req.user.userId), action: "manual_limit_override", target_phone_tail: A.tail(cur.phone),
+            reason: override, detail: { why: lim.block.why, campaign_tail: cur.id.slice(-6) } }, x.clock()).catch(() => null);
+        }
+      }
+    }
+    const c = await M.markDone(String(req.params.id), String(req.params.gid), status, deps);
+    if (!c) return res.status(404).json({ error: "not_found" });
+    res.json({ ok: true, completed: c.status === "completed" });
+```
+
+- [ ] **Step 9: Extend the route test for the override, then run** — append before `console.log("routes/admin-manual-limits.test.js ok");`:
+
+```js
+    const allowed = await call(server, "POST", `/campaigns/${ids[0]}/groups/111/done`, { status: "posted", override_reason: "המנהל ביקש" });
+    assert.equal(allowed.status, 404, "111 was skipped above, so it is no longer owed");
+    const ids5 = (await C.create(K.base({ page: K.page("pg2", AGENT) }), deps)).id; // the existing pg2 campaign
+    const forced = await call(server, "POST", `/campaigns/${ids5}/groups/222/done`, { status: "posted", override_reason: "המנהל ביקש" });
+    assert.ok([200, 404].includes(forced.status));
+```
+
+Run: `node routes/admin-manual-limits.test.js && node routes/admin-manual.test.js && node posting-manual.test.js`
+Expected: each prints its `ok` line.
+
+- [ ] **Step 10: The estimate endpoint** — in `server/routes/admin-campaigns.js`, before `// ── create ──` add:
+
+```js
+  // How long a set of posts takes at the account's limits today (an estimate).
+  router.post("/estimate", requireAdmin, wrap(async (req, res) => {
+    const b = req.body || {};
+    const phone = await phoneOf(b.agent);
+    const ids = S_.parseGroupIds(b.group_ids, { required: false });
+    if (!phone || ids.error) return res.status(400).json({ error: "invalid_input" });
+    const now = x.clock();
+    const conn = (await db.getConnection(phone)) || {};
+    const live = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== b.page_id);
+    const owed = live.reduce((n, c) => n + M.groupsOf(c).filter((g) => g.status === "owed").length, 0);
+    const days = Number.isFinite(b.days) ? Math.min(Math.max(b.days, 1), 30) : 30;
+    const config = await A.configOf(deps, x);
+    const account = await A.accountView(phone, conn, deps, now);
+    res.json(require("../posting-limits").estimate({ posts: owed + (ids.ids || []).length, account, now, config, daysLeft: days }));
+  }));
+```
+
+Add to `server/routes/admin-campaigns.test.js`, before `// ── staging never changes campaigns ──`:
+
+```js
+    const est = await call(server, "POST", "/estimate", { agent: REF, page_id: "pgNew", group_ids: ["111", "222"], days: 30 }, false);
+    assert.equal(est.status, 200);
+    assert.ok(est.body.posts >= 2); assert.equal(typeof est.body.days, "number"); assert.equal(typeof est.body.fits, "boolean");
+```
+
+Run: `node routes/admin-campaigns.test.js`
+Expected: `routes/admin-campaigns.test.js ok`.
+
+- [ ] **Step 11: The manual tab shows limits and asks for a reason** — in `public-agent/admin-manual.js`:
+
+1. Add after the `ERR` object:
+   ```js
+  var LIMIT = { group_daily_cap: "כבר 3 פוסטים של הסוכן בקבוצה הזו היום", property_cooldown: "הנכס פורסם בקבוצה הזו לפני פחות מ-3 ימים" };
+  var limitText = function (l) { return l.block ? LIMIT[l.block.why] + (l.block.until ? " (עד " + when(l.block.until) + ")" : "") : ""; };
+   ```
+2. In the group `<li>` template, after the status chip (`'<span class="manual-chip ' + esc(g.status) + '">' … "</span>" +`), add:
+   ```js
+                (owed && g.limit ? '<span class="manual-chip ' + (g.limit.block ? "skipped" : "owed") + '">' + g.limit.today + "/" + g.limit.cap + " היום</span>" +
+                  (g.limit.block ? ' <span class="manual-muted">' + esc(limitText(g.limit)) + "</span>" : "") : "") +
+   ```
+3. Every `call("POST", "/campaigns/" … "/done", { status: "posted" })` (lines 299 and 327) goes through one helper instead. Add:
+   ```js
+  // "posted" on a group at its limit: the server says why; the admin may go ahead with a reason (audited).
+  function markPosted(cid, gid) {
+    var path = "/campaigns/" + encodeURIComponent(cid) + "/groups/" + encodeURIComponent(gid) + "/done";
+    return call("POST", path, { status: "posted" }).catch(function (e) {
+      if (!e || e.code !== "group_limit") throw e;
+      var r = window.prompt((LIMIT[e.why] || "הקבוצה הגיעה למגבלה") + ". לסמן בכל זאת? כתבו סיבה:");
+      if (!r || r.trim().length < 3) { FLY.toast("בוטל"); return null; }
+      return call("POST", path, { status: "posted", override_reason: r.trim() });
+    });
+  }
+   ```
+   and replace both `call("POST", "/campaigns/" + encodeURIComponent(…) + "/groups/" + encodeURIComponent(…) + "/done", { status: "posted" })` expressions with `markPosted(<the same campaign id expression>, <the same group id expression>)`. The `call()` error object must carry the server's `why`: in `call`, change `Object.assign(new Error(j.error || String(r.status)), { code: j.error, status: r.status })` to `Object.assign(new Error(j.error || String(r.status)), { code: j.error, status: r.status, why: j.why, until: j.until })`.
+
+- [ ] **Step 12: The campaigns tab shows the estimate** — in `public-agent/admin.html`, inside `#campForm` before the save button, add `<p id="campFormEstimate" class="manual-muted"></p>`. In `public-agent/admin-campaigns.js`, add:
+
+```js
+  function showEstimate() {
+    var agent = $("#campFormAgent").value;
+    if (!agent) { $("#campFormEstimate").textContent = ""; return; }
+    req("POST", "/estimate", { agent: agent, page_id: $("#campFormProperty").value, group_ids: chosenGroups(), days: Number($("#campFormDays").value) || 30 }).then(function (e) {
+      $("#campFormEstimate").textContent = "הערכה: " + e.posts + " פוסטים לסוכן, כ-" + e.per_week + " בשבוע לפי המגבלות היום ← כ-" + e.days + " ימים" +
+        (e.fits ? "." : ". ⚠️ יותר מ-" + e.days_left + " ימים — חלק מהפוסטים לא יספיקו לצאת.") + (e.warmup ? " החשבון עדיין בחימום, הקצב יעלה בהמשך." : "");
+    }).catch(function () { $("#campFormEstimate").textContent = ""; });
+  }
+```
+
+and wire it: add `$("#campFormGroups").addEventListener("change", showEstimate); $("#campFormDays").addEventListener("change", showEstimate);`, and call `showEstimate()` at the end of the `then` in `loadAgentChoices`.
+
+In `server/admin-campaigns.dom.test.js`, add a stub `app.post("/api/admin/campaigns/estimate", (q, r) => r.json({ posts: 200, per_week: 64, days: 22, fits: true, days_left: 30, warmup: false }));` before the catch-all `/api` stub, and after checking group 111 in the create flow add:
+
+```js
+    await page.waitForFunction(() => /22 ימים/.test(document.querySelector("#campFormEstimate").textContent));
+```
+
+Run: `node admin-campaigns.dom.test.js`
+Expected: `admin-campaigns.dom.test.js ok`.
+
+- [ ] **Step 13: Register, sync the spec, run everything, commit, push**
+
+In `server/package.json`'s `test` script, after `node routes/admin-campaigns.test.js && ` insert `node posting-limits.test.js && node routes/admin-manual-limits.test.js && `.
+
+In the spec (`docs/superpowers/specs/2026-10-07-admin-campaign-controls-design.md`) add a section:
+
+```markdown
+## 9. Group limits in manual posting, and a duration estimate
+
+- The manual tab shows, per owed group, the agent's posts there today (`n/3`) and whether automatic posting's rules would block a post now (`posting-safety.groupBlock`: 3 a day per group; the same property not within 3 days or the repeat interval).
+- Marking a blocked group "posted" is refused (`409 group_limit`) unless the admin gives a reason (3–200 chars); the override is audited (`manual_limit_override`). Skipping is never blocked.
+- The campaigns form shows an estimate at today's limits: posts, posts per week, days, and a warning when it does not fit the campaign's days (`posting-limits.estimate`).
+```
+
+Run: `npm test` (in `server/`). Expected: exit 0 (known exception: `dev-driver.dom.test.js`, see Task 6).
+
+```bash
+git add server/posting-limits.js server/posting-limits.test.js server/posting-manual.js server/routes/admin-manual.js server/routes/admin-manual-limits.test.js \
+  server/routes/admin-campaigns.js server/routes/admin-campaigns.test.js server/admin-campaigns.dom.test.js server/package.json \
+  public-agent/admin-manual.js public-agent/admin-campaigns.js public-agent/admin.html docs/superpowers/specs/2026-10-07-admin-campaign-controls-design.md
+git commit -m "feat(admin): group limits in manual posting; campaign duration estimate"
+git push -u origin claude/funny-cray-7oi9w9
+```
