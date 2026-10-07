@@ -19,12 +19,14 @@ Agents can create, edit, pause, stop and resume their own campaigns (`server/rou
 
 - `server/routes/admin-campaigns.js` mounted at `/api/admin/campaigns` (next to admin-posting in `server/index.js`).
 - `public-agent/admin-campaigns.js` and a tab in `public-agent/admin.html`.
-- `server/posting-campaign.js`: new `removeGroups(id, groupIds, deps)` and `update(id, patch, deps, { version })`; existing `create`, `addGroups`, `stop`, `resume` reused.
+- `server/posting-campaign-admin.js`: `update(id, edit, deps, { version, by })` (adds and removes groups, texts, end date, repeat, targets, mode in one transaction); `server/routes/posting-create.js`: the create checks shared with the agent API. Existing `create`, `addGroups`, `stop`, `resume` reused.
 - `server/posting-messages.js`: two new texts (created by the team, stopped by the team).
 
 ## 4. API
 
 All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-enable), and an `audit_events` row: action, admin, campaign id ending, changed field names. Never texts, never the full phone.
+- Audit rows store digits-only phone tails (the audit store requires 0–4 digits); the consent's `admin_tail` is digits-only too.
+- `say()` sends `admin_created` and `admin_stopped` also when `POSTING_MANUAL=1` (it drops other kinds there); an admin stop sends `admin_stopped` instead of the agent's `stopped`.
 
 | Method | Path | Notes |
 |---|---|---|
@@ -41,7 +43,8 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 **Create**
 - Same checks as the agent flow: Facebook connected (`facebook_browser_connected_at`), the page belongs to the agent, Page confirmed and Page id read when the Page is a target, groups vetted (`vetGroups`).
 - `consent = { by: "admin", admin: <operator id>, method, note, at, version: CONSENT_VERSION }`. Note required (1–300 chars). Posting permission recorded the same way when none is in force.
-- An existing running/paused campaign for the same agent+property is edited instead (create answers 200 with `existing: true`), as the agent API does.
+- An existing running/paused campaign for the same agent+property is returned unchanged with `existing: true` (200), as the agent API does; the tab then offers it for editing.
+- `consent.admin_tail` is digits-only.
 - `created_by: "admin"`.
 
 **Edit**
@@ -50,10 +53,13 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 - Texts: same validation as the agent texts screen (string, at most `MAX_COPY`, at most 60).
 - End date 1–30 days from now; repeat 3–30 days or off (existing limits).
 - Targets and mode re-checked against the connection, as on create.
+- PATCH requires a non-empty `version` (400 otherwise).
+- Editing sends end date, repeat, mode and targets only when the admin changed them; `days` on PATCH means "end N days from now".
 - `last_changed_by: { by: "admin"|"agent", at }` written on every change by either side.
 
 **Stop / start**
 - Stop cancels open posts as today.
+- Restarting a stopped or completed campaign reuses its stored groups as they are (not re-vetted) — a decision by the owner — and asks the admin for the consent method and note.
 - Start refuses with `409 account_halted` when the account is disabled or under owner review; the tab links to the existing re-enable control. Starting a campaign never lifts an account halt.
 
 ## 6. Interactions
