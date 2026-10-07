@@ -90,6 +90,7 @@
     if (!agent || restarting) { el.textContent = ""; return; }
     req("POST", "/estimate", { agent: agent, page_id: $("#campFormProperty").value, group_ids: chosenGroups(), days: Number($("#campFormDays").value) || 30 }).then(function (e) {
       if (my !== seq) return;
+      if (e.days === null || e.days === undefined) { el.textContent = "הערכה: אי אפשר להעריך כרגע — החשבון מושהה או מוגבל."; return; }
       el.textContent = "הערכה: " + e.posts + " פוסטים לסוכן, כ-" + e.per_week + " בשבוע לפי המגבלות היום ← כ-" + e.days + " ימים" +
         (e.fits ? "." : ". ⚠️ יותר מ-" + e.days_left + " ימים — חלק מהפוסטים לא יספיקו לצאת.") + (e.warmup ? " החשבון עדיין בחימום, הקצב יעלה בהמשך." : "");
     }).catch(function () { if (my === seq) el.textContent = ""; });

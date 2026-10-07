@@ -28,6 +28,15 @@ const L = require("./posting-limits");
   assert.equal(lim2["222"].block.why, "property_cooldown");
   assert.ok(lim2["222"].block.until);
 
+  // a repeat interval is enforced past the 8-day look-back: 10 days ago, repeat 14
+  const old = { group_id: "222", status: "posted", posted_at: at(240) };
+  const rep = Object.assign(camp("c1", "pg1", [old]), { repeat_days: 14 });
+  const lim3 = L.limitsFor(rep, [rep], now, config);
+  assert.equal(lim3["222"].block.why, "property_cooldown");
+  assert.equal(lim3["222"].block.until, new Date(new Date(old.posted_at).getTime() + 14 * 86400000 - 3600000).toISOString());
+  const norep = camp("c1", "pg1", [old]);
+  assert.equal(L.limitsFor(norep, [norep], now, config)["222"].block, null, "no repeat: the 3-day rule has passed");
+
   // estimate: an established account, 200 posts → about 3 weeks, fits 30 days
   const { deps } = await K.setup();
   const conn = await K.db.getConnection("972500000001");

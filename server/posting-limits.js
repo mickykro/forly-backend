@@ -14,29 +14,31 @@ const A = require("./posting-account");
 
 const DAY = 86400000;
 
-// The agent's posts done by hand, from all their campaigns, last 8 days.
-function manualPosts(campaigns, now) {
+// The agent's posts done by hand, from all their campaigns, last `days` days
+// (at least 8; a repeat interval needs its own length plus a day).
+function manualPosts(campaigns, now, days = 8) {
   const out = [];
   for (const c of campaigns || []) {
     for (const p of c.posts || []) {
       if (p.status !== "posted" || !p.posted_at || !p.group_id) continue;
       const t = new Date(p.posted_at).getTime();
-      if (Number.isFinite(t) && now.getTime() - t < 8 * DAY) out.push({ t, ms: t, group_id: String(p.group_id), page_id: c.page_id });
+      if (Number.isFinite(t) && now.getTime() - t < days * DAY) out.push({ t, ms: t, group_id: String(p.group_id), page_id: c.page_id });
     }
   }
   return out;
 }
 
 function limitsFor(c, campaigns, now, config) {
-  const posts = manualPosts(campaigns, now);
-  const today = safety.jerusalemDate(now);
+  const posts = manualPosts(campaigns, now, Math.max(8, (Number(c.repeat_days) || 0) + 1));
+  const dateOf = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: config.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(d); // as groupBlock's "today"
+  const today = dateOf(now);
   const out = {};
   for (const g of c.groups || []) {
     const id = String(g.group_id);
     const b = safety.groupBlock({ group_id: id, aliases: [], repeat_days: c.repeat_days || null },
       { now, posts, pageId: c.page_id, fp: null, groupActivity: {}, config });
     out[id] = {
-      today: posts.filter((p) => p.group_id === id && safety.jerusalemDate(new Date(p.t)) === today).length,
+      today: posts.filter((p) => p.group_id === id && dateOf(new Date(p.t)) === today).length,
       cap: config.group_daily_cap,
       block: b && (b.why === "group_daily_cap" || b.why === "property_cooldown") ? { why: b.why, until: b.until || null } : null,
     };
