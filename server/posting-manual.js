@@ -72,8 +72,9 @@ async function checklist(deps = {}) {
   const running = (await x.store.listPostingCampaignsByStatus("running", 500))
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   const out = [];
-  for (const c of running) {
-    const page = await x.db.getPage(c.page_id);
+  const pages = await Promise.all(running.map((c) => x.db.getPage(c.page_id)));
+  for (const [i, c] of running.entries()) {
+    const page = pages[i];
     if (!page) continue;
     const byId = new Map((c.groups || []).map((g) => [String(g.group_id), g]));
     out.push({
