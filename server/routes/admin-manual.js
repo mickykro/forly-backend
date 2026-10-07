@@ -256,8 +256,13 @@ module.exports = function createAdminManualRouter({
     let file;
     try { file = await media.fetchVideo(url, deps); }
     catch (e) { return res.status(502).json({ error: (e && e.code) || "media_unavailable" }); }
+    const t0 = Date.now();
+    const target = chooser ? (chooser.page ? chooser.page() : hp) : hp;
     if (chooser) { await chooser.setFiles(file); s.chooser = null; }
     else await input.setInputFiles(file);
+    // Timing only (posting-media logs the rest): how long the file took to reach the remote browser.
+    console.log("posting-media: manual video handover", JSON.stringify({ handover_ms: Date.now() - t0, bytes: file && file.buffer ? file.buffer.length : null }));
+    if (typeof media.watchUpload === "function") media.watchUpload(target);
     res.json({ ok: true });
   }));
 

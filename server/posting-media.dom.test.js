@@ -97,6 +97,14 @@ const FIXTURES = {
     await page.setContent(`<html><body>${FIXTURES.stuck}</body></html>`);
     assert.equal(await M.attach(page, x, file), null);
     assert.equal(await M.waitUploaded(page, x, 1500), "media_upload_failed", "an upload that never finishes");
+    // The manual tab's background watch: a stuck upload is reported as such, a finished one with its time.
+    const stuck = await M.watchUpload(page, { maxMs: 300, everyMs: 50 });
+    assert.deepEqual([stuck.ok, stuck.why, typeof stuck.preview_ms], [false, "still uploading", "number"], "manual watch: stuck");
+    await page.setContent(`<html><body>${FIXTURES.input}</body></html>`);
+    assert.equal(await M.attach(page, x, file), null);
+    const finished = await M.watchUpload(page, { maxMs: 5000, everyMs: 50 });
+    assert.ok(finished.ok && finished.upload_ms >= finished.preview_ms, "manual watch: finished");
+    assert.equal((await M.watchUpload(null, { everyMs: 10 })).why, "page closed", "manual watch: no page");
     await page.setContent(`<html><body>${FIXTURES.none}</body></html>`);
     assert.equal(await M.attach(page, x, file), "media_not_found");
     console.log("posting-media.dom.test.js ok");
