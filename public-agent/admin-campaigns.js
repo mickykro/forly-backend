@@ -71,7 +71,7 @@
   var initial = null;    // prefilled values of the row being edited
   function loadAgentChoices(ref, checked) {
     var my = ++seq;
-    if (!ref) { $("#campFormProperty").innerHTML = ""; $("#campFormGroups").innerHTML = ""; return Promise.resolve(false); }
+    if (!ref) { $("#campFormProperty").innerHTML = ""; $("#campFormGroups").innerHTML = ""; $("#campFormEstimate").textContent = ""; return Promise.resolve(false); }
     return Promise.all([req("GET", "/agents/" + encodeURIComponent(ref) + "/properties"), req("GET", "/agents/" + encodeURIComponent(ref) + "/groups")]).then(function (r) {
       if (my !== seq) return false;
       $("#campFormProperty").innerHTML = (r[0].properties || []).map(function (p) { return '<option value="' + esc(p.page_id) + '">' + esc(p.title) + "</option>"; }).join("");
@@ -79,14 +79,25 @@
         var on = checked && checked.indexOf(g.group_id) >= 0 ? " checked" : "";
         return '<label><input type="checkbox" value="' + esc(g.group_id) + '"' + on + "> " + esc(g.name || g.group_id) + "</label>";
       }).join("");
+      showEstimate();
       return true;
     }).catch(function (e) { if (my === seq) fail(e); return false; });
   }
   function chosenGroups() { return Array.prototype.map.call(document.querySelectorAll("#campFormGroups input:checked"), function (i) { return i.value; }); }
+  // How long the chosen groups take at the agent's limits today (an estimate); a stale answer is dropped.
+  function showEstimate() {
+    var el = $("#campFormEstimate"), my = seq, agent = $("#campFormAgent").value;
+    if (!agent || restarting) { el.textContent = ""; return; }
+    req("POST", "/estimate", { agent: agent, page_id: $("#campFormProperty").value, group_ids: chosenGroups(), days: Number($("#campFormDays").value) || 30 }).then(function (e) {
+      if (my !== seq) return;
+      el.textContent = "הערכה: " + e.posts + " פוסטים לסוכן, כ-" + e.per_week + " בשבוע לפי המגבלות היום ← כ-" + e.days + " ימים" +
+        (e.fits ? "." : ". ⚠️ יותר מ-" + e.days_left + " ימים — חלק מהפוסטים לא יספיקו לצאת.") + (e.warmup ? " החשבון עדיין בחימום, הקצב יעלה בהמשך." : "");
+    }).catch(function () { if (my === seq) el.textContent = ""; });
+  }
   function setMain(show) { // the campaign fields vs. the consent-only restart form
     Array.prototype.forEach.call(document.querySelectorAll("#campForm > label, #campForm > fieldset:not(#campFormConsent)"), function (el) { el.hidden = !show; });
   }
-  function closeForm() { seq++; editing = null; restarting = null; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; }
+  function closeForm() { seq++; editing = null; restarting = null; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; }
   function validNote() {
     var n = $("#campFormConsentNote").value.trim();
     if (!n || n.length > 300) { FLY.toast("חובה לכתוב הערת הסכמה של 1 עד 300 תווים."); return null; }
@@ -102,7 +113,7 @@
     $("#campFormConsent").hidden = !!row;
     $("#campFormAgent").value = ""; $("#campFormProperty").innerHTML = ""; $("#campFormGroups").innerHTML = "";
     $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
-    $("#campFormSave").disabled = false;
+    $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = "";
     if (row) {
       var left = Math.min(30, Math.max(1, Math.ceil((Date.parse(row.expires_at) - Date.now()) / 86400000)) || 1);
       initial = { days: String(left), repeat: row.repeat ? String(row.repeat_days) : "0", mode: row.mode, page: row.targets.indexOf("page") >= 0 };
@@ -125,7 +136,7 @@
     $("#campFormTitle").textContent = "הפעלה מחדש — הסכמת הסוכן";
     $("#campFormConsent").hidden = false;
     $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
-    $("#campFormSave").disabled = false;
+    $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = "";
     $("#campForm").hidden = false;
   }
   function settle(p) { // one request in flight per save click
@@ -184,6 +195,9 @@
   $("#campAgent").addEventListener("change", load);
   $("#campNew").addEventListener("click", function () { openForm(null); });
   $("#campFormAgent").addEventListener("change", function () { loadAgentChoices($("#campFormAgent").value, null); });
+  $("#campFormGroups").addEventListener("change", showEstimate);
+  $("#campFormDays").addEventListener("change", showEstimate);
+  $("#campFormProperty").addEventListener("change", showEstimate);
   $("#campFormSave").addEventListener("click", save);
   $("#campFormCancel").addEventListener("click", closeForm);
   $("#campList").addEventListener("click", function (ev) {

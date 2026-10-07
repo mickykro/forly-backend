@@ -10,6 +10,7 @@
 const crypto = require("crypto");
 const A = require("./posting-account");
 const C = require("./posting-campaign");
+const L = require("./posting-limits");
 
 const enabled = (env = process.env) => env.POSTING_MANUAL === "1";
 
@@ -71,17 +72,28 @@ async function checklist(deps = {}) {
   const x = A.ctxOf(deps);
   const running = (await x.store.listPostingCampaignsByStatus("running", 500))
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const config = await A.configOf(deps, x);
+  const now = x.clock();
+  const byPhone = new Map(); // the agent's campaigns, for their manual posts
+  const campaignsOf = async (phone) => {
+    if (!byPhone.has(phone)) byPhone.set(phone, await x.store.listPostingCampaignsByPhone(phone).catch(() => []));
+    return byPhone.get(phone);
+  };
   const out = [];
   for (const c of running) {
     const page = await x.db.getPage(c.page_id);
     if (!page) continue;
+    const limits = L.limitsFor(c, await campaignsOf(c.phone), now, config);
     const byId = new Map((c.groups || []).map((g) => [String(g.group_id), g]));
     out.push({
       ref: refOf(c.phone), campaign_id: c.id, phone_tail: A.tail(c.phone), awaiting_agent: c.awaiting_texts === true,
       agent_name: (page.agent && page.agent.name) || "", page_id: c.page_id,
       title: (page.property && page.property.title) || c.page_id, page_url: pageUrlOf(c.page_id, deps.pageBaseUrl),
-      groups: groupsOf(c).map((g) => (g.status !== "owed" || g.copy ? g
-        : { ...g, copy: C.buildCopy(page, c, { ...byId.get(g.group_id), target: "group" }, "property", deps.pageBaseUrl || "") })),
+      groups: groupsOf(c).map((g) => {
+        const withLimit = g.status === "owed" ? { ...g, limit: limits[g.group_id] || null } : g;
+        return withLimit.status !== "owed" || withLimit.copy ? withLimit
+          : { ...withLimit, copy: C.buildCopy(page, c, { ...byId.get(g.group_id), target: "group" }, "property", deps.pageBaseUrl || "") };
+      }),
     });
   }
   return out;

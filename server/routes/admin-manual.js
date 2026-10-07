@@ -13,6 +13,7 @@
 const express = require("express");
 const M = require("../posting-manual");
 const A = require("../posting-account");
+const L = require("../posting-limits");
 
 const SESSION_S = 3600;      // Driver's limit
 const CHOOSER_FRESH_MS = 60000;
@@ -88,6 +89,23 @@ module.exports = function createAdminManualRouter({
   router.post("/campaigns/:id/groups/:gid/done", requireAdmin, wrap(async (req, res) => {
     const status = req.body && req.body.status;
     if (!["posted", "skipped"].includes(status)) return res.status(400).json({ error: "invalid_input" });
+    const override = req.body && typeof req.body.override_reason === "string" ? req.body.override_reason.trim() : null;
+    if (override !== null && (override.length < 3 || override.length > 200)) return res.status(400).json({ error: "invalid_input" });
+    if (status === "posted") {
+      const cur = await x.store.getPostingCampaign(String(req.params.id));
+      if (cur && M.owed(cur).some((g) => String(g.group_id) === String(req.params.gid))) {
+        const config = await A.configOf(deps, x);
+        const lim = L.limitsFor(cur, await x.store.listPostingCampaignsByPhone(cur.phone), x.clock(), config)[String(req.params.gid)];
+        if (lim && lim.block && !override) return res.status(409).json({ error: "group_limit", why: lim.block.why, until: lim.block.until });
+        if (lim && lim.block) {
+          // store-facing tails are digits only (A.tail's "…" prefix is display-only). Fail closed: no audit, no override.
+          const dtail = (p) => String(p || "").replace(/\D/g, "").slice(-4);
+          const audited = await x.store.addAuditEvent({ operator_tail: dtail(req.user && req.user.userId), action: "manual_limit_override", target_phone_tail: dtail(cur.phone),
+            reason: override, detail: { why: lim.block.why, campaign_tail: String(cur.id).slice(-6) } }, x.clock()).then(() => true, () => false);
+          if (!audited) return res.status(500).json({ error: "internal" });
+        }
+      }
+    }
     const c = await M.markDone(String(req.params.id), String(req.params.gid), status, deps);
     if (!c) return res.status(404).json({ error: "not_found" });
     res.json({ ok: true, completed: c.status === "completed" });

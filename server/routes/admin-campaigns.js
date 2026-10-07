@@ -119,6 +119,22 @@ module.exports = function createAdminCampaignsRouter({
     res.json({ groups: members.map((m) => ({ group_id: String(m.group_id), name: m.name || "", url: S_.memberUrl(m) })) });
   }));
 
+  // How long a set of posts takes at the account's limits today (an estimate).
+  router.post("/estimate", requireAdmin, wrap(async (req, res) => {
+    const b = req.body || {};
+    const phone = await phoneOf(b.agent);
+    const ids = S_.parseGroupIds(b.group_ids, { required: false });
+    if (!phone || ids.error) return res.status(400).json({ error: "invalid_input" });
+    const now = x.clock();
+    const conn = (await db.getConnection(phone)) || {};
+    const live = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== b.page_id);
+    const owed = live.reduce((n, c) => n + M.groupsOf(c).filter((g) => g.status === "owed").length, 0);
+    const days = Number.isFinite(b.days) ? Math.min(Math.max(b.days, 1), 30) : 30;
+    const config = await A.configOf(deps, x);
+    const account = await A.accountView(phone, conn, deps, now);
+    res.json(require("../posting-limits").estimate({ posts: owed + (ids.ids || []).length, account, now, config, daysLeft: days }));
+  }));
+
   // ── create ──
   router.post("/campaigns", ...guard, wrap(async (req, res) => {
     const b = req.body || {};

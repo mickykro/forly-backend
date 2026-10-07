@@ -80,3 +80,9 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 - Stop/start: stop cancels open posts and sends WhatsApp; start a paused campaign; restart a stopped one keeps history; halted account refused; no WhatsApp on edit or start.
 - Security: every mutation needs step-up; audit row has no phone or text.
 - UI: DOM test for the tab (list, create form, edit, stop/start, error messages).
+
+## 9. Group limits in manual posting, and a duration estimate
+
+- The manual tab shows, per owed group, the agent's posts there today (`n/3`) and whether automatic posting's rules would block a post now (`posting-safety.groupBlock`: 3 a day per group; the same property not within 3 days or the repeat interval).
+- Marking a blocked group "posted" is refused (`409 group_limit`) unless the admin gives a reason (3–200 chars); the override is audited (`manual_limit_override`). Skipping is never blocked.
+- The campaigns form shows an estimate at today's limits: posts, posts per week, days, and a warning when it does not fit the campaign's days (`posting-limits.estimate`).

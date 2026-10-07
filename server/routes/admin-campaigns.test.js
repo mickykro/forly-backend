@@ -104,6 +104,12 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     for (const a of ["create_campaign", "edit_campaign", "stop_campaign", "start_campaign"]) assert.ok(rows.some((r) => r.action === a), a);
     assert.ok(!JSON.stringify(rows).includes(AGENT) && !JSON.stringify(rows).includes("שלום"));
 
+    // ── the duration estimate ──
+    const est = await call(server, "POST", "/estimate", { agent: REF, page_id: "pgNew", group_ids: ["111", "222"], days: 30 }, false);
+    assert.equal(est.status, 200);
+    assert.ok(est.body.posts >= 2); assert.equal(typeof est.body.days, "number"); assert.equal(typeof est.body.fits, "boolean");
+    assert.equal((await call(server, "POST", "/estimate", { agent: "acct_nope", group_ids: [] }, false)).status, 400);
+
     // ── staging never changes campaigns ──
     const sApp = express(); sApp.use(express.json());
     sApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: { FORLY_ENV: "staging" }, catalog: CATALOG }));

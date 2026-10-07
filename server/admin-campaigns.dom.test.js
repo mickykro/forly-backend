@@ -37,6 +37,7 @@ function findChromium() {
   app.get("/api/admin/campaigns/agents", (q, r) => r.json({ agents: [{ ref: "acct_1", phone_tail: "…0001", name: "דנה לוי" }] }));
   app.get("/api/admin/campaigns/agents/:ref/properties", (q, r) => r.json({ properties: [{ page_id: "pg1", title: "דירה בחיפה" }] }));
   app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111" }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222" }] }));
+  app.post("/api/admin/campaigns/estimate", (q, r) => r.json({ posts: 200, per_week: 64, days: 22, fits: true, days_left: 30, warmup: false }));
   app.post("/api/admin/campaigns/campaigns", (q, r) => { seen.creates.push(q.body); r.status(201).json({ campaign: ROW }); });
   app.patch("/api/admin/campaigns/campaigns/c1", (q, r) => { seen.patches.push(q.body); r.status(editAnswer.status).json(editAnswer.body); });
   app.post("/api/admin/campaigns/campaigns/c1/start", (q, r) => { seen.starts.push(q.body); cur = ROW; r.json({ campaign: ROW }); });
@@ -60,6 +61,7 @@ function findChromium() {
     await page.selectOption("#campFormProperty", "pg1");
     await page.waitForSelector("#campFormGroups input[value='111']");
     await page.check("#campFormGroups input[value='111']");
+    await page.waitForFunction(() => /22 ימים/.test(document.querySelector("#campFormEstimate").textContent));
     await page.selectOption("#campFormConsentMethod", "phone");
     await page.fill("#campFormConsentNote", "אישר בטלפון");
     await page.click("#campFormSave");
