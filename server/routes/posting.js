@@ -18,10 +18,11 @@ const A = require("../posting-account");
 const S_ = require("./posting-shared");
 const { escapeHtml: esc, publicUrl } = require("../utils");
 const { postingEnvAllowed } = require("../posting-guard");
+const PC = require("./posting-create");
+const { validCreate, campaignPermission, permActive } = PC;
 
 const { CONSENT_VERSION, publicView, wrap, allowed, card } = S_;
 const { MAX_ACTIVE_CAMPAIGNS } = S_;
-const MODES = new Set(["per_post", "standing"]);
 const LIVE = new Set(["running", "paused"]);
 const ENDED = new Set(["stopped", "completed"]);
 const PERMISSION_CURED = ["no_permission", "permission_scope"]; // this request's consent grants it
@@ -46,32 +47,6 @@ function contextOf(ctx) {
     clock: typeof deps.clock === "function" ? deps.clock : () => new Date(),
     authSecret: ctx.authSecret, pageBaseUrl: ctx.pageBaseUrl,
   };
-}
-
-// A permission created by a campaign's own consent covers campaign posting
-// only: no default groups and groups-only targets, so it never auto-enrolls
-// new listings (posting-campaign.enrollNewPage) — that is PUT /settings' job.
-function campaignPermission(prev, now) {
-  return {
-    enabled: true, consent_version: CONSENT_VERSION, granted_at: A.iso(now), platforms: ["facebook"],
-    targets: ["groups"], default_group_ids: [], page_id: (prev && prev.page_id) || null,
-    auto_mode: "standing", allows_dwell: true, allows_visible_interactions: false, revoked_at: null,
-  };
-}
-const permActive = (p) => !!p && p.enabled === true && Array.isArray(p.platforms) && p.platforms.includes("facebook");
-
-function validCreate(b) {
-  if (typeof b.page_id !== "string" || !S_.ID_RE.test(b.page_id) || !MODES.has(b.mode)) return null;
-  const g = S_.parseGroupIds(b.group_ids, { required: true });
-  const t = S_.parseTargets(b.targets);
-  if (g.error || t.error) return null;
-  if (b.days !== undefined && !(Number.isFinite(b.days) && b.days >= 1 && b.days <= 30)) return null;
-  if (b.repeat_days !== undefined && b.repeat_days !== null && !(Number.isInteger(b.repeat_days) && b.repeat_days >= 3 && b.repeat_days <= 30)) return null; // never the same property to a group within 3 days
-  for (const k of ["repeat", "include_unknown", "account_aged", "posted_manually"]) if (b[k] !== undefined && typeof b[k] !== "boolean") return null;
-  // The text the agent approved per group (manual posting): { group_id: text }.
-  if (b.copies !== undefined && b.copies !== null && (typeof b.copies !== "object" || Array.isArray(b.copies) || Object.keys(b.copies).length > 60
-    || Object.values(b.copies).some((t) => typeof t !== "string" || t.length > require("../posting-campaign").MAX_COPY))) return null;
-  return { ids: g.ids, targets: t.targets };
 }
 
 module.exports = function createPostingRouter(ctx) {
@@ -112,29 +87,6 @@ module.exports = function createPostingRouter(ctx) {
     return (await store.getPostingCampaign(c.id)) || c;
   }
 
-  // The hard gate for groups a campaign may post to (create, add): only groups
-  // this account belongs to now; the catalog adds names and policy. A group
-  // the catalog forbids to agents, or whose listing types exclude this page's,
-  // is refused here rather than kept and never planned. → { groups } or
-  // { error, group_ids } (a 422). posting-campaign derives the eligibility
-  // booleans itself from these fields, the connection and the raw catalog.
-  async function vetGroups(conn, page, ids, includeUnknown) {
-    const gate = S_.memberGate(conn, ids);
-    if (gate.notMember) return { error: "not_member", group_ids: gate.notMember };
-    const listingType = (page.property || {}).listing_type || null;
-    const lookup = S_.catalogLookup(await S.catalog(listingType || "sale"));
-    const unknown = gate.entries.filter((m) => !lookup(m)).map((m) => m.group_id);
-    if (unknown.length && !includeUnknown) return { error: "unknown_group", group_ids: unknown };
-    const disallowed = gate.entries.filter((m) => lookup.all(m).some(A.policyDisallowed) || A.nameBarsAgents(m.name)).map((m) => m.group_id);
-    if (disallowed.length) return { error: "group_disallowed", group_ids: disallowed };
-    const wrongType = gate.entries.filter((m) => lookup.all(m).some((e) => A.typeExcluded(e, listingType))).map((m) => m.group_id);
-    if (wrongType.length) return { error: "listing_type_not_allowed", group_ids: wrongType };
-    return { groups: gate.entries.map((m) => {
-      const cat = lookup(m);
-      return { group_id: m.group_id, url: S_.memberUrl(m), name: m.name || (cat && cat.name) || "", agent_policy: (cat && cat.agent_policy) || "unknown" };
-    }) };
-  }
-
   // Manual posting: an admin publishes by hand, so the automatic posting switch does not apply.
   const manualOn = () => require("../posting-manual").enabled(deps.env || process.env);
 
@@ -166,7 +118,7 @@ module.exports = function createPostingRouter(ctx) {
     // Until connect has read the Page's numeric id, R3 could never prove it: refused (I4).
     if (v.targets && v.targets.includes("page") && !A.pageTarget(conn)) return res.status(409).json({ error: "page_target_unavailable" });
 
-    const vet = await vetGroups(conn, page, v.ids, b.include_unknown === true);
+    const vet = await PC.vetGroups(S.catalog, conn, page, v.ids, b.include_unknown === true);
     if (vet.error) return res.status(422).json(vet);
     const groups = vet.groups;
     if (!groups.length && !(wanted.includes("page") && A.pageTarget(conn))) return res.status(400).json({ error: "invalid_input" });
@@ -255,7 +207,7 @@ module.exports = function createPostingRouter(ctx) {
     if (!manualOn() && !(await allowed(S, c.phone, res))) return;
     const page = await db.getPage(c.page_id);
     if (!page || page.business_phone !== c.phone) return res.status(404).json({ error: "not_found" });
-    const vet = await vetGroups((await db.getConnection(c.phone)) || {}, page, g.ids, b.include_unknown === true);
+    const vet = await PC.vetGroups(S.catalog, (await db.getConnection(c.phone)) || {}, page, g.ids, b.include_unknown === true);
     if (vet.error) return res.status(422).json(vet);
     const out = await campaigns.addGroups(c.id, vet.groups, deps);
     if (!out) return res.status(404).json({ error: "not_found" });

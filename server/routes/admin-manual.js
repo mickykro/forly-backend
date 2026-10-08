@@ -13,13 +13,15 @@
 const express = require("express");
 const M = require("../posting-manual");
 const A = require("../posting-account");
+const L = require("../posting-limits");
 
 const SESSION_S = 3600;      // Driver's limit
 const CHOOSER_FRESH_MS = 60000;
 // The admin flips between the list and the browser: keep the viewer connected
 // that long rather than reconnecting (CDP + checks) after 20s without a watcher.
 const VIEW_IDLE_MS = 10 * 60000;
-const GROUP_URL = /^https:\/\/(www\.|m\.|web\.)?facebook\.com\/groups\/[^/?#\s]+\/?$/i;
+// Where the admin's browser may be sent: a group, or the agent's Page (a target by hand too).
+const GROUP_URL = /^https:\/\/(www\.|m\.|web\.)?facebook\.com\/[^?#\s]+$/i;
 
 module.exports = function createAdminManualRouter({
   requireAdmin, deps = {},
@@ -32,6 +34,14 @@ module.exports = function createAdminManualRouter({
   const hooked = new WeakSet(); // pages whose file chooser we listen for
   const key = (phone) => `manual|${phone}`;
   const redact = (s) => (driver.redact ? driver.redact(s) : s);
+  const doneChain = new Map();
+  function oneAtATime(key, fn) {
+    const run = (doneChain.get(key) || Promise.resolve()).then(fn, fn);
+    const tail = run.catch(() => {});
+    doneChain.set(key, tail);
+    tail.then(() => { if (doneChain.get(key) === tail) doneChain.delete(key); });
+    return run;
+  }
   const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
     console.error(redact(`admin manual: ${(e && (e.code || e.name)) || "error"}`));
     if (!res.headersSent) res.status(500).json({ error: "internal" });
@@ -94,9 +104,34 @@ module.exports = function createAdminManualRouter({
   router.post("/campaigns/:id/groups/:gid/done", requireAdmin, wrap(async (req, res) => {
     const status = req.body && req.body.status;
     if (!["posted", "skipped"].includes(status)) return res.status(400).json({ error: "invalid_input" });
-    const c = await M.markDone(String(req.params.id), String(req.params.gid), status, deps);
-    if (!c) return res.status(404).json({ error: "not_found" });
-    res.json({ ok: true, completed: c.status === "completed" });
+    const override = req.body && typeof req.body.override_reason === "string" ? req.body.override_reason.trim() : null;
+    if (override !== null && (override.length < 3 || override.length > 200)) return res.status(400).json({ error: "invalid_input" });
+    const head = await x.store.getPostingCampaign(String(req.params.id));
+    if (!head) return res.status(404).json({ error: "not_found" });
+    // The limit check and the record are one step per agent, so two tabs at
+    // 2/3 cannot both pass. In-process: the server runs as one container.
+    return oneAtATime(String(head.phone), async () => {
+      const cur = await x.store.getPostingCampaign(String(req.params.id));
+      if (status === "posted" && cur) {
+        const config = await A.configOf(deps, x);
+        const now = x.clock();
+        const agent = await L.agentPosts(cur.phone, deps, x, now);
+        if (M.owed(cur, agent.conn, now, config).some((g) => String(g.group_id) === String(req.params.gid))) {
+          const lim = L.limitsFor(cur, agent.campaigns, now, config, agent)[String(req.params.gid)];
+          if (lim && lim.block && !override) return res.status(409).json({ error: "group_limit", why: lim.block.why, until: lim.block.until });
+          if (lim && lim.block) {
+            // store-facing tails are digits only (A.tail's "…" prefix is display-only). Fail closed: no audit, no override.
+            const dtail = (p) => String(p || "").replace(/\D/g, "").slice(-4);
+            const audited = await x.store.addAuditEvent({ operator_tail: dtail(req.user && req.user.userId), action: "manual_limit_override", target_phone_tail: dtail(cur.phone),
+              reason: override, detail: { why: lim.block.why, campaign_tail: String(cur.id).slice(-6) } }, x.clock()).then(() => true, () => false);
+            if (!audited) return res.status(500).json({ error: "internal" });
+          }
+        }
+      }
+      const c = await M.markDone(String(req.params.id), String(req.params.gid), status, deps);
+      if (!c) return res.status(404).json({ error: "not_found" });
+      res.json({ ok: true, completed: c.status === "completed" });
+    });
   }));
 
   // ── agents and their properties ──
@@ -113,6 +148,35 @@ module.exports = function createAdminManualRouter({
     const out = rows.filter(Boolean);
     out.sort((a, b) => b.owed - a.owed || String(a.name).localeCompare(String(b.name)));
     res.json({ agents: out });
+  }));
+
+  // ── agents who started a Facebook login but are not marked connected ──
+  // (logged in, then closed the window instead of pressing done). One read
+  // per agent, only when the admin opens this list.
+  async function unconnected() {
+    const out = [];
+    for (const b of await x.db.listAllBusinesses().catch(() => [])) {
+      if (!b || !b.phone) continue;
+      const conn = (await x.db.getConnection(String(b.phone)).catch(() => null)) || {};
+      if (!conn.browser_consent_at || conn.facebook_browser_connected_at) continue;
+      if (["revoked", "quarantined"].includes(conn.facebook_profile_state)) continue;
+      out.push({ phone: String(b.phone), name: b.full_name || b.business_name || "", started_at: conn.browser_consent_at });
+    }
+    return out;
+  }
+  router.get("/unconnected", requireAdmin, wrap(async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    const list = await unconnected();
+    res.json({ agents: list.map((a) => ({ ref: M.refOf(a.phone), phone_tail: A.tail(a.phone), name: a.name, started_at: a.started_at })) });
+  }));
+  // Opens the agent's saved profile, checks the login, and marks the agent
+  // connected only when it is logged in (login-verify.js).
+  router.post("/unconnected/:ref/verify", requireAdmin, wrap(async (req, res) => {
+    const hit = (await unconnected()).find((a) => M.refOf(a.phone) === String(req.params.ref));
+    if (!hit) return res.status(404).json({ error: "not_found" });
+    const r = await (deps.verifySaved || require("../login-verify").verifySaved)(hit.phone, "facebook", { db: x.db, driver });
+    if (r.error) return res.status(r.error === "profile_busy" || r.error === "driver_busy" ? 409 : 502).json({ error: r.error });
+    res.json(r);
   }));
 
   router.get("/agents/:ref/properties", requireAdmin, wrap(async (req, res) => {
@@ -135,10 +199,11 @@ module.exports = function createAdminManualRouter({
     const page = phone && (await x.db.getPage(String(req.params.pageId)));
     if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
     const c = await x.store.getPostingCampaign(x.store.campaignId(phone, page.page_id)).catch(() => null);
+    const conn = c ? (await x.db.getConnection(phone)) || {} : {};
     res.set("Cache-Control", "no-store");
     res.json({
       property: M.propertyCard(page, deps.pageBaseUrl), versions: M.versions(page, deps.pageBaseUrl),
-      campaign: c ? { id: c.id, status: c.status } : null, groups: M.groupsOf(c),
+      campaign: c ? { id: c.id, status: c.status } : null, groups: M.groupsOf(c, conn, x.clock(), await A.configOf(deps, x)),
     });
   }));
 

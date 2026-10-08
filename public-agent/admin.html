@@ -164,6 +164,7 @@
     <button id="tabMessages">הודעות לסוכנים</button>
     <button id="tabPosting">פרסום אוטומטי</button>
     <button id="tabManual">פרסום ידני</button>
+    <button id="tabCampaigns">קמפיינים</button>
   </div>
 
   <!-- ── AGENT MESSAGES ── -->
@@ -273,6 +274,37 @@
     </div>
   </div>
 
+  <!-- ── CAMPAIGNS (admin-campaigns.js) ── -->
+  <div id="paneCampaigns" class="hidden">
+    <div class="posting-warn hidden" id="campStepUp">נדרש אימות מחדש — התחברו שוב</div>
+    <div class="manual-agentbar">
+      <select id="campStatus" aria-label="סטטוס">
+        <option value="">כל הסטטוסים</option><option value="running">פעיל</option><option value="paused">מושהה</option>
+        <option value="stopped">נעצר</option><option value="completed">הסתיים</option>
+      </select>
+      <select id="campAgent" aria-label="סוכן"><option value="">כל הסוכנים</option></select>
+      <button type="button" class="btn btn-gold btn-sm" id="campNew">קמפיין חדש</button>
+    </div>
+    <form id="campForm" class="manual-agent" hidden>
+      <h3 id="campFormTitle">קמפיין חדש</h3>
+      <label>סוכן <select id="campFormAgent"></select></label>
+      <label>נכס <select id="campFormProperty"></select></label>
+      <fieldset><legend>קבוצות</legend><div id="campFormGroups"></div></fieldset>
+      <label>ימים <input id="campFormDays" type="number" min="1" max="30" value="14"></label>
+      <label>חזרה כל <input id="campFormRepeat" type="number" min="0" max="30" value="0"> ימים (0 = בלי חזרה)</label>
+      <label>מצב <select id="campFormMode"><option value="standing">אישור אחד לכל הקמפיין</option><option value="per_post">אישור לכל פוסט</option></select></label>
+      <label><input id="campFormPage" type="checkbox"> גם בדף העסקי</label>
+      <p id="campFormEstimate" class="manual-muted"></p>
+      <fieldset id="campFormConsent"><legend>הסכמת הסוכן</legend>
+        <select id="campFormConsentMethod"><option value="phone">בטלפון</option><option value="in_person">פנים אל פנים</option><option value="whatsapp">בוואטסאפ</option></select>
+        <input id="campFormConsentNote" maxlength="300" placeholder="מה הסוכן אישר, ומתי">
+      </fieldset>
+      <button type="button" class="btn btn-gold btn-sm" id="campFormSave">שמירה</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="campFormCancel">ביטול</button>
+    </form>
+    <div id="campList"><p class="manual-muted">טוען…</p></div>
+  </div>
+
   <!-- ── MANUAL POSTING (admin-manual.js) ── -->
   <div id="paneManual" class="hidden">
     <div class="manual-grid">
@@ -283,6 +315,11 @@
           <button type="button" class="btn btn-ghost btn-sm" id="manualReload">רענון</button>
         </div>
         <p class="manual-help">לכל קבוצה: <b>פתיחה בקבוצה</b>, לחיצה בדפדפן על "כתבו משהו", <b>הקלדת הטקסט</b>, לחיצה בפייסבוק על "תמונה/סרטון" ואז <b>העלאת הסרטון</b>. בסוף לוחצים "פרסום" בפייסבוק ומסמנים את הקבוצה ✓. נכס יוצא מהרשימה כשכל הקבוצות שלו סומנו.</p>
+        <details class="manual-agent" id="manualUnconnected">
+          <summary>סוכנים שהתחברו לפייסבוק אבל לא סומנו כמחוברים</summary>
+          <p class="manual-help">סוכן שהתחבר בחלון ההתחברות וסגר אותו בלי ללחוץ "סיימתי" נשאר שמור ב-Driver אבל לא מסומן כמחובר כאן. <b>בדיקת ההתחברות</b> פותחת את הפרופיל השמור שלו לרגע, ואם הוא מחובר — מסמנת אותו כמחובר.</p>
+          <div id="manualUnconnectedList"><p class="manual-muted">טוען…</p></div>
+        </details>
         <h3 class="manual-h">רשימת הפרסום <small class="manual-muted" id="manualSummary"></small></h3>
         <div id="manualQueue"></div>
         <div id="manualDetail"></div>
@@ -503,6 +540,7 @@
 <script src="/admin-posting.js"></script>
 <script src="/connect-viewer.js"></script>
 <script src="/admin-manual.js"></script>
+<script src="/admin-campaigns.js"></script>
 <footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

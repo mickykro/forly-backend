@@ -144,6 +144,36 @@ function call(server, method, path, body) {
     assert.equal((await call(server, "DELETE", B)).status, 200);
     assert.deepEqual(stopped, ["s1"]);
     assert.equal((await call(server, "GET", `${B}/state`)).status, 409, "closed");
-    console.log("routes/admin-manual.test.js ok");
   } finally { server.close(); }
+
+  // ── agents who logged in but never pressed done: listed, and verified on request ──
+  {
+    const STUCK = "972500000003", DONE = "972500000004", NEVER = "972500000005";
+    const conns = {
+      [STUCK]: { browser_consent_at: "2026-10-05T10:00:00Z" },
+      [DONE]: { browser_consent_at: "2026-10-05T10:00:00Z", facebook_browser_connected_at: "2026-10-05T10:05:00Z" },
+      [NEVER]: {},
+    };
+    const db = Object.assign(Object.create(deps.db || require("../db")), {
+      listAllBusinesses: async () => [STUCK, DONE, NEVER].map((phone) => ({ phone, full_name: `Agent ${phone.slice(-1)}` })),
+      getConnection: async (p) => conns[p] || null,
+    });
+    const verified = [];
+    const deps2 = Object.assign({}, deps, { db, verifySaved: async (phone, platform) => { verified.push([phone, platform]); return { state: "connected", identity_label: "Agent 3" }; } });
+    const app2 = express(); app2.use(express.json());
+    app2.use("/api/admin/manual", createRouter({ requireAdmin, deps: deps2, driver: {}, viewer: {}, media: {} }));
+    const server2 = app2.listen(0);
+    try {
+      const list = await call(server2, "GET", "/api/admin/manual/unconnected");
+      assert.equal(list.status, 200);
+      assert.deepEqual(list.body.agents.map((a) => a.ref), [M.refOf(STUCK)], "only the agent who started a login and is not connected");
+      assert.ok(!JSON.stringify(list.body).includes(STUCK), "no phone, only a ref and a tail");
+      const v = await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(STUCK)}/verify`);
+      assert.equal(v.status, 200);
+      assert.equal(v.body.state, "connected");
+      assert.deepEqual(verified, [[STUCK, "facebook"]]);
+      assert.equal((await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(DONE)}/verify`)).status, 404, "a connected agent is not in the list");
+    } finally { server2.close(); }
+  }
+  console.log("routes/admin-manual.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

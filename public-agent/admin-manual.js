@@ -29,16 +29,32 @@
     media_unavailable: "לא הצלחנו להביא את הסרטון של הנכס.",
     not_found: "לא נמצא. אולי הקבוצה כבר סומנה או שהקמפיין הסתיים.",
     invalid_input: "הבקשה לא תקינה.",
+    driver_busy: "הדפדפנים תפוסים כרגע. נסו שוב בעוד דקה.",
+    cannot_verify_login: "לא הצלחנו לוודא את ההתחברות. נסו שוב בעוד רגע.",
+    verify_failed: "הבדיקה נכשלה. נסו שוב.",
   };
+  var LIMIT = { group_daily_cap: "כבר 3 פוסטים של הסוכן בקבוצה הזו היום", property_cooldown: "הנכס פורסם בקבוצה הזו לאחרונה — לא לפני המועד" }; // the interval is the campaign's (3 days, or its repeat)
+  var limitText = function (l) { return l.block ? (LIMIT[l.block.why] || "הקבוצה הגיעה למגבלה") + (l.block.until ? " (עד " + when(l.block.until) + ")" : "") : ""; };
   var fail = function (e) { FLY.toast(ERR[e && e.code] || "הפעולה נכשלה"); };
   function call(method, path, body) {
     return fetch(API + path, { method: method, credentials: "include", headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (j) {
-          if (!r.ok) throw Object.assign(new Error(j.error || String(r.status)), { code: j.error, status: r.status });
+          if (!r.ok) throw Object.assign(new Error(j.error || String(r.status)), { code: j.error, status: r.status, why: j.why, until: j.until });
           return j;
         });
       });
+  }
+  // "posted" on a group at its limit: the server says why; the admin may go ahead with a reason (audited).
+  // Resolves null when the admin cancels.
+  function markPosted(cid, gid) {
+    var path = "/campaigns/" + encodeURIComponent(cid) + "/groups/" + encodeURIComponent(gid) + "/done";
+    return call("POST", path, { status: "posted" }).catch(function (e) {
+      if (!e || e.code !== "group_limit") throw e;
+      var r = window.prompt((LIMIT[e.why] || "הקבוצה הגיעה למגבלה") + ". לסמן בכל זאת? כתבו סיבה:");
+      if (!r || r.trim().length < 3) { FLY.toast("בוטל"); return null; }
+      return call("POST", path, { status: "posted", override_reason: r.trim() });
+    });
   }
   var B = function (ref) { return "/agents/" + encodeURIComponent(ref) + "/browser"; };
   var price = function (n) { return n ? Number(n).toLocaleString("en-US") + " ש\"ח" : ""; };
@@ -94,9 +110,11 @@
             '<ul class="manual-groups">' + c.groups.map(function (g) {
               var k = esc(c.campaign_id + "|" + g.group_id), on = picked === c.campaign_id + "|" + g.group_id, owed = g.status === "owed";
               return '<li class="' + (on ? "on" : "") + '"><label class="name"><input type="checkbox" data-act="check" data-k="' + k + '"' +
-                (g.status === "posted" ? " checked" : "") + (owed ? "" : " disabled") + "> <b>" + esc(g.name || "קבוצה") + "</b></label>" +
+                (g.status === "posted" ? " checked" : "") + (owed ? "" : " disabled") + "> <b>" + (g.kind === "page" ? "📄 " : "") + esc(g.name || (g.kind === "page" ? "הדף העסקי" : "קבוצה")) + "</b></label>" +
                 '<span class="manual-chip ' + esc(g.status) + '">' + STATE[g.status] + (g.posted_at ? " " + esc(when(g.posted_at)) : "") + "</span>" +
-                (owed ? '<button type="button" class="btn btn-gold btn-sm" data-act="open" data-k="' + k + '">פתיחה בקבוצה</button>' +
+                (owed && g.limit ? '<span class="manual-chip ' + (g.limit.block ? "skipped" : "owed") + '">' + esc(g.limit.today) + "/" + esc(g.limit.cap) + " היום</span>" +
+                  (g.limit.block ? ' <span class="manual-muted">' + esc(limitText(g.limit)) + "</span>" : "") : "") +
+                (owed ? '<button type="button" class="btn btn-gold btn-sm" data-act="open" data-k="' + k + '">' + (g.kind === "page" ? "פתיחה בדף העסקי" : "פתיחה בקבוצה") + "</button>" +
                   '<button type="button" class="btn btn-ghost btn-sm" data-act="type" data-k="' + k + '">הקלדת הטקסט</button>' +
                   '<button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-k="' + k + '">העתקה</button>' +
                   '<button type="button" class="btn btn-ghost btn-sm" data-act="skipped" data-k="' + k + '">דילוג</button>' : "") +
@@ -244,6 +262,28 @@
     show(ref).catch(fail).then(function () { b.disabled = false; });
   });
   $("#manualReload").addEventListener("click", load);
+
+  // ── agents who logged in but never pressed done: check the saved login ──
+  function loadUnconnected() {
+    var box = $("#manualUnconnectedList");
+    return call("GET", "/unconnected").then(function (j) {
+      var list = j.agents || [];
+      box.innerHTML = !list.length ? '<p class="manual-muted">אין סוכנים כאלה.</p>' : list.map(function (a) {
+        return '<div class="manual-item"><b>' + esc(a.name || "סוכן") + '</b> <span class="manual-muted">' + esc(a.phone_tail || "") + " · התחיל התחברות " + esc(when(a.started_at)) + "</span> " +
+          '<button type="button" class="btn btn-ghost btn-sm" data-verify="' + esc(a.ref) + '">בדיקת התחברות</button></div>';
+      }).join("");
+    }).catch(function (e) { box.innerHTML = '<p class="manual-muted">לא הצלחנו לטעון את הרשימה.</p>'; fail(e); });
+  }
+  $("#manualUnconnected").addEventListener("toggle", function () { if (this.open) loadUnconnected(); });
+  $("#manualUnconnectedList").addEventListener("click", function (ev) {
+    var btn = ev.target.closest("[data-verify]");
+    if (!btn) return;
+    btn.disabled = true; btn.textContent = "בודקים…";
+    call("POST", "/unconnected/" + encodeURIComponent(btn.getAttribute("data-verify")) + "/verify").then(function (r) {
+      if (r.state === "connected") { FLY.toast("הסוכן מחובר ✓" + (r.identity_label ? " (" + r.identity_label + ")" : "")); load(); loadUnconnected(); }
+      else { FLY.toast("הפרופיל השמור לא מחובר — הסוכן צריך להתחבר מחדש."); btn.disabled = false; btn.textContent = "בדיקת התחברות"; }
+    }).catch(function (e) { fail(e); btn.disabled = false; btn.textContent = "בדיקת התחברות"; });
+  });
   $("#manualAgent").addEventListener("change", renderQueue);
   $("#manualPropPick").addEventListener("change", function () { if (this.value) setProperty(this.value).catch(fail); });
   $("#manualClose").addEventListener("click", function () {
@@ -269,11 +309,11 @@
       if (!ids.length) { FLY.toast("סמנו את הקבוצות שבהן פרסמתם"); return; }
       if (!confirm("לסמן " + ids.length + " קבוצות כ\"פורסם\"? אי אפשר לבטל.")) return;
       b.disabled = true;
-      var cid = detail.campaign.id, last = null;
+      var cid = detail.campaign.id, last = null, marked = 0;
       ids.reduce(function (p, gid) {
-        return p.then(function () { return call("POST", "/campaigns/" + encodeURIComponent(cid) + "/groups/" + encodeURIComponent(gid) + "/done", { status: "posted" }).then(function (j) { last = j; }); });
+        return p.then(function () { return markPosted(cid, gid).then(function (j) { if (j) { last = j; marked++; } }); });
       }, Promise.resolve())
-        .then(function () { FLY.toast(last && last.completed ? "הקמפיין הושלם, הסוכן קיבל הודעה" : "סומנו " + ids.length + " קבוצות ✓"); })
+        .then(function () { if (marked) FLY.toast(last && last.completed ? "הקמפיין הושלם, הסוכן קיבל הודעה" : "סומנו " + marked + " קבוצות ✓"); })
         .catch(fail).then(function () { b.disabled = false; loadDetail(detailFor); load(); });
       return;
     }
@@ -299,8 +339,8 @@
     if (!item || item.status !== "owed") return;
     if (!confirm("לסמן את " + (item.group_name || "הקבוצה") + " כ\"פורסם\"? אי אפשר לבטל.")) { box.checked = false; return; }
     box.disabled = true;
-    call("POST", "/campaigns/" + encodeURIComponent(item.campaign_id) + "/groups/" + encodeURIComponent(item.group_id) + "/done", { status: "posted" })
-      .then(function (j) { FLY.toast(j.completed ? "הנכס פורסם בכל הקבוצות, הסוכן קיבל הודעה" : "סומן ✓"); if (picked === box.dataset.k) picked = null; if (detailFor) loadDetail(detailFor); return load(); })
+    markPosted(item.campaign_id, item.group_id)
+      .then(function (j) { if (!j) { box.checked = false; box.disabled = false; return; } FLY.toast(j.completed ? "הנכס פורסם בכל הקבוצות, הסוכן קיבל הודעה" : "סומן ✓"); if (picked === box.dataset.k) picked = null; if (detailFor) loadDetail(detailFor); return load(); })
       .catch(function (e) { box.checked = false; box.disabled = false; fail(e); });
   });
   $("#manualQueue").addEventListener("click", function (ev) {

@@ -1,0 +1,66 @@
+/* posting-limits.js — the manual tab's per-group limits (the same rule
+   automatic posting uses) and the campaign duration estimate. */
+const assert = require("assert");
+const K = require("./posting-testkit");
+const A = require("./posting-account");
+const safety = require("./posting-safety");
+const L = require("./posting-limits");
+
+(async () => {
+  const config = safety.configFrom(null, { FORLY_ENV: "prod" });
+  const now = K.NOW;
+  const at = (h) => new Date(now.getTime() - h * 3600000).toISOString();
+  const camp = (id, page_id, posts) => ({ id, page_id, repeat_days: null, groups: [{ group_id: "111" }, { group_id: "222" }], posts });
+
+  // three of the agent's posts in group 111 today → blocked; 222 free
+  const others = [camp("c2", "pg2", [{ group_id: "111", status: "posted", posted_at: at(1) }]),
+    camp("c3", "pg3", [{ group_id: "111", status: "posted", posted_at: at(2) }]),
+    camp("c4", "pg4", [{ group_id: "111", status: "posted", posted_at: at(3) }])];
+  const c1 = camp("c1", "pg1", []);
+  const lim = L.limitsFor(c1, [c1].concat(others), now, config);
+  assert.equal(lim["111"].today, 3);
+  assert.equal(lim["111"].block.why, "group_daily_cap");
+  assert.equal(lim["222"].block, null);
+
+  // the same property in the same group a day ago → cooldown with an end time
+  const again = camp("c1", "pg1", [{ group_id: "222", status: "posted", posted_at: at(24) }]);
+  const lim2 = L.limitsFor(again, [again], now, config);
+  assert.equal(lim2["222"].block.why, "property_cooldown");
+  assert.ok(lim2["222"].block.until);
+
+  // a repeat interval is enforced past the 8-day look-back: 10 days ago, repeat 14
+  const old = { group_id: "222", status: "posted", posted_at: at(240) };
+  const rep = Object.assign(camp("c1", "pg1", [old]), { repeat_days: 14 });
+  const lim3 = L.limitsFor(rep, [rep], now, config);
+  assert.equal(lim3["222"].block.why, "property_cooldown");
+  assert.equal(lim3["222"].block.until, new Date(new Date(old.posted_at).getTime() + 14 * 86400000 - 3600000).toISOString());
+  const norep = camp("c1", "pg1", [old]);
+  assert.equal(L.limitsFor(norep, [norep], now, config)["222"].block, null, "no repeat: the 3-day rule has passed");
+
+  // a group known by a resolved slug: history under the slug counts (alias via the membership entry)
+  const slugPosts = [camp("c2", "pg2", [{ group_id: "slug:foo", status: "posted", posted_at: at(1) }]),
+    camp("c3", "pg3", [{ group_id: "slug:foo", status: "posted", posted_at: at(2) }]),
+    camp("c4", "pg4", [{ group_id: "slug:foo", status: "posted", posted_at: at(3) }])];
+  const slugConn = { facebook_groups_member: [{ group_id: "111", aliases: ["slug:foo"], membership_state: "member" }] };
+  const limA = L.limitsFor(c1, [c1].concat(slugPosts), now, config, { conn: slugConn });
+  assert.equal(limA["111"].today, 3); assert.equal(limA["111"].block.why, "group_daily_cap");
+
+  // posts outside a manual campaign post (attempts, share-kit) count; one in both counts once
+  const acct = [{ at: at(1), group_id: "111", page_id: "pgX", ok: true }, { at: at(2), group_id: "111", page_id: "pgY", ok: null, attempt_key: "k1" }];
+  const withAuto = camp("c5", "pgY", [{ group_id: "111", status: "posted", posted_at: at(2), attempt_key: "k1" }]);
+  const limB = L.limitsFor(c1, [c1, withAuto], now, config, { accountPosts: acct });
+  assert.equal(limB["111"].today, 2, "the share-kit post counts; the automatic one is not counted twice");
+  assert.equal(L.limitsFor(c1, [c1], now, config, { accountPosts: [{ at: at(1), group_id: "111", ok: false }] })["111"].today, 0, "a failed attempt does not count");
+
+  // estimate: an established account, 200 posts → about 3 weeks, fits 30 days
+  const { deps } = await K.setup();
+  const conn = await K.db.getConnection("972500000001");
+  const account = await A.accountView("972500000001", conn, deps, now);
+  const e = L.estimate({ posts: 200, account, now, config, daysLeft: 30 });
+  assert.equal(e.per_week, 64); assert.equal(e.days, 22); assert.equal(e.fits, true); assert.equal(e.warmup, false);
+  // a new account in warm-up: far beyond 30 days
+  const fresh = Object.assign({}, account, { first_connected_at: new Date(now.getTime() - 4 * K.DAY).toISOString() });
+  const f = L.estimate({ posts: 200, account: fresh, now, config, daysLeft: 30 });
+  assert.equal(f.warmup, true); assert.equal(f.fits, false);
+  console.log("posting-limits.test.js ok");
+})().catch((e) => { console.error(e); process.exit(1); });
