@@ -84,6 +84,8 @@ const C = require("./posting-campaign");
     assert.equal((await K.store.getPostingCampaign(c.id)).status, "running", "a repeating campaign does not end with its first pass");
     assert.equal((await M.queue(deps)).length, 0, "nothing owed until the interval passes");
     assert.equal(notes.length, 0);
+    at(new Date(K.NOW.getTime() + 3 * K.DAY - 30 * 60000));
+    assert.equal((await M.queue(deps)).length, 0, "repeat 3: owed only once the pacer's 3-day floor has passed, not an hour before");
     at(new Date(K.NOW.getTime() + 3 * K.DAY));
     q = await M.queue(deps);
     assert.deepEqual(q.map((i) => i.group_id), ["111", "222"], "3 days on: the groups again (the skipped one too), the Page not for 30 days");
@@ -95,6 +97,24 @@ const C = require("./posting-campaign");
     assert.equal((await M.queue(deps)).length, 0, "past expires_at: over");
     assert.equal((await K.store.getPostingCampaign(c.id)).status, "completed");
     assert.equal(notes.length, 1, "the agent hears it once, at the end");
+  }
+
+  // ── a restarted campaign's hand-ticked posts belong to the new pass ──
+  {
+    const { deps, notes, at } = await K.setup();
+    deps.env = { POSTING_MANUAL: "1", FORLY_ENV: "prod" };
+    const c = await C.create(K.base(), deps);
+    await M.markDone(c.id, "111", "posted", deps); await M.markDone(c.id, "222", "posted", deps);
+    assert.equal((await K.store.getPostingCampaign(c.id)).status, "completed");
+    at(new Date(K.NOW.getTime() + 10 * K.DAY));
+    const again = await C.create(K.base({ consent: { at: K.iso(new Date(K.NOW.getTime() + 10 * K.DAY)), version: "v" } }), deps);
+    assert.equal(again.status, "running"); assert.ok(again.restarted_at);
+    assert.deepEqual((await M.queue(deps)).map((i) => i.group_id), ["111", "222"], "owed again after the restart");
+    assert.ok(await M.markDone(again.id, "111", "posted", deps));
+    assert.equal(await M.markDone(again.id, "111", "posted", deps), null, "ticked once: the post counts for this pass");
+    const done = await M.markDone(again.id, "222", "posted", deps);
+    assert.equal(done.status, "completed", "the restarted pass completes");
+    assert.equal(notes.length, 2);
   }
 
   // ── queue → markDone → completed, with one WhatsApp listing the posted group ──

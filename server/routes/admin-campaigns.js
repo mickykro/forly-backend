@@ -83,14 +83,15 @@ module.exports = function createAdminCampaignsRouter({
     if (!names.has(phone)) { const b = (await db.getBusiness(phone).catch(() => null)) || {}; names.set(phone, b.full_name || b.business_name || ""); }
     return names.get(phone);
   }
-  const conns = new Map();
-  async function connOf(phone) {
-    if (!conns.has(phone)) conns.set(phone, (await db.getConnection(phone).catch(() => null)) || {});
-    return conns.get(phone);
+  // cache: one request's connections (the list reads many rows of one agent); a single row reads fresh.
+  async function connOf(phone, cache = null) {
+    if (!cache) return (await db.getConnection(phone).catch(() => null)) || {};
+    if (!cache.has(phone)) cache.set(phone, (await db.getConnection(phone).catch(() => null)) || {});
+    return cache.get(phone);
   }
-  async function rowOf(c) {
+  async function rowOf(c, cache = null) {
     const page = (await db.getPage(c.page_id).catch(() => null)) || {};
-    const pass = M.groupsOf(c, await connOf(c.phone), x.clock()); // this pass only: a restart keeps older posts as history
+    const pass = M.groupsOf(c, await connOf(c.phone, cache), x.clock(), await A.configOf(deps, x)); // this pass only: a restart keeps older posts as history
     const n = (st) => pass.filter((g) => g.status === st).length;
     return {
       id: c.id, ref: M.refOf(c.phone), phone_tail: A.tail(c.phone), agent_name: await nameOf(c.phone),
@@ -131,8 +132,8 @@ module.exports = function createAdminCampaignsRouter({
     for (const s of want) all = all.concat(await store.listPostingCampaignsByStatus(s, 200));
     if (req.query.agent) all = all.filter((c) => M.refOf(c.phone) === String(req.query.agent));
     all.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
-    conns.clear();
-    res.json({ campaigns: await Promise.all(all.map(rowOf)), manual: manual() });
+    const cache = new Map();
+    res.json({ campaigns: await Promise.all(all.map((c) => rowOf(c, cache))), manual: manual() });
   }));
   router.get("/agents", requireAdmin, wrap(async (req, res) => {
     const out = [];
@@ -165,19 +166,23 @@ module.exports = function createAdminCampaignsRouter({
     const live = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== b.page_id);
     const days = Number.isFinite(b.days) ? Math.min(Math.max(b.days, 1), 30) : 30;
     // What the agent's other live campaigns still take within these days: what
-    // is owed now (the Page included), and every later repeat pass of the groups.
+    // is owed now (the Page included), every later repeat pass of the groups,
+    // and a repeating campaign's Page coming due again (30 days after its last).
+    const config = await A.configOf(deps, x);
     const owed = live.reduce((n, c) => {
-      const pass = M.groupsOf(c, conn, now);
+      const pass = M.groupsOf(c, conn, now, config);
       const left = Math.min(days, Math.max(0, (new Date(c.expires_at).getTime() - now.getTime()) / DAY));
       const later = c.repeat && c.repeat_days > 0 ? Math.max(0, Math.ceil(left / c.repeat_days) - 1) * (c.groups || []).length : 0;
-      return n + pass.filter((g) => g.status === "owed").length + later;
+      const pageRow = pass.find((g) => g.kind === "page");
+      const lastPage = Math.max(0, ...A.currentPosts(c).filter((p) => p.target === "page" && p.status !== "skipped").map((p) => new Date(p.posted_at || p.scheduled_at).getTime()).filter(Number.isFinite));
+      const pageAgain = c.repeat && pageRow && pageRow.status !== "owed" && lastPage && lastPage + 30 * DAY <= now.getTime() + left * DAY ? 1 : 0;
+      return n + pass.filter((g) => g.status === "owed").length + later + pageAgain;
     }, 0);
     // A repeating campaign comes back to each group every repeat_days within its days;
     // the Page takes one post per 30 days.
     const repeat = Number.isInteger(b.repeat_days) && b.repeat_days >= 3 && b.repeat_days <= 30 ? b.repeat_days : 0;
     const passes = repeat ? Math.ceil(days / repeat) : 1;
     const page = Array.isArray(b.targets) && b.targets.includes("page") && A.pageTarget(conn) ? 1 : 0;
-    const config = await A.configOf(deps, x);
     const account = await A.accountView(phone, conn, deps, now);
     res.json(require("../posting-limits").estimate({ posts: owed + (ids.ids || []).length * passes + page, account, now, config, daysLeft: days }));
   }));

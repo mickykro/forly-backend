@@ -116,7 +116,7 @@ module.exports = function createAdminManualRouter({
         const config = await A.configOf(deps, x);
         const now = x.clock();
         const agent = await L.agentPosts(cur.phone, deps, x, now);
-        if (M.owed(cur, agent.conn, now).some((g) => String(g.group_id) === String(req.params.gid))) {
+        if (M.owed(cur, agent.conn, now, config).some((g) => String(g.group_id) === String(req.params.gid))) {
           const lim = L.limitsFor(cur, agent.campaigns, now, config, agent)[String(req.params.gid)];
           if (lim && lim.block && !override) return res.status(409).json({ error: "group_limit", why: lim.block.why, until: lim.block.until });
           if (lim && lim.block) {
@@ -203,7 +203,7 @@ module.exports = function createAdminManualRouter({
     res.set("Cache-Control", "no-store");
     res.json({
       property: M.propertyCard(page, deps.pageBaseUrl), versions: M.versions(page, deps.pageBaseUrl),
-      campaign: c ? { id: c.id, status: c.status } : null, groups: M.groupsOf(c, conn, x.clock()),
+      campaign: c ? { id: c.id, status: c.status } : null, groups: M.groupsOf(c, conn, x.clock(), await A.configOf(deps, x)),
     });
   }));
 

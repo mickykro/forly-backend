@@ -21,6 +21,7 @@ const crypto = require("crypto");
 const A = require("./posting-account");
 const C = require("./posting-campaign");
 const L = require("./posting-limits");
+const safety = require("./posting-safety");
 
 const enabled = (env = process.env) => env.POSTING_MANUAL === "1";
 
@@ -64,7 +65,7 @@ function targetsOf(c, conn) {
   return out;
 }
 // The targets still owed a post now, in order (groupsOf's "owed").
-const owed = (c, conn, now) => groupsOf(c, conn, now).filter((g) => g.status === "owed");
+const owed = (c, conn, now, config) => groupsOf(c, conn, now, config).filter((g) => g.status === "owed");
 
 // What the session is sharing, for the admin's header. video_url is what the
 // browser can play; the server uploads from C.videoOf(page) itself.
@@ -93,11 +94,13 @@ function versions(page, base) {
 
 // The campaign's targets, each with where it stands now: owed, posted or
 // skipped (with the approved text, if any). A target with no post this pass
-// is owed. A repeating campaign owes a group again repeat_days after its
-// last post (an hour short, so it does not creep later each round — the
-// pacer's own rule) and the Page after 30 days; a campaign that does not
-// repeat owes nothing twice. `now` is needed only for a repeating campaign.
-function groupsOf(c, conn = null, now = null) {
+// is owed. A repeating campaign owes a group again when the pacer would let
+// the property back in (posting-safety.groupBlock's property cooldown:
+// repeat_days, an hour short, never under property_group_cooldown_days) and
+// the Page after 30 days; a campaign that does not repeat owes nothing
+// twice. `now` is needed only for a repeating campaign; `config` for its
+// cooldown floor (the defaults otherwise).
+function groupsOf(c, conn = null, now = null, config = null) {
   if (!c) return [];
   const at = (p) => new Date(p.posted_at || p.scheduled_at || p.created_at || 0).getTime();
   const last = new Map();
@@ -107,7 +110,8 @@ function groupsOf(c, conn = null, now = null) {
     if (!prev || at(p) >= at(prev)) last.set(k, p);
   }
   const t = now ? now.getTime() : null;
-  const again = (g) => (!c.repeat ? Infinity : g.kind === "page" ? PAGE_DAYS * MS_DAY : Math.max(1, Number(c.repeat_days) || 0) * MS_DAY - MS_HOUR);
+  const floor = ((config || safety.DEFAULTS).property_group_cooldown_days || 0) * MS_DAY;
+  const again = (g) => (!c.repeat ? Infinity : g.kind === "page" ? PAGE_DAYS * MS_DAY : Math.max((Number(c.repeat_days) || 0) * MS_DAY - MS_HOUR, floor, MS_HOUR));
   return targetsOf(c, conn).map((g) => {
     const p = last.get(String(g.group_id));
     const due = !!p && t !== null && t - at(p) >= again(g);
@@ -145,7 +149,7 @@ async function checklist(deps = {}) {
       agent_name: (page.agent && page.agent.name) || "", page_id: c.page_id,
       title: (page.property && page.property.title) || c.page_id, page_url: pageUrlOf(c.page_id, deps.pageBaseUrl),
       repeat_days: c.repeat ? c.repeat_days || null : null,
-      groups: groupsOf(c, agent.conn, now).map((g) => {
+      groups: groupsOf(c, agent.conn, now, config).map((g) => {
         const withLimit = g.status === "owed" && g.kind === "group" ? { ...g, limit: limits[g.group_id] || null } : g;
         const tg = byId.get(g.group_id);
         return withLimit.status !== "owed" || withLimit.copy ? withLimit
@@ -180,20 +184,22 @@ async function markDone(campaignId, groupId, status, deps = {}) {
   const head = await x.store.getPostingCampaign(String(campaignId));
   if (!head) return null;
   const conn = (await x.db.getConnection(head.phone)) || {};
+  const config = await A.configOf(deps, x);
   const id = crypto.randomUUID();
   let finished = false, past = false;
   const next = await A.mutate(x, String(campaignId), (cur) => {
     finished = false; past = false;
     if (!cur || cur.status !== "running") return null;
     if (expired(cur, at)) { past = true; return null; }
-    const g = owed(cur, conn, at).find((q) => String(q.group_id) === String(groupId));
+    const g = owed(cur, conn, at, config).find((q) => String(q.group_id) === String(groupId));
     if (!g) return null;
+    // created_at: what A.currentPosts keys a restarted campaign's pass on — without it the post is not this pass's.
     const post = {
       id, target: g.kind === "page" ? "page" : "group", group_id: String(g.group_id), group_url: g.url, group_name: g.name || null, manual: true,
-      status, scheduled_at: now, posted_at: status === "posted" ? now : null, error_code: status === "skipped" ? "manual_skip" : null,
+      status, created_at: now, scheduled_at: now, posted_at: status === "posted" ? now : null, error_code: status === "skipped" ? "manual_skip" : null,
     };
     const posts = (cur.posts || []).concat([post]);
-    finished = !cur.repeat && owed({ ...cur, posts }, conn, at).length === 0;
+    finished = !cur.repeat && owed({ ...cur, posts }, conn, at, config).length === 0;
     return finished ? { posts, status: "completed" } : { posts };
   });
   if (past) { await expire({ id: String(campaignId) }, deps, x); return null; }
