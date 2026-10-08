@@ -28,11 +28,14 @@ const expired = (c, now) => Number.isFinite(new Date(c.expires_at).getTime()) &&
 // A running campaign past its end: completed (expired), its open posts
 // skipped, the agent told — as posting-tick's housekeeping does. The agent
 // hears it once: only the call whose transaction made the change says so
-// (two checklist polls may meet the same campaign).
+// (two checklist polls may meet the same campaign). The flag is reset on
+// every run of the callback: Firestore re-runs it on contention, and the
+// re-run on a campaign another call just ended must leave it false.
 async function expire(c, deps, x) {
   if (!require("./posting-guard").postingEnvAllowed(deps.env || process.env)) return null;
   let changed = false;
   const next = await A.mutate(x, c.id, (cur) => {
+    changed = false;
     if (cur.status !== "running") return null;
     changed = true;
     return {

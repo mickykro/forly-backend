@@ -213,8 +213,9 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       assert.deepEqual((await K.store.getPostingCampaign(row.id)).targets, ["page"], "untouched");
       // a resume refused (halted) strips nothing and adds a refusal row
       await K.store.mutatePostingCampaign(row.id, () => ({ groups: row.groups.map((g) => ({ group_id: g.group_id, name: g.name, url: K.G(g.group_id) })), repeat: true, repeat_days: 7 }));
-      const realResume = campaigns.resume;
-      campaigns.resume = async (id, d) => K.store.getPostingCampaign(id); // refuses: stays paused
+      const realBlocked = campaigns._test.accountBlocked;
+      let checks = 0;
+      campaigns._test.accountBlocked = (conn2) => ++checks > 1; // the halt lands after the route's pre-check
       try {
         const halted = await call(mServer, "POST", `/campaigns/${row.id}/start`, {});
         assert.equal(halted.status, 409);
@@ -222,8 +223,8 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
         const last = (await audits()).filter((r) => r.action === "start_campaign").slice(-2);
         assert.deepEqual(last.map((r) => r.detail.outcome), ["requested", "refused"]);
         assert.equal(last[1].detail.refused, "account_halted");
-      } finally { campaigns.resume = realResume; }
-      await K.store.mutatePostingCampaign(row.id, () => ({ status: "running", repeat: false, repeat_days: null }));
+      } finally { campaigns._test.accountBlocked = realBlocked; }
+      await K.store.mutatePostingCampaign(row.id, () => ({ status: "running", repeat: false, repeat_days: null, targets: row.targets }));
     } finally { mServer.close(); }
 
     // ── staging never changes campaigns ──
