@@ -213,9 +213,9 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       assert.deepEqual((await K.store.getPostingCampaign(row.id)).targets, ["page"], "untouched");
       // a resume refused (halted) strips nothing and adds a refusal row
       await K.store.mutatePostingCampaign(row.id, () => ({ groups: row.groups.map((g) => ({ group_id: g.group_id, name: g.name, url: K.G(g.group_id) })), repeat: true, repeat_days: 7 }));
-      const realBlocked = campaigns._test.accountBlocked;
-      let checks = 0;
-      campaigns._test.accountBlocked = (conn2) => ++checks > 1; // the halt lands after the route's pre-check
+      const realGet = rdeps.db.getConnection;
+      let reads = 0;
+      rdeps.db.getConnection = async (p2) => { const c3 = await realGet.call(rdeps.db, p2); return ++reads > 1 ? Object.assign({}, c3, { posting_disabled_until_admin: true }) : c3; }; // the halt lands after the route's pre-check
       try {
         const halted = await call(mServer, "POST", `/campaigns/${row.id}/start`, {});
         assert.equal(halted.status, 409);
@@ -223,7 +223,10 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
         const last = (await audits()).filter((r) => r.action === "start_campaign").slice(-2);
         assert.deepEqual(last.map((r) => r.detail.outcome), ["requested", "refused"]);
         assert.equal(last[1].detail.refused, "account_halted");
-      } finally { campaigns._test.accountBlocked = realBlocked; }
+      } finally { rdeps.db.getConnection = realGet; }
+      // a page-only campaign with groups resumes as groups-only, never with no target at all
+      await K.store.mutatePostingCampaign(row.id, () => ({ status: "paused", pause_reason: "agent", repeat: false, repeat_days: null, targets: ["page"] }));
+      assert.deepEqual((await call(mServer, "POST", `/campaigns/${row.id}/start`, {})).body.campaign.targets, ["groups"]);
       await K.store.mutatePostingCampaign(row.id, () => ({ status: "running", repeat: false, repeat_days: null, targets: row.targets }));
     } finally { mServer.close(); }
 

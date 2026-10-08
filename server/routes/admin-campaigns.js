@@ -115,11 +115,12 @@ module.exports = function createAdminCampaignsRouter({
     await store.mutateConnection(phone, (cur) => (PC.permActive(cur.posting_permission) ? null : { posting_permission: PC.campaignPermission(cur.posting_permission, x.clock(), consent) }));
   }
   // campaigns.resume plus the manual-mode strip (no Page, no repeat) in one campaign transaction.
-  async function resumeStripped(id, conn) {
+  async function resumeStripped(id, phone) {
+    const conn = (await db.getConnection(phone)) || {}; // read again right before the change, as campaigns.resume does
     if (campaigns._test.accountBlocked(conn)) return store.getPostingCampaign(id);
     return A.mutate(x, id, (cur) => (cur.status !== "paused" ? null : {
       status: "running", pause_reason: null, consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
-      targets: (cur.targets || []).filter((t2) => t2 !== "page"), repeat: false, repeat_days: null,
+      targets: A.targetsFor(conn, (cur.targets || []).filter((t2) => t2 !== "page")), repeat: false, repeat_days: null,
     }));
   }
   // A restart runs as long as the run it repeats (1–30 days), unless the admin says otherwise.
@@ -276,7 +277,7 @@ module.exports = function createAdminCampaignsRouter({
       if (strip) detail.fields = ["targets", "repeat"].filter((f) => (f === "targets" ? (c.targets || []).includes("page") : c.repeat)).join(",");
       await audit(req, "start_campaign", c.phone, detail);
       // The resume and the strip are one transaction: a refused resume changes nothing, and nothing runs unstripped.
-      out = strip ? await resumeStripped(c.id, conn) : await campaigns.resume(c.id, deps);
+      out = strip ? await resumeStripped(c.id, c.phone) : await campaigns.resume(c.id, deps);
     } else {
       const consent = consentOf(req.body);
       if (!consent) return res.status(400).json({ error: "consent_note_required" });
@@ -299,8 +300,8 @@ module.exports = function createAdminCampaignsRouter({
       }, deps);
     }
     if (!out || out.status !== "running") {
-      // Halted, or changed under us (stopped by the agent, already running elsewhere): the row says which.
-      const why = !out || out.status === c.status ? "account_halted" : "not_live";
+      // Gone, halted, or changed under us (stopped by the agent): the row says which.
+      const why = !out ? "not_found" : out.status === c.status ? "account_halted" : "not_live";
       await refusalRow(req, "start_campaign", c.phone, detail, why);
       return res.status(409).json({ error: why });
     }
