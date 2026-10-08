@@ -4,8 +4,10 @@
  * tab. Create, edit, stop and start an agent's campaign. Every change needs
  * the admin guard and a fresh step-up, and writes an audit row (no phone, no
  * text) BEFORE the change: no audit row, no change (503 audit_unavailable).
- * A change refused after its row was written leaves a row for a change not
- * made — never a change without one. A campaign the admin creates carries the consent the admin recorded
+ * That row records the request (outcome "requested"); a change refused
+ * after it (stale version, busy, nowhere to post) adds a second row for
+ * the refusal (outcome "refused", the reason), so the log never shows a
+ * change that did not happen as made — and never a change without a row. A campaign the admin creates carries the consent the admin recorded
  * (who agreed, how, a note). Agents are addressed by posting-manual.refOf.
  * Staging shares production's Firestore: no change outside prod (or a local
  * box with POSTING_SWEEPER=1), as routes/posting.js.
@@ -24,7 +26,7 @@ const { redact } = require("../driver-browser");
 const METHODS = new Set(["phone", "in_person", "whatsapp"]);
 const LIVE = new Set(["running", "paused"]);
 const STATUSES = ["running", "paused", "stopped", "completed"];
-const ERR_STATUS = { not_found: 404, stale_version: 409, busy: 409, not_live: 409, audit_unavailable: 503 };
+const ERR_STATUS = { not_found: 404, stale_version: 409, busy: 409, not_live: 409, no_destination: 400, audit_unavailable: 503 };
 const DAY = 86400000;
 
 function consentOf(b) {
@@ -57,10 +59,21 @@ module.exports = function createAdminCampaignsRouter({
 
   // Written before the change it records; throws audit_unavailable (503) when it cannot be.
   async function audit(req, action, phone, detail) {
-    try { await store.addAuditEvent({ operator_tail: opTail(req), action, target_phone_tail: dtail(phone), reason: null, detail }, x.clock()); }
+    try { await store.addAuditEvent({ operator_tail: opTail(req), action, target_phone_tail: dtail(phone), reason: null, detail: { ...detail, outcome: "requested" } }, x.clock()); }
     catch (e) {
       console.error(redact(`admin campaigns audit ${action} failed: ${(e && e.code) || "error"}`));
       throw Object.assign(new Error("audit_unavailable"), { code: "audit_unavailable" });
+    }
+  }
+  // The change the row above requested was refused: a second row says so (best effort — the refusal stands either way).
+  async function refused(req, action, phone, detail, fn) {
+    try { return await fn(); }
+    catch (e) {
+      if (e && ERR_STATUS[e.code] && e.code !== "audit_unavailable") {
+        await store.addAuditEvent({ operator_tail: opTail(req), action, target_phone_tail: dtail(phone), reason: null, detail: { ...detail, outcome: "refused", refused: e.code } }, x.clock())
+          .catch((e2) => console.error(redact(`admin campaigns audit ${action} refusal failed: ${(e2 && e2.code) || "error"}`)));
+      }
+      throw e;
     }
   }
   const manual = () => require("../posting-manual").enabled(env);
@@ -84,6 +97,8 @@ module.exports = function createAdminCampaignsRouter({
       groups: (c.groups || []).map((g) => ({ group_id: g.group_id, name: g.name || "", copy: g.copy })),
       counts: { owed: n("owed"), posted: n("posted"), skipped: n("skipped") },
       created_by: c.created_by || "agent", consent_by: c.consent_by || { by: "agent" }, version: c.updated_at,
+      // Manual posting cannot do what an older (or the agent's) campaign asks: shown, not hidden.
+      manual_unsupported: manual() ? [(c.targets || []).includes("page") ? "page" : null, c.repeat ? "repeat" : null].filter(Boolean) : [],
     };
   }
   // The same gates as the agent's create: connected, the page is the agent's, a confirmed Page when targeted.
@@ -147,8 +162,16 @@ module.exports = function createAdminCampaignsRouter({
     const now = x.clock();
     const conn = (await db.getConnection(phone)) || {};
     const live = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== b.page_id);
-    const owed = live.reduce((n, c) => n + M.groupsOf(c).filter((g) => g.status === "owed").length, 0);
     const days = Number.isFinite(b.days) ? Math.min(Math.max(b.days, 1), 30) : 30;
+    // What the agent's other live campaigns still take within these days: this
+    // pass's owed groups, every later repeat pass, and a Page post not yet made.
+    const owed = live.reduce((n, c) => {
+      const pass = M.groupsOf(c);
+      const left = Math.min(days, Math.max(0, (new Date(c.expires_at).getTime() - now.getTime()) / DAY));
+      const later = !manual() && c.repeat_days > 0 ? Math.max(0, Math.ceil(left / c.repeat_days) - 1) * pass.length : 0;
+      const page = !manual() && (c.targets || []).includes("page") && !A.currentPosts(c).some((p) => p.target === "page" && p.status !== "skipped") ? 1 : 0;
+      return n + pass.filter((g) => g.status === "owed").length + later + page;
+    }, 0);
     // A repeating campaign comes back to each group every repeat_days within its days;
     // the Page takes one post per 30 days. Manual posting has neither.
     const repeat = !manual() && Number.isInteger(b.repeat_days) && b.repeat_days >= 3 && b.repeat_days <= 30 ? b.repeat_days : 0;
@@ -215,8 +238,9 @@ module.exports = function createAdminCampaignsRouter({
     if (remove.ids.length) edit.remove_group_ids = remove.ids;
     for (const k of ["copies", "days", "repeat_days", "mode"]) if (b[k] !== undefined) edit[k] = b[k];
     if (t.targets) edit.targets = t.targets;
-    await audit(req, "edit_campaign", c.phone, { campaign_tail: c.id.slice(-6), fields: Object.keys(edit).join(",") });
-    const out = await admin.update(c.id, edit, deps, { version: b.version, by: "admin" });
+    const detail = { campaign_tail: c.id.slice(-6), fields: Object.keys(edit).join(",") };
+    await audit(req, "edit_campaign", c.phone, detail);
+    const out = await refused(req, "edit_campaign", c.phone, detail, () => admin.update(c.id, edit, deps, { version: b.version, by: "admin" }));
     res.json({ campaign: await rowOf(out) });
   }));
 
@@ -239,6 +263,10 @@ module.exports = function createAdminCampaignsRouter({
     let out;
     if (c.status === "paused") {
       await audit(req, "start_campaign", c.phone, { campaign_tail: c.id.slice(-6), from: c.status });
+      // Manual posting: a campaign resumed here goes on as the manual flow runs it — groups once, no Page.
+      if (manual() && ((c.targets || []).includes("page") || c.repeat)) {
+        await store.mutatePostingCampaign(c.id, (cur) => (cur.status === "paused" ? { targets: (cur.targets || []).filter((t2) => t2 !== "page"), repeat: false, repeat_days: null } : null));
+      }
       out = await campaigns.resume(c.id, deps);
     } else {
       const consent = consentOf(req.body);
@@ -250,6 +278,7 @@ module.exports = function createAdminCampaignsRouter({
       const repeatDays = manual() ? null : c.repeat_days || null;
       const g = await gates(c.phone, c.page_id, targets && targets.includes("page") ? targets : null);
       if (g.error) return res.status(g.status).json({ error: g.error });
+      if (!(c.groups || []).length && !((targets || []).includes("page") && A.pageTarget(g.conn))) return res.status(400).json({ error: "no_destination" });
       const days = b.days !== undefined ? b.days : previousDays(c);
       await audit(req, "start_campaign", c.phone, { campaign_tail: c.id.slice(-6), from: c.status, days });
       const record = consentRecord(req, consent);

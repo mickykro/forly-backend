@@ -30,6 +30,26 @@ const C = require("./posting-campaign");
   assert.equal(M.refOf("972500000001"), M.refOf("972500000001"));
   assert.notEqual(M.refOf("972500000001"), M.refOf("972500000002"));
 
+  // ── expires_at holds in manual mode: the checklist ends a campaign past it, markDone refuses ──
+  {
+    const { deps, notes, at } = await K.setup();
+    deps.env = { POSTING_MANUAL: "1" };
+    const c = await C.create(K.base({ days: 7 }), deps);
+    assert.equal((await M.queue(deps)).length, 2);
+    at(new Date(K.NOW.getTime() + 8 * K.DAY));
+    assert.equal(await M.markDone(c.id, "111", "posted", deps), null, "day 8 of a 7-day campaign: refused");
+    const ended = await K.store.getPostingCampaign(c.id);
+    assert.equal(ended.status, "completed"); assert.equal(ended.pause_reason, "expired");
+    assert.equal(ended.posts.length, 0, "nothing recorded");
+    assert.equal(notes.length, 1, "the agent hears the campaign ended");
+    const c2 = await C.create(K.base({ page: K.page("pg2"), days: 7 }), deps);
+    await K.db.savePage(K.page("pg2"));
+    assert.equal((await M.queue(deps)).length, 2, "a fresh campaign is listed");
+    at(new Date(K.NOW.getTime() + 20 * K.DAY));
+    assert.equal((await M.queue(deps)).length, 0, "past its end: gone from the queue");
+    assert.equal((await K.store.getPostingCampaign(c2.id)).status, "completed");
+  }
+
   // ── queue → markDone → completed, with one WhatsApp listing the posted group ──
   {
     const { deps, notes } = await K.setup();

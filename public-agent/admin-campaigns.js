@@ -29,6 +29,7 @@
     invalid_input: "הנתונים לא תקינים.",
     posting_unavailable_in_env: "בשרת הזה אי אפשר לשנות קמפיינים.",
     manual_unsupported: "בפרסום ידני אין פרסום בדף העסקי ואין חזרה.",
+    no_destination: "צריך לפחות קבוצה אחת (או הדף העסקי).",
     audit_unavailable: "לא ניתן לרשום את הפעולה ביומן — לא בוצע שינוי. נסו שוב.",
   };
   var fmt = function (v) { var d = new Date(v); return isNaN(d) ? "—" : d.toLocaleDateString("he-IL"); };
@@ -49,6 +50,7 @@
         "<h3>" + esc(r.agent_name || r.phone_tail) + " · " + esc(r.page_title) + " <small>" + esc(STATUS[r.status] || r.status) + "</small></h3>" +
         '<div class="manual-muted">' + r.groups.length + " קבוצות · פורסם " + r.counts.posted + " · עד " + fmt(r.expires_at) +
         (r.repeat ? " · חזרה כל " + esc(r.repeat_days) + " ימים" : "") + " · נוצר על ידי " + (r.created_by === "admin" ? "הצוות" : "הסוכן") + "</div>" +
+        ((r.manual_unsupported || []).length ? '<div class="ap-note">⚠️ בפרסום ידני לא יתבצע: ' + r.manual_unsupported.map(function (u) { return u === "page" ? "הדף העסקי" : "החזרה"; }).join(", ") + "</div>" : "") +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="edit">עריכה</button>' : "") +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="stop">עצירה</button>' : "") +
         (r.status !== "running" ? '<button type="button" class="btn btn-ghost btn-sm" data-act="start">הפעלה</button>' : "") +

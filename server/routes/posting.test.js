@@ -27,6 +27,13 @@ const { db, store } = K;
   }
 
   // ── the member gate: ids the account is not a member of (or left) → 422 with those ids ──
+  // ── manual posting: no Page target, no repeat (the manual flow cannot do them) ──
+  {
+    const { app } = await setup({ deps: { env: { POSTING_ENABLED: "1", FORLY_ENV: "prod", POSTING_MANUAL: "1" } } });
+    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ repeat_days: 7 }))).body.error, "manual_unsupported");
+    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({ targets: ["groups", "page"] }))).body.error, "manual_unsupported");
+    assert.equal((await call(app, "POST", "/api/posting/campaigns", consented({}))).status, 201, "groups once: fine");
+  }
   {
     const { app } = await setup();
     const r = await call(app, "POST", "/api/posting/campaigns", consented({ group_ids: ["111", "333", "555"] }));

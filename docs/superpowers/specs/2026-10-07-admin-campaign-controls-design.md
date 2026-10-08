@@ -25,7 +25,7 @@ Agents can create, edit, pause, stop and resume their own campaigns (`server/rou
 ## 4. API
 
 All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-enable), and an `audit_events` row: action, admin, campaign id ending, changed field names. Never texts, never the full phone.
-- The audit row is written before the change. If it cannot be written, nothing changes and the request fails `503 audit_unavailable`. A change refused after its row was written (stale version, busy) leaves a row for a change that did not happen; a change never happens without a row.
+- The audit row is written before the change, with `detail.outcome: "requested"`. If it cannot be written, nothing changes and the request fails `503 audit_unavailable`. A change refused after its row was written (stale version, busy, nowhere to post) adds a second row, `outcome: "refused"` with `refused: <code>` (best effort: the refusal stands even if that row fails). A change never happens without a row, and the log never shows a refused change as made.
 - Audit rows store digits-only phone tails (the audit store requires 0–4 digits); the consent's `admin_tail` is digits-only too.
 - `say()` sends `admin_created` and `admin_stopped` also when `POSTING_MANUAL=1` (it drops other kinds there); an admin stop sends `admin_stopped` instead of the agent's `stopped`.
 
@@ -50,7 +50,7 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 
 **Edit**
 - Every edit runs in `store.mutatePostingCampaign` and carries the `version` the admin loaded. A different stored version → `409 stale_version`.
-- Remove groups: owed posts for those groups are dropped; posted and skipped history stays. If an attempt for a removed group is in progress (reserved, session started, composer ready) → `409 busy`, nothing changed.
+- Remove groups: owed posts for those groups are dropped; posted and skipped history stays. An edit that leaves no group and no usable Page target (manual posting has no Page) → `400 no_destination`, nothing changed. A restart of a campaign with no destination is refused the same way. If an attempt for a removed group is in progress (reserved, session started, composer ready) → `409 busy`, nothing changed.
 - Texts: editable through the API (`copies`); the tab has no text editor yet. Same validation as the agent texts screen (string, at most `MAX_COPY`, at most 60).
 - End date 1–30 days from now; repeat 3–30 days or off (existing limits).
 - Targets and mode re-checked against the connection, as on create.
@@ -66,14 +66,15 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 
 ## 6. Interactions
 
-- Prod (`POSTING_MANUAL=1`): admin campaigns appear in the manual posting list like any other. The manual flow publishes groups once, by hand: a Page target or repeat is refused there (`400 manual_unsupported`), a restart drops them, and the tab hides repeat, mode and Page (`GET /campaigns` returns `manual`).
+- Prod (`POSTING_MANUAL=1`): admin campaigns appear in the manual posting list like any other. The manual flow publishes groups once, by hand: a Page target or repeat is refused there (`400 manual_unsupported`) on the admin API and on the agent's `POST /api/posting/campaigns` alike, and the agent's page hides them. A restart or an admin resume of an older campaign drops them; such a campaign is listed with `manual_unsupported: ["page" | "repeat"]` and the tab shows what will not happen. The tab hides repeat, mode and Page (`GET /campaigns` returns `manual`).
+- In manual mode `expires_at` holds as in automatic posting: the manual checklist ends a running campaign past it (`completed`, `pause_reason: "expired"`, open posts skipped, the agent told), and marking a group done on one past it is refused (404, the campaign ends).
 - Local: automated posting picks them up on local's own data.
 - Profiles spec: campaigns refer to agents by phone; profile names come from the resolver. No dependency.
 - The agent keeps full control of their campaign in their own screens.
 
 ## 7. Errors
 
-`invalid_input`, `not_found`, `facebook_not_connected`, `page_not_confirmed`, `page_target_unavailable`, `consent_note_required`, `stale_version`, `busy`, `account_halted`, `stepup_required`, `manual_unsupported`, `audit_unavailable`. Each has a Hebrew message in the tab.
+`invalid_input`, `not_found`, `facebook_not_connected`, `page_not_confirmed`, `page_target_unavailable`, `consent_note_required`, `stale_version`, `busy`, `account_halted`, `stepup_required`, `manual_unsupported`, `audit_unavailable`, `no_destination`. Each has a Hebrew message in the tab.
 
 ## 8. Tests
 
@@ -87,4 +88,4 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 
 - The manual tab shows, per owed group, the agent's posts there today (`n/3`: manual campaign posts plus everything `accountView` counts — attempts, share-kit posts — matched by every id the group is known by) and whether automatic posting's rules would block a post now (`posting-safety.groupBlock`: 3 a day per group; the same property not within 3 days or the repeat interval).
 - Marking a blocked group "posted" is refused (`409 group_limit`) unless the admin gives a reason (3–200 chars); the override is audited (`manual_limit_override`). Skipping is never blocked. The limit check and the record run one at a time per agent (in-process; the server is one container).
-- The campaigns form shows an estimate at today's limits: posts, posts per week, days, and a warning when it does not fit the campaign's days (`posting-limits.estimate`). It counts every repeat pass within the days and one Page post.
+- The campaigns form shows an estimate at today's limits: posts, posts per week, days, and a warning when it does not fit the campaign's days (`posting-limits.estimate`). It counts every repeat pass within the days and one Page post, and for the agent's other live campaigns their owed groups, their later repeat passes within the window, and a Page post not yet made.

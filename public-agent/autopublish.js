@@ -69,7 +69,6 @@
     const video = v0 && /^https?:\/\//.test(v0.video_url || "") ? `<video class="ap-fb-video" controls playsinline preload="metadata" src="${U.esc(v0.video_url)}"></video>` : "";
     return `<div class="ap-preview">${cards}${video}
       <p class="camp-muted camp-small">זה הנוסח שיעלה לכל קבוצה, עם הסרטון של הנכס. אפשר לערוך כל אחד. אחרי האישור לא נבקש אישור נוסף, ובסוף תקבלו הודעת וואטסאפ עם הקבוצות שבהן פורסם.</p>
-      ${repeatHtml(p.page_id)}
       <button type="button" class="btn btn-gold btn-sm" data-confirm="${U.esc(p.page_id)}">אישור והתחלת הפרסום</button></div>`;
   }
   function previewHtml(p) {
@@ -90,7 +89,7 @@
       <p class="ap-note">${U.esc(v.link_notice || U.linkNotice(v.link_kind))}</p>
       <p class="camp-muted camp-small">כך ייראה הפוסט. הנוסח משתנה מעט מקבוצה לקבוצה, והמחיר והפרטים נלקחים מדף הנכס ברגע הפרסום.</p>
       <p class="ap-note"><b>יפורסם בקבוצות (${groupsOf(p).size}):</b> ${members().filter((g) => groupsOf(p).has(String(g.group_id))).map((g) => U.esc(g.name)).join(" · ") || "—"}</p>
-      ${confirming.has(p.page_id) ? repeatHtml(p.page_id) : ""}
+      ${confirming.has(p.page_id) && !(settings && settings.manual) ? repeatHtml(p.page_id) : ""}
       ${confirming.has(p.page_id) && mode() === "per_post" ? whenHtml(p.page_id)
     + '<p class="camp-muted camp-small">האישור כאן הוא האישור של הפוסט הראשון. הפוסטים לשאר הקבוצות יופיעו כאן, בשורה של הנכס, לאישור שלכם.</p>' : ""}
       ${confirming.has(p.page_id) ? `<button type="button" class="btn btn-gold btn-sm" data-confirm="${id}">אישור והפעלת פרסום אוטומטי</button>` : ""}</div>`;
@@ -130,7 +129,7 @@
   }
   // How often the property returns to its groups: once, or every N days.
   const repeatOf = (key) => { const d = draftOf(key); if (!d.repeat) d.repeat = { k: "once", n: 4 }; return d.repeat; };
-  const repeatDays = (key) => { const r = repeatOf(key); return r.k === "once" ? null : r.k === "custom" ? r.n : Number(r.k); };
+  const repeatDays = (key) => { if (settings && settings.manual) return null; const r = repeatOf(key); return r.k === "once" ? null : r.k === "custom" ? r.n : Number(r.k); };
   const everyText = (n) => (n === 7 ? "כל שבוע" : n === 14 ? "כל שבועיים" : `כל ${n} ימים`);
   function repeatHtml(key) {
     const r = repeatOf(key), k = U.esc(key);
@@ -156,7 +155,8 @@
   const usableIds = () => members().filter(U.usable).map((g) => String(g.group_id));
   const mode = () => (document.querySelector('input[name="apMode"]:checked') || {}).value || "per_post";
   const pages = () => U.cardPages(settings);
-  const pageOn = () => pages().length > 0 && !!($("apPageOn") || {}).checked;
+  // Manual posting (settings.manual): groups once, by hand — no Page post, no repeat.
+  const pageOn = () => !(settings && settings.manual) && pages().length > 0 && !!($("apPageOn") || {}).checked;
   const withPage = () => pageOn() && (pages().length === 1 || !!($("apPageSelect") || {}).value);
   const DEAL = { sale: "למכירה", rent: "להשכרה" };
 
@@ -299,7 +299,7 @@
   }
 
   function renderPages(chosen) {
-    const ps = pages(), box = $("apPageTarget");
+    const ps = settings && settings.manual ? [] : pages(), box = $("apPageTarget");
     box.innerHTML = !ps.length ? "" : `<label class="camp-consent"><input type="checkbox" id="apPageOn"> <span><strong>גם בדף העסקי</strong>` +
       `<small>${ps.length === 1 ? `${U.esc(ps[0].name)} · ` : ""}כל נכס שתפעילו יתפרסם גם בדף. אם כבר פרסמתם אותו שם ידנית, אל תסמנו — שלא יעלה פעמיים.</small></span></label>` +
       (ps.length > 1 ? `<label class="camp-page-pick" hidden>באיזה דף: <select id="apPageSelect"><option value="">בחרו דף…</option>` +

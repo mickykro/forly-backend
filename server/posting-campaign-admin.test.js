@@ -103,6 +103,15 @@ const A_ = require("./posting-account");
     assert.ok(M.admin_created({ id: "c1", groups: [{}, {}] }).body.includes("2"));
     assert.ok(M.admin_stopped({ id: "c1" }).header.length > 0);
   }
+  // ── an edit that leaves nowhere to post is refused ──
+  {
+    const { deps } = await K.setup();
+    const c = await C.create(K.base(), deps);
+    const cur = await K.store.getPostingCampaign(c.id);
+    await assert.rejects(CA.update(c.id, { remove_group_ids: ["111", "222"] }, deps, { version: cur.updated_at }), (e) => e.code === "no_destination");
+    assert.deepEqual((await K.store.getPostingCampaign(c.id)).groups.map((g) => g.group_id), ["111", "222"], "untouched");
+  }
+
   // ── targets and mode reconcile the posts already planned ──
   {
     const { deps, notes } = await K.setup();

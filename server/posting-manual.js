@@ -5,7 +5,10 @@
  * web; an admin publishes it from the admin "פרסום ידני" tab in a live
  * browser on the agent's own profile and ticks each group off here. No
  * automatic posting, no planner, no WhatsApp until the campaign is complete:
- * then one message with the groups it went up in.
+ * then one message with the groups it went up in. The campaign's expires_at
+ * holds here as in automatic posting: the checklist ends a campaign past it
+ * (completed, expired — the sweeper's own housekeeping never runs in manual
+ * mode), and markDone refuses one past it.
  */
 const crypto = require("crypto");
 const A = require("./posting-account");
@@ -18,6 +21,17 @@ const enabled = (env = process.env) => env.POSTING_MANUAL === "1";
 const refOf = (phone) => `acct_${crypto.createHmac("sha256", process.env.PROFILE_KEY || "forly-manual").update(`${phone}|manual-ref`).digest("hex").slice(0, 24)}`;
 
 const DONE = new Set(["posted", "skipped", "pending_group_approval"]);
+const expired = (c, now) => Number.isFinite(new Date(c.expires_at).getTime()) && now.getTime() > new Date(c.expires_at).getTime();
+// A running campaign past its end: completed (expired), its open posts
+// skipped, the agent told — as posting-tick's housekeeping does.
+async function expire(c, deps, x) {
+  const next = await A.mutate(x, c.id, (cur) => (cur.status !== "running" ? null : {
+    status: "completed", pause_reason: "expired",
+    posts: (cur.posts || []).map((p) => (["scheduled", "pending_approval"].includes(p.status) ? { ...p, status: "skipped", error_code: "expired", copy: undefined } : p)),
+  }));
+  if (next && next.status === "completed") await A.say(deps, next.phone, "completed", "🎉 הפרסום הושלם", next);
+  return next;
+}
 const urlOf = (g) => g.url || g.canonical_url || `https://www.facebook.com/groups/${g.group_id}`;
 const pageUrlOf = (pageId, base) => `${String(base || "").replace(/\/+$/, "")}/p/${pageId}`;
 
@@ -84,6 +98,7 @@ async function checklist(deps = {}) {
   for (const [i, c] of running.entries()) {
     const page = pages[i];
     if (!page) continue;
+    if (expired(c, now)) { await expire(c, deps, x); continue; }
     const agent = await agentOf(c.phone);
     const limits = L.limitsFor(c, agent.campaigns, now, config, agent);
     const byId = new Map((c.groups || []).map((g) => [String(g.group_id), g]));
@@ -121,9 +136,10 @@ async function markDone(campaignId, groupId, status, deps = {}) {
   if (!["posted", "skipped"].includes(status)) return null;
   const x = A.ctxOf(deps), now = A.iso(x.clock());
   const id = crypto.randomUUID();
-  let finished = false;
+  let finished = false, past = false;
   const next = await A.mutate(x, String(campaignId), (cur) => {
     if (!cur || cur.status !== "running") return null;
+    if (expired(cur, x.clock())) { past = true; return null; }
     const g = owed(cur).find((q) => String(q.group_id) === String(groupId));
     if (!g) return null;
     const post = {
@@ -134,9 +150,10 @@ async function markDone(campaignId, groupId, status, deps = {}) {
     finished = owed({ ...cur, posts }).length === 0;
     return finished ? { posts, status: "completed" } : { posts };
   });
+  if (past) { await expire({ id: String(campaignId) }, deps, x); return null; }
   if (!next || !(next.posts || []).some((p) => p && p.id === id)) return null;
   if (finished) await A.say(deps, next.phone, "completed", "🎉 הפרסום הושלם", next);
   return next;
 }
 
-module.exports = { enabled, refOf, owed, propertyCard, versions, groupsOf, checklist, queueOf, queue, markDone };
+module.exports = { enabled, refOf, owed, expired, propertyCard, versions, groupsOf, checklist, queueOf, queue, markDone };

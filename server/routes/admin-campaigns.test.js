@@ -129,6 +129,15 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     assert.ok(est.body.posts >= 2); assert.equal(typeof est.body.days, "number"); assert.equal(typeof est.body.fits, "boolean");
     assert.equal((await call(server, "POST", "/estimate", { agent: "acct_nope", group_ids: [] }, false)).status, 400);
 
+    // ── another live campaign's later repeat passes take capacity too ──
+    const other = (await K.store.listPostingCampaignsByPhone(AGENT))[0];
+    await K.store.mutatePostingCampaign(other.id, () => ({ status: "running", repeat: false, repeat_days: null, expires_at: K.iso(K.NOW.getTime() + 30 * K.DAY) }));
+    const estBefore = (await call(server, "POST", "/estimate", { agent: REF, page_id: "pgNew", group_ids: ["111", "222"], days: 30 }, false)).body.posts;
+    await K.store.mutatePostingCampaign(other.id, () => ({ repeat: true, repeat_days: 3 }));
+    const estRep = await call(server, "POST", "/estimate", { agent: REF, page_id: "pgNew", group_ids: ["111", "222"], days: 30 }, false);
+    assert.equal(estRep.body.posts - estBefore, 9 * other.groups.length, "its 9 later passes are counted");
+    await K.store.mutatePostingCampaign(other.id, () => ({ status: other.status, repeat: other.repeat, repeat_days: other.repeat_days, expires_at: other.expires_at }));
+
     // ── the estimate counts every repeat pass and the Page ──
     const est3 = await call(server, "POST", "/estimate", { agent: REF, page_id: "pgNew", group_ids: ["111", "222"], days: 30, repeat_days: 3 }, false);
     assert.equal(est3.body.posts - est.body.posts, 2 * 9, "two groups every 3 days over 30 days: 10 passes, not 1");
@@ -144,6 +153,22 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     assert.equal(again7.status, 200);
     assert.equal(new Date(again7.body.campaign.expires_at).getTime(), K.NOW.getTime() + 7 * K.DAY, "7-day run → 7 days, not 30");
     assert.deepEqual(again7.body.campaign.counts, { owed: 2, posted: 0, skipped: 0 }, "the previous run's post is history");
+
+    // ── an edit refused after its row: a second row says so ──
+    const curV = (await K.store.getPostingCampaign(row.id)).updated_at;
+    const noDest = await call(server, "PATCH", `/campaigns/${row.id}`, { version: curV, remove_group_ids: ["111", "222"] });
+    assert.equal(noDest.status, 400); assert.equal(noDest.body.error, "no_destination");
+    const edits = (await audits()).filter((r) => r.action === "edit_campaign").slice(-2);
+    assert.deepEqual(edits.map((r) => r.detail.outcome), ["requested", "refused"]);
+    assert.equal(edits[1].detail.refused, "no_destination");
+    assert.equal((await call(server, "PATCH", `/campaigns/${row.id}`, { version: "nope", days: 5 })).status, 409);
+    assert.equal((await audits()).filter((r) => r.action === "edit_campaign").pop().detail.refused, "stale_version");
+
+    // ── a restart with nowhere to post is refused ──
+    await K.store.mutatePostingCampaign(row.id, () => ({ status: "stopped", groups: [] }));
+    const empty = await call(server, "POST", `/campaigns/${row.id}/start`, { consent: CONSENT });
+    assert.equal(empty.status, 400); assert.equal(empty.body.error, "no_destination");
+    await K.store.mutatePostingCampaign(row.id, () => ({ status: "running", groups: row.groups.map((g) => ({ group_id: g.group_id, name: g.name, url: K.G(g.group_id) })) }));
 
     // ── no audit row, no change ──
     const realAudit = K.store.addAuditEvent;
@@ -174,6 +199,12 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       assert.equal((await call(mServer, "POST", "/campaigns", Object.assign({}, mBody, { repeat_days: 7 }))).body.error, "manual_unsupported");
       const cur = await K.store.getPostingCampaign(row.id);
       assert.equal((await call(mServer, "PATCH", `/campaigns/${row.id}`, { version: cur.updated_at, repeat_days: 7 })).body.error, "manual_unsupported");
+      // an older campaign with a Page or repeat is flagged, and a resume drops them
+      await K.store.mutatePostingCampaign(row.id, () => ({ status: "paused", pause_reason: "agent", repeat: true, repeat_days: 7 }));
+      const flagged = (await call(mServer, "GET", "/campaigns", undefined, false)).body.campaigns.find((c2) => c2.id === row.id);
+      assert.deepEqual(flagged.manual_unsupported, ["repeat"]);
+      const resumed = await call(mServer, "POST", `/campaigns/${row.id}/start`, {});
+      assert.equal(resumed.status, 200); assert.equal(resumed.body.campaign.repeat, false); assert.deepEqual(resumed.body.campaign.manual_unsupported, []);
     } finally { mServer.close(); }
 
     // ── staging never changes campaigns ──

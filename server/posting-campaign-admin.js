@@ -6,7 +6,9 @@
  * loaded it; a campaign changed since is refused (stale_version), never
  * overwritten. Removing a group drops its not-yet-started posts (skipped,
  * error_code "removed") and keeps its history; a group with an attempt past
- * reservation is refused (busy) — that post is already on its way.
+ * reservation is refused (busy) — that post is already on its way. An edit
+ * that leaves nowhere to post (no group, no Page; manual posting has no
+ * Page) is refused (no_destination).
  * Targets and mode reconcile the posts already planned: a post to a target
  * no longer wanted is skipped (target_removed; one already posting refuses
  * the edit, busy); standing → per_post sends unapproved scheduled posts back
@@ -46,6 +48,7 @@ async function update(id, edit = {}, deps = {}, { version, by = "admin" } = {}) 
   const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
   const added = Array.isArray(edit.add_groups) && edit.add_groups.length ? C.normalizeGroups(edit.add_groups, ctx) : [];
   const env = deps.env || process.env;
+  const manual = require("./posting-manual").enabled(env);
 
   let refused = null, sentBack = [];
   const out = await A.mutate(x, id, (cur) => {
@@ -77,6 +80,8 @@ async function update(id, edit = {}, deps = {}, { version, by = "admin" } = {}) 
     if (Array.isArray(edit.targets)) patch.targets = A.targetsFor(conn, edit.targets);
     if (edit.mode) patch.mode = localMode.requireApproval(env) || edit.mode === "per_post" ? "per_post" : "standing";
     const targets = patch.targets || cur.targets || ["groups"];
+    const pageOn = targets.includes("page") && !manual && !!A.pageTarget(conn);
+    if (!groups.length && !pageOn) { refused = "no_destination"; return null; }
     const mode = patch.mode || cur.mode;
     const posts = patch.posts || cur.posts || [];
     if (posts.some((p) => p.status === "posting" && !targets.includes(kindOf(p)))) { refused = "busy"; return null; }

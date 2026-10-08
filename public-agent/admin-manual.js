@@ -33,7 +33,7 @@
     cannot_verify_login: "לא הצלחנו לוודא את ההתחברות. נסו שוב בעוד רגע.",
     verify_failed: "הבדיקה נכשלה. נסו שוב.",
   };
-  var LIMIT = { group_daily_cap: "כבר 3 פוסטים של הסוכן בקבוצה הזו היום", property_cooldown: "הנכס פורסם בקבוצה הזו לפני פחות מ-3 ימים" };
+  var LIMIT = { group_daily_cap: "כבר 3 פוסטים של הסוכן בקבוצה הזו היום", property_cooldown: "הנכס פורסם בקבוצה הזו לאחרונה — לא לפני המועד" }; // the interval is the campaign's (3 days, or its repeat)
   var limitText = function (l) { return l.block ? (LIMIT[l.block.why] || "הקבוצה הגיעה למגבלה") + (l.block.until ? " (עד " + when(l.block.until) + ")" : "") : ""; };
   var fail = function (e) { FLY.toast(ERR[e && e.code] || "הפעולה נכשלה"); };
   function call(method, path, body) {
