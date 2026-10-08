@@ -10,7 +10,7 @@
   var esc = FLY.esc;
   var API = "/api/admin/campaigns";
   var rows = [], agents = [], editing = null; // editing: the row being edited, or null for a new campaign
-  var manual = false; // POSTING_MANUAL=1 on the server: groups by hand, one pass, no Page
+  var manual = false; // POSTING_MANUAL=1 on the server: an admin publishes by hand; the approval mode has no meaning there
   var STATUS = { running: "פעיל", paused: "מושהה", stopped: "נעצר", completed: "הסתיים" };
   var ERR = {
     consent_note_required: "חובה לבחור איך הסוכן הסכים ולכתוב הערה.",
@@ -28,7 +28,6 @@
     not_found: "לא נמצא.",
     invalid_input: "הנתונים לא תקינים.",
     posting_unavailable_in_env: "בשרת הזה אי אפשר לשנות קמפיינים.",
-    manual_unsupported: "בפרסום ידני אין פרסום בדף העסקי ואין חזרה.",
     no_destination: "צריך לפחות קבוצה אחת (או הדף העסקי).",
     audit_unavailable: "לא ניתן לרשום את הפעולה ביומן — לא בוצע שינוי. נסו שוב.",
   };
@@ -50,7 +49,6 @@
         "<h3>" + esc(r.agent_name || r.phone_tail) + " · " + esc(r.page_title) + " <small>" + esc(STATUS[r.status] || r.status) + "</small></h3>" +
         '<div class="manual-muted">' + r.groups.length + " קבוצות · פורסם " + r.counts.posted + " · עד " + fmt(r.expires_at) +
         (r.repeat ? " · חזרה כל " + esc(r.repeat_days) + " ימים" : "") + " · נוצר על ידי " + (r.created_by === "admin" ? "הצוות" : "הסוכן") + "</div>" +
-        ((r.manual_unsupported || []).length ? '<div class="ap-note">⚠️ בפרסום ידני לא יתבצע: ' + r.manual_unsupported.map(function (u) { return u === "page" ? "הדף העסקי" : "החזרה"; }).join(", ") + "</div>" : "") +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="edit">עריכה</button>' : "") +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="stop">עצירה</button>' : "") +
         (r.status !== "running" ? '<button type="button" class="btn btn-ghost btn-sm" data-act="start">הפעלה</button>' : "") +
@@ -105,8 +103,7 @@
   function setMain(show) { // the campaign fields vs. the restart form (consent and days)
     Array.prototype.forEach.call(document.querySelectorAll("#campForm > label, #campForm > fieldset:not(#campFormConsent)"), function (el) { el.hidden = !show; });
     $("#campFormDays").closest("label").hidden = false;
-    // Manual posting publishes groups once, by hand: no repeat, no Page, no approval mode.
-    ["#campFormRepeat", "#campFormMode", "#campFormPage"].forEach(function (s) { if (manual) $(s).closest("label").hidden = true; });
+    if (manual) $("#campFormMode").closest("label").hidden = true; // by hand there is no approval step
   }
   function closeForm() { seq++; editing = null; restarting = null; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; }
   function validNote() {
@@ -163,8 +160,8 @@
       return settle(req("POST", "/campaigns/" + encodeURIComponent(rid) + "/start", { consent: { method: $("#campFormConsentMethod").value, note: rn }, days: Number($("#campFormDays").value) || 30 })
         .then(function () { closeForm(); FLY.toast("הקמפיין פעיל"); load(); }).catch(failClose));
     }
-    var targets = $("#campFormPage").checked && !manual ? ["groups", "page"] : ["groups"];
-    var repeat = manual ? 0 : Number($("#campFormRepeat").value) || 0;
+    var targets = $("#campFormPage").checked ? ["groups", "page"] : ["groups"];
+    var repeat = Number($("#campFormRepeat").value) || 0;
     if (!editing) {
       var note = validNote(); if (!note) return;
       return settle(req("POST", "/campaigns", {

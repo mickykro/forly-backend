@@ -64,7 +64,6 @@
     not_resumable: "אי אפשר להמשיך כרגע — החשבון עדיין ממתין לבדיקה.",
     needs_developer: "הצוות שלנו מתקן תקלה אצלנו ויחזיר את הפרסום בעצמו — לא צריך לעשות כלום.",
     page_target_unavailable: "עוד אי אפשר לפרסם אוטומטית בדף העסקי — חברו מחדש את החשבון כדי שנזהה את הדף.",
-    manual_unsupported: "כרגע הפרסום נעשה ידנית: לקבוצות בלבד, פעם אחת, בלי הדף העסקי ובלי חזרה.",
     not_found: "לא מצאנו את זה — רעננו את העמוד.", post_not_found: "הפוסט הזה כבר לא קיים — רעננו את העמוד.",
     invalid_input: "משהו בבחירה לא תקין — בדקו ונסו שוב.",
   };
@@ -244,8 +243,7 @@
     const mode = () => (document.querySelector('input[name="campMode"]:checked') || {}).value || "per_post";
     const live = (c) => !!c && (c.status === "running" || c.status === "paused");
     // The Page is opt-in (never a default): the Graph "פרסום בדף הפייסבוק" above is outside the campaign's duplicate checks.
-    // Manual posting (settings.manual): groups once, by hand — no Page post.
-    const pageOn = () => !(settings && settings.manual) && pages().length > 0 && !!($("campPageOn") || {}).checked;
+    const pageOn = () => pages().length > 0 && !!($("campPageOn") || {}).checked;
     const withPage = () => pageOn() && (pages().length === 1 || !!($("campPageSelect") || {}).value);
 
     async function loadSettings() {
@@ -259,7 +257,7 @@
     }
 
     function renderPages(chosen) {
-      const ps = settings && settings.manual ? [] : pages(), box = $("campPageTarget");
+      const ps = pages(), box = $("campPageTarget");
       box.innerHTML = !ps.length ? "" : `<label class="camp-consent"><input type="checkbox" id="campPageOn"> <span><strong>גם בדף העסקי</strong>` +
         (ps.length === 1 ? `<small>${U.esc(ps[0].name)} · אם כבר פרסמתם בדף מלמעלה, אל תסמנו — שלא יעלה פעמיים.</small>`
           : `<small>אם כבר פרסמתם בדף מלמעלה, אל תסמנו — שלא יעלה פעמיים.</small>`) + `</span></label>` +

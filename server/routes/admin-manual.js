@@ -20,7 +20,8 @@ const CHOOSER_FRESH_MS = 60000;
 // The admin flips between the list and the browser: keep the viewer connected
 // that long rather than reconnecting (CDP + checks) after 20s without a watcher.
 const VIEW_IDLE_MS = 10 * 60000;
-const GROUP_URL = /^https:\/\/(www\.|m\.|web\.)?facebook\.com\/groups\/[^/?#\s]+\/?$/i;
+// Where the admin's browser may be sent: a group, or the agent's Page (a target by hand too).
+const GROUP_URL = /^https:\/\/(www\.|m\.|web\.)?facebook\.com\/[^?#\s]+$/i;
 
 module.exports = function createAdminManualRouter({
   requireAdmin, deps = {},
@@ -111,11 +112,11 @@ module.exports = function createAdminManualRouter({
     // 2/3 cannot both pass. In-process: the server runs as one container.
     return oneAtATime(String(head.phone), async () => {
       const cur = await x.store.getPostingCampaign(String(req.params.id));
-      if (status === "posted") {
-        if (cur && M.owed(cur).some((g) => String(g.group_id) === String(req.params.gid))) {
-          const config = await A.configOf(deps, x);
-          const now = x.clock();
-          const agent = await L.agentPosts(cur.phone, deps, x, now);
+      if (status === "posted" && cur) {
+        const config = await A.configOf(deps, x);
+        const now = x.clock();
+        const agent = await L.agentPosts(cur.phone, deps, x, now);
+        if (M.owed(cur, agent.conn, now).some((g) => String(g.group_id) === String(req.params.gid))) {
           const lim = L.limitsFor(cur, agent.campaigns, now, config, agent)[String(req.params.gid)];
           if (lim && lim.block && !override) return res.status(409).json({ error: "group_limit", why: lim.block.why, until: lim.block.until });
           if (lim && lim.block) {
@@ -198,10 +199,11 @@ module.exports = function createAdminManualRouter({
     const page = phone && (await x.db.getPage(String(req.params.pageId)));
     if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
     const c = await x.store.getPostingCampaign(x.store.campaignId(phone, page.page_id)).catch(() => null);
+    const conn = c ? (await x.db.getConnection(phone)) || {} : {};
     res.set("Cache-Control", "no-store");
     res.json({
       property: M.propertyCard(page, deps.pageBaseUrl), versions: M.versions(page, deps.pageBaseUrl),
-      campaign: c ? { id: c.id, status: c.status } : null, groups: M.groupsOf(c),
+      campaign: c ? { id: c.id, status: c.status } : null, groups: M.groupsOf(c, conn, x.clock()),
     });
   }));
 

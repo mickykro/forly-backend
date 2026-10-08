@@ -11,9 +11,9 @@
  * (who agreed, how, a note). Agents are addressed by posting-manual.refOf.
  * Staging shares production's Firestore: no change outside prod (or a local
  * box with POSTING_SWEEPER=1), as routes/posting.js.
- * POSTING_MANUAL=1: an admin publishes groups by hand (posting-manual), one
- * pass, no Page — so the Page target and repeat are refused there
- * (manual_unsupported), and a restart drops them.
+ * POSTING_MANUAL=1: an admin publishes by hand (posting-manual) — the same
+ * targets, Page and repeat included; only the approval mode has no meaning
+ * there (the tab hides it).
  */
 const express = require("express");
 const A = require("../posting-account");
@@ -76,8 +76,6 @@ module.exports = function createAdminCampaignsRouter({
     }
   }
   const manual = () => require("../posting-manual").enabled(env);
-  // What the manual flow cannot do: a Page post, a second pass.
-  const manualRefuses = (targets, repeatDays) => manual() && ((Array.isArray(targets) && targets.includes("page")) || Number(repeatDays) > 0);
   async function phones() { return (await store.listConnectedPhones("facebook").catch(() => [])).map(String); }
   async function phoneOf(ref) { return (await phones()).find((p) => M.refOf(p) === String(ref)) || null; }
   const names = new Map();
@@ -85,9 +83,14 @@ module.exports = function createAdminCampaignsRouter({
     if (!names.has(phone)) { const b = (await db.getBusiness(phone).catch(() => null)) || {}; names.set(phone, b.full_name || b.business_name || ""); }
     return names.get(phone);
   }
+  const conns = new Map();
+  async function connOf(phone) {
+    if (!conns.has(phone)) conns.set(phone, (await db.getConnection(phone).catch(() => null)) || {});
+    return conns.get(phone);
+  }
   async function rowOf(c) {
     const page = (await db.getPage(c.page_id).catch(() => null)) || {};
-    const pass = M.groupsOf(c); // this pass only: a restart keeps older posts as history
+    const pass = M.groupsOf(c, await connOf(c.phone), x.clock()); // this pass only: a restart keeps older posts as history
     const n = (st) => pass.filter((g) => g.status === st).length;
     return {
       id: c.id, ref: M.refOf(c.phone), phone_tail: A.tail(c.phone), agent_name: await nameOf(c.phone),
@@ -96,8 +99,6 @@ module.exports = function createAdminCampaignsRouter({
       groups: (c.groups || []).map((g) => ({ group_id: g.group_id, name: g.name || "", copy: g.copy })),
       counts: { owed: n("owed"), posted: n("posted"), skipped: n("skipped") },
       created_by: c.created_by || "agent", consent_by: c.consent_by || { by: "agent" }, version: c.updated_at,
-      // Manual posting cannot do what an older (or the agent's) campaign asks: shown, not hidden.
-      manual_unsupported: manual() ? [(c.targets || []).includes("page") ? "page" : null, c.repeat ? "repeat" : null].filter(Boolean) : [],
     };
   }
   // The same gates as the agent's create: connected, the page is the agent's, a confirmed Page when targeted.
@@ -113,15 +114,6 @@ module.exports = function createAdminCampaignsRouter({
   }
   async function grantPermission(phone, consent) {
     await store.mutateConnection(phone, (cur) => (PC.permActive(cur.posting_permission) ? null : { posting_permission: PC.campaignPermission(cur.posting_permission, x.clock(), consent) }));
-  }
-  // campaigns.resume plus the manual-mode strip (no Page, no repeat) in one campaign transaction.
-  async function resumeStripped(id, phone) {
-    const conn = (await db.getConnection(phone)) || {}; // read again right before the change, as campaigns.resume does
-    if (campaigns._test.accountBlocked(conn)) return store.getPostingCampaign(id);
-    return A.mutate(x, id, (cur) => (cur.status !== "paused" ? null : {
-      status: "running", pause_reason: null, consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
-      targets: A.targetsFor(conn, (cur.targets || []).filter((t2) => t2 !== "page")), repeat: false, repeat_days: null,
-    }));
   }
   // A restart runs as long as the run it repeats (1–30 days), unless the admin says otherwise.
   function previousDays(c) {
@@ -139,6 +131,7 @@ module.exports = function createAdminCampaignsRouter({
     for (const s of want) all = all.concat(await store.listPostingCampaignsByStatus(s, 200));
     if (req.query.agent) all = all.filter((c) => M.refOf(c.phone) === String(req.query.agent));
     all.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+    conns.clear();
     res.json({ campaigns: await Promise.all(all.map(rowOf)), manual: manual() });
   }));
   router.get("/agents", requireAdmin, wrap(async (req, res) => {
@@ -171,20 +164,19 @@ module.exports = function createAdminCampaignsRouter({
     const conn = (await db.getConnection(phone)) || {};
     const live = (await store.listPostingCampaignsByPhone(phone)).filter((c) => LIVE.has(c.status) && c.page_id !== b.page_id);
     const days = Number.isFinite(b.days) ? Math.min(Math.max(b.days, 1), 30) : 30;
-    // What the agent's other live campaigns still take within these days: this
-    // pass's owed groups, every later repeat pass, and a Page post not yet made.
+    // What the agent's other live campaigns still take within these days: what
+    // is owed now (the Page included), and every later repeat pass of the groups.
     const owed = live.reduce((n, c) => {
-      const pass = M.groupsOf(c);
+      const pass = M.groupsOf(c, conn, now);
       const left = Math.min(days, Math.max(0, (new Date(c.expires_at).getTime() - now.getTime()) / DAY));
-      const later = !manual() && c.repeat_days > 0 ? Math.max(0, Math.ceil(left / c.repeat_days) - 1) * pass.length : 0;
-      const page = !manual() && (c.targets || []).includes("page") && !A.currentPosts(c).some((p) => p.target === "page" && p.status !== "skipped") ? 1 : 0;
-      return n + pass.filter((g) => g.status === "owed").length + later + page;
+      const later = c.repeat && c.repeat_days > 0 ? Math.max(0, Math.ceil(left / c.repeat_days) - 1) * (c.groups || []).length : 0;
+      return n + pass.filter((g) => g.status === "owed").length + later;
     }, 0);
     // A repeating campaign comes back to each group every repeat_days within its days;
-    // the Page takes one post per 30 days. Manual posting has neither.
-    const repeat = !manual() && Number.isInteger(b.repeat_days) && b.repeat_days >= 3 && b.repeat_days <= 30 ? b.repeat_days : 0;
+    // the Page takes one post per 30 days.
+    const repeat = Number.isInteger(b.repeat_days) && b.repeat_days >= 3 && b.repeat_days <= 30 ? b.repeat_days : 0;
     const passes = repeat ? Math.ceil(days / repeat) : 1;
-    const page = !manual() && Array.isArray(b.targets) && b.targets.includes("page") && A.pageTarget(conn) ? 1 : 0;
+    const page = Array.isArray(b.targets) && b.targets.includes("page") && A.pageTarget(conn) ? 1 : 0;
     const config = await A.configOf(deps, x);
     const account = await A.accountView(phone, conn, deps, now);
     res.json(require("../posting-limits").estimate({ posts: owed + (ids.ids || []).length * passes + page, account, now, config, daysLeft: days }));
@@ -197,7 +189,6 @@ module.exports = function createAdminCampaignsRouter({
     if (!consent) return res.status(400).json({ error: "consent_note_required" });
     const v = PC.validCreate(b);
     if (!v) return res.status(400).json({ error: "invalid_input" });
-    if (manualRefuses(v.targets, b.repeat_days)) return res.status(400).json({ error: "manual_unsupported" });
     const phone = await phoneOf(b.agent);
     if (!phone) return res.status(404).json({ error: "not_found" });
     const g = await gates(phone, b.page_id, v.targets);
@@ -231,7 +222,6 @@ module.exports = function createAdminCampaignsRouter({
       repeat_days: b.repeat_days === 0 ? undefined : b.repeat_days });
     if (add.error || remove.error || t.error || !probe || typeof b.version !== "string" || !b.version) return res.status(400).json({ error: "invalid_input" });
     if (b.repeat_days !== undefined && b.repeat_days !== 0 && !(b.repeat_days >= 3 && b.repeat_days <= 30)) return res.status(400).json({ error: "invalid_input" });
-    if (manualRefuses(t.targets, b.repeat_days)) return res.status(400).json({ error: "manual_unsupported" });
     const edit = {};
     if (add.ids.length) {
       const g = await gates(c.phone, c.page_id, t.targets || null);
@@ -271,21 +261,14 @@ module.exports = function createAdminCampaignsRouter({
     let out;
     const detail = { campaign_tail: c.id.slice(-6), from: c.status };
     if (c.status === "paused") {
-      // Manual posting: a campaign resumed here goes on as the manual flow runs it — groups once, no Page.
-      const strip = manual() && ((c.targets || []).includes("page") || c.repeat);
-      if (strip && !(c.groups || []).length) return res.status(400).json({ error: "no_destination" });
-      if (strip) detail.fields = ["targets", "repeat"].filter((f) => (f === "targets" ? (c.targets || []).includes("page") : c.repeat)).join(",");
       await audit(req, "start_campaign", c.phone, detail);
-      // The resume and the strip are one transaction: a refused resume changes nothing, and nothing runs unstripped.
-      out = strip ? await resumeStripped(c.id, c.phone) : await campaigns.resume(c.id, deps);
+      out = await campaigns.resume(c.id, deps);
     } else {
       const consent = consentOf(req.body);
       if (!consent) return res.status(400).json({ error: "consent_note_required" });
       const b = req.body || {};
       if (b.days !== undefined && !(Number.isFinite(b.days) && b.days >= 1 && b.days <= 30)) return res.status(400).json({ error: "invalid_input" });
-      // Manual posting: one pass, groups only (what the manual flow can publish).
-      const targets = manual() ? (c.targets || []).filter((t2) => t2 !== "page") : c.targets;
-      const repeatDays = manual() ? null : c.repeat_days || null;
+      const targets = c.targets, repeatDays = c.repeat_days || null;
       const g = await gates(c.phone, c.page_id, targets && targets.includes("page") ? targets : null);
       if (g.error) return res.status(g.status).json({ error: g.error });
       if (!(c.groups || []).length && !((targets || []).includes("page") && A.pageTarget(g.conn))) return res.status(400).json({ error: "no_destination" });

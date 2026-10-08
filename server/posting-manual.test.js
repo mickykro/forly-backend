@@ -64,6 +64,39 @@ const C = require("./posting-campaign");
     assert.equal(await M.markDone(c.id, "111", "posted", deps), null, "still refused");
   }
 
+  // ── the Page is a target by hand too, first in the list; a repeating campaign owes each target again ──
+  {
+    const { deps, notes, at } = await K.setup();
+    deps.env = { POSTING_MANUAL: "1", FORLY_ENV: "prod" };
+    await K.db.setConnection("972500000001", { facebook_pages: [{ id: "555000", url: "https://www.facebook.com/myagency", name: "My Agency" }],
+      posting_permission: Object.assign({}, K.PERM, { page_id: "555000" }) });
+    const c = await C.create(K.base({ targets: ["groups", "page"], repeat: true, repeatDays: 3, days: 30 }), deps);
+    assert.deepEqual(c.targets, ["page", "groups"]);
+    let q = await M.queue(deps);
+    assert.deepEqual(q.map((i) => [i.group_id, i.group_name]), [["page:555000", "My Agency"], ["111", "A"], ["222", "B"]]);
+    assert.equal(q[0].group_url, "https://www.facebook.com/myagency");
+    assert.ok(q[0].copy && !q[0].copy.includes("undefined"), "the Page gets the Page text");
+    assert.ok(await M.markDone(c.id, "page:555000", "posted", deps), "the Page is ticked like a group");
+    const after = await K.store.getPostingCampaign(c.id);
+    assert.equal(after.posts[0].target, "page");
+    assert.ok(await M.markDone(c.id, "111", "posted", deps));
+    assert.ok(await M.markDone(c.id, "222", "skipped", deps));
+    assert.equal((await K.store.getPostingCampaign(c.id)).status, "running", "a repeating campaign does not end with its first pass");
+    assert.equal((await M.queue(deps)).length, 0, "nothing owed until the interval passes");
+    assert.equal(notes.length, 0);
+    at(new Date(K.NOW.getTime() + 3 * K.DAY));
+    q = await M.queue(deps);
+    assert.deepEqual(q.map((i) => i.group_id), ["111", "222"], "3 days on: the groups again (the skipped one too), the Page not for 30 days");
+    const g111 = (await M.checklist(deps))[0].groups.find((g) => g.group_id === "111");
+    assert.equal(g111.limit.block, null, "the pacer's cooldown (an hour short of the interval) lets it through");
+    assert.ok(await M.markDone(c.id, "111", "posted", deps));
+    assert.equal((await K.store.getPostingCampaign(c.id)).posts.filter((p) => p.group_id === "111" && p.status === "posted").length, 2);
+    at(new Date(K.NOW.getTime() + 31 * K.DAY));
+    assert.equal((await M.queue(deps)).length, 0, "past expires_at: over");
+    assert.equal((await K.store.getPostingCampaign(c.id)).status, "completed");
+    assert.equal(notes.length, 1, "the agent hears it once, at the end");
+  }
+
   // ── queue → markDone → completed, with one WhatsApp listing the posted group ──
   {
     const { deps, notes } = await K.setup();

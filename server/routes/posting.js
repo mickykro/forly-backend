@@ -106,8 +106,6 @@ module.exports = function createPostingRouter(ctx) {
     // The consent is to the text the card showed: it must be this version.
     if (b.consent_version !== CONSENT_VERSION) return res.status(409).json({ error: "consent_outdated", consent_version: CONSENT_VERSION });
     const manual = manualOn();
-    // Manual posting publishes groups once, by hand: no Page post, no second pass (as routes/admin-campaigns.js).
-    if (manual && ((v.targets && v.targets.includes("page")) || b.repeat === true || Number(b.repeat_days) > 0)) return res.status(400).json({ error: "manual_unsupported" });
     if (!manual && !(await allowed(S, phone, res, PERMISSION_CURED))) return;
 
     const conn = (await db.getConnection(phone)) || {};

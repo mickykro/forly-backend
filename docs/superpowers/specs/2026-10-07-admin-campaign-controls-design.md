@@ -50,7 +50,7 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 
 **Edit**
 - Every edit runs in `store.mutatePostingCampaign` and carries the `version` the admin loaded. A different stored version → `409 stale_version`.
-- Remove groups: owed posts for those groups are dropped; posted and skipped history stays. An edit that leaves no group and no usable Page target (manual posting has no Page) → `400 no_destination`, nothing changed. A restart of a campaign with no destination is refused the same way. If an attempt for a removed group is in progress (reserved, session started, composer ready) → `409 busy`, nothing changed.
+- Remove groups: owed posts for those groups are dropped; posted and skipped history stays. An edit that leaves no group and no usable Page target → `400 no_destination`, nothing changed. A restart of a campaign with no destination is refused the same way. If an attempt for a removed group is in progress (reserved, session started, composer ready) → `409 busy`, nothing changed.
 - Texts: editable through the API (`copies`); the tab has no text editor yet. Same validation as the agent texts screen (string, at most `MAX_COPY`, at most 60).
 - End date 1–30 days from now; repeat 3–30 days or off (existing limits).
 - Targets and mode re-checked against the connection, as on create.
@@ -66,15 +66,15 @@ All mutations: `requireAdmin` + `requireStepUp` (the same guard as account re-en
 
 ## 6. Interactions
 
-- Prod (`POSTING_MANUAL=1`): admin campaigns appear in the manual posting list like any other. The manual flow publishes groups once, by hand: a Page target or repeat is refused there (`400 manual_unsupported`) on the admin API and on the agent's `POST /api/posting/campaigns` alike, and the agent's page hides them. A restart or an admin resume of an older campaign drops them; such a campaign is listed with `manual_unsupported: ["page" | "repeat"]` and the tab shows what will not happen. The tab hides repeat, mode and Page (`GET /campaigns` returns `manual`).
-- In manual mode `expires_at` holds as in automatic posting: the manual checklist ends a running campaign past it (`completed`, `pause_reason: "expired"`, open posts skipped, the agent told), and marking a group done on one past it is refused (404, the campaign ends). The checklist never lists an expired campaign, but ends one only where posting may change state (`posting-guard.postingEnvAllowed`: never from staging, which shares production's data), and the agent hears "completed" once even when two admin tabs poll at the same time. An admin resume in manual mode drops a Page target and repeat in the same transaction as the resume (a refused resume changes nothing) and refuses a page-only campaign (`no_destination`). A halted account is refused before any row is written; a start that fails after its `requested` row (the account halted or the campaign changed meanwhile) adds the `refused` row with `account_halted` or `not_live`.
+- Prod (`POSTING_MANUAL=1`): admin campaigns appear in the manual posting list like any other, with the same targets as automatic posting: the manual checklist lists the campaign's Page first when targeted and known (`A.pageTarget`), then its groups; a repeating campaign owes each group again `repeat_days` after its last post (an hour short, the pacer's rule) and the Page after 30 days, until `expires_at`; a campaign that does not repeat completes with its last target, a repeating one on expiry. The admin's browser may be sent to the Page as to a group. Only the approval mode has no meaning by hand (the tab hides it; `GET /campaigns` returns `manual`).
+- In manual mode `expires_at` holds as in automatic posting: the manual checklist ends a running campaign past it (`completed`, `pause_reason: "expired"`, open posts skipped, the agent told), and marking a target done on one past it is refused (404, the campaign ends). The checklist never lists an expired campaign, but ends one only where posting may change state (`posting-guard.postingEnvAllowed`: never from staging, which shares production's data), and the agent hears "completed" once even when two admin tabs poll at the same time. A halted account is refused before any row is written; a start that fails after its `requested` row (the account halted or the campaign changed meanwhile) adds the `refused` row with `account_halted` or `not_live`.
 - Local: automated posting picks them up on local's own data.
 - Profiles spec: campaigns refer to agents by phone; profile names come from the resolver. No dependency.
 - The agent keeps full control of their campaign in their own screens.
 
 ## 7. Errors
 
-`invalid_input`, `not_found`, `facebook_not_connected`, `page_not_confirmed`, `page_target_unavailable`, `consent_note_required`, `stale_version`, `busy`, `account_halted`, `stepup_required`, `manual_unsupported`, `audit_unavailable`, `no_destination`. Each has a Hebrew message in the tab.
+`invalid_input`, `not_found`, `facebook_not_connected`, `page_not_confirmed`, `page_target_unavailable`, `consent_note_required`, `stale_version`, `busy`, `account_halted`, `stepup_required`, `audit_unavailable`, `no_destination`. Each has a Hebrew message in the tab.
 
 ## 8. Tests
 

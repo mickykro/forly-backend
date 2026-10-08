@@ -110,11 +110,11 @@
             '<ul class="manual-groups">' + c.groups.map(function (g) {
               var k = esc(c.campaign_id + "|" + g.group_id), on = picked === c.campaign_id + "|" + g.group_id, owed = g.status === "owed";
               return '<li class="' + (on ? "on" : "") + '"><label class="name"><input type="checkbox" data-act="check" data-k="' + k + '"' +
-                (g.status === "posted" ? " checked" : "") + (owed ? "" : " disabled") + "> <b>" + esc(g.name || "קבוצה") + "</b></label>" +
+                (g.status === "posted" ? " checked" : "") + (owed ? "" : " disabled") + "> <b>" + (g.kind === "page" ? "📄 " : "") + esc(g.name || (g.kind === "page" ? "הדף העסקי" : "קבוצה")) + "</b></label>" +
                 '<span class="manual-chip ' + esc(g.status) + '">' + STATE[g.status] + (g.posted_at ? " " + esc(when(g.posted_at)) : "") + "</span>" +
                 (owed && g.limit ? '<span class="manual-chip ' + (g.limit.block ? "skipped" : "owed") + '">' + esc(g.limit.today) + "/" + esc(g.limit.cap) + " היום</span>" +
                   (g.limit.block ? ' <span class="manual-muted">' + esc(limitText(g.limit)) + "</span>" : "") : "") +
-                (owed ? '<button type="button" class="btn btn-gold btn-sm" data-act="open" data-k="' + k + '">פתיחה בקבוצה</button>' +
+                (owed ? '<button type="button" class="btn btn-gold btn-sm" data-act="open" data-k="' + k + '">' + (g.kind === "page" ? "פתיחה בדף העסקי" : "פתיחה בקבוצה") + "</button>" +
                   '<button type="button" class="btn btn-ghost btn-sm" data-act="type" data-k="' + k + '">הקלדת הטקסט</button>' +
                   '<button type="button" class="btn btn-ghost btn-sm" data-act="copy" data-k="' + k + '">העתקה</button>' +
                   '<button type="button" class="btn btn-ghost btn-sm" data-act="skipped" data-k="' + k + '">דילוג</button>' : "") +
