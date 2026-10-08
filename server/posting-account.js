@@ -303,7 +303,8 @@ async function accountView(phone, conn, deps, now, opts = {}) {
 function currentPosts(c) {
   const since = ms(c.restarted_at);
   const posts = c.posts || [];
-  return Number.isFinite(since) ? posts.filter((p) => OPEN_POST.has(p.status) || ms(p.created_at) >= since) : posts;
+  // A manual post written before created_at was recorded (Oct 2026) is dated by its tick (scheduled_at).
+  return Number.isFinite(since) ? posts.filter((p) => OPEN_POST.has(p.status) || ms(p.created_at || p.scheduled_at) >= since) : posts;
 }
 
 // The reservation's hard ceilings for the landing day (16a: required), and

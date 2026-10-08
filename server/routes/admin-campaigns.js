@@ -172,10 +172,12 @@ module.exports = function createAdminCampaignsRouter({
     const owed = live.reduce((n, c) => {
       const pass = M.groupsOf(c, conn, now, config);
       const left = Math.min(days, Math.max(0, (new Date(c.expires_at).getTime() - now.getTime()) / DAY));
-      const later = c.repeat && c.repeat_days > 0 ? Math.max(0, Math.ceil(left / c.repeat_days) - 1) * (c.groups || []).length : 0;
+      // Passes are spaced as the manual checklist spaces them: repeat_days, never under the property cooldown.
+      const every = Math.max(c.repeat_days || 0, config.property_group_cooldown_days || 0);
+      const later = c.repeat && every > 0 ? Math.max(0, Math.ceil(left / every) - 1) * (c.groups || []).length : 0;
       const pageRow = pass.find((g) => g.kind === "page");
-      const lastPage = Math.max(0, ...A.currentPosts(c).filter((p) => p.target === "page" && p.status !== "skipped").map((p) => new Date(p.posted_at || p.scheduled_at).getTime()).filter(Number.isFinite));
-      const pageAgain = c.repeat && pageRow && pageRow.status !== "owed" && lastPage && lastPage + 30 * DAY <= now.getTime() + left * DAY ? 1 : 0;
+      const lastPage = pageRow && pageRow.status !== "owed" ? Math.max(0, ...A.currentPosts(c).filter((p) => p.target === "page" && ["posted", "skipped", "pending_group_approval"].includes(p.status)).map((p) => new Date(p.posted_at || p.scheduled_at).getTime()).filter(Number.isFinite)) : 0;
+      const pageAgain = c.repeat && lastPage && lastPage + 30 * DAY <= now.getTime() + left * DAY ? 1 : 0;
       return n + pass.filter((g) => g.status === "owed").length + later + pageAgain;
     }, 0);
     // A repeating campaign comes back to each group every repeat_days within its days;

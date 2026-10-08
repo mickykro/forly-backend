@@ -90,7 +90,7 @@ const C = require("./posting-campaign");
     q = await M.queue(deps);
     assert.deepEqual(q.map((i) => i.group_id), ["111", "222"], "3 days on: the groups again (the skipped one too), the Page not for 30 days");
     const g111 = (await M.checklist(deps))[0].groups.find((g) => g.group_id === "111");
-    assert.equal(g111.limit.block, null, "the pacer's cooldown (an hour short of the interval) lets it through");
+    assert.equal(g111.limit.block, null, "owed exactly when the pacer's cooldown lets it through");
     assert.ok(await M.markDone(c.id, "111", "posted", deps));
     assert.equal((await K.store.getPostingCampaign(c.id)).posts.filter((p) => p.group_id === "111" && p.status === "posted").length, 2);
     at(new Date(K.NOW.getTime() + 31 * K.DAY));
