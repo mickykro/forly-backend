@@ -11,6 +11,7 @@ const { makeAdminGuard, makeStepUpGuard } = require("../admin-auth");
 const K = require("../posting-testkit");
 const M = require("../posting-manual");
 const createRouter = require("./admin-campaigns");
+const campaigns = require("../posting-campaign");
 
 const SECRET = "admin-campaigns-secret", ADMIN = "972500000009", AGENT = "972500000001";
 const { requireAdmin } = makeAdminGuard({ verifySession: auth.verifySession, readToken: auth.readToken, authSecret: SECRET, adminPhones: [ADMIN] });
@@ -205,6 +206,24 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       assert.deepEqual(flagged.manual_unsupported, ["repeat"]);
       const resumed = await call(mServer, "POST", `/campaigns/${row.id}/start`, {});
       assert.equal(resumed.status, 200); assert.equal(resumed.body.campaign.repeat, false); assert.deepEqual(resumed.body.campaign.manual_unsupported, []);
+      // a page-only paused campaign cannot run by hand: refused, untouched
+      await K.store.mutatePostingCampaign(row.id, () => ({ status: "paused", pause_reason: "agent", groups: [], targets: ["page"] }));
+      const pageOnly = await call(mServer, "POST", `/campaigns/${row.id}/start`, {});
+      assert.equal(pageOnly.status, 400); assert.equal(pageOnly.body.error, "no_destination");
+      assert.deepEqual((await K.store.getPostingCampaign(row.id)).targets, ["page"], "untouched");
+      // a resume refused (halted) strips nothing and adds a refusal row
+      await K.store.mutatePostingCampaign(row.id, () => ({ groups: row.groups.map((g) => ({ group_id: g.group_id, name: g.name, url: K.G(g.group_id) })), repeat: true, repeat_days: 7 }));
+      const realResume = campaigns.resume;
+      campaigns.resume = async (id, d) => K.store.getPostingCampaign(id); // refuses: stays paused
+      try {
+        const halted = await call(mServer, "POST", `/campaigns/${row.id}/start`, {});
+        assert.equal(halted.status, 409);
+        assert.equal((await K.store.getPostingCampaign(row.id)).repeat, true, "nothing stripped");
+        const last = (await audits()).filter((r) => r.action === "start_campaign").slice(-2);
+        assert.deepEqual(last.map((r) => r.detail.outcome), ["requested", "refused"]);
+        assert.equal(last[1].detail.refused, "account_halted");
+      } finally { campaigns.resume = realResume; }
+      await K.store.mutatePostingCampaign(row.id, () => ({ status: "running", repeat: false, repeat_days: null }));
     } finally { mServer.close(); }
 
     // ── staging never changes campaigns ──

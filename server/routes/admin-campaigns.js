@@ -66,13 +66,12 @@ module.exports = function createAdminCampaignsRouter({
     }
   }
   // The change the row above requested was refused: a second row says so (best effort — the refusal stands either way).
+  const refusalRow = (req, action, phone, detail, code) => store.addAuditEvent({ operator_tail: opTail(req), action, target_phone_tail: dtail(phone), reason: null, detail: { ...detail, outcome: "refused", refused: code } }, x.clock())
+    .catch((e2) => console.error(redact(`admin campaigns audit ${action} refusal failed: ${(e2 && e2.code) || "error"}`)));
   async function refused(req, action, phone, detail, fn) {
     try { return await fn(); }
     catch (e) {
-      if (e && ERR_STATUS[e.code] && e.code !== "audit_unavailable") {
-        await store.addAuditEvent({ operator_tail: opTail(req), action, target_phone_tail: dtail(phone), reason: null, detail: { ...detail, outcome: "refused", refused: e.code } }, x.clock())
-          .catch((e2) => console.error(redact(`admin campaigns audit ${action} refusal failed: ${(e2 && e2.code) || "error"}`)));
-      }
+      if (e && ERR_STATUS[e.code] && e.code !== "audit_unavailable") await refusalRow(req, action, phone, detail, e.code);
       throw e;
     }
   }
@@ -261,13 +260,18 @@ module.exports = function createAdminCampaignsRouter({
     const conn = (await db.getConnection(c.phone)) || {};
     if (campaigns._test.accountBlocked(conn)) return res.status(409).json({ error: "account_halted" });
     let out;
+    const detail = { campaign_tail: c.id.slice(-6), from: c.status };
     if (c.status === "paused") {
-      await audit(req, "start_campaign", c.phone, { campaign_tail: c.id.slice(-6), from: c.status });
       // Manual posting: a campaign resumed here goes on as the manual flow runs it — groups once, no Page.
-      if (manual() && ((c.targets || []).includes("page") || c.repeat)) {
-        await store.mutatePostingCampaign(c.id, (cur) => (cur.status === "paused" ? { targets: (cur.targets || []).filter((t2) => t2 !== "page"), repeat: false, repeat_days: null } : null));
-      }
+      const strip = manual() && ((c.targets || []).includes("page") || c.repeat);
+      if (strip && !(c.groups || []).length) return res.status(400).json({ error: "no_destination" });
+      if (strip) detail.fields = ["targets", "repeat"].filter((f) => (f === "targets" ? (c.targets || []).includes("page") : c.repeat)).join(",");
+      await audit(req, "start_campaign", c.phone, detail);
       out = await campaigns.resume(c.id, deps);
+      // Stripped only once it runs (A.mutate: the version moves with it); a refused resume changes nothing.
+      if (strip && out && out.status === "running") {
+        out = await A.mutate(x, c.id, (cur) => (cur.status === "running" ? { targets: (cur.targets || []).filter((t2) => t2 !== "page"), repeat: false, repeat_days: null } : null)) || out;
+      }
     } else {
       const consent = consentOf(req.body);
       if (!consent) return res.status(400).json({ error: "consent_note_required" });
@@ -280,7 +284,8 @@ module.exports = function createAdminCampaignsRouter({
       if (g.error) return res.status(g.status).json({ error: g.error });
       if (!(c.groups || []).length && !((targets || []).includes("page") && A.pageTarget(g.conn))) return res.status(400).json({ error: "no_destination" });
       const days = b.days !== undefined ? b.days : previousDays(c);
-      await audit(req, "start_campaign", c.phone, { campaign_tail: c.id.slice(-6), from: c.status, days });
+      detail.days = days;
+      await audit(req, "start_campaign", c.phone, detail);
       const record = consentRecord(req, consent);
       await grantPermission(c.phone, record);
       out = await campaigns.create({
@@ -288,7 +293,10 @@ module.exports = function createAdminCampaignsRouter({
         targets, consent: record, copies: Object.fromEntries((c.groups || []).filter((x2) => x2.copy).map((x2) => [x2.group_id, x2.copy])),
       }, deps);
     }
-    if (!out || out.status !== "running") return res.status(409).json({ error: "account_halted" });
+    if (!out || out.status !== "running") {
+      await refusalRow(req, "start_campaign", c.phone, detail, "account_halted");
+      return res.status(409).json({ error: "account_halted" });
+    }
     res.json({ campaign: await rowOf(out) });
   }));
 

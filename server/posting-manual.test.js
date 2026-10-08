@@ -33,7 +33,7 @@ const C = require("./posting-campaign");
   // ── expires_at holds in manual mode: the checklist ends a campaign past it, markDone refuses ──
   {
     const { deps, notes, at } = await K.setup();
-    deps.env = { POSTING_MANUAL: "1" };
+    deps.env = { POSTING_MANUAL: "1", FORLY_ENV: "prod" };
     const c = await C.create(K.base({ days: 7 }), deps);
     assert.equal((await M.queue(deps)).length, 2);
     at(new Date(K.NOW.getTime() + 8 * K.DAY));
@@ -46,8 +46,22 @@ const C = require("./posting-campaign");
     await K.db.savePage(K.page("pg2"));
     assert.equal((await M.queue(deps)).length, 2, "a fresh campaign is listed");
     at(new Date(K.NOW.getTime() + 20 * K.DAY));
-    assert.equal((await M.queue(deps)).length, 0, "past its end: gone from the queue");
+    notes.length = 0;
+    const polls = await Promise.all([M.queue(deps), M.queue(deps)]); // two admin tabs polling at once
+    assert.deepEqual(polls.map((q) => q.length), [0, 0], "past its end: gone from the queue");
     assert.equal((await K.store.getPostingCampaign(c2.id)).status, "completed");
+    assert.equal(notes.length, 1, "the agent hears it once");
+  }
+  // ── outside a posting env (staging shares prod's data) a read ends nothing ──
+  {
+    const { deps, notes, at } = await K.setup();
+    deps.env = { POSTING_MANUAL: "1", FORLY_ENV: "staging" };
+    const c = await C.create(K.base({ days: 7 }), deps);
+    at(new Date(K.NOW.getTime() + 8 * K.DAY));
+    assert.equal((await M.queue(deps)).length, 0, "not listed");
+    assert.equal((await K.store.getPostingCampaign(c.id)).status, "running", "unchanged");
+    assert.equal(notes.length, 0);
+    assert.equal(await M.markDone(c.id, "111", "posted", deps), null, "still refused");
   }
 
   // ── queue → markDone → completed, with one WhatsApp listing the posted group ──

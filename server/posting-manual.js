@@ -8,7 +8,10 @@
  * then one message with the groups it went up in. The campaign's expires_at
  * holds here as in automatic posting: the checklist ends a campaign past it
  * (completed, expired — the sweeper's own housekeeping never runs in manual
- * mode), and markDone refuses one past it.
+ * mode), and markDone refuses one past it. The checklist lists no expired
+ * campaign; it ends one only where posting may change state at all
+ * (posting-guard.postingEnvAllowed: never from staging, which shares
+ * production's Firestore).
  */
 const crypto = require("crypto");
 const A = require("./posting-account");
@@ -23,13 +26,21 @@ const refOf = (phone) => `acct_${crypto.createHmac("sha256", process.env.PROFILE
 const DONE = new Set(["posted", "skipped", "pending_group_approval"]);
 const expired = (c, now) => Number.isFinite(new Date(c.expires_at).getTime()) && now.getTime() > new Date(c.expires_at).getTime();
 // A running campaign past its end: completed (expired), its open posts
-// skipped, the agent told — as posting-tick's housekeeping does.
+// skipped, the agent told — as posting-tick's housekeeping does. The agent
+// hears it once: only the call whose transaction made the change says so
+// (two checklist polls may meet the same campaign).
 async function expire(c, deps, x) {
-  const next = await A.mutate(x, c.id, (cur) => (cur.status !== "running" ? null : {
-    status: "completed", pause_reason: "expired",
-    posts: (cur.posts || []).map((p) => (["scheduled", "pending_approval"].includes(p.status) ? { ...p, status: "skipped", error_code: "expired", copy: undefined } : p)),
-  }));
-  if (next && next.status === "completed") await A.say(deps, next.phone, "completed", "🎉 הפרסום הושלם", next);
+  if (!require("./posting-guard").postingEnvAllowed(deps.env || process.env)) return null;
+  let changed = false;
+  const next = await A.mutate(x, c.id, (cur) => {
+    if (cur.status !== "running") return null;
+    changed = true;
+    return {
+      status: "completed", pause_reason: "expired",
+      posts: (cur.posts || []).map((p) => (["scheduled", "pending_approval"].includes(p.status) ? { ...p, status: "skipped", error_code: "expired", copy: undefined } : p)),
+    };
+  });
+  if (changed && next && next.status === "completed") await A.say(deps, next.phone, "completed", "🎉 הפרסום הושלם", next);
   return next;
 }
 const urlOf = (g) => g.url || g.canonical_url || `https://www.facebook.com/groups/${g.group_id}`;
