@@ -79,8 +79,10 @@ function findChromium() {
     assert.ok(await page.locator(".tile.big").count() === 1);
     assert.equal(await page.locator("button", { hasText: "Open externally" }).count(), 2);
 
-    // An ended browser leaves the grid at the next poll.
+    // An ended browser leaves the grid on the next load (the page no longer
+    // polls by itself — a tab left open burned the Firestore read quota).
     sessions = sessions.slice(1);
+    await page.reload();
     await page.waitForFunction(() => document.querySelectorAll(".tile").length === 1, null, { timeout: 8000 });
     assert.deepEqual(await page.locator(".tile header b").allTextContents(), ["forly-local-post:facebook"]);
     console.log("dev-driver.dom.test.js ok");

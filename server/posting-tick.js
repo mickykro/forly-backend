@@ -170,14 +170,21 @@ function duplicateIn(ga, fp, now, config) {
 // ── a due post: re-check, reserve (R1), run ──
 async function runDue(c, post, st, deps, x, now) {
   const { phone, conn, config } = st;
+  // A target the campaign no longer has (an admin edit) never gets the post.
+  if (!(c.targets || ["groups"]).includes(post.target === "page" ? "page" : "groups")) return skip(x, c.id, post.id, "target_removed");
   // Local watched tests are approval-only even for a scheduled post left by an
-  // older standing campaign. This gate runs before opening any browser.
-  if (localMode.requireApproval(deps.env || process.env) && !post.approved_at) {
+  // older standing campaign; so is a per_post campaign's post planned while it
+  // was standing (an admin edit). This gate runs before opening any browser.
+  const local = localMode.requireApproval(deps.env || process.env);
+  if ((local || c.mode === "per_post") && !post.approved_at) {
     const next = await mutate(x, c.id, (cur) => ({
-      posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "pending_approval" } : p)),
+      posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" && (local || cur.mode === "per_post") ? { ...p, status: "pending_approval" } : p)),
     }));
     const pending = next && next.posts.find((p) => p.id === post.id && p.status === "pending_approval");
-    if (pending) await say(deps, phone, "approve", `📣 בדיקה מקומית: הפוסט מוכן לאישור ל${pending.target === "page" ? "דף העסקי" : `קבוצה "${pending.group_name || pending.group_url}"`} — הדפדפן לא ייפתח לפני האישור.\n──────────\n${pending.copy}\n──────────`, next, pending);
+    const where = pending && (pending.target === "page" ? "דף העסקי" : `קבוצה "${pending.group_name || pending.group_url}"`);
+    if (pending) await say(deps, phone, "approve", local
+      ? `📣 בדיקה מקומית: הפוסט מוכן לאישור ל${where} — הדפדפן לא ייפתח לפני האישור.\n──────────\n${pending.copy}\n──────────`
+      : `📣 פוסט מוכן לאישור ל${where}:\n──────────\n${pending.copy}\n──────────`, next, pending);
     return "pending_approval";
   }
   const page = await x.db.getPage(c.page_id);

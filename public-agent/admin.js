@@ -98,21 +98,19 @@
       "</tr>";
   }
 
-  // Per-page chat-bot override: "" = inherit the agent, on = force on for this
-  // page even if the agent is off, off = force off even if the agent is on.
-  // The line underneath spells out what "inherit" currently works out to,
-  // since otherwise the selector alone never tells you the actual state.
+  // Per-page chat-bot override. The bot is on for every agent by default
+  // (no approval); "" = default (on), off = switched off for this page only.
+  // The line underneath spells out the actual state.
   var CB_REASON = {
     page_on: "מופעל לדף הזה", page_off: "כבוי לדף הזה",
-    agent_on: "מופעל דרך הסוכן", agent_off: "כבוי — הסוכן לא מורשה",
-    global_off: "כבוי גלובלית",
+    default_on: "מופעל", global_off: "כבוי גלובלית",
   };
 
   function chatbotCell(p) {
     if (!p.page_id || !p.chatbot) return '<span class="p-addr">—</span>';
     var v = p.chatbot.page === true ? "on" : p.chatbot.page === false ? "off" : "";
     return '<select class="cb ' + esc(v) + '" data-cb="' + esc(p.page_id) + '">' +
-      '<option value=""' + (v === "" ? " selected" : "") + ">ירושה מהסוכן</option>" +
+      '<option value=""' + (v === "" ? " selected" : "") + ">ברירת מחדל (מופעל)</option>" +
       '<option value="on"' + (v === "on" ? " selected" : "") + ">מופעל</option>" +
       '<option value="off"' + (v === "off" ? " selected" : "") + ">כבוי</option>" +
       "</select>" +
@@ -235,13 +233,14 @@
       '<td class="agent"><div class="agent-name">' + esc(a.name) + demo + "</div>" +
         '<div class="p-addr num" dir="ltr">' + esc(a.phone) + "</div>" +
         // A property in this client's name, their saved details prefilled.
-        '<a class="p-addr" href="/create.html?key=admin&agent=' + encodeURIComponent(a.phone) + '">+ יצירת נכס ללקוח</a></td>' +
+        '<a class="p-addr" href="/create.html?key=admin&agent=' + encodeURIComponent(a.phone) + '">+ יצירת נכס ללקוח</a>' +
+        // Their portfolio, edited (or created) for them.
+        ' · <a class="p-addr" href="/portfolio.html?agent=' + encodeURIComponent(a.phone) + '">' +
+        (a.portfolio_status ? "✎ דף נכסים" : "+ דף נכסים") + "</a></td>" +
       '<td class="num">' + esc(a.active_pages) + "</td>" +
       '<td class="num">' + Number(a.views || 0).toLocaleString("he-IL") + "</td>" +
       '<td class="num">' + Number(a.leads || 0).toLocaleString("he-IL") + "</td>" +
       "<td>" + readinessPills(a.readiness) + "</td>" +
-      '<td><label class="switch"><input type="checkbox" data-chatbot="' + esc(a.phone) + '"' +
-        (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
       '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
         (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
       "<td>" + quotaCellHtml(a) + "</td>" +
@@ -468,9 +467,7 @@
     });
     $("#agentRows").innerHTML = shown.map(agentRowHtml).join("");
     $("#agentEmpty").classList.toggle("hidden", shown.length > 0);
-    $("#agentCount").textContent = agentStats.chatbot_agents != null ?
-      agentStats.chatbot_agents + " מתוך " + agents.length + " עם צ׳אט · " +
-      agentStats.chatbot_pages + " דפים" : "";
+    $("#agentCount").textContent = agents.length + " סוכנים";
     bindAgentActions();
   }
 
@@ -518,33 +515,6 @@
         });
       });
     });
-
-    document.querySelectorAll("[data-chatbot]").forEach(function (input) {
-      input.addEventListener("change", function () {
-        var phone = input.dataset.chatbot;
-        var want = input.checked;
-        input.disabled = true;
-        FLY.req("/api/admin/business/features", {
-          method: "POST",
-          body: { phone: phone, feature: "chatbot", enabled: want },
-          noRedirect: true,
-        }).then(function () {
-          // Keep the local copy in step so a re-filter doesn't revert the switch.
-          var a = agents.filter(function (x) { return x.phone === phone; })[0];
-          if (a) a.chatbot_enabled = want;
-          agentStats.chatbot_agents = agents.filter(function (x) { return x.chatbot_enabled; }).length;
-          agentStats.chatbot_pages = agents.reduce(function (n, x) {
-            return n + (x.chatbot_enabled ? x.active_pages : 0);
-          }, 0);
-          applyAgentFilter();
-          FLY.toast(want ? "✅ צ׳אט בוט הופעל לכל הדפים של הסוכן" : "צ׳אט בוט כובה");
-        }).catch(function (e) {
-          input.checked = !want;   // the server refused — don't lie about the state
-          input.disabled = false;
-          FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
-        });
-      });
-    });
   }
 
   function loadAgents() {
@@ -565,6 +535,7 @@
     if (p.url) {
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="' + esc(p.url) + '">צפייה</a>');
     }
+    actions.push('<a class="btn btn-ghost btn-sm" href="/portfolio.html?agent=' + encodeURIComponent(p.phone) + '">✎ עריכה</a>');
     if (p.status === "open") {
       actions.push('<button class="btn btn-ghost btn-sm" data-portfolio-close="' + esc(p.phone) + '">סגירה</button>');
     } else {

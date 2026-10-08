@@ -40,7 +40,7 @@ const verify = (u, action, nowMs = Date.now()) =>
 
 (async () => {
   // ── build() exposes exactly the kinds the call sites use (grep `say(` across posting-*.js) ──
-  const KINDS = ["approve", "posted", "paused", "halted", "penalty", "reconnect", "removed", "stopped", "completed"];
+  const KINDS = ["approve", "posted", "paused", "halted", "penalty", "reconnect", "removed", "stopped", "completed", "admin_created", "admin_stopped"];
   assert.deepEqual(Object.keys(M).sort(), KINDS.sort());
   for (const k of KINDS) assert.equal(typeof M[k], "function", k);
 

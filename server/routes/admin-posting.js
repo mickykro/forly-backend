@@ -94,7 +94,8 @@ function accountRow(phone, conn, now) {
     disabled_at: conn.posting_disabled_at || null,
     last_halt_at: conn.posting_last_halt_at || null,
     penalty_until: ms(conn.posting_penalty_until) > now ? conn.posting_penalty_until : null,
-    needs_reconnect: conn.facebook_needs_reconnect === true,
+    // Only until the agent reconnects (as posting-campaign.js reads it): the flag itself is never cleared.
+    needs_reconnect: conn.facebook_needs_reconnect === true && !(ms(conn.facebook_browser_connected_at) > ms(conn.facebook_needs_reconnect_at)),
     reconnected_since_disable: disabled && ms(conn.facebook_browser_connected_at) > ms(conn.posting_disabled_at),
     profile_state: conn.facebook_profile_state || null,
     reenabled_at: conn.posting_reenabled_at || null,

@@ -379,7 +379,22 @@
     } finally { btn.disabled = false; }
   });
 
-  $("browserModalClose").addEventListener("click", () => { closeBrowser(); if (currentPlatform) refreshBrowserChip(currentPlatform); });
+  // Closing the window is not "give up": an agent who logged in and closed it
+  // without pressing done is still logged in at Driver. Run /finish's check
+  // quietly; only a confirmed login says anything.
+  $("browserModalClose").addEventListener("click", async () => {
+    const platform = currentPlatform;
+    closeBrowser();
+    if (!platform) return;
+    if (pending[platform]) {
+      try {
+        const j = await api(`/api/connections/browser/${platform}/finish`, { method: "POST" });
+        pending[platform] = false;
+        toast(j.identity_label ? `החשבון מחובר ✓ (${j.identity_label})` : "החשבון מחובר ✓");
+      } catch (e) { /* not logged in (or the window already gone): closing stays closing */ }
+    }
+    refreshBrowserChip(platform);
+  });
 
   // If the agent leaves for the SMS and comes back, the modal is still here;
   // only when they close it explicitly is the session's fate decided by /finish.

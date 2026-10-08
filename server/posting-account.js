@@ -303,7 +303,8 @@ async function accountView(phone, conn, deps, now, opts = {}) {
 function currentPosts(c) {
   const since = ms(c.restarted_at);
   const posts = c.posts || [];
-  return Number.isFinite(since) ? posts.filter((p) => OPEN_POST.has(p.status) || ms(p.created_at) >= since) : posts;
+  // A manual post written before created_at was recorded (Oct 2026) is dated by its tick (scheduled_at).
+  return Number.isFinite(since) ? posts.filter((p) => OPEN_POST.has(p.status) || ms(p.created_at || p.scheduled_at) >= since) : posts;
 }
 
 // The reservation's hard ceilings for the landing day (16a: required), and
@@ -350,12 +351,15 @@ async function mutate(x, id, fn) {
   });
 }
 
+// Kinds an agent hears in manual posting too: the end, and what the team did.
+const MANUAL_KINDS = new Set(["completed", "admin_created", "admin_stopped"]);
+
 // deps.messages (Task 20) supplies the signed-link texts; until then these
 // Hebrew fallbacks go out. A failed notification never changes state.
 async function say(deps, phone, kind, fallback, ...args) {
   if (typeof deps.notify !== "function") return;
   // Manual posting (posting-manual): the agent hears from us once, at the end.
-  if (require("./posting-manual").enabled(deps.env || process.env) && kind !== "completed") return;
+  if (require("./posting-manual").enabled(deps.env || process.env) && !MANUAL_KINDS.has(kind)) return;
   const text = deps.messages && typeof deps.messages[kind] === "function" ? deps.messages[kind](...args) : fallback;
   if (!text) return;
   try { await deps.notify(phone, text); } catch (e) { console.error(redact(`posting notify ${kind} ${tail(phone)} failed: ${(e && e.code) || "error"}`)); }

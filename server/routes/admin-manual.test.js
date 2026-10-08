@@ -50,14 +50,16 @@ function call(server, method, path, body) {
   const hubs = new Map();
   const viewer = {
     _hubs: hubs,
-    attach: async (k) => { hubs.set(k, { page: fakePage, context }); return hubs.get(k); },
+    attaches: [],
+    attach: async (k, sid, o) => { viewer.attaches.push([k, sid, o && o.idleMs]); hubs.set(k, { page: fakePage, context }); return hubs.get(k); },
     pipe: (req, res) => res.json({ streaming: true }),
     input: async () => ({}),
     close: async (k) => { hubs.delete(k); },
   };
   const sessions = [];
   const driver = { createSession: async (o) => { sessions.push(o); return { sessionId: "s1" }; }, stopSession: async (id) => { stopped.push(id); } };
-  const media = { fetchVideo: async (u) => ({ name: "property.mp4", mimeType: "video/mp4", buffer: Buffer.from(u) }) };
+  const fetched = [];
+  const media = { fetchVideo: async (u) => { fetched.push(u); return { name: "property.mp4", mimeType: "video/mp4", buffer: Buffer.from(u) }; } };
 
   const app = express();
   app.use(express.json());
@@ -88,10 +90,14 @@ function call(server, method, path, body) {
     assert.deepEqual(opened.body, { open: true, at_group: true });
     assert.equal(sessions[0].url, "https://www.facebook.com/groups/111", "the browser starts on the group");
     assert.deepEqual((await call(server, "POST", B)).body, { open: true, at_group: false }, "opening again reuses it");
+    assert.equal(viewer.attaches.length, 1, "the viewer connects as soon as the browser opens, not on the first view");
+    assert.ok(viewer.attaches[0][2] >= 5 * 60000, "and stays connected through a few minutes away from the tab");
     await call(server, "GET", `${B}/view`);
     assert.equal((await call(server, "POST", `${B}/property`, { page_id: "other" })).status, 404, "another agent's property is refused");
     const prop = await call(server, "POST", `${B}/property`, { page_id: "pg1" });
     assert.equal(prop.body.property.page_id, "pg1");
+    for (let i = 0; i < 50 && !fetched.length; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(fetched, ["https://f.ly/files/pages/pg1/walkthrough.mp4"], "the video is fetched when the property is picked");
     assert.equal((await call(server, "GET", `${B}/state`)).body.property.page_id, "pg1", "the session shows what it shares");
 
     // ── goto: Facebook groups only ──
@@ -111,6 +117,7 @@ function call(server, method, path, body) {
     assert.equal((await call(server, "POST", `${B}/video`)).status, 200);
     assert.equal(chosen.length, 1);
     assert.equal(chosen[0].buffer.toString(), "https://f.ly/files/pages/pg1/walkthrough.mp4", "the session property's video");
+    assert.equal(fetched.length, 1, "the click reuses the prefetched video");
     assert.equal((await call(server, "GET", `${B}/state`)).body.chooser_open, false, "a chooser is used once");
 
     // ── tick off ──
@@ -137,6 +144,36 @@ function call(server, method, path, body) {
     assert.equal((await call(server, "DELETE", B)).status, 200);
     assert.deepEqual(stopped, ["s1"]);
     assert.equal((await call(server, "GET", `${B}/state`)).status, 409, "closed");
-    console.log("routes/admin-manual.test.js ok");
   } finally { server.close(); }
+
+  // ── agents who logged in but never pressed done: listed, and verified on request ──
+  {
+    const STUCK = "972500000003", DONE = "972500000004", NEVER = "972500000005";
+    const conns = {
+      [STUCK]: { browser_consent_at: "2026-10-05T10:00:00Z" },
+      [DONE]: { browser_consent_at: "2026-10-05T10:00:00Z", facebook_browser_connected_at: "2026-10-05T10:05:00Z" },
+      [NEVER]: {},
+    };
+    const db = Object.assign(Object.create(deps.db || require("../db")), {
+      listAllBusinesses: async () => [STUCK, DONE, NEVER].map((phone) => ({ phone, full_name: `Agent ${phone.slice(-1)}` })),
+      getConnection: async (p) => conns[p] || null,
+    });
+    const verified = [];
+    const deps2 = Object.assign({}, deps, { db, verifySaved: async (phone, platform) => { verified.push([phone, platform]); return { state: "connected", identity_label: "Agent 3" }; } });
+    const app2 = express(); app2.use(express.json());
+    app2.use("/api/admin/manual", createRouter({ requireAdmin, deps: deps2, driver: {}, viewer: {}, media: {} }));
+    const server2 = app2.listen(0);
+    try {
+      const list = await call(server2, "GET", "/api/admin/manual/unconnected");
+      assert.equal(list.status, 200);
+      assert.deepEqual(list.body.agents.map((a) => a.ref), [M.refOf(STUCK)], "only the agent who started a login and is not connected");
+      assert.ok(!JSON.stringify(list.body).includes(STUCK), "no phone, only a ref and a tail");
+      const v = await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(STUCK)}/verify`);
+      assert.equal(v.status, 200);
+      assert.equal(v.body.state, "connected");
+      assert.deepEqual(verified, [[STUCK, "facebook"]]);
+      assert.equal((await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(DONE)}/verify`)).status, 404, "a connected agent is not in the list");
+    } finally { server2.close(); }
+  }
+  console.log("routes/admin-manual.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

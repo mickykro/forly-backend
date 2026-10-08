@@ -336,6 +336,7 @@ if (driverBoot.enabled) {
   // profile revoke); every change needs a fresh OTP step-up and is audited.
   // Owner-only re-enables read POSTING_OWNER_PHONES (unset → refused).
   app.use("/api/admin/posting", require("./routes/admin-posting")({ requireAdmin, requireStepUp, deps: postingDeps }));
+  app.use("/api/admin/campaigns", require("./routes/admin-campaigns")({ requireAdmin, requireStepUp, deps: postingDeps }));
   // Manual group posting (POSTING_MANUAL=1): the admin's queue and a live browser per agent.
   app.use("/api/admin/manual", require("./routes/admin-manual")({ requireAdmin, deps: postingDeps }));
 
@@ -377,6 +378,8 @@ app.use("/api", createDashboardRouter({
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
 }));
+// ── admin edits an agent's portfolio (same editor, ?agent=) ──
+app.use("/api/admin", require("./routes/admin-portfolio")({ requireAdmin, normalizeAuthPhone }));
 // ── admin routes (all-agent property management, allowlist-gated) ──
 const createAdminRouter = require("./routes/admin");
 app.use("/api/admin", createAdminRouter({
