@@ -6,7 +6,7 @@
  * and shown in the page through connect-viewer.js (GET /sessions/:id/view,
  * POST /sessions/:id/view/input) — the cdpUrl stays on the server. Opening one
  * externally, in Driver's own viewer, takes a viewer grant — minted by an
- * admin who logged in with an OTP in the last 10 minutes (step-up), spent
+ * admin who logged in with an OTP in the last 10 hours (step-up), spent
  * once, by that same admin, as a redirect. That redirect is the only response
  * in the whole server that carries a browser-control URL.
  */

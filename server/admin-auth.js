@@ -34,7 +34,7 @@ function makeAdminGuard({ verifySession, readToken, authSecret, adminPhones }) {
 
 // Step-up: for the few admin actions that hand out live control (the dev
 // browser viewer), a 30-day session is not enough — the admin must have
-// completed an OTP login in the last 10 minutes. That login sets a
+// completed an OTP login in the last 10 hours. That login sets a
 // "stepup"-scoped token (auth.js verifyHandler) in the forly_stepup cookie;
 // scripts may send it as x-stepup-token instead. Mount AFTER requireAdmin: it
 // must belong to the same person as the admin session (req.user).

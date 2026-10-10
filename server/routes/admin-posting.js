@@ -12,7 +12,7 @@
  *   POST /attempts/:key/resolve     { outcome: posted|not_posted, reason }  an outcome_unknown attempt (I7)
  *   POST /campaigns/:id/resume      { reason }                          a campaign paused `internal` (R5)
  *
- * Every POST needs a fresh step-up (an OTP login in the last 10 minutes) and
+ * Every POST needs a fresh step-up (an OTP login in the last 10 hours) and
  * writes an audit_events row. Switches are compare-and-set on
  * settings/posting.version (409 version_conflict). Phones leave this file only
  * as last-4 tails; an account is addressed by the opaque `ref` the overview
