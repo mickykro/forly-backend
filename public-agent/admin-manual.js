@@ -32,6 +32,8 @@
     driver_busy: "הדפדפנים תפוסים כרגע. נסו שוב בעוד דקה.",
     cannot_verify_login: "לא הצלחנו לוודא את ההתחברות. נסו שוב בעוד רגע.",
     verify_failed: "הבדיקה נכשלה. נסו שוב.",
+    browser_open: "הדפדפן של הסוכן פתוח. סגרו אותו ואז שמרו את הפרופיל.",
+    profile_revoked: "החיבור של הסוכן בוטל — הוא צריך להתחבר מחדש.",
     invalid_profile_name: "שם הפרופיל לא תקין. העתיקו אותו בדיוק מ-Driver (מתחיל ב-facebook-).",
   };
   var LIMIT = { group_daily_cap: "כבר 3 פוסטים של הסוכן בקבוצה הזו היום", property_cooldown: "הנכס פורסם בקבוצה הזו לאחרונה — לא לפני המועד" }; // the interval is the campaign's (3 days, or its repeat)
@@ -78,6 +80,17 @@
       return '<option value="' + esc(a.ref) + '">' + esc(a.name || "סוכן") + " " + esc(a.phone_tail) + (a.owed ? " (" + a.owed + " לפרסום)" : "") + "</option>";
     }).join("");
     sel.value = cur || shown || "";
+    renderProfile();
+  }
+
+  // The Driver profile the agent's browser opens: saved on the agent, or (not
+  // saved yet) the name this server computes. Pasting the name from Driver and
+  // saving attaches that profile to the agent before the browser is opened.
+  function renderProfile() {
+    var a = agents.filter(function (x) { return x.ref === $("#manualAgent").value; })[0];
+    $("#manualProfile").value = a ? (a.profile_name || "") : "";
+    $("#manualProfile").disabled = $("#manualProfileSave").disabled = !a;
+    $("#manualProfileState").textContent = !a ? "" : a.profile_saved ? "פרופיל שמור לסוכן" : "לא נשמר פרופיל — זה השם המחושב";
   }
 
   // The checklist: per agent, per property, every group the agent asked for.
@@ -292,6 +305,17 @@
     }).catch(function (e) { fail(e); btn.disabled = false; btn.textContent = "בדיקת התחברות"; });
   });
   $("#manualAgent").addEventListener("change", renderQueue);
+  $("#manualAgent").addEventListener("change", renderProfile);
+  $("#manualProfileSave").addEventListener("click", function () {
+    var ref = $("#manualAgent").value, name = $("#manualProfile").value.trim(), btn = this;
+    if (!ref || !name) return;
+    btn.disabled = true;
+    call("POST", "/agents/" + encodeURIComponent(ref) + "/profile-name", { profile_name: name }).then(function (r) {
+      agents.forEach(function (a) { if (a.ref === ref) { a.profile_name = r.profile_name; a.profile_saved = true; } });
+      FLY.toast("הפרופיל נשמר לסוכן ✓");
+      renderProfile();
+    }).catch(fail).then(function () { btn.disabled = false; });
+  });
   $("#manualPropPick").addEventListener("change", function () { if (this.value) setProperty(this.value).catch(fail); });
   $("#manualClose").addEventListener("click", function () {
     if (!shown || !confirm("לסגור את הדפדפן של הסוכן?")) return;
