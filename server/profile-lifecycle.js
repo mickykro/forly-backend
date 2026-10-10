@@ -11,7 +11,7 @@
  * timestamps — the cookies live only at Driver, and revoke()/quarantine()
  * ask Driver to delete them at once.
  */
-const { resolveName } = require("./profile-name");
+const { profileNameFor } = require("./profile-name");
 const locksLive = require("./profile-lock");
 
 const HALT_CLASSES = new Set(["captcha", "checkpoint", "restricted", "suspected_compromise"]);
@@ -103,7 +103,7 @@ async function attemptDelete(phone, platform, conn, deps, opts = {}) {
   // the connection's stored name for that generation, else the computed one.
   // A rebuilt name can miss (another FORLY_ENV/PROFILE_KEY): Driver answers
   // 404, which counts as deleted, and the real profile keeps its cookies.
-  const name = opts.name || resolveName(platform, phone, conn, gen);
+  const name = opts.name || profileNameFor(platform, phone, conn, gen);
   const rowGen = legacy ? undefined : gen;
   const release = (deps.locks || locksLive).tryAcquire(phone, platform);
   if (!release) {

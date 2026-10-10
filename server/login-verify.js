@@ -20,7 +20,7 @@
  */
 const driverLive = require("./driver-browser");
 const dbLive = require("./db");
-const { resolveName, pendingName, validName } = require("./profile-name");
+const { profileNameFor, pendingName, validName } = require("./profile-name");
 
 const VERIFY_SECONDS = 180;
 
@@ -43,7 +43,7 @@ async function verifySaved(phone, platform, deps = {}) {
     await db.setConnection(phone, typed);
     Object.assign(conn, typed);
   }
-  const name = pendingName(platform, conn) || resolveName(platform, phone, conn);
+  const name = pendingName(platform, conn) || profileNameFor(platform, phone, conn);
 
   let r;
   try {

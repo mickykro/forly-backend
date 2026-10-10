@@ -168,11 +168,11 @@ function proxyFor(phone, env = process.env) {
     : `anon${crypto.randomBytes(6).toString("hex")}`;
   return { proxyUrl: tpl.split("{agent}").join(id) };
 }
-// What a session request may say in a log line: never the proxy's credentials,
-// the profile name or a phone.
-const sessionLogLine = (b) => ({ note: b.note || null, duration: b.duration || null, type: b.type || null, country: b.country || null,
-  url_host: (() => { try { return b.url ? new URL(b.url).host : null; } catch (e) { return null; } })(),
-  profile: b.profile ? "set" : "none", proxy: b.proxyUrl ? "set" : "none" });
+// The whole session request as sent, minus the proxy's credentials and the
+// profile name (the body never carries a phone).
+const sessionLogLine = (b) => ({ ...b,
+  ...(b.proxyUrl ? { proxyUrl: redact(b.proxyUrl) } : {}),
+  ...(b.profile ? { profile: { ...b.profile, name: "[profile]" } } : {}) });
 
 // Dev-only: a registry of live sessions, so a developer can watch every
 // browser the server opens (routes/dev-driver.js). Never on in production

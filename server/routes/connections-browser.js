@@ -29,7 +29,7 @@ const CONSENT_VERSION = "2026-09-24";
 // Disabling halt classes R5 resolves with a reconnect (see startFlow).
 const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
 const FLEET_REASONS = new Set(["env_off", "global_off", "platform_off", "visible_off"]);
-const { resolveName, pendingName } = require("../profile-name");
+const { profileNameFor, pendingName } = require("../profile-name");
 
 // Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
 // read — see listing-sweep.js). Add a platform here when a feature needs it.
@@ -283,7 +283,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     // A stored name is reused; after a generation bump (above) it no longer
     // matches and the new generation's computed name is opened.
-    const name = resolveName(platform, phone, conn, gen);
+    const name = profileNameFor(platform, phone, conn, gen);
     let session = null, launchError = null;
     // A Driver-hosted exit can die between API acceptance and Chrome's first
     // request. Stop it and try one fresh machine; never loop indefinitely.
@@ -421,7 +421,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     await viewer.close(hubKey(phone, platform), "connected");
     await driver.stopSession(open.session_id);
     // The profile this login browser opened (/start recorded it as pending).
-    const name = pendingName(platform, conn) || resolveName(platform, phone, conn);
+    const name = pendingName(platform, conn) || profileNameFor(platform, phone, conn);
     await db.setConnection(phone, connectedPatch(conn, platform, { label, pages, groups, name }));
     // Warm-up starts now, not at the next sweep (index.js: the first browse,
     // under the same guard and profile lock). Never delays or fails the connect.

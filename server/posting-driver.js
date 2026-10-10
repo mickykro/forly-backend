@@ -42,7 +42,7 @@ const driver = require("./driver-browser");
 const guardLive = require("./posting-guard");
 const social = require("./social-dwell");
 const localMode = require("./posting-local");
-const { resolveName } = require("./profile-name");
+const { profileNameFor } = require("./profile-name");
 const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
 const P = require("./posting-driver-proof");
 const media = require("./posting-media");
@@ -144,7 +144,7 @@ function sessionOpts(x, notePrefix, duration) {
   return {
     duration, type: x.deps.browserType || process.env.POSTING_BROWSER_TYPE || "hosted",
     note: `${notePrefix}${x.attempt.campaign_id || "adhoc"}`,
-    profile: { name: resolveName("facebook", x.phone, x.conn), persist: true },
+    profile: { name: profileNameFor("facebook", x.phone, x.conn), persist: true },
   };
 }
 const pageDepsOf = (x) => Object.assign({}, x.deps, { phone: x.phone, platform: "facebook", conn: x.conn });

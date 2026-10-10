@@ -30,7 +30,7 @@
  */
 const safety = require("./posting-safety");
 const { redact } = require("./driver-browser");
-const { resolveName } = require("./profile-name");
+const { profileNameFor } = require("./profile-name");
 const A = require("./posting-account");
 const H = require("./posting-halts");
 const { loginOpen } = require("./profile-lock");
@@ -143,7 +143,7 @@ async function visit(phone, due, conn, deps, x) {
   const opts = {
     duration: SESSION_S, type: deps.browserType || process.env.POSTING_BROWSER_TYPE || "hosted",
     note: `forly-recheck:${due[0].campaign_id || "adhoc"}`,
-    profile: { name: resolveName("facebook", phone, conn), persist: true },
+    profile: { name: profileNameFor("facebook", phone, conn), persist: true },
   };
   try {
     return await withPage(opts, async (page) => {

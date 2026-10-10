@@ -474,9 +474,13 @@ async function handleTurn(input, deps) {
     if (!kind) return notOurs("not_ours");
     return openDraft(phone, kind, input.text, deps, now);
   }
-  // Paused: any message brings the open draft back up (המשך / חדש / ביטול).
+  // Paused: any message brings the open draft back up (המשך / חדש / ביטול) —
+  // unless it's naming a different, already-live page ("בכותרת... תתקן לי"),
+  // which would otherwise be swallowed into "continue the old draft?" (972508505321, 2026-10-08).
   if (D.isPaused(draft, now)) {
     if (input.event) return notOurs("not_ours");
+    const kind = await openerOf(input.text, deps);
+    if (kind === "update") { const u = await updatePage(phone, input.text, deps, now, draft); if (u.handled) return u; }
     return PC.editInDraft(draft, input.text, now, true) || resumePrompt(draft, { text: input.text || null, file_urls: photoUrlsOf(input) }, now);
   }
   // A new link or "נכס חדש" while a draft is open is a different property: ask

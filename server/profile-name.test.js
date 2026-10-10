@@ -3,7 +3,7 @@
    FORLY_ENV validation, the generation suffix, and assertOwnership. */
 process.env.FORLY_ENV = "local"; // set AFTER require would still work: read at call time
 const assert = require("assert");
-const { profileName, resolveName, storedName, pendingName, validName, assertOwnership, ENV } = require("./profile-name");
+const { profileName, profileNameFor, storedName, pendingName, validName, assertOwnership, ENV } = require("./profile-name");
 
 process.env.PROFILE_KEY = "k";
 
@@ -72,30 +72,30 @@ for (const state of ["revoked", "quarantined"]) {
 // ── a stored name wins over the computed one, for its own generation only ──
 {
   const STORED = "facebook-staging-0123456789abcdef0123";
-  assert.equal(resolveName("facebook", "05x", { facebook_profile_name: STORED }), STORED, "missing _gen counts as gen 0");
-  assert.equal(resolveName("facebook", "05x", { facebook_profile_name: STORED, facebook_profile_name_gen: 0 }), STORED);
-  assert.equal(resolveName("facebook", "05x", { facebook_profile_name: STORED, facebook_profile_name_gen: 0, facebook_profile_gen: 1 }),
+  assert.equal(profileNameFor("facebook", "05x", { facebook_profile_name: STORED }), STORED, "missing _gen counts as gen 0");
+  assert.equal(profileNameFor("facebook", "05x", { facebook_profile_name: STORED, facebook_profile_name_gen: 0 }), STORED);
+  assert.equal(profileNameFor("facebook", "05x", { facebook_profile_name: STORED, facebook_profile_name_gen: 0, facebook_profile_gen: 1 }),
     profileName("facebook", "05x", 1), "a generation bump retires the stored name");
-  assert.equal(resolveName("facebook", "05x", null), profileName("facebook", "05x"), "no connection → computed");
-  assert.equal(resolveName("facebook", "05x", {}, 3), profileName("facebook", "05x", 3), "explicit gen");
-  assert.equal(resolveName("https://www.facebook.com/groups/1", "05x", { facebook_profile_name: STORED }), STORED, "URL call shape");
+  assert.equal(profileNameFor("facebook", "05x", null), profileName("facebook", "05x"), "no connection → computed");
+  assert.equal(profileNameFor("facebook", "05x", {}, 3), profileName("facebook", "05x", 3), "explicit gen");
+  assert.equal(profileNameFor("https://www.facebook.com/groups/1", "05x", { facebook_profile_name: STORED }), STORED, "URL call shape");
   // FORLY_ENV / PROFILE_KEY changes do not move a stored name
   process.env.FORLY_ENV = "prod"; process.env.PROFILE_KEY = "other";
-  assert.equal(resolveName("facebook", "05x", { facebook_profile_name: STORED }), STORED);
+  assert.equal(profileNameFor("facebook", "05x", { facebook_profile_name: STORED }), STORED);
   process.env.FORLY_ENV = "local"; process.env.PROFILE_KEY = "k";
 
   // malformed or another platform's name is ignored
   for (const bad of ["yad2-prod-0123456789abcdef0123", "facebook-", "Facebook-prod-x", "facebook-prod-x/../y", "facebook prod", 42, null, "facebook-" + "a".repeat(101)]) {
     assert.equal(validName("facebook", bad), false, String(bad));
     assert.equal(storedName("facebook", { facebook_profile_name: bad }), null, String(bad));
-    assert.equal(resolveName("facebook", "05x", { facebook_profile_name: bad }), profileName("facebook", "05x"), String(bad));
+    assert.equal(profileNameFor("facebook", "05x", { facebook_profile_name: bad }), profileName("facebook", "05x"), String(bad));
   }
 
   // pending: never resolved, but owned (the login check may open it)
   const PENDING = "facebook-prod-aaaaaaaaaaaaaaaaaaaa";
   const c = { facebook_profile_name_pending: PENDING, facebook_profile_name_pending_gen: 0 };
   assert.equal(pendingName("facebook", c), PENDING);
-  assert.equal(resolveName("facebook", "05x", c), profileName("facebook", "05x"), "pending is not used for posting");
+  assert.equal(profileNameFor("facebook", "05x", c), profileName("facebook", "05x"), "pending is not used for posting");
   assert.equal(pendingName("facebook", Object.assign({ facebook_profile_gen: 1 }, c)), null, "pending of an older gen");
 
   // ownership: stored and pending accepted, a third name refused, revoked still refused
@@ -107,6 +107,17 @@ for (const state of ["revoked", "quarantined"]) {
   assert.throws(() => assertOwnership(STORED, "05x", "facebook", { facebook_profile_name: STORED, facebook_profile_state: "revoked" }),
     (e) => e.code === "profile_ownership", "revoked refuses a stored name too");
   assert.throws(() => assertOwnership(null, "05x", "facebook", {}), (e) => e.code === "profile_ownership");
+}
+
+// ── a saved name wins on every environment (the profile prod minted) ──
+{
+  const prodName = "facebook-prod-0123456789abcdef0123";
+  const saved = { facebook_profile_name: prodName, facebook_browser_connected_at: "t" };
+  assert.equal(profileNameFor("facebook", "05x", saved), prodName, "local opens prod's saved profile");
+  assert.doesNotThrow(() => assertOwnership(prodName, "05x", "facebook", saved));
+  assert.throws(() => assertOwnership(profileName("facebook", "05x"), "05x", "facebook", saved), (e) => e.code === "profile_ownership", "the computed name is refused once one is saved");
+  assert.throws(() => assertOwnership(prodName, "05x", "facebook", { ...saved, facebook_profile_state: "revoked" }), (e) => e.code === "profile_ownership");
+  assert.equal(profileNameFor("facebook", "05x", { facebook_profile_name: "yad2-x" }), profileName("facebook", "05x"), "another platform's name is ignored");
 }
 
 console.log("profile-name.test.js ok");

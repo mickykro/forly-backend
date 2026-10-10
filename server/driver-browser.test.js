@@ -238,9 +238,10 @@ async function quiet(fn) {
     );
     if (saved === undefined) delete process.env.DRIVER_PROXY_URL; else process.env.DRIVER_PROXY_URL = saved;
     if (savedKey === undefined) delete process.env.PROFILE_KEY; else process.env.PROFILE_KEY = savedKey;
-    // The session log line: no credentials, no profile name.
-    const line = JSON.stringify(D._test.sessionLogLine({ note: "forly-local-post:facebook", proxyUrl: a1, profile: { name: "facebook-local-" + "a".repeat(20) }, url: "https://www.facebook.com/x?y=1" }));
-    assert.ok(!line.includes("pw@") && !line.includes("facebook-local-a") && line.includes("www.facebook.com") && line.includes('"proxy":"set"'), line);
+    // The session log line: the whole request, but no credentials, no profile name.
+    const line = JSON.stringify(D._test.sessionLogLine({ note: "forly-local-post:facebook", proxyUrl: a1, profile: { name: "facebook-local-" + "a".repeat(20), persist: true }, url: "https://www.facebook.com/x?y=1", country: "IL" }));
+    assert.ok(!line.includes("pw@") && !line.includes("facebook-local-a") && line.includes("https://www.facebook.com/x?y=1") &&
+      line.includes("[credentials]@") && line.includes('"persist":true') && line.includes('"country":"IL"'), line);
   }
 
   // ── deleteProfile never throws, and reports ok/error so revoke() can record it ──

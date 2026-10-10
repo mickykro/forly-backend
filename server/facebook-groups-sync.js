@@ -24,7 +24,7 @@
  */
 const crypto = require("crypto");
 const driver = require("./driver-browser");
-const { resolveName } = require("./profile-name");
+const { profileNameFor } = require("./profile-name");
 const postingGuard = require("./posting-guard");
 const dbLive = require("./db");
 const shareKit = require("./distribution/share-kit");
@@ -297,7 +297,7 @@ async function runSync({ phone }, deps = {}) {
   let scraped;
   try {
     scraped = await withPage(
-      { duration: 300, note: "forly-sync:groups", profile: { name: resolveName("facebook", phone, conn), persist: true } },
+      { duration: 300, note: "forly-sync:groups", profile: { name: profileNameFor("facebook", phone, conn), persist: true } },
       (page) => syncMembership(page, { guard: navGuard }),
       pageDeps,
     );
