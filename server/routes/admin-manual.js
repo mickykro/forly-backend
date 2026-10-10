@@ -221,10 +221,11 @@ module.exports = function createAdminManualRouter({
     const release = locks.tryAcquire(phone, "facebook");
     if (!release) return res.status(409).json({ error: "profile_busy" });
     try {
-      const { profileName } = require("../profile-name");
+      const { profileNameFor } = require("../profile-name");
+      console.log(` facebook profile ${profileNameFor("facebook", phone, conn)}`);
       const s = await driver.createSession({
         duration: SESSION_S, url: groupUrl || "https://www.facebook.com/",
-        profile: { name: profileName("facebook", phone, conn.facebook_profile_gen || 0), persist: true },
+        profile: { name: profileNameFor("facebook", phone, conn), persist: true },
         note: "forly-manual:facebook", // never the phone
       }, { phone });
       const timer = setTimeout(() => closeFor(phone, "expired"), SESSION_S * 1000);

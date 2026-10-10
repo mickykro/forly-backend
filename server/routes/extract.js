@@ -130,7 +130,7 @@ module.exports = function createExtractRouter(ctx) {
         if (profileName) {
           const conn = (await database.getConnection(phone)) || {};
           const platform = profileName.split("-")[0];
-          profileName = profileFor(input.url, phone, conn[`${platform}_profile_gen`] || 0);
+          profileName = require("../profile-name").profileNameFor(platform, phone, conn);
         }
         const job = await extractJobs.create({ phone, url: input.url, forceSource, profileName }, jobDeps);
         return { job_id: job.id, status: job.status };

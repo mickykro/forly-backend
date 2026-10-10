@@ -296,6 +296,13 @@ if (driverBoot.enabled) {
   })());
   extractJobs.startSweeper(extractJobs.liveDeps());
   console.log("driver: extract sweeper started");
+  // Agents connected before profile names were saved: prod minted their
+  // profiles, so prod writes the names down for every other environment.
+  if (process.env.FORLY_ENV === "prod") {
+    require("./profile-name").backfillSavedNames(db)
+      .then((n) => { if (n) console.log(`driver: saved the profile name for ${n} agent(s)`); })
+      .catch((e) => console.warn(`driver: profile-name backfill failed: ${e.code || e.name}`));
+  }
 
   const createConnectionsBrowserRouter = require("./routes/connections-browser");
   app.use("/api/connections/browser", createConnectionsBrowserRouter({

@@ -3,7 +3,7 @@
    FORLY_ENV validation, the generation suffix, and assertOwnership. */
 process.env.FORLY_ENV = "local"; // set AFTER require would still work: read at call time
 const assert = require("assert");
-const { profileName, assertOwnership, ENV } = require("./profile-name");
+const { profileName, profileNameFor, assertOwnership, backfillSavedNames, ENV } = require("./profile-name");
 
 process.env.PROFILE_KEY = "k";
 
@@ -69,4 +69,27 @@ for (const state of ["revoked", "quarantined"]) {
   assert.throws(() => assertOwnership(profileName("facebook", "05x"), "05x", "facebook", c), (e) => e.code === "profile_ownership", state);
 }
 
-console.log("profile-name.test.js ok");
+// ── a saved name wins on every environment (the profile prod minted) ──
+const prodName = "facebook-prod-0123456789abcdef0123";
+const saved = { facebook_profile_name: prodName, facebook_browser_connected_at: "t" };
+assert.equal(profileNameFor("facebook", "05x", saved), prodName, "local opens prod's saved profile");
+assert.doesNotThrow(() => assertOwnership(prodName, "05x", "facebook", saved));
+assert.throws(() => assertOwnership(profileName("facebook", "05x"), "05x", "facebook", saved), (e) => e.code === "profile_ownership", "the computed name is refused once one is saved");
+assert.throws(() => assertOwnership(prodName, "05x", "facebook", { ...saved, facebook_profile_state: "revoked" }), (e) => e.code === "profile_ownership");
+assert.equal(profileNameFor("facebook", "05x", { facebook_profile_name: "yad2-x" }), profileName("facebook", "05x"), "another platform's name is ignored");
+assert.equal(profileNameFor("facebook", "05x", null), profileName("facebook", "05x"), "no connection: computed");
+
+// ── backfill: writes the computed name only for connected platforms without one ──
+(async () => {
+  const conns = {
+    "05a": { facebook_browser_connected_at: "t" },
+    "05b": { facebook_browser_connected_at: "t", facebook_profile_name: prodName },
+    "05c": { facebook_profile_gen: 1 },
+  };
+  const writes = [];
+  const db = { listAllBusinesses: async () => [{ phone: "05a" }, { phone: "05b" }, { phone: "05c" }, {}],
+    getConnection: async (p) => conns[p] || null, setConnection: async (p, patch) => writes.push([p, patch]) };
+  assert.equal(await backfillSavedNames(db), 1);
+  assert.deepEqual(writes, [["05a", { facebook_profile_name: profileName("facebook", "05a") }]]);
+  console.log("profile-name.test.js ok");
+})().catch((e) => { console.error(e); process.exit(1); });

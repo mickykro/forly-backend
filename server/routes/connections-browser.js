@@ -29,7 +29,7 @@ const CONSENT_VERSION = "2026-09-24";
 // Disabling halt classes R5 resolves with a reconnect (see startFlow).
 const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
 const FLEET_REASONS = new Set(["env_off", "global_off", "platform_off", "visible_off"]);
-const { profileName } = require("../profile-name");
+const { profileNameFor } = require("../profile-name");
 
 // Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
 // read — see listing-sweep.js). Add a platform here when a feature needs it.
@@ -166,10 +166,12 @@ async function readLogin(page, platform, spec, conn, db) {
   return { loggedIn: true, label, pages, groups };
 }
 
-// What a confirmed login writes on the connection.
-function connectedPatch(conn, platform, { label, pages, groups }) {
+// What a confirmed login writes on the connection — including the profile it
+// lives in, so every environment opens that same profile.
+function connectedPatch(conn, platform, { label, pages, groups }, phone) {
   const first = conn[`${platform}_browser_first_connected_at`] || new Date().toISOString();
   return Object.assign({
+    [`${platform}_profile_name`]: profileNameFor(platform, phone, conn),
     [`${platform}_browser_connected_at`]: new Date().toISOString(),
     [`${platform}_browser_first_connected_at`]: first, // warm-up counts from here, not from every reconnect
     [`${platform}_identity_label`]: label,
@@ -257,7 +259,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       statePatch[`${platform}_profile_revoke_reason`] = null;
       statePatch[`${platform}_profile_quarantined_at`] = null;
       statePatch[`${platform}_profile_quarantine_class`] = null;
+      statePatch[`${platform}_profile_name`] = null; // the new generation gets a new profile
     }
+    const name = profileNameFor(platform, phone, Object.assign({}, conn, statePatch));
 
     // Never open a second login browser on this profile while one is recorded.
     const existing = conn[`browser_session_${platform}`];
@@ -281,7 +285,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         session = await driver.createSession({
           duration: SESSION_SECONDS,
           url: spec.loginUrl,
-          profile: { name: profileName(platform, phone, gen), persist: true },
+          profile: { name, persist: true },
           note: `forly-connect:${platform}`, // never the phone
         }, { phone }); // the agent's sticky proxy address (driver-browser.proxyFor)
         if (typeof driver.inspectInitialPage === "function") {
@@ -404,7 +408,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     await viewer.close(hubKey(phone, platform), "connected");
     await driver.stopSession(open.session_id);
-    await db.setConnection(phone, connectedPatch(conn, platform, { label, pages, groups }));
+    await db.setConnection(phone, connectedPatch(conn, platform, { label, pages, groups }, phone));
     // Warm-up starts now, not at the next sweep (index.js: the first browse,
     // under the same guard and profile lock). Never delays or fails the connect.
     if (typeof ctx.onConnected === "function") { try { ctx.onConnected(phone, platform); } catch (e) { /* the sweep will start it */ } }

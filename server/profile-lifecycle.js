@@ -11,7 +11,7 @@
  * timestamps — the cookies live only at Driver, and revoke()/quarantine()
  * ask Driver to delete them at once.
  */
-const { profileName } = require("./profile-name");
+const { profileName, profileNameFor } = require("./profile-name");
 const locksLive = require("./profile-lock");
 
 const HALT_CLASSES = new Set(["captcha", "checkpoint", "restricted", "suspected_compromise"]);
@@ -99,7 +99,9 @@ async function attemptDelete(phone, platform, conn, deps, opts = {}) {
   const currentGen = conn[`${platform}_profile_gen`] || 0;
   const gen = opts.gen !== undefined ? opts.gen : currentGen;
   const staleGen = gen !== currentGen;
-  const name = profileName(platform, phone, gen);
+  // ponytail: an older generation was never saved, so its name is this server's computed one;
+  // a stale delete for a profile minted on another environment misses (Driver keeps it until cleaned by hand).
+  const name = staleGen ? profileName(platform, phone, gen) : profileNameFor(platform, phone, conn);
   const rowGen = legacy ? undefined : gen;
   const release = (deps.locks || locksLive).tryAcquire(phone, platform);
   if (!release) {

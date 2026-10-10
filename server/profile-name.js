@@ -6,6 +6,12 @@
  * live in the profile, never here. The name is an HMAC of the phone: the
  * Driver key alone must not be able to enumerate customers.
  *
+ * The profile is shared by every environment: the name is minted once, by the
+ * server the agent connects on, and saved on the connection
+ * (<platform>_profile_name). Every server opens that saved name
+ * (profileNameFor); computing it is only for a first connect, or a connection
+ * from before names were saved.
+ *
  * FORLY_ENV is read at CALL time, not load time — profileName must see a
  * value set by the caller (e.g. a test) after this module was required, and
  * an unset/unknown env must fail loudly rather than silently becoming "prod".
@@ -47,22 +53,50 @@ function profileName(urlOrPlatform, phone, gen = 0) {
   const platform = platformOf(urlOrPlatform);
   if (!platform) return null;
   const tag = crypto.createHmac("sha256", String(process.env.PROFILE_KEY || "dev")).update(String(phone)).digest("hex").slice(0, 20);
-  return `${platform}-${ENV()}-${tag}${gen ? `-r${gen}` : ""}`;
+  return `${platform}-${"prod"}-${tag}${gen ? `-r${gen}` : ""}`;
+}
+
+// The profile this agent's login lives in: the name saved on their own
+// connection doc, else (never connected, or connected before names were
+// saved) this server's computed name. Anything that bumps
+// <platform>_profile_gen must also clear <platform>_profile_name.
+function profileNameFor(platform, phone, conn) {
+  const saved = conn && conn[`${platform}_profile_name`];
+  if (typeof saved === "string" && saved.startsWith(`${platform}-`)) return saved;
+  return profileName(platform, phone, (conn && conn[`${platform}_profile_gen`]) || 0);
 }
 
 // Every code path that passes a `profile` option to Driver derives it through
-// profileName and asserts it here — never a stored string. Refuses a name
-// that isn't the phone's current-generation name for that platform, and
-// refuses ANY name (even the right one) once the connection is revoked or
-// quarantined — that is the whole point of those states.
+// profileNameFor and asserts it here. Refuses a name that isn't the one on
+// the phone's own connection, and refuses ANY name (even the right one) once
+// the connection is revoked or quarantined — that is the whole point of those
+// states.
 function assertOwnership(name, phone, platform, conn = null) {
-  const gen = conn ? (conn[`${platform}_profile_gen`] || 0) : 0;
   const state = conn ? conn[`${platform}_profile_state`] : null;
-  if (name !== profileName(platform, phone, gen) || ["revoked", "quarantined"].includes(state)) {
+  if (name !== profileNameFor(platform, phone, conn) || ["revoked", "quarantined"].includes(state)) {
     const e = new Error("profile ownership");
     e.code = "profile_ownership";
     throw e;
   }
 }
 
-module.exports = { profileName, assertOwnership, ENV };
+// Connections made before names were saved: the server they were made on is
+// the only one that computes their name, so it (prod, at boot) writes it down.
+const PLATFORMS = ["facebook", "yad2", "madlan"]; // the ones an agent connects (routes/connections-browser.js)
+async function backfillSavedNames(db) {
+  let saved = 0;
+  for (const biz of await db.listAllBusinesses()) {
+    const phone = biz && biz.phone;
+    if (!phone) continue;
+    const conn = await db.getConnection(phone);
+    if (!conn) continue;
+    const patch = {};
+    for (const p of PLATFORMS) {
+      if (conn[`${p}_browser_connected_at`] && !conn[`${p}_profile_name`]) patch[`${p}_profile_name`] = profileNameFor(p, phone, conn);
+    }
+    if (Object.keys(patch).length) { await db.setConnection(phone, patch); saved++; }
+  }
+  return saved;
+}
+
+module.exports = { profileName, profileNameFor, assertOwnership, backfillSavedNames, ENV };
