@@ -16,7 +16,7 @@
  */
 const safety = require("./posting-safety");
 const { redact } = require("./driver-browser");
-const { profileName } = require("./profile-name");
+const { resolveName } = require("./profile-name");
 const A = require("./posting-account");
 const C = require("./posting-campaign");
 const H = require("./posting-halts");
@@ -320,7 +320,7 @@ async function buildCall(attempt, st, deps, x, now) {
   const args = {
     // The link is in the post's text now; a first comment only when it is not.
     attempt, copy, comment: copy.includes(`/p/${c.page_id}`) ? null : destinations.commentUrl(post, attempt, { pageBaseUrl: deps.pageBaseUrl || "", campaignId: c.id }),
-    profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0),
+    profileName: resolveName("facebook", phone, conn),
     dryRun: deps.dryRun === true, campaignId: c.id, phone, videoUrl: (video && video.video_url) || null,
     [post.target === "page" ? "pageUrl" : "groupUrl"]: target.url,
   };
@@ -465,7 +465,7 @@ async function browse(phone, conn, deps, x, now) {
   if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < browseEveryMs(deps.env || process.env)) return;
   try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "dwell" }, A.guardDeps(deps, x)); } catch (e) { if (e && e.code === "posting_disabled") return; throw e; }
   await x.db.setConnection(phone, { last_browse_attempt_at: iso(now) });
-  const r = await deps.dwell({ phone, profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0), note: "forly-dwell:" }, { lockHeld: true, phone, platform: "facebook", conn });
+  const r = await deps.dwell({ phone, profileName: resolveName("facebook", phone, conn), note: "forly-dwell:" }, { lockHeld: true, phone, platform: "facebook", conn });
   if (r && r.noop === true) return;
   await x.db.setConnection(phone, { last_browse_at: iso(now) });
   const cls = H.classOf(r && r.signal);

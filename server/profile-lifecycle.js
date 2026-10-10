@@ -11,7 +11,7 @@
  * timestamps — the cookies live only at Driver, and revoke()/quarantine()
  * ask Driver to delete them at once.
  */
-const { profileName } = require("./profile-name");
+const { resolveName } = require("./profile-name");
 const locksLive = require("./profile-lock");
 
 const HALT_CLASSES = new Set(["captcha", "checkpoint", "restricted", "suspected_compromise"]);
@@ -99,13 +99,17 @@ async function attemptDelete(phone, platform, conn, deps, opts = {}) {
   const currentGen = conn[`${platform}_profile_gen`] || 0;
   const gen = opts.gen !== undefined ? opts.gen : currentGen;
   const staleGen = gen !== currentGen;
-  const name = profileName(platform, phone, gen);
+  // The exact name to delete: the one a failed earlier attempt recorded, else
+  // the connection's stored name for that generation, else the computed one.
+  // A rebuilt name can miss (another FORLY_ENV/PROFILE_KEY): Driver answers
+  // 404, which counts as deleted, and the real profile keeps its cookies.
+  const name = opts.name || resolveName(platform, phone, conn, gen);
   const rowGen = legacy ? undefined : gen;
   const release = (deps.locks || locksLive).tryAcquire(phone, platform);
   if (!release) {
     deferred = true;
     if (!staleGen) await deps.db.setConnection(phone, { [`${platform}_profile_delete_error`]: BUSY });
-    await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts, last_error: BUSY, gen: rowGen });
+    await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts, last_error: BUSY, gen: rowGen, name });
     return { ok: false, error: BUSY, gen, staleGen, deferred: true };
   }
   let del;
@@ -116,7 +120,7 @@ async function attemptDelete(phone, platform, conn, deps, opts = {}) {
     await deps.db.clearPendingDelete(phone, platform, rowGen);
   } else {
     if (!staleGen) await deps.db.setConnection(phone, { [`${platform}_profile_delete_error`]: del.error });
-    await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts: attempts + 1, last_error: del.error, gen: rowGen });
+    await deps.db.savePendingDelete({ phone, platform, since: since || nowIso(), attempts: attempts + 1, last_error: del.error, gen: rowGen, name });
   }
   return { ok: del.ok, error: del.error, gen, staleGen };
 }
@@ -161,7 +165,7 @@ async function revoke({ phone, platform, reason }, deps) {
 // compromise): the profile is quarantined — assertOwnership refuses it —
 // and deleted at Driver like a revoke. Reconnecting after quarantine is a
 // separate, not-yet-built flow that bumps `<platform>_profile_gen` so the
-// new profile gets a fresh name (profileName's `-r<n>` suffix); this
+// new profile gets a fresh name (profile-name.js's `-r<n>` suffix); this
 // function does not do that bump itself.
 async function quarantine(phone, platform, cls, deps) {
   if (!HALT_CLASSES.has(cls)) { const e = new Error(`unknown halt class: ${cls}`); e.code = "invalid_input"; throw e; }
@@ -210,7 +214,7 @@ async function retryDeletes(deps, opts = {}) {
     if (row.gen === undefined) {
       if (!["revoked", "quarantined"].includes(conn[`${platform}_profile_state`])) continue; // reconnected past it
       if (conn[`${platform}_profile_deleted_at`]) continue; // already succeeded elsewhere
-      const del = await attemptDelete(phone, platform, conn, deps, { since, attempts, legacy: true });
+      const del = await attemptDelete(phone, platform, conn, deps, { since, attempts, legacy: true, name: row.name });
       const ageMs = since ? Date.now() - new Date(since).getTime() : 0;
       results.push({ phone, platform, gen: del.gen, ok: del.ok, staleGen: del.staleGen, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
       continue;
@@ -221,7 +225,7 @@ async function retryDeletes(deps, opts = {}) {
     // delete must not orphan the old generation's cookies at Driver, and
     // must not let this retry touch the NEW generation's deleted_at/error
     // (attemptDelete's staleGen check handles that half).
-    const del = await attemptDelete(phone, platform, conn, deps, { since, attempts, gen: row.gen });
+    const del = await attemptDelete(phone, platform, conn, deps, { since, attempts, gen: row.gen, name: row.name });
     const ageMs = since ? Date.now() - new Date(since).getTime() : 0;
     results.push({ phone, platform, gen: del.gen, ok: del.ok, staleGen: del.staleGen, escalate: !del.ok && ageMs >= ESCALATE_AFTER_DAYS * 24 * 60 * 60 * 1000 });
   }

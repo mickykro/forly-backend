@@ -561,5 +561,46 @@ function fakeGuard(reason) {
     }
   }
 
+  // ── stored names: /start records the opened name as PENDING (never pins it),
+  //    /finish pins it; a stored name is reopened; a gen bump retires it ──
+  {
+    assert.equal(db1.conn.facebook_profile_name_pending, profileName("facebook", PHONE));
+    assert.equal(db1.conn.facebook_profile_name_pending_gen, 0);
+    assert.equal(db1.conn.facebook_profile_name, undefined, "an unconfirmed login never pins");
+
+    const STORED = "yad2-staging-0123456789abcdef0123";
+    let opened = null;
+    const connS = { yad2_profile_name: STORED, yad2_profile_name_gen: 0 };
+    const sApp = makeApp({
+      driver: { createSession: async (o) => { opened = o; return { sessionId: "ss", status: "active" }; }, stopSession: async () => {} },
+      db: fakeDb(connS), locks: fakeLocks(),
+    });
+    assert.equal((await call(sApp, "POST", "/api/connections/browser/start", { platform: "yad2", consent: true })).status, 200);
+    assert.equal(opened.profile.name, STORED, "a stored name is reopened, not recomputed");
+
+    // /finish pins the pending name the login browser opened, and clears pending
+    const PENDING = "yad2-prod-aaaaaaaaaaaaaaaaaaaa";
+    const connF = { browser_session_yad2: { session_id: "sf" }, yad2_profile_name_pending: PENDING, yad2_profile_name_pending_gen: 0 };
+    const fApp = makeApp({
+      driver: { stopSession: async () => {}, attachPage: async (id, fn) => fn({ goto: async () => ({ status: () => 200 }), url: () => "https://www.yad2.co.il/my-ads", innerText: async () => "x".repeat(500), title: async () => "Dana" }) },
+      db: { getConnection: async () => connF, setConnection: async (p, patch) => Object.assign(connF, patch) },
+    });
+    assert.equal((await call(fApp, "POST", "/api/connections/browser/yad2/finish")).status, 200);
+    assert.equal(connF.yad2_profile_name, PENDING);
+    assert.equal(connF.yad2_profile_name_gen, 0);
+    assert.equal(connF.yad2_profile_name_pending, null);
+
+    // after a revoke, /start bumps the gen: the stored gen-0 name is not reopened
+    let reopened = null;
+    const connR = { yad2_profile_name: STORED, yad2_profile_name_gen: 0, yad2_profile_state: "revoked" };
+    const rApp = makeApp({
+      driver: { createSession: async (o) => { reopened = o; return { sessionId: "sr", status: "active" }; }, stopSession: async () => {} },
+      db: fakeDb(connR), locks: fakeLocks(),
+    });
+    assert.equal((await call(rApp, "POST", "/api/connections/browser/start", { platform: "yad2", consent: true })).status, 200);
+    assert.equal(reopened.profile.name, profileName("yad2", PHONE, 1));
+    assert.equal(connR.yad2_profile_name_pending_gen, 1);
+  }
+
   console.log("routes/connections-browser.test.js ok");
 })();

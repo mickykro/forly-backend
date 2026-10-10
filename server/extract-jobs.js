@@ -96,13 +96,13 @@ async function runJobLocked(job, deps) {
 
   try {
     // A job with a profile opens the agent's CURRENT profile (I2): the name
-    // is derived again from the connection's generation, and the connection
+    // is the stored name, or derived again from the connection's generation; the connection
     // goes to withPage, which refuses a revoked or quarantined profile.
     let profileName = job.profile_name || null, conn = null;
     if (profileName) {
       conn = (await deps.db.getConnection(job.phone)) || {};
       const platform = String(profileName).split("-")[0];
-      profileName = require("./profile-name").profileName(platform, job.phone, conn[`${platform}_profile_gen`] || 0);
+      profileName = require("./profile-name").resolveName(platform, job.phone, conn);
     }
     const source = await deps.resolve(
       { url: job.url, userId: job.phone },

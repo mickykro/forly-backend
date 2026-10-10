@@ -32,6 +32,7 @@
     driver_busy: "הדפדפנים תפוסים כרגע. נסו שוב בעוד דקה.",
     cannot_verify_login: "לא הצלחנו לוודא את ההתחברות. נסו שוב בעוד רגע.",
     verify_failed: "הבדיקה נכשלה. נסו שוב.",
+    invalid_profile_name: "שם הפרופיל לא תקין. העתיקו אותו בדיוק מ-Driver (מתחיל ב-facebook-).",
   };
   var LIMIT = { group_daily_cap: "כבר 3 פוסטים של הסוכן בקבוצה הזו היום", property_cooldown: "הנכס פורסם בקבוצה הזו לאחרונה — לא לפני המועד" }; // the interval is the campaign's (3 days, or its repeat)
   var limitText = function (l) { return l.block ? (LIMIT[l.block.why] || "הקבוצה הגיעה למגבלה") + (l.block.until ? " (עד " + when(l.block.until) + ")" : "") : ""; };
@@ -270,6 +271,9 @@
       var list = j.agents || [];
       box.innerHTML = !list.length ? '<p class="manual-muted">אין סוכנים כאלה.</p>' : list.map(function (a) {
         return '<div class="manual-item"><b>' + esc(a.name || "סוכן") + '</b> <span class="manual-muted">' + esc(a.phone_tail || "") + " · התחיל התחברות " + esc(when(a.started_at)) + "</span> " +
+          // Optional: the exact profile name from Driver's dashboard, for a login made
+          // in a profile this server would not find by itself (e.g. on staging).
+          '<input type="text" class="manual-input" dir="ltr" data-profile="' + esc(a.ref) + '" placeholder="שם הפרופיל ב-Driver (לא חובה)" title="העתיקו את השם בדיוק מ-Driver. שם של סוכן אחר יחבר את החשבון שלו לסוכן הזה."> ' +
           '<button type="button" class="btn btn-ghost btn-sm" data-verify="' + esc(a.ref) + '">בדיקת התחברות</button></div>';
       }).join("");
     }).catch(function (e) { box.innerHTML = '<p class="manual-muted">לא הצלחנו לטעון את הרשימה.</p>'; fail(e); });
@@ -278,8 +282,11 @@
   $("#manualUnconnectedList").addEventListener("click", function (ev) {
     var btn = ev.target.closest("[data-verify]");
     if (!btn) return;
+    var ref = btn.getAttribute("data-verify");
+    var input = btn.parentNode.querySelector("[data-profile]");
+    var typed = input ? input.value.trim() : "";
     btn.disabled = true; btn.textContent = "בודקים…";
-    call("POST", "/unconnected/" + encodeURIComponent(btn.getAttribute("data-verify")) + "/verify").then(function (r) {
+    call("POST", "/unconnected/" + encodeURIComponent(ref) + "/verify", typed ? { profile_name: typed } : null).then(function (r) {
       if (r.state === "connected") { FLY.toast("הסוכן מחובר ✓" + (r.identity_label ? " (" + r.identity_label + ")" : "")); load(); loadUnconnected(); }
       else { FLY.toast("הפרופיל השמור לא מחובר — הסוכן צריך להתחבר מחדש."); btn.disabled = false; btn.textContent = "בדיקת התחברות"; }
     }).catch(function (e) { fail(e); btn.disabled = false; btn.textContent = "בדיקת התחברות"; });

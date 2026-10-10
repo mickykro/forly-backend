@@ -67,6 +67,55 @@ function fakeDriver(page, seen) {
     assert.equal(db.writes.length, 0);
   }
 
+  // ── a login confirmed here pins the name it was confirmed in ──
+  {
+    const db = fakeDb({ browser_consent_at: "2026-10-01T00:00:00Z", yad2_profile_gen: 1 });
+    await verifySaved(PHONE, "yad2", { db, driver: fakeDriver(fakePage(), []) });
+    assert.equal(db.conn.yad2_profile_name, profileName("yad2", PHONE, 1));
+    assert.equal(db.conn.yad2_profile_name_gen, 1);
+  }
+
+  // ── the pending name (a login browser opened on another server) is checked first ──
+  {
+    const PENDING = "yad2-staging-0123456789abcdef0123";
+    const db = fakeDb({ browser_consent_at: "2026-10-01T00:00:00Z", yad2_profile_name_pending: PENDING, yad2_profile_name_pending_gen: 0 });
+    const seen = [];
+    const r = await verifySaved(PHONE, "yad2", { db, driver: fakeDriver(fakePage(), seen) });
+    assert.equal(r.state, "connected");
+    assert.equal(seen[0].opts.profile.name, PENDING);
+    assert.equal(db.conn.yad2_profile_name, PENDING, "pinned");
+    assert.equal(db.conn.yad2_profile_name_pending, null, "pending cleared");
+  }
+
+  // ── an admin-typed name: recorded as pending, opened exactly, pinned on success ──
+  {
+    const TYPED = "yad2-staging-ffffffffffffffffffff";
+    const db = fakeDb({ browser_consent_at: "2026-10-01T00:00:00Z" });
+    const seen = [];
+    const r = await verifySaved(PHONE, "yad2", { db, driver: fakeDriver(fakePage(), seen), name: TYPED });
+    assert.equal(r.state, "connected");
+    assert.equal(seen[0].opts.profile.name, TYPED);
+    assert.equal(db.conn.yad2_profile_name, TYPED);
+  }
+  {
+    // not logged in: never pinned (the typed name stays pending only)
+    const TYPED = "yad2-staging-eeeeeeeeeeeeeeeeeeee";
+    const db = fakeDb({ browser_consent_at: "2026-10-01T00:00:00Z" });
+    const r = await verifySaved(PHONE, "yad2", { db, driver: fakeDriver(fakePage({ url: "https://www.yad2.co.il/auth/login" }), []), name: TYPED });
+    assert.equal(r.state, "not_logged_in");
+    assert.equal(db.conn.yad2_profile_name, undefined);
+    assert.equal(db.conn.yad2_browser_connected_at, undefined);
+  }
+  {
+    // malformed or another platform's name: no write, no browser
+    for (const bad of ["facebook-prod-x", "yad2-../x", ""]) {
+      const db = fakeDb({ browser_consent_at: "2026-10-01T00:00:00Z" });
+      const seen = [];
+      assert.equal((await verifySaved(PHONE, "yad2", { db, driver: fakeDriver(fakePage(), seen), name: bad })).error, "invalid_profile_name", bad);
+      assert.equal(seen.length + db.writes.length, 0, bad);
+    }
+  }
+
   assert.equal((await verifySaved(PHONE, "nope", { db: fakeDb({}), driver: {} })).error, "invalid_input");
   console.log("login-verify.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

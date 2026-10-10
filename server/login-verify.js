@@ -11,10 +11,16 @@
  *
  * One Driver session per call: it runs only when an admin asks
  * (routes/admin-manual.js).
+ *
+ * Which profile: deps.name (a name the admin typed, copied from Driver's
+ * dashboard), else the name a login browser opened (pending), else the
+ * stored/computed one. A typed name is first recorded as pending — the only
+ * non-stored name assertOwnership accepts — and is pinned only if the check
+ * finds it logged in.
  */
 const driverLive = require("./driver-browser");
 const dbLive = require("./db");
-const { profileName } = require("./profile-name");
+const { resolveName, pendingName, validName } = require("./profile-name");
 
 const VERIFY_SECONDS = 180;
 
@@ -30,10 +36,19 @@ async function verifySaved(phone, platform, deps = {}) {
   // would refuse it anyway (assertOwnership).
   if (["revoked", "quarantined"].includes(conn[`${platform}_profile_state`])) return { error: "profile_revoked" };
 
+  const gen = conn[`${platform}_profile_gen`] || 0;
+  if (deps.name !== undefined) {
+    if (!validName(platform, deps.name)) return { error: "invalid_profile_name" };
+    const typed = { [`${platform}_profile_name_pending`]: deps.name, [`${platform}_profile_name_pending_gen`]: gen };
+    await db.setConnection(phone, typed);
+    Object.assign(conn, typed);
+  }
+  const name = pendingName(platform, conn) || resolveName(platform, phone, conn);
+
   let r;
   try {
     r = await driver.withPage(
-      { duration: VERIFY_SECONDS, note: `forly-connect:verify-${platform}`, profile: { name: profileName(platform, phone, conn[`${platform}_profile_gen`] || 0), persist: true } },
+      { duration: VERIFY_SECONDS, note: `forly-connect:verify-${platform}`, profile: { name, persist: true } },
       (page) => CB.readLogin(page, platform, spec, conn, db),
       { phone, platform, conn },
     );
@@ -46,7 +61,7 @@ async function verifySaved(phone, platform, deps = {}) {
   }
   if (r.unverifiable) return { error: "cannot_verify_login" };
   if (!r.loggedIn) return { state: "not_logged_in" };
-  await db.setConnection(phone, CB.connectedPatch(conn, platform, r));
+  await db.setConnection(phone, CB.connectedPatch(conn, platform, Object.assign({}, r, { name })));
   return { state: "connected", identity_label: r.label || null };
 }
 

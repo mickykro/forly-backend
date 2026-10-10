@@ -170,12 +170,17 @@ module.exports = function createAdminManualRouter({
     res.json({ agents: list.map((a) => ({ ref: M.refOf(a.phone), phone_tail: A.tail(a.phone), name: a.name, started_at: a.started_at })) });
   }));
   // Opens the agent's saved profile, checks the login, and marks the agent
-  // connected only when it is logged in (login-verify.js).
+  // connected only when it is logged in (login-verify.js). body.profile_name
+  // (optional): the exact Driver profile name, copied by the admin from
+  // Driver's dashboard — for a login made in a profile this server would not
+  // compute (another environment, an older key). Pinned only if logged in.
   router.post("/unconnected/:ref/verify", requireAdmin, wrap(async (req, res) => {
+    const typed = String((req.body && req.body.profile_name) || "").trim();
+    if (typed && !require("../profile-name").validName("facebook", typed)) return res.status(400).json({ error: "invalid_profile_name" });
     const hit = (await unconnected()).find((a) => M.refOf(a.phone) === String(req.params.ref));
     if (!hit) return res.status(404).json({ error: "not_found" });
-    const r = await (deps.verifySaved || require("../login-verify").verifySaved)(hit.phone, "facebook", { db: x.db, driver });
-    if (r.error) return res.status(r.error === "profile_busy" || r.error === "driver_busy" ? 409 : 502).json({ error: r.error });
+    const r = await (deps.verifySaved || require("../login-verify").verifySaved)(hit.phone, "facebook", Object.assign({ db: x.db, driver }, typed ? { name: typed } : {}));
+    if (r.error) return res.status(r.error === "profile_busy" || r.error === "driver_busy" ? 409 : r.error === "invalid_profile_name" ? 400 : 502).json({ error: r.error });
     res.json(r);
   }));
 
@@ -221,10 +226,10 @@ module.exports = function createAdminManualRouter({
     const release = locks.tryAcquire(phone, "facebook");
     if (!release) return res.status(409).json({ error: "profile_busy" });
     try {
-      const { profileName } = require("../profile-name");
+      const { resolveName } = require("../profile-name");
       const s = await driver.createSession({
         duration: SESSION_S, url: groupUrl || "https://www.facebook.com/",
-        profile: { name: profileName("facebook", phone, conn.facebook_profile_gen || 0), persist: true },
+        profile: { name: resolveName("facebook", phone, conn), persist: true },
         note: "forly-manual:facebook", // never the phone
       }, { phone });
       const timer = setTimeout(() => closeFor(phone, "expired"), SESSION_S * 1000);

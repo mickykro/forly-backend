@@ -29,7 +29,7 @@ const CONSENT_VERSION = "2026-09-24";
 // Disabling halt classes R5 resolves with a reconnect (see startFlow).
 const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
 const FLEET_REASONS = new Set(["env_off", "global_off", "platform_off", "visible_off"]);
-const { profileName } = require("../profile-name");
+const { resolveName, pendingName } = require("../profile-name");
 
 // Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
 // read — see listing-sweep.js). Add a platform here when a feature needs it.
@@ -166,10 +166,18 @@ async function readLogin(page, platform, spec, conn, db) {
   return { loggedIn: true, label, pages, groups };
 }
 
-// What a confirmed login writes on the connection.
-function connectedPatch(conn, platform, { label, pages, groups }) {
+// What a confirmed login writes on the connection. `name`: the Driver profile
+// the login was confirmed in — pinned here, so every later browser (on prod
+// and staging alike) opens exactly it instead of computing a name again.
+function connectedPatch(conn, platform, { label, pages, groups, name }) {
   const first = conn[`${platform}_browser_first_connected_at`] || new Date().toISOString();
-  return Object.assign({
+  const pin = name ? {
+    [`${platform}_profile_name`]: name,
+    [`${platform}_profile_name_gen`]: conn[`${platform}_profile_gen`] || 0,
+    [`${platform}_profile_name_pending`]: null,
+    [`${platform}_profile_name_pending_gen`]: null,
+  } : {};
+  return Object.assign(pin, {
     [`${platform}_browser_connected_at`]: new Date().toISOString(),
     [`${platform}_browser_first_connected_at`]: first, // warm-up counts from here, not from every reconnect
     [`${platform}_identity_label`]: label,
@@ -273,6 +281,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       conn[`browser_session_${platform}`] = null;
     }
 
+    // A stored name is reused; after a generation bump (above) it no longer
+    // matches and the new generation's computed name is opened.
+    const name = resolveName(platform, phone, conn, gen);
     let session = null, launchError = null;
     // A Driver-hosted exit can die between API acceptance and Chrome's first
     // request. Stop it and try one fresh machine; never loop indefinitely.
@@ -281,7 +292,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         session = await driver.createSession({
           duration: SESSION_SECONDS,
           url: spec.loginUrl,
-          profile: { name: profileName(platform, phone, gen), persist: true },
+          profile: { name, persist: true },
           note: `forly-connect:${platform}`, // never the phone
         }, { phone }); // the agent's sticky proxy address (driver-browser.proxyFor)
         if (typeof driver.inspectInitialPage === "function") {
@@ -321,6 +332,11 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
         [`browser_session_${platform}`]: { session_id: session.sessionId, started_at: new Date().toISOString() },
         browser_consent_at: new Date().toISOString(),
         browser_consent_version: CONSENT_VERSION,
+        // Pending, not pinned: only /finish's confirmed login pins it. Pinning
+        // here would let an abandoned login (say on staging) replace the name
+        // a working login (on prod) is using.
+        [`${platform}_profile_name_pending`]: name,
+        [`${platform}_profile_name_pending_gen`]: gen,
       }, statePatch));
     } catch (e) {
       await driver.stopSession(session.sessionId); // unrecorded, nobody could ever resume it
@@ -404,7 +420,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
 
     await viewer.close(hubKey(phone, platform), "connected");
     await driver.stopSession(open.session_id);
-    await db.setConnection(phone, connectedPatch(conn, platform, { label, pages, groups }));
+    // The profile this login browser opened (/start recorded it as pending).
+    const name = pendingName(platform, conn) || resolveName(platform, phone, conn);
+    await db.setConnection(phone, connectedPatch(conn, platform, { label, pages, groups, name }));
     // Warm-up starts now, not at the next sweep (index.js: the first browse,
     // under the same guard and profile lock). Never delays or fails the connect.
     if (typeof ctx.onConnected === "function") { try { ctx.onConnected(phone, platform); } catch (e) { /* the sweep will start it */ } }

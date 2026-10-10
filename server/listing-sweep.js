@@ -17,7 +17,7 @@ const crypto = require("crypto");
 const driverLive = require("./driver-browser");
 const extractJobsLive = require("./extract-jobs");
 const locksLive = require("./profile-lock");
-const { profileName } = require("./profile-name");
+const { resolveName } = require("./profile-name");
 const { isLoginWall } = require("./listing-driver")._test;
 
 const GOTO_TIMEOUT_MS = 45000;
@@ -91,7 +91,7 @@ async function sweep({ platform, phone }, deps) {
     const opts = {
       duration: 300, note: `forly-sweep:${platform}`, type: "hosted", country: "IL",
       // The CURRENT generation's name (I2): after a reconnect the old name is refused.
-      profile: { name: profileName(platform, phone, conn[`${platform}_profile_gen`] || 0), persist: true },
+      profile: { name: resolveName(platform, phone, conn), persist: true },
     };
     // We hold the lock (above); withPage still asserts the name is this
     // phone's, and refuses a revoked or quarantined connection.
