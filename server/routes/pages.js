@@ -19,7 +19,7 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsAppRich, storeBuffer, ownUploadedVideo, inPlace } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsAppRich, whatsappEnabled, storeBuffer, ownUploadedVideo, inPlace } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { CURRENCIES, normalizeCurrency } = require("../currency");
 const { roomLabel } = require("../rooms");
@@ -47,7 +47,7 @@ const expiredLinkHtml = () =>
   confirmHtml("הקישור אינו תקף", "הקישור כבר נוצל או שאינו תקף. לניהול הנכסים: nadlan.call4li.com");
 
 module.exports = function createPagesRouter(ctx) {
-  const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook, greenInstance, greenToken,
+  const { uploadDir, baseUrl, pageBaseUrl, templatesDir, n8nLeadWebhook,
           requireAuth, verifyActionToken, authSecret, adminApiSecret,
           uploadPublicBase, remoteUploadBase, signActionToken,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
@@ -65,12 +65,12 @@ module.exports = function createPagesRouter(ctx) {
     Promise.resolve().then(async () => {
       if (!choice) return require("../posting-campaign").enrollNewPage(page, ctx.postingDeps || {});
       const c = await LG.apply(page, listing, ctx.postingDeps || {});
-      if (c && Array.isArray(choice) && greenInstance && greenToken) {
+      if (c && Array.isArray(choice) && whatsappEnabled()) {
         await sendWhatsAppRich(page.business_phone, {
           header: "דף הנכס מוכן ✅", footer: "",
           body: "לפני שנפרסם בקבוצות שבחרתם, אשרו את הטקסט לכל קבוצה. אפשר לערוך כל אחד.",
           buttons: [{ type: "url", buttonText: "לאישור הטקסטים", url: LG.link(baseUrl, authSecret, page.business_phone, listing.listing_id) }],
-        }, greenInstance, greenToken);
+        });
       }
     }).catch(() => null);
   };
@@ -91,7 +91,6 @@ module.exports = function createPagesRouter(ctx) {
   const adminSet = pageAuth.normalizeSet(adminPhones, normalizeAuthPhone);
   const authMode = pageAuth.readMode(process.env.PAGE_UPDATE_AUTH);
   const distDeps = distributionJobs.liveDeps({
-    greenInstance: greenInstance, greenToken: greenToken,
     pageBaseUrl: pageBaseUrl, authSecret: authSecret,
   });
 
@@ -661,7 +660,7 @@ module.exports = function createPagesRouter(ctx) {
           body: `מדף הנכס "${page.property.address}, ${page.property.city}"\n👤 ${name}\n📞 0${prospectPhone.slice(3)}`,
           footer: "",
           buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${prospectPhone}` }],
-        }, greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
+        }).catch((e) => console.error("lead notify failed:", e.message));
       }
 
       if (n8nLeadWebhook) {

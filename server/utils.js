@@ -287,106 +287,11 @@ function sniffMatchesExt(buf, ext) {
 }
 
 // ── whatsapp ──
-// Each instance's own API host (the first 4 digits of its id name its server,
-// e.g. 7105… → 7105.api.greenapi.com), not the shared api.green-api.com: the
-// shared host went down with Green API's site while instance 7105 stayed up,
-// which broke login codes. GREENAPI_API_URL overrides it.
-function greenApiBase(instance) {
-  const override = (process.env.GREENAPI_API_URL || "").trim().replace(/\/+$/, "");
-  return `${override || `https://${String(instance).slice(0, 4)}.api.greenapi.com`}/waInstance${instance}`;
-}
-
-// Resolves true when Green API accepted the message, false when it refused it
-// (logged with its status), undefined when no creds are set (local dev).
-async function sendWhatsApp(phone, message, instance, token) {
-  if (!instance || !token) return;
-  const r = await fetch(`${greenApiBase(instance)}/sendMessage/${token}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!r.ok) {
-    const body = await r.text().catch(() => "");
-    console.error(`Green API sendMessage refused (${r.status}): ${body.slice(0, 200)}`);
-  }
-  return r.ok;
-}
-
-// The last `count` messages of a chat, newest first (Green API getChatHistory).
-async function getWhatsAppHistory(chatId, count, instance, token) {
-  if (!instance || !token) return [];
-  const r = await fetch(`${greenApiBase(instance)}/getChatHistory/${token}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chatId, count }),
-    signal: AbortSignal.timeout(20000),
-  });
-  const j = r.ok ? await r.json() : [];
-  return Array.isArray(j) ? j : [];
-}
-
-// One message of a chat, e.g. the image an agent replied to (its downloadUrl).
-async function getWhatsAppMessage(chatId, idMessage, instance, token) {
-  if (!instance || !token) return null;
-  const r = await fetch(`${greenApiBase(instance)}/getMessage/${token}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chatId, idMessage }),
-    signal: AbortSignal.timeout(20000),
-  });
-  return r.ok ? r.json() : null;
-}
-
-/*
- * Interactive buttons (Green API sendInteractiveButtons).
- * Limits enforced here rather than trusted from call sites: at most 3
- * buttons, button text ≤ 25 chars — Green API rejects the whole message
- * otherwise, and a rejected message is a lost notification.
- * Throws on a non-2xx so callers can fall back to a plain text send.
- */
-async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, instance, token) {
-  // Never the phone, the body or the links: a link may be a signed one-tap token.
-  console.log(`[whatsapp] buttons → …${String(phone || "").slice(-4)} (${(buttons || []).length})`);
-  if (!instance || !token) return;
-  const clean = (buttons || []).slice(0, 3).map((b, i) => ({
-    ...b,
-    buttonId: String(b.buttonId || i + 1),
-    buttonText: String(b.buttonText || "").slice(0, 25),
-  }));
-  const resp = await fetch(
-    `${greenApiBase(instance)}/sendInteractiveButtons/${token}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chatId: `${phone}@c.us`,
-        header: String(header || " ").slice(0, 60),
-        body: String(body || ""),
-        footer: String(footer || " ").slice(0, 60),
-        buttons: clean,
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-  if (!resp.ok) {
-    throw new Error(`sendInteractiveButtons ${resp.status}`);
-  }
-  return resp.json().catch(() => ({}));
-}
-
-// The same message as plain text: header, body, each link spelled out, footer.
-// What a rejected interactive send falls back to — the link is never lost.
-function textOfButtons({ header, body, footer, buttons } = {}) {
-  const links = (buttons || []).filter((b) => b && b.url).map((b) => `${String(b.buttonText || "").trim()}: ${b.url}`);
-  return [String(header || "").trim(), String(body || "").trim(), links.join("\n"), String(footer || "").trim()]
-    .filter(Boolean).join("\n\n");
-}
-
-// Links go behind buttons: the interactive message first, its text on any failure.
-async function sendWhatsAppRich(phone, payload, instance, token) {
-  try { return await sendWhatsAppButtons(phone, payload, instance, token); }
-  catch (e) { console.warn(`[whatsapp] buttons failed (${e && e.message}), sending text`); }
-  return sendWhatsApp(phone, textOfButtons(payload), instance, token);
-}
+// Provider-neutral; the provider (Green API, Whapi, …) lives in ./whatsapp.
+const {
+  sendWhatsApp, sendWhatsAppButtons, sendWhatsAppRich, textOfButtons,
+  getWhatsAppHistory, getWhatsAppMessage, whatsappEnabled,
+} = require("./whatsapp");
 
 // A page's hero video may only point at one of our own uploads — an mp4 with
 // the upload route's UUID filename under one of our public bases — never an
@@ -413,6 +318,6 @@ module.exports = {
   ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
-  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons, greenApiBase, getWhatsAppMessage, getWhatsAppHistory,
+  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons, whatsappEnabled, getWhatsAppMessage, getWhatsAppHistory,
   assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
 };

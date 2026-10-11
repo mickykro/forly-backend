@@ -4,7 +4,7 @@ import * as crypto from "crypto";
 import type {Request} from "firebase-functions/https";
 import {
   db, normalizePhone, sendWhatsAppMessage,
-  greenApiInstance, greenApiToken, nadlanJwtSecret, adminPhone,
+  whatsappSecrets, nadlanJwtSecret, adminPhone,
 } from "../shared";
 
 const OTP_TTL_MS = 5 * 60 * 1000;
@@ -105,7 +105,7 @@ function todayKey(): string {
 // sendLoginOtp — POST { phone, mode?: "login" | "signup" }
 // ────────────────────────────────────────────────────────────
 export const sendLoginOtp = onRequest(
-  {secrets: [greenApiInstance, greenApiToken, nadlanJwtSecret], cors: false},
+  {secrets: [...whatsappSecrets, nadlanJwtSecret], cors: false},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("POST only");
@@ -163,9 +163,7 @@ export const sendLoginOtp = onRequest(
     try {
       await sendWhatsAppMessage(
         phone,
-        `🔐 קוד הכניסה שלך לפורלי: ${code}\nהקוד תקף ל-5 דקות.`,
-        greenApiInstance.value(),
-        greenApiToken.value()
+        `🔐 קוד הכניסה שלך לפורלי: ${code}\nהקוד תקף ל-5 דקות.`
       );
     } catch (err) {
       logger.error("OTP WhatsApp send failed:", err);

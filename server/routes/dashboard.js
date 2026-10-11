@@ -17,7 +17,7 @@ const { buildFailed, retryBlocked } = require("../listing-create");
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
 
 module.exports = function createDashboardRouter(ctx) {
-  const { requireAuth, authSecret, pageBaseUrl, uploadDir, greenInstance, greenToken } = ctx;
+  const { requireAuth, authSecret, pageBaseUrl, uploadDir } = ctx;
 
   const router = express.Router();
 
@@ -173,7 +173,7 @@ module.exports = function createDashboardRouter(ctx) {
             `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
           footer: "",
           buttons: [{ type: "url", buttonText: "לכניסה לפורלי", url: PUBLIC_BASE_URL }],
-        }, greenInstance, greenToken);
+        });
       } catch (err) { console.error("welcome send failed (signup still ok):", err.message); }
       res.json({ ok: true });
     } catch (err) {

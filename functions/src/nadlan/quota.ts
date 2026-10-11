@@ -10,7 +10,7 @@
 import {FieldValue} from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import {defineString} from "firebase-functions/params";
-import {db, sendWhatsAppMessage, adminPhone, greenApiInstance, greenApiToken} from "../shared";
+import {db, sendWhatsAppMessage, adminPhone} from "../shared";
 
 export const paymentLinkUrl = defineString("PAYMENT_LINK_URL", {default: ""});
 
@@ -113,7 +113,7 @@ export async function consumeQuota(
           `ניסה/תה: ${LABELS[kind]}`,
           `נוצל ${out.used} מתוך ${out.cap}`,
           "הבקשה האחרונה נשמרה בפאנל הניהול.",
-        ].join("\n"), greenApiInstance.value(), greenApiToken.value());
+        ].join("\n"));
       } catch (err) {
         logger.warn("quota admin notify failed:", err);
       }

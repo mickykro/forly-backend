@@ -339,11 +339,11 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   // ── no draft, but the chat has the ad and edited photos: "תעשי איך שנראה לך" builds from them ──
   const nowS = Math.floor(T0.getTime() / 1000);
   const chat = [ // newest first, like Green API
-    { type: "outgoing", typeMessage: "textMessage", textMessage: "איזה כותרת תרצה לדף הנכס?", timestamp: nowS - 60 },
-    { type: "incoming", typeMessage: "textMessage", textMessage: "למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת", timestamp: nowS - 600 },
-    { type: "outgoing", typeMessage: "imageMessage", downloadUrl: "https://fal/e2.jpg", timestamp: nowS - 1200 },
-    { type: "outgoing", typeMessage: "imageMessage", downloadUrl: "https://fal/e1.jpg", timestamp: nowS - 1300 },
-    { type: "incoming", typeMessage: "imageMessage", downloadUrl: "https://green/o1.jpg", timestamp: nowS - 1500 },
+    { fromMe: true, type: "text", text: "איזה כותרת תרצה לדף הנכס?", timestamp: nowS - 60 },
+    { fromMe: false, type: "text", text: "למכירה בפלורנטין 3 חדרים 70 מ״ר קומה 2 מחיר 2,200,000 ₪ משופצת", timestamp: nowS - 600 },
+    { fromMe: true, type: "image", mediaUrl: "https://fal/e2.jpg", timestamp: nowS - 1200 },
+    { fromMe: true, type: "image", mediaUrl: "https://fal/e1.jpg", timestamp: nowS - 1300 },
+    { fromMe: false, type: "image", mediaUrl: "https://green/o1.jpg", timestamp: nowS - 1500 },
   ];
   let ctxSeen = null;
   ({ d } = deps({ recentChat: async () => chat, resolve: async ({ text }) => ({ source: "text", text, photos: [] }),
@@ -355,7 +355,7 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   assert.match(texts(t), /אספתי מהשיחה את פרטי הנכס מהמודעה ו-2 תמונות/);
   // nothing in the chat to build from: no LLM call at all
   let calls = 0;
-  ({ d } = deps({ recentChat: async () => [{ type: "incoming", typeMessage: "textMessage", textMessage: "היי", timestamp: nowS - 60 }], classifyIntent: async () => { calls++; return "new"; } }));
+  ({ d } = deps({ recentChat: async () => [{ fromMe: false, type: "text", text: "היי", timestamp: nowS - 60 }], classifyIntent: async () => { calls++; return "new"; } }));
   t = await turn({ text: "תעשי איך שנראה לך" }, d);
   assert.deepEqual([t.handled, calls], [false, 0]);
 
@@ -492,10 +492,10 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   // "לשפר תמונה" quoting an album, nothing open: the photos she just sent are edited now.
   const albumS = T0.getTime() / 1000;
   const albumChat = [
-    { type: "incoming", timestamp: albumS - 30, typeMessage: "textMessage", textMessage: "לא לעדכן" },
-    { type: "incoming", timestamp: albumS - 60, typeMessage: "imageMessage", downloadUrl: "https://green/a2.jpg" },
-    { type: "incoming", timestamp: albumS - 60, typeMessage: "imageMessage", downloadUrl: "https://green/a1.jpg" },
-    { type: "outgoing", timestamp: albumS - 70, typeMessage: "imageMessage", downloadUrl: "https://bot/edited.jpg" },
+    { fromMe: false, type: "text", text: "לא לעדכן", timestamp: albumS - 30 },
+    { fromMe: false, type: "image", mediaUrl: "https://green/a2.jpg", timestamp: albumS - 60 },
+    { fromMe: false, type: "image", mediaUrl: "https://green/a1.jpg", timestamp: albumS - 60 },
+    { fromMe: true, type: "image", mediaUrl: "https://bot/edited.jpg", timestamp: albumS - 70 },
   ];
   ({ d } = deps({ classifyIntent: async () => null, recentChat: async () => albumChat }));
   t = await turn({ text: "לשפר תמונה" }, d);

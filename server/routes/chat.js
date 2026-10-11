@@ -31,7 +31,7 @@ const nowDay = () => new Date().toISOString().slice(0, 10);
 const nowMonth = () => new Date().toISOString().slice(0, 7);
 
 module.exports = function createChatRouter(ctx) {
-  const { apiKeys, ipSalt, greenInstance, greenToken, quota, pageBaseUrl } = ctx;
+  const { apiKeys, ipSalt, quota, pageBaseUrl } = ctx;
   const router = express.Router();
 
   const hashIp = (ip) =>
@@ -287,7 +287,7 @@ module.exports = function createChatRouter(ctx) {
       sendWhatsAppRich(page.business_phone, {
         header: "🔔 שאלה נוספת מליד", body: alert, footer: "",
         buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${convo.lead.phone}` }],
-      }, greenInstance, greenToken)
+      })
         .catch((e) => console.error("chat followup notify failed:", e.message));
 
       await saveConversation(pageId, cid, convo);
@@ -423,7 +423,7 @@ module.exports = function createChatRouter(ctx) {
     sendWhatsAppRich(page.business_phone, {
       header: "🔔 ליד חדש", body: alert, footer: "",
       buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${prospectPhone}` }],
-    }, greenInstance, greenToken)
+    })
       .catch((e) => console.error("chat lead notify failed:", e.message));
 
     const at = new Date();

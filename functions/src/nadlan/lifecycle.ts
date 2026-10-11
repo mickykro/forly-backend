@@ -3,7 +3,7 @@ import {onSchedule} from "firebase-functions/scheduler";
 import * as logger from "firebase-functions/logger";
 import {
   db, sendWhatsAppMessage, pageBaseUrl,
-  greenApiInstance, greenApiToken, nadlanJwtSecret,
+  whatsappSecrets, nadlanJwtSecret,
 } from "../shared";
 import {requireAuth, signActionToken, verifyActionToken} from "./auth";
 import {PropertyPage, PAGE_LIFESPAN_DAYS, REMINDER_BEFORE_DAYS} from "./types";
@@ -118,7 +118,7 @@ export const expirePagesDaily = onSchedule(
   {
     schedule: "every day 09:00",
     timeZone: "Asia/Jerusalem",
-    secrets: [greenApiInstance, greenApiToken, nadlanJwtSecret],
+    secrets: [...whatsappSecrets, nadlanJwtSecret],
   },
   async () => {
     const now = Date.now();
@@ -148,9 +148,7 @@ export const expirePagesDaily = onSchedule(
             d.business_phone,
             `⏳ דף הנכס "${d.property.title}" יפוג בעוד ${daysLeft} ימים.\n` +
             `להארכה בחינם (30 יום נוספים) בלחיצה אחת:\n${link}\n\n` +
-            `לניהול כל הנכסים: agent.call4li.com`,
-            greenApiInstance.value(),
-            greenApiToken.value()
+            `לניהול כל הנכסים: agent.call4li.com`
           );
           await doc.ref.update({reminder_sent_at: new Date(), status: "expiring"});
           reminded++;

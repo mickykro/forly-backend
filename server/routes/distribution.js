@@ -80,9 +80,9 @@ async function mergedCatalog(db, want) {
 
 module.exports = function createDistributionRouter(ctx) {
   const { requireAuth, verifyActionToken, verifySession, readToken,
-          authSecret, adminApiSecret, pageBaseUrl, greenInstance, greenToken } = ctx;
+          authSecret, adminApiSecret, pageBaseUrl } = ctx;
   const { constantTimeEqual } = require("../security");
-  const deps = jobs.liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret });
+  const deps = jobs.liveDeps({ pageBaseUrl, authSecret });
   const router = express.Router();
   // The page-picker posts a plain HTML form (no session, no JS required).
   router.use(express.urlencoded({ extended: false }));

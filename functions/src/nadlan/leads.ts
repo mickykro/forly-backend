@@ -4,7 +4,7 @@ import axios from "axios";
 import {FieldValue} from "firebase-admin/firestore";
 import {
   db, normalizePhone, sendWhatsAppMessage,
-  greenApiInstance, greenApiToken, n8nLeadWebhookUrl,
+  whatsappSecrets, n8nLeadWebhookUrl,
 } from "../shared";
 import {PropertyPage} from "./types";
 
@@ -14,7 +14,7 @@ const LEAD_MAX_PER_HOUR = 3;
 // submitPropertyLead — POST { page_id, name, phone } from the /p/ form
 // ────────────────────────────────────────────────────────────
 export const submitPropertyLead = onRequest(
-  {secrets: [greenApiInstance, greenApiToken], cors: false},
+  {secrets: [...whatsappSecrets], cors: false},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("POST only");
@@ -106,9 +106,7 @@ export const submitPropertyLead = onRequest(
           page.business_phone,
           `🔔 ליד חדש מדף הנכס "${page.property.address}, ${page.property.city}"!\n` +
           `👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
-          `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
-          greenApiInstance.value(),
-          greenApiToken.value()
+          `דברו איתו עכשיו: https://wa.me/${prospectPhone}`
         );
       } catch (err) {
         logger.error("lead notify failed (lead still saved):", err);

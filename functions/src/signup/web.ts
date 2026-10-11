@@ -1,7 +1,7 @@
 import {onRequest} from "firebase-functions/https";
 import * as logger from "firebase-functions/logger";
 import {
-  db, sendWhatsAppMessage, greenApiInstance, greenApiToken, nadlanJwtSecret,
+  db, sendWhatsAppMessage, whatsappSecrets, nadlanJwtSecret,
 } from "../shared";
 import {requireAuth} from "../nadlan/auth";
 
@@ -12,7 +12,7 @@ import {requireAuth} from "../nadlan/auth";
 // channels converge on one canonical doc.
 // ────────────────────────────────────────────────────────────
 export const submitWebSignup = onRequest(
-  {secrets: [nadlanJwtSecret, greenApiInstance, greenApiToken], cors: false},
+  {secrets: [...whatsappSecrets, nadlanJwtSecret], cors: false},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("POST only");
@@ -75,9 +75,7 @@ export const submitWebSignup = onRequest(
           `ברוכים הבאים לפורלי 🦉\n` +
           `${fullName}, החשבון של ${businessName} מוכן!\n\n` +
           `מה עכשיו? נכנסים ל-agent.call4li.com, פותחים נכס ראשון — ` +
-          `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
-          greenApiInstance.value(),
-          greenApiToken.value()
+          `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`
         );
       } catch (err) {
         logger.error("welcome send failed (signup still ok):", err);

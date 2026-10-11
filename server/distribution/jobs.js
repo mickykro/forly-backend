@@ -117,7 +117,7 @@ const hasInFlight = (dists) => (dists || []).some((d) =>
   d && (d.status === "awaiting_confirm" || d.status === "queued" || d.status === "running"));
 
 // ── deps assembly for production wiring ──
-function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, env = process.env }) {
+function liveDeps({ pageBaseUrl, authSecret, env = process.env }) {
   const db = require("../db");
   const meta = require("./meta");
   const shareKit = require("./share-kit");
@@ -133,9 +133,9 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, env = pr
     mediaBaseUrl: (env.REMOTE_UPLOAD_BASE || pageBaseUrl || "").replace(/\/+$/, ""),
     graphVersion: env.META_GRAPH_VERSION || meta.DEFAULT_VERSION,
     signActionToken: (parts) => signActionToken(parts, authSecret),
-    sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, greenInstance, greenToken),
+    sendWhatsApp,
     sendWhatsAppButtons: (phone, payload) =>
-      sendWhatsAppButtons(phone, payload, greenInstance, greenToken),
+      sendWhatsAppButtons(phone, payload),
     now: () => new Date(),
     getBusinessCached: (phone) => businessCache.get(phone),
   };

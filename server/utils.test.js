@@ -159,21 +159,28 @@ const fakeFetch = (body) => async () => ({
     const payload = { header: "כותרת", body: "גוף", footer: "תחתית", buttons: [{ type: "url", buttonText: "לאישור", url: "https://x.test/a?t=1" }] };
     assert.strictEqual(textOfButtons(payload), "כותרת\n\nגוף\n\nלאישור: https://x.test/a?t=1\n\nתחתית");
     const realFetch = global.fetch, realLog = console.log, realWarn = console.warn;
+    const realEnv = { ...process.env };
+    Object.assign(process.env, { WHATSAPP_PROVIDER: "greenapi", GREENAPI_INSTANCE: "7105422200", GREENAPI_TOKEN: "tok" });
     const sent = [], logs = [];
     console.log = (...a) => logs.push(a.join(" ")); console.warn = () => {};
     try {
       global.fetch = async (url, o) => { sent.push([url, JSON.parse(o.body)]); return { ok: true, json: async () => ({}) }; };
-      await sendWhatsAppRich("972500000001", payload, "7105422200", "tok");
+      await sendWhatsAppRich("972500000001", payload);
       assert.ok(sent[0][0].endsWith("/waInstance7105422200/sendInteractiveButtons/tok"));
       assert.deepEqual(sent[0][1].buttons, [{ type: "url", buttonText: "לאישור", url: "https://x.test/a?t=1", buttonId: "1" }]);
       assert.strictEqual(sent[0][1].chatId, "972500000001@c.us");
       assert.ok(!logs.join("\n").includes("972500000001") && !logs.join("\n").includes("t=1"), "no phone or link logged");
       sent.length = 0;
       global.fetch = async (url, o) => { sent.push([url, JSON.parse(o.body)]); return url.includes("sendInteractiveButtons") ? { ok: false, status: 400 } : { ok: true }; };
-      await sendWhatsAppRich("972500000001", payload, "7105422200", "tok");
+      await sendWhatsAppRich("972500000001", payload);
       assert.ok(sent[1][0].includes("/sendMessage/"));
       assert.strictEqual(sent[1][1].message, textOfButtons(payload), "the text fallback keeps the link");
-    } finally { global.fetch = realFetch; console.log = realLog; console.warn = realWarn; }
+    } finally {
+      global.fetch = realFetch; console.log = realLog; console.warn = realWarn;
+      for (const k of ["WHATSAPP_PROVIDER", "GREENAPI_INSTANCE", "GREENAPI_TOKEN"]) {
+        if (k in realEnv) process.env[k] = realEnv[k]; else delete process.env[k];
+      }
+    }
   }
 
   // ── ownUploadedVideo: a page video may only be one of our own mp4 uploads ──

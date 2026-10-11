@@ -17,6 +17,12 @@ export const db = admin.firestore();
 // ── secrets & params (shared across carousel + nadlan) ──
 export const greenApiInstance = defineSecret("GREENAPI_INSTANCE");
 export const greenApiToken = defineSecret("GREENAPI_TOKEN");
+export const whapiToken = defineSecret("WHAPI_TOKEN");
+// Every function that sends WhatsApp declares all of these, so switching
+// provider (WHATSAPP_PROVIDER) needs no code change. Each must exist in
+// Secret Manager for a deploy to succeed — a placeholder value is fine for
+// the provider not in use.
+export const whatsappSecrets = [greenApiInstance, greenApiToken, whapiToken];
 export const nadlanJwtSecret = defineSecret("NADLAN_JWT_SECRET");
 export const demoSecret = defineSecret("DEMO_SECRET");
 export const pageBaseUrl = defineString("PAGE_BASE_URL", {
@@ -126,8 +132,16 @@ export async function downloadAndUpload(
   return uploadBuffer(destPath, Buffer.from(response.data as ArrayBuffer), contentType);
 }
 
-// ── Green-API WhatsApp ──
-const GREEN_TIMEOUT_MS = 20000;
+// ── WhatsApp ──
+// WHATSAPP_PROVIDER (greenapi | whapi; default greenapi) picks the provider —
+// the same switch as server/whatsapp/. Senders take only phone + content;
+// URLs, auth and chat-id formats stay in here.
+const WA_TIMEOUT_MS = 20000;
+
+type Provider = {
+  text(phone: string, message: string): Promise<unknown>;
+  file(phone: string, urlFile: string, fileName: string, caption: string): Promise<unknown>;
+};
 
 // The instance's own API host (first 4 digits of its id name its server), not
 // the shared api.green-api.com, which can be down while the instance is up.
@@ -137,34 +151,51 @@ export function greenApiBase(instance: string): string {
   return `${override || `https://${String(instance).slice(0, 4)}.api.greenapi.com`}/waInstance${instance}`;
 }
 
-export async function sendWhatsAppMessage(
-  phone: string,
-  message: string,
-  instance: string,
-  token: string
-): Promise<void> {
-  const baseUrl = greenApiBase(instance);
-  await axios.post(`${baseUrl}/sendMessage/${token}`, {
-    chatId: `${phone}@c.us`,
-    message,
-  }, {timeout: GREEN_TIMEOUT_MS});
+const greenApi = (): Provider => {
+  const base = greenApiBase(greenApiInstance.value());
+  const token = greenApiToken.value();
+  const post = (method: string, body: object) =>
+    axios.post(`${base}/${method}/${token}`, body, {timeout: WA_TIMEOUT_MS});
+  return {
+    text: (phone, message) => post("sendMessage", {chatId: `${phone}@c.us`, message}),
+    file: (phone, urlFile, fileName, caption) =>
+      post("sendFileByUrl", {chatId: `${phone}@c.us`, urlFile, fileName, caption}),
+  };
+};
+
+const whapi = (): Provider => {
+  const base = (process.env.WHAPI_API_URL || "https://gate.whapi.cloud").trim().replace(/\/+$/, "");
+  const post = (path: string, body: object) => axios.post(`${base}${path}`, body, {
+    timeout: WA_TIMEOUT_MS,
+    headers: {Authorization: `Bearer ${whapiToken.value()}`},
+  });
+  const to = (phone: string) => `${phone}@s.whatsapp.net`;
+  return {
+    text: (phone, message) => post("/messages/text", {to: to(phone), body: message}),
+    file: (phone, urlFile, fileName, caption) => /\.(png|jpe?g|webp)$/i.test(fileName) ?
+      post("/messages/image", {to: to(phone), media: urlFile, caption}) :
+      post("/messages/document", {to: to(phone), media: urlFile, filename: fileName, caption}),
+  };
+};
+
+function whatsapp(): Provider {
+  const name = (process.env.WHATSAPP_PROVIDER || "greenapi").trim().toLowerCase();
+  if (name === "whapi") return whapi();
+  if (name === "greenapi") return greenApi();
+  throw new Error(`WHATSAPP_PROVIDER "${name}" is not one of: greenapi, whapi`);
+}
+
+export async function sendWhatsAppMessage(phone: string, message: string): Promise<void> {
+  await whatsapp().text(phone, message);
 }
 
 export async function sendWhatsAppFile(
   phone: string,
   urlFile: string,
   fileName: string,
-  caption: string,
-  instance: string,
-  token: string
+  caption: string
 ): Promise<void> {
-  const baseUrl = greenApiBase(instance);
-  await axios.post(`${baseUrl}/sendFileByUrl/${token}`, {
-    chatId: `${phone}@c.us`,
-    urlFile,
-    fileName,
-    caption,
-  }, {timeout: GREEN_TIMEOUT_MS});
+  await whatsapp().file(phone, urlFile, fileName, caption);
 }
 
 /** Normalize an Israeli phone to Green-API format: 9725XXXXXXXX. */

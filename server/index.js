@@ -67,8 +67,6 @@ const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
 const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
 const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
 const N8N_LEAD_WEBHOOK_URL = process.env.N8N_LEAD_WEBHOOK_URL || "";
-const GREENAPI_INSTANCE = process.env.GREENAPI_INSTANCE || "";
-const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
 
 // Session/action/OTP signing key. Everything that proves identity is signed
 // with this, so a missing or placeholder value means anyone could forge a
@@ -120,7 +118,7 @@ db.init();
 const createAuthRouter = require("./auth");
 const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
-const { sendWhatsApp, sendWhatsAppButtons, sendWhatsAppRich, getWhatsAppMessage, getWhatsAppHistory } = require("./utils");
+const { sendWhatsApp, sendWhatsAppButtons, sendWhatsAppRich, getWhatsAppMessage, getWhatsAppHistory, whatsappEnabled } = require("./utils");
 // A number that tries to log in but has no businesses/{phone} doc isn't a
 // Forly client yet — self-service signup off the login screen is gone (see
 // the issue this shipped with), so the OTP route forwards them here as a
@@ -137,7 +135,7 @@ const { createQuota } = require("./quota");
 const quota = createQuota({
   db: db.db,
   FieldValue: db.db ? require("firebase-admin").firestore.FieldValue : null,
-  sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  sendWhatsApp,
   adminPhone: SALES_LEAD_PHONE,
   paymentUrl: PAYMENT_LINK_URL,
 });
@@ -192,8 +190,8 @@ app.use("/api/auth/otp/verify", rateLimit({ windowMs: 60_000, max: 10 }));
 app.use("/api/auth/verify", rateLimit({ windowMs: 60_000, max: 10 }));
 app.use("/api/auth", createAuthRouter({
   db: db.db, mem: db.mem,
-  sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
-  sendWhatsAppRich: (phone, payload) => sendWhatsAppRich(phone, payload, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  sendWhatsApp,
+  sendWhatsAppRich,
   secret: AUTH_SECRET,
   salesLeadPhone: SALES_LEAD_PHONE,
 }));
@@ -239,14 +237,10 @@ app.use("/api/whatsapp", createWhatsappRouter({
   linkBaseUrl: (process.env.LINK_BASE_URL || "").trim().replace(/\/+$/, "") || BASE_URL,
   linkSharesSession: process.env.LINK_SHARES_SESSION === "1", // LINK_BASE_URL's server has this NADLAN_JWT_SECRET
   // null when Green API is unset so the response's `replied` is honest and n8n forwards `reply`.
-  sendWhatsApp: GREENAPI_INSTANCE && GREENAPI_TOKEN
-    ? (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
-  sendButtons: GREENAPI_INSTANCE && GREENAPI_TOKEN
-    ? (phone, payload) => sendWhatsAppButtons(phone, payload, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
-  getMessage: GREENAPI_INSTANCE && GREENAPI_TOKEN
-    ? (chatId, id) => getWhatsAppMessage(chatId, id, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
-  getHistory: GREENAPI_INSTANCE && GREENAPI_TOKEN
-    ? (chatId, count) => getWhatsAppHistory(chatId, count, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+  sendWhatsApp: whatsappEnabled() ? sendWhatsApp : null,
+  sendButtons: whatsappEnabled() ? sendWhatsAppButtons : null,
+  getMessage: whatsappEnabled() ? getWhatsAppMessage : null,
+  getHistory: whatsappEnabled() ? getWhatsAppHistory : null,
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
   baseUrl: BASE_URL,
   pipelineDeps: {
@@ -316,7 +310,7 @@ if (driverBoot.enabled) {
   // ── automated group posting: the campaign sweeper (posting-sweeper.js) ──
   const postingSweeper = require("./posting-sweeper");
   const postingDeps = devPostingDeps = postingSweeper.liveDeps({
-    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
+    pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
     operatorPhone: process.env.POSTING_OPERATOR_PHONE,
   });
   // Staging shares production's Firestore and GreenAPI: the sweeper runs only
@@ -375,8 +369,6 @@ app.use("/api", createDashboardRouter({
   authSecret: AUTH_SECRET,
   pageBaseUrl: PAGE_BASE_URL,
   uploadDir: UPLOAD_DIR,
-  greenInstance: GREENAPI_INSTANCE,
-  greenToken: GREENAPI_TOKEN,
 }));
 // ── admin edits an agent's portfolio (same editor, ?agent=) ──
 app.use("/api/admin", require("./routes/admin-portfolio")({ requireAdmin, normalizeAuthPhone }));
@@ -388,7 +380,7 @@ app.use("/api/admin", createAdminRouter({
   pageBaseUrl: PAGE_BASE_URL,
   uploadDir: UPLOAD_DIR,
   adminPhones: ADMIN_PHONES,
-  sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  sendWhatsApp,
   quota,
   pipelineDeps: {
     n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
@@ -405,8 +397,6 @@ app.use("/api/distribution", createDistributionRouter({
   authSecret: AUTH_SECRET,
   adminApiSecret: ADMIN_API_SECRET,
   pageBaseUrl: PAGE_BASE_URL,
-  greenInstance: GREENAPI_INSTANCE,
-  greenToken: GREENAPI_TOKEN,
 }));
 
 // signup redirect at root level
@@ -448,8 +438,6 @@ app.use(createChatRouter({
   ipSalt: process.env.CHATBOT_IP_SALT || AUTH_SECRET,
   quota,
   // Chat leads WhatsApp the agent directly (the form path relays via n8n).
-  greenInstance: GREENAPI_INSTANCE,
-  greenToken: GREENAPI_TOKEN,
   // Recommendation links point at the public page URL.
   pageBaseUrl: PAGE_BASE_URL,
 }));
@@ -470,8 +458,6 @@ app.use(createPagesRouter({
   pageBaseUrl: PAGE_BASE_URL,
   templatesDir: TEMPLATES_DIR,
   n8nLeadWebhook: N8N_LEAD_WEBHOOK_URL,
-  greenInstance: GREENAPI_INSTANCE,
-  greenToken: GREENAPI_TOKEN,
   requireAuth, verifyActionToken,
   authSecret: AUTH_SECRET,
   adminApiSecret: ADMIN_API_SECRET,
@@ -505,7 +491,6 @@ app.listen(PORT, () => {
     baseUrl: BASE_URL,
   });
   distributionJobs.startSweeper(distributionJobs.liveDeps({
-    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN,
     pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
   }));
 });

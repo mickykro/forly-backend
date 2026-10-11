@@ -2,11 +2,10 @@ import {onRequest} from "firebase-functions/https";
 import {onSchedule} from "firebase-functions/scheduler";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
-import axios from "axios";
 import {v4 as uuidv4} from "uuid";
 import {
   db, bucket, pad, setCors, uploadBuffer, downloadAndUpload,
-  greenApiInstance, greenApiToken, greenApiBase,
+  whatsappSecrets, sendWhatsAppMessage, sendWhatsAppFile,
 } from "./shared";
 import {consumeQuota} from "./nadlan/quota";
 
@@ -47,7 +46,7 @@ interface StoredSlide {
 // 1) createCarouselDraft — called from n8n after Manus completes
 // ────────────────────────────────────────────────────────────
 export const createCarouselDraft = onRequest(
-  {timeoutSeconds: 120, memory: "512MiB", cors: false, secrets: [greenApiInstance, greenApiToken]},
+  {timeoutSeconds: 120, memory: "512MiB", cors: false, secrets: [...whatsappSecrets]},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("POST only");
@@ -170,7 +169,7 @@ export const saveCarouselDraft = onRequest(
   {
     timeoutSeconds: 300,
     memory: "1GiB",
-    secrets: [greenApiInstance, greenApiToken],
+    secrets: [...whatsappSecrets],
     cors: false,
   },
   async (req, res) => {
@@ -261,12 +260,10 @@ export const saveCarouselDraft = onRequest(
         try {
           await sendUpdatedPngsToWhatsApp(
             data.business_phone as string,
-            newSlides,
-            greenApiInstance.value(),
-            greenApiToken.value()
+            newSlides
           );
         } catch (err) {
-          logger.error("Green-API send failed (save still succeeded):", err);
+          logger.error("WhatsApp send failed (save still succeeded):", err);
         }
       }
 
@@ -285,28 +282,13 @@ export const saveCarouselDraft = onRequest(
 
 async function sendUpdatedPngsToWhatsApp(
   phone: string,
-  slides: StoredSlide[],
-  instance: string,
-  token: string
+  slides: StoredSlide[]
 ): Promise<void> {
-  const chatId = `${phone}@c.us`;
-  const baseUrl = greenApiBase(instance);
-  const REQ_TIMEOUT_MS = 20000;
-
-  await axios.post(`${baseUrl}/sendMessage/${token}`, {
-    chatId,
-    message: "✏️ הקרוסלה המעודכנת שלך:",
-  }, {timeout: REQ_TIMEOUT_MS});
-
-  // Send all 5 PNGs in parallel — Green-API handles concurrent calls fine.
-  await Promise.all(slides.map((s) =>
-    axios.post(`${baseUrl}/sendFileByUrl/${token}`, {
-      chatId,
-      urlFile: s.png_url,
-      fileName: `slide-${pad(s.index)}.png`,
-      caption: `${s.index}/${slides.length}`,
-    }, {timeout: REQ_TIMEOUT_MS})
-  ));
+  await sendWhatsAppMessage(phone, "✏️ הקרוסלה המעודכנת שלך:");
+  // Send all 5 PNGs in parallel — the providers handle concurrent calls fine.
+  await Promise.all(slides.map((s) => sendWhatsAppFile(
+    phone, s.png_url, `slide-${pad(s.index)}.png`, `${s.index}/${slides.length}`
+  )));
 }
 
 // ────────────────────────────────────────────────────────────

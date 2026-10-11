@@ -8,7 +8,7 @@ import {
 } from "../shared";
 import {requireAuth, requireAdmin, signSession, SESSION_COOKIE} from "./auth";
 import {consumeQuota} from "./quota";
-import {greenApiInstance, greenApiToken} from "../shared";
+import {whatsappSecrets} from "../shared";
 import {AgentInfo, Listing, PropertyPage} from "./types";
 
 const SESSION_TTL_S = 30 * 24 * 60 * 60; // 30 days
@@ -214,7 +214,7 @@ async function createListingAndKickPipeline(
 // createProperty — POST (session cookie)
 // ────────────────────────────────────────────────────────────
 export const createProperty = onRequest(
-  {secrets: [nadlanJwtSecret, greenApiInstance, greenApiToken], cors: false},
+  {secrets: [...whatsappSecrets, nadlanJwtSecret], cors: false},
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("POST only");

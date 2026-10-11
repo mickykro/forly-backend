@@ -253,9 +253,9 @@ const optionalCall = (mod, name) => async (...args) => {
   return fn ? fn(...args) : { noop: true };
 };
 
-function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, operatorPhone } = {}) {
+function liveDeps({ pageBaseUrl, authSecret, operatorPhone } = {}) {
   const db = require("./db");
-  const { sendWhatsApp, sendWhatsAppRich, textOfButtons } = require("./utils");
+  const { sendWhatsApp, sendWhatsAppRich, textOfButtons, whatsappEnabled } = require("./utils");
   const build = optionalFn("./posting-messages", "build");
   const operator = operatorPhone || process.env.POSTING_OPERATOR_PHONE || null;
   return {
@@ -268,10 +268,10 @@ function liveDeps({ greenInstance, greenToken, pageBaseUrl, authSecret, operator
     // A message is a button payload (posting-messages) or plain text. No
     // Green API on a local box: it goes to the console instead, links spelled
     // out, so an approval request can still be tapped (phone tail only).
-    notify: (greenInstance && greenToken) || process.env.FORLY_ENV !== "local"
-      ? (phone, m) => (typeof m === "string" ? sendWhatsApp(phone, m, greenInstance, greenToken) : sendWhatsAppRich(phone, m, greenInstance, greenToken))
-      : async (phone, m) => { console.log(`[whatsapp → ${tail(phone)} · not sent: no GREENAPI_TOKEN]\n${typeof m === "string" ? m : textOfButtons(m)}`); },
-    notifyOperator: operator ? (text) => sendWhatsApp(operator, text, greenInstance, greenToken) : null,
+    notify: whatsappEnabled() || process.env.FORLY_ENV !== "local"
+      ? (phone, m) => (typeof m === "string" ? sendWhatsApp(phone, m) : sendWhatsAppRich(phone, m))
+      : async (phone, m) => { console.log(`[whatsapp → ${tail(phone)} · not sent: WhatsApp not configured]\n${typeof m === "string" ? m : textOfButtons(m)}`); },
+    notifyOperator: operator ? (text) => sendWhatsApp(operator, text) : null,
     messages: build ? build({ pageBaseUrl, authSecret }) : undefined,
   };
 }

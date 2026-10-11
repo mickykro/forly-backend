@@ -42,7 +42,7 @@ async function runExpirySweep(ctx) {
           { type: "url", buttonText: "להארכה בחינם", url: link },
           { type: "url", buttonText: "לניהול כל הנכסים", url: PUBLIC_BASE_URL },
         ],
-      }, ctx.greenInstance, ctx.greenToken);
+      });
       // Only mark as reminded once the send succeeded, so a WhatsApp outage
       // retries tomorrow instead of silently swallowing the reminder.
       await db.updatePage(p.page_id, { reminder_sent_at: new Date(), status: "expiring" });

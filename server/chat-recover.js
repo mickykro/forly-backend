@@ -13,14 +13,13 @@ const D = require("./property-draft");
 const R = require("./whatsapp-replies");
 
 const WINDOW_S = 3 * 60 * 60;
-const textOf = (m) => m.textMessage || (m.extendedTextMessage || {}).text || m.caption || "";
 
 // Newest first, 3 h: [{ who: "agent" | "bot", text, image }]
 function readChat(history, nowS) {
   return history.filter((m) => nowS - m.timestamp < WINDOW_S).map((m) => ({
-    who: m.type === "incoming" ? "agent" : "bot",
-    text: textOf(m),
-    image: m.typeMessage === "imageMessage" && /^https:\/\//.test(m.downloadUrl || "") ? m.downloadUrl : null,
+    who: m.fromMe ? "bot" : "agent",
+    text: m.text || "",
+    image: m.type === "image" && /^https:\/\//.test(m.mediaUrl || "") ? m.mediaUrl : null,
   }));
 }
 

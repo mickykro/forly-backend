@@ -131,7 +131,7 @@ module.exports = function createWhatsappRouter(ctx) {
     return {
       business, resolve, parseListing, classifyIntent: (t, context) => classify(t, { context }),
       // The chat so far (newest first), for a page asked for with no draft (chat-recover.js).
-      recentChat: getHistory ? (p) => getHistory(`${p}@c.us`, 30) : null,
+      recentChat: getHistory ? (p) => getHistory(p, 30) : null,
       listPages: async (p) => (await db.listPagesByPhone(p)).filter((pg) => pg.status === "active" && pg.property)
         .sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at)),
       editUrl: (pageId) => `${linkBase}/edit.html?id=${encodeURIComponent(pageId)}`,
@@ -311,8 +311,8 @@ module.exports = function createWhatsappRouter(ctx) {
     const url = typeof body.quoted_image_url === "string" && /^https:\/\//.test(body.quoted_image_url) ? body.quoted_image_url : null;
     if (url || !getMessage || typeof body.quoted_id !== "string" || !phone) return url;
     try {
-      const m = await getMessage(`${phone}@c.us`, body.quoted_id.slice(0, 100));
-      return m && /^https:\/\//.test(String(m.downloadUrl || "")) ? m.downloadUrl : null;
+      const m = await getMessage(phone, body.quoted_id.slice(0, 100));
+      return m && /^https:\/\//.test(String(m.mediaUrl || "")) ? m.mediaUrl : null;
     } catch (err) { console.warn("[whatsapp] quoted image lookup failed:", err.message); return null; }
   }
 

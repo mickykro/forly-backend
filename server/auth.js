@@ -177,7 +177,7 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, sendWhatsApp
 
       // ponytail: no GreenAPI creds = local dev, WhatsApp send is a no-op —
       // print the code so login is testable. Never fires in prod (creds set).
-      if (!process.env.GREENAPI_TOKEN) console.log(`[dev] OTP for ${phone}: ${code}`);
+      if (!require("./whatsapp").whatsappEnabled()) console.log(`[dev] OTP for ${phone}: ${code}`);
       try {
         const sent = await sendWhatsApp(
           phone,
