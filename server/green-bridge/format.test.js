@@ -70,4 +70,36 @@ assert.equal(F.toGreenWebhook({ ...base, type: "poll", poll: {} }, opts), null);
 assert.equal(F.toGreenWebhook({ ...base, chat_id: "", type: "text", text: { body: "x" } }, opts), null);
 assert.equal(F.toGreenWebhook(null, opts), null);
 
+// ── history items: the getChatHistory shape the routers read ──
+{
+  const t = F.toGreenHistoryItem({ id: "A", from_me: true, type: "text", text: { body: "hi" }, chat_id: "972501234567@s.whatsapp.net", timestamp: 10 });
+  assert.equal(t.type, "outgoing");
+  assert.equal(t.typeMessage, "textMessage");
+  assert.equal(t.textMessage, "hi");
+  assert.equal(t.idMessage, "A");
+  assert.equal(t.timestamp, 10);
+  assert.equal(t.chatId, "972501234567@c.us");
+  const i = F.toGreenHistoryItem({ id: "B", from_me: false, type: "image", image: { link: "https://w/1.jpg", caption: "c" }, chat_id: "972501234567@s.whatsapp.net", timestamp: 9 });
+  assert.equal(i.type, "incoming");
+  assert.equal(i.typeMessage, "imageMessage");
+  assert.equal(i.downloadUrl, "https://w/1.jpg");
+  assert.equal(i.caption, "c");
+  assert.equal(F.toGreenHistoryItem(null), null);
+}
+
+// ── buttons → one text message, every link / code written out ──
+assert.equal(F.buttonsText({ header: " ", body: "הדף מוכן", footer: "Forly", buttons: [
+  { type: "url", buttonText: "לצפייה", url: "https://x.test/p" },
+  { type: "copy", buttonText: "העתקה", copyCode: "https://x.test/c" },
+  { type: "call", buttonText: "התקשרו", phoneNumber: "972500000000" },
+] }), "הדף מוכן\n\nלצפייה: https://x.test/p\nהעתקה: https://x.test/c\nהתקשרו: 972500000000\n\nForly");
+assert.equal(F.buttonsText({ body: "רק טקסט" }), "רק טקסט");
+
+// ── media kind from the file name (or URL) ──
+assert.equal(F.fileKind("slide-01.png"), "image");
+assert.equal(F.fileKind("https://cdn.x/a/walk.MP4?sig=1"), "video");
+assert.equal(F.fileKind("note.ogg"), "audio");
+assert.equal(F.fileKind("brochure.pdf"), "document");
+assert.equal(F.fileKind(""), "document");
+
 console.log("green-bridge/format.test.js: ok");
