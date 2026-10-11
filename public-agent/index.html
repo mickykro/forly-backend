@@ -168,8 +168,8 @@
         // no self-service signup here any more — a number with no account
         // is routed to sales as a lead server-side (server/auth.js)
         err.textContent = e.code === "not_a_client" ? "עדיין לא לקוחות של פורלי — ניצור איתכם קשר בקרוב 🦉" :
-          e.code === "too_soon" ? tooSoonMsg(e) :
-          e.code === "invalid_phone" ? "מספר לא תקין" : "שגיאה בשליחת הקוד";
+          e.code === "too_soon" || e.code === "rate_limited" ? tooSoonMsg(e) :
+          e.code === "invalid_phone" ? "מספר לא תקין" : sendErrMsg(e);
         err.classList.add("show");
       })
       .finally(function () { btn.disabled = false; });
@@ -257,7 +257,7 @@
         err.classList.add("show");
       })
       .catch(function (e) {
-        err.textContent = e.code === "too_soon" ? tooSoonMsg(e) : "שגיאה בשליחת הקוד";
+        err.textContent = e.code === "too_soon" || e.code === "rate_limited" ? tooSoonMsg(e) : sendErrMsg(e);
         err.classList.add("show");
       })
       .finally(function () { setTimeout(function () { btn.disabled = false; }, 1000); });
@@ -346,6 +346,10 @@
     return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
+  }
+
+  function sendErrMsg(e) {
+    return e.code === "whatsapp_send_failed" ? "הוואטסאפ לא נשלח — נסו שוב בעוד רגע" : "שגיאה בשליחת הקוד";
   }
 
   // the server says exactly how long until the next code can be sent
