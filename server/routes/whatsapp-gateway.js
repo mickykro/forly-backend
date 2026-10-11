@@ -66,6 +66,10 @@ module.exports = function createWhatsappGateway({ n8nSecret, env = process.env, 
     const text = String(b.text || "").slice(0, MAX_TEXT);
     const quoted = typeof b.quoted_id === "string" && b.quoted_id ? { quotedMessageId: b.quoted_id.slice(0, 200) } : {};
     let method, body;
+    // n8n keypair bodies can only carry strings, so buttons may arrive as JSON.
+    if (typeof b.buttons === "string") {
+      try { b.buttons = JSON.parse(b.buttons); } catch (e) { return res.status(400).json({ error: "invalid_buttons" }); }
+    }
     if (Array.isArray(b.buttons) && b.buttons.length) {
       method = "sendInteractiveButtons";
       body = { chatId, header: String(b.header || "").slice(0, 60), body: text, footer: String(b.footer || "").slice(0, 60),
@@ -85,7 +89,8 @@ module.exports = function createWhatsappGateway({ n8nSecret, env = process.env, 
     }
     try {
       const data = await call(method, body);
-      return res.json({ ok: true, id: (data && data.idMessage) || "" });
+      const id = (data && data.idMessage) || "";
+      return res.json({ ok: true, id, idMessage: id }); // idMessage: what the Green API node returned
     } catch (err) { return fail(res, method, chatId)(err); }
   });
 
