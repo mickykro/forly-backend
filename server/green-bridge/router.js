@@ -70,5 +70,34 @@ module.exports = function createGreenBridge({ env = process.env, fetchFn = fetch
     }
   });
 
+  // Whapi webhook. Answered at once (Whapi retries slow or failed calls,
+  // which would handle a message twice); forwarding runs after, in order.
+  router.post("/whapi-inbound/:secret", (req, res) => {
+    if (!env.WHAPI_WEBHOOK_SECRET || !constantTimeEqual(req.params.secret, env.WHAPI_WEBHOOK_SECRET)) {
+      return res.status(401).json({ error: "bad_secret" });
+    }
+    const target = String(env.GREEN_BRIDGE_N8N_WEBHOOK || "").trim();
+    if (!target) return res.status(503).json({ error: "no_target" });
+    const msgs = Array.isArray(req.body && req.body.messages) ? req.body.messages : [];
+    res.json({ ok: true, received: msgs.length });
+    pending = pending.then(async () => {
+      for (const m of msgs) {
+        const hook = F.toGreenWebhook(m, { idInstance: env.GREENAPI_INSTANCE, wid: env.WHATSAPP_WID });
+        if (!hook) continue;
+        try {
+          const r = await fetchFn(target, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(hook),
+            signal: AbortSignal.timeout(FORWARD_TIMEOUT_MS),
+          });
+          if (!r.ok) console.error(`[green-bridge] n8n refused ${hook.messageData.typeMessage} from ${tail(hook.senderData.chatId)}: ${r.status}`);
+        } catch (err) {
+          console.error(`[green-bridge] n8n forward from ${tail(hook.senderData.chatId)} failed: ${err.message}`);
+        }
+      }
+    });
+  });
+
   return router;
 };
