@@ -16,6 +16,10 @@ function fakeClient() {
       { id: "A", from_me: false, type: "image", image: { link: "https://w/1.jpg" }, chat_id: "972501234567@s.whatsapp.net", timestamp: 9 },
     ] }; },
     getMessage: async (...a) => { calls.push(["getMessage", ...a]); return { id: "A", from_me: false, type: "text", text: { body: "x" }, chat_id: "972501234567@s.whatsapp.net", timestamp: 9 }; },
+    listChats: async (...a) => { calls.push(["listChats", ...a]); return { chats: [
+      { id: "972501234567@s.whatsapp.net", name: "Dana", type: "contact", timestamp: 9 },
+      { id: "120363410405308894@g.us", name: "Forly log", type: "group", timestamp: 8 },
+    ] }; },
   };
 }
 
@@ -29,7 +33,7 @@ async function serve(router) {
     const r = await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     return { status: r.status, data: await r.json() };
   };
-  return { post, close: () => server.close() };
+  return { post, base, close: () => server.close() };
 }
 
 (async () => {
@@ -54,6 +58,9 @@ async function serve(router) {
     assert.equal(calls[3].o.body, undefined);
     await c.getMessage("M 1");
     assert.equal(calls[4].url, "https://gate.whapi.cloud/messages/M%201");
+    await c.listChats(200);
+    assert.equal(calls[5].url, "https://gate.whapi.cloud/chats?count=200");
+    assert.equal(calls[5].o.method, "GET");
     const bad = createWhapiClient({ token: "t", fetchFn: async () => ({ ok: false, status: 401, json: async () => ({}) }) });
     await assert.rejects(bad.sendText("x@s.whatsapp.net", "y"), (e) => e.status === 401 && !e.message.includes("972"));
   }
@@ -63,7 +70,7 @@ async function serve(router) {
     const realErr = console.error; console.error = () => {};
     const client = fakeClient();
     const env = { GREENAPI_TOKEN: "gtok", WHATSAPP_PROVIDER_TOKEN: "wtok" };
-    const { post, close } = await serve(createGreenBridge({ env, client }));
+    const { post, base, close } = await serve(createGreenBridge({ env, client }));
     const P = "/waInstance7105422200";
     try {
       // wrong or missing token → refused, nothing sent
@@ -97,6 +104,20 @@ async function serve(router) {
       assert.equal(r.status, 200);
       assert.equal(r.data.textMessage, "x");
       assert.deepEqual(client.calls.at(-1), ["getMessage", "A"]);
+
+      // getChats: Green's list shape; the daily review calls it with GET and no body
+      r = await post(`${P}/getChats/gtok`, {});
+      assert.equal(r.status, 200);
+      assert.deepEqual(client.calls.at(-1), ["listChats", 500]);
+      assert.deepEqual(r.data, [
+        { id: "972501234567@c.us", name: "Dana", type: "user" },
+        { id: "120363410405308894@g.us", name: "Forly log", type: "group" },
+      ]);
+      const g = await fetch(`${base}${P}/getChats/gtok`);
+      assert.equal(g.status, 200);
+      assert.equal((await g.json()).length, 2);
+      assert.equal((await fetch(`${base}${P}/getChats/nope`)).status, 401);
+      assert.equal((await fetch(`${base}${P}/sendMessage/gtok`)).status, 404, "GET only for getChats");
 
       assert.equal((await post(`${P}/setSettings/gtok`, {})).status, 501);
 

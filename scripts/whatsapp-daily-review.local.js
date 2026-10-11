@@ -39,6 +39,7 @@ process.chdir(require("path").join(__dirname, "..", "server"));
 
 const db = require("../server/db");
 const chatProvider = require("../server/chat-provider");
+const { greenApiBase } = require("../server/utils");
 
 const line = (s = "") => console.log(s);
 const rule = (s) => line(`\n══ ${s} ${"═".repeat(Math.max(0, 62 - s.length))}`);
@@ -66,8 +67,9 @@ const ANALYZE = hasFlag("--analyze");
 const MODEL = arg("--model", "claude-sonnet-5");
 
 // ── Green API (read-only) ──
+// greenApiBase: the instance's own host, or GREENAPI_API_URL (the Whapi bridge).
 async function greenApi(instance, token, path, body) {
-  const url = `https://api.green-api.com/waInstance${instance}/${path}/${token}`;
+  const url = `${greenApiBase(instance)}/${path}/${token}`;
   const res = await fetch(url, body
     ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) }
     : { signal: AbortSignal.timeout(30000) });
