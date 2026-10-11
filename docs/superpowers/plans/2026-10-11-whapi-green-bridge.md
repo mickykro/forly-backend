@@ -894,8 +894,9 @@ No code. Every step has a check. Steps 1–4 bring back login codes and backend 
   1. Create a channel at whapi.cloud.
   2. On the business phone, go to WhatsApp → Linked devices → Link a device, and scan Whapi's QR code.
   3. In Linked devices, **log out Green API's device**, so messages aren't processed twice when Green API recovers.
-  4. In the Whapi channel settings, **turn on media auto-download**. Without it, photos and voice notes arrive with no link.
-  5. Copy the channel's API token.
+  4. In the Whapi channel settings, **turn on media auto-download** for images, audio/voice, video and documents. Without it, photos and voice notes arrive with no link.
+  5. **Don't set the webhook yet.** It's set in Step 5, after the server is deployed; before that, Whapi's calls fail and it may retry or disable the webhook.
+  6. Copy the channel's API token.
 
   Check: in the Whapi dashboard, channel status is `AUTH` (connected).
 
@@ -905,7 +906,7 @@ No code. Every step has a check. Steps 1–4 bring back login codes and backend 
   ```
   WHAPI_TOKEN=<Whapi channel token>
   WHAPI_WEBHOOK_SECRET=<new random string, e.g. output of: openssl rand -hex 24>
-  GREEN_BRIDGE_N8N_WEBHOOK=https://n8n.srv1173890.hstgr.cloud/webhook/avisa-reply-v2
+  GREEN_BRIDGE_N8N_WEBHOOK=https://n8n.srv1173890.hstgr.cloud/webhook/avisa-reply-v3
   GREENAPI_API_URL=http://127.0.0.1:8787/greenapi
   ```
   Keep the existing `GREENAPI_INSTANCE` and `GREENAPI_TOKEN`. The bridge uses that token as its password, and the server keeps sending with it.
@@ -937,7 +938,7 @@ No code. Every step has a check. Steps 1–4 bring back login codes and backend 
   - URL: `<PUBLIC_BASE>/greenapi/whapi-inbound/<WHAPI_WEBHOOK_SECRET>`
   - Mode: `body`, method `POST`, events: `messages` only
 
-  Check: send "בדיקה" to the business number from another phone. The server log shows no `[green-bridge]` error, and in n8n → Executions, "Main Router v2" has a new run.
+  Check: send "בדיקה" to the business number from another phone. The server log shows no `[green-bridge]` error, and in n8n → Executions, "Main Router v3" has a new run.
 
 - [ ] **Step 6: Point n8n's Green API node at the bridge (on the n8n VPS)**
 
@@ -974,6 +975,50 @@ No code. Every step has a check. Steps 1–4 bring back login codes and backend 
      ```
   3. Remove `GREENAPI_API_URL` from the server and `functions/.env`, and redeploy.
   4. Re-link Green API by QR when it recovers.
+
+---
+
+### Task 8: Provider-neutral send / history endpoints for n8n (done, `a2ce27e`)
+
+**Files:** `server/routes/whatsapp-gateway.js`, `server/routes/whatsapp-gateway.test.js`, mounted in `server/index.js` under `/api/whatsapp`.
+
+- **`POST /api/whatsapp/send`**, header `x-forly-secret: <N8N_WEBHOOK_SECRET>`. Body is one of:
+  - `{to, text}`
+  - `{to, file_url, file_name, caption}`
+  - `{to, text, header?, footer?, buttons:[{type, buttonText, url|copyCode}]}`
+
+  An optional `quoted_id` works on any of them. Returns `{ok, id}`. `to` is `972…`, `05…`, `…@c.us` or a group `…@g.us`.
+- **`POST /api/whatsapp/history`**, with the same header and `{to, count?}`. Returns `{ok, messages}` in Green's history item shape (`type`, `typeMessage`, `textMessage`, `idMessage`, `timestamp`, `downloadUrl`), which the n8n code nodes already read.
+- Behind them is one file that calls Green's REST shape at `greenApiBase` (the bridge today). Moving to the official API changes that file only.
+
+---
+
+### Task 9: n8n edits in the chosen workflows (after the server deploy, with the user)
+
+**Workflows:**
+- Main Router v3 (entry, `avisa-reply-v3`)
+- Business Handler v6
+- Forli - Lead Chat (non-business)
+- Forly — Log to Group
+- Forly — Image Gen v4
+- Forly Video Gen (Auto-Routed)
+- video gen with cuts
+- WW1 Walkthrough V3
+- Forly — Property Page Builder
+
+The other active workflows keep their Green API nodes and run through the node patch (Task 7, Step 6). Main Router v2 is out of scope.
+
+**Per workflow:**
+1. Duplicate the workflow, and leave the copy inactive as the rollback.
+2. Replace each Green API node, keeping its name and connections:
+   - `sendMessage` → an HTTP Request node, `POST http://forly-intake:8787/api/whatsapp/send`, header `x-forly-secret` from the existing Forly credential, JSON body `{"to": <the node's chatId expression>, "text": <its message expression>}`.
+   - `sendFileByUrl` → the same endpoint with `{"to", "file_url", "file_name"}`.
+   - `sendInteractiveButtons` → the same endpoint with `{"to", "text": <body>, "header", "footer", "buttons"}`.
+   - `getChatHistory` → `POST http://forly-intake:8787/api/whatsapp/history` with `{"to": <chatId expression>}`. Its output is `{ok, messages}`, and "Merge Chat History" already reads `.messages`. Check every other consumer of the old node's output and point it at `.messages` where it expected an array.
+3. Save, run one test message, and check the execution.
+4. Business Handler v6 (15 nodes) goes last, with the user watching.
+
+**Rollback:** deactivate the edited workflow and activate its copy.
 
 ---
 
