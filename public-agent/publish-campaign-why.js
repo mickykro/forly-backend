@@ -27,7 +27,7 @@
     checkpoint: "פייסבוק ביקשה לאמת את החשבון", captcha: "פייסבוק ביקשה לאמת את החשבון",
     restricted: "החשבון מוגבל בפייסבוק",
     rate_limited: "פייסבוק ביקשה להאט", feature_blocked: "פייסבוק ביקשה להאט",
-    posting_disabled: "הפרסום כובה באמצע",
+    posting_disabled: "ננסה שוב בסבב הבא", // a system switch: never named to the agent
   };
   const failedText = (code) => FAILED[code] || "תקלה טכנית";
 

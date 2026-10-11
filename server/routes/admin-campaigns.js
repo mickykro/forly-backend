@@ -20,7 +20,6 @@ const A = require("../posting-account");
 const S_ = require("./posting-shared");
 const PC = require("./posting-create");
 const M = require("../posting-manual");
-const { postingEnvAllowed } = require("../posting-guard");
 const { redact } = require("../driver-browser");
 
 const METHODS = new Set(["phone", "in_person", "whatsapp"]);
@@ -55,7 +54,6 @@ module.exports = function createAdminCampaignsRouter({
     if (!res.headersSent) res.status(500).json({ error: "internal" });
   });
   router.use((req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
-  router.use((req, res, next) => (req.method === "GET" || postingEnvAllowed(env) ? next() : res.status(503).json({ error: "posting_unavailable_in_env" })));
 
   // Written before the change it records; throws audit_unavailable (503) when it cannot be.
   async function audit(req, action, phone, detail) {

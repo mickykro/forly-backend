@@ -27,7 +27,6 @@
     listing_type_not_allowed: "יש קבוצות שלא מתאימות לסוג הנכס.",
     not_found: "לא נמצא.",
     invalid_input: "הנתונים לא תקינים.",
-    posting_unavailable_in_env: "בשרת הזה אי אפשר לשנות קמפיינים.",
     no_destination: "צריך לפחות קבוצה אחת (או הדף העסקי).",
     audit_unavailable: "לא ניתן לרשום את הפעולה ביומן — לא בוצע שינוי. נסו שוב.",
   };
