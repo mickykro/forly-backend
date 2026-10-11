@@ -287,14 +287,21 @@ function sniffMatchesExt(buf, ext) {
 }
 
 // ── whatsapp ──
+// Resolves true when Green API accepted the message, false when it refused it
+// (logged with its status), undefined when no creds are set (local dev).
 async function sendWhatsApp(phone, message, instance, token) {
   if (!instance || !token) return;
-  await fetch(`https://api.green-api.com/waInstance${instance}/sendMessage/${token}`, {
+  const r = await fetch(`https://api.green-api.com/waInstance${instance}/sendMessage/${token}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
     signal: AbortSignal.timeout(20000),
   });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    console.error(`Green API sendMessage refused (${r.status}): ${body.slice(0, 200)}`);
+  }
+  return r.ok;
 }
 
 // The last `count` messages of a chat, newest first (Green API getChatHistory).
