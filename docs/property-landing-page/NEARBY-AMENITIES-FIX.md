@@ -1,9 +1,9 @@
 # Nearby amenities — walking-first, client-relevant categories
 
-Applies to the n8n workflows **Forly — Property Page Builder** (`csEnTziNFrNNHaE9`),
-**… dev** (`xJeoWbjNS5E2Wt4X`) and **… private** (`Hke9ZUeb5Pb8V1pG`). Apply by
-hand in the n8n editor — the MCP update path rewrites the whole workflow and
-drops node credentials.
+**Status:** published to production **Forly — Property Page Builder** (`csEnTziNFrNNHaE9`)
+on 2026-10-11, active version `d1ef68cd-dbf6-42a2-8e81-d8fb79131915`. Rollback: publish the
+previous version `73daaf9e-657f-43c0-8870-1e009e596d16`. Not yet applied to the **dev**
+(`xJeoWbjNS5E2Wt4X`) and **private** (`Hke9ZUeb5Pb8V1pG`) copies.
 
 ## Client feedback (נופר הרוש, 11.10)
 "זה אף פעם לא נכון · הכל מרחק הליכה · יש אזורי עניין אחרים רלוונטים — מרכז
@@ -217,8 +217,8 @@ found.forEach(function (f, i) {
 return [{ json: Object.assign({}, ctx, { stops: stops, proximity: proximity }) }];
 ```
 
-### 6. Delete the orphan `Prepare Distance Query` node
-It is not connected, and it has a hard-coded Maps key as an
+### 6. Orphan `Prepare Distance Query` node (deleted)
+It was not connected, and it had a hard-coded Maps key as an
 `$env.GOOGLE_MAPS_KEY ||` fallback. If that key is live, rotate it: it is
 stored in the workflow JSON.
 
