@@ -62,7 +62,7 @@ async function serve(router) {
   {
     const realErr = console.error; console.error = () => {};
     const client = fakeClient();
-    const env = { GREENAPI_TOKEN: "gtok", WHAPI_TOKEN: "wtok" };
+    const env = { GREENAPI_TOKEN: "gtok", WHATSAPP_PROVIDER_TOKEN: "wtok" };
     const { post, close } = await serve(createGreenBridge({ env, client }));
     const P = "/waInstance7105422200";
     try {
@@ -107,7 +107,7 @@ async function serve(router) {
       assert.equal((await post(`${P}/sendMessage/gtok`, { chatId: "972501234567@c.us", message: "x" })).status, 502);
     } finally { close(); console.error = realErr; }
 
-    // bridge off (no WHAPI_TOKEN, no client) → 503
+    // bridge off (no WHATSAPP_PROVIDER_TOKEN, no client) → 503
     const off = await serve(createGreenBridge({ env: { GREENAPI_TOKEN: "gtok" } }));
     try { assert.equal((await off.post(`${P}/sendMessage/gtok`, { chatId: "972501234567@c.us", message: "x" })).status, 503); }
     finally { off.close(); }
@@ -118,13 +118,13 @@ async function serve(router) {
     const realErr = console.error; console.error = () => {};
     const forwarded = [];
     const fetchFn = async (url, o) => { forwarded.push({ url, body: JSON.parse(o.body) }); return { ok: true, status: 200 }; };
-    const env = { GREENAPI_TOKEN: "gtok", WHAPI_WEBHOOK_SECRET: "hook-secret", GREENAPI_INSTANCE: "7105422200",
-      GREEN_BRIDGE_N8N_WEBHOOK: "https://n8n.test/webhook/avisa-reply-v2" };
+    const env = { GREENAPI_TOKEN: "gtok", WHATSAPP_WEBHOOK_SECRET: "hook-secret", GREENAPI_INSTANCE: "7105422200",
+      WHATSAPP_INBOUND_N8N_WEBHOOK: "https://n8n.test/webhook/avisa-reply-v2" };
     const bridge = createGreenBridge({ env, fetchFn, client: fakeClient() });
     const { post, close } = await serve(bridge);
     try {
-      assert.equal((await post("/whapi-inbound/wrong", { messages: [] })).status, 401);
-      const r = await post("/whapi-inbound/hook-secret", { messages: [
+      assert.equal((await post("/inbound/wrong", { messages: [] })).status, 401);
+      const r = await post("/inbound/hook-secret", { messages: [
         { id: "W1", from_me: false, type: "text", text: { body: "ראשון" }, chat_id: "972501234567@s.whatsapp.net", from: "972501234567", timestamp: 1 },
         { id: "W2", from_me: true, type: "text", text: { body: "ours" }, chat_id: "972501234567@s.whatsapp.net", timestamp: 2 },
         { id: "W3", from_me: false, type: "image", image: { link: "https://w/1.jpg" }, chat_id: "972501234567@s.whatsapp.net", from: "972501234567", timestamp: 3 },
@@ -142,14 +142,14 @@ async function serve(router) {
       const failing = createGreenBridge({ env, fetchFn: async () => { throw new Error("ECONNREFUSED"); }, client: fakeClient() });
       const s2 = await serve(failing);
       try {
-        assert.equal((await s2.post("/whapi-inbound/hook-secret", { messages: [
+        assert.equal((await s2.post("/inbound/hook-secret", { messages: [
           { id: "W9", from_me: false, type: "text", text: { body: "x" }, chat_id: "972501234567@s.whatsapp.net", timestamp: 1 }] })).status, 200);
         await failing.idle();
       } finally { s2.close(); }
 
       // no target configured → 503
-      const noTarget = await serve(createGreenBridge({ env: { ...env, GREEN_BRIDGE_N8N_WEBHOOK: "" }, fetchFn, client: fakeClient() }));
-      try { assert.equal((await noTarget.post("/whapi-inbound/hook-secret", { messages: [] })).status, 503); }
+      const noTarget = await serve(createGreenBridge({ env: { ...env, WHATSAPP_INBOUND_N8N_WEBHOOK: "" }, fetchFn, client: fakeClient() }));
+      try { assert.equal((await noTarget.post("/inbound/hook-secret", { messages: [] })).status, 503); }
       finally { noTarget.close(); }
     } finally { close(); console.error = realErr; }
   }
