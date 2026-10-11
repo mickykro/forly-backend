@@ -37,6 +37,7 @@ function createWhapiClient({ token, baseUrl = "https://gate.whapi.cloud", fetchF
     listMessages: (chatId, count) =>
       call("messages/list", "GET", `/messages/list/${encodeURIComponent(chatId)}?count=${Number(count) || 100}`),
     getMessage: (id) => call("messages/get", "GET", `/messages/${encodeURIComponent(id)}`),
+    listChats: (count) => call("chats", "GET", `/chats?count=${Number(count) || 100}`),
   };
 }
 
