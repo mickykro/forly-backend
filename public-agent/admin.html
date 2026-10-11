@@ -119,6 +119,52 @@
   .manual-versions details{border-top:1px solid rgba(23,20,15,.06);padding:6px 0}
   .manual-versions summary{cursor:pointer;font-size:.9rem}
   #manualVideo.ready{background:#1f7a3a;color:#fff;border-color:#1f7a3a}
+  /* campaigns tab (admin-campaigns.js); .camp-* comes from app.css */
+  .cf{background:var(--paper);border:1px solid rgba(185,138,47,.22);border-radius:var(--radius);padding:20px 22px;margin-bottom:18px;counter-reset:cf}
+  .cf [hidden]{display:none !important}
+  .cf-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .cf-top h3{font-family:var(--serif);font-size:1.25rem;margin:0}
+  .cf-x{border:0;background:none;font-size:1.5rem;line-height:1;color:var(--ink-soft);cursor:pointer;padding:4px 8px}
+  .cf-step{border:0;border-top:1px solid rgba(23,20,15,.07);margin:0;padding:16px 0 4px;min-width:0}
+  .cf-step h4,.cf-step legend{counter-increment:cf;display:flex;align-items:center;gap:8px;font-size:.95rem;font-weight:600;margin:0 0 12px;padding:0}
+  .cf-step legend{float:right;width:100%}
+  .cf-step legend+*{clear:both}
+  .cf-step h4::before,.cf-step legend::before{content:counter(cf);display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--gold-faint);color:#8A6A1E;font-size:.78rem;font-weight:700}
+  .cf-row{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:flex-start}
+  .cf-field{display:flex;flex-direction:column;gap:6px;flex:1 1 220px;min-width:0;font-size:.8rem;color:var(--ink-soft);font-weight:500}
+  .cf-grow{flex:3 1 320px}
+  .cf select,.cf input[type=number],.cf input[type=search],.cf-field input{font:400 .92rem var(--sans);color:var(--ink);background:#fff;border:1px solid rgba(23,20,15,.16);border-radius:10px;padding:9px 12px;outline:none;width:100%}
+  .cf select:focus,.cf input:focus{border-color:var(--gold);box-shadow:0 0 0 4px var(--gold-faint)}
+  .cf select:disabled{background:#f4f1ea;color:var(--ink-soft)}
+  .cf .cf-bad,.cf .cf-bad:focus{border-color:rgba(190,60,50,.6);box-shadow:0 0 0 4px rgba(190,60,50,.1)}
+  .cf-days{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--ink);font-size:.88rem}
+  .cf-days input[type=number]{width:72px;text-align:center}
+  .cf-days button{font:500 .8rem var(--sans);border:1px solid rgba(23,20,15,.14);background:#fff;color:var(--ink-soft);border-radius:100px;padding:6px 12px;cursor:pointer}
+  .cf-days button.on{border-color:var(--gold);background:var(--gold-faint);color:var(--ink)}
+  .cf-check{display:inline-flex;align-items:center;gap:8px;font-size:.88rem;color:var(--ink);cursor:pointer;margin:10px 0 4px}
+  .cf-check input{width:17px;height:17px;accent-color:var(--gold)}
+  .cf-gbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:10px}
+  .cf-gbar input[type=search]{flex:1 1 200px;width:auto}
+  .cf-count{font-size:.8rem;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  .cf-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;max-height:300px;overflow-y:auto;padding:2px}
+  .cf-groups .camp-g{cursor:pointer;justify-content:flex-start}
+  .cf-groups .camp-g input{width:16px;height:16px;flex-shrink:0}
+  .cf-empty{grid-column:1/-1;font-size:.86rem;color:var(--ink-soft);background:var(--bg);border:1px dashed rgba(23,20,15,.16);border-radius:12px;padding:14px;margin:0;text-align:center}
+  .cf-est{font-size:.86rem;line-height:1.6;background:var(--gold-faint);border-radius:12px;padding:10px 14px;margin:14px 0 4px}
+  .cf-est:empty{display:none}
+  .cf-est.warn{background:rgba(190,60,50,.08);color:#9a2f25}
+  .cf-hint{font-size:.8rem;color:var(--ink-soft);margin:0 0 10px;font-weight:300}
+  .cf-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;border-top:1px solid rgba(23,20,15,.07);margin-top:16px;padding-top:14px}
+  .cf-err{flex:1 1 200px;margin:0;font-size:.85rem;color:#9a2f25}
+  .cf-card{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--paper);border:1px solid rgba(23,20,15,.09);border-radius:14px;padding:14px 18px;margin-bottom:10px}
+  .cf-card .cf-main-info{flex:1 1 280px;min-width:0}
+  .cf-card h3{font-size:1rem;margin:0 0 4px;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .cf-card .row-actions{flex-shrink:0}
+  .cf-st{font-size:.72rem;font-weight:600;border-radius:100px;padding:2px 10px;background:rgba(23,20,15,.06);color:var(--ink-soft)}
+  .cf-st.running{background:rgba(45,140,80,.12);color:#157A3F}
+  .cf-st.paused{background:rgba(217,177,92,.22);color:#8A6A1E}
+  .cf-st.stopped{background:rgba(190,60,50,.1);color:#9a2f25}
+  @media(max-width:600px){.cf{padding:16px}.cf-foot .btn{flex:1}}
 </style>
 </head>
 <body class="agent-page admin-page">
@@ -285,22 +331,58 @@
       <select id="campAgent" aria-label="סוכן"><option value="">כל הסוכנים</option></select>
       <button type="button" class="btn btn-gold btn-sm" id="campNew">קמפיין חדש</button>
     </div>
-    <form id="campForm" class="manual-agent" hidden>
-      <h3 id="campFormTitle">קמפיין חדש</h3>
-      <label>סוכן <select id="campFormAgent"></select></label>
-      <label>נכס <select id="campFormProperty"></select></label>
-      <fieldset><legend>קבוצות</legend><div id="campFormGroups"></div></fieldset>
-      <label>ימים <input id="campFormDays" type="number" min="1" max="30" value="14"></label>
-      <label>חזרה כל <input id="campFormRepeat" type="number" min="0" max="30" value="0"> ימים (0 = בלי חזרה)</label>
-      <label>מצב <select id="campFormMode"><option value="standing">אישור אחד לכל הקמפיין</option><option value="per_post">אישור לכל פוסט</option></select></label>
-      <label><input id="campFormPage" type="checkbox"> גם בדף העסקי</label>
-      <p id="campFormEstimate" class="manual-muted"></p>
-      <fieldset id="campFormConsent"><legend>הסכמת הסוכן</legend>
-        <select id="campFormConsentMethod"><option value="phone">בטלפון</option><option value="in_person">פנים אל פנים</option><option value="whatsapp">בוואטסאפ</option></select>
-        <input id="campFormConsentNote" maxlength="300" placeholder="מה הסוכן אישר, ומתי">
+    <form id="campForm" class="cf" hidden novalidate>
+      <div class="cf-top"><h3 id="campFormTitle">קמפיין חדש</h3><button type="button" class="cf-x" id="campFormClose" aria-label="סגירה">×</button></div>
+      <section class="cf-step cf-main">
+        <h4>סוכן ונכס</h4>
+        <div class="cf-row">
+          <label class="cf-field"><span>סוכן</span><select id="campFormAgent"></select></label>
+          <label class="cf-field"><span>נכס לפרסום</span><select id="campFormProperty"><option value="">קודם בחרו סוכן</option></select></label>
+        </div>
+      </section>
+      <section class="cf-step cf-main">
+        <h4>איפה לפרסם</h4>
+        <div class="cf-gbar" id="campFormGroupBar" hidden>
+          <input type="search" id="campFormGroupSearch" placeholder="חיפוש קבוצה…" aria-label="חיפוש קבוצה">
+          <span class="cf-count" id="campFormGroupCount"></span>
+          <button type="button" class="camp-link" id="campFormAll">בחירת הכל</button>
+          <button type="button" class="camp-link" id="campFormNone">ניקוי</button>
+        </div>
+        <div id="campFormGroups" class="cf-groups"><p class="cf-empty">בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן.</p></div>
+        <label class="cf-check"><input id="campFormPage" type="checkbox"> לפרסם גם בדף העסקי של הסוכן</label>
+      </section>
+      <section class="cf-step">
+        <h4>תזמון</h4>
+        <div class="cf-row">
+          <div class="cf-field"><span>משך הקמפיין</span>
+            <div class="cf-days">
+              <input id="campFormDays" type="number" min="1" max="30" value="14" aria-label="מספר ימים"> <small>ימים</small>
+              <button type="button" data-days="7">שבוע</button><button type="button" data-days="14">שבועיים</button><button type="button" data-days="30">חודש</button>
+            </div>
+          </div>
+          <div class="cf-field cf-main"><span>חזרה</span>
+            <div class="cf-days">
+              <label class="cf-check"><input id="campFormRepeatOn" type="checkbox"> לפרסם שוב</label>
+              <span id="campFormRepeatWrap" hidden>כל <input id="campFormRepeat" type="number" min="3" max="30" value="7" aria-label="ימים בין סבבים"> ימים</span>
+            </div>
+          </div>
+          <label class="cf-field cf-main"><span>אישור פוסטים</span><select id="campFormMode"><option value="standing">אישור אחד לכל הקמפיין</option><option value="per_post">אישור לכל פוסט</option></select></label>
+        </div>
+        <p id="campFormEstimate" class="cf-est"></p>
+      </section>
+      <fieldset id="campFormConsent" class="cf-step">
+        <legend>הסכמת הסוכן</legend>
+        <p class="cf-hint">חובה לתעד איך ומתי הסוכן אישר את הקמפיין — זה נרשם ביומן.</p>
+        <div class="cf-row">
+          <label class="cf-field"><span>איך אישר</span><select id="campFormConsentMethod"><option value="phone">בטלפון</option><option value="in_person">פנים אל פנים</option><option value="whatsapp">בוואטסאפ</option></select></label>
+          <label class="cf-field cf-grow"><span>פרטי האישור</span><input id="campFormConsentNote" maxlength="300" placeholder="לדוגמה: אישר בשיחה ב-11/10 בצהריים, 14 יום בקבוצות של העיר"></label>
+        </div>
       </fieldset>
-      <button type="button" class="btn btn-gold btn-sm" id="campFormSave">שמירה</button>
-      <button type="button" class="btn btn-ghost btn-sm" id="campFormCancel">ביטול</button>
+      <div class="cf-foot">
+        <p class="cf-err" id="campFormError" role="alert"></p>
+        <button type="button" class="btn btn-ghost btn-sm" id="campFormCancel">ביטול</button>
+        <button type="button" class="btn btn-gold btn-sm" id="campFormSave">יצירת קמפיין</button>
+      </div>
     </form>
     <div id="campList"><p class="manual-muted">טוען…</p></div>
   </div>
