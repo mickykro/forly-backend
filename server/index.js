@@ -200,7 +200,7 @@ app.use("/api/auth", createAuthRouter({
 
 // ── Green API ⇄ Whapi bridge (stopgap; see server/green-bridge/router.js) ──
 // Answers Green-style calls through Whapi and forwards Whapi's webhook to n8n
-// in Green's format, so n8n's workflows run unchanged. Off until WHAPI_TOKEN.
+// in Green's format, so n8n's workflows run unchanged. Off until WHATSAPP_PROVIDER_TOKEN.
 app.use("/greenapi", require("./green-bridge/router")());
 
 // ── intake routes (uploads, property creation) ──

@@ -22,8 +22,8 @@ This is a stopgap until the planned move to Meta's official API, after which it 
 - **Tests are plain `node file.test.js` scripts** using `assert`, registered in `server/package.json` `scripts.test`.
 - **Chat ids:** Green `972XXXXXXXXX@c.us` ⇄ Whapi `972XXXXXXXXX@s.whatsapp.net`. Groups stay `…@g.us`.
 - **Green-side auth:** the bridge accepts only the existing `GREENAPI_TOKEN` (the same token that n8n's Green API credential, the server and Functions already hold).
-- **Whapi side:** `WHAPI_TOKEN`, base `https://gate.whapi.cloud`, `Authorization: Bearer <token>`.
-- **Inbound webhook auth:** a secret in the URL path, `WHAPI_WEBHOOK_SECRET`.
+- **Whapi side:** `WHATSAPP_PROVIDER_TOKEN`, base `https://gate.whapi.cloud`, `Authorization: Bearer <token>`.
+- **Inbound webhook auth:** a secret in the URL path, `WHATSAPP_WEBHOOK_SECRET`.
 - **Inbound responses are always 200** after the secret check, so Whapi never retries and causes a message to be handled twice.
 
 Fields the live n8n workflows read. The bridge must produce exactly these, taken from Main Router v3 "Code - Parse Webhook" and Business Handler v6:
@@ -568,7 +568,7 @@ Then add before the final `console.log`:
   {
     const realErr = console.error; console.error = () => {};
     const client = fakeClient();
-    const env = { GREENAPI_TOKEN: "gtok", WHAPI_TOKEN: "wtok" };
+    const env = { GREENAPI_TOKEN: "gtok", WHATSAPP_PROVIDER_TOKEN: "wtok" };
     const { post, close } = await serve(createGreenBridge({ env, client }));
     const P = "/waInstance7105422200";
     try {
@@ -613,7 +613,7 @@ Then add before the final `console.log`:
       assert.equal((await post(`${P}/sendMessage/gtok`, { chatId: "972501234567@c.us", message: "x" })).status, 502);
     } finally { close(); console.error = realErr; }
 
-    // bridge off (no WHAPI_TOKEN, no client) → 503
+    // bridge off (no WHATSAPP_PROVIDER_TOKEN, no client) → 503
     const off = await serve(createGreenBridge({ env: { GREENAPI_TOKEN: "gtok" } }));
     try { assert.equal((await off.post(`${P}/sendMessage/gtok`, { chatId: "972501234567@c.us", message: "x" })).status, 503); }
     finally { off.close(); }
@@ -637,9 +637,9 @@ Create `server/green-bridge/router.js`:
  *   POST /greenapi/waInstance{id}/{method}/{GREENAPI_TOKEN}
  *       Green-style calls (n8n's patched Green API node, the server and
  *       Functions via GREENAPI_API_URL) answered through Whapi.
- *   POST /greenapi/whapi-inbound/{WHAPI_WEBHOOK_SECRET}
+ *   POST /greenapi/inbound/{WHATSAPP_WEBHOOK_SECRET}
  *       Whapi's webhook; each message is rebuilt as a Green API
- *       incomingMessageReceived webhook and posted to GREEN_BRIDGE_N8N_WEBHOOK.
+ *       incomingMessageReceived webhook and posted to WHATSAPP_INBOUND_N8N_WEBHOOK.
  *
  * Delete this folder once Forly is on the official WhatsApp API.
  */
@@ -654,8 +654,8 @@ const tail = (chatId) => `…${String(chatId || "").replace(/@.*/, "").slice(-4)
 
 module.exports = function createGreenBridge({ env = process.env, fetchFn = fetch, client } = {}) {
   const router = express.Router();
-  const whapi = client || (env.WHAPI_TOKEN
-    ? createWhapiClient({ token: env.WHAPI_TOKEN, baseUrl: env.WHAPI_API_URL || undefined, fetchFn })
+  const whapi = client || (env.WHATSAPP_PROVIDER_TOKEN
+    ? createWhapiClient({ token: env.WHATSAPP_PROVIDER_TOKEN, baseUrl: env.WHATSAPP_PROVIDER_API_URL || undefined, fetchFn })
     : null);
   let pending = Promise.resolve();
   router.idle = () => pending;
@@ -728,7 +728,7 @@ git commit -m "feat(green-bridge): Green-style send and history calls answered b
 
 **Interfaces:**
 - Consumes: `toGreenWebhook` (Task 1); the `pending` / `router.idle()` defined in Task 4.
-- Produces: `POST /whapi-inbound/:secret` → `200 {ok:true, received:n}` immediately. Forwarding then runs in order, one message at a time, and across webhooks too. `router.idle()` resolves when it is done.
+- Produces: `POST /inbound/:secret` → `200 {ok:true, received:n}` immediately. Forwarding then runs in order, one message at a time, and across webhooks too. `router.idle()` resolves when it is done.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -740,13 +740,13 @@ Add before the final `console.log` in `server/green-bridge/router.test.js`:
     const realErr = console.error; console.error = () => {};
     const forwarded = [];
     const fetchFn = async (url, o) => { forwarded.push({ url, body: JSON.parse(o.body) }); return { ok: true, status: 200 }; };
-    const env = { GREENAPI_TOKEN: "gtok", WHAPI_WEBHOOK_SECRET: "hook-secret", GREENAPI_INSTANCE: "7105422200",
-      GREEN_BRIDGE_N8N_WEBHOOK: "https://n8n.test/webhook/avisa-reply-v2" };
+    const env = { GREENAPI_TOKEN: "gtok", WHATSAPP_WEBHOOK_SECRET: "hook-secret", GREENAPI_INSTANCE: "7105422200",
+      WHATSAPP_INBOUND_N8N_WEBHOOK: "https://n8n.test/webhook/avisa-reply-v2" };
     const bridge = createGreenBridge({ env, fetchFn, client: fakeClient() });
     const { post, close } = await serve(bridge);
     try {
-      assert.equal((await post("/whapi-inbound/wrong", { messages: [] })).status, 401);
-      const r = await post("/whapi-inbound/hook-secret", { messages: [
+      assert.equal((await post("/inbound/wrong", { messages: [] })).status, 401);
+      const r = await post("/inbound/hook-secret", { messages: [
         { id: "W1", from_me: false, type: "text", text: { body: "ראשון" }, chat_id: "972501234567@s.whatsapp.net", from: "972501234567", timestamp: 1 },
         { id: "W2", from_me: true, type: "text", text: { body: "ours" }, chat_id: "972501234567@s.whatsapp.net", timestamp: 2 },
         { id: "W3", from_me: false, type: "image", image: { link: "https://w/1.jpg" }, chat_id: "972501234567@s.whatsapp.net", from: "972501234567", timestamp: 3 },
@@ -764,14 +764,14 @@ Add before the final `console.log` in `server/green-bridge/router.test.js`:
       const failing = createGreenBridge({ env, fetchFn: async () => { throw new Error("ECONNREFUSED"); }, client: fakeClient() });
       const s2 = await serve(failing);
       try {
-        assert.equal((await s2.post("/whapi-inbound/hook-secret", { messages: [
+        assert.equal((await s2.post("/inbound/hook-secret", { messages: [
           { id: "W9", from_me: false, type: "text", text: { body: "x" }, chat_id: "972501234567@s.whatsapp.net", timestamp: 1 }] })).status, 200);
         await failing.idle();
       } finally { s2.close(); }
 
       // no target configured → 503
-      const noTarget = await serve(createGreenBridge({ env: { ...env, GREEN_BRIDGE_N8N_WEBHOOK: "" }, fetchFn, client: fakeClient() }));
-      try { assert.equal((await noTarget.post("/whapi-inbound/hook-secret", { messages: [] })).status, 503); }
+      const noTarget = await serve(createGreenBridge({ env: { ...env, WHATSAPP_INBOUND_N8N_WEBHOOK: "" }, fetchFn, client: fakeClient() }));
+      try { assert.equal((await noTarget.post("/inbound/hook-secret", { messages: [] })).status, 503); }
       finally { noTarget.close(); }
     } finally { close(); console.error = realErr; }
   }
@@ -789,11 +789,11 @@ In `server/green-bridge/router.js`, add before `return router;`:
 ```js
   // Whapi webhook. Answered at once (Whapi retries slow or failed calls,
   // which would handle a message twice); forwarding runs after, in order.
-  router.post("/whapi-inbound/:secret", (req, res) => {
-    if (!env.WHAPI_WEBHOOK_SECRET || !constantTimeEqual(req.params.secret, env.WHAPI_WEBHOOK_SECRET)) {
+  router.post("/inbound/:secret", (req, res) => {
+    if (!env.WHATSAPP_WEBHOOK_SECRET || !constantTimeEqual(req.params.secret, env.WHATSAPP_WEBHOOK_SECRET)) {
       return res.status(401).json({ error: "bad_secret" });
     }
-    const target = String(env.GREEN_BRIDGE_N8N_WEBHOOK || "").trim();
+    const target = String(env.WHATSAPP_INBOUND_N8N_WEBHOOK || "").trim();
     if (!target) return res.status(503).json({ error: "no_target" });
     const msgs = Array.isArray(req.body && req.body.messages) ? req.body.messages : [];
     res.json({ ok: true, received: msgs.length });
@@ -848,7 +848,7 @@ In `server/index.js`, directly after the closing `}));` of `app.use("/api/auth",
 ```js
 // ── Green API ⇄ Whapi bridge (stopgap; see server/green-bridge/router.js) ──
 // Answers Green-style calls through Whapi and forwards Whapi's webhook to n8n
-// in Green's format, so n8n's workflows run unchanged. Off until WHAPI_TOKEN.
+// in Green's format, so n8n's workflows run unchanged. Off until WHATSAPP_PROVIDER_TOKEN.
 app.use("/greenapi", require("./green-bridge/router")());
 ```
 
@@ -866,7 +866,7 @@ node auth-otp.test.js && node green-bridge/format.test.js && node green-bridge/r
 
 Run:
 ```bash
-cd server && (PORT=18788 FORLY_ENV=local WHAPI_TOKEN=x GREENAPI_TOKEN=gtok timeout 10 node index.js >/tmp/bridge-boot.log 2>&1 &) ; sleep 5; \
+cd server && (PORT=18788 FORLY_ENV=local WHATSAPP_PROVIDER_TOKEN=x GREENAPI_TOKEN=gtok timeout 10 node index.js >/tmp/bridge-boot.log 2>&1 &) ; sleep 5; \
 curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:18788/greenapi/waInstance1/sendMessage/nope
 ```
 Expected: `401`
@@ -904,9 +904,9 @@ No code. Every step has a check. Steps 1–4 bring back login codes and backend 
 
   Add to the production server env:
   ```
-  WHAPI_TOKEN=<Whapi channel token>
-  WHAPI_WEBHOOK_SECRET=<new random string, e.g. output of: openssl rand -hex 24>
-  GREEN_BRIDGE_N8N_WEBHOOK=https://n8n.srv1173890.hstgr.cloud/webhook/avisa-reply-v3
+  WHATSAPP_PROVIDER_TOKEN=<Whapi channel token>
+  WHATSAPP_WEBHOOK_SECRET=<new random string, e.g. output of: openssl rand -hex 24>
+  WHATSAPP_INBOUND_N8N_WEBHOOK=https://n8n.srv1173890.hstgr.cloud/webhook/avisa-reply-v3
   GREENAPI_API_URL=http://127.0.0.1:8787/greenapi
   ```
   Keep the existing `GREENAPI_INSTANCE` and `GREENAPI_TOKEN`. The bridge uses that token as its password, and the server keeps sending with it.
@@ -935,7 +935,7 @@ No code. Every step has a check. Steps 1–4 bring back login codes and backend 
 - [ ] **Step 5: Point Whapi's webhook at the bridge**
 
   In the Whapi channel settings, set the webhook:
-  - URL: `<PUBLIC_BASE>/greenapi/whapi-inbound/<WHAPI_WEBHOOK_SECRET>`
+  - URL: `<PUBLIC_BASE>/greenapi/inbound/<WHATSAPP_WEBHOOK_SECRET>`
   - Mode: `body`, method `POST`, events: `messages` only
 
   Check: send "בדיקה" to the business number from another phone. The server log shows no `[green-bridge]` error, and in n8n → Executions, "Main Router v3" has a new run.

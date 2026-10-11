@@ -5,9 +5,9 @@
  *   POST /greenapi/waInstance{id}/{method}/{GREENAPI_TOKEN}
  *       Green-style calls (n8n's patched Green API node, the server and
  *       Functions via GREENAPI_API_URL) answered through Whapi.
- *   POST /greenapi/whapi-inbound/{WHAPI_WEBHOOK_SECRET}
+ *   POST /greenapi/inbound/{WHATSAPP_WEBHOOK_SECRET}
  *       Whapi's webhook; each message is rebuilt as a Green API
- *       incomingMessageReceived webhook and posted to GREEN_BRIDGE_N8N_WEBHOOK.
+ *       incomingMessageReceived webhook and posted to WHATSAPP_INBOUND_N8N_WEBHOOK.
  *
  * Delete this folder once Forly is on the official WhatsApp API.
  */
@@ -22,8 +22,8 @@ const tail = (chatId) => `…${String(chatId || "").replace(/@.*/, "").slice(-4)
 
 module.exports = function createGreenBridge({ env = process.env, fetchFn = fetch, client } = {}) {
   const router = express.Router();
-  const whapi = client || (env.WHAPI_TOKEN
-    ? createWhapiClient({ token: env.WHAPI_TOKEN, baseUrl: env.WHAPI_API_URL || undefined, fetchFn })
+  const whapi = client || (env.WHATSAPP_PROVIDER_TOKEN
+    ? createWhapiClient({ token: env.WHATSAPP_PROVIDER_TOKEN, baseUrl: env.WHATSAPP_PROVIDER_API_URL || undefined, fetchFn })
     : null);
   let pending = Promise.resolve();
   router.idle = () => pending;
@@ -72,11 +72,11 @@ module.exports = function createGreenBridge({ env = process.env, fetchFn = fetch
 
   // Whapi webhook. Answered at once (Whapi retries slow or failed calls,
   // which would handle a message twice); forwarding runs after, in order.
-  router.post("/whapi-inbound/:secret", (req, res) => {
-    if (!env.WHAPI_WEBHOOK_SECRET || !constantTimeEqual(req.params.secret, env.WHAPI_WEBHOOK_SECRET)) {
+  router.post("/inbound/:secret", (req, res) => {
+    if (!env.WHATSAPP_WEBHOOK_SECRET || !constantTimeEqual(req.params.secret, env.WHATSAPP_WEBHOOK_SECRET)) {
       return res.status(401).json({ error: "bad_secret" });
     }
-    const target = String(env.GREEN_BRIDGE_N8N_WEBHOOK || "").trim();
+    const target = String(env.WHATSAPP_INBOUND_N8N_WEBHOOK || "").trim();
     if (!target) return res.status(503).json({ error: "no_target" });
     const msgs = Array.isArray(req.body && req.body.messages) ? req.body.messages : [];
     res.json({ ok: true, received: msgs.length });
