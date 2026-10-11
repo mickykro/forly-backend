@@ -5,6 +5,8 @@
  *   POST /greenapi/waInstance{id}/{method}/{GREENAPI_TOKEN}
  *       Green-style calls (n8n's patched Green API node, the server and
  *       Functions via GREENAPI_API_URL) answered through Whapi.
+ *   GET  /greenapi/waInstance{id}/getChats/{GREENAPI_TOKEN}
+ *       The chat list, for the daily conversation review.
  *   POST /greenapi/inbound/{WHATSAPP_WEBHOOK_SECRET}
  *       Whapi's webhook; each message is rebuilt as a Green API
  *       incomingMessageReceived webhook and posted to WHATSAPP_INBOUND_N8N_WEBHOOK.
@@ -28,7 +30,7 @@ module.exports = function createGreenBridge({ env = process.env, fetchFn = fetch
   let pending = Promise.resolve();
   router.idle = () => pending;
 
-  router.post("/waInstance:instance/:method/:token", async (req, res) => {
+  async function handle(req, res) {
     if (!whapi) return res.status(503).json({ error: "bridge_off" });
     if (!env.GREENAPI_TOKEN || !constantTimeEqual(req.params.token, env.GREENAPI_TOKEN)) {
       return res.status(401).json({ error: "bad_token" });
@@ -61,6 +63,12 @@ module.exports = function createGreenBridge({ env = process.env, fetchFn = fetch
           if (!b.idMessage) return res.status(400).json({ error: "idMessage_required" });
           return res.json(F.toGreenHistoryItem(await whapi.getMessage(String(b.idMessage))) || {});
         }
+        case "getChats": {
+          const r = await whapi.listChats(500);
+          return res.json((Array.isArray(r.chats) ? r.chats : []).map((c) => ({
+            id: F.toGreenChat(c.id), name: c.name || "", type: c.type === "group" ? "group" : "user",
+          })).filter((c) => c.id));
+        }
         default:
           return res.status(501).json({ error: "method_not_bridged", method: req.params.method });
       }
@@ -68,7 +76,9 @@ module.exports = function createGreenBridge({ env = process.env, fetchFn = fetch
       console.error(`[green-bridge] ${req.params.method} ${tail(b.chatId)} failed: ${err.message}`);
       return res.status(err.status >= 400 && err.status < 500 ? err.status : 502).json({ error: "whapi_failed" });
     }
-  });
+  }
+  router.post("/waInstance:instance/:method/:token", handle);
+  router.get("/waInstance:instance/:method(getChats)/:token", handle);
 
   // Whapi webhook. Answered at once (Whapi retries slow or failed calls,
   // which would handle a message twice); forwarding runs after, in order.
