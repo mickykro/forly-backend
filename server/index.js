@@ -198,6 +198,11 @@ app.use("/api/auth", createAuthRouter({
   salesLeadPhone: SALES_LEAD_PHONE,
 }));
 
+// ── Green API ⇄ Whapi bridge (stopgap; see server/green-bridge/router.js) ──
+// Answers Green-style calls through Whapi and forwards Whapi's webhook to n8n
+// in Green's format, so n8n's workflows run unchanged. Off until WHAPI_TOKEN.
+app.use("/greenapi", require("./green-bridge/router")());
+
 // ── intake routes (uploads, property creation) ──
 const createIntakeRouter = require("./routes/intake");
 // ── quota routes (n8n consume/status, agent /me) ──
