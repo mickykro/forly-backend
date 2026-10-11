@@ -23,10 +23,11 @@ function fakeDb(conns = {}) {
     getConnection: async (phone) => conns[phone] || null,
     setConnection: async (phone, patch) => { conns[phone] = Object.assign(conns[phone] || {}, patch); },
     cancelOpenAttempts: async () => {},
-    savePendingDelete: async ({ phone, platform, since, attempts, last_error, gen }) => {
+    savePendingDelete: async ({ phone, platform, since, attempts, last_error, gen, name }) => {
       const id = idFor(platform, phone, gen);
       const rec = { id, phone, platform, since, attempts, last_error };
       if (gen !== undefined) rec.gen = gen;
+      if (name) rec.name = name;
       pending.set(id, rec);
     },
     listPendingDeletes: async () => [...pending.values()],
@@ -341,6 +342,29 @@ function fakeDb(conns = {}) {
     await L.quarantine("m", "facebook", "checkpoint", { db: fakeDb(conns2), driver: { stopSession: async () => {}, deleteProfile: async () => { heldDuringDelete = locks.isHeld("m", "facebook"); return { ok: true }; } } });
     assert.equal(heldDuringDelete, true); assert.equal(locks.isHeld("m", "facebook"), false);
     assert.ok(conns2.m.facebook_profile_deleted_at);
+  }
+
+  // ── a stored name is the one deleted, and a failed delete records it, so the
+  //    retry deletes that exact profile even after FORLY_ENV/PROFILE_KEY change ──
+  {
+    const STORED = "facebook-staging-0123456789abcdef0123";
+    const c = { facebook_browser_connected_at: "2026-09-01", facebook_profile_name: STORED, facebook_profile_name_gen: 0 };
+    const d = fakeDb({ "05s": c });
+    const tried = [];
+    await L.revoke({ phone: "05s", platform: "facebook" }, {
+      db: d, driver: { stopSession: async () => {}, deleteProfile: async (n) => { tried.push(n); throw Object.assign(new Error("503"), { status: 503 }); } },
+    });
+    assert.deepEqual(tried, [STORED]);
+    const row = [...d.pending.values()][0];
+    assert.equal(row.name, STORED, "the pending row carries the exact name");
+
+    process.env.FORLY_ENV = "prod"; process.env.PROFILE_KEY = "rotated";
+    delete c.facebook_profile_name; // even with the connection's own name gone
+    const retried = [];
+    await L.retryDeletes({ db: d, driver: { deleteProfile: async (n) => { retried.push(n); return { ok: true }; } } });
+    assert.deepEqual(retried, [STORED]);
+    assert.equal(d.pending.size, 0);
+    process.env.FORLY_ENV = "local"; process.env.PROFILE_KEY = "k";
   }
 
   console.log("profile-lifecycle.test.js ok");

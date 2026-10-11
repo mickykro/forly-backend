@@ -54,11 +54,9 @@ module.exports = function createPostingRouter(ctx) {
   const { db, store, campaigns, deps, authSecret } = S;
   const auth = ctx.requireAuth(authSecret);
   const router = express.Router();
-  // C1: staging shares production's Firestore — nothing here changes a
-  // campaign, a permission or a membership outside prod (or a local box with
-  // POSTING_SWEEPER=1). Read-only GETs stay.
-  router.use((req, res, next) => (req.method === "GET" || req.method === "HEAD" || postingEnvAllowed(ctx.env || deps.env || process.env) ? next()
-    : res.status(503).json({ error: "posting_unavailable_in_env" })));
+  // Agents' changes are saved in every env (staging included): nothing here
+  // posts — the sweeper never starts outside prod, and manual posting is the
+  // admin's (posting-manual.js).
 
   // A running campaign always shows its next post or why it waits: plan now
   // rather than at the next sweep (up to a minute, or never while the sweep
@@ -219,7 +217,7 @@ module.exports = function createPostingRouter(ctx) {
     if (!c) return;
     const postId = String(req.params.post_id);
     if (!(c.posts || []).some((p) => p && p.id === postId)) return res.status(404).json({ error: "post_not_found" });
-    if (!(await allowed(S, c.phone, res))) return;
+    if (!manualOn() && !(await allowed(S, c.phone, res))) return;
     // The agent's own text and time, both optional: the text as edited on the
     // card, and "not before" for when it goes out (now … 30 days ahead).
     const b = req.body || {}, opts = {};
@@ -327,6 +325,8 @@ module.exports = function createPostingRouter(ctx) {
       await S.guard.assertAllowed({ phone: camp.phone, platform: "facebook", action: "reserve" }, { db, env: deps.env || process.env });
     } catch (e) {
       if (!e || e.code !== "posting_disabled") throw e;
+      // A system switch is never the agent's business: the approval is saved and waits.
+      if (!S_.SYSTEM_OFF.includes(e.reason))
       return send(409, "הפרסום כבוי כרגע", "לא אישרנו את הפוסט. אפשר לנסות שוב מכרטיס הפרסום בדשבורד.");
     }
     // The text as the agent left it on the page (unchanged, or edited).

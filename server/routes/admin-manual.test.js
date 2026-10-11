@@ -84,11 +84,31 @@ function call(server, method, path, body) {
     // ── a browser action before one is open ──
     assert.equal((await call(server, "POST", `${B}/type`, { text: "x" })).status, 409);
 
+    // ── the manual browser opens the name a login pinned (e.g. one made on staging) ──
+    //    — attached by hand, before the browser opens
+    const PINNED = "facebook-staging-0123456789abcdef0123";
+    const before = (await call(server, "GET", "/api/admin/manual/agents")).body.agents[0];
+    assert.equal(before.profile_saved, false, "no saved profile yet: the computed name is shown");
+    assert.ok(before.profile_name.startsWith("facebook-"));
+    for (const bad of ["", "yad2-prod-x", "facebook-prod-../x"]) {
+      const r = await call(server, "POST", `/api/admin/manual/agents/${REF}/profile-name`, { profile_name: bad });
+      assert.equal(r.status, 400, bad); assert.equal(r.body.error, "invalid_profile_name");
+    }
+    assert.equal((await call(server, "POST", "/api/admin/manual/agents/acct_nope/profile-name", { profile_name: PINNED })).status, 404);
+    const saved = await call(server, "POST", `/api/admin/manual/agents/${REF}/profile-name`, { profile_name: ` ${PINNED} ` });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.body, { profile_name: PINNED, profile_saved: true });
+    const after = (await call(server, "GET", "/api/admin/manual/agents")).body.agents[0];
+    assert.equal(after.profile_name, PINNED); assert.equal(after.profile_saved, true);
+    assert.equal((await K.db.getConnection(AGENT)).facebook_profile_name_gen, (await K.db.getConnection(AGENT)).facebook_profile_gen || 0, "saved for the current generation");
     // ── open (twice reuses), view, property ──
     assert.equal((await call(server, "POST", B, { group_url: "https://evil.example/groups/1" })).status, 400, "groups on Facebook only");
     const opened = await call(server, "POST", B, { group_url: "https://www.facebook.com/groups/111" });
     assert.deepEqual(opened.body, { open: true, at_group: true });
     assert.equal(sessions[0].url, "https://www.facebook.com/groups/111", "the browser starts on the group");
+    assert.equal(sessions[0].profile.name, PINNED, "the pinned profile, not a recomputed one");
+    assert.equal((await call(server, "POST", `/api/admin/manual/agents/${REF}/profile-name`, { profile_name: "facebook-prod-bbbbbbbbbbbbbbbbbbbb" })).body.error, "browser_open",
+      "not while the browser runs on the current profile");
     assert.deepEqual((await call(server, "POST", B)).body, { open: true, at_group: false }, "opening again reuses it");
     assert.equal(viewer.attaches.length, 1, "the viewer connects as soon as the browser opens, not on the first view");
     assert.ok(viewer.attaches[0][2] >= 5 * 60000, "and stays connected through a few minutes away from the tab");
@@ -159,7 +179,7 @@ function call(server, method, path, body) {
       getConnection: async (p) => conns[p] || null,
     });
     const verified = [];
-    const deps2 = Object.assign({}, deps, { db, verifySaved: async (phone, platform) => { verified.push([phone, platform]); return { state: "connected", identity_label: "Agent 3" }; } });
+    const deps2 = Object.assign({}, deps, { db, verifySaved: async (phone, platform, o) => { verified.push([phone, platform, o.name]); return { state: "connected", identity_label: "Agent 3" }; } });
     const app2 = express(); app2.use(express.json());
     app2.use("/api/admin/manual", createRouter({ requireAdmin, deps: deps2, driver: {}, viewer: {}, media: {} }));
     const server2 = app2.listen(0);
@@ -171,7 +191,18 @@ function call(server, method, path, body) {
       const v = await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(STUCK)}/verify`);
       assert.equal(v.status, 200);
       assert.equal(v.body.state, "connected");
-      assert.deepEqual(verified, [[STUCK, "facebook"]]);
+      assert.deepEqual(verified, [[STUCK, "facebook", undefined]]);
+      // a profile name typed by the admin is passed on exactly (trimmed)…
+      const TYPED = "facebook-staging-ffffffffffffffffffff";
+      assert.equal((await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(STUCK)}/verify`, { profile_name: `  ${TYPED} ` })).status, 200);
+      assert.deepEqual(verified[1], [STUCK, "facebook", TYPED]);
+      // …and a malformed one is refused before any browser opens
+      for (const bad of ["yad2-prod-x", "facebook-prod-../x", "https://facebook.com"]) {
+        const r = await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(STUCK)}/verify`, { profile_name: bad });
+        assert.equal(r.status, 400, bad);
+        assert.equal(r.body.error, "invalid_profile_name");
+      }
+      assert.equal(verified.length, 2);
       assert.equal((await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(DONE)}/verify`)).status, 404, "a connected agent is not in the list");
     } finally { server2.close(); }
   }

@@ -24,8 +24,8 @@ function deny(reason) {
 // Which environment may run automated posting at all (C1): staging shares
 // production's Firestore and GreenAPI, so it never may. Production does; a
 // local box only with POSTING_SWEEPER=1. index.js starts the sweeper on it,
-// and the mutating /api/posting and /api/admin/posting routes answer 503
-// posting_unavailable_in_env without it. Pure.
+// and the /api/admin/posting switches answer 503 posting_unavailable_in_env
+// without it. Agents' changes (/api/posting) are saved in every env. Pure.
 function postingEnvAllowed(env = {}) {
   if (!env || env.FORLY_ENV === "staging") return false;
   return env.FORLY_ENV === "prod" || env.POSTING_SWEEPER === "1";

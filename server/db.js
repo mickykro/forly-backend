@@ -398,10 +398,13 @@ function pendingDeleteId(platform, phone, gen) {
   return gen === undefined ? `${platform}:${phone}` : `${platform}:${phone}:${gen}`;
 }
 
-async function savePendingDelete({ phone, platform, since, attempts = 0, last_error = null, gen }) {
+// `name`: the exact Driver profile name the delete targets, so a retry never
+// rebuilds it (a rebuilt name can differ — another FORLY_ENV or PROFILE_KEY).
+async function savePendingDelete({ phone, platform, since, attempts = 0, last_error = null, gen, name }) {
   const id = pendingDeleteId(platform, phone, gen);
   const rec = { id, phone: String(phone), platform, since, attempts, last_error };
   if (gen !== undefined) rec.gen = gen;
+  if (name) rec.name = name;
   if (db) { await db.collection("profile_deletes").doc(id).set(rec); return; }
   mem.profileDeletes.set(id, rec);
 }

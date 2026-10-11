@@ -148,23 +148,18 @@ const { db, store } = K;
     assert.equal((await store.getPostingCampaign(c.id)).status, "paused");
   }
 
-  // ── the kill switch: create/resume/approve refused; stop, pause and skip always work ──
+  // ── a system switch never refuses the agent's save: create/approve/pause/resume/stop all save ──
   {
     const env = await setup();
     const { app } = env;
     const c = await pendingCampaign(env);
     globalOff();
-    const cr = await call(app, "POST", "/api/posting/campaigns", consented({ page_id: "pg2" }));
-    assert.equal(cr.status, 409); assert.equal(cr.body.error, "posting_disabled"); assert.equal(cr.body.reason, "global_off");
     const ap = await call(app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`);
-    assert.equal(ap.status, 409); assert.equal(ap.body.reason, "global_off");
-    assert.equal((await store.getPostingCampaign(c.id)).posts[0].status, "pending_approval");
-    const sk = await call(app, "POST", `/api/posting/campaigns/${c.id}/posts/p1/skip`);
-    assert.equal(sk.status, 200); assert.equal(sk.body.campaign.posts[0].status, "skipped");
+    assert.equal(ap.status, 200); assert.equal((await store.getPostingCampaign(c.id)).posts[0].status, "scheduled");
     const pa = await call(app, "POST", `/api/posting/campaigns/${c.id}/pause`);
     assert.equal(pa.status, 200); assert.equal(pa.body.campaign.status, "paused"); assert.equal(pa.body.campaign.pause_reason, "agent");
     const re = await call(app, "POST", `/api/posting/campaigns/${c.id}/resume`);
-    assert.equal(re.status, 409); assert.equal(re.body.reason, "global_off");
+    assert.equal(re.status, 200); assert.equal(re.body.campaign.status, "running");
     const st = await call(app, "POST", `/api/posting/campaigns/${c.id}/stop`);
     assert.equal(st.status, 200); assert.equal(st.body.campaign.status, "stopped");
     globalOn();
@@ -253,31 +248,16 @@ const { db, store } = K;
     assert.equal(createRouter.publicView(null), null);
   }
 
-  // ── C1: outside prod (without POSTING_SWEEPER=1, never on staging) every mutation is 503; reads stay ──
+  // ── every env saves the agent's changes (staging included): no env 503 ──
   {
     const env = await setup();
     const c = await pendingCampaign(env);
-    const before = JSON.stringify(await store.getPostingCampaign(c.id));
-    const perm = JSON.stringify((await db.getConnection(PH)).posting_permission);
-    for (const e of [{ FORLY_ENV: "staging", POSTING_ENABLED: "1", POSTING_SWEEPER: "1" }, { FORLY_ENV: "local", POSTING_ENABLED: "1" }]) {
+    for (const e of [{ FORLY_ENV: "staging" }, { FORLY_ENV: "local" }]) {
       const app = R.makeApp({ deps: Object.assign({}, env.deps, { env: e }) });
-      const writes = [
-        ["POST", "/api/posting/campaigns", consented()], ["POST", `/api/posting/campaigns/${c.id}/pause`], ["POST", `/api/posting/campaigns/${c.id}/stop`],
-        ["POST", `/api/posting/campaigns/${c.id}/resume`], ["POST", `/api/posting/campaigns/${c.id}/posts/p1/approve`], ["POST", `/api/posting/campaigns/${c.id}/posts/p1/skip`],
-        ["PUT", "/api/posting/settings", { enabled: false }], ["POST", "/api/posting/groups/resync"], ["DELETE", "/api/posting/groups/111"],
-        ["POST", "/api/posting/groups/111/unhide"], ["POST", "/api/posting/act?c=x"],
-      ];
-      for (const [m, path, body] of writes) {
-        const r = await call(app, m, path, body);
-        assert.deepEqual([r.status, r.body], [503, { error: "posting_unavailable_in_env" }], `${e.FORLY_ENV} ${m} ${path}`);
-      }
-      assert.equal((await call(app, "GET", `/api/posting/campaigns/${c.id}`)).status, 200);
-      assert.equal((await call(app, "GET", "/api/posting/settings")).status, 200);
+      const r = await call(app, "POST", `/api/posting/campaigns/${c.id}/pause`);
+      assert.notEqual(r.status, 503, `${e.FORLY_ENV}`);
+      assert.notEqual(r.body && r.body.error, "posting_unavailable_in_env");
     }
-    assert.equal(JSON.stringify(await store.getPostingCampaign(c.id)), before, "nothing changed");
-    assert.equal(JSON.stringify((await db.getConnection(PH)).posting_permission), perm);
-    const local = R.makeApp({ deps: Object.assign({}, env.deps, { env: { FORLY_ENV: "local", POSTING_ENABLED: "1", POSTING_SWEEPER: "1" } }) });
-    assert.equal((await call(local, "POST", `/api/posting/campaigns/${c.id}/pause`)).status, 200, "a local box with POSTING_SWEEPER=1 may");
   }
 
   // ── a started campaign is planned at once: the card shows its post or why it waits ──

@@ -41,7 +41,7 @@ const hashCode = (secret, phone, code) =>
 
 // scope "session" is a full login; "review" is the WhatsApp review link, which
 // only the routes that opt in (requireAuth(secret, REVIEW_SCOPES)) accept.
-const STEPUP_TTL_S = 600;
+const STEPUP_TTL_S = 10 * 60 * 60; // 10 hours
 
 function signSession(secret, phone, { scope = "session", ttlS = SESSION_TTL_S } = {}) {
   const payload = { userId: phone, scope, exp: Math.floor(Date.now() / 1000) + ttlS };
