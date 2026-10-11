@@ -36,7 +36,7 @@ function findChromium() {
   app.get("/api/admin/campaigns/campaigns", (q, r) => r.json({ campaigns: [cur] }));
   app.get("/api/admin/campaigns/agents", (q, r) => r.json({ agents: [{ ref: "acct_1", phone_tail: "…0001", name: "דנה לוי" }] }));
   app.get("/api/admin/campaigns/agents/:ref/properties", (q, r) => r.json({ properties: [{ page_id: "pg1", title: "דירה בחיפה" }] }));
-  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111" }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222" }] }));
+  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111", in_catalog: true }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222", in_catalog: true }, { group_id: "333", name: "", url: "https://www.facebook.com/groups/333", in_catalog: false }] }));
   let estimateAnswer = { posts: 200, per_week: 64, days: 22, fits: true, days_left: 30, warmup: false };
   app.post("/api/admin/campaigns/estimate", (q, r) => r.json(estimateAnswer));
   app.post("/api/admin/campaigns/campaigns", (q, r) => { seen.creates.push(q.body); r.status(201).json({ campaign: ROW }); });
@@ -98,6 +98,8 @@ function findChromium() {
     editAnswer = { status: 200, body: { campaign: ROW } };
     await page.click("[data-camp='c1'] [data-act='edit']");
     await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
+    assert.equal(await page.locator("#campFormGroups input[value='333']").count(), 0, "a group outside the catalog is not offered");
+    assert.match(await page.textContent("#campFormGroupsHidden"), /עוד 1 קבוצות/);
     await page.check("#campFormGroups input[value='222']");
     await page.uncheck("#campFormGroups input[value='111']");
     await page.click("#campFormSave");

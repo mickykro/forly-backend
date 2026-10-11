@@ -51,7 +51,9 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     // ── pickers ──
     assert.deepEqual((await call(server, "GET", "/agents", undefined, false)).body.agents.map((a) => a.ref), [REF]);
     assert.ok((await call(server, "GET", `/agents/${REF}/properties`, undefined, false)).body.properties.some((p) => p.page_id === "pg1"));
-    assert.deepEqual((await call(server, "GET", `/agents/${REF}/groups`, undefined, false)).body.groups.map((g) => g.group_id), ["111", "222"]);
+    const gl = (await call(server, "GET", `/agents/${REF}/groups`, undefined, false)).body.groups;
+    assert.deepEqual(gl.map((g) => g.group_id), ["111", "222"]);
+    assert.ok(gl.every((g) => g.in_catalog === true && g.name), "catalog groups carry in_catalog and a name (the catalog's when the sync hashed it)");
 
     // ── create: step-up, consent, checks ──
     const body = { agent: REF, page_id: "pg1", group_ids: ["111", "222"], mode: "standing", days: 14, consent: CONSENT };
