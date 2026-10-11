@@ -198,6 +198,11 @@ app.use("/api/auth", createAuthRouter({
   salesLeadPhone: SALES_LEAD_PHONE,
 }));
 
+// ── Green API ⇄ Whapi bridge (stopgap; see server/green-bridge/router.js) ──
+// Answers Green-style calls through Whapi and forwards Whapi's webhook to n8n
+// in Green's format, so n8n's workflows run unchanged. Off until WHATSAPP_PROVIDER_TOKEN.
+app.use("/greenapi", require("./green-bridge/router")());
+
 // ── intake routes (uploads, property creation) ──
 const createIntakeRouter = require("./routes/intake");
 // ── quota routes (n8n consume/status, agent /me) ──
@@ -232,6 +237,8 @@ app.use("/api", createIntakeRouter({
 }));
 
 // ── WhatsApp: agent sends a listing link, Forly builds the page ──
+// n8n's provider-neutral send / history door (routes/whatsapp-gateway.js).
+app.use("/api/whatsapp", require("./routes/whatsapp-gateway")({ n8nSecret: N8N_WEBHOOK_SECRET }));
 const createWhatsappRouter = require("./routes/whatsapp");
 app.use("/api/whatsapp", createWhatsappRouter({
   n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone, signSession, authSecret: AUTH_SECRET, quota,

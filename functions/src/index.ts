@@ -6,7 +6,7 @@ import axios from "axios";
 import {v4 as uuidv4} from "uuid";
 import {
   db, bucket, pad, setCors, uploadBuffer, downloadAndUpload,
-  greenApiInstance, greenApiToken,
+  greenApiInstance, greenApiToken, greenApiBase,
 } from "./shared";
 import {consumeQuota} from "./nadlan/quota";
 
@@ -290,7 +290,7 @@ async function sendUpdatedPngsToWhatsApp(
   token: string
 ): Promise<void> {
   const chatId = `${phone}@c.us`;
-  const baseUrl = `https://api.green-api.com/waInstance${instance}`;
+  const baseUrl = greenApiBase(instance);
   const REQ_TIMEOUT_MS = 20000;
 
   await axios.post(`${baseUrl}/sendMessage/${token}`, {

@@ -306,6 +306,19 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   assert.deepEqual([t.status, t.draft.status, t.draft.fields.city, t.draft.photos.length], ["asked:price", "active", "חיפה", 4], "resume: the edited photos join the paused draft");
   assert.match(texts(t), /שמרתי 4 תמונות/);
 
+  // a paused draft from one property must not swallow a correction naming a
+  // *different*, already-live page — it should wake the update flow instead
+  // of "continue / new / cancel?" (972508505321, 2026-10-08 title-typo report)
+  ({ d } = deps({ classifyIntent: async () => "update",
+    listPages: async () => [{ page_id: "P9", listing_id: "L9", business_phone: PHONE,
+      property: { title: "2 חדרים בהמרכז השכט, פתח תקווה", address: null, city: "פתח תקווה", neighborhood: "המרכז השכט" } }],
+    editUrl: (id) => `https://agent/edit.html?id=${id}` }));
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  t = await turn({ text: "חיפה", draft }, d); draft = t.draft;
+  t = await turn({ text: "שלום, רשום בכותרת המרכז השכט ולא השקט כפי שצריך להיות רשום.\nתתקן לי בבקשה במהירות", draft, now: later }, d);
+  assert.equal(t.status, "update_link", "the title correction names the live page, not the paused draft");
+  assert.match(texts(t), /edit\.html\?id=P9/);
+
   // ── building: only an opener replaces it ──
   ({ d } = deps());
   const bld = { ...ready, status: "building", listing_id: "L9" };
