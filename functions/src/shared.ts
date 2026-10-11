@@ -129,13 +129,21 @@ export async function downloadAndUpload(
 // ── Green-API WhatsApp ──
 const GREEN_TIMEOUT_MS = 20000;
 
+// The instance's own API host (first 4 digits of its id name its server), not
+// the shared api.green-api.com, which can be down while the instance is up.
+// GREENAPI_API_URL overrides it.
+export function greenApiBase(instance: string): string {
+  const override = (process.env.GREENAPI_API_URL || "").trim().replace(/\/+$/, "");
+  return `${override || `https://${String(instance).slice(0, 4)}.api.greenapi.com`}/waInstance${instance}`;
+}
+
 export async function sendWhatsAppMessage(
   phone: string,
   message: string,
   instance: string,
   token: string
 ): Promise<void> {
-  const baseUrl = `https://api.green-api.com/waInstance${instance}`;
+  const baseUrl = greenApiBase(instance);
   await axios.post(`${baseUrl}/sendMessage/${token}`, {
     chatId: `${phone}@c.us`,
     message,
@@ -150,7 +158,7 @@ export async function sendWhatsAppFile(
   instance: string,
   token: string
 ): Promise<void> {
-  const baseUrl = `https://api.green-api.com/waInstance${instance}`;
+  const baseUrl = greenApiBase(instance);
   await axios.post(`${baseUrl}/sendFileByUrl/${token}`, {
     chatId: `${phone}@c.us`,
     urlFile,

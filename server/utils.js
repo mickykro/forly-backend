@@ -287,20 +287,36 @@ function sniffMatchesExt(buf, ext) {
 }
 
 // ── whatsapp ──
+// Each instance's own API host (the first 4 digits of its id name its server,
+// e.g. 7105… → 7105.api.greenapi.com), not the shared api.green-api.com: the
+// shared host went down with Green API's site while instance 7105 stayed up,
+// which broke login codes. GREENAPI_API_URL overrides it.
+function greenApiBase(instance, env = process.env) {
+  const override = (env.GREENAPI_API_URL || "").trim().replace(/\/+$/, "");
+  return `${override || `https://${String(instance).slice(0, 4)}.api.greenapi.com`}/waInstance${instance}`;
+}
+
+// Resolves true when Green API accepted the message, false when it refused it
+// (logged with its status), undefined when no creds are set (local dev).
 async function sendWhatsApp(phone, message, instance, token) {
   if (!instance || !token) return;
-  await fetch(`https://api.green-api.com/waInstance${instance}/sendMessage/${token}`, {
+  const r = await fetch(`${greenApiBase(instance)}/sendMessage/${token}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chatId: `${phone}@c.us`, message }),
     signal: AbortSignal.timeout(20000),
   });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    console.error(`Green API sendMessage refused (${r.status}): ${body.slice(0, 200)}`);
+  }
+  return r.ok;
 }
 
 // The last `count` messages of a chat, newest first (Green API getChatHistory).
 async function getWhatsAppHistory(chatId, count, instance, token) {
   if (!instance || !token) return [];
-  const r = await fetch(`https://api.green-api.com/waInstance${instance}/getChatHistory/${token}`, {
+  const r = await fetch(`${greenApiBase(instance)}/getChatHistory/${token}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chatId, count }),
@@ -313,7 +329,7 @@ async function getWhatsAppHistory(chatId, count, instance, token) {
 // One message of a chat, e.g. the image an agent replied to (its downloadUrl).
 async function getWhatsAppMessage(chatId, idMessage, instance, token) {
   if (!instance || !token) return null;
-  const r = await fetch(`https://api.green-api.com/waInstance${instance}/getMessage/${token}`, {
+  const r = await fetch(`${greenApiBase(instance)}/getMessage/${token}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chatId, idMessage }),
@@ -339,7 +355,7 @@ async function sendWhatsAppButtons(phone, { header, body, footer, buttons }, ins
     buttonText: String(b.buttonText || "").slice(0, 25),
   }));
   const resp = await fetch(
-    `https://7105.api.greenapi.com/waInstance${instance}/sendInteractiveButtons/${token}`, {
+    `${greenApiBase(instance)}/sendInteractiveButtons/${token}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -397,6 +413,6 @@ module.exports = {
   ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
-  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons, getWhatsAppMessage, getWhatsAppHistory,
+  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons, greenApiBase, getWhatsAppMessage, getWhatsAppHistory,
   assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
 };
