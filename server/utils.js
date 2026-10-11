@@ -291,8 +291,8 @@ function sniffMatchesExt(buf, ext) {
 // e.g. 7105… → 7105.api.greenapi.com), not the shared api.green-api.com: the
 // shared host went down with Green API's site while instance 7105 stayed up,
 // which broke login codes. GREENAPI_API_URL overrides it.
-function greenApiBase(instance) {
-  const override = (process.env.GREENAPI_API_URL || "").trim().replace(/\/+$/, "");
+function greenApiBase(instance, env = process.env) {
+  const override = (env.GREENAPI_API_URL || "").trim().replace(/\/+$/, "");
   return `${override || `https://${String(instance).slice(0, 4)}.api.greenapi.com`}/waInstance${instance}`;
 }
 

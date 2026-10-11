@@ -237,6 +237,8 @@ app.use("/api", createIntakeRouter({
 }));
 
 // ── WhatsApp: agent sends a listing link, Forly builds the page ──
+// n8n's provider-neutral send / history door (routes/whatsapp-gateway.js).
+app.use("/api/whatsapp", require("./routes/whatsapp-gateway")({ n8nSecret: N8N_WEBHOOK_SECRET }));
 const createWhatsappRouter = require("./routes/whatsapp");
 app.use("/api/whatsapp", createWhatsappRouter({
   n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone, signSession, authSecret: AUTH_SECRET, quota,
