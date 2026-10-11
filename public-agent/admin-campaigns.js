@@ -42,16 +42,17 @@
   }
 
   function render() {
-    $("#campList").innerHTML = !rows.length ? '<p class="manual-muted">אין קמפיינים.</p>' : rows.map(function (r) {
+    $("#campList").innerHTML = !rows.length ? '<p class="cf-empty">אין קמפיינים להצגה. לחצו "קמפיין חדש" כדי להתחיל.</p>' : rows.map(function (r) {
       var live = r.status === "running" || r.status === "paused";
-      return '<div class="manual-agent" data-camp="' + esc(r.id) + '">' +
-        "<h3>" + esc(r.agent_name || r.phone_tail) + " · " + esc(r.page_title) + " <small>" + esc(STATUS[r.status] || r.status) + "</small></h3>" +
+      return '<div class="cf-card" data-camp="' + esc(r.id) + '"><div class="cf-main-info">' +
+        "<h3>" + esc(r.agent_name || r.phone_tail) + " · " + esc(r.page_title) + ' <span class="cf-st ' + esc(r.status) + '">' + esc(STATUS[r.status] || r.status) + "</span></h3>" +
         '<div class="manual-muted">' + r.groups.length + " קבוצות · פורסם " + r.counts.posted + " · עד " + fmt(r.expires_at) +
-        (r.repeat ? " · חזרה כל " + esc(r.repeat_days) + " ימים" : "") + " · נוצר על ידי " + (r.created_by === "admin" ? "הצוות" : "הסוכן") + "</div>" +
+        (r.repeat ? " · חזרה כל " + esc(r.repeat_days) + " ימים" : "") + " · נוצר על ידי " + (r.created_by === "admin" ? "הצוות" : "הסוכן") + "</div></div>" +
+        '<div class="row-actions">' +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="edit">עריכה</button>' : "") +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="stop">עצירה</button>' : "") +
-        (r.status !== "running" ? '<button type="button" class="btn btn-ghost btn-sm" data-act="start">הפעלה</button>' : "") +
-        "</div>";
+        (r.status !== "running" ? '<button type="button" class="btn btn-gold btn-sm" data-act="start">הפעלה</button>' : "") +
+        "</div></div>";
     }).join("");
   }
   function load() {
@@ -71,46 +72,104 @@
   var seq = 0;           // bumps whenever the form is (re)opened or its agent changes; stale async fills compare against it
   var restarting = null; // the stopped/completed row being restarted, or null
   var initial = null;    // prefilled values of the row being edited
+  function emptyGroups(text) { $("#campFormGroups").innerHTML = '<p class="cf-empty">' + esc(text) + "</p>"; $("#campFormGroupBar").hidden = true; }
   function loadAgentChoices(ref, checked) {
     var my = ++seq;
-    if (!ref) { $("#campFormProperty").innerHTML = ""; $("#campFormGroups").innerHTML = ""; $("#campFormEstimate").textContent = ""; return Promise.resolve(false); }
+    $("#campFormEstimate").textContent = "";
+    if (!ref) { $("#campFormProperty").innerHTML = '<option value="">קודם בחרו סוכן</option>'; emptyGroups("בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן."); return Promise.resolve(false); }
+    $("#campFormProperty").innerHTML = '<option value="">טוען…</option>'; emptyGroups("טוען קבוצות…");
     return Promise.all([req("GET", "/agents/" + encodeURIComponent(ref) + "/properties"), req("GET", "/agents/" + encodeURIComponent(ref) + "/groups")]).then(function (r) {
       if (my !== seq) return false;
-      $("#campFormProperty").innerHTML = (r[0].properties || []).map(function (p) { return '<option value="' + esc(p.page_id) + '">' + esc(p.title) + "</option>"; }).join("");
-      $("#campFormGroups").innerHTML = (r[1].groups || []).map(function (g) {
-        var on = checked && checked.indexOf(g.group_id) >= 0 ? " checked" : "";
-        return '<label><input type="checkbox" value="' + esc(g.group_id) + '"' + on + "> " + esc(g.name || g.group_id) + "</label>";
-      }).join("");
-      showEstimate();
+      var props = r[0].properties || [], groups = r[1].groups || [];
+      // one property is chosen for you; with several, the admin picks on purpose
+      $("#campFormProperty").innerHTML = (!props.length ? '<option value="">לסוכן אין נכסים פעילים</option>' : props.length > 1 ? '<option value="">בחרו נכס…</option>' : "") +
+        props.map(function (p) { return '<option value="' + esc(p.page_id) + '">' + esc(p.title) + "</option>"; }).join("");
+      if (!groups.length) emptyGroups("הסוכן לא חבר באף קבוצה מהקטלוג — אפשר לפרסם רק בדף העסקי.");
+      else {
+        $("#campFormGroups").innerHTML = groups.map(function (g) {
+          var on = checked && checked.indexOf(g.group_id) >= 0;
+          return '<label class="camp-g' + (on ? " on" : "") + '"><input type="checkbox" value="' + esc(g.group_id) + '"' + (on ? " checked" : "") + '> <span class="camp-gn">' + esc(g.name || g.group_id) + "</span></label>";
+        }).join("");
+        $("#campFormGroupBar").hidden = false;
+        $("#campFormGroupSearch").value = "";
+        $("#campFormGroupSearch").hidden = groups.length < 8;
+      }
+      groupsChanged();
       return true;
-    }).catch(function (e) { if (my === seq) fail(e); return false; });
+    }).catch(function (e) { if (my === seq) { emptyGroups("טעינת הקבוצות נכשלה."); fail(e); } return false; });
+  }
+  function groupsChanged() {
+    var all = document.querySelectorAll("#campFormGroups input");
+    Array.prototype.forEach.call(all, function (i) { i.closest(".camp-g").classList.toggle("on", i.checked); });
+    $("#campFormGroupCount").textContent = "נבחרו " + chosenGroups().length + " מתוך " + all.length;
+    clearError();
+    showEstimate();
+  }
+  function filterGroups() {
+    var q = $("#campFormGroupSearch").value.trim().toLowerCase();
+    Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups .camp-g"), function (l) { l.hidden = !!q && l.textContent.toLowerCase().indexOf(q) < 0; });
+  }
+  function setAllGroups(on) { // only the groups the search shows
+    Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups .camp-g:not([hidden]) input"), function (i) { i.checked = on; });
+    groupsChanged();
+  }
+  function repeatVal() { // "0" or 3..30, as the server accepts
+    if (!$("#campFormRepeatOn").checked) return "0";
+    return String(Math.min(30, Math.max(3, Math.round(Number($("#campFormRepeat").value)) || 7)));
+  }
+  function syncTiming() {
+    $("#campFormRepeatWrap").hidden = !$("#campFormRepeatOn").checked;
+    var d = $("#campFormDays").value;
+    Array.prototype.forEach.call(document.querySelectorAll(".cf-days [data-days]"), function (b) { b.classList.toggle("on", b.getAttribute("data-days") === d); });
+  }
+  function clearError() { $("#campFormError").textContent = ""; Array.prototype.forEach.call(document.querySelectorAll("#campForm .cf-bad"), function (e) { e.classList.remove("cf-bad"); }); }
+  function showError(msg, el) {
+    $("#campFormError").textContent = msg; FLY.toast(msg);
+    if (el) { el.classList.add("cf-bad"); el.focus(); }
+    return null;
   }
   function chosenGroups() { return Array.prototype.map.call(document.querySelectorAll("#campFormGroups input:checked"), function (i) { return i.value; }); }
   // How long the chosen groups take at the agent's limits today (an estimate); a stale answer is dropped.
   function showEstimate() {
     var el = $("#campFormEstimate"), my = seq, agent = $("#campFormAgent").value;
-    if (!agent || restarting) { el.textContent = ""; return; }
-    var repeat = Number($("#campFormRepeat").value) || 0;
+    el.classList.remove("warn");
+    if (!agent || !$("#campFormProperty").value || restarting) { el.textContent = ""; return; }
+    var repeat = Number(repeatVal());
     req("POST", "/estimate", { agent: agent, page_id: $("#campFormProperty").value, group_ids: chosenGroups(), days: Number($("#campFormDays").value) || 30,
       repeat_days: repeat >= 3 ? repeat : undefined, targets: $("#campFormPage").checked ? ["groups", "page"] : ["groups"] }).then(function (e) {
       if (my !== seq) return;
       if (e.days === null || e.days === undefined) { el.textContent = "הערכה: אי אפשר להעריך כרגע — החשבון מושהה או מוגבל."; return; }
+      el.classList.toggle("warn", !e.fits);
       el.textContent = "הערכה: " + e.posts + " פוסטים לסוכן, כ-" + e.per_week + " בשבוע לפי המגבלות היום ← כ-" + e.days + " ימים" +
         (e.fits ? "." : ". ⚠️ יותר מ-" + e.days_left + " ימים — חלק מהפוסטים לא יספיקו לצאת.") + (e.warmup ? " החשבון עדיין בחימום, הקצב יעלה בהמשך." : "");
     }).catch(function () { if (my === seq) el.textContent = ""; });
   }
   function setMain(show) { // the campaign fields vs. the restart form (consent and days)
-    Array.prototype.forEach.call(document.querySelectorAll("#campForm > label, #campForm > fieldset:not(#campFormConsent)"), function (el) { el.hidden = !show; });
-    $("#campFormDays").closest("label").hidden = false;
-    if (manual) $("#campFormMode").closest("label").hidden = true; // by hand there is no approval step
+    Array.prototype.forEach.call(document.querySelectorAll("#campForm .cf-main"), function (el) { el.hidden = !show; });
+    if (manual) $("#campFormMode").closest(".cf-field").hidden = true; // by hand there is no approval step
   }
-  function closeForm() { seq++; editing = null; restarting = null; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; }
+  function closeForm() { seq++; editing = null; restarting = null; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; clearError(); }
   function validNote() {
-    var n = $("#campFormConsentNote").value.trim();
-    if (!n || n.length > 300) { FLY.toast("חובה לכתוב הערת הסכמה של 1 עד 300 תווים."); return null; }
+    var el = $("#campFormConsentNote"), n = el.value.trim();
+    if (!n || n.length > 300) return showError("חובה לכתוב הערת הסכמה של 1 עד 300 תווים: איך ומתי הסוכן אישר.", el);
     return n;
   }
-
+  function validNew() { // what the server would refuse anyway, said next to the field
+    if (!$("#campFormAgent").value) return showError("בחרו סוכן.", $("#campFormAgent"));
+    if (!$("#campFormProperty").value) return showError("בחרו נכס לפרסום.", $("#campFormProperty"));
+    if (!chosenGroups().length && !$("#campFormPage").checked) return showError("בחרו לפחות קבוצה אחת, או סמנו פרסום בדף העסקי.", null);
+    return validDays();
+  }
+  function validDays() {
+    var el = $("#campFormDays"), d = Number(el.value);
+    if (!(d >= 1 && d <= 30) || d !== Math.round(d)) return showError("משך הקמפיין: בין 1 ל-30 ימים.", el);
+    return true;
+  }
+  function showForm() {
+    $("#campForm").hidden = false;
+    syncTiming();
+    $("#campForm").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   function openForm(row) {
     var my = ++seq;
     editing = row || null; restarting = null;
@@ -118,22 +177,28 @@
     $("#campFormTitle").textContent = row ? "עריכת קמפיין" : "קמפיין חדש";
     $("#campFormAgent").disabled = !!row; $("#campFormProperty").disabled = !!row;
     $("#campFormConsent").hidden = !!row;
-    $("#campFormAgent").value = ""; $("#campFormProperty").innerHTML = ""; $("#campFormGroups").innerHTML = "";
+    $("#campFormAgent").value = ""; $("#campFormProperty").innerHTML = ""; emptyGroups("");
     $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
-    $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = "";
+    $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; clearError();
+    $("#campFormSave").textContent = row ? "שמירת שינויים" : "יצירת קמפיין";
     if (row) {
       var left = Math.min(30, Math.max(1, Math.ceil((Date.parse(row.expires_at) - Date.now()) / 86400000)) || 1);
       initial = { days: String(left), repeat: row.repeat ? String(row.repeat_days) : "0", mode: row.mode, page: row.targets.indexOf("page") >= 0 };
-      $("#campFormDays").value = initial.days; $("#campFormRepeat").value = initial.repeat;
+      $("#campFormDays").value = initial.days;
+      $("#campFormRepeatOn").checked = initial.repeat !== "0"; $("#campFormRepeat").value = initial.repeat !== "0" ? initial.repeat : "7";
       $("#campFormMode").value = initial.mode; $("#campFormPage").checked = initial.page;
     } else {
       initial = null;
-      $("#campFormDays").value = "14"; $("#campFormRepeat").value = "0"; $("#campFormMode").value = "standing"; $("#campFormPage").checked = false;
+      $("#campFormDays").value = "14"; $("#campFormRepeatOn").checked = false; $("#campFormRepeat").value = "7"; $("#campFormMode").value = "standing"; $("#campFormPage").checked = false;
     }
-    $("#campForm").hidden = false;
+    showForm();
     if (row) {
       $("#campFormAgent").value = row.ref;
-      loadAgentChoices(row.ref, row.groups.map(function (g) { return g.group_id; })).then(function (ok) { if (ok && my + 1 === seq) $("#campFormProperty").value = row.page_id; });
+      loadAgentChoices(row.ref, row.groups.map(function (g) { return g.group_id; })).then(function (ok) { if (ok && my + 1 === seq) { $("#campFormProperty").value = row.page_id; showEstimate(); } });
+    } else {
+      // start from the agent the list is filtered to
+      $("#campFormAgent").value = $("#campAgent").value;
+      loadAgentChoices($("#campFormAgent").value, null);
     }
   }
   function openRestart(row) {
@@ -144,8 +209,9 @@
     $("#campFormConsent").hidden = false;
     $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
     $("#campFormDays").value = String(row.run_days || 30); // as long as the run it repeats
-    $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = "";
-    $("#campForm").hidden = false;
+    $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; clearError();
+    $("#campFormSave").textContent = "הפעלה מחדש";
+    showForm();
   }
   function settle(p) { // one request in flight per save click
     $("#campFormSave").disabled = true;
@@ -153,15 +219,18 @@
   }
   function save() {
     if ($("#campFormSave").disabled) return;
+    clearError();
     if (restarting) {
+      if (!validDays()) return;
       var rn = validNote(); if (!rn) return;
       var rid = restarting.id;
       return settle(req("POST", "/campaigns/" + encodeURIComponent(rid) + "/start", { consent: { method: $("#campFormConsentMethod").value, note: rn }, days: Number($("#campFormDays").value) || 30 })
         .then(function () { closeForm(); FLY.toast("הקמפיין פעיל"); load(); }).catch(failClose));
     }
     var targets = $("#campFormPage").checked ? ["groups", "page"] : ["groups"];
-    var repeat = Number($("#campFormRepeat").value) || 0;
+    var repeat = Number(repeatVal());
     if (!editing) {
+      if (!validNew()) return;
       var note = validNote(); if (!note) return;
       return settle(req("POST", "/campaigns", {
         agent: $("#campFormAgent").value, page_id: $("#campFormProperty").value, group_ids: chosenGroups(),
@@ -171,13 +240,16 @@
     }
     var before = editing.groups.map(function (g) { return g.group_id; }), now = chosenGroups();
     var add = now.filter(function (g) { return before.indexOf(g) < 0; }), rem = before.filter(function (g) { return now.indexOf(g) < 0; });
+    if (!now.length && !$("#campFormPage").checked) return showError("בחרו לפחות קבוצה אחת, או סמנו פרסום בדף העסקי.", null);
+    if (!validDays()) return;
     var body = { version: editing.version };
     if ($("#campFormDays").value !== initial.days) body.days = Number($("#campFormDays").value) || 14;
-    if ($("#campFormRepeat").value !== initial.repeat) body.repeat_days = repeat;
+    if (repeatVal() !== initial.repeat) body.repeat_days = repeat;
     if ($("#campFormMode").value !== initial.mode) body.mode = $("#campFormMode").value;
     if ($("#campFormPage").checked !== initial.page) body.targets = targets;
     if (add.length) body.add_group_ids = add;
     if (rem.length) body.remove_group_ids = rem;
+    if (Object.keys(body).length === 1) { closeForm(); FLY.toast("לא היו שינויים"); return; }
     return settle(req("PATCH", "/campaigns/" + encodeURIComponent(editing.id), body)
       .then(function () { closeForm(); FLY.toast("נשמר"); load(); }).catch(failClose));
   }
@@ -203,13 +275,20 @@
   $("#campAgent").addEventListener("change", load);
   $("#campNew").addEventListener("click", function () { openForm(null); });
   $("#campFormAgent").addEventListener("change", function () { loadAgentChoices($("#campFormAgent").value, null); });
-  $("#campFormGroups").addEventListener("change", showEstimate);
-  $("#campFormDays").addEventListener("change", showEstimate);
-  $("#campFormProperty").addEventListener("change", showEstimate);
-  $("#campFormRepeat").addEventListener("change", showEstimate);
-  $("#campFormPage").addEventListener("change", showEstimate);
+  $("#campFormGroups").addEventListener("change", groupsChanged);
+  $("#campFormGroupSearch").addEventListener("input", filterGroups);
+  $("#campFormAll").addEventListener("click", function () { setAllGroups(true); });
+  $("#campFormNone").addEventListener("click", function () { setAllGroups(false); });
+  $("#campFormDays").addEventListener("input", syncTiming);
+  $("#campFormRepeatOn").addEventListener("change", function () { syncTiming(); showEstimate(); });
+  ["#campFormDays", "#campFormProperty", "#campFormRepeat", "#campFormPage"].forEach(function (id) { $(id).addEventListener("change", function () { clearError(); showEstimate(); }); });
+  $("#campFormConsentNote").addEventListener("input", clearError);
+  document.querySelectorAll("#campForm [data-days]").forEach(function (b) {
+    b.addEventListener("click", function () { $("#campFormDays").value = b.getAttribute("data-days"); syncTiming(); clearError(); showEstimate(); });
+  });
   $("#campFormSave").addEventListener("click", save);
   $("#campFormCancel").addEventListener("click", closeForm);
+  $("#campFormClose").addEventListener("click", closeForm);
   $("#campList").addEventListener("click", function (ev) {
     var b = ev.target.closest("[data-act]"); if (!b) return;
     if (b.disabled) return;
