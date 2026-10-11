@@ -37,7 +37,7 @@ async function serve(router) {
     // ── text: phone, @c.us or 05… all reach the same chat ──
     let r = await post("/send", { to: "972501234567", text: "שלום" });
     assert.equal(r.status, 200);
-    assert.deepEqual(r.data, { ok: true, id: "ID1" });
+    assert.deepEqual(r.data, { ok: true, id: "ID1", idMessage: "ID1" });
     assert.equal(calls.at(-1).url, `${G}/sendMessage/gtok`);
     assert.deepEqual(calls.at(-1).body, { chatId: "972501234567@c.us", message: "שלום" });
     await post("/send", { to: "972501234567@c.us", text: "a", quoted_id: "Q1" });
@@ -55,6 +55,11 @@ async function serve(router) {
     assert.equal(calls.at(-1).url, `${G}/sendInteractiveButtons/gtok`);
     assert.deepEqual(calls.at(-1).body, { chatId: "972501234567@c.us", header: "", body: "מוכן", footer: "Forly",
       buttons: [{ type: "url", buttonText: "לדף", url: "https://x/p", buttonId: "1" }] });
+
+    // buttons as a JSON string (what an n8n keypair body sends)
+    await post("/send", { to: "972501234567", text: "נגמר", buttons: JSON.stringify([{ type: "call", buttonText: "צור קשר", phoneNumber: "972548018957" }]) });
+    assert.deepEqual(calls.at(-1).body.buttons, [{ type: "call", buttonText: "צור קשר", phoneNumber: "972548018957", buttonId: "1" }]);
+    assert.equal((await post("/send", { to: "972501234567", text: "x", buttons: "[oops" })).status, 400);
 
     // ── validation ──
     assert.equal((await post("/send", { to: "", text: "x" })).status, 400);
