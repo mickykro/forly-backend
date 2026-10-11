@@ -178,10 +178,22 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, sendWhatsApp
       // ponytail: no GreenAPI creds = local dev, WhatsApp send is a no-op —
       // print the code so login is testable. Never fires in prod (creds set).
       if (!process.env.GREENAPI_TOKEN) console.log(`[dev] OTP for ${phone}: ${code}`);
-      await sendWhatsApp(
-        phone,
-        `קוד הכניסה שלך ל-Forly: ${code}\nהקוד תקף ל-5 דקות.\n\nYour Forly login code: ${code}\nValid for 5 minutes.`
-      );
+      try {
+        const sent = await sendWhatsApp(
+          phone,
+          `קוד הכניסה שלך ל-Forly: ${code}\nהקוד תקף ל-5 דקות.\n\nYour Forly login code: ${code}\nValid for 5 minutes.`
+        );
+        if (sent === false) throw new Error("Green API refused the message");
+      } catch (err) {
+        // The send failed (Green API down, refused, or the 20s timeout), so
+        // it must not count toward the resend spacing: before this, every
+        // failed try still lengthened the wait and the agent was locked out
+        // of retrying. The code itself stays valid in case a timed-out
+        // message is delivered late.
+        console.error(`auth/otp WhatsApp send failed for ${phone}:`, err.message);
+        await patchOtp(phone, { created_at: (prev && prev.created_at) || null, sends_today: sendsToday });
+        return res.status(502).json({ ok: false, error: "whatsapp_send_failed" });
+      }
 
       return res.json({ ok: true, sent: true, expires_in: OTP_TTL_MS / 1000 });
     } catch (err) {
