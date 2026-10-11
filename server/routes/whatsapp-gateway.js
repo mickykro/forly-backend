@@ -8,7 +8,8 @@
  *   POST /history  { to, count? }                        → { ok, messages }
  *
  * `to` is a phone (972…, 05…, …@c.us) or a group id (…@g.us). Auth is the
- * same x-forly-secret n8n sends to /intake.
+ * same x-forly-secret n8n sends to /intake, or a direct call from inside the
+ * Docker network (see internalCaller).
  *
  * Today this speaks Green API's REST shape at greenApiBase — the Whapi bridge
  * (GREENAPI_API_URL → /greenapi) or Green API itself — and history comes back
@@ -30,13 +31,26 @@ function chatIdOf(to) {
   return phone ? `${phone}@c.us` : "";
 }
 
-module.exports = function createWhatsappGateway({ n8nSecret, env = process.env, fetchFn = fetch } = {}) {
+// A call straight from a container on the same Docker network (n8n →
+// http://forly-intake:8787): a private source address and no proxy headers.
+// Everything from outside arrives through Traefik, which always adds
+// X-Forwarded-For, so it still needs the secret. The container publishes no
+// host port. WHATSAPP_GATEWAY_INTERNAL=0 turns this off.
+const PRIVATE_IP = /^(?:::ffff:)?(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|127\.)|^::1$/;
+function internalCaller(req) {
+  if (req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.headers.forwarded) return false;
+  return PRIVATE_IP.test(String((req.socket && req.socket.remoteAddress) || ""));
+}
+
+module.exports = function createWhatsappGateway({ n8nSecret, env = process.env, fetchFn = fetch, trustInternal } = {}) {
   const router = express.Router();
+  const internalOk = trustInternal !== undefined ? trustInternal : String(env.WHATSAPP_GATEWAY_INTERNAL || "1") !== "0";
 
   function requireN8n(req, res, next) {
-    if (!n8nSecret) return res.status(503).json({ error: "n8n_secret_not_configured" });
-    if (!constantTimeEqual(req.get("x-forly-secret"), n8nSecret)) return res.status(403).json({ error: "forbidden" });
-    next();
+    if (n8nSecret && constantTimeEqual(req.get("x-forly-secret"), n8nSecret)) return next();
+    if (internalOk && internalCaller(req)) return next();
+    if (!n8nSecret && !internalOk) return res.status(503).json({ error: "n8n_secret_not_configured" });
+    return res.status(403).json({ error: "forbidden" });
   }
 
   async function call(method, body) {
