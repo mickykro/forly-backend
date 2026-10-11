@@ -11,9 +11,9 @@ async function serve(router) {
   app.use("/api/whatsapp", router);
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}/api/whatsapp`;
-  const post = async (path, body, secret = "n8n") => {
+  const post = async (path, body, secret = "n8n", extra = {}) => {
     const r = await fetch(base + path, { method: "POST",
-      headers: { "Content-Type": "application/json", ...(secret ? { "x-forly-secret": secret } : {}) },
+      headers: { "Content-Type": "application/json", ...(secret ? { "x-forly-secret": secret } : {}), ...extra },
       body: JSON.stringify(body) });
     return { status: r.status, data: await r.json() };
   };
@@ -26,7 +26,7 @@ async function serve(router) {
   const fetchFn = async (url, o) => { calls.push({ url, body: JSON.parse(o.body) }); return reply(url); };
   const env = { GREENAPI_INSTANCE: "7105422200", GREENAPI_TOKEN: "gtok", GREENAPI_API_URL: "http://127.0.0.1:8787/greenapi" };
   const realErr = console.error; console.error = () => {};
-  const { post, close } = await serve(createWhatsappGateway({ n8nSecret: "n8n", env, fetchFn }));
+  const { post, close } = await serve(createWhatsappGateway({ n8nSecret: "n8n", env, fetchFn, trustInternal: false }));
   const G = "http://127.0.0.1:8787/greenapi/waInstance7105422200";
   try {
     // ── n8n secret ──
@@ -79,9 +79,23 @@ async function serve(router) {
     assert.equal((await post("/send", { to: "972501234567", text: "x" })).status, 502);
   } finally { close(); }
 
-  const off = await serve(createWhatsappGateway({ n8nSecret: "n8n", env: {}, fetchFn }));
+  const off = await serve(createWhatsappGateway({ n8nSecret: "n8n", env: {}, fetchFn, trustInternal: false }));
   try { assert.equal((await off.post("/send", { to: "972501234567", text: "x" })).status, 503); }
   finally { off.close(); console.error = realErr; }
+
+  // ── internal network: a direct container-to-container call needs no secret;
+  //    anything carrying proxy headers (i.e. through Traefik) still does ──
+  {
+    const inner = await serve(createWhatsappGateway({ n8nSecret: "n8n", env, fetchFn, trustInternal: true }));
+    try {
+      reply = () => ({ ok: true, status: 200, json: async () => ({ idMessage: "ID2" }) });
+      assert.equal((await inner.post("/send", { to: "972501234567", text: "x" }, "")).status, 200, "127.0.0.1, no proxy headers");
+      assert.equal((await inner.post("/send", { to: "972501234567", text: "x" }, "", { "x-forwarded-for": "203.0.113.9" })).status, 403,
+        "through the proxy, no secret → refused");
+      assert.equal((await inner.post("/send", { to: "972501234567", text: "x" }, "n8n", { "x-forwarded-for": "203.0.113.9" })).status, 200,
+        "through the proxy with the secret → allowed");
+    } finally { inner.close(); }
+  }
 
   console.log("routes/whatsapp-gateway.test.js: ok");
 })().catch((e) => { console.error(e); process.exit(1); });
