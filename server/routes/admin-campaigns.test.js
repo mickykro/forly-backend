@@ -203,11 +203,11 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       await K.store.mutatePostingCampaign(row.id, () => ({ repeat: false, repeat_days: null }));
     } finally { mServer.close(); }
 
-    // ── staging never changes campaigns ──
+    // ── staging saves campaign changes too (no env 503) ──
     const sApp = express(); sApp.use(express.json());
     sApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: { FORLY_ENV: "staging" }, catalog: CATALOG }));
     const sServer = sApp.listen(0);
-    try { assert.equal((await call(sServer, "POST", "/campaigns", body)).status, 503); } finally { sServer.close(); }
+    try { assert.notEqual((await call(sServer, "POST", "/campaigns", body)).status, 503); } finally { sServer.close(); }
     console.log("routes/admin-campaigns.test.js ok");
   } finally { server.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

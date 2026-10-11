@@ -6,7 +6,7 @@
  * and shown in the page through connect-viewer.js (GET /sessions/:id/view,
  * POST /sessions/:id/view/input) — the cdpUrl stays on the server. Opening one
  * externally, in Driver's own viewer, takes a viewer grant — minted by an
- * admin who logged in with an OTP in the last 10 minutes (step-up), spent
+ * admin who logged in with an OTP in the last 10 hours (step-up), spent
  * once, by that same admin, as a redirect. That redirect is the only response
  * in the whole server that carries a browser-control URL.
  */
@@ -113,9 +113,9 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
     if (blocked) return res.status(409).json({ error: "posting_disabled", reason: blocked });
     const release = P.locks.tryAcquire(phone, "facebook");
     if (!release) return res.status(409).json({ error: "profile_busy" });
-    const { profileName } = require("../profile-name");
+    const { profileNameFor } = require("../profile-name");
     Promise.resolve()
-      .then(() => P.dwell({ phone, profileName: profileName("facebook", phone, conn.facebook_profile_gen || 0), note: "forly-dwell:" }, Object.assign({}, P.deps || {}, { lockHeld: true, phone, platform: "facebook", conn })))
+      .then(() => P.dwell({ phone, profileName: profileNameFor("facebook", phone, conn), note: "forly-dwell:" }, Object.assign({}, P.deps || {}, { lockHeld: true, phone, platform: "facebook", conn })))
       .catch((e) => console.error(driver.redact(`dev browse: ${(e && (e.code || e.name)) || "error"}`)))
       .finally(release);
     res.status(202).json({ started: true });

@@ -89,6 +89,7 @@
   .manual-agent{border:1px solid rgba(23,20,15,.1);border-radius:10px;padding:12px;margin-bottom:12px;background:#fff}
   .manual-agent h3{margin:0 0 8px;font-size:1rem}
   .manual-item{border-top:1px solid rgba(23,20,15,.06);padding:10px 0}
+  .manual-input{width:100%;max-width:340px;padding:6px 8px;font-family:monospace;font-size:.85rem}
   .manual-item.on{background:#fff8e6;border-radius:8px;padding:10px}
   .manual-detail pre,.manual-item pre{white-space:pre-wrap;font:inherit;font-size:.9rem;background:#f7f5f1;padding:8px;border-radius:6px;margin:6px 0}
   .manual-row{display:flex;flex-wrap:wrap;gap:6px}
@@ -395,6 +396,11 @@
           <select id="manualAgent" aria-label="סוכן"><option value="">בחרו סוכן…</option></select>
           <button type="button" class="btn btn-gold btn-sm" id="manualOpen">פתיחת הפייסבוק של הסוכן</button>
           <button type="button" class="btn btn-ghost btn-sm" id="manualReload">רענון</button>
+        </div>
+        <div class="manual-agentbar">
+          <input type="text" class="manual-input" id="manualProfile" dir="ltr" aria-label="פרופיל Driver של הסוכן" placeholder="שם הפרופיל ב-Driver" title="העתיקו את השם בדיוק מ-Driver. שם של סוכן אחר יחבר את החשבון שלו לסוכן הזה.">
+          <button type="button" class="btn btn-ghost btn-sm" id="manualProfileSave">שמירת הפרופיל לסוכן</button>
+          <span class="manual-muted" id="manualProfileState"></span>
         </div>
         <p class="manual-help">לכל קבוצה: <b>פתיחה בקבוצה</b>, לחיצה בדפדפן על "כתבו משהו", <b>הקלדת הטקסט</b>, לחיצה בפייסבוק על "תמונה/סרטון" ואז <b>העלאת הסרטון</b>. בסוף לוחצים "פרסום" בפייסבוק ומסמנים את הקבוצה ✓. נכס יוצא מהרשימה כשכל הקבוצות שלו סומנו.</p>
         <details class="manual-agent" id="manualUnconnected">

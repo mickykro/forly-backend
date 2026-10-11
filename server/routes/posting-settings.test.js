@@ -81,14 +81,12 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal(cc.status, "paused"); assert.equal(cc.pause_reason, "permission");
     const perm = (await db.getConnection(PH)).posting_permission;
     assert.equal(perm.enabled, false); assert.ok(perm.revoked_at); assert.deepEqual(perm.default_group_ids, ["111", "222"], "the rest is kept");
-    // Switching on while the fleet switch is off is refused; with it on, allowed.
-    assert.equal((await put(env.app, enable())).body.reason, "global_off");
-    globalOn();
+    // Switching on while the fleet switch is off is saved (a system switch never refuses the agent).
     assert.equal((await put(env.app, enable())).status, 200);
+    globalOn();
   }
 
-  // Manual posting: an admin posts by hand, so saving is not blocked by the
-  // automatic posting switches (fleet or env); without it, it still is.
+  // Saving is never blocked by the system switches (fleet or env), manual posting or not.
   {
     const env = await setup();
     const app = (e) => R.makeApp({ deps: Object.assign({}, env.deps, { env: Object.assign({}, env.deps.env, e) }) });
@@ -96,8 +94,7 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     assert.equal((await put(app({ POSTING_MANUAL: "1" }), enable())).status, 200, "fleet switch off");
     globalOn();
     assert.equal((await put(app({ POSTING_MANUAL: "1", POSTING_ENABLED: "0" }), enable())).status, 200, "env switch off");
-    const auto = await put(app({ POSTING_ENABLED: "0" }), enable());
-    assert.equal(auto.status, 409); assert.equal(auto.body.reason, "env_off");
+    assert.equal((await put(app({ POSTING_ENABLED: "0" }), enable())).status, 200, "env switch off, automatic posting");
   }
 
   // ── GET: member groups (hashed ones nameless, no URLs), suggestions, halt state, estimate ──

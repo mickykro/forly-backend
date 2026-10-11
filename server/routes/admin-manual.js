@@ -143,7 +143,10 @@ module.exports = function createAdminManualRouter({
       if (!conn.facebook_browser_connected_at) return null;
       const biz = (await x.db.getBusiness(phone).catch(() => null)) || {};
       const ref = M.refOf(phone);
-      return { ref, phone_tail: A.tail(phone), name: conn.facebook_identity_label || biz.name || biz.business_name || "", owed: q.filter((i) => i.ref === ref).length, open: open.has(phone) };
+      const PN = require("../profile-name");
+      return { ref, phone_tail: A.tail(phone), name: conn.facebook_identity_label || biz.name || biz.business_name || "", owed: q.filter((i) => i.ref === ref).length, open: open.has(phone),
+        // The Driver profile the manual browser will open, and whether it is a saved one or computed.
+        profile_name: PN.profileNameFor("facebook", phone, conn), profile_saved: !!PN.storedName("facebook", conn) };
     }));
     const out = rows.filter(Boolean);
     out.sort((a, b) => b.owed - a.owed || String(a.name).localeCompare(String(b.name)));
@@ -170,13 +173,38 @@ module.exports = function createAdminManualRouter({
     res.json({ agents: list.map((a) => ({ ref: M.refOf(a.phone), phone_tail: A.tail(a.phone), name: a.name, started_at: a.started_at })) });
   }));
   // Opens the agent's saved profile, checks the login, and marks the agent
-  // connected only when it is logged in (login-verify.js).
+  // connected only when it is logged in (login-verify.js). body.profile_name
+  // (optional): the exact Driver profile name, copied by the admin from
+  // Driver's dashboard — for a login made in a profile this server would not
+  // compute (another environment, an older key). Pinned only if logged in.
   router.post("/unconnected/:ref/verify", requireAdmin, wrap(async (req, res) => {
+    const typed = String((req.body && req.body.profile_name) || "").trim();
+    if (typed && !require("../profile-name").validName("facebook", typed)) return res.status(400).json({ error: "invalid_profile_name" });
     const hit = (await unconnected()).find((a) => M.refOf(a.phone) === String(req.params.ref));
     if (!hit) return res.status(404).json({ error: "not_found" });
-    const r = await (deps.verifySaved || require("../login-verify").verifySaved)(hit.phone, "facebook", { db: x.db, driver });
-    if (r.error) return res.status(r.error === "profile_busy" || r.error === "driver_busy" ? 409 : 502).json({ error: r.error });
+    const r = await (deps.verifySaved || require("../login-verify").verifySaved)(hit.phone, "facebook", Object.assign({ db: x.db, driver }, typed ? { name: typed } : {}));
+    if (r.error) return res.status(r.error === "profile_busy" || r.error === "driver_busy" ? 409 : r.error === "invalid_profile_name" ? 400 : 502).json({ error: r.error });
     res.json(r);
+  }));
+
+  // Attaches a Driver profile to the agent by hand: the exact name, copied by
+  // the admin from Driver's dashboard, saved as the agent's profile for the
+  // current generation — every server opens it from now on (profile-name.js).
+  // Not while this agent's browser is open: it is running on the old profile.
+  router.post("/agents/:ref/profile-name", requireAdmin, wrap(async (req, res) => {
+    const PN = require("../profile-name");
+    const name = String((req.body && req.body.profile_name) || "").trim();
+    if (!PN.validName("facebook", name)) return res.status(400).json({ error: "invalid_profile_name" });
+    const phone = await phoneOf(req.params.ref);
+    if (!phone) return res.status(404).json({ error: "not_found" });
+    if (open.has(phone)) return res.status(409).json({ error: "browser_open" });
+    const conn = (await x.db.getConnection(phone)) || {};
+    if (["revoked", "quarantined"].includes(conn.facebook_profile_state)) return res.status(409).json({ error: "profile_revoked" });
+    await x.db.setConnection(phone, {
+      facebook_profile_name: name, facebook_profile_name_gen: conn.facebook_profile_gen || 0,
+      facebook_profile_name_pending: null, facebook_profile_name_pending_gen: null,
+    });
+    res.json({ profile_name: name, profile_saved: true });
   }));
 
   router.get("/agents/:ref/properties", requireAdmin, wrap(async (req, res) => {
@@ -221,10 +249,10 @@ module.exports = function createAdminManualRouter({
     const release = locks.tryAcquire(phone, "facebook");
     if (!release) return res.status(409).json({ error: "profile_busy" });
     try {
-      const { profileName } = require("../profile-name");
+      const { profileNameFor } = require("../profile-name");
       const s = await driver.createSession({
         duration: SESSION_S, url: groupUrl || "https://www.facebook.com/",
-        profile: { name: profileName("facebook", phone, conn.facebook_profile_gen || 0), persist: true },
+        profile: { name: profileNameFor("facebook", phone, conn), persist: true },
         note: "forly-manual:facebook", // never the phone
       }, { phone });
       const timer = setTimeout(() => closeFor(phone, "expired"), SESSION_S * 1000);

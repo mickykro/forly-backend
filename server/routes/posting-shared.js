@@ -108,13 +108,16 @@ const card = (title, body, extraHtml = "") => `<!doctype html><html lang="he" di
 // ── the kill switch (R2) ──
 // → true when allowed; otherwise answers 409 and → false. `tolerate` lists
 // the denial reasons this call itself cures (granting the permission).
+// A system switch never refuses the agent's save: nothing posts here, and the
+// sweeper asks the guard again before every post.
+const SYSTEM_OFF = ["env_off", "global_off", "platform_off", "visible_off"];
 async function allowed(S, phone, res, tolerate = []) {
   try {
     await S.guard.assertAllowed({ phone, platform: "facebook", action: "reserve" }, { db: S.db, env: S.deps.env || process.env });
     return true;
   } catch (e) {
     if (!e || e.code !== "posting_disabled") throw e;
-    if (tolerate.includes(e.reason)) return true;
+    if (tolerate.includes(e.reason) || SYSTEM_OFF.includes(e.reason)) return true;
     res.status(409).json({ error: "posting_disabled", reason: e.reason });
     return false;
   }
@@ -241,7 +244,7 @@ const MAX_ACTIVE_CAMPAIGNS = 3;
 
 module.exports = {
   MAX_ACTIVE_CAMPAIGNS, CONSENT_VERSION, PRIVATE_NAME, ACTIONS, ACT_TTL_S, TARGETS, DEFAULT_TARGETS, MAX_GROUP_IDS, GROUP_ID_RE, ID_RE,
-  publicView, scrub, actionLink, readActionLink, card, allowed,
+  publicView, scrub, actionLink, readActionLink, card, allowed, SYSTEM_OFF,
   hiddenIds, memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, catalogLookup, publicMember,
   pagesOf, pageKey, storedPageId, pageByStored, pageByKey, pageConfirmed, parseTargets,
   needsReconnect, haltState, publicPermission, wrap,

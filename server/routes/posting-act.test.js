@@ -118,15 +118,11 @@ const linkFor = (campaignId, postId, action, now = K.NOW) => pathOf(createRouter
     assert.equal(cur.status, "running"); assert.equal(cur.posts[0].status, "pending_approval");
   }
 
-  // ── approve: re-timed and scheduled; refused while posting is off; the page names the group ──
+  // ── approve: re-timed and scheduled; a system switch is never announced; the page names the group ──
   {
     const env = await setup();
     const c = await pendingCampaign(env);
     globalOff();
-    const off = await call(env.app, "POST", linkFor(c.id, "p1", "approve"));
-    assert.equal(off.status, 409); assert.ok(off.raw.includes("כבוי"));
-    assert.equal((await store.getPostingCampaign(c.id)).posts[0].status, "pending_approval");
-    globalOn();
     const ok = await call(env.app, "POST", linkFor(c.id, "p1", "approve"));
     assert.equal(ok.status, 200); assert.ok(ok.raw.includes("אושר")); assert.ok(ok.raw.includes("דירות בחיפה"));
     const p = (await store.getPostingCampaign(c.id)).posts[0];
