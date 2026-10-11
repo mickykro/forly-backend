@@ -85,4 +85,42 @@ function toGreenWebhook(m, { idInstance, wid } = {}) {
   };
 }
 
-module.exports = { toWhapiChat, toGreenChat, greenType, toGreenWebhook, fileData, textOf };
+// One Whapi message → one Green getChatHistory / getMessage item.
+function toGreenHistoryItem(m) {
+  if (!m) return null;
+  const typeMessage = greenType(m.type);
+  const item = {
+    type: m.from_me ? "outgoing" : "incoming",
+    idMessage: m.id,
+    timestamp: Number(m.timestamp) || 0,
+    typeMessage,
+    chatId: toGreenChat(m.chat_id),
+    senderId: toGreenChat(m.from || ""),
+    senderName: m.from_name || "",
+  };
+  if (typeMessage === "textMessage") item.textMessage = textOf(m);
+  else Object.assign(item, fileData(m));
+  return item;
+}
+
+// Green interactive buttons → one plain text (Whapi documents quick replies
+// only): header, body, each button's link / code / number, footer.
+function buttonsText({ header, body, footer, buttons } = {}) {
+  const lines = (Array.isArray(buttons) ? buttons : []).map((b) => {
+    const label = String((b && b.buttonText) || "").trim();
+    const value = b && (b.url || b.copyCode || b.phoneNumber);
+    return value ? `${label}: ${value}` : label;
+  }).filter(Boolean);
+  return [header, body, lines.join("\n"), footer].map((s) => String(s || "").trim()).filter(Boolean).join("\n\n");
+}
+
+// Which Whapi /messages/{kind} endpoint sends this file.
+function fileKind(nameOrUrl) {
+  const ext = (String(nameOrUrl || "").toLowerCase().split("?")[0].match(/\.([a-z0-9]+)$/) || [])[1] || "";
+  if (/^(jpe?g|png|webp)$/.test(ext)) return "image";
+  if (/^(mp4|mov|3gp)$/.test(ext)) return "video";
+  if (/^(mp3|ogg|oga|opus|m4a|aac|wav)$/.test(ext)) return "audio";
+  return "document";
+}
+
+module.exports = { toWhapiChat, toGreenChat, greenType, toGreenWebhook, toGreenHistoryItem, buttonsText, fileKind, fileData, textOf };
