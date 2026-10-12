@@ -89,6 +89,7 @@
       $("#campFormProperty").innerHTML = (!props.length ? '<option value="">לסוכן אין נכסים פעילים</option>' : props.length > 1 ? '<option value="">בחרו נכס…</option>' : "") +
         props.map(function (p) { return '<option value="' + esc(p.page_id) + '">' + esc(p.title) + "</option>"; }).join("");
       showGroups(r[1], checked);
+      checkFit();
       groupsChanged();
       return true;
     }).catch(function (e) { if (my === seq) { emptyGroups("טעינת הקבוצות נכשלה."); fail(e); } return false; });
@@ -140,7 +141,7 @@
     var keep = chosenGroups();
     return req("POST", "/agents/" + encodeURIComponent(ref) + "/groups/refresh", {}).then(function (d) {
       if (my !== seq) return;
-      showGroups(d, keep); groupsChanged(); FLY.toast("הקבוצות עודכנו");
+      showGroups(d, keep); groupsChanged(); checkFit(); FLY.toast("הקבוצות עודכנו");
     }).catch(function (e) {
       if (e && e.status === 401) return fail(e);
       FLY.toast((e && REFRESH_ERR[e.code]) || "הרענון נכשל");
@@ -157,12 +158,61 @@
     var q = $("#campFormGroupSearch").value.trim().toLowerCase();
     Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups .camp-g"), function (l) { l.hidden = !!q && l.textContent.toLowerCase().indexOf(q) < 0; });
   }
+  // Groups the chosen property can't take, marked with why (GET /agents/:ref/groups/fit);
+  // a blocked one is unticked and locked, a warning is only shown.
+  var DEAL = { sale: "מכירה", rent: "השכרה" };
+  function fitReason(r, lt) {
+    if (r.block === "listing_type") return "הקבוצה רק ל" + (r.listing_types || []).map(function (t) { return DEAL[t] || t; }).join("/") + " — והנכס ל" + (DEAL[lt] || lt || "סוג אחר");
+    if (r.block === "no_agents_name") return "שם הקבוצה אומר שאין כניסה למתווכים";
+    if (r.block === "no_agents_policy") return "בקטלוג: הקבוצה לא מאפשרת פרסום של מתווכים";
+    if (r.warn === "deal_name") return "לפי השם הקבוצה ל" + (lt === "sale" ? "השכרה" : "מכירה") + " — כדאי לבדוק";
+    return "";
+  }
+  var REJECTED = { listing_type_not_allowed: "לא מתאימה לסוג הנכס", group_disallowed: "אסור לפרסם בה", not_member: "הסוכן כבר לא חבר בה", unknown_group: "לא מוכרת" };
+  function markGroup(id, cls, why, block) {
+    var input = document.querySelector('#campFormGroups input[value="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+    if (!input) return false;
+    var card = input.closest(".camp-g");
+    card.classList.add(cls);
+    var w = document.createElement("small"); w.className = "cf-why"; w.textContent = why; card.appendChild(w);
+    if (block) { input.checked = false; input.disabled = true; }
+    return true;
+  }
+  function clearFit() {
+    Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups .camp-g"), function (c) {
+      c.classList.remove("cf-bad-g", "cf-warn-g");
+      Array.prototype.forEach.call(c.querySelectorAll(".cf-why"), function (w) { w.remove(); });
+      c.querySelector("input").disabled = false;
+    });
+    $("#campFormFit").textContent = "";
+  }
+  function checkFit() {
+    var ref = $("#campFormAgent").value, pageId = $("#campFormProperty").value, my = seq;
+    clearFit();
+    if (!ref || !pageId || restarting || applying) return Promise.resolve();
+    return req("GET", "/agents/" + encodeURIComponent(ref) + "/groups/fit?page_id=" + encodeURIComponent(pageId)).then(function (d) {
+      if (my !== seq || $("#campFormProperty").value !== pageId) return;
+      var blocked = 0, warned = 0;
+      Object.keys(d.fit || {}).forEach(function (id) {
+        var r = d.fit[id];
+        if (markGroup(id, r.block ? "cf-bad-g" : "cf-warn-g", fitReason(r, d.listing_type), !!r.block)) { if (r.block) blocked++; else warned++; }
+      });
+      $("#campFormFit").textContent = (blocked ? blocked + " קבוצות לא מתאימות לנכס הזה (באדום) ולא ייבחרו. " : "") + (warned ? warned + " קבוצות כדאי לבדוק (בכתום)." : "");
+      groupsChanged();
+    }).catch(function () { /* the save still checks */ });
+  }
+  // A refused save: mark the groups the server named.
+  function markRejected(e) {
+    var ids = (e && e.data && e.data.group_ids) || [];
+    var n = ids.filter(function (id) { return markGroup(String(id), "cf-bad-g", REJECTED[e.code] || "נדחתה", true); }).length;
+    if (n) { groupsChanged(); showError("סומנו באדום " + n + " קבוצות שנדחו — הן הוסרו מהבחירה, אפשר לשמור שוב.", null); }
+  }
   function useDefaults() {
-    Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups input"), function (i) { i.checked = defaults.indexOf(i.value) >= 0; });
+    Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups input:not(:disabled)"), function (i) { i.checked = defaults.indexOf(i.value) >= 0; });
     groupsChanged();
   }
   function setAllGroups(on) { // only the groups the search shows
-    Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups .camp-g:not([hidden]) input"), function (i) { i.checked = on; });
+    Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups .camp-g:not([hidden]) input:not(:disabled)"), function (i) { i.checked = on; });
     groupsChanged();
   }
   function repeatVal() { // "0" or 3..30, as the server accepts
@@ -248,7 +298,7 @@
     showForm();
     if (row) {
       $("#campFormAgent").value = row.ref;
-      loadAgentChoices(row.ref, row.groups.map(function (g) { return g.group_id; })).then(function (ok) { if (ok && my + 1 === seq) { $("#campFormProperty").value = row.page_id; showEstimate(); } });
+      loadAgentChoices(row.ref, row.groups.map(function (g) { return g.group_id; })).then(function (ok) { if (ok && my + 1 === seq) { $("#campFormProperty").value = row.page_id; showEstimate(); checkFit(); } });
     } else {
       // start from the agent the list is filtered to
       $("#campFormAgent").value = $("#campAgent").value;
@@ -321,7 +371,7 @@
         days: Number($("#campFormDays").value) || 14, repeat_days: repeat || undefined, mode: $("#campFormMode").value, targets: targets,
         include_unknown: outsideCatalog(chosenGroups()) || undefined, set_defaults: $("#campFormSetDefaults").checked || undefined,
         consent: { method: $("#campFormConsentMethod").value, note: note },
-      }).then(function (d) { closeForm(); FLY.toast(d.existing ? "לנכס הזה כבר יש קמפיין — פתחו אותו לעריכה" : "הקמפיין נפתח" + (d.default_group_ids ? " · הקבוצות נשמרו כברירת מחדל" : "")); load(); }).catch(failClose));
+      }).then(function (d) { closeForm(); FLY.toast(d.existing ? "לנכס הזה כבר יש קמפיין — פתחו אותו לעריכה" : "הקמפיין נפתח" + (d.default_group_ids ? " · הקבוצות נשמרו כברירת מחדל" : "")); load(); }).catch(failSave));
     }
     var before = editing.groups.map(function (g) { return g.group_id; }), now = chosenGroups();
     var add = now.filter(function (g) { return before.indexOf(g) < 0; }), rem = before.filter(function (g) { return now.indexOf(g) < 0; });
@@ -336,8 +386,9 @@
     if (rem.length) body.remove_group_ids = rem;
     if (Object.keys(body).length === 1) { closeForm(); FLY.toast("לא היו שינויים"); return; }
     return settle(req("PATCH", "/campaigns/" + encodeURIComponent(editing.id), body)
-      .then(function () { closeForm(); FLY.toast("נשמר"); load(); }).catch(failClose));
+      .then(function () { closeForm(); FLY.toast("נשמר"); load(); }).catch(failSave));
   }
+  function failSave(e) { markRejected(e); failClose(e); }
   function failClose(e) { // a stale version closes the form: the reload brings the fresh row to edit
     if (e && e.code === "stale_version") closeForm();
     fail(e);
@@ -369,6 +420,7 @@
   $("#campFormNone").addEventListener("click", function () { setAllGroups(false); });
   $("#campFormDays").addEventListener("input", syncTiming);
   $("#campFormRepeatOn").addEventListener("change", function () { syncTiming(); showEstimate(); });
+  $("#campFormProperty").addEventListener("change", checkFit);
   ["#campFormDays", "#campFormProperty", "#campFormRepeat", "#campFormPage"].forEach(function (id) { $(id).addEventListener("change", function () { clearError(); showEstimate(); }); });
   $("#campFormConsentNote").addEventListener("input", clearError);
   document.querySelectorAll("#campForm [data-days]").forEach(function (b) {

@@ -45,7 +45,10 @@ function findChromium() {
     : r.json({ synced_at: "2026-10-12T09:00:00.000Z", groups: [{ group_id: "111", name: "A", in_catalog: true }, { group_id: "222", name: "B", in_catalog: true }, { group_id: "444", name: "D", in_catalog: true }] })));
   let estimateAnswer = { posts: 200, per_week: 64, days: 22, fits: true, days_left: 30, warmup: false };
   app.post("/api/admin/campaigns/estimate", (q, r) => r.json(estimateAnswer));
-  app.post("/api/admin/campaigns/campaigns", (q, r) => { seen.creates.push(q.body); r.status(201).json({ campaign: ROW }); });
+  let createAnswer = null; // null: 201; else { status, body } once
+  app.post("/api/admin/campaigns/campaigns", (q, r) => { seen.creates.push(q.body); if (createAnswer) { const a = createAnswer; createAnswer = null; return r.status(a.status).json(a.body); } r.status(201).json({ campaign: ROW }); });
+  let fitAnswer = { listing_type: "sale", fit: {} };
+  app.get("/api/admin/campaigns/agents/:ref/groups/fit", (q, r) => r.json(fitAnswer));
   app.patch("/api/admin/campaigns/campaigns/c1", (q, r) => { seen.patches.push(q.body); r.status(editAnswer.status).json(editAnswer.body); });
   app.post("/api/admin/campaigns/campaigns/c1/start", (q, r) => { seen.starts.push(q.body); cur = ROW; r.json({ campaign: ROW }); });
   app.post("/api/admin/campaigns/campaigns/c1/stop", (q, r) => { seen.stops++; cur = Object.assign({}, ROW, { status: "stopped" }); r.json({ campaign: cur }); });
@@ -110,6 +113,31 @@ function findChromium() {
     assert.equal(seen.creates[1].set_defaults, true);
     assert.deepEqual(seen.creates[1].group_ids.slice().sort(), ["111", "222"]);
     defaultsAnswer = [];
+
+    // a property's misfits are marked with why: a blocked group is unticked and locked, a warning only shown
+    fitAnswer = { listing_type: "sale", fit: { "222": { block: "listing_type", listing_types: ["rent"] }, "555": { warn: "deal_name" } } };
+    await page.click("#campNew");
+    await page.selectOption("#campFormAgent", "acct_1");
+    await page.waitForSelector("#campFormProperty option[value='pg1']", { state: "attached" });
+    await page.selectOption("#campFormProperty", "pg1");
+    await page.waitForSelector("#campFormGroups .cf-bad-g input[value='222']", { state: "attached" });
+    assert.match(await page.textContent("#campFormGroups label:has(input[value='222']) .cf-why"), /הקבוצה רק להשכרה — והנכס למכירה/);
+    assert.equal(await page.isDisabled("#campFormGroups input[value='222']"), true);
+    assert.equal(await page.isChecked("#campFormGroups input[value='222']"), false);
+    assert.match(await page.textContent("#campFormGroups label:has(input[value='555']) .cf-why"), /כדאי לבדוק/);
+    assert.equal(await page.isDisabled("#campFormGroups input[value='555']"), false, "a warning does not lock");
+    assert.match(await page.textContent("#campFormFit"), /1 קבוצות לא מתאימות/);
+    await page.click("#campFormAll");
+    assert.equal(await page.isChecked("#campFormGroups input[value='222']"), false, "select-all skips a blocked group");
+    // a refused save marks the groups the server named and unticks them
+    fitAnswer = { listing_type: "sale", fit: {} };
+    createAnswer = { status: 422, body: { error: "listing_type_not_allowed", group_ids: ["111"] } };
+    await page.fill("#campFormConsentNote", "אישר בטלפון");
+    await page.click("#campFormSave");
+    await page.waitForSelector("#campFormGroups .cf-bad-g input[value='111']", { state: "attached" });
+    assert.equal(await page.isChecked("#campFormGroups input[value='111']"), false);
+    assert.match(await page.textContent("#campFormError"), /סומנו באדום 1 קבוצות שנדחו/);
+    await page.click("#campFormCancel");
 
     // a refused edit (stale version) shows its reason, sends the row's version and the changed days, and closes the form
     await page.click("[data-camp='c1'] [data-act='edit']");
