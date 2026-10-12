@@ -3,7 +3,7 @@
    flipped between two calls is seen by the second call. No network: db and
    env are fakes. */
 const assert = require("assert");
-const { assertAllowed, assertFleetAllowed, postingEnvAllowed } = require("./posting-guard");
+const { assertAllowed, assertFleetAllowed, assertAccountAllowed, postingEnvAllowed } = require("./posting-guard");
 
 const PHONE = "0500000000";
 const PLATFORM = "facebook";
@@ -200,6 +200,20 @@ async function denies(opts, deps, reason) {
     await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, { db: fakeDb(), env }, "env_off");
   }
   assert.deepStrictEqual(await assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env: ON }), ENABLED);
+
+  // ── assertAccountAllowed: a groups sync reads with every automation switch off,
+  //    but a disabled account or a revoked profile still refuses it ──
+  {
+    const off = { db: fakeDb({ settings: null }), env: {} };
+    assert.strictEqual(await assertAccountAllowed({ phone: PHONE, platform: PLATFORM, action: "session" }, off), true);
+    assert.strictEqual(await assertAccountAllowed({ phone: PHONE, platform: PLATFORM, action: "navigate" }, off), true);
+    for (const [conn, reason] of [[{ posting_disabled_until_admin: true }, "account_disabled"], [{ posting_owner_review_required: true }, "account_disabled"], [{ facebook_profile_state: "revoked" }, "profile_revoked"]]) {
+      await assert.rejects(() => assertAccountAllowed({ phone: PHONE, platform: PLATFORM, action: "session" }, { db: fakeDb({ settings: null, conn }), env: {} }),
+        (e) => e.code === "posting_disabled" && e.reason === reason, reason);
+    }
+    // posting still needs the switches
+    await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, off, "env_off");
+  }
 
   // ── postingEnvAllowed (C1): prod, or POSTING_SWEEPER=1 off staging; never staging ──
   const table = [
