@@ -215,6 +215,29 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       await K.store.mutatePostingCampaign(row.id, () => ({ repeat: false, repeat_days: null }));
     } finally { mServer.close(); }
 
+    // ── which groups a property can't take, and why ──
+    {
+      const conn0 = await K.db.getConnection(AGENT);
+      await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member.concat([
+        K.member("333", { name: "דירות להשכרה בחיפה" }), K.member("444", { name: "דירות בחיפה - ללא מתווכים" }), K.member("555", { name: "חיפה דירות" }), K.member("666", { name: "חיפה נדל״ן" }),
+      ]) });
+      const fApp = express(); fApp.use(express.json());
+      fApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: deps.env, catalog: async () => (await CATALOG()).concat([
+        { url: K.G(555), name: "חיפה דירות", agent_policy: "explicitly_allowed", listing_types: ["rent"] }, { url: K.G(666), name: "חיפה נדל״ן", agent_policy: "no_agents", listing_types: [] },
+      ]) }));
+      const fServer = fApp.listen(0);
+      try {
+        const f = await call(fServer, "GET", `/agents/${REF}/groups/fit?page_id=pg1`, undefined, false);
+        assert.equal(f.status, 200); assert.equal(f.body.listing_type, "sale");
+        assert.deepEqual(f.body.fit["333"], { warn: "deal_name" }, "a rent name on a sale: a warning");
+        assert.deepEqual(f.body.fit["444"], { block: "no_agents_name" });
+        assert.deepEqual(f.body.fit["555"], { block: "listing_type", listing_types: ["rent"] });
+        assert.deepEqual(f.body.fit["666"], { block: "no_agents_policy" });
+        assert.equal(f.body.fit["111"], undefined, "a fitting group says nothing");
+        assert.equal((await call(fServer, "GET", `/agents/${REF}/groups/fit?page_id=nope`, undefined, false)).status, 404);
+      } finally { fServer.close(); await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member }); }
+    }
+
     // ── staging saves campaign changes too (no env 503) ──
     const sApp = express(); sApp.use(express.json());
     sApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: { FORLY_ENV: "staging" }, catalog: CATALOG }));

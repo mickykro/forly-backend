@@ -180,6 +180,30 @@ module.exports = function createAdminCampaignsRouter({
         real_estate: require("../facebook-groups-sync").isRealEstateGroup(m, lookup.all(m)) };
     }) };
   }
+  // Which of the agent's groups a property can't take, and why — the same
+  // rules vetGroups refuses on (catalog policy / a name that bars agents,
+  // catalog listing types), plus a softer warning when the group's name is
+  // for the other kind of deal. Only the groups with something to say.
+  router.get("/agents/:ref/groups/fit", requireAdmin, wrap(async (req, res) => {
+    const phone = await phoneOf(req.params.ref);
+    const pageId = String(req.query.page_id || "");
+    const page = phone && S_.ID_RE.test(pageId) ? await db.getPage(pageId) : null;
+    if (!page || page.business_phone !== phone) return res.status(404).json({ error: "not_found" });
+    const conn = (await db.getConnection(phone)) || {};
+    const listingType = (page.property || {}).listing_type || null;
+    const lookup = S_.catalogLookup(await catalogFn(listingType || "sale"));
+    const fit = {};
+    for (const m of S_.memberList(conn).filter((x) => x.membership_state === "member")) {
+      const cats = lookup.all(m);
+      const typed = cats.find((e) => A.typeExcluded(e, listingType));
+      const row = A.nameBarsAgents(m.name) ? { block: "no_agents_name" }
+        : cats.some(A.policyDisallowed) ? { block: "no_agents_policy" }
+        : typed ? { block: "listing_type", listing_types: typed.listing_types }
+        : A.nameDealConflict(m.name, listingType) ? { warn: "deal_name" } : null;
+      if (row) fit[String(m.group_id)] = row;
+    }
+    res.json({ listing_type: listingType, fit });
+  }));
   // Re-reads the agent's "Your groups" page now (the same guarded sync as the
   // agent's own resync button: refused while posting is switched off).
   const refreshing = new Map(); // phone → last start (ms): one refresh a minute per agent
