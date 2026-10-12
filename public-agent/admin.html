@@ -157,6 +157,8 @@
   .cf-hint{font-size:.8rem;color:var(--ink-soft);margin:0 0 10px;font-weight:300}
   .cf-hint:empty{display:none}
   #campFormGroupsHidden{margin:8px 0 0}
+  .cf-sync{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:.78rem;color:var(--ink-soft);margin:8px 0 0}
+  .cf-sync .camp-link:disabled{opacity:.6;cursor:wait}
   .cf-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;border-top:1px solid rgba(23,20,15,.07);margin-top:16px;padding-top:14px}
   .cf-err{flex:1 1 200px;margin:0;font-size:.85rem;color:#9a2f25}
   .cf-card{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--paper);border:1px solid rgba(23,20,15,.09);border-radius:14px;padding:14px 18px;margin-bottom:10px}
@@ -353,6 +355,7 @@
         </div>
         <div id="campFormGroups" class="cf-groups"><p class="cf-empty">בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן.</p></div>
         <p class="cf-hint" id="campFormGroupsHidden"></p>
+        <div class="cf-sync" id="campFormSync" hidden><span id="campFormSynced"></span><button type="button" class="camp-link" id="campFormRefresh">רענון הקבוצות מפייסבוק</button></div>
         <label class="cf-check"><input id="campFormPage" type="checkbox"> לפרסם גם בדף העסקי של הסוכן</label>
       </section>
       <section class="cf-step">
