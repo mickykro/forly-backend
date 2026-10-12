@@ -51,11 +51,17 @@ async function assertFleetAllowed({ platform } = {}, deps = {}) {
 
 // action ∈ "reserve" | "session" | "navigate" | "post" | "like" | "story" | "dwell" | "retry"
 async function assertAllowed({ phone, platform, action }, deps = {}) {
-  const db = deps.db || dbLive;
-
   const settings = await assertFleetAllowed({ platform }, deps);
   if (VISIBLE_ACTIONS.has(action) && settings.visible_interactions_enabled === false) deny("visible_off");
+  return assertAccountAllowed({ phone, platform, action }, deps);
+}
 
+// The account-level half alone: no fleet switch involved. Reading the agent's
+// own groups list (facebook-groups-sync) asks only this — it posts nothing, so
+// it runs while automated posting is switched off; a disabled account or a
+// revoked profile still refuses it.
+async function assertAccountAllowed({ phone, platform, action }, deps = {}) {
+  const db = deps.db || dbLive;
   const nowMs = deps.now instanceof Date ? deps.now.getTime() : Date.now();
   const conn = (await db.getConnection(phone)) || {};
   // An owner-level review (R5: a second disabling halt in 30 days) is a
@@ -79,4 +85,4 @@ async function assertAllowed({ phone, platform, action }, deps = {}) {
   return true;
 }
 
-module.exports = { assertAllowed, assertFleetAllowed, postingEnvAllowed };
+module.exports = { assertAllowed, assertFleetAllowed, assertAccountAllowed, postingEnvAllowed };

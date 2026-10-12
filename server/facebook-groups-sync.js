@@ -289,11 +289,14 @@ async function runSync({ phone }, deps = {}) {
   const withPage = deps.withPage || driver.withPage;
   const guard = deps.guard || postingGuard;
   const db = deps.db || dbLive;
-  await guard.assertAllowed({ phone, platform: "facebook", action: "session" }, deps);
+  // A sync only reads the groups page: the account-level checks, not the
+  // automation switches (posting-guard.assertAccountAllowed).
+  const check = typeof guard.assertAccountAllowed === "function" ? guard.assertAccountAllowed.bind(guard) : guard.assertAllowed.bind(guard);
+  await check({ phone, platform: "facebook", action: "session" }, deps);
   const conn = (await db.getConnection(phone)) || {};
   if (profileLock.loginOpen(conn, "facebook")) throw Object.assign(new Error("login browser open"), { code: "profile_busy" });
   const pageDeps = Object.assign({}, deps, { phone, platform: "facebook", conn });
-  const navGuard = (action) => guard.assertAllowed({ phone, platform: "facebook", action }, deps);
+  const navGuard = (action) => check({ phone, platform: "facebook", action }, deps);
   let scraped;
   try {
     scraped = await withPage(
