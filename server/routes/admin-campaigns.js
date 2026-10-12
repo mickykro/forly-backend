@@ -150,7 +150,14 @@ module.exports = function createAdminCampaignsRouter({
     if (!phone) return res.status(404).json({ error: "not_found" });
     const conn = (await db.getConnection(phone)) || {};
     const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
-    res.json({ groups: members.map((m) => ({ group_id: String(m.group_id), name: m.name || "", url: S_.memberUrl(m) })) });
+    // The catalog fills the names the sync hashed (facebook-groups-sync keeps a
+    // name only for catalog / real-estate / selected groups); in_catalog tells
+    // the form which groups a campaign may use (vetGroups refuses the rest).
+    const lookup = S_.catalogLookup(await catalogFn("sale"));
+    res.json({ groups: members.map((m) => {
+      const cat = lookup(m);
+      return { group_id: String(m.group_id), name: m.name || (cat && cat.name) || "", url: S_.memberUrl(m), in_catalog: !!cat };
+    }) });
   }));
 
   // How long a set of posts takes at the account's limits today (an estimate).

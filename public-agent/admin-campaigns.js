@@ -76,23 +76,29 @@
   function loadAgentChoices(ref, checked) {
     var my = ++seq;
     $("#campFormEstimate").textContent = "";
-    if (!ref) { $("#campFormProperty").innerHTML = '<option value="">קודם בחרו סוכן</option>'; emptyGroups("בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן."); return Promise.resolve(false); }
-    $("#campFormProperty").innerHTML = '<option value="">טוען…</option>'; emptyGroups("טוען קבוצות…");
+    if (!ref) { $("#campFormGroupsHidden").textContent = ""; $("#campFormProperty").innerHTML = '<option value="">קודם בחרו סוכן</option>'; emptyGroups("בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן."); return Promise.resolve(false); }
+    $("#campFormProperty").innerHTML = '<option value="">טוען…</option>'; emptyGroups("טוען קבוצות…"); $("#campFormGroupsHidden").textContent = "";
     return Promise.all([req("GET", "/agents/" + encodeURIComponent(ref) + "/properties"), req("GET", "/agents/" + encodeURIComponent(ref) + "/groups")]).then(function (r) {
       if (my !== seq) return false;
       var props = r[0].properties || [], groups = r[1].groups || [];
       // one property is chosen for you; with several, the admin picks on purpose
       $("#campFormProperty").innerHTML = (!props.length ? '<option value="">לסוכן אין נכסים פעילים</option>' : props.length > 1 ? '<option value="">בחרו נכס…</option>' : "") +
         props.map(function (p) { return '<option value="' + esc(p.page_id) + '">' + esc(p.title) + "</option>"; }).join("");
-      if (!groups.length) emptyGroups("הסוכן לא חבר באף קבוצה מהקטלוג — אפשר לפרסם רק בדף העסקי.");
+      // Only catalog groups can be posted to (the server refuses the rest), so the
+      // others are left out — kept only when the campaign being edited has them.
+      var shown = groups.filter(function (g) { return g.in_catalog || (checked && checked.indexOf(g.group_id) >= 0); });
+      var hidden = groups.length - shown.length;
+      $("#campFormGroupsHidden").textContent = hidden ? "עוד " + hidden + " קבוצות של הסוכן לא מוצגות — הן לא בקטלוג, ולכן אי אפשר לפרסם בהן בקמפיין." : "";
+      shown.sort(function (a, b) { return (b.name ? 1 : 0) - (a.name ? 1 : 0) || String(a.name).localeCompare(String(b.name), "he"); });
+      if (!shown.length) emptyGroups("הסוכן לא חבר באף קבוצה מהקטלוג — אפשר לפרסם רק בדף העסקי.");
       else {
-        $("#campFormGroups").innerHTML = groups.map(function (g) {
+        $("#campFormGroups").innerHTML = shown.map(function (g) {
           var on = checked && checked.indexOf(g.group_id) >= 0;
-          return '<label class="camp-g' + (on ? " on" : "") + '"><input type="checkbox" value="' + esc(g.group_id) + '"' + (on ? " checked" : "") + '> <span class="camp-gn">' + esc(g.name || g.group_id) + "</span></label>";
+          return '<label class="camp-g' + (on ? " on" : "") + '"><input type="checkbox" value="' + esc(g.group_id) + '"' + (on ? " checked" : "") + '> <span class="camp-gn">' + esc(g.name || "קבוצה ללא שם · " + g.group_id) + "</span></label>";
         }).join("");
         $("#campFormGroupBar").hidden = false;
         $("#campFormGroupSearch").value = "";
-        $("#campFormGroupSearch").hidden = groups.length < 8;
+        $("#campFormGroupSearch").hidden = shown.length < 8;
       }
       groupsChanged();
       return true;
