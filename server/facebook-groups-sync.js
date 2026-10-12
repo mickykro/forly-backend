@@ -36,11 +36,15 @@ const SELECTORS = { groupLink: 'a[href*="/groups/"][role="link"]' };
 const STALE_MS = 7 * 86400000; // isStale(): a sync older than this is due for a refresh
 const STALE_DROP_MS = 30 * 86400000; // mergeMembership(): a stale/left entry this old is forgotten
 
-const REAL_ESTATE_RE = /דיר|נדל|להשכר|למכיר|שכירות|מתווכ|תיווך|נכס|apartment|rent|real estate|realtor|broker/i;
+const REAL_ESTATE_RE = /דיר|נדל|להשכר|למכיר|שכירות|מתווכ|תיווך|נכס|בתים|בית פרטי|בית למכירה|קוטג|וילה|וילות|פנטהאוז|דופלקס|קרקע|מגרשים|מגרש למכירה|משכנת|פינוי.?בינוי|התחדשות עירונית|תמ"?א ?38|apartment|rent|real estate|realtor|broker|propert|housing/i;
+// What the words above also catch but is not real estate: clothes or items
+// "for rent / for sale", giveaways, cars.
+const NOT_REAL_ESTATE_RE = /שמלות|שמלה|בגדים|תחפוש|ציוד|מסירה|למסור|רכב|אופנוע|תכשיט|עגלות|תינוק|rental car|dress/i;
+const looksRealEstate = (name) => REAL_ESTATE_RE.test(String(name || "")) && !NOT_REAL_ESTATE_RE.test(String(name || ""));
 // What the agent is shown and can pick: real-estate groups only — one the
 // curated catalog carries, or one whose own name reads as real estate.
 // Everything else the account belongs to (a hobby, a job board) stays out.
-const isRealEstateGroup = (m, cats) => (Array.isArray(cats) && cats.some(Boolean)) || REAL_ESTATE_RE.test(String((m && m.name) || ""));
+const isRealEstateGroup = (m, cats) => (Array.isArray(cats) && cats.some(Boolean)) || looksRealEstate(m && m.name);
 
 // The link on "Your groups" also carries the group's last-activity line;
 // only the first line is the name. The suffix is also cut when the two come
@@ -116,7 +120,7 @@ function catalogMatchers(catalog) {
 function shouldKeepName(entry, { catalogUrls, catalogIds, selected }) {
   if (catalogUrls.has(entry.canonical_url)) return true;
   if (entry.id_verified && catalogIds.has(entry.group_id)) return true;
-  if (REAL_ESTATE_RE.test(entry.name || "")) return true;
+  if (looksRealEstate(entry.name)) return true;
   if (Array.isArray(selected) && selected.includes(entry.group_id)) return true;
   return false;
 }
