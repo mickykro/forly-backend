@@ -150,14 +150,40 @@ module.exports = function createAdminCampaignsRouter({
     if (!phone) return res.status(404).json({ error: "not_found" });
     const conn = (await db.getConnection(phone)) || {};
     const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
-    // The catalog fills the names the sync hashed (facebook-groups-sync keeps a
-    // name only for catalog / real-estate / selected groups); in_catalog tells
-    // the form which groups a campaign may use (vetGroups refuses the rest).
+    res.json(await groupsView(conn));
+  }));
+  // The catalog fills the names the sync hashed (facebook-groups-sync keeps a
+  // name only for catalog / real-estate / selected groups); a group outside the
+  // catalog is still offered — the form sends include_unknown for it.
+  async function groupsView(conn) {
+    const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
     const lookup = S_.catalogLookup(await catalogFn("sale"));
-    res.json({ groups: members.map((m) => {
+    return { synced_at: conn.facebook_groups_synced_at || null, groups: members.map((m) => {
       const cat = lookup(m);
       return { group_id: String(m.group_id), name: m.name || (cat && cat.name) || "", url: S_.memberUrl(m), in_catalog: !!cat };
-    }) });
+    }) };
+  }
+  // Re-reads the agent's "Your groups" page now (the same guarded sync as the
+  // agent's own resync button: refused while posting is switched off).
+  const refreshing = new Map(); // phone → last start (ms): one refresh a minute per agent
+  router.post("/agents/:ref/groups/refresh", requireAdmin, wrap(async (req, res) => {
+    const phone = await phoneOf(req.params.ref);
+    if (!phone) return res.status(404).json({ error: "not_found" });
+    const conn = (await db.getConnection(phone)) || {};
+    if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
+    const nowMs = x.clock().getTime();
+    if (nowMs - (refreshing.get(phone) || 0) < 60000) return res.status(429).json({ error: "too_soon" });
+    refreshing.set(phone, nowMs);
+    try {
+      await (deps.groupsSync || require("../facebook-groups-sync")).runSync({ phone }, deps);
+    } catch (e) {
+      refreshing.delete(phone);
+      if (e && e.code === "posting_disabled") return res.status(409).json({ error: "posting_disabled", reason: e.reason });
+      if (e && e.code === "profile_busy") return res.status(409).json({ error: "profile_busy" });
+      console.error(redact(`admin campaigns groups refresh: ${(e && (e.code || e.name)) || "error"} ${(e && (e.anomaly || e.signal)) || ""}`));
+      return res.status(503).json({ error: "sync_failed" });
+    }
+    res.json(await groupsView((await db.getConnection(phone)) || {}));
   }));
 
   // How long a set of posts takes at the account's limits today (an estimate).

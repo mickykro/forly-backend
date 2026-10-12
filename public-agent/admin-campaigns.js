@@ -76,33 +76,59 @@
   function loadAgentChoices(ref, checked) {
     var my = ++seq;
     $("#campFormEstimate").textContent = "";
+    $("#campFormSync").hidden = !ref; $("#campFormSynced").textContent = "";
     if (!ref) { $("#campFormGroupsHidden").textContent = ""; $("#campFormProperty").innerHTML = '<option value="">קודם בחרו סוכן</option>'; emptyGroups("בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן."); return Promise.resolve(false); }
     $("#campFormProperty").innerHTML = '<option value="">טוען…</option>'; emptyGroups("טוען קבוצות…"); $("#campFormGroupsHidden").textContent = "";
     return Promise.all([req("GET", "/agents/" + encodeURIComponent(ref) + "/properties"), req("GET", "/agents/" + encodeURIComponent(ref) + "/groups")]).then(function (r) {
       if (my !== seq) return false;
-      var props = r[0].properties || [], groups = r[1].groups || [];
+      var props = r[0].properties || [];
       // one property is chosen for you; with several, the admin picks on purpose
       $("#campFormProperty").innerHTML = (!props.length ? '<option value="">לסוכן אין נכסים פעילים</option>' : props.length > 1 ? '<option value="">בחרו נכס…</option>' : "") +
         props.map(function (p) { return '<option value="' + esc(p.page_id) + '">' + esc(p.title) + "</option>"; }).join("");
-      // Only catalog groups can be posted to (the server refuses the rest), so the
-      // others are left out — kept only when the campaign being edited has them.
-      var shown = groups.filter(function (g) { return g.in_catalog || (checked && checked.indexOf(g.group_id) >= 0); });
-      var hidden = groups.length - shown.length;
-      $("#campFormGroupsHidden").textContent = hidden ? "עוד " + hidden + " קבוצות של הסוכן לא מוצגות — הן לא בקטלוג, ולכן אי אפשר לפרסם בהן בקמפיין." : "";
-      shown.sort(function (a, b) { return (b.name ? 1 : 0) - (a.name ? 1 : 0) || String(a.name).localeCompare(String(b.name), "he"); });
-      if (!shown.length) emptyGroups("הסוכן לא חבר באף קבוצה מהקטלוג — אפשר לפרסם רק בדף העסקי.");
-      else {
-        $("#campFormGroups").innerHTML = shown.map(function (g) {
-          var on = checked && checked.indexOf(g.group_id) >= 0;
-          return '<label class="camp-g' + (on ? " on" : "") + '"><input type="checkbox" value="' + esc(g.group_id) + '"' + (on ? " checked" : "") + '> <span class="camp-gn">' + esc(g.name || "קבוצה ללא שם · " + g.group_id) + "</span></label>";
-        }).join("");
-        $("#campFormGroupBar").hidden = false;
-        $("#campFormGroupSearch").value = "";
-        $("#campFormGroupSearch").hidden = shown.length < 8;
-      }
+      showGroups(r[1], checked);
       groupsChanged();
       return true;
     }).catch(function (e) { if (my === seq) { emptyGroups("טעינת הקבוצות נכשלה."); fail(e); } return false; });
+  }
+  function showGroups(d, checked) {
+    var groups = d.groups || [];
+    $("#campFormSynced").textContent = d.synced_at ? "הקבוצות נקראו מפייסבוק ב-" + new Date(d.synced_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "הקבוצות עוד לא נקראו מפייסבוק.";
+    // Only catalog groups can be posted to (the server refuses the rest), so the
+    // others are left out — kept only when the campaign being edited has them.
+    var shown = groups.filter(function (g) { return g.in_catalog || (checked && checked.indexOf(g.group_id) >= 0); });
+    var hidden = groups.length - shown.length;
+    $("#campFormGroupsHidden").textContent = hidden ? "עוד " + hidden + " קבוצות של הסוכן לא מוצגות — הן לא בקטלוג, ולכן אי אפשר לפרסם בהן בקמפיין." : "";
+    shown.sort(function (a, b) { return (b.name ? 1 : 0) - (a.name ? 1 : 0) || String(a.name).localeCompare(String(b.name), "he"); });
+    if (!shown.length) { emptyGroups("הסוכן לא חבר באף קבוצה מהקטלוג — אפשר לפרסם רק בדף העסקי."); return; }
+    $("#campFormGroups").innerHTML = shown.map(function (g) {
+      var on = checked && checked.indexOf(g.group_id) >= 0;
+      return '<label class="camp-g' + (on ? " on" : "") + '"><input type="checkbox" value="' + esc(g.group_id) + '"' + (on ? " checked" : "") + '> <span class="camp-gn">' + esc(g.name || "קבוצה ללא שם · " + g.group_id) + "</span></label>";
+    }).join("");
+    $("#campFormGroupBar").hidden = false;
+    $("#campFormGroupSearch").value = "";
+    $("#campFormGroupSearch").hidden = shown.length < 8;
+  }
+  // Re-reads the agent's groups from Facebook (routes/admin-campaigns.js, the
+  // same guarded sync as the agent's own resync), keeping what is ticked.
+  var REFRESH_ERR = {
+    posting_disabled: "אי אפשר לרענן כרגע — הפרסום האוטומטי כבוי בשרת הזה.",
+    profile_busy: "הדפדפן של הסוכן פתוח כרגע (פרסום ידני או התחברות). סגרו אותו ונסו שוב.",
+    facebook_not_connected: "הסוכן עוד לא חיבר את פייסבוק.",
+    too_soon: "רענון רץ לפני רגע — נסו שוב בעוד דקה.",
+    sync_failed: "הקריאה מפייסבוק נכשלה. נסו שוב מאוחר יותר.",
+  };
+  function refreshGroups() {
+    var ref = $("#campFormAgent").value, btn = $("#campFormRefresh"), my = seq;
+    if (!ref || btn.disabled) return;
+    btn.disabled = true; btn.textContent = "קורא מפייסבוק… (יכול לקחת כמה דקות)";
+    var keep = chosenGroups();
+    return req("POST", "/agents/" + encodeURIComponent(ref) + "/groups/refresh", {}).then(function (d) {
+      if (my !== seq) return;
+      showGroups(d, keep); groupsChanged(); FLY.toast("הקבוצות עודכנו");
+    }).catch(function (e) {
+      if (e && e.status === 401) return fail(e);
+      FLY.toast((e && REFRESH_ERR[e.code]) || "הרענון נכשל");
+    }).then(function () { btn.disabled = false; btn.textContent = "רענון הקבוצות מפייסבוק"; });
   }
   function groupsChanged() {
     var all = document.querySelectorAll("#campFormGroups input");
@@ -283,6 +309,7 @@
   $("#campFormAgent").addEventListener("change", function () { loadAgentChoices($("#campFormAgent").value, null); });
   $("#campFormGroups").addEventListener("change", groupsChanged);
   $("#campFormGroupSearch").addEventListener("input", filterGroups);
+  $("#campFormRefresh").addEventListener("click", refreshGroups);
   $("#campFormAll").addEventListener("click", function () { setAllGroups(true); });
   $("#campFormNone").addEventListener("click", function () { setAllGroups(false); });
   $("#campFormDays").addEventListener("input", syncTiming);

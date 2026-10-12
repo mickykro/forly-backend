@@ -54,6 +54,16 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     const gl = (await call(server, "GET", `/agents/${REF}/groups`, undefined, false)).body.groups;
     assert.deepEqual(gl.map((g) => g.group_id), ["111", "222"]);
     assert.ok(gl.every((g) => g.in_catalog === true && g.name), "catalog groups carry in_catalog and a name (the catalog's when the sync hashed it)");
+    // refresh from Facebook: the guarded sync's refusal is passed on; a success returns the re-read list
+    rdeps.groupsSync = { runSync: async () => { throw Object.assign(new Error("off"), { code: "posting_disabled", reason: "env_off" }); } };
+    const rf = await call(server, "POST", `/agents/${REF}/groups/refresh`, {}, false);
+    assert.deepEqual([rf.status, rf.body], [409, { error: "posting_disabled", reason: "env_off" }]);
+    let synced = 0;
+    rdeps.groupsSync = { runSync: async ({ phone }) => { synced++; await K.db.setConnection(phone, { facebook_groups_synced_at: "2026-10-12T09:00:00.000Z" }); return 2; } };
+    const ok = await call(server, "POST", `/agents/${REF}/groups/refresh`, {}, false);
+    assert.equal(ok.status, 200); assert.equal(synced, 1); assert.equal(ok.body.synced_at, "2026-10-12T09:00:00.000Z");
+    assert.equal((await call(server, "POST", `/agents/${REF}/groups/refresh`, {}, false)).status, 429, "one refresh a minute per agent");
+    delete rdeps.groupsSync;
 
     // ── create: step-up, consent, checks ──
     const body = { agent: REF, page_id: "pg1", group_ids: ["111", "222"], mode: "standing", days: 14, consent: CONSENT };

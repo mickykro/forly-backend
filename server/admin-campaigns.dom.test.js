@@ -37,6 +37,9 @@ function findChromium() {
   app.get("/api/admin/campaigns/agents", (q, r) => r.json({ agents: [{ ref: "acct_1", phone_tail: "…0001", name: "דנה לוי" }] }));
   app.get("/api/admin/campaigns/agents/:ref/properties", (q, r) => r.json({ properties: [{ page_id: "pg1", title: "דירה בחיפה" }] }));
   app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111", in_catalog: true }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222", in_catalog: true }, { group_id: "333", name: "", url: "https://www.facebook.com/groups/333", in_catalog: false }] }));
+  let refreshes = 0; // the first refresh is refused (posting off), the second reads one more group
+  app.post("/api/admin/campaigns/agents/:ref/groups/refresh", (q, r) => (++refreshes === 1 ? r.status(409).json({ error: "posting_disabled", reason: "env_off" })
+    : r.json({ synced_at: "2026-10-12T09:00:00.000Z", groups: [{ group_id: "111", name: "A", in_catalog: true }, { group_id: "222", name: "B", in_catalog: true }, { group_id: "444", name: "D", in_catalog: true }] })));
   let estimateAnswer = { posts: 200, per_week: 64, days: 22, fits: true, days_left: 30, warmup: false };
   app.post("/api/admin/campaigns/estimate", (q, r) => r.json(estimateAnswer));
   app.post("/api/admin/campaigns/campaigns", (q, r) => { seen.creates.push(q.body); r.status(201).json({ campaign: ROW }); });
@@ -100,6 +103,15 @@ function findChromium() {
     await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
     assert.equal(await page.locator("#campFormGroups input[value='333']").count(), 0, "a group outside the catalog is not offered");
     assert.match(await page.textContent("#campFormGroupsHidden"), /עוד 1 קבוצות/);
+    // refresh from Facebook: a refusal says why; a success re-lists the groups and keeps what is ticked
+    assert.match(await page.textContent("#campFormSynced"), /עוד לא נקראו/);
+    await page.click("#campFormRefresh");
+    await page.waitForFunction(() => /הפרסום האוטומטי כבוי/.test((document.getElementById("toast") || {}).textContent || ""));
+    await page.waitForFunction(() => !document.getElementById("campFormRefresh").disabled);
+    await page.click("#campFormRefresh");
+    await page.waitForSelector("#campFormGroups input[value='444']", { state: "attached" });
+    assert.equal(await page.isChecked("#campFormGroups input[value='111']"), true, "a ticked group stays ticked");
+    assert.match(await page.textContent("#campFormSynced"), /נקראו מפייסבוק ב-/);
     await page.check("#campFormGroups input[value='222']");
     await page.uncheck("#campFormGroups input[value='111']");
     await page.click("#campFormSave");
