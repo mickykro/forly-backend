@@ -120,6 +120,20 @@ module.exports = function createAdminCampaignsRouter({
     const d = Math.round((to - from) / DAY);
     return Number.isFinite(d) ? Math.min(Math.max(d, 1), 30) : 30;
   }
+  // The agent's default groups (as PUT /api/posting/default-groups saves them):
+  // posting_permission.default_group_ids, mirrored to the distribution page's
+  // links, keeping the links of groups not joined yet. entries: member rows.
+  async function saveDefaults(phone, conn, entries) {
+    const ids = entries.map((m) => String(m.group_id));
+    const saved = await store.mutateConnection(phone, (cur) => ({
+      posting_permission: Object.assign({}, (cur && cur.posting_permission) || {}, { default_group_ids: ids, defaults_set: true }),
+    }));
+    const biz = await db.getBusiness(phone).catch(() => null);
+    const links = entries.map((m) => S_.memberUrl(m)).filter(Boolean).concat(A.nonMemberLinks(saved || conn, biz));
+    await db.setBusiness(phone, { distribution: Object.assign({}, (biz && biz.distribution) || {}, { groups: require("../distribution/share-kit").sanitizeGroups(links) }) });
+    try { require("../business-cache").invalidate(phone); } catch (e) { /* no cache */ }
+    return ids;
+  }
   const consentRecord = (req, consent) => ({ at: A.iso(x.clock()), version: S_.CONSENT_VERSION, by: "admin", admin_tail: opTail(req), method: consent.method, note: consent.note });
   const notifyDeps = Object.assign({}, deps, { messages: deps.messages });
 
@@ -150,16 +164,17 @@ module.exports = function createAdminCampaignsRouter({
     if (!phone) return res.status(404).json({ error: "not_found" });
     const conn = (await db.getConnection(phone)) || {};
     const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
-    res.json(await groupsView(conn));
+    res.json(await groupsView(conn, phone));
   }));
   // The catalog fills the names the sync hashed (facebook-groups-sync keeps a
   // name only for catalog / real-estate / selected groups). real_estate is the
   // agent's own rule (isRealEstateGroup: in the catalog, or a real-estate name):
   // the form offers those, sending include_unknown for one outside the catalog.
-  async function groupsView(conn) {
+  async function groupsView(conn, phone) {
     const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
     const lookup = S_.catalogLookup(await catalogFn("sale"));
-    return { synced_at: conn.facebook_groups_synced_at || null, groups: members.map((m) => {
+    const biz = await db.getBusiness(phone).catch(() => null);
+    return { synced_at: conn.facebook_groups_synced_at || null, default_group_ids: A.defaultGroupIds(conn, biz).map(String), groups: members.map((m) => {
       const cat = lookup(m);
       return { group_id: String(m.group_id), name: m.name || (cat && cat.name) || "", url: S_.memberUrl(m), in_catalog: !!cat,
         real_estate: require("../facebook-groups-sync").isRealEstateGroup(m, lookup.all(m)) };
@@ -185,7 +200,7 @@ module.exports = function createAdminCampaignsRouter({
       console.error(redact(`admin campaigns groups refresh: ${(e && (e.code || e.name)) || "error"} ${(e && (e.anomaly || e.signal)) || ""}`));
       return res.status(503).json({ error: "sync_failed" });
     }
-    res.json(await groupsView((await db.getConnection(phone)) || {}));
+    res.json(await groupsView((await db.getConnection(phone)) || {}, phone));
   }));
 
   // How long a set of posts takes at the account's limits today (an estimate).
@@ -228,7 +243,7 @@ module.exports = function createAdminCampaignsRouter({
     const consent = consentOf(b);
     if (!consent) return res.status(400).json({ error: "consent_note_required" });
     const v = PC.validCreate(b);
-    if (!v) return res.status(400).json({ error: "invalid_input" });
+    if (!v || (b.set_defaults !== undefined && typeof b.set_defaults !== "boolean")) return res.status(400).json({ error: "invalid_input" });
     const phone = await phoneOf(b.agent);
     if (!phone) return res.status(404).json({ error: "not_found" });
     const g = await gates(phone, b.page_id, v.targets);
@@ -239,15 +254,18 @@ module.exports = function createAdminCampaignsRouter({
     if (vet.error) return res.status(422).json(vet);
     const before = await store.getPostingCampaign(store.campaignId(phone, g.page.page_id));
     if (before && LIVE.has(before.status)) return res.json({ campaign: await rowOf(before), existing: true });
-    await audit(req, "create_campaign", phone, { campaign_tail: store.campaignId(phone, g.page.page_id).slice(-6), groups: vet.groups.length, method: consent.method });
+    await audit(req, "create_campaign", phone, { campaign_tail: store.campaignId(phone, g.page.page_id).slice(-6), groups: vet.groups.length, method: consent.method, defaults: b.set_defaults === true });
     const record = consentRecord(req, consent);
     await grantPermission(phone, record);
     const c = await campaigns.create({
       phone, page: g.page, groups: vet.groups, mode: b.mode, days: b.days, repeat: !!b.repeat_days, repeatDays: b.repeat_days || null,
       targets: v.targets || undefined, consent: record, copies: b.copies || null,
     }, deps);
+    // "Save these as the agent's default groups": the groups the campaign took (member rows).
+    const defaults = b.set_defaults === true && vet.groups.length
+      ? await saveDefaults(phone, g.conn, S_.memberGate(g.conn, vet.groups.map((x) => String(x.group_id))).entries || []) : null;
     await A.say(notifyDeps, phone, "admin_created", "📣 הצוות של פורלי פתח לכם קמפיין פרסום.", c);
-    res.status(201).json({ campaign: await rowOf(c) });
+    res.status(201).json({ campaign: await rowOf(c), default_group_ids: defaults });
   }));
 
   // ── one campaign's groups for all the agent's properties ──
@@ -274,15 +292,7 @@ module.exports = function createAdminCampaignsRouter({
     if (!ids.length) return res.status(400).json({ error: "no_destination" });
 
     await audit(req, "apply_groups_to_all", phone, { campaign_tail: src.id.slice(-6), groups: ids.length, method: consent.method });
-    if (b.set_defaults !== false) {
-      const saved = await store.mutateConnection(phone, (cur) => ({
-        posting_permission: Object.assign({}, (cur && cur.posting_permission) || {}, { default_group_ids: ids, defaults_set: true }),
-      }));
-      const biz = await db.getBusiness(phone).catch(() => null);
-      const links = gate.entries.map((m) => S_.memberUrl(m)).filter(Boolean).concat(A.nonMemberLinks(saved || conn, biz));
-      await db.setBusiness(phone, { distribution: Object.assign({}, (biz && biz.distribution) || {}, { groups: require("../distribution/share-kit").sanitizeGroups(links) }) });
-      try { require("../business-cache").invalidate(phone); } catch (e) { /* no cache */ }
-    }
+    if (b.set_defaults !== false) await saveDefaults(phone, conn, gate.entries);
 
     const record = consentRecord(req, consent);
     const days = b.days || previousDays(src);

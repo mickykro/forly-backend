@@ -36,7 +36,8 @@ function findChromium() {
   app.get("/api/admin/campaigns/campaigns", (q, r) => r.json({ campaigns: [cur] }));
   app.get("/api/admin/campaigns/agents", (q, r) => r.json({ agents: [{ ref: "acct_1", phone_tail: "…0001", name: "דנה לוי" }] }));
   app.get("/api/admin/campaigns/agents/:ref/properties", (q, r) => r.json({ properties: [{ page_id: "pg1", title: "דירה בחיפה" }] }));
-  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111", in_catalog: true }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222", in_catalog: true }, { group_id: "333", name: "", url: "https://www.facebook.com/groups/333", in_catalog: false }, { group_id: "555", name: "דירות בחיפה", url: "https://www.facebook.com/groups/555", in_catalog: false, real_estate: true }] }));
+  let defaultsAnswer = [];
+  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ default_group_ids: defaultsAnswer, groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111", in_catalog: true }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222", in_catalog: true }, { group_id: "333", name: "", url: "https://www.facebook.com/groups/333", in_catalog: false }, { group_id: "555", name: "דירות בחיפה", url: "https://www.facebook.com/groups/555", in_catalog: false, real_estate: true }] }));
   const applies = [];
   app.post("/api/admin/campaigns/campaigns/c1/apply-to-all", (q, r) => { applies.push(q.body); r.json({ defaults_set: true, default_group_ids: ["111"], created: [{ page_id: "pg2" }], skipped: [{ page_id: "pg3", reason: "has_campaign" }] }); });
   let refreshes = 0; // the first refresh is refused (posting off), the second reads one more group
@@ -86,6 +87,29 @@ function findChromium() {
     assert.equal(seen.creates[0].days, 14);
     assert.equal(seen.creates[0].mode, "standing");
     assert.deepEqual(seen.creates[0].targets, ["groups"]);
+    assert.equal(seen.creates[0].set_defaults, undefined, "defaults are saved only when asked");
+
+    // the agent's default groups: a new campaign starts from them, and a create can save the chosen ones
+    defaultsAnswer = ["222"];
+    await page.click("#campNew");
+    await page.selectOption("#campFormAgent", "acct_1");
+    await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
+    assert.equal(await page.isChecked("#campFormGroups input[value='222']"), true, "the default group is ticked");
+    assert.equal(await page.isChecked("#campFormGroups input[value='111']"), false);
+    assert.match(await page.textContent("#campFormGroups label:has(input[value='222'])"), /ברירת מחדל/);
+    assert.match(await page.textContent("#campFormDefaultsHint"), /סומנו 1 קבוצות ברירת המחדל/);
+    await page.click("#campFormNone");
+    await page.click("#campFormUseDefaults");
+    assert.equal(await page.isChecked("#campFormGroups input[value='222']"), true, "one click brings the defaults back");
+    await page.check("#campFormGroups input[value='111']");
+    await page.check("#campFormSetDefaults");
+    await page.selectOption("#campFormProperty", "pg1");
+    await page.fill("#campFormConsentNote", "אישר בטלפון");
+    await page.click("#campFormSave");
+    await page.waitForFunction(() => document.querySelector("#campForm").hidden);
+    assert.equal(seen.creates[1].set_defaults, true);
+    assert.deepEqual(seen.creates[1].group_ids.slice().sort(), ["111", "222"]);
+    defaultsAnswer = [];
 
     // a refused edit (stale version) shows its reason, sends the row's version and the changed days, and closes the form
     await page.click("[data-camp='c1'] [data-act='edit']");
