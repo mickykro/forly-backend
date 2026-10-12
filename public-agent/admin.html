@@ -159,6 +159,7 @@
   #campFormGroupsHidden{margin:8px 0 0}
   .cf-sync{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:.78rem;color:var(--ink-soft);margin:8px 0 0}
   .cf-groups .camp-g .cf-tag{font-size:.68rem;color:var(--ink-soft);border:1px solid rgba(23,20,15,.14);border-radius:100px;padding:1px 7px;white-space:nowrap;margin-inline-start:auto}
+  .cf-groups .camp-g .cf-def{border-color:rgba(185,138,47,.5);color:#8A6A1E;background:var(--gold-faint)}
   .cf-sync .camp-link:disabled{opacity:.6;cursor:wait}
   .cf-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px;border-top:1px solid rgba(23,20,15,.07);margin-top:16px;padding-top:14px}
   .cf-err{flex:1 1 200px;margin:0;font-size:.85rem;color:#9a2f25}
@@ -353,10 +354,13 @@
           <span class="cf-count" id="campFormGroupCount"></span>
           <button type="button" class="camp-link" id="campFormAll">בחירת הכל</button>
           <button type="button" class="camp-link" id="campFormNone">ניקוי</button>
+          <button type="button" class="camp-link" id="campFormUseDefaults" hidden></button>
         </div>
+        <p class="cf-hint" id="campFormDefaultsHint"></p>
         <div id="campFormGroups" class="cf-groups"><p class="cf-empty">בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן.</p></div>
         <p class="cf-hint" id="campFormGroupsHidden"></p>
         <div class="cf-sync" id="campFormSync" hidden><span id="campFormSynced"></span><button type="button" class="camp-link" id="campFormRefresh">רענון הקבוצות מפייסבוק</button></div>
+        <label class="cf-check cf-main" id="campFormSetDefaultsRow" hidden><input id="campFormSetDefaults" type="checkbox"> לשמור את הקבוצות שנבחרו כקבוצות ברירת המחדל של הסוכן</label>
         <label class="cf-check"><input id="campFormPage" type="checkbox"> לפרסם גם בדף העסקי של הסוכן</label>
       </section>
       <section class="cf-step">

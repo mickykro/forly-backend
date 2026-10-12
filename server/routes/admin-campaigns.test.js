@@ -240,6 +240,14 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       assert.deepEqual(c4.groups.map((g) => String(g.group_id)), ids);
       assert.equal(c4.consent_by.by, "admin");
       assert.ok((await audits()).some((e) => e.action === "apply_groups_to_all"));
+      // the groups list returns the defaults; a create with set_defaults saves its groups as the new defaults
+      assert.deepEqual((await call(server, "GET", `/agents/${REF}/groups`, undefined, false)).body.default_group_ids, ids);
+      await K.db.savePage(K.page("pg6", AGENT));
+      const made6 = await call(server, "POST", "/campaigns", { agent: REF, page_id: "pg6", group_ids: ["222"], mode: "standing", days: 7, consent: CONSENT, set_defaults: true });
+      assert.equal(made6.status, 201, JSON.stringify(made6.body)); assert.deepEqual(made6.body.default_group_ids, ["222"]);
+      assert.deepEqual((await K.db.getConnection(AGENT)).posting_permission.default_group_ids, ["222"]);
+      assert.equal((await call(server, "POST", "/campaigns", { agent: REF, page_id: "pg6", group_ids: ["222"], mode: "standing", consent: CONSENT, set_defaults: "yes" })).status, 400);
+      await K.db.setConnection(AGENT, { posting_permission: Object.assign({}, (await K.db.getConnection(AGENT)).posting_permission, { default_group_ids: ids }) });
       // again: everything has a campaign now, nothing new
       const again = await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT, set_defaults: false });
       assert.equal(again.body.created.length, 0); assert.equal(again.body.defaults_set, false);
