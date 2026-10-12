@@ -75,7 +75,7 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     const row = made.body.campaign;
     assert.equal(row.created_by, "admin");
     assert.equal(row.consent_by.method, "phone");
-    assert.equal(notes.length, 1, "agent told about the new campaign");
+    assert.equal(notes.length, 0, "an admin-created campaign sends the agent nothing");
     const again = await call(server, "POST", "/campaigns", body);
     assert.equal(again.status, 200); assert.equal(again.body.existing, true);
 
@@ -102,12 +102,12 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     assert.deepEqual(edited.body.campaign.groups.map((g) => g.group_id), ["111"]);
     const back = await call(server, "PATCH", `/campaigns/${row.id}`, { version: edited.body.campaign.version, add_group_ids: ["222"] });
     assert.deepEqual(back.body.campaign.groups.map((g) => g.group_id), ["111", "222"]);
-    assert.equal(notes.length, 1, "edits are silent");
+    assert.equal(notes.length, 0, "edits are silent");
 
     // ── stop / start ──
     const stopped = await call(server, "POST", `/campaigns/${row.id}/stop`, {});
     assert.equal(stopped.body.campaign.status, "stopped");
-    assert.equal(notes.length, 2, "agent told about the stop");
+    assert.equal(notes.length, 1, "agent told about the stop");
     assert.equal((await call(server, "POST", `/campaigns/${row.id}/start`, {})).body.error, "consent_note_required", "a restart needs a fresh consent");
     const restarted = await call(server, "POST", `/campaigns/${row.id}/start`, { consent: CONSENT });
     assert.equal(restarted.body.campaign.status, "running");
@@ -115,7 +115,7 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     await K.store.mutatePostingCampaign(row.id, () => ({ status: "paused", pause_reason: "agent" }));
     const halted = await call(server, "POST", `/campaigns/${row.id}/start`, {});
     assert.equal(halted.status, 409); assert.equal(halted.body.error, "account_halted");
-    assert.equal(notes.length, 2, "starts are silent");
+    assert.equal(notes.length, 1, "starts are silent");
 
     // ── create on a halted account: 409, nothing created or sent ──
     const nBefore = notes.length, aBefore = (await audits()).length;
@@ -228,7 +228,9 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       const src = await K.store.getPostingCampaign(row.id);
       assert.equal((await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { days: 10 })).body.error, "consent_note_required");
       assert.equal((await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT }, false)).status, 401, "step-up first");
+      const nApply = notes.length;
       const r = await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT, days: 10 });
+      assert.equal(notes.length, nApply, "opening campaigns for all properties sends the agent nothing");
       assert.equal(r.status, 200, JSON.stringify(r.body));
       const made = r.body.created.map((c) => c.page_id);
       assert.ok(made.includes("pg4") && made.includes("pg5") && !made.includes("pg1"), JSON.stringify(made));

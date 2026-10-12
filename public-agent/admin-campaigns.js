@@ -321,7 +321,7 @@
         days: Number($("#campFormDays").value) || 14, repeat_days: repeat || undefined, mode: $("#campFormMode").value, targets: targets,
         include_unknown: outsideCatalog(chosenGroups()) || undefined, set_defaults: $("#campFormSetDefaults").checked || undefined,
         consent: { method: $("#campFormConsentMethod").value, note: note },
-      }).then(function (d) { closeForm(); FLY.toast(d.existing ? "לנכס הזה כבר יש קמפיין — פתחו אותו לעריכה" : "הקמפיין נפתח והסוכן קיבל הודעה" + (d.default_group_ids ? " · הקבוצות נשמרו כברירת מחדל" : "")); load(); }).catch(failClose));
+      }).then(function (d) { closeForm(); FLY.toast(d.existing ? "לנכס הזה כבר יש קמפיין — פתחו אותו לעריכה" : "הקמפיין נפתח" + (d.default_group_ids ? " · הקבוצות נשמרו כברירת מחדל" : "")); load(); }).catch(failClose));
     }
     var before = editing.groups.map(function (g) { return g.group_id; }), now = chosenGroups();
     var add = now.filter(function (g) { return before.indexOf(g) < 0; }), rem = before.filter(function (g) { return now.indexOf(g) < 0; });

@@ -264,7 +264,7 @@ module.exports = function createAdminCampaignsRouter({
     // "Save these as the agent's default groups": the groups the campaign took (member rows).
     const defaults = b.set_defaults === true && vet.groups.length
       ? await saveDefaults(phone, g.conn, S_.memberGate(g.conn, vet.groups.map((x) => String(x.group_id))).entries || []) : null;
-    await A.say(notifyDeps, phone, "admin_created", "📣 הצוות של פורלי פתח לכם קמפיין פרסום.", c);
+    // No WhatsApp to the agent: the team opens campaigns quietly (the agent sees them on the publish page).
     res.status(201).json({ campaign: await rowOf(c), default_group_ids: defaults });
   }));
 
@@ -298,7 +298,6 @@ module.exports = function createAdminCampaignsRouter({
     const days = b.days || previousDays(src);
     const pages = ((await db.listPagesByPhone(phone)) || []).filter((p) => p && p.status !== "deleted" && p.page_id !== src.page_id);
     const created = [], skipped = [];
-    let last = null;
     for (const p of pages) {
       const title = ((p.property || {}).title) || p.page_id;
       const before = await store.getPostingCampaign(store.campaignId(phone, p.page_id));
@@ -322,9 +321,7 @@ module.exports = function createAdminCampaignsRouter({
         targets: src.targets || undefined, consent: record, copies: null,
       }, deps);
       created.push({ page_id: p.page_id, title, groups: vet.groups.length, campaign_id: c.id });
-      last = c;
     }
-    if (created.length) await A.say(notifyDeps, phone, "admin_created", `📣 הצוות של פורלי פתח לכם ${created.length} קמפיינים — אחד לכל נכס, באותן קבוצות.`, last);
     res.json({ defaults_set: b.set_defaults !== false, default_group_ids: ids, created, skipped });
   }));
 
