@@ -220,6 +220,30 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     sApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: { FORLY_ENV: "staging" }, catalog: CATALOG }));
     const sServer = sApp.listen(0);
     try { assert.notEqual((await call(sServer, "POST", "/campaigns", body)).status, 503); } finally { sServer.close(); }
+    // ── one campaign's groups for all the agent's properties: defaults saved,
+    //    a campaign per property without a live one, the rest reported ──
+    {
+      await K.db.savePage(K.page("pg4", AGENT));
+      await K.db.savePage(K.page("pg5", AGENT, { property: { title: "להשכרה", listing_type: "rent" } }));
+      const src = await K.store.getPostingCampaign(row.id);
+      assert.equal((await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { days: 10 })).body.error, "consent_note_required");
+      assert.equal((await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT }, false)).status, 401, "step-up first");
+      const r = await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT, days: 10 });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const made = r.body.created.map((c) => c.page_id);
+      assert.ok(made.includes("pg4") && made.includes("pg5") && !made.includes("pg1"), JSON.stringify(made));
+      assert.ok(r.body.skipped.some((k) => k.page_id === "pg3" && k.reason === "has_campaign"), "a property with a live campaign is left alone");
+      const ids = src.groups.map((g) => String(g.group_id));
+      assert.deepEqual(r.body.default_group_ids, ids);
+      assert.deepEqual((await K.db.getConnection(AGENT)).posting_permission.default_group_ids, ids, "the defaults are the campaign's groups");
+      const c4 = await K.store.getPostingCampaign(K.store.campaignId(AGENT, "pg4"));
+      assert.deepEqual(c4.groups.map((g) => String(g.group_id)), ids);
+      assert.equal(c4.consent_by.by, "admin");
+      assert.ok((await audits()).some((e) => e.action === "apply_groups_to_all"));
+      // again: everything has a campaign now, nothing new
+      const again = await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT, set_defaults: false });
+      assert.equal(again.body.created.length, 0); assert.equal(again.body.defaults_set, false);
+    }
     console.log("routes/admin-campaigns.test.js ok");
   } finally { server.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

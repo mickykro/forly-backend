@@ -36,7 +36,9 @@ function findChromium() {
   app.get("/api/admin/campaigns/campaigns", (q, r) => r.json({ campaigns: [cur] }));
   app.get("/api/admin/campaigns/agents", (q, r) => r.json({ agents: [{ ref: "acct_1", phone_tail: "…0001", name: "דנה לוי" }] }));
   app.get("/api/admin/campaigns/agents/:ref/properties", (q, r) => r.json({ properties: [{ page_id: "pg1", title: "דירה בחיפה" }] }));
-  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111", in_catalog: true }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222", in_catalog: true }, { group_id: "333", name: "", url: "https://www.facebook.com/groups/333", in_catalog: false }] }));
+  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111", in_catalog: true }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222", in_catalog: true }, { group_id: "333", name: "", url: "https://www.facebook.com/groups/333", in_catalog: false }, { group_id: "555", name: "דירות בחיפה", url: "https://www.facebook.com/groups/555", in_catalog: false, real_estate: true }] }));
+  const applies = [];
+  app.post("/api/admin/campaigns/campaigns/c1/apply-to-all", (q, r) => { applies.push(q.body); r.json({ defaults_set: true, default_group_ids: ["111"], created: [{ page_id: "pg2" }], skipped: [{ page_id: "pg3", reason: "has_campaign" }] }); });
   let refreshes = 0; // the first refresh is refused (posting off), the second reads one more group
   app.post("/api/admin/campaigns/agents/:ref/groups/refresh", (q, r) => (++refreshes === 1 ? r.status(409).json({ error: "posting_disabled", reason: "env_off" })
     : r.json({ synced_at: "2026-10-12T09:00:00.000Z", groups: [{ group_id: "111", name: "A", in_catalog: true }, { group_id: "222", name: "B", in_catalog: true }, { group_id: "444", name: "D", in_catalog: true }] })));
@@ -101,7 +103,8 @@ function findChromium() {
     editAnswer = { status: 200, body: { campaign: ROW } };
     await page.click("[data-camp='c1'] [data-act='edit']");
     await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
-    assert.equal(await page.locator("#campFormGroups input[value='333']").count(), 0, "a group outside the catalog is not offered");
+    assert.equal(await page.locator("#campFormGroups input[value='333']").count(), 0, "a group that doesn't read as real estate is not offered");
+    assert.match(await page.textContent("#campFormGroups label:has(input[value='555'])"), /לא בקטלוג/, "a real-estate group outside the catalog is offered, tagged");
     assert.match(await page.textContent("#campFormGroupsHidden"), /עוד 1 קבוצות/);
     // refresh from Facebook: a refusal says why; a success re-lists the groups and keeps what is ticked
     assert.match(await page.textContent("#campFormSynced"), /עוד לא נקראו/);
@@ -139,6 +142,14 @@ function findChromium() {
     await page.click("#campFormSave");
     await page.waitForFunction(() => !document.getElementById("campStepUp").classList.contains("hidden"));
     await page.click("#campFormCancel");
+
+    // the campaign's groups for all the agent's properties: consent, then a summary
+    await page.click("[data-camp='c1'] [data-act='all']");
+    assert.equal(await page.isChecked("#campFormDefaults"), true);
+    await page.fill("#campFormConsentNote", "ביקשה בטלפון לכל הנכסים");
+    await page.click("#campFormSave");
+    await page.waitForFunction(() => /נפתחו 1 קמפיינים · דולגו: 1 כבר יש קמפיין/.test((document.getElementById("toast") || {}).textContent || ""));
+    assert.deepEqual(applies[0], { consent: { method: "phone", note: "ביקשה בטלפון לכל הנכסים" }, days: 7, set_defaults: true });
 
     // stop asks (dialog accepted), then really stops
     await page.click("[data-camp='c1'] [data-act='stop']");

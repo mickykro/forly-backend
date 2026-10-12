@@ -153,14 +153,16 @@ module.exports = function createAdminCampaignsRouter({
     res.json(await groupsView(conn));
   }));
   // The catalog fills the names the sync hashed (facebook-groups-sync keeps a
-  // name only for catalog / real-estate / selected groups); a group outside the
-  // catalog is still offered — the form sends include_unknown for it.
+  // name only for catalog / real-estate / selected groups). real_estate is the
+  // agent's own rule (isRealEstateGroup: in the catalog, or a real-estate name):
+  // the form offers those, sending include_unknown for one outside the catalog.
   async function groupsView(conn) {
     const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
     const lookup = S_.catalogLookup(await catalogFn("sale"));
     return { synced_at: conn.facebook_groups_synced_at || null, groups: members.map((m) => {
       const cat = lookup(m);
-      return { group_id: String(m.group_id), name: m.name || (cat && cat.name) || "", url: S_.memberUrl(m), in_catalog: !!cat };
+      return { group_id: String(m.group_id), name: m.name || (cat && cat.name) || "", url: S_.memberUrl(m), in_catalog: !!cat,
+        real_estate: require("../facebook-groups-sync").isRealEstateGroup(m, lookup.all(m)) };
     }) };
   }
   // Re-reads the agent's "Your groups" page now (the same guarded sync as the
@@ -246,6 +248,74 @@ module.exports = function createAdminCampaignsRouter({
     }, deps);
     await A.say(notifyDeps, phone, "admin_created", "📣 הצוות של פורלי פתח לכם קמפיין פרסום.", c);
     res.status(201).json({ campaign: await rowOf(c) });
+  }));
+
+  // ── one campaign's groups for all the agent's properties ──
+  // The agent asked for the groups of a campaign (usually her own) to be her
+  // defaults and to run for every property: saves them as default_group_ids
+  // (mirrored to the distribution page, as PUT /api/posting/default-groups
+  // does), then opens a campaign with the same settings for each other
+  // property without a live one. Each property's groups are vetted on their
+  // own (a rent-only group never goes to a property for sale); a property with
+  // nothing left is skipped and reported. One consent covers the batch.
+  router.post("/campaigns/:id/apply-to-all", ...guard, wrap(async (req, res) => {
+    const b = req.body || {};
+    const consent = consentOf(b);
+    if (!consent) return res.status(400).json({ error: "consent_note_required" });
+    if (b.days !== undefined && !(Number.isFinite(b.days) && b.days >= 1 && b.days <= 30)) return res.status(400).json({ error: "invalid_input" });
+    const src = S_.ID_RE.test(String(req.params.id)) ? await store.getPostingCampaign(String(req.params.id)) : null;
+    if (!src) return res.status(404).json({ error: "not_found" });
+    const phone = src.phone;
+    const conn = (await db.getConnection(phone)) || {};
+    if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
+    if (campaigns._test.accountBlocked(conn)) return res.status(409).json({ error: "account_halted" });
+    const gate = S_.memberGate(conn, (src.groups || []).map((g) => String(g.group_id)));
+    const ids = (gate.entries || []).map((m) => String(m.group_id)); // groups she has left since are dropped
+    if (!ids.length) return res.status(400).json({ error: "no_destination" });
+
+    await audit(req, "apply_groups_to_all", phone, { campaign_tail: src.id.slice(-6), groups: ids.length, method: consent.method });
+    if (b.set_defaults !== false) {
+      const saved = await store.mutateConnection(phone, (cur) => ({
+        posting_permission: Object.assign({}, (cur && cur.posting_permission) || {}, { default_group_ids: ids, defaults_set: true }),
+      }));
+      const biz = await db.getBusiness(phone).catch(() => null);
+      const links = gate.entries.map((m) => S_.memberUrl(m)).filter(Boolean).concat(A.nonMemberLinks(saved || conn, biz));
+      await db.setBusiness(phone, { distribution: Object.assign({}, (biz && biz.distribution) || {}, { groups: require("../distribution/share-kit").sanitizeGroups(links) }) });
+      try { require("../business-cache").invalidate(phone); } catch (e) { /* no cache */ }
+    }
+
+    const record = consentRecord(req, consent);
+    const days = b.days || previousDays(src);
+    const pages = ((await db.listPagesByPhone(phone)) || []).filter((p) => p && p.status !== "deleted" && p.page_id !== src.page_id);
+    const created = [], skipped = [];
+    let last = null;
+    for (const p of pages) {
+      const title = ((p.property || {}).title) || p.page_id;
+      const before = await store.getPostingCampaign(store.campaignId(phone, p.page_id));
+      if (before && LIVE.has(before.status)) { skipped.push({ page_id: p.page_id, title, reason: "has_campaign" }); continue; }
+      const g = await gates(phone, p.page_id, src.targets || null);
+      if (g.error) { skipped.push({ page_id: p.page_id, title, reason: g.error }); continue; }
+      // Drop what this property refuses (policy, listing type), keep the rest.
+      let want = ids.slice(), vet = null;
+      for (let i = 0; i < 3 && want.length; i++) {
+        vet = await PC.vetGroups(catalogFn, g.conn, g.page, want, src.include_unknown === true || (src.created_by || "agent") === "agent");
+        if (!vet.error) break;
+        const bad = new Set((vet.group_ids || []).map(String));
+        if (!bad.size) break;
+        want = want.filter((id) => !bad.has(id));
+      }
+      const pageOnly = (src.targets || S_.DEFAULT_TARGETS).includes("page") && A.pageTarget(g.conn);
+      if (!vet || vet.error || (!vet.groups.length && !pageOnly)) { skipped.push({ page_id: p.page_id, title, reason: (vet && vet.error) || "no_destination" }); continue; }
+      await grantPermission(phone, record);
+      const c = await campaigns.create({
+        phone, page: g.page, groups: vet.groups, mode: src.mode, days, repeat: !!src.repeat, repeatDays: src.repeat_days || null,
+        targets: src.targets || undefined, consent: record, copies: null,
+      }, deps);
+      created.push({ page_id: p.page_id, title, groups: vet.groups.length, campaign_id: c.id });
+      last = c;
+    }
+    if (created.length) await A.say(notifyDeps, phone, "admin_created", `📣 הצוות של פורלי פתח לכם ${created.length} קמפיינים — אחד לכל נכס, באותן קבוצות.`, last);
+    res.json({ defaults_set: b.set_defaults !== false, default_group_ids: ids, created, skipped });
   }));
 
   // ── edit ──
