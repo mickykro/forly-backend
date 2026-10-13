@@ -501,7 +501,16 @@ async function textThenPhotos(input, deps, draft) {
     return { ...t, status: `${p.status}+${t.status}`, replies: [...p.replies, ...t.replies] };
   }
   const t1 = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft }, deps);
-  if (!t1.handled) return t1;
+  if (!t1.handled) {
+    // The caption alone already resolved to an edit hand-off against *older*
+    // unanswered photos read from chat history (photo-choice.editRequestNow) —
+    // but this very message also carries its own fresh photos. Edit those
+    // instead, or the ones just attached are silently dropped and never reach
+    // n8n at all (972547221770, 2026-10-12: two custom-instruction batches,
+    // 16 and 8 photos, went unanswered this way).
+    const fresh = t1.edit_photos && photoUrlsOf(input);
+    return fresh && fresh.length ? { ...t1, edit_photos: fresh.slice(0, PC.MAX_PHOTOS) } : t1;
+  }
   const after = t1.del ? null : (t1.draft || draft);
   if (!after) return t1;
   const t2 = await handleTurn({ ...input, text: "", draft: after }, deps);
