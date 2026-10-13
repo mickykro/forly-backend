@@ -511,6 +511,13 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.del], [false, "edit_recent", 2, true], "כן with fresh photos: edited");
   t = await turn({ text: "לשפר" }, d);
   assert.deepEqual([t.status, t.edit_photos.length], ["edit_recent", 2], "a bare 'לשפר' is an edit request");
+  // The caption arrives WITH its own fresh photos in one webhook (textThenPhotos) —
+  // these must be edited, not the older, unrelated ones from chat history that
+  // editRequestNow would otherwise fall back to (972547221770, 2026-10-12: a
+  // custom-instruction batch was silently dropped this way, twice).
+  t = await turn({ text: "לשפר תמונה", fileUrls: ["https://green/new1.jpg", "https://green/new2.jpg"] }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos], [false, "edit_recent", ["https://green/new1.jpg", "https://green/new2.jpg"]],
+    "the photos attached to THIS message are edited, not the stale album ones from history");
   t = await turn({ text: "למחוק נכס" }, d);
   assert.notEqual(t.status, "edit_recent", "deleting a property is not a photo edit");
   // "לא לעדכן" to the page list: the code answers.
