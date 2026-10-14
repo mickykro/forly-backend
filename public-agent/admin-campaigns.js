@@ -41,24 +41,35 @@
     if (e && e.code === "stale_version") load();
   }
 
-  // Uploaded posts per day ({ "2026-10-14": 5 }), newest day first: "14.10: 5 · 13.10: 3".
-  function byDay(days) {
-    return Object.keys(days || {}).sort().reverse().map(function (d) {
-      var p = d.split("-");
-      return '<span class="cf-day"><b>' + esc(Number(p[2]) + "." + Number(p[1])) + "</b> " + esc(days[d]) + "</span>";
+  // Uploads grouped by day, newest first; each day opens to the groups it went to
+  // (and, in the summary over all campaigns, which property).
+  function byDay(list, withProperty) {
+    var days = {};
+    (list || []).forEach(function (u) { (days[u.day] = days[u.day] || []).push(u); });
+    return Object.keys(days).sort().reverse().map(function (d) {
+      var p = d.split("-"), items = days[d];
+      return '<details class="cf-day"><summary><b>' + esc(Number(p[2]) + "." + Number(p[1])) + "</b> " + items.length + "</summary><ul>" +
+        items.map(function (u) {
+          var t = new Date(u.at), time = isNaN(t) ? "" : t.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
+          var name = u.page ? "הדף העסקי" : (u.group_name || u.group_id || "קבוצה");
+          return "<li>" + (withProperty ? "🏠 " + esc(u.property || "") + " · " : "") +
+            (u.url ? '<a href="' + esc(u.url) + '" target="_blank" rel="noopener">' + esc(name) + "</a>" : esc(name)) +
+            ' <span class="manual-muted">' + esc(time) + (u.pending ? " · ממתין לאישור מנהל הקבוצה" : "") + "</span></li>";
+        }).join("") + "</ul></details>";
     }).join("");
   }
   function render() {
-    var total = {};
-    rows.forEach(function (r) { Object.keys(r.posted_by_day || {}).forEach(function (d) { total[d] = (total[d] || 0) + r.posted_by_day[d]; }); });
-    var head = Object.keys(total).length ? '<div class="cf-days-sum"><span class="manual-muted">פוסטים שעלו לפי יום (כל הקמפיינים ברשימה):</span> ' + byDay(total) + "</div>" : "";
+    var all = [];
+    rows.forEach(function (r) { (r.uploads || []).forEach(function (u) { all.push(Object.assign({ property: (r.agent_name ? r.agent_name + " · " : "") + r.page_title }, u)); }); });
+    all.sort(function (a, b) { return a.at < b.at ? 1 : a.at > b.at ? -1 : 0; });
+    var head = all.length ? '<div class="cf-days-sum"><span class="manual-muted">פוסטים שעלו לפי יום (כל הקמפיינים ברשימה) — לחצו על יום לפירוט:</span> ' + byDay(all, true) + "</div>" : "";
     $("#campList").innerHTML = !rows.length ? '<p class="cf-empty">אין קמפיינים להצגה. לחצו "קמפיין חדש" כדי להתחיל.</p>' : head + rows.map(function (r) {
       var live = r.status === "running" || r.status === "paused";
       return '<div class="cf-card" data-camp="' + esc(r.id) + '"><div class="cf-main-info">' +
         "<h3>" + esc(r.agent_name || r.phone_tail) + " · " + esc(r.page_title) + ' <span class="cf-st ' + esc(r.status) + '">' + esc(STATUS[r.status] || r.status) + "</span></h3>" +
         '<div class="manual-muted">' + r.groups.length + " קבוצות · פורסם " + r.counts.posted + " · עד " + fmt(r.expires_at) +
         (r.repeat ? " · חזרה כל " + esc(r.repeat_days) + " ימים" : "") + " · נוצר על ידי " + (r.created_by === "admin" ? "הצוות" : "הסוכן") + "</div>" +
-        (Object.keys(r.posted_by_day || {}).length ? '<div class="cf-days-row"><span class="manual-muted">עלו לפי יום:</span> ' + byDay(r.posted_by_day) + "</div>" : "") + "</div>" +
+        ((r.uploads || []).length ? '<div class="cf-days-row"><span class="manual-muted">עלו לפי יום:</span> ' + byDay(r.uploads, false) + "</div>" : "") + "</div>" +
         '<div class="row-actions">' +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="edit">עריכה</button>' : "") +
         (live ? '<button type="button" class="btn btn-ghost btn-sm" data-act="all" title="אותן קבוצות כברירת מחדל ולכל שאר הנכסים של הסוכן">לכל הנכסים</button>' : "") +

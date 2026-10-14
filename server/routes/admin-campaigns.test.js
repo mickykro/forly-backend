@@ -170,7 +170,7 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     await K.db.setConnection(AGENT, { posting_disabled_until_admin: false });
     await K.store.mutatePostingCampaign(row.id, () => ({ status: "stopped", restarted_at: null,
       created_at: K.iso(K.NOW.getTime() - 10 * K.DAY), expires_at: K.iso(K.NOW.getTime() - 3 * K.DAY),
-      posts: [{ id: "old1", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY) },
+      posts: [{ id: "old1", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY), post_url: "https://www.facebook.com/groups/111/posts/9" },
         { id: "old2", target: "group", group_id: "222", status: "pending_group_approval", scheduled_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY) },
         { id: "old3", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 6 * K.DAY), created_at: K.iso(K.NOW.getTime() - 6 * K.DAY) },
         { id: "old4", target: "group", group_id: "222", status: "skipped", created_at: K.iso(K.NOW.getTime() - 6 * K.DAY) },
@@ -182,7 +182,12 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     assert.equal(new Date(again7.body.campaign.expires_at).getTime(), K.NOW.getTime() + 7 * K.DAY, "7-day run → 7 days, not 30");
     assert.deepEqual(again7.body.campaign.counts, { owed: 2, posted: 0, skipped: 0 }, "the previous run's post is history");
     const day = (n) => require("../posting-safety").jerusalemDate(K.NOW.getTime() - n * K.DAY);
-    assert.deepEqual(again7.body.campaign.posted_by_day, { [day(5)]: 2, [day(6)]: 1 }, "uploaded posts per day, every round; skipped and failed are not uploads");
+    const ups = again7.body.campaign.uploads;
+    assert.deepEqual(ups.map((u) => [u.day, u.group_id, u.pending]), [[day(5), "111", false], [day(5), "222", true], [day(6), "111", false]],
+      "every round's uploads, newest first; skipped and failed are not uploads");
+    assert.equal(ups[0].url, "https://www.facebook.com/groups/111/posts/9", "the post's own link when known");
+    assert.ok(/facebook\.com\/groups\/222/.test(ups[1].url || ""), "else the group's");
+    assert.ok(ups.every((u) => typeof u.group_name === "string"));
 
     // ── an edit refused after its row: a second row says so ──
     const curV = (await K.store.getPostingCampaign(row.id)).updated_at;
