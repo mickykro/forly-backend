@@ -17,6 +17,7 @@
   var detail = null, detailFor = null; // the session property in full: its groups and every text version
   var texts = [];                      // what the type/copy buttons in the detail panel refer to, by index
   var opened = {};                     // campaign_id → expanded in the checklist (collapsed by default)
+  var here = null;                     // the group open in the browser { ref, group_id, group_name }: stays after its tick
 
   var ERR = {
     profile_busy: "הפרופיל של הסוכן תפוס כרגע (פרסום אוטומטי או התחברות). נסו שוב בעוד דקה.",
@@ -147,16 +148,17 @@
 
   // The group on screen also suits the agent's other properties (same group,
   // still owed there): offer them, one click posts that property here next.
+  // Keyed on the group in the browser, not the picked row: ticking a row keeps the offers.
   function alsoHere() {
-    var cur = picked && itemOf(picked);
+    var cur = here, p = picked && itemOf(picked);
     if (!cur) return [];
     return campaigns.filter(function (c) {
-      return c.ref === cur.ref && c.campaign_id !== cur.campaign_id &&
+      return c.ref === cur.ref && !(p && c.campaign_id === p.campaign_id) &&
         c.groups.some(function (g) { return g.group_id === cur.group_id && g.status === "owed"; });
     }).sort(function (a, b) { return postedOf(a) - postedOf(b); });
   }
   function renderAlso() {
-    var list = alsoHere(), cur = picked && itemOf(picked);
+    var list = alsoHere(), cur = here;
     $("#manualAlso").innerHTML = !list.length ? "" :
       '<div class="manual-detail"><b>הקבוצה "' + esc(cur.group_name || "") + '" מתאימה גם ל:</b><div class="manual-row">' +
       list.map(function (c) {
@@ -289,7 +291,7 @@
   function closed() {
     clearInterval(poll); poll = null;
     if (viewer) viewer.unmount();
-    viewer = null; shown = null; state = null; props = []; detail = null; detailFor = null;
+    viewer = null; shown = null; state = null; props = []; detail = null; detailFor = null; here = null;
     renderDetail();
     $("#manualBrowser").innerHTML = "";
     renderSide(); load();
@@ -328,7 +330,7 @@
     return show(item.ref, item.group_url)
       .then(function (r) { return r && r.at_group ? null : gotoGroup(item.ref, item.group_url, 4); })
       .then(function () { return setProperty(item.page_id); })
-      .then(function () { picked = k; opened[item.campaign_id] = true; renderQueue(); FLY.toast("הקבוצה נפתחה: " + (item.group_name || "")); });
+      .then(function () { picked = k; here = { ref: item.ref, group_id: item.group_id, group_name: item.group_name }; opened[item.campaign_id] = true; renderQueue(); FLY.toast("הקבוצה נפתחה: " + (item.group_name || "")); });
   }
   var setProperty = function (pageId) {
     return call("POST", B(shown) + "/property", { page_id: pageId }).then(function (j) { state = Object.assign({}, state, { property: j.property }); renderSide(); loadDetail(pageId); });
