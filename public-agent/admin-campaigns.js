@@ -284,7 +284,7 @@
     $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
     $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; clearError();
     $("#campFormSave").textContent = row ? "שמירת שינויים" : "יצירת קמפיין";
-    $("#campFormSetDefaultsRow").hidden = !!row; $("#campFormSetDefaults").checked = false;
+    $("#campFormSetDefaultsRow").hidden = false; $("#campFormSetDefaults").checked = false;
     if (row) {
       var left = Math.min(30, Math.max(1, Math.ceil((Date.parse(row.expires_at) - Date.now()) / 86400000)) || 1);
       initial = { days: String(left), repeat: row.repeat ? String(row.repeat_days) : "0", mode: row.mode, page: row.targets.indexOf("page") >= 0 };
@@ -384,9 +384,10 @@
     if ($("#campFormPage").checked !== initial.page) body.targets = targets;
     if (add.length) { body.add_group_ids = add; if (outsideCatalog(add)) body.include_unknown = true; }
     if (rem.length) body.remove_group_ids = rem;
+    if ($("#campFormSetDefaults").checked) body.set_defaults = true;
     if (Object.keys(body).length === 1) { closeForm(); FLY.toast("לא היו שינויים"); return; }
     return settle(req("PATCH", "/campaigns/" + encodeURIComponent(editing.id), body)
-      .then(function () { closeForm(); FLY.toast("נשמר"); load(); }).catch(failSave));
+      .then(function (d) { closeForm(); FLY.toast("נשמר" + (d && d.default_group_ids ? " · הקבוצות נשמרו כברירת מחדל" : "")); load(); }).catch(failSave));
   }
   function failSave(e) { markRejected(e); failClose(e); }
   function failClose(e) { // a stale version closes the form: the reload brings the fresh row to edit

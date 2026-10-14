@@ -102,6 +102,17 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     assert.deepEqual(edited.body.campaign.groups.map((g) => g.group_id), ["111"]);
     const back = await call(server, "PATCH", `/campaigns/${row.id}`, { version: edited.body.campaign.version, add_group_ids: ["222"] });
     assert.deepEqual(back.body.campaign.groups.map((g) => g.group_id), ["111", "222"]);
+    // edit with "save as defaults": the edited campaign's groups become the agent's defaults; on its own it changes nothing else
+    assert.equal((await call(server, "PATCH", `/campaigns/${row.id}`, { version: back.body.campaign.version, set_defaults: "yes" })).status, 400);
+    const asDefaults = await call(server, "PATCH", `/campaigns/${row.id}`, { version: back.body.campaign.version, set_defaults: true });
+    assert.equal(asDefaults.status, 200, JSON.stringify(asDefaults.body));
+    assert.deepEqual(asDefaults.body.default_group_ids, ["111", "222"]);
+    assert.deepEqual((await K.db.getConnection(AGENT)).posting_permission.default_group_ids, ["111", "222"]);
+    assert.equal(asDefaults.body.campaign.version, back.body.campaign.version, "defaults alone leave the campaign as it was");
+    const trimmed = await call(server, "PATCH", `/campaigns/${row.id}`, { version: back.body.campaign.version, remove_group_ids: ["222"], set_defaults: true });
+    assert.deepEqual(trimmed.body.default_group_ids, ["111"]);
+    const restored = await call(server, "PATCH", `/campaigns/${row.id}`, { version: trimmed.body.campaign.version, add_group_ids: ["222"] });
+    assert.deepEqual(restored.body.campaign.groups.map((g) => g.group_id), ["111", "222"]);
     assert.equal(notes.length, 0, "edits are silent");
 
     // ── stop / start ──
