@@ -86,6 +86,16 @@ function findChromium() {
     await page.click("#manualAsk [data-ans='failed']");
     await page.waitForFunction(() => document.querySelector("#manualQueue li.on [data-k='c2|g3']"));
     assert.deepEqual(seen.done, ["c1|g2"]);
+    // back on g2 (couldn't post g3), then tick its box: the other property for g2 is still offered
+    await page.click("[data-act='open'][data-k='c1|g2']");
+    await page.click("#manualAsk [data-ans='failed']");
+    await page.waitForSelector("#manualAlso [data-also='c2|g2']");
+    const before = seen.done.length;
+    await page.click("[data-act='check'][data-k='c1|g2']");
+    for (let i = 0; i < 50 && seen.done.length === before; i++) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(seen.done[seen.done.length - 1], "c1|g2", "the tick marked it");
+    await new Promise((r) => setTimeout(r, 300)); // the list redraws after the mark
+    assert.ok(await page.$("#manualAlso [data-also='c2|g2']"), "offers stay after a tick");
     console.log("admin-manual.dom.test.js ok");
   } finally { server.close(); await browser.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });
