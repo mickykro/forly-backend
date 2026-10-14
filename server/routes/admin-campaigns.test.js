@@ -170,13 +170,19 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     await K.db.setConnection(AGENT, { posting_disabled_until_admin: false });
     await K.store.mutatePostingCampaign(row.id, () => ({ status: "stopped", restarted_at: null,
       created_at: K.iso(K.NOW.getTime() - 10 * K.DAY), expires_at: K.iso(K.NOW.getTime() - 3 * K.DAY),
-      posts: [{ id: "old1", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY) }] }));
+      posts: [{ id: "old1", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY) },
+        { id: "old2", target: "group", group_id: "222", status: "pending_group_approval", scheduled_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY) },
+        { id: "old3", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 6 * K.DAY), created_at: K.iso(K.NOW.getTime() - 6 * K.DAY) },
+        { id: "old4", target: "group", group_id: "222", status: "skipped", created_at: K.iso(K.NOW.getTime() - 6 * K.DAY) },
+        { id: "old5", target: "group", group_id: "222", status: "failed", scheduled_at: K.iso(K.NOW.getTime() - 6 * K.DAY), created_at: K.iso(K.NOW.getTime() - 6 * K.DAY) }] }));
     const listed = (await call(server, "GET", "/campaigns", undefined, false)).body;
     assert.equal(listed.campaigns.find((c) => c.id === row.id).run_days, 7);
     const again7 = await call(server, "POST", `/campaigns/${row.id}/start`, { consent: CONSENT });
     assert.equal(again7.status, 200);
     assert.equal(new Date(again7.body.campaign.expires_at).getTime(), K.NOW.getTime() + 7 * K.DAY, "7-day run → 7 days, not 30");
     assert.deepEqual(again7.body.campaign.counts, { owed: 2, posted: 0, skipped: 0 }, "the previous run's post is history");
+    const day = (n) => require("../posting-safety").jerusalemDate(K.NOW.getTime() - n * K.DAY);
+    assert.deepEqual(again7.body.campaign.posted_by_day, { [day(5)]: 2, [day(6)]: 1 }, "uploaded posts per day, every round; skipped and failed are not uploads");
 
     // ── an edit refused after its row: a second row says so ──
     const curV = (await K.store.getPostingCampaign(row.id)).updated_at;

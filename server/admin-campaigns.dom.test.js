@@ -27,7 +27,7 @@ function findChromium() {
 
   const ROW = { id: "c1", ref: "acct_1", phone_tail: "…0001", agent_name: "דנה לוי", page_id: "pg1", page_title: "דירה בחיפה", status: "running",
     pause_reason: null, mode: "standing", repeat: false, repeat_days: null, targets: ["groups"], expires_at: new Date(Date.now() + 5 * 86400000 - 3600000).toISOString(), run_days: 7,
-    groups: [{ group_id: "111", name: "A" }], counts: { owed: 1, posted: 0, skipped: 0 }, created_by: "agent", consent_by: { by: "agent" }, version: "v1" };
+    groups: [{ group_id: "111", name: "A" }], counts: { owed: 1, posted: 0, skipped: 0 }, posted_by_day: { "2026-10-13": 3, "2026-10-14": 5 }, created_by: "agent", consent_by: { by: "agent" }, version: "v1" };
   const seen = { creates: [], patches: [], starts: [], stops: 0 };
   let cur = ROW;
   let editAnswer = { status: 409, body: { error: "stale_version" } };
@@ -63,6 +63,9 @@ function findChromium() {
     await page.click("#tabCampaigns");
     await page.waitForSelector("#campList [data-camp='c1']");
     assert.ok((await page.innerText("#campList")).includes("דנה לוי"));
+    // uploaded posts per day, newest first: on the campaign and summed over the list
+    assert.deepEqual(await page.$$eval("[data-camp='c1'] .cf-day", (d) => d.map((x) => x.textContent)), ["14.10 5", "13.10 3"]);
+    assert.deepEqual(await page.$$eval(".cf-days-sum .cf-day", (d) => d.map((x) => x.textContent)), ["14.10 5", "13.10 3"]);
 
     // create with recorded consent
     await page.click("#campNew");
