@@ -198,6 +198,7 @@ function findChromium() {
     // the campaign's groups for all the agent's properties: consent, then a summary
     await page.click("[data-camp='c1'] [data-act='all']");
     assert.equal(await page.isChecked("#campFormDefaults"), true);
+    assert.deepEqual(await page.$$eval("#campFormEstimate .cf-applylist li", (li) => li.map((x) => x.textContent)), ["A"], "the consent names the groups it covers");
     await page.fill("#campFormConsentNote", "ביקשה בטלפון לכל הנכסים");
     await page.click("#campFormSave");
     await page.waitForFunction(() => /נפתחו 1 קמפיינים · דולגו: 1 כבר יש קמפיין/.test((document.getElementById("toast") || {}).textContent || ""));

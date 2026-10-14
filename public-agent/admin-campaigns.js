@@ -329,7 +329,9 @@
     $("#campFormConsentMethod").value = "phone"; $("#campFormConsentNote").value = "";
     $("#campFormDays").value = String(row.run_days || 14);
     $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; clearError();
-    $("#campFormEstimate").textContent = row.groups.length + " קבוצות. לכל נכס אחר של הסוכן בלי קמפיין פעיל ייפתח קמפיין עם אותן קבוצות ואותן הגדרות; קבוצה שלא מתאימה לנכס (סוג עסקה, מדיניות) תדלג.";
+    // The groups themselves, so the consent asked for names what it covers.
+    $("#campFormEstimate").innerHTML = esc(row.groups.length + " קבוצות. לכל נכס אחר של הסוכן בלי קמפיין פעיל ייפתח קמפיין עם אותן קבוצות ואותן הגדרות; קבוצה שלא מתאימה לנכס (סוג עסקה, מדיניות) תדלג.") +
+      '<ul class="cf-applylist">' + row.groups.map(function (g) { return "<li>" + esc(g.name || g.group_id) + "</li>"; }).join("") + "</ul>";
     $("#campFormSave").textContent = "פתיחת קמפיינים לכל הנכסים";
     showForm();
   }
