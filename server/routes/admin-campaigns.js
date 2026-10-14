@@ -360,6 +360,7 @@ module.exports = function createAdminCampaignsRouter({
     const probe = PC.validCreate({ page_id: c.page_id, mode: b.mode || "standing", group_ids: ["1"], days: b.days, copies: b.copies,
       repeat_days: b.repeat_days === 0 ? undefined : b.repeat_days });
     if (add.error || remove.error || t.error || !probe || typeof b.version !== "string" || !b.version) return res.status(400).json({ error: "invalid_input" });
+    if (b.set_defaults !== undefined && typeof b.set_defaults !== "boolean") return res.status(400).json({ error: "invalid_input" });
     if (b.repeat_days !== undefined && b.repeat_days !== 0 && !(b.repeat_days >= 3 && b.repeat_days <= 30)) return res.status(400).json({ error: "invalid_input" });
     const edit = {};
     if (add.ids.length) {
@@ -375,10 +376,19 @@ module.exports = function createAdminCampaignsRouter({
     if (remove.ids.length) edit.remove_group_ids = remove.ids;
     for (const k of ["copies", "days", "repeat_days", "mode"]) if (b[k] !== undefined) edit[k] = b[k];
     if (t.targets) edit.targets = t.targets;
-    const detail = { campaign_tail: c.id.slice(-6), fields: Object.keys(edit).join(",") };
+    const detail = { campaign_tail: c.id.slice(-6), fields: Object.keys(edit).join(","), defaults: b.set_defaults === true };
     await audit(req, "edit_campaign", c.phone, detail);
-    const out = await refused(req, "edit_campaign", c.phone, detail, () => admin.update(c.id, edit, deps, { version: b.version, by: "admin" }));
-    res.json({ campaign: await rowOf(out) });
+    // Only "save as defaults" changed: nothing to edit on the campaign itself.
+    const out = !Object.keys(edit).length && b.set_defaults === true ? c
+      : await refused(req, "edit_campaign", c.phone, detail, () => admin.update(c.id, edit, deps, { version: b.version, by: "admin" }));
+    // "Save these as the agent's default groups": the groups the edited campaign has (member rows), as on create.
+    let defaults = null;
+    const ids = (out.groups || []).map((g) => String(g.group_id));
+    if (b.set_defaults === true && ids.length) {
+      const conn = (await db.getConnection(c.phone)) || {};
+      defaults = await saveDefaults(c.phone, conn, S_.memberGate(conn, ids).entries || []);
+    }
+    res.json({ campaign: await rowOf(out), default_group_ids: defaults });
   }));
 
   // ── stop / start ──
