@@ -27,7 +27,10 @@ function findChromium() {
 
   const ROW = { id: "c1", ref: "acct_1", phone_tail: "…0001", agent_name: "דנה לוי", page_id: "pg1", page_title: "דירה בחיפה", status: "running",
     pause_reason: null, mode: "standing", repeat: false, repeat_days: null, targets: ["groups"], expires_at: new Date(Date.now() + 5 * 86400000 - 3600000).toISOString(), run_days: 7,
-    groups: [{ group_id: "111", name: "A" }], counts: { owed: 1, posted: 0, skipped: 0 }, posted_by_day: { "2026-10-13": 3, "2026-10-14": 5 }, created_by: "agent", consent_by: { by: "agent" }, version: "v1" };
+    groups: [{ group_id: "111", name: "A" }], counts: { owed: 1, posted: 0, skipped: 0 }, uploads: [
+      { day: "2026-10-14", at: "2026-10-14T09:00:00Z", group_id: "111", group_name: "A", url: "https://www.facebook.com/groups/111/posts/1", pending: false },
+      { day: "2026-10-14", at: "2026-10-14T08:00:00Z", group_id: "222", group_name: "B", url: null, pending: true },
+      { day: "2026-10-13", at: "2026-10-13T09:00:00Z", group_id: "111", group_name: "A", url: null, pending: false }], created_by: "agent", consent_by: { by: "agent" }, version: "v1" };
   const seen = { creates: [], patches: [], starts: [], stops: 0 };
   let cur = ROW;
   let editAnswer = { status: 409, body: { error: "stale_version" } };
@@ -64,8 +67,13 @@ function findChromium() {
     await page.waitForSelector("#campList [data-camp='c1']");
     assert.ok((await page.innerText("#campList")).includes("דנה לוי"));
     // uploaded posts per day, newest first: on the campaign and summed over the list
-    assert.deepEqual(await page.$$eval("[data-camp='c1'] .cf-day", (d) => d.map((x) => x.textContent)), ["14.10 5", "13.10 3"]);
-    assert.deepEqual(await page.$$eval(".cf-days-sum .cf-day", (d) => d.map((x) => x.textContent)), ["14.10 5", "13.10 3"]);
+    assert.deepEqual(await page.$$eval("[data-camp='c1'] .cf-day > summary", (d) => d.map((x) => x.textContent)), ["14.10 2", "13.10 1"]);
+    await page.click("[data-camp='c1'] .cf-day > summary");
+    const items = await page.$$eval("[data-camp='c1'] .cf-day[open] li", (li) => li.map((x) => x.textContent));
+    assert.equal(items.length, 2); assert.ok(items[0].startsWith("A") && /ממתין/.test(items[1]), "the day's groups, pending marked");
+    assert.equal(await page.$eval("[data-camp='c1'] .cf-day[open] li a", (a) => a.href), "https://www.facebook.com/groups/111/posts/1");
+    const sum = await page.$$eval(".cf-days-sum .cf-day li", (li) => li.map((x) => x.textContent));
+    assert.ok(sum.length === 3 && sum.every((t) => t.includes("דירה בחיפה")), "the summary names the property");
 
     // create with recorded consent
     await page.click("#campNew");

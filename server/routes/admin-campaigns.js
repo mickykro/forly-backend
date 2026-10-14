@@ -88,17 +88,20 @@ module.exports = function createAdminCampaignsRouter({
     if (!cache.has(phone)) cache.set(phone, (await db.getConnection(phone).catch(() => null)) || {});
     return cache.get(phone);
   }
-  // Posts that went up, per Israel calendar day, over every round (not only this pass): { "2026-10-14": 5 }.
-  // pending_group_approval is uploaded too (waiting on the group's admin); it has no posted_at, so its tick dates it.
-  function postedByDay(c) {
-    const out = {};
-    for (const p of c.posts || []) {
-      const at = p && (p.status === "posted" || p.status === "pending_group_approval") && (p.posted_at || p.scheduled_at);
-      if (!at) continue;
-      const d = jerusalemDate(at);
-      out[d] = (out[d] || 0) + 1;
-    }
-    return out;
+  // Posts that went up, every round (not only this pass), newest first: the
+  // Israel calendar day, when, which group (its name, the post's own link when
+  // known, else the group's). pending_group_approval is up too (waiting on the
+  // group's admin); it has no posted_at, so its tick dates it.
+  function uploadsOf(c) {
+    const byId = new Map((c.groups || []).map((g) => [String(g.group_id), g]));
+    const http = (u) => (typeof u === "string" && /^https?:\/\//i.test(u) ? u : null);
+    return (c.posts || []).filter((p) => p && (p.status === "posted" || p.status === "pending_group_approval") && (p.posted_at || p.scheduled_at))
+      .map((p) => {
+        const at = p.posted_at || p.scheduled_at, g = byId.get(String(p.group_id)) || {};
+        return { day: jerusalemDate(at), at, group_id: p.group_id || null, page: p.target === "page",
+          group_name: p.group_name || g.name || "", url: http(p.post_url) || http(p.group_url) || http(g.url), pending: p.status === "pending_group_approval" };
+      })
+      .sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0));
   }
   async function rowOf(c, cache = null) {
     const page = (await db.getPage(c.page_id).catch(() => null)) || {};
@@ -110,7 +113,7 @@ module.exports = function createAdminCampaignsRouter({
       mode: c.mode, repeat: !!c.repeat, repeat_days: c.repeat_days || null, targets: c.targets || [], expires_at: c.expires_at, run_days: previousDays(c),
       groups: (c.groups || []).map((g) => ({ group_id: g.group_id, name: g.name || "", copy: g.copy })),
       counts: { owed: n("owed"), posted: n("posted"), skipped: n("skipped") },
-      posted_by_day: postedByDay(c),
+      uploads: uploadsOf(c),
       created_by: c.created_by || "agent", consent_by: c.consent_by || { by: "agent" }, version: c.updated_at,
     };
   }
