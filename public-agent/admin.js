@@ -236,7 +236,9 @@
         '<a class="p-addr" href="/create.html?key=admin&agent=' + encodeURIComponent(a.phone) + '">+ יצירת נכס ללקוח</a>' +
         // Their portfolio, edited (or created) for them.
         ' · <a class="p-addr" href="/portfolio.html?agent=' + encodeURIComponent(a.phone) + '">' +
-        (a.portfolio_status ? "✎ דף נכסים" : "+ דף נכסים") + "</a></td>" +
+        (a.portfolio_status ? "✎ דף נכסים" : "+ דף נכסים") + "</a>" +
+        // Their dashboard exactly as they see it (read-only, admin-auth.js makeViewAs).
+        ' · <a class="p-addr" href="/" data-viewas="' + esc(a.phone) + '">👁 צפייה בדשבורד</a></td>' +
       '<td class="num">' + esc(a.active_pages) + "</td>" +
       '<td class="num">' + Number(a.views || 0).toLocaleString("he-IL") + "</td>" +
       '<td class="num">' + Number(a.leads || 0).toLocaleString("he-IL") + "</td>" +
@@ -738,6 +740,15 @@
         updateMessageMeta();
       });
       $("#sendCustomerMessage").addEventListener("click", sendCustomerMessage);
+      // "View dashboard": the agent pages then run as that agent, read-only (api.js banner exits).
+      document.addEventListener("click", function (ev) {
+        var a = ev.target.closest("[data-viewas]");
+        if (!a) return;
+        ev.preventDefault();
+        document.cookie = "forly_viewas=" + encodeURIComponent(a.dataset.viewas) + "; path=/; SameSite=Lax" +
+          (location.protocol === "https:" ? "; Secure" : "");
+        location.href = "/";
+      });
       $("#refreshBtn").addEventListener("click", function () {
         FLY.toast("מרענן…"); load();
       });

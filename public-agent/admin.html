@@ -112,6 +112,7 @@
   .manual-chip{font-size:.75rem;padding:2px 8px;border-radius:999px;background:#eee}
   .manual-check{border-top:1px solid rgba(23,20,15,.08);padding:10px 0}
   .manual-check-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-weight:600}
+  summary.manual-check-head{cursor:pointer}
   .manual-bar{height:6px;border-radius:999px;background:#f0ece4;margin:6px 0 4px;overflow:hidden}
   .manual-bar i{display:block;height:100%;background:#3a9a5b}
   .manual-groups li.on{background:#fff8e6;border-radius:8px}
@@ -440,6 +441,7 @@
           <button type="button" class="btn btn-ghost btn-sm" id="manualFull">מסך מלא</button>
           <button type="button" class="btn btn-ghost btn-sm" id="manualClose" hidden>סגירת הדפדפן</button>
         </div>
+        <div id="manualAlso"></div>
         <div id="manualBrowser" class="manual-browser"></div>
       </section>
     </div>
