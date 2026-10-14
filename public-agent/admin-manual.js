@@ -170,14 +170,36 @@
     var cur = picked && picked !== next && itemOf(picked);
     if (!cur || cur.status !== "owed") return Promise.resolve(true);
     var title = (campaigns.filter(function (c) { return c.campaign_id === cur.campaign_id; })[0] || {}).title || "";
-    if (!confirm("לפני שעוברים: הפוסט של \"" + title + "\" בקבוצה \"" + (cur.group_name || "") + "\" פורסם?\nאישור = כן, לסמן כפורסם · ביטול = לא פורסם")) {
-      picked = null; return Promise.resolve(true);
+    return askPosted(title, cur.group_name || "").then(function (a) {
+      if (a === "editing") return false;                    // still working on it: stay on this group
+      if (a === "failed") { picked = null; return true; }   // could not post: move on, nothing marked
+      return markPosted(cur.campaign_id, cur.group_id).then(function (j) {
+        if (!j) return false; // a limit override the admin cancelled: stay on this group
+        FLY.toast(j.completed ? "הנכס פורסם בכל הקבוצות, הסוכן קיבל הודעה" : "סומן ✓");
+        picked = null;
+        return load().then(function () { return true; });
+      });
+    });
+  }
+  // → "posted" | "failed" | "editing" (also Esc: closing the dialog never moves on).
+  function askPosted(title, group) {
+    var dlg = $("#manualAsk");
+    if (!dlg) {
+      dlg = document.createElement("dialog");
+      dlg.id = "manualAsk"; dlg.dir = "rtl";
+      dlg.style.cssText = "max-width:420px;border:1px solid rgba(23,20,15,.15);border-radius:14px;padding:20px;font:inherit";
+      document.body.appendChild(dlg);
     }
-    return markPosted(cur.campaign_id, cur.group_id).then(function (j) {
-      if (!j) return false; // a limit override the admin cancelled: stay on this group
-      FLY.toast(j.completed ? "הנכס פורסם בכל הקבוצות, הסוכן קיבל הודעה" : "סומן ✓");
-      picked = null;
-      return load().then(function () { return true; });
+    dlg.innerHTML = '<p style="margin:0 0 14px">לפני שעוברים: הפוסט של <b>' + esc(title) + "</b> בקבוצה <b>" + esc(group) + "</b> פורסם?</p>" +
+      '<div class="manual-row">' +
+      '<button type="button" class="btn btn-gold btn-sm" data-ans="posted">פורסם ✓</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-ans="failed">לא הצלחתי לפרסם</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-ans="editing">עוד עורך/ת</button></div>';
+    return new Promise(function (resolve) {
+      var done = function (a) { dlg.onclick = dlg.oncancel = null; if (dlg.open) dlg.close(); resolve(a); };
+      dlg.onclick = function (ev) { var b = ev.target.closest("[data-ans]"); if (b) done(b.dataset.ans); };
+      dlg.oncancel = function (ev) { ev.preventDefault(); done("editing"); };
+      dlg.showModal();
     });
   }
 

@@ -51,8 +51,7 @@ function findChromium() {
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const page = await browser.newPage();
-    const dialogs = [];
-    page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
+    page.on("dialog", (d) => d.accept());
     await page.goto(`${base}/admin.html`);
     await page.click("#tabManual");
     await page.waitForSelector("#manualQueue details[data-cid]");
@@ -67,17 +66,26 @@ function findChromium() {
     assert.ok(await page.$eval("details[data-cid='c1']", (d) => d.open), "the property being posted stays open across redraws");
     assert.deepEqual(seen.property, ["pg1"]);
 
-    // the other property that fits this group: asks first, marks c1|g2, then shares pg2 here
+    // the other property that fits this group: "still editing" stays put, nothing marked
     await page.click("#manualAlso [data-also='c2|g2']");
+    await page.click("#manualAsk [data-ans='editing']");
+    await page.waitForFunction(() => !document.querySelector("#manualAsk").open);
+    assert.ok(/פורסם\?/.test(await page.innerText("#manualAsk")), "asked whether the post went up");
+    assert.deepEqual(seen.done, []);
+    assert.deepEqual(seen.property, ["pg1"]);
+
+    // "posted": marks c1|g2, then shares pg2 in the same group
+    await page.click("#manualAlso [data-also='c2|g2']");
+    await page.click("#manualAsk [data-ans='posted']");
     await page.waitForFunction(() => document.querySelector("details[data-cid='c2']").open);
-    assert.ok(/פורסם\?/.test(dialogs[0] || ""), "asked whether the post went up");
     assert.deepEqual(seen.done, ["c1|g2"]);
     assert.deepEqual(seen.property, ["pg1", "pg2"]);
 
-    // opening a different group asks again about the current one (c2|g2)
+    // "couldn't post": moves on to another group without marking c2|g2
     await page.click("[data-act='open'][data-k='c2|g3']");
+    await page.click("#manualAsk [data-ans='failed']");
     await page.waitForFunction(() => document.querySelector("#manualQueue li.on [data-k='c2|g3']"));
-    assert.deepEqual(seen.done, ["c1|g2", "c2|g2"]);
+    assert.deepEqual(seen.done, ["c1|g2"]);
     console.log("admin-manual.dom.test.js ok");
   } finally { server.close(); await browser.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });
