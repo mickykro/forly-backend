@@ -322,6 +322,7 @@ assert.equal(endStyleFor(NaN), "dark");
   assert.ok(dual.indexOf("out.mp4") < dual.indexOf("clean.mp4"));
   const cleanArgs = dual.slice(dual.indexOf("out.mp4") + 1);
   assert.deepEqual(cleanArgs.filter((x) => x.startsWith("[")), ["[vclean]", "[aclean]"], "clean output maps the untouched video + music");
+  assert.equal(dual.join(" ").split("-pix_fmt yuv420p").length - 1, 2, "both outputs pinned to yuv420p (Android can't play 4:4:4)");
   // logo: looped still, scaled to 16% width, ~80% opacity, top-left inset, titled output only
   const li = dual.indexOf("logo.png");
   assert.deepEqual(dual.slice(li - 5, li), ["-loop", "1", "-t", "19.500", "-i"], "logo looped for the video length");
