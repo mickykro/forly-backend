@@ -33,8 +33,8 @@ function init() {
     // ponytail: first Firestore RPC sync-loads grpc protos and blocks the event
     // loop for ~30s — burn that at boot, not on the user's first OTP request.
     db.collection("_warmup").doc("_").get()
-      .then(() => console.log("Firestore warm"))
-      .catch((e) => console.warn("Firestore warmup failed:", e.message));
+      .then(() => console.log(`Firestore warm (project: ${db.projectId})`)) // projectId is readable only after the first RPC
+      .catch((e) => console.warn(`Firestore warmup failed (project: ${db.projectId}):`, e.message));
   } else {
     console.warn("No GOOGLE_APPLICATION_CREDENTIALS — using in-memory store.");
   }

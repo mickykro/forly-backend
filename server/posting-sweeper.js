@@ -33,6 +33,8 @@ const fleetWindowH = (setting) => { const h = Number(setting && setting.fleet_br
 const FLEET_BREAKER_DEFAULT = 3;
 const SYNC_RETRY_MS = 6 * MS_HOUR;
 const code = (e) => (e && (e.code || e.name)) || "error";
+// The code plus the message's first line: a Firestore "9" alone hides which index is missing (the message has its link).
+const why = (e) => `${code(e)} ${String((e && e.message) || "").split("\n")[0].slice(0, 500)}`.trim();
 const { loginOpen } = require("./profile-lock");
 
 // 1. → the failures ({ key, error_code }) the reaper could not move.
@@ -225,7 +227,7 @@ async function sweep(deps = {}, now) {
     return phones.length;
   } catch (e) {
     state.last = { at: stamp(), result: "error", code: code(e) };
-    console.error(redact(`posting sweep: ${code(e)}`));
+    console.error(redact(`posting sweep: ${why(e)}`));
     return 0;
   } finally {
     await writeHealth(x, start, reapFailures).catch((e) => console.error(redact(`posting health write: ${code(e)}`)));
@@ -235,7 +237,7 @@ async function sweep(deps = {}, now) {
 
 function startSweeper(deps = {}) {
   state.started = true;
-  const t = setInterval(() => { sweep(deps).catch((e) => console.error(redact(`posting sweep: ${code(e)}`))); }, deps.sweepMs || SWEEP_MS);
+  const t = setInterval(() => { sweep(deps).catch((e) => console.error(redact(`posting sweep: ${why(e)}`))); }, deps.sweepMs || SWEEP_MS);
   if (t.unref) t.unref();
   return () => clearInterval(t);
 }

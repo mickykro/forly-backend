@@ -250,13 +250,16 @@ async function drive(page, x, want, args, opts = {}) {
   // scrolling, post-opening, likes, stories or synthetic "human" actions. The
   // separate calendar warm-up and idle browser sessions remain disabled.
   // opts.warm: a later post in the same session (posting-chain) — the feed and the dwell are already behind it.
+  let dwellMs; // how long this post's feed dwell took (a chained post's is on its session_started)
   if (opts.warm) { /* straight to the destination */ } else if (localMode.enabled(env)) {
     if (!(await nav(page, x, FEED_URL))) return x.end("verified_failed", { error_code: "navigation_failed", check: "open_feed" });
     done = await preSubmitSignal(page, x);
     if (done) return done;
     await x.guard("dwell");
     const seconds = localMode.sessionPreflightSeconds(env);
+    const t0 = Date.now();
     if (seconds > 0) await page.waitForTimeout(seconds * 1000);
+    dwellMs = Date.now() - t0;
     done = await preSubmitSignal(page, x);
     if (done) return done;
   } else {
@@ -266,7 +269,9 @@ async function drive(page, x, want, args, opts = {}) {
     if (done) return done;
     const allowVisible = await x.allows("like");
     const socialDwell = x.deps.socialDwell || social.dwell;
+    const t0 = Date.now();
     const log = await socialDwell(page, { allowVisible, avoidGroupUrl: kind === "group" ? attempt.target_url : null, avoidGroupIds: kind === "group" ? want.ids : [] }, x.dwellDeps);
+    dwellMs = Date.now() - t0;
     const halt = (Array.isArray(log) ? log : []).find((l) => l && l.action === "halt");
     const dwellSig = halt && halt.detail && halt.detail.signal;
     if (HALTING.has(dwellSig)) return x.end("verified_failed", { error_code: dwellSig }, { signal: dwellSig });
@@ -330,7 +335,7 @@ async function drive(page, x, want, args, opts = {}) {
   if (done) return done;
   const roots = await P.countOf(page, S.composerRoot);
   if (roots !== 1) { x.diag = { expected: 1, found: roots }; return x.end("verified_failed", { error_code: roots < 1 ? "composer_not_found" : "destination_mismatch", check: "composer_count" }); }
-  await x.step("composer_ready");
+  await x.step("composer_ready", { dwell_ms: dwellMs });
   // The property's video first (it uploads while the text is typed); the copy is its description.
   if (x.media) {
     const bad = await media.attach(page, x, x.media);
@@ -508,14 +513,15 @@ async function more(page, out, x0, deps) {
     let prepare = null;
     try { prepare = await next(out); } catch { prepare = null; }
     if (!prepare) break;
-    if (!(await between(page, x0))) break;
+    const dwellMs = await between(page, x0);
+    if (dwellMs === false) break;
     let call = null;
     try { call = await prepare(); } catch { call = null; }
     if (!call) break;
     const x = context(call.kind, call.args, call.deps);
     x.page = page;
     try {
-      await x.step("session_started");
+      await x.step("session_started", { dwell_ms: dwellMs });
       const want = preflight(call.kind, x, call.args);
       if (!want.ok) out = await x.end("verified_failed", { error_code: want.code, check: want.check || "preflight" });
       else {
@@ -536,10 +542,11 @@ async function more(page, out, x0, deps) {
   return Object.assign({}, out, { chained: true });
 }
 
-// Between two posts: on the feed, reading, for 1.5–5.8 minutes. → false when
-// the page says stop (a halting signal) or the switches do.
+// Between two posts: on the feed, reading, for 1.5–5.8 minutes. → the ms it took,
+// or false when the page says stop (a halting signal) or the switches do.
 async function between(page, x) {
   if (!(await x.allows("dwell")) || !(await nav(page, x, FEED_URL).catch(() => false))) return false;
+  const start = Date.now();
   const until = Date.now() + (typeof x.deps.chainDwellMs === "number" ? x.deps.chainDwellMs : chain.dwellMs(x.rand)); // tests: chainDwellMs
   while (Date.now() < until) {
     await page.mouse.wheel(0, Math.round(250 + x.rand() * 650)).catch(() => {});
@@ -548,7 +555,7 @@ async function between(page, x) {
     const sig = await P.readSignal(page, "");
     if (HALTING.has(sig) || sig === "login_required") return false;
   }
-  return true;
+  return Date.now() - start;
 }
 
 // postToGroup / postToPage({ attempt, copy, comment, videoUrl, dryRun, groupUrl|pageUrl }, deps)
