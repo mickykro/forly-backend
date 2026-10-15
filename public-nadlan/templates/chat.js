@@ -30,6 +30,8 @@
       hello: "היי! אני יכול לענות על שאלות על הנכס — גודל, מחיר, קומה, השכונה. מה מעניין אתכם?",
       ph: "כתבו שאלה…", send: "שליחה", close: "סגירה",
       cta: "השאירו פרטים", err: "משהו השתבש. נסו שוב.",
+      err_invalid_phone: "מספר הטלפון לא תקין — צריך 10 ספרות, למשל 0501234567",
+      err_invalid_name: "נא למלא שם", err_invalid_budget: "נא למלא תקציב במספרים",
       note: "העוזר החכם של Forly — עונה מהמידע שבדף",
       lead_intro: "אשמח שהמתווך יחזור אליכם עם התשובה. השאירו שם וטלפון:",
       lead_name: "שם", lead_phone: "טלפון", lead_send: "שליחה",
@@ -49,6 +51,8 @@
       hello: "Hi! I can answer questions about this property — size, price, floor, the area. What would you like to know?",
       ph: "Ask a question…", send: "Send", close: "Close",
       cta: "Leave your details", err: "Something went wrong. Please try again.",
+      err_invalid_phone: "Invalid phone number — use an Israeli mobile, e.g. 0501234567",
+      err_invalid_name: "Please enter your name", err_invalid_budget: "Please enter a budget in numbers",
       note: "Forly assistant — answers from this page",
       lead_intro: "I'll have the agent get back to you with the answer. Leave your name and phone:",
       lead_name: "Name", lead_phone: "Phone", lead_send: "Send",
@@ -257,12 +261,35 @@
 
       var fields = [nm, ph, bd, tl, fn, sub];
       function lock(v) { fields.forEach(function (x) { x.disabled = v; }); }
+      // Inline error under the form; the offending field turns red and takes focus.
+      var errEl = el("div", "flychat-lead-err");
+      errEl.setAttribute("role", "alert");
+      var FIELD = { invalid_name: nm, invalid_phone: ph, invalid_budget: bd };
+      function showErr(code) {
+        [nm, ph, bd].forEach(function (x) { x.classList.remove("flychat-invalid"); x.removeAttribute("aria-invalid"); });
+        errEl.textContent = (code && t("err_" + code)) || t("err");
+        if (!errEl.parentNode) f.appendChild(errEl);
+        var bad = FIELD[code];
+        if (bad) { bad.classList.add("flychat-invalid"); bad.setAttribute("aria-invalid", "true"); bad.focus(); }
+      }
+      [nm, ph, bd].forEach(function (x) {
+        x.addEventListener("input", function () {
+          if (!x.classList.contains("flychat-invalid")) return;
+          x.classList.remove("flychat-invalid"); x.removeAttribute("aria-invalid");
+          if (errEl.parentNode) errEl.parentNode.removeChild(errEl);
+        });
+      });
 
       f.addEventListener("submit", function (e) {
         e.preventDefault();
         var name = nm.value.trim(), phone = ph.value.trim();
         var budget = parseInt(bd.value, 10);
-        if (name.length < 2 || phone.length < 9 || !(budget > 0)) return;
+        // Mirror server normalizePhone (Israeli mobile) so a typo gets a clear hint, not a generic error.
+        var digits = phone.replace(/\D/g, "");
+        var bad = name.length < 2 ? "invalid_name" :
+          !/^(0?5\d{8}|9725\d{8})$/.test(digits) ? "invalid_phone" :
+          !(budget > 0) ? "invalid_budget" : null;
+        if (bad) { showErr(bad); return; }
         lock(true);
         fetch("/api/chat/handoff", {
           method: "POST",
@@ -281,11 +308,11 @@
               if (d.recommendations && d.recommendations.length) pushRecommendations(d.recommendations);
             } else {
               lock(false);
-              push("err", t("err"));
+              showErr(d && d.error);
             }
           }).catch(function () {
             lock(false);
-            push("err", t("err"));
+            showErr(null);
           });
       });
     }
