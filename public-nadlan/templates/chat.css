@@ -110,6 +110,8 @@
   border-radius: 10px; padding: 9px 12px; outline: none; }
 .flychat-lead-f select:focus { border-color: rgba(23, 20, 15, .3); }
 .flychat-lead-f .flychat-lead-wide { flex: 1 1 100%; }
+.flychat-lead-f .flychat-invalid, .flychat-lead-f .flychat-invalid:focus { border-color: #c0392b; background: #fdf1ef; }
+.flychat-lead-err { flex: 1 1 100%; color: #a5281b; font-size: .8rem; line-height: 1.4; }
 
 /* other listings of the same agent that fit the budget */
 .flychat-recs { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
