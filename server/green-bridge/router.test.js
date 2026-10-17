@@ -87,6 +87,8 @@ async function serve(router) {
       r = await post(`${P}/sendFileByUrl/gtok`, { chatId: "972501234567@c.us", fileName: "slide-01.png", urlFile: "https://x/s.png", quotedMessageId: "Q" });
       assert.equal(r.status, 200);
       assert.deepEqual(client.calls.at(-1), ["sendMedia", "image", "972501234567@s.whatsapp.net", "https://x/s.png", { caption: undefined, filename: "slide-01.png", quoted: "Q" }]);
+      await post(`${P}/sendFileByUrl/gtok`, { chatId: "972501234567@c.us", fileName: "video.mp4", urlFile: "https://x/v.mp4", asDocument: true });
+      assert.equal(client.calls.at(-1)[1], "document", "asDocument forces a document");
 
       r = await post(`${P}/sendInteractiveButtons/gtok`, { chatId: "972501234567@c.us", header: "", body: "מוכן", footer: "",
         buttons: [{ type: "url", buttonId: "1", buttonText: "לדף", url: "https://x/p" }] });

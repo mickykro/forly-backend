@@ -49,6 +49,8 @@ async function serve(router) {
     await post("/send", { to: "972501234567", file_url: "https://x/v.mp4", file_name: "walk.mp4", caption: "סיור" });
     assert.equal(calls.at(-1).url, `${G}/sendFileByUrl/gtok`);
     assert.deepEqual(calls.at(-1).body, { chatId: "972501234567@c.us", urlFile: "https://x/v.mp4", fileName: "walk.mp4", caption: "סיור" });
+    await post("/send", { to: "972501234567", file_url: "https://x/v.mp4", file_name: "walk.mp4", as_document: "true" });
+    assert.equal(calls.at(-1).body.asDocument, true, "n8n's string flag forwarded");
 
     // ── buttons ──
     await post("/send", { to: "972501234567", text: "מוכן", footer: "Forly", buttons: [{ type: "url", buttonText: "לדף", url: "https://x/p" }] });

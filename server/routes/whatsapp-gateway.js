@@ -2,7 +2,7 @@
  * n8n's provider-neutral WhatsApp door (mounted under /api/whatsapp):
  *
  *   POST /send     { to, text }                          plain text
- *                  { to, file_url, file_name, caption }  a file by URL
+ *                  { to, file_url, file_name, caption, as_document? }  a file by URL
  *                  { to, text, header?, footer?, buttons: [{ type, buttonText, url | copyCode }] }
  *                  optional quoted_id on any of them     → { ok, id }
  *   POST /history  { to, count? }                        → { ok, messages }
@@ -94,7 +94,9 @@ module.exports = function createWhatsappGateway({ n8nSecret, env = process.env, 
       if (!/^https?:\/\/[^\s]+$/i.test(String(b.file_url))) return res.status(400).json({ error: "invalid_file_url" });
       method = "sendFileByUrl";
       body = { chatId, urlFile: String(b.file_url), fileName: String(b.file_name || String(b.file_url).split("/").pop().split("?")[0] || "file"),
-        ...(b.caption ? { caption: String(b.caption).slice(0, 1024) } : {}), ...quoted };
+        ...(b.caption ? { caption: String(b.caption).slice(0, 1024) } : {}),
+        // Bridge-only: Whapi's re-encoded videos fail on Android, a document doesn't.
+        ...(b.as_document === true || b.as_document === "true" ? { asDocument: true } : {}), ...quoted };
     } else if (text) {
       method = "sendMessage";
       body = { chatId, message: text, ...quoted };

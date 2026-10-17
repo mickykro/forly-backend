@@ -734,7 +734,7 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
     return [
       "-y", "-i", inFiles[0],
       "-vf", `ass=${assFile}:fontsdir=${FONTS_DIR}`,
-      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
       "-c:a", "copy",
       "-movflags", "+faststart",
       outFile,
@@ -811,7 +811,9 @@ function buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegme
   args.push("-filter_complex", parts.join(";"), "-map", "[v]");
   if (musicFile) args.push("-map", "[a]", "-c:a", "aac", "-b:a", "128k");
   else if (n === 1) args.push("-map", "0:a?", "-c:a", "copy");
-  const enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart"];
+  // Pinned per output: format negotiation through split can otherwise hand the
+  // clean output yuv444p (High 4:4:4), which Android and WhatsApp can't decode.
+  const enc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
   args.push(...enc, outFile);
   if (cleanFile) {
     args.push("-map", "[vclean]");

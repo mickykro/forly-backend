@@ -46,7 +46,7 @@ module.exports = function createGreenBridge({ env = process.env, fetchFn = fetch
           return sent(await whapi.sendText(to, String(b.message), quoted));
         case "sendFileByUrl":
           if (!to || !b.urlFile) return res.status(400).json({ error: "chatId_and_urlFile_required" });
-          return sent(await whapi.sendMedia(F.fileKind(b.fileName || b.urlFile), to, String(b.urlFile),
+          return sent(await whapi.sendMedia(b.asDocument ? "document" : F.fileKind(b.fileName || b.urlFile), to, String(b.urlFile),
             { caption: b.caption || undefined, filename: b.fileName || undefined, quoted }));
         case "sendInteractiveButtons": {
           const text = F.buttonsText(b);
