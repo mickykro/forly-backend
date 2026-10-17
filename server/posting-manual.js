@@ -149,15 +149,32 @@ async function checklist(deps = {}) {
       agent_name: (page.agent && page.agent.name) || "", page_id: c.page_id,
       title: (page.property && page.property.title) || c.page_id, page_url: pageUrlOf(c.page_id, deps.pageBaseUrl),
       repeat_days: c.repeat ? c.repeat_days || null : null,
-      groups: groupsOf(c, agent.conn, now, config).map((g) => {
+      groups: await tagLinks(c, groupsOf(c, agent.conn, now, config).map((g) => {
         const withLimit = g.status === "owed" && g.kind === "group" ? { ...g, limit: limits[g.group_id] || null } : g;
         const tg = byId.get(g.group_id);
         return withLimit.status !== "owed" || withLimit.copy ? withLimit
           : { ...withLimit, copy: C.buildCopy(page, c, { ...tg, target: tg.kind === "page" ? "page" : "group" }, "property", deps.pageBaseUrl || "") };
-      }),
+      }), now),
     });
   }
   return out;
+}
+
+// R4 on posts made by hand: each link to the property in an owed group's text
+// gets that group's click code (/p/<page>/<code>), so a lead from it names the
+// group. A new code for each post of the group (its round); the code is derived,
+// so drawing the list again finds the same one. No code → the text as is.
+async function tagLinks(c, groups, now = new Date()) {
+  if (!c) return groups;
+  const path = `/p/${c.page_id}`;
+  const re = new RegExp(`(${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![\\w/-])`, "g");
+  return Promise.all(groups.map(async (g) => {
+    if (g.status !== "owed" || g.kind === "page" || !g.copy || !g.copy.includes(path)) return g;
+    const round = (c.posts || []).filter((p) => p && String(p.group_id) === g.group_id).length;
+    const code = await require("./posting-attempts").issueManualClick({ key: `manual:${c.id}:${g.group_id}:${round}`, campaign_id: c.id, page_id: c.page_id, group_id: g.group_id }, now)
+      .catch((e) => { console.error(`manual click: ${(e && (e.code || e.name)) || "error"}`); return null; });
+    return code ? { ...g, copy: g.copy.replace(re, `$1/${code}`) } : g;
+  }));
 }
 
 // The work list: one item per group still owed, from the checklist.
@@ -258,4 +275,4 @@ async function dropGroup(phone, groupId, exceptId, deps = {}) {
   });
 }
 
-module.exports = { enabled, refOf, owed, targetsOf, expired, propertyCard, versions, groupsOf, checklist, queueOf, queue, markDone, skip, dropGroup, SKIP_REASONS };
+module.exports = { enabled, refOf, owed, targetsOf, expired, propertyCard, versions, groupsOf, tagLinks, checklist, queueOf, queue, markDone, skip, dropGroup, SKIP_REASONS };

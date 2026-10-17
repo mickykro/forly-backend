@@ -147,6 +147,29 @@ const C = require("./posting-campaign");
     assert.ok(!body.includes("facebook.com/groups/222"), "a skipped group is not listed");
   }
 
+  // ── R4 by hand: every property link in an owed group's text carries that group's click code ──
+  {
+    const { deps } = await K.setup();
+    deps.env = { POSTING_MANUAL: "1" }; deps.pageBaseUrl = "https://f.ly";
+    const pid = K.base().page.page_id;
+    const c = await C.create(K.base({ copies: { 111: `דירה יפה https://f.ly/p/${pid}\nשוב: https://f.ly/p/${pid}?x=1` } }), deps);
+    const q = await M.queue(deps);
+    const code = (copy) => { const m = [...copy.matchAll(new RegExp(`/p/${pid}/([a-z0-9]{6})`, "g"))].map((x) => x[1]); return m; };
+    const c111 = code(q[0].copy), c222 = code(q[1].copy);
+    assert.equal(c111.length, 2, "both links in the approved text are tagged");
+    assert.equal(c111[0], c111[1], "with one code");
+    assert.ok(!q[0].copy.includes(`/p/${pid} `) && !q[0].copy.includes(`/p/${pid}?`), "no untagged link left");
+    assert.ok(c222.length >= 1, "the built text's link is tagged too");
+    assert.notEqual(c111[0], c222[0], "each group its own code");
+    const k = await require("./posting-attempts").getClick(c111[0]);
+    assert.equal(k.campaign_id, c.id); assert.equal(k.group_id, "111"); assert.equal(k.page_id, pid);
+    assert.equal(typeof k.attempt_key, "string", "attributionFor needs an attempt key");
+    assert.equal(code((await M.queue(deps))[0].copy)[0], c111[0], "the same code when the list is drawn again");
+    const later = new Date(Date.parse(k.expires_at) - K.DAY); // ours, nearly expired: the same code, 30 more days
+    assert.equal(await require("./posting-attempts").issueManualClick({ key: k.attempt_key, campaign_id: c.id, page_id: pid, group_id: "111" }, later), c111[0]);
+    assert.ok(Date.parse((await require("./posting-attempts").getClick(c111[0])).expires_at) > Date.parse(k.expires_at), "extended");
+  }
+
   // ── the property card for the session header ──
   {
     const card = M.propertyCard(K.page("pg9"), "https://f.ly/");

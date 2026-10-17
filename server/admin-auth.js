@@ -56,4 +56,28 @@ function makeStepUpGuard({ verifySession, authSecret }) {
   return { requireStepUp };
 }
 
-module.exports = { makeAdminGuard, makeStepUpGuard };
+// View-as: an admin sees an agent's dashboard exactly as the agent does. The
+// admin panel sets the forly_viewas=<phone> cookie; every requireAuth route
+// then runs as that agent. It is not a credential (the admin session is
+// re-checked on every request), and it is read-only: writes are refused so
+// the admin can never act in the agent's name by accident.
+function readViewAs(req) {
+  const m = (req.headers.cookie || "").match(/(?:^|;\s*)forly_viewas=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+// Wraps auth.requireAuth(secret, scopes) with the same signature.
+function makeViewAs({ isAdmin }) {
+  return (requireAuth) => (secret, scopes) => {
+    const inner = requireAuth(secret, scopes);
+    return (req, res, next) => inner(req, res, () => {
+      const target = normalizeAuthPhone(readViewAs(req) || "");
+      if (!target || (req.user.scope || "session") !== "session" || !isAdmin(req.user)) return next();
+      if (req.method !== "GET" && req.method !== "HEAD") return res.status(403).json({ error: "view_as_readonly" });
+      req.user = { ...req.user, userId: target, viewAsBy: req.user.userId };
+      next();
+    });
+  };
+}
+
+module.exports = { makeAdminGuard, makeStepUpGuard, makeViewAs };
