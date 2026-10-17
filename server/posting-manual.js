@@ -167,7 +167,7 @@ function queueOf(list) {
     for (const g of c.groups) {
       if (g.status !== "owed") continue;
       const { groups, ...head } = c; // eslint-disable-line no-unused-vars
-      out.push({ ...head, group_id: g.group_id, group_name: g.name, group_url: g.url, copy: g.copy });
+      out.push({ ...head, group_id: g.group_id, group_name: g.name, group_url: g.url, copy: g.copy, kind: g.kind, limit: g.limit || null });
     }
   }
   return out;
@@ -178,7 +178,9 @@ const queue = async (deps = {}) => queueOf(await checklist(deps));
 // when that target is not owed (not in the campaign, already done, campaign
 // over). A campaign that does not repeat completes with its last target; a
 // repeating one runs until expires_at.
-async function markDone(campaignId, groupId, status, deps = {}) {
+// opts.reason (skipped only): kept on the post as skip_reason; "pending_overload"
+// also takes the group out of the campaign (see skip()).
+async function markDone(campaignId, groupId, status, deps = {}, opts = {}) {
   if (!["posted", "skipped"].includes(status)) return null;
   const x = A.ctxOf(deps), at = x.clock(), now = A.iso(at);
   const head = await x.store.getPostingCampaign(String(campaignId));
@@ -197,10 +199,14 @@ async function markDone(campaignId, groupId, status, deps = {}) {
     const post = {
       id, target: g.kind === "page" ? "page" : "group", group_id: String(g.group_id), group_url: g.url, group_name: g.name || null, manual: true,
       status, created_at: now, scheduled_at: now, posted_at: status === "posted" ? now : null, error_code: status === "skipped" ? "manual_skip" : null,
+      skip_reason: status === "skipped" && opts.reason ? opts.reason : undefined,
     };
     const posts = (cur.posts || []).concat([post]);
-    finished = !cur.repeat && owed({ ...cur, posts }, conn, at, config).length === 0;
-    return finished ? { posts, status: "completed" } : { posts };
+    const drop = status === "skipped" && opts.reason === "pending_overload" && g.kind === "group";
+    const groups = drop ? (cur.groups || []).filter((q) => String(q.group_id) !== String(g.group_id)) : cur.groups;
+    const next = { ...cur, posts, groups };
+    finished = (!cur.repeat && owed(next, conn, at, config).length === 0) || targetsOf(next, conn).length === 0;
+    return Object.assign({ posts }, drop ? { groups } : {}, finished ? { status: "completed" } : {});
   });
   if (past) { await expire({ id: String(campaignId) }, deps, x); return null; }
   if (!next || !(next.posts || []).some((p) => p && p.id === id)) return null;
@@ -208,4 +214,48 @@ async function markDone(campaignId, groupId, status, deps = {}) {
   return next;
 }
 
-module.exports = { enabled, refOf, owed, targetsOf, expired, propertyCard, versions, groupsOf, checklist, queueOf, queue, markDone };
+// Why the admin moved on without posting (the semi-automatic "הבא").
+// pending_overload: the agent already has posts waiting in that group (seen:
+// 60+, never approved) — trying again is wasted, so the group leaves this
+// campaign, the agent's other campaigns and their default list. The rest stay
+// in the campaign; every skip is counted on the global flag list
+// (manual_group_flags) for the team to look at.
+const SKIP_REASONS = new Set(["pending_overload", "posting_method", "other", "prep_failed"]);
+
+// → the campaign, or null as markDone. note: free text from the admin (other, prep_failed's code).
+async function skip(campaignId, groupId, reason, deps = {}, { note = null, ref = null } = {}) {
+  if (!SKIP_REASONS.has(reason)) return null;
+  const x = A.ctxOf(deps);
+  const head = await x.store.getPostingCampaign(String(campaignId));
+  const g = head && groupsOf(head).find((q) => q.group_id === String(groupId));
+  const next = await markDone(campaignId, groupId, "skipped", deps, { reason });
+  if (!next) return null;
+  // Best effort after the skip is recorded: a failure here must not undo or repeat it.
+  try {
+    if (reason === "pending_overload" && g && g.kind === "group") await dropGroup(next.phone, String(groupId), next.id, deps);
+    await x.store.addGroupFlag(String(groupId), { name: g && g.name, url: g && g.url, reason, note, ref }, x.clock());
+  } catch (e) { console.error(`manual skip follow-up: ${(e && (e.code || e.name)) || "error"}`); }
+  return next;
+}
+
+// The group out of the agent's other live campaigns (its open posts there
+// skipped) and out of their default list. History stays.
+async function dropGroup(phone, groupId, exceptId, deps = {}) {
+  const x = A.ctxOf(deps);
+  for (const c of await x.store.listPostingCampaignsByPhone(phone)) {
+    if (c.id === exceptId || !["running", "paused"].includes(c.status)) continue;
+    if (!(c.groups || []).some((q) => String(q.group_id) === groupId)) continue;
+    await A.mutate(x, c.id, (cur) => ({
+      groups: (cur.groups || []).filter((q) => String(q.group_id) !== groupId),
+      posts: (cur.posts || []).map((p) => (String(p.group_id) === groupId && ["scheduled", "pending_approval"].includes(p.status) ? { ...p, status: "skipped", error_code: "group_removed", copy: undefined } : p)),
+    }));
+  }
+  const biz = await x.db.getBusiness(phone).catch(() => null);
+  await x.store.mutateConnection(phone, (conn) => {
+    const ids = A.defaultGroupIds(conn, biz);
+    if (!ids.includes(groupId)) return null;
+    return { posting_permission: { default_group_ids: ids.filter((id) => id !== groupId), defaults_set: true } };
+  });
+}
+
+module.exports = { enabled, refOf, owed, targetsOf, expired, propertyCard, versions, groupsOf, checklist, queueOf, queue, markDone, skip, dropGroup, SKIP_REASONS };

@@ -8,6 +8,10 @@
  * type the approved text, and put the property's video into Facebook's file
  * chooser the moment the admin opens it. The admin clicks Post themselves.
  *
+ * Semi-automatic (admin-manual-lane): ▶ prepares each owed target in turn —
+ * video, text, the R3 proof — and stops short of Post; "הבא" records what
+ * happened and prepares the next.
+ *
  * Agents are addressed by an opaque ref (posting-manual.refOf), never a phone.
  */
 const express = require("express");
@@ -26,7 +30,7 @@ const GROUP_URL = /^https:\/\/(www\.|m\.|web\.)?facebook\.com\/[^?#\s]+$/i;
 module.exports = function createAdminManualRouter({
   requireAdmin, deps = {},
   driver = require("../driver-browser"), viewer = require("../connect-viewer"),
-  media = require("../posting-media"), locks = require("../profile-lock"),
+  media = require("../posting-media"), locks = require("../profile-lock"), lanePrep = null,
 }) {
   const router = express.Router();
   const x = A.ctxOf(deps);
@@ -64,6 +68,8 @@ module.exports = function createAdminManualRouter({
     return page && page.business_phone === phone ? M.propertyCard(page, deps.pageBaseUrl) : null;
   }
   const hubPage = (phone) => { const h = viewer._hubs && viewer._hubs.get(key(phone)); return (h && !h.closed && h.page) || null; };
+  const emit = (phone, evt) => { const h = viewer._hubs && viewer._hubs.get(key(phone)); if (h && !h.closed && viewer.emit) viewer.emit(h, evt); };
+  const lane = require("./admin-manual-lane")({ deps, open, hubPage, videoFor: (s, page) => videoFor(s, page), emit, ...(lanePrep ? { prep: lanePrep } : {}) });
 
   // Listen for Facebook's file chooser on every page of the agent's browser:
   // with a listener on, Playwright intercepts it (no native dialog) and the
@@ -86,6 +92,7 @@ module.exports = function createAdminManualRouter({
     const s = open.get(phone);
     if (!s) return;
     open.delete(phone);
+    if (s.lane) s.lane.gen++; // a preparation under way stops at its next step
     clearTimeout(s.timer);
     await viewer.close(key(phone), reason).catch(() => {});
     await driver.stopSession(s.sessionId).catch(() => {});
@@ -312,7 +319,7 @@ module.exports = function createAdminManualRouter({
     try { path = page ? new URL(page.url()).pathname : null; } catch { path = null; }
     res.json({
       open: true, property: s.pageId ? await cardOf(phone, s.pageId) : null,
-      chooser_open: !!(s.chooser && Date.now() - s.chooser.at < CHOOSER_FRESH_MS), url_path: path,
+      chooser_open: !!(s.chooser && Date.now() - s.chooser.at < CHOOSER_FRESH_MS), url_path: path, lane: lane.view(s),
     });
   }));
 
@@ -379,6 +386,22 @@ module.exports = function createAdminManualRouter({
     if (chooser) { await chooser.setFiles(file); s.chooser = null; }
     else await input.setInputFiles(file);
     res.json({ ok: true });
+  }));
+
+  // ── semi-automatic: ▶ and "הבא" (admin-manual-lane) ──
+  router.post("/agents/:ref/browser/run", requireAdmin, withBrowser(async (req, res, phone, s) => {
+    res.json({ lane: await lane.run(phone, s) });
+  }));
+  router.post("/agents/:ref/browser/next", requireAdmin, withBrowser(async (req, res, phone, s) => oneAtATime(phone, async () => {
+    const r = await lane.next(phone, s, req.body || {}, req.user);
+    if (r.error) return res.status(r.error === "not_running" ? 409 : 400).json({ error: r.error });
+    res.json(r);
+  })));
+
+  // The groups admins skipped, most flagged first (posting-manual.skip).
+  router.get("/flags", requireAdmin, wrap(async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({ flags: await x.store.listGroupFlags() });
   }));
 
   router.delete("/agents/:ref/browser", requireAdmin, wrap(async (req, res) => {
