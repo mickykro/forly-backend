@@ -189,12 +189,11 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     const local = R.makeApp({ deps: Object.assign({}, env.deps, { env: Object.assign({}, env.deps.env, { FORLY_ENV: "local", POSTING_SWEEPER: "1" }) }) });
     assert.notEqual((await call(local, "POST", "/api/posting/groups/resync")).body.error, "too_soon", "FORLY_ENV=local resyncs at once");
     clk.t = new Date(K.NOW.getTime() + 30 * K.MIN);
+    // A sync only reads the groups page: it runs while automated posting is switched off.
     globalOff();
-    const off = await call(env.app, "POST", "/api/posting/groups/resync");
-    assert.equal(off.status, 409); assert.equal(off.body.reason, "global_off");
-    globalOn();
     mode = "ok";
-    assert.equal((await call(env.app, "POST", "/api/posting/groups/resync")).status, 200, "a refused call did not stamp");
+    assert.equal((await call(env.app, "POST", "/api/posting/groups/resync")).status, 200, "a resync runs with the global switch off");
+    globalOn();
     const nc = await setup({ conn: { facebook_browser_connected_at: null } });
     assert.equal((await call(nc.app, "POST", "/api/posting/groups/resync")).body.error, "facebook_not_connected");
   }

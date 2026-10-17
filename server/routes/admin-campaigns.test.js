@@ -51,7 +51,19 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     // ── pickers ──
     assert.deepEqual((await call(server, "GET", "/agents", undefined, false)).body.agents.map((a) => a.ref), [REF]);
     assert.ok((await call(server, "GET", `/agents/${REF}/properties`, undefined, false)).body.properties.some((p) => p.page_id === "pg1"));
-    assert.deepEqual((await call(server, "GET", `/agents/${REF}/groups`, undefined, false)).body.groups.map((g) => g.group_id), ["111", "222"]);
+    const gl = (await call(server, "GET", `/agents/${REF}/groups`, undefined, false)).body.groups;
+    assert.deepEqual(gl.map((g) => g.group_id), ["111", "222"]);
+    assert.ok(gl.every((g) => g.in_catalog === true && g.name), "catalog groups carry in_catalog and a name (the catalog's when the sync hashed it)");
+    // refresh from Facebook: the guarded sync's refusal is passed on; a success returns the re-read list
+    rdeps.groupsSync = { runSync: async () => { throw Object.assign(new Error("off"), { code: "posting_disabled", reason: "env_off" }); } };
+    const rf = await call(server, "POST", `/agents/${REF}/groups/refresh`, {}, false);
+    assert.deepEqual([rf.status, rf.body], [409, { error: "posting_disabled", reason: "env_off" }]);
+    let synced = 0;
+    rdeps.groupsSync = { runSync: async ({ phone }) => { synced++; await K.db.setConnection(phone, { facebook_groups_synced_at: "2026-10-12T09:00:00.000Z" }); return 2; } };
+    const ok = await call(server, "POST", `/agents/${REF}/groups/refresh`, {}, false);
+    assert.equal(ok.status, 200); assert.equal(synced, 1); assert.equal(ok.body.synced_at, "2026-10-12T09:00:00.000Z");
+    assert.equal((await call(server, "POST", `/agents/${REF}/groups/refresh`, {}, false)).status, 429, "one refresh a minute per agent");
+    delete rdeps.groupsSync;
 
     // ── create: step-up, consent, checks ──
     const body = { agent: REF, page_id: "pg1", group_ids: ["111", "222"], mode: "standing", days: 14, consent: CONSENT };
@@ -63,7 +75,7 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     const row = made.body.campaign;
     assert.equal(row.created_by, "admin");
     assert.equal(row.consent_by.method, "phone");
-    assert.equal(notes.length, 1, "agent told about the new campaign");
+    assert.equal(notes.length, 0, "an admin-created campaign sends the agent nothing");
     const again = await call(server, "POST", "/campaigns", body);
     assert.equal(again.status, 200); assert.equal(again.body.existing, true);
 
@@ -90,12 +102,23 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     assert.deepEqual(edited.body.campaign.groups.map((g) => g.group_id), ["111"]);
     const back = await call(server, "PATCH", `/campaigns/${row.id}`, { version: edited.body.campaign.version, add_group_ids: ["222"] });
     assert.deepEqual(back.body.campaign.groups.map((g) => g.group_id), ["111", "222"]);
-    assert.equal(notes.length, 1, "edits are silent");
+    // edit with "save as defaults": the edited campaign's groups become the agent's defaults; on its own it changes nothing else
+    assert.equal((await call(server, "PATCH", `/campaigns/${row.id}`, { version: back.body.campaign.version, set_defaults: "yes" })).status, 400);
+    const asDefaults = await call(server, "PATCH", `/campaigns/${row.id}`, { version: back.body.campaign.version, set_defaults: true });
+    assert.equal(asDefaults.status, 200, JSON.stringify(asDefaults.body));
+    assert.deepEqual(asDefaults.body.default_group_ids, ["111", "222"]);
+    assert.deepEqual((await K.db.getConnection(AGENT)).posting_permission.default_group_ids, ["111", "222"]);
+    assert.equal(asDefaults.body.campaign.version, back.body.campaign.version, "defaults alone leave the campaign as it was");
+    const trimmed = await call(server, "PATCH", `/campaigns/${row.id}`, { version: back.body.campaign.version, remove_group_ids: ["222"], set_defaults: true });
+    assert.deepEqual(trimmed.body.default_group_ids, ["111"]);
+    const restored = await call(server, "PATCH", `/campaigns/${row.id}`, { version: trimmed.body.campaign.version, add_group_ids: ["222"] });
+    assert.deepEqual(restored.body.campaign.groups.map((g) => g.group_id), ["111", "222"]);
+    assert.equal(notes.length, 0, "edits are silent");
 
     // ── stop / start ──
     const stopped = await call(server, "POST", `/campaigns/${row.id}/stop`, {});
     assert.equal(stopped.body.campaign.status, "stopped");
-    assert.equal(notes.length, 2, "agent told about the stop");
+    assert.equal(notes.length, 1, "agent told about the stop");
     assert.equal((await call(server, "POST", `/campaigns/${row.id}/start`, {})).body.error, "consent_note_required", "a restart needs a fresh consent");
     const restarted = await call(server, "POST", `/campaigns/${row.id}/start`, { consent: CONSENT });
     assert.equal(restarted.body.campaign.status, "running");
@@ -103,7 +126,7 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     await K.store.mutatePostingCampaign(row.id, () => ({ status: "paused", pause_reason: "agent" }));
     const halted = await call(server, "POST", `/campaigns/${row.id}/start`, {});
     assert.equal(halted.status, 409); assert.equal(halted.body.error, "account_halted");
-    assert.equal(notes.length, 2, "starts are silent");
+    assert.equal(notes.length, 1, "starts are silent");
 
     // ── create on a halted account: 409, nothing created or sent ──
     const nBefore = notes.length, aBefore = (await audits()).length;
@@ -147,13 +170,24 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
     await K.db.setConnection(AGENT, { posting_disabled_until_admin: false });
     await K.store.mutatePostingCampaign(row.id, () => ({ status: "stopped", restarted_at: null,
       created_at: K.iso(K.NOW.getTime() - 10 * K.DAY), expires_at: K.iso(K.NOW.getTime() - 3 * K.DAY),
-      posts: [{ id: "old1", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY) }] }));
+      posts: [{ id: "old1", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY), post_url: "https://www.facebook.com/groups/111/posts/9" },
+        { id: "old2", target: "group", group_id: "222", status: "pending_group_approval", scheduled_at: K.iso(K.NOW.getTime() - 5 * K.DAY), created_at: K.iso(K.NOW.getTime() - 5 * K.DAY) },
+        { id: "old3", target: "group", group_id: "111", status: "posted", posted_at: K.iso(K.NOW.getTime() - 6 * K.DAY), created_at: K.iso(K.NOW.getTime() - 6 * K.DAY) },
+        { id: "old4", target: "group", group_id: "222", status: "skipped", created_at: K.iso(K.NOW.getTime() - 6 * K.DAY) },
+        { id: "old5", target: "group", group_id: "222", status: "failed", scheduled_at: K.iso(K.NOW.getTime() - 6 * K.DAY), created_at: K.iso(K.NOW.getTime() - 6 * K.DAY) }] }));
     const listed = (await call(server, "GET", "/campaigns", undefined, false)).body;
     assert.equal(listed.campaigns.find((c) => c.id === row.id).run_days, 7);
     const again7 = await call(server, "POST", `/campaigns/${row.id}/start`, { consent: CONSENT });
     assert.equal(again7.status, 200);
     assert.equal(new Date(again7.body.campaign.expires_at).getTime(), K.NOW.getTime() + 7 * K.DAY, "7-day run → 7 days, not 30");
     assert.deepEqual(again7.body.campaign.counts, { owed: 2, posted: 0, skipped: 0 }, "the previous run's post is history");
+    const day = (n) => require("../posting-safety").jerusalemDate(K.NOW.getTime() - n * K.DAY);
+    const ups = again7.body.campaign.uploads;
+    assert.deepEqual(ups.map((u) => [u.day, u.group_id, u.pending]), [[day(5), "111", false], [day(5), "222", true], [day(6), "111", false]],
+      "every round's uploads, newest first; skipped and failed are not uploads");
+    assert.equal(ups[0].url, "https://www.facebook.com/groups/111/posts/9", "the post's own link when known");
+    assert.ok(/facebook\.com\/groups\/222/.test(ups[1].url || ""), "else the group's");
+    assert.ok(ups.every((u) => typeof u.group_name === "string"));
 
     // ── an edit refused after its row: a second row says so ──
     const curV = (await K.store.getPostingCampaign(row.id)).updated_at;
@@ -203,11 +237,68 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       await K.store.mutatePostingCampaign(row.id, () => ({ repeat: false, repeat_days: null }));
     } finally { mServer.close(); }
 
+    // ── which groups a property can't take, and why ──
+    {
+      const conn0 = await K.db.getConnection(AGENT);
+      await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member.concat([
+        K.member("333", { name: "דירות להשכרה בחיפה" }), K.member("444", { name: "דירות בחיפה - ללא מתווכים" }), K.member("555", { name: "חיפה דירות" }), K.member("666", { name: "חיפה נדל״ן" }),
+      ]) });
+      const fApp = express(); fApp.use(express.json());
+      fApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: deps.env, catalog: async () => (await CATALOG()).concat([
+        { url: K.G(555), name: "חיפה דירות", agent_policy: "explicitly_allowed", listing_types: ["rent"] }, { url: K.G(666), name: "חיפה נדל״ן", agent_policy: "no_agents", listing_types: [] },
+      ]) }));
+      const fServer = fApp.listen(0);
+      try {
+        const f = await call(fServer, "GET", `/agents/${REF}/groups/fit?page_id=pg1`, undefined, false);
+        assert.equal(f.status, 200); assert.equal(f.body.listing_type, "sale");
+        assert.deepEqual(f.body.fit["333"], { warn: "deal_name" }, "a rent name on a sale: a warning");
+        assert.deepEqual(f.body.fit["444"], { block: "no_agents_name" });
+        assert.deepEqual(f.body.fit["555"], { block: "listing_type", listing_types: ["rent"] });
+        assert.deepEqual(f.body.fit["666"], { block: "no_agents_policy" });
+        assert.equal(f.body.fit["111"], undefined, "a fitting group says nothing");
+        assert.equal((await call(fServer, "GET", `/agents/${REF}/groups/fit?page_id=nope`, undefined, false)).status, 404);
+      } finally { fServer.close(); await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member }); }
+    }
+
     // ── staging saves campaign changes too (no env 503) ──
     const sApp = express(); sApp.use(express.json());
     sApp.use("/api/admin/campaigns", createRouter({ requireAdmin, requireStepUp, deps: rdeps, env: { FORLY_ENV: "staging" }, catalog: CATALOG }));
     const sServer = sApp.listen(0);
     try { assert.notEqual((await call(sServer, "POST", "/campaigns", body)).status, 503); } finally { sServer.close(); }
+    // ── one campaign's groups for all the agent's properties: defaults saved,
+    //    a campaign per property without a live one, the rest reported ──
+    {
+      await K.db.savePage(K.page("pg4", AGENT));
+      await K.db.savePage(K.page("pg5", AGENT, { property: { title: "להשכרה", listing_type: "rent" } }));
+      const src = await K.store.getPostingCampaign(row.id);
+      assert.equal((await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { days: 10 })).body.error, "consent_note_required");
+      assert.equal((await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT }, false)).status, 401, "step-up first");
+      const nApply = notes.length;
+      const r = await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT, days: 10 });
+      assert.equal(notes.length, nApply, "opening campaigns for all properties sends the agent nothing");
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      const made = r.body.created.map((c) => c.page_id);
+      assert.ok(made.includes("pg4") && made.includes("pg5") && !made.includes("pg1"), JSON.stringify(made));
+      assert.ok(r.body.skipped.some((k) => k.page_id === "pg3" && k.reason === "has_campaign"), "a property with a live campaign is left alone");
+      const ids = src.groups.map((g) => String(g.group_id));
+      assert.deepEqual(r.body.default_group_ids, ids);
+      assert.deepEqual((await K.db.getConnection(AGENT)).posting_permission.default_group_ids, ids, "the defaults are the campaign's groups");
+      const c4 = await K.store.getPostingCampaign(K.store.campaignId(AGENT, "pg4"));
+      assert.deepEqual(c4.groups.map((g) => String(g.group_id)), ids);
+      assert.equal(c4.consent_by.by, "admin");
+      assert.ok((await audits()).some((e) => e.action === "apply_groups_to_all"));
+      // the groups list returns the defaults; a create with set_defaults saves its groups as the new defaults
+      assert.deepEqual((await call(server, "GET", `/agents/${REF}/groups`, undefined, false)).body.default_group_ids, ids);
+      await K.db.savePage(K.page("pg6", AGENT));
+      const made6 = await call(server, "POST", "/campaigns", { agent: REF, page_id: "pg6", group_ids: ["222"], mode: "standing", days: 7, consent: CONSENT, set_defaults: true });
+      assert.equal(made6.status, 201, JSON.stringify(made6.body)); assert.deepEqual(made6.body.default_group_ids, ["222"]);
+      assert.deepEqual((await K.db.getConnection(AGENT)).posting_permission.default_group_ids, ["222"]);
+      assert.equal((await call(server, "POST", "/campaigns", { agent: REF, page_id: "pg6", group_ids: ["222"], mode: "standing", consent: CONSENT, set_defaults: "yes" })).status, 400);
+      await K.db.setConnection(AGENT, { posting_permission: Object.assign({}, (await K.db.getConnection(AGENT)).posting_permission, { default_group_ids: ids }) });
+      // again: everything has a campaign now, nothing new
+      const again = await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT, set_defaults: false });
+      assert.equal(again.body.created.length, 0); assert.equal(again.body.defaults_set, false);
+    }
     console.log("routes/admin-campaigns.test.js ok");
   } finally { server.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

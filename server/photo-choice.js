@@ -250,4 +250,4 @@ function photoTimer(draft, deps, now, promptFor) {
   return { handled: true, status: p.status, draft: touched, replies: [R.oneBubble([R.photosSaved(n, dropped), ...p.replies])] };
 }
 
-module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editRequestNow, waitingTurn, editWith, editInDraft, resumeAfterEdit, offerTimer, offeredDraft, storeVideo, photoTimer };
+module.exports = { hold, ask, turn, quotedEdit, noteBatch, swapTurn, isSwap, editRequest, editRequestNow, waitingTurn, editWith, editInDraft, resumeAfterEdit, offerTimer, offeredDraft, storeVideo, photoTimer, MAX_PHOTOS };

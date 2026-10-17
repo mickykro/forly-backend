@@ -27,7 +27,10 @@ function findChromium() {
 
   const ROW = { id: "c1", ref: "acct_1", phone_tail: "…0001", agent_name: "דנה לוי", page_id: "pg1", page_title: "דירה בחיפה", status: "running",
     pause_reason: null, mode: "standing", repeat: false, repeat_days: null, targets: ["groups"], expires_at: new Date(Date.now() + 5 * 86400000 - 3600000).toISOString(), run_days: 7,
-    groups: [{ group_id: "111", name: "A" }], counts: { owed: 1, posted: 0, skipped: 0 }, created_by: "agent", consent_by: { by: "agent" }, version: "v1" };
+    groups: [{ group_id: "111", name: "A" }], counts: { owed: 1, posted: 0, skipped: 0 }, uploads: [
+      { day: "2026-10-14", at: "2026-10-14T09:00:00Z", group_id: "111", group_name: "A", url: "https://www.facebook.com/groups/111/posts/1", pending: false },
+      { day: "2026-10-14", at: "2026-10-14T08:00:00Z", group_id: "222", group_name: "B", url: null, pending: true },
+      { day: "2026-10-13", at: "2026-10-13T09:00:00Z", group_id: "111", group_name: "A", url: null, pending: false }], created_by: "agent", consent_by: { by: "agent" }, version: "v1" };
   const seen = { creates: [], patches: [], starts: [], stops: 0 };
   let cur = ROW;
   let editAnswer = { status: 409, body: { error: "stale_version" } };
@@ -36,10 +39,19 @@ function findChromium() {
   app.get("/api/admin/campaigns/campaigns", (q, r) => r.json({ campaigns: [cur] }));
   app.get("/api/admin/campaigns/agents", (q, r) => r.json({ agents: [{ ref: "acct_1", phone_tail: "…0001", name: "דנה לוי" }] }));
   app.get("/api/admin/campaigns/agents/:ref/properties", (q, r) => r.json({ properties: [{ page_id: "pg1", title: "דירה בחיפה" }] }));
-  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111" }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222" }] }));
+  let defaultsAnswer = [];
+  app.get("/api/admin/campaigns/agents/:ref/groups", (q, r) => r.json({ default_group_ids: defaultsAnswer, groups: [{ group_id: "111", name: "A", url: "https://www.facebook.com/groups/111", in_catalog: true }, { group_id: "222", name: "B", url: "https://www.facebook.com/groups/222", in_catalog: true }, { group_id: "333", name: "", url: "https://www.facebook.com/groups/333", in_catalog: false }, { group_id: "555", name: "דירות בחיפה", url: "https://www.facebook.com/groups/555", in_catalog: false, real_estate: true }] }));
+  const applies = [];
+  app.post("/api/admin/campaigns/campaigns/c1/apply-to-all", (q, r) => { applies.push(q.body); r.json({ defaults_set: true, default_group_ids: ["111"], created: [{ page_id: "pg2" }], skipped: [{ page_id: "pg3", reason: "has_campaign" }] }); });
+  let refreshes = 0; // the first refresh is refused (posting off), the second reads one more group
+  app.post("/api/admin/campaigns/agents/:ref/groups/refresh", (q, r) => (++refreshes === 1 ? r.status(409).json({ error: "posting_disabled", reason: "env_off" })
+    : r.json({ synced_at: "2026-10-12T09:00:00.000Z", groups: [{ group_id: "111", name: "A", in_catalog: true }, { group_id: "222", name: "B", in_catalog: true }, { group_id: "444", name: "D", in_catalog: true }] })));
   let estimateAnswer = { posts: 200, per_week: 64, days: 22, fits: true, days_left: 30, warmup: false };
   app.post("/api/admin/campaigns/estimate", (q, r) => r.json(estimateAnswer));
-  app.post("/api/admin/campaigns/campaigns", (q, r) => { seen.creates.push(q.body); r.status(201).json({ campaign: ROW }); });
+  let createAnswer = null; // null: 201; else { status, body } once
+  app.post("/api/admin/campaigns/campaigns", (q, r) => { seen.creates.push(q.body); if (createAnswer) { const a = createAnswer; createAnswer = null; return r.status(a.status).json(a.body); } r.status(201).json({ campaign: ROW }); });
+  let fitAnswer = { listing_type: "sale", fit: {} };
+  app.get("/api/admin/campaigns/agents/:ref/groups/fit", (q, r) => r.json(fitAnswer));
   app.patch("/api/admin/campaigns/campaigns/c1", (q, r) => { seen.patches.push(q.body); r.status(editAnswer.status).json(editAnswer.body); });
   app.post("/api/admin/campaigns/campaigns/c1/start", (q, r) => { seen.starts.push(q.body); cur = ROW; r.json({ campaign: ROW }); });
   app.post("/api/admin/campaigns/campaigns/c1/stop", (q, r) => { seen.stops++; cur = Object.assign({}, ROW, { status: "stopped" }); r.json({ campaign: cur }); });
@@ -54,6 +66,14 @@ function findChromium() {
     await page.click("#tabCampaigns");
     await page.waitForSelector("#campList [data-camp='c1']");
     assert.ok((await page.innerText("#campList")).includes("דנה לוי"));
+    // uploaded posts per day, newest first: on the campaign and summed over the list
+    assert.deepEqual(await page.$$eval("[data-camp='c1'] .cf-day > summary", (d) => d.map((x) => x.textContent)), ["14.10 2", "13.10 1"]);
+    await page.click("[data-camp='c1'] .cf-day > summary");
+    const items = await page.$$eval("[data-camp='c1'] .cf-day[open] li", (li) => li.map((x) => x.textContent));
+    assert.equal(items.length, 2); assert.ok(items[0].startsWith("A") && /ממתין/.test(items[1]), "the day's groups, pending marked");
+    assert.equal(await page.$eval("[data-camp='c1'] .cf-day[open] li a", (a) => a.href), "https://www.facebook.com/groups/111/posts/1");
+    const sum = await page.$$eval(".cf-days-sum .cf-day li", (li) => li.map((x) => x.textContent));
+    assert.ok(sum.length === 3 && sum.every((t) => t.includes("דירה בחיפה")), "the summary names the property");
 
     // create with recorded consent
     await page.click("#campNew");
@@ -81,6 +101,54 @@ function findChromium() {
     assert.equal(seen.creates[0].days, 14);
     assert.equal(seen.creates[0].mode, "standing");
     assert.deepEqual(seen.creates[0].targets, ["groups"]);
+    assert.equal(seen.creates[0].set_defaults, undefined, "defaults are saved only when asked");
+
+    // the agent's default groups: a new campaign starts from them, and a create can save the chosen ones
+    defaultsAnswer = ["222"];
+    await page.click("#campNew");
+    await page.selectOption("#campFormAgent", "acct_1");
+    await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
+    assert.equal(await page.isChecked("#campFormGroups input[value='222']"), true, "the default group is ticked");
+    assert.equal(await page.isChecked("#campFormGroups input[value='111']"), false);
+    assert.match(await page.textContent("#campFormGroups label:has(input[value='222'])"), /ברירת מחדל/);
+    assert.match(await page.textContent("#campFormDefaultsHint"), /סומנו 1 קבוצות ברירת המחדל/);
+    await page.click("#campFormNone");
+    await page.click("#campFormUseDefaults");
+    assert.equal(await page.isChecked("#campFormGroups input[value='222']"), true, "one click brings the defaults back");
+    await page.check("#campFormGroups input[value='111']");
+    await page.check("#campFormSetDefaults");
+    await page.selectOption("#campFormProperty", "pg1");
+    await page.fill("#campFormConsentNote", "אישר בטלפון");
+    await page.click("#campFormSave");
+    await page.waitForFunction(() => document.querySelector("#campForm").hidden);
+    assert.equal(seen.creates[1].set_defaults, true);
+    assert.deepEqual(seen.creates[1].group_ids.slice().sort(), ["111", "222"]);
+    defaultsAnswer = [];
+
+    // a property's misfits are marked with why: a blocked group is unticked and locked, a warning only shown
+    fitAnswer = { listing_type: "sale", fit: { "222": { block: "listing_type", listing_types: ["rent"] }, "555": { warn: "deal_name" } } };
+    await page.click("#campNew");
+    await page.selectOption("#campFormAgent", "acct_1");
+    await page.waitForSelector("#campFormProperty option[value='pg1']", { state: "attached" });
+    await page.selectOption("#campFormProperty", "pg1");
+    await page.waitForSelector("#campFormGroups .cf-bad-g input[value='222']", { state: "attached" });
+    assert.match(await page.textContent("#campFormGroups label:has(input[value='222']) .cf-why"), /הקבוצה רק להשכרה — והנכס למכירה/);
+    assert.equal(await page.isDisabled("#campFormGroups input[value='222']"), true);
+    assert.equal(await page.isChecked("#campFormGroups input[value='222']"), false);
+    assert.match(await page.textContent("#campFormGroups label:has(input[value='555']) .cf-why"), /כדאי לבדוק/);
+    assert.equal(await page.isDisabled("#campFormGroups input[value='555']"), false, "a warning does not lock");
+    assert.match(await page.textContent("#campFormFit"), /1 קבוצות לא מתאימות/);
+    await page.click("#campFormAll");
+    assert.equal(await page.isChecked("#campFormGroups input[value='222']"), false, "select-all skips a blocked group");
+    // a refused save marks the groups the server named and unticks them
+    fitAnswer = { listing_type: "sale", fit: {} };
+    createAnswer = { status: 422, body: { error: "listing_type_not_allowed", group_ids: ["111"] } };
+    await page.fill("#campFormConsentNote", "אישר בטלפון");
+    await page.click("#campFormSave");
+    await page.waitForSelector("#campFormGroups .cf-bad-g input[value='111']", { state: "attached" });
+    assert.equal(await page.isChecked("#campFormGroups input[value='111']"), false);
+    assert.match(await page.textContent("#campFormError"), /סומנו באדום 1 קבוצות שנדחו/);
+    await page.click("#campFormCancel");
 
     // a refused edit (stale version) shows its reason, sends the row's version and the changed days, and closes the form
     await page.click("[data-camp='c1'] [data-act='edit']");
@@ -98,6 +166,18 @@ function findChromium() {
     editAnswer = { status: 200, body: { campaign: ROW } };
     await page.click("[data-camp='c1'] [data-act='edit']");
     await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
+    assert.equal(await page.locator("#campFormGroups input[value='333']").count(), 0, "a group that doesn't read as real estate is not offered");
+    assert.match(await page.textContent("#campFormGroups label:has(input[value='555'])"), /לא בקטלוג/, "a real-estate group outside the catalog is offered, tagged");
+    assert.match(await page.textContent("#campFormGroupsHidden"), /עוד 1 קבוצות/);
+    // refresh from Facebook: a refusal says why; a success re-lists the groups and keeps what is ticked
+    assert.match(await page.textContent("#campFormSynced"), /עוד לא נקראו/);
+    await page.click("#campFormRefresh");
+    await page.waitForFunction(() => /הפרסום האוטומטי כבוי/.test((document.getElementById("toast") || {}).textContent || ""));
+    await page.waitForFunction(() => !document.getElementById("campFormRefresh").disabled);
+    await page.click("#campFormRefresh");
+    await page.waitForSelector("#campFormGroups input[value='444']", { state: "attached" });
+    assert.equal(await page.isChecked("#campFormGroups input[value='111']"), true, "a ticked group stays ticked");
+    assert.match(await page.textContent("#campFormSynced"), /נקראו מפייסבוק ב-/);
     await page.check("#campFormGroups input[value='222']");
     await page.uncheck("#campFormGroups input[value='111']");
     await page.click("#campFormSave");
@@ -125,6 +205,15 @@ function findChromium() {
     await page.click("#campFormSave");
     await page.waitForFunction(() => !document.getElementById("campStepUp").classList.contains("hidden"));
     await page.click("#campFormCancel");
+
+    // the campaign's groups for all the agent's properties: consent, then a summary
+    await page.click("[data-camp='c1'] [data-act='all']");
+    assert.equal(await page.isChecked("#campFormDefaults"), true);
+    assert.deepEqual(await page.$$eval("#campFormEstimate .cf-applylist li", (li) => li.map((x) => x.textContent)), ["A"], "the consent names the groups it covers");
+    await page.fill("#campFormConsentNote", "ביקשה בטלפון לכל הנכסים");
+    await page.click("#campFormSave");
+    await page.waitForFunction(() => /נפתחו 1 קמפיינים · דולגו: 1 כבר יש קמפיין/.test((document.getElementById("toast") || {}).textContent || ""));
+    assert.deepEqual(applies[0], { consent: { method: "phone", note: "ביקשה בטלפון לכל הנכסים" }, days: 7, set_defaults: true });
 
     // stop asks (dialog accepted), then really stops
     await page.click("[data-camp='c1'] [data-act='stop']");

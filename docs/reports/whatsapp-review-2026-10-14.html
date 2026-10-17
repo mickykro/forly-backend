@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forly WhatsApp Review — 2026-10-14</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f27; --muted: #5b6472; --border: #e3e6ea;
+    --accent: #2563eb; --good: #15803d; --good-bg: #ecfdf3; --warn: #b45309; --warn-bg: #fffbeb;
+    --bad: #b91c1c; --bad-bg: #fef2f2; --info-bg: #eff6ff; --code-bg: #0f172a; --code-ink: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55; padding: 0 16px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { padding: 40px 0 20px; }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 0.82rem; color: var(--muted); }
+  .verdict {
+    margin: 22px 0 30px; padding: 20px 22px; border-radius: 14px; background: var(--info-bg);
+    border: 1px solid #bfdbfe;
+  }
+  .verdict.alert { background: var(--bad-bg); border-color: #fecaca; }
+  .verdict h2 { margin: 0 0 8px; font-size: 1.05rem; }
+  .verdict p { margin: 0 0 8px; color: #1e3a5f; }
+  .verdict.alert p { color: #7f1d1d; }
+  .verdict p:last-child { margin-bottom: 0; }
+  section { margin: 36px 0; }
+  h2.section-title { font-size: 1.2rem; border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 18px; }
+  .section-note { color: var(--muted); margin-top: -10px; margin-bottom: 18px; font-size: 0.92rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card.critical { border-color: #fecaca; }
+  .card h3 { margin: 0 0 4px; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .badge.fixed { background: var(--good-bg); color: var(--good); }
+  .badge.n8n { background: var(--warn-bg); color: var(--warn); }
+  .badge.watch { background: #f3f4f6; color: var(--muted); }
+  .badge.good { background: var(--good-bg); color: var(--good); }
+  .badge.critical { background: var(--bad-bg); color: var(--bad); }
+  .badge.biz { background: #f3e8ff; color: #7e22ce; }
+  .card .meta { color: var(--muted); font-size: 0.82rem; margin: 4px 0 12px; }
+  .card p { margin: 8px 0; }
+  .evidence {
+    background: #fafbfc; border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 0.86rem;
+  }
+  .evidence .line { margin: 3px 0; }
+  .evidence .bot { color: var(--accent); }
+  .evidence .bot::before { content: "🤖 "; }
+  .evidence .user { color: #374151; }
+  .evidence .user::before { content: "👤 "; }
+  .evidence .ext { color: var(--muted); font-style: italic; }
+  code, .code-inline { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .commit-ref {
+    display: inline-block; margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem; background: var(--good-bg); color: var(--good); border-radius: 6px; padding: 4px 10px;
+  }
+  ul.plain { margin: 8px 0; padding-inline-start: 20px; }
+  ul.plain li { margin: 4px 0; }
+  .outbound-msg {
+    background: var(--bad-bg); border: 1px solid #fecaca; border-radius: 10px; padding: 14px 16px; margin-top: 10px;
+  }
+  .outbound-msg .to { font-size: 0.78rem; color: var(--bad); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+  footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --ink: #e5e7eb; --muted: #9199a8; --border: #262b34;
+      --info-bg: #142238; --good-bg: #0f2a1c; --warn-bg: #2a2110; --bad-bg: #2a1414; --code-bg: #05070c;
+    }
+    .badge.biz { background: #2a1a3a; color: #d8b4fe; }
+    .verdict { border-color: #1e3a5f; }
+    .verdict p { color: #bcd4ee; }
+    .verdict.alert { border-color: #4c1d1d; }
+    .verdict.alert p { color: #fca5a5; }
+    .evidence { background: #12151c; }
+    code, .code-inline { background: #20242e; color: #dbe1ea; }
+    .outbound-msg { border-color: #4c1d1d; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Forly WhatsApp Review</h1>
+  <div class="subtitle">Daily check on the agent-facing WhatsApp bot — what real conversations show about where it helps and where it trips people up.</div>
+  <div class="meta-row">
+    <span class="pill">Generated 2026-10-14, ~08:50 IDT</span>
+    <span class="pill">Window: Tue 2026-10-13 08:50 IDT → Wed 2026-10-14 08:50 IDT</span>
+    <span class="pill">Source: Green API getChats / getChatHistory / lastIncomingMessages / lastOutgoingMessages + n8n workflow graphs</span>
+    <span class="pill">1,403 individual chats listed; 0 outgoing / 0 incoming account-wide in-window (excl. operator)</span>
+    <span class="pill">Channel: waInstance7105422200 — instance state: authorized (confirmed healthy)</span>
+    <span class="pill">972542045280 excluded (the operator's own number)</span>
+  </div>
+</header>
+
+<div class="verdict alert">
+  <h2>Bottom line</h2>
+  <p><strong>Nothing new happened on the account this cycle — and that is itself the finding.</strong> Zero inbound WhatsApp messages and zero outbound bot replies, account-wide, since the last report's cutoff (2026-10-13 08:50 IDT). The Green API instance itself is healthy (<code>getStateInstance</code> → <code>authorized</code>), so this isn't an outage; people simply didn't write in. The two incidents carried forward from 2026-10-12/13 are consequently unchanged in evidence but <strong>materially worse in elapsed time</strong>: Nofar Harush (972546582548) has now had <strong>zero bot reply for 63+ hours</strong> (since 2026-10-11 17:24 IDT) despite trying again in full — new photos, a full listing, menu answers — as recently as 2026-10-13 11:47 IDT, itself now 21 hours ago with no further attempt. Tsach Ben-Basat's two dropped photo batches (2026-10-12) remain un-followed-up by a human.</p>
+  <p><strong>New this cycle:</strong> confirmed, by reading the live n8n workflow graphs again, that the error-handling fix recommended on 2026-10-12 and repeated on 2026-10-13 has <strong>still not been applied</strong> — both <code>Main Router v3</code> and <code>Business Handler v6</code> show <code>updatedAt: 2026-10-11</code>, i.e. unchanged since <em>before</em> either warning. Also new: the <code>AI Agent - Business1</code> node in <code>Business Handler v6</code> has no <code>onError</code> either, and neither workflow has a workflow-level Error Workflow configured — so an uncaught failure anywhere in the chain (not just the three HTTP calls named previously) can leave a customer in permanent silence with zero trace. This is the most likely explanation for why Nofar's brand-new 2026-10-13 attempt — a fresh start, not a continuation of the earlier stuck draft — still got nothing: if her saved conversation history is what's triggering the failure, every retry reloads the same poisoned history and fails the same way, regardless of what she sends.</p>
+  <p>This PR ships <strong>no code changes</strong> — there was no new in-repo bug surfaced this cycle, and the one already fixed (2026-10-13's dropped-photos bug) is unrelated to what's still open. One business WhatsApp message and one n8n WhatsApp message went out with today's update, per standing instruction.</p>
+</div>
+
+<section>
+  <h2 class="section-title">Active incident — carried forward, now 63+ hours</h2>
+  <div class="card critical">
+    <h3><span class="badge critical">Critical</span><span class="badge biz">Business</span><span class="badge n8n">n8n</span> 972546582548 — still zero reply since 2026-10-11 17:24 IDT</h3>
+    <div class="meta">נופר הרוש שמאות מקרקעין ונדל"ן · first reported 2026-10-12, carried forward 2026-10-13, still open today</div>
+    <p>Full earlier timeline in <a href="./whatsapp-review-2026-10-13.html"><code>whatsapp-review-2026-10-13.html</code></a>. What's new: she tried again, fully fresh, on 2026-10-13 — not a continuation of the stuck draft, a brand-new batch:</p>
+    <div class="evidence">
+      <div class="line user">11:43 — 7 new photos, back to back</div>
+      <div class="line user">11:44 — "1" (new listing)</div>
+      <div class="line user">11:45 — a full listing text block (address, rooms, size…), then a second line with the neighbourhood</div>
+      <div class="line user">11:46–11:47 — "1", "2", "5", "1" (menu answers — design choice, confirmations)</div>
+      <div class="line ext">No reply of any kind to any of it. Nothing from this chat since — 21 hours of silence on her side too, as of this report, consistent with having given up.</div>
+    </div>
+    <p>This matters because it rules out the simplest theory: this isn't a draft stuck at one step that a retry would clear. A complete, independent new attempt — new photos, new text, new menu answers — hit the exact same wall. That points at something keyed to <em>this phone number's stored state</em> (most likely her saved conversation history, which both Business Handler v6's <code>Get Chat History</code> and the AI Agent itself read on every turn) rather than at the specific message content.</p>
+    <p><strong>No Firestore access this cycle either</strong> (no <code>GOOGLE_APPLICATION_CREDENTIALS</code> in this session) — her lock document and draft state still can't be inspected directly. Diagnosing this fully needs someone with Firestore/server-log access to look at her specific record, or a direct manual conversation with her to rebuild the listing by hand.</p>
+  </div>
+  <div class="card critical">
+    <h3><span class="badge critical">Critical</span><span class="badge biz">Business</span> 972547221770 — two dropped batches, still no human follow-up</h3>
+    <div class="meta">צח בן בסט · batches from 2026-10-12 08:34 and 11:44 IDT, unchanged this cycle (no new message from him)</div>
+    <p>Root cause already fixed in this repo (2026-10-13, <code>fix(whatsapp): edit the photos just sent, not a stale album from history</code>), now on <code>staging</code>. He hasn't sent anything since the fix landed, so the fix is unverified against a live retry from him — and more importantly, nobody has told him his two batches didn't just silently vanish. A short manual WhatsApp message costs nothing and closes the loop.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">n8n — the recommended fix still hasn't landed</h2>
+  <div class="card">
+    <h3><span class="badge n8n">n8n</span> Business Handler v6 / Main Router v3 unchanged since before the first warning</h3>
+    <div class="meta">Read directly from the live workflow graphs again this cycle (same workflow ids as 2026-10-13: <code>fhyTsd1DSN6wtMGz</code>, <code>lQwn7eYSuIxAZkJB</code>)</div>
+    <p>Both workflows' <code>updatedAt</code> is still <code>2026-10-11T12:5x</code> — before the fix was first recommended on 2026-10-12, and before it was repeated with exact node names on 2026-10-13. Confirmed again today: <code>onError</code> is still unset (<code>null</code>) on <code>Quota - Batch Edit</code> and <code>Check Stop</code> in Business Handler v6, and on <code>GreenAPI - Send Lock Reply</code> in Main Router v3 — the only three gateway calls on the "clear the lock / tell the customer to hold on" paths, and still the only three with no error branch.</p>
+    <p><strong>New this cycle:</strong> the <code>AI Agent - Business1</code> node (the LangChain agent that answers every message that doesn't resolve as a property-page action) also has no <code>onError</code>, and <code>workflow.settings.errorWorkflow</code> is unset on both workflows — there is no safety net anywhere in this chain. A failure in the agent call itself (not just the three HTTP calls named before) halts the execution with no reply sent, no lock cleared, and no record anywhere that it happened. Given Nofar's fresh 2026-10-13 attempt failed identically to her stuck-draft attempts, an agent-call failure driven by something in her stored history is the most likely single explanation covering both incidents.</p>
+    <p><strong>Recommended fix (unchanged ask, now three cycles running):</strong> add <code>onError: continueRegularOutput</code> (or a dedicated error branch) to all four nodes named above, each routing to its own lock-clear + "משהו השתבש, נסו שוב" fallback; and set a workflow-level Error Workflow on both <code>Main Router v3</code> and <code>Business Handler v6</code> so <em>any</em> uncaught failure — including ones in nodes nobody has named yet — clears the lock and notifies, instead of leaving the customer, and everyone else, with silence. A WhatsApp message with this update went to 972542045280.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Still open — no new evidence this cycle</h2>
+  <p class="section-note">Carried forward unchanged, not re-notified — nothing below got new evidence one way or the other.</p>
+  <div class="card">
+    <h3><span class="badge watch">Watch</span> The neighbourhood-name typo lineage</h3>
+    <div class="meta">972508505321 — no activity from this agent this cycle</div>
+    <p>Carried forward unchanged, as every prior cycle since 2026-10-08.</p>
+  </div>
+  <div class="card">
+    <h3><span class="badge watch">Watch</span> 972532844408 (Dr. Eyal Elad) — still unread, still off-topic</h3>
+    <div class="meta">No new message this cycle; still the same 5 messages from 2026-10-11, still unread in Green API</div>
+    <p>Unchanged. Still reads like a wrong-number / forwarded message, so a missed reply here stays lower-stakes than the two active incidents above.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Working well</h2>
+  <div class="card">
+    <h3><span class="badge good">Good</span> What held up</h3>
+    <ul class="plain">
+      <li>The Green API WhatsApp session itself is healthy and authorized — today's silence is a traffic fact, not an infrastructure outage, confirmed via <code>getStateInstance</code>.</li>
+      <li>No new misunderstandings, redundant generations, or cross-wired agents this cycle — there simply was no new traffic to go wrong (0 incoming / 0 outgoing account-wide, excluding the operator).</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">General improvements / commonly-requested gaps</h2>
+  <div class="card">
+    <h3>No unnecessary generations seen, nothing new to prevent this cycle</h3>
+    <p>With zero account-wide traffic this cycle there's nothing to point to on "preventing unnecessary generations" or "misunderstood messages" beyond what's already open above.</p>
+  </div>
+  <div class="card">
+    <h3>Worth considering: a saved default edit instruction</h3>
+    <p>Not a bug, just a pattern worth noting from Tsach's three photo-batches on record (2026-10-05, and twice on 2026-10-12): he sends the exact same paragraph verbatim every time — "clean small objects, remove any text revealing which office the photos belong to, brighten and sharpen for appealing real-estate marketing." An agent who always wants the same edit style has no way to set that once and skip retyping it per batch. Low priority, but a real, repeated signal — worth a product call, not something this review is proposing to build unasked.</p>
+  </div>
+</section>
+
+<div class="outbound-msg">
+  <div class="to">Sent via WhatsApp → +972542045280</div>
+  <p style="margin:0"><strong>Business:</strong> Nofar's incident is now 63+ hours old and survived a completely fresh retry on 2026-10-13, ruling out "just a stuck draft"; Tsach's two dropped batches still have no human follow-up. Recommended manually reaching both agents now.<br><strong>n8n:</strong> the fix recommended on 2026-10-12 and 2026-10-13 (onError on the three named gateway nodes) still hasn't been applied — both workflows are unchanged since 2026-10-11. Also flagged that the AI Agent node itself has no onError and neither workflow has an Error Workflow configured, which best explains why a fresh retry failed identically to the stuck draft.</p>
+</div>
+
+<footer>
+  Methodology: pulled the full chat list via <code>getChats</code> (1,405 chats, 1,403 individual; 972542045280 excluded per standing instruction). Cross-checked the full account via <code>lastIncomingMessages</code>/<code>lastOutgoingMessages</code> over a 48-hour window, filtered to everything after the last report's cutoff (2026-10-13 05:50 UTC / 08:50 IDT): 0 incoming / 0 outgoing account-wide in-window, excluding the operator and the prior cycle's own report messages. Pulled full <code>getChatHistory</code> (60–100 message windows) for the two open-incident chats (972546582548, 972547221770) plus a spot-check (972532844408) to confirm no change. Confirmed instance health via <code>getStateInstance</code> (<code>authorized</code>). Re-read the live <code>Main Router v3</code> and <code>Business Handler v6</code> n8n workflow graphs via n8n's MCP tools (node names, connections, <code>onError</code> settings, workflow-level <code>errorWorkflow</code> setting) — still no execution-log tool available to confirm an actual failed run, only the static graph and its <code>updatedAt</code> timestamps. No Firestore access this cycle (no <code>GOOGLE_APPLICATION_CREDENTIALS</code>), so neither agent's lock document or draft state could be inspected directly. HEAD at review time: <code>33e9d2e</code> on <code>main</code>; <code>staging</code> is 24 commits ahead (admin-campaigns work, group-sync improvements, the 2026-10-13 photo-edit fix and its report, among others), not yet promoted to <code>main</code> — this cycle's PR into <code>main</code> carries that promotion alongside today's report.
+</footer>
+
+</div>
+</body>
+</html>

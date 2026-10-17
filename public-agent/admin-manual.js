@@ -16,6 +16,8 @@
   var state = null, viewer = null, poll = null;
   var detail = null, detailFor = null; // the session property in full: its groups and every text version
   var texts = [];                      // what the type/copy buttons in the detail panel refer to, by index
+  var opened = {};                     // campaign_id → expanded in the checklist (collapsed by default)
+  var here = null;                     // the group open in the browser { ref, group_id, group_name }: stays after its tick
 
   var ERR = {
     profile_busy: "הפרופיל של הסוכן תפוס כרגע (פרסום אוטומטי או התחברות). נסו שוב בעוד דקה.",
@@ -97,6 +99,7 @@
   // A tick marks it posted; the property is done when no group is owed.
   var STATE = { owed: "לפרסום", posted: "פורסם ✓", skipped: "דולג" };
   var when = function (iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("he-IL", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }); };
+  var postedOf = function (c) { return c.groups.filter(function (g) { return g.status === "posted"; }).length; };
   function renderQueue() {
     // An agent chosen in the dropdown: only theirs (no browser needed).
     var only = $("#manualAgent").value;
@@ -112,13 +115,15 @@
     $("#manualQueue").innerHTML = !refs.length ? '<p class="manual-muted">' + (only ? "לסוכן הזה אין נכסים בפרסום." : "אין כרגע נכסים לפרסום.") + "</p>" : refs.map(function (ref) {
       var list = byRef[ref];
       return '<div class="manual-agent"><h3>' + esc(list[0].agent_name || "סוכן") + ' <small class="manual-muted">' + esc(list[0].phone_tail) + "</small></h3>" +
-        list.map(function (c) {
+        // Least-posted property first, so the ones still waiting are on top.
+        list.slice().sort(function (a, b) { return postedOf(a) - postedOf(b); }).map(function (c) {
           var n = c.groups.length, d = c.groups.filter(function (g) { return g.status !== "owed"; }).length;
           var up = c.groups.filter(function (g) { return g.status === "posted"; });
-          return '<div class="manual-check">' +
-            '<div class="manual-check-head">🏠 <a href="' + esc(c.page_url) + '" target="_blank" rel="noopener">' + esc(c.title) + "</a>" +
+          var open = opened[c.campaign_id] || (picked && picked.indexOf(c.campaign_id + "|") === 0);
+          return '<details class="manual-check" data-cid="' + esc(c.campaign_id) + '"' + (open ? " open" : "") + ">" +
+            '<summary class="manual-check-head">🏠 <a href="' + esc(c.page_url) + '" target="_blank" rel="noopener">' + esc(c.title) + "</a>" +
             '<span class="manual-chip ' + (d === n ? "posted" : "owed") + '">' + d + "/" + n + "</span>" +
-            (c.awaiting_agent ? ' <span class="manual-chip owed">הסוכן עוד לא אישר את הטקסט</span>' : "") + "</div>" +
+            (c.awaiting_agent ? ' <span class="manual-chip owed">הסוכן עוד לא אישר את הטקסט</span>' : "") + "</summary>" +
             '<div class="manual-bar"><i style="width:' + (n ? Math.round((d / n) * 100) : 0) + '%"></i></div>' +
             '<div class="manual-muted">' + (up.length ? "עלה ל-" + up.length + " קבוצות: " + up.map(function (g) { return esc(g.name || "קבוצה"); }).join(", ") : "עוד לא עלה לאף קבוצה") + "</div>" +
             '<ul class="manual-groups">' + c.groups.map(function (g) {
@@ -135,9 +140,69 @@
                 '<a href="' + esc(g.url) + '" target="_blank" rel="noopener" title="פתיחה בדפדפן שלכם">↗</a>' +
                 (owed && g.copy ? '<details class="manual-text"' + (on ? " open" : "") + '><summary>הטקסט</summary><pre dir="auto">' + esc(g.copy) + "</pre></details>" : "") +
                 "</li>";
-            }).join("") + "</ul></div>";
+            }).join("") + "</ul></details>";
         }).join("") + "</div>";
     }).join("");
+    renderAlso();
+  }
+
+  // The group on screen also suits the agent's other properties (same group,
+  // still owed there): offer them, one click posts that property here next.
+  // Keyed on the group in the browser, not the picked row: ticking a row keeps the offers.
+  function alsoHere() {
+    var cur = here, p = picked && itemOf(picked);
+    if (!cur) return [];
+    return campaigns.filter(function (c) {
+      return c.ref === cur.ref && !(p && c.campaign_id === p.campaign_id) &&
+        c.groups.some(function (g) { return g.group_id === cur.group_id && g.status === "owed"; });
+    }).sort(function (a, b) { return postedOf(a) - postedOf(b); });
+  }
+  function renderAlso() {
+    var list = alsoHere(), cur = here;
+    $("#manualAlso").innerHTML = !list.length ? "" :
+      '<div class="manual-detail"><b>הקבוצה "' + esc(cur.group_name || "") + '" מתאימה גם ל:</b><div class="manual-row">' +
+      list.map(function (c) {
+        return '<button type="button" class="btn btn-ghost btn-sm" data-also="' + esc(c.campaign_id + "|" + cur.group_id) + '">🏠 ' + esc(c.title) + "</button>";
+      }).join("") + "</div></div>";
+  }
+
+  // Leaving the group being worked on (another group or property): first ask
+  // whether the post went up, and mark it if so. Resolves false to stay put.
+  function leavePicked(next) {
+    var cur = picked && picked !== next && itemOf(picked);
+    if (!cur || cur.status !== "owed") return Promise.resolve(true);
+    var title = (campaigns.filter(function (c) { return c.campaign_id === cur.campaign_id; })[0] || {}).title || "";
+    return askPosted(title, cur.group_name || "").then(function (a) {
+      if (a === "editing") return false;                    // still working on it: stay on this group
+      if (a === "failed") { picked = null; return true; }   // could not post: move on, nothing marked
+      return markPosted(cur.campaign_id, cur.group_id).then(function (j) {
+        if (!j) return false; // a limit override the admin cancelled: stay on this group
+        FLY.toast(j.completed ? "הנכס פורסם בכל הקבוצות, הסוכן קיבל הודעה" : "סומן ✓");
+        picked = null;
+        return load().then(function () { return true; });
+      });
+    });
+  }
+  // → "posted" | "failed" | "editing" (also Esc: closing the dialog never moves on).
+  function askPosted(title, group) {
+    var dlg = $("#manualAsk");
+    if (!dlg) {
+      dlg = document.createElement("dialog");
+      dlg.id = "manualAsk"; dlg.dir = "rtl";
+      dlg.style.cssText = "max-width:420px;border:1px solid rgba(23,20,15,.15);border-radius:14px;padding:20px;font:inherit";
+      document.body.appendChild(dlg);
+    }
+    dlg.innerHTML = '<p style="margin:0 0 14px">לפני שעוברים: הפוסט של <b>' + esc(title) + "</b> בקבוצה <b>" + esc(group) + "</b> פורסם?</p>" +
+      '<div class="manual-row">' +
+      '<button type="button" class="btn btn-gold btn-sm" data-ans="posted">פורסם ✓</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-ans="failed">לא הצלחתי לפרסם</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-ans="editing">עוד עורך/ת</button></div>';
+    return new Promise(function (resolve) {
+      var done = function (a) { dlg.onclick = dlg.oncancel = null; if (dlg.open) dlg.close(); resolve(a); };
+      dlg.onclick = function (ev) { var b = ev.target.closest("[data-ans]"); if (b) done(b.dataset.ans); };
+      dlg.oncancel = function (ev) { ev.preventDefault(); done("editing"); };
+      dlg.showModal();
+    });
   }
 
   function load() {
@@ -226,7 +291,7 @@
   function closed() {
     clearInterval(poll); poll = null;
     if (viewer) viewer.unmount();
-    viewer = null; shown = null; state = null; props = []; detail = null; detailFor = null;
+    viewer = null; shown = null; state = null; props = []; detail = null; detailFor = null; here = null;
     renderDetail();
     $("#manualBrowser").innerHTML = "";
     renderSide(); load();
@@ -259,10 +324,13 @@
   }
   // One click: the agent's browser on this group, sharing this property.
   function openAt(item, k) {
+    return leavePicked(k).then(function (go) { return go ? goOpen(item, k) : null; });
+  }
+  function goOpen(item, k) {
     return show(item.ref, item.group_url)
       .then(function (r) { return r && r.at_group ? null : gotoGroup(item.ref, item.group_url, 4); })
       .then(function () { return setProperty(item.page_id); })
-      .then(function () { picked = k; renderQueue(); FLY.toast("הקבוצה נפתחה: " + (item.group_name || "")); });
+      .then(function () { picked = k; here = { ref: item.ref, group_id: item.group_id, group_name: item.group_name }; opened[item.campaign_id] = true; renderQueue(); FLY.toast("הקבוצה נפתחה: " + (item.group_name || "")); });
   }
   var setProperty = function (pageId) {
     return call("POST", B(shown) + "/property", { page_id: pageId }).then(function (j) { state = Object.assign({}, state, { property: j.property }); renderSide(); loadDetail(pageId); });
@@ -316,7 +384,36 @@
       renderProfile();
     }).catch(fail).then(function () { btn.disabled = false; });
   });
-  $("#manualPropPick").addEventListener("change", function () { if (this.value) setProperty(this.value).catch(fail); });
+  $("#manualPropPick").addEventListener("change", function () {
+    var v = this.value, sel = this;
+    if (!v) return;
+    leavePicked(null).then(function (go) {
+      if (!go) { sel.value = (state && state.property && state.property.page_id) || ""; return; }
+      renderQueue();
+      return setProperty(v);
+    }).catch(fail);
+  });
+  // Another property for the group already on screen: no navigation needed.
+  $("#manualAlso").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-also]");
+    if (!b) return;
+    var k = b.dataset.also, item = itemOf(k);
+    if (!item) return;
+    b.disabled = true;
+    leavePicked(k).then(function (go) {
+      if (!go) return;
+      if (shown !== item.ref) return goOpen(item, k);
+      return setProperty(item.page_id).then(function () {
+        picked = k; opened[item.campaign_id] = true; renderQueue();
+        FLY.toast("עכשיו משתפים: " + b.textContent.replace("🏠 ", ""));
+      });
+    }).catch(fail).then(function () { b.disabled = false; });
+  });
+  // Remember which properties are expanded, across the list's redraws.
+  $("#manualQueue").addEventListener("toggle", function (ev) {
+    var d = ev.target;
+    if (d.matches && d.matches("details[data-cid]")) opened[d.dataset.cid] = d.open;
+  }, true);
   $("#manualClose").addEventListener("click", function () {
     if (!shown || !confirm("לסגור את הדפדפן של הסוכן?")) return;
     call("DELETE", B(shown)).catch(function () {}).then(closed);
@@ -351,8 +448,8 @@
     if (act === "copy") { navigator.clipboard.writeText(t).then(function () { FLY.toast("הטקסט הועתק"); }, function () { FLY.toast("ההעתקה נכשלה"); }); return; }
     b.disabled = true;
     var req = act === "type" ? call("POST", B(shown) + "/type", { text: t })
-      : call("POST", B(shown) + "/goto", { group_url: b.dataset.url });
-    req.then(function () { FLY.toast(act === "type" ? "הטקסט הוקלד" : "הקבוצה נפתחה"); }).catch(fail).then(function () { b.disabled = false; });
+      : leavePicked(picked && itemOf(picked) && itemOf(picked).group_url === b.dataset.url ? picked : null).then(function (go) { renderQueue(); if (!go) throw { code: "cancelled" }; return call("POST", B(shown) + "/goto", { group_url: b.dataset.url }); });
+    req.then(function () { FLY.toast(act === "type" ? "הטקסט הוקלד" : "הקבוצה נפתחה"); }).catch(function (e) { if (!e || e.code !== "cancelled") fail(e); }).then(function () { b.disabled = false; });
   });
   $("#manualBig").addEventListener("click", function () {
     var big = $(".manual-grid").classList.toggle("big");
