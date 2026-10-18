@@ -87,10 +87,17 @@ const tick = () => new Promise((r) => setTimeout(r, 10));
     // A failed preparation: "הבא" still looks — the admin may have posted by hand — and asks when it cannot tell.
     await K.db.savePage(K.page("pg2", AGENT));
     const c2 = await C.create(K.base({ page: K.page("pg2", AGENT) }), deps);
-    prep.results.push({ ok: false, code: "not_member" });
+    // ▶ on a failure retries the same group and records nothing.
+    prep.results.push({ ok: false, code: "upload_timeout" }, { ok: false, code: "not_member" });
+    await call(server, "POST", `${B}/run`);
+    l = await until("failed");
+    assert.equal(l.code, "upload_timeout");
+    prepared.length = 0;
     await call(server, "POST", `${B}/run`);
     l = await until("failed");
     assert.equal(l.code, "not_member");
+    assert.deepEqual(prepared, ["111"], "the same group again");
+    assert.equal(((await K.store.getPostingCampaign(c2.id)).posts || []).length, 0, "a retry records nothing");
     prep.seen = "not_posted";
     r = await call(server, "POST", `${B}/next`, {});
     assert.equal(r.body.need, "confirm", "after a failure even an open composer is the admin's call");

@@ -48,13 +48,13 @@
       : st === "loading" ? "מחפשים את הקבוצה הבאה…"
       : st === "preparing" ? "מכינים: " + name + " (סרטון וטקסט)…"
       : st === "ready" ? "🔔 מוכן: " + name + ". לחצו \"פרסום\" בפייסבוק ואז הבא" + (l.warn ? " · ⚠ בדקו לפני פרסום: " + codeText(l.warn, l.check) : "")
-      : st === "failed" ? "⚠ " + name + ": " + codeText(l.code) + ". פרסמתם בעצמכם? לחצו הבא — נבדוק ונשאל"
+      : st === "failed" ? "⚠ " + name + ": " + codeText(l.code) + ". ▶ = לנסות שוב · פרסמתם בעצמכם? הבא — נבדוק ונשאל"
       : st === "held" ? name + ": למה לא פורסם?"
       : st === "blocked" ? "הקבוצות שנשארו חסומות כרגע במגבלה" + (l.until ? " (עד " + new Date(l.until).toLocaleString("he-IL") + ")" : "")
       : st === "empty" ? "אין עוד קבוצות לסוכן הזה ✓" : "";
     $("#manualLaneStatus").textContent = text + (l && l.left > 1 && ["preparing", "ready"].indexOf(st) >= 0 ? " · עוד " + (l.left - 1) + " אחריה" : "");
     $("#manualNext").disabled = !l || st === "loading";
-    $("#manualRun").hidden = !!l && ["loading", "preparing", "ready", "held", "failed"].indexOf(st) >= 0;
+    $("#manualRun").hidden = !!l && ["loading", "preparing", "ready", "held"].indexOf(st) >= 0; // shown on "failed": ▶ retries the same group
     var key = st + "|" + (g ? g.campaign_id + "|" + g.group_id : "");
     if (key !== lastKey) {
       lastKey = key;

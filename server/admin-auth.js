@@ -63,7 +63,8 @@ function makeStepUpGuard({ verifySession, authSecret }) {
 // the admin can never act in the agent's name by accident.
 function readViewAs(req) {
   const m = (req.headers.cookie || "").match(/(?:^|;\s*)forly_viewas=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : null;
+  if (!m) return null;
+  try { return decodeURIComponent(m[1]); } catch (e) { return null; } // malformed %-escape: no view-as, not a 500
 }
 
 // Wraps auth.requireAuth(secret, scopes) with the same signature.
