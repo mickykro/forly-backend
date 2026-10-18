@@ -273,7 +273,7 @@ app.use("/api/whatsapp", createWhatsappRouter({
 // ── paste text / link → pre-filled create form ──
 const createExtractRouter = require("./routes/extract");
 app.use("/api", createExtractRouter({
-  requireAuth, authSecret: AUTH_SECRET,
+  requireAuth, authSecret: AUTH_SECRET, verifySession, readToken, adminPhones: ADMIN_PHONES,
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
 }));
 
