@@ -3,8 +3,10 @@
  * Handles: POST /api/properties/extract, POST /api/photos/import-url
  *
  * Auth mirrors the upload routes: an x-demo-key header passes (the demo
- * wizard has no login), otherwise a signed session. The Facebook source needs
- * a real user (its Page token), so demo callers get facebook_not_connected.
+ * wizard has no login), otherwise a signed session. A demo run by a logged-in
+ * admin (ADMIN_PHONES) keeps that admin as req.user, so Yad2/Facebook links
+ * get the browser scrape on the admin's own profile and daily cap. Anonymous
+ * demo callers still get login_required_for_browser.
  */
 const express = require("express");
 const crypto = require("crypto");
@@ -12,6 +14,7 @@ const { parseListing, MAX_INPUT } = require("../listing-extract");
 const { isPublicUrl, TIMEOUT_MS } = require("../listing-sources");
 const { storeBuffer } = require("../upload-store");
 const { REVIEW_SCOPES } = require("../auth");
+const { makeAdminGuard } = require("../admin-auth");
 
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -95,12 +98,17 @@ module.exports = function createExtractRouter(ctx) {
   // The same decision index.js makes at boot: key, PROFILE_KEY and FORLY_ENV.
   const driverEnabled = ctx.driverEnabled !== undefined ? ctx.driverEnabled : require("../driver-browser").driverEnabled();
   const { sourceFor } = require("../listing-sources")._test;
+  const { isAdmin } = makeAdminGuard({ adminPhones: ctx.adminPhones });
   const router = express.Router();
   const limit = new DailyLimit(DAILY_CAP);
   const driverLimit = new DailyLimit(DRIVER_DAILY_CAP);
 
   function auth(req, res, next) {
-    if ("x-demo-key" in req.headers) return next();
+    if ("x-demo-key" in req.headers) {
+      const session = ctx.verifySession && ctx.verifySession(authSecret, ctx.readToken(req));
+      if (isAdmin(session)) req.user = session;
+      return next();
+    }
     return requireAuth(authSecret, REVIEW_SCOPES)(req, res, next);
   }
   const keyFor = (req) => (req.user && req.user.userId) || `demo:${req.ip}`;

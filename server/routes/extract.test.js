@@ -74,7 +74,7 @@ function makeApp(o = {}) {
   const phone = o.phone || "0500000000";
   const requireAuth = () => (req, res, next) => { req.user = { userId: phone }; next(); };
   const app = express(); app.use(express.json());
-  app.use("/api", createExtractRouter({ requireAuth, authSecret: "s", resolve: o.resolve, db: o.db, extractJobs: o.extractJobs, driverEnabled: o.driverEnabled !== false }));
+  app.use("/api", createExtractRouter({ requireAuth, authSecret: "s", verifySession: o.verifySession, readToken: () => "t", adminPhones: o.adminPhones, resolve: o.resolve, db: o.db, extractJobs: o.extractJobs, driverEnabled: o.driverEnabled !== false }));
   return app;
 }
 function call(app, method, path, body, headers) {
@@ -149,6 +149,30 @@ const get = (app, path) => call(app, "GET", path);
   const app = makeApp({ extractJobs: { create: async () => { throw new Error("must not queue"); } } });
   const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" }, { "x-demo-key": "demo" });
   assert.equal(res.status, 409);
+  assert.equal(res.body.error, "login_required_for_browser");
+}
+
+// ── a demo run by a logged-in admin queues the browser scrape as that admin ──
+{
+  const created = [];
+  const app = makeApp({
+    adminPhones: ["0501111111"],
+    verifySession: () => ({ userId: "0501111111" }),
+    extractJobs: { create: async (input) => { created.push(input); return { id: "job-d", status: "queued" }; } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" }, { "x-demo-key": "demo" });
+  assert.equal(res.status, 202);
+  assert.equal(created[0].phone, "0501111111");
+}
+
+// ── a non-admin session on the demo path is still anonymous ──
+{
+  const app = makeApp({
+    adminPhones: ["0501111111"],
+    verifySession: () => ({ userId: "0502222222" }),
+    extractJobs: { create: async () => { throw new Error("must not queue"); } },
+  });
+  const res = await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/abc" }, { "x-demo-key": "demo" });
   assert.equal(res.body.error, "login_required_for_browser");
 }
 
