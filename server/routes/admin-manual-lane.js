@@ -27,7 +27,7 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     const l = s && s.lane;
     if (!l) return null;
     const i = l.item;
-    return { state: l.state, code: l.code || null, until: l.until || null, left: l.left || 0,
+    return { state: l.state, code: l.code || null, warn: l.warn || null, check: l.check || null, until: l.until || null, left: l.left || 0,
       item: i ? { campaign_id: i.campaign_id, group_id: i.group_id, group_name: i.group_name || "", group_url: i.group_url, kind: i.kind || "group", title: i.title || "", page_id: i.page_id } : null };
   }
   const set = (phone, s, patch) => { s.lane = Object.assign({}, s.lane, patch); emit(phone, { t: "lane", lane: view(s) }); };
@@ -47,7 +47,7 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     const { item, left, until } = await nextItem(phone);
     if (open.get(phone) !== s || s.lane.gen !== gen) return;
     if (!item) return set(phone, s, { state: until ? "blocked" : "empty", item: null, code: null, until, left: 0 });
-    set(phone, s, { state: "preparing", item, code: null, until: null, left });
+    set(phone, s, { state: "preparing", item, code: null, warn: null, check: null, until: null, left });
     const alive = () => open.get(phone) === s && s.lane.gen === gen;
     const work = (async () => {
       const page = hubPage(phone);
@@ -68,7 +68,7 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     clearTimeout(timer);
     if (!alive()) return;
     if (r.code === "prep_timeout") s.lane.gen++; // stops the late preparation at its next step
-    set(phone, s, r.ok ? { state: "ready", pendingBefore: !!r.pendingBefore } : { state: "failed", code: r.code });
+    set(phone, s, r.ok ? { state: "ready", pendingBefore: !!r.pendingBefore, warn: r.warn || null, check: r.check || null } : { state: "failed", code: r.code });
   }
 
   // ▶: starts (or restarts after an end) the run; a run under way is left alone.
@@ -112,14 +112,15 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     if (reason && (!M.SKIP_REASONS.has(reason) || reason === "prep_failed")) return { error: "invalid_input" };
     if (reason === "other" && (!note || note.length < 3 || note.length > 200)) return { error: "invalid_input" };
     let recorded = null, c = null;
-    if (item && body.posted === true && ["ready", "held"].includes(l.state)) { c = await recordPosted(phone, item, user); recorded = "posted"; }
-    else if (item && reason) { c = await M.skip(item.campaign_id, item.group_id, reason, deps, { note: reason === "other" ? note : null, ref: M.refOf(phone) }); recorded = "skipped"; }
-    else if (item && l.state === "failed") { c = await M.skip(item.campaign_id, item.group_id, "prep_failed", deps, { note: l.code, ref: M.refOf(phone) }); recorded = "skipped"; }
+    if (item && body.posted === true && ["ready", "held", "failed"].includes(l.state)) { c = await recordPosted(phone, item, user); recorded = "posted"; }
+    else if (item && reason) { c = await M.skip(item.campaign_id, item.group_id, reason, deps, { note: reason === "other" ? note : l.code || null, ref: M.refOf(phone) }); recorded = "skipped"; }
     else if (item && l.state === "preparing") { l.gen++; set(phone, s, { state: "held" }); return { lane: view(s), need: "reason" }; }
-    else if (item && ["ready", "held"].includes(l.state)) {
+    else if (item && ["ready", "held", "failed"].includes(l.state)) {
+      // After a failed preparation the admin may still have posted by hand: look, and ask when it cannot be seen.
       const page = hubPage(phone);
       const seen = page ? await prep.check(page, item, (await x.db.getConnection(phone)) || {}, { pendingBefore: l.pendingBefore }) : "unsure";
-      if (seen === "not_posted") { set(phone, s, { state: "held" }); return { lane: view(s), need: "reason" }; }
+      if (seen === "not_posted" && l.state !== "failed") { set(phone, s, { state: "held" }); return { lane: view(s), need: "reason" }; }
+      if (seen !== "posted" && l.state === "failed") { set(phone, s, { state: "held" }); return { lane: view(s), need: "confirm" }; }
       if (seen === "unsure") { set(phone, s, { state: "held" }); return { lane: view(s), need: "confirm" }; }
       c = await recordPosted(phone, item, user); recorded = "posted";
     }

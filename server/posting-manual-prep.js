@@ -5,7 +5,9 @@
  *
  * prepare() opens the group (or the agent's Page), checks membership, opens
  * the composer, attaches the property's video, types the text, waits for the
- * upload and runs the R3 proof (posting-driver-proof) — then STOPS. It never
+ * upload and runs the R3 proof (posting-driver-proof) — then STOPS. A proof
+ * that does not pass is a warning on the ready post (warn, check), not a stop:
+ * the admin is looking at the page and clicks Post themselves. It never
  * clicks Post: the admin does, in Facebook. The driver's own drive() is left
  * alone (its attempt states and its one Post click are its rules); this reuses
  * its selectors and helpers only.
@@ -33,8 +35,8 @@ function targetOf(item) {
 }
 
 /*
- * prepare(page, item, conn, { file, alive }) → { ok: true, pendingBefore }
- * | { ok: false, code }. item: a queue item (group_id, group_url, kind, copy).
+ * prepare(page, item, conn, { file, alive }) → { ok: true, pendingBefore,
+ * warn?, check? } | { ok: false, code }. item: a queue item (group_id, group_url, kind, copy).
  * file: the video as posting-media.fetchVideo returns it (or null). alive():
  * false once the admin moved on — checked between steps, nothing after it.
  */
@@ -69,8 +71,8 @@ async function prepare(page, item, conn, { file = null, alive = () => true } = {
     if (file) { const bad = await media.waitUploaded(page, x); if (bad) return no(bad); step(); }
     const resolved = kind === "group" ? await P.readTargetId(page, "group") : null;
     const proof = await P.proveIdentityAndDestination(page, targetOf(item), conn, { copy: item.copy, resolvedGroupId: resolved });
-    if (!proof.ok) return no(proof.code);
-    return { ok: true, pendingBefore: sig === "pending_approval" };
+    const out = { ok: true, pendingBefore: sig === "pending_approval" };
+    return proof.ok ? out : Object.assign(out, { warn: proof.code, check: proof.check || null });
   } catch (e) {
     if (e && e.code === "cancelled") return no("cancelled");
     return no("prep_error");

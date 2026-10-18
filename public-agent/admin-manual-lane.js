@@ -20,7 +20,8 @@
     identity_mismatch: "הפרופיל בדפדפן הוא לא של הסוכן", destination_mismatch: "זו לא הקבוצה הנכונה", copy_mismatch: "הטקסט לא הוקלד נכון",
     markers_missing: "לא הצלחנו לקרוא את דף הקבוצה", unreadable: "לא הצלחנו לקרוא את הדף",
   };
-  var codeText = function (c) { return CODE[c] || "פייסבוק הציג הודעה (" + (c || "שגיאה") + ")"; };
+  // check: which part of the pre-post check did not match (posting-driver-proof), for telling us why.
+  var codeText = function (c, check) { return (CODE[c] || "פייסבוק הציג הודעה (" + (c || "שגיאה") + ")") + (check ? " [" + check + "]" : ""); };
   var REASONS = [["pending_overload", "כבר יש פוסטים ממתינים"], ["posting_method", "הקבוצה מפרסמת אחרת"], ["other", "אחר…"]];
 
   // ── sound: generated tones; the ▶ click is the gesture that unlocks audio ──
@@ -46,8 +47,8 @@
     var text = !l ? "לחצו ▶ כדי להכין את הקבוצה הבאה"
       : st === "loading" ? "מחפשים את הקבוצה הבאה…"
       : st === "preparing" ? "מכינים: " + name + " (סרטון וטקסט)…"
-      : st === "ready" ? "🔔 מוכן: " + name + ". לחצו \"פרסום\" בפייסבוק ואז הבא"
-      : st === "failed" ? "⚠ " + name + ": " + codeText(l.code) + ". הבא = דילוג"
+      : st === "ready" ? "🔔 מוכן: " + name + ". לחצו \"פרסום\" בפייסבוק ואז הבא" + (l.warn ? " · ⚠ בדקו לפני פרסום: " + codeText(l.warn, l.check) : "")
+      : st === "failed" ? "⚠ " + name + ": " + codeText(l.code) + ". פרסמתם בעצמכם? לחצו הבא — נבדוק ונשאל"
       : st === "held" ? name + ": למה לא פורסם?"
       : st === "blocked" ? "הקבוצות שנשארו חסומות כרגע במגבלה" + (l.until ? " (עד " + new Date(l.until).toLocaleString("he-IL") + ")" : "")
       : st === "empty" ? "אין עוד קבוצות לסוכן הזה ✓" : "";
