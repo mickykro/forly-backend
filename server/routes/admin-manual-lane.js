@@ -27,15 +27,16 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     const l = s && s.lane;
     if (!l) return null;
     const i = l.item;
-    return { state: l.state, code: l.code || null, until: l.until || null, left: l.left || 0,
+    return { state: l.state, code: l.code || null, until: l.until || null, left: l.left || 0, only: l.only || null,
       item: i ? { campaign_id: i.campaign_id, group_id: i.group_id, group_name: i.group_name || "", group_url: i.group_url, kind: i.kind || "group", title: i.title || "", page_id: i.page_id } : null };
   }
   const set = (phone, s, patch) => { s.lane = Object.assign({}, s.lane, patch); emit(phone, { t: "lane", lane: view(s) }); };
 
   // The agent's next target: owed, its text approved, not blocked by a limit now.
-  async function nextItem(phone) {
+  // only: a page_id — the run stays on that one property.
+  async function nextItem(phone, only) {
     const ref = M.refOf(phone);
-    const mine = (await M.queue(deps)).filter((i) => i.ref === ref && !i.awaiting_agent);
+    const mine = (await M.queue(deps)).filter((i) => i.ref === ref && !i.awaiting_agent && (!only || String(i.page_id) === only));
     const free = mine.filter((i) => !(i.limit && i.limit.block));
     const untils = mine.filter((i) => i.limit && i.limit.block && i.limit.block.until).map((i) => i.limit.block.until).sort();
     return { item: free[0] || null, left: free.length, until: free.length ? null : untils[0] || null };
@@ -44,7 +45,7 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
   async function advance(phone, s) {
     const gen = (s.lane.gen || 0) + 1;
     s.lane.gen = gen;
-    const { item, left, until } = await nextItem(phone);
+    const { item, left, until } = await nextItem(phone, s.lane.only);
     if (open.get(phone) !== s || s.lane.gen !== gen) return;
     if (!item) return set(phone, s, { state: until ? "blocked" : "empty", item: null, code: null, until, left: 0 });
     set(phone, s, { state: "preparing", item, code: null, until: null, left });
@@ -71,10 +72,15 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     set(phone, s, r.ok ? { state: "ready", pendingBefore: !!r.pendingBefore } : { state: "failed", code: r.code });
   }
 
-  // ▶: starts (or restarts after an end) the run; a run under way is left alone.
-  async function run(phone, s) {
+  // ▶: starts (or restarts after an end) the run; a run under way is left alone
+  // unless `only` changes it: a page_id keeps the run on that property, null
+  // takes it back to all of them, undefined leaves it as it was. A target
+  // prepared for the old choice is not recorded; it stays owed.
+  async function run(phone, s, only) {
     if (!s.lane) s.lane = { gen: 0 };
-    if (!["preparing", "ready", "held", "loading"].includes(s.lane.state)) {
+    const moved = only !== undefined && (only || null) !== (s.lane.only || null);
+    if (only !== undefined) s.lane.only = only || null;
+    if (moved || !["preparing", "ready", "held", "loading"].includes(s.lane.state)) {
       set(phone, s, { state: "loading", item: null, code: null });
       advance(phone, s).catch(() => set(phone, s, { state: "failed", code: "prep_error" }));
     }

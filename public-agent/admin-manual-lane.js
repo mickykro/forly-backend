@@ -10,7 +10,7 @@
   "use strict";
   var $ = function (s) { return document.querySelector(s); };
   var esc = window.FLY ? FLY.esc : function (s) { return String(s); };
-  var ctx = null, lane = null, lastKey = null, audio = null;
+  var ctx = null, lane = null, lastKey = null, audio = null, only = null; // only: the run's one property (page_id), or null for all
   var TITLE = document.title;
 
   var CODE = {
@@ -50,7 +50,7 @@
       : st === "failed" ? "⚠ " + name + ": " + codeText(l.code) + ". ▶ = לנסות שוב, הבא = דילוג"
       : st === "held" ? name + ": למה לא פורסם?"
       : st === "blocked" ? "הקבוצות שנשארו חסומות כרגע במגבלה" + (l.until ? " (עד " + new Date(l.until).toLocaleString("he-IL") + ")" : "")
-      : st === "empty" ? "אין עוד קבוצות לסוכן הזה ✓" : "";
+      : st === "empty" ? (l.only ? "אין עוד קבוצות לנכס הזה ✓" : "אין עוד קבוצות לסוכן הזה ✓") : "";
     $("#manualLaneStatus").textContent = text + (l && l.left > 1 && ["preparing", "ready"].indexOf(st) >= 0 ? " · עוד " + (l.left - 1) + " אחריה" : "");
     $("#manualNext").disabled = !l || st === "loading";
     $("#manualRun").hidden = !!l && ["loading", "preparing", "ready", "held"].indexOf(st) >= 0; // shown on "failed": ▶ retries the same group
@@ -91,8 +91,11 @@
   run.addEventListener("click", function () {
     if (!ctx) return;
     try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); } catch (e) { audio = null; }
-    ctx.call("POST", ctx.path + "/run").then(function (r) { render(r.lane); }).catch(function () { FLY.toast("ההפעלה נכשלה"); });
+    start();
   });
+  function start() {
+    ctx.call("POST", ctx.path + "/run", { page_id: only }).then(function (r) { render(r.lane); }).catch(function () { FLY.toast("ההפעלה נכשלה"); });
+  }
   nx.addEventListener("click", function () { next({}); });
   askBox.addEventListener("click", function (ev) {
     var b = ev.target.closest("button[data-lane]");
@@ -125,7 +128,12 @@
 
   window.ForlyManualLane = {
     // c: { call, path: "/agents/<ref>/browser", name, onRecorded }
-    attach: function (c) { ctx = c; lastKey = null; $("#manualLane").hidden = false; render(null); },
+    attach: function (c) { ctx = c; lastKey = null; only = null; $("#manualLane").hidden = false; render(null); },
+    // The property picker: the run moves to that property (null: all); a run under way restarts on it.
+    scope: function (pageId) {
+      only = pageId || null;
+      if (ctx && lane && ["loading", "preparing", "ready", "held", "failed"].indexOf(lane.state) >= 0) start();
+    },
     detach: function () { ctx = null; lane = null; lastKey = null; $("#manualLane").hidden = true; ask(null); document.title = TITLE; },
     onState: function (l) { if (ctx && l !== undefined) render(l); },
     active: function () { return !!(ctx && lane && ["loading", "preparing", "ready", "held", "failed"].indexOf(lane.state) >= 0); },

@@ -389,8 +389,17 @@ module.exports = function createAdminManualRouter({
   }));
 
   // ── semi-automatic: ▶ and "הבא" (admin-manual-lane) ──
+  // body.page_id: run on that property only (one of this agent's own); null: all of them.
   router.post("/agents/:ref/browser/run", requireAdmin, withBrowser(async (req, res, phone, s) => {
-    res.json({ lane: await lane.run(phone, s) });
+    const b = req.body || {};
+    let only;
+    if (b.page_id === null) only = null;
+    else if (b.page_id !== undefined) {
+      const card = typeof b.page_id === "string" && (await cardOf(phone, b.page_id));
+      if (!card) return res.status(404).json({ error: "not_found" });
+      only = card.page_id;
+    }
+    res.json({ lane: await lane.run(phone, s, only) });
   }));
   router.post("/agents/:ref/browser/next", requireAdmin, withBrowser(async (req, res, phone, s) => oneAtATime(phone, async () => {
     const r = await lane.next(phone, s, req.body || {}, req.user);

@@ -268,7 +268,7 @@
     pick.hidden = !shown;
     if (pick.dataset.list !== list) {
       pick.dataset.list = list;
-      pick.innerHTML = '<option value="">החלפת נכס…</option>' + props.map(function (x) {
+      pick.innerHTML = '<option value="">החלפת נכס…</option>' + (Lane ? '<option value="*">▶ כל הנכסים</option>' : "") + props.map(function (x) {
         return '<option value="' + esc(x.page_id) + '">' + esc(x.title) + (x.address ? ", " + esc(x.address) : "") + "</option>";
       }).join("");
     }
@@ -396,10 +396,12 @@
   $("#manualPropPick").addEventListener("change", function () {
     var v = this.value, sel = this;
     if (!v) return;
+    // ▶'s run follows the pick: this property only, or "*" all of them again.
+    if (v === "*") { if (Lane) Lane.scope(null); sel.value = (state && state.property && state.property.page_id) || ""; return; }
     leavePicked(null).then(function (go) {
       if (!go) { sel.value = (state && state.property && state.property.page_id) || ""; return; }
       renderQueue();
-      return setProperty(v);
+      return setProperty(v).then(function () { if (Lane) Lane.scope(v); });
     }).catch(fail);
   });
   // Another property for the group already on screen: no navigation needed.

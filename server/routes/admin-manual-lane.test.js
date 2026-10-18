@@ -109,6 +109,21 @@ const tick = () => new Promise((r) => setTimeout(r, 10));
     const posts = (await K.store.getPostingCampaign(c2.id)).posts;
     assert.deepEqual(posts.map((p) => [p.group_id, p.status, p.skip_reason || null]), [["111", "skipped", "prep_failed"], ["222", "posted", null]]);
 
+    // ▶ on one property: only its groups. Picking another mid-run restarts on it;
+    // the group prepared for the first is not recorded. null: all properties again.
+    for (const id of ["pg3", "pg4"]) { await K.db.savePage(K.page(id, AGENT)); await C.create(K.base({ page: K.page(id, AGENT) }), deps); }
+    await until("empty");
+    await call(server, "POST", `${B}/run`, { page_id: "pg4" });
+    l = await until("ready");
+    assert.deepEqual([l.item.page_id, l.only], ["pg4", "pg4"]);
+    await call(server, "POST", `${B}/run`, { page_id: "pg3" });
+    l = await until("ready");
+    assert.deepEqual([l.item.page_id, l.only], ["pg3", "pg3"]);
+    assert.equal(((await K.store.getPostingCampaign(K.store.campaignId(AGENT, "pg4"))).posts || []).length, 0, "the switch records nothing");
+    l = (await call(server, "POST", `${B}/run`, { page_id: null })).body.lane;
+    assert.equal(l.only, null);
+    assert.equal((await call(server, "POST", `${B}/run`, { page_id: "not-theirs" })).status, 404);
+
     // The global list: every skip, most flagged first.
     const flags = (await call(server, "GET", "/api/admin/manual/flags")).body.flags;
     assert.deepEqual(flags.map((f) => [f.group_id, f.total]).sort(), [["111", 1], ["222", 1]]);
