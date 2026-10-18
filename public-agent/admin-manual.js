@@ -16,6 +16,7 @@
   var state = null, viewer = null, poll = null;
   var detail = null, detailFor = null; // the session property in full: its groups and every text version
   var texts = [];                      // what the type/copy buttons in the detail panel refer to, by index
+  var Lane = window.ForlyManualLane || null; // the semi-automatic run (admin-manual-lane.js)
   var opened = {};                     // campaign_id → expanded in the checklist (collapsed by default)
   var here = null;                     // the group open in the browser { ref, group_id, group_name }: stays after its tick
 
@@ -283,6 +284,7 @@
     if (!shown) return;
     call("GET", B(shown) + "/state").then(function (s) {
       state = s; renderSide();
+      if (Lane) Lane.onState(s.lane);
       var pid = s.property && s.property.page_id;
       if ((pid || null) !== detailFor) loadDetail(pid);
     })
@@ -290,6 +292,7 @@
   }
   function closed() {
     clearInterval(poll); poll = null;
+    if (Lane) Lane.detach();
     if (viewer) viewer.unmount();
     viewer = null; shown = null; state = null; props = []; detail = null; detailFor = null; here = null;
     renderDetail();
@@ -306,9 +309,15 @@
       shown = ref; state = null;
       viewer = window.ForlyViewer.create($("#manualBrowser"), API + B(ref) + "/view", {
         onEnd: function (code) { if (code !== "closed") FLY.toast("הדפדפן נסגר"); },
+        onEvent: function (e) { if (e.t === "lane" && Lane && shown === ref) Lane.onState(e.lane); },
       });
+      if (Lane) {
+        var a = agents.filter(function (x) { return x.ref === ref; })[0];
+        Lane.attach({ call: call, path: B(ref), name: (a && a.name) || "", onRecorded: function () { if (detailFor) loadDetail(detailFor); load(); } });
+      }
       clearInterval(poll);
-      poll = setInterval(function () { if (document.visibilityState === "visible") refresh(); }, 1500);
+      // A running lane keeps polling in a hidden tab too: the backup to the pushed events.
+      poll = setInterval(function () { if (document.visibilityState === "visible" || (Lane && Lane.active())) refresh(); }, 1500);
       call("GET", "/agents/" + encodeURIComponent(ref) + "/properties").then(function (j) { props = j.properties || []; renderSide(); }).catch(function () {});
       $("#manualAgent").value = ref;
       renderSide(); refresh();
