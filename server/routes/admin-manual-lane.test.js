@@ -127,6 +127,27 @@ const tick = () => new Promise((r) => setTimeout(r, 10));
     l = await until("ready");
     assert.deepEqual([l.warn, l.check], ["destination_mismatch", "group_name"]);
 
+    // The admin picks another property (one was posted too much): the run restarts there, the group in hand stays owed.
+    await K.db.savePage(K.page("pg4", AGENT));
+    await C.create(K.base({ page: K.page("pg4", AGENT) }), deps);
+    prepared.length = 0;
+    r = await call(server, "POST", `${B}/run`, { page_id: "pg4" });
+    assert.equal(r.status, 200);
+    l = await until("ready");
+    assert.deepEqual([l.page_id, l.item.page_id, l.item.group_id], ["pg4", "pg4", "111"]);
+    assert.deepEqual(l.pages.map((p) => [p.page_id, p.owed]).sort(), [["pg3", 1], ["pg4", 2]], "each property and what it still owes");
+    assert.ok(!(await K.store.getPostingCampaign(c3.id)).posts.some((p) => p.group_id === "222"), "pg3's group was left owed, nothing recorded");
+    prep.seen = "posted";
+    await call(server, "POST", `${B}/next`, {});
+    l = await until("ready");
+    assert.equal(l.item.page_id, "pg4", "stays on the picked property");
+    await call(server, "POST", `${B}/next`, {});
+    l = await until("empty");
+    assert.equal(l.page_id, "pg4", "the picked property is done; pg3 still waits for its own pick");
+    r = await call(server, "POST", `${B}/run`, { page_id: "" });
+    l = await until("ready");
+    assert.deepEqual([l.page_id, l.item.page_id], [null, "pg3"], "back to any property");
+
     // The global list: every skip, most flagged first.
     const flags = (await call(server, "GET", "/api/admin/manual/flags")).body.flags;
     assert.deepEqual(flags.map((f) => [f.group_id, f.total]).sort(), [["111", 1], ["222", 1]]);

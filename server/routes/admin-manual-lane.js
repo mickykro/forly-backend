@@ -28,24 +28,35 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     if (!l) return null;
     const i = l.item;
     return { state: l.state, code: l.code || null, warn: l.warn || null, check: l.check || null, until: l.until || null, left: l.left || 0,
+      page_id: l.pageId || null, pages: l.pages || [],
       item: i ? { campaign_id: i.campaign_id, group_id: i.group_id, group_name: i.group_name || "", group_url: i.group_url, kind: i.kind || "group", title: i.title || "", page_id: i.page_id } : null };
   }
   const set = (phone, s, patch) => { s.lane = Object.assign({}, s.lane, patch); emit(phone, { t: "lane", lane: view(s) }); };
 
-  // The agent's next target: owed, its text approved, not blocked by a limit now.
-  async function nextItem(phone) {
+  // The agent's next target: owed, its text approved, not blocked by a limit now
+  // — of the property the admin picked (pageId), when one is picked. pages:
+  // each property with groups it can be posted to now, for the picker.
+  async function nextItem(phone, pageId = null) {
     const ref = M.refOf(phone);
-    const mine = (await M.queue(deps)).filter((i) => i.ref === ref && !i.awaiting_agent);
+    const all = (await M.queue(deps)).filter((i) => i.ref === ref && !i.awaiting_agent);
+    const byPage = new Map();
+    for (const i of all) {
+      const p = byPage.get(i.page_id) || { page_id: i.page_id, title: i.title || i.page_id, owed: 0 };
+      if (!(i.limit && i.limit.block)) p.owed++;
+      byPage.set(i.page_id, p);
+    }
+    const mine = pageId ? all.filter((i) => i.page_id === pageId) : all;
     const free = mine.filter((i) => !(i.limit && i.limit.block));
     const untils = mine.filter((i) => i.limit && i.limit.block && i.limit.block.until).map((i) => i.limit.block.until).sort();
-    return { item: free[0] || null, left: free.length, until: free.length ? null : untils[0] || null };
+    return { item: free[0] || null, left: free.length, until: free.length ? null : untils[0] || null, pages: [...byPage.values()] };
   }
 
   async function advance(phone, s) {
     const gen = (s.lane.gen || 0) + 1;
     s.lane.gen = gen;
-    const { item, left, until } = await nextItem(phone);
+    const { item, left, until, pages } = await nextItem(phone, s.lane.pageId || null);
     if (open.get(phone) !== s || s.lane.gen !== gen) return;
+    s.lane.pages = pages;
     if (!item) return set(phone, s, { state: until ? "blocked" : "empty", item: null, code: null, until, left: 0 });
     set(phone, s, { state: "preparing", item, code: null, warn: null, check: null, until: null, left });
     const alive = () => open.get(phone) === s && s.lane.gen === gen;
@@ -72,9 +83,13 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
   }
 
   // ▶: starts (or restarts after an end) the run; a run under way is left alone.
-  async function run(phone, s) {
+  // pageId (optional): post this property only ("" = any). Picking one restarts
+  // the run there — the group in hand is left owed, nothing is recorded.
+  async function run(phone, s, pageId) {
     if (!s.lane) s.lane = { gen: 0 };
-    if (!["preparing", "ready", "held", "loading"].includes(s.lane.state)) {
+    const pick = typeof pageId === "string";
+    if (pick) { s.lane.pageId = pageId.slice(0, 100) || null; s.lane.gen++; }
+    if (pick || !["preparing", "ready", "held", "loading"].includes(s.lane.state)) {
       set(phone, s, { state: "loading", item: null, code: null });
       advance(phone, s).catch(() => set(phone, s, { state: "failed", code: "prep_error" }));
     }
