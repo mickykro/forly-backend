@@ -84,7 +84,7 @@ const tick = () => new Promise((r) => setTimeout(r, 10));
     await until("empty");
     assert.deepEqual(prepared, ["111", "222"]);
 
-    // A failed preparation: "הבא" skips it with the failure as the reason. Unsure: the admin confirms.
+    // A failed preparation: "הבא" still looks — the admin may have posted by hand — and asks when it cannot tell.
     await K.db.savePage(K.page("pg2", AGENT));
     const c2 = await C.create(K.base({ page: K.page("pg2", AGENT) }), deps);
     // ▶ on a failure retries the same group and records nothing.
@@ -98,7 +98,10 @@ const tick = () => new Promise((r) => setTimeout(r, 10));
     assert.equal(l.code, "not_member");
     assert.deepEqual(prepared, ["111"], "the same group again");
     assert.equal(((await K.store.getPostingCampaign(c2.id)).posts || []).length, 0, "a retry records nothing");
+    prep.seen = "not_posted";
     r = await call(server, "POST", `${B}/next`, {});
+    assert.equal(r.body.need, "confirm", "after a failure even an open composer is the admin's call");
+    r = await call(server, "POST", `${B}/next`, { reason: "posting_method" });
     assert.equal(r.body.recorded, "skipped");
     await until("ready");
     prep.seen = "unsure";
@@ -107,7 +110,43 @@ const tick = () => new Promise((r) => setTimeout(r, 10));
     r = await call(server, "POST", `${B}/next`, { posted: true });
     assert.equal(r.body.recorded, "posted");
     const posts = (await K.store.getPostingCampaign(c2.id)).posts;
-    assert.deepEqual(posts.map((p) => [p.group_id, p.status, p.skip_reason || null]), [["111", "skipped", "prep_failed"], ["222", "posted", null]]);
+    assert.deepEqual(posts.map((p) => [p.group_id, p.status, p.skip_reason || null]), [["111", "skipped", "posting_method"], ["222", "posted", null]]);
+
+    // A failed preparation the admin posted around by hand: seen → recorded as posted.
+    await K.db.savePage(K.page("pg3", AGENT));
+    const c3 = await C.create(K.base({ page: K.page("pg3", AGENT) }), deps);
+    prep.results.push({ ok: false, code: "destination_mismatch" });
+    await call(server, "POST", `${B}/run`);
+    await until("failed");
+    prep.seen = "posted";
+    prep.results.push({ ok: true, warn: "destination_mismatch", check: "group_name" }); // for the next group, prepared right after
+    r = await call(server, "POST", `${B}/next`, {});
+    assert.equal(r.body.recorded, "posted");
+    assert.equal((await K.store.getPostingCampaign(c3.id)).posts.find((p) => p.group_id === "111").status, "posted");
+    // A ready post whose check did not match carries the warning.
+    l = await until("ready");
+    assert.deepEqual([l.warn, l.check], ["destination_mismatch", "group_name"]);
+
+    // The admin picks another property (one was posted too much): the run restarts there, the group in hand stays owed.
+    await K.db.savePage(K.page("pg4", AGENT));
+    await C.create(K.base({ page: K.page("pg4", AGENT) }), deps);
+    prepared.length = 0;
+    r = await call(server, "POST", `${B}/run`, { page_id: "pg4" });
+    assert.equal(r.status, 200);
+    l = await until("ready");
+    assert.deepEqual([l.page_id, l.item.page_id, l.item.group_id], ["pg4", "pg4", "111"]);
+    assert.deepEqual(l.pages.map((p) => [p.page_id, p.owed]).sort(), [["pg3", 1], ["pg4", 2]], "each property and what it still owes");
+    assert.ok(!(await K.store.getPostingCampaign(c3.id)).posts.some((p) => p.group_id === "222"), "pg3's group was left owed, nothing recorded");
+    prep.seen = "posted";
+    await call(server, "POST", `${B}/next`, {});
+    l = await until("ready");
+    assert.equal(l.item.page_id, "pg4", "stays on the picked property");
+    await call(server, "POST", `${B}/next`, {});
+    l = await until("empty");
+    assert.equal(l.page_id, "pg4", "the picked property is done; pg3 still waits for its own pick");
+    r = await call(server, "POST", `${B}/run`, { page_id: "" });
+    l = await until("ready");
+    assert.deepEqual([l.page_id, l.item.page_id], [null, "pg3"], "back to any property");
 
     // The global list: every skip, most flagged first.
     const flags = (await call(server, "GET", "/api/admin/manual/flags")).body.flags;

@@ -37,7 +37,11 @@ function page(o = {}) {
   assert.equal((await PREP.prepare(page({ counts: { [S.joinGroup]: 1 } }), item(), F.connOf(), {})).code, "not_member");
   assert.equal((await PREP.prepare(page({ counts: { [S.composer]: 0 } }), item(), F.connOf(), {})).code, "composer_not_found");
   assert.equal((await PREP.prepare(page({ counts: { [S.mediaInput]: 0 } }), item(), F.connOf(), { file: FILE })).code, "media_not_found");
-  assert.equal((await PREP.prepare(page(), item(), F.connOf({ facebook_identity_label: "Someone Else" }), {})).code, "identity_mismatch", "R3 proof still runs");
+  // The R3 proof still runs, but a mismatch is a warning on the ready post: the admin looks and decides.
+  {
+    const r = await PREP.prepare(page(), item(), F.connOf({ facebook_identity_label: "Someone Else" }), {});
+    assert.equal(r.ok, true); assert.equal(r.warn, "identity_mismatch"); assert.ok(r.check, "which check, for diagnosis");
+  }
   assert.equal((await PREP.prepare(page({ texts: { [S.dialog]: "Your account is restricted" } }), item(), F.connOf(), {})).ok, false, "a warning on the page stops it");
   // ── the admin moved on: stops at the next step, types nothing ──
   {

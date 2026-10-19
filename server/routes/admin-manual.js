@@ -390,7 +390,7 @@ module.exports = function createAdminManualRouter({
 
   // ── semi-automatic: ▶ and "הבא" (admin-manual-lane) ──
   router.post("/agents/:ref/browser/run", requireAdmin, withBrowser(async (req, res, phone, s) => {
-    res.json({ lane: await lane.run(phone, s) });
+    res.json({ lane: await lane.run(phone, s, req.body && req.body.page_id) });
   }));
   router.post("/agents/:ref/browser/next", requireAdmin, withBrowser(async (req, res, phone, s) => oneAtATime(phone, async () => {
     const r = await lane.next(phone, s, req.body || {}, req.user);

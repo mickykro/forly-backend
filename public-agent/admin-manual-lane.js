@@ -20,7 +20,8 @@
     identity_mismatch: "הפרופיל בדפדפן הוא לא של הסוכן", destination_mismatch: "זו לא הקבוצה הנכונה", copy_mismatch: "הטקסט לא הוקלד נכון",
     markers_missing: "לא הצלחנו לקרוא את דף הקבוצה", unreadable: "לא הצלחנו לקרוא את הדף",
   };
-  var codeText = function (c) { return CODE[c] || "פייסבוק הציג הודעה (" + (c || "שגיאה") + ")"; };
+  // check: which part of the pre-post check did not match (posting-driver-proof), for telling us why.
+  var codeText = function (c, check) { return (CODE[c] || "פייסבוק הציג הודעה (" + (c || "שגיאה") + ")") + (check ? " [" + check + "]" : ""); };
   var REASONS = [["pending_overload", "כבר יש פוסטים ממתינים"], ["posting_method", "הקבוצה מפרסמת אחרת"], ["other", "אחר…"]];
 
   // ── sound: generated tones; the ▶ click is the gesture that unlocks audio ──
@@ -46,21 +47,43 @@
     var text = !l ? "לחצו ▶ כדי להכין את הקבוצה הבאה"
       : st === "loading" ? "מחפשים את הקבוצה הבאה…"
       : st === "preparing" ? "מכינים: " + name + " (סרטון וטקסט)…"
-      : st === "ready" ? "🔔 מוכן: " + name + ". לחצו \"פרסום\" בפייסבוק ואז הבא"
-      : st === "failed" ? "⚠ " + name + ": " + codeText(l.code) + ". ▶ = לנסות שוב, הבא = דילוג"
+      : st === "ready" ? "🔔 מוכן: " + name + ". לחצו \"פרסום\" בפייסבוק ואז הבא" + (l.warn ? " · ⚠ בדקו לפני פרסום: " + codeText(l.warn, l.check) : "")
+      : st === "failed" ? "⚠ " + name + ": " + codeText(l.code) + ". ▶ = לנסות שוב · פרסמתם בעצמכם? הבא — נבדוק ונשאל"
       : st === "held" ? name + ": למה לא פורסם?"
       : st === "blocked" ? "הקבוצות שנשארו חסומות כרגע במגבלה" + (l.until ? " (עד " + new Date(l.until).toLocaleString("he-IL") + ")" : "")
-      : st === "empty" ? "אין עוד קבוצות לסוכן הזה ✓" : "";
+      : st === "empty" ? (l.page_id ? "אין עוד קבוצות לנכס הזה — בחרו נכס אחר" : "אין עוד קבוצות לסוכן הזה ✓") : "";
     $("#manualLaneStatus").textContent = text + (l && l.left > 1 && ["preparing", "ready"].indexOf(st) >= 0 ? " · עוד " + (l.left - 1) + " אחריה" : "");
     $("#manualNext").disabled = !l || st === "loading";
     $("#manualRun").hidden = !!l && ["loading", "preparing", "ready", "held"].indexOf(st) >= 0; // shown on "failed": ▶ retries the same group
+    pickRender(l);
     var key = st + "|" + (g ? g.campaign_id + "|" + g.group_id : "");
     if (key !== lastKey) {
       lastKey = key;
       if (SOUND[st]) tones(SOUND[st]);
+      // A ping outside the tab too: the admin may be in another agent's tab, or another window.
+      if (st === "ready" && document.hidden && window.Notification && Notification.permission === "granted") {
+        try { new Notification("🔔 מוכן לפרסום", { body: (ctx && ctx.name ? ctx.name + " · " : "") + name, tag: "forly-lane-" + (ctx && ctx.path) }); } catch (e) { /* not supported here */ }
+      }
       document.title = st === "ready" ? "🔔 מוכן – " + (ctx && ctx.name || "") : st === "failed" ? "⚠ " + (ctx && ctx.name || "") : TITLE;
       if (st !== "held") ask(null);
     }
+  }
+
+  // Which property to post: any, or one the admin picks (one posted too much → pick another).
+  // The options are rebuilt only when the list changes: redrawing them on every poll closed the open dropdown.
+  function pickRender(l) {
+    var pick = $("#manualLanePick");
+    if (!pick) return;
+    var pages = (l && l.pages) || [];
+    pick.hidden = pages.length < 2 && !(l && l.page_id);
+    var list = JSON.stringify(pages);
+    if (pick.dataset.list !== list) {
+      pick.dataset.list = list;
+      pick.innerHTML = '<option value="">כל הנכסים</option>' + pages.map(function (p) {
+        return '<option value="' + esc(p.page_id) + '">' + esc(p.title) + " (" + esc(p.owed) + ")</option>";
+      }).join("");
+    }
+    if (document.activeElement !== pick) pick.value = (l && l.page_id) || "";
   }
 
   // The question under the buttons: a skip reason, or "did it go up?".
@@ -88,12 +111,23 @@
   // ── wiring ──
   var run = $("#manualRun"), nx = $("#manualNext"), askBox = $("#manualLaneAsk");
   if (!run || !nx || !askBox) return;
+  // Sound and notifications need a click first: ▶ or picking a property is that click.
+  function unlock() {
+    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); } catch (e) { audio = null; }
+    try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (e) { /* no notifications: the sound and the tab title still say it */ }
+  }
   run.addEventListener("click", function () {
     if (!ctx) return;
-    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === "suspended") audio.resume(); } catch (e) { audio = null; }
+    unlock();
     ctx.call("POST", ctx.path + "/run").then(function (r) { render(r.lane); }).catch(function () { FLY.toast("ההפעלה נכשלה"); });
   });
   nx.addEventListener("click", function () { next({}); });
+  var lanePick = $("#manualLanePick");
+  if (lanePick) lanePick.addEventListener("change", function () {
+    if (!ctx) return;
+    unlock();
+    ctx.call("POST", ctx.path + "/run", { page_id: lanePick.value }).then(function (r) { render(r.lane); }).catch(function () { FLY.toast("ההחלפה נכשלה"); });
+  });
   askBox.addEventListener("click", function (ev) {
     var b = ev.target.closest("button[data-lane]");
     if (!b) return;
