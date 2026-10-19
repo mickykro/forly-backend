@@ -21,6 +21,7 @@ const metrics = require("../distribution/metrics");
 const config = require("../distribution/config");
 const businessCache = require("../business-cache");
 const { escapeHtml: esc } = require("../utils");
+const { refuseViewAs } = require("../admin-auth");
 
 // Same card shell as routes/pages.js confirmHtml — Hebrew, RTL, self-contained.
 // `redirectTo` auto-forwards after 2s (used to land back on the dashboard
@@ -135,7 +136,7 @@ module.exports = function createDistributionRouter(ctx) {
       : "/distribution.html?connected=1";
 
   // ── GET /oauth/start — logged-in agent → Facebook consent ──
-  router.get("/oauth/start", requireAuth(authSecret), (req, res) => {
+  router.get("/oauth/start", requireAuth(authSecret), refuseViewAs, (req, res) => {
     // Both callers NAVIGATE here (location.href / <a href>), so a JSON body
     // lands as raw text in the address bar. Answer with the same card the rest
     // of this flow uses, and name the missing vars in the log where a developer

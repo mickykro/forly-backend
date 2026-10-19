@@ -20,7 +20,7 @@ function page(o = {}) {
   {
     const p = page();
     const r = await PREP.prepare(p, item(), F.connOf(), { file: FILE });
-    assert.deepEqual(r, { ok: true, pendingBefore: false });
+    assert.deepEqual(r, { ok: true, pendingBefore: false, seenBefore: [] });
     assert.deepEqual(p.st.visited, [F.GROUP_URL]);
     assert.equal(p.st.files.length, 1, "the video went into the composer");
     assert.equal(p.st.editor, F.COPY, "the text, line by line");
@@ -51,6 +51,16 @@ function page(o = {}) {
     assert.equal(r.code, "cancelled");
     assert.equal(p.st.editor, "");
   }
+  // ── cancelled while typing: no further keystroke goes in ──
+  {
+    const p = page();
+    let live = true;
+    const insert = p.keyboard.insertText;
+    p.keyboard.insertText = async (t) => { await insert(t); live = false; };
+    const r = await PREP.prepare(p, item({ copy: "line one\nline two\nline three" }), F.connOf(), { alive: () => live });
+    assert.equal(r.code, "cancelled");
+    assert.equal(p.st.editor, "line one", "stopped before the second line");
+  }
 
   // ── check(): only looks ──
   {
@@ -59,7 +69,16 @@ function page(o = {}) {
     assert.equal(await PREP.check(p, item(), F.connOf()), "not_posted", "the composer still holds the text");
     // The admin clicked Post: the composer is gone, the post is in the feed.
     const posted = page({ counts: { [S.composerRoot]: 0 }, feed: [{ href: `${F.PERMA}?x=1`, author: F.NAME, text: F.COPY }] });
-    assert.equal(await PREP.check(posted, item(), F.connOf()), "posted");
+    assert.equal(await PREP.check(posted, item(), F.connOf(), { seenBefore: [] }), "posted");
+    assert.equal(await PREP.check(posted, item(), F.connOf()), "unsure", "no baseline (a failed preparation): the feed proves nothing");
+    // An older post of the same copy, already there when prepare() looked: not a new publication.
+    const old = { href: `${F.PERMA}?x=1`, author: F.NAME, text: F.COPY };
+    const before = await PREP.prepare(page({ feed: [old] }), item(), F.connOf(), {});
+    assert.equal(before.seenBefore.length, 1);
+    assert.equal(await PREP.check(posted, item(), F.connOf(), { seenBefore: before.seenBefore }), "unsure");
+    // A cut text ("… See more") only starts like the copy: never proof.
+    const cut = page({ counts: { [S.composerRoot]: 0 }, feed: [{ href: `${F.PERMA}?x=1`, author: F.NAME, text: `${F.COPY.slice(0, 40)}… See more` }] });
+    assert.equal(await PREP.check(cut, item(), F.connOf(), { seenBefore: [] }), "unsure");
     const pending = page({ counts: { [S.composerRoot]: 0 }, feed: [], texts: { [S.alert]: "Your post is pending approval" } });
     assert.equal(await PREP.check(pending, item(), F.connOf()), "posted", "held for the group's admins: it went up");
     assert.equal(await PREP.check(pending, item(), F.connOf(), { pendingBefore: true }), "unsure", "a banner that was there before is not ours");

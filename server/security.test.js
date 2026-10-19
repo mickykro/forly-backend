@@ -8,7 +8,7 @@
 const assert = require("assert");
 const { assertPublicHttpUrl, sniffMatchesExt } = require("./utils");
 const { constantTimeEqual, rateLimit, securityHeaders } = require("./security");
-const { makeAdminGuard, makeStepUpGuard, makeViewAs } = require("./admin-auth");
+const { makeAdminGuard, makeStepUpGuard, makeViewAs, refuseViewAs } = require("./admin-auth");
 const auth = require("./auth");
 
 (async () => {
@@ -126,6 +126,13 @@ const auth = require("./auth");
     assert.deepStrictEqual(await viewCall("972599999999", "POST", asAgent), { status: "next", user: "972599999999" });
     // a review-scope link for the admin's phone is not an admin session
     assert.deepStrictEqual(await viewCall("972500000000", "GET", asAgent, "review"), { status: "next", user: "972500000000" });
+    // a GET that starts a write (the Facebook OAuth start) is refused while viewing as an agent
+    const refuse = (user) => new Promise((resolve) => {
+      const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ status: this.c, body: b }); return this; } };
+      refuseViewAs({ user }, res, () => resolve({ status: "next" }));
+    });
+    assert.deepStrictEqual(await refuse({ userId: "972521234567", viewAsBy: "972500000000" }), { status: 403, body: { error: "view_as_readonly" } });
+    assert.deepStrictEqual(await refuse({ userId: "972521234567" }), { status: "next" });
   }
 
   // ── step-up: a fresh OTP login's "stepup" token, for the same admin ──
