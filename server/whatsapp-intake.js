@@ -335,6 +335,15 @@ async function activeTurn(input, deps, draft, now) {
   if (!cmd && C.needsExtraction(step.field || null, input.text) && deps.extractAllowed(draft.phone)) {
     const r = await C.smartAnswer(draft, input.text, deps, now, step.field, promptFor);
     if (r) return r;
+    // The text named one field other than the one asked ("רגע, המחיר 2.1 מיליון"
+    // while "floor" is open) but the extractor found nothing in it. Falling through
+    // to the asked field's own parser would misread the other field's words/digits
+    // as this field's answer (e.g. a price turns into a bogus floor) — re-ask instead.
+    const hinted = step.kind === "ask" ? C.hintedFields(input.text) : [];
+    if (hinted.length === 1 && hinted[0] !== step.field) {
+      const p = promptFor(draft, deps);
+      return { handled: true, status: p.status, replies: p.replies };
+    }
   }
   if (step.kind === "ask") {
     const r = answerField(draft, step.field, input.text, cmd, deps);
