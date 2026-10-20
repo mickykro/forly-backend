@@ -83,7 +83,8 @@ function nameHash(name) {
 
   // ── I3: runSync never trusts an empty, collapsed or unreadable scrape ──
   {
-    const T0 = "2026-09-20T00:00:00.000Z";
+    // Relative to now: runSync reads the real clock, and a fixed date ages past STALE_DROP_MS (30 days).
+    const T0 = new Date(Date.now() - 86400000).toISOString();
     const prevList = () => Array.from({ length: 6 }, (_, i) => ({ group_id: String(200 + i), slug: String(200 + i), membership_state: "member", observed_at: T0, last_confirmed_at: T0 }));
     const world = (pg, o = {}) => {
       const conn = Object.assign({ facebook_groups_member: prevList(), facebook_groups_synced_at: T0 }, o.conn || {});
