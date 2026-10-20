@@ -48,6 +48,22 @@
 .collapsible summary{padding:12px;cursor:pointer;font-weight:500;background:#fafafa;border-radius:8px}
 .collapsible[open] summary{border-radius:8px 8px 0 0;border-bottom:1px solid #eee}
 .collapsible-content{padding:12px}
+/* These rules come after app.css, so its mobile breakpoints have to be restated here. */
+@media(max-width:960px){
+  .edit-layout{grid-template-columns:minmax(0,1fr);gap:16px}
+  .edit-panel{max-height:none;overflow:visible;padding-left:0}
+  .preview-frame{position:relative;top:auto;order:-1;height:min(50svh,460px)}
+}
+@media(max-width:560px){
+  .card{padding:16px 14px}
+  .grid-2{grid-template-columns:minmax(0,1fr)}
+  .grid-3{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.grid-3>:first-child{grid-column:1/-1}
+  .field input,.field textarea,.field select{font-size:16px} /* under 16px iOS zooms in on focus */
+  .thumbs .t,.thumbs .t-add{width:72px;height:72px}
+  .thumbs .t .x{width:26px;height:26px;font-size:14px}
+  .save-bar{padding:12px 0 calc(12px + env(safe-area-inset-bottom))}
+  .save-bar .btn{flex:1}
+}
 </style>
 </head>
 <body class="agent-page edit-page">
