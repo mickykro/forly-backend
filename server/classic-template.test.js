@@ -57,6 +57,14 @@ async function main() {
     assert.match(nocturne.html, /M-500 18 L0 18 H440 V62 H1000/);
     assert.match(nocturne.html, /window\.__PAGE__=/);
     assert.doesNotMatch(nocturne.html, /תצוגת קונספט|assets\/tour\.mp4|דיזנגוף 156|8,400,000/);
+    for (const template of ['passage', 'soleil']) {
+      page = {status:'active', theme:{template}, property:{title:'Story home'}, hero:{video_url:'/story.mp4'}, agent:{name:'Agent'}};
+      const story = await render();
+      assert.match(story.html, /data-story-pin/, `${template} is served as its own template`);
+      assert.match(story.html, /\/tpl\/story\.js/);
+      assert.match(story.html, /data-lead-form/);
+      assert.match(story.html, /window\.__PAGE__=/);
+    }
     page = {status:'expired',theme:{template:'original'}};
     assert.match((await render()).file, /public-nadlan\/p\/index\.html$/);
     page = null;

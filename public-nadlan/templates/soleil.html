@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Forly Nadlan</title>
+<meta name="description" content="">
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Suez+One&family=Assistant:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+/* Soleil — 4 colors: warm white · olive · terracotta · charcoal (alphas allowed). Engine: story.js */
+:root{--sun:#FAF7F2;--olive:#5E6B4E;--terra:var(--accent,#C4673F);--char:#2F2C28;--pad:clamp(18px,5vw,80px);--serif:'Suez One',serif;--sans:'Assistant',sans-serif;--arch:999px 999px 0 0}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--char);color:var(--char);font:400 18px/1.6 var(--sans);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,figure{margin:0}h1,h2,.h3{font-family:var(--serif);font-weight:400;line-height:1.08}
+a{color:inherit}button,input{font:inherit}button{cursor:pointer}
+:focus-visible{outline:2px solid var(--terra);outline-offset:4px}
+.num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
+
+/* fixed video layer */
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden;background:var(--char) center/cover no-repeat}
+.bg video{width:100%;height:100%;object-fit:cover;display:block}
+.bg:after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(47,44,40,calc(.3 + var(--dim,0)*.5)),rgba(47,44,40,.05) 60%)}
+main{position:relative;z-index:1}
+.topbar{position:fixed;top:0;inset-inline:0;z-index:5;display:flex;justify-content:space-between;align-items:center;padding:16px var(--pad);color:var(--sun);transition:background .4s,padding .4s}
+.topbar.solid{background:var(--char);padding-block:10px}
+.brand{font:400 24px/1 var(--serif);text-decoration:none}
+.topbar .cta{color:var(--sun);text-decoration:none;font-size:14px;font-weight:700;background:var(--terra);padding:9px 18px}
+
+/* 1+2 · Arrival → Reveal */
+.pin{height:165vh;position:relative}
+.stage{position:sticky;top:0;height:100svh;display:flex;flex-direction:column;justify-content:flex-end;padding:0 var(--pad) clamp(28px,6vh,56px);color:var(--sun)}
+.phrase{position:absolute;bottom:clamp(28px,6vh,56px);inset-inline:var(--pad);max-width:28ch;font:400 clamp(20px,2.2vw,28px)/1.35 var(--serif);transition:opacity .5s,transform .6s}
+.phrase.off{opacity:0;transform:translateY(-20px);pointer-events:none}
+.cue{display:block;margin-top:14px;font:700 12px var(--sans);letter-spacing:.18em}
+.st{opacity:0;transform:translateY(20px);transition:opacity .55s ease,transform .7s cubic-bezier(.2,.7,.2,1)}.st.on{opacity:1;transform:none}
+.deal{align-self:flex-start;font:700 12px/1 var(--sans);letter-spacing:.14em;background:var(--terra);padding:9px 16px 7px;border-radius:var(--arch);margin-bottom:14px}
+.stage h1{font-size:clamp(40px,7vw,100px);max-width:16ch}
+.addr{margin-top:6px;font-size:clamp(15px,1.5vw,19px);color:rgba(250,247,242,.9)}.addr span+span:before{content:' · '}
+.data{margin-top:clamp(16px,3vh,28px);display:flex;flex-direction:column}
+.price{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding-bottom:10px;border-bottom:2px solid var(--terra);align-self:flex-start}
+.price b{font:400 clamp(34px,5vw,62px)/1 var(--serif)}.price small{font-size:14px;opacity:.8}
+.specs{display:flex;flex-wrap:wrap;gap:6px 0;margin-top:12px;font-size:clamp(15px,1.6vw,19px)}
+.specs span{white-space:nowrap}.specs span+span:before{content:'';display:inline-block;width:7px;height:9px;background:var(--terra);border-radius:var(--arch);margin:0 12px}
+.specs b{font-weight:700}.specs i{font-style:normal}
+
+/* panels */
+.gap{height:30vh}
+.panel{--p:1;position:relative;padding:clamp(64px,9vw,120px) var(--pad)}
+.p-sun{background:var(--sun)}.p-char{background:var(--char);color:var(--sun)}.p-olive{background:var(--olive);color:var(--sun)}
+h2{font-size:clamp(32px,4.6vw,68px);margin-bottom:16px}
+.p-sun h2{color:var(--olive)}
+.lede{max-width:44ch;font-size:clamp(17px,1.5vw,20px);opacity:.85}
+
+/* E-F terraces: four steps that flatten as the section lands; data-flip mirrors */
+[data-edge="E-F"]{--s:calc((1 - var(--p))*28px);clip-path:polygon(0 calc(var(--s)*4),25% calc(var(--s)*4),25% calc(var(--s)*3),50% calc(var(--s)*3),50% calc(var(--s)*2),75% calc(var(--s)*2),75% var(--s),100% var(--s),100% 100%,0 100%)}
+[data-edge="E-F"][data-flip]{clip-path:polygon(0 var(--s),25% var(--s),25% calc(var(--s)*2),50% calc(var(--s)*2),50% calc(var(--s)*3),75% calc(var(--s)*3),75% calc(var(--s)*4),100% calc(var(--s)*4),100% 100%,0 100%)}
+
+/* 3 · Living — arch window + numbered highlights */
+.living-top{display:flex;justify-content:space-between;align-items:end;gap:5vw;flex-wrap:wrap;margin-bottom:36px}
+.chips{max-width:520px}.chips span{background:var(--sun);color:var(--char);border:0!important;border-radius:0!important;padding:8px 16px!important;font-size:14px!important;font-weight:700;box-shadow:0 1px 2px rgba(47,44,40,.08),0 6px 16px rgba(47,44,40,.12)}
+.story{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(24px,5vw,72px);align-items:center}
+.window{position:relative;aspect-ratio:4/5;max-height:70vh;border-radius:var(--arch);overflow:hidden;background:var(--olive)}
+.w-img{position:absolute;inset:0;opacity:0;transform:scale(1.06);transition:opacity .8s,transform 1.6s}.w-img.on{opacity:1;transform:scale(1)}
+.w-img img,.w-img canvas{width:100%;height:100%;object-fit:cover;display:block}
+.window .tag{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);z-index:1;background:var(--sun);color:var(--terra);font-weight:700;font-size:13px;padding:6px 14px;border-radius:var(--arch);white-space:nowrap}
+.hls{list-style:none;padding:0;margin:0}
+.hl{border-top:1px solid rgba(47,44,40,.15)}.hl:last-child{border-bottom:1px solid rgba(47,44,40,.15)}
+.hl button{display:flex;gap:16px;align-items:baseline;width:100%;background:none;border:0;padding:18px 0;text-align:start;color:var(--char)}
+.hl .n{font:400 16px var(--serif);color:var(--terra);min-width:2ch}
+.hl .h3{font-size:clamp(20px,2vw,28px);color:rgba(47,44,40,.45);transition:color .4s}
+.hl.on .h3{color:var(--olive)}
+.hl .body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .6s cubic-bezier(.2,.7,.2,1)}.hl.on .body{grid-template-rows:1fr}
+.hl .body>div{overflow:hidden;padding-inline-start:calc(2ch + 16px)}.hl .body p{font-size:16px;opacity:.8}
+.hl .bar{display:block;height:2px;background:var(--terra);width:0;margin:14px 0 18px}.hl.on .bar{animation:bar 2.5s linear forwards}
+.hl-tag{display:none}
+@keyframes bar{to{width:100%}}
+
+/* 4 · Inside — square stage + square thumbnails */
+.g-main{position:relative;overflow:hidden;aspect-ratio:16/9;max-height:72vh;width:100%;background:var(--char);touch-action:pan-y;cursor:zoom-in}
+.g-track{display:flex;height:100%;direction:ltr;transition:transform .8s cubic-bezier(.65,0,.35,1)}
+.g-track figure{flex:0 0 100%;height:100%;position:relative}
+.g-track img,.g-track canvas{width:100%;height:100%;object-fit:cover;display:block}
+.g-cap{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font-size:15px}
+.g-cap b{font-weight:600}.g-cap .g-count{font:400 15px var(--serif);color:var(--terra);direction:ltr}
+.g-thumbs{display:flex;gap:10px;margin-top:14px;padding-top:8px;overflow-x:auto;scrollbar-width:none}
+.g-th{position:relative;flex:0 0 clamp(64px,9vw,110px);aspect-ratio:1/1;padding:0;border:0;background:#4a4640;overflow:hidden;opacity:.45;transition:opacity .3s,transform .3s}
+.g-th.on{opacity:1;transform:translateY(-6px);box-shadow:0 3px 0 var(--terra)}.g-th .g-no{display:none}
+.single .g-thumbs,.single .g-count{display:none}
+
+/* 5 · Around — olive glass with an arched top */
+.over{color:var(--sun);padding:clamp(60px,10vw,140px) var(--pad)}
+.around{display:grid;grid-template-columns:1fr 1fr;gap:0 5vw;padding:clamp(56px,7vw,96px) clamp(24px,4vw,56px) clamp(24px,4vw,48px);background:rgba(94,107,78,.62);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-radius:clamp(90px,22vw,320px) clamp(90px,22vw,320px) 0 0}
+.around h2,.around .lede{grid-column:1/-1;text-align:center}.around .lede{margin:0 auto 14px}
+.stops,.stats{list-style:none;padding:0;margin:0}
+.stops li,.stat{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:14px 0;border-bottom:1px solid rgba(250,247,242,.25)}
+.stops span,.stat span{font-size:15px;opacity:.85}
+.stat b{order:2;font:400 clamp(22px,2.4vw,30px)/1 var(--serif)}
+
+/* 6 · Invitation */
+.invite{display:grid;grid-template-columns:1.1fr 1fr;gap:7vw;align-items:center}
+.agent{display:flex;gap:14px;align-items:center;margin-top:28px}
+.av{width:56px;height:56px;background:var(--sun);color:var(--olive);display:grid;place-items:center;font:400 22px var(--serif);flex:none}
+form,[data-lead-sent]{background:var(--sun);color:var(--char);padding:clamp(28px,4vw,48px) clamp(22px,3vw,40px)}
+form{display:grid;gap:14px}
+label{font-size:14px;font-weight:600}
+input{display:block;width:100%;border:0;border-bottom:1.5px solid rgba(47,44,40,.25);border-radius:0;background:transparent;color:inherit;padding:8px 0;font-size:19px}input:focus{outline:none;border-color:var(--terra)}
+form button{margin-top:8px;background:var(--terra);color:var(--sun);border:0;min-height:56px;font-weight:700;font-size:17px}
+form button:disabled{opacity:.6}
+[data-lead-sent]{display:none}[data-lead-sent] h3{font:400 clamp(26px,3vw,38px)/1.1 var(--serif);color:var(--olive);margin-bottom:8px}
+footer{position:relative;z-index:1;padding:26px var(--pad) 40px;color:var(--sun);font-size:13px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;background:var(--char)}
+footer a{text-decoration:none;opacity:.85}
+
+.in-view{opacity:0;transform:translateY(24px);transition:opacity .7s,transform .8s cubic-bezier(.2,.7,.2,1)}.in-view.on{opacity:1;transform:none}
+
+@media(max-width:760px){
+  .story{grid-template-columns:1fr}.window{aspect-ratio:1/1;max-width:420px;width:100%;margin:0 auto}
+  .g-main{aspect-ratio:4/5}
+  .around,.invite{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important;animation:none!important}.st,.in-view{opacity:1;transform:none}[data-edge]{clip-path:none!important}}
+</style>
+</head>
+<body>
+<div class="bg"><video data-video autoplay muted loop playsinline preload="auto" aria-hidden="true"></video></div>
+<header class="topbar"><a class="brand" href="#top" data-logo><span data-bind="texts.footer_brand||agent.brand_name||agent.name">forly.</span></a><a class="cta" href="#contact" data-i18n="book_visit">תיאום ביקור</a></header>
+
+<main id="top">
+  <!-- 1+2 · Arrival → Reveal -->
+  <section class="pin" data-story-pin aria-labelledby="hero-title">
+    <div class="stage">
+      <p class="phrase"><span data-bind="hero.phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד — נכס שמגיעים אליו פעם בעשור.</span><span class="cue">↓ <span data-i18n="scroll">גללו</span></span></p>
+      <span class="deal st" data-at=".08" data-deal>למכירה</span>
+      <h1 id="hero-title" class="st" data-at=".16" data-bind="property.title">דירת 4 חדרים בדיזנגוף</h1>
+      <p class="addr st" data-at=".26"><span data-show="property.address" data-bind="property.address"></span><span data-show="property.neighborhood" data-bind="property.neighborhood"></span><span data-show="property.city" data-bind="property.city"></span></p>
+      <div class="data">
+        <div class="price st" data-at=".38" data-show="property.price"><b class="num" data-bind="property.price" data-fmt="price"></b><small data-price-label>מחיר מבוקש</small></div>
+        <div class="specs st" data-at=".5"><span data-show="property.size_sqm"><b class="num" data-bind="property.size_sqm"></b> <i data-i18n="sqm">מ״ר</i></span><span data-show="property.rooms"><b class="num" data-bind="property.rooms"></b> <i data-i18n="rooms">חדרים</i></span><span data-show="property.floor"><i data-i18n="floor">קומה</i> <b class="num" data-bind="property.floor"></b></span><span data-show="property.parking"><b class="num" data-bind="property.parking"></b> <i data-i18n="parking">חניות</i></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Living -->
+  <section class="panel p-sun" id="living">
+    <div class="living-top in-view">
+      <div><h2 data-bind="texts.why_title" data-i18n="why_head">נכס כזה לא מגיע ללוחות. הוא מגיע לאנשים הנכונים.</h2><p class="lede" data-bind="texts.why_sub" data-i18n="why_sub">כמה סיבות שבגללן הנכס הזה שווה ביקור.</p></div>
+      <div class="chips" data-amenities></div>
+    </div>
+    <div class="story in-view" data-story-highlights data-story-mode="window">
+      <div class="window"><span class="tag" hidden></span></div>
+      <ol class="hls" data-list="carousel.slides"><template><li class="hl" data-hl><button type="button"><span class="n" data-field="num"></span><span class="h3" data-field="title"></span></button><div class="body"><div><p data-field="body"></p><span class="hl-tag" data-field="tag"></span><span class="bar"></span></div></div></li></template></ol>
+    </div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- 4 · Inside (E-F terraces) -->
+  <section class="panel p-char" data-edge="E-F" id="gallery" aria-label="גלריה">
+    <div class="g in-view" data-story-gallery>
+      <div class="g-main" role="button" tabindex="0" aria-label="הגדלת התמונה"><div class="g-track"></div></div>
+      <div class="g-cap"><b></b><span class="g-count"></span></div>
+      <div class="g-thumbs" data-gallery data-gallery-class="g-th" data-gallery-count="6"></div>
+    </div>
+  </section>
+
+  <!-- 5 · Around (olive glass arch over the video) -->
+  <section class="over" id="area">
+    <div class="around in-view">
+      <h2 data-bind="texts.area_title||property.neighborhood||property.city" data-i18n="the_area">השכונה</h2><p class="lede" data-bind="texts.area_sub||area.blurb" data-i18n="area_sub">אחת השכונות המבוקשות באזור — וזה לא במקרה.</p>
+      <ul class="stops" data-list="area.stops"><template><li><b data-field="label"></b><span data-field="minutes"></span></li></template></ul>
+      <div class="stats" data-list="area.stats"><template><div class="stat"><b class="num" data-field="value"></b><span data-field="label"></span></div></template></div>
+    </div>
+  </section>
+
+  <!-- 6 · Invitation (E-F mirrored) -->
+  <section class="panel p-olive" data-edge="E-F" data-flip id="contact">
+    <div class="invite">
+      <div class="in-view"><h2 data-bind="cta.headline">התמונה הבאה? אתם, כאן.</h2><p class="lede" data-bind="cta.sub">יש דברים שמרגישים רק כשנכנסים. נשמח לתאם ביקור אישי.</p>
+        <div class="agent"><span class="av" data-avatar aria-hidden="true"></span><div><b data-bind="agent.name">סוכן הנכס</b><br><small><span data-bind="agent.brand_name"></span><span data-show="agent.license"> · <span data-i18n="license_label">רישיון תיווך</span> <span class="num" data-bind="agent.license"></span></span></small></div></div></div>
+      <form class="in-view" data-lead-form><label><span data-i18n="form_name">שם מלא</span><input data-lead="name" name="name" autocomplete="name"></label><label><span data-i18n="form_phone">טלפון נייד</span><input data-lead="phone" name="phone" type="tel" autocomplete="tel" placeholder="050-000-0000"></label><button type="submit" data-i18n="book_visit">תיאום ביקור</button></form>
+      <div data-lead-sent aria-live="polite"><h3 data-i18n="sent_title">הפרטים אצלנו.</h3><p data-i18n="sent_body">נחזור אליכם באופן אישי בהקדם.</p></div>
+    </div>
+  </section>
+</main>
+<footer><a href="#top" data-logo><span data-bind="texts.footer_brand||agent.brand_name||agent.name">forly.</span></a><span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉</span><span><a href="/legal/privacy.html" data-i18n="privacy_policy">מדיניות פרטיות</a> · <a href="/legal/accessibility.html" data-i18n="accessibility">הצהרת נגישות</a></span></footer>
+<script src="/tpl/demo.js"></script>
+<script src="/templates/i18n.js"></script>
+<script src="/tpl/runtime.js"></script>
+<script src="/tpl/story.js"></script>
+</body>
+</html>

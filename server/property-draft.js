@@ -27,11 +27,12 @@ const COMMAND_ALIASES = { "להמשיך": "resume", "להמשיך אותה": "re
   "ברירת המחדל": "default", "דיפולט": "default", "קבוצות ברירת מחדל": "default",
   "מחק": "cancel", "מחקי": "cancel", "תמחק": "cancel", "תמחקי": "cancel", "לבטל": "cancel", "לבטל אותה": "cancel", "בטל": "cancel", "תבטל": "cancel", "תבטלי": "cancel" };
 
-// Page designs, in the order create.html's picker lists them (1-6). The first
+// Page designs, in the order create.html's picker lists them (1-8). The first
 // alias is the Hebrew name shown there; create.html preselects the chosen one.
 const TEMPLATES = {
   original: ["קלאסי", "classic", "original"], nocturne: ["נוקטורן", "nocturne"], reel: ["ריל", "reel"],
   atelier: ["אטלייה", "atelier"], loupe: ["לופה", "לופ", "loupe"], orbite: ["אורביט", "orbite"],
+  passage: ["פסאז׳", "פסאז'", "פסאז", "passage"], soleil: ["סוליי", "soleil"],
 };
 const TEMPLATE_KEYS = Object.keys(TEMPLATES);
 
@@ -175,7 +176,7 @@ function parseDeal(t) {
 }
 function parseTemplate(t) {
   const s = clean(t).toLowerCase();
-  const n = /^([1-6])(?:\D|$)/.exec(s);
+  const n = /^([1-8])(?:\D|$)/.exec(s);
   if (n) return TEMPLATE_KEYS[Number(n[1]) - 1];
   return TEMPLATE_KEYS.find((k) => TEMPLATES[k].includes(s)) || null;
 }
