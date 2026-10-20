@@ -33,7 +33,7 @@ const todayKey = () => new Date().toISOString().slice(0, 10);
 // Canonical form lives in utils.js so ownership checks and their tests can
 // reach it without loading Express. Aliased here to keep call sites unchanged.
 const normalizeAny = require("./utils").normalizeAuthPhone;
-const { decideLoginLead, leadMessage } = require("./login-leads");
+const { decideLoginLead, leadMessage, leadButtons } = require("./login-leads");
 
 // ── crypto ──
 const hashCode = (secret, phone, code) =>
@@ -41,6 +41,8 @@ const hashCode = (secret, phone, code) =>
 
 // scope "session" is a full login; "review" is the WhatsApp review link, which
 // only the routes that opt in (requireAuth(secret, REVIEW_SCOPES)) accept.
+const STEPUP_TTL_S = 10 * 60 * 60; // 10 hours
+
 function signSession(secret, phone, { scope = "session", ttlS = SESSION_TTL_S } = {}) {
   const payload = { userId: phone, scope, exp: Math.floor(Date.now() / 1000) + ttlS };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
@@ -86,7 +88,7 @@ function readToken(req) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, salesLeadPhone }) {
+module.exports = function createAuthRouter({ db, mem, sendWhatsApp, sendWhatsAppRich, secret, salesLeadPhone }) {
   const router = express.Router();
   if (!secret) throw new Error("auth: FORLY_JWT_SECRET is required");
   if (mem && !mem.otps) mem.otps = new Map();
@@ -130,7 +132,10 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
       const now = new Date();
       const { notify, doc } = decideLoginLead(prev, now);
       await saveLoginLead(phone, { phone, ...doc });
-      if (notify && salesLeadPhone) await sendWhatsApp(salesLeadPhone, leadMessage(phone));
+      if (notify && salesLeadPhone) {
+        if (sendWhatsAppRich) await sendWhatsAppRich(salesLeadPhone, leadButtons(phone));
+        else await sendWhatsApp(salesLeadPhone, leadMessage(phone));
+      }
     } catch (err) {
       console.error("not-a-client lead notice failed:", err.message);
     }
@@ -173,10 +178,22 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
       // ponytail: no GreenAPI creds = local dev, WhatsApp send is a no-op —
       // print the code so login is testable. Never fires in prod (creds set).
       if (!process.env.GREENAPI_TOKEN) console.log(`[dev] OTP for ${phone}: ${code}`);
-      await sendWhatsApp(
-        phone,
-        `קוד הכניסה שלך ל-Forly: ${code}\nהקוד תקף ל-5 דקות.\n\nYour Forly login code: ${code}\nValid for 5 minutes.`
-      );
+      try {
+        const sent = await sendWhatsApp(
+          phone,
+          `קוד הכניסה שלך ל-Forly: ${code}\nהקוד תקף ל-5 דקות.\n\nYour Forly login code: ${code}\nValid for 5 minutes.`
+        );
+        if (sent === false) throw new Error("Green API refused the message");
+      } catch (err) {
+        // The send failed (Green API down, refused, or the 20s timeout), so
+        // it must not count toward the resend spacing: before this, every
+        // failed try still lengthened the wait and the agent was locked out
+        // of retrying. The code itself stays valid in case a timed-out
+        // message is delivered late.
+        console.error(`auth/otp WhatsApp send failed for ${phone}:`, err.message);
+        await patchOtp(phone, { created_at: (prev && prev.created_at) || null, sends_today: sendsToday });
+        return res.status(502).json({ ok: false, error: "whatsapp_send_failed" });
+      }
 
       return res.json({ ok: true, sent: true, expires_in: OTP_TTL_MS / 1000 });
     } catch (err) {
@@ -219,7 +236,15 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
         sameSite: "lax",
         maxAge: SESSION_TTL_S * 1000,
       });
-      return res.json({ ok: true, token, userId: phone, expires_in: SESSION_TTL_S });
+      // A fresh OTP login IS the step-up (admin-auth.js makeStepUpGuard): a
+      // short-lived, separately-scoped token that no session route accepts.
+      res.cookie("forly_stepup", signSession(secret, phone, { scope: "stepup", ttlS: STEPUP_TTL_S }), {
+        httpOnly: true,
+        secure: cookieSecure(req),
+        sameSite: "lax",
+        maxAge: STEPUP_TTL_S * 1000,
+      });
+      return res.json({ ok: true, token, userId: phone, expires_in: SESSION_TTL_S, stepup_expires_in: STEPUP_TTL_S });
     } catch (err) {
       console.error("auth/otp/verify failed:", err);
       return res.status(500).json({ ok: false, error: "otp_verify_failed" });
@@ -298,6 +323,7 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, secret, sale
   // ── POST /api/auth/logout ──
   router.post("/logout", (req, res) => {
     res.clearCookie("forly_session");
+    res.clearCookie("forly_stepup");
     return res.json({ ok: true });
   });
 

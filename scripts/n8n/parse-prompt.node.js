@@ -43,6 +43,7 @@ function snapUrls(returned, allowed) {
 const curatedAll = $("Curate Photos").first().json.curated || [];
 const PIN = [curatedAll[0] && curatedAll[0].url, curatedAll.length ? curatedAll[curatedAll.length - 1].url : null];
 
+const OUTDOOR_OPENER = $("Curate Photos").first().json.opener_group === "outdoor";
 const plans = $("Plan Clips").all();
 const phone = $("Validate Quota").first().json.phone;
 return $input.all().map((item, i) => {
@@ -67,7 +68,22 @@ return $input.all().map((item, i) => {
     images.splice(want, 0, m);
     pinRepaired = true;
   }
-  const prompt = clampPrompt(parsed.prompt);
+  const BANNED = /\b(rising|descend\w*|starting above|pull-?back|pull-?out|orbit\w*|horizon|golden hour|sunset|sunrise|dusk|dawn|dissolve\w*|blend\w*|morph\w*|fades?|seamless|walk\w*|steps?|stepping|person|first-person|pov|handheld|phone)\b/i;
+  const TAIL = " Cut on movement between shots, no morphing or blending. Everything stays exactly as in the photos: nothing is added, removed, moved or restyled. No people, hands or shadows of the camera operator. Clean frame with no text, logos or watermarks.";
+  const per = plan.seconds_per_shot || 3.5;
+  const safe = images.map((_, k) => `Shot ${k + 1} (${per}s): @image${k + 1}, the camera glides slowly forward toward the center of the frame.`).join(" ") + TAIL;
+  // The fixed closing sentence itself says "morphing or blending", so check only the part before it.
+  const body = String(parsed.prompt || "").split("Cut on movement between shots")[0];
+  const bad = body.match(BANNED);
+  const prompt = bad ? safe : clampPrompt(parsed.prompt);
+  // Only say the tour starts outside when Curate Photos actually opened on an
+  // outdoor photo; otherwise Seedance invents a garden/entrance before @image1.
+  const HEAD = clipIndex === 0
+    ? (OUTDOOR_OPENER
+      ? "One continuous cinematic tour of a single property, starting outside and moving toward the house. "
+      : "One continuous cinematic tour of a single property, starting inside, in the room shown in @image1. ")
+    : "The same continuous tour continues inside the house. ";
+  const finalPrompt = HEAD + prompt;
   return { json: {
     phone,
     clip_index: clipIndex,
@@ -75,8 +91,10 @@ return $input.all().map((item, i) => {
     image_count: plan.image_count,
     ...parsed,
     ordered_images: images,
-    prompt,
-    prompt_chars: prompt.length,
+    prompt: finalPrompt,
+    prompt_fallback: !!bad,
+    prompt_fallback_word: bad ? bad[0] : null,
+    prompt_chars: finalPrompt.length,
     prompt_clamped: prompt.length !== String(parsed.prompt || "").length,
     images_repaired: repaired,
     pin_repaired: pinRepaired

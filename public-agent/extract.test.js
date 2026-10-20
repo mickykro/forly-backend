@@ -89,4 +89,49 @@ assert.equal(X.errorKey(429, "extract_limit"), "ext_err_limit");
 assert.equal(X.errorKey(503, "extract_unavailable"), "ext_err_unavailable");
 assert.equal(X.errorKey(500, "whatever"), "ext_err_unavailable");
 assert.equal(X.errorKey(0, null), "ext_err_unavailable");
-console.log("extract.test.js ok");
+
+// ── pollJob: keeps asking until the job settles ──
+(async () => {
+  const states = [{ status: "queued" }, { status: "running" }, { status: "done", fields: { city: "חיפה" }, missing: [], photos: [] }];
+  let n = 0;
+  const slept = [];
+  const out = await X.pollJob("job-1", {
+    fetchFn: async () => ({ ok: true, json: async () => states[Math.min(n++, states.length - 1)] }),
+    sleep: async (ms) => slept.push(ms),
+  });
+  assert.equal(out.status, "done");
+  assert.deepEqual(out.fields, { city: "חיפה" });
+  assert.equal(slept.length, 2, "polled twice before the answer");
+
+  // a failed job comes back as-is, not as a throw — the caller shows its code
+  const failed = await X.pollJob("job-2", {
+    fetchFn: async () => ({ ok: true, json: async () => ({ status: "failed", error_code: "social_login_required" }) }),
+    sleep: async () => {},
+  });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error_code, "social_login_required");
+
+  // a job that never settles gives up rather than polling forever
+  let calls = 0;
+  await assert.rejects(
+    X.pollJob("job-3", {
+      fetchFn: async () => { calls++; return { ok: true, json: async () => ({ status: "running" }) }; },
+      sleep: async () => {},
+      timeoutMs: 0,
+    }),
+    /timeout/,
+  );
+  assert.ok(calls >= 1);
+
+  // an HTTP error on the poll is a plain failure, not a silent hang
+  await assert.rejects(
+    X.pollJob("job-4", { fetchFn: async () => ({ ok: false, status: 404, json: async () => ({}) }), sleep: async () => {} }),
+    /404/,
+  );
+
+  // ── the new error code maps to its own Hebrew string ──
+  assert.equal(X.errorKey(409, "social_login_required"), "ext_err_social_login");
+  assert.equal(X.errorKey(409, "facebook_not_connected"), "ext_err_fb_connect");
+
+  console.log("extract.test.js ok");
+})();

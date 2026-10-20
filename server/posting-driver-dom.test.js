@@ -1,0 +1,195 @@
+/* posting-driver-proof.js's DOM reads, in real Chromium (local HTML via
+   setContent — no network). Skipped, saying so, when no Chromium binary is
+   found (CHROMIUM_PATH, or PLAYWRIGHT_BROWSERS_PATH / /opt/pw-browsers). */
+process.env.FORLY_ENV = "local";
+process.env.POSTING_SHOTS = "0"; // never into the dev page's screenshot folder
+process.env.PROFILE_KEY = "test-profile-key";
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+const P = require("./posting-driver-proof");
+const PD = require("./posting-driver");
+const S = P.SELECTORS;
+
+function findChromium() {
+  if (process.env.CHROMIUM_PATH && fs.existsSync(process.env.CHROMIUM_PATH)) return process.env.CHROMIUM_PATH;
+  for (const root of [process.env.PLAYWRIGHT_BROWSERS_PATH, "/opt/pw-browsers"].filter(Boolean)) {
+    let dirs = [];
+    try { dirs = fs.readdirSync(root).filter((d) => /^chromium-\d+$/.test(d)).sort().reverse(); } catch { continue; }
+    for (const d of dirs) {
+      const exe = path.join(root, d, "chrome-linux", "chrome");
+      if (fs.existsSync(exe)) return exe;
+    }
+  }
+  return null;
+}
+
+const EN = "Great flat. You're restricted from posting in groups? No! You're temporarily blocked from posting — joke";
+const HE = "דירה בחיפה 4 חדרים. נחסמת באופן זמני? לא! החשבון שלך מוגבל — בדיחה";
+const PLAIN = "דירה בחיפה 4 חדרים, מרפסת וחניה";
+const R3 = "דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות, חניה בשפע";
+const R3P = "דירה חדשה מקבלן. היתר הבנייה ממתין לאישור הוועדה, כניסה מיידית";
+const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". ").map((s) => `<p>${s}</p>`).join("")}</div>`;
+
+(async () => {
+  const exe = findChromium();
+  if (!exe) { console.log("posting-driver-dom.test.js skipped (no Chromium binary)"); return; }
+  const { chromium } = require("patchright");
+  let browser;
+  try { browser = await chromium.launch({ executablePath: exe, headless: true, args: ["--no-sandbox"] }); }
+  catch { console.log("posting-driver-dom.test.js skipped (launch failed)"); return; }
+  try {
+    const page = await browser.newPage();
+    const sig = async (html, copy) => { await page.setContent(`<html><body>${html}</body></html>`); return P.readSignal(page, copy); };
+
+    // ── the copy never reads as a signal, wherever it sits ──
+    for (const [label, copy, html] of [
+      ["EN copy in the composer", EN, `<div role="dialog">${editor(EN)}</div>`],
+      ["HE copy in the composer", HE, `<div role="dialog">${editor(HE)}</div>`],
+      ["composer inside a dialog, copy echoed in a status", HE, `<div role="dialog"><h2>Create post</h2><div role="dialog">${editor(HE)}<div role="status">${HE}</div></div></div>`],
+      ["composer wrapping an inner dialog/alert with the copy", EN, `<div role="dialog">${editor(EN)}<div role="dialog"><span role="alert">${EN}</span></div></div>`],
+      ["a toast that IS a cut of the copy (Minor 10)", HE, `<div role="status">${HE.slice(0, 40)}…</div>`],
+      ["a toast holding a cut of the copy in its own element", HE, `<div role="status">Posted: <span>${HE.slice(0, 40)}…</span></div>`],
+      ["'Posted: <cut of the copy>' as plain text (round-1 Minor 10)", HE, `<div role="status">Posted: ${HE.slice(0, 40)}…</div>`],
+      ["a link-preview card in the composer repeating our listing text", R3P, `<div role="dialog">${editor(R3P)}<a><div>f.ly</div><div>היתר הבנייה ממתין לאישור</div></a></div>`],
+      ["a toast with the copy, emoji as <img alt>", `🏠 ${HE}`, `<div role="status"><img alt="🏠">${HE}</div>`],
+      ["after submit: the editor gone, a preview of the copy remains", HE, `<div role="dialog"><div>${HE}</div></div>`],
+    ]) assert.equal(await sig(html, copy), "ok", label);
+
+    // ── real signals still count: the composer's chrome is read, only its editor is not ──
+    for (const [label, copy, html, want] of [
+      ["an inline error in the composer chrome, outside the editor", PLAIN, `<div role="dialog">${editor(PLAIN)}<div role="alert">You can't post in this group</div></div>`, "group_blocked"],
+      ["a restriction dialog wrapping the composer", PLAIN, `<div role="dialog"><div>Your account is restricted</div><div role="dialog">${editor(PLAIN)}</div></div>`, "restricted"],
+      ["a real block dialog beside the composer", PLAIN, `<div role="dialog">${editor(PLAIN)}</div><div role="dialog">You're temporarily blocked from posting</div>`, "rate_limited"],
+      ["the same pattern, a phrase NOT in the copy", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">Your account is restricted</div>`, "restricted"],
+      // fix round 3: echo toasts are stripped PER REGION — one never excuses another
+      ["an echo toast next to the real alert", R3, `<div role="status">הכביש חסום זמנית בגלל עבודות</div><div role="alert">אתה חסום זמנית מפרסום בקבוצות עד מחר</div>`, "rate_limited"],
+      ["span-wrapped echo toast and alert", R3, `<div role="status">פורסם: <span>הכביש חסום זמנית בגלל עבודות…</span></div><div role="alert"><span>אתה חסום זמנית מפרסום בקבוצות עד מחר</span></div>`, "rate_limited"],
+      ["a real 16-character alert whose words are in our copy", "דירה יפה. נחסמת באופן זמני? לא אצלנו", `<div role="alert">נחסמת באופן זמני</div>`, "rate_limited"],
+      ["a real pending alert beside an echo of our pending-sounding copy", "דירה חדשה מקבלן. היתר הבנייה ממתין לאישור הוועדה, כניסה מיידית", `<div role="status"><span>היתר הבנייה ממתין לאישור הוועדה</span></div><div role="status"><span>הפוסט שלך ממתין לאישור מנהל</span></div>`, "pending_approval"],
+      ["ordinary copy sharing a short phrase (HE, rate_limited)", "דירה ברחוב הנביאים. הכביש חסום זמנית בגלל עבודות", `<div role="alert">אתה חסום זמנית מפרסום בקבוצות</div>`, "rate_limited"],
+      ["ordinary copy sharing a short phrase (HE, pending)", "הנכס ממתין לאישור טאבו, כניסה מיידית", `<div role="status">הפוסט שלך ממתין לאישור מנהל הקבוצה</div>`, "pending_approval"],
+      ["a short bolded fragment that is also in our copy", "הכביש חסום זמנית בגלל עבודות", `<div role="alert">אתה <b>חסום זמנית</b> מפרסום</div>`, "rate_limited"],
+      // fix round 4: a run shared with the copy that only cuts INTO Facebook's sentence never hides it
+      ["EN bisect: the copy shares '…temporarily blocked from post…'", "Quiet street, never temporarily blocked from post office traffic. 3 rooms", `<div role="alert">You're temporarily blocked from posting in this group</div>`, "rate_limited"],
+      ["HE bisect: the copy shares 'דירה למכירה. נחסמת באופ…'", "דירה למכירה. נחסמת באופנוע בדרך לדירה? יש חניה", `<div role="alert"><span>דירה למכירה.</span> נחסמת באופן זמני מפרסום</div>`, "rate_limited"],
+      ["an echo toast beside a real alert in ONE region", R3, `<div role="alert"><span>פורסם: הכביש חסום זמנית בגלל עבודות…</span> <span>אתה חסום זמנית מפרסום בקבוצות</span></div>`, "rate_limited"],
+      // fix round 5: the phrase alone never excuses itself; 10 more characters of the copy must be echoed around it
+      ["a real block dialog beside the composer, the copy holding the phrase", EN, `<div role="dialog">${editor(EN)}</div><div role="dialog">You're temporarily blocked from posting</div>`, "rate_limited"],
+      ["EN: the copy holds the phrase alone", "x You're temporarily blocked from posting y", `<div role="alert">You're temporarily blocked from posting in this group</div>`, "rate_limited"],
+      ["EN: the copy is exactly the phrase", "Your account is restricted", `<div role="dialog">Your account is restricted</div>`, "restricted"],
+      ["HE: the copy holds the phrase alone", "דירה. לא ניתן לפרסם בקבוצה! יש חניה", `<div role="alert">לא ניתן לפרסם בקבוצה</div>`, "group_blocked"],
+      ["an alert after 9000 blank characters", PLAIN, `<div role="alert"><pre>${" ".repeat(9000)}</pre>posting too fast</div>`, "rate_limited"],
+      ["an alert inside an open shadow root", PLAIN, `<div id="h"></div><script>document.getElementById("h").attachShadow({ mode: "open" }).innerHTML = '<div role="alert">Your account is restricted</div>';</script>`, "restricted"],
+      ["a captcha frame is structural, whatever the copy says", "Confirm you're human", `<div role="dialog">${editor("Confirm you're human")}</div><iframe title="captcha"></iframe>`, "captcha"],
+    ]) assert.equal(await sig(html, copy), want, label);
+
+    // ── fix round 4: a megabyte comment-thread dialog is cut in the page, then classified fast ──
+    await page.setContent(`<div role="dialog"><div role="alert">You're temporarily blocked from posting</div><div id="t"></div></div>`);
+    await page.evaluate(() => { document.getElementById("t").textContent = "Nice flat! Is it still available? ".repeat(30000); });
+    const [big] = await P.regionTexts(page, S.dialog);
+    assert.ok(big.length <= 8000, "no more than RAW_CAP crosses into Node");
+    assert.equal(await P.readSignal(page, PLAIN), "rate_limited");
+
+    // ── fix round 5: a 200k-element dialog is read in under a second, its leading alert still found ──
+    await page.setContent(`<div role="dialog"><div>You're temporarily blocked from posting</div><div id="t"></div></div>`);
+    await page.evaluate(() => {
+      const t = document.getElementById("t");
+      for (let i = 0; i < 50000; i++) { const d = document.createElement("div"); d.innerHTML = `<span>c${i}</span><a>x</a><b>y</b>`; t.appendChild(d); }
+    });
+    assert.ok(await page.evaluate(() => document.querySelectorAll('div[role="dialog"] *').length) >= 200000);
+    let t0 = Date.now();
+    const [huge] = await P.regionTexts(page, S.dialog);
+    assert.ok(Date.now() - t0 < 1000, `the dialog read took ${Date.now() - t0} ms`);
+    assert.equal(huge.length, 8000);
+    assert.ok(huge.startsWith("You're temporarily blocked from posting c0 x y c1"), "the leading alert, then the thread, in order");
+    t0 = Date.now();
+    assert.equal(await P.readSignal(page, PLAIN), "rate_limited");
+    assert.ok(Date.now() - t0 < 1000, `readSignal took ${Date.now() - t0} ms`);
+
+    // ── fix round 2 A: only INNERMOST composer roots count ──
+    for (const [label, html, n] of [
+      ["a restriction dialog wrapping the composer", `<div role="dialog"><div>Your account is restricted</div><div role="dialog">${editor(PLAIN)}</div></div>`, 1],
+      ["a nested Create-post layer", `<div role="dialog" aria-label="layer"><div role="dialog" aria-label="Create post"><h2>Create post</h2>${editor(PLAIN)}</div></div>`, 1],
+    ]) {
+      await page.setContent(html);
+      assert.equal(await P.countOf(page, S.composerRoot), n, label);
+      assert.equal(await P.textOf(page, S.editor), P.norm(PLAIN), label);
+    }
+
+    // ── M5: the composer root, and what is scoped to it ──
+    await page.setContent(`<div role="dialog">${editor("stale draft")}</div><div role="dialog">${editor(PLAIN)}</div>`);
+    assert.equal(await P.countOf(page, S.composerRoot), 2, "two composers are seen as two");
+    await page.setContent(`<div role="dialog"><div aria-label="Post" role="button">outside</div></div><div role="dialog">${editor(PLAIN)}<div aria-label="Post" role="button">ours</div></div>`);
+    assert.equal(await P.countOf(page, S.composerRoot), 1);
+    assert.equal(await page.locator(S.submit).count(), 1, "the Post button outside the composer is not ours");
+    assert.equal(await page.locator(S.submit).first().innerText(), "ours");
+    assert.equal(await P.textOf(page, S.editor), P.norm(PLAIN));
+
+    // ── emoji rendered as <img alt> are part of the text (M6); nothing else in an <img> is ──
+    const EM = (e) => `<span><img alt="${e}" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></span>`;
+    await page.setContent(`<div role="banner"></div><div role="main"><h1><span>פורלי- הבית של המתווכים${EM("😇")}</span></h1></div>
+      <div role="dialog"><div contenteditable="true" role="textbox"><p>${EM("🏠")} דירה בחיפה</p><p>3 חדרים<span style="display:none">hidden</span></p><p>שורה<br>חדשה ${EM("👨‍👩‍👧")}</p></div>
+      <strong><img alt="Dana Cohen" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">Dana <span>Cohen</span></strong></div>`);
+    assert.equal(await P.textOf(page, S.targetName), P.norm("פורלי- הבית של המתווכים😇"), "the group name with its emoji");
+    assert.equal(await P.textOf(page, S.editor), P.norm("🏠 דירה בחיפה\n3 חדרים\nשורה\nחדשה 👨‍👩‍👧"), "the editor: emoji kept, blocks and <br> break words, hidden text not read");
+    assert.equal(await P.textOf(page, `${S.composerRoot} strong`), "Dana Cohen", "an avatar's alt is not text; inline spans do not split words");
+    await page.setContent(`<div role="feed"><div><h3><strong>Dana Cohen</strong></h3><a href="https://www.facebook.com/groups/111/posts/9/">x</a><div data-ad-preview="message">${EM("🏠")} דירה בחיפה 4 חדרים<div>מרפסת</div></div></div></div>`);
+    assert.deepEqual(await P.readFeedPosts(page), [{ href: "https://www.facebook.com/groups/111/posts/9/", text: "\n🏠 דירה בחיפה 4 חדרים\nמרפסת\n\n", author: "Dana Cohen" }]);
+    assert.deepEqual(await page.$$eval("a", P.readDom), [{ href: "https://www.facebook.com/groups/111/posts/9/", text: "x" }], "a list of links (facebook-groups-sync)");
+
+    // ── who is logged in: Facebook's own bootstrap data, never a post's text ──
+    const boot = (name) => `<script type="application/json">${JSON.stringify({ require: [["ScheduledServerJS", "handle", null, [{ __bbox: { define: [["CurrentUserInitialData", [], { NAME: name, SHORT_NAME: "M" }, 270]] } }]]] })}</script>`;
+    const fakePost = `<script type="application/json">${JSON.stringify({ story: { message: { text: '["CurrentUserInitialData",[],{"NAME":"Evil Twin"},1]' } } })}</script>`;
+    await page.setContent(`${boot("Micky Kroitoro")}${fakePost}<div role="banner"><a href="/me/"><span>Banner</span></a></div>`);
+    assert.equal(await P.readIdentity(page), "Micky Kroitoro", "a post quoting the structure is a string, not the structure");
+    await page.setContent(`${boot("Micky Kroitoro")}${boot("Someone Else")}<div role="banner"><a href="/me/"><span>Banner</span></a></div>`);
+    assert.equal(await P.readIdentity(page), "Banner", "two names: the bootstrap says nothing");
+    await page.setContent(`<script type="application/json">{broken "CurrentUserInitialData"</script>`);
+    page.setDefaultTimeout(1500); // no banner either: the read gives up, empty (fails closed)
+    assert.equal(await P.readIdentity(page), "");
+
+    // ── the failure note's markup facts: what calibration needs, nothing a person wrote ──
+    const diag = require("./posting-diag");
+    await page.setContent(`<html><head><meta property="og:url" content="https://www.facebook.com/groups/111/?token=SECRET"><meta property="al:android:url" content="fb://group/111">
+      <meta name="description" content="a post's private text"><link rel="canonical" href="https://www.facebook.com/groups/111/?x=SECRET"></head><body>${boot("Micky Kroitoro")}
+      <div role="banner"><div aria-label="הפרופיל שלך" role="button"></div></div>
+      <div role="main"><h1>G</h1><div role="button">הצטרפת</div><div role="button">כאן כותבים...</div><a href="https://www.facebook.com/groups/111/members/?t=SECRET">אנשים</a><a href="https://www.facebook.com/groups/111/user/999/">Other Person</a>
+        <div role="button">${"a card with a long text someone wrote ".repeat(3)}</div>
+        <div role="feed"><div role="article"><div role="button" aria-label="Actions for this post by Other Person"></div><div role="button">Other Person wrote this</div></div></div>
+        <div aria-label="כתיבת תגובה בתור Micky Kroitoro"></div><span>Micky Kroitoro</span></div>
+      <div role="dialog"><h2>יצירת פוסט</h2><strong>Micky Kroitoro</strong>${editor(PLAIN)}<div aria-label="פרסום" role="button"></div></div></body></html>`);
+    const facts = await diag.snapshot(page, { conn: { facebook_identity_label: "Facebook" }, attempt: { target_type: "group", target_id: "111" } });
+    const mk = facts.markup, flat = JSON.stringify(facts);
+    assert.deepEqual(mk.meta, ["og:url=www.facebook.com/groups/111/", "al:android:url=fb://group/111", "description (21)"]);
+    assert.equal(mk.canonical, "www.facebook.com/groups/111/");
+    assert.deepEqual(mk.main_buttons, ["הצטרפת", "כאן כותבים..."]);
+    assert.deepEqual(mk.main_group_links, ["www.facebook.com/groups/111/members/"]);
+    assert.deepEqual(mk.banner_labels, ["div[button] @הפרופיל שלך"]);
+    assert.deepEqual([mk.user_json, mk.name_at, mk.name_labels], [1, ["main: div[main]>span", "dialog: div[dialog]>strong"], ["main: div @כתיבת תגובה בתור Micky Kroitoro"]]);
+    const { texts, ...composerFacts } = mk.composer;
+    assert.deepEqual(composerFacts, { buttons: ["@פרסום"], headings: ["יצירת פוסט"], strong: ["Micky Kroitoro"], group_links: [], editor_emoji_imgs: 0 });
+    assert.ok(texts.includes("Micky Kroitoro") && texts.every((t) => t.length <= 40), "the dialog's own short labels, never the editor's text");
+    assert.deepEqual([facts.read.identity, facts.read.url_id, facts.read.header_identity], ["Micky Kroitoro", null, ""]);
+    for (const leak of ["SECRET", "Other Person", "private text", "long text someone wrote"]) assert.ok(!flat.includes(leak), `never in the note: ${leak}`);
+    page.setDefaultTimeout(30000);
+
+    // ── M8: typing goes through the editor even when something steals focus between words ──
+    await page.setContent(`<div role="dialog"><div contenteditable="true" role="textbox" id="ed"></div></div><input id="other">
+      <script>document.getElementById("ed").addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") document.getElementById("other").focus(); });</script>`);
+    const text = "דירה בחיפה\nמרפסת גדולה וחניה";
+    const x = { typingDelay: () => 0, rand: () => 0.5, wait: async () => {} };
+    await PD._test.humanType(page, page.locator(S.editor).first(), text, x);
+    assert.equal(await page.inputValue("#other"), "", "nothing reached the element that stole focus");
+    assert.equal(await P.textOf(page, S.editor), P.norm(text), "the editor holds exactly the copy");
+    // a newline is never pressed unless focus is inside the target: a focus
+    // thief that wins every time makes typing stop, not type elsewhere
+    await page.setContent(`<div role="dialog"><div contenteditable="true" role="textbox" id="ed"></div></div><input id="other">
+      <script>document.getElementById("ed").addEventListener("focus", () => document.getElementById("other").focus());</script>`);
+    await assert.rejects(PD._test.humanType(page, page.locator(S.editor).first(), "a\nb", x), (e) => e.code === "composer_focus_lost");
+    assert.ok(!(await page.inputValue("#other")).includes("\n"));
+  } finally {
+    await browser.close();
+  }
+  console.log("posting-driver-dom.test.js ok");
+})().catch((e) => { console.error(e); process.exit(1); });

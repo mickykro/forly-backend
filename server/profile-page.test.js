@@ -64,7 +64,7 @@ const style = page.slice(page.indexOf("<style>"), page.indexOf("</style>"));
 
 // ── it talks to the server's own session-authenticated endpoints ──
 {
-  for (const route of ["/api/onboarding", "/api/onboarding/save", "/api/onboarding/complete"]) {
+  for (const route of ["/api/onboarding", "/api/onboarding/save", "/api/onboarding/complete", "/api/onboarding/update"]) {
     assert.ok(script.includes(`"${route}"`), `the form must call ${route}`);
   }
   assert.ok(!/signup-(get|save|complete|upload)/.test(page),

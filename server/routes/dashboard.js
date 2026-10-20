@@ -9,9 +9,10 @@ const fs = require("fs");
 const db = require("../db");
 const { REVIEW_SCOPES } = require("../auth");
 const portalStream = require("../portal-stream");
-const { sendWhatsApp, inPlace } = require("../utils");
-const { portfolioSlug, normalizePortfolio, visiblePortfolioPages, nextPortfolioStatus } = require("../portfolio");
+const { sendWhatsAppRich, PUBLIC_BASE_URL, inPlace } = require("../utils");
 const businessCache = require("../business-cache");
+const portfolioEdit = require("../portfolio-edit");
+const { buildFailed, retryBlocked } = require("../listing-create");
 
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
 
@@ -21,21 +22,27 @@ module.exports = function createDashboardRouter(ctx) {
   const router = express.Router();
 
   // ── properties list ──
+  // Archived listings come back separately: the dashboard shows them under an
+  // archive tab (with restore), never in the main list. Deleted ones are gone.
   router.get("/properties", requireAuth(authSecret), async (req, res) => {
     const listings = await db.listListingsByPhone(req.user.userId);
     listings.sort((a, b) => (asDate(b.created_at) || 0) - (asDate(a.created_at) || 0));
-    const properties = [];
+    const properties = [], archived = [];
     for (const l of listings) {
-      if (l.status === "archived") continue;
+      if (l.status === "deleted") continue;
+      const isArchived = l.status === "archived";
       const page = l.page_id ? await db.getPage(l.page_id).catch(() => null) : null;
-      properties.push({
+      (isArchived ? archived : properties).push({
         listing_id: l.listing_id,
         title: `${l.rooms || ""} חד׳ ${inPlace(l.neighborhood || l.city)}`.trim(),
         address: [l.address, l.city].filter(Boolean).join(", "),
         thumb_url: (l.photos_urls && l.photos_urls[0]) || null,
         page_id: l.page_id || null,
         page_url: l.page_id ? `${pageBaseUrl}/p/${l.page_id}` : null,
-        page_status: page ? page.status : "building",
+        // A build that never produced a page reads "failed" (the card offers a
+        // retry) instead of "building" forever.
+        page_status: isArchived ? "archived" : page ? page.status : buildFailed(l) ? "failed" : "building",
+        can_retry: !isArchived && !page && !retryBlocked(l),
         // Drives group matching on the distribution page: a sale listing must
         // not be pushed at rental-only groups.
         listing_type: (page && page.property && page.property.listing_type) ||
@@ -46,7 +53,7 @@ module.exports = function createDashboardRouter(ctx) {
         lead_count: (page && page.lead_count) || 0,
       });
     }
-    res.json({ properties });
+    res.json({ properties, archived });
   });
 
   // ── profile (for completion check) ──
@@ -64,9 +71,9 @@ module.exports = function createDashboardRouter(ctx) {
           full_name: d.full_name || "",
           business_name: d.business_name || "",
           logo_url: d.logo_url || null,
+          extra_phones: Array.isArray(d.extra_phones) ? d.extra_phones : [],
           onboarding_state: state,
           onboarding_pct: d.onboarding_pct || 0,
-          portfolio_enabled: !!(d.features && d.features.portfolio),
           portfolio_url: d.portfolio?.status === "open" ? `/${d.portfolio.slug}` : null,
           portfolio_status: d.portfolio?.status || null,
         },
@@ -89,7 +96,10 @@ module.exports = function createDashboardRouter(ctx) {
     if (!listing) return res.status(404).json({ error: "not found" });
     if (listing.business_phone !== req.user.userId) return res.status(403).json({ error: "not_owner" });
     try {
-      await db.updateListing(listingId, { status: mode === "archive" ? "archived" : "deleted" });
+      // archived_from: restore puts a failed build back as failed, not active.
+      await db.updateListing(listingId, mode === "archive"
+        ? { status: "archived", archived_from: listing.status === "archived" ? (listing.archived_from || "active") : listing.status, archived_at: new Date() }
+        : { status: "deleted" });
       if (listing.page_id) {
         await db.updatePage(listing.page_id, { status: "archived" });
         // Realtime: pull the card off the public portal immediately.
@@ -101,6 +111,30 @@ module.exports = function createDashboardRouter(ctx) {
       res.json({ ok: true });
     } catch (err) {
       console.error("deleteProperty failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── restore an archived property (owner only) ──
+  // The page goes live again: dashboard, public page, portal and portfolio.
+  router.post("/properties/restore", requireAuth(authSecret), async (req, res) => {
+    const listingId = String((req.body && req.body.listing_id) || "");
+    if (!listingId) return res.status(400).json({ error: "listing_id required" });
+    const listing = await db.getListing(listingId);
+    if (!listing) return res.status(404).json({ error: "not found" });
+    if (listing.business_phone !== req.user.userId) return res.status(403).json({ error: "not_owner" });
+    if (listing.status !== "archived") return res.status(409).json({ error: "not_archived" });
+    try {
+      const back = listing.archived_from === "failed" ? "failed" : "active";
+      await db.updateListing(listingId, { status: back, archived_from: null, archived_at: null });
+      if (listing.page_id) {
+        await db.updatePage(listing.page_id, { status: "active", updated_at: new Date() });
+        const fresh = await db.getPage(listing.page_id).catch(() => null);
+        if (fresh) portalStream.broadcast("listing_added", portalStream.toCard(fresh, pageBaseUrl));
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("restoreProperty failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });
@@ -132,11 +166,14 @@ module.exports = function createDashboardRouter(ctx) {
       businessCache.invalidate(phone);
       // Welcome message is best-effort — a WhatsApp outage must not fail signup.
       try {
-        await sendWhatsApp(phone,
-          `ברוכים הבאים לפורלי 🦉\n${fullName}, החשבון של ${businessName} מוכן!\n\n` +
-          `מה עכשיו? נכנסים ל-nadlan.call4li.com, פותחים נכס ראשון — ` +
-          `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
-          greenInstance, greenToken);
+        await sendWhatsAppRich(phone, {
+          header: "ברוכים הבאים לפורלי 🦉",
+          body: `${fullName}, החשבון של ${businessName} מוכן!\n\n` +
+            `מה עכשיו? נכנסים לפורלי, פותחים נכס ראשון — ` +
+            `ותוך דקות יש לו דף נחיתה עם וידאו, גלריה ומידע על השכונה.`,
+          footer: "",
+          buttons: [{ type: "url", buttonText: "לכניסה לפורלי", url: PUBLIC_BASE_URL }],
+        }, greenInstance, greenToken);
       } catch (err) { console.error("welcome send failed (signup still ok):", err.message); }
       res.json({ ok: true });
     } catch (err) {
@@ -145,154 +182,31 @@ module.exports = function createDashboardRouter(ctx) {
     }
   });
 
-  // ── portfolio management ──
-  // Entitlement lives on the business doc (businesses/{phone}.features.portfolio)
-  // and is flipped from the admin panel, same shape as features.chatbot.
-  const portfolioEnabled = (business) => !!(business && business.features && business.features.portfolio);
+  // ── portfolio management (shared with the admin editor, see portfolio-edit.js) ──
+  const sendPortfolioError = (res, err, what) => {
+    if (err.message === "slug_taken") return res.status(409).json({ error: "slug_taken" });
+    console.error(`${what} failed:`, err);
+    res.status(500).json({ error: "internal" });
+  };
 
   router.get("/my-portfolio", requireAuth(authSecret), async (req, res) => {
-    const phone = req.user.userId;
     try {
-      const business = await db.getBusiness(phone);
-      if (!portfolioEnabled(business)) return res.status(403).json({ error: "feature_disabled" });
-      if (!business) return res.json({ profile: { business_name: "", full_name: "", city: "", license_number: "", logo_url: null }, portfolio: null, pages: [] });
-      const pages = await db.listPagesByPhone(phone, 100);
-      const portfolio = business.portfolio || null;
-      res.json({
-        profile: {
-          business_name: business.business_name || "",
-          full_name: business.full_name || "",
-          city: business.city || "",
-          license_number: business.license_number || "",
-          logo_url: business.logo_url || null,
-        },
-        portfolio: portfolio ? {
-          ...portfolio,
-          url: `/${portfolio.slug}`,
-        } : null,
-        pages: pages.map((p) => ({
-          page_id: p.page_id,
-          title: p.property?.title || "",
-          address: p.property?.address || "",
-          status: p.status,
-          public_slug: p.public_slug,
-          portfolio_visible: p.portfolio_visible ?? true,
-          portfolio_rank: p.portfolio_rank ?? null,
-        })),
-      });
-    } catch (err) {
-      console.error("GET /api/my-portfolio failed:", err);
-      res.status(500).json({ error: "internal" });
-    }
+      res.json(await portfolioEdit.getPortfolio(req.user.userId));
+    } catch (err) { sendPortfolioError(res, err, "GET /api/my-portfolio"); }
   });
 
   router.post("/my-portfolio", requireAuth(authSecret), async (req, res) => {
-    const phone = req.user.userId;
-    const body = req.body || {};
     try {
-      const business = await db.getBusiness(phone);
-      if (!business) return res.status(404).json({ error: "not_found" });
-      if (!portfolioEnabled(business)) return res.status(403).json({ error: "feature_disabled" });
-      const existing = business.portfolio || {};
-
-      // Handle business name change → slug reservation
-      const newBizName = body.business_name?.trim() || business.business_name;
-      let newSlug = existing.slug;
-      if (newBizName !== business.business_name && existing.slug) {
-        newSlug = portfolioSlug(newBizName);
-        await db.reservePortfolioSlug(phone, newSlug, existing.slug);
-      }
-
-      // Normalize portfolio config
-      const portfolioInput = body.portfolio || {};
-      const normalized = normalizePortfolio(portfolioInput, existing);
-      normalized.slug = newSlug || existing.slug;
-      normalized.status = existing.status || "draft";
-
-      // Update business doc
-      await db.setBusiness(phone, {
-        business_name: newBizName,
-        full_name: body.full_name?.trim() || business.full_name,
-        city: body.city?.trim() || business.city,
-        license_number: body.license_number?.trim() || business.license_number,
-        logo_url: body.logo_url ?? business.logo_url,
-        portfolio: normalized,
-      }, true);
-      businessCache.invalidate(phone);
-
-      // Update page visibility/rank if provided
-      if (Array.isArray(body.portfolio?.properties)) {
-        const pages = await db.listPagesByPhone(phone, 100);
-        const pageMap = new Map(pages.map((p) => [p.page_id, p]));
-        for (const prop of body.portfolio.properties) {
-          if (!prop.page_id || !pageMap.has(prop.page_id)) continue;
-          await db.updatePage(prop.page_id, {
-            portfolio_visible: prop.portfolio_visible ?? true,
-            portfolio_rank: prop.portfolio_rank ?? null,
-          });
-        }
-      }
-
-      res.json({
-        ok: true,
-        portfolio_url: `/${normalized.slug}`,
-      });
-    } catch (err) {
-      if (err.message === "slug_taken") {
-        return res.status(409).json({ error: "slug_taken" });
-      }
-      console.error("POST /api/my-portfolio failed:", err);
-      res.status(500).json({ error: "internal" });
-    }
+      const out = await portfolioEdit.savePortfolio(req.user.userId, req.body || {});
+      if (!out) return res.status(404).json({ error: "not_found" });
+      res.json({ ok: true, ...out });
+    } catch (err) { sendPortfolioError(res, err, "POST /api/my-portfolio"); }
   });
 
   router.post("/my-portfolio/create", requireAuth(authSecret), async (req, res) => {
-    const phone = req.user.userId;
     try {
-      let business = await db.getBusiness(phone);
-      if (!portfolioEnabled(business)) return res.status(403).json({ error: "feature_disabled" });
-      // Create minimal business record if none exists
-      if (!business) {
-        const now = new Date();
-        await db.setBusiness(phone, { phone, created_at: now }, true);
-        businessCache.invalidate(phone);
-        business = { phone };
-      }
-      if (business.portfolio?.slug) {
-        return res.json({
-          created: false,
-          portfolio_url: `/${business.portfolio.slug}`,
-        });
-      }
-      // Create new portfolio
-      const slug = portfolioSlug(business.business_name || business.full_name || phone);
-      await db.reservePortfolioSlug(phone, slug);
-      const now = new Date();
-      await db.setBusiness(phone, {
-        portfolio: {
-          slug,
-          status: "open",
-          hero: { headline: "", intro: "", portrait_url: null },
-          about: { body: "" },
-          area: { headline: "", body: "", locations: [] },
-          testimonials: [],
-          theme: { primary: null, accent: null, font_url: null },
-          created_at: now,
-          updated_at: now,
-        },
-      }, true);
-      businessCache.invalidate(phone);
-      res.json({
-        created: true,
-        portfolio_url: `/${slug}`,
-      });
-    } catch (err) {
-      if (err.message === "slug_taken") {
-        return res.status(409).json({ error: "slug_taken" });
-      }
-      console.error("POST /api/my-portfolio/create failed:", err);
-      res.status(500).json({ error: "internal" });
-    }
+      res.json(await portfolioEdit.createPortfolio(req.user.userId));
+    } catch (err) { sendPortfolioError(res, err, "POST /api/my-portfolio/create"); }
   });
 
   return router;

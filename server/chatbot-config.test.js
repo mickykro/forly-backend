@@ -18,17 +18,16 @@ assert.equal(globallyEnabled({ CHATBOT_ENABLED: "yes" }), true);
 assert.equal(globallyEnabled({ CHATBOT_ENABLED: "false" }), false);
 assert.equal(globallyEnabled({ CHATBOT_ENABLED: " FALSE " }), false);
 
-// ── the agent flag drives every page that doesn't override ──
+// ── on for every agent, no approval: the old agent flag no longer matters ──
 assert.equal(r(page(), ON).enabled, true);
-assert.equal(r(page(), ON).reason, "agent_on");
-assert.equal(r(page(), OFF).enabled, false);
-assert.equal(r(page(), NONE).enabled, false);
-assert.equal(r(page(), null).enabled, false, "no business ⇒ off, not a crash");
-assert.equal(r(page(), NONE).reason, "agent_off");
+assert.equal(r(page(), OFF).enabled, true, "an old features.chatbot=false no longer blocks the bot");
+assert.equal(r(page(), NONE).enabled, true);
+assert.equal(r(page(), null).enabled, true, "no business ⇒ still on, not a crash");
+assert.equal(r(page(), NONE).reason, "default_on");
+assert.equal(r(page(), {}, { CHATBOT_ENABLED: "false" }).enabled, false, "the kill switch still wins");
 
-// ── explicit null on the page still means inherit ──
-assert.equal(r(page(null), ON).enabled, true);
-assert.equal(r(page(null), OFF).enabled, false);
+// ── explicit null on the page still means default ──
+assert.equal(r(page(null), OFF).enabled, true);
 
 // ── the two cases the user actually asked for ──
 // "just some pages" for an agent who is on:
@@ -81,7 +80,7 @@ assert.equal(
 );
 
 // ── adminState: what the selector renders from ──
-assert.deepEqual(adminState(page(), ON, {}), { page: null, effective: true, reason: "agent_on" });
+assert.deepEqual(adminState(page(), OFF, {}), { page: null, effective: true, reason: "default_on" });
 assert.deepEqual(adminState(page(false), ON, {}), { page: false, effective: false, reason: "page_off" });
 assert.deepEqual(adminState(page(true), OFF, {}), { page: true, effective: true, reason: "page_on" });
 assert.equal(adminState({ chatbot: {} }, ON, {}).page, null);

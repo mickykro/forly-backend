@@ -166,7 +166,9 @@
       "Bash(npx @claude-flow*)",
       "Bash(npx claude-flow*)",
       "Bash(node .claude/*)",
-      "mcp__claude-flow__*"
+      "mcp__claude-flow__*",
+      "Bash(git push origin *:refs/heads/staging)",
+      "Bash(ssh -o ConnectTimeout=15 -i ~/.ssh/forly_tunnel root@31.97.216.242 \"docker exec -w /app/server forly-intake *)"
     ],
     "deny": [
       "Read(./.env)",

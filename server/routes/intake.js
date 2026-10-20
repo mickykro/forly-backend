@@ -1,7 +1,8 @@
 /*
  * routes/intake.js — demo form uploads + property creation
  * Handles: /api/upload-urls, /api/upload/:fname, /api/properties/demo-create,
- *          /api/properties/create, /api/demo-save-agent, /api/listing-status
+ *          /api/properties/create, /api/properties/retry, /api/demo-save-agent,
+ *          /api/listing-status
  */
 
 const express = require("express");
@@ -14,8 +15,10 @@ const businessCache = require("../business-cache");
 const pageEdit = require("../edit");
 const { sniffMatchesExt } = require("../utils");
 const { REVIEW_SCOPES } = require("../auth");
-const { validateListing, createListing: createListingShared, MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
+const { validateListing, createListing: createListingShared, buildFailed, retryBlocked, retryListing,
+  MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
 const { makeAdminGuard } = require("../admin-auth");
+const { uprightJpeg } = require("../photo-orient");
 
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const VIDEO_TYPES = { "video/mp4": "mp4", "video/quicktime": "mp4" };
@@ -111,15 +114,22 @@ module.exports = function createIntakeRouter(ctx) {
     if (!sniffMatchesExt(req.body, ext)) {
       return res.status(400).json({ error: "content does not match file type" });
     }
+    // Phone photos are often landscape pixels + an EXIF "rotate" flag. Browsers
+    // honour it, Seedance does not (rooms came out sideways), so store upright.
+    let body = req.body;
+    if (ext === "jpg") {
+      const up = await uprightJpeg(body).catch((err) => { console.warn("upright photo failed (kept as is):", err.message); return null; });
+      if (up) body = up.buffer;
+    }
     if (remoteUploadBase) {
       const out = await relayUpload({
-        fetch, base: remoteUploadBase, fname, req, body: req.body,
+        fetch, base: remoteUploadBase, fname, req, body,
         contentType: req.headers["content-type"],
       });
       if (out.status !== 200) console.error("upload relay:", out.body.error);
       return res.status(out.status).json(out.body);
     }
-    fs.writeFileSync(path.join(uploadDir, fname), req.body);
+    fs.writeFileSync(path.join(uploadDir, fname), body);
     res.json({ ok: true });
   });
 
@@ -159,9 +169,11 @@ module.exports = function createIntakeRouter(ctx) {
     const result = await createListing(agentPhone, body, { ...(body.agent || {}), phone: agentPhone });
     if (result.error) return res.status(result.code).json({ error: result.error });
 
-    // ensure partial business exists
+    // ensure partial business exists. A real client (an operator creating a
+    // property in their name) keeps their account untouched: only a missing
+    // doc or an earlier demo one is (re)written as a demo account.
     const existing = await db.getBusiness(agentPhone);
-    if (!existing || existing.onboarding_state !== "complete") {
+    if (!existing || (existing.source === "demo" && existing.onboarding_state !== "complete")) {
       const now = new Date();
       await db.setBusiness(agentPhone, {
         phone: agentPhone,
@@ -179,6 +191,18 @@ module.exports = function createIntakeRouter(ctx) {
         created_at: now, updated_at: now,
       });
       businessCache.invalidate(agentPhone);
+    }
+
+    // Recreated from a failed listing (create.html?from_listing=): the old one
+    // never got a page and now never will, so it leaves every list. Only a
+    // page-less listing of the same client is retired.
+    const replacesId = typeof body.replaces_listing_id === "string" ? body.replaces_listing_id : "";
+    if (replacesId && replacesId !== result.listing_id) {
+      const old = await db.getListing(replacesId).catch(() => null);
+      if (old && !old.page_id && old.business_phone === agentPhone) {
+        await db.updateListing(replacesId, { status: "deleted", replaced_by: result.listing_id })
+          .catch((err) => console.warn("retire replaced listing failed:", err.message));
+      }
     }
 
     // The admin stays logged in as themselves so they can create the next
@@ -214,8 +238,8 @@ module.exports = function createIntakeRouter(ctx) {
     const phone = req.user.userId;
     const invalid = validateListing(body);
     if (invalid) return res.status(invalid.code).json({ error: invalid.error });
+    const business = await db.getBusiness(phone).catch(() => null);
     if (quota) {
-      const business = await db.getBusiness(phone).catch(() => null);
       const q = await quota.consume(phone, "walkthroughs", 1, {
         source: "dashboard", business,
         request: { address: body.address, city: body.city, price: body.price, rooms: body.rooms,
@@ -227,10 +251,33 @@ module.exports = function createIntakeRouter(ctx) {
     // source and clear the draft: otherwise the agent's next message would
     // keep re-sending the review link for a page that already exists.
     const fromDraft = body.whatsapp_draft === true;
-    const result = await createListing(phone, body, null, fromDraft ? { source: "whatsapp" } : null);
+    // The phones the agent picked for this page (main and/or additional ones).
+    const agentPhones = require("../profile-onboarding").pagePhones(body.agent_phones, phone, business && business.extra_phones);
+    const result = await createListing(phone, body, null, { ...(fromDraft ? { source: "whatsapp" } : {}), agentPhones });
     if (result.error) return res.status(result.code).json({ error: result.error });
     if (fromDraft) await db.deleteDraft(phone).catch((err) => console.warn("whatsapp draft cleanup failed:", err.message));
     res.json({ ...result, status: "building" });
+  });
+
+  // ── retry a failed build (owner only) ──
+  // The listing still holds every detail and photo URL, so this re-runs the
+  // whole pipeline from the stored data. No quota unit: the original creation
+  // paid for a page it never got. retryBlocked caps the attempts.
+  router.post("/properties/retry", requireAuth(authSecret, REVIEW_SCOPES), async (req, res) => {
+    const listingId = String((req.body && req.body.listing_id) || "");
+    if (!listingId) return res.status(400).json({ error: "listing_id required" });
+    const listing = await db.getListing(listingId);
+    if (!listing) return res.status(404).json({ error: "not found" });
+    if (listing.business_phone !== req.user.userId) return res.status(403).json({ error: "not_owner" });
+    const blocked = retryBlocked(listing);
+    if (blocked) return res.status(409).json({ error: blocked });
+    try {
+      await retryListing(listing, pipelineDeps);
+      res.json({ ok: true, listing_id: listingId, status: "building" });
+    } catch (err) {
+      console.error("retry listing failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
   });
 
   // ── listing-status ──
@@ -257,7 +304,7 @@ module.exports = function createIntakeRouter(ctx) {
       page_id: listing.page_id || null,
       page_url: listing.page_id ? `${pageBaseUrl}/p/${listing.page_id}` : null,
       edit_url: editUrl,
-      status: listing.page_id ? "ready" : (listing.status === "failed" ? "failed" : "building"),
+      status: listing.page_id ? "ready" : (buildFailed(listing) ? "failed" : "building"),
     });
   });
 

@@ -79,6 +79,8 @@
         });
       } else if (err.code === "not_connected" || err.code === "needs_reconnect") {
         openConnectDialog();
+      } else if (err.code === "not_entitled") {
+        setPagePublish({ text: "פרסום אוטומטי בדף הפייסבוק העסקי לא כלול בחבילה שלכם. כתבו לנו בוואטסאפ ונפעיל אותו עבורכם.", label: "פרסום בדף", disabled: true });
       } else {
         setPagePublish({ text: "הפרסום בדף נכשל. נסו שוב בעוד רגע.", label: "ניסיון פרסום מחדש", onClick: () => publishPage(!!force) });
       }
@@ -384,5 +386,7 @@
     $("facebookConnectCancel").onclick = () => $("facebookConnectDialog").close();
     render();
     refreshPagePublish(0);
+    // Automatic group posting (publish-campaign.js); it stays hidden for a signed-out share link.
+    if (window.ForlyCampaign && session.page_id) window.ForlyCampaign.mount({ pageId: session.page_id, toast });
   })();
 })();

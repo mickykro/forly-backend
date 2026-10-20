@@ -189,8 +189,16 @@ const two2 = buildFfmpegArgs({
 });
 const twoFilter = two2[two2.indexOf("-filter_complex") + 1];
 assert.equal(two2.filter((a) => a === "-i").length, 2, "one -i per clip");
-assert.ok(twoFilter.includes("[0:v]scale=720:1280,setsar=1,fps=30,format=yuv420p[v0]"), "clip 0 normalized");
-assert.ok(twoFilter.includes("[1:v]scale=720:1280,setsar=1,fps=30,format=yuv420p[v1]"), "clip 1 normalized");
+assert.ok(twoFilter.includes("[0:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30,format=yuv420p[v0]"), "clip 0 normalized");
+// probe reports the displayed size: a 90°-rotated 1280x720 stream is portrait
+{
+  const { probeResult } = require("./overlay")._test;
+  const base = { format: { duration: "5" } };
+  assert.deepEqual([probeResult({ ...base, streams: [{ width: 1280, height: 720, side_data_list: [{ rotation: -90 }] }] })].map((p) => [p.width, p.height]), [[720, 1280]]);
+  assert.deepEqual([probeResult({ ...base, streams: [{ width: 1280, height: 720, tags: { rotate: "270" } }] })].map((p) => [p.width, p.height]), [[720, 1280]]);
+  assert.deepEqual([probeResult({ ...base, streams: [{ width: 720, height: 1280, side_data_list: [{ rotation: 180 }] }] })].map((p) => [p.width, p.height]), [[720, 1280]]);
+}
+assert.ok(twoFilter.includes("[1:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30,format=yuv420p[v1]"), "clip 1 normalized");
 assert.ok(twoFilter.includes("[v0][v1]xfade=transition=fade:duration=0.5:offset=14.500[vcat]"), "join at 14.5s");
 assert.ok(!two2.includes("0:a?"), "no per-clip audio carried across a join");
 
@@ -259,7 +267,7 @@ assert.equal(pickAudioUrl(null), null);
 assert.equal(pickAudioUrl("nope"), null);
 
 assert.equal(MAX_ROOMS, 12);
-assert.equal(MAX_CLIPS, 4);
+assert.equal(MAX_CLIPS, 6);
 // ── endStyleFor: last-frame brightness picks the title palette ──
 assert.equal(endStyleFor(181), "light");
 assert.equal(endStyleFor(136), "light");
@@ -314,6 +322,7 @@ assert.equal(endStyleFor(NaN), "dark");
   assert.ok(dual.indexOf("out.mp4") < dual.indexOf("clean.mp4"));
   const cleanArgs = dual.slice(dual.indexOf("out.mp4") + 1);
   assert.deepEqual(cleanArgs.filter((x) => x.startsWith("[")), ["[vclean]", "[aclean]"], "clean output maps the untouched video + music");
+  assert.equal(dual.join(" ").split("-pix_fmt yuv420p").length - 1, 2, "both outputs pinned to yuv420p (Android can't play 4:4:4)");
   // logo: looped still, scaled to 16% width, ~80% opacity, top-left inset, titled output only
   const li = dual.indexOf("logo.png");
   assert.deepEqual(dual.slice(li - 5, li), ["-loop", "1", "-t", "19.500", "-i"], "logo looped for the video length");

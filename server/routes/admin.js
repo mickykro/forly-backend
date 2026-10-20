@@ -11,6 +11,9 @@
  *   GET  /api/admin/properties         → every property + agent + page stats
  *   POST /api/admin/page/extend        → extend ANY page by 30 days
  *   POST /api/admin/properties/delete  → archive/delete ANY listing
+ *   POST /api/admin/properties/retry   → rerun the page build of ANY listing with no page
+ *   GET  /api/admin/agent-profile      → one agent's saved details, to prefill create.html
+ *   GET  /api/admin/listing            → one listing's details + photos, to reopen it in create.html
  */
 
 const express = require("express");
@@ -22,6 +25,7 @@ const readiness = require("../chatbot-readiness");
 const chatbotConfig = require("../chatbot-config");
 const businessCache = require("../business-cache");
 const { deliverAgentMessage, MAX_RECIPIENTS } = require("../admin-messages");
+const { buildFailed, retryListing } = require("../listing-create");
 
 const PAGE_LIFESPAN_DAYS = 30;
 const asDate = (v) => (v && v.toDate ? v.toDate() : v ? new Date(v) : null);
@@ -29,7 +33,7 @@ const asMillis = (v) => { const d = asDate(v); return d ? d.getTime() : 0; };
 
 module.exports = function createAdminRouter(ctx) {
   const { verifySession, readToken, authSecret, normalizeAuthPhone, pageBaseUrl,
-          uploadDir, adminPhones, sendWhatsApp, quota } = ctx;
+          uploadDir, adminPhones, sendWhatsApp, quota, pipelineDeps = {} } = ctx;
 
   const router = express.Router();
 
@@ -122,7 +126,8 @@ module.exports = function createAdminRouter(ctx) {
         const expires = page ? asDate(page.expires_at) : null;
         const views = (page && page.view_count) || 0;
         const leads = (page && page.lead_count) || 0;
-        const pageStatus = page ? page.status : "building";
+        // No page 20 min after the last attempt (or marked failed) reads "failed".
+        const pageStatus = page ? page.status : buildFailed(l) ? "failed" : "building";
         totalViews += views;
         totalLeads += leads;
         if (pageStatus === "active" || pageStatus === "expiring") activePages += 1;
@@ -145,6 +150,7 @@ module.exports = function createAdminRouter(ctx) {
           view_count: views,
           lead_count: leads,
           created_at: asMillis(l.created_at) || null,
+          retry_count: l.retry_count || 0,
           // {page: true|false|null(inherit), effective, reason} — drives the
           // per-page selector. No extra read: page and biz are already loaded.
           chatbot: page ? chatbotConfig.adminState(page, biz, process.env) : null,
@@ -192,8 +198,6 @@ module.exports = function createAdminRouter(ctx) {
           plan: b.plan || "",
           onboarding_state: b.onboarding_state || "",
           is_demo: b.source === "demo" || b.onboarding_state === "demo_partial",
-          chatbot_enabled: !!(b.features && b.features.chatbot),
-          portfolio_enabled: !!(b.features && b.features.portfolio),
           portfolio_status: b.portfolio?.status || null,
           portfolio_url: b.portfolio?.status === "open" ? `/${b.portfolio.slug}` : null,
           distribution_enabled: !!(b.features && b.features.distribution),
@@ -224,14 +228,7 @@ module.exports = function createAdminRouter(ctx) {
 
       const agents = [...byPhone.values()]
         .sort((a, b) => (b.active_pages - a.active_pages) || a.name.localeCompare(b.name, "he"));
-      res.json({
-        agents,
-        stats: {
-          total_agents: agents.length,
-          chatbot_agents: agents.filter((a) => a.chatbot_enabled).length,
-          chatbot_pages: agents.reduce((n, a) => n + (a.chatbot_enabled ? a.active_pages : 0), 0),
-        },
-      });
+      res.json({ agents, stats: { total_agents: agents.length } });
     } catch (err) {
       console.error("admin/agents failed:", err);
       res.status(500).json({ error: "internal" });
@@ -239,13 +236,11 @@ module.exports = function createAdminRouter(ctx) {
   });
 
   // ── grant/revoke a premium feature for one agent ──
-  // Flipping this on turns the bot on for every page that agent owns, old ones
-  // included: entitlement is resolved live from the business, never stamped
-  // onto the page. Revoking is immediate in the same way.
+  // (The chat bot is no longer one: it is on for every agent, see chatbot-config.js.)
   // Flipping "distribution" arms the page-ready hook for every future page
   // that agent creates (resolved live, like chatbot). Off by default —
   // pilots first (spec §2 "Rollout").
-  const FEATURES = new Set(["chatbot", "portfolio", "distribution"]);
+  const FEATURES = new Set(["distribution"]);
 
   router.post("/business/features", requireAdmin, async (req, res) => {
     const body = req.body || {};
@@ -392,9 +387,8 @@ module.exports = function createAdminRouter(ctx) {
           business_phone: phone,
           agent_name: (biz && (biz.business_name || biz.full_name)) ||
             (p.agent && (p.agent.brand_name || p.agent.name)) || "—",
-          // Entitlement as it stands today. Flipping this on the business turns
-          // the bot on for every page that agent owns, this one included.
-          chatbot_enabled: !!(biz && biz.features && biz.features.chatbot),
+          // Whether the bot answers on this page today (on unless switched off).
+          chatbot_enabled: chatbotConfig.resolve(p, biz, process.env).enabled,
           verdict,
           signals,
           gaps,
@@ -453,6 +447,69 @@ module.exports = function createAdminRouter(ctx) {
       res.json({ ok: true });
     } catch (err) {
       console.error("admin/properties/delete failed:", err);
+      res.status(500).json({ error: "internal" });
+    }
+  });
+
+  // ── one agent's saved details (create.html?key=admin&agent=<phone>) ──
+  // Prefills the agent block when an operator creates a property for a client,
+  // so the page carries the client's own name, office, licence and logo.
+  router.get("/agent-profile", requireAdmin, async (req, res) => {
+    const phone = normalizeAuthPhone(req.query.phone);
+    if (!phone) return res.status(400).json({ error: "valid phone required" });
+    const b = await db.getBusiness(phone).catch(() => null);
+    if (!b) return res.status(404).json({ error: "not_found" });
+    res.json({
+      phone,
+      full_name: b.full_name || "",
+      business_name: b.business_name || "",
+      license_number: b.license_number || "",
+      logo_url: b.logo_url || null,
+    });
+  });
+
+  // ── one listing, in the create form's field names (create.html?from_listing=<id>) ──
+  // A build that keeps failing is reopened in the create form: same details and
+  // photos, which the operator can change before creating it again.
+  router.get("/listing", requireAdmin, async (req, res) => {
+    const id = String(req.query.id || "");
+    const l = id ? await db.getListing(id) : null;
+    if (!l) return res.status(404).json({ error: "not_found" });
+    res.json({
+      listing_id: l.listing_id,
+      business_phone: l.business_phone,
+      has_page: !!l.page_id,
+      fields: {
+        deal: l.listing_type === "rent" ? "rent" : "sale",
+        address: l.address || null, city: l.city || null, neighborhood: l.neighborhood || null,
+        price: l.price || null, rooms: l.rooms || null, size_sqm: l.size_sqm || null,
+        floor: l.floor || null, parking: l.parking || null,
+        sqm_built: l.size_built || null, sqm_balcony: l.size_balcony || null, sqm_garden: l.size_garden || null,
+        elevator: !!l.elevator, shabbat_elevator: !!l.shabbat_elevator, storage: !!l.storage,
+      },
+      description: l.description || "",
+      photos: Array.isArray(l.photos_urls) ? l.photos_urls : [],
+      template: (l.theme && l.theme.template) || null,
+    });
+  });
+
+  // ── retry ANY listing's page build ──
+  // Replays the n8n pipeline from the stored listing, like the agent's retry,
+  // but without the agent's 3-attempt cap, and also for a build that is not
+  // yet past the 20-min failure mark (the panel asks first: it may still land
+  // and the retry is a second paid generation). Never consumes the agent's quota.
+  router.post("/properties/retry", requireAdmin, async (req, res) => {
+    const listingId = String((req.body && req.body.listing_id) || "");
+    if (!listingId) return res.status(400).json({ error: "listing_id required" });
+    const listing = await db.getListing(listingId);
+    if (!listing) return res.status(404).json({ error: "not found" });
+    if (listing.page_id) return res.status(409).json({ error: "already_built" });
+    if (listing.status === "archived" || listing.status === "deleted") return res.status(409).json({ error: "not_active" });
+    try {
+      const patch = await retryListing(listing, pipelineDeps);
+      res.json({ ok: true, retry_count: patch.retry_count });
+    } catch (err) {
+      console.error("admin/properties/retry failed:", err);
       res.status(500).json({ error: "internal" });
     }
   });

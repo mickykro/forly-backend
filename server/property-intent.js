@@ -43,7 +43,7 @@ async function classify(text, { askFn = ask, model = MODEL, keys = process.env, 
 
 // Only a message that mentions a property or a listing detail is worth the
 // intent check's LLM call; photo edits and small talk go straight to n8n's bot.
-const PROPERTY_WORDS = /נכס|דירה|דירת|בית|וילה|פנטהאוז|קוטג|דופלקס|מגרש|דף|סרטון|וידאו/;
+const PROPERTY_WORDS = /נכס|דירה|דירת|בית|וילה|פנטהאוז|קוטג|דופלקס|מגרש|דף|סרטון|וידאו|כותרת/;
 async function intentOf(text, deps) {
   const t = String(text || "").trim();
   if (!deps.classifyIntent || !t || t.length > 300) return null;

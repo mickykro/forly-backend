@@ -7,21 +7,33 @@
   let showingPreview = false;
   let portraitUrl = null; // uploaded portrait URL
 
-  FLY.req("/api/my-portfolio", { noRedirect: true })
+  // ?agent=<phone>: the operator editing that agent's portfolio (admin API).
+  const AGENT = new URLSearchParams(location.search).get("agent") || "";
+  const API = AGENT ? "/api/admin/portfolio" : "/api/my-portfolio";
+  const HOME = AGENT ? "/admin.html" : "/";
+  const withAgent = (body) => (AGENT ? Object.assign({ phone: AGENT }, body) : body);
+  if (AGENT) {
+    const back = document.querySelector('a[href="/"][style]');
+    if (back) { back.href = HOME; back.textContent = "← חזרה לניהול"; }
+  }
+
+  FLY.req(AGENT ? API + "?phone=" + encodeURIComponent(AGENT) : API, { noRedirect: true })
     .then((d) => {
       data = d;
       render();
     })
     .catch((e) => {
       if (e.status === 403) {
-        editor.innerHTML = "<p>דף הנכסים אינו פעיל בחשבון שלך. <a href='/'>חזרה</a></p>";
+        editor.innerHTML = AGENT
+          ? "<p>רק מנהלים יכולים לערוך דף נכסים של סוכן אחר. <a href='/'>חזרה</a></p>"
+          : "<p>דף הנכסים אינו פעיל בחשבון שלך. <a href='/'>חזרה</a></p>";
         return;
       }
       if (e.status === 401) {
-        window.location.href = "/?next=" + encodeURIComponent("/portfolio.html");
+        window.location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
         return;
       }
-      editor.innerHTML = "<p>שגיאה בטעינת הנתונים. <a href='/'>חזרה</a></p>";
+      editor.innerHTML = "<p>שגיאה בטעינת הנתונים. <a href='" + HOME + "'>חזרה</a></p>";
     });
 
   function render() {
@@ -33,7 +45,7 @@
     editor.innerHTML = `
       ${hasPortfolio ? `
         <div class="portfolio-link">
-          <span>דף הנכסים שלך:</span>
+          <span>${AGENT ? "דף הנכסים של " + esc(profile.business_name || profile.full_name || AGENT) + ":" : "דף הנכסים שלך:"}</span>
           <a href="${esc(rel(portfolio.url))}" target="_blank">${esc(location.host + rel(portfolio.url))}</a>
         </div>
       ` : `
@@ -345,11 +357,11 @@
 
     try {
       // First create the portfolio
-      const createRes = await FLY.req("/api/my-portfolio/create", { method: "POST", body: {}, noRedirect: true });
+      const createRes = await FLY.req(API + "/create", { method: "POST", body: withAgent({}), noRedirect: true });
       if (!createRes.portfolio_url) throw new Error(createRes.error || "create_failed");
 
       // Then save the form data
-      const saveRes = await FLY.req("/api/my-portfolio", { method: "POST", body: formData, noRedirect: true });
+      const saveRes = await FLY.req(API, { method: "POST", body: withAgent(formData), noRedirect: true });
       if (!saveRes.ok) throw new Error(saveRes.error || "save_failed");
 
       // Success - redirect to view
@@ -369,7 +381,7 @@
     const formData = collectFormData();
 
     try {
-      const d = await FLY.req("/api/my-portfolio", { method: "POST", body: formData, noRedirect: true });
+      const d = await FLY.req(API, { method: "POST", body: withAgent(formData), noRedirect: true });
       if (d.ok) {
         showStatus("נשמר בהצלחה!", "green");
         hidePreview();

@@ -65,6 +65,14 @@ assert.match(SYSTEM, /"rent"/);
 assert.match(SYSTEM, /מכירה/);
 assert.match(SYSTEM, /מ״ר בנוי/);
 assert.match(SYSTEM, /most scraped listings omit it/);
+assert.match(SYSTEM, /never converted/);
+assert.match(SYSTEM, /currency/);
+assert.equal(coerce({ currency: "EUR" }).currency, "EUR");
+assert.equal(coerce({ currency: "GBP" }).currency, null, "only currencies a page can show");
+// the plot is not part of the built/balcony/garden breakdown, so it never trips the sum check
+const villa = coerce({ size_sqm: 100, sqm_built: 100, sqm_plot: 400 });
+assert.deepEqual([villa.size_sqm, villa.sqm_built, villa.sqm_plot], [100, 100, 400]);
+assert.match(SYSTEM, /sqm_plot 400/);
 
 // ── parseListing: caps input, wires the stub, maps provider errors ──
 (async () => {
@@ -86,5 +94,18 @@ assert.match(SYSTEM, /most scraped listings omit it/);
   await assert.rejects(
     parseListing("t", { askFn: async () => { throw new Error("ANTHROPIC_API_KEY is not set"); } }),
     (e) => e.code === "extract_unavailable");
+
+  // 972526003708, 2026-09-30: a Crete villa priced "285,000 אירו" came back as ₪285,000.
+  // The price stays as stated and the property takes the currency the text names — even
+  // when the model leaves currency out or says ILS.
+  const euroReply = async () => ({ text: '{"city":"כפר וליכאדה","price":285000,"rooms":3,"currency":"ILS"}' });
+  const euro = await parseListing("כפר וליכאדה, באי כרתים. המחיר הוא 285,000 אירו", { askFn: euroReply });
+  assert.deepEqual([euro.fields.price, euro.fields.currency, euro.fields.city, euro.fields.rooms], [285000, "EUR", "כפר וליכאדה", 3]);
+  const usd = await parseListing("$450,000", { askFn: async () => ({ text: '{"price":450000}' }) });
+  assert.equal(usd.fields.currency, "USD");
+  const ils = await parseListing("מחיר:285,000 ₪", { askFn: async () => ({ text: '{"price":285000}' }) });
+  assert.deepEqual([ils.fields.price, ils.fields.currency], [285000, "ILS"]);
+  const none = await parseListing("3 חדרים, 2.9 מיליון", { askFn: async () => ({ text: '{"price":2900000}' }) });
+  assert.equal(none.fields.currency, null, "unstated stays null (read as ₪ downstream)");
   console.log("listing-extract.test.js ok");
 })();

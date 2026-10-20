@@ -1,0 +1,10 @@
+const assert = require("assert");
+const { normalizeCity, sameArea } = require("./city-normalize");
+assert.equal(normalizeCity(" תל אביב - יפו "), "תל אביב");
+assert.equal(normalizeCity("Tel Aviv"), "תל אביב");
+assert.equal(normalizeCity("Beersheba"), "באר שבע");
+assert.equal(normalizeCity("רמלה, לוד, באר יעקב"), "רמלה");
+assert.equal(sameArea("תל אביב", "Tel Aviv-Yafo"), true);
+assert.equal(sameArea("כל הארץ", "חיפה"), true, "nationwide matches everything");
+assert.equal(sameArea("חיפה", "תל אביב"), false);
+console.log("city-normalize.test.js ok");

@@ -18,7 +18,9 @@ const db = require("./db");
 // source: "landing_page" | "chat" | "portfolio". questions: string[] (chat only; [] for form).
 // qualification: { budget, timeline, financing } (chat only). recommended_page_ids: string[] (chat only).
 // Supports both page-based leads and portfolio leads (context.page vs context.business_phone).
-async function submitLead({ page, context, name, phone, source, questions, message, portfolio_url, qualification, recommended_page_ids }) {
+// attribution: { campaign_id, attempt_key, group_id } — resolved by the route
+// from the fly_ref cookie (posting-attribution.js, R4), never from a request body.
+async function submitLead({ page, context, name, phone, source, questions, message, portfolio_url, qualification, recommended_page_ids, attribution }) {
   if (!phone) throw new Error("phone required");   // reject before any write
   const q = Array.isArray(questions) ? questions.filter(Boolean) : [];
   const qual = qualification && Number(qualification.budget) > 0 ? {
@@ -65,6 +67,7 @@ async function submitLead({ page, context, name, phone, source, questions, messa
       license: agent.license || "",
     },
     agent_phone: agentPhone,
+    ...(cleanAttribution(attribution) ? { attribution: cleanAttribution(attribution) } : {}),
     created_at: new Date(),
   });
 
@@ -72,6 +75,14 @@ async function submitLead({ page, context, name, phone, source, questions, messa
   if (p?.page_id) {
     await db.incrPageCounter(p.page_id, "lead_count", 1);
   }
+}
+
+// Only the three ids, as short strings; anything else attributes nothing.
+function cleanAttribution(a) {
+  if (!a || typeof a !== "object") return null;
+  const id = (v) => (typeof v === "string" && v.length > 0 && v.length <= 200 ? v : null);
+  const out = { campaign_id: id(a.campaign_id), attempt_key: id(a.attempt_key), group_id: id(a.group_id) };
+  return out.campaign_id && out.attempt_key ? out : null;
 }
 
 module.exports = { submitLead };

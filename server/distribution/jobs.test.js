@@ -108,7 +108,7 @@ async function queuedDist(deps, { force = false } = {}) {
     const pub = db.actions.find((a) => a.action === "published");
     assert.equal(pub.post_id, "V1");
     assert.equal(pub.content.media_type, "video");
-    assert.ok(pub.content.copy.includes("דירה"), "exact copy audited");
+    assert.ok(pub.content.copy.includes("3 חדרים"), "exact copy audited");
     assert.equal(pub.trigger, "dashboard");
     // the agent gets ONE message: the post link + a deep link into the queue
     const queueMsg = sent.find((s) => s.msg.includes("/share.html?s="));
@@ -288,10 +288,10 @@ async function queuedDist(deps, { force = false } = {}) {
     assert.ok(d.confirmed_at);
     assert.equal(d.snapshot.video_url, "https://x.test/v.mp4");
     assert.deepEqual(d.snapshot.groups, ["https://www.facebook.com/groups/g1"]);
-    assert.ok(d.snapshot.copy.includes("דירה"), "copy frozen into the snapshot");
+    assert.ok(d.snapshot.copy.includes("3 חדרים"), "copy frozen into the snapshot");
   }
   {
-    // the page shows the clean video; publishing uses the titled promo cut
+    // the page shows the clean video; publishing uses the titled marketing cut
     const page = { ...PAGE, hero: { ...PAGE.hero, promo_video_url: "https://x.test/v-promo.mp4" } };
     const db = fakeDb(); seed(db, { page });
     const { deps } = makeDeps({ db, metaMod: fakeMeta() });
@@ -411,7 +411,7 @@ async function queuedDist(deps, { force = false } = {}) {
     const offer = rich.find((r) => r.payload.buttons.some((b) => b.buttonId === "confirm"));
     assert.ok(offer, "confirm offer sent as buttons");
     assert.ok(offer.payload.buttons[0].url.includes("/api/distribution/confirm?d="));
-    assert.ok(offer.payload.body.includes("דירה"), "post preview in the body");
+    assert.ok(offer.payload.body.includes("3 חדרים"), "post preview in the body");
     assert.equal(sent.length, 0, "no plain-text duplicate when buttons succeed");
     // every button obeys Green API limits: ≤3 buttons, ≤25 chars of text
     for (const r of rich) {
@@ -421,6 +421,15 @@ async function queuedDist(deps, { force = false } = {}) {
         assert.ok(b.type === "url" ? !!b.url : true, "url buttons carry a url");
       }
     }
+  }
+
+  // ── a plain summary's post links go behind buttons, out of the text ──
+  {
+    const text = jobs.M.posted("דירה", "https://www.facebook.com/V1") + "\n" + jobs.M.igPosted("דירה", "https://www.instagram.com/p/X");
+    const p = jobs.summaryButtons(text);
+    assert.ok(!/https?:\/\//.test(p.body) && p.body.includes("פורסם"), p.body);
+    assert.deepEqual(p.buttons.map((b) => [b.buttonText, b.url]), [["לצפייה בפוסט", "https://www.facebook.com/V1"], ["לצפייה באינסטגרם", "https://www.instagram.com/p/X"]]);
+    assert.equal(jobs.summaryButtons(jobs.M.failed("דירה")), null, "no link: stays text");
   }
 
   // ── buttons unsupported/rejected ⇒ silent fallback to the text message ──

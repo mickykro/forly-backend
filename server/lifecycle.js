@@ -6,7 +6,7 @@
  */
 
 const db = require("./db");
-const { asMillis, sendWhatsApp } = require("./utils");
+const { asMillis, sendWhatsAppRich, PUBLIC_BASE_URL } = require("./utils");
 const { signActionToken } = require("./auth");
 
 const REMINDER_BEFORE_DAYS = 5;
@@ -33,11 +33,16 @@ async function runExpirySweep(ctx) {
       if (p.reminder_sent_at) continue;
       const daysLeft = Math.max(1, Math.ceil((expMs - now) / 86400000));
       const link = buildExtendLink(p.page_id, expMs, ctx.pageBaseUrl, ctx.authSecret);
-      await sendWhatsApp(p.business_phone,
-        `⏳ דף הנכס "${(p.property && p.property.title) || ""}" יפוג בעוד ${daysLeft} ימים.\n` +
-        `להארכה בחינם (${PAGE_LIFESPAN_DAYS} יום נוספים) בלחיצה אחת:\n${link}\n\n` +
-        `לניהול כל הנכסים: nadlan.call4li.com`,
-        ctx.greenInstance, ctx.greenToken);
+      await sendWhatsAppRich(p.business_phone, {
+        header: "⏳ דף הנכס עומד לפוג",
+        body: `דף הנכס "${(p.property && p.property.title) || ""}" יפוג בעוד ${daysLeft} ימים.\n` +
+          `להארכה בחינם (${PAGE_LIFESPAN_DAYS} יום נוספים) — בלחיצה אחת על הכפתור.`,
+        footer: "",
+        buttons: [
+          { type: "url", buttonText: "להארכה בחינם", url: link },
+          { type: "url", buttonText: "לניהול כל הנכסים", url: PUBLIC_BASE_URL },
+        ],
+      }, ctx.greenInstance, ctx.greenToken);
       // Only mark as reminded once the send succeeded, so a WhatsApp outage
       // retries tomorrow instead of silently swallowing the reminder.
       await db.updatePage(p.page_id, { reminder_sent_at: new Date(), status: "expiring" });

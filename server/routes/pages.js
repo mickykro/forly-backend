@@ -14,12 +14,14 @@ const pageEdit = require("../edit");
 const pageAuth = require("../page-auth");
 const chatbotConfig = require("../chatbot-config");
 const { submitLead } = require("../leads");
+const attribution = require("../posting-attribution"); // R4: ?c= and fly_ref, server-side
 const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, storeBuffer, sendWhatsApp, ownUploadedVideo, inPlace } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsAppRich, storeBuffer, ownUploadedVideo, inPlace } = require("../utils");
 const { sanitizeTags, deriveTags } = require("../tags");
+const { CURRENCIES, normalizeCurrency } = require("../currency");
 const { roomLabel } = require("../rooms");
 const { describePhotos } = require("../photo-vision");
 const { propertySlug, parsePublicPath, visiblePortfolioPages } = require("../portfolio");
@@ -50,6 +52,28 @@ module.exports = function createPagesRouter(ctx) {
           uploadPublicBase, remoteUploadBase, signActionToken,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
   const { constantTimeEqual } = require("../security");
+  // Automated posting (Task 16): a page that becomes active joins a campaign
+  // when its account opted in. Fire-and-forget — enrollment never fails or
+  // delays the page; its own failure is stored as posting_enroll_error.
+  // A listing whose groups the agent chose while it was building
+  // (posting-listing-groups) gets exactly that choice instead; a chosen list
+  // of groups also gets a WhatsApp link to approve each group's text.
+  const enrollPosting = (page, listing) => {
+    if (!require("../posting-guard").postingEnvAllowed(process.env)) return; // C1: never from staging/local
+    const LG = require("../posting-listing-groups");
+    const choice = listing && listing.posting_groups;
+    Promise.resolve().then(async () => {
+      if (!choice) return require("../posting-campaign").enrollNewPage(page, ctx.postingDeps || {});
+      const c = await LG.apply(page, listing, ctx.postingDeps || {});
+      if (c && Array.isArray(choice) && greenInstance && greenToken) {
+        await sendWhatsAppRich(page.business_phone, {
+          header: "דף הנכס מוכן ✅", footer: "",
+          body: "לפני שנפרסם בקבוצות שבחרתם, אשרו את הטקסט לכל קבוצה. אפשר לערוך כל אחד.",
+          buttons: [{ type: "url", buttonText: "לאישור הטקסטים", url: LG.link(baseUrl, authSecret, page.business_phone, listing.listing_id) }],
+        }, greenInstance, greenToken);
+      }
+    }).catch(() => null);
+  };
 
   // Options every rehost() in this router shares. remoteUploadBase sends the
   // bytes to the always-on instance; signUpload is the credential for that hop,
@@ -80,7 +104,8 @@ module.exports = function createPagesRouter(ctx) {
   function pagePayload(id, d, chatbot) {
     return {
       page_id: id, status: d.status, agent: d.agent, agent2: d.agent2 || null,
-      property: d.property,
+      // Place names in the page language when they were translated (page-translate.js).
+      property: d.place_i18n ? { ...d.property, ...d.place_i18n } : d.property,
       hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
       cta: d.cta, sections: d.sections, theme: d.theme || null,
       language: d.language || "he",
@@ -133,9 +158,11 @@ module.exports = function createPagesRouter(ctx) {
   // ── page builder (called by n8n) ──
   router.post("/createPropertyPage", async (req, res) => {
     const body = req.body || {};
-    if (!body.listing_id || !body.business_phone || !body.video_url ||
+    // video_url is optional: a build whose video failed still gets its page
+    // (build-fallback.js), with the first photo as the hero instead.
+    if (!body.listing_id || !body.business_phone ||
         !Array.isArray(body.photos) || body.photos.length < 1) {
-      return res.status(400).json({ error: "listing_id, business_phone, video_url and photos are required" });
+      return res.status(400).json({ error: "listing_id, business_phone and photos are required" });
     }
     try {
       const reusable = await db.findActivePageByListing(body.listing_id);
@@ -147,6 +174,7 @@ module.exports = function createPagesRouter(ctx) {
       // listing here (this is what kept uploaded logos off the page).
       const listing = await db.getListing(body.listing_id).catch(() => null);
       const theme = sanitizeTheme(body.theme || (listing && listing.theme));
+      const archivedListing = !!listing && listing.status === "archived";
       const listingAgent = (listing && listing.agent) || {};
       const agentIn = body.agent || {};
       const agentField = (k) => String(agentIn[k] || listingAgent[k] || "");
@@ -172,10 +200,10 @@ module.exports = function createPagesRouter(ctx) {
       // (the relay host when one is configured), localPath is where the bytes
       // landed here, which the captioning pass below reads back.
       const rehostFn = (url, dest) => rehost(url, dest, uploadDir, baseUrl, rehostOpts);
-      const videoP = rehostFn(body.video_url, `${base}/walkthrough.mp4`);
+      const videoP = body.video_url ? rehostFn(body.video_url, `${base}/walkthrough.mp4`) : Promise.resolve(null);
       // A clean overlay render (<id>.clean.mp4) has a titled sibling for
       // publishing; keep both. Best-effort — the page stands on the clean one.
-      const promoSrc = promoVideoUrl(body.video_url);
+      const promoSrc = body.video_url ? promoVideoUrl(body.video_url) : null;
       const promoP = promoSrc
         ? rehostFn(promoSrc, `${base}/promo.mp4`).catch((err) => {
           console.warn("createPropertyPage: promo video rehost failed:", err.message);
@@ -192,7 +220,7 @@ module.exports = function createPagesRouter(ctx) {
       const [video, poster, ...rest] = await Promise.all([
         videoP, posterP, ...photoPs, ...(mapP ? [mapP] : []), ...(logoP ? [logoP] : []),
       ]);
-      const videoUrl = video.url;
+      const videoUrl = video ? video.url : null;
       const promo = await promoP;
       const posterUrl = poster.url;
       const photos = rest.slice(0, photoPs.length);
@@ -243,7 +271,9 @@ module.exports = function createPagesRouter(ctx) {
       const now = new Date();
       const doc = {
         page_id: pageId, listing_id: body.listing_id, business_phone: body.business_phone,
-        status: "active",
+        // Archived while still building: the page is born archived, so it stays
+        // off the portal and portfolio until the agent restores it.
+        status: archivedListing ? "archived" : "active",
         created_at: reusable ? reusable.created_at : now,
         updated_at: now,
         expires_at: reusable ? reusable.expires_at : daysFromNow(PAGE_LIFESPAN_DAYS),
@@ -256,8 +286,9 @@ module.exports = function createPagesRouter(ctx) {
           brand_name: agentField("brand_name") || agentField("name"),
           logo_url: logoUrl,
           tagline: agentField("tagline"),
-          phone: agentField("phone") || body.business_phone,
-          phone2: agentField("phone2") || null,
+          // The phones the agent picked on create win; otherwise as before.
+          phone: (listing && listing.agent_phones && listing.agent_phones.phone) || agentField("phone") || body.business_phone,
+          phone2: listing && listing.agent_phones ? listing.agent_phones.phone2 || null : agentField("phone2") || null,
           license: agentField("license"),
         },
         agent2: agent2Doc,
@@ -269,11 +300,14 @@ module.exports = function createPagesRouter(ctx) {
           neighborhood: (body.property && body.property.neighborhood) || "",
           city: (body.property && body.property.city) || "",
           price: Number(body.property && body.property.price) || 0,
+          // The listing's currency: n8n forwards price but may not forward this.
+          currency: normalizeCurrency(listing && listing.currency) || normalizeCurrency(body.property && body.property.currency) || "ILS",
           rooms: Number(body.property && body.property.rooms) || 0,
           size_sqm: Number(body.property && body.property.size_sqm) || 0,
           size_built: propNum("size_built"),
           size_balcony: propNum("size_balcony"),
           size_garden: propNum("size_garden"),
+          size_plot: propNum("size_plot"),
           floor: Number(body.property && body.property.floor) || 0,
           storage: propBool("storage"),
           elevator: propBool("elevator") || propBool("shabbat_elevator"),
@@ -315,6 +349,10 @@ module.exports = function createPagesRouter(ctx) {
       };
 
       if (!doc.property.tags.length) doc.property.tags = deriveTags(doc.property, listing && listing.description);
+      // Every visible text in the page's chosen language, whatever the input was.
+      // Fail-open: a failed translation leaves the page as built.
+      const tr = await require("../page-translate").translatePage(doc);
+      if (tr.translated) console.log(`[page-translate] ${pageId} → ${doc.language}: ${tr.translated} fields`);
       await db.savePage(doc);
       await db.setListingPageId(body.listing_id, pageId);
       // A listing built from chat: its draft is done. Only that draft — the agent
@@ -324,13 +362,22 @@ module.exports = function createPagesRouter(ctx) {
           .then((d) => d && d.listing_id === body.listing_id && db.deleteDraft(body.business_phone))
           .catch((e) => console.warn("draft cleanup failed:", e && e.message));
       }
-      // Realtime: the portal shows the listing the moment it exists.
-      portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
-        portalStream.toCard(doc, pageBaseUrl));
-      // Distribution hook: fire-and-forget — never delays or fails page
-      // creation (spec §4). Entitlement + duplicate checks live in maybeOffer.
-      distributionJobs.maybeOffer(distDeps, doc)
-        .catch((e) => console.warn("distribution offer failed:", e && e.message));
+      // A listing built from create.html?draft=<id> (Yad2/Madlan sweep): mark
+      // that draft created, carrying the page_id, so it drops off the list.
+      if (listing && listing.listing_draft_id) {
+        db.updateListingDraft(listing.listing_draft_id, { status: "created", page_id: pageId, updated_at: new Date().toISOString() })
+          .catch((e) => console.warn("listing-draft mark-created failed:", e && e.message));
+      }
+      if (!archivedListing) {
+        // Realtime: the portal shows the listing the moment it exists.
+        portalStream.broadcast(reusable ? "listing_updated" : "listing_added",
+          portalStream.toCard(doc, pageBaseUrl));
+        // Distribution hook: fire-and-forget — never delays or fails page
+        // creation (spec §4). Entitlement + duplicate checks live in maybeOffer.
+        distributionJobs.maybeOffer(distDeps, doc)
+          .catch((e) => console.warn("distribution offer failed:", e && e.message));
+        enrollPosting(doc, listing);
+      }
       res.json({ page_id: pageId, page_url: `${pageBaseUrl}/p/${pageId}` });
     } catch (err) {
       console.error("createPropertyPage failed:", err);
@@ -460,12 +507,35 @@ module.exports = function createPagesRouter(ctx) {
         if (body.agent.brand_name != null) patch["agent.brand_name"] = String(body.agent.brand_name).slice(0, 60);
         if (body.agent.tagline != null) patch["agent.tagline"] = String(body.agent.tagline).slice(0, 120);
       }
+      // Co-listing agent: name + WhatsApp number (leads go to both). Both blank
+      // removes it; a half-filled pair is skipped, since the editor autosaves
+      // mid-typing and must not wipe the saved agent on every keystroke.
+      let agent2Patch;
+      if (body.agent2 !== undefined) {
+        const a2 = body.agent2 && typeof body.agent2 === "object" ? body.agent2 : {};
+        const name = String(a2.name || "").trim().slice(0, 60);
+        const rawPhone = String(a2.phone || "").trim();
+        if (!name && !rawPhone) agent2Patch = null;
+        else if (name && normalizeAuthPhone(rawPhone)) agent2Patch = { name, phone: normalizeAuthPhone(rawPhone) };
+        if (agent2Patch !== undefined) patch.agent2 = agent2Patch;
+      }
       // Property
       if (body.property && typeof body.property === "object") {
         if (body.property.title != null) patch["property.title"] = String(body.property.title).slice(0, 80);
         if (body.property.price != null) patch["property.price"] = Number(body.property.price) || 0;
+        if (body.property.currency != null) {
+          if (!CURRENCIES.includes(body.property.currency)) return res.status(400).json({ error: "bad_currency" });
+          patch["property.currency"] = body.property.currency;
+        }
         if (body.property.rooms != null) patch["property.rooms"] = Number(body.property.rooms) || 0;
         if (body.property.size_sqm != null) patch["property.size_sqm"] = Number(body.property.size_sqm) || 0;
+        // Area breakdown: built / balconies / garden, and the plot the property stands on.
+        for (const [k, max] of [["size_built", 5000], ["size_balcony", 2000], ["size_garden", 100000], ["size_plot", 1000000]]) {
+          if (body.property[k] == null) continue;
+          const v = Number(body.property[k]) || 0;
+          if (v < 0 || v > max) return res.status(400).json({ error: `bad_${k}` });
+          patch[`property.${k}`] = v;
+        }
         if (body.property.floor != null) patch["property.floor"] = Number(body.property.floor) || 0;
       }
       if (Array.isArray(body.gallery_images)) {
@@ -507,6 +577,10 @@ module.exports = function createPagesRouter(ctx) {
         patch["sections.area"] = !!body.sections.area;
       }
       await db.updatePage(pageId, patch);
+      // The listing keeps it too: a rebuild of the page reads agent2 from there.
+      if (agent2Patch !== undefined && d.listing_id) {
+        await db.updateListing(d.listing_id, { agent2: agent2Patch }).catch((e) => console.warn("listing agent2 sync failed:", e.message));
+      }
       const fresh = await db.getPage(pageId).catch(() => null);
       if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true });
@@ -528,6 +602,8 @@ module.exports = function createPagesRouter(ctx) {
       extension_count: (page.extension_count || 0) + 1,
       reminder_sent_at: null, updated_at: new Date(),
     });
+    // An expired page coming back is a page becoming active again.
+    if (page.status !== "active" && page.status !== "expiring") enrollPosting({ ...page, status: "active" });
     return expiresAt;
   }
 
@@ -576,14 +652,16 @@ module.exports = function createPagesRouter(ctx) {
     db.mem.throttle.set(prospectPhone, { windowStart: count === 0 ? now : t.windowStart, count: count + 1 });
 
     try {
-      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [] });
+      await submitLead({ page, name, phone: prospectPhone, source: "landing_page", questions: [], attribution: await attribution.attributionFor(req, page.page_id) });
 
       // ponytail: skip direct WA if n8n webhook handles leads (avoids duplicate agent msg)
       if (!n8nLeadWebhook) {
-        sendWhatsApp(page.business_phone,
-          `🔔 ליד חדש מדף הנכס "${page.property.address}, ${page.property.city}"!\n👤 ${name}\n📞 0${prospectPhone.slice(3)}\n` +
-          `דברו איתו עכשיו: https://wa.me/${prospectPhone}`,
-          greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
+        sendWhatsAppRich(page.business_phone, {
+          header: "🔔 ליד חדש",
+          body: `מדף הנכס "${page.property.address}, ${page.property.city}"\n👤 ${name}\n📞 0${prospectPhone.slice(3)}`,
+          footer: "",
+          buttons: [{ type: "url", buttonText: "לשיחה בוואטסאפ", url: `https://wa.me/${prospectPhone}` }],
+        }, greenInstance, greenToken).catch((e) => console.error("lead notify failed:", e.message));
       }
 
       if (n8nLeadWebhook) {
@@ -611,7 +689,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── video stitch + overlay ──
-  const { overlayVideo, promoVideoUrl, ensurePlayableVideo, MAX_LINES, MAX_ROOMS, MAX_CLIPS } = require("../overlay");
+  const { overlayVideo, promoVideoUrl, ensurePlayableVideo, MAX_LINES, MAX_CLIPS } = require("../overlay");
   router.post("/api/video-overlay", async (req, res) => {
     const body = req.body || {};
     // video_urls (ordered clips, stitched with a crossfade) is the current
@@ -621,8 +699,6 @@ module.exports = function createPagesRouter(ctx) {
       .filter((u) => /^https?:\/\//.test(u));
     const lines = Array.isArray(body.lines) ?
       body.lines.map((l) => String(l || "").trim()).filter(Boolean) : [];
-    // Optional room labels: strings or {room_type} objects, in any order.
-    const rooms = Array.isArray(body.rooms) ? body.rooms.slice(0, MAX_ROOMS) : [];
     // Optional music: an explicit track wins, otherwise a bed is generated to
     // fit the stitched length. music_prompt tailors that generation per listing.
     const musicUrl = /^https?:\/\//.test(String(body.music_url || "")) ? String(body.music_url) : null;
@@ -644,7 +720,7 @@ module.exports = function createPagesRouter(ctx) {
       }
     }
     try {
-      const result = await overlayVideo({ videoUrls, lines, rooms, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl });
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);
@@ -723,6 +799,7 @@ module.exports = function createPagesRouter(ctx) {
         city: p.property?.city || "",
         neighborhood: p.property?.neighborhood || "",
         price: p.property?.price || 0,
+        currency: p.property?.currency || "ILS",
         rooms: p.property?.rooms || 0,
         size_sqm: p.property?.size_sqm || 0,
         image_url: (p.gallery?.images?.[0]?.url) || p.hero?.poster_url || null,
@@ -906,12 +983,22 @@ module.exports = function createPagesRouter(ctx) {
     res.type("html").send(html);
   }
 
+  // R4: a campaign post's link, /p/:id/<code>: the click is consumed like ?c=
+  // (visit + fly_ref), then a 302 to the page itself — so is an unknown code.
+  router.get("/p/:id/:code", async (req, res, next) => {
+    if (!/^[a-z0-9]{6}$/.test(req.params.code)) return next();
+    await attribution.consumeClick(req, res, req.params.id, {}, req.params.code);
+    return res.redirect(302, attribution.withoutClick(`/p/${encodeURIComponent(req.params.id)}`, req.query));
+  });
+
   // ── legacy /p/:id redirect to nested URL ──
   router.get("/p/:id", async (req, res) => {
     const id = req.params.id;
     let d = null;
     try { d = await db.getPage(id); } catch (e) { /* fall back */ }
     const pageUrl = `${pageBaseUrl}/p/${id}`;
+    // R4: a campaign link's ?c= is consumed here (visit + fly_ref); then a 302 without it.
+    const tracked = await attribution.consumeClick(req, res, id);
     // Group-share attribution (?src=fb_group&s=&g=): record which sharing
     // session/group sent this visitor. Best-effort and fire-and-forget — the
     // canonical og:url stays undecorated so Facebook aggregates shares.
@@ -920,7 +1007,7 @@ module.exports = function createPagesRouter(ctx) {
         type: "group_visit", page_id: id,
         listing_id: d.listing_id || null, business_phone: d.business_phone || null,
         share_session: String(req.query.s || "").slice(0, 64),
-        group_token: String(req.query.g).slice(0, 24),
+        group_token: String(req.query.g).slice(0, 64),
       }).catch(() => { /* never block a page render on analytics */ });
     }
     // Portfolio pages live at /:portfolioSlug/:pageSlug — 301 the legacy URL.
@@ -930,14 +1017,16 @@ module.exports = function createPagesRouter(ctx) {
         if (business?.portfolio?.slug) {
           const qs = new URLSearchParams(req.query);
           qs.delete("edit_token");
+          qs.delete("c");
           const qsStr = qs.toString();
           // Host-relative so a preview host (tunnel, staging) keeps its own origin;
           // only the canonical og:url is pinned to pageBaseUrl.
           const nested = `/${business.portfolio.slug}/${d.public_slug}`;
-          return res.redirect(301, qsStr ? `${nested}?${qsStr}` : nested);
+          return res.redirect(tracked ? 302 : 301, qsStr ? `${nested}?${qsStr}` : nested);
         }
       } catch (e) { /* fall through to the legacy shell */ }
     }
+    if (tracked) return res.redirect(302, attribution.withoutClick(`/p/${encodeURIComponent(id)}`, req.query));
     renderPropertyPage(res, id, d, pageUrl, { classic: req.query.view === "classic" });
   });
 

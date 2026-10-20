@@ -8,13 +8,14 @@
  */
 
 const { escapeHtml: esc } = require("./utils");
+const { symbol } = require("./currency");
 
 function description(page) {
   const p = (page && page.property) || {};
   const facts = [];
   if (Number(p.rooms) > 0) facts.push(`${p.rooms} חדרים`);
   if (Number(p.size_sqm) > 0) facts.push(`${p.size_sqm} מ"ר`);
-  if (Number(p.price) > 0) facts.push(`₪${Number(p.price).toLocaleString("en-US")}`);
+  if (Number(p.price) > 0) facts.push(`${symbol(p.currency)}${Number(p.price).toLocaleString("en-US")}`);
   const loc = [p.neighborhood, p.city].filter(Boolean).join(", ");
   const agent = (page.agent && page.agent.name) || "";
   return [loc, facts.join(" · "), agent].filter(Boolean).join(" | ");

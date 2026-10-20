@@ -22,6 +22,22 @@ const auth = require("./auth");
   console.log(`Loaded config from ${envPath}`);
 })();
 
+// ── environment guards, before anything touches Driver ──
+const postingLocal = require("./posting-local");
+const localPostingProblem = postingLocal.problem(process.env);
+if (localPostingProblem) {
+  console.error(`FATAL: ${localPostingProblem}. Refusing to start.`);
+  process.exit(1);
+}
+// A wrong FORLY_ENV would mix prod and staging browser profiles; the dev
+// viewer must never exist off a local box. See driver-browser.js bootCheck.
+const driverBrowser = require("./driver-browser");
+const driverBoot = driverBrowser.bootCheck();
+if (driverBoot.fatal) {
+  console.error(`FATAL: ${driverBoot.fatal}. Refusing to start.`);
+  process.exit(1);
+}
+
 // ── config ──
 // Port precedence: CLI arg (e.g. `npm run local 3111`) → PORT env → default.
 const cliPort = Number(process.argv[2]);
@@ -34,7 +50,7 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "data", "uploa
 // happens to answer on (hstgr.cloud, a cloudflare tunnel, an IP). PAGE_BASE_URL
 // wins when set; otherwise local dev keeps its own BASE_URL and anything else
 // falls back to the canonical domain.
-const PUBLIC_BASE_URL = "https://nadlan.call4li.com";
+const { PUBLIC_BASE_URL } = require("./utils");
 // The rule lives in utils.js (resolvePageBaseUrl) so it is unit-testable and so
 // the operator scripts can share the same INFRA_HOST definition. Setting
 // ALLOW_INFRA_PAGE_BASE=1 — dev and staging only — lets a *.hstgr.cloud
@@ -60,7 +76,7 @@ const GREENAPI_TOKEN = process.env.GREENAPI_TOKEN || "";
 // fall back to an ephemeral random key (never the old public constant) so the
 // app still runs but sessions reset on restart. NADLAN_JWT_SECRET is the
 // canonical env var; FORLY_JWT_SECRET is accepted for back-compat.
-const { resolveAuthSecret, resolveRemoteUploadBase } = require("./upload-relay");
+const { resolveAuthSecret, resolveRemoteUploadBase, uploadTokenParts } = require("./upload-relay");
 const authSecretInfo = resolveAuthSecret(process.env,
   () => require("crypto").randomBytes(32).toString("base64url"));
 if (authSecretInfo.ephemeral) {
@@ -102,9 +118,16 @@ db.init();
 
 // ── auth ──
 const createAuthRouter = require("./auth");
-const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
+const { normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
-const { sendWhatsApp, getWhatsAppMessage, getWhatsAppHistory } = require("./utils");
+// The operator-admin guards: an ADMIN_PHONES session, plus a fresh OTP
+// step-up for the actions that change live posting or hand out control.
+const { makeAdminGuard, makeStepUpGuard, makeViewAs } = require("./admin-auth");
+const { requireAdmin, isAdmin } = makeAdminGuard({ verifySession, readToken, authSecret: AUTH_SECRET, adminPhones: ADMIN_PHONES });
+const { requireStepUp } = makeStepUpGuard({ verifySession, authSecret: AUTH_SECRET });
+// Agent routes honour an admin's read-only "view as agent" (admin-auth.js).
+const requireAuth = makeViewAs({ isAdmin })(createAuthRouter.requireAuth);
+const { sendWhatsApp, sendWhatsAppButtons, sendWhatsAppRich, getWhatsAppMessage, getWhatsAppHistory } = require("./utils");
 // A number that tries to log in but has no businesses/{phone} doc isn't a
 // Forly client yet — self-service signup off the login screen is gone (see
 // the issue this shipped with), so the OTP route forwards them here as a
@@ -127,6 +150,18 @@ const quota = createQuota({
 });
 
 // ── app ──
+// Express 4 drops a rejected async handler on the floor and Node then exits:
+// one Firestore quota error on any route took the whole server down. Every
+// handler's rejection goes to next(err) instead (the final handler below).
+const Layer = require("express/lib/router/layer");
+const handleRequest = Layer.prototype.handle_request;
+Layer.prototype.handle_request = function (req, res, next) {
+  if (this.handle.length > 3) return handleRequest.call(this, req, res, next);
+  try {
+    const r = this.handle(req, res, next);
+    if (r && typeof r.catch === "function") r.catch(next);
+  } catch (e) { next(e); }
+};
 const app = express();
 // Behind the Cloud Run / hosting proxy: trust X-Forwarded-* so req.secure and
 // the rate limiter's client-IP keying are accurate.
@@ -165,9 +200,15 @@ app.use("/api/auth/verify", rateLimit({ windowMs: 60_000, max: 10 }));
 app.use("/api/auth", createAuthRouter({
   db: db.db, mem: db.mem,
   sendWhatsApp: (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN),
+  sendWhatsAppRich: (phone, payload) => sendWhatsAppRich(phone, payload, GREENAPI_INSTANCE, GREENAPI_TOKEN),
   secret: AUTH_SECRET,
   salesLeadPhone: SALES_LEAD_PHONE,
 }));
+
+// ── Green API ⇄ Whapi bridge (stopgap; see server/green-bridge/router.js) ──
+// Answers Green-style calls through Whapi and forwards Whapi's webhook to n8n
+// in Green's format, so n8n's workflows run unchanged. Off until WHATSAPP_PROVIDER_TOKEN.
+app.use("/greenapi", require("./green-bridge/router")());
 
 // ── intake routes (uploads, property creation) ──
 const createIntakeRouter = require("./routes/intake");
@@ -175,6 +216,15 @@ const createIntakeRouter = require("./routes/intake");
 const createQuotaRouter = require("./routes/quota");
 app.use("/api/quota", createQuotaRouter({
   quota, requireAuth, authSecret: AUTH_SECRET, n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone,
+}));
+// ── walkthrough plan (n8n: space map → Seedance clips) ──
+const createWalkthroughRouter = require("./routes/walkthrough");
+app.use("/api/walkthrough", createWalkthroughRouter({
+  n8nSecret: N8N_WEBHOOK_SECRET, uploadDir: UPLOAD_DIR, baseUrl: BASE_URL,
+  storeOpts: {
+    uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
+    signUpload: (fname) => signActionToken(uploadTokenParts(fname), AUTH_SECRET),
+  },
 }));
 
 app.use("/api", createIntakeRouter({
@@ -194,6 +244,8 @@ app.use("/api", createIntakeRouter({
 }));
 
 // ── WhatsApp: agent sends a listing link, Forly builds the page ──
+// n8n's provider-neutral send / history door (routes/whatsapp-gateway.js).
+app.use("/api/whatsapp", require("./routes/whatsapp-gateway")({ n8nSecret: N8N_WEBHOOK_SECRET }));
 const createWhatsappRouter = require("./routes/whatsapp");
 app.use("/api/whatsapp", createWhatsappRouter({
   n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone, signSession, authSecret: AUTH_SECRET, quota,
@@ -203,6 +255,8 @@ app.use("/api/whatsapp", createWhatsappRouter({
   // null when Green API is unset so the response's `replied` is honest and n8n forwards `reply`.
   sendWhatsApp: GREENAPI_INSTANCE && GREENAPI_TOKEN
     ? (phone, msg) => sendWhatsApp(phone, msg, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
+  sendButtons: GREENAPI_INSTANCE && GREENAPI_TOKEN
+    ? (phone, payload) => sendWhatsAppButtons(phone, payload, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
   getMessage: GREENAPI_INSTANCE && GREENAPI_TOKEN
     ? (chatId, id) => getWhatsAppMessage(chatId, id, GREENAPI_INSTANCE, GREENAPI_TOKEN) : null,
   getHistory: GREENAPI_INSTANCE && GREENAPI_TOKEN
@@ -219,9 +273,105 @@ app.use("/api/whatsapp", createWhatsappRouter({
 // ── paste text / link → pre-filled create form ──
 const createExtractRouter = require("./routes/extract");
 app.use("/api", createExtractRouter({
-  requireAuth, authSecret: AUTH_SECRET,
+  requireAuth, authSecret: AUTH_SECRET, verifySession, readToken, adminPhones: ADMIN_PHONES,
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
 }));
+
+// ── browser-backed extracts ──
+// A crash between "session created" and the finally leaves a browser running
+// until its duration expires, holding a concurrency slot the whole time. Every
+// session we create carries a forly-<kind>: note, so we can tell ours from
+// anyone else's. Driver is on only with DRIVER_API_KEY, PROFILE_KEY and a
+// valid FORLY_ENV (driverBrowser.driverEnabled — routes/extract.js asks too).
+
+// The sweeper's deps, when Driver is on — also handed to the local monitor.
+let devPostingDeps = null;
+if (driverBoot.enabled) {
+  const extractJobs = require("./extract-jobs");
+  const ORPHAN_NOTES = ["forly-extract:", "forly-connect:", "forly-sweep:", "forly-post:", "forly-dwell:", "forly-recheck:", "forly-sync:"];
+  // Retried until it succeeds; until then no new Driver browser (fail closed).
+  driverBrowser.holdCreatesUntil((async () => {
+    for (let wait = 5000; ; wait = Math.min(wait * 2, 5 * 60000)) {
+      try {
+        let n = 0;
+        for (const prefix of ORPHAN_NOTES) n += await driverBrowser.cleanupOrphans(prefix);
+        if (n) console.log(`driver: stopped ${n} orphaned session(s) at boot`);
+        return;
+      } catch (e) {
+        console.warn(`driver: orphan cleanup failed, new browsers held; retry in ${wait / 1000}s: ${driverBrowser.redact(e.message)}`);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+  })());
+  extractJobs.startSweeper(extractJobs.liveDeps());
+  console.log("driver: extract sweeper started");
+
+  const createConnectionsBrowserRouter = require("./routes/connections-browser");
+  app.use("/api/connections/browser", createConnectionsBrowserRouter({
+    requireAuth, authSecret: AUTH_SECRET, campaigns: require("./posting-campaign"),
+    // Facebook just connected: its warm-up browse starts right away (not at the
+    // next sweep) wherever the sweeper may run. A short pause lets Driver finish
+    // saving the profile the login browser just closed [Unverified: needed].
+    onConnected: (phone, platform) => {
+      if (platform !== "facebook" || postingLocal.skipWarmup(process.env) || !devPostingDeps || !require("./posting-guard").postingEnvAllowed(process.env)) return;
+      const t = setTimeout(() => {
+        require("./posting-tick").warmIdle(phone, devPostingDeps)
+          .catch((e) => console.error(require("./driver-browser").redact(`warm-up on connect: ${(e && (e.code || e.name)) || "error"}`)));
+      }, 10000);
+      if (t.unref) t.unref();
+    },
+  }));
+
+  // ── automated group posting: the campaign sweeper (posting-sweeper.js) ──
+  const postingSweeper = require("./posting-sweeper");
+  const postingDeps = devPostingDeps = postingSweeper.liveDeps({
+    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
+    operatorPhone: process.env.POSTING_OPERATOR_PHONE,
+  });
+  // Staging shares production's Firestore and GreenAPI: the sweeper runs only
+  // in prod, or on a local box that opts in with POSTING_SWEEPER=1 — never on
+  // staging (posting-guard.postingEnvAllowed). The mutating /api/posting and
+  // /api/admin/posting routes answer 503 by the same rule.
+  if (require("./posting-guard").postingEnvAllowed(process.env)) {
+    postingSweeper.startSweeper(postingDeps);
+    console.log("driver: posting sweeper started");
+  } else {
+    console.warn("driver: posting sweeper NOT started (FORLY_ENV is not prod and POSTING_SWEEPER is not 1, or this is staging)");
+  }
+  // The campaign card's API (consent, campaigns, one-tap links), same deps as the sweeper.
+  const createPostingRouter = require("./routes/posting");
+  app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET, pageBaseUrl: PAGE_BASE_URL, deps: postingDeps }));
+  // The operator's levers (kill switches, fleet overview, per-class re-enable,
+  // profile revoke); every change needs a fresh OTP step-up and is audited.
+  // Owner-only re-enables read POSTING_OWNER_PHONES (unset → refused).
+  app.use("/api/admin/posting", require("./routes/admin-posting")({ requireAdmin, requireStepUp, deps: postingDeps }));
+  app.use("/api/admin/campaigns", require("./routes/admin-campaigns")({ requireAdmin, requireStepUp, deps: postingDeps }));
+  // Manual group posting (POSTING_MANUAL=1): the admin's queue and a live browser per agent.
+  app.use("/api/admin/manual", require("./routes/admin-manual")({ requireAdmin, deps: postingDeps }));
+
+  // ── the agent's own Yad2/Madlan listings, read and offered as draft pages ──
+  const createListingDraftsRouter = require("./routes/listing-drafts");
+  app.use("/api", createListingDraftsRouter({ requireAuth, authSecret: AUTH_SECRET }));
+} else if (process.env.DRIVER_API_KEY) {
+  console.error(`DRIVER DISABLED: DRIVER_API_KEY is set but ${driverBoot.missing.join(" and ")} ` +
+    `${driverBoot.missing.length > 1 ? "are" : "is"} missing or invalid — no extract sweeper, no connect or drafts routes.`);
+} else {
+  console.warn("DRIVER_API_KEY not set — yad2/madlan/social URLs will fail to extract");
+}
+
+// ── dev-only: watch the browsers this server opens (routes/dev-driver.js) ──
+// With Driver on, the monitor's posting panel gets the sweeper's own deps.
+// On by itself under FORLY_ENV=local (driver-browser.devViewOn); bootCheck
+// refuses DRIVER_DEV_VIEW=1 anywhere else.
+if (driverBoot.devView) {
+  app.use("/api/dev/driver", require("./routes/dev-driver")({ requireAdmin, requireStepUp, posting: devPostingDeps ? { deps: devPostingDeps } : null }));
+  console.warn(`${postingLocal.enabled(process.env) ? `POSTING_LOCAL_TEST=1: ${postingLocal.sessionPreflightSeconds(process.env)}s passive same-session preflight; every post needs approval;` : "FORLY_ENV=local:"} every Driver browser is shown at /dev-driver.html`);
+}
+
+// ── failed-post screenshots (posting-shots.js): local and staging only ──
+if (require("./posting-shots").enabled(process.env)) {
+  app.use("/api/dev/driver-shots", require("./routes/driver-shots")({ requireAdmin, requireStepUp }));
+}
 
 // ── profile onboarding (the 15-field "השלמת פרופיל" form) ──
 const createProfileRouter = require("./routes/profile");
@@ -237,6 +387,8 @@ app.use("/api", createDashboardRouter({
   greenInstance: GREENAPI_INSTANCE,
   greenToken: GREENAPI_TOKEN,
 }));
+// ── admin edits an agent's portfolio (same editor, ?agent=) ──
+app.use("/api/admin", require("./routes/admin-portfolio")({ requireAdmin, normalizeAuthPhone }));
 // ── admin routes (all-agent property management, allowlist-gated) ──
 const createAdminRouter = require("./routes/admin");
 app.use("/api/admin", createAdminRouter({
@@ -247,6 +399,11 @@ app.use("/api/admin", createAdminRouter({
   adminPhones: ADMIN_PHONES,
   sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
   quota,
+  pipelineDeps: {
+    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+    n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
+    isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL,
+  },
 }));
 
 // ── distribution routes (Meta OAuth, one-tap confirm, publish, groups) ──
@@ -332,6 +489,13 @@ app.use(createPagesRouter({
   adminPhones: ADMIN_PHONES,
 }));
 
+// Last stop for any route error (sync or async): log it, answer 500.
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  console.error(`route error ${req.method} ${req.path}: ${(err && (err.code || err.name)) || "error"} ${(err && err.message) || ""}`.slice(0, 300));
+  if (res.headersSent) return res.end();
+  res.status(err && err.status && err.status < 600 ? err.status : 500).json({ error: "internal" });
+});
+
 // ── start ──
 app.listen(PORT, () => {
   console.log(`Forly server on ${BASE_URL} (port ${PORT})`);
@@ -343,6 +507,12 @@ app.listen(PORT, () => {
   console.log("  agent auth:  enabled");
   // Expiry scheduler retired: property pages no longer expire — the public
   // portal (call4li.com) lists every live page until the agent archives it.
+  // A build whose video never came still gets its page, photo instead of video.
+  // Dev runs (N8N_DEV_*) leave it off: their page builder is a separate workflow.
+  require("./build-fallback").startPhotoFallback({
+    pageBuilderWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL ? "" : N8N_PIPELINE_WEBHOOK_URL,
+    baseUrl: BASE_URL,
+  });
   distributionJobs.startSweeper(distributionJobs.liveDeps({
     greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN,
     pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,

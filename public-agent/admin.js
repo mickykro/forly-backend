@@ -8,7 +8,7 @@
 
   var STATUS_LABELS = {
     active: "פעיל", expiring: "עומד לפוג", expired: "פג תוקף",
-    archived: "בארכיון", building: "בבנייה",
+    archived: "בארכיון", building: "בבנייה", failed: "הבנייה נכשלה",
   };
 
   var all = [];   // full property list from the server
@@ -64,6 +64,15 @@
       actions.push('<a class="btn btn-ghost btn-sm" href="/edit.html?id=' + esc(p.page_id) + '&from=admin">עריכה</a>');
       actions.push('<button class="btn btn-ghost btn-sm" data-extend="' + esc(p.page_id) + '">+30</button>');
     }
+    // A build with no page — failed, or still "building" — can be rerun from
+    // the stored listing. The server takes no agent cap here.
+    if (!p.page_id && (p.page_status === "failed" || p.page_status === "building") &&
+        p.listing_status !== "archived" && p.listing_status !== "deleted") {
+      actions.push('<button class="btn btn-gold btn-sm" data-retry="' + esc(p.listing_id) + '" data-retry-status="' +
+        esc(p.page_status) + '" title="ניסיונות קודמים: ' + esc(p.retry_count || 0) + '">↻ נסו שוב</button>');
+      // Retry keeps failing → reopen it in the create form to swap photos or fix details.
+      actions.push('<a class="btn btn-ghost btn-sm" href="/create.html?key=admin&from_listing=' + encodeURIComponent(p.listing_id) + '">✎ פתיחה מחדש</a>');
+    }
     if (p.listing_status !== "archived") {
       actions.push('<button class="btn btn-ghost btn-sm" data-archive="' + esc(p.listing_id) + '">ארכיון</button>');
     }
@@ -89,21 +98,19 @@
       "</tr>";
   }
 
-  // Per-page chat-bot override: "" = inherit the agent, on = force on for this
-  // page even if the agent is off, off = force off even if the agent is on.
-  // The line underneath spells out what "inherit" currently works out to,
-  // since otherwise the selector alone never tells you the actual state.
+  // Per-page chat-bot override. The bot is on for every agent by default
+  // (no approval); "" = default (on), off = switched off for this page only.
+  // The line underneath spells out the actual state.
   var CB_REASON = {
     page_on: "מופעל לדף הזה", page_off: "כבוי לדף הזה",
-    agent_on: "מופעל דרך הסוכן", agent_off: "כבוי — הסוכן לא מורשה",
-    global_off: "כבוי גלובלית",
+    default_on: "מופעל", global_off: "כבוי גלובלית",
   };
 
   function chatbotCell(p) {
     if (!p.page_id || !p.chatbot) return '<span class="p-addr">—</span>';
     var v = p.chatbot.page === true ? "on" : p.chatbot.page === false ? "off" : "";
     return '<select class="cb ' + esc(v) + '" data-cb="' + esc(p.page_id) + '">' +
-      '<option value=""' + (v === "" ? " selected" : "") + ">ירושה מהסוכן</option>" +
+      '<option value=""' + (v === "" ? " selected" : "") + ">ברירת מחדל (מופעל)</option>" +
       '<option value="on"' + (v === "on" ? " selected" : "") + ">מופעל</option>" +
       '<option value="off"' + (v === "off" ? " selected" : "") + ">כבוי</option>" +
       "</select>" +
@@ -158,6 +165,21 @@
           .catch(function () { FLY.toast("שגיאה"); b.disabled = false; });
       });
     });
+    document.querySelectorAll("[data-retry]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var msg = b.dataset.retryStatus === "building"
+          ? "הדף עדיין בבנייה (פחות מ-20 דק׳ מהניסיון האחרון). להריץ שוב בכל זאת? זה ייצור סרטון נוסף בתשלום."
+          : "להריץ מחדש את בניית הדף מהנתונים השמורים? זה ייצור סרטון חדש בתשלום.";
+        if (!confirm(msg)) return;
+        b.disabled = true;
+        FLY.req("/api/admin/properties/retry", { method: "POST", body: { listing_id: b.dataset.retry }, noRedirect: true })
+          .then(function () { FLY.toast("↻ הבנייה הופעלה מחדש"); load(); })
+          .catch(function (e) {
+            FLY.toast(e && e.code === "already_built" ? "לנכס כבר יש דף" : "שגיאה בהפעלה מחדש");
+            b.disabled = false;
+          });
+      });
+    });
     document.querySelectorAll("[data-cb]").forEach(function (sel) {
       sel.addEventListener("change", function () {
         var prev = sel.dataset.prev != null ? sel.dataset.prev : "";
@@ -209,15 +231,18 @@
     var demo = a.is_demo ? '<span class="tag-demo">demo</span>' : "";
     return "<tr>" +
       '<td class="agent"><div class="agent-name">' + esc(a.name) + demo + "</div>" +
-        '<div class="p-addr num" dir="ltr">' + esc(a.phone) + "</div></td>" +
+        '<div class="p-addr num" dir="ltr">' + esc(a.phone) + "</div>" +
+        // A property in this client's name, their saved details prefilled.
+        '<a class="p-addr" href="/create.html?key=admin&agent=' + encodeURIComponent(a.phone) + '">+ יצירת נכס ללקוח</a>' +
+        // Their portfolio, edited (or created) for them.
+        ' · <a class="p-addr" href="/portfolio.html?agent=' + encodeURIComponent(a.phone) + '">' +
+        (a.portfolio_status ? "✎ דף נכסים" : "+ דף נכסים") + "</a>" +
+        // Their dashboard exactly as they see it (read-only, admin-auth.js makeViewAs).
+        ' · <a class="p-addr" href="/" data-viewas="' + esc(a.phone) + '">👁 צפייה בדשבורד</a></td>' +
       '<td class="num">' + esc(a.active_pages) + "</td>" +
       '<td class="num">' + Number(a.views || 0).toLocaleString("he-IL") + "</td>" +
       '<td class="num">' + Number(a.leads || 0).toLocaleString("he-IL") + "</td>" +
       "<td>" + readinessPills(a.readiness) + "</td>" +
-      '<td><label class="switch"><input type="checkbox" data-chatbot="' + esc(a.phone) + '"' +
-        (a.chatbot_enabled ? " checked" : "") + "><i></i></label></td>" +
-      '<td><label class="switch"><input type="checkbox" data-portfolio-feature="' + esc(a.phone) + '"' +
-        (a.portfolio_enabled ? " checked" : "") + "><i></i></label></td>" +
       '<td><label class="switch"><input type="checkbox" data-distribution="' + esc(a.phone) + '"' +
         (a.distribution_enabled ? " checked" : "") + "><i></i></label></td>" +
       "<td>" + quotaCellHtml(a) + "</td>" +
@@ -444,9 +469,7 @@
     });
     $("#agentRows").innerHTML = shown.map(agentRowHtml).join("");
     $("#agentEmpty").classList.toggle("hidden", shown.length > 0);
-    $("#agentCount").textContent = agentStats.chatbot_agents != null ?
-      agentStats.chatbot_agents + " מתוך " + agents.length + " עם צ׳אט · " +
-      agentStats.chatbot_pages + " דפים" : "";
+    $("#agentCount").textContent = agents.length + " סוכנים";
     bindAgentActions();
   }
 
@@ -465,12 +488,10 @@
     document.querySelectorAll("[data-quota]").forEach(function (btn) {
       btn.addEventListener("click", function () { openQuotaEditor(btn.dataset.quota); });
     });
-    // Portfolio + distribution entitlements share one shape: flip a feature
+    // Feature entitlements share one shape: flip a feature
     // flag on the business, keep the local row in step, toast the result.
     // (Distribution arms the WhatsApp publish offer for FUTURE pages.)
     [
-      { attr: "portfolioFeature", sel: "[data-portfolio-feature]", feature: "portfolio", key: "portfolio_enabled",
-        on: "✅ דף נכסים הופעל לסוכן", off: "דף נכסים כובה" },
       { attr: "distribution", sel: "[data-distribution]", feature: "distribution", key: "distribution_enabled",
         on: "✅ הפצה הופעלה — נכסים חדשים יקבלו הצעת פרסום בוואטסאפ", off: "הפצה כובתה לסוכן" },
     ].forEach(function (f) {
@@ -496,33 +517,6 @@
         });
       });
     });
-
-    document.querySelectorAll("[data-chatbot]").forEach(function (input) {
-      input.addEventListener("change", function () {
-        var phone = input.dataset.chatbot;
-        var want = input.checked;
-        input.disabled = true;
-        FLY.req("/api/admin/business/features", {
-          method: "POST",
-          body: { phone: phone, feature: "chatbot", enabled: want },
-          noRedirect: true,
-        }).then(function () {
-          // Keep the local copy in step so a re-filter doesn't revert the switch.
-          var a = agents.filter(function (x) { return x.phone === phone; })[0];
-          if (a) a.chatbot_enabled = want;
-          agentStats.chatbot_agents = agents.filter(function (x) { return x.chatbot_enabled; }).length;
-          agentStats.chatbot_pages = agents.reduce(function (n, x) {
-            return n + (x.chatbot_enabled ? x.active_pages : 0);
-          }, 0);
-          applyAgentFilter();
-          FLY.toast(want ? "✅ צ׳אט בוט הופעל לכל הדפים של הסוכן" : "צ׳אט בוט כובה");
-        }).catch(function (e) {
-          input.checked = !want;   // the server refused — don't lie about the state
-          input.disabled = false;
-          FLY.toast(e.code === "unknown_agent" ? "הסוכן לא נמצא" : "שגיאה בעדכון");
-        });
-      });
-    });
   }
 
   function loadAgents() {
@@ -543,6 +537,7 @@
     if (p.url) {
       actions.push('<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="' + esc(p.url) + '">צפייה</a>');
     }
+    actions.push('<a class="btn btn-ghost btn-sm" href="/portfolio.html?agent=' + encodeURIComponent(p.phone) + '">✎ עריכה</a>');
     if (p.status === "open") {
       actions.push('<button class="btn btn-ghost btn-sm" data-portfolio-close="' + esc(p.phone) + '">סגירה</button>');
     } else {
@@ -745,6 +740,15 @@
         updateMessageMeta();
       });
       $("#sendCustomerMessage").addEventListener("click", sendCustomerMessage);
+      // "View dashboard": the agent pages then run as that agent, read-only (api.js banner exits).
+      document.addEventListener("click", function (ev) {
+        var a = ev.target.closest("[data-viewas]");
+        if (!a) return;
+        ev.preventDefault();
+        document.cookie = "forly_viewas=" + encodeURIComponent(a.dataset.viewas) + "; path=/; SameSite=Lax" +
+          (location.protocol === "https:" ? "; Secure" : "");
+        location.href = "/";
+      });
       $("#refreshBtn").addEventListener("click", function () {
         FLY.toast("מרענן…"); load();
       });

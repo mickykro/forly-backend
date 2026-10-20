@@ -16,6 +16,7 @@ window.FLY = (function () {
       }
       return r.json().catch(function () { return {}; }).then(function (data) {
         if (!r.ok) {
+          if (data.error === "view_as_readonly") toast("מצב צפייה כסוכן — קריאה בלבד");
           var e = new Error(data.error || ("http " + r.status));
           e.code = data.error; e.status = r.status; e.data = data;
           throw e;
@@ -318,6 +319,27 @@ window.FLY = (function () {
         }).then(function () { a.style.opacity = ""; a.style.pointerEvents = ""; });
       });
     });
+  }
+
+  // Admin "view as agent" (server/admin-auth.js makeViewAs): flag it on every
+  // page, with a way back to the admin panel.
+  var viewAs = (document.cookie.match(/(?:^|;\s*)forly_viewas=([^;]+)/) || [])[1];
+  function viewAsBanner() {
+    var bar = el("div", null,
+      '<span>👁 צפייה כסוכן <b dir="ltr">' + esc(decodeURIComponent(viewAs)) + "</b> — קריאה בלבד</span>" +
+      '<button type="button" class="btn btn-gold btn-sm">יציאה לפאנל ניהול</button>');
+    bar.dir = "rtl";
+    bar.style.cssText = "position:sticky;top:0;z-index:1000;display:flex;gap:10px;align-items:center;justify-content:center;" +
+      "flex-wrap:wrap;padding:8px 12px;background:#17140f;color:#fffdf9;font-size:.9rem";
+    bar.querySelector("button").onclick = function () {
+      document.cookie = "forly_viewas=; path=/; max-age=0";
+      location.href = "/admin.html";
+    };
+    document.body.insertBefore(bar, document.body.firstChild);
+  }
+  if (viewAs) {
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", viewAsBanner);
+    else viewAsBanner();
   }
 
   return { req: req, toast: toast, uploadFiles: uploadFiles, deleteUpload: deleteUpload, el: el,

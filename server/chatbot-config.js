@@ -1,13 +1,12 @@
 /*
  * chatbot-config.js — is the chat bot on for this page, and with what settings?
  *
- * Two levels of control, because the operator needs both:
- *   • a per-AGENT entitlement (businesses/{phone}.features.chatbot) — flipping
- *     it lights up every page that agent owns, old ones included, because it is
- *     resolved live here rather than stamped onto the page when it was built;
+ * The bot is on for every agent's pages by default — no admin approval (the
+ * old per-agent businesses/{phone}.features.chatbot entitlement is ignored).
+ * Two switches remain:
+ *   • the CHATBOT_ENABLED env kill switch, for every page at once;
  *   • a per-PAGE override (property_pages/{id}.chatbot.enabled) that can force
- *     one page on for an agent who isn't entitled, or force one page off for an
- *     agent who is. `null` means "inherit", which is the default.
+ *     one page off (or back on). `null` means "default", i.e. on.
  *
  * Everything else (model, greeting, limits) resolves page → business defaults →
  * the constants below, so a page with no chatbot config at all still works.
@@ -74,7 +73,6 @@ function isDemoBusiness(business) {
 function resolve(page, business, env) {
   const pc = (page && page.chatbot) || {};
   const bd = (business && business.chatbot_defaults) || {};
-  const agentOn = !!(business && business.features && business.features.chatbot);
 
   let enabled;
   let reason;
@@ -85,7 +83,7 @@ function resolve(page, business, env) {
   } else if (pc.enabled === false) {
     enabled = false; reason = "page_off";
   } else {
-    enabled = agentOn; reason = agentOn ? "agent_on" : "agent_off";
+    enabled = true; reason = "default_on";
   }
 
   const pick = (k) => firstDefined(pc[k], bd[k], DEFAULTS[k]);

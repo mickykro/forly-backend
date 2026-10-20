@@ -28,7 +28,8 @@ function deps(over = {}) {
 }
 // handleTurn mutates the draft it is given; clone so a test can branch from one draft.
 const turn = (input, d) => handleTurn({ phone: PHONE, now: T0, ...input, draft: input.draft ? structuredClone(input.draft) : null }, d);
-const texts = (t) => t.replies.map((r) => r.text).join("\n");
+// What the agent sees: each reply's text and its link buttons' URLs.
+const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) => l.url)].join("\n")).join("\n");
 
 (async () => {
   // ── not ours ──
@@ -63,6 +64,7 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.status, "choose", "fields and photos done: preview or create");
   assert.deepEqual(t.replies[0].buttons, ["תצוגה מקדימה", "ליצור"]);
   draft = t.draft;
+  const atChoose = structuredClone(t.draft); // reused by the groups-choice block below
   t = await turn({ text: "מה?", draft }, d);
   assert.deepEqual([t.status, t.draft], ["choose", undefined], "anything else repeats the choice");
   // preview: straight to the review link, no design question (it's picked on the page)
@@ -82,7 +84,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d } = deps({ createListing: async () => ({ error: "quota", code: 402, message: "המכסה שלך נוצלה. לרכישה: https://pay" }) }));
   t = await turn({ text: "דלג", draft }, d);
   assert.deepEqual([t.status, t.draft.status, t.draft.skipped.includes("template")], ["create_failed:402", "active", true]);
-  assert.match(texts(t), /המכסה שלך נוצלה. לרכישה: https:\/\/pay/, "out of quota says so, with the payment link");
+  assert.match(texts(t), /המכסה שלך נוצלה. לרכישה\nhttps:\/\/pay/, "out of quota says so, with the payment link");
+  assert.deepEqual(t.replies[t.replies.length - 1].links, [{ text: "לרכישת חבילה", url: "https://pay" }], "the link behind a button");
   ({ d } = deps({ createListing: async () => ({ error: "boom", code: 500 }) }));
   t = await turn({ text: "דלג", draft }, d);
   assert.match(texts(t), /משהו השתבש/);
@@ -115,6 +118,14 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "דלג", draft }, d); draft = t.draft;         // size_sqm skipped
   assert.deepEqual(draft.skipped, ["size_sqm"]);
   assert.equal(t.status, "asked:floor");
+
+  // ── a one-field aside about a field other than the one asked, that the extractor
+  // can't parse, must not fall through to the asked field's own parser (972508505321,
+  // 2026-10-08: "למכירה כמובן" while rooms was asked became an invalid rooms answer) ──
+  ({ d } = deps({ parseListing: async () => ({ fields: Object.fromEntries(Object.keys(FIELDS).map((k) => [k, null])), missing: [] }) }));
+  t = await turn({ text: "רגע, המחיר האמיתי הוא 285,000 ש״ח", draft }, d);
+  assert.deepEqual([t.status, t.draft], ["asked:floor", undefined],
+    "a price aside while floor is asked re-asks floor and saves nothing — not invalid:floor with the stray digits read as a floor");
 
   // ── text opener with extraction failure keeps an empty draft open ──
   ({ d } = deps({ resolve: async () => { throw fail("page_unreadable"); } }));
@@ -303,6 +314,19 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.status, t.draft.status, t.draft.fields.city, t.draft.photos.length], ["asked:price", "active", "חיפה", 4], "resume: the edited photos join the paused draft");
   assert.match(texts(t), /שמרתי 4 תמונות/);
 
+  // a paused draft from one property must not swallow a correction naming a
+  // *different*, already-live page — it should wake the update flow instead
+  // of "continue / new / cancel?" (972508505321, 2026-10-08 title-typo report)
+  ({ d } = deps({ classifyIntent: async () => "update",
+    listPages: async () => [{ page_id: "P9", listing_id: "L9", business_phone: PHONE,
+      property: { title: "2 חדרים בהמרכז השכט, פתח תקווה", address: null, city: "פתח תקווה", neighborhood: "המרכז השכט" } }],
+    editUrl: (id) => `https://agent/edit.html?id=${id}` }));
+  t = await turn({ text: "נכס חדש" }, d); draft = t.draft;
+  t = await turn({ text: "חיפה", draft }, d); draft = t.draft;
+  t = await turn({ text: "שלום, רשום בכותרת המרכז השכט ולא השקט כפי שצריך להיות רשום.\nתתקן לי בבקשה במהירות", draft, now: later }, d);
+  assert.equal(t.status, "update_link", "the title correction names the live page, not the paused draft");
+  assert.match(texts(t), /edit\.html\?id=P9/);
+
   // ── building: only an opener replaces it ──
   ({ d } = deps());
   const bld = { ...ready, status: "building", listing_id: "L9" };
@@ -356,6 +380,13 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "לא", draft: proposed }, d);
   assert.deepEqual([t.draft.fields.price, t.status], [1950000, "asked:parking"]);
   assert.match(texts(t), /השארתי כמו שהיה/);
+  // "1.כן" (972526003708, 2026-09-30): the agent names the number AND spells out
+  // the button — the change must still land, not get silently dropped.
+  t = await turn({ text: "1.כן", draft: { ...proposed, last_buttons: ["כן", "לא"] } }, d);
+  assert.deepEqual([t.draft.fields.price, t.draft.pending_changes, t.status], [2100000, null, "asked:parking"]);
+  // a number followed by unrelated text is not a button tap: never read as "כן"
+  t = await turn({ text: "1 תודה", draft: { ...proposed, last_buttons: ["כן", "לא"] } }, d);
+  assert.notEqual(t.draft.fields.price, 2100000, "unrelated trailing text after the digit must not be read as confirming the change");
 
   // the asked place name survives a reply that also talks about the price
   let seen;
@@ -417,15 +448,15 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.equal(t.status, "preview_only");
   assert.match(texts(t), new RegExp(`https://review/${PHONE}`));
 
-  // #6/#7 photo timer: one bubble with the count and the next question; over-12 reported
+  // #6/#7 photo timer: one bubble with the count and the next question; over-54 reported
   ({ d } = deps());
   t = await turn({ text: "נכס חדש" }, d);
-  const twelve = Array.from({ length: 14 }, (_, i) => `https://green/m${i}.jpg`);
-  t = await turn({ fileUrls: twelve, draft: t.draft }, d);
-  assert.deepEqual([t.draft.photos.length, t.draft.photos_dropped], [12, 2]);
+  const overCap = Array.from({ length: 56 }, (_, i) => `https://green/m${i}.jpg`);
+  t = await turn({ fileUrls: overCap, draft: t.draft }, d);
+  assert.deepEqual([t.draft.photos.length, t.draft.photos_dropped], [54, 2]);
   t = await turn({ event: "photo_timer", draft: t.draft }, d);
   assert.equal(t.replies.length, 1, "one bubble");
-  assert.match(texts(t), /שמרתי 12 תמונות לנכס. \(2 לא נשמרו/);
+  assert.match(texts(t), /שמרתי 54 תמונות לנכס. \(2 לא נשמרו — המקסימום הוא 54\)/);
   assert.match(texts(t), /באיזו עיר/);
   assert.equal(t.draft.photos_dropped, 0);
 
@@ -485,6 +516,43 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ text: "המחיר ירד ל-2.5 מיליון https://www.yad2.co.il/item/abc https://www.yad2.co.il/item/def" }, d);
   assert.equal(t.draft.fields.price, 2500000);
   assert.match(texts(t), /קראתי את הקישור הראשון/);
+
+  // ── choosing the property's groups after "ליצור" (posting-listing-groups) ──
+  {
+    const build = async (d) => { const a = await turn({ text: "ליצור", draft: atChoose }, d); return turn({ text: "2", draft: a.draft }, d); };
+    // Facebook not connected: nothing about groups at all
+    ({ d } = deps({ postingOffer: async () => null }));
+    t = await build(d);
+    assert.equal(t.status, "building");
+    assert.ok(!/קבוצות/.test(texts(t)) && !t.replies[0].buttons && !t.replies[0].links, "no group options without a connected Facebook");
+    // connected with default groups: the picker link, and a "ברירת מחדל" button
+    ({ d } = deps({ postingOffer: async (id) => ({ connected: true, defaults: 3, link: `https://g/${id}` }) }));
+    t = await build(d);
+    assert.match(texts(t), /באילו קבוצות/);
+    assert.match(texts(t), /https:\/\/g\/L1/);
+    assert.deepEqual(t.replies[0].buttons, ["ברירת מחדל"]);
+    // connected, no default groups: only the link
+    ({ d } = deps({ postingOffer: async (id) => ({ connected: true, defaults: 0, link: `https://g/${id}` }) }));
+    t = await build(d);
+    assert.ok(!t.replies[0].buttons && /https:\/\/g\/L1/.test(texts(t)));
+
+    // "ברירת מחדל" while building, and after the draft is gone
+    const asked = [];
+    ({ d } = deps({ chooseDefault: async (id) => { asked.push(id); return { ok: true, count: 3 }; } }));
+    t = await turn({ text: "ברירת מחדל", draft: { ...ready, status: "building", listing_id: "L9" } }, d);
+    assert.deepEqual([t.handled, t.status], [true, "default:ok"]);
+    assert.match(texts(t), /ברירת המחדל שלכם \(3\)/);
+    t = await turn({ text: "ברירת מחדל" }, d);
+    assert.deepEqual([t.handled, asked], [true, ["L9", null]], "no draft: the newest property of the day");
+    // nothing to apply it to (or Facebook not connected): not ours, n8n answers
+    ({ d } = deps({ chooseDefault: async () => null }));
+    t = await turn({ text: "ברירת מחדל" }, d);
+    assert.equal(t.handled, false);
+    // no default groups saved: the picker link instead
+    ({ d } = deps({ chooseDefault: async () => ({ ok: false, link: "https://g/L9" }) }));
+    t = await turn({ text: "ברירת מחדל", draft: { ...ready, status: "building", listing_id: "L9" } }, d);
+    assert.match(texts(t), /https:\/\/g\/L9/);
+  }
 
   console.log("whatsapp-intake.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

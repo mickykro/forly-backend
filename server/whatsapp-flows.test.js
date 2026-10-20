@@ -29,7 +29,7 @@ function deps(over = {}) {
 }
 // handleTurn mutates the draft it is given; clone so a test can branch from one draft.
 const turn = (input, d) => handleTurn({ phone: PHONE, now: T0, ...input, draft: input.draft ? structuredClone(input.draft) : null }, d);
-const texts = (t) => t.replies.map((r) => r.text).join("\n");
+const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) => l.url)].join("\n")).join("\n");
 
 (async () => {
   let d, t;
@@ -114,8 +114,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   t = await turn({ fileUrl: "https://green/3.jpg", draft: t.draft }, d);
   t = await turn({ fileUrls: ["https://green/2.jpg", "https://green/4.jpg", "https://green/5.jpg"], draft: t.draft }, d);
   assert.deepEqual([t.status, t.replies.length], ["photo_choice:5", 0], "the burst piles up silently, duplicates skipped");
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
   const choice = t.draft;
-  t = await turn({ event: "photo_timer", draft: choice }, d);
   assert.match(texts(t), /קיבלתי 5 תמונות[\s\S]*1 · דף נכס חדש[\s\S]*4 · לשפר 3 לדוגמה/);
   t = await turn({ text: "3", draft: choice }, d);
   assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.edit_instruction, t.del], [false, "edit_photos", 5, "", true]);
@@ -149,6 +149,10 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.handled, t.status, cancelled], [true, "stopped", PHONE]);
   t = await turn({ text: "די", draft: choice }, d);
   assert.deepEqual([t.status, t.del], ["stopped", true], "stop also drops held photos");
+  // "סגור" (972547221770, 2026-09-30) used to fall through to n8n's generic fallback
+  cancelled = null;
+  t = await turn({ text: "סגור" }, d);
+  assert.deepEqual([t.handled, t.status, cancelled], [true, "stopped", PHONE]);
 
   // ── a reply to an image with a comment edits that image; praise does not ──
   ({ d } = deps());
@@ -253,7 +257,8 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   ({ d } = deps({ classifyIntent: async () => null }));
   const ask12 = "היי פורלי, אני רוצה להעלות 12 תמונות וננקה אותם מעצמים קטנים, נמחק מלל שכתוב מאחורה";
   t = await turn({ text: ask12 }, d);
-  assert.deepEqual([t.handled, t.draft.status], [false, "edit_request"], "n8n answers it; the request is remembered");
+  assert.deepEqual([t.handled, t.draft.status], [true, "edit_request"], "the code answers it (not n8n's bot); the request is remembered");
+  assert.match(texts(t), /שלחו את התמונות לעריכה/);
   const req = t.draft;
   t = await turn({ fileUrls: ["https://green/1.jpg", "https://green/2.jpg"], draft: req, now: new Date(T0.getTime() + 20000) }, d);
   assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.edit_instruction], [false, "edit_requested", 2, ask12], "edited with his instruction, no 1/2/3/4");
@@ -382,6 +387,146 @@ const texts = (t) => t.replies.map((r) => r.text).join("\n");
   assert.deepEqual([t.status, t.draft.status, t.draft.dup_page], ["duplicate_new", "active", null]);
   t = await turn({ text: "1,390,000", draft: t.draft }, d);
   assert.notEqual(t.status, "duplicate_asked", "asked once only");
+
+  // ── currency: the property keeps the price as given, in the currency given (972526003708, 2026-09-30) ──
+  // The real extractor with a stubbed model that never mentions currency: detection is the code's job.
+  const { parseListing: realParse } = require("./listing-extract");
+  const modelSays = (json) => ({ parseListing: (txt) => realParse(txt, { askFn: async () => ({ text: JSON.stringify(json) }) }) });
+  const eurKeyword = { ...D.newDraft(PHONE, "keyword", T0) };
+  ({ d } = deps(modelSays({ city: "כפר וליכאדה", price: 285000, rooms: 3, deal: "sale" })));
+  t = await turn({ text: "הנכס בכפר וליכאדה, 3 חדרי שינה, 3 חדרים. המחיר הוא 285,000 אירו", draft: eurKeyword }, d);
+  assert.equal(t.draft.fields.price, 285000);
+  assert.equal(t.draft.fields.currency, "EUR");
+  assert.match(texts(t), /€285,000/);
+  assert.doesNotMatch(texts(t), /₪/);
+  assert.equal(D.listingBody(t.draft).currency, "EUR");
+
+  // "it's not shekels, it's euro" while another question is open: the property's currency changes
+  const eurAtFloor = { ...D.newDraft(PHONE, "keyword", T0) };
+  Object.assign(eurAtFloor.fields, { city: "כפר וליכאדה", price: 285000, rooms: 3, deal: "sale", size_sqm: 100 });
+  ({ d } = deps(modelSays({ price: 285000 })));
+  t = await turn({ text: "וזה לא 285,000 שח, אלא € יורו", draft: eurAtFloor }, d);
+  assert.equal(t.draft.fields.currency, "EUR");
+  assert.equal(t.draft.fields.price, 285000, "the number stays");
+  assert.match(texts(t), /מטבע €/);
+  assert.match(texts(t), /באיזו קומה/, "and the open question comes back");
+
+  // "100 מ״ר בנוי על מגרש של 400": built 100, plot 400 — the plot is never the main area (972526003708)
+  const eurPlot = { ...D.newDraft(PHONE, "keyword", T0) };
+  Object.assign(eurPlot.fields, { city: "כפר וליכאדה", price: 285000, rooms: 3 });
+  ({ d } = deps(modelSays({ size_sqm: 100, sqm_built: 100, sqm_plot: 400 })));
+  t = await turn({ text: "הווילה 100 מ״ר בנוי על מגרש של 400 מ״ר", draft: eurPlot }, d);
+  assert.deepEqual([t.draft.fields.size_sqm, t.draft.fields.sqm_built, t.draft.fields.sqm_plot], [100, 100, 400]);
+  assert.match(texts(t), /מגרש \(מ״ר\) 400/);
+  assert.equal(D.listingBody(t.draft).size_plot, 400);
+
+  // a direct answer to "מה המחיר?"
+  const eurAtPrice = { ...D.newDraft(PHONE, "keyword", T0) };
+  eurAtPrice.fields.city = "כפר וליכאדה";
+  t = await turn({ text: "285,000 יורו", draft: eurAtPrice }, d);
+  assert.deepEqual([t.draft.fields.price, t.draft.fields.currency], [285000, "EUR"]);
+
+  // ── 972546582548, 2026-10-04: "edit my photos" never reached the edit ──
+  ({ d } = deps({ classifyIntent: async () => null }));
+  const at = (min) => new Date(T0.getTime() + min * 60000);
+  // An old draft, idle for hours: the edit request is taken, not set aside behind המשך/חדש/ביטול.
+  const idle = { ...D.newDraft(PHONE, "keyword", at(-300)), photos: ["https://files/old.jpg"] };
+  idle.fields.city = "❤";
+  t = await turn({ text: "אני רוצה שתעכי לי תמונות :", draft: idle }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status, t.draft.keep_apart], [true, "edit_request", "edit_request", true]);
+  assert.match(texts(t), /שלחו את התמונות לעריכה/);
+  const waitingEdit = t.draft;
+  t = await turn({ fileUrls: ["https://green/a.jpg", "https://green/b.jpg"], draft: waitingEdit, now: at(1) }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos], [false, "edit_requested", ["https://green/a.jpg", "https://green/b.jpg"]], "the photos are edited");
+  t = await turn({ event: "photos_edited", photos: ["https://n8n/a.jpg"], batchDone: true, draft: t.draft, now: at(4) }, d);
+  assert.deepEqual([t.status, t.draft.photos], ["offered", ["https://files/a.jpg"]], "kept apart from the idle draft's photos");
+  t = await turn({ text: "היי", draft: waitingEdit, now: at(1) }, d);
+  assert.deepEqual([t.status, t.draft.status], ["resume_prompt", "resume_prompt"], "no photos came: the idle draft is offered back");
+
+  // "חדש" to a set-aside edit request edits, it doesn't open a property.
+  const paused = { ...idle, updated_at: T0, status: "resume_prompt", pending_opener: { text: "תערכי לי תמונות בבקשה" } };
+  t = await turn({ text: "חדש", draft: paused }, d);
+  assert.deepEqual([t.handled, t.draft.status], [true, "edit_request"]);
+
+  // Mid-questions: "תערכי את התמונות" edits the photos just sent — never the city.
+  const asking = D.newDraft(PHONE, "keyword", T0);
+  t = await turn({ fileUrls: ["https://green/1.jpg", "https://green/2.jpg"], draft: asking }, d);
+  t = await turn({ text: "תערכי את התמונות", draft: t.draft, now: at(8) }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos, t.draft.fields.city, t.draft.photos.length, t.draft.editing],
+    [false, "edit_draft_photos", ["https://files/1.jpg", "https://files/2.jpg"], null, 0, 2]);
+  t = await turn({ event: "photos_edited", photos: ["https://n8n/e1.jpg"], draft: t.draft, now: at(10) }, d);
+  assert.deepEqual([t.status, t.replies.length, t.draft.editing], ["edits_pending:1", 0, 1], "quiet until the last one");
+  t = await turn({ event: "photos_edited", photos: ["https://n8n/e2.jpg"], draft: t.draft, now: at(11) }, d);
+  assert.deepEqual([t.draft.photos, t.draft.editing], [["https://files/e1.jpg", "https://files/e2.jpg"], 0]);
+  assert.match(texts(t), /שמרתי 2 תמונות[\s\S]*באיזו עיר/, "then one message, and the question again");
+
+  t = await turn({ text: "תמחקי את התמונות", draft: asking }, d);
+  assert.notEqual(t.status, "edit_request", "removing the photos is not a paid edit");
+  // No photos yet: the next ones are edited and come back into the draft.
+  t = await turn({ text: "תערכי את התמונות", draft: asking }, d);
+  assert.deepEqual([t.handled, t.draft.status, t.draft.suspended.status], [true, "edit_request", "active"]);
+  t = await turn({ fileUrl: "https://green/9.jpg", draft: t.draft, now: at(1) }, d);
+  assert.equal(t.draft.suspended.editing, 1);
+  t = await turn({ event: "photos_edited", photos: ["https://n8n/9.jpg"], draft: t.draft, now: at(3) }, d);
+  assert.deepEqual([t.draft.status, t.draft.photos], ["active", ["https://files/9.jpg"]]);
+  t = await turn({ text: "רמת גן", draft: (await turn({ text: "תערכי את התמונות", draft: asking }, d)).draft, now: at(1) }, d);
+  assert.deepEqual([t.draft.status, t.draft.fields.city], ["active", "רמת גן"], "other text: the draft is back and answered");
+
+  // "חדש" / "בואי נתחיל מההתחלה" mid-question: never a price.
+  const priceStep = { ...D.newDraft(PHONE, "keyword", T0) };
+  priceStep.fields.city = "באר שבע";
+  t = await turn({ text: "חדש", draft: priceStep }, d);
+  assert.deepEqual([t.status, t.draft.fields.city], ["asked:city", null], "a fresh property");
+  t = await turn({ text: "לא משנה.  בואי נתחיל מההתחלה", draft: priceStep }, d);
+  assert.deepEqual([t.status, t.del], ["cancelled", true]);
+
+  // ── 972546582548 after the 2026-10-04 merge ──
+  // "2" ("no" to the page offer) typed before the photo menu went out: the menu, not "add to a page".
+  ({ d } = deps({ classifyIntent: async () => null, listPages: async () => [{ page_id: "p1", property: { title: "x" } }], editUrl: (id) => id }));
+  t = await turn({ fileUrls: ["https://green/n1.jpg", "https://green/n2.jpg"] }, d);
+  t = await turn({ text: "2", draft: t.draft }, d);
+  assert.deepEqual([t.status, t.draft.photos.length], ["photo_choice_asked", 2]);
+  assert.match(texts(t), /קיבלתי 2 תמונות/);
+  t = await turn({ event: "photo_timer", draft: t.draft }, d);
+  assert.equal(t.replies.length, 0, "the timer doesn't ask twice");
+  // "לשפר תמונה" quoting an album, nothing open: the photos she just sent are edited now.
+  const albumS = T0.getTime() / 1000;
+  const albumChat = [
+    { type: "incoming", timestamp: albumS - 30, typeMessage: "textMessage", textMessage: "לא לעדכן" },
+    { type: "incoming", timestamp: albumS - 60, typeMessage: "imageMessage", downloadUrl: "https://green/a2.jpg" },
+    { type: "incoming", timestamp: albumS - 60, typeMessage: "imageMessage", downloadUrl: "https://green/a1.jpg" },
+    { type: "outgoing", timestamp: albumS - 70, typeMessage: "imageMessage", downloadUrl: "https://bot/edited.jpg" },
+  ];
+  ({ d } = deps({ classifyIntent: async () => null, recentChat: async () => albumChat }));
+  t = await turn({ text: "לשפר תמונה" }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos], [false, "edit_recent", ["https://green/a1.jpg", "https://green/a2.jpg"]]);
+  ({ d } = deps({ classifyIntent: async () => null, recentChat: async () => albumChat.slice(0, 1) }));
+  t = await turn({ text: "לשפר תמונה" }, d);
+  assert.deepEqual([t.handled, t.status, t.draft.status], [true, "edit_request", "edit_request"], "no fresh photos: asked for, by the code");
+  const waitReq = t.draft;
+  t = await turn({ text: "כן", draft: waitReq }, d);
+  assert.deepEqual([t.handled, t.status], [true, "edit_request"], "כן while waiting: asked again, never n8n's 'מעולה!'");
+  ({ d } = deps({ classifyIntent: async () => null, recentChat: async () => albumChat }));
+  t = await turn({ text: "כן", draft: waitReq }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos.length, t.del], [false, "edit_recent", 2, true], "כן with fresh photos: edited");
+  t = await turn({ text: "לשפר" }, d);
+  assert.deepEqual([t.status, t.edit_photos.length], ["edit_recent", 2], "a bare 'לשפר' is an edit request");
+  // The caption arrives WITH its own fresh photos in one webhook (textThenPhotos) —
+  // these must be edited, not the older, unrelated ones from chat history that
+  // editRequestNow would otherwise fall back to (972547221770, 2026-10-12: a
+  // custom-instruction batch was silently dropped this way, twice).
+  t = await turn({ text: "לשפר תמונה", fileUrls: ["https://green/new1.jpg", "https://green/new2.jpg"] }, d);
+  assert.deepEqual([t.handled, t.status, t.edit_photos], [false, "edit_recent", ["https://green/new1.jpg", "https://green/new2.jpg"]],
+    "the photos attached to THIS message are edited, not the stale album ones from history");
+  t = await turn({ text: "למחוק נכס" }, d);
+  assert.notEqual(t.status, "edit_recent", "deleting a property is not a photo edit");
+  // "לא לעדכן" to the page list: the code answers.
+  t = await turn({ text: "לא לעדכן", draft: { phone: PHONE, status: "updating", links: [{ title: "x", url: "u" }], created_at: T0, updated_at: T0, hinted_at: T0 } }, d);
+  assert.deepEqual([t.handled, t.status, t.del], [true, "update_declined", true]);
+  assert.match(texts(t), /לא מעדכנת/);
+  // "מחק" mid-question cancels, never a price.
+  t = await turn({ text: "מחק", draft: { ...D.newDraft(PHONE, "keyword", T0), fields: { ...D.newDraft(PHONE, "keyword", T0).fields, city: "באר שבע" } } }, d);
+  assert.deepEqual([t.status, t.del], ["cancelled", true]);
 
   console.log("whatsapp-flows.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });
