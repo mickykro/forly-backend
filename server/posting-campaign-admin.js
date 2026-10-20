@@ -60,6 +60,7 @@ async function update(id, edit = {}, deps = {}, { version, by = "admin" } = {}) 
     groups = groups.concat(added.filter((g) => !have.has(g.group_id))).slice(0, shareKit.MAX_GROUPS);
     if (edit.copies) groups = groups.map((g) => (typeof edit.copies[g.group_id] === "string" ? withCopy(g, edit.copies[g.group_id]) : g));
     const patch = { groups, wait_reason: null, last_changed_by: { by, at: iso(now) } };
+    if (edit.include_unknown === true) patch.include_unknown = true;
     if (remove.size) {
       patch.posts = (cur.posts || []).map((p) => (remove.has(String(p.group_id)) && NOT_STARTED.has(p.status)
         ? { ...p, status: "skipped", error_code: "removed", copy: undefined } : p));

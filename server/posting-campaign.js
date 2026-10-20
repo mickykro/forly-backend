@@ -56,7 +56,7 @@ function normalizeGroups(groups, ctx) {
 // Default (Task 19's route, an explicit agent create): any stopped/completed
 // one. enrollNewPage passes a narrower rule (see there). Evaluated inside the
 // campaign transaction, so a STOP landing meanwhile is never overridden.
-async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets, copies } = {}, deps = {}, opts = {}) {
+async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets, copies, includeUnknown } = {}, deps = {}, opts = {}) {
   const x = ctxOf(deps);
   if (!consent || !consent.at) throw fail("consent_required", "consent required");
   if (!page || !page.page_id || !phone) throw fail("invalid_input", "phone and page required");
@@ -76,6 +76,8 @@ async function create({ phone, page, groups, mode, days, repeat, repeatDays, con
       ? { by: "admin", admin_tail: consent.admin_tail || null, method: consent.method || null, note: consent.note || null }
       : { by: "agent" },
     created_by: consent.by === "admin" ? "admin" : "agent",
+    // Groups outside the catalog were accepted for this campaign: a copy of it (apply-to-all) accepts them too.
+    include_unknown: includeUnknown === true,
     // The text the agent approved for each group (manual posting), kept as written.
     groups: normalizeGroups(groups, ctx).map((g) => {
       const t = copies && typeof copies[g.group_id] === "string" ? cleanCopy(copies[g.group_id]) : "";
@@ -96,7 +98,7 @@ async function create({ phone, page, groups, mode, days, repeat, repeatDays, con
   const fresh = {
     status: "running", pause_reason: null, wait_reason: null, restarted_at: c.created_at,
     mode: c.mode, repeat: c.repeat, repeat_days: c.repeat_days, expires_at: c.expires_at, consent_at: c.consent_at, consent_version: c.consent_version, consent_by: c.consent_by,
-    groups: c.groups, targets: c.targets, consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
+    groups: c.groups, targets: c.targets, include_unknown: c.include_unknown, consecutive_failures: 0, tick_errors: 0, selector_failures: 0,
   };
   return mutate(x, campaign.id, (cur) => (may(cur) ? fresh : null));
 }

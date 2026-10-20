@@ -148,6 +148,23 @@ const tick = () => new Promise((r) => setTimeout(r, 10));
     l = await until("ready");
     assert.deepEqual([l.page_id, l.item.page_id], [null, "pg3"], "back to any property");
 
+    // Picking again while a preparation is still typing: the next one waits for it (one browser, one composer).
+    {
+      const plain = prep.prepare;
+      let active = 0, most = 0, release;
+      const gate = new Promise((r) => { release = r; });
+      prep.prepare = async (...a) => { active++; most = Math.max(most, active); await gate; active--; return plain(...a); };
+      await call(server, "POST", `${B}/run`, { page_id: "pg3" });
+      await tick();
+      await call(server, "POST", `${B}/run`, { page_id: "" });
+      await tick(); await tick();
+      assert.equal(active, 1, "the second preparation has not started");
+      release();
+      l = await until("ready");
+      assert.equal(most, 1, "never two at once");
+      prep.prepare = plain;
+    }
+
     // The global list: every skip, most flagged first.
     const flags = (await call(server, "GET", "/api/admin/manual/flags")).body.flags;
     assert.deepEqual(flags.map((f) => [f.group_id, f.total]).sort(), [["111", 1], ["222", 1]]);

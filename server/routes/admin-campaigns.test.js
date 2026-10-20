@@ -299,6 +299,24 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       const again = await call(server, "POST", `/campaigns/${row.id}/apply-to-all`, { consent: CONSENT, set_defaults: false });
       assert.equal(again.body.created.length, 0); assert.equal(again.body.defaults_set, false);
     }
+    // ── apply-to-all after she left one of the groups: the rest still go, and
+    //    an uncatalogued group the create accepted stays accepted ──
+    {
+      const conn0 = await K.db.getConnection(AGENT);
+      await K.db.savePage(K.page("pg7", AGENT)); await K.db.savePage(K.page("pg8", AGENT));
+      await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member.concat([K.member("777")]) });
+      const u = await call(server, "POST", "/campaigns", { agent: REF, page_id: "pg7", group_ids: ["111", "777"], mode: "standing", days: 7, consent: CONSENT, include_unknown: true });
+      assert.equal(u.status, 201, JSON.stringify(u.body));
+      await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member.filter((m) => m.group_id !== "111").concat([K.member("777")]) });
+      const r = await call(server, "POST", `/campaigns/${u.body.campaign.id}/apply-to-all`, { consent: CONSENT, set_defaults: false });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.deepEqual(r.body.default_group_ids, ["777"]);
+      assert.deepEqual(r.body.created.map((c) => c.page_id), ["pg8"], JSON.stringify(r.body));
+      const c8 = await K.store.getPostingCampaign(K.store.campaignId(AGENT, "pg8"));
+      assert.deepEqual(c8.groups.map((g) => String(g.group_id)), ["777"]);
+      assert.equal(c8.include_unknown, true, "the copy keeps the acceptance");
+      await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member });
+    }
     console.log("routes/admin-campaigns.test.js ok");
   } finally { server.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

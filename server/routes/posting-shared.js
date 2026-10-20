@@ -162,6 +162,11 @@ function memberGate(conn, ids) {
   }
   return notMember.length ? { notMember } : { entries };
 }
+// The entries of the ids the agent can still post to, the rest dropped (memberGate refuses the whole set).
+function memberEntries(conn, ids) {
+  const g = memberGate(conn, ids);
+  return g.entries || memberGate(conn, ids.filter((id) => !g.notMember.includes(id))).entries || [];
+}
 
 // The catalog entries for a membership entry — posting-account's helper, so
 // the route and the planner match a group to the catalog the same way: by
@@ -245,7 +250,7 @@ const MAX_ACTIVE_CAMPAIGNS = 3;
 module.exports = {
   MAX_ACTIVE_CAMPAIGNS, CONSENT_VERSION, PRIVATE_NAME, ACTIONS, ACT_TTL_S, TARGETS, DEFAULT_TARGETS, MAX_GROUP_IDS, GROUP_ID_RE, ID_RE,
   publicView, scrub, actionLink, readActionLink, card, allowed, SYSTEM_OFF,
-  hiddenIds, memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, catalogLookup, publicMember,
+  hiddenIds, memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, memberEntries, catalogLookup, publicMember,
   pagesOf, pageKey, storedPageId, pageByStored, pageByKey, pageConfirmed, parseTargets,
   needsReconnect, haltState, publicPermission, wrap,
 };

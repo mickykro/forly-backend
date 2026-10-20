@@ -300,11 +300,11 @@ module.exports = function createAdminCampaignsRouter({
     await grantPermission(phone, record);
     const c = await campaigns.create({
       phone, page: g.page, groups: vet.groups, mode: b.mode, days: b.days, repeat: !!b.repeat_days, repeatDays: b.repeat_days || null,
-      targets: v.targets || undefined, consent: record, copies: b.copies || null,
+      targets: v.targets || undefined, consent: record, copies: b.copies || null, includeUnknown: b.include_unknown === true,
     }, deps);
     // "Save these as the agent's default groups": the groups the campaign took (member rows).
     const defaults = b.set_defaults === true && vet.groups.length
-      ? await saveDefaults(phone, g.conn, S_.memberGate(g.conn, vet.groups.map((x) => String(x.group_id))).entries || []) : null;
+      ? await saveDefaults(phone, g.conn, S_.memberEntries(g.conn, vet.groups.map((x) => String(x.group_id)))) : null;
     // No WhatsApp to the agent: the team opens campaigns quietly (the agent sees them on the publish page).
     res.status(201).json({ campaign: await rowOf(c), default_group_ids: defaults });
   }));
@@ -328,17 +328,18 @@ module.exports = function createAdminCampaignsRouter({
     const conn = (await db.getConnection(phone)) || {};
     if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
     if (campaigns._test.accountBlocked(conn)) return res.status(409).json({ error: "account_halted" });
-    const gate = S_.memberGate(conn, (src.groups || []).map((g) => String(g.group_id)));
-    const ids = (gate.entries || []).map((m) => String(m.group_id)); // groups she has left since are dropped
+    const entries = S_.memberEntries(conn, (src.groups || []).map((g) => String(g.group_id)));
+    const ids = entries.map((m) => String(m.group_id)); // groups she has left since are dropped
     if (!ids.length) return res.status(400).json({ error: "no_destination" });
 
     await audit(req, "apply_groups_to_all", phone, { campaign_tail: src.id.slice(-6), groups: ids.length, method: consent.method });
-    if (b.set_defaults !== false) await saveDefaults(phone, conn, gate.entries);
+    if (b.set_defaults !== false) await saveDefaults(phone, conn, entries);
 
     const record = consentRecord(req, consent);
     const days = b.days || previousDays(src);
     const pages = ((await db.listPagesByPhone(phone)) || []).filter((p) => p && p.status !== "deleted" && p.page_id !== src.page_id);
     const created = [], skipped = [];
+    const unknownOk = src.include_unknown === true || (src.created_by || "agent") === "agent";
     for (const p of pages) {
       const title = ((p.property || {}).title) || p.page_id;
       const before = await store.getPostingCampaign(store.campaignId(phone, p.page_id));
@@ -348,7 +349,7 @@ module.exports = function createAdminCampaignsRouter({
       // Drop what this property refuses (policy, listing type), keep the rest.
       let want = ids.slice(), vet = null;
       for (let i = 0; i < 3 && want.length; i++) {
-        vet = await PC.vetGroups(catalogFn, g.conn, g.page, want, src.include_unknown === true || (src.created_by || "agent") === "agent");
+        vet = await PC.vetGroups(catalogFn, g.conn, g.page, want, unknownOk);
         if (!vet.error) break;
         const bad = new Set((vet.group_ids || []).map(String));
         if (!bad.size) break;
@@ -359,7 +360,7 @@ module.exports = function createAdminCampaignsRouter({
       await grantPermission(phone, record);
       const c = await campaigns.create({
         phone, page: g.page, groups: vet.groups, mode: src.mode, days, repeat: !!src.repeat, repeatDays: src.repeat_days || null,
-        targets: src.targets || undefined, consent: record, copies: null,
+        targets: src.targets || undefined, consent: record, copies: null, includeUnknown: unknownOk,
       }, deps);
       created.push({ page_id: p.page_id, title, groups: vet.groups.length, campaign_id: c.id });
     }
@@ -386,6 +387,7 @@ module.exports = function createAdminCampaignsRouter({
       const vet = await PC.vetGroups(catalogFn, g.conn, g.page, add.ids, b.include_unknown === true);
       if (vet.error) return res.status(422).json(vet);
       edit.add_groups = vet.groups;
+      if (b.include_unknown === true) edit.include_unknown = true;
     } else if (t.targets) {
       const g = await gates(c.phone, c.page_id, t.targets);
       if (g.error) return res.status(g.status).json({ error: g.error });
@@ -403,7 +405,7 @@ module.exports = function createAdminCampaignsRouter({
     const ids = (out.groups || []).map((g) => String(g.group_id));
     if (b.set_defaults === true && ids.length) {
       const conn = (await db.getConnection(c.phone)) || {};
-      defaults = await saveDefaults(c.phone, conn, S_.memberGate(conn, ids).entries || []);
+      defaults = await saveDefaults(c.phone, conn, S_.memberEntries(conn, ids));
     }
     res.json({ campaign: await rowOf(out), default_group_ids: defaults });
   }));

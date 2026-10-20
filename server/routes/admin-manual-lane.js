@@ -58,9 +58,11 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     if (open.get(phone) !== s || s.lane.gen !== gen) return;
     s.lane.pages = pages;
     if (!item) return set(phone, s, { state: until ? "blocked" : "empty", item: null, code: null, until, left: 0 });
-    set(phone, s, { state: "preparing", item, code: null, warn: null, check: null, until: null, left });
+    set(phone, s, { state: "preparing", item, code: null, warn: null, check: null, until: null, left, pendingBefore: false, seenBefore: null });
     const alive = () => open.get(phone) === s && s.lane.gen === gen;
-    const work = (async () => {
+    // One preparation at a time on this browser: a cancelled one still finishes its current step first.
+    const work = (s.prepping || Promise.resolve()).then(async () => {
+      if (!alive()) return { ok: false, code: "cancelled" };
       const page = hubPage(phone);
       if (!page) return { ok: false, code: "no_viewer" };
       s.pageId = item.page_id;
@@ -72,14 +74,15 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
       if (!alive()) return { ok: false, code: "cancelled" };
       const conn = (await x.db.getConnection(phone)) || {};
       return prep.prepare(page, item, conn, { file, alive });
-    })().catch(() => ({ ok: false, code: "prep_error" }));
+    }).catch(() => ({ ok: false, code: "prep_error" }));
+    s.prepping = work;
     let timer;
     const late = new Promise((r) => { timer = setTimeout(() => r({ ok: false, code: "prep_timeout" }), PREP_MS); if (timer.unref) timer.unref(); });
     const r = await Promise.race([work, late]);
     clearTimeout(timer);
     if (!alive()) return;
     if (r.code === "prep_timeout") s.lane.gen++; // stops the late preparation at its next step
-    set(phone, s, r.ok ? { state: "ready", pendingBefore: !!r.pendingBefore, warn: r.warn || null, check: r.check || null } : { state: "failed", code: r.code });
+    set(phone, s, r.ok ? { state: "ready", pendingBefore: !!r.pendingBefore, seenBefore: r.seenBefore || null, warn: r.warn || null, check: r.check || null } : { state: "failed", code: r.code });
   }
 
   // ▶: starts (or restarts after an end) the run; a run under way is left alone.
@@ -133,7 +136,7 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     else if (item && ["ready", "held", "failed"].includes(l.state)) {
       // After a failed preparation the admin may still have posted by hand: look, and ask when it cannot be seen.
       const page = hubPage(phone);
-      const seen = page ? await prep.check(page, item, (await x.db.getConnection(phone)) || {}, { pendingBefore: l.pendingBefore }) : "unsure";
+      const seen = page ? await prep.check(page, item, (await x.db.getConnection(phone)) || {}, { pendingBefore: l.pendingBefore, seenBefore: l.seenBefore }) : "unsure";
       if (seen === "not_posted" && l.state !== "failed") { set(phone, s, { state: "held" }); return { lane: view(s), need: "reason" }; }
       if (seen !== "posted" && l.state === "failed") { set(phone, s, { state: "held" }); return { lane: view(s), need: "confirm" }; }
       if (seen === "unsure") { set(phone, s, { state: "held" }); return { lane: view(s), need: "confirm" }; }

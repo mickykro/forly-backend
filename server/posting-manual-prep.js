@@ -12,9 +12,11 @@
  * alone (its attempt states and its one Post click are its rules); this reuses
  * its selectors and helpers only.
  *
- * check() only looks: composer still holding our text → not posted; our post
- * in the feed, or a new "pending approval" banner → posted; else unsure (the
- * admin is asked).
+ * check() only looks: composer still holding our text → not posted; a post of
+ * the complete copy in the feed that was not there before prepare() typed it
+ * (seenBefore), or a new "pending approval" banner → posted; else unsure (the
+ * admin is asked). A cut feed text ("… See more") never proves a post: an
+ * older post of the same property starts the same way.
  *
  * Nothing is logged: no phone, URL, name or post text.
  */
@@ -36,9 +38,9 @@ function targetOf(item) {
 
 /*
  * prepare(page, item, conn, { file, alive }) → { ok: true, pendingBefore,
- * warn?, check? } | { ok: false, code }. item: a queue item (group_id, group_url, kind, copy).
+ * seenBefore, warn?, check? } | { ok: false, code }. item: a queue item (group_id, group_url, kind, copy).
  * file: the video as posting-media.fetchVideo returns it (or null). alive():
- * false once the admin moved on — checked between steps, nothing after it.
+ * false once the admin moved on — checked before every browser change, nothing after it.
  */
 async function prepare(page, item, conn, { file = null, alive = () => true } = {}) {
   const step = () => { if (!alive()) throw cancelled(); };
@@ -51,10 +53,12 @@ async function prepare(page, item, conn, { file = null, alive = () => true } = {
     step();
     const sig = await P.readSignal(page, item.copy);
     if (!FINE.has(sig)) return no(sig);
+    const seenBefore = (await ownPosts(page, item, conn)).map((p) => p.permalink);
     const kind = item.kind === "page" ? "page" : "group";
     if (kind === "group" && (await P.countOf(page, S.joinGroup)) > 0) return no("not_member");
     const composer = page.locator(S.composer).first();
     if ((await composer.count().catch(() => 0)) === 0) return no("composer_not_found");
+    step();
     await composer.click();
     const editor = page.locator(S.editor).first();
     if (!(await editor.waitFor({ timeout: LOAD_MS }).then(() => true, () => false))) return no("composer_not_found");
@@ -64,6 +68,7 @@ async function prepare(page, item, conn, { file = null, alive = () => true } = {
     await editor.click();
     const lines = String(item.copy).replace(/\r\n?/g, "\n").split("\n");
     for (let i = 0; i < lines.length; i++) {
+      step();
       if (i > 0) await page.keyboard.press("Enter");
       if (lines[i]) await page.keyboard.insertText(lines[i]);
     }
@@ -71,7 +76,7 @@ async function prepare(page, item, conn, { file = null, alive = () => true } = {
     if (file) { const bad = await media.waitUploaded(page, x); if (bad) return no(bad); step(); }
     const resolved = kind === "group" ? await P.readTargetId(page, "group") : null;
     const proof = await P.proveIdentityAndDestination(page, targetOf(item), conn, { copy: item.copy, resolvedGroupId: resolved });
-    const out = { ok: true, pendingBefore: sig === "pending_approval" };
+    const out = { ok: true, pendingBefore: sig === "pending_approval", seenBefore };
     return proof.ok ? out : Object.assign(out, { warn: proof.code, check: proof.check || null });
   } catch (e) {
     if (e && e.code === "cancelled") return no("cancelled");
@@ -79,14 +84,20 @@ async function prepare(page, item, conn, { file = null, alive = () => true } = {
   }
 }
 
-// → "posted" | "not_posted" | "unsure". Only looks; never clicks.
-async function check(page, item, conn, { pendingBefore = false } = {}) {
+// Every feed post by us under the target whose text is the copy or a cut of it: [{ permalink, exact }].
+async function ownPosts(page, item, conn) {
+  const t = targetOf(item);
+  const ids = [t.target_id, P.urlSegment(item.group_url, t.target_type)].filter(Boolean);
+  const author = t.target_type === "group" ? P.norm(conn && conn.facebook_identity_label) : P.norm(await P.textOf(page, S.targetName));
+  return (await P.readFeedPosts(page)).map((p) => P.findOwnPost([p], { kind: t.target_type, ids, author, copy: item.copy })).filter(Boolean);
+}
+
+// → "posted" | "not_posted" | "unsure". Only looks; never clicks. seenBefore:
+// prepare()'s permalinks; without it (a failed preparation) the feed proves nothing.
+async function check(page, item, conn, { pendingBefore = false, seenBefore = null } = {}) {
   try {
     if ((await P.countOf(page, S.composerRoot)) > 0 && P.norm(await P.textOf(page, S.editor))) return "not_posted";
-    const t = targetOf(item);
-    const ids = [t.target_id, P.urlSegment(item.group_url, t.target_type)].filter(Boolean);
-    const author = t.target_type === "group" ? P.norm(conn && conn.facebook_identity_label) : P.norm(await P.textOf(page, S.targetName));
-    if (P.findOwnPost(await P.readFeedPosts(page), { kind: t.target_type, ids, author, copy: item.copy })) return "posted";
+    if (Array.isArray(seenBefore) && (await ownPosts(page, item, conn)).some((p) => p.exact && !seenBefore.includes(p.permalink))) return "posted";
     if (!pendingBefore && (await P.readSignal(page, item.copy)) === "pending_approval") return "posted";
   } catch (e) { /* a failed read proves nothing */ }
   return "unsure";
