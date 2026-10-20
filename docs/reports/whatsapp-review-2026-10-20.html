@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forly WhatsApp Review — 2026-10-20</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f27; --muted: #5b6472; --border: #e3e6ea;
+    --accent: #2563eb; --good: #15803d; --good-bg: #ecfdf3; --warn: #b45309; --warn-bg: #fffbeb;
+    --bad: #b91c1c; --bad-bg: #fef2f2; --info-bg: #eff6ff; --code-bg: #0f172a; --code-ink: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55; padding: 0 16px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { padding: 40px 0 20px; }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 0.82rem; color: var(--muted); }
+  .verdict {
+    margin: 22px 0 30px; padding: 20px 22px; border-radius: 14px; background: var(--info-bg);
+    border: 1px solid #bfdbfe;
+  }
+  .verdict.alert { background: var(--bad-bg); border-color: #fecaca; }
+  .verdict h2 { margin: 0 0 8px; font-size: 1.05rem; }
+  .verdict p { margin: 0 0 8px; color: #1e3a5f; }
+  .verdict.alert p { color: #7f1d1d; }
+  .verdict p:last-child { margin-bottom: 0; }
+  section { margin: 36px 0; }
+  h2.section-title { font-size: 1.2rem; border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 18px; }
+  .section-note { color: var(--muted); margin-top: -10px; margin-bottom: 18px; font-size: 0.92rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card.critical { border-color: #fecaca; }
+  .card h3 { margin: 0 0 4px; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .badge.fixed { background: var(--good-bg); color: var(--good); }
+  .badge.n8n { background: var(--warn-bg); color: var(--warn); }
+  .badge.watch { background: #f3f4f6; color: var(--muted); }
+  .badge.good { background: var(--good-bg); color: var(--good); }
+  .badge.critical { background: var(--bad-bg); color: var(--bad); }
+  .badge.biz { background: #f3e8ff; color: #7e22ce; }
+  .badge.lead { background: #e0f2fe; color: #0369a1; }
+  .card .meta { color: var(--muted); font-size: 0.82rem; margin: 4px 0 12px; }
+  .card p { margin: 8px 0; }
+  .evidence {
+    background: #fafbfc; border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 0.86rem;
+  }
+  .evidence .line { margin: 3px 0; }
+  .evidence .bot { color: var(--accent); }
+  .evidence .bot::before { content: "🤖 "; }
+  .evidence .user { color: #374151; }
+  .evidence .user::before { content: "👤 "; }
+  .evidence .ext { color: var(--muted); font-style: italic; }
+  code, .code-inline { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .commit-ref {
+    display: inline-block; margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem; background: var(--good-bg); color: var(--good); border-radius: 6px; padding: 4px 10px;
+  }
+  ul.plain { margin: 8px 0; padding-inline-start: 20px; }
+  ul.plain li { margin: 4px 0; }
+  .outbound-msg {
+    background: var(--bad-bg); border: 1px solid #fecaca; border-radius: 10px; padding: 14px 16px; margin-top: 10px;
+  }
+  .outbound-msg .to { font-size: 0.78rem; color: var(--bad); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+  .outbound-msg.sent-prior { background: var(--info-bg); border-color: #bfdbfe; }
+  .outbound-msg.sent-prior .to { color: #1e3a5f; }
+  .outbound-msg pre { white-space: pre-wrap; font-family: inherit; margin: 0; direction: rtl; text-align: right; }
+  footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --ink: #e5e7eb; --muted: #9199a8; --border: #262b34;
+      --info-bg: #142238; --good-bg: #0f2a1c; --warn-bg: #2a2110; --bad-bg: #2a1414; --code-bg: #05070c;
+    }
+    .badge.biz { background: #2a1a3a; color: #d8b4fe; }
+    .badge.lead { background: #0c3a52; color: #93d4f0; }
+    .verdict { border-color: #1e3a5f; }
+    .verdict.alert { border-color: #4c1d1d; }
+    .verdict p { color: #bcd4ee; }
+    .verdict.alert p { color: #fca5a5; }
+    .evidence { background: #12151c; }
+    code, .code-inline { background: #20242e; color: #dbe1ea; }
+    .outbound-msg { border-color: #4c1d1d; }
+    .outbound-msg.sent-prior { border-color: #1e3a5f; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Forly WhatsApp Review</h1>
+  <div class="subtitle">Daily check on the agent-facing WhatsApp bot — what real conversations show about where it helps and where it trips people up.</div>
+  <div class="meta-row">
+    <span class="pill">Generated 2026-10-20, ~08:46 IDT</span>
+    <span class="pill">Window: Mon 2026-10-19 09:10 IDT → Tue 2026-10-20 08:46 IDT</span>
+    <span class="pill">Source: Green API getChats / getChatHistory / lastIncomingMessages / lastOutgoingMessages + n8n workflow graphs (MCP)</span>
+    <span class="pill">1,410 chats listed (1,408 one-to-one); getChatHistory on the most-recently-active chats, cross-checked against the full-account last 24–48h feeds</span>
+    <span class="pill">Channel: waInstance7105422200 — instance state: authorized (confirmed healthy)</span>
+    <span class="pill">972542045280 excluded (the operator's own number)</span>
+  </div>
+</header>
+
+<div class="verdict alert">
+  <h2>Bottom line</h2>
+  <p><strong>The outage is still open — day 9.</strong> First silent failure: Nofar Harush, 2026-10-11 17:24 IDT. As of this report that's <strong>~207 hours</strong> with the shared Main Router v3 → Business Handler v6 pipeline still not reliably answering. This cycle's cross-check is the strongest evidence yet that this is an account-wide outage, not one agent's bad luck: <code>lastOutgoingMessages</code> over the trailing 48 hours returned exactly <strong>4 messages</strong>, all of them this review's own operator-notification pairs from 2026-10-18 and 2026-10-19 — <strong>zero messages went out to any real agent or lead in 48 hours</strong>, against 26 genuine inbound messages from 3 different agents in the trailing 24 hours alone.</p>
+  <p>New since the last report: Nofar made a <strong>seventh</strong> full attempt (2026-10-19, 15:59–16:42 IDT) — 6 photos, a complete second listing (Be'er Sheva, Nachal Kidron St 36, 5 rooms, ~160 m², floor 5/8, 2 parking spots), the usual menu replies, and a price-correction message at the end — all unanswered. גוני ליד, previously a closed "sent only an emoji" watch item, is reopened: on 2026-10-19 at 11:31 IDT she sent a direct question by name ("היי מיקי?") plus a real complaint — <em>the photos sent to her don't match the photos in her video</em> — also unanswered. Tsach Ben-Basat sent two more of his usual photo-cleanup requests late on 2026-10-19; also unanswered. n8n confirmed unchanged for the <strong>ninth cycle running</strong> (same <code>updatedAt</code> on both workflows, read live via n8n's MCP tools). No unrelated in-repo bug was found this cycle — this report is the outage update only. Two WhatsApp messages go to the operator with this update (business + n8n), listed below.</p>
+</div>
+
+<section>
+  <h2 class="section-title">Critical — new evidence this window, same outage</h2>
+
+  <div class="card critical">
+    <h3><span class="badge critical">Critical</span><span class="badge biz">Business</span> 972546582548 (Nofar Harush) — a seventh full attempt, including an unanswered price correction</h3>
+    <div class="meta">Prior attempts 2026-10-11 (first silent message), 10-13, 10-14, 10-15, 10-17, 10-18 (sixth, plus "send me my property link") — today's new evidence is the seventh</div>
+    <div class="evidence">
+      <div class="line user">2026-10-19 15:59:XX — 6 new photos, back to back</div>
+      <div class="line user">2026-10-19 16:00–16:23 — full second listing: "באר שבע, שכונת הפארק, רחוב נחל קידרון 36", ₪1,650,000, 5 rooms, ~160 m², floor 5/8, 2 parking spots, plus the numeric menu replies</div>
+      <div class="line user">2026-10-19 16:42:XX — "צריך לתקן את המחיר / 1,650,000 שח" (a price correction to her own just-sent listing)</div>
+    </div>
+    <p>A fresh pull of her chat history (40 messages) is still 100% <code>type: "incoming"</code> — not one outgoing message anywhere in the window. This is the seventh independent, complete attempt in nine days from the same agent, and the first time a correction to a draft she'd just built also went unanswered — ruling out any theory that only the <em>first</em> message in a sequence gets dropped.</p>
+  </div>
+
+  <div class="card critical">
+    <h3><span class="badge critical">Critical</span><span class="badge biz">Business</span> 972526935995 (גוני ליד) — reopened: a direct question, plus a real product complaint, both unanswered</h3>
+    <div class="meta">Last report treated her as a closed watch item (she'd sent only a 🙏 on 10-18). New messages 2026-10-19, 11:31 IDT — before this report's window even opened, but not covered by any prior report</div>
+    <div class="evidence">
+      <div class="line user">2026-10-19 11:31:XX — "היי מיקי?"</div>
+      <div class="line user">2026-10-19 11:31:XX — "התמונות ששלחת לי אתמול לא תואמות לתמונות בסרטון תוכל לבדוק" (the photos you sent me don't match the photos in the video — can you check?)</div>
+    </div>
+    <p>Two things worth separating: the silence itself is the same outage as Nofar's, confirmed by the same chat-level check (all her messages are <code>incoming</code>, zero replies). But the complaint's <em>content</em> is a distinct claim — that a previously-delivered video used different photos than the ones actually sent — which isn't explained by the router/handler outage and deserves a human look once a human is answering her at all. Flagged below as a separate business item, not assumed to be the same bug.</p>
+  </div>
+
+  <div class="card">
+    <h3><span class="badge watch">Watch</span> Tsach Ben-Basat (972547221770) — two more photo-cleanup requests, same unanswered pattern</h3>
+    <div class="meta">2026-10-19, 21:41 and 21:44 IDT — 20-photo then 10-photo cleanup requests, his usual verbatim paragraph</div>
+    <p>Same zero-reply pattern (40/40 messages in his pulled history are <code>incoming</code>). No new content here beyond confirming a third agent is affected; the standing "saved default instruction" product idea below still applies and now has two more occurrences to its count.</p>
+  </div>
+
+  <div class="card">
+    <h3><span class="badge watch">Watch</span> Everyone else from prior cycles — no new attempt to confirm either way</h3>
+    <div class="meta">Avi Teivi (972509488869), the unanswered sign-up lead (972528487391) — neither wrote again this window</div>
+    <p>Carried forward unchanged.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">n8n — unchanged for a ninth cycle running</h2>
+  <div class="card">
+    <h3><span class="badge n8n">n8n</span> Main Router v3 / Business Handler v6 — same <code>updatedAt</code>, same gap</h3>
+    <div class="meta">Read directly from the live workflow graphs again via n8n's MCP tools (same ids every cycle: <code>fhyTsd1DSN6wtMGz</code>, <code>lQwn7eYSuIxAZkJB</code>)</div>
+    <p>Both workflows' <code>updatedAt</code> is still exactly <code>2026-10-11T12:54:47.252Z</code> (Main Router v3) and <code>2026-10-11T12:52:48.574Z</code> (Business Handler v6) — byte-for-byte the same as every prior cycle's check, including today's. <code>onError</code> is still <code>null</code> on every previously-named node: <code>FS - Lookup Business</code>, <code>FS - Lookup Pending</code>, <code>FS - Lookup Lock</code> and <code>GreenAPI - Send Lock Reply</code> in Main Router v3 (all <code>retryOnFail: true</code>, which only retries the same failing call in place — it doesn't route around it); <code>Quota - Batch Edit</code>, <code>Check Stop</code> and <code>AI Agent - Business1</code> in Business Handler v6. Neither workflow has a workflow-level Error Workflow configured.</p>
+    <p>Recommended fix (unchanged, now asked for a ninth time): <code>onError: continueRegularOutput</code> (or a dedicated error branch) on each node above, routing to its own lock-clear plus a "קרתה תקלה, נסו שוב" fallback reply; plus a workflow-level Error Workflow on both workflows. This review has write access to n8n and could apply the fix directly, but is holding — changing a live, shared automation that answers every registered agent is exactly the kind of action this review won't take without the operator's own go-ahead, repeated again in tonight's message below.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">WhatsApp sent to the operator with this update</h2>
+  <div class="card">
+    <div class="outbound-msg">
+      <div class="to">To 972542045280 — business update</div>
+      <pre>⚠️ פורלי — עדכון עסקי, 20.10: התקלה נמשכת — יום תשיעי ברצף (~207 שעות מההודעה הראשונה שנפלה בשקט)
+
+נופר הרוש (972546582548): ניסיון שביעי. אתמול (19.10, 15:59-16:42) היא שלחה 6 תמונות ונכס שני מלא (באר שבע, נחל קידרון 36, 5 חדרים, כ-160 מ"ר, קומה 5, 2 חניות), ואפילו תיקון מחיר להודעה שהיא עצמה שלחה לפני רגע — גם זה לא נענה. בדקתי 40 ההודעות האחרונות שלה: כולן נכנסות, אין אפילו הודעת בוט אחת.
+
+גוני ליד (972526935995) חזרה אחרי שחשבנו שהתייאשה: היא שאלה "היי מיקי?" וגם דיווחה על תקלה נפרדת — שהתמונות שנשלחו לה לא תואמות לתמונות שבסרטון שקיבלה. זה מצריך בדיקה אנושית משלכם ברגע שיש מענה, בנוסף לתקלת השקט.
+
+הבדיקה הכי חזקה היום: בדקתי את כל ההודעות היוצאות בחשבון ב-48 השעות האחרונות (lastOutgoingMessages) — יצאו רק 4 הודעות, וכולן הודעות העדכון שאני שולחת אליכם. אף הודעה אחת לא יצאה ללקוח או סוכן אמיתי ב-48 שעות, מול 26 הודעות נכנסות אמיתיות מ-3 סוכנים שונים ב-24 השעות האחרונות בלבד. זו לא תקלה שתלויה בסוכן או בתהליך מסוים — שום תשובה לא יוצאת מהמערכת בכלל.
+
+עדיין אין תגובה מכם להצעה להחיל את תיקון onError ישירות.
+
+מומלץ בחום, בפעם התשיעית: לפנות ידנית לנופר ולגוני עוד היום — נופר השקיעה 7 ניסיונות מלאים על פני 9 ימים, וגוני חזרה אחרי שחשבנו שהלכה.</pre>
+    </div>
+    <div class="outbound-msg">
+      <div class="to">To 972542045280 — n8n update</div>
+      <pre>🔧 פורלי — עדכון n8n, 20.10: שוב ללא שינוי (דווח 9 ימים ברצף: 12.10-20.10)
+
+בדקתי שוב היום את ה-workflow graphs של Main Router v3 (fhyTsd1DSN6wtMGz) ו-Business Handler v6 (lQwn7eYSuIxAZkJB): updatedAt זהה לכל הבדיקות הקודמות (2026-10-11T12:54:47Z / 2026-10-11T12:52:48Z). onError עדיין null על כל הנודים שדיווחנו עליהם, ואין Error Workflow מוגדר באף אחד מהם.
+
+הבדיקה החדשה היום (lastOutgoingMessages, 48 שעות אחרונות): רק 4 הודעות יצאו מהחשבון בכלל, וכולן הודעות העדכון האלה אליכם. אפס הודעות ללקוחות/סוכנים אמיתיים, מול 26 הודעות נכנסות מ-3 סוכנים. זה מאשר שהבעיה היא בנתיב התגובה כולו של Business Handler, לא בסוכנת אחת או בדראפט תקוע ספציפי.
+
+יש לי גישת כתיבה ל-n8n ואני יכולה להחיל את תיקון onError ישירות אם תאשרו — עדיין מחכה לאור ירוק לפני שינוי בוורקפלואים חיים.</pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Working well</h2>
+  <div class="card">
+    <h3><span class="badge good">Good</span> What held up</h3>
+    <p>The Green API WhatsApp session is still healthy and <code>authorized</code> — this remains an application-logic failure, not an account disconnect. Inbound delivery itself is intact: every photo and text message across all seven of Nofar's attempts, and both of Goni's and Tsach's messages, landed in chat history exactly as sent. The silence is entirely on the reply side.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">General improvements / commonly-requested gaps</h2>
+  <div class="card">
+    <h3>Nothing new to assess on "unnecessary generations" or bot misunderstanding this cycle</h3>
+    <p>Both require an actual bot reply to look at, and this account's active chats produced none in this window. The single highest-value improvement remains the one flagged for nine cycles running: ship the <code>onError</code> / Error Workflow fix above.</p>
+  </div>
+  <div class="card">
+    <h3>Carried forward: a saved default edit instruction</h3>
+    <p>Tsach has now sent the identical cleanup paragraph verbatim seven times across seven attempts (2026-10-05, twice on 2026-10-12, 10-15, 10-16, twice on 10-19). An agent with one standing photo-editing preference still has no way to set it once and skip retyping it per batch. Low priority on its own, worth a product call once the outage is resolved.</p>
+  </div>
+  <div class="card">
+    <h3>New: a reported mismatch between delivered photos and video content</h3>
+    <p>גוני ליד's complaint (above) — photos she says she received don't match what's in her video — is a product-quality claim this review can't confirm or deny without her original assets and the video pipeline's logs, neither of which were pulled this cycle (chat transcripts don't carry the actual media this review redacts/skips). Worth a direct look once she's reachable again; not assumed to be outage-related.</p>
+  </div>
+</section>
+
+<footer>
+  Methodology: pulled the full chat list via <code>getChats</code> (1,410 chats, 1,408 one-to-one; 972542045280 excluded per standing instruction). Pulled <code>getChatHistory</code> (up to 40 messages per chat) for the most-recently-active one-to-one chats, then cross-checked the full account via <code>lastOutgoingMessages</code> (trailing 48h: 4 messages, all operator-notification pairs) and <code>lastIncomingMessages</code> (trailing 24h: 26 messages, from 972546582548, 972547221770 and 972526935995 only, plus 3 from the excluded operator number) — this combination catches a chat with new traffic even when its <code>unreadCount</code> never moved, closing the gap the 10-19 report's methodology note flagged. Nofar's chat (972546582548) was pulled in full (40-message window) to confirm the zero-reply pattern continues into a seventh attempt. n8n's <code>Main Router v3</code> (<code>fhyTsd1DSN6wtMGz</code>) and <code>Business Handler v6</code> (<code>lQwn7eYSuIxAZkJB</code>) were read live via n8n's MCP tools. This review did not have Firestore access this cycle, same as prior cycles; it wasn't needed, since no chat had any new agent-side activity that required the agent/lead label to interpret. The new-evidence window is everything after the last report (committed as <code>docs/reports/whatsapp-review-2026-10-19.html</code>, merged to <code>staging</code> via PR #134; its promotion to <code>main</code>, together with the 10-12 → 10-19 backlog, is PR #115, still open at review time). HEAD at review time: <code>efe637a</code> on <code>staging</code> before this cycle's commit.
+</footer>
+
+</div>
+</body>
+</html>

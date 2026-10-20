@@ -8,7 +8,7 @@
 const assert = require("assert");
 const { assertPublicHttpUrl, sniffMatchesExt } = require("./utils");
 const { constantTimeEqual, rateLimit, securityHeaders } = require("./security");
-const { makeAdminGuard, makeStepUpGuard } = require("./admin-auth");
+const { makeAdminGuard, makeStepUpGuard, makeViewAs, refuseViewAs } = require("./admin-auth");
 const auth = require("./auth");
 
 (async () => {
@@ -106,6 +106,34 @@ const auth = require("./auth");
   assert.deepStrictEqual(await call(null), { status: 401 });
   assert.deepStrictEqual(await call("972599999999"), { status: 403 });
   assert.deepStrictEqual(await call("972500000000"), { status: "next" });
+
+  // ── view-as: an admin reads an agent's routes as that agent, never writes ──
+  {
+    const S = "viewas-secret";
+    const requireAuth = makeViewAs({ isAdmin: makeAdminGuard({ adminPhones: ["972500000000"] }).isAdmin })(auth.requireAuth);
+    const viewCall = (who, method, cookie, scope) => new Promise((resolve) => {
+      const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ status: this.c, body: b }); return this; } };
+      const req = { method, headers: { authorization: `Bearer ${auth.signSession(S, who, { scope })}`, cookie } };
+      requireAuth(S, auth.REVIEW_SCOPES)(req, res, () => resolve({ status: "next", user: req.user.userId }));
+    });
+    const asAgent = "forly_viewas=0521234567";
+    assert.deepStrictEqual(await viewCall("972500000000", "GET", asAgent), { status: "next", user: "972521234567" });
+    assert.deepStrictEqual(await viewCall("972500000000", "POST", asAgent), { status: 403, body: { error: "view_as_readonly" } });
+    assert.deepStrictEqual(await viewCall("972500000000", "GET"), { status: "next", user: "972500000000" });
+    // a malformed cookie is ignored, not thrown
+    assert.deepStrictEqual(await viewCall("972500000000", "GET", "forly_viewas=%E0%A4%A"), { status: "next", user: "972500000000" });
+    // a non-admin's cookie is ignored, writes included
+    assert.deepStrictEqual(await viewCall("972599999999", "POST", asAgent), { status: "next", user: "972599999999" });
+    // a review-scope link for the admin's phone is not an admin session
+    assert.deepStrictEqual(await viewCall("972500000000", "GET", asAgent, "review"), { status: "next", user: "972500000000" });
+    // a GET that starts a write (the Facebook OAuth start) is refused while viewing as an agent
+    const refuse = (user) => new Promise((resolve) => {
+      const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ status: this.c, body: b }); return this; } };
+      refuseViewAs({ user }, res, () => resolve({ status: "next" }));
+    });
+    assert.deepStrictEqual(await refuse({ userId: "972521234567", viewAsBy: "972500000000" }), { status: 403, body: { error: "view_as_readonly" } });
+    assert.deepStrictEqual(await refuse({ userId: "972521234567" }), { status: "next" });
+  }
 
   // ── step-up: a fresh OTP login's "stepup" token, for the same admin ──
   const SECRET = "stepup-secret";

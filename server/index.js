@@ -118,8 +118,15 @@ db.init();
 
 // ── auth ──
 const createAuthRouter = require("./auth");
-const { requireAuth, normalizeAuthPhone, signSession, verifySession, readToken,
+const { normalizeAuthPhone, signSession, verifySession, readToken,
         signActionToken, verifyActionToken } = createAuthRouter;
+// The operator-admin guards: an ADMIN_PHONES session, plus a fresh OTP
+// step-up for the actions that change live posting or hand out control.
+const { makeAdminGuard, makeStepUpGuard, makeViewAs } = require("./admin-auth");
+const { requireAdmin, isAdmin } = makeAdminGuard({ verifySession, readToken, authSecret: AUTH_SECRET, adminPhones: ADMIN_PHONES });
+const { requireStepUp } = makeStepUpGuard({ verifySession, authSecret: AUTH_SECRET });
+// Agent routes honour an admin's read-only "view as agent" (admin-auth.js).
+const requireAuth = makeViewAs({ isAdmin })(createAuthRouter.requireAuth);
 const { sendWhatsApp, sendWhatsAppButtons, sendWhatsAppRich, getWhatsAppMessage, getWhatsAppHistory } = require("./utils");
 // A number that tries to log in but has no businesses/{phone} doc isn't a
 // Forly client yet — self-service signup off the login screen is gone (see
@@ -266,7 +273,7 @@ app.use("/api/whatsapp", createWhatsappRouter({
 // ── paste text / link → pre-filled create form ──
 const createExtractRouter = require("./routes/extract");
 app.use("/api", createExtractRouter({
-  requireAuth, authSecret: AUTH_SECRET,
+  requireAuth, authSecret: AUTH_SECRET, verifySession, readToken, adminPhones: ADMIN_PHONES,
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
 }));
 
@@ -276,11 +283,6 @@ app.use("/api", createExtractRouter({
 // session we create carries a forly-<kind>: note, so we can tell ours from
 // anyone else's. Driver is on only with DRIVER_API_KEY, PROFILE_KEY and a
 // valid FORLY_ENV (driverBrowser.driverEnabled — routes/extract.js asks too).
-// The operator-admin guards: an ADMIN_PHONES session, plus a fresh OTP
-// step-up for the actions that change live posting or hand out control.
-const { makeAdminGuard, makeStepUpGuard } = require("./admin-auth");
-const { requireAdmin } = makeAdminGuard({ verifySession, readToken, authSecret: AUTH_SECRET, adminPhones: ADMIN_PHONES });
-const { requireStepUp } = makeStepUpGuard({ verifySession, authSecret: AUTH_SECRET });
 
 // The sweeper's deps, when Driver is on — also handed to the local monitor.
 let devPostingDeps = null;

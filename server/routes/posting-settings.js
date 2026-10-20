@@ -321,7 +321,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     // runSync asks the guard itself (action "session"); asked here first so
     // a refusal does not use up the agent's 10 minutes.
     try {
-      await S.guard.assertAllowed({ phone, platform: "facebook", action: "session" }, { db, env: deps.env || process.env });
+      await (S.guard.assertAccountAllowed || S.guard.assertAllowed)({ phone, platform: "facebook", action: "session" }, { db, env: deps.env || process.env });
     } catch (e) {
       if (!e || e.code !== "posting_disabled") throw e;
       return res.status(409).json({ error: "posting_disabled", reason: e.reason });

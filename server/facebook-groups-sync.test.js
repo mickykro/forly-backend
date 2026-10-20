@@ -56,6 +56,17 @@ function nameHash(name) {
     assert.equal(pageDeps.platform, "facebook");
   }
 
+  // ── runSync: a sync asks the account-level guard, not the automation switches ──
+  {
+    const asked = [];
+    await G.runSync({ phone: "p" }, {
+      db: { getConnection: async () => ({}), listGroupCatalog: async () => [], setConnection: async () => {}, getSetting: async () => null, setSetting: async () => {} },
+      guard: { assertAllowed: async () => { throw Object.assign(new Error("off"), { code: "posting_disabled", reason: "env_off" }); }, assertAccountAllowed: async (a) => { asked.push(a.action); return true; } },
+      withPage: async (o, fn) => fn({ goto: async () => {}, waitForLoadState: async () => {}, mouse: { wheel: async () => {} }, waitForTimeout: async () => {}, $$eval: async () => [] }),
+    }).catch((e) => assert.equal(e.code === "sync_signal" || e.code === "sync_anomaly", true, String(e && (e.code || e.message))));
+    assert.deepEqual(asked.slice(0, 1), ["session"], "the session is guarded by the account-level check");
+  }
+
   // ── runSync: the guard throwing means no session is ever opened ──
   {
     let opened = false;
@@ -72,7 +83,8 @@ function nameHash(name) {
 
   // ── I3: runSync never trusts an empty, collapsed or unreadable scrape ──
   {
-    const T0 = "2026-09-20T00:00:00.000Z";
+    // Relative to now: runSync reads the real clock, and a fixed date ages past STALE_DROP_MS (30 days).
+    const T0 = new Date(Date.now() - 86400000).toISOString();
     const prevList = () => Array.from({ length: 6 }, (_, i) => ({ group_id: String(200 + i), slug: String(200 + i), membership_state: "member", observed_at: T0, last_confirmed_at: T0 }));
     const world = (pg, o = {}) => {
       const conn = Object.assign({ facebook_groups_member: prevList(), facebook_groups_synced_at: T0 }, o.conn || {});

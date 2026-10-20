@@ -147,11 +147,72 @@ const C = require("./posting-campaign");
     assert.ok(!body.includes("facebook.com/groups/222"), "a skipped group is not listed");
   }
 
+  // ── R4 by hand: every property link in an owed group's text carries that group's click code ──
+  {
+    const { deps } = await K.setup();
+    deps.env = { POSTING_MANUAL: "1" }; deps.pageBaseUrl = "https://f.ly";
+    const pid = K.base().page.page_id;
+    const c = await C.create(K.base({ copies: { 111: `דירה יפה https://f.ly/p/${pid}\nשוב: https://f.ly/p/${pid}?x=1` } }), deps);
+    const q = await M.queue(deps);
+    const code = (copy) => { const m = [...copy.matchAll(new RegExp(`/p/${pid}/([a-z0-9]{6})`, "g"))].map((x) => x[1]); return m; };
+    const c111 = code(q[0].copy), c222 = code(q[1].copy);
+    assert.equal(c111.length, 2, "both links in the approved text are tagged");
+    assert.equal(c111[0], c111[1], "with one code");
+    assert.ok(!q[0].copy.includes(`/p/${pid} `) && !q[0].copy.includes(`/p/${pid}?`), "no untagged link left");
+    assert.ok(c222.length >= 1, "the built text's link is tagged too");
+    assert.notEqual(c111[0], c222[0], "each group its own code");
+    const k = await require("./posting-attempts").getClick(c111[0]);
+    assert.equal(k.campaign_id, c.id); assert.equal(k.group_id, "111"); assert.equal(k.page_id, pid);
+    assert.equal(typeof k.attempt_key, "string", "attributionFor needs an attempt key");
+    assert.equal(code((await M.queue(deps))[0].copy)[0], c111[0], "the same code when the list is drawn again");
+    const later = new Date(Date.parse(k.expires_at) - K.DAY); // ours, nearly expired: the same code, 30 more days
+    assert.equal(await require("./posting-attempts").issueManualClick({ key: k.attempt_key, campaign_id: c.id, page_id: pid, group_id: "111" }, later), c111[0]);
+    assert.ok(Date.parse((await require("./posting-attempts").getClick(c111[0])).expires_at) > Date.parse(k.expires_at), "extended");
+  }
+
   // ── the property card for the session header ──
   {
     const card = M.propertyCard(K.page("pg9"), "https://f.ly/");
     assert.equal(card.page_id, "pg9");
     assert.equal(card.page_url, "https://f.ly/p/pg9");
+  }
+
+  // ── skip reasons (the semi-automatic "הבא") ──
+  {
+    const { deps } = await K.setup();
+    deps.env = { POSTING_MANUAL: "1", FORLY_ENV: "prod" };
+    const c = await C.create(K.base({ repeat: true, repeat_days: 3, days: 14 }), deps);
+    await K.db.savePage(K.page("pg2"));
+    const c2 = await C.create(K.base({ page: K.page("pg2") }), deps);
+    assert.equal(await M.skip(c.id, "111", "nonsense", deps), null, "an unknown reason records nothing");
+    // pending_overload: out of this campaign, the agent's other one, and their default list; history stays.
+    const s1 = await M.skip(c.id, "111", "pending_overload", deps, { ref: M.refOf(K.base().phone) });
+    assert.deepEqual(s1.groups.map((g) => g.group_id), ["222"]);
+    assert.equal(s1.posts.find((p) => p.group_id === "111").skip_reason, "pending_overload");
+    assert.deepEqual((await K.store.getPostingCampaign(c2.id)).groups.map((g) => g.group_id), ["222"], "gone from the other campaign too");
+    assert.deepEqual((await K.db.getConnection(K.base().phone)).posting_permission.default_group_ids, ["222"], "gone from the default list");
+    // posting_method: skipped this pass, stays in the campaign (a repeat owes it again).
+    const s2 = await M.skip(c.id, "222", "posting_method", deps);
+    assert.deepEqual(s2.groups.map((g) => g.group_id), ["222"]);
+    assert.equal(s2.status, "running", "a repeating campaign keeps running");
+    const flags = await K.store.listGroupFlags();
+    assert.deepEqual(flags.map((f) => [f.group_id, f.total]).sort(), [["111", 1], ["222", 1]]);
+    assert.equal(flags.find((f) => f.group_id === "111").counts.pending_overload, 1);
+    // other, a second time: counted, the note kept, newest first.
+    await M.skip(c2.id, "222", "other", deps, { note: "צריך לענות על שאלות" });
+    const f222 = (await K.store.listGroupFlags()).find((f) => f.group_id === "222");
+    assert.equal(f222.total, 2); assert.equal(f222.recent[0].note, "צריך לענות על שאלות");
+    // A campaign whose last group was removed has nowhere left to post: completed.
+    const s3 = await M.skip(c2.id, "222", "pending_overload", deps);
+    assert.equal(s3, null, "222 is no longer owed in c2 (skipped above)");
+  }
+  {
+    const { deps } = await K.setup();
+    deps.env = { POSTING_MANUAL: "1", FORLY_ENV: "prod" };
+    const c = await C.create(K.base({ repeat: true, repeat_days: 3, days: 14 }), deps);
+    await M.skip(c.id, "111", "pending_overload", deps);
+    const done = await M.skip(c.id, "222", "pending_overload", deps);
+    assert.equal(done.status, "completed", "no group left: completed even though it repeats");
   }
 
   console.log("posting-manual.test.js ok");

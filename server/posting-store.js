@@ -13,8 +13,8 @@ const crypto = require("crypto");
 const attempts = require("./posting-attempts");
 const { firestore, runTx, fail, hmacHex, toDate, toIso, assertId, isPlainObject, stripUndefined, deepMerge } = require("./posting-tx");
 
-const CAMP = "posting_campaigns", DWELL = "dwell_sessions", AUDIT = "audit_events";
-const maps = { [CAMP]: new Map(), [DWELL]: new Map(), [AUDIT]: new Map() };
+const CAMP = "posting_campaigns", DWELL = "dwell_sessions", AUDIT = "audit_events", GFLAG = "manual_group_flags";
+const maps = { [CAMP]: new Map(), [DWELL]: new Map(), [AUDIT]: new Map(), [GFLAG]: new Map() };
 const MS_DAY = 86400000;
 const PLATFORM = /^[a-z][a-z0-9_]{0,31}$/;
 
@@ -249,6 +249,35 @@ const DWELL_LIKES_MAX = 5;
 const POST_ID_RE = /^\d{5,25}$/;
 const LIKE_FIELDS = new Set(["post_id", "at"]);
 
+// ── groups skipped by hand (manual_group_flags/{group_id}, posting-manual) ──
+// One doc per group, across agents: a count per reason and the last 10 skips
+// (reason, note, the agent's opaque ref — never a phone).
+const FLAG_REASON = /^[a-z][a-z0-9_:]{0,47}$/;
+async function addGroupFlag(groupId, f = {}, now = new Date()) {
+  const id = String(groupId || "");
+  if (!id || id.includes("/") || id.length > 200) throw fail("invalid_input", "group id required");
+  if (typeof f.reason !== "string" || !FLAG_REASON.test(f.reason)) throw fail("invalid_input", "invalid reason");
+  const at = toDate(now).toISOString();
+  return runTx(maps, async (tx) => {
+    const cur = (await tx.get(GFLAG, id)) || { group_id: id, counts: {}, total: 0, recent: [] };
+    const next = {
+      group_id: id, name: String(f.name || cur.name || "").slice(0, 200), url: String(f.url || cur.url || "").slice(0, 500),
+      counts: { ...cur.counts, [f.reason]: ((cur.counts || {})[f.reason] || 0) + 1 }, total: (cur.total || 0) + 1,
+      recent: [{ reason: f.reason, note: f.note ? maskDigits(f.note).slice(0, 200) : null, ref: f.ref ? String(f.ref).slice(0, 40) : null, at }].concat(cur.recent || []).slice(0, 10),
+      updated_at: at,
+    };
+    tx.set(GFLAG, id, next);
+    return next;
+  });
+}
+// Most flagged first.
+async function listGroupFlags(limit = 200) {
+  const fdb = firestore();
+  const rows = fdb ? (await fdb.collection(GFLAG).orderBy("total", "desc").limit(limit).get()).docs.map((d) => d.data())
+    : [...maps[GFLAG].values()].map(clone).sort((a, b) => b.total - a.total).slice(0, limit);
+  return rows;
+}
+
 function cleanActionsSummary(s) {
   if (s === undefined || s === null) return {};
   if (!isPlainObject(s)) throw fail("invalid_input", "actions_summary must be an object of counts");
@@ -327,7 +356,7 @@ module.exports = {
   campaignId, createPostingCampaignIfAbsent, getPostingCampaign, updatePostingCampaign, mutatePostingCampaign,
   listPostingCampaignsByStatus, listPostingCampaignsByPhone, countPostingCampaignsByStatus,
   // operator views and audit (Task 21)
-  listDisabledPhones, addAuditEvent, listAuditEvents,
+  listDisabledPhones, addAuditEvent, listAuditEvents, addGroupFlag, listGroupFlags,
   // attempts (R1) and group activity — posting-attempts.js
   LEASE_MS: attempts.LEASE_MS, EDGES: attempts.EDGES, countingStates: attempts.countingStates, isCounting: attempts.isCounting,
   attemptKey: attempts.attemptKey, reserveAttempt: attempts.reserveAttempt, transition: attempts.transition, annotateAttempt: attempts.annotate,

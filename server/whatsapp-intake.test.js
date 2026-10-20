@@ -119,6 +119,14 @@ const texts = (t) => t.replies.map((r) => [r.text, ...(r.links || []).map((l) =>
   assert.deepEqual(draft.skipped, ["size_sqm"]);
   assert.equal(t.status, "asked:floor");
 
+  // ── a one-field aside about a field other than the one asked, that the extractor
+  // can't parse, must not fall through to the asked field's own parser (972508505321,
+  // 2026-10-08: "למכירה כמובן" while rooms was asked became an invalid rooms answer) ──
+  ({ d } = deps({ parseListing: async () => ({ fields: Object.fromEntries(Object.keys(FIELDS).map((k) => [k, null])), missing: [] }) }));
+  t = await turn({ text: "רגע, המחיר האמיתי הוא 285,000 ש״ח", draft }, d);
+  assert.deepEqual([t.status, t.draft], ["asked:floor", undefined],
+    "a price aside while floor is asked re-asks floor and saves nothing — not invalid:floor with the stray digits read as a floor");
+
   // ── text opener with extraction failure keeps an empty draft open ──
   ({ d } = deps({ resolve: async () => { throw fail("page_unreadable"); } }));
   t = await turn({ text: "https://dead.link/1" }, d);

@@ -72,6 +72,7 @@ window.ForlyViewer = (() => {
         if (!me.gotFrame) { me.gotFrame = true; img.hidden = false; wait.hidden = true; if (opts.onFrame) opts.onFrame(); }
         url.textContent = e.u || "";
       } else if (e.t === "end") end(e.reason || "closed");
+      else if (opts.onEvent) opts.onEvent(e); // anything else the server pushes (the manual tab's lane)
     };
     (async () => {
       let tries = 0;

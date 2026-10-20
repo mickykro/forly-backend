@@ -496,6 +496,26 @@ async function getClick(click_id) {
   return d;
 }
 
+// R4 for a post the team publishes by hand (posting-manual.js): no attempt is
+// reserved, so the code comes from `key` (campaign, group, round) and its doc
+// is written once: the same copy shown again keeps its link. A code another
+// key already owns moves to the next salt. → the code, or null.
+async function issueManualClick({ key, campaign_id, page_id, group_id }, now = new Date()) {
+  return runTx(maps, async (tx) => {
+    for (let i = 0; i < 5; i++) {
+      const code = Array.from(Buffer.from(hmacHex(`manual_click|${key}|${i}`, 12), "hex"), (b) => CLICK_ABC[b % CLICK_ABC.length]).join("");
+      const cur = await tx.get(CLK, code);
+      if (cur && cur.attempt_key !== key) continue;
+      if (cur && Date.parse(cur.expires_at) - now.getTime() > CLICK_TTL_MS / 2) return code;
+      // new, or ours with under half its life left (a group owed a long time): 30 days from now
+      tx.set(CLK, code, { campaign_id, attempt_key: key, page_id, group_id, issued_at: (cur && cur.issued_at) || now.toISOString(),
+        expires_at: new Date(now.getTime() + CLICK_TTL_MS).toISOString(), expire_at: new Date(now.getTime() + CLICK_TTL_MS) });
+      return code;
+    }
+    return null;
+  });
+}
+
 function reset() { for (const m of Object.values(maps)) m.clear(); }
 
 module.exports = {
@@ -503,6 +523,6 @@ module.exports = {
   LEASE_MS, CLICK_RE, newClickCode, EDGES, countingStates, isCounting,
   attemptKey, reserveAttempt, transition, annotate, recordGroupAlias, groupIdsFor, reapExpired, cancelOpenAttempts,
   getAttempt, listAttemptsByPhone, listAttemptsByState, listOpenAttemptsByCampaign, getGroupActivityFor,
-  recordRecheck, listRecheckDue, recordReconcile, listReconcileDue, getClick, VISIBILITY,
+  recordRecheck, listRecheckDue, recordReconcile, listReconcileDue, getClick, issueManualClick, VISIBILITY,
   _test: { reset, maps, dedupKey, lastDates },
 };

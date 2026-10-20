@@ -335,6 +335,15 @@ async function activeTurn(input, deps, draft, now) {
   if (!cmd && C.needsExtraction(step.field || null, input.text) && deps.extractAllowed(draft.phone)) {
     const r = await C.smartAnswer(draft, input.text, deps, now, step.field, promptFor);
     if (r) return r;
+    // The text named one field other than the one asked ("רגע, המחיר 2.1 מיליון"
+    // while "floor" is open) but the extractor found nothing in it. Falling through
+    // to the asked field's own parser would misread the other field's words/digits
+    // as this field's answer (e.g. a price turns into a bogus floor) — re-ask instead.
+    const hinted = step.kind === "ask" ? C.hintedFields(input.text) : [];
+    if (hinted.length === 1 && hinted[0] !== step.field) {
+      const p = promptFor(draft, deps);
+      return { handled: true, status: p.status, replies: p.replies };
+    }
   }
   if (step.kind === "ask") {
     const r = answerField(draft, step.field, input.text, cmd, deps);
@@ -501,7 +510,16 @@ async function textThenPhotos(input, deps, draft) {
     return { ...t, status: `${p.status}+${t.status}`, replies: [...p.replies, ...t.replies] };
   }
   const t1 = await handleTurn({ ...input, fileUrl: null, fileUrls: [], draft }, deps);
-  if (!t1.handled) return t1;
+  if (!t1.handled) {
+    // The caption alone already resolved to an edit hand-off against *older*
+    // unanswered photos read from chat history (photo-choice.editRequestNow) —
+    // but this very message also carries its own fresh photos. Edit those
+    // instead, or the ones just attached are silently dropped and never reach
+    // n8n at all (972547221770, 2026-10-12: two custom-instruction batches,
+    // 16 and 8 photos, went unanswered this way).
+    const fresh = t1.edit_photos && photoUrlsOf(input);
+    return fresh && fresh.length ? { ...t1, edit_photos: fresh.slice(0, PC.MAX_PHOTOS) } : t1;
+  }
   const after = t1.del ? null : (t1.draft || draft);
   if (!after) return t1;
   const t2 = await handleTurn({ ...input, text: "", draft: after }, deps);

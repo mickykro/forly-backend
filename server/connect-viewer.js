@@ -290,4 +290,4 @@ function pipe(req, res, hub, sub = subscribe) {
   if (req.destroyed) done();
 }
 
-module.exports = { attach, adopt, subscribe, pipe, input, close, parseInput, shortUrl, _hubs: hubs, MAX_TEXT };
+module.exports = { attach, adopt, subscribe, pipe, input, close, parseInput, shortUrl, emit, _hubs: hubs, MAX_TEXT };
