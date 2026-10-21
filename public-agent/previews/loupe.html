@@ -6,9 +6,6 @@
 <title>Forly Nadlan · loupe · דוגמה</title>
 <meta name="description" content="">
 <link rel="icon" type="image/png" href="/favicon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@300;400;500;600;700&family=Heebo:wght@300;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 /* ── tokens ────────────────────────────────────────────────────────────────
    --accent/--accent-lite/--accent2 and the font roles are what runtime.js
@@ -26,8 +23,8 @@
   --dark: #14110C;
   --dark-2: #1D1913;
   --radius: 22px;
-  --serif: 'Frank Ruhl Libre', 'David Libre', 'Times New Roman', serif;
-  --sans: 'Heebo', -apple-system, 'Segoe UI', sans-serif;
+  --serif: 'Discovery FS', serif;
+  --sans: 'Discovery FS', -apple-system, 'Segoe UI', sans-serif;
   /* the lens ring / hero accent — the theme's secondary colour when set */
   --sage: var(--accent2, #8E9775);
   --sage-l: var(--accent2, #B5C4A0);
@@ -327,6 +324,7 @@ footer a { color: rgba(255,255,255,.7); text-decoration: underline; }
   .peep-layer { transition: none; }
 }
 </style>
+<link rel="stylesheet" href="/fonts/discovery.css">
 </head>
 <body>
 <!-- Example render of the loupe template (public-nadlan/templates/loupe.html).
@@ -776,7 +774,7 @@ window.__DEMO__ = {
     path.setAttribute("d", "M " + cx + " " + cx + " m -" + r + " 0 a " + r + " " + r + " 0 1 1 " + (r * 2) + " 0 a " + r + " " + r + " 0 1 1 -" + (r * 2) + " 0");
     defs.appendChild(path); svg.appendChild(defs);
     var t = document.createElementNS(NS, "text");
-    t.setAttribute("font-family", "Heebo, sans-serif");
+    t.setAttribute("font-family", "Discovery FS, sans-serif");
     t.setAttribute("font-size", "10"); t.setAttribute("font-weight", "700");
     t.setAttribute("fill", "rgba(255,255,255,.6)"); t.setAttribute("letter-spacing", "2");
     // The page is dir="rtl" and an inherited direction:rtl makes Blink drop the

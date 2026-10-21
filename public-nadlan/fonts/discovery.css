@@ -1,0 +1,6 @@
+/* Discovery FS — the house face for the platform and every template. Two cuts:
+   Light serves weights up to 500, Bold 600 and up. */
+@font-face{font-family:'Discovery FS';src:url(/fonts/Discovery_Fs-Light.woff) format('woff');font-weight:100 500;font-style:normal;font-display:swap}
+@font-face{font-family:'Discovery FS';src:url(/fonts/Discovery_Fs-Bold.woff) format('woff');font-weight:600 900;font-style:normal;font-display:swap}
+/* form controls don't inherit the page font by default */
+button,input,select,textarea{font-family:inherit}

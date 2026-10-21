@@ -114,8 +114,8 @@
         theme.font_url.replace(/"/g, "") + '");font-display:swap}';
       document.head.appendChild(style);
     }
-    applyRoleFont("--serif", theme.font_title, "'Frank Ruhl Libre', serif");
-    applyRoleFont("--sans", theme.font_body, "'Heebo', sans-serif");
+    applyRoleFont("--serif", theme.font_title, "'Discovery FS', serif");
+    applyRoleFont("--sans", theme.font_body, "'Discovery FS', sans-serif");
   }
 
   function loadGoogleFont(family) {

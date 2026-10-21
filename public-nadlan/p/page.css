@@ -9,8 +9,8 @@
   --dark:#14110C;
   --dark-2:#1D1913;
   --radius:22px;
-  --serif:'Frank Ruhl Libre', 'Times New Roman', serif;
-  --sans:'Heebo', -apple-system, 'Segoe UI', sans-serif;
+  --serif:'Discovery FS', serif;
+  --sans:'Discovery FS', -apple-system, 'Segoe UI', sans-serif;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}

@@ -80,8 +80,8 @@
     function loadFont(f) { if (!FF[f] || document.querySelector('link[data-f="' + f + '"]')) return; var l = document.createElement("link"); l.rel = "stylesheet"; l.setAttribute("data-f", f); l.href = "https://fonts.googleapis.com/css2?family=" + FF[f] + "&display=swap"; document.head.appendChild(l); }
     if (theme.font_url) { var st = document.createElement("style"); st.textContent = '@font-face{font-family:"CF";src:url("' + String(theme.font_url).replace(/"/g, "") + '");font-display:swap}'; document.head.appendChild(st); }
     function role(vars, choice, fb) { if (!choice) return; var fam = (choice === "custom" && theme.font_url) ? '"CF", ' + fb : (FF[choice] ? (loadFont(choice), "'" + choice + "', " + fb) : null); if (fam) vars.forEach(function (v) { rs.setProperty(v, fam); }); }
-    role(["--serif", "--disp"], theme.font_title, "'Frank Ruhl Libre', serif"); // title → headings (--disp for reel)
-    role(["--sans"], theme.font_body, "'Heebo', sans-serif");
+    role(["--serif", "--disp"], theme.font_title, "'Discovery FS', serif"); // title → headings (--disp for reel)
+    role(["--sans"], theme.font_body, "'Discovery FS', sans-serif");
   })();
 
   // ── scalar text bindings (data-bind="a.b||c.d" → first non-empty path wins) ──
