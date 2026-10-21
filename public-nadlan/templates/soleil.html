@@ -71,9 +71,11 @@ h2{font-size:clamp(32px,4.6vw,68px);margin-bottom:16px}
 .hl.on .h3{color:var(--olive)}
 .hl .body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .6s cubic-bezier(.2,.7,.2,1)}.hl.on .body{grid-template-rows:1fr}
 .hl .body>div{overflow:hidden;padding-inline-start:calc(2ch + 16px)}.hl .body p{font-size:16px;opacity:.8}
-.hl .bar{display:block;height:2px;background:var(--terra);width:0;margin:14px 0 18px}.hl.on .bar{animation:bar 2.5s linear forwards}
+.hl .bar{display:block;height:2px;background:var(--terra);width:0;margin:14px 0 18px}.hl .bar{width:calc(var(--k,0) * 100%)}
 .hl-tag{display:none}
-@keyframes bar{to{width:100%}}
+/* scroll-pinned highlights (story.js adds .pinned and sizes the section) */
+.pinned{padding:0}.pinned .stick{position:sticky;min-height:100svh;display:flex;flex-direction:column;justify-content:center;padding:clamp(72px,9vw,110px) var(--pad) clamp(24px,4vw,56px)}
+@media(min-width:761px){.pinned h2{font-size:clamp(30px,3.4vw,54px)}.pinned .living-top{margin-bottom:22px}.pinned .window{height:min(52vh,560px);max-height:none;width:auto;max-width:100%;margin-inline:auto}}
 
 /* 4 · Inside — square stage + square thumbnails */
 .g-main{position:relative;overflow:hidden;aspect-ratio:16/9;max-height:72vh;width:100%;background:var(--char);touch-action:pan-y;cursor:zoom-in}
@@ -113,7 +115,7 @@ footer a{text-decoration:none;opacity:.85}
 .in-view{opacity:0;transform:translateY(24px);transition:opacity .7s,transform .8s cubic-bezier(.2,.7,.2,1)}.in-view.on{opacity:1;transform:none}
 
 @media(max-width:760px){
-  .story{grid-template-columns:1fr}.window{aspect-ratio:1/1;max-width:420px;width:100%;margin:0 auto}
+  .story{grid-template-columns:1fr}.window{aspect-ratio:16/10;max-height:30svh;max-width:420px;width:100%;margin:0 auto}.living-top{margin-bottom:16px}.hl button{padding:12px 0}
   .g-main{aspect-ratio:4/5}
   .around,.invite{grid-template-columns:1fr}
 }
@@ -142,6 +144,7 @@ footer a{text-decoration:none;opacity:.85}
 
   <!-- 3 · Living -->
   <section class="panel p-sun" id="living">
+    <div class="stick">
     <div class="living-top in-view">
       <div><h2 data-bind="texts.why_title" data-i18n="why_head">נכס כזה לא מגיע ללוחות. הוא מגיע לאנשים הנכונים.</h2><p class="lede" data-bind="texts.why_sub" data-i18n="why_sub">כמה סיבות שבגללן הנכס הזה שווה ביקור.</p></div>
       <div class="chips" data-amenities></div>
@@ -149,6 +152,7 @@ footer a{text-decoration:none;opacity:.85}
     <div class="story in-view" data-story-highlights data-story-mode="window">
       <div class="window"><span class="tag" hidden></span></div>
       <ol class="hls" data-list="carousel.slides"><template><li class="hl" data-hl><button type="button"><span class="n" data-field="num"></span><span class="h3" data-field="title"></span></button><div class="body"><div><p data-field="body"></p><span class="hl-tag" data-field="tag"></span><span class="bar"></span></div></div></li></template></ol>
+    </div>
     </div>
   </section>
 

@@ -3,8 +3,8 @@
      [data-story-pin]        the arrival pin; its [data-at] items get .on as it scrolls
      [data-edge]             sections whose shape follows --p (0 entering → 1 landed)
      .in-view                fades in once on screen
-     [data-story-highlights] carousel.slides as an auto-cycling block
-       data-story-mode="accordion|window"; items are [data-hl]
+     [data-story-highlights] carousel.slides, opened one by one as the page scrolls
+       (its section pins; content sits in a .stick); data-story-mode="accordion|window"; items are [data-hl]
      [data-story-gallery]    big stage mirrored from runtime.js's [data-gallery] tiles
    Spec: docs/superpowers/specs/2026-09-30-passage-soleil-templates-design.md */
 (function () {
@@ -28,7 +28,7 @@
 
   // ── scroll loop: reveal, edges, top bar, video pause under opaque panels ──
   var pin = $("[data-story-pin]"), steps = pin ? $$("[data-at]", pin) : [], phrase = pin && $(".phrase", pin);
-  var edges = $$("[data-edge]"), panels = $$(".panel"), bar = $(".topbar"), ticking = false;
+  var edges = $$("[data-edge]"), panels = $$(".panel"), bar = $(".topbar"), ticking = false, onFrame = [];
   function frame() {
     ticking = false;
     var vh = innerHeight;
@@ -40,6 +40,7 @@
       if (bar) bar.classList.toggle("solid", r.bottom <= bar.offsetHeight);
     }
     edges.forEach(function (s) { s.style.setProperty("--p", reduce ? 1 : clamp((vh - s.getBoundingClientRect().top) / (vh * 0.7)).toFixed(3)); });
+    onFrame.forEach(function (f) { f(); });
     if (!vid) return;
     var covered = panels.some(function (s) { var b = s.getBoundingClientRect(); return b.top <= 0 && b.bottom >= vh; });
     if (covered) { if (!vid.paused) vid.pause(); }
@@ -65,10 +66,6 @@
     if ("IntersectionObserver" in window) new IntersectionObserver(function (es) { vis = es[0].isIntersecting; restart(); }, { threshold: 0.3 }).observe(el);
     go(0);
     return { pick: function (k) { go(k); restart(); }, step: function (d) { go(i + d); restart(); }, at: function () { return i; } };
-  }
-  // restart a CSS progress bar: drop .on, reflow, put it back
-  function flip(list, k) {
-    list.forEach(function (el, j) { if (j === k) { el.classList.remove("on"); void el.offsetWidth; } el.classList.toggle("on", j === k); });
   }
 
   // ── photos: the gallery tiles runtime.js builds (real <img> or demo <canvas>) ──
@@ -107,13 +104,51 @@
       });
     }
     refreshers.push(fill); fill();
-    var c = cycle(host, items.length, function (i) {
-      flip(items, i);
-      if (mode === "window") flip(slots, i);
-      items.forEach(function (it, k) { var b = it.matches("button") ? it : $("button", it); if (b) b.setAttribute("aria-expanded", k === i); });
+    var n = items.length, cur = -1;
+    function btn(it) { return it.matches("button") ? it : $("button", it); }
+    function show(i) {
+      if (i === cur) return;
+      cur = i;
+      items.forEach(function (it, k) { it.classList.toggle("on", k === i); btn(it).setAttribute("aria-expanded", k === i); });
+      if (mode === "window") slots.forEach(function (s, k) { s.classList.toggle("on", k === i); });
       if (tag) { var tx = $(".hl-tag", items[i]); tag.textContent = tx ? tx.textContent : ""; tag.hidden = !tag.textContent; }
+    }
+    var sec = host.closest("section"), stick = host.closest(".stick");
+    if (reduce || !sec || !stick || n < 2) {
+      show(0);
+      items.forEach(function (it, k) { it.style.setProperty("--k", 1); btn(it).addEventListener("click", function () { show(k); }); });
+      return;
+    }
+    // Scroll-driven: the section pins and each highlight owns a third of a
+    // screen of scrolling; its bar fills with that scroll.
+    sec.classList.add("pinned");
+    var stickTop = 0;
+    function size() {
+      var sh = stick.offsetHeight;
+      stickTop = Math.min(0, innerHeight - sh); // taller than the screen: pin by its bottom edge
+      stick.style.top = stickTop + "px";
+      sec.style.height = Math.round(sh + n * innerHeight * 0.35) + "px";
+    }
+    function run() { return Math.max(1, sec.offsetHeight - stick.offsetHeight); }
+    function update() {
+      var p = clamp((stickTop - sec.getBoundingClientRect().top) / run());
+      var f = Math.min(n - 1e-4, p * n), k = Math.floor(f);
+      show(k);
+      items.forEach(function (it, j) { it.style.setProperty("--k", j < k ? 1 : j > k ? 0 : (f - k).toFixed(3)); });
+    }
+    function relayout() { size(); update(); }
+    relayout();
+    onFrame.push(update);
+    addEventListener("resize", relayout);
+    addEventListener("load", relayout);
+    if (document.fonts) document.fonts.ready.then(relayout);
+    // a tap scrolls to that highlight's slice, so tapping and scrolling agree
+    items.forEach(function (it, k) {
+      btn(it).addEventListener("click", function () {
+        var top = sec.getBoundingClientRect().top + scrollY - stickTop;
+        scrollTo({ top: top + run() * (k + 0.05) / n, behavior: "smooth" });
+      });
     });
-    items.forEach(function (it, k) { (it.matches("button") ? it : $("button", it)).addEventListener("click", function () { c.pick(k); }); });
   });
 
   // ── gallery: stage + thumbnails (the runtime tiles), auto-swipe 2.5 s ──

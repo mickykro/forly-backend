@@ -70,8 +70,10 @@ h2{font-size:clamp(34px,5vw,76px);margin-bottom:18px}
 .acc-i.on .acc-t .p{max-height:120px;opacity:.9;margin-top:8px;max-width:42ch;font-size:15px}
 .acc-i.on .acc-t .hl-tag{max-height:30px;opacity:1;display:inline-block;margin-top:10px;font-size:12px;letter-spacing:.14em;color:var(--gold)}
 .acc-i:not(.on) .acc-t .h3{writing-mode:vertical-rl;transform:rotate(180deg);position:absolute;bottom:0;inset-inline-start:0}
-.acc-bar{position:absolute;top:0;inset-inline-start:0;height:3px;background:var(--gold);width:0;z-index:2}.acc-i.on .acc-bar{animation:bar 2.5s linear forwards}
-@keyframes bar{to{width:100%}}
+.acc-bar{position:absolute;top:0;inset-inline-start:0;height:3px;background:var(--gold);width:calc(var(--k,0) * 100%);z-index:2}
+/* scroll-pinned highlights (story.js adds .pinned and sizes the section) */
+.pinned{padding:0}.pinned .stick{position:sticky;min-height:100svh;display:flex;flex-direction:column;justify-content:center;padding:clamp(76px,9vw,110px) var(--pad) clamp(24px,4vw,56px)}
+@media(min-width:761px){.pinned h2{font-size:clamp(30px,3.6vw,56px)}.pinned .living-head{margin-bottom:22px}.pinned .acc{height:min(46vh,440px)}}
 
 /* 4 · Inside — big image + thumbnails */
 .g-main{position:relative;overflow:hidden;aspect-ratio:16/9;max-height:72vh;width:100%;background:var(--ink);touch-action:pan-y;cursor:zoom-in}
@@ -110,7 +112,7 @@ footer a{text-decoration:none;opacity:.8}
 .in-view{opacity:0;transform:translateY(24px);transition:opacity .7s,transform .8s cubic-bezier(.2,.7,.2,1)}.in-view.on{opacity:1;transform:none}
 
 @media(max-width:760px){
-  .acc{flex-direction:column;height:auto;gap:8px}.acc-i,.acc-i.on{flex:none;height:68px;transition:height .7s cubic-bezier(.2,.7,.2,1)}.acc-i.on{height:min(340px,52svh)}
+  .acc{flex-direction:column;height:auto;gap:8px}.acc-i,.acc-i.on{flex:none;height:68px;transition:height .7s cubic-bezier(.2,.7,.2,1)}.acc-i.on{height:min(300px,40svh)}.living-head{margin-bottom:18px}
   .acc-i:not(.on) .acc-t .h3{writing-mode:horizontal-tb;transform:none;position:static}
   .acc-i:not(.on) .acc-t{bottom:auto;top:22px;inset-inline-start:52px}
   .g-main{aspect-ratio:4/5}.around,.invite{grid-template-columns:1fr}
@@ -140,11 +142,13 @@ footer a{text-decoration:none;opacity:.8}
 
   <!-- 3 · Living -->
   <section class="panel cream" id="living">
+    <div class="stick">
     <div class="living-head in-view">
       <div><h2 data-bind="texts.why_title" data-i18n="why_head">נכס כזה לא מגיע ללוחות. הוא מגיע לאנשים הנכונים.</h2><p class="lede" data-bind="texts.why_sub" data-i18n="why_sub">כמה סיבות שבגללן הנכס הזה שווה ביקור.</p></div>
       <div class="chips" data-amenities></div>
     </div>
     <div class="acc in-view" data-story-highlights data-story-mode="accordion" data-list="carousel.slides"><template><button type="button" class="acc-i" data-hl><span class="acc-img" data-hl-img></span><span class="acc-bar"></span><span class="acc-n" data-field="num"></span><span class="acc-t"><span class="h3" data-field="title"></span><span class="p" data-field="body"></span><span class="hl-tag" data-field="tag"></span></span></button></template></div>
+    </div>
   </section>
 
   <div class="gap"></div>

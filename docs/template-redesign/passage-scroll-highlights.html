@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Passage: scroll-driven highlights</title>
+<style>
+@font-face{font-family:'Discovery FS';src:url(../../public-nadlan/fonts/Discovery_Fs-Light.woff) format('woff');font-weight:100 500}
+@font-face{font-family:'Discovery FS';src:url(../../public-nadlan/fonts/Discovery_Fs-Bold.woff) format('woff');font-weight:600 900}
+:root{--cream:#F3EDE2;--white:#fff;--gold:#B8935A;--ink:#1E1C19;--pad:clamp(18px,5vw,80px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--ink);font:300 17px/1.65 'Discovery FS',sans-serif}
+h1,h2,p{margin:0}h1,h2,.h3{font-weight:700;line-height:1.05}
+.intro,.outro{min-height:90vh;display:grid;place-items:center;color:var(--cream);text-align:center;padding:var(--pad)}
+.intro small,.outro small{display:block;color:var(--gold);letter-spacing:.2em;margin-top:12px}
+
+/* the pin: one slice of scroll per highlight (--n set from JS) */
+.living{background:var(--cream);height:calc(var(--n,4) * 35vh + 100vh);position:relative}
+.stick{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;justify-content:center;padding:0 var(--pad)}
+.head{display:flex;justify-content:space-between;align-items:end;gap:5vw;margin-bottom:28px;flex-wrap:wrap}
+h2{font-size:clamp(30px,4.5vw,64px);max-width:16ch}
+.lede{max-width:40ch;opacity:.75}
+.count{font-size:13px;letter-spacing:.2em;color:var(--gold);direction:ltr}
+
+.acc{display:flex;gap:10px;height:min(58vh,520px)}
+.it{position:relative;flex:1;min-width:0;overflow:hidden;border:0;padding:0;background:var(--ink);color:var(--white);text-align:start;cursor:pointer;font:inherit;transition:flex .7s cubic-bezier(.2,.7,.2,1)}
+.it.on{flex:4.2}
+.it img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.5;transform:scale(1.08);transition:opacity .7s,transform 1.2s}
+.it.on img{opacity:.9;transform:none}
+.it:after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(30,28,25,.85),transparent 60%)}
+.n{position:absolute;top:16px;inset-inline-start:16px;z-index:1;color:var(--gold);font-weight:700}
+.t{position:absolute;bottom:20px;inset-inline:18px;z-index:1}
+.h3{display:block;font-size:clamp(19px,2.1vw,30px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.it:not(.on) .h3{writing-mode:vertical-rl;transform:rotate(180deg);position:absolute;bottom:0;inset-inline-start:0}
+.p,.tag{display:block;max-height:0;opacity:0;overflow:hidden;transition:opacity .4s,max-height .6s}
+.it.on .p{max-height:120px;opacity:.9;margin-top:8px;max-width:42ch;font-size:15px}
+.it.on .tag{max-height:30px;opacity:1;margin-top:10px;font-size:12px;letter-spacing:.14em;color:var(--gold)}
+/* progress follows the scroll, not a timer */
+.bar{position:absolute;top:0;inset-inline-start:0;height:3px;width:calc(var(--k,0) * 100%);background:var(--gold);z-index:2}
+
+@media(max-width:760px){
+  .acc{flex-direction:column;height:auto;gap:8px}
+  .it,.it.on{flex:none;height:64px;transition:height .7s cubic-bezier(.2,.7,.2,1)}.it.on{height:min(320px,46svh)}
+  .it:not(.on) .h3{writing-mode:horizontal-tb;transform:none;position:static}
+  .it:not(.on) .t{bottom:auto;top:20px;inset-inline-start:48px}
+  .head{margin-bottom:18px}
+}
+/* reduced motion: no pin, everything open and readable */
+@media(prefers-reduced-motion:reduce){
+  .living{height:auto}.stick{position:static;height:auto;padding-block:80px}
+  .acc{flex-direction:column;height:auto}.it,.it.on{flex:none;height:auto;min-height:260px}
+  .it .p,.it .tag{max-height:none;opacity:1}.it:not(.on) .h3{writing-mode:horizontal-tb;transform:none;position:static}
+  *{transition:none!important}
+}
+</style>
+</head>
+<body>
+<section class="intro"><div><h1>גללו למטה</h1><small>↓ SCROLL</small></div></section>
+
+<section class="living" id="living">
+  <div class="stick">
+    <div class="head">
+      <div><h2>נכס כזה לא מגיע ללוחות.</h2><p class="lede">כמה סיבות שבגללן הנכס הזה שווה ביקור.</p></div>
+      <span class="count" id="count">01 / 04</span>
+    </div>
+    <div class="acc" id="acc">
+      <button class="it" type="button"><img src="assets/view.jpg" alt=""><span class="bar"></span><span class="n">01</span><span class="t"><span class="h3">נוף שאי אפשר לשכפל</span><span class="p">קו ראשון לים מקומה גבוהה, מרפסת שמש הפונה מערבה. את השקיעה רואים מהסלון.</span><span class="tag">חזית מערבית</span></span></button>
+      <button class="it" type="button"><img src="assets/room.jpg" alt=""><span class="bar"></span><span class="n">02</span><span class="t"><span class="h3">שיפוץ אדריכלי מהיסוד</span><span class="p">מטבח מעוצב עם אי מרכזי, סוויטת הורים עם רחצה צמודה, מיזוג VRF.</span><span class="tag">2023</span></span></button>
+      <button class="it" type="button"><img src="assets/detail.jpg" alt=""><span class="bar"></span><span class="n">03</span><span class="t"><span class="h3">נדיר באזור</span><span class="p">שלוש חניות בטאבו ומחסן צמוד, בבניין מטופח עם מעלית ולובי משופץ.</span><span class="tag">3 חניות בטאבו</span></span></button>
+      <button class="it" type="button"><img src="assets/view.jpg" alt=""><span class="bar"></span><span class="n">04</span><span class="t"><span class="h3">כניסה מיידית</span><span class="p">תהליך דיסקרטי, ליווי אישי עד למסירת מפתח.</span><span class="tag">ליווי מלא</span></span></button>
+    </div>
+  </div>
+</section>
+
+<section class="outro"><div><h1>הגלריה ממשיכה כאן</h1><small>THE PAGE CONTINUES</small></div></section>
+
+<script>
+(function () {
+  var reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var sec = document.getElementById("living"), items = [].slice.call(document.querySelectorAll(".it"));
+  var count = document.getElementById("count"), n = items.length, current = -1, ticking = false;
+  sec.style.setProperty("--n", n);
+  if (reduce) { items.forEach(function (it) { it.classList.add("on"); }); return; }
+
+  // progress through the pinned stretch: 0 when it locks to the top, 1 when it lets go
+  function progress() {
+    var r = sec.getBoundingClientRect(), run = r.height - innerHeight;
+    return Math.min(1, Math.max(0, -r.top / run));
+  }
+  function frame() {
+    ticking = false;
+    var f = Math.min(n - 1e-4, progress() * n), k = Math.floor(f);
+    if (k !== current) {
+      current = k;
+      items.forEach(function (it, i) { it.classList.toggle("on", i === k); it.setAttribute("aria-expanded", i === k); });
+      count.textContent = "0" + (k + 1) + " / 0" + n;
+    }
+    // each bar: full for passed items, filling for the open one, empty after
+    items.forEach(function (it, i) { it.style.setProperty("--k", i < k ? 1 : i > k ? 0 : (f - k).toFixed(3)); });
+  }
+  addEventListener("scroll", function () { if (!ticking) { ticking = true; requestAnimationFrame(frame); } }, { passive: true });
+  addEventListener("resize", frame);
+  frame();
+
+  // a tap scrolls to that item's slice, so tapping and scrolling always agree
+  items.forEach(function (it, i) {
+    it.addEventListener("click", function () {
+      var top = sec.getBoundingClientRect().top + scrollY, run = sec.offsetHeight - innerHeight;
+      scrollTo({ top: top + run * (i + 0.05) / n, behavior: "smooth" });
+    });
+  });
+})();
+</script>
+</body>
+</html>
