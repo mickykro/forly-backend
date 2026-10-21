@@ -307,8 +307,12 @@
     return call("POST", B(ref), groupUrl ? { group_url: groupUrl } : undefined).then(function (r) {
       if (viewer) viewer.unmount();
       shown = ref; state = null;
-      viewer = window.ForlyViewer.create($("#manualBrowser"), API + B(ref) + "/view", {
-        onEnd: function (code) { if (code !== "closed") FLY.toast("הדפדפן נסגר"); },
+      var me = viewer = window.ForlyViewer.create($("#manualBrowser"), API + B(ref) + "/view", {
+        // A dead view must not look open: reset so the next "open" starts the browser again.
+        onEnd: function (code) {
+          if (code !== "closed") FLY.toast("הדפדפן נסגר — פתחו אותו שוב");
+          if (viewer === me) closed();
+        },
         onEvent: function (e) { if (e.t === "lane" && Lane && shown === ref) Lane.onState(e.lane); },
       });
       if (Lane) {
