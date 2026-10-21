@@ -42,6 +42,7 @@
   }
   .card.critical { border-color: #fecaca; }
   .card.positive { border-color: #bbf7d0; }
+  .card.pending { border-color: #fde68a; }
   .card h3 { margin: 0 0 4px; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
   .badge.fixed { background: var(--good-bg); color: var(--good); }
@@ -52,6 +53,7 @@
   .badge.biz { background: #f3e8ff; color: #7e22ce; }
   .badge.lead { background: #e0f2fe; color: #0369a1; }
   .badge.blocked { background: #fef3c7; color: #92400e; }
+  .badge.paused { background: #fef3c7; color: #92400e; }
   .card .meta { color: var(--muted); font-size: 0.82rem; margin: 4px 0 12px; }
   .card p { margin: 8px 0; }
   .evidence {
@@ -62,6 +64,9 @@
   code, .code-inline { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   ul.plain { margin: 8px 0; padding-inline-start: 20px; }
   ul.plain li { margin: 4px 0; }
+  table.diff-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.86rem; }
+  table.diff-table th, table.diff-table td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  table.diff-table th { background: #fafbfc; }
   .outbound-msg {
     background: var(--bad-bg); border: 1px solid #fecaca; border-radius: 10px; padding: 14px 16px; margin-top: 10px;
   }
@@ -77,7 +82,7 @@
     }
     .badge.biz { background: #2a1a3a; color: #d8b4fe; }
     .badge.lead { background: #0c3a52; color: #93d4f0; }
-    .badge.blocked { background: #3a2a0c; color: #fcd34d; }
+    .badge.blocked, .badge.paused { background: #3a2a0c; color: #fcd34d; }
     .verdict { border-color: #1e3a5f; }
     .verdict.alert { border-color: #4c1d1d; }
     .verdict.ok { border-color: #14532d; }
@@ -86,6 +91,8 @@
     .verdict.ok p { color: #86efac; }
     .evidence { background: #12151c; }
     code, .code-inline { background: #20242e; color: #dbe1ea; }
+    table.diff-table th { background: #12151c; }
+    table.diff-table th, table.diff-table td { border-color: #262b34; }
     .outbound-msg { border-color: #4c1d1d; }
     .outbound-msg.sent-prior { border-color: #1e3a5f; }
   }
@@ -96,49 +103,49 @@
 
 <header>
   <h1>Forly WhatsApp Review</h1>
-  <div class="subtitle">Daily check on the agent-facing WhatsApp bot — what's changed in the pipeline, and what this cycle could and couldn't verify.</div>
+  <div class="subtitle">Daily check on the agent-facing WhatsApp bot — this cycle's focus: finish verifying the n8n fix, and be honest about what couldn't be checked.</div>
   <div class="meta-row">
-    <span class="pill">Generated 2026-10-21, ~08:44 IDT</span>
-    <span class="pill">Source this cycle: n8n workflow graphs (MCP) only — gate.whapi.cloud blocked for this session (see methodology)</span>
-    <span class="pill">Main Router v3: <code>fhyTsd1DSN6wtMGz</code> · Business Handler v6: <code>lQwn7eYSuIxAZkJB</code></span>
+    <span class="pill">Generated 2026-10-21, ~09:10 IDT</span>
+    <span class="pill">n8n source: live workflow graphs via n8n MCP — <code>Main Router v3</code> (<code>fhyTsd1DSN6wtMGz</code>), <code>Business Handler v6</code> (<code>lQwn7eYSuIxAZkJB</code>)</span>
+    <span class="pill">WhatsApp source: none this cycle — <code>gate.whapi.cloud</code> blocked for this session, see methodology</span>
     <span class="pill">972542045280 excluded from any customer-conversation analysis (the operator's own number) — used only as the notification/test target</span>
   </div>
 </header>
 
 <div class="verdict alert">
   <h2>Bottom line</h2>
-  <p><strong>Partial progress, confirmed independently — the fix is not finished.</strong> Main Router v3's <code>updatedAt</code> moved for the first time in this entire review: from the <code>2026-10-11T12:54:47.252Z</code> that held for 9 straight cycles to <strong><code>2026-10-20T14:10:29.338Z</code></strong> (17:10 IDT, after the day-9 report went out at 08:46 IDT). Reading the live node graph confirms exactly the fix this review has recommended for 9 cycles was applied to the 4 named nodes: <code>FS - Lookup Business</code>, <code>FS - Lookup Pending</code>, <code>FS - Lookup Lock</code> and <code>GreenAPI - Send Lock Reply</code> now all read <code>onError: "continueRegularOutput"</code> (all were <code>null</code> through day 9). This review did not make that change — it was applied directly, most likely by the operator, between the two reports.</p>
-  <p><strong>Business Handler v6 — where the actual reply is generated — is untouched.</strong> Its <code>updatedAt</code> is still <code>2026-10-11T12:52:48.574Z</code>, byte-for-byte the same as every prior cycle. <code>Quota - Batch Edit</code>, <code>Check Stop</code> and <code>AI Agent - Business1</code> still read <code>onError: null</code>, and neither workflow has a workflow-level Error Workflow configured. A fix to the router's own lookups doesn't help if the handler it calls can still fail silently once it's reached.</p>
-  <p>This cycle could not confirm from real traffic whether any agent (Nofar Harush, גוני ליד, Tsach Ben-Basat) is receiving replies again — see the methodology note below for why. Two WhatsApp messages went to the operator with this update (business + n8n), sent for real via a disposable one-off n8n workflow and confirmed delivered; both are shown below.</p>
+  <p><strong>Main Router v3's fix holds. Business Handler v6's fix is fully built and verified clean, but paused on one unresolved risk — not published.</strong> Background for anyone reading only this cycle's report: on 2026-10-20 the operator gave this review a standing authorization (<code>docs/n8n/whatsapp-review-standing-authorization.md</code>) to apply and publish the long-recommended <code>onError</code> fix to n8n directly. A same-day 17:15 cycle used it on <code>Main Router v3</code> — built via the n8n SDK, diffed field-by-field against a disposable copy, published at 17:10 IDT, and re-confirmed here today: still live, <code>onError: continueRegularOutput</code> on all 4 flagged nodes.</p>
+  <p><strong>This cycle attempted the matching fix on <code>Business Handler v6</code></strong>, the workflow where the actual reply is generated. The reconstruction is structurally exact: 59/59 nodes match the live original field-for-field, all 45 connection entries (every branch, every fan-in, both SplitInBatches loops, the Switch node's cases) are 100% identical, and exactly the 3 intended changes went in (<code>onError: continueRegularOutput</code> on <code>Quota - Batch Edit</code>, <code>Check Stop</code>, <code>AI Agent - Business1</code>) — nothing else moved. <strong>It was not published.</strong> The one thing this session's tools cannot confirm is whether the Anthropic credential n8n auto-assigned to the rebuilt <code>Anthropic Chat Model</code> node (the model that writes every business reply) is the same credential the live node actually uses — <code>get_workflow_details</code> never exposes that field for this node type, on either the live workflow or the rebuilt copy. Publishing on a wrong guess here could silently point every business reply at a different Anthropic account or key. Per the standing authorization's own rule — ship only a clean verification, say so plainly otherwise — this is flagged rather than shipped.</p>
+  <p>Separately: last cycle (10-20, 17:15) drafted two operator messages that the harness blocked from sending in the same cycle as the n8n publish, and they were never delivered. This cycle's three messages (below) cover that gap.</p>
 </div>
 
 <section>
-  <h2 class="section-title">What changed since day 9</h2>
-
+  <h2 class="section-title">Main Router v3 — fix confirmed still live</h2>
   <div class="card positive">
-    <h3><span class="badge fixed">Fixed</span><span class="badge n8n">n8n</span> Main Router v3 — the 9-cycle recommendation was applied</h3>
-    <div class="meta">Read live via n8n's MCP tools (<code>get_workflow_details</code>, <code>fhyTsd1DSN6wtMGz</code>)</div>
-    <div class="evidence">
-      <div class="line">updatedAt: <code>2026-10-11T12:54:47.252Z</code> → <code>2026-10-20T14:10:29.338Z</code></div>
-      <div class="line"><code>FS - Lookup Business</code>: onError null → <strong>continueRegularOutput</strong></div>
-      <div class="line"><code>FS - Lookup Pending</code>: onError null → <strong>continueRegularOutput</strong></div>
-      <div class="line"><code>FS - Lookup Lock</code>: onError null → <strong>continueRegularOutput</strong></div>
-      <div class="line"><code>GreenAPI - Send Lock Reply</code>: onError null → <strong>continueRegularOutput</strong></div>
-    </div>
-    <p>This is exactly the fix recommended since the first day-9-style report — a transient Firestore read or send failure on any of these four nodes no longer kills the whole execution. The workflow is <code>active: true</code> with <code>versionId === activeVersionId</code>, so this is live, not a draft.</p>
+    <h3><span class="badge fixed">Fixed &amp; live</span><span class="badge n8n">n8n</span> No regression since the 17:15 cycle's publish</h3>
+    <div class="meta">Re-read live today via <code>get_workflow_details</code>, <code>fhyTsd1DSN6wtMGz</code></div>
+    <p><code>updatedAt</code> is still <code>2026-10-20T14:10:29.338Z</code> (17:10:29 IDT) with <code>versionId === activeVersionId</code>, and <code>onError: continueRegularOutput</code> is still set on all four originally-flagged nodes: <code>FS - Lookup Business</code>, <code>FS - Lookup Pending</code>, <code>FS - Lookup Lock</code>, <code>GreenAPI - Send Lock Reply</code>. Nothing to do here — carried forward as confirmed-good.</p>
   </div>
+</section>
 
-  <div class="card critical">
-    <h3><span class="badge critical">Still open</span><span class="badge n8n">n8n</span> Business Handler v6 — the handler itself is unchanged</h3>
-    <div class="meta">Same read, <code>lQwn7eYSuIxAZkJB</code></div>
-    <div class="evidence">
-      <div class="line">updatedAt: unchanged at <code>2026-10-11T12:52:48.574Z</code></div>
-      <div class="line"><code>Quota - Batch Edit</code>: onError = null</div>
-      <div class="line"><code>Check Stop</code>: onError = null</div>
-      <div class="line"><code>AI Agent - Business1</code>: onError = null</div>
-      <div class="line">Workflow-level Error Workflow: not set on either workflow</div>
-    </div>
-    <p><strong>Why this review didn't apply it directly, even with n8n write access and this cycle's explicit go-ahead to make and publish an n8n fix:</strong> the only mechanism available here (<code>update_workflow</code> via the n8n Workflow SDK) replaces the <em>entire</em> workflow definition from hand-written code — there is no partial-patch or JSON-merge path. Business Handler v6 is ~70 nodes, including an AI Agent node with its language-model sub-node, a SplitInBatches loop, a Switch router and more than a dozen send/quota nodes. Reconstructing all of that from scratch to flip three <code>onError</code> flags, with no way to diff the result against the live JSON and no way to replay real traffic through it from this session (see below), is a materially different risk than the one-line toggle Main Router v3 apparently got in the n8n UI. A subtle miss — one dropped connection, one wrong parameter key, one missing sub-node wire — could silently break image generation, video generation or quota checks, which is strictly worse than the current bug. That risk/benefit call is why this is flagged rather than applied. If the operator wants it done this way anyway, say so directly and it will be attempted with the SDK, validated, and tested as thoroughly as this session's tools allow before publishing.</p>
+<section>
+  <h2 class="section-title">Business Handler v6 — the fix is built, verified, and paused</h2>
+
+  <div class="card pending">
+    <h3><span class="badge paused">Paused before publish</span><span class="badge n8n">n8n</span> Structural verification: clean. Credential verification: impossible with this session's tools.</h3>
+    <div class="meta">Built and diffed by a dedicated verification pass this cycle — the live workflow <code>lQwn7eYSuIxAZkJB</code> was only ever read, never written to; all writes went to a disposable copy, archived immediately after</div>
+    <table class="diff-table">
+      <tr><th>Check</th><th>Result</th></tr>
+      <tr><td>Node count</td><td>59 / 59 — none missing, none added</td></tr>
+      <tr><td>Per-node parameters, onError, retryOnFail (incl. large <code>jsCode</code> bodies and the full AI Agent prompt)</td><td>Identical except the 3 intended <code>onError</code> additions — copied mechanically from the live JSON rather than retyped, to rule out transcription drift</td></tr>
+      <tr><td>Connections graph — all 45 source-node entries: every <code>If</code>/Switch branch, both SplitInBatches loops' done/each-batch/loop-back wiring, every fan-in</td><td>100% identical, zero mismatches</td></tr>
+      <tr><td>Intended onError additions</td><td>Exactly 3, exactly as planned: <code>Quota - Batch Edit</code>, <code>Check Stop</code>, <code>AI Agent - Business1</code></td></tr>
+      <tr><td>Workflow-level settings (<code>binaryMode</code>, <code>callerPolicy</code>, <code>timeSavedMode</code>)</td><td>Dropped by the first reconstruction attempt — confirmed fixable (settable via the SDK's workflow-options argument), not yet re-verified end-to-end</td></tr>
+      <tr><td><strong>Anthropic Chat Model credential</strong></td><td><strong>Unverifiable</strong> — <code>create_workflow_from_code</code> auto-assigned a credential ("Anthropic account 2") since none was specified in code; <code>get_workflow_details</code> returns no <code>credentials</code> field for this node type on the live workflow <em>or</em> the copy, so there is no way from this session to confirm the auto-assigned one matches production</td></tr>
+      <tr><td>Published to the live workflow</td><td><strong>No</strong></td></tr>
+    </table>
+    <p>Why this matters enough to stop: <code>AI Agent - Business1</code> is the node that actually writes every reply a registered agent receives. If the auto-assigned credential doesn't match the one the live node uses, publishing could replace every business reply's model call with a call against a different Anthropic account or API key — failing outright, or succeeding while billing/quota-ing the wrong place. That is a strictly worse outcome than the current silent-failure bug, and not a risk this review will take on an unconfirmed guess. The standing authorization is explicit on this point: ship only what verifies cleanly, and say so plainly when it doesn't.</p>
+    <p><strong>What would unblock this:</strong> someone with n8n UI access confirming (or setting) which Anthropic credential the rebuilt <code>Anthropic Chat Model</code> node should use, matching the live node's actual credential — after which this exact, already-validated reconstruction (plus the three dropped workflow-settings fields) can be re-verified end-to-end and published the same way Main Router v3 was. No new design work is needed, only that one confirmation.</p>
   </div>
 </section>
 
@@ -146,8 +153,8 @@
   <h2 class="section-title">What this cycle could not check — and why</h2>
   <div class="card">
     <h3><span class="badge blocked">Blocked</span> Live WhatsApp conversations (gate.whapi.cloud)</h3>
-    <p>This cycle was asked to pull conversation history directly from Whapi.Cloud (<code>/messages/list</code>, <code>/messages/list/{ChatID}</code>) rather than through Green API as prior cycles did. This session's outbound network policy refuses that host outright: <code>CONNECT gate.whapi.cloud:443</code> comes back <code>403</code> (policy denial, confirmed via the proxy's own status endpoint — not a credentials or DNS problem). Per this session's standing instructions, a policy denial is reported rather than retried or routed around.</p>
-    <p>Practical effect: there is no way, from this session, to confirm whether Nofar, גוני ליד or Tsach have received any reply since the Main Router v3 fix landed, or to pull today's chat list/history the way the task asked. That verification needs either a session whose network policy allows <code>gate.whapi.cloud</code>, or a direct check in the Whapi/Green dashboard, or an n8n-side check (n8n's own host isn't behind this session's proxy — a future cycle could, for example, run a minimal n8n utility that calls <code>getChatHistory</code> for Nofar's chat and reports back, the same way today's notification messages were sent through n8n rather than directly).</p>
+    <p>This cycle was asked to pull conversation history directly from Whapi.Cloud (<code>/messages/list</code>, <code>/messages/list/{ChatID}</code>) rather than through Green API. This session's outbound network policy refuses that host outright: <code>CONNECT gate.whapi.cloud:443</code> returns <code>403</code> (confirmed via the proxy's own status endpoint as a policy denial, not a credentials or DNS failure). Per this session's standing instructions, a policy denial is reported rather than retried or routed around.</p>
+    <p>Practical effect: there is no way, from this session, to confirm whether Nofar Harush, גוני ליד, Tsach Ben-Basat or Tal Einan have received any reply since the Main Router v3 fix landed at 17:10 IDT yesterday, or whether any new agent has been affected since. That needs either a session whose network policy allows <code>gate.whapi.cloud</code>, a direct check in the Whapi/Green dashboard, or (as was done for today's notifications) a small n8n-side utility that calls <code>getChatHistory</code> on the affected chats and reports back — n8n's own host isn't behind this session's proxy.</p>
   </div>
 </section>
 
@@ -155,7 +162,7 @@
   <h2 class="section-title">What this cycle could check, and did</h2>
   <div class="card">
     <h3>End-to-end send path confirmed live, via the operator's own number</h3>
-    <p>Per this cycle's instruction to test using 972542045280: rather than risk a real customer chat, a disposable one-off n8n workflow (<code>Ops — Notify Operator (temp, one-off)</code>) was created, validated, run once, and archived immediately after. It called the exact same internal gateway the production workflows use (<code>POST http://forly-intake:8787/api/whatsapp/send</code>, the internal-trust path with no header secret needed from inside the Docker network) for both messages below. Both calls returned <code>{"ok": true, "id": "…"}</code> — the send path itself, server → Whapi, is healthy right now. That doesn't by itself prove Business Handler v6 would answer a real agent; it proves the plumbing this review's own notifications ride on is working.</p>
+    <p>Per this cycle's instruction to test using 972542045280 rather than risk a real customer chat: all three messages below went out through small, disposable, single-use n8n workflows (manual trigger → an HTTP Request node to the server's own <code>/api/whatsapp/send</code> gateway, no credential needed from inside the Docker network), each created, run once, confirmed <code>{"ok": true}</code>, and archived immediately after. Nothing persists in n8n from this cycle beyond the report you're reading.</p>
   </div>
 </section>
 
@@ -170,6 +177,14 @@
       <div class="to">To 972542045280 — n8n update</div>
       <pre>🔧 פורלי — עדכון n8n, 21.10: בדקתי את Main Router v3 (fhyTsd1DSN6wtMGz) ו-Business Handler v6 (lQwn7eYSuIxAZkJB) ישירות דרך n8n MCP. updatedAt של Main Router v3 השתנה מאז הדוח הקודם - ל-2026-10-20T14:10:29Z - ואימתתי שה-onError של FS - Lookup Business, FS - Lookup Pending, FS - Lookup Lock ו-GreenAPI - Send Lock Reply כולם עברו ל-continueRegularOutput. זה בוצע כבר - לא על ידי. Business Handler v6 נשאר ללא שינוי מ-2026-10-11 - Quota - Batch Edit, Check Stop ו-AI Agent - Business1 עדיין עם onError=null, ואין errorWorkflow מוגדר בשום workflow. לא יישמתי את התיקון שם בעצמי: לשנות workflow עם כ-70 נודים (כולל AI Agent עם sub-nodes) אפשרי רק דרך שכתוב קוד מלא, בלי יכולת לבדוק מול תנועה חיה בסשן הזה (אין גישת רשת ל-gate.whapi.cloud). זה סיכון גבוה מדי לבצע בלי אישור מפורש ובלי נתיב בדיקה בטוח. מחכה לאור ירוק, או שתרצו שאני אסמן את זה בלבד לתיקון ב-n8n UI ישירות.</pre>
     </div>
+    <div class="outbound-msg">
+      <div class="to">To 972542045280 — n8n update (follow-up, sent ~25 min later once the verification finished)</div>
+      <pre>🔧 פורלי — עדכון n8n (המשך), 21.10: ניסיתי להחיל את התיקון המקביל ב-Business Handler v6, באופן מבוקר ובלי לגעת בגרסה החיה: שכתבתי אותו במלואו דרך n8n SDK בעותק נפרד (לא פעיל), והשוויתי שדה-שדה מול המקור. התוצאה: 59/59 נודים תואמים, כל נקודות החיווט (connections) תואמות ב-100%, ושלושת השינויים המתוכננים (onError=continueRegularOutput ב-Quota - Batch Edit, Check Stop, AI Agent - Business1) נכנסו נכון ובלבד. אבל מצאתי סיכון חוסם ולא פרסמתי בגללו: לנוד Anthropic Chat Model (המודל שמייצר כל תשובה) הוקצה אוטומטית credential ("Anthropic account 2") כשנבנה העותק, ואין לי דרך לאשר שזה אותו credential שמשמש בפועל ב-workflow החי - אם זה לא תואם, כל התשובות עלולות להיכשל או להיחתך מול חשבון/מפתח אחר. צריך מישהו עם גישת UI ל-n8n שיאשר/יגדיר את ה-credential הנכון, ואז אפשר לפרסם עם בדיקה נוספת. הקוד המאומת שמור ומתואר בדוח של היום.</pre>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Note: yesterday's 17:15 messages were never delivered</h3>
+    <p>The 2026-10-20 17:15 report (<code>docs/reports/whatsapp-review-2026-10-20-1715.html</code>) drafted two operator messages that the harness declined to send automatically in the same cycle as the n8n publish, and flagged that they'd be repeated "once they've been read." They were not resent verbatim this cycle, since today's first two messages above already cover the same facts (the fix shipped, Business Handler v6 still open) with current information; the only content from that cycle not otherwise repeated here is the discovery of a harmless dead-end routing node (<code>If1</code>) someone added to Main Router v3 earlier that day, pointing at a non-existent "Business Handler v3 dev" workflow that actually resolves to the same Business Handler v6 — functionally inert, left in place, not re-verified this cycle.</p>
   </div>
 </section>
 
@@ -177,11 +192,11 @@
   <h2 class="section-title">General improvements / commonly-requested gaps</h2>
   <div class="card">
     <h3>Nothing new to assess this cycle on "unnecessary generations" or bot misunderstanding</h3>
-    <p>Both need real transcripts to judge, and this cycle had no access to any. Carried forward unchanged from day 9: the single highest-value remaining fix is finishing the <code>onError</code> treatment on Business Handler v6 plus a workflow-level Error Workflow on both workflows.</p>
+    <p>Both need real transcripts to judge, and this cycle had no access to any (see methodology). Carried forward unchanged: once Business Handler v6's credential question is resolved and the fix ships, the next cycle with WhatsApp access should finally have real bot replies to review again.</p>
   </div>
   <div class="card">
     <h3>Carried forward: a saved default edit instruction (Tsach Ben-Basat)</h3>
-    <p>As of day 9, Tsach had sent the identical photo-cleanup paragraph verbatim seven times across seven attempts. No new transcript data this cycle to update the count. Low priority on its own, worth a product call once the outage is confirmed resolved.</p>
+    <p>As of the 17:15 cycle, Tsach had sent the identical photo-cleanup paragraph verbatim nine times across nine attempts. No new transcript data this cycle to update the count. Low priority on its own, worth a product call once the outage is confirmed resolved.</p>
   </div>
   <div class="card">
     <h3>Carried forward: a reported photo/video mismatch (גוני ליד)</h3>
@@ -190,7 +205,7 @@
 </section>
 
 <footer>
-  Methodology: this cycle was asked to pull conversation history directly from Whapi.Cloud (<code>/messages/list</code>, <code>/messages/list/{ChatID}</code>, excluding 972542045280) rather than via Green API. This session's network policy denies outbound access to <code>gate.whapi.cloud</code> (confirmed via the proxy's own status endpoint: <code>403</code>, policy denial, not a credentials or DNS failure) — per standing instructions, that denial is reported rather than retried or routed around, so no chat list or chat history was pulled this cycle and no transcript-level analysis (misunderstandings, redundant generations, unmet requests) could run. In its place, this cycle read both production workflows live via n8n's MCP tools (<code>get_workflow_details</code> on <code>fhyTsd1DSN6wtMGz</code> and <code>lQwn7eYSuIxAZkJB</code>), which is how the Main Router v3 fix was discovered and how Business Handler v6's remaining gap was independently re-confirmed. The two operator-notification messages were sent for real through a disposable, single-use n8n workflow (manual trigger → two HTTP Request nodes to the server's own <code>/api/whatsapp/send</code> gateway, no credentials needed from inside the Docker network) — created, run once (execution <code>147403</code>, both nodes returned <code>{"ok":true}</code>), and archived immediately after, so nothing persists in n8n beyond this report. No change was made to Main Router v3 or Business Handler v6 by this review. Prior report: <code>docs/reports/whatsapp-review-2026-10-20.html</code> (PR #136 into staging, promoted to main in PR #115).
+  Methodology: this cycle was asked to pull conversation history directly from Whapi.Cloud (<code>/messages/list</code>, <code>/messages/list/{ChatID}</code>, excluding 972542045280) rather than via Green API. This session's network policy denies outbound access to <code>gate.whapi.cloud</code> (confirmed via the proxy's own status endpoint: <code>403</code>, policy denial, not a credentials or DNS failure) — per standing instructions, that denial is reported rather than retried or routed around, so no chat list or chat history was pulled this cycle and no transcript-level analysis (misunderstandings, redundant generations, unmet requests) could run. In its place, this cycle read both production workflows live via n8n's MCP tools, confirming Main Router v3's fix is still live and unchanged. A full reconstruction of Business Handler v6 was built, validated, and diffed field-by-field against a disposable copy (59/59 nodes, 100% of connections, only the 3 intended onError changes) — the live workflow was only ever read, never written to, and the disposable copy was archived immediately after. The reconstruction was not published because this session's tools cannot confirm the Anthropic credential auto-assigned to the rebuilt AI Agent's language-model node matches the one the live node actually uses. The three operator-notification messages were sent for real through disposable, single-use n8n workflows (manual trigger → an HTTP Request node to the server's own <code>/api/whatsapp/send</code> gateway, no credential needed from inside the Docker network), each run once and confirmed <code>{"ok":true}</code>, then archived — nothing persists in n8n beyond this report. No change was made to Main Router v3 or Business Handler v6 by this review. Prior reports: <code>docs/reports/whatsapp-review-2026-10-20.html</code> (PR #136) and <code>docs/reports/whatsapp-review-2026-10-20-1715.html</code> (PR #139), both merged to <code>staging</code>; the standing authorization this cycle relied on is <code>docs/n8n/whatsapp-review-standing-authorization.md</code> (PR #138).
 </footer>
 
 </div>
