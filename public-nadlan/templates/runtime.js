@@ -553,7 +553,9 @@
       if (name.length < 2) { if (nameEl) nameEl.reportValidity(); return; }
 
       var done = function () {
-        var sent = form.querySelector("[data-lead-sent]"); if (sent) sent.style.display = "block";
+        // the thank-you sits inside the form or beside it (the form itself is hidden next)
+        var sent = form.querySelector("[data-lead-sent]") || (form.parentNode && form.parentNode.querySelector(":scope > [data-lead-sent]"));
+        if (sent) sent.style.display = "block";
         form.style.display = "none";
         beacon("cta_click");
       };

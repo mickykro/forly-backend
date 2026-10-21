@@ -366,6 +366,16 @@
             <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-orbite.webp" alt="" loading="lazy"><iframe data-src="/tpl/orbite.html" title="Orbite" tabindex="-1" scrolling="no"></iframe></div>
             <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_orbite">אורביט · חללים</span><button type="button" class="tpl-full" data-src="/tpl/orbite.html">⛶</button></div>
           </div>
+          <div class="tpl-card" data-tpl="passage">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-passage.webp" alt="" loading="lazy"><iframe data-src="/tpl/passage.html" title="Passage" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_passage">פסאז׳ · סיפור בווידאו</span><button type="button" class="tpl-full" data-src="/tpl/passage.html">⛶</button></div>
+          </div>
+          <div class="tpl-card" data-tpl="soleil">
+            <div class="tpl-check">✓</div>
+            <div class="tpl-frame"><img class="template-cover tpl-shot" src="/assets/tpl-soleil.webp" alt="" loading="lazy"><iframe data-src="/tpl/soleil.html" title="Soleil" tabindex="-1" scrolling="no"></iframe></div>
+            <div class="tpl-bar"><span class="tpl-name" data-i18n="tpl_soleil">סוליי · קשתות ושמש</span><button type="button" class="tpl-full" data-src="/tpl/soleil.html">⛶</button></div>
+          </div>
         <input type="hidden" id="thTemplate" value="original">
       </div>
       </div>
@@ -681,7 +691,8 @@
     liveText("#liveFeatureCount", String(features.length));
     var template = $("#thTemplate").value || "original";
     var templateNames = { original: FT("tpl_name_classic"), nocturne: FT("tpl_name_nocturne"), reel: FT("tpl_name_reel") };
-    liveText("#liveTemplate", templateNames[template] || FT("tpl_name_classic"));
+    var tplCardName = document.querySelector('.tpl-card[data-tpl="' + template + '"] .tpl-name');
+    liveText("#liveTemplate", templateNames[template] || (tplCardName && tplCardName.textContent) || FT("tpl_name_classic"));
     $("#livePreviewCard").classList.toggle("nocturne", template === "nocturne");
     if (firstPhoto) $("#livePreviewImage").src = firstPhoto;
     $("#liveTags").innerHTML = features.map(function (feature) { return "<span>" + feature + "</span>"; }).join("");
