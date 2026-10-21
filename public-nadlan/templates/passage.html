@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Forly Nadlan</title>
+<meta name="description" content="">
+<link rel="icon" type="image/png" href="/favicon.png">
+<style>
+/* Passage — 4 colors: cream · white · gold · ink (alphas allowed). Engine: story.js */
+:root{--cream:#F3EDE2;--white:#FFFFFF;--gold:var(--accent,#B8935A);--ink:#1E1C19;--pad:clamp(18px,5vw,80px);--serif:'Discovery FS',serif;--sans:'Discovery FS',sans-serif}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--ink);color:var(--ink);font:400 17px/1.65 var(--sans);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,figure{margin:0}h1,h2,.h3{font-family:var(--serif);font-weight:700;line-height:1.02;letter-spacing:-.03em}
+a{color:inherit}button,input{font:inherit}button{cursor:pointer}
+:focus-visible{outline:2px solid var(--gold);outline-offset:4px}
+.num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
+
+/* fixed video layer — the page scrolls over it */
+.bg{position:fixed;inset:0;z-index:0;overflow:hidden;background:var(--ink) center/cover no-repeat}
+.bg video{width:100%;height:100%;object-fit:cover;display:block}
+.bg:after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(30,28,25,calc(.25 + var(--dim,0)*.55)),rgba(30,28,25,.05) 60%)}
+main{position:relative;z-index:1}
+.topbar{position:fixed;top:0;inset-inline:0;z-index:5;display:flex;justify-content:space-between;align-items:center;padding:18px var(--pad);color:var(--white);transition:background .4s,padding .4s}
+.topbar.solid{background:var(--ink);padding-block:12px}
+.brand{font:900 24px/1 var(--serif);text-decoration:none}
+.topbar .cta{text-decoration:none;font-size:14px;border-bottom:1px solid var(--gold);padding-bottom:3px}
+
+/* 1+2 · Arrival → Reveal */
+.pin{height:165vh;position:relative}
+.stage{position:sticky;top:0;height:100svh;display:flex;flex-direction:column;justify-content:flex-end;padding:0 var(--pad) clamp(28px,6vh,56px);color:var(--white)}
+.phrase{position:absolute;bottom:clamp(28px,6vh,56px);inset-inline:var(--pad);max-width:30ch;font:500 clamp(18px,2vw,24px)/1.4 var(--serif);transition:opacity .5s,transform .6s}
+.phrase.off{opacity:0;transform:translateY(-20px);pointer-events:none}
+.cue{display:block;margin-top:16px;font:500 12px var(--sans);letter-spacing:.2em;color:var(--gold)}
+.st{opacity:0;transform:translateY(20px);transition:opacity .55s ease,transform .7s cubic-bezier(.2,.7,.2,1)}.st.on{opacity:1;transform:none}
+.deal{font:700 11px/1 var(--sans);letter-spacing:.26em;color:var(--gold);margin-bottom:12px}
+.stage h1{font-size:clamp(40px,7vw,104px);max-width:16ch}
+.addr{margin-top:8px;font-size:clamp(14px,1.5vw,18px);color:rgba(255,255,255,.85)}.addr span+span:before{content:' · '}
+.data{margin-top:clamp(18px,3vh,30px)}
+.price{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,.3);padding-top:clamp(14px,2vh,22px)}
+.price b{font:700 clamp(34px,5vw,64px)/1 var(--serif);color:var(--gold)}.price small{font-size:13px;opacity:.75}
+.specs{display:flex;flex-wrap:wrap;gap:6px 0;margin-top:10px;font-size:clamp(15px,1.6vw,19px)}
+.specs span{white-space:nowrap}.specs span+span:before{content:'·';color:var(--gold);margin:0 12px}
+.specs b{font-weight:700}.specs i{font-style:normal}
+
+/* panels + gaps */
+.gap{height:30vh}
+.panel{--p:1;position:relative;padding:clamp(56px,9vw,120px) var(--pad)}
+.cream{background:var(--cream)}.white{background:var(--white)}.inkp{background:var(--ink);color:var(--cream)}
+h2{font-size:clamp(34px,5vw,76px);margin-bottom:18px}
+.lede{max-width:44ch;font-size:clamp(16px,1.5vw,19px);opacity:.8}
+
+/* edges: E-B arch doorway · E-D leveling slant */
+[data-edge="E-B"]{clip-path:inset(0 calc((1 - var(--p))*14%) round calc((1 - var(--p))*50vw) calc((1 - var(--p))*50vw) 0 0)}
+[data-edge="E-D"]{clip-path:polygon(0 calc((1 - var(--p))*16vw),100% 0,100% 100%,0 100%)}
+
+/* 3 · Living — photo accordion of highlights */
+.living-head{display:flex;justify-content:space-between;align-items:end;gap:5vw;flex-wrap:wrap;margin-bottom:34px}
+.chips{max-width:520px}.chips span{border:1px solid var(--gold)!important;font-size:13px!important}
+.acc{display:flex;gap:10px;height:min(62vh,560px)}
+.acc-i{position:relative;flex:1;min-width:0;overflow:hidden;border:0;padding:0;background:var(--ink);color:var(--white);text-align:start;transition:flex .7s cubic-bezier(.2,.7,.2,1)}
+.acc-i.on{flex:4.2}
+.acc-img img,.acc-img canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.55;transform:scale(1.08);transition:opacity .7s,transform 1.2s}
+.acc-i.on .acc-img img,.acc-i.on .acc-img canvas{opacity:.9;transform:scale(1)}
+.acc-i:after{content:'';position:absolute;inset:0;background:linear-gradient(to top,rgba(30,28,25,.85),transparent 60%)}
+.acc-n{position:absolute;top:18px;inset-inline-start:18px;z-index:1;font:700 14px var(--serif);color:var(--gold)}
+.acc-t{position:absolute;bottom:22px;inset-inline:20px;z-index:1}
+.acc-t .h3{display:block;font-size:clamp(20px,2.2vw,32px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acc-t .p,.acc-t .hl-tag{display:block;max-height:0;opacity:0;overflow:hidden;transition:opacity .4s,max-height .6s}
+.acc-i.on .acc-t .p{max-height:120px;opacity:.9;margin-top:8px;max-width:42ch;font-size:15px}
+.acc-i.on .acc-t .hl-tag{max-height:30px;opacity:1;display:inline-block;margin-top:10px;font-size:12px;letter-spacing:.14em;color:var(--gold)}
+.acc-i:not(.on) .acc-t .h3{writing-mode:vertical-rl;transform:rotate(180deg);position:absolute;bottom:0;inset-inline-start:0}
+.acc-bar{position:absolute;top:0;inset-inline-start:0;height:3px;background:var(--gold);width:0;z-index:2}.acc-i.on .acc-bar{animation:bar 2.5s linear forwards}
+@keyframes bar{to{width:100%}}
+
+/* 4 · Inside — big image + thumbnails */
+.g-main{position:relative;overflow:hidden;aspect-ratio:16/9;max-height:72vh;width:100%;background:var(--ink);touch-action:pan-y;cursor:zoom-in}
+.g-track{display:flex;height:100%;direction:ltr;transition:transform .8s cubic-bezier(.65,0,.35,1)}
+.g-track figure{flex:0 0 100%;height:100%;position:relative}
+.g-track img,.g-track canvas{width:100%;height:100%;object-fit:cover;display:block}
+.g-cap{position:absolute;bottom:14px;inset-inline-start:18px;color:var(--white);font-size:14px;text-shadow:0 1px 10px rgba(30,28,25,.9);pointer-events:none}.g-cap b{font-weight:500}
+.g-count{position:absolute;top:14px;left:16px;color:var(--white);font:500 12px var(--sans);letter-spacing:.14em;direction:ltr;pointer-events:none}
+.g-thumbs{display:flex;gap:10px;margin-top:12px;overflow-x:auto;scrollbar-width:none}
+.g-th{position:relative;flex:0 0 clamp(70px,11vw,130px);aspect-ratio:4/3;padding:0;border:2px solid transparent;background:#2b2824;opacity:.55;overflow:hidden;transition:opacity .3s,border-color .3s}
+.g-th.on{border-color:var(--gold);opacity:1}.g-th .g-no{display:none}
+.single .g-thumbs,.single .g-count{display:none}
+
+/* 5 · Around — thin glass over the video */
+.over{color:var(--white);padding:clamp(60px,10vw,140px) var(--pad)}
+.around{display:grid;grid-template-columns:1fr 1fr;gap:0 5vw;padding:clamp(24px,4vw,48px);background:rgba(30,28,25,.5);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid color-mix(in srgb,var(--gold) 35%,transparent)}
+.around h2,.around .lede{grid-column:1/-1}.around .lede{margin-bottom:10px}
+.stops,.stats{list-style:none;padding:0;margin:0}
+.stops li,.stat{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.2)}
+.stops span,.stat span{font-size:14px;opacity:.8}
+.stat b{order:2;font:700 clamp(22px,2.4vw,30px)/1 var(--serif);color:var(--gold)}
+
+/* 6 · Invitation */
+.invite{display:grid;grid-template-columns:1.1fr 1fr;gap:7vw}
+.agent{display:flex;gap:14px;align-items:center;margin-top:28px;padding-top:18px;border-top:1px solid color-mix(in srgb,var(--gold) 50%,transparent)}
+.av{width:52px;height:52px;border:1px solid var(--gold);color:var(--gold);display:grid;place-items:center;font:700 20px var(--serif);flex:none}
+form{display:grid;gap:20px;align-content:center}label{font-size:13px}
+input{display:block;width:100%;border:0;border-bottom:1px solid rgba(30,28,25,.3);border-radius:0;background:transparent;color:inherit;padding:10px 0;font-size:19px}
+input:focus{outline:none;border-color:var(--gold)}
+form button{background:var(--gold);color:var(--white);border:0;min-height:56px;padding:0 20px;text-align:start;font-weight:700}
+form button:disabled{opacity:.6}
+[data-lead-sent]{display:none;align-self:center}[data-lead-sent] h3{font:700 clamp(28px,3vw,40px)/1.1 var(--serif);margin-bottom:8px}
+footer{position:relative;z-index:1;padding:26px var(--pad) 40px;color:var(--cream);font-size:12px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;background:var(--ink)}
+footer a{text-decoration:none;opacity:.8}
+
+.in-view{opacity:0;transform:translateY(24px);transition:opacity .7s,transform .8s cubic-bezier(.2,.7,.2,1)}.in-view.on{opacity:1;transform:none}
+
+@media(max-width:760px){
+  .acc{flex-direction:column;height:auto;gap:8px}.acc-i,.acc-i.on{flex:none;height:68px;transition:height .7s cubic-bezier(.2,.7,.2,1)}.acc-i.on{height:min(340px,52svh)}
+  .acc-i:not(.on) .acc-t .h3{writing-mode:horizontal-tb;transform:none;position:static}
+  .acc-i:not(.on) .acc-t{bottom:auto;top:22px;inset-inline-start:52px}
+  .g-main{aspect-ratio:4/5}.around,.invite{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important;animation:none!important}.st,.in-view{opacity:1;transform:none}[data-edge]{clip-path:none!important}}
+</style>
+<link rel="stylesheet" href="/fonts/discovery.css">
+</head>
+<body>
+<div class="bg"><video data-video autoplay muted loop playsinline preload="auto" aria-hidden="true"></video></div>
+<header class="topbar"><a class="brand" href="#top" data-logo><span data-bind="texts.footer_brand||agent.brand_name||agent.name">forly.</span></a><a class="cta" href="#contact" data-i18n="book_visit">תיאום ביקור</a></header>
+
+<main id="top">
+  <!-- 1+2 · Arrival → Reveal -->
+  <section class="pin" data-story-pin aria-labelledby="hero-title">
+    <div class="stage">
+      <p class="phrase"><span data-bind="hero.phrase">קו ראשון לים, שיפוץ אדריכלי מהיסוד — נכס שמגיעים אליו פעם בעשור.</span><span class="cue">↓ <span data-i18n="scroll">גללו</span></span></p>
+      <span class="deal st" data-at=".08" data-deal>למכירה</span>
+      <h1 id="hero-title" class="st" data-at=".16" data-bind="property.title">דירת 4 חדרים בדיזנגוף</h1>
+      <p class="addr st" data-at=".26"><span data-show="property.address" data-bind="property.address"></span><span data-show="property.neighborhood" data-bind="property.neighborhood"></span><span data-show="property.city" data-bind="property.city"></span></p>
+      <div class="data">
+        <div class="price st" data-at=".38" data-show="property.price"><b class="num" data-bind="property.price" data-fmt="price"></b><small data-price-label>מחיר מבוקש</small></div>
+        <div class="specs st" data-at=".5"><span data-show="property.size_sqm"><b class="num" data-bind="property.size_sqm"></b> <i data-i18n="sqm">מ״ר</i></span><span data-show="property.rooms"><b class="num" data-bind="property.rooms"></b> <i data-i18n="rooms">חדרים</i></span><span data-show="property.floor"><i data-i18n="floor">קומה</i> <b class="num" data-bind="property.floor"></b></span><span data-show="property.parking"><b class="num" data-bind="property.parking"></b> <i data-i18n="parking">חניות</i></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · Living -->
+  <section class="panel cream" id="living">
+    <div class="living-head in-view">
+      <div><h2 data-bind="texts.why_title" data-i18n="why_head">נכס כזה לא מגיע ללוחות. הוא מגיע לאנשים הנכונים.</h2><p class="lede" data-bind="texts.why_sub" data-i18n="why_sub">כמה סיבות שבגללן הנכס הזה שווה ביקור.</p></div>
+      <div class="chips" data-amenities></div>
+    </div>
+    <div class="acc in-view" data-story-highlights data-story-mode="accordion" data-list="carousel.slides"><template><button type="button" class="acc-i" data-hl><span class="acc-img" data-hl-img></span><span class="acc-bar"></span><span class="acc-n" data-field="num"></span><span class="acc-t"><span class="h3" data-field="title"></span><span class="p" data-field="body"></span><span class="hl-tag" data-field="tag"></span></span></button></template></div>
+  </section>
+
+  <div class="gap"></div>
+
+  <!-- 4 · Inside (E-B) -->
+  <section class="panel inkp" data-edge="E-B" id="gallery" aria-label="גלריה">
+    <div class="g in-view" data-story-gallery>
+      <div class="g-main" role="button" tabindex="0" aria-label="הגדלת התמונה"><div class="g-track"></div><span class="g-count"></span><span class="g-cap"><b></b></span></div>
+      <div class="g-thumbs" data-gallery data-gallery-class="g-th" data-gallery-count="6"></div>
+    </div>
+  </section>
+
+  <!-- 5 · Around (glass over the video) -->
+  <section class="over" id="area">
+    <div class="around in-view">
+      <h2 data-bind="texts.area_title||property.neighborhood||property.city" data-i18n="the_area">השכונה</h2><p class="lede" data-bind="texts.area_sub||area.blurb" data-i18n="area_sub">אחת השכונות המבוקשות באזור — וזה לא במקרה.</p>
+      <ul class="stops" data-list="area.stops"><template><li><b data-field="label"></b><span data-field="minutes"></span></li></template></ul>
+      <div class="stats" data-list="area.stats"><template><div class="stat"><b class="num" data-field="value"></b><span data-field="label"></span></div></template></div>
+    </div>
+  </section>
+
+  <!-- 6 · Invitation (E-D) -->
+  <section class="panel white" data-edge="E-D" id="contact">
+    <div class="invite">
+      <div class="in-view"><h2 data-bind="cta.headline">התמונה הבאה? אתם, כאן.</h2><p class="lede" data-bind="cta.sub">יש דברים שמרגישים רק כשנכנסים. נשמח לתאם ביקור אישי.</p>
+        <div class="agent"><span class="av" data-avatar aria-hidden="true"></span><div><b data-bind="agent.name">סוכן הנכס</b><br><small><span data-bind="agent.brand_name"></span><span data-show="agent.license"> · <span data-i18n="license_label">רישיון תיווך</span> <span class="num" data-bind="agent.license"></span></span></small></div></div></div>
+      <form class="in-view" data-lead-form><label><span data-i18n="form_name">שם מלא</span><input data-lead="name" name="name" autocomplete="name"></label><label><span data-i18n="form_phone">טלפון נייד</span><input data-lead="phone" name="phone" type="tel" autocomplete="tel" placeholder="050-000-0000"></label><button type="submit"><span data-i18n="book_visit">תיאום ביקור</span> ↙</button></form>
+      <div data-lead-sent aria-live="polite"><h3 data-i18n="sent_title">הפרטים אצלנו.</h3><p data-i18n="sent_body">נחזור אליכם באופן אישי בהקדם.</p></div>
+    </div>
+  </section>
+</main>
+<footer><a href="#top" data-logo><span data-bind="texts.footer_brand||agent.brand_name||agent.name">forly.</span></a><span data-i18n="footer_disclaimer">הדף נוצר אוטומטית ע״י Forly 🦉</span><span><a href="/legal/privacy.html" data-i18n="privacy_policy">מדיניות פרטיות</a> · <a href="/legal/accessibility.html" data-i18n="accessibility">הצהרת נגישות</a></span></footer>
+<script src="/tpl/demo.js"></script>
+<script src="/templates/i18n.js"></script>
+<script src="/tpl/runtime.js"></script>
+<script src="/tpl/story.js"></script>
+</body>
+</html>

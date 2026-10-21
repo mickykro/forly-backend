@@ -6,15 +6,10 @@
 <title>Forly Nadlan</title>
 <meta name="description" content="">
 <link rel="icon" type="image/png" href="/favicon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@300;400;500;700&family=Assistant:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
   /* Discovery FS — the house face. Served from /tpl rather than inlined as
      base64: two 42KB files that the browser caches once across every listing,
      instead of 113KB re-downloaded with every page's HTML. */
-  @font-face{font-family:'Discovery FS';src:url(/tpl/assets/atelier/discovery-300.woff2) format('woff2');font-weight:300;font-style:normal;font-display:swap}
-  @font-face{font-family:'Discovery FS';src:url(/tpl/assets/atelier/discovery-700.woff2) format('woff2');font-weight:700;font-style:normal;font-display:swap}
 
   :root{
     --bg:#faf8f1; --panel:#f2eee1; --panel2:#ece5d3; --shade:#ded4ba;
@@ -26,9 +21,9 @@
        falls through to unset, never to an earlier declaration. */
     --line:rgba(176,132,40,.26);
     --text:#2e2a21; --muted:#7c745e; --ink-2:#453d29;
-    --serif:'Discovery FS','Frank Ruhl Libre','David Libre',serif;
-    --disp:'Discovery FS','Frank Ruhl Libre','David Libre',serif;
-    --sans:'Discovery FS','Assistant',-apple-system,'Segoe UI',sans-serif;
+    --serif:'Discovery FS',serif;
+    --disp:'Discovery FS',serif;
+    --sans:'Discovery FS',-apple-system,'Segoe UI',sans-serif;
     --ease:cubic-bezier(.16,1,.3,1);
     --bar:64px;
   }
@@ -375,6 +370,7 @@
     .stack-card{position:static;transform:none!important;filter:none!important}
   }
 </style>
+<link rel="stylesheet" href="/fonts/discovery.css">
 </head>
 <body>
 

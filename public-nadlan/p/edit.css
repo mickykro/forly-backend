@@ -9,7 +9,7 @@
   background:rgba(23,20,15,.96);color:#fff;
   backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
   border-top:1px solid rgba(217,177,92,.4);
-  font-family:'Heebo',sans-serif;
+  font-family:'Discovery FS',sans-serif;
 }
 .et-info{display:flex;align-items:baseline;gap:10px;min-width:0}
 .et-info b{color:var(--gold-bright,#D9B15C);font-size:.95rem;white-space:nowrap}

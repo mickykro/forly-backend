@@ -1,0 +1,10 @@
+/* Discovery FS — the house face for the platform and every template. Two cuts:
+   Light serves weights up to 500, Bold 600 and up. */
+@font-face{font-family:'Discovery FS';src:url(/fonts/Discovery_Fs-Light.woff) format('woff');font-weight:100 500;font-style:normal;font-display:swap}
+@font-face{font-family:'Discovery FS';src:url(/fonts/Discovery_Fs-Bold.woff) format('woff');font-weight:600 900;font-style:normal;font-display:swap}
+/* form controls don't inherit the page font by default */
+button,input,select,textarea{font-family:inherit}
+/* House rule: titles are Bold, everything else is Light. !important because it
+   overrides every page's and template's own weights, inline ones included. */
+body *{font-weight:300!important}
+h1,h2,h3,h4,h5,h6,h1 *,h2 *,h3 *,h4 *,h5 *,h6 *,.h3,.sec-title,.brand,.brand *,.forly-brand,.forly-wordmark,[data-logo],[data-logo] *,.legal-brand b,[data-bind^="cta.headline"],[data-bind^="property.title"],[data-bind*="_title"]{font-weight:700!important}

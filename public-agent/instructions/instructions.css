@@ -4,7 +4,7 @@
   --gold: #B98A2F; --gold-bright: #D9B15C; --gold-faint: rgba(185, 138, 47, .14);
   --dark: #14110C; --dark-2: #1D1913; --green: #1FAF5A; --red: #C0392B; --sage: #607D70;
   --wa-bg: #E9E2D6; --wa-out: #DCF6C6; --wa-in: #FFFFFF;
-  --serif: 'Frank Ruhl Libre', Georgia, serif; --sans: 'Heebo', system-ui, sans-serif; --radius: 18px;
+  --serif: 'Discovery FS', serif; --sans: 'Discovery FS', system-ui, sans-serif; --radius: 18px;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }

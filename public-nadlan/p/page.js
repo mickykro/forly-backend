@@ -84,7 +84,7 @@
   }
   var rgbStr = function (c) { return "rgb(" + c.r + "," + c.g + "," + c.b + ")"; };
 
-  var TEMPLATES = { original: 1, nocturne: 1, reel: 1, movie: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1 };
+  var TEMPLATES = { original: 1, nocturne: 1, reel: 1, movie: 1, atelier: 1, revue: 1, loupe: 1, orbite: 1, passage: 1, soleil: 1 };
 
   function applyTheme(theme) {
     if (!theme) return;
@@ -114,8 +114,8 @@
         theme.font_url.replace(/"/g, "") + '");font-display:swap}';
       document.head.appendChild(style);
     }
-    applyRoleFont("--serif", theme.font_title, "'Frank Ruhl Libre', serif");
-    applyRoleFont("--sans", theme.font_body, "'Heebo', sans-serif");
+    applyRoleFont("--serif", theme.font_title, "'Discovery FS', serif");
+    applyRoleFont("--sans", theme.font_body, "'Discovery FS', sans-serif");
   }
 
   function loadGoogleFont(family) {

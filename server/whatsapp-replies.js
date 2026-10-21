@@ -29,7 +29,7 @@ const QUESTIONS = {
   neighborhood: "באיזו שכונה?",
   description: "רוצים להוסיף תיאור קצר לנכס? שלחו טקסט חופשי.",
   // Numbers and names follow property-draft.js TEMPLATES (create.html's picker order).
-  template: "איזה עיצוב לדף? ענו במספר או בשם:\n1 קלאסי · 2 נוקטורן · 3 ריל · 4 אטלייה · 5 לופה · 6 אורביט",
+  template: "איזה עיצוב לדף? ענו במספר או בשם:\n1 קלאסי · 2 נוקטורן · 3 ריל · 4 אטלייה · 5 לופה · 6 אורביט · 7 פסאז׳ · 8 סוליי",
 };
 const REQUIRED = new Set(["city", "price", "rooms"]);
 
@@ -37,7 +37,7 @@ function ask(field) {
   const optional = !REQUIRED.has(field);
   const r = { text: QUESTIONS[field] + (optional ? "\n(או דלג)" : "") };
   if (field === "deal") r.buttons = ["למכירה", "להשכרה"];
-  if (field === "template") r.buttons = ["קלאסי", "נוקטורן", "ריל"]; // Green API caps buttons at 3; the text lists all six
+  if (field === "template") r.buttons = ["קלאסי", "נוקטורן", "ריל"]; // Green API caps buttons at 3; the text lists all eight
   return r;
 }
 // Second miss on the same question: don't repeat it word for word — say what works.

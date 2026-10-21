@@ -89,7 +89,7 @@ assert.equal(D.parseAnswer("description", "y".repeat(3000)).length, 2000);
 assert.equal(D.isRequired("city"), true);
 assert.equal(D.isRequired("floor"), false);
 assert.deepEqual(D.ASK_ORDER, ["city", "price", "rooms", "deal", "size_sqm", "floor", "parking", "neighborhood", "description"], "the design is asked only on the create path");
-assert.deepEqual(D.TEMPLATE_KEYS, ["original", "nocturne", "reel", "atelier", "loupe", "orbite"], "same order as create.html's picker");
+assert.deepEqual(D.TEMPLATE_KEYS, ["original", "nocturne", "reel", "atelier", "loupe", "orbite", "passage", "soleil"], "same order as create.html's picker");
 assert.deepEqual(["בכפר סבא", "ברמת גן", "באר שבע", "בבאר שבע", "בני ברק", "חיפה"].map((t) => D.parseAnswer("city", t)),
   ["כפר סבא", "רמת גן", "באר שבע", "באר שבע", "בני ברק", "חיפה"], "spoken 'in <city>' drops the ב, real ב-cities keep it");
 assert.deepEqual([["size_sqm", "100 ו-10."], ["size_sqm", "מאה ועשר"], ["floor", "קומה אחת"], ["floor", "קומה שנייה"], ["rooms", "שלוש וחצי"],
@@ -100,7 +100,10 @@ assert.equal(D.parseAnswer("template", "2 נוקטורן"), "nocturne");
 assert.equal(D.parseAnswer("template", "קלאסי"), "original");
 assert.equal(D.parseAnswer("template", " Reel "), "reel");
 assert.equal(D.parseAnswer("template", "לופ"), "loupe");
-assert.equal(D.parseAnswer("template", "7"), null);
+assert.equal(D.parseAnswer("template", "7"), "passage");
+assert.equal(D.parseAnswer("template", "8 סוליי"), "soleil");
+assert.equal(D.parseAnswer("template", "פסאז'"), "passage");
+assert.equal(D.parseAnswer("template", "9"), null);
 assert.equal(D.parseAnswer("template", "מודרני"), null);
 
 // ── draft state ──

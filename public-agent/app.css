@@ -3,8 +3,8 @@
   --gold:#B98A2F; --gold-bright:#D9B15C; --gold-faint:rgba(185,138,47,.16);
   --dark:#14110C; --dark-2:#1D1913; --green:#1FAF5A; --red:#C0392B;
   --radius:20px;
-  --serif:'Frank Ruhl Libre','Times New Roman',serif;
-  --sans:'Heebo',-apple-system,'Segoe UI',sans-serif;
+  --serif:'Discovery FS',serif;
+  --sans:'Discovery FS',-apple-system,'Segoe UI',sans-serif;
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:var(--sans);background:var(--bg);color:var(--ink);line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100svh}
