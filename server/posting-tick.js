@@ -212,7 +212,7 @@ async function runDue(c, post, st, deps, x, now) {
     if (!g || !A.isEligible(A.eligibility(g, ctx))) return skip(x, c.id, post.id, "ineligible");
     // Another Forly account may have posted this listing here since it was planned.
     aliases = A.groupIdsOf(g, conn).slice(1); // a resolved slug's history is this group's (Task 18)
-    const ga = (await x.store.getGroupActivityFor([g.group_id], now, undefined, { [g.group_id]: aliases }))[g.group_id] || {};
+    const ga = (await x.store.getGroupActivityFor([g.group_id], now, safety.activityDays(config), { [g.group_id]: aliases }))[g.group_id] || {};
     if (duplicateIn(ga, fp, now, config)) return skip(x, c.id, post.id, "duplicate");
     target = { ...g, target: "group", target_id: g.group_id };
   }
@@ -513,7 +513,7 @@ async function planNext(phone, st, deps, x, now) {
   if (!decision) return "idle";
   if (decision.campaignId) {
     const at = decision.at;
-    for (let i = 0; i < A.MAX_SESSION_POSTS && decision && decision.campaignId; i++) {
+    for (let i = 0, max = A.maxSessionPosts(deps.env); i < max && decision && decision.campaignId; i++) {
       const c = await C.schedulePost(Object.assign({}, decision, { at }), deps, now);
       const post = c && (c.posts || []).find((p) => p.group_id === decision.group_id && OPEN_POST.has(p.status));
       if (!post || post.status !== "pending_approval") break;

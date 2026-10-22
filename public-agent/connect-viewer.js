@@ -27,7 +27,7 @@ window.ForlyViewer = (() => {
   // session_expired | driver_busy | viewer_unavailable | connected | closed | …
   function mount(box, platform, opts = {}) {
     unmount();
-    cur = create(box, `/api/connections/browser/${platform}/view`, opts);
+    cur = create(box, `/api/connections/browser/${platform}/view`, Object.assign({ fit: true }, opts));
     return cur;
   }
 
@@ -70,7 +70,7 @@ window.ForlyViewer = (() => {
     const fitTo = (v) => Math.max(320, Math.min(1280, Math.floor(v)));
     let fitted = "";
     const fit = () => {
-      if (!me.alive || me.ended || !screen.clientWidth) return;
+      if (!opts.fit || !me.alive || me.ended || !screen.clientWidth) return; // the login window only (the server ignores it elsewhere)
       const ev = { t: "fit", w: fitTo(screen.clientWidth), h: fitTo(screen.clientHeight) };
       if (fitted === ev.w + "x" + ev.h) return;
       fitted = ev.w + "x" + ev.h;
@@ -151,7 +151,7 @@ window.ForlyViewer = (() => {
     img.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       const d = down = { x: e.clientX, y: e.clientY, lastY: e.clientY, lastX: e.clientX, moved: 0, type: e.pointerType, held: false };
-      d.timer = setTimeout(() => { if (down === d && d.moved <= 10) { d.held = true; send(Object.assign({ t: "down" }, frac(d.x, d.y))); } }, HOLD_MS);
+      d.timer = setTimeout(() => { if (down === d && d.moved <= 10) { d.held = true; typedFirst(); send(Object.assign({ t: "down" }, frac(d.x, d.y))); } }, HOLD_MS);
       try { img.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
     });
     img.addEventListener("pointermove", (e) => {
@@ -180,6 +180,7 @@ window.ForlyViewer = (() => {
       // A phone opens its keyboard only on focus inside the tap itself; if
       // the page's focus did not land in a text field, it is closed again.
       ta.focus({ preventScroll: true });
+      typedFirst(); // text still waiting in the box goes before the click, never after it (PR #145 review)
       send(Object.assign({ t: "click" }, frac(d.x, d.y))).then((r) => { if (touch && r && r.editable === false) ta.blur(); });
     });
     img.addEventListener("pointercancel", () => { const d = down; down = null; if (d) release(d, d.lastX, d.lastY); });
@@ -215,6 +216,8 @@ window.ForlyViewer = (() => {
       send({ t: "key", key: e.key, shift: e.shiftKey });
     });
     ta.addEventListener("compositionstart", () => { composing = true; });
+    // Before a click, a press or back/reload: what is typed goes first (not mid-composition).
+    const typedFirst = () => { if (!composing) flush(); };
     // One request per character is a round trip each: while one is in flight,
     // what is typed waits in the box and goes as one text event after it.
     let busy = false, again = false;
@@ -230,7 +233,7 @@ window.ForlyViewer = (() => {
     box.querySelector(".cv-bar").addEventListener("click", (e) => {
       const a = e.target && e.target.getAttribute && e.target.getAttribute("data-a");
       if (a === "kbd") ta.focus();
-      else if (a === "back" || a === "reload") send({ t: a });
+      else if (a === "back" || a === "reload") { typedFirst(); send({ t: a }); }
     });
     me.send = send;
     me.unmount = () => stop(me);

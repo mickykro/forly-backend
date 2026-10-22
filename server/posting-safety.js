@@ -183,6 +183,9 @@ function jerusalemDate(date) { return localDate(new Date(date), DEFAULTS.timezon
 // means not on the same date, so 23:00 and 08:00 the next morning are 1 apart.
 const calDay = (date) => { const [y, m, d] = jerusalemDate(date).split("-").map(Number); return Math.round(Date.UTC(y, m - 1, d) / MS_DAY); };
 const datesApart = (from, to) => calDay(to) - calDay(from);
+// How many date buckets of other accounts' activity to read: the configured
+// same-listing window, never under 1 (today's bucket holds the group's daily count).
+const activityDays = (config) => Math.max(1, Math.ceil(Number((config || DEFAULTS).fingerprint_window_days) || 0));
 // The first moment (Jerusalem midnight) of the date `days` after `from`'s date — when a `days` guard ends.
 function dateGapEnd(from, days) {
   const n = calDay(from) + days;
@@ -450,7 +453,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 
 module.exports = {
   capsOff, burst, CAP_FIELDS, CAP_MAX, capsFrom, capRange,
-  datesApart, dateGapEnd,
+  datesApart, dateGapEnd, activityDays,
   DEFAULTS, CALENDAR_OK, nextSlot, groupBlock, withTimes, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
   wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },

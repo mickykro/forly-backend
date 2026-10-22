@@ -369,7 +369,7 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
   const conn = pre.conn || (await x.db.getConnection(phone)) || {};
   const campaigns = pre.campaigns || (await x.store.listPostingCampaignsByPhone(phone));
   const open = campaigns.reduce((n, c) => n + (c.posts || []).filter((p) => OPEN_POST.has(p.status)).length, 0);
-  if (open >= A.MAX_SESSION_POSTS) return null;
+  if (open >= A.maxSessionPosts(deps.env)) return null;
   // awaiting_texts: the agent has not approved the group texts yet (posting-listing-groups).
   const ready = campaigns.filter((c) => c.status === "running" && !c.awaiting_texts && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
   if (!ready.length) return null;
@@ -390,7 +390,7 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
     const groupCands = cands.filter((g) => g.target === "group");
     const groupIds = groupCands.map((g) => g.group_id);
     const aliases = Object.fromEntries(groupCands.map((g) => [g.group_id, g.aliases || []]));
-    const groupActivity = groupIds.length ? await x.store.getGroupActivityFor(groupIds, now, undefined, aliases) : {};
+    const groupActivity = groupIds.length ? await x.store.getGroupActivityFor(groupIds, now, safety.activityDays(config), aliases) : {};
     const fp = safety.fingerprint(s.page.property || {});
     for (const set of [cands.filter((g) => g.target === "page"), cands.filter((g) => g.target === "group")]) {
       if (!set.length) continue;
@@ -501,7 +501,7 @@ async function explainGroups(c, deps = {}, now) {
   const account = await A.accountView(c.phone, conn, deps, now);
   const groups = (c.groups || []).filter((g) => g && g.group_id);
   const aliases = Object.fromEntries(groups.map((grp) => [grp.group_id, A.groupIdsOf(grp, conn).slice(1)]));
-  const activity = groups.length ? await x.store.getGroupActivityFor(groups.map((grp) => grp.group_id), now, undefined, aliases) : {};
+  const activity = groups.length ? await x.store.getGroupActivityFor(groups.map((grp) => grp.group_id), now, safety.activityDays(config), aliases) : {};
   const g = { now, posts: safety.withTimes(account), pageId: c.page_id, fp: safety.fingerprint(page.property || {}), groupActivity: activity, config };
   const pens = conn.posting_group_penalties || {};
   return groups.map((grp) => {

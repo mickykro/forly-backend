@@ -284,6 +284,12 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.equal(out["222"].posts_today, 1);
     assert.deepEqual(out["333"], { posts_today: 0, fingerprints: [] });
     assert.equal((await S.getGroupActivityFor(["111"], NOW, 1))["111"].fingerprints.length, 2);
+    // a 7-day same-listing window (an admin's caps) reaches the one four dates back (PR #145 review)
+    const safety = require("./posting-safety");
+    const days = safety.activityDays(safety.configFrom({ caps: { fingerprint_window_days: 7 } }, {}));
+    assert.equal(days, 7);
+    assert.ok((await S.getGroupActivityFor(["111"], NOW, days))["111"].fingerprints.some((f) => f.exact === fp("old").exact), "the configured window is read");
+    assert.equal(safety.activityDays(safety.configFrom({ caps: { fingerprint_window_days: 0 } }, { FORLY_ENV: "local" })), 1, "no window (local): today's bucket still");
     for (const b of S._test.maps.group_activity.values()) {
       for (const f of b.fingerprints) {
         assert.deepEqual(Object.keys(f).sort(), ["at", "exact", "strong", "weak"]);

@@ -579,7 +579,8 @@ async function more(page, out, x0, deps) {
 // Between two posts: on the feed, reading, for 1.5–5.8 minutes. → false when
 // the page says stop (a halting signal) or the switches do.
 async function between(page, x) {
-  if (safety.burst(x.deps.env || process.env)) return 0; // POSTING_BURST (local): straight to the next post, no feed visit
+  // POSTING_BURST (local): straight to the next post, no feed visit — but the switches still decide (0 would end the chain).
+  if (safety.burst(x.deps.env || process.env)) return x.allows("dwell");
   if (!(await x.allows("dwell")) || !(await nav(page, x, FEED_URL).catch(() => false))) return false;
   const until = Date.now() + (typeof x.deps.chainDwellMs === "number" ? x.deps.chainDwellMs : chain.dwellMs(x.rand, x.deps.env)); // tests: chainDwellMs
   while (Date.now() < until) {

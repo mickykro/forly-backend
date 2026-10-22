@@ -20,7 +20,9 @@ const ACTIVE_PAGE = new Set(["active", "expiring"]);
 const OPEN_POST = new Set(["pending_approval", "scheduled", "posting"]);
 // Posts one browser session publishes, and so the most posts the planner
 // prepares ahead for the agent to approve together.
-const MAX_SESSION_POSTS = safety.burst(process.env) ? 1000 : 5; // POSTING_BURST (local): no per-session limit
+const MAX_SESSION_POSTS = 5;
+// Read at each use: the admin's posting modes can turn burst on or off while the server runs. POSTING_BURST (local): no per-session limit.
+const maxSessionPosts = (env = process.env) => (safety.burst(env) ? 1000 : MAX_SESSION_POSTS);
 // Attempt state → campaign post status (the post mirrors its attempt).
 const POST_STATUS_OF = {
   verified_posted: "posted", submitted_for_approval: "pending_group_approval",
@@ -432,7 +434,7 @@ const drainCancelFailures = () => { const n = cancelFailures; cancelFailures = 0
 
 module.exports = {
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
-  MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, MAX_SESSION_POSTS, POST_STATUS_OF, ELIGIBILITY,
+  MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, MAX_SESSION_POSTS, maxSessionPosts, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
   groupIdFromUrl, defaultGroupIds, nonMemberLinks, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY, fitsProperty, nameDealConflict, nameBarsAgents,
   memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,

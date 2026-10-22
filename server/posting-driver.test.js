@@ -68,6 +68,19 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.ok(v.lastIndexOf("https://www.facebook.com/") > 1 && v[v.length - 1].includes("/posts/") || v.includes(GROUP_URL), "the dwell back on the feed between posts");
     assert.ok(h.transitions.some((t) => t.k === second.key && t.to === "verified_posted"), "the second attempt walked its own states");
   }
+  // burst (local): no dwell, but the chain goes on — a zero wait must never end it
+  {
+    const h = harness();
+    const second = attemptOf({ key: "abcdefabcdefabcdefabcdefabcdef12", post_id: "p2" });
+    let asked = 0;
+    const next = async () => (++asked > 1 ? null : async () => ({ kind: "group", args: argsOf({ attempt: second }), deps: Object.assign({}, h.deps, { next }) }));
+    h.deps.next = next; h.deps.env = { FORLY_ENV: "local", POSTING_SHOTS: "0", POSTING_BURST: "1" };
+    await PD.postToGroup(argsOf(), h.deps);
+    assert.equal(h.submits(), 2, "burst: both posts in one session");
+    assert.equal(h.opened.length, 1);
+  }
+  assert.equal(require("./posting-account").maxSessionPosts({ FORLY_ENV: "local", POSTING_BURST: "1" }), 1000, "burst read at each use");
+  assert.equal(require("./posting-account").maxSessionPosts({ FORLY_ENV: "local" }), 5);
   // POSTING_CHAIN=0: one post, the old short session
   {
     const h = harness();
