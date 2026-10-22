@@ -8,8 +8,8 @@
  * unchanged. Their own limits still hold: burst, fast pacing, no warm-up and
  * no caps only ever apply with FORLY_ENV=local; screenshots never in prod.
  *
- * Infrastructure and security stay env-only: POSTING_ENABLED (the deploy's
- * kill switch), POSTING_SWEEPER (which server posts), the owner/operator
+ * Infrastructure and security stay env-only: POSTING_ENABLED=0 (a server's
+ * emergency brake; unset, the admin's main switch decides), POSTING_SWEEPER (which server posts), the owner/operator
  * phones, the browser type and proxy hops.
  */
 const MODES = {

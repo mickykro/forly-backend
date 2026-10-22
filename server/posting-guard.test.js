@@ -195,9 +195,10 @@ async function denies(opts, deps, reason) {
     await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, { db: fakeDb({ settings }), env: ON }, "global_off");
     await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb({ settings }), env: ON }), (e) => e.reason === "global_off");
   }
-  // …and the env must say POSTING_ENABLED=1: unset, "0", "" or anything else is env_off, before the doc is read
-  for (const env of [{}, { POSTING_ENABLED: "0" }, { POSTING_ENABLED: "" }, { POSTING_ENABLED: "true" }, { POSTING_ENABLED: "yes" }]) {
-    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, { db: fakeDb(), env }, "env_off");
+  // …the env only brakes: POSTING_ENABLED=0 is env_off before the doc is read; unset or anything else leaves it to the admin's switch
+  await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, { db: fakeDb(), env: { POSTING_ENABLED: "0" } }, "env_off");
+  for (const env of [{}, { POSTING_ENABLED: "" }, { POSTING_ENABLED: "true" }]) {
+    assert.deepStrictEqual(await assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env }), ENABLED, `the switch decides: ${JSON.stringify(env)}`);
   }
   assert.deepStrictEqual(await assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env: ON }), ENABLED);
 
@@ -212,7 +213,7 @@ async function denies(opts, deps, reason) {
         (e) => e.code === "posting_disabled" && e.reason === reason, reason);
     }
     // posting still needs the switches
-    await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, off, "env_off");
+    await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, off, "global_off");
   }
 
   // ── postingEnvAllowed (C1): prod, or POSTING_SWEEPER=1 off staging; never staging ──
@@ -248,7 +249,7 @@ async function denies(opts, deps, reason) {
     process.env.POSTING_ENABLED = "0";
     await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "env_off");
     delete process.env.POSTING_ENABLED;
-    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "env_off");
+    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "global_off"); // unset: the switch decides, and there is no switch doc
     // env on, and the real db (memory path) holds no settings/posting doc: global_off
     process.env.POSTING_ENABLED = "1";
     await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "global_off");

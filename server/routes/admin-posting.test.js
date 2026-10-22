@@ -111,7 +111,7 @@ const noFullPhone = (raw, what) => {
       const sE = await new Promise((r) => { const sv = appE.listen(0, () => r(sv)); });
       try {
         const g = await call(sE, "GET", "/p/overview", as(ADMIN, false));
-        assert.equal(g.status, 200); assert.equal(g.body.env_forced_off, e.POSTING_ENABLED !== "1");
+        assert.equal(g.status, 200); assert.equal(g.body.env_forced_off, e.POSTING_ENABLED === "0", "only an explicit 0 brakes");
         // Allowed: reaches the route (a stale version → 409, nothing written). Refused: 503 before anything.
         const paths = allowed ? ["/switch"] : ["/switch", "/switch/platform", "/switch/visible", `/accounts/${P.captcha}/reenable`, `/accounts/${P.compromised}/revoke-profile`,
           `/attempts/${"a".repeat(32)}/resolve`, "/campaigns/abc/resume"];
