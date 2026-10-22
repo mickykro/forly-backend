@@ -33,12 +33,10 @@ async function denies(opts, deps, reason) {
 }
 
 (async () => {
-  // ── env_off: the global kill switch, checked before anything else ──
-  await denies(
-    { phone: PHONE, platform: PLATFORM, action: "dwell" },
-    { db: fakeDb(), env: { POSTING_ENABLED: "0" } },
-    "env_off",
-  );
+  // ── no env switch: POSTING_ENABLED, whatever its value, never decides — the admin's main switch does ──
+  for (const env of [{}, { POSTING_ENABLED: "0" }, { POSTING_ENABLED: "1" }]) {
+    assert.deepStrictEqual(await assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env }), ENABLED, `the switch decides: ${JSON.stringify(env)}`);
+  }
 
   // ── global_off: settings/posting.enabled === false ──
   await denies(
@@ -195,10 +193,6 @@ async function denies(opts, deps, reason) {
     await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, { db: fakeDb({ settings }), env: ON }, "global_off");
     await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb({ settings }), env: ON }), (e) => e.reason === "global_off");
   }
-  // …and the env must say POSTING_ENABLED=1: unset, "0", "" or anything else is env_off, before the doc is read
-  for (const env of [{}, { POSTING_ENABLED: "0" }, { POSTING_ENABLED: "" }, { POSTING_ENABLED: "true" }, { POSTING_ENABLED: "yes" }]) {
-    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, { db: fakeDb(), env }, "env_off");
-  }
   assert.deepStrictEqual(await assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env: ON }), ENABLED);
 
   // ── assertAccountAllowed: a groups sync reads with every automation switch off,
@@ -212,7 +206,7 @@ async function denies(opts, deps, reason) {
         (e) => e.code === "posting_disabled" && e.reason === reason, reason);
     }
     // posting still needs the switches
-    await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, off, "env_off");
+    await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, off, "global_off");
   }
 
   // ── postingEnvAllowed (C1): prod, or POSTING_SWEEPER=1 off staging; never staging ──
@@ -244,15 +238,8 @@ async function denies(opts, deps, reason) {
 
   // ── default deps: db defaults to the real module, env to process.env ──
   {
-    const saved = process.env.POSTING_ENABLED;
-    process.env.POSTING_ENABLED = "0";
-    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "env_off");
-    delete process.env.POSTING_ENABLED;
-    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "env_off");
-    // env on, and the real db (memory path) holds no settings/posting doc: global_off
-    process.env.POSTING_ENABLED = "1";
+    // the real db (memory path) holds no settings/posting doc: global_off
     await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "global_off");
-    if (saved === undefined) delete process.env.POSTING_ENABLED; else process.env.POSTING_ENABLED = saved;
   }
 
   console.log("posting-guard.test.js ok");

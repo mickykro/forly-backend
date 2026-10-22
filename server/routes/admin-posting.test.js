@@ -92,7 +92,7 @@ const noFullPhone = (raw, what) => {
     {
       assert.equal(await db.getSetting("posting"), null);
       const ov0 = await overview();
-      assert.equal(ov0.body.enabled, false, "no doc is off, never on"); assert.equal(ov0.body.version, 0); assert.equal(ov0.body.env_forced_off, false);
+      assert.equal(ov0.body.enabled, false, "no doc is off, never on"); assert.equal(ov0.body.version, 0);
       const first = await post("/switch", { enabled: true, reason: "launch", version: 0 });
       assert.equal(first.status, 200, first.raw); assert.equal(first.body.enabled, true); assert.equal(first.body.version, 1);
       const made = await db.getSetting("posting");
@@ -111,7 +111,7 @@ const noFullPhone = (raw, what) => {
       const sE = await new Promise((r) => { const sv = appE.listen(0, () => r(sv)); });
       try {
         const g = await call(sE, "GET", "/p/overview", as(ADMIN, false));
-        assert.equal(g.status, 200); assert.equal(g.body.env_forced_off, e.POSTING_ENABLED !== "1");
+        assert.equal(g.status, 200); assert.equal("env_forced_off" in g.body, false, "no env switch");
         // Allowed: reaches the route (a stale version → 409, nothing written). Refused: 503 before anything.
         const paths = allowed ? ["/switch"] : ["/switch", "/switch/platform", "/switch/visible", `/accounts/${P.captcha}/reenable`, `/accounts/${P.compromised}/revoke-profile`,
           `/attempts/${"a".repeat(32)}/resolve`, "/campaigns/abc/resume"];
