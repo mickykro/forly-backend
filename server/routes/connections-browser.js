@@ -28,7 +28,7 @@ const SESSION_SECONDS = locksLive.LOGIN_SESSION_S;
 const CONSENT_VERSION = "2026-09-24";
 // Disabling halt classes R5 resolves with a reconnect (see startFlow).
 const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
-const FLEET_REASONS = new Set(["env_off", "global_off", "platform_off", "visible_off"]);
+const FLEET_REASONS = new Set(["global_off", "platform_off", "visible_off"]);
 const { profileNameFor, pendingName } = require("../profile-name");
 
 // Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
@@ -228,7 +228,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
       const fleetOn = Object.assign(Object.create(db), {
         getSetting: async (k) => (k === "posting" ? { enabled: true, platforms: {}, visible_interactions_enabled: true } : db.getSetting(k)),
       });
-      reason = await check({ db: fleetOn, env: Object.assign({}, process.env, { POSTING_ENABLED: "1" }) });
+      reason = await check({ db: fleetOn, env: process.env });
     }
     if (!reason || reason === "profile_revoked") return null;
     if (reason === "account_disabled" && platform === "facebook") {

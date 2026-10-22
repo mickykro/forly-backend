@@ -149,7 +149,6 @@
     $("#postingGlobal").checked = !!d.enabled;
     $("#postingGlobal").disabled = !known;
     $("#postingGlobalLabel").textContent = !known ? "לא ידוע" : onOff(d.enabled) + (d.enabled ? "" : d.disabled_reason ? " — " + d.disabled_reason : "");
-    $("#postingEnvNote").classList.toggle("hidden", !d.env_forced_off);
     var lc = d.last_change;
     $("#postingLastChange").textContent =
       (d.changed_at ? "שינוי אחרון במתג הראשי: …" + (d.changed_by_tail || "?") + " · " + (d.reason || "") + " · " + fmt(d.changed_at) : "המתג הראשי לא שונה ידנית.") +

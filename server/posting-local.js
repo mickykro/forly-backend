@@ -19,7 +19,6 @@ function problem(env = process.env) {
   if (env.FORLY_ENV !== "local") return `${FLAG}=1 requires FORLY_ENV=local`;
   if (env.NODE_ENV === "production") return `${FLAG}=1 is forbidden with NODE_ENV=production`;
   if (env.POSTING_SWEEPER !== "1") return `${FLAG}=1 requires POSTING_SWEEPER=1`;
-  if (env.POSTING_ENABLED === "0") return `${FLAG}=1 is refused with POSTING_ENABLED=0`;
   if (env.DRIVER_DEV_VIEW === "0") return `${FLAG}=1 requires the live browser viewer (DRIVER_DEV_VIEW must not be 0)`;
   if (env[PREFLIGHT_SECONDS] !== undefined) {
     const n = Number(env[PREFLIGHT_SECONDS]);

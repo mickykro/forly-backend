@@ -115,10 +115,9 @@ function switchView(s, env) {
   for (const p of PLATFORMS) platforms[p] = !(s.platforms && s.platforms[p] === false);
   const lc = s.last_change || null;
   return {
-    // Off unless switched on (I5): a missing doc or enabled !== true is off,
-    // and so is a server with POSTING_ENABLED=0, the env's brake (as posting-guard reads them).
+    // Off unless switched on (I5): a missing doc or enabled !== true is off.
     enabled: s.enabled === true, disabled_reason: s.enabled === false ? s.disabled_reason || null : null,
-    version: s.version || 0, enabled_at: s.enabled_at || null, env_forced_off: env.POSTING_ENABLED === "0",
+    version: s.version || 0, enabled_at: s.enabled_at || null,
     platforms, visible_interactions_enabled: s.visible_interactions_enabled !== false,
     changed_by_tail: s.changed_by || null, changed_at: s.changed_at || null, reason: s.reason || null,
     last_change: lc && { what: lc.what, enabled: lc.enabled, by_tail: lc.by_tail, reason: lc.reason, at: lc.at },
@@ -226,7 +225,7 @@ module.exports = function createAdminPostingRouter({
     // R5: campaigns paused `internal` (selector failures, tick errors) — the team resumes them.
     const internal = await section("internal_paused", async () => (await store.listPostingCampaignsByStatus("paused", 500)).filter((c) => c.pause_reason === "internal"), null);
     // Without the switch doc nothing about the switches is known: null, never a default "on".
-    const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, k === "env_forced_off" ? env.POSTING_ENABLED === "0" : null]));
+    const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, null]));
     res.json(Object.assign(sw, {
       campaigns, halts_24h, halts_by_class,
       // Counted over the disabled list; unknown (never a partial count) when

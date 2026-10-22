@@ -36,13 +36,11 @@ function postingEnvAllowed(env = {}) {
 // (after reaping); assertAllowed() asks it first, in the same order.
 // Off unless switched on (I5): the admin's main switch decides — the
 // settings/posting doc must exist with enabled === true; a missing doc, or
-// any other value, is global_off. The env only brakes: POSTING_ENABLED=0 on a
-// server stops it whatever the switch says. → the settings/posting doc.
+// any other value, is global_off. No env var is involved. → the settings/posting doc.
 async function assertFleetAllowed({ platform } = {}, deps = {}) {
   const db = deps.db || dbLive;
   const env = deps.env || process.env;
 
-  if (env.POSTING_ENABLED === "0") deny("env_off");
 
   const settings = await db.getSetting("posting");
   if (!settings || settings.enabled !== true) deny("global_off");
