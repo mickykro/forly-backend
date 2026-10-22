@@ -26,9 +26,13 @@
     max_consecutive_failures: "כשלונות ברצף עד עצירה", property_group_cooldown_days: "ימים עד אותו נכס באותה קבוצה",
     fingerprint_window_days: "ימים עד אותה מודעה (מכל מקור) באותה קבוצה",
   };
+  var MODE_LABELS = {
+    manual: "פרסום ידני (מנהל מפרסם כל פוסט)", caps: "מגבלות פעילות (מקומי)", pacing: "קצב רגיל (מקומי)", warmup: "חימום חשבון חדש (מקומי)",
+    burst: "מצב בדיקה — פרסום רצוף (מקומי)", browse: "גלישה בין סשנים (מקומי)", shots: "צילום מסך של כשלונות",
+  };
   var PLATFORM_LABELS = { facebook: "פייסבוק", yad2: "יד2", madlan: "מדלן" };
   var AUDIT_LABELS = {
-    caps: "מגבלות פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
+    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
     reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל", resolve_attempt: "הכרעה בפוסט לא ידוע", resume_campaign: "המשך קמפיין",
   };
   var SECTION_LABELS = {
@@ -161,6 +165,7 @@
       input.addEventListener("change", function () { flip(input, "/switch/platform", { platform: p }); });
     });
     renderCaps(known ? d.caps : null);
+    renderModes(known ? d.modes : null);
     var vis = known && $("#postingVisible");
     if (vis) vis.addEventListener("change", function () { flip(vis, "/switch/visible"); });
 
@@ -204,6 +209,31 @@
         (c.set == null ? "" : esc(c.set)) + '" placeholder="' + esc(c.default) + '"><span class="posting-note">ברירת מחדל ' + esc(c.default) +
         " · חל עכשיו: " + shown(c.applies) + " · מותר " + esc(c.min) + "–" + esc(c.max) + "</span></label>";
     }).join("");
+  }
+  // Each mode: default (the env's own value) / on / off.
+  function renderModes(modes) {
+    $("#postingModesSave").disabled = !modes;
+    if (!modes) { $("#postingModes").innerHTML = '<p class="posting-note">המצבים לא נטענו.</p>'; return; }
+    var envText = function (v) { return v === null ? "לא מוגדר" : v === "1" ? "פעיל" : "כבוי"; };
+    $("#postingModes").innerHTML = Object.keys(MODE_LABELS).filter(function (m) { return modes[m]; }).map(function (m) {
+      var c = modes[m], sel = c.set === null ? "" : c.set ? "on" : "off";
+      var opt = function (v, l) { return '<option value="' + v + '"' + (sel === v ? " selected" : "") + ">" + l + "</option>"; };
+      return "<label>" + esc(MODE_LABELS[m]) + '<select data-mode="' + m + '">' + opt("", "ברירת מחדל") + opt("on", "פעיל") + opt("off", "כבוי") + "</select>" +
+        '<span class="posting-note">בסביבה: ' + envText(c.env) + "</span></label>";
+    }).join("");
+  }
+  function saveModes(btn) {
+    var modes = {};
+    Array.prototype.forEach.call(document.querySelectorAll("#postingModes select[data-mode]"), function (s) {
+      modes[s.dataset.mode] = s.value === "" ? null : s.value === "on";
+    });
+    var reason = askReason("למה משנים את מצבי הפרסום?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/modes", { modes: modes, reason: reason, version: state.version })
+      .then(function (d) { saved(d, "✅ המצבים נשמרו"); return load(); })
+      .catch(function (e) { handleError(e, "שגיאה בשמירת המצבים"); })
+      .then(function () { btn.disabled = false; });
   }
   function saveCaps(btn) {
     var caps = {}, bad = null;
@@ -317,6 +347,7 @@
   });
   $("#postingGlobal").addEventListener("change", function () { flip($("#postingGlobal"), "/switch"); });
   $("#postingCapsSave").addEventListener("click", function () { saveCaps(this); });
+  $("#postingModesSave").addEventListener("click", function () { saveModes(this); });
   $("#postingWarmSave").addEventListener("click", function () {
     var btn = this, phone = ($("#postingWarmPhone").value || "").replace(/\D/g, "").replace(/^0/, "972");
     if (!/^\d{9,15}$/.test(phone)) { FLY.toast("מספר טלפון לא תקין"); return; }

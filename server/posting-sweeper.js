@@ -190,6 +190,8 @@ const state = { started: false, last: null, accounts: new Map() };
 const stamp = () => new Date().toISOString();
 // → the number of accounts ticked (0 when the switch is off or the breaker tripped).
 async function sweep(deps = {}, now) {
+  // The admin's posting modes first: a switch to or from manual posting takes effect here.
+  if (!deps.env) await require("./posting-modes").refresh(deps.db);
   // Manual posting: an admin publishes every post by hand (posting-manual).
   if (require("./posting-manual").enabled(deps.env || process.env)) { state.last = { at: stamp(), result: "manual" }; return 0; }
   if (sweeping && Date.now() - sweepStarted < STUCK_SWEEP_MS) return 0;

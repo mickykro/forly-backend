@@ -185,7 +185,7 @@ async function pause(id, reason, deps = {}) {
 // The agent cannot lift an operator-level stop (R5): a disabled account, an
 // owner review, or a reconnect that has not happened yet.
 function accountBlocked(conn) {
-  if (conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true) return true;
+  if (conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true || conn.posting_paused_by_admin) return true;
   return conn.facebook_needs_reconnect === true && !(ms(conn.facebook_browser_connected_at) > ms(conn.facebook_needs_reconnect_at));
 }
 

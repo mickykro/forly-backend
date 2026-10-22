@@ -470,6 +470,18 @@ const noFullPhone = (raw, what) => {
       await post("/caps", { caps: {}, reason: "back to defaults", version: v0 + 2 });
     }
 
+    // ── modes: validated, compare-and-set, replaced whole, shown with the env's own value ──
+    {
+      const v0 = (await db.getSetting("posting")).version;
+      assert.equal((await post("/modes", { modes: { nope: true }, reason: "x", version: v0 })).body.field, "nope");
+      assert.equal((await post("/modes", { modes: { manual: "on" }, reason: "x", version: v0 })).body.field, "manual");
+      assert.equal((await post("/modes", { modes: { manual: false }, reason: " ", version: v0 })).body.error, "reason_required");
+      const m1 = await post("/modes", { modes: { manual: false, shots: null }, reason: "automatic posting", version: v0 });
+      assert.equal(m1.status, 200, m1.raw);
+      assert.deepEqual((await db.getSetting("posting")).modes, { manual: false }, "null leaves the env in charge");
+      assert.deepEqual(m1.body.modes.manual.set, false);
+      assert.equal((await post("/modes", { modes: {}, reason: "x", version: v0 })).status, 409, "stale version");
+    }
     console.log("routes/admin-posting.test.js ok");
   } finally {
     server.close();
