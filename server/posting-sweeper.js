@@ -152,7 +152,10 @@ async function retryProfileDeletes(deps, x, now) {
   return results;
 }
 
-let sweeping = false;
+let sweeping = false, sweepStarted = 0;
+// Longer than any browser session (Driver's 55 min): a sweep past it is stuck on a call
+// that never returns (21 Oct: a network drop froze posting for 1.5 h). The profile lock still guards each account.
+const STUCK_SWEEP_MS = 60 * 60 * 1000;
 // Accounts tick side by side, not one after another (2 Oct 2026: a single
 // account's post — ten minutes, longer with several in one session — held up
 // every other agent). At most DRIVER_MAX_CONCURRENT at once, the Driver
@@ -189,8 +192,9 @@ const stamp = () => new Date().toISOString();
 async function sweep(deps = {}, now) {
   // Manual posting: an admin publishes every post by hand (posting-manual).
   if (require("./posting-manual").enabled(deps.env || process.env)) { state.last = { at: stamp(), result: "manual" }; return 0; }
-  if (sweeping) return 0;
-  sweeping = true;
+  if (sweeping && Date.now() - sweepStarted < STUCK_SWEEP_MS) return 0;
+  if (sweeping) console.error(`posting sweep: the last sweep has run ${Math.round((Date.now() - sweepStarted) / 60000)} min, starting a new one`);
+  sweeping = true; sweepStarted = Date.now();
   const x = ctxOf(deps);
   const fixed = now instanceof Date ? now : null;
   const at = () => fixed || x.clock();

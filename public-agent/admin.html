@@ -71,6 +71,9 @@
   .posting-row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
   .posting-row .switch{display:inline-block;vertical-align:middle}
   .posting-note{font-size:.78rem;color:var(--ink-soft);font-weight:300;margin:4px 0 0}
+  .caps-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin:10px 0}
+  .caps-grid label{display:flex;flex-direction:column;gap:4px;font-size:.85rem}
+  .caps-grid input{width:100%;max-width:140px}
   .posting-warn{font-size:.82rem;color:#9a2f25;background:rgba(190,60,50,.08);border:1px solid rgba(190,60,50,.25);border-radius:12px;padding:10px 14px;margin-bottom:14px}
   .posting-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-bottom:18px}
   .posting-audit{list-style:none;margin:0;padding:0;font-size:.8rem}
@@ -294,6 +297,12 @@
         </section>
       </div>
       <div class="stat-grid" id="postingCounts"></div>
+      <section class="message-card" style="margin-bottom:18px">
+        <h2>מגבלות פרסום</h2>
+        <p class="posting-note">חלות על כל הסוכנים, בכל הסביבות, וגוברות על ברירת המחדל ועל קובץ ההגדרות. שדה ריק = ברירת המחדל. כל שדה מראה את הטווח המותר (0 = ללא הגבלה, רק בסביבה מקומית).</p>
+        <div class="caps-grid" id="postingCaps"></div>
+        <button type="button" class="btn btn-gold btn-sm" id="postingCapsSave">שמירת המגבלות</button>
+      </section>
       <section class="message-card" style="margin-bottom:18px">
         <h2>חימום חשבון</h2>
         <p class="posting-note">חשבון פעיל מספיק יכול לפרסם מיד. חשבון חדש או שקט — חימום איטי. "אוטומטי" — לפי מה שהסוכן ענה.</p>

@@ -89,7 +89,7 @@ const A_ = require("./posting-account");
     const { deps: d2, notes: n2 } = await K.setup();
     const c2 = await C.create(K.base(), d2);
     await C.stop(c2.id, d2);
-    assert.equal(n2.length, 1, "an agent stop still tells the agent");
+    assert.equal(n2.length, 0, "posting is quiet: an agent's own stop sends nothing either");
   }
   // ── admin messages go out in manual mode too; other kinds do not ──
   {

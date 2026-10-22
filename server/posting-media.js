@@ -21,6 +21,8 @@ const { SELECTORS: S } = require("./posting-driver-proof");
 const MAX_BYTES = 48 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 60 * 1000;
 const UPLOAD_TIMEOUT_MS = 4 * 60 * 1000;
+const PROGRESS_GRACE_MS = 30 * 1000;
+const HANDOFF_MS = 2 * 60 * 1000; // the file goes to a remote browser; a slow link needs more than the 30 s default
 
 // detail: what the download saw (posting-diag's failure note): the host, never the path.
 const fail = (code, detail) => Object.assign(new Error(code), { code, detail: detail || null });
@@ -40,7 +42,7 @@ function ownFile(url, deps = {}) {
 }
 
 // → { name, mimeType, buffer }. Throws { code } on anything short of a video.
-async function fetchVideo(url, deps = {}) {
+async function fetchVideoOnce(url, deps = {}) {
   if (typeof url !== "string" || !/^https?:\/\//i.test(url)) throw fail("media_unavailable", { why: "not an http(s) address" });
   if (typeof deps.fetchMedia === "function") return deps.fetchMedia(url);
   const host = hostOf(url);
@@ -68,6 +70,17 @@ async function fetchVideo(url, deps = {}) {
   return require("./posting-video").shrink({ name: `property.${mimeType === "video/quicktime" ? "mov" : "mp4"}`, mimeType, buffer }, deps);
 }
 
+// POSTING_BURST (local): the same video goes to many groups, so it is fetched and encoded once per process.
+// shortcut: keyed by URL, a replaced file under the same URL is only seen after a restart; dev only.
+const burstMemo = new Map();
+async function fetchVideo(url, deps = {}) {
+  const fast = require("./posting-safety").burst(deps.env || process.env) && typeof deps.fetchMedia !== "function";
+  if (fast && burstMemo.has(url)) return burstMemo.get(url);
+  const file = await fetchVideoOnce(url, deps);
+  if (fast) { burstMemo.set(url, file); if (burstMemo.size > 30) burstMemo.delete(burstMemo.keys().next().value); }
+  return file;
+}
+
 const countOf = (page, sel) => page.locator(sel).count().catch(() => 0);
 // How many of each thing the attach step looks for were on the page.
 const mediaCounts = async (page) => ({ file_input: await countOf(page, S.mediaInput), photo_video_button: await countOf(page, S.mediaButton),
@@ -77,7 +90,7 @@ const mediaCounts = async (page) => ({ file_input: await countOf(page, S.mediaIn
 async function attach(page, x, file) {
   const toInput = async () => {
     if ((await countOf(page, S.mediaInput)) < 1) return false;
-    await page.locator(S.mediaInput).first().setInputFiles(file);
+    await page.locator(S.mediaInput).first().setInputFiles(file, { timeout: HANDOFF_MS });
     return true;
   };
   try {
@@ -91,24 +104,32 @@ async function attach(page, x, file) {
           page.waitForEvent("filechooser", { timeout: 10000 }),
           page.locator(S.mediaDrop).first().click(),
         ]);
-        await chooser.setFiles(file);
+        await chooser.setFiles(file, { timeout: HANDOFF_MS });
         done = true;
       }
     }
     if (!done) { x.diag = { why: "no way to attach a video in the composer", counts: await mediaCounts(page) }; return "media_not_found"; }
-  } catch (e) { x.diag = { why: `attaching threw (${(e && e.name) || "error"})`, counts: await mediaCounts(page) }; return "media_not_found"; }
+  } catch (e) {
+    // A slow link can time out the file hand-off after the file arrived (21 Oct): the preview says it did.
+    const arrived = await page.locator(S.mediaAttached).first().waitFor({ timeout: 60000 }).then(() => true, () => false);
+    if (!arrived) { x.diag = { why: `attaching threw (${(e && e.name) || "error"})`, counts: await mediaCounts(page) }; return "media_not_found"; }
+  }
   const seen = await page.locator(S.mediaAttached).first().waitFor({ timeout: 120000 }).then(() => true, () => false); // the file travels to a remote browser first
   if (!seen) x.diag = { why: "the file was handed over but no video preview appeared in 120 s", counts: await mediaCounts(page) };
   return seen ? null : "media_upload_failed";
 }
 
 // → null once the upload is done (no progress bar, Post enabled), else a code.
-async function waitUploaded(page, x, timeoutMs = UPLOAD_TIMEOUT_MS) {
+async function waitUploaded(page, x, timeoutMs = UPLOAD_TIMEOUT_MS, graceMs = PROGRESS_GRACE_MS) {
   const until = Date.now() + timeoutMs;
+  let readySince = null;
   while (Date.now() < until) {
     const busy = await countOf(page, S.mediaProgress);
     const disabled = await page.locator(S.submit).first().getAttribute("aria-disabled").catch(() => null);
-    if (busy === 0 && disabled !== "true" && (await countOf(page, S.mediaAttached)) > 0) return null;
+    const ready = disabled !== "true" && (await countOf(page, S.mediaAttached)) > 0;
+    // Facebook disables Post while a video uploads; a progress bar still there long after Post came back is not an upload (21 Oct: 4 min lost on one).
+    readySince = ready ? readySince || Date.now() : null;
+    if (ready && (busy === 0 || Date.now() - readySince >= graceMs)) return null;
     await x.wait(page, 1, 2);
   }
   x.diag = { why: `the upload did not finish in ${Math.round(timeoutMs / 1000)} s`, counts: await mediaCounts(page),

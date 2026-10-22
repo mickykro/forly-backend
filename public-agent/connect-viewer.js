@@ -10,12 +10,13 @@
  * sentinels stay in it so a phone's backspace has something to delete.
  */
 window.ForlyViewer = (() => {
-  const S = "​​";
+  const S = "\u200B".repeat(8); // enough for a phone's backspaces while a send is in flight
   const SPECIAL = new Set(["Enter", "Tab", "Escape", "Delete", "Backspace", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
   let cur = null;
   const stop = (me) => {
     if (!me || !me.alive) return;
     me.alive = false;
+    if (me.offResize) me.offResize();
     try { me.ac.abort(); } catch (e) { /* already done */ }
     me.box.innerHTML = "";
   };
@@ -64,12 +65,28 @@ window.ForlyViewer = (() => {
       return r.ok ? r.json().catch(() => ({})) : {};
     }));
 
+    // ── size: the remote page is laid out at the screen's size, so its text is not shrunk ──
+    const screen = box.querySelector(".cv-screen");
+    const fitTo = (v) => Math.max(320, Math.min(1280, Math.floor(v)));
+    let fitted = "";
+    const fit = () => {
+      if (!me.alive || me.ended || !screen.clientWidth) return;
+      const ev = { t: "fit", w: fitTo(screen.clientWidth), h: fitTo(screen.clientHeight) };
+      if (fitted === ev.w + "x" + ev.h) return;
+      fitted = ev.w + "x" + ev.h;
+      send(ev);
+    };
+    let fitTimer = null;
+    const onResize = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fit, 300); };
+    window.addEventListener("resize", onResize);
+    me.offResize = () => window.removeEventListener("resize", onResize);
+
     // ── frames ──
     const onEvent = (e) => {
       if (e.t === "frame") {
         me.size = { w: e.w, h: e.h };
         img.src = `data:image/jpeg;base64,${e.d}`;
-        if (!me.gotFrame) { me.gotFrame = true; img.hidden = false; wait.hidden = true; if (opts.onFrame) opts.onFrame(); }
+        if (!me.gotFrame) { me.gotFrame = true; img.hidden = false; wait.hidden = true; fit(); if (opts.onFrame) opts.onFrame(); }
         url.textContent = e.u || "";
       } else if (e.t === "end") end(e.reason || "closed");
       else if (opts.onEvent) opts.onEvent(e); // anything else the server pushes (the manual tab's lane)
@@ -194,11 +211,21 @@ window.ForlyViewer = (() => {
     ta.addEventListener("keydown", (e) => {
       if (e.isComposing || e.keyCode === 229 || !SPECIAL.has(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
       e.preventDefault();
+      flush(); // text still waiting in the box goes before this key
       send({ t: "key", key: e.key, shift: e.shiftKey });
     });
     ta.addEventListener("compositionstart", () => { composing = true; });
-    ta.addEventListener("compositionend", () => { composing = false; flush(); });
-    ta.addEventListener("input", () => { if (!composing) flush(); });
+    // One request per character is a round trip each: while one is in flight,
+    // what is typed waits in the box and goes as one text event after it.
+    let busy = false, again = false;
+    const pump = () => {
+      if (busy) { again = true; return; }
+      busy = true;
+      flush();
+      me.queue.then(() => { busy = false; if (again) { again = false; pump(); } });
+    };
+    ta.addEventListener("compositionend", () => { composing = false; pump(); });
+    ta.addEventListener("input", () => { if (!composing) pump(); });
 
     box.querySelector(".cv-bar").addEventListener("click", (e) => {
       const a = e.target && e.target.getAttribute && e.target.getAttribute("data-a");

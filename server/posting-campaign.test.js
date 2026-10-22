@@ -201,7 +201,7 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(c.pause_reason, "page_gone");
     assert.equal(c.posts[0].status, "skipped");
     assert.equal(deps.post.calls.length, 0);
-    assert.ok(notes.some((m) => m.includes("נעצר")));
+    assert.ok(!notes.some((m) => m.includes("נעצר")), "posting is quiet: no stop message");
   }
 
   // ── per_post: waits for approval; approval at night re-times the post to the morning ──
@@ -514,7 +514,7 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     const cur = await store.getPostingCampaign(c.id);
     const why = await C.explainGroups(cur, deps);
     assert.deepEqual(why.map((w) => [w.group_id, w.why]), [[g1, "seen_not_member"], [g2, "property_cooldown"]]);
-    assert.equal(why[1].until, new Date(NOW.getTime() - 2 * DAY + 3 * DAY).toISOString(), "until when");
+    assert.equal(why[1].until, require("./posting-safety").dateGapEnd(new Date(NOW.getTime() - 2 * DAY), 3).toISOString(), "until when: midnight, 3 dates after the post");
     const plan = await C.planAccount(PH, deps);
     assert.equal(plan.reason, "no_eligible_group", "the card's reason and the explanation agree");
     // a later groups sync sees the account in g1 again → the block lifts

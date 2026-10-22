@@ -35,6 +35,9 @@ function browseEveryMs(env = process.env) {
   const min = Number(env.POSTING_BROWSE_EVERY_MIN || 20);
   return Number.isFinite(min) && min >= 1 ? min * MS_MIN : BROWSE_EVERY_MS;
 }
+// A local box has no idle browsing (it only holds the profile lock the posts
+// need, and the login may not be there): POSTING_BROWSE=1 keeps it.
+const browseOff = (env = process.env) => env.FORLY_ENV === "local" && env.POSTING_BROWSE !== "1";
 // Clearly below profile-lock's MAX_HOLD_MS (20 min): the profile lock must
 // still be ours when a hung driver call is settled (asserted in the tests).
 const POST_TIMEOUT_MS = 15 * MS_MIN;
@@ -163,7 +166,7 @@ async function skip(x, id, postId, reason) {
 }
 
 function duplicateIn(ga, fp, now, config) {
-  const within = (f) => now.getTime() - ms(f.at) < config.fingerprint_window_days * MS_DAY;
+  const within = (f) => safety.datesApart(new Date(ms(f.at)), now) < config.fingerprint_window_days;
   return (ga.fingerprints || []).some((f) => within(f) && ((fp.exact && f.exact === fp.exact) || (fp.strong && f.strong === fp.strong)));
 }
 
@@ -461,7 +464,7 @@ async function settle(key, result, err, st, deps, x, now) {
 
 // ── nothing due: plan the next post, or browse on a warm-up day ──
 async function browse(phone, conn, deps, x, now) {
-  if (typeof deps.dwell !== "function") return;
+  if (typeof deps.dwell !== "function" || browseOff(deps.env || process.env)) return;
   if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < browseEveryMs(deps.env || process.env)) return;
   try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "dwell" }, A.guardDeps(deps, x)); } catch (e) { if (e && e.code === "posting_disabled") return; throw e; }
   await x.db.setConnection(phone, { last_browse_attempt_at: iso(now) });
@@ -489,6 +492,7 @@ async function warmIdle(phone, deps = {}, now) {
   // A local box browses every interval whatever the warm-up says (it skips
   // the warm-up to test posting, and browsing should still be watchable).
   const local = (deps.env || process.env).FORLY_ENV === "local";
+  if (browseOff(deps.env || process.env)) return "idle";
   if (!local && !safety.wantsBrowseSession(await A.accountView(phone, conn, deps, now), now, config)) return "idle";
   if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < browseEveryMs(deps.env || process.env)) return "browse_only";
   const release = x.locks.tryAcquire(phone, "facebook");

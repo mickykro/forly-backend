@@ -123,7 +123,7 @@ function harness(deps, { results = {}, page = {}, openThrows = null, real = fals
     const rm = await removals();
     assert.equal(rm.length, 1); assert.equal(rm[0].group_id, "111");
     assert.ok(((await conn()).posting_group_penalties || {})["111"], "that group is off for 30 days");
-    assert.ok(notes.some((m) => /הסירו פוסט/.test(m)));
+    assert.ok(!notes.some((m) => /הסירו פוסט/.test(m)), "posting is quiet: no removal message");
     assert.equal(await R.recheckOne(h.d, new Date(t2.getTime() + 3 * DAY)), "none");
     assert.equal((await removals()).length, 1, "haltAccount called once");
   }

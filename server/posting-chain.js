@@ -71,6 +71,6 @@ function session(phone, deps, x, lock) {
   };
 }
 
-const dwellMs = (rand = Math.random) => Math.round((DWELL_S[0] + rand() * (DWELL_S[1] - DWELL_S[0])) * 1000);
+const dwellMs = (rand = Math.random, env = process.env) => safety.burst(env) ? 0 : Math.round((DWELL_S[0] + rand() * (DWELL_S[1] - DWELL_S[0])) * 1000);
 
 module.exports = { enabled, session, prepareNext, sessionConfig, dwellMs, SESSION_MS, MAX_POSTS, DWELL_S };
