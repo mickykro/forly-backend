@@ -121,6 +121,32 @@ module.exports = function createDevDriverRouter({ requireAdmin, requireStepUp, d
     res.status(202).json({ started: true });
   });
 
+  // What Facebook says became of the admin's own posts, per member group (posting-audit.js).
+  // The queue holds the profile while it posts: wait for a gap (up to 5 min), never a second browser on it.
+  let audit = { running: false };
+  router.post("/posting/audit", requireAdmin, async (req, res) => {
+    if (!P) return res.status(404).json({ error: "posting_unavailable" });
+    if (audit.running) return res.status(409).json({ error: "already_running" });
+    const phone = req.user.userId;
+    const conn = (await P.db.getConnection(phone)) || {};
+    if (!conn.facebook_browser_connected_at) return res.status(409).json({ error: "facebook_not_connected" });
+    const groups = (conn.facebook_groups_member || []).filter((g) => g && g.membership_state === "member" && /^\d+$/.test(String(g.group_id)))
+      .map((g) => ({ group_id: String(g.group_id), name: g.name || null }));
+    audit = { running: true, started_at: new Date().toISOString(), groups: groups.length };
+    res.status(202).json(audit);
+    (async () => {
+      let release = null;
+      for (let i = 0; i < 150 && !(release = P.locks.tryAcquire(phone, "facebook")); i++) await new Promise((r) => setTimeout(r, 2000));
+      if (!release) throw Object.assign(new Error("profile_busy"), { code: "profile_busy" });
+      try { return await require("../posting-audit").auditGroups({ phone, groups }, Object.assign({}, P.deps || {}, { lockHeld: true })); }
+      finally { release(); }
+    })().then(
+      (result) => { audit = { running: false, at: new Date().toISOString(), result }; },
+      (e) => { audit = { running: false, at: new Date().toISOString(), error: (e && (e.code || e.name)) || "error" }; },
+    );
+  });
+  router.get("/posting/audit", requireAdmin, (req, res) => res.json(audit));
+
   router.get("/sessions", requireAdmin, (req, res) => {
     res.json({ sessions: driver.liveSessions() });
   });
