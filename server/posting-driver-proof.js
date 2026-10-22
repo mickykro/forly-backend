@@ -115,7 +115,8 @@ function readDom(target, s) {
   if (!s) return target.map((a) => ({ href: a.href, text: text(a).trim() }));
   return target.slice(0, 15).map((el) => {
     const link = el.querySelector(s.link), msg = el.querySelector(s.text), au = el.querySelector(s.author);
-    return { href: link ? link.href : null, text: msg ? text(msg) : "", author: au ? text(au) : "" };
+    // hrefs: a video card's first link is often not the post's own.
+    return { href: link ? link.href : null, hrefs: Array.from(el.querySelectorAll(s.link)).slice(0, 8).map((a) => a.href), text: msg ? text(msg) : "", author: au ? text(au) : "" };
   });
 }
 
@@ -278,7 +279,7 @@ function isCutOf(text, copy) {
 function findOwnPost(posts, { kind, ids, author, copy }) {
   const fp = fingerprint(copy);
   for (const p of Array.isArray(posts) ? posts : []) {
-    const permalink = p && permalinkOf(p.href, kind, ids);
+    const permalink = p && [p.href, ...(Array.isArray(p.hrefs) ? p.hrefs : [])].map((h) => permalinkOf(h, kind, ids)).find(Boolean);
     if (!permalink || !author || norm(p.author) !== author) continue;
     const exact = fingerprint(p.text) === fp;
     if (exact || isCutOf(p.text, copy)) return { permalink, exact };

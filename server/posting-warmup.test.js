@@ -56,11 +56,14 @@ const PH = "972500000001";
     assert.equal(calls.length, 0, "the main switch off: no browse");
     assert.equal(Sw.status().last.result, "off");
   }
-  // ── a local box: every POSTING_BROWSE_EVERY_MIN minutes (default 20), warm-up or not ──
+  // ── a local box: no idle browsing; POSTING_BROWSE=1 keeps it, every POSTING_BROWSE_EVERY_MIN minutes (default 20) ──
   {
     const { deps } = await K.setup(PH); // connected 90 days ago: past any warm-up
     const calls = [];
     Object.assign(deps, { dwell: dwellFor(calls, []), env: { POSTING_ENABLED: "1", FORLY_ENV: "local", POSTING_SWEEPER: "1" } });
+    assert.equal(await T.warmIdle(PH, deps, K.NOW), "idle", "local does not browse unless asked");
+    assert.equal(calls.length, 0);
+    deps.env.POSTING_BROWSE = "1";
     assert.equal(T.browseEveryMs({ FORLY_ENV: "local" }), 20 * 60000);
     assert.equal(T.browseEveryMs({ FORLY_ENV: "local", POSTING_BROWSE_EVERY_MIN: "5" }), 5 * 60000);
     assert.equal(T.browseEveryMs({ FORLY_ENV: "prod", POSTING_BROWSE_EVERY_MIN: "5" }), 20 * K.HOUR, "prod ignores it");

@@ -458,7 +458,7 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     const platform = String(req.params.platform);
     if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
     try {
-      return res.json(await viewer.input(hubKey(req.user.userId, platform), req.body));
+      return res.json(await viewer.input(hubKey(req.user.userId, platform), req.body, { fit: true }));
     } catch (e) {
       const code = e && e.code;
       const status = { no_viewer: 409, invalid_input: 400, slow_down: 429 }[code] || 502;

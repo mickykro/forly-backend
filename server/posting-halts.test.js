@@ -44,7 +44,7 @@ const with_ = (deps, o) => Object.assign({}, deps, o);
     assert.equal(k.posting_disabled_class, "restricted", "the restricted disable keeps its class");
     assert.equal(k.posting_disabled_at, iso(at(2)), "and its date");
     assert.equal(k.facebook_profile_state, "quarantined", "the profile is quarantined again");
-    assert.ok(notes.length > n0, "the agent is told");
+    assert.equal(notes.length, n0, "posting is quiet: the agent is not messaged");
     assert.ok(ops.length > o0, "the operator is told");
     // while the disable that covers that checkpoint stands, another checkpoint is the same halt
     const n1 = notes.length;
@@ -121,7 +121,7 @@ const with_ = (deps, o) => Object.assign({}, deps, o);
     assert.equal(k.posting_penalty_class, "rate_limited");
     assert.equal(k.posting_penalty_at, iso(at(3)));
     assert.equal(k.posting_halts.filter((h) => h.code === "rate_limited").length, 2);
-    assert.ok(notes.length > n0, "the agent is told");
+    assert.equal(notes.length, n0, "posting is quiet: the agent is not messaged");
     // a second removal in 7 days penalises the account: that penalty is confirmed_removed's
     await setup();
     await H.haltAccount(PH, "confirmed_removed", deps, { group_id: "111", now: at(0) });

@@ -110,11 +110,11 @@ function groupsOf(c, conn = null, now = null, config = null) {
     if (!prev || at(p) >= at(prev)) last.set(k, p);
   }
   const t = now ? now.getTime() : null;
-  const floor = ((config || safety.DEFAULTS).property_group_cooldown_days || 0) * MS_DAY;
-  const again = (g) => (!c.repeat ? Infinity : g.kind === "page" ? PAGE_DAYS * MS_DAY : Math.max((Number(c.repeat_days) || 0) * MS_DAY - MS_HOUR, floor, MS_HOUR));
+  const days = (config || safety.DEFAULTS).property_group_cooldown_days || 0; // a date gap (posting-safety.dateGapEnd)
+  const again = (g) => (!c.repeat ? Infinity : g.kind === "page" ? PAGE_DAYS * MS_DAY : Math.max((Number(c.repeat_days) || 0) * MS_DAY - MS_HOUR, MS_HOUR));
   return targetsOf(c, conn).map((g) => {
     const p = last.get(String(g.group_id));
-    const due = !!p && t !== null && t - at(p) >= again(g);
+    const due = !!p && t !== null && t - at(p) >= again(g) && (g.kind === "page" || !days || safety.datesApart(new Date(at(p)), now) >= days);
     const status = !p || due ? "owed" : p.status === "skipped" ? "skipped" : "posted";
     return { group_id: String(g.group_id), kind: g.kind, name: g.name || "", url: g.kind === "page" ? g.url : urlOf(g), status, copy: g.kind === "page" ? null : g.copy || null,
       posted_at: p && p.status !== "skipped" ? p.posted_at || null : null };

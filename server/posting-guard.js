@@ -67,6 +67,8 @@ async function assertAccountAllowed({ phone, platform, action }, deps = {}) {
   // An owner-level review (R5: a second disabling halt in 30 days) is a
   // disabled account too, whatever the standard re-enable flag says.
   if (conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true) deny("account_disabled");
+  // An admin paused this agent's automatic posting (routes/admin-agents.js).
+  if (conn.posting_paused_by_admin) deny("paused_by_admin");
   // R5: a penalty halves the caps (posting-safety); it stops posting only on
   // day one — while the newest penalising halt is under 24 h old.
   if (action === "post" && conn.posting_penalty_until && new Date(conn.posting_penalty_until).getTime() > nowMs) {

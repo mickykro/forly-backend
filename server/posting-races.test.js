@@ -102,7 +102,7 @@ const with_ = (deps, o) => Object.assign({}, deps, o);
     assert.equal((await store.getAttempt(c.posts[0].attempt_key)).state, "cancelled");
     assert.equal(c.status, "stopped");
     assert.equal(c.posts[0].status, "skipped");
-    assert.ok(notes.some((n) => /נעצר/.test(n)), "the stop notification is sent");
+    assert.ok(!notes.some((n) => /נעצר/.test(n)), "posting is quiet: no stop message");
     assert.equal(A.drainCancelFailures(), 1, "the failed listing counts as a cancel failure");
   }
 

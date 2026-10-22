@@ -21,9 +21,18 @@
     login_required: "נדרשת התחברות", confirmed_removed: "פוסט הוסר ע״י מנהלי קבוצה",
     selector_failure: "תקלת ממשק", unknown: "לא ידוע",
   };
+  var CAP_LABELS = {
+    daily_cap: "פוסטים ביום לחשבון", weekly_cap: "פוסטים בשבוע לחשבון", group_daily_cap: "פוסטים ביום לקבוצה",
+    max_consecutive_failures: "כשלונות ברצף עד עצירה", property_group_cooldown_days: "ימים עד אותו נכס באותה קבוצה",
+    fingerprint_window_days: "ימים עד אותה מודעה (מכל מקור) באותה קבוצה",
+  };
+  var MODE_LABELS = {
+    manual: "פרסום ידני (מנהל מפרסם כל פוסט)", caps: "מגבלות פעילות (מקומי)", pacing: "קצב רגיל (מקומי)", warmup: "חימום חשבון חדש (מקומי)",
+    burst: "מצב בדיקה — פרסום רצוף (מקומי)", browse: "גלישה בין סשנים (מקומי)", shots: "צילום מסך של כשלונות",
+  };
   var PLATFORM_LABELS = { facebook: "פייסבוק", yad2: "יד2", madlan: "מדלן" };
   var AUDIT_LABELS = {
-    switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
+    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
     reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל", resolve_attempt: "הכרעה בפוסט לא ידוע", resume_campaign: "המשך קמפיין",
   };
   var SECTION_LABELS = {
@@ -39,7 +48,7 @@
     reconnect_required: "הסוכן צריך להתחבר מחדש עם פרופיל חדש לפני הפעלה מחדש",
     not_disabled: "החשבון כבר פעיל", reason_required: "חובה לכתוב סיבה", not_found: "החשבון לא נמצא",
     not_outcome_unknown: "הפוסט כבר לא בתוצאה לא ידועה — המצב נטען מחדש", not_internal_pause: "הקמפיין כבר לא עצור בגלל תקלה",
-    not_resumable: "החשבון עצמו עצור — קודם צריך להפעיל אותו מחדש", posting_unavailable_in_env: "בסביבה הזו אין פרסום אוטומטי",
+    out_of_range: "ערך מחוץ לטווח המותר", not_resumable: "החשבון עצמו עצור — קודם צריך להפעיל אותו מחדש", posting_unavailable_in_env: "בסביבה הזו אין פרסום אוטומטי",
   };
 
   function fmt(v) {
@@ -155,6 +164,8 @@
       var input = $("#postingPlatform_" + p);
       input.addEventListener("change", function () { flip(input, "/switch/platform", { platform: p }); });
     });
+    renderCaps(known ? d.caps : null);
+    renderModes(known ? d.modes : null);
     var vis = known && $("#postingVisible");
     if (vis) vis.addEventListener("change", function () { flip(vis, "/switch/visible"); });
 
@@ -187,6 +198,62 @@
   }
 
   // I7: outcome_unknown attempts — the verdict is the operator's, after checking the group by hand.
+  // Each cap: the admin's value (empty = default), with the default and what applies now.
+  function renderCaps(caps) {
+    $("#postingCapsSave").disabled = !caps;
+    if (!caps) { $("#postingCaps").innerHTML = '<p class="posting-note">המגבלות לא נטענו.</p>'; return; }
+    var shown = function (n) { return n === 0 ? "ללא הגבלה" : esc(n); };
+    $("#postingCaps").innerHTML = Object.keys(CAP_LABELS).filter(function (f) { return caps[f]; }).map(function (f) {
+      var c = caps[f];
+      return '<label>' + esc(CAP_LABELS[f]) + '<input type="number" min="' + esc(c.min) + '" max="' + esc(c.max) + '" step="1" inputmode="numeric" data-cap="' + f + '" value="' +
+        (c.set == null ? "" : esc(c.set)) + '" placeholder="' + esc(c.default) + '"><span class="posting-note">ברירת מחדל ' + esc(c.default) +
+        " · חל עכשיו: " + shown(c.applies) + " · מותר " + esc(c.min) + "–" + esc(c.max) + "</span></label>";
+    }).join("");
+  }
+  // Each mode: default (the env's own value) / on / off.
+  function renderModes(modes) {
+    $("#postingModesSave").disabled = !modes;
+    if (!modes) { $("#postingModes").innerHTML = '<p class="posting-note">המצבים לא נטענו.</p>'; return; }
+    var envText = function (v) { return v === null ? "לא מוגדר" : v === "1" ? "פעיל" : "כבוי"; };
+    $("#postingModes").innerHTML = Object.keys(MODE_LABELS).filter(function (m) { return modes[m]; }).map(function (m) {
+      var c = modes[m], sel = c.set === null ? "" : c.set ? "on" : "off";
+      var opt = function (v, l) { return '<option value="' + v + '"' + (sel === v ? " selected" : "") + ">" + l + "</option>"; };
+      return "<label>" + esc(MODE_LABELS[m]) + '<select data-mode="' + m + '">' + opt("", "ברירת מחדל") + opt("on", "פעיל") + opt("off", "כבוי") + "</select>" +
+        '<span class="posting-note">בסביבה: ' + envText(c.env) + "</span></label>";
+    }).join("");
+  }
+  function saveModes(btn) {
+    var modes = {};
+    Array.prototype.forEach.call(document.querySelectorAll("#postingModes select[data-mode]"), function (s) {
+      modes[s.dataset.mode] = s.value === "" ? null : s.value === "on";
+    });
+    var reason = askReason("למה משנים את מצבי הפרסום?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/modes", { modes: modes, reason: reason, version: state.version })
+      .then(function (d) { saved(d, "✅ המצבים נשמרו"); return load(); })
+      .catch(function (e) { handleError(e, "שגיאה בשמירת המצבים"); })
+      .then(function () { btn.disabled = false; });
+  }
+  function saveCaps(btn) {
+    var caps = {}, bad = null;
+    Array.prototype.forEach.call(document.querySelectorAll("#postingCaps input[data-cap]"), function (i) {
+      var v = i.value.trim();
+      if (v === "") { caps[i.dataset.cap] = null; return; }
+      var n = Number(v);
+      if (!Number.isInteger(n) || n < Number(i.min) || n > Number(i.max)) bad = bad || i;
+      caps[i.dataset.cap] = n;
+    });
+    if (bad) { bad.focus(); FLY.toast("מספר שלם בטווח " + bad.min + "–" + bad.max); return; }
+    var reason = askReason("למה משנים את המגבלות?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/caps", { caps: caps, reason: reason, version: state.version })
+      .then(function (d) { saved(d, "✅ המגבלות נשמרו"); return load(); })
+      .catch(function (e) { handleError(e, "שגיאה בשמירת המגבלות"); })
+      .then(function () { btn.disabled = false; });
+  }
+
   function renderUnknown(u) {
     $("#postingUnknownSummary").textContent = !u ? "לא נטען." : u.count ? (u.count_capped ? u.count + "+" : u.count) +
       " פוסטים ממתינים · הוותיק ביותר: " + (u.oldest_age_h == null ? "—" : u.oldest_age_h + " שעות") +
@@ -279,6 +346,8 @@
     if (b !== tab) b.addEventListener("click", function () { tab.classList.remove("on"); pane.classList.add("hidden"); });
   });
   $("#postingGlobal").addEventListener("change", function () { flip($("#postingGlobal"), "/switch"); });
+  $("#postingCapsSave").addEventListener("click", function () { saveCaps(this); });
+  $("#postingModesSave").addEventListener("click", function () { saveModes(this); });
   $("#postingWarmSave").addEventListener("click", function () {
     var btn = this, phone = ($("#postingWarmPhone").value || "").replace(/\D/g, "").replace(/^0/, "972");
     if (!/^\d{9,15}$/.test(phone)) { FLY.toast("מספר טלפון לא תקין"); return; }

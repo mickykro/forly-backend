@@ -135,6 +135,33 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   const c = S.configFrom({});
   c.active_hours.start = 0;
   c.warmup.length = 0;
+  const L = { FORLY_ENV: "local" };
+  assert.equal(S.configFrom({}, { ...L, POSTING_BURST: "1" }).min_gap_minutes, 0, "burst: no gap locally");
+  assert.equal(require("./posting-account").nextDayStart(new Date(1e12), S.configFrom({}, { ...L, POSTING_BURST: "1" }), Math.random).getTime(), 1e12, "burst: a retry is due at once, not tomorrow");
+  assert.ok(require("./posting-account").nextDayStart(new Date(1e12), S.configFrom({}, L), Math.random).getTime() > 1e12, "no burst: next day");
+  assert.equal(S.configFrom({}, L).min_gap_minutes, 5, "no burst: local 5-minute gap");
+  // ── admin caps (settings/posting.caps): win over defaults and the env; 0 = no limit, a day count 0 = off ──
+  const adm = (caps, env) => S.configFrom({ caps }, env);
+  const a1 = adm({ daily_cap: 40, group_daily_cap: 5 }, {});
+  assert.deepEqual([a1.daily_cap, a1.group_daily_cap, a1.weekly_cap, a1.property_group_cooldown_days], [40, 5, cfg.weekly_cap, 3], "set caps change; the rest stay default");
+  const a2 = adm({ daily_cap: 0, weekly_cap: 0, group_daily_cap: 0, max_consecutive_failures: 0 }, { ...L, POSTING_CAPS: "1", POSTING_BURST: "1" });
+  assert.deepEqual([a2.daily_cap, a2.weekly_cap, a2.group_daily_cap, a2.max_consecutive_failures, a2.property_group_cooldown_days, a2.fingerprint_window_days, a2.burst], [1e6, 1e6, 1e6, 1e6, 3, 3, true], "no limits but the duplicate guards");
+  const a3 = adm({ property_group_cooldown_days: 7 }, L);
+  assert.deepEqual([a3.daily_cap, a3.property_group_cooldown_days], [1e6, 7], "a local box without caps still takes the admin's values");
+  assert.equal(adm({ property_group_cooldown_days: 0 }, L).property_group_cooldown_days, 0, "local: a day count 0 turns the guard off");
+  // outside local: never 0, never past the range — an out-of-range value is ignored (the default holds)
+  assert.equal(adm({ property_group_cooldown_days: 0 }, {}).property_group_cooldown_days, 3);
+  assert.equal(adm({ daily_cap: 0 }, {}).daily_cap, cfg.daily_cap);
+  assert.equal(adm({ daily_cap: 61 }, {}).daily_cap, cfg.daily_cap);
+  assert.equal(adm({ daily_cap: 60 }, {}).daily_cap, 60);
+  assert.deepEqual([S.capRange("group_daily_cap", {}), S.capRange("group_daily_cap", L)], [[1, 10], [0, S.CAP_MAX]]);
+  for (const bad of [-1, 2.5, "5", 1e9, null]) assert.equal(adm({ daily_cap: bad }, {}).daily_cap, cfg.daily_cap, `ignored: ${bad}`);
+  assert.ok(require("./posting-account").nextDayStart(new Date(1e12), adm({ daily_cap: 40 }, { ...L, POSTING_BURST: "1" }), Math.random).getTime() > 1e12, "burst with a cap: a full day waits for tomorrow");
+  for (const env of [{ FORLY_ENV: "staging", POSTING_BURST: "1" }, { ...L, NODE_ENV: "production", POSTING_BURST: "1" }]) {
+    assert.equal(S.burst(env), false, "burst only on a local box with caps off");
+  }
+  assert.equal(require("./posting-chain").dwellMs(() => 0.5, { ...L, POSTING_BURST: "1" }), 0, "burst: no dwell");
+  assert.ok(require("./posting-chain").dwellMs(() => 0.5, L) >= 90000, "no burst: normal dwell");
   assert.equal(cfg.active_hours.start, 9, "configFrom deep-copies — mutating the result never touches DEFAULTS");
   assert.equal(cfg.warmup.length, 3, "nested arrays are copied too");
 }
@@ -175,11 +202,19 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
   const posted = (hoursAgo) => account({ posts: [{ at: at(hoursAgo * 3600000), group_id: "g", group_url: "g", page_id: "p", ok: true }] });
   const slot = (acct, cand, config = cfgNoSkip) => S.nextSlot({ now: NOW, account: acct, candidates: [cand], pageId: "p", config, rand: noRand });
-  assert.equal(slot(posted(60), ok("g")).at, null, "once: the same property waits out the 3 days");
-  assert.ok(slot(posted(73), ok("g")).at, "after 3 days it may go again");
+  // The cooldown counts calendar dates (Jerusalem), not hours: posted at noon N dates ago.
+  const datesAgo = (n) => account({ posts: [{ at: S.dateGapEnd(NOW, -n).getTime() + 12 * 3600000, group_id: "g", group_url: "g", page_id: "p", ok: true }] });
+  assert.equal(slot(datesAgo(2), ok("g")).at, null, "once: the same property waits out 3 dates");
+  assert.ok(slot(datesAgo(3), ok("g")).at, "3 dates later it may go again");
+  const one = Object.assign({}, cfgNoSkip, { property_group_cooldown_days: 1 });
+  const lateNight = S.dateGapEnd(NOW, 0).getTime() - 3600000; // 23:00 the date before
+  const night = account({ posts: [{ at: lateNight, group_id: "g", group_url: "g", page_id: "p", ok: true }] });
+  assert.ok(S.nextSlot({ now: new Date(lateNight + 9 * 3600000), account: night, candidates: [ok("g")], pageId: "p", config: one, rand: noRand }).at, "1 day: 23:00 and 08:00 the next morning are different dates");
+  const sameDay = account({ posts: [{ at: S.dateGapEnd(NOW, 0).getTime() + 3600000, group_id: "g", group_url: "g", page_id: "p", ok: true }] });
+  assert.equal(S.nextSlot({ now: new Date(S.dateGapEnd(NOW, 0).getTime() + 22 * 3600000), account: sameDay, candidates: [ok("g")], pageId: "p", config: one, rand: noRand }).at, null, "1 day: never twice on the same date");
   assert.equal(slot(posted(100), Object.assign(ok("g"), { repeat_days: 7 })).at, null, "every week: not after 4 days");
   assert.ok(slot(posted(7 * 24), Object.assign(ok("g"), { repeat_days: 7 })).at);
-  assert.equal(slot(posted(48), Object.assign(ok("g"), { repeat_days: 1 })).at, null, "never under 3 days, whatever the rhythm says");
+  assert.equal(slot(datesAgo(2), Object.assign(ok("g"), { repeat_days: 1 })).at, null, "never under 3 dates, whatever the rhythm says");
   const noCaps = S.configFrom(null, { FORLY_ENV: "local" });
   assert.equal(slot(posted(100), Object.assign(ok("g"), { repeat_days: 7 }), noCaps).at, null, "the rhythm holds where caps are off");
 }
@@ -401,6 +436,7 @@ const POSITIVES = [
   ["feature_blocked, hebrew", { dialogText: "לא ניתן להשתמש בתכונה זו כרגע" }, "feature_blocked"],
   ["rate_limited, english", { alertText: "You're temporarily blocked from posting" }, "rate_limited"],
   ["rate_limited, curly apostrophe", { alertText: "You’re temporarily blocked from posting" }, "rate_limited"],
+  ["rate_limited, under the composer", { dialogText: "Create post … Post We limit how often you can post, comment or do other things in a given amount of time in order to help protect the community from spam. You can try again later." }, "rate_limited"],
   ["rate_limited, hebrew (חסומים זמנית)", { alertText: "אתם חסומים זמנית" }, "rate_limited"],
   ["rate_limited, hebrew (נחסמת באופן זמני)", { alertText: "נחסמת באופן זמני" }, "rate_limited"],
   ["rate_limited, hebrew (חסימה זמנית)", { alertText: "חסימה זמנית" }, "rate_limited"],

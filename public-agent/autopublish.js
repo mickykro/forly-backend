@@ -73,6 +73,9 @@
       <button type="button" class="btn btn-gold btn-sm" data-confirm="${U.esc(p.page_id)}">אישור והתחלת הפרסום</button></div>`;
   }
   function previewHtml(p) {
+    if (!groupsOf(p).size) return '<div class="ap-preview"><p class="ap-note">בחרו לפחות קבוצה אחת כדי לראות את הפוסט.</p></div>';
+    // The groups changed since the preview was loaded: load the post for the new ones (loadPreview skips what it has).
+    setTimeout(() => loadPreview(p), 0);
     if (settings && settings.manual && confirming.has(p.page_id)) return manualPreviewHtml(p);
     const v = previews.get(previewKey(p)), id = U.esc(p.page_id);
     if (!v || v === "loading") return '<div class="ap-preview"><p class="camp-muted">טוענים את הפוסט…</p></div>';
@@ -214,7 +217,11 @@
     const thumb = /^https:\/\//.test(p.thumb_url || "") ? `<img class="ap-thumb" src="${U.esc(p.thumb_url)}" alt="" loading="lazy">` : '<div class="ap-thumb"></div>';
     const where = [p.city, DEAL[p.listing_type]].filter(Boolean).map(U.esc).join(" · ");
     const none = !on && !ids.size ? `<p class="ap-note">לא מצאנו קבוצה שלכם שמתאימה ל${U.esc(p.city || "נכס הזה")} — בחרו קבוצות.</p>` : "";
-    const panel = !open.has(p.page_id) ? "" : `<div class="ap-groups"><div class="camp-groups">` +
+    const panel = !open.has(p.page_id) ? "" : `<div class="ap-groups"><div class="ap-pick">` +
+      `<button type="button" class="btn btn-ghost btn-sm" data-all="${id}">בחירת הכל</button>` +
+      `<button type="button" class="btn btn-ghost btn-sm" data-none="${id}">ניקוי הבחירה</button>` +
+      ((settings.default_group_ids || []).length ? `<button type="button" class="btn btn-ghost btn-sm" data-usedefaults="${id}">בחירת קבוצות ברירת המחדל</button>` : "") +
+      `<button type="button" class="btn btn-ghost btn-sm" data-defaults="${id}">שמירה כברירת מחדל</button></div><div class="camp-groups">` +
       (members().filter(U.usable).map((g) => {
         const gid = String(g.group_id), checked = ids.has(gid);
         // A group the server refuses for this property's deal is shown, never tickable.
@@ -236,7 +243,7 @@
         <button type="button" class="btn btn-ghost btn-sm" data-groups="${id}">קבוצות (${ids.size})</button>
         <button type="button" class="btn btn-ghost btn-sm" data-preview="${id}">${previewOpen.has(p.page_id) ? "הסתרת התצוגה" : "תצוגה מקדימה של הפוסט"}</button>
         <a class="btn btn-ghost btn-sm" href="/publish.html?page=${encodeURIComponent(p.page_id)}">שיתוף ידני</a>
-      </div>${approvalsHtml(p)}${recentHtml(p)}${previewOpen.has(p.page_id) ? previewHtml(p) : ""}${panel}</div>`;
+      </div>${approvalsHtml(p)}${recentHtml(p)}${confirming.has(p.page_id) ? panel : ""}${previewOpen.has(p.page_id) ? previewHtml(p) : ""}${confirming.has(p.page_id) ? "" : panel}</div>`;
   }
 
   // Properties in a live campaign always come first; within each part, the
@@ -396,10 +403,11 @@
     if (on) {
       if (!settings.connected) { toast("קודם חברו את החשבון האישי שלכם בפייסבוק."); return renderProps(); }
       const ids = [...groupsOf(p)];
-      if (!ids.length) { open.add(p.page_id); toast("בחרו לפחות קבוצה אחת לנכס הזה"); return renderProps(); }
-      if (!previewed.has(p.page_id)) {
-        previewOpen.add(p.page_id); confirming.add(p.page_id); loadPreview(p);
-        toast("בדקו את הפוסט ואשרו כדי להפעיל"); return renderProps();
+      // One place to finish: the group choice, then the post, then the confirm button under it.
+      if (!ids.length || !previewed.has(p.page_id)) {
+        open.add(p.page_id); previewOpen.add(p.page_id); confirming.add(p.page_id);
+        if (ids.length) loadPreview(p);
+        toast(ids.length ? "בדקו את הקבוצות ואת הפוסט, ואשרו כדי להפעיל" : "בחרו קבוצות לנכס הזה, ואשרו כדי להפעיל"); return renderProps();
       }
       if (pageOn() && !withPage()) { $("apSettings").open = true; toast("בחרו באיזה דף עסקי לפרסם, או בטלו את \"גם בדף העסקי\""); return renderProps(); }
       if (needConsent()) return renderProps();
@@ -412,6 +420,8 @@
         toast(approved ? startedText(dropped) : "התחלנו ✓ הפוסט הראשון יופיע כאן לאישור בעוד רגע"); open.delete(p.page_id);
       });
     }
+    // Switched off before confirming: nothing started, just close the setup.
+    if (!live(p.campaign)) { confirming.delete(p.page_id); previewOpen.delete(p.page_id); open.delete(p.page_id); return renderProps(); }
     // STOP: always allowed, whatever the switches or halts say (routes/posting.js).
     if (!confirm("לעצור את הפרסום של הנכס הזה? מה שכבר עלה נשאר בקבוצות. אפשר להפעיל שוב מתי שתרצו.")) return renderProps();
     return withBusy(p, async () => { await post(`/api/posting/campaigns/${encodeURIComponent(p.campaign.id)}/stop`); toast("הפרסום של הנכס נעצר"); });
@@ -454,6 +464,17 @@
     });
   }
 
+  // The ticked groups (on screen, saved or not) become the account's default groups.
+  async function saveDefaults(p, btn) {
+    const ids = [...document.querySelectorAll(`input[data-page="${CSS.escape(p.page_id)}"]:checked`)].map((i) => i.dataset.group);
+    if (!ids.length) return toast("בחרו לפחות קבוצה אחת");
+    if (!confirm(`להגדיר את ${ids.length === 1 ? "הקבוצה" : `${ids.length} הקבוצות`} כברירת מחדל? הן יחליפו את קבוצות ברירת המחדל הנוכחיות.`)) return;
+    btn.disabled = true;
+    try { settings.default_group_ids = (await put("/api/posting/default-groups", { group_ids: ids })).default_group_ids || ids; renderSettings(); toast("קבוצות ברירת המחדל נשמרו ✓"); }
+    catch (e) { toast(errorText(e)); }
+    finally { btn.disabled = false; }
+  }
+
   // ── wiring ──
   const byId = (id) => props.find((p) => p.page_id === id);
   $("apProps").addEventListener("change", (ev) => {
@@ -484,6 +505,16 @@
     if (b.dataset.skip) return decide(b.dataset.skip, "skip");
     if (b.dataset.groups) { if (open.has(b.dataset.groups)) open.delete(b.dataset.groups); else open.add(b.dataset.groups); renderProps(); }
     if (b.dataset.save && byId(b.dataset.save)) saveGroups(byId(b.dataset.save));
+    if (b.dataset.defaults && byId(b.dataset.defaults)) saveDefaults(byId(b.dataset.defaults), b);
+    const pickId = b.dataset.all || b.dataset.none || b.dataset.usedefaults;
+    if (pickId && byId(pickId)) {
+      // The tickable boxes only (a group refused for this deal is disabled); a live campaign keeps the change on screen until "save".
+      const p = byId(pickId), defs = new Set((settings.default_group_ids || []).map(String));
+      const want = (gid) => (b.dataset.all ? true : b.dataset.none ? false : defs.has(gid));
+      const boxes = [...document.querySelectorAll(`input[data-page="${CSS.escape(p.page_id)}"]`)];
+      boxes.forEach((i) => { i.checked = want(i.dataset.group); i.closest(".camp-g").classList.toggle("on", i.checked); });
+      if (!live(p.campaign)) { const s = groupsOf(p); boxes.forEach((i) => (i.checked ? s.add(i.dataset.group) : s.delete(i.dataset.group))); renderProps(); }
+    }
     if (b.dataset.preview && byId(b.dataset.preview)) {
       const p = byId(b.dataset.preview);
       if (previewOpen.has(p.page_id)) { previewOpen.delete(p.page_id); confirming.delete(p.page_id); } else { previewOpen.add(p.page_id); loadPreview(p); }

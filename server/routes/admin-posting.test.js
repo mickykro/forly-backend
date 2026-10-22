@@ -449,6 +449,39 @@ const noFullPhone = (raw, what) => {
       assert.equal(ev.filter((e) => e.action === "resume_campaign").length, 1);
     }
 
+    // ── caps: validated, compare-and-set, replaced whole, shown with default and what applies ──
+    {
+      const v0 = (await db.getSetting("posting")).version;
+      assert.equal((await post("/caps", { caps: { daily_cap: -1 }, reason: "x", version: v0 })).body.field, "daily_cap");
+      const zero = await post("/caps", { caps: { daily_cap: 0 }, reason: "x", version: v0 });
+      assert.deepEqual([zero.status, zero.body.error, zero.body.min, zero.body.max], [400, "out_of_range", 1, 60], "prod: no unlimited");
+      assert.equal((await post("/caps", { caps: { property_group_cooldown_days: 0 }, reason: "x", version: v0 })).body.error, "out_of_range", "prod: the duplicate guard never off");
+      assert.equal((await post("/caps", { caps: { nope: 1 }, reason: "x", version: v0 })).body.field, "nope");
+      assert.equal((await post("/caps", { caps: { daily_cap: 5 }, reason: " ", version: v0 })).body.error, "reason_required");
+      assert.equal((await post("/caps", { caps: { daily_cap: 5 }, reason: "x", version: v0 - 1 })).status, 409);
+      const c1 = await post("/caps", { caps: { daily_cap: 50, group_daily_cap: 5, weekly_cap: null }, reason: "more a day", version: v0 });
+      assert.equal(c1.status, 200, c1.raw);
+      assert.deepEqual((await db.getSetting("posting")).caps, { daily_cap: 50, group_daily_cap: 5 }, "null keeps the default");
+      assert.deepEqual(c1.body.caps.group_daily_cap, { set: 5, default: 3, applies: 5, min: 1, max: 10 });
+      assert.equal(c1.body.caps.weekly_cap.set, null);
+      const c2 = await post("/caps", { caps: { property_group_cooldown_days: 7 }, reason: "longer", version: v0 + 1 });
+      assert.deepEqual((await db.getSetting("posting")).caps, { property_group_cooldown_days: 7 }, "a save replaces the whole set");
+      assert.equal(c2.body.version, v0 + 2);
+      await post("/caps", { caps: {}, reason: "back to defaults", version: v0 + 2 });
+    }
+
+    // ── modes: validated, compare-and-set, replaced whole, shown with the env's own value ──
+    {
+      const v0 = (await db.getSetting("posting")).version;
+      assert.equal((await post("/modes", { modes: { nope: true }, reason: "x", version: v0 })).body.field, "nope");
+      assert.equal((await post("/modes", { modes: { manual: "on" }, reason: "x", version: v0 })).body.field, "manual");
+      assert.equal((await post("/modes", { modes: { manual: false }, reason: " ", version: v0 })).body.error, "reason_required");
+      const m1 = await post("/modes", { modes: { manual: false, shots: null }, reason: "automatic posting", version: v0 });
+      assert.equal(m1.status, 200, m1.raw);
+      assert.deepEqual((await db.getSetting("posting")).modes, { manual: false }, "null leaves the env in charge");
+      assert.deepEqual(m1.body.modes.manual.set, false);
+      assert.equal((await post("/modes", { modes: {}, reason: "x", version: v0 })).status, 409, "stale version");
+    }
     console.log("routes/admin-posting.test.js ok");
   } finally {
     server.close();

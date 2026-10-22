@@ -21,6 +21,8 @@ const OPEN_POST = new Set(["pending_approval", "scheduled", "posting"]);
 // Posts one browser session publishes, and so the most posts the planner
 // prepares ahead for the agent to approve together.
 const MAX_SESSION_POSTS = 5;
+// Read at each use: the admin's posting modes can turn burst on or off while the server runs. POSTING_BURST (local): no per-session limit.
+const maxSessionPosts = (env = process.env) => (safety.burst(env) ? 1000 : MAX_SESSION_POSTS);
 // Attempt state → campaign post status (the post mirrors its attempt).
 const POST_STATUS_OF = {
   verified_posted: "posted", submitted_for_approval: "pending_group_approval",
@@ -321,6 +323,8 @@ function limitsFor(account, at, config, targetType = "group") {
 // The start of the next Jerusalem calendar day's active window, with the
 // day's own start jitter — a post pushed to "tomorrow" never lands at 09:00:00 sharp.
 function nextDayStart(now, config, rand) {
+  // POSTING_BURST with no caps: no "tomorrow", retry at once. With caps a full day waits for the next.
+  if (config.burst && config.daily_cap >= 1e6) return new Date(now.getTime());
   const today = safety.jerusalemDate(now);
   let t = new Date(now.getTime());
   for (let i = 0; i < 4 * 30 && safety.jerusalemDate(t) === today; i++) t = new Date(t.getTime() + 15 * MS_MIN);
@@ -353,14 +357,26 @@ async function mutate(x, id, fn) {
 
 // Kinds an agent hears in manual posting too: the end, and what the team did.
 const MANUAL_KINDS = new Set(["completed", "admin_created", "admin_stopped"]);
+// Automatic posting is quiet too (17 Oct 2026): no message per post, pause or halt. Approvals
+// still go out (a per_post campaign waits on them), so does what the team did, and the end.
+const AUTO_KINDS = new Set(["completed", "approve", "admin_created", "admin_stopped"]);
+const ALL_DONE = "✅ סיימנו לפרסם את כל הקמפיינים שלך.";
 
 // deps.messages (Task 20) supplies the signed-link texts; until then these
 // Hebrew fallbacks go out. A failed notification never changes state.
 async function say(deps, phone, kind, fallback, ...args) {
   if (typeof deps.notify !== "function") return;
   // Manual posting (posting-manual): the agent hears from us once, at the end.
-  if (require("./posting-manual").enabled(deps.env || process.env) && !MANUAL_KINDS.has(kind)) return;
-  const text = deps.messages && typeof deps.messages[kind] === "function" ? deps.messages[kind](...args) : fallback;
+  const manual = require("./posting-manual").enabled(deps.env || process.env);
+  if (!(manual ? MANUAL_KINDS : AUTO_KINDS).has(kind)) return;
+  let text = deps.messages && typeof deps.messages[kind] === "function" ? deps.messages[kind](...args) : fallback;
+  if (kind === "completed" && !manual) { // manual posting keeps its per-campaign summary (its links)
+    // One message for the whole batch: only once no other campaign of this account is still running.
+    const self = args[0] && args[0].id;
+    const campaigns = await (deps.store || require("./posting-store")).listPostingCampaignsByPhone(phone).catch(() => null);
+    if (!campaigns || campaigns.some((c) => c && c.status === "running" && c.id !== self)) return;
+    text = ALL_DONE;
+  }
   if (!text) return;
   try { await deps.notify(phone, text); } catch (e) { console.error(redact(`posting notify ${kind} ${tail(phone)} failed: ${(e && e.code) || "error"}`)); }
 }
@@ -418,7 +434,7 @@ const drainCancelFailures = () => { const n = cancelFailures; cancelFailures = 0
 
 module.exports = {
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
-  MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, MAX_SESSION_POSTS, POST_STATUS_OF, ELIGIBILITY,
+  MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, MAX_SESSION_POSTS, maxSessionPosts, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,
   groupIdFromUrl, defaultGroupIds, nonMemberLinks, catalogIndex, catalogEntriesFor, policyDisallowed, typeExcluded, isHidden, DISALLOWED_POLICY, fitsProperty, nameDealConflict, nameBarsAgents,
   memberOf, groupIdsOf, applyFindings, eligibility, isEligible, needsMembershipCheck,

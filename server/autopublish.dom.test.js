@@ -112,8 +112,8 @@ function findChromium() {
     assert.deepEqual(state.calls.map((c) => c[0]), ["preview"]);
     state.calls.length = 0;
 
-    // Edit Kfar Saba's groups first: drop k2.
-    await rows.nth(0).locator("[data-groups]").click();
+    // Edit Kfar Saba's groups first: drop k2. Turning the switch on already opened the group list with the preview.
+    assert.ok(await page.locator('input[data-page="pgK"][data-group="k2"]').isVisible(), "the switch opens the groups together with the post");
     await page.locator('input[data-page="pgK"][data-group="k2"]').uncheck();
     assert.ok((await rows.nth(0).textContent()).includes("קבוצות (1)"));
 
@@ -132,8 +132,9 @@ function findChromium() {
 
     // Eilat: switching on with no group opens its panel instead of starting.
     await rows.nth(1).locator(".switch i").click();
-    await page.waitForFunction(() => /בחרו לפחות קבוצה אחת/.test(document.getElementById("msg").textContent));
+    await page.waitForFunction(() => /בחרו קבוצות לנכס הזה/.test(document.getElementById("msg").textContent));
     assert.equal(await page.locator('input[data-page="pgE"]').count(), 3, "its group list is open (usable groups only)");
+    assert.ok((await rows.nth(1).textContent()).includes("בחרו לפחות קבוצה אחת כדי לראות את הפוסט"), "the preview waits for a group");
     assert.equal(state.calls.filter((c) => c[0] === "create").length, 1);
 
     // A running property's groups: saved as a new pass — stop, then create with the new set.
