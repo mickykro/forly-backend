@@ -57,12 +57,8 @@
     return isNaN(d.getTime()) ? "—" : d.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" });
   }
   function onOff(on) { return on ? "פעיל" : "כבוי"; }
-  function askReason(q) {
-    var r = window.prompt(q || "סיבה?");
-    r = r == null ? "" : String(r).trim();
-    if (!r) FLY.toast("בוטל — חובה לכתוב סיבה");
-    return r || null;
-  }
+  // One admin: no reason is asked; the action log records each change as made by the admin.
+  function askReason() { return "admin"; }
 
   function handleError(e, fallback) {
     if (e && e.status === 401 && e.code === "stepup_required") {

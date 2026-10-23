@@ -51,9 +51,7 @@
       .catch(function (e) { if (my === seq) { box.innerHTML = '<p class="posting-note">הטעינה נכשלה.</p>'; fail(e); } });
   }
   function toggle(ref, pause, btn) {
-    var reason = window.prompt(pause ? "למה משהים את הסוכן?" : "למה ממשיכים את הפרסום?");
-    reason = reason == null ? "" : String(reason).trim();
-    if (!reason) { FLY.toast("בוטל — חובה לכתוב סיבה"); return; }
+    var reason = "admin"; // one admin: no reason is asked
     btn.disabled = true;
     FLY.req(API + encodeURIComponent(ref) + "/pause", { method: "POST", body: { paused: pause, reason: reason }, noRedirect: true })
       .then(function () { $("#campStepUp").classList.add("hidden"); FLY.toast(pause ? "✅ הסוכן הושהה" : "✅ הפרסום ממשיך"); load(); })
