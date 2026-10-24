@@ -11,9 +11,10 @@
  */
 
 const MODEL = process.env.REEL_SCRIPT_MODEL || "claude-haiku-4-5-20251001";
-// Spoken Hebrew at the 1.08x the render applies runs ~13 chars/s; a line may
-// overrun its clip a little (the render stretches the shot), not by much.
-const CHARS_PER_SECOND = 13;
+// Gemini's Hebrew at the 1.08x the render applies runs ~10.5 chars/s (measured
+// on WW1 V4 runs). A longer line still plays whole — the render holds the shot —
+// but the reel gets longer, so the model is held to the clip.
+const CHARS_PER_SECOND = 10;
 const SUB_LINE_MAX = 28;
 const MUSIC_PROMPT = "Warm, modern, uplifting instrumental background music for a real-estate Instagram reel. " +
   "Soft electric piano and light acoustic guitar, gentle deep-house beat, airy pads, 110 BPM, bright and " +
@@ -71,7 +72,7 @@ function wrapSubtitle(text) {
   return best < 0 ? t : `${t.slice(0, best)}\\N${t.slice(best + 1)}`;
 }
 
-const capFor = (clip) => Math.round((num(clip.duration) + 1) * CHARS_PER_SECOND);
+const capFor = (clip) => Math.round(num(clip.duration) * CHARS_PER_SECOND);
 
 function describeClip(clip, spaces) {
   return (clip.spaces || []).map((id) => {
@@ -96,7 +97,7 @@ function buildPrompt(clips, spaces, d = {}) {
     `LISTING\n${facts}\n\nCLIPS, in order\n${list}\n\n` +
     `Write one line per clip, in order.\n` +
     `- "narration": spoken Hebrew, warm and natural, like an agent showing the home. Numbers as Hebrew words ` +
-    `(e.g. "חמישה חדרים", "קומה תשע"). Stay under the clip's max length. Mention only the rooms and things ` +
+    `(e.g. "חמישה חדרים", "קומה תשע"). Stay under the clip's max length — short and punchy beats complete; one idea per line. Mention only the rooms and things ` +
     `listed for that clip and the listing facts — never invent a feature, view or material.\n` +
     `- Line 1 opens with a short hook ("בואו תראו את זה...") and says the rooms, neighborhood and city.\n` +
     `- The last line ends with "הפרטים כאן על המסך".\n` +
@@ -115,7 +116,7 @@ function validateScript(raw, clips) {
     const narration = clean(l && l.narration, 400);
     const sub = clean(l && l.subtitle, 120);
     if (!hasHebrew(narration) || !hasHebrew(sub)) throw new Error(`line ${i + 1} is not Hebrew`);
-    if (narration.length > capFor(clips[i]) * 1.4) throw new Error(`line ${i + 1} too long (${narration.length})`);
+    if (narration.length > capFor(clips[i]) * 1.25) throw new Error(`line ${i + 1} too long (${narration.length})`);
     const parts = sub.split("|").map((x) => x.trim()).filter(Boolean).slice(0, 2);
     const subtitle = parts.length === 2 && parts.every((x) => x.length <= SUB_LINE_MAX + 4)
       ? `${parts[0]}\\N${parts[1]}` : wrapSubtitle(parts.join(" "));

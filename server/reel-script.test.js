@@ -25,7 +25,7 @@ assert.ok(/\\N/.test(wrapSubtitle("סלון מואר עם יציאה למרפס�
 
 // the prompt carries each clip's spaces, length cap and the listing facts
 const p = buildPrompt(clips, spaces, sale);
-assert.ok(p.includes("Clip 2 (11s, narration max 156 chars): סלון (sofa, hanging chair)"));
+assert.ok(p.includes("Clip 2 (11s, narration max 110 chars): סלון (sofa, hanging chair)"));
 assert.ok(p.includes("for sale") && p.includes("neighborhood: הפארק") && p.includes("exactly 2 lines"));
 
 // validation: count, Hebrew, length, subtitle split
