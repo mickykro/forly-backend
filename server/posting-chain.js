@@ -33,7 +33,7 @@ const sessionConfig = (config) => Object.assign({}, config, { min_gap_minutes: 1
 // already planned — not one set for later by the agent — else one planned now.
 async function prepareNext(phone, deps, x, now) {
   const T = require("./posting-tick");
-  const config = sessionConfig(await configOf(deps, x));
+  const config = sessionConfig(await configOf(deps, x, phone));
   const d = Object.assign({}, deps, { config });
   const conn = (await x.db.getConnection(phone)) || {};
   const ready = (campaigns) => campaigns.filter((c) => c.status === "running")

@@ -461,6 +461,7 @@ const noFullPhone = (raw, what) => {
       assert.equal((await post("/caps", { caps: { daily_cap: 5 }, reason: "x", version: v0 - 1 })).status, 409);
       const c1 = await post("/caps", { caps: { daily_cap: 50, group_daily_cap: 5, weekly_cap: null }, reason: "more a day", version: v0 });
       assert.equal(c1.status, 200, c1.raw);
+      assert.equal(c1.body.audited, true, "the change is in the action log");
       assert.deepEqual((await db.getSetting("posting")).caps, { daily_cap: 50, group_daily_cap: 5 }, "null keeps the default");
       assert.deepEqual(c1.body.caps.group_daily_cap, { set: 5, default: 3, applies: 5, min: 1, max: 10 });
       assert.equal(c1.body.caps.weekly_cap.set, null);
@@ -478,6 +479,7 @@ const noFullPhone = (raw, what) => {
       assert.equal((await post("/modes", { modes: { manual: false }, reason: " ", version: v0 })).body.error, "reason_required");
       const m1 = await post("/modes", { modes: { manual: false, shots: null }, reason: "automatic posting", version: v0 });
       assert.equal(m1.status, 200, m1.raw);
+      assert.equal(m1.body.audited, true, "the change is in the action log");
       assert.deepEqual((await db.getSetting("posting")).modes, { manual: false }, "null leaves the env in charge");
       assert.deepEqual(m1.body.modes.manual.set, false);
       assert.equal((await post("/modes", { modes: {}, reason: "x", version: v0 })).status, 409, "stale version");

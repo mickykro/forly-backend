@@ -4,6 +4,7 @@
  *
  *   GET  /:ref/activity  { paused, attempts (last 7 days), halts, shots }
  *   POST /:ref/pause     { paused: true|false, reason }  connections.posting_paused_by_admin
+ *   POST /:ref/rules     { rules: { field: number|null } }  connections.posting_rules (posting-safety RULES)
  *
  * A paused agent's account is refused by posting-guard (paused_by_admin):
  * campaigns wait, a post not yet submitted is cancelled and retried after the
@@ -17,6 +18,7 @@ const A = require("../posting-account");
 const M = require("../posting-manual");
 const { redact } = require("../driver-browser");
 const { postingEnvAllowed } = require("../posting-guard");
+const safety = require("../posting-safety");
 
 const DAY = 86400000;
 const tail = (p) => (p ? String(p).slice(-4) : null);
@@ -51,7 +53,13 @@ module.exports = function createAdminAgentsRouter({ requireAdmin, requireStepUp,
     const halts = (conn.posting_halts || []).slice(-10).reverse().map((h) => ({ at: h.at, code: h.code }));
     // Failure screenshots exist on local/staging only (posting-shots); served by /api/dev/driver-shots/:id.jpg.
     const shotList = shots.enabled(env) ? (await shots.list(env)).filter((s) => s.phone_tail === `…${tail(phone)}`).slice(0, 10).map((s) => ({ id: s.id, at: s.at, error_code: s.error_code, image: s.image })) : [];
+    // The agent's rules: their own (null = the global value), the global value, what applies to them.
+    const setting = (await x.db.getSetting("posting")) || {};
+    const rules = safety.rulesView(conn.posting_rules, safety.configFrom(setting, env, conn.posting_rules), env);
+    const global = safety.rulesOf(safety.configFrom(setting, env));
+    for (const f of Object.keys(rules)) rules[f].global = global[f];
     res.json({
+      rules,
       paused: conn.posting_paused_by_admin || null,
       disabled: conn.posting_disabled_until_admin === true,
       running: camps.filter((c) => c.status === "running").length,
@@ -74,6 +82,29 @@ module.exports = function createAdminAgentsRouter({ requireAdmin, requireStepUp,
     await store.mutateConnection(phone, () => ({ posting_paused_by_admin: paused }));
     console.log(`posting admin: agent …${tail(phone)} ${b.paused ? "paused" : "resumed"} by …${by}`);
     res.json({ ok: true, paused });
+  }));
+
+  // The agent's own rules: each a whole number in its range, or null (the global value). Replaces the whole set.
+  router.post("/:ref/rules", requireAdmin, requireStepUp, wrap(async (req, res) => {
+    if (!postingEnvAllowed(env)) return res.status(503).json({ error: "posting_unavailable_in_env" });
+    const raw = (req.body || {}).rules;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return res.status(400).json({ error: "invalid_input", field: "rules" });
+    const rules = {};
+    for (const [f, v] of Object.entries(raw)) {
+      if (!safety.CAP_FIELDS.includes(f)) return res.status(400).json({ error: "invalid_input", field: f });
+      if (v === null) continue;
+      const [min, max] = safety.capRange(f, env);
+      if (!Number.isInteger(v) || v < min || v > max) return res.status(400).json({ error: "out_of_range", field: f, min, max });
+      rules[f] = v;
+    }
+    const phone = await phoneOf(req.params.ref);
+    if (!phone) return res.status(404).json({ error: "not_found" });
+    const by = tail(req.user && req.user.userId);
+    try { await store.addAuditEvent({ operator_tail: by, action: "agent_rules", target_phone_tail: tail(phone), reason: "admin", detail: { changed: Object.keys(rules).join(" ") || "cleared" } }, x.clock()); }
+    catch (e) { throw Object.assign(new Error("audit_unavailable"), { code: "audit_unavailable" }); }
+    await store.mutateConnection(phone, () => ({ posting_rules: Object.keys(rules).length ? rules : null }));
+    console.log(`posting admin: agent …${tail(phone)} rules ${JSON.stringify(rules)} by …${by}`);
+    res.json({ ok: true, rules });
   }));
 
   return router;

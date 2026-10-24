@@ -53,9 +53,12 @@ function ctxOf(deps = {}) {
 const nowOf = (deps, x) => (deps && deps.now instanceof Date ? deps.now : x.clock());
 const guardDeps = (deps, x) => ({ db: x.db, env: deps.env || process.env });
 
-async function configOf(deps, x) {
+// `who`: the agent (a phone, or their connection doc already read): their own
+// rules (connections.posting_rules) over the global ones. Without it: the global config.
+async function configOf(deps, x, who) {
   if (deps.config) return deps.config;
-  return safety.configFrom(await x.db.getSetting("posting"), deps.env || process.env);
+  const conn = who && typeof who === "object" ? who : who ? await x.db.getConnection(String(who)).catch(() => null) : null;
+  return safety.configFrom(await x.db.getSetting("posting"), deps.env || process.env, conn && conn.posting_rules);
 }
 
 // facebook.com/groups/<slug> → the Task 14 group_id: the numeric id, or

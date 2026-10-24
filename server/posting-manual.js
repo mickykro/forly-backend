@@ -203,7 +203,7 @@ async function markDone(campaignId, groupId, status, deps = {}, opts = {}) {
   const head = await x.store.getPostingCampaign(String(campaignId));
   if (!head) return null;
   const conn = (await x.db.getConnection(head.phone)) || {};
-  const config = await A.configOf(deps, x);
+  const config = await A.configOf(deps, x, conn);
   const id = crypto.randomUUID();
   let finished = false, past = false;
   const next = await A.mutate(x, String(campaignId), (cur) => {

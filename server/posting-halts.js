@@ -128,7 +128,7 @@ async function haltAccount(phone, cls, deps = {}, opts = {}) {
   // tick's start time. opts.now is only for tests that call this directly.
   const now = opts.now instanceof Date ? opts.now : nowOf(deps, x);
   const at = iso(now);
-  const config = await configOf(deps, x);
+  const config = await configOf(deps, x, phone);
   const out = { cls, disabled: false, owner_review: false, penalty_until: null, reconnect: false, paused: 0, campaign_paused: false };
   const entry = opts.group_id ? { at, code: cls, group_id: String(opts.group_id) } : { at, code: cls };
   const within = (h, days) => now.getTime() - ms(h.at) < days * MS_DAY;

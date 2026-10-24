@@ -13,7 +13,7 @@
     verified_posted: "פורסם", verified_failed: "נכשל", outcome_unknown: "לא ידוע", cancelled: "בוטל",
     reserved: "בתור", session_started: "בדרך", composer_ready: "בדרך", submit_started: "נשלח", verification_pending: "נבדק",
   };
-  var ERR = { posting_unavailable_in_env: "בסביבה הזו אין שינויים בפרסום", reason_required: "חובה לכתוב סיבה", audit_unavailable: "יומן הפעולות לא זמין — לא שונה דבר" };
+  var ERR = { out_of_range: "ערך מחוץ לטווח המותר", posting_unavailable_in_env: "בסביבה הזו אין שינויים בפרסום", reason_required: "חובה לכתוב סיבה", audit_unavailable: "יומן הפעולות לא זמין — לא שונה דבר" };
   var when = function (v) { var d = new Date(v); return isNaN(d) ? "—" : d.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }); };
   var seq = 0;
 
@@ -38,8 +38,12 @@
       "<details open><summary>פעילות בשבוע האחרון (" + (d.attempts || []).length + ")</summary>" +
       (rows ? '<table class="posting-table"><thead><tr><th>מתי</th><th>קבוצה</th><th>תוצאה</th></tr></thead><tbody>' + rows + "</tbody></table>" : '<p class="posting-note">אין פעילות.</p>') + "</details>" +
       (halts ? "<details><summary>עצירות של פייסבוק</summary><ul>" + halts + "</ul></details>" : "") +
-      (shots ? "<details><summary>צילומי מסך של כשלונות</summary><ul>" + shots + "</ul></details>" : "");
+      (shots ? "<details><summary>צילומי מסך של כשלונות</summary><ul>" + shots + "</ul></details>" : "") +
+      (d.rules ? '<details><summary>חוקי פרסום של הסוכן</summary><p class="posting-note">שדה ריק = החוק הכללי (מוצג באפור).</p><div id="agentRules">' +
+        FORLY_RULES.form(d.rules, { inherit: true }) + '</div><button type="button" class="btn btn-gold btn-sm" id="agentRulesSave">שמירת החוקים של הסוכן</button></details>' : "");
     $("#agentPause").addEventListener("click", function () { toggle(ref, !p, this); });
+    var save = $("#agentRulesSave");
+    if (save) save.addEventListener("click", function () { saveRules(ref, this); });
   }
   function load() {
     var ref = pick.value, my = ++seq;
@@ -50,10 +54,17 @@
       .then(function (d) { if (my === seq) render(ref, d); })
       .catch(function (e) { if (my === seq) { box.innerHTML = '<p class="posting-note">הטעינה נכשלה.</p>'; fail(e); } });
   }
+  // The agent's own rules: empty = the global rule.
+  function saveRules(ref, btn) {
+    var got = FORLY_RULES.read($("#agentRules"));
+    if (got.bad) { got.bad.focus(); FLY.toast("מספר שלם בטווח " + got.bad.min + "–" + got.bad.max); return; }
+    btn.disabled = true;
+    FLY.req(API + encodeURIComponent(ref) + "/rules", { method: "POST", body: { rules: got.rules }, noRedirect: true })
+      .then(function () { $("#campStepUp").classList.add("hidden"); FLY.toast("✅ החוקים של הסוכן נשמרו"); load(); })
+      .catch(function (e) { btn.disabled = false; fail(e); });
+  }
   function toggle(ref, pause, btn) {
-    var reason = window.prompt(pause ? "למה משהים את הסוכן?" : "למה ממשיכים את הפרסום?");
-    reason = reason == null ? "" : String(reason).trim();
-    if (!reason) { FLY.toast("בוטל — חובה לכתוב סיבה"); return; }
+    var reason = "admin"; // one admin: no reason is asked
     btn.disabled = true;
     FLY.req(API + encodeURIComponent(ref) + "/pause", { method: "POST", body: { paused: pause, reason: reason }, noRedirect: true })
       .then(function () { $("#campStepUp").classList.add("hidden"); FLY.toast(pause ? "✅ הסוכן הושהה" : "✅ הפרסום ממשיך"); load(); })

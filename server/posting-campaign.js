@@ -267,8 +267,8 @@ async function approvePost(id, postId, deps = {}, opts = {}) {
   if (!c) return null;
   const post = c.posts.find((p) => p.id === postId && p.status === "pending_approval");
   if (!post) return c;
-  const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(c.phone)) || {};
+  const config = await configOf(deps, x, conn);
   const account = await A.accountView(c.phone, conn, deps, now, { exclude: post.id });
   const cand = { group_id: post.group_id, url: post.group_url };
   const slot = safety.nextSlot({ now, account, candidates: [{ ...cand, aliases: A.groupIdsOf(cand, conn).slice(1) }], pageId: c.page_id, config, rand: x.rand });
@@ -365,7 +365,7 @@ function candidatesFor(c, ctx) {
 async function planAccount(phone, deps = {}, now, pre = {}) {
   const x = ctxOf(deps);
   now = now || nowOf(deps, x);
-  const config = pre.config || (await configOf(deps, x));
+  const config = pre.config || (await configOf(deps, x, pre.conn || phone));
   const conn = pre.conn || (await x.db.getConnection(phone)) || {};
   const campaigns = pre.campaigns || (await x.store.listPostingCampaignsByPhone(phone));
   const open = campaigns.reduce((n, c) => n + (c.posts || []).filter((p) => OPEN_POST.has(p.status)).length, 0);
@@ -493,8 +493,8 @@ async function schedulePost(decision, deps = {}, now) {
 async function explainGroups(c, deps = {}, now) {
   const x = ctxOf(deps);
   now = now || nowOf(deps, x);
-  const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(c.phone)) || {};
+  const config = await configOf(deps, x, conn);
   const page = (await x.db.getPage(c.page_id)) || {};
   const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
   const used = usedTargets(c, now);

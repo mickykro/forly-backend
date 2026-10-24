@@ -212,28 +212,74 @@ const capsOff = (env = process.env) => !!env && env.FORLY_ENV === "local" && env
 // POSTING_BURST=1 (local only): no gap between sessions and no dwell between
 // chained posts. With POSTING_CAPS=1 the caps and duplicate guards still hold.
 const burst = (env = process.env) => !!env && env.FORLY_ENV === "local" && env.NODE_ENV !== "production" && env.POSTING_BURST === "1";
-// The caps an admin sets in the posting admin (settings/posting.caps). Each is a
-// whole number; 0 means no limit (for a day count: the guard is off); a missing
-// one keeps the default.
-const CAP_FIELDS = ["daily_cap", "weekly_cap", "group_daily_cap", "max_consecutive_failures", "property_group_cooldown_days", "fingerprint_window_days"];
-const DAY_FIELDS = new Set(["property_group_cooldown_days", "fingerprint_window_days"]);
+// The posting rules an admin sets (settings/posting.caps, and per agent
+// connections.posting_rules): each a whole number in its range — outside a
+// local box never 0 for a limit (no "unlimited") or a duplicate guard (never
+// off). A missing or out-of-range value keeps what was there. A local box may
+// use 0: no limit (a count) or off (a day count). Percentages are whole %.
 const CAP_MAX = 100000;
-// Outside a local box an admin's value must stay in a sane range: never 0 (no limit, or the duplicate guard off).
-const PROD_RANGE = { daily_cap: [1, 60], weekly_cap: [1, 300], group_daily_cap: [1, 10], max_consecutive_failures: [1, 10], property_group_cooldown_days: [1, 30], fingerprint_window_days: [1, 30] };
-const capRange = (f, env = process.env) => (!!env && env.FORLY_ENV === "local" ? [0, CAP_MAX] : PROD_RANGE[f]);
-function capsFrom(raw, env = process.env) {
-  const out = {};
+const pct = (k) => ({ set: (o, v) => { o[k] = v / 100; }, get: (c) => Math.round((c[k] || 0) * 100) });
+const plain = (k) => ({ set: (o, v) => { o[k] = v; }, get: (c) => c[k] });
+const limit = (k) => ({ set: (o, v) => { o[k] = v === 0 ? 1e6 : v; }, get: (c) => (c[k] >= 1e6 ? 0 : c[k]) });
+const hours = (k) => ({ set: (o, v) => { o.active_hours = Object.assign({}, o.active_hours, { [k]: v }); }, get: (c) => (c.active_hours || {})[k] });
+const win = (i, k) => ({
+  set: (o, v) => {
+    const ws = [0, 1].map((n) => Object.assign({}, (o._windows || o.post_windows || DEFAULTS.post_windows)[n] || DEFAULTS.post_windows[n]));
+    ws[i][k] = v; o._windows = ws;
+  },
+  get: (c) => ((c.post_windows || [])[i] || { start: 0, end: 0 })[k],
+});
+const RULES = {
+  daily_cap: { prod: [1, 60], ...limit("daily_cap") },
+  weekly_cap: { prod: [1, 300], ...limit("weekly_cap") },
+  group_daily_cap: { prod: [1, 10], ...limit("group_daily_cap") },
+  group_global_daily_cap: { prod: [1, 50], ...limit("group_global_daily_cap") },
+  max_consecutive_failures: { prod: [1, 10], ...limit("max_consecutive_failures") },
+  property_group_cooldown_days: { prod: [1, 30], ...plain("property_group_cooldown_days") },
+  fingerprint_window_days: { prod: [1, 30], ...plain("fingerprint_window_days") },
+  active_start: { prod: [0, 23], local: [0, 23], ...hours("start") },
+  active_end: { prod: [1, 24], local: [1, 24], ...hours("end") },
+  window1_start: { prod: [0, 24], local: [0, 24], ...win(0, "start") },
+  window1_end: { prod: [0, 24], local: [0, 24], ...win(0, "end") },
+  window2_start: { prod: [0, 24], local: [0, 24], ...win(1, "start") },
+  window2_end: { prod: [0, 24], local: [0, 24], ...win(1, "end") },
+  min_gap_minutes: { prod: [10, 1440], ...plain("min_gap_minutes") },
+  gap_jitter_pct: { prod: [0, 200], ...pct("gap_jitter") },
+  long_break_pct: { prod: [0, 50], ...pct("long_break_probability") },
+  day_start_jitter_min: { prod: [0, 300], ...plain("day_start_jitter_min") },
+  skip_day_pct: { prod: [0, 90], ...pct("skip_day_probability") },
+  penalty_days: { prod: [1, 60], ...plain("penalty_days") },
+  penalty_cap_divisor: { prod: [1, 10], ...plain("penalty_cap_divisor") },
+  halts_to_disable: { prod: [1, 10], ...plain("halts_to_disable") },
+  halts_window_days: { prod: [1, 365], ...plain("halts_window_days") },
+};
+const CAP_FIELDS = Object.keys(RULES);
+const capRange = (f, env = process.env) => (!!env && env.FORLY_ENV === "local" ? RULES[f].local || [0, CAP_MAX] : RULES[f].prod);
+// Lays the valid rules of `raw` over `out` (a config); → the fields applied.
+function applyRules(out, raw, env = process.env) {
+  const applied = [];
   for (const f of CAP_FIELDS) {
     const v = raw && raw[f], [min, max] = capRange(f, env);
-    if (Number.isInteger(v) && v >= min && v <= max) out[f] = v === 0 && !DAY_FIELDS.has(f) ? 1e6 : v;
+    if (Number.isInteger(v) && v >= min && v <= max) { RULES[f].set(out, v); applied.push(f); }
   }
-  return out;
+  if (out._windows) { out.post_windows = out._windows.filter((w) => w.start < w.end); delete out._windows; } // a window with start >= end is off
+  return applied;
+}
+// The rules' values in a config, as the admin page shows them (0 = no limit).
+const rulesOf = (config) => Object.fromEntries(CAP_FIELDS.map((f) => [f, RULES[f].get(config)]));
+// For the admin page: per rule, what is set here (null = inherited), the code's default, what applies, the range.
+function rulesView(raw, config, env = process.env) {
+  const set = raw || {}, def = rulesOf(DEFAULTS), now = rulesOf(config);
+  return Object.fromEntries(CAP_FIELDS.map((f) => {
+    const [min, max] = capRange(f, env);
+    return [f, { set: Number.isInteger(set[f]) ? set[f] : null, default: def[f], applies: now[f], min, max }];
+  }));
 }
 const NO_CAPS = {
   daily_cap: 1e6, weekly_cap: 1e6, group_global_daily_cap: 1e6, max_consecutive_failures: 1e6,
   group_daily_cap: 1e6, property_group_cooldown_days: 0, fingerprint_window_days: 0,
 };
-function configFrom(settings, env = {}) {
+function configFrom(settings, env = {}, agentRules = null) {
   const out = structuredClone(DEFAULTS);
   const v = settings && settings.group_global_daily_cap;
   if (Number.isInteger(v) && v > 0) out.group_global_daily_cap = v;
@@ -244,7 +290,9 @@ function configFrom(settings, env = {}) {
   if (capsOff(env)) Object.assign(out, NO_CAPS);
   if (burst(env)) Object.assign(out, { min_gap_minutes: 0, burst: true });
   // An admin's caps (settings/posting.caps) win over the defaults and the env, in every env.
-  Object.assign(out, capsFrom(settings && settings.caps, env));
+  applyRules(out, settings && settings.caps, env);
+  // One agent's own rules (connections.posting_rules) over the global ones.
+  applyRules(out, agentRules, env);
   return out;
 }
 
@@ -452,7 +500,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 }
 
 module.exports = {
-  capsOff, burst, CAP_FIELDS, CAP_MAX, capsFrom, capRange,
+  capsOff, burst, CAP_FIELDS, CAP_MAX, capRange, applyRules, rulesOf, rulesView, RULES,
   datesApart, dateGapEnd, activityDays,
   DEFAULTS, CALENDAR_OK, nextSlot, groupBlock, withTimes, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
   wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
