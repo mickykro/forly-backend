@@ -10,7 +10,8 @@
  * template lines, so a reel never fails for want of a script.
  */
 
-const MODEL = process.env.REEL_SCRIPT_MODEL || "claude-haiku-4-5-20251001";
+// Sonnet: Haiku misspelled Hebrew and wandered off its clip in the first V4 runs.
+const MODEL = process.env.REEL_SCRIPT_MODEL || "claude-sonnet-5-5";
 // Gemini's Hebrew at the 1.08x the render applies runs ~10.5 chars/s (measured
 // on WW1 V4 runs). A longer line still plays whole — the render holds the shot —
 // but the reel gets longer, so the model is held to the clip.
@@ -99,7 +100,8 @@ function buildPrompt(clips, spaces, d = {}) {
     `- "narration": spoken Hebrew, warm and natural, like an agent showing the home. Numbers as Hebrew words ` +
     `(e.g. "חמישה חדרים", "קומה תשע"). Stay under the clip's max length — short and punchy beats complete; one idea per line. Mention only the rooms and things ` +
     `listed for that clip and the listing facts — never invent a feature, view or material.\n` +
-    `- Line 1 opens with a short hook ("בואו תראו את זה...") and says the rooms, neighborhood and city.\n` +
+    `- Each line talks about the rooms of ITS OWN clip only — the viewer sees that clip while hearing it.\n` +
+    `- Line 1 opens with a short hook ("בואו תראו את זה..."), the rooms count, neighborhood and city, then its clip's room.\n` +
     `- The last line ends with "הפרטים כאן על המסך".\n` +
     `- "subtitle": the same line for the screen, shorter, digits allowed, split into two short parts with " | " ` +
     `(each part at most ${SUB_LINE_MAX} characters).\n` +
@@ -108,15 +110,22 @@ function buildPrompt(clips, spaces, d = {}) {
   );
 }
 
-/** Check a model reply against the clips; throws on anything unusable. */
-function validateScript(raw, clips) {
+/**
+ * Check a model reply against the clips; throws on anything unusable. A line
+ * over its length budget throws an error with `tooLong` (line numbers) unless
+ * `lenient` — the render plays long lines whole, they only lengthen the reel.
+ */
+function validateScript(raw, clips, { lenient = false } = {}) {
   const lines = raw && Array.isArray(raw.lines) ? raw.lines : null;
   if (!lines || lines.length !== clips.length) throw new Error(`script has ${lines ? lines.length : 0} lines, want ${clips.length}`);
   return lines.map((l, i) => {
     const narration = clean(l && l.narration, 400);
     const sub = clean(l && l.subtitle, 120);
     if (!hasHebrew(narration) || !hasHebrew(sub)) throw new Error(`line ${i + 1} is not Hebrew`);
-    if (narration.length > capFor(clips[i]) * 1.25) throw new Error(`line ${i + 1} too long (${narration.length})`);
+    if (!lenient && narration.length > capFor(clips[i]) * 1.25) {
+      const tooLong = lines.map((x, k) => (clean(x && x.narration, 400).length > capFor(clips[k]) * 1.25 ? k + 1 : 0)).filter(Boolean);
+      throw Object.assign(new Error(`line(s) ${tooLong.join(", ")} too long`), { tooLong });
+    }
     const parts = sub.split("|").map((x) => x.trim()).filter(Boolean).slice(0, 2);
     const subtitle = parts.length === 2 && parts.every((x) => x.length <= SUB_LINE_MAX + 4)
       ? `${parts[0]}\\N${parts[1]}` : wrapSubtitle(parts.join(" "));
@@ -150,18 +159,34 @@ function parseReply(text) {
 async function writeScript({ clips, spaces = [], details = {}, agent = {}, fetchFn = fetch }) {
   const base = { tag: tagFor(details), end_card: buildEndCard(details, agent), music_prompt: MUSIC_PROMPT };
   if (!process.env.ANTHROPIC_API_KEY) return { ...base, lines: fallbackScript(clips, spaces, details), debug: "no_api_key" };
-  try {
+  const ask = async (messages) => {
     const resp = await fetchFn("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 1500, temperature: 0.4,
-        messages: [{ role: "user", content: buildPrompt(clips, spaces, details) }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: 1500, messages }),
       signal: AbortSignal.timeout(60000),
     });
     if (!resp.ok) throw new Error(`script api ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-    const data = await resp.json();
-    const text = (data.content || []).map((b) => b.text || "").join("");
-    return { ...base, lines: validateScript(parseReply(text), clips), debug: "ok" };
+    return ((await resp.json()).content || []).map((b) => b.text || "").join("");
+  };
+  try {
+    const messages = [{ role: "user", content: buildPrompt(clips, spaces, details) }];
+    const first = await ask(messages);
+    try {
+      return { ...base, lines: validateScript(parseReply(first), clips), debug: "ok" };
+    } catch (err) {
+      if (!err.tooLong) throw err;
+      // One rewrite with the overruns named; a second overrun is kept as is.
+      const limits = err.tooLong.map((n) => `line ${n}: max ${capFor(clips[n - 1])} chars`).join("; ");
+      const second = await ask([...messages, { role: "assistant", content: first },
+        { role: "user", content: `Too long to speak in time (${limits}). Rewrite all ${clips.length} lines shorter, same JSON.` }]);
+      try {
+        return { ...base, lines: validateScript(parseReply(second), clips), debug: "ok_after_rewrite" };
+      } catch (err2) {
+        if (!err2.tooLong) throw err2;
+        return { ...base, lines: validateScript(parseReply(second), clips, { lenient: true }), debug: "ok_long_lines" };
+      }
+    }
   } catch (err) {
     console.warn("reel-script: model script failed, using template lines:", err.message);
     return { ...base, lines: fallbackScript(clips, spaces, details), debug: "fallback: " + err.message.slice(0, 160) };
