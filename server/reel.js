@@ -37,7 +37,7 @@ const VO_IN = 0.25; // a line starts this far into its shot
 const MIN_SHOT = 4;
 const CARD = 3.4; // end card
 const VO_TEMPO = 1.08;
-const MAX_STRETCH = 1.25; // a clip is slowed at most this much to fit its line
+const MAX_STRETCH = 1.25; // a clip is slowed at most this much to fit its line; past that its last frame holds
 
 function run(cmd, args, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -122,15 +122,18 @@ async function music(prompt) {
 // ── timeline + subtitles (pure) ──
 
 /**
- * Shot k lasts long enough for its line (+0.7 s), at least MIN_SHOT, and a
- * multi-angle clip keeps nearly all its angles. Shots overlap by XF.
- * → { shots:[{len, start, stretch}], total (incl. end card), videoEnd }
+ * Shot k lasts long enough for its whole line (+0.7 s), at least MIN_SHOT, and
+ * a multi-angle clip keeps nearly all its angles. Shots overlap by XF. A line
+ * never runs into the next one: a clip too short for its line is slowed (up to
+ * MAX_STRETCH), then holds its last frame for the rest.
+ * → { shots:[{len, start, stretch, hold}], total (incl. end card), videoEnd }
  */
 function timeline(clips, voDurations) {
   const shots = clips.map((c, k) => {
-    const want = Math.max(MIN_SHOT, voDurations[k] + 0.7, (c.shot_count || 1) > 1 ? c.duration - 0.5 : 0);
-    const len = Math.min(want, c.duration * MAX_STRETCH);
-    return { len, stretch: Math.max(1, len / (c.duration - 0.05)) };
+    const len = Math.max(MIN_SHOT, voDurations[k] + 0.7, (c.shot_count || 1) > 1 ? c.duration - 0.5 : 0);
+    const usable = c.duration - 0.05;
+    const stretch = Math.min(MAX_STRETCH, Math.max(1, len / usable));
+    return { len, stretch, hold: Math.max(0, len - usable * stretch) };
   });
   let t = 0;
   shots.forEach((s, k) => { s.start = t; t += s.len - (k < shots.length - 1 ? XF : 0); });
@@ -177,7 +180,7 @@ const FIT = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}
 const ENC = ["-c:v", "libx264", "-preset", "medium", "-crf", "23", "-maxrate", "2500k", "-bufsize", "5000k", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
 
 function videoChain(tl, n) {
-  const f = tl.shots.map((s, k) => `[${k}:v]setpts=${s.stretch.toFixed(4)}*(PTS-STARTPTS),trim=0:${s.len.toFixed(3)},setpts=PTS-STARTPTS,${FIT}[v${k}]`);
+  const f = tl.shots.map((s, k) => `[${k}:v]setpts=${s.stretch.toFixed(4)}*(PTS-STARTPTS)${s.hold > 0 ? `,tpad=stop_mode=clone:stop_duration=${(s.hold + 0.1).toFixed(3)}` : ""},trim=0:${s.len.toFixed(3)},setpts=PTS-STARTPTS,${FIT}[v${k}]`);
   let prev = "v0";
   for (let k = 1; k < n; k++) {
     f.push(`[${prev}][v${k}]xfade=transition=fade:duration=${XF}:offset=${tl.shots[k].start.toFixed(3)}[x${k}]`);

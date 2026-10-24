@@ -15,7 +15,17 @@ assert.ok(near(tl.shots[1].start, 6.0 - XF) && near(tl.shots[2].start, 6.0 + 4 -
 assert.ok(near(tl.videoEnd, tl.shots[2].start + 10.5));
 assert.ok(near(tl.total, tl.videoEnd - XF + CARD));
 // a line far longer than its clip is capped at 1.25x slow-down
-assert.ok(near(timeline([{ duration: 5 }], [9]).shots[0].len, 6.25));
+// a line far longer than its clip still plays whole: slowed 1.25x, then the last frame holds
+{
+  const long = timeline([{ duration: 5 }], [9]).shots[0];
+  assert.ok(near(long.len, 9.7) && near(long.stretch, 1.25) && near(long.hold, 9.7 - 4.95 * 1.25));
+}
+// no line ever starts before the previous one has finished (the bug in the first V4 run: 8-9 s lines on 7 s clips)
+{
+  const vo = [8.6, 8.3, 6.9, 2.1];
+  const t = timeline([{ duration: 7, shot_count: 2 }, { duration: 7, shot_count: 2 }, { duration: 7, shot_count: 2 }, { duration: 5 }], vo);
+  for (let k = 0; k + 1 < vo.length; k++) assert.ok(t.shots[k + 1].start >= t.shots[k].start + vo[k] + 0.3, `line ${k + 1} overlaps line ${k + 2}`);
+}
 
 assert.equal(assTime(0), "0:00:00.00");
 assert.equal(assTime(83.456), "0:01:23.46");
