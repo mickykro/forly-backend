@@ -40,6 +40,7 @@ const p = buildPrompt(3, ["kitchen", "", "bedroom"]);
 assert.ok(p.includes("Photo 1 to Photo 3"));
 assert.ok(p.includes("Photo 3: tagged bedroom") && !p.includes("Photo 2: tagged"));
 assert.ok(/same room type is NOT enough/.test(p), "two bedrooms are not merged by type");
+assert.ok(/from another angle .* mean the SAME space/s.test(p), "one room shot from several angles is one space");
 assert.ok(/Never list a door, doorway, hallway or corridor/.test(p));
 
 (async () => {

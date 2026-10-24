@@ -173,8 +173,13 @@ function pickTarget(photo, space, used) {
   return ok.find((t) => !used.has(t)) || ok[0] || null;
 }
 
-/** Build one clip from a group of spaces. `index` is its position in the video. */
-function buildClip(group, index, openerGroup) {
+// MiniMax H3 names references "Image N" (Seedance: "@imageN") and takes 5-15 s,
+// any whole second; it gets ~3.5 s per shot so each angle has time to move.
+const H3_SECONDS_PER_SHOT = 3.5;
+
+/** Build one clip from a group of spaces. `index` is its position in the video; `model` "seedance" or "h3". */
+function buildClip(group, index, openerGroup, model = "seedance") {
+  const ref = (i) => (model === "h3" ? `Image ${i}` : `@image${i}`);
   const packed = group.length > 1;
   const perSpace = packed ? Math.max(1, Math.floor(MAX_REFS / group.length)) : MAX_REFS;
   const image_urls = [];
@@ -186,20 +191,22 @@ function buildClip(group, index, openerGroup) {
     refs.forEach((p) => image_urls.push(p.url));
     const shotCount = packed ? 1 : Math.min(refs.length, MAX_SHOTS);
     for (let i = 0; i < shotCount; i++) shots.push({ space, photo: refs[i], idx: first + i });
-    const spare = refs.slice(shotCount).map((_, i) => `@image${first + shotCount + i}`);
-    if (spare.length) extras.push(`${spare.join(", ")} ${spare.length > 1 ? "show" : "shows"} the same room as @image${first} from another angle: use ${spare.length > 1 ? "them" : "it"} only to keep that room exactly as it is.`);
+    const spare = refs.slice(shotCount).map((_, i) => ref(first + shotCount + i));
+    if (spare.length) extras.push(`${spare.join(", ")} ${spare.length > 1 ? "show" : "shows"} the same room as ${ref(first)} from another angle: use ${spare.length > 1 ? "them" : "it"} only to keep that room exactly as it is.`);
   }
-  const duration = packed ? fit(shots.length * SECONDS_PER_PACKED_SHOT) : fit(shots.length * SECONDS_PER_SOLO_SHOT);
+  const duration = model === "h3"
+    ? Math.min(15, Math.max(5, Math.ceil(shots.length * H3_SECONDS_PER_SHOT)))
+    : packed ? fit(shots.length * SECONDS_PER_PACKED_SHOT) : fit(shots.length * SECONDS_PER_SOLO_SHOT);
   const per = (duration / shots.length).toFixed(1);
   const used = new Set();
   const lines = shots.map((s, k) => {
     const target = pickTarget(s.photo, s.space, used);
     if (target) used.add(target);
-    return `Shot ${k + 1} (${per}s): @image${s.idx}, the camera ${MOVES[k % MOVES.length]} toward the ${target || "center of the frame"}.`;
+    return `Shot ${k + 1} (${per}s): ${ref(s.idx)}, the camera ${MOVES[k % MOVES.length]} toward the ${target || "center of the frame"}.`;
   });
   const head = index === 0 && openerGroup === "outdoor"
     ? "A smooth, stabilized cinematic walkthrough of a property for sale, starting outside and moving toward the house."
-    : "A smooth, stabilized cinematic walkthrough of a property for sale, inside the room shown in @image1.";
+    : "A smooth, stabilized cinematic walkthrough of a property for sale, inside the room shown in " + ref(1) + ".";
   const scope = packed
     ? "Each shot is in a different room and opens directly inside it: never show a door frame, doorway or passage between shots."
     : "Every shot stays inside this one room.";
@@ -213,6 +220,7 @@ function buildClip(group, index, openerGroup) {
     clip_index: index,
     duration,
     packed,
+    shot_count: shots.length,
     spaces: group.map((s) => s.id),
     image_urls,
     prompt,
@@ -243,7 +251,7 @@ function buildTitles(d = {}) {
  * The whole plan: `map` from space-map.js, `tags` the photos ([{url,
  * room_type?, quality_score?, is_real_estate?}]) in the order sent for mapping.
  */
-function planWalkthrough(map, tags, details, maxClips = MAX_CLIPS) {
+function planWalkthrough(map, tags, details, maxClips = MAX_CLIPS, model = "seedance") {
   const spaces = buildSpaces(map, tags);
   const photoCount = spaces.reduce((n, s) => n + s.photos.length, 0);
   if (photoCount < MIN_PHOTOS) {
@@ -252,7 +260,7 @@ function planWalkthrough(map, tags, details, maxClips = MAX_CLIPS) {
     throw err;
   }
   const { groups, opener_group, dropped } = groupSpaces(spaces, map.sees || [], maxClips);
-  const clips = groups.map((g, i) => buildClip(g, i, opener_group));
+  const clips = groups.map((g, i) => buildClip(g, i, opener_group, model));
   return { clips, clip_count: clips.length, opener_group, dropped, ...buildTitles(details) };
 }
 
