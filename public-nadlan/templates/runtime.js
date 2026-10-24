@@ -120,6 +120,48 @@
     }
   });
 
+  // ── soundtrack: narration + music beside the muted hero video. Browsers allow
+  //    sound only after a tap/click/key, so it starts at once where allowed, else
+  //    on the first one; a corner button (opposite the chat bubble) mutes it. The narration is timed to the
+  //    video from 0, so the video restarts with it. Volume is baked into the files
+  //    (iOS ignores audio.volume).
+  var narr = get("hero.narration_url"), music = get("hero.music_url"), hv = document.querySelector("[data-video]");
+  if ((narr || music) && vsrc && hv) {
+    var tracks = [narr, music].filter(Boolean).map(function (u) {
+      var a = new Audio(u); a.preload = "auto"; a.loop = u === music; return a;
+    });
+    var started = false, on = false, sbtn = document.createElement("button");
+    sbtn.type = "button";
+    sbtn.style.cssText = "position:fixed;z-index:60;bottom:16px;inset-inline-end:16px;width:44px;height:44px;" +
+      "border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:20px;line-height:44px;cursor:pointer";
+    var paint = function () {
+      sbtn.textContent = on ? "🔊" : "🔇";
+      sbtn.setAttribute("aria-label", T(on ? "video_mute" : "video_sound"));
+      sbtn.setAttribute("aria-pressed", on ? "true" : "false");
+    };
+    var setOn = function (v) { on = v; tracks.forEach(function (a) { a.muted = !v; }); paint(); };
+    var start = function () {
+      try { hv.currentTime = 0; } catch (e) {}
+      return Promise.all(tracks.map(function (a) { a.currentTime = 0; a.muted = false; return a.play(); }))
+        .then(function () { started = true; stopWaiting(); setOn(true); },
+              function () { tracks.forEach(function (a) { a.pause(); }); });
+    };
+    // A touch only counts as a gesture when it ends.
+    var GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
+    var firstGesture = function (e) { if (e.target !== sbtn) start(); };
+    var stopWaiting = function () {
+      GESTURES.forEach(function (t) { document.removeEventListener(t, firstGesture, true); });
+    };
+    GESTURES.forEach(function (t) { document.addEventListener(t, firstGesture, true); });
+    sbtn.addEventListener("click", function () { if (started) setOn(!on); else start(); });
+    document.addEventListener("visibilitychange", function () {
+      if (started && on) tracks.forEach(function (a) { if (document.hidden) a.pause(); else if (!a.ended) a.play().catch(function () {}); });
+    });
+    paint();
+    document.body.appendChild(sbtn);
+    start();
+  }
+
   // ── editorial photo slots — the single, full-bleed images the magazine-style
   //    templates hang their layout on, outside the gallery grid. data-photo="k"
   //    takes gallery.images[k] (wrapping round when the listing has fewer
