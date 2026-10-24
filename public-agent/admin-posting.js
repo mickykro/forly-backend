@@ -21,11 +21,6 @@
     login_required: "נדרשת התחברות", confirmed_removed: "פוסט הוסר ע״י מנהלי קבוצה",
     selector_failure: "תקלת ממשק", unknown: "לא ידוע",
   };
-  var CAP_LABELS = {
-    daily_cap: "פוסטים ביום לחשבון", weekly_cap: "פוסטים בשבוע לחשבון", group_daily_cap: "פוסטים ביום לקבוצה",
-    max_consecutive_failures: "כשלונות ברצף עד עצירה", property_group_cooldown_days: "ימים עד אותו נכס באותה קבוצה",
-    fingerprint_window_days: "ימים עד אותה מודעה (מכל מקור) באותה קבוצה",
-  };
   var MODE_LABELS = {
     manual: "פרסום ידני (מנהל מפרסם כל פוסט)", caps: "מגבלות פעילות (מקומי)", pacing: "קצב רגיל (מקומי)", warmup: "חימום חשבון חדש (מקומי)",
     burst: "מצב בדיקה — פרסום רצוף (מקומי)", browse: "גלישה בין סשנים (מקומי)", shots: "צילום מסך של כשלונות",
@@ -194,17 +189,12 @@
 
   // I7: outcome_unknown attempts — the verdict is the operator's, after checking the group by hand.
   // Each cap: the admin's value (empty = default), with the default and what applies now.
+  // All the posting rules (admin-rules.js): empty = the default.
   function renderCaps(caps) {
     $("#postingCapsSave").disabled = !caps;
-    if (!caps) { $("#postingCaps").innerHTML = '<p class="posting-note">המגבלות לא נטענו.</p>'; return; }
-    var shown = function (n) { return n === 0 ? "ללא הגבלה" : esc(n); };
-    $("#postingCaps").innerHTML = Object.keys(CAP_LABELS).filter(function (f) { return caps[f]; }).map(function (f) {
-      var c = caps[f];
-      return '<label>' + esc(CAP_LABELS[f]) + '<input type="number" min="' + esc(c.min) + '" max="' + esc(c.max) + '" step="1" inputmode="numeric" data-cap="' + f + '" value="' +
-        (c.set == null ? "" : esc(c.set)) + '" placeholder="' + esc(c.default) + '"><span class="posting-note">ברירת מחדל ' + esc(c.default) +
-        " · חל עכשיו: " + shown(c.applies) + " · מותר " + esc(c.min) + "–" + esc(c.max) + "</span></label>";
-    }).join("");
+    $("#postingCaps").innerHTML = caps ? FORLY_RULES.form(caps) : '<p class="posting-note">החוקים לא נטענו.</p>';
   }
+
   // Each mode: default (the env's own value) / on / off.
   function renderModes(modes) {
     $("#postingModesSave").disabled = !modes;
@@ -231,20 +221,14 @@
       .then(function () { btn.disabled = false; });
   }
   function saveCaps(btn) {
-    var caps = {}, bad = null;
-    Array.prototype.forEach.call(document.querySelectorAll("#postingCaps input[data-cap]"), function (i) {
-      var v = i.value.trim();
-      if (v === "") { caps[i.dataset.cap] = null; return; }
-      var n = Number(v);
-      if (!Number.isInteger(n) || n < Number(i.min) || n > Number(i.max)) bad = bad || i;
-      caps[i.dataset.cap] = n;
-    });
-    if (bad) { bad.focus(); FLY.toast("מספר שלם בטווח " + bad.min + "–" + bad.max); return; }
+    var got = FORLY_RULES.read($("#postingCaps"));
+    if (got.bad) { got.bad.focus(); FLY.toast("מספר שלם בטווח " + got.bad.min + "–" + got.bad.max); return; }
+    var caps = got.rules;
     var reason = askReason("למה משנים את המגבלות?");
     if (!reason) return;
     btn.disabled = true;
     send("/caps", { caps: caps, reason: reason, version: state.version })
-      .then(function (d) { saved(d, "✅ המגבלות נשמרו"); return load(); })
+      .then(function (d) { saved(d, "✅ החוקים נשמרו"); return load(); })
       .catch(function (e) { handleError(e, "שגיאה בשמירת המגבלות"); })
       .then(function () { btn.disabled = false; });
   }

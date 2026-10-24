@@ -60,6 +60,19 @@ function call(server, method, path, headers, body) {
     assert.equal(await guard.assertAccountAllowed({ phone: AGENT, platform: "facebook", action: "post" }, { db }), true, "resumed: allowed again");
     const audit = await store.listAuditEvents({ limit: 10 });
     assert.ok(audit.some((e) => e.action === "agent_pause") && audit.some((e) => e.action === "agent_resume"), "both changes audited");
+    // ── the agent's own rules: validated, saved whole, applied over the global ones ──
+    assert.equal((await call(server, "POST", `/a/${ref}/rules`, h(true), { rules: { nope: 1 } })).body.field, "nope");
+    const far = await call(server, "POST", `/a/${ref}/rules`, h(true), { rules: { daily_cap: 0 } });
+    assert.deepEqual([far.status, far.body.error, far.body.min], [400, "out_of_range", 1], "prod: no unlimited for an agent either");
+    const ok = await call(server, "POST", `/a/${ref}/rules`, h(true), { rules: { daily_cap: 40, min_gap_minutes: 60, weekly_cap: null } });
+    assert.equal(ok.status, 200, ok.raw);
+    assert.deepEqual((await db.getConnection(AGENT)).posting_rules, { daily_cap: 40, min_gap_minutes: 60 });
+    const v = (await call(server, "GET", `/a/${ref}/activity`, h(false))).body.rules;
+    assert.deepEqual([v.daily_cap.set, v.daily_cap.applies, v.daily_cap.global, v.weekly_cap.set, v.weekly_cap.applies], [40, 40, 20, null, 100]);
+    const cfg = await require("../posting-account").configOf({}, require("../posting-account").ctxOf({ db }), AGENT);
+    assert.deepEqual([cfg.daily_cap, cfg.min_gap_minutes], [40, 60], "the posting engine reads the agent's rules");
+    await call(server, "POST", `/a/${ref}/rules`, h(true), { rules: {} });
+    assert.equal((await db.getConnection(AGENT)).posting_rules, null, "cleared: back to the global rules");
     console.log("routes/admin-agents.test.js ok");
   } finally { server.close(); staging.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

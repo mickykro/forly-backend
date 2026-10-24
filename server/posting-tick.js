@@ -416,7 +416,7 @@ async function runAttempt(attempt, st, deps, now) {
 async function settle(key, result, err, st, deps, x, now) {
   const { c, post } = st;
   const phone = c.phone;
-  const config = await configOf(deps, x);
+  const config = await configOf(deps, x, phone);
   const hint = codeOf(result, err);
   let a = await x.store.getAttempt(key);
   if (a && (PRE_SUBMIT.has(a.state) || IN_FLIGHT.has(a.state))) {
@@ -488,7 +488,7 @@ async function warmIdle(phone, deps = {}, now) {
   if (!conn.facebook_browser_connected_at) return "idle";
   if (C._test.accountBlocked(conn)) return "account_blocked";
   if (loginOpen(conn, "facebook", now.getTime())) return "login_open";
-  const config = await configOf(deps, x);
+  const config = await configOf(deps, x, conn);
   // A local box browses every interval whatever the warm-up says (it skips
   // the warm-up to test posting, and browsing should still be watchable).
   const local = (deps.env || process.env).FORLY_ENV === "local";
@@ -532,8 +532,8 @@ async function planNext(phone, st, deps, x, now) {
 
 // ── one account ──
 async function tickLocked(phone, deps, x, now, lock, opts = {}) {
-  const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(phone)) || {};
+  const config = await configOf(deps, x, conn);
   const campaigns = await housekeep(phone, conn, deps, x, now, config);
   const running = campaigns.filter((c) => c.status === "running");
   if (!running.length) return "idle";

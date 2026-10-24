@@ -156,6 +156,18 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(adm({ daily_cap: 60 }, {}).daily_cap, 60);
   assert.deepEqual([S.capRange("group_daily_cap", {}), S.capRange("group_daily_cap", L)], [[1, 10], [0, S.CAP_MAX]]);
   for (const bad of [-1, 2.5, "5", 1e9, null]) assert.equal(adm({ daily_cap: bad }, {}).daily_cap, cfg.daily_cap, `ignored: ${bad}`);
+  // ── every rule, and one agent's own over the global ones ──
+  const r = adm({ active_start: 8, active_end: 20, window1_start: 9, window1_end: 12, window2_start: 0, window2_end: 0, min_gap_minutes: 60, gap_jitter_pct: 25, long_break_pct: 10, skip_day_pct: 0, day_start_jitter_min: 30, penalty_days: 7, penalty_cap_divisor: 3, halts_to_disable: 3, halts_window_days: 14, group_global_daily_cap: 5 }, {});
+  assert.deepEqual(r.active_hours, { start: 8, end: 20 });
+  assert.deepEqual(r.post_windows, [{ start: 9, end: 12 }], "a window with start >= end is off");
+  assert.deepEqual([r.min_gap_minutes, r.gap_jitter, r.long_break_probability, r.skip_day_probability, r.day_start_jitter_min], [60, 0.25, 0.1, 0, 30]);
+  assert.deepEqual([r.penalty_days, r.penalty_cap_divisor, r.halts_to_disable, r.halts_window_days, r.group_global_daily_cap], [7, 3, 3, 14, 5]);
+  assert.equal(adm({ min_gap_minutes: 1 }, {}).min_gap_minutes, cfg.min_gap_minutes, "under the production range: ignored");
+  const agent = S.configFrom({ caps: { daily_cap: 30, group_daily_cap: 4 } }, {}, { daily_cap: 40, min_gap_minutes: 90 });
+  assert.deepEqual([agent.daily_cap, agent.group_daily_cap, agent.min_gap_minutes], [40, 4, 90], "the agent's own wins; the rest inherits the global");
+  assert.equal(S.configFrom({}, {}, { daily_cap: 999 }).daily_cap, cfg.daily_cap, "an agent's value obeys the same range");
+  const shown = S.rulesOf(S.configFrom({}, {}));
+  assert.deepEqual([shown.daily_cap, shown.gap_jitter_pct, shown.window2_start, shown.active_end], [20, 50, 18, 21], "the admin page reads values back");
   assert.ok(require("./posting-account").nextDayStart(new Date(1e12), adm({ daily_cap: 40 }, { ...L, POSTING_BURST: "1" }), Math.random).getTime() > 1e12, "burst with a cap: a full day waits for tomorrow");
   for (const env of [{ FORLY_ENV: "staging", POSTING_BURST: "1" }, { ...L, NODE_ENV: "production", POSTING_BURST: "1" }]) {
     assert.equal(S.burst(env), false, "burst only on a local box with caps off");

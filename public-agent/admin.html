@@ -73,6 +73,7 @@
   .posting-note{font-size:.78rem;color:var(--ink-soft);font-weight:300;margin:4px 0 0}
   .posting-table{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:6px}
   .posting-table th,.posting-table td{padding:4px 6px;border-bottom:1px solid rgba(0,0,0,.08);text-align:right}
+  .rules-group{font-size:.9rem;margin:14px 0 4px}
   .caps-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin:10px 0}
   .caps-grid label{display:flex;flex-direction:column;gap:4px;font-size:.85rem}
   .caps-grid input{width:100%;max-width:140px}
@@ -299,10 +300,10 @@
       </div>
       <div class="stat-grid" id="postingCounts"></div>
       <section class="message-card" style="margin-bottom:18px">
-        <h2>מגבלות פרסום</h2>
-        <p class="posting-note">חלות על כל הסוכנים, בכל הסביבות, וגוברות על ברירת המחדל ועל קובץ ההגדרות. שדה ריק = ברירת המחדל. כל שדה מראה את הטווח המותר (0 = ללא הגבלה, רק בסביבה מקומית).</p>
-        <div class="caps-grid" id="postingCaps"></div>
-        <button type="button" class="btn btn-gold btn-sm" id="postingCapsSave">שמירת המגבלות</button>
+        <h2>חוקי פרסום</h2>
+        <p class="posting-note">חלים על כל הסוכנים. שדה ריק = ברירת המחדל. לכל סוכן אפשר לקבוע חוקים משלו בלשונית קמפיינים. כל שדה מראה את הטווח המותר (0 = ללא הגבלה, רק בסביבה מקומית). חלון שבו "מ" גדול או שווה ל"עד" — כבוי.</p>
+        <div id="postingCaps"></div>
+        <button type="button" class="btn btn-gold btn-sm" id="postingCapsSave">שמירת החוקים</button>
       </section>
       <section class="message-card" style="margin-bottom:18px">
         <h2>מצבי פרסום</h2>
@@ -687,6 +688,7 @@
 
 <script src="/api.js"></script>
 <script src="/admin.js"></script>
+<script src="/admin-rules.js"></script>
 <script src="/admin-posting.js"></script>
 <script src="/connect-viewer.js"></script>
 <script src="/admin-manual-lane.js"></script>

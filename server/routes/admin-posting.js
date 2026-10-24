@@ -128,15 +128,7 @@ function switchView(s, env) {
 
 // The caps: what the admin set, the code's default, and what applies now
 // (after the env: a local box without POSTING_CAPS has none of its own).
-function capsView(s, env) {
-  const set = (s && s.caps) || {}, now = safety.configFrom(s, env), out = {};
-  for (const f of safety.CAP_FIELDS) {
-    const eff = now[f] >= 1e6 ? 0 : now[f];
-    const [min, max] = safety.capRange(f, env);
-    out[f] = { set: Number.isInteger(set[f]) ? set[f] : null, default: safety.DEFAULTS[f], applies: eff, min, max };
-  }
-  return out;
-}
+const capsView = (s, env) => safety.rulesView(s && s.caps, safety.configFrom(s, env), env);
 
 module.exports = function createAdminPostingRouter({
   requireAdmin, requireStepUp, db = require("../db"), store = require("../posting-store"),
@@ -323,7 +315,7 @@ module.exports = function createAdminPostingRouter({
       const fresh = (await db.getSetting("posting")) || {};
       return res.status(409).json({ error: "version_conflict", version: fresh.version || 0 });
     }
-    const audited = await audit(req, "caps", { reason, detail: { caps, version: next.version } });
+    const audited = await audit(req, "caps", { reason, detail: { changed: Object.keys(caps).join(" ") || "cleared", version: next.version } }); // the log takes flat values only
     console.log(`posting admin: caps ${JSON.stringify(caps)} by …${by} (v${next.version})`);
     res.json(Object.assign({ ok: true, audited }, switchView(next, env)));
   }));
@@ -350,7 +342,7 @@ module.exports = function createAdminPostingRouter({
       return res.status(409).json({ error: "version_conflict", version: fresh.version || 0 });
     }
     if (env === process.env) modes.apply(next.modes);
-    const audited = await audit(req, "modes", { reason, detail: { modes: set, version: next.version } });
+    const audited = await audit(req, "modes", { reason, detail: { changed: Object.entries(set).map(([m, v]) => `${m}=${v ? "on" : "off"}`).join(" ") || "cleared", version: next.version } });
     console.log(`posting admin: modes ${JSON.stringify(set)} by …${by} (v${next.version})`);
     res.json(Object.assign({ ok: true, audited }, switchView(next, env)));
   }));
