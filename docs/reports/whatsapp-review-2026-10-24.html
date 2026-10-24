@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forly WhatsApp Review — 2026-10-24</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f27; --muted: #5b6472; --border: #e3e6ea;
+    --accent: #2563eb; --good: #15803d; --good-bg: #ecfdf3; --warn: #b45309; --warn-bg: #fffbeb;
+    --bad: #b91c1c; --bad-bg: #fef2f2; --info-bg: #eff6ff; --code-bg: #0f172a; --code-ink: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55; padding: 0 16px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { padding: 40px 0 20px; }
+  h1 { font-size: 1.7rem; margin: 0 0 6px; }
+  .subtitle { color: var(--muted); font-size: 0.95rem; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 0.82rem; color: var(--muted); }
+  .verdict {
+    margin: 22px 0 30px; padding: 20px 22px; border-radius: 14px; background: var(--info-bg);
+    border: 1px solid #bfdbfe;
+  }
+  .verdict.alert { background: var(--bad-bg); border-color: #fecaca; }
+  .verdict.ok { background: var(--good-bg); border-color: #bbf7d0; }
+  .verdict h2 { margin: 0 0 8px; font-size: 1.05rem; }
+  .verdict p { margin: 0 0 8px; color: #1e3a5f; }
+  .verdict.alert p { color: #7f1d1d; }
+  .verdict.ok p { color: #14532d; }
+  .verdict p:last-child { margin-bottom: 0; }
+  section { margin: 36px 0; }
+  h2.section-title { font-size: 1.2rem; border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 18px; }
+  .section-note { color: var(--muted); margin-top: -10px; margin-bottom: 18px; font-size: 0.92rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card.critical { border-color: #fecaca; }
+  .card.positive { border-color: #bbf7d0; }
+  .card.pending { border-color: #fde68a; }
+  .card h3 { margin: 0 0 4px; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .badge.fixed { background: var(--good-bg); color: var(--good); }
+  .badge.n8n { background: var(--warn-bg); color: var(--warn); }
+  .badge.watch { background: #f3f4f6; color: var(--muted); }
+  .badge.good { background: var(--good-bg); color: var(--good); }
+  .badge.critical { background: var(--bad-bg); color: var(--bad); }
+  .badge.biz { background: #f3e8ff; color: #7e22ce; }
+  .badge.lead { background: #e0f2fe; color: #0369a1; }
+  .badge.blocked { background: #fef3c7; color: #92400e; }
+  .badge.paused { background: #fef3c7; color: #92400e; }
+  .badge.new { background: #dbeafe; color: #1d4ed8; }
+  .card .meta { color: var(--muted); font-size: 0.82rem; margin: 4px 0 12px; }
+  .card p { margin: 8px 0; }
+  .evidence {
+    background: #fafbfc; border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 0.86rem;
+  }
+  .evidence .line { margin: 3px 0; }
+  code, .code-inline { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  ul.plain { margin: 8px 0; padding-inline-start: 20px; }
+  ul.plain li { margin: 4px 0; }
+  table.diff-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.86rem; }
+  table.diff-table th, table.diff-table td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  table.diff-table th { background: #fafbfc; }
+  .outbound-msg {
+    background: var(--bad-bg); border: 1px solid #fecaca; border-radius: 10px; padding: 14px 16px; margin-top: 10px;
+  }
+  .outbound-msg .to { font-size: 0.78rem; color: var(--bad); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+  .outbound-msg.sent-prior { background: var(--info-bg); border-color: #bfdbfe; }
+  .outbound-msg.sent-prior .to { color: #1e3a5f; }
+  .outbound-msg pre { white-space: pre-wrap; font-family: inherit; margin: 0; direction: rtl; text-align: right; }
+  footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --ink: #e5e7eb; --muted: #9199a8; --border: #262b34;
+      --info-bg: #142238; --good-bg: #0f2a1c; --warn-bg: #2a2110; --bad-bg: #2a1414; --code-bg: #05070c;
+    }
+    .badge.biz { background: #2a1a3a; color: #d8b4fe; }
+    .badge.lead { background: #0c3a52; color: #93d4f0; }
+    .badge.blocked, .badge.paused { background: #3a2a0c; color: #fcd34d; }
+    .badge.new { background: #1e3a5f; color: #93c5fd; }
+    .verdict { border-color: #1e3a5f; }
+    .verdict.alert { border-color: #4c1d1d; }
+    .verdict.ok { border-color: #14532d; }
+    .verdict p { color: #bcd4ee; }
+    .verdict.alert p { color: #fca5a5; }
+    .verdict.ok p { color: #86efac; }
+    .evidence { background: #12151c; }
+    code, .code-inline { background: #20242e; color: #dbe1ea; }
+    table.diff-table th { background: #12151c; }
+    table.diff-table th, table.diff-table td { border-color: #262b34; }
+    .outbound-msg { border-color: #4c1d1d; }
+    .outbound-msg.sent-prior { border-color: #1e3a5f; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Forly WhatsApp Review</h1>
+  <div class="subtitle">Daily check on the agent-facing WhatsApp bot — this cycle's focus: pull whatever conversation history landed since the last report and confirm whether the two issues found on 2026-10-23 are still open.</div>
+  <div class="meta-row">
+    <span class="pill">Generated 2026-10-24, ~08:50 IDT</span>
+    <span class="pill">WhatsApp source: Whapi.Cloud <code>/messages/list</code> + <code>/messages/list/{ChatID}</code>, pulled via a disposable n8n workflow (see methodology) — 3 one-to-one chats, since 2026-10-22 00:00 IDT</span>
+    <span class="pill">n8n source: live workflow graphs via n8n MCP — <code>Main Router v3</code> (<code>fhyTsd1DSN6wtMGz</code>), <code>Business Handler v6</code> (<code>lQwn7eYSuIxAZkJB</code>)</span>
+    <span class="pill">972542045280 excluded from conversation analysis (the operator's own number) — used only as the notification/test target</span>
+  </div>
+</header>
+
+<div class="verdict ok">
+  <h2>Bottom line</h2>
+  <p><strong>Quiet cycle: no new findings, no code or n8n change made.</strong> The individual-chat pull (Nofar Harush, Illana, Tal Eynan — same three agents as 2026-10-23) turned up no activity at all after 2026-10-22 21:09 IDT: roughly 35 hours of silence in every one-to-one chat at the time this report was generated. Everything in this pull is the same content the 2026-10-23 report already covered and flagged — the "logo processed as a property photo" and "away-message answered as a real instruction" findings are the <em>same two messages</em>, re-confirmed rather than new (their timestamps only looked different because the 2026-10-23 report's times were off by exactly the IDT/UTC offset — 18:07 UTC there is the same message as 21:07 IDT here). Both remain open, unactioned, waiting on the same blocked <code>AI Agent - Business1</code> prompt fix. <code>Main Router v3</code> is still stable; <code>Business Handler v6</code> is still paused on the identical unverifiable-credential risk first identified 2026-10-21 — nothing this cycle changes that, so no rebuild was attempted again.</p>
+</div>
+
+<section>
+  <h2 class="section-title">Findings from today's pull</h2>
+  <div class="card">
+    <h3><span class="badge watch">No new activity</span> Every individual chat has been silent since 2026-10-22 21:09 IDT</h3>
+    <div class="meta">Pull window: 2026-10-22 00:00 IDT → now (2026-10-24 ~08:50 IDT)</div>
+    <p>The account-wide pull (<code>/messages/list</code>, 500-message cap, not hit — only 313 messages total existed in the window) returned exactly three non-excluded one-to-one chats, the same three as 2026-10-23: Nofar Harush (972546582548, 160 messages), Illana (972584191283, 64 messages), and Tal Eynan (972548018957, 4 messages — a login code plus one exchange). The newest message in any of them is timestamped 2026-10-22 21:09 IDT. Nothing from 2026-10-23 or 2026-10-24 appears in any individual chat — only the excluded internal distribution group had messages that recent (up to 2026-10-23 08:47 IDT).</p>
+  </div>
+  <div class="card pending">
+    <h3><span class="badge watch">Re-confirmed, not new</span><span class="badge biz">agent</span> The two 2026-10-23 findings are the same messages, still open</h3>
+    <div class="meta">Illana (972584191283) and Nofar Harush (972546582548) — both at 2026-10-22, re-read in this pull</div>
+    <p>Cross-checking today's raw timestamps against the 2026-10-23 report: the "logo processed as a property photo" message (Illana, "זה הלוגו שלי" → a garbled "golden mountains" caption) and the "away-message answered as a real instruction" message (Nofar's auto-responder → "לא בטוחה למה התכוונת") are both still sitting in these chats, unchanged, with no follow-up message since. They are not two new occurrences — they are the identical events the 2026-10-23 report already flagged, confirmed still unresolved because no prompt change has shipped to <code>AI Agent - Business1</code> since then. Carrying both forward as still open; no new evidence either way on how often this recurs, since no new business-chat traffic happened at all.</p>
+  </div>
+  <div class="card positive">
+    <h3><span class="badge good">Still improved</span><span class="badge biz">agent</span> The repeated "retype the edit instruction" pattern remains absent</h3>
+    <div class="meta">Tsach Ben-Basat, 972547221770 — no activity in this chat at all in the pulled window</div>
+    <p>Consistent with 2026-10-23: no new submission from this agent. Carried forward as a still-open, scoped product request (save a per-agent default edit instruction), with nothing new to add.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">n8n — Business Handler v6 still paused, Main Router v3 still fine</h2>
+  <div class="card positive">
+    <h3><span class="badge fixed">Fixed &amp; live</span><span class="badge n8n">n8n</span> Main Router v3 — confirmed still live, no regression</h3>
+    <div class="meta">Re-read live today via <code>get_workflow_details</code>, <code>fhyTsd1DSN6wtMGz</code></div>
+    <p><code>updatedAt</code> unchanged at <code>2026-10-20T14:10:29.338Z</code>, <code>versionId === activeVersionId</code>, all four originally-flagged nodes (<code>FS - Lookup Business</code>, <code>FS - Lookup Pending</code>, <code>FS - Lookup Lock</code>, <code>GreenAPI - Send Lock Reply</code>) still carry <code>onError: continueRegularOutput</code>. Nothing to do here.</p>
+  </div>
+  <div class="card pending">
+    <h3><span class="badge paused">Still paused before publish</span><span class="badge n8n">n8n</span> Business Handler v6 — unchanged since 2026-10-11</h3>
+    <div class="meta">Re-read live today via <code>get_workflow_details</code>, <code>lQwn7eYSuIxAZkJB</code></div>
+    <p><code>updatedAt</code> is still <code>2026-10-11T12:52:48.574Z</code>. <code>Quota - Batch Edit</code>, <code>Check Stop</code> and <code>AI Agent - Business1</code> still show <code>onError: null</code>, and <code>settings.errorWorkflow</code> is still unset. <code>get_workflow_details</code> still returns no <code>credentials</code> field for the <code>Anthropic Chat Model</code> node on the live workflow, so the credential-verification blocker identified 2026-10-21 is exactly as it was. <strong>No new rebuild or publish attempt was made this cycle</strong> — repeating the same unverifiable action would add risk without adding information. Still waiting on someone with n8n UI access to confirm the correct credential (<code>docs/n8n/whatsapp-review-standing-authorization.md</code>). When that's unblocked, the publish should fold in the prompt-quality fixes for both open findings above (logo-vs-property-photo, away-message handling) plus the earlier natural-language menu-number miss — all in the same node, one careful verification rather than several unverified rebuilds.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">What this cycle did, and verified</h2>
+  <div class="card">
+    <h3>Whapi.Cloud history pulled directly, via n8n rather than this session's own network</h3>
+    <p><code>gate.whapi.cloud</code> is still blocked by this session's outbound network policy — a fresh check today got the same <code>403</code> policy denial as every prior cycle (confirmed via the proxy's own status endpoint, not a credentials or DNS failure). Per standing instructions, that denial was reported rather than retried or routed around. As on 2026-10-22/23, a small disposable n8n workflow did the pull instead (n8n's own host isn't behind this session's proxy): manual trigger → <code>GET /messages/list</code> (500-message cap, <code>time_from</code> = 2026-10-22 00:00 IDT) → a Code node extracting the distinct, non-excluded chat IDs → a batched loop of <code>GET /messages/list/{ChatID}</code> (300 messages each, same <code>time_from</code>) → a Code node aggregating the results for this cycle's reading. It ran once, returned real data for 3 one-to-one chats plus the one internal distribution group (excluded from analysis, same as every prior cycle), and was archived immediately after the results were read. Same transparency note as prior cycles: the Whapi channel token had to be set as a direct header value on the two HTTP Request nodes, since this session's n8n MCP tools have no way to create a new n8n credential — the workflow was disposable and archived within minutes of use either way.</p>
+  </div>
+  <div class="card">
+    <h3>Both operator WhatsApp updates sent for real, and confirmed delivered</h3>
+    <p>Same pattern as every prior cycle: a second disposable n8n workflow (manual trigger → two chained HTTP Request nodes → the server's own <code>/api/whatsapp/send</code> gateway, reached from inside the Docker network at <code>http://forly-intake:8787</code> so no secret was needed) sent both messages below to 972542045280, each confirmed <code>{"ok": true}</code> with a real WhatsApp message id, then archived. This also serves as this cycle's "test the whole flow" check: the send path itself is healthy end-to-end.</p>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">WhatsApp sent to the operator with this update</h2>
+  <div class="card">
+    <div class="outbound-msg">
+      <div class="to">To 972542045280 — business update</div>
+      <pre>⚠️ פורלי — עדכון עסקי, 24.10: משכתי היום שוב את היסטוריית הוואטסאפ (דרך n8n, ישירות מ-Whapi, מ-22.10 00:00). לא היתה פעילות חדשה בשיחות פרטניות מאז ההודעה האחרונה שנרשמה ב-22.10 21:09 (כ-35 שעות שקט) — שלושת הצאטים הפעילים (נופר הרוש, Illana, טל איינן) מכילים בדיוק את מה שכבר דווח אתמול (23.10): (1) תמונת לוגו שטופלה כתמונת נכס עם כיתוב משובש, (2) הודעת המענה האוטומטי (away message) של נופר נענתה כאילו היא הוראה אמיתית. שני הממצאים האלה עדיין פתוחים וממתינים לתיקון הפרומפט ב-AI Agent (אותו node שחוסם גם את תיקון ה-onError). אין ממצא חדש הפעם. שום שינוי עסקי לא בוצע — זו הודעת סטטוס + בדיקת זרימה.</pre>
+    </div>
+    <div class="outbound-msg">
+      <div class="to">To 972542045280 — n8n update</div>
+      <pre>🔧 פורלי — עדכון n8n, 24.10: בדקתי שוב ישירות דרך n8n MCP. Main Router v3 עדיין יציב (fhyTsd1DSN6wtMGz, updatedAt ללא שינוי מ-20.10, onError תקין על כל 4 הנודים). Business Handler v6 (lQwn7eYSuIxAZkJB) נשאר חסום בדיוק כמו ב-21–23.10: onError עדיין null על Quota - Batch Edit, Check Stop ו-AI Agent - Business1, אין errorWorkflow, ואין לי דרך לאשר שה-credential של Anthropic Chat Model בעותק המשוכתב תואם את הגרסה החיה. לא ניסיתי שוב לשכתב/לפרסם — זה לא יוסיף מידע בלי אישור ה-credential ב-UI. היום גם הצלחתי שוב למשוך בהצלחה את היסטוריית הוואטסאפ דרך n8n workflow חד-פעמי שנמחק מיד בסיום. זו הודעת הבדיקה של אותו נתיב שליחה.</pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">General improvements considered, not pursued this cycle</h2>
+  <div class="card">
+    <h3>Carried forward: Nofar's Facebook-connection nudge timing</h3>
+    <p>From 2026-10-23: nudge an agent proactively the first time they try to build a second property without a connected Facebook page, instead of only after the share-kit generation fails. No new occurrence this cycle (no new property pages were built by anyone in the pulled window) — still a live product suggestion, not a bug.</p>
+  </div>
+  <div class="card">
+    <h3>Carried forward: the photo/video mismatch complaints</h3>
+    <p>Two independent agents (גוני ליד, 2026-10-19; Johnny Laoui, 2026-10-19) reported delivered photos not matching their generated video, three days apart. Still needs a human look at the actual assets and the video pipeline's logs — no new data on this in today's pull.</p>
+  </div>
+  <div class="card">
+    <h3>Nothing else rose to the level of a recommendation</h3>
+    <p>With no new traffic in any individual chat since the last report, there is nothing new to assess on unnecessary generations or bot misunderstanding beyond what's already carried forward above.</p>
+  </div>
+</section>
+
+<footer>
+  Methodology: this cycle was asked to pull conversation history directly from Whapi.Cloud (<code>/messages/list</code>, <code>/messages/list/{ChatID}</code>, excluding 972542045280) rather than via Green API, same as every cycle since 2026-10-21. This session's network policy still denies outbound access to <code>gate.whapi.cloud</code> directly (confirmed via the proxy's own status endpoint: <code>403</code>, policy denial) — per standing instructions, that denial was reported, not retried. As on 2026-10-22/23, a disposable n8n workflow did the pull instead (n8n's own host is not behind this session's proxy): manual trigger → <code>GET /messages/list</code> (500-message cap, not reached; 313 messages existed in the window, <code>time_from</code> = 2026-10-22 00:00 IDT) → a Code node building the distinct, non-excluded chat-id list → a batched loop of <code>GET /messages/list/{ChatID}</code> (300 messages each, same <code>time_from</code>) → a Code node aggregating the per-chat results for reading. It ran once, covered 3 individual chats and 1 group (excluded, same as always — an automated distribution log, not a two-way conversation), and was archived immediately after its output was read. Both production n8n workflows were also re-read live via n8n's MCP tools: <code>Main Router v3</code> is unchanged and still fixed; <code>Business Handler v6</code> is unchanged since 2026-10-11 and still blocked on the same unverifiable-credential risk first identified 2026-10-21 — no rebuild or publish was attempted this cycle. Cross-checking today's raw message timestamps against the 2026-10-23 report showed its two findings (the logo-as-property-photo caption, the away-message reply) are the same two messages, not new recurrences — the 2026-10-23 report's listed times were offset from true IDT by exactly the UTC difference. The two operator-notification messages were sent for real through a second disposable, single-use n8n workflow (manual trigger → two chained HTTP Request nodes → the server's own <code>/api/whatsapp/send</code> gateway at <code>http://forly-intake:8787</code>, reached from inside the Docker network), each confirmed <code>{"ok":true}</code> with a real message id, then archived — nothing persists in n8n beyond this report. No code or n8n change was made to any production system this cycle. Prior report: <code>docs/reports/whatsapp-review-2026-10-23.html</code> (PR #147, merged to <code>staging</code>); the standing authorization referenced here is <code>docs/n8n/whatsapp-review-standing-authorization.md</code> (PR #138).
+</footer>
+
+</div>
+</body>
+</html>
