@@ -179,6 +179,21 @@ function activityKey(group_id, date) { return `${group_id}|${jerusalemDate(date)
 // every daily bucket uses (R7). Accepts a Date, an ISO string or epoch ms.
 function jerusalemDate(date) { return localDate(new Date(date), DEFAULTS.timezone); }
 
+// The duplicate guards count calendar dates (Jerusalem), not hours: "1 day"
+// means not on the same date, so 23:00 and 08:00 the next morning are 1 apart.
+const calDay = (date) => { const [y, m, d] = jerusalemDate(date).split("-").map(Number); return Math.round(Date.UTC(y, m - 1, d) / MS_DAY); };
+const datesApart = (from, to) => calDay(to) - calDay(from);
+// How many date buckets of other accounts' activity to read: the configured
+// same-listing window, never under 1 (today's bucket holds the group's daily count).
+const activityDays = (config) => Math.max(1, Math.ceil(Number((config || DEFAULTS).fingerprint_window_days) || 0));
+// The first moment (Jerusalem midnight) of the date `days` after `from`'s date — when a `days` guard ends.
+function dateGapEnd(from, days) {
+  const n = calDay(from) + days;
+  let t = n * MS_DAY - 3 * MS_HOUR; // midnight at UTC+3 (summer); one hour later at UTC+2
+  if (calDay(new Date(t)) !== n) t += MS_HOUR;
+  return new Date(t);
+}
+
 // settings/posting may override a small, explicit allowlist of DEFAULTS
 // without a deploy. Anything else in `settings` — and any non-positive-
 // integer override — is ignored, so nextSlot stays pure and predictable.
@@ -194,6 +209,26 @@ function jerusalemDate(date) { return localDate(new Date(date), DEFAULTS.timezon
 // posts a day, the same group and the same property again at once, any
 // number of failures. What Facebook itself says (halts, penalties) still counts.
 const capsOff = (env = process.env) => !!env && env.FORLY_ENV === "local" && env.NODE_ENV !== "production" && env.POSTING_CAPS !== "1";
+// POSTING_BURST=1 (local only): no gap between sessions and no dwell between
+// chained posts. With POSTING_CAPS=1 the caps and duplicate guards still hold.
+const burst = (env = process.env) => !!env && env.FORLY_ENV === "local" && env.NODE_ENV !== "production" && env.POSTING_BURST === "1";
+// The caps an admin sets in the posting admin (settings/posting.caps). Each is a
+// whole number; 0 means no limit (for a day count: the guard is off); a missing
+// one keeps the default.
+const CAP_FIELDS = ["daily_cap", "weekly_cap", "group_daily_cap", "max_consecutive_failures", "property_group_cooldown_days", "fingerprint_window_days"];
+const DAY_FIELDS = new Set(["property_group_cooldown_days", "fingerprint_window_days"]);
+const CAP_MAX = 100000;
+// Outside a local box an admin's value must stay in a sane range: never 0 (no limit, or the duplicate guard off).
+const PROD_RANGE = { daily_cap: [1, 60], weekly_cap: [1, 300], group_daily_cap: [1, 10], max_consecutive_failures: [1, 10], property_group_cooldown_days: [1, 30], fingerprint_window_days: [1, 30] };
+const capRange = (f, env = process.env) => (!!env && env.FORLY_ENV === "local" ? [0, CAP_MAX] : PROD_RANGE[f]);
+function capsFrom(raw, env = process.env) {
+  const out = {};
+  for (const f of CAP_FIELDS) {
+    const v = raw && raw[f], [min, max] = capRange(f, env);
+    if (Number.isInteger(v) && v >= min && v <= max) out[f] = v === 0 && !DAY_FIELDS.has(f) ? 1e6 : v;
+  }
+  return out;
+}
 const NO_CAPS = {
   daily_cap: 1e6, weekly_cap: 1e6, group_global_daily_cap: 1e6, max_consecutive_failures: 1e6,
   group_daily_cap: 1e6, property_group_cooldown_days: 0, fingerprint_window_days: 0,
@@ -207,6 +242,9 @@ function configFrom(settings, env = {}) {
     Object.assign(out, LOCAL_PACING, { active_hours: { start: 0, end: 24 }, post_windows: [] });
   }
   if (capsOff(env)) Object.assign(out, NO_CAPS);
+  if (burst(env)) Object.assign(out, { min_gap_minutes: 0, burst: true });
+  // An admin's caps (settings/posting.caps) win over the defaults and the env, in every env.
+  Object.assign(out, capsFrom(settings && settings.caps, env));
   return out;
 }
 
@@ -300,7 +338,7 @@ function sameGroup(a, b, aliases) {
 // before group_id existed falls back to matching by group_url.
 // A candidate's `aliases` (its former slug id) match too: sameGroup.
 const postsForGroup = (posts, c) => posts.filter((p) => (p.group_id ? sameGroup(p.group_id, c.group_id, c.aliases) : p.group_url === c.url));
-const fpWithin = (g, iso) => g.now.getTime() - new Date(iso).getTime() < g.config.fingerprint_window_days * MS_DAY;
+const fpWithin = (g, iso) => datesApart(new Date(iso), g.now) < g.config.fingerprint_window_days;
 // Why group `c` cannot take a post now — { why, until } — or null. nextSlot's
 // own rule, and what the campaign card shows (posting-campaign.explainGroups).
 // g: { now, posts (each with t, ms), pageId, fp, groupActivity, config }.
@@ -314,10 +352,12 @@ function groupBlock(c, g) {
   // A repeating campaign (c.repeat_days: the agent's own "every N days")
   // returns on that rhythm — an hour short, so it does not creep later each
   // round — and never sooner than property_group_cooldown_days (3).
-  const every = Number(c.repeat_days) > 0 ? Number(c.repeat_days) * MS_DAY - MS_HOUR : null;
-  const propMs = Math.max(every || 0, config.property_group_cooldown_days * MS_DAY);
-  const same = toGroup.filter((p) => p.page_id === pageId && now.getTime() - p.t < propMs);
-  if (same.length) return { why: "property_cooldown", until: new Date(lastOf(same) + propMs).toISOString() };
+  // The cooldown is a date gap (dateGapEnd); the repeat rhythm stays in hours.
+  const every = Number(c.repeat_days) > 0 ? Number(c.repeat_days) * MS_DAY - MS_HOUR : 0;
+  const days = config.property_group_cooldown_days || 0;
+  const freeAt = (t) => Math.max(t + every, days > 0 ? dateGapEnd(new Date(t), days).getTime() : t);
+  const same = toGroup.filter((p) => p.page_id === pageId && now.getTime() < freeAt(p.t));
+  if (same.length) return { why: "property_cooldown", until: new Date(freeAt(lastOf(same))).toISOString() };
   // What OTHER Forly accounts did to this group (group_activity/{group_id}|{date}, Task 16).
   const ga = (g.groupActivity || {})[c.group_id] || {};
   if ((ga.posts_today || 0) >= config.group_global_daily_cap) return { why: "group_daily_cap", until: null };
@@ -412,7 +452,8 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
 }
 
 module.exports = {
-  capsOff,
+  capsOff, burst, CAP_FIELDS, CAP_MAX, capsFrom, capRange,
+  datesApart, dateGapEnd, activityDays,
   DEFAULTS, CALENDAR_OK, nextSlot, groupBlock, withTimes, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
   wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },

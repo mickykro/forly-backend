@@ -203,13 +203,24 @@ module.exports = function createPagesRouter(ctx) {
       const videoP = body.video_url ? rehostFn(body.video_url, `${base}/walkthrough.mp4`) : Promise.resolve(null);
       // A clean overlay render (<id>.clean.mp4) has a titled sibling for
       // publishing; keep both. Best-effort — the page stands on the clean one.
-      const promoSrc = body.video_url ? promoVideoUrl(body.video_url) : null;
+      // A narrated reel (WW1 V4) is its own titled cut, sent as post_video_url.
+      const promoSrc = body.post_video_url || (body.video_url ? promoVideoUrl(body.video_url) : null);
       const promoP = promoSrc
         ? rehostFn(promoSrc, `${base}/promo.mp4`).catch((err) => {
           console.warn("createPropertyPage: promo video rehost failed:", err.message);
           return null;
         })
         : Promise.resolve(null);
+      // The reel's soundtrack for the page (runtime.js plays it over the clean
+      // video). Audio-only MP4s; best-effort like the promo.
+      const trackP = (u, name) => (/^https?:\/\//.test(String(u || ""))
+        ? rehostFn(u, `${base}/${name}.mp4`).then((r) => r.url).catch((err) => {
+          console.warn(`createPropertyPage: ${name} rehost failed:`, err.message);
+          return null;
+        })
+        : Promise.resolve(null));
+      const narrationP = trackP(body.narration_url, "narration");
+      const musicP = trackP(body.music_url, "music");
       const posterSrc = body.poster_url || body.photos[0].url;
       const posterP = rehostFn(posterSrc, `${base}/poster.${guessImageExt(posterSrc)}`);
       const photoPs = body.photos.slice(0, 12).map((p, i) =>
@@ -222,6 +233,7 @@ module.exports = function createPagesRouter(ctx) {
       ]);
       const videoUrl = video ? video.url : null;
       const promo = await promoP;
+      const [narrationUrl, musicUrl] = await Promise.all([narrationP, musicP]);
       const posterUrl = poster.url;
       const photos = rest.slice(0, photoPs.length);
       const photoUrls = photos.map((r) => r.url);
@@ -318,7 +330,10 @@ module.exports = function createPagesRouter(ctx) {
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
-        hero: { phrase: body.hero_phrase || "", video_url: videoUrl, promo_video_url: promo ? promo.url : null, poster_url: posterUrl },
+        hero: {
+          phrase: body.hero_phrase || "", video_url: videoUrl, promo_video_url: promo ? promo.url : null, poster_url: posterUrl,
+          ...(narrationUrl ? { narration_url: narrationUrl } : {}), ...(musicUrl ? { music_url: musicUrl } : {}),
+        },
         gallery: { images: galleryImages },
         carousel: { slides: (body.carousel_slides || []).slice(0, 6) },
         area: {

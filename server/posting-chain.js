@@ -18,7 +18,7 @@ const C = require("./posting-campaign");
 const safety = require("./posting-safety");
 
 const { ms, MS_MIN, configOf } = A;
-const MAX_POSTS = A.MAX_SESSION_POSTS;        // per session, the first included
+const MAX_POSTS = A.MAX_SESSION_POSTS;        // per session, the first included (burst: A.maxSessionPosts)
 const DWELL_S = [90, 348];                    // between posts: 1.5–5.8 minutes
 const POST_BUDGET_MS = 12 * MS_MIN;           // a dwell and a post must still fit in the session
 const SESSION_MS = (env) => Math.max(14, Number((env || process.env).POSTING_SESSION_MINUTES) || 55) * MS_MIN; // Driver's limit is 1 hour
@@ -60,7 +60,7 @@ function session(phone, deps, x, lock) {
   let posts = 1;
   const budget = SESSION_MS(deps.env) - POST_BUDGET_MS;
   return {
-    more: (state) => OK.has(state) && posts < MAX_POSTS && Date.now() - started < budget,
+    more: (state) => OK.has(state) && posts < A.maxSessionPosts(deps.env) && Date.now() - started < budget,
     prepare: async () => {
       if (Date.now() - started >= budget) return null;
       if (lock && lock.renew && !lock.renew()) return null; // our hold lapsed: the profile is someone else's
@@ -71,6 +71,6 @@ function session(phone, deps, x, lock) {
   };
 }
 
-const dwellMs = (rand = Math.random) => Math.round((DWELL_S[0] + rand() * (DWELL_S[1] - DWELL_S[0])) * 1000);
+const dwellMs = (rand = Math.random, env = process.env) => safety.burst(env) ? 0 : Math.round((DWELL_S[0] + rand() * (DWELL_S[1] - DWELL_S[0])) * 1000);
 
 module.exports = { enabled, session, prepareNext, sessionConfig, dwellMs, SESSION_MS, MAX_POSTS, DWELL_S };

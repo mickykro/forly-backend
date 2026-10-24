@@ -34,14 +34,13 @@ function postingEnvAllowed(env = {}) {
 // The fleet-level half: the env switch, the global switch and the platform
 // switch — no account involved. The sweeper asks this before anything else
 // (after reaping); assertAllowed() asks it first, in the same order.
-// Off unless switched on (I5): the env must say POSTING_ENABLED=1, and the
-// settings/posting doc must exist with enabled === true — a missing doc, or
-// any other value, is global_off. → the settings/posting doc.
+// Off unless switched on (I5): the admin's main switch decides — the
+// settings/posting doc must exist with enabled === true; a missing doc, or
+// any other value, is global_off. No env var is involved. → the settings/posting doc.
 async function assertFleetAllowed({ platform } = {}, deps = {}) {
   const db = deps.db || dbLive;
   const env = deps.env || process.env;
 
-  if (env.POSTING_ENABLED !== "1") deny("env_off");
 
   const settings = await db.getSetting("posting");
   if (!settings || settings.enabled !== true) deny("global_off");
@@ -67,6 +66,8 @@ async function assertAccountAllowed({ phone, platform, action }, deps = {}) {
   // An owner-level review (R5: a second disabling halt in 30 days) is a
   // disabled account too, whatever the standard re-enable flag says.
   if (conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true) deny("account_disabled");
+  // An admin paused this agent's automatic posting (routes/admin-agents.js).
+  if (conn.posting_paused_by_admin) deny("paused_by_admin");
   // R5: a penalty halves the caps (posting-safety); it stops posting only on
   // day one — while the newest penalising halt is under 24 h old.
   if (action === "post" && conn.posting_penalty_until && new Date(conn.posting_penalty_until).getTime() > nowMs) {

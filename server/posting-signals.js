@@ -47,7 +47,8 @@ const CAPTCHA_EXACT = /^confirm you're human\.?$/i;
 // echo rule (below) can judge each match on its own.
 const TEXT_PHRASES = [
   ["feature_blocked", ["can't use this feature right now", "we limit how often you can do this", "לא ניתן להשתמש בתכונה"]],
-  ["rate_limited", ["you're temporarily blocked from posting", "temporarily blocked from posting", "posting too fast", "נחסמת באופן זמני", "חסימה זמנית", "חסומה זמנית", "חסומים זמנית", "חסום זמנית"]],
+  // "We limit how often you can post, comment or do other things…" — shown under the composer's Post button (17 Oct 2026).
+  ["rate_limited", ["you're temporarily blocked from posting", "temporarily blocked from posting", "posting too fast", "we limit how often you can post", "נחסמת באופן זמני", "חסימה זמנית", "חסומה זמנית", "חסומים זמנית", "חסום זמנית"]],
   ["restricted", ["your account is restricted", "you're restricted from posting in groups", "החשבון שלך מוגבל"]],
   ["pending_approval", ["your post is pending approval", "will be reviewed by a group admin", "ממתין לאישור", "ייבדק על ידי מנהל"]],
   ["group_blocked", ["you can't post in this group", "you're no longer able to post in this group", "לא ניתן לפרסם בקבוצה"]],

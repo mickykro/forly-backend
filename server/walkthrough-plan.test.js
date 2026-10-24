@@ -112,4 +112,22 @@ assert.equal(buildTitles({ rooms: 3.5, neighborhood: "שכונת רמות", park
   assert.ok(planWalkthrough(one, et.slice(0, 5), {}).clips.every((c) => !c.packed));
 }
 
+// H3: "Image N" references, 5-15 s, ~3.5 s per angle of a multi-photo room
+{
+  const map = normalizeMap({ spaces: [
+    { type: "living_room", photos: [{ n: 1, shows: ["sofa"], quality: 8 }, { n: 2, shows: ["hanging chair"], quality: 8 }, { n: 3, shows: ["tv"], quality: 7 }] },
+    { type: "kitchen", photos: [{ n: 4, shows: ["kitchen cabinets"], quality: 8 }] },
+    { type: "bedroom", photos: [{ n: 5, shows: ["bed"], quality: 7 }] },
+    { type: "balcony", photos: [{ n: 6, shows: ["railing"], quality: 9 }] },
+  ] }, 6);
+  const t6 = [1, 2, 3, 4, 5, 6].map((i) => ({ url: `https://x/${i}.jpg` }));
+  const seed = planWalkthrough(map, t6, {});
+  const h3 = planWalkthrough(map, t6, {}, MAX_CLIPS, "h3");
+  assert.ok(seed.clips.every((c) => /@image1/.test(c.prompt) && !/Image \d/.test(c.prompt)), "Seedance prompts unchanged");
+  assert.ok(h3.clips.every((c) => /Image 1/.test(c.prompt) && !/@image/.test(c.prompt)));
+  assert.ok(h3.clips.every((c) => Number.isInteger(c.duration) && c.duration >= 5 && c.duration <= 15));
+  const lounge = h3.clips.find((c) => c.shot_count === 3);
+  assert.ok(lounge && lounge.duration === 11 && lounge.image_urls.length === 3, "three angles of the lounge in one clip");
+}
+
 console.log("walkthrough-plan: all tests passed");

@@ -115,6 +115,8 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // ── db init ──
 const db = require("./db");
 db.init();
+// The admin panel's posting modes (settings/posting.modes) laid over the env: posting-modes.js.
+require("./posting-modes").refresh().catch(() => {});
 
 // ── auth ──
 const createAuthRouter = require("./auth");
@@ -346,6 +348,7 @@ if (driverBoot.enabled) {
   // Owner-only re-enables read POSTING_OWNER_PHONES (unset → refused).
   app.use("/api/admin/posting", require("./routes/admin-posting")({ requireAdmin, requireStepUp, deps: postingDeps }));
   app.use("/api/admin/campaigns", require("./routes/admin-campaigns")({ requireAdmin, requireStepUp, deps: postingDeps }));
+  app.use("/api/admin/agents", require("./routes/admin-agents")({ requireAdmin, requireStepUp, deps: postingDeps }));
   // Manual group posting (POSTING_MANUAL=1): the admin's queue and a live browser per agent.
   app.use("/api/admin/manual", require("./routes/admin-manual")({ requireAdmin, deps: postingDeps }));
 
