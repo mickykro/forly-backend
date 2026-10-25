@@ -25,6 +25,16 @@ const code = (c) => (e) => e.code === c;
 const walk = async (key, states, at = NOW) => { for (const s of states) await S.transition(key, s, {}, at); };
 
 (async () => {
+  // ── an explicit epoch lower bound must not become the moving 30-day default ──
+  {
+    S._test.reset();
+    await S.addAuditEvent({ action: "test_audit", operator_tail: "0001", target_phone_tail: "0002" }, NOW);
+    const rows = await S.listAuditEvents({ sinceMs: 0, limit: 10 });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].action, "test_audit");
+    assert.equal(rows[0].at, NOW.toISOString());
+  }
+
   // ── duplicate reservation; a different Jerusalem date is a different key ──
   {
     S._test.reset();

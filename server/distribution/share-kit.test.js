@@ -13,7 +13,7 @@ const page = {
 };
 const url = "https://forly.example/p/dana-abc12";
 
-// ── post copy carries the facts, the link, and the agent ──
+// ── post copy carries the facts and routes the reader to the property ──
 const copy = buildPostCopy(page, url);
 assert.ok(copy.includes("בבלי") && copy.includes("תל אביב"), "location present");
 assert.match(copy, /4 (חדרים|חד')/, "rooms present");
@@ -21,15 +21,16 @@ assert.ok(copy.includes("105"), "sqm present");
 assert.ok(copy.includes("קומה 3"), "floor present");
 assert.ok(copy.includes('4,200,000 ש"ח'), "price formatted with separators");
 assert.ok(copy.includes(url), "page link present");
-assert.ok(copy.includes("דנה לוי"), "agent name present");
-assert.ok(copy.includes("0501234567"), "phone shown in local 05x form");
+assert.ok(!copy.includes("דנה לוי") && !copy.includes("0501234567"), "a direct property link replaces a redundant contact block");
 
 // ── missing fields drop their lines instead of printing zeros ──
 const bare = buildPostCopy({ property: { title: "נכס" }, agent: {} }, url);
 assert.ok(!bare.includes("קומה"), "no floor line when floor is 0/absent");
 assert.ok(!bare.includes('ש"ח'), "no price line when price is 0/absent");
 assert.ok(bare.includes(url));
-assert.ok(bare.includes("כתבו לי בפרטי"), "no agent contact: the post still says how to respond");
+assert.ok(!bare.includes("כתבו לי בפרטי"), "a direct link is enough when there is no agent contact");
+const unlinked = buildPostCopy({ property: { title: "נכס" }, agent: {} }, "");
+assert.ok(unlinked.includes("כתבו לי בפרטי"), "without a link or agent contact, the post still says how to respond");
 
 // ── group sanitizer: facebook.com/groups/* only, normalized, deduped, capped ──
 assert.deepEqual(sanitizeGroups([
@@ -112,7 +113,8 @@ assert.ok(!qm0.includes("undefined"));
     assert.match(text, /4,200,000 ש"ח|4\.2 מ' ש"ח/, "price identical everywhere");
     assert.match(text, /4 (חדרים|חד')/, "rooms identical everywhere");
     assert.ok(text.includes("105") && text.includes("קומה 3"), "facts identical everywhere");
-    assert.ok(text.includes("050"), "every variation carries the agent's phone");
+    assert.ok(text.includes(url), "every variation ends with the property's direct link");
+    assert.ok(!text.includes("050"), "a direct link avoids repeated contact blocks");
     assert.ok(!/[·—–]/.test(text), "no middle dots or long dashes");
   }
 
@@ -127,15 +129,22 @@ assert.ok(!qm0.includes("undefined"));
   }
 }
 
-// ── all ten templates rotate in; "חדש" only on a first round; rent wording ──
+// ── all ten templates rotate in; detail modules are data-gated; rent wording ──
 {
   const all = Array.from({ length: 10 }, (_, r) => buildPostCopy(page, url, { variantSeed: "pg1|g", variantRound: r }));
   assert.equal(new Set(all).size, 10, "ten rounds give ten different posts");
   assert.equal(buildPostCopy(page, url, { variantSeed: "pg1|g", variantRound: 10 }), all[0], "round 10 wraps to the first template");
   const nth = (r) => buildPostCopy(page, url, { variantSeed: "pg1|g", variantRound: r });
-  const six = all.findIndex((t) => t.includes("אצלי בשיווק:"));
-  assert.ok(six >= 0 && nth(six + 10).includes("אצלי בשיווק:"), "the same template comes back after ten rounds");
-  assert.ok(!nth(six + 10).includes("חדש"), "a later round never calls the listing new");
+  const numbers = all.findIndex((t) => t.includes("הבית במספרים"));
+  assert.ok(numbers >= 0 && nth(numbers + 10).includes("הבית במספרים"), "the same template comes back after ten rounds");
+  for (const text of all) assert.ok(!/מרפסת:|גינה:|מגרש:|שטח בנוי:|מעלית:|חניה:|מחסן:/.test(text), "unknown detail fields never create labels");
+
+  const detailed = { ...page, property: { ...page.property, size_built: 118, size_balcony: 14, size_garden: 32,
+    size_plot: 180, parking: 2, storage: true, elevator: true } };
+  const rich = Array.from({ length: 10 }, (_, r) => buildPostCopy(detailed, url, { variantSeed: "pg1|g", variantRound: r }));
+  assert.ok(rich.some((t) => t.includes("מרפסת: 14 מ\"ר") && t.includes("גינה: 32 מ\"ר") && t.includes("מגרש: 180 מ\"ר")), "outdoor areas appear only when structured");
+  assert.ok(rich.some((t) => t.includes("מעלית") && t.includes("חניה: 2 מקומות") && t.includes("מחסן: קיים")), "access details appear only when structured");
+  assert.ok(rich.some((t) => t.includes("שטח בנוי: 118 מ\"ר")), "built area is labeled, never merged into another measure");
   const odd = { ...page, property: { ...page.property, price: 2925000 } };
   for (let r = 0; r < 10; r++) assert.ok(buildPostCopy(odd, url, { variantSeed: "pg1|g", variantRound: r }).includes("2,925,000"), "a short price is never rounded");
   const rent = { ...page, property: { ...page.property, listing_type: "rent", price: 6800 } };
