@@ -46,6 +46,34 @@ const own = (n) => `${BASE}/files/0000000${n}-aaaa-bbbb-cccc-dddddddddddd.mp4`;
     assert.equal(patch["hero.promo_video_url"], own(4));
 
     assert.equal((await post("/plan", { page_id: "nope" })).status, 404, "unknown page");
+
+    // /reel/render: a retry joins the render in flight or gets its result; a third different one is refused
+    const reel = require("../reel");
+    const orig = { tts: reel.tts, music: reel.music, renderReel: reel.renderReel };
+    const pending = [];
+    let renders = 0, fails = 0;
+    reel.tts = async () => "https://fal.example/vo.wav";
+    reel.music = async () => "https://fal.example/m.wav";
+    reel.renderReel = ({ clipUrls }) => { renders++; return new Promise((ok, no) => pending.push({ ok: () => ok({ reel_url: clipUrls[0] }), no })); };
+    const job = (n) => ({ clips: [{ prompt: "x", duration: 5, image_urls: ["https://a/1.jpg"] }], clip_urls: [`https://a/clip${n}.mp4`],
+      script: { lines: [{ narration: "שלום", subtitle: "שלום" }] }, end_bg_image_url: "https://a/bg.jpg" });
+    const settle = () => new Promise((r) => setTimeout(r, 50));
+    try {
+      const a1 = post("/reel/render", job(1)); await settle();
+      const a2 = post("/reel/render", job(1)); const b = post("/reel/render", job(2)); await settle();
+      assert.equal(renders, 2, "the retry of render 1 joined it");
+      const busy = await post("/reel/render", job(3));
+      assert.equal(busy.status, 429, "two renders at once at most");
+      pending.forEach((p) => p.ok());
+      const outs = await Promise.all([a1, a2, b].map(async (r) => (await r).json()));
+      assert.deepEqual(outs.map((o) => o.reel_url), ["https://a/clip1.mp4", "https://a/clip1.mp4", "https://a/clip2.mp4"]);
+      assert.equal((await (await post("/reel/render", job(1))).json()).reel_url, "https://a/clip1.mp4");
+      assert.equal(renders, 2, "a finished render is answered from its result");
+      reel.renderReel = async () => { fails++; throw new Error("ffmpeg failed"); };
+      assert.equal((await post("/reel/render", job(4))).status, 502);
+      assert.equal((await post("/reel/render", job(4))).status, 502);
+      assert.equal(fails, 2, "a failed render is tried afresh");
+    } finally { Object.assign(reel, orig); }
     console.log("walkthrough-reel routes: all tests passed");
   } finally {
     server.close();

@@ -46,6 +46,15 @@ function call(server, method, path, body) {
     assert.equal(refused.status, 409); assert.equal(refused.body.error, "group_limit"); assert.equal(refused.body.why, "group_daily_cap");
     assert.equal((await overrides()).length, 0);
 
+    // the agent's own rules win over the global ones here too (as in automatic posting)
+    const pinned = deps.config; delete deps.config; // the real layering: settings, then the agent's rules
+    const g111 = async () => (await call(server, "GET", "/queue")).body.campaigns.find((c) => c.campaign_id === ids[0]).groups.find((x) => x.group_id === "111").limit;
+    try {
+      assert.equal((await g111()).block.why, "group_daily_cap", "the global cap of 3 blocks 111");
+      await K.db.setConnection(AGENT, { posting_rules: { group_daily_cap: 4 } });
+      assert.deepEqual([(await g111()).cap, (await g111()).block], [4, null], "the agent's cap of 4 leaves 111 open at 3 today");
+    } finally { await K.db.setConnection(AGENT, { posting_rules: null }); deps.config = pinned; }
+
     // a skip is never blocked (pg5's 111 is blocked too)
     assert.equal((await done(ids[4], "111", { status: "skipped" })).status, 200, "a skip is never blocked");
 

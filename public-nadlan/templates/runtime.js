@@ -146,9 +146,12 @@
       sbtn.setAttribute("aria-label", T(on ? "video_mute" : "video_sound"));
       sbtn.setAttribute("aria-pressed", on ? "true" : "false");
     };
-    // The narration is timed to the video from 0: over a looping clip it is heard
-    // once, and it stays silent past its own end.
-    var voiceDue = function () { return hv.loop ? !voice.ended : hv.currentTime < (voice.duration || Infinity); };
+    // The narration is timed to the video from 0 and stays silent past its own end.
+    // Over a looping clip it is heard once: "heard" means it ended while audible —
+    // not voice.ended, which a muted pass sets too (and the next loop clears).
+    var voiceHeard = false;
+    if (voice) voice.addEventListener("ended", function () { if (!voice.muted) voiceHeard = true; });
+    var voiceDue = function () { return !(hv.loop && voiceHeard) && hv.currentTime < (voice.duration || Infinity); };
     var align = function () {
       if (voice.ended || Math.abs(voice.currentTime - hv.currentTime) > 0.5) { try { voice.currentTime = hv.currentTime; } catch (e) {} }
     };
@@ -162,20 +165,34 @@
       });
     };
     hv.addEventListener("volumechange", function () {
-      // Sound on for the first time over a looping clip: from the top, so the narration is heard whole.
-      if (!hv.muted && !heard) { heard = true; if (hv.loop) { try { hv.currentTime = 0; } catch (e) {} } }
+      // Sound on for the first time over a looping clip: video and narration both from
+      // the top (before follow() asks whether the narration is due), so it is heard whole.
+      if (!hv.muted && !heard) {
+        heard = true;
+        if (hv.loop) { try { hv.currentTime = 0; if (voice) voice.currentTime = 0; } catch (e) {} }
+      }
       follow(); paint();
     });
     ["play", "playing", "pause", "ended", "seeked"].forEach(function (t) { hv.addEventListener(t, follow); });
-    hv.addEventListener("timeupdate", function () { if (voice && !hv.paused && voiceDue()) align(); });
+    // Drift only, on a narration that is playing: restarting an ended one is follow()'s, on a seek, a loop or play.
+    hv.addEventListener("timeupdate", function () { if (voice && !voice.paused && !hv.paused && voiceDue()) align(); });
     document.addEventListener("visibilitychange", follow);
     // A touch only counts as a gesture when it ends. A tap on a control is left to that control.
     var GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
+    var unlocked = false;
     var firstGesture = function (e) {
-      if (heard) return stopWaiting();
+      // iOS lets a track play from script only once it has played inside a tap, and a
+      // template's Play starts the video after the tap — so each track plays here once
+      // (follow() pauses it again at once when the video is not playing). A pointerdown
+      // is no tap on iOS: the unlock waits for the touchend.
+      if (!unlocked && e.type !== "pointerdown") {
+        unlocked = true;
+        tracks.forEach(function (a) { if (a.paused && !a.ended) { var p = a.play(); if (p && p.catch) p.catch(function () {}); } });
+      }
       var t = e.target && e.target.closest ? e.target : null;
-      if (!(t && t.closest("button,a,input,select,textarea,label,video[controls],[role=button]"))) hv.muted = false;
-      follow(); // inside the gesture: the browser lets the tracks play
+      if (!heard && !(t && t.closest("button,a,input,select,textarea,label,video[controls],[role=button]"))) hv.muted = false;
+      follow();
+      if (heard && unlocked) stopWaiting();
     };
     var stopWaiting = function () {
       GESTURES.forEach(function (t) { document.removeEventListener(t, firstGesture, true); });

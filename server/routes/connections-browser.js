@@ -28,7 +28,6 @@ const SESSION_SECONDS = locksLive.LOGIN_SESSION_S;
 const CONSENT_VERSION = "2026-09-24";
 // Disabling halt classes R5 resolves with a reconnect (see startFlow).
 const RECONNECT_CLASSES = new Set(["captcha", "checkpoint", "suspected_compromise"]);
-const FLEET_REASONS = new Set(["global_off", "platform_off", "visible_off"]);
 const { profileNameFor, pendingName } = require("../profile-name");
 
 // Facebook posts; Yad2 and Madlan are read-only (Phase 4: connect, dwell,
@@ -204,12 +203,11 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
   });
 
   // Why /start must refuse, or null. Connecting only opens a login browser
-  // for the agent; it never posts, likes or dwells. So the fleet-level
-  // POSTING switches (env, global, per-platform, visible) do not block it —
-  // posting is off by default, and connecting (also used by the Yad2/Madlan
-  // import) must keep working. The guard stops at its first failing check and
-  // the fleet checks come first, so when one of those fired, the account-level
-  // checks are re-run with the fleet switches read as on.
+  // for the agent; it never posts, likes or dwells. So only the account-level
+  // checks apply (posting-guard.assertAccountAllowed): none of the fleet-level
+  // automation switches — global, per-platform, visible, manual posting —
+  // block it. Posting is off by default, an admin posting by hand works in the
+  // agent's own connected profile, and connecting is also the Yad2/Madlan import.
   // Account level: reconnecting is how a revoked profile is replaced, so
   // profile_revoked is let through. A disabled account may reconnect too when
   // R5 resolves its halt that way: a captcha/checkpoint (the agent completes
@@ -219,17 +217,9 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
   // until the operator or owner lifts it (routes/admin-posting.js); until
   // then it still stops every post, like, story and dwell.
   async function connectRefusal(phone, platform) {
-    const check = async (deps) => {
-      try { await guard.assertAllowed({ phone, platform, action: "session" }, deps); return null; }
-      catch (e) { if (e.code !== "posting_disabled") throw e; return e.reason; }
-    };
-    let reason = await check({ db });
-    if (reason && FLEET_REASONS.has(reason)) {
-      const fleetOn = Object.assign(Object.create(db), {
-        getSetting: async (k) => (k === "posting" ? { enabled: true, platforms: {}, visible_interactions_enabled: true } : db.getSetting(k)),
-      });
-      reason = await check({ db: fleetOn, env: process.env });
-    }
+    let reason = null;
+    try { await guard.assertAccountAllowed({ phone, platform, action: "session" }, { db }); }
+    catch (e) { if (e.code !== "posting_disabled") throw e; reason = e.reason; }
     if (!reason || reason === "profile_revoked") return null;
     if (reason === "account_disabled" && platform === "facebook") {
       const c = (await db.getConnection(phone)) || {};

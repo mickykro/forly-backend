@@ -50,4 +50,14 @@ assert.ok(!/,Tag,/.test(noBrand.split("[Events]")[1]) && (noBrand.match(/Dialogu
 assert.ok(falQueueUrl("https://queue.fal.run/minimax/h3/requests/abc/status"));
 assert.ok(!falQueueUrl("https://evil.example/queue.fal.run/x"), "polling only follows fal's own queue urls");
 
-console.log("reel: all tests passed");
+// downloads stop at the cap, even without a content-length (a chunked body is read chunk by chunk)
+const { readCapped } = require("./utils");
+let pulled = 0;
+const endless = () => new Response(new ReadableStream({ pull(c) { pulled++; c.enqueue(new Uint8Array(1024)); } }));
+(async () => {
+  await assert.rejects(readCapped(endless(), 10 * 1024), /response_too_large/);
+  assert.ok(pulled < 20, "stopped near the cap, not after reading on");
+  assert.equal((await readCapped(new Response("abc"), 10)).toString(), "abc");
+  assert.ok(_test.MAX_DOWNLOAD_BYTES <= 100 * 1024 * 1024);
+  console.log("reel: all tests passed");
+})().catch((e) => { console.error(e); process.exit(1); });
