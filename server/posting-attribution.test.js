@@ -16,7 +16,8 @@ const createPagesRouter = require("./routes/pages");
 
 const PH = "972500000001";
 const DAY = 86400000;
-const T0 = new Date(Date.now() - 86400000); // a day ago: a fixed date ages past the 30-day click expiry
+// Relative to now: clicks live 30 days from T0, so a fixed date expires the fixtures. T0, T0+DAY and now are three distinct days.
+const T0 = new Date(Date.now() - 2 * DAY);
 const IP = "203.0.113.77";
 const HEX = /^[0-9a-f]{32}$/;
 const COOKIE_RE = /^fly_ref=([0-9a-f]{32}); HttpOnly; Secure; SameSite=Lax; Max-Age=604800; Path=\/$/;

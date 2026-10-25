@@ -229,7 +229,7 @@ async function addAuditEvent(e, now = new Date()) {
 
 // Newest first, since sinceMs; `at` is an ISO string on both paths.
 async function listAuditEvents({ sinceMs, limit = 20 } = {}) {
-  const since = toIso(sinceMs == null ? Date.now() - 30 * MS_DAY : sinceMs); // 0 means from the start, not "unset"
+  const since = toIso(sinceMs ?? Date.now() - 30 * MS_DAY); // 0 means "since the epoch", not "default"
   const fdb = firestore();
   const rows = fdb
     ? (await fdb.collection(AUDIT).where("at", ">=", since).get()).docs.map((d) => d.data())

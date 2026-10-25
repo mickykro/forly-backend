@@ -66,8 +66,11 @@ function buildPrompt(count, types) {
     `- Two photos are the same space only if they visibly share the same features (the same ` +
     `island, sofa, windows, flooring layout). The same room type is NOT enough: two bedrooms ` +
     `are two spaces unless the photos show the same room.\n` +
+    `- The same distinctive furniture or fixtures seen from another angle (the same sofa, ` +
+    `hanging chair, pendant lights, rug, kitchen cabinets) mean the SAME space: put those ` +
+    `photos in one space even when the camera faces a different wall.\n` +
     `- Kitchen, dining and living areas are one space only if a photo shows them together.\n` +
-    `- When unsure, keep photos in separate spaces.\n` +
+    `- When unsure and no distinctive item repeats, keep photos in separate spaces.\n` +
     `- "shows": up to ${MAX_SHOWS} large, plainly visible things in that photo (e.g. "kitchen ` +
     `island", "sofa", "bed", "window", "balcony doors", "pool"). Nouns only, no adjectives. ` +
     `Never list a door, doorway, hallway or corridor.\n` +

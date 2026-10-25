@@ -17,7 +17,9 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { videoRef, REF_MAX_SIDE } = require("../photo-orient");
-const { assertPublicHttpUrl, storeBuffer } = require("../utils");
+const { assertPublicHttpUrl, storeBuffer, ownUploadedVideo } = require("../utils");
+const { writeScript } = require("../reel-script");
+const reel = require("../reel");
 
 const HEAD_BYTES = 128 * 1024; // EXIF sits at the start of a JPEG
 const MAX_PHOTO_BYTES = 25 * 1024 * 1024;
@@ -99,7 +101,17 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
   });
 
   router.post("/plan", requireN8n, async (req, res) => {
-    const body = req.body || {};
+    const body = { ...(req.body || {}) };
+    // page_id: re-make the video of an existing page from its own photos,
+    // details and agent (WW1 V4). Explicit fields in the body still win.
+    const page = typeof body.page_id === "string" && body.page_id ? await db.getPage(body.page_id.slice(0, 100)).catch(() => null) : null;
+    if (body.page_id && !page) return res.status(404).json({ error: "page not found" });
+    if (page) {
+      if (!Array.isArray(body.image_urls) || !body.image_urls.length) body.image_urls = ((page.gallery && page.gallery.images) || []).map((g) => g.url);
+      if (!body.property_details) body.property_details = page.property || {};
+      if (!body.listing_id && page.listing_id) body.listing_id = page.listing_id;
+    }
+    const model = body.model === "h3" ? "h3" : "seedance";
     // image_urls: plain strings, {url} or Firestore {stringValue}. `tags` (the
     // old Vision Tagger output) is still accepted; its scores are used only
     // where the space map gives none.
@@ -123,7 +135,7 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
     const { map, debug } = await mapSpaces(tags);
     let plan;
     try {
-      plan = planWalkthrough(map, tags, details);
+      plan = planWalkthrough(map, tags, details, undefined, model);
     } catch (err) {
       if (err.code === "too_few_photos") return res.status(422).json({ error: err.message, map_debug: debug });
       console.error("walkthrough plan failed:", err.message);
@@ -139,7 +151,82 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
         console.warn("walkthrough: saving space map failed:", err.message);
       }
     }
-    res.json({ ...plan, space_map: map, map_debug: debug, ref_photos: shrunk.refs, uprighted_photos: shrunk.uprighted });
+    // The narrated reel's words (WW1 V4): one Claude call, template fallback.
+    let script;
+    if (body.script) {
+      let agent = body.agent && typeof body.agent === "object" ? body.agent : page && page.agent;
+      if (!agent && body.phone) {
+        const biz = await db.getBusiness(String(body.phone)).catch(() => null);
+        agent = biz ? { name: biz.full_name, brand_name: biz.business_name, phone: body.phone } : null;
+      }
+      script = await writeScript({ clips: plan.clips, spaces: map.spaces, details, agent: agent || {} });
+    }
+    res.json({ ...plan, ...(script ? { script } : {}), ...(page ? { page_id: page.page_id || body.page_id } : {}),
+      end_bg_image_url: tags[0] && tags[0].url, space_map: map, map_debug: debug, ref_photos: shrunk.refs, uprighted_photos: shrunk.uprighted });
+  });
+
+  // ── narrated reel (WW1 V4): n8n submits, polls, then renders ──
+  const fail = (res, where) => (err) => {
+    console.error(`walkthrough ${where} failed:`, err.message);
+    res.status(502).json({ error: `${where}_failed`, detail: err.message.slice(0, 300) });
+  };
+  const validClips = (clips) => Array.isArray(clips) && clips.length >= 1 && clips.length <= 6 && clips.every((c) =>
+    c && typeof c.prompt === "string" && c.prompt.length <= 2000 && Number.isInteger(c.duration) && c.duration >= 5 && c.duration <= 15 &&
+    Array.isArray(c.image_urls) && c.image_urls.length >= 1 && c.image_urls.every((u) => /^https:\/\//.test(String(u))));
+
+  // { clips } (from /plan with model "h3") → { requests } to poll
+  router.post("/reel/clips", requireN8n, async (req, res) => {
+    const clips = req.body && req.body.clips;
+    if (!validClips(clips)) return res.status(400).json({ error: "clips: 1-6 of {prompt, duration 5-15, image_urls}" });
+    reel.submitClips(clips).then((requests) => res.json({ requests }), fail(res, "reel_clips"));
+  });
+
+  // { requests } → { all_complete, failed, statuses, video_urls }
+  router.post("/reel/status", requireN8n, async (req, res) => {
+    const requests = req.body && req.body.requests;
+    if (!Array.isArray(requests) || !requests.length || requests.length > 6) return res.status(400).json({ error: "requests required" });
+    reel.clipStatus(requests).then((r) => res.json(r), fail(res, "reel_status"));
+  });
+
+  // { clips, clip_urls, script, end_bg_image_url } → voice + music on fal, then the four files
+  router.post("/reel/render", requireN8n, async (req, res) => {
+    const b = req.body || {};
+    const urls = Array.isArray(b.clip_urls) ? b.clip_urls.map(String) : [];
+    const lines = b.script && Array.isArray(b.script.lines) ? b.script.lines : [];
+    if (!validClips(b.clips) || urls.length !== b.clips.length || lines.length !== urls.length ||
+      !urls.every((u) => /^https:\/\//.test(u)) || !/^https:\/\//.test(String(b.end_bg_image_url || ""))) {
+      return res.status(400).json({ error: "clips, clip_urls, script.lines (same length) and end_bg_image_url required" });
+    }
+    if (!uploadDir) return res.status(503).json({ error: "no upload dir" });
+    try {
+      const [narrationUrls, musicUrl] = await Promise.all([
+        Promise.all(lines.map((l) => reel.tts(String(l.narration || "").slice(0, 400)))),
+        reel.music(String(b.script.music_prompt || "").slice(0, 600) || "Warm uplifting instrumental background music, no vocals"),
+      ]);
+      const store = (buf) => storeBuffer(buf, "mp4", uploadDir, baseUrl, storeOpts).then((r) => r.url);
+      const out = await reel.renderReel({ clips: b.clips, clipUrls: urls, script: b.script, narrationUrls, musicUrl,
+        endBgUrl: b.end_bg_image_url, store });
+      res.json(out);
+    } catch (err) {
+      fail(res, "reel_render")(err);
+    }
+  });
+
+  // { page_id, video_url, narration_url, music_url, post_video_url? } → the page plays the new reel.
+  // Only our own /files uploads are accepted.
+  router.post("/reel/page-media", requireN8n, async (req, res) => {
+    const b = req.body || {};
+    const bases = [storeOpts.uploadPublicBase, baseUrl, storeOpts.remoteUploadBase];
+    const own = (u) => ownUploadedVideo(u, bases);
+    const pageId = String(b.page_id || "").slice(0, 100);
+    if (!pageId || !own(b.video_url) || !own(b.narration_url) || !own(b.music_url) || (b.post_video_url && !own(b.post_video_url))) {
+      return res.status(400).json({ error: "page_id and our own video_url, narration_url, music_url required" });
+    }
+    const pageDoc = await db.getPage(pageId).catch(() => null);
+    if (!pageDoc) return res.status(404).json({ error: "page not found" });
+    const patch = { "hero.video_url": b.video_url, "hero.narration_url": b.narration_url, "hero.music_url": b.music_url, updated_at: new Date() };
+    if (b.post_video_url) patch["hero.promo_video_url"] = b.post_video_url;
+    db.updatePage(pageId, patch).then(() => res.json({ ok: true, page_id: pageId }), fail(res, "page_media"));
   });
 
   return router;
