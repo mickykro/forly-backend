@@ -484,6 +484,18 @@ const noFullPhone = (raw, what) => {
       assert.deepEqual(m1.body.modes.manual.set, false);
       assert.equal((await post("/modes", { modes: {}, reason: "x", version: v0 })).status, 409, "stale version");
     }
+    // ── which environment posts: on = staging (production holds off), audited, shown ──
+    {
+      const v = ((await db.getSetting("posting")) || {}).version || 0;
+      const on = await post("/switch/staging", { enabled: true, reason: "posting from staging today", version: v });
+      assert.equal(on.status, 200, on.raw);
+      assert.equal((await db.getSetting("posting")).sweeper_env, "staging");
+      assert.deepEqual([on.body.sweeper_env, on.body.audited, on.body.last_change.what], ["staging", true, "staging"]);
+      assert.equal((await post("/switch/staging", { enabled: false, reason: "x", version: v })).status, 409, "stale version");
+      assert.equal((await post("/switch/staging", { enabled: false, reason: "", version: v + 1 })).status, 400, "a reason is required");
+      const off = await post("/switch/staging", { enabled: false, reason: "back to production", version: v + 1 });
+      assert.deepEqual([off.status, (await db.getSetting("posting")).sweeper_env, off.body.sweeper_env], [200, "prod", "prod"]);
+    }
     console.log("routes/admin-posting.test.js ok");
   } finally {
     server.close();

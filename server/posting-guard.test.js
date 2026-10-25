@@ -212,13 +212,17 @@ async function denies(opts, deps, reason) {
     await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, off, "global_off");
   }
 
-  // ── postingEnvAllowed (C1): prod, or POSTING_SWEEPER=1 off staging; never staging ──
+  // ── postingEnvAllowed (C1): prod; POSTING_SWEEPER=1 off staging; staging only with POSTING_ON_STAGING=1 ──
   const table = [
     [{ FORLY_ENV: "prod" }, true],
     [{ FORLY_ENV: "prod", POSTING_SWEEPER: "1" }, true],
     [{ FORLY_ENV: "prod", POSTING_SWEEPER: "0" }, true],
     [{ FORLY_ENV: "staging" }, false],
     [{ FORLY_ENV: "staging", POSTING_SWEEPER: "1" }, false],
+    [{ FORLY_ENV: "staging", POSTING_ON_STAGING: "1" }, true],
+    [{ FORLY_ENV: "staging", POSTING_ON_STAGING: "true" }, false],
+    [{ FORLY_ENV: "prod", POSTING_ON_STAGING: "1" }, true],
+    [{ FORLY_ENV: "local", POSTING_ON_STAGING: "1" }, false],
     [{ FORLY_ENV: "local" }, false],
     [{ FORLY_ENV: "local", POSTING_SWEEPER: "1" }, true],
     [{ FORLY_ENV: "local", POSTING_SWEEPER: "true" }, false],
@@ -229,6 +233,20 @@ async function denies(opts, deps, reason) {
   for (const [env, want] of table) assert.strictEqual(postingEnvAllowed(env), want, JSON.stringify(env));
   assert.strictEqual(postingEnvAllowed(undefined), false);
   assert.strictEqual(postingEnvAllowed(null), false);
+
+  // ── one of production and staging posts: production, unless settings/posting.sweeper_env hands it to staging ──
+  for (const [sweeper_env, env, want] of [
+    [undefined, "prod", null], [undefined, "staging", "other_env"],
+    ["staging", "staging", null], ["staging", "prod", "other_env"],
+    ["prod", "staging", "other_env"], ["nonsense", "staging", "other_env"],
+    ["staging", "local", null], [undefined, undefined, null], // a local box, and an env without FORLY_ENV: unaffected
+  ]) {
+    const deps = { db: fakeDb({ settings: { enabled: true, sweeper_env } }), env: { FORLY_ENV: env, POSTING_ON_STAGING: "1" } };
+    if (want) await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, deps), (e) => e.reason === want, `${sweeper_env}/${env}`);
+    else assert.ok(await assertFleetAllowed({ platform: PLATFORM }, deps), `${sweeper_env}/${env}`);
+  }
+  await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb({ settings: { enabled: false, sweeper_env: "staging" } }), env: { FORLY_ENV: "staging" } }),
+    (e) => e.reason === "global_off", "the main switch still comes first");
 
   // ── no caching: a switch flipped between two calls is seen by the second ──
   {

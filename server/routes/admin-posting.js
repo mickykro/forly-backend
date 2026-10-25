@@ -7,6 +7,7 @@
  *   POST /switch           { enabled, reason, version }            global kill switch (R2)
  *   POST /switch/platform  { platform, enabled, reason, version }  settings/posting.platforms.<p>
  *   POST /switch/visible   { enabled, reason, version }            visible_interactions_enabled
+ *   POST /switch/staging   { enabled, reason, version }            settings/posting.sweeper_env (on = staging posts)
  *   POST /caps             { caps, reason, version }               settings/posting.caps (posting-safety CAP_FIELDS)
  *   POST /modes            { modes, reason, version }              settings/posting.modes (posting-modes MODES)
  *   POST /accounts/:account/reenable       { reason, agent_confirmed }  per halt class (R5)
@@ -119,6 +120,7 @@ function switchView(s, env) {
     enabled: s.enabled === true, disabled_reason: s.enabled === false ? s.disabled_reason || null : null,
     version: s.version || 0, enabled_at: s.enabled_at || null,
     platforms, visible_interactions_enabled: s.visible_interactions_enabled !== false,
+    sweeper_env: s.sweeper_env === "staging" ? "staging" : "prod",
     changed_by_tail: s.changed_by || null, changed_at: s.changed_at || null, reason: s.reason || null,
     last_change: lc && { what: lc.what, enabled: lc.enabled, by_tail: lc.by_tail, reason: lc.reason, at: lc.at },
     caps: capsView(s, env),
@@ -289,6 +291,8 @@ module.exports = function createAdminPostingRouter({
   switchRoute("/switch/platform", (b) => (PLATFORMS.includes(b.platform) ? `platform:${b.platform}` : null),
     (cur, on, m) => ({ platforms: Object.assign({}, cur.platforms || {}, { [m.platform]: on }) }));
   switchRoute("/switch/visible", () => "visible", (cur, on) => ({ visible_interactions_enabled: on }));
+  // Which of production and staging posts (posting-guard): on = staging, and production holds off.
+  switchRoute("/switch/staging", () => "staging", (cur, on) => ({ sweeper_env: on ? "staging" : "prod" }));
 
   // The caps: each a whole number 0..CAP_MAX (0 = no limit), or null for the default.
   router.post("/caps", ...guard, wrap(async (req, res) => {

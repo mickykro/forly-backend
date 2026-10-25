@@ -110,6 +110,11 @@ function publicUrl(url) {
   return PUBLIC_BASE_URL + u.pathname + u.search + u.hash;
 }
 
+// The host in a post's links and in the agents' posting messages. Staging may
+// post (posting-guard.postingEnvAllowed) for production's agents, from the
+// shared database: its links are production's pages, never staging's.
+const postingPageBaseUrl = (env, pageBaseUrl) => (env && env.FORLY_ENV === "staging" ? PUBLIC_BASE_URL : pageBaseUrl);
+
 function resolvePageBaseUrl({ pageBaseUrl, baseUrl, publicBaseUrl, allowInfra }) {
   const isLocalBase = /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:|$)/
     .test(baseUrl || "");
@@ -425,5 +430,5 @@ module.exports = {
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
   guessImageExt, rehost, readCapped, storeBuffer, sendWhatsApp, sendWhatsAppButtons, greenApiBase, getWhatsAppMessage, getWhatsAppHistory,
-  assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
+  assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl, postingPageBaseUrl,
 };
