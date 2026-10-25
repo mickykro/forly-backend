@@ -348,6 +348,8 @@ if (driverBoot.enabled) {
   // The operator's levers (kill switches, fleet overview, per-class re-enable,
   // profile revoke); every change needs a fresh OTP step-up and is audited.
   // Owner-only re-enables read POSTING_OWNER_PHONES (unset → refused).
+  // The posting sessions open now: watch one, hold it, skip its post, or take it over by hand.
+  app.use("/api/admin/posting/live", require("./routes/admin-posting-live")({ requireAdmin, requireStepUp, deps: postingDeps }));
   app.use("/api/admin/posting", require("./routes/admin-posting")({ requireAdmin, requireStepUp, deps: postingDeps }));
   app.use("/api/admin/campaigns", require("./routes/admin-campaigns")({ requireAdmin, requireStepUp, deps: postingDeps }));
   app.use("/api/admin/agents", require("./routes/admin-agents")({ requireAdmin, requireStepUp, deps: postingDeps }));

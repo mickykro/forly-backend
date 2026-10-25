@@ -16,6 +16,7 @@
 const A = require("./posting-account");
 const C = require("./posting-campaign");
 const safety = require("./posting-safety");
+const live = require("./posting-live");
 
 const { ms, MS_MIN, configOf } = A;
 const MAX_POSTS = A.MAX_SESSION_POSTS;        // per session, the first included (burst: A.maxSessionPosts)
@@ -60,7 +61,8 @@ function session(phone, deps, x, lock) {
   let posts = 1;
   const budget = SESSION_MS(deps.env) - POST_BUDGET_MS;
   return {
-    more: (state) => OK.has(state) && posts < A.maxSessionPosts(deps.env) && Date.now() - started < budget,
+    // The admin's live panel may hold the session after this post (posting-live).
+    more: (state) => OK.has(state) && posts < A.maxSessionPosts(deps.env) && Date.now() - started < budget && !live.held(phone),
     prepare: async () => {
       if (Date.now() - started >= budget) return null;
       if (lock && lock.renew && !lock.renew()) return null; // our hold lapsed: the profile is someone else's

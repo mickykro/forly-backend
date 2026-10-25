@@ -393,6 +393,8 @@ async function runAttempt(attempt, st, deps, now) {
       };
     };
   }
+  // An admin's takeover (posting-live) keeps the browser — and so the profile — past the post.
+  if (st.lock && st.lock.renew) call.postDeps.renewLock = () => st.lock.renew();
   // Before the session closes: the account's due checks (yesterday's posts)
   // and, when it is stale, its groups sync — on the same page, no session of
   // their own. Never in the way of the posts: any failure is only logged.

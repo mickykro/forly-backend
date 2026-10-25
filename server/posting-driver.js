@@ -50,6 +50,7 @@ const shots = require("./posting-shots");
 const chain = require("./posting-chain");
 const diag = require("./posting-diag");
 const safety = require("./posting-safety");
+const live = require("./posting-live");
 
 const S = P.SELECTORS;
 const FEED_URL = "https://www.facebook.com/";
@@ -65,6 +66,7 @@ const MIN_FEED_FOR_ABSENT = 5; // posts read, each with text and author, before 
 const CHRONO_PARAM = ["sorting_setting", "CHRONOLOGICAL"];
 const HALTING = new Set([...SIGNAL_DISABLES, ...SIGNAL_PENALISES, "login_required"]);
 
+const liveKey = (phone) => `post|${phone}`;
 function fail(code, msg) { const e = new Error(msg || code); e.code = code; return e; }
 
 // deps.guard is posting-tick's `(action) => …`, or a module-like
@@ -81,7 +83,13 @@ function context(kind, args, deps) {
   const phone = attempt.phone || deps.phone;
   if (!phone || (deps.phone && attempt.phone && deps.phone !== attempt.phone)) throw fail("invalid_input", "attempt phone");
   const attempts = deps.attempts || { transition: (k, s, d) => require("./posting-attempts").transition(k, s, d, new Date()) };
-  const guardFn = guardOf(deps, phone);
+  const guardOuter = guardOf(deps, phone);
+  // The admin's live panel (posting-live): a skip or a takeover stops this post at its next guard.
+  const guardFn = (action) => {
+    const why = live.denial(phone, attempt.key);
+    if (why) return Promise.reject(Object.assign(fail("posting_disabled", why), { reason: why, admin: why }));
+    return guardOuter(action);
+  };
   const rand = deps.rand || Math.random;
   const burst = safety.burst(deps.env || process.env);
   const x = {
@@ -94,6 +102,7 @@ function context(kind, args, deps) {
       catch (e) { if (e && e.code === "illegal_transition") throw Object.assign(new Error("stopped"), { stop: true }); throw e; }
       if (to === "submit_started") x.submitted = true;
       x.reached = to;
+      live.step(phone, attempt, to);
     },
     // A follow-up note without a state change (posting-attempts.annotate);
     // best-effort — a note never changes what happened.
@@ -118,7 +127,7 @@ function context(kind, args, deps) {
     // R2, throwing: a denial unwinds the session (see settleError).
     async guard(action) {
       try { await guardFn(action); }
-      catch (e) { if (e && e.code === "posting_disabled") throw Object.assign(new Error("denied"), { denied: true, reason: String(e.reason || "").slice(0, 60) }); throw e; }
+      catch (e) { if (e && e.code === "posting_disabled") throw Object.assign(new Error("denied"), { denied: true, reason: String(e.reason || "").slice(0, 60), admin: e.admin || null }); throw e; }
     },
     // R2, non-throwing: may this happen? Anything but a clean yes is a no.
     async allows(action) { try { await guardFn(action); return true; } catch { return false; } },
@@ -136,7 +145,8 @@ async function settleError(x, e) {
   if (e && e.denied) {
     // After submit_started the click has NOT happened (the guard is the last
     // await before it): recorded as clicked:false for reconciliation.
-    const detail = Object.assign({ error_code: "posting_disabled", reason: e.reason }, x.submitted ? { clicked: false } : {});
+    // An admin's skip or takeover is not the switches: the post is not retried (posting-tick RETRY_CANCELS).
+    const detail = Object.assign({ error_code: e.admin || "posting_disabled", reason: e.reason }, x.submitted ? { clicked: false } : {});
     try { return await x.end(x.submitted ? "outcome_unknown" : "cancelled", detail); }
     catch (e2) { if (e2 && e2.stop) return stopped(); throw e2; }
   }
@@ -523,10 +533,20 @@ async function run(kind, args = {}, deps = {}) {
     }
     const withPage = deps.withPage || driver.withPage;
     const duration = chain.enabled(deps) ? Math.round(chain.SESSION_MS(deps.env) / 1000) : POST_SESSION_S;
-    return await withPage(sessionOpts(x, "forly-post:", duration), async (page) => {
-      let out;
-      try { out = await drive(page, x, want, args); } catch (e) { out = await settleError(x, e); }
-      return more(page, out, x, deps);
+    return await withPage(sessionOpts(x, "forly-post:", duration), async (page, active) => {
+      const sessionId = (active && active.sessionId) || null;
+      const entry = live.open(x.phone, sessionId);
+      // Watched from the admin's live panel over this same connection; the screencast runs only while someone looks.
+      try { if (sessionId) require("./connect-viewer").adopt(liveKey(x.phone), sessionId, page.context().browser(), page.context()); } catch { /* watching never breaks the work */ }
+      try {
+        live.step(x.phone, x.attempt, x.reached === "reserved" ? "session_started" : x.reached);
+        let out;
+        try { out = await drive(page, x, want, args); } catch (e) { out = await settleError(x, e); }
+        out = await more(page, out, x, deps);
+        // Taken over: the browser stays open for the admin until they finish (or the time runs out).
+        if (entry.takeover) await live.awaitRelease(x.phone, entry, deps.takeoverMaxMs, deps.renewLock);
+        return out;
+      } finally { live.close(x.phone, entry); }
     }, pageDepsOf(x));
   } catch (e) {
     return settleError(x, e);
@@ -569,7 +589,7 @@ async function more(page, out, x0, deps) {
   }
   // The session's housekeeping on the same page (posting-tick): yesterday's
   // checks, a stale groups sync. Not after a halting page.
-  if (typeof deps.afterPosts === "function" && !(out && HALTING.has(out.signal))) {
+  if (typeof deps.afterPosts === "function" && !(out && HALTING.has(out.signal)) && !(live.get(x0.phone) || {}).takeover) {
     try { await deps.afterPosts(page); } catch { /* never in the way of the posts */ }
   }
   if (next === null && typeof deps.next !== "function") return out;
@@ -589,6 +609,7 @@ async function between(page, x) {
     await page.waitForTimeout(social.readFor(await social.centered(page), x.rand));
     const sig = await P.readSignal(page, "");
     if (HALTING.has(sig) || sig === "login_required") return false;
+    if (live.held(x.phone)) return false; // the admin: no next post
   }
   return true;
 }
@@ -689,7 +710,7 @@ async function reconcile(attempt, deps = {}) {
 }
 
 module.exports = {
-  postToGroup, postToPage, reconcile, SELECTORS: S, POST_SESSION_S, RECHECK_SESSION_S,
+  postToGroup, postToPage, reconcile, liveKey, SELECTORS: S, POST_SESSION_S, RECHECK_SESSION_S,
   proveIdentityAndDestination: P.proveIdentityAndDestination,
-  _test: { preflight, humanType, guardOf, submitReady, nav },
+  _test: { preflight, humanType, guardOf, submitReady, nav, context, settleError },
 };
