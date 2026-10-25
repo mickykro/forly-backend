@@ -40,14 +40,18 @@
 #    same n8n, same NADLAN_JWT_SECRET (the shared secret is what lets dev relay
 #    uploads here at all).
 #
-#    Automated Facebook posting NEVER runs here, whatever staging.env says:
-#    with FORLY_ENV=staging the posting sweeper is not started, and the
-#    /api/admin/posting switches answer 503 posting_unavailable_in_env.
-#    Agents' and admins' campaign/group changes ARE saved here (they show in
-#    the admin manual-posting tab; nothing posts automatically). Staging
-#    shares production's Firestore and GreenAPI, so a staging sweeper would
-#    post from, and message, production's agents. POSTING_SWEEPER=1 does not
-#    override this on staging (server/posting-guard.js postingEnvAllowed).
+#    Automated Facebook posting runs here ONLY with POSTING_ON_STAGING=1 in
+#    staging.env; without it the posting sweeper is not started and the
+#    /api/admin/posting switches answer 503 posting_unavailable_in_env
+#    (POSTING_SWEEPER=1 does not count on staging). Staging shares
+#    production's Firestore and GreenAPI, so a staging sweeper posts from,
+#    and messages, production's agents — with production's links
+#    (utils.postingPageBaseUrl). Only one of the two posts: the admin's
+#    "staging posts" switch (settings/posting.sweeper_env) — production
+#    holds off while it is on, staging while it is off. A production build
+#    from before that switch does not know it: it must not post at the same
+#    time (POSTING_ENABLED unset in deploy.env) while staging posts.
+#    Agents' and admins' campaign/group changes are saved here either way.
 #    Do not copy POSTING_* settings into staging.env expecting them to act.
 #
 #    REMOTE_UPLOAD_BASE points at production (see the top of this file): media

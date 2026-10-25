@@ -128,7 +128,9 @@ async function checklist(deps = {}) {
   const x = A.ctxOf(deps);
   const running = (await x.store.listPostingCampaignsByStatus("running", 500))
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-  const config = await A.configOf(deps, x);
+  // Each agent's own rules over the global ones (as markDone applies them); the settings doc read once.
+  const settings = deps.config ? null : await x.db.getSetting("posting");
+  const configFor = (conn) => deps.config || safety.configFrom(settings, deps.env || process.env, conn && conn.posting_rules);
   const now = x.clock();
   const byPhone = new Map(); // the agent's campaigns, connection and other posts, for the group limits
   const agentOf = async (phone) => {
@@ -142,6 +144,7 @@ async function checklist(deps = {}) {
     if (!page) continue;
     if (expired(c, now)) { await expire(c, deps, x); continue; }
     const agent = await agentOf(c.phone);
+    const config = configFor(agent.conn);
     const limits = L.limitsFor(c, agent.campaigns, now, config, agent);
     const byId = new Map(targetsOf(c, agent.conn).map((g) => [String(g.group_id), g]));
     out.push({

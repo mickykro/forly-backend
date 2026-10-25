@@ -45,6 +45,10 @@ const DEFAULTS = {
   // (posting-chain): Driver bills every byte, and each session pays for
   // loading Facebook once. Between sessions the gap below; inside one, the
   // chain's 1.5–5.8-minute dwell. Friday's window ends at 15:00 anyway.
+  // window_slots: window 1 and window 2, always both, a disabled one (start >=
+  // end) included — the admin's rules and the admin page address them by slot.
+  // post_windows: the enabled ones, what scheduling reads (none = all active hours).
+  window_slots: [{ start: 10, end: 13 }, { start: 18, end: 21 }],
   post_windows: [{ start: 10, end: 13 }, { start: 18, end: 21 }],
   min_gap_minutes: 120,             // between sessions; posts inside a session are minutes apart
   gap_jitter: 0.5,                  // adds up to +50% of the gap, never subtracts
@@ -223,11 +227,8 @@ const plain = (k) => ({ set: (o, v) => { o[k] = v; }, get: (c) => c[k] });
 const limit = (k) => ({ set: (o, v) => { o[k] = v === 0 ? 1e6 : v; }, get: (c) => (c[k] >= 1e6 ? 0 : c[k]) });
 const hours = (k) => ({ set: (o, v) => { o.active_hours = Object.assign({}, o.active_hours, { [k]: v }); }, get: (c) => (c.active_hours || {})[k] });
 const win = (i, k) => ({
-  set: (o, v) => {
-    const ws = [0, 1].map((n) => Object.assign({}, (o._windows || o.post_windows || DEFAULTS.post_windows)[n] || DEFAULTS.post_windows[n]));
-    ws[i][k] = v; o._windows = ws;
-  },
-  get: (c) => ((c.post_windows || [])[i] || { start: 0, end: 0 })[k],
+  set: (o, v) => { o.window_slots[i][k] = v; },
+  get: (c) => ((c.window_slots || c.post_windows || [])[i] || { start: 0, end: 0 })[k],
 });
 const RULES = {
   daily_cap: { prod: [1, 60], ...limit("daily_cap") },
@@ -262,10 +263,7 @@ function applyRules(out, raw, env = process.env) {
     const v = raw && raw[f], [min, max] = capRange(f, env);
     if (Number.isInteger(v) && v >= min && v <= max) { RULES[f].set(out, v); applied.push(f); }
   }
-  return applied; // windows stay in out._windows, at their positions, until configFrom has applied every layer
-}
-function finishWindows(out) {
-  if (out._windows) { out.post_windows = out._windows.filter((w) => w.start < w.end); delete out._windows; } // a window with start >= end is off
+  return applied;
 }
 // The rules' values in a config, as the admin page shows them (0 = no limit).
 const rulesOf = (config) => Object.fromEntries(CAP_FIELDS.map((f) => [f, RULES[f].get(config)]));
@@ -287,7 +285,7 @@ function configFrom(settings, env = {}, agentRules = null) {
   if (Number.isInteger(v) && v > 0) out.group_global_daily_cap = v;
   if (localMode.skipWarmup(env) || (env.FORLY_ENV === "local" && env.POSTING_WARMUP !== "1")) out.warmup = [];
   if (localMode.enabled(env) || (env.FORLY_ENV === "local" && env.POSTING_PACING !== "1")) {
-    Object.assign(out, LOCAL_PACING, { active_hours: { start: 0, end: 24 }, post_windows: [] });
+    Object.assign(out, LOCAL_PACING, { active_hours: { start: 0, end: 24 }, window_slots: [{ start: 0, end: 0 }, { start: 0, end: 0 }] });
   }
   if (capsOff(env)) Object.assign(out, NO_CAPS);
   if (burst(env)) Object.assign(out, { min_gap_minutes: 0, burst: true });
@@ -295,7 +293,7 @@ function configFrom(settings, env = {}, agentRules = null) {
   applyRules(out, settings && settings.caps, env);
   // One agent's own rules (connections.posting_rules) over the global ones.
   applyRules(out, agentRules, env);
-  finishWindows(out);
+  out.post_windows = out.window_slots.filter((w) => w.start < w.end); // a window with start >= end is off
   return out;
 }
 

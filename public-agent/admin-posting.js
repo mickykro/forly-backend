@@ -149,6 +149,7 @@
       return switchRow("postingPlatform_" + p, PLATFORM_LABELS[p], d.platforms && d.platforms[p]);
     });
     rows.push(switchRow("postingVisible", "לייקים וצפייה בסטוריז", d.visible_interactions_enabled));
+    rows.push(switchRow("postingStaging", "פרסום אוטומטי מ־staging (פרודקשן לא מפרסם)", d.sweeper_env === "staging"));
     $("#postingSwitches").innerHTML = known ? rows.join("") : '<p class="posting-note">מצב המתגים לא נטען.</p>';
     if (known) Object.keys(PLATFORM_LABELS).forEach(function (p) {
       var input = $("#postingPlatform_" + p);
@@ -158,6 +159,8 @@
     renderModes(known ? d.modes : null);
     var vis = known && $("#postingVisible");
     if (vis) vis.addEventListener("change", function () { flip(vis, "/switch/visible"); });
+    var stg = known && $("#postingStaging");
+    if (stg) stg.addEventListener("change", function () { flip(stg, "/switch/staging"); });
 
     var c = d.campaigns || {};
     var stat = function (n, l) { return '<div class="stat"><div class="n num">' + esc(n == null ? "—" : n) + '</div><div class="l">' + esc(l) + "</div></div>"; };

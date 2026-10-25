@@ -188,6 +188,14 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
     reel.clipStatus(requests).then((r) => res.json(r), fail(res, "reel_status"));
   });
 
+  // Renders by request body. A retry of a render still running joins it, and one
+  // that finished in the last RENDER_KEEP_MS gets its result, so a timed-out n8n
+  // call never pays fal or ffmpeg twice. At most RENDER_MAX different renders at
+  // once (each is minutes of ffmpeg); past that, 429. In memory: one container.
+  const renders = new Map(); // key → { promise, done }
+  const RENDER_MAX = Math.max(1, Number(process.env.REEL_RENDER_MAX) || 2);
+  const RENDER_KEEP_MS = 30 * 60 * 1000;
+
   // { clips, clip_urls, script, end_bg_image_url } → voice + music on fal, then the four files
   router.post("/reel/render", requireN8n, async (req, res) => {
     const b = req.body || {};
@@ -198,18 +206,26 @@ module.exports = function createWalkthroughRouter({ n8nSecret, uploadDir, baseUr
       return res.status(400).json({ error: "clips, clip_urls, script.lines (same length) and end_bg_image_url required" });
     }
     if (!uploadDir) return res.status(503).json({ error: "no upload dir" });
-    try {
-      const [narrationUrls, musicUrl] = await Promise.all([
-        Promise.all(lines.map((l) => reel.tts(String(l.narration || "").slice(0, 400)))),
-        reel.music(String(b.script.music_prompt || "").slice(0, 600) || "Warm uplifting instrumental background music, no vocals"),
-      ]);
-      const store = (buf) => storeBuffer(buf, "mp4", uploadDir, baseUrl, storeOpts).then((r) => r.url);
-      const out = await reel.renderReel({ clips: b.clips, clipUrls: urls, script: b.script, narrationUrls, musicUrl,
-        endBgUrl: b.end_bg_image_url, store });
-      res.json(out);
-    } catch (err) {
-      fail(res, "reel_render")(err);
+    const key = crypto.createHash("sha256").update(JSON.stringify([b.clips, urls, b.script, b.end_bg_image_url])).digest("hex");
+    for (const [k, r] of renders) if (r.done && Date.now() - r.done > RENDER_KEEP_MS) renders.delete(k);
+    let job = renders.get(key);
+    if (!job) {
+      if ([...renders.values()].filter((r) => !r.done).length >= RENDER_MAX) {
+        return res.status(429).set("Retry-After", "60").json({ error: "reel_render_busy" });
+      }
+      job = { done: 0, promise: (async () => {
+        const [narrationUrls, musicUrl] = await Promise.all([
+          Promise.all(lines.map((l) => reel.tts(String(l.narration || "").slice(0, 400)))),
+          reel.music(String(b.script.music_prompt || "").slice(0, 600) || "Warm uplifting instrumental background music, no vocals"),
+        ]);
+        const store = (buf) => storeBuffer(buf, "mp4", uploadDir, baseUrl, storeOpts).then((r) => r.url);
+        return reel.renderReel({ clips: b.clips, clipUrls: urls, script: b.script, narrationUrls, musicUrl,
+          endBgUrl: b.end_bg_image_url, store });
+      })() };
+      renders.set(key, job);
+      job.promise.then(() => { job.done = Date.now(); }, () => renders.delete(key)); // a failed render is tried afresh
     }
+    job.promise.then((out) => res.json(out), fail(res, "reel_render"));
   });
 
   // { page_id, video_url, narration_url, music_url, post_video_url? } → the page plays the new reel.

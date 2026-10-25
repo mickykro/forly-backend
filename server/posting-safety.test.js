@@ -167,6 +167,18 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.deepEqual([agent.daily_cap, agent.group_daily_cap, agent.min_gap_minutes], [40, 4, 90], "the agent's own wins; the rest inherits the global");
   const inherit = S.configFrom({ caps: { window1_start: 0, window1_end: 0, window2_start: 19, window2_end: 20 } }, {}, { window1_start: 9, window1_end: 12 });
   assert.deepEqual(inherit.post_windows, [{ start: 9, end: 12 }, { start: 19, end: 20 }], "an agent's window 1 keeps the global window 2");
+  // …and that is what runs: Tuesday 3 Nov 2026, Jerusalem = UTC+2
+  const at = (h, m = 0) => new Date(Date.UTC(2026, 10, 3, h - 2, m));
+  assert.deepEqual([at(10), at(14), at(18, 30), at(19, 30)].map((d) => S.isActiveTime(d, inherit)), [true, false, false, true], "9-12 and 19-20, not the default 18-21");
+  // the admin page shows each window at its own slot: the disabled one as off, the inherited one as inherited
+  const globalOnly = S.configFrom({ caps: { window1_start: 0, window1_end: 0, window2_start: 19, window2_end: 20 } }, {});
+  assert.deepEqual([1, 2].map((n) => [S.rulesOf(globalOnly)[`window${n}_start`], S.rulesOf(globalOnly)[`window${n}_end`]]), [[0, 0], [19, 20]], "a disabled window 1 is not shown as window 2");
+  const view = S.rulesView({ window1_start: 9, window1_end: 12 }, inherit, {});
+  assert.deepEqual([view.window1_start.set, view.window1_start.applies, view.window2_start.set, view.window2_start.applies, view.window2_end.applies], [9, 9, null, 19, 20]);
+  // both windows off: no window restriction, the active hours still hold
+  const open = S.configFrom({ caps: { window1_start: 0, window1_end: 0, window2_start: 5, window2_end: 5 } }, {});
+  assert.deepEqual(open.post_windows, []);
+  assert.deepEqual([at(15), at(20, 30), at(22)].map((d) => S.isActiveTime(d, open)), [true, true, false], "both off = all active hours (9-21)");
   assert.equal(S.configFrom({}, {}, { daily_cap: 999 }).daily_cap, cfg.daily_cap, "an agent's value obeys the same range");
   const shown = S.rulesOf(S.configFrom({}, {}));
   assert.deepEqual([shown.daily_cap, shown.gap_jitter_pct, shown.window2_start, shown.active_end], [20, 50, 18, 21], "the admin page reads values back");

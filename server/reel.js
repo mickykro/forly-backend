@@ -15,7 +15,7 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const { execFile } = require("child_process");
-const { assertPublicHttpUrl } = require("./utils");
+const { assertPublicHttpUrl, readCapped } = require("./utils");
 
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 const FFPROBE = process.env.FFPROBE_PATH || "ffprobe";
@@ -38,6 +38,8 @@ const MIN_SHOT = 4;
 const CARD = 3.4; // end card
 const VO_TEMPO = 1.08;
 const MAX_STRETCH = 1.25; // a clip is slowed at most this much to fit its line; past that its last frame holds
+// Per downloaded file. A 15 s H3 clip, a line of TTS wav or a Lyria track is a few MB.
+const MAX_DOWNLOAD_BYTES = 60 * 1024 * 1024;
 
 function run(cmd, args, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -60,7 +62,7 @@ async function download(url, dest) {
   // redirect "error": a redirect could point past assertPublicHttpUrl to a private host (same policy as utils.rehost)
   const resp = await fetch(safe, { signal: AbortSignal.timeout(120000), redirect: "error" });
   if (!resp.ok) throw new Error(`fetch ${resp.status} ${String(url).slice(0, 80)}`);
-  fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
+  fs.writeFileSync(dest, await readCapped(resp, MAX_DOWNLOAD_BYTES));
 }
 
 // ── fal ──
@@ -273,4 +275,4 @@ async function renderReel({ clips, clipUrls, script, narrationUrls, musicUrl, en
   }
 }
 
-module.exports = { submitClips, clipStatus, tts, music, renderReel, PRICE, _test: { timeline, buildAss, assTime, assText, falQueueUrl, XF, CARD } };
+module.exports = { submitClips, clipStatus, tts, music, renderReel, PRICE, _test: { download, MAX_DOWNLOAD_BYTES, timeline, buildAss, assTime, assText, falQueueUrl, XF, CARD } };

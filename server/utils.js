@@ -110,6 +110,11 @@ function publicUrl(url) {
   return PUBLIC_BASE_URL + u.pathname + u.search + u.hash;
 }
 
+// The host in a post's links and in the agents' posting messages. Staging may
+// post (posting-guard.postingEnvAllowed) for production's agents, from the
+// shared database: its links are production's pages, never staging's.
+const postingPageBaseUrl = (env, pageBaseUrl) => (env && env.FORLY_ENV === "staging" ? PUBLIC_BASE_URL : pageBaseUrl);
+
 function resolvePageBaseUrl({ pageBaseUrl, baseUrl, publicBaseUrl, allowInfra }) {
   const isLocalBase = /^https?:\/\/(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:|$)/
     .test(baseUrl || "");
@@ -188,9 +193,20 @@ async function assertPublicHttpUrl(rawUrl) {
 async function readCapped(resp, maxBytes = MAX_REHOST_BYTES) {
   const declared = Number(resp.headers.get("content-length") || 0);
   if (declared && declared > maxBytes) throw new Error("response_too_large");
-  const buf = Buffer.from(await resp.arrayBuffer());
-  if (buf.length > maxBytes) throw new Error("response_too_large");
-  return buf;
+  if (!resp.body) { // no stream (an empty body, a stub): nothing to read chunk by chunk
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.length > maxBytes) throw new Error("response_too_large");
+    return buf;
+  }
+  // Chunk by chunk: a body without a content-length stops at the cap, not after it is all in memory.
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of resp.body) {
+    total += chunk.length;
+    if (total > maxBytes) throw new Error("response_too_large"); // leaving the loop cancels the stream
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, total);
 }
 
 // Content types for the extensions the upload store accepts. The remote
@@ -413,6 +429,6 @@ module.exports = {
   ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
   sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
-  guessImageExt, rehost, storeBuffer, sendWhatsApp, sendWhatsAppButtons, greenApiBase, getWhatsAppMessage, getWhatsAppHistory,
-  assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl,
+  guessImageExt, rehost, readCapped, storeBuffer, sendWhatsApp, sendWhatsAppButtons, greenApiBase, getWhatsAppMessage, getWhatsAppHistory,
+  assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl, postingPageBaseUrl,
 };

@@ -105,7 +105,8 @@ module.exports = function createAdminCampaignsRouter({
   }
   async function rowOf(c, cache = null) {
     const page = (await db.getPage(c.page_id).catch(() => null)) || {};
-    const pass = M.groupsOf(c, await connOf(c.phone, cache), x.clock(), await A.configOf(deps, x)); // this pass only: a restart keeps older posts as history
+    const conn = await connOf(c.phone, cache);
+    const pass = M.groupsOf(c, conn, x.clock(), await A.configOf(deps, x, conn)); // this pass only: a restart keeps older posts as history
     const n = (st) => pass.filter((g) => g.status === st).length;
     return {
       id: c.id, ref: M.refOf(c.phone), phone_tail: A.tail(c.phone), agent_name: await nameOf(c.phone),
@@ -257,7 +258,7 @@ module.exports = function createAdminCampaignsRouter({
     // What the agent's other live campaigns still take within these days: what
     // is owed now (the Page included), every later repeat pass of the groups,
     // and a repeating campaign's Page coming due again (30 days after its last).
-    const config = await A.configOf(deps, x);
+    const config = await A.configOf(deps, x, conn);
     const owed = live.reduce((n, c) => {
       const pass = M.groupsOf(c, conn, now, config);
       const left = Math.min(days, Math.max(0, (new Date(c.expires_at).getTime() - now.getTime()) / DAY));
