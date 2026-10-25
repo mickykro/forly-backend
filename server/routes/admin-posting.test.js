@@ -34,7 +34,12 @@ const lifecycle = {
 const env = { FORLY_ENV: "prod", POSTING_ENABLED: "1" };
 const app = express();
 app.use(express.json());
-app.use("/api/admin/posting", createRouter({ requireAdmin, requireStepUp, db, store, lifecycle, env, deps: { driver: {} } }));
+const sweepCalls = [];
+const sweeper = {
+  sweep: async (d) => { sweepCalls.push(d); return 2; },
+  status: () => ({ last: { result: "ticked", accounts: 2 }, accounts: [{ phone: "972500000001", at: "t", outcome: "scheduled" }] }),
+};
+app.use("/api/admin/posting", createRouter({ requireAdmin, requireStepUp, db, store, lifecycle, env, deps: { driver: {} }, sweeper }));
 
 const headersFor = (phone, { stepup = false } = {}) => {
   const h = { authorization: `Bearer ${auth.signSession(SECRET, phone)}`, "content-type": "application/json" };
@@ -495,6 +500,17 @@ const noFullPhone = (raw, what) => {
       assert.equal((await post("/switch/staging", { enabled: false, reason: "", version: v + 1 })).status, 400, "a reason is required");
       const off = await post("/switch/staging", { enabled: false, reason: "back to production", version: v + 1 });
       assert.deepEqual([off.status, (await db.getSetting("posting")).sweeper_env, off.body.sweeper_env], [200, "prod", "prod"]);
+    }
+    // ── a sweep now: step-up, the sweeper's own deps, its result, tails only, audited ──
+    {
+      assert.equal((await post("/sweep", {}, as(ADMIN, false))).status, 401, "step-up required");
+      assert.equal(sweepCalls.length, 0);
+      const r = await post("/sweep", {});
+      assert.equal(r.status, 200, r.raw);
+      assert.equal(sweepCalls.length, 1); assert.equal(sweepCalls[0].driver !== undefined, true, "the posting deps");
+      assert.deepEqual([r.body.ticked, r.body.running, r.body.last.result, r.body.audited], [2, false, "ticked", true]);
+      assert.deepEqual(r.body.accounts, [{ phone_tail: "0001", at: "t", outcome: "scheduled" }]);
+      assert.ok(!r.raw.includes("972500000001"), "no full phone");
     }
     console.log("routes/admin-posting.test.js ok");
   } finally {
