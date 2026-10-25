@@ -57,7 +57,8 @@ async function duration(file) {
 
 async function download(url, dest) {
   const safe = await assertPublicHttpUrl(url);
-  const resp = await fetch(safe, { signal: AbortSignal.timeout(120000) });
+  // redirect "error": a redirect could point past assertPublicHttpUrl to a private host (same policy as utils.rehost)
+  const resp = await fetch(safe, { signal: AbortSignal.timeout(120000), redirect: "error" });
   if (!resp.ok) throw new Error(`fetch ${resp.status} ${String(url).slice(0, 80)}`);
   fs.writeFileSync(dest, Buffer.from(await resp.arrayBuffer()));
 }

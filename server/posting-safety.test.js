@@ -165,6 +165,8 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(adm({ min_gap_minutes: 1 }, {}).min_gap_minutes, cfg.min_gap_minutes, "under the production range: ignored");
   const agent = S.configFrom({ caps: { daily_cap: 30, group_daily_cap: 4 } }, {}, { daily_cap: 40, min_gap_minutes: 90 });
   assert.deepEqual([agent.daily_cap, agent.group_daily_cap, agent.min_gap_minutes], [40, 4, 90], "the agent's own wins; the rest inherits the global");
+  const inherit = S.configFrom({ caps: { window1_start: 0, window1_end: 0, window2_start: 19, window2_end: 20 } }, {}, { window1_start: 9, window1_end: 12 });
+  assert.deepEqual(inherit.post_windows, [{ start: 9, end: 12 }, { start: 19, end: 20 }], "an agent's window 1 keeps the global window 2");
   assert.equal(S.configFrom({}, {}, { daily_cap: 999 }).daily_cap, cfg.daily_cap, "an agent's value obeys the same range");
   const shown = S.rulesOf(S.configFrom({}, {}));
   assert.deepEqual([shown.daily_cap, shown.gap_jitter_pct, shown.window2_start, shown.active_end], [20, 50, 18, 21], "the admin page reads values back");

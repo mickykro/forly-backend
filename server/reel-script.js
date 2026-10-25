@@ -10,6 +10,8 @@
  * template lines, so a reel never fails for want of a script.
  */
 
+const { symbol } = require("./currency");
+
 // Sonnet: Haiku misspelled Hebrew and wandered off its clip in the first V4 runs.
 const MODEL = process.env.REEL_SCRIPT_MODEL || "claude-sonnet-5-5";
 // Gemini's Hebrew at the 1.08x the render applies runs ~10.5 chars/s (measured
@@ -50,7 +52,7 @@ function tagFor(d = {}) {
 function buildEndCard(d = {}, agent = {}) {
   const price = num(d.price);
   const facts = [
-    price ? `${price.toLocaleString("en-US")} ₪${isRent(d) ? " לחודש" : ""}` : "",
+    price ? `${price.toLocaleString("en-US")} ${symbol(d.currency)}${isRent(d) ? " לחודש" : ""}` : "",
     num(d.size_sqm) ? `${num(d.size_sqm)} מ״ר` : "",
     num(d.floor) ? `קומה ${num(d.floor)}` : "",
   ].filter(Boolean).join(" · ");

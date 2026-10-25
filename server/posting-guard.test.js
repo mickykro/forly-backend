@@ -194,6 +194,9 @@ async function denies(opts, deps, reason) {
     await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb({ settings }), env: ON }), (e) => e.reason === "global_off");
   }
   assert.deepStrictEqual(await assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env: ON }), ENABLED);
+  // ── manual posting: every automatic step is refused, however the switches stand ──
+  await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env: { ...ON, POSTING_MANUAL: "1" } }), (e) => e.reason === "manual_mode");
+  await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, { db: fakeDb({ conn: { posting_permission: GRANTED } }), env: { ...ON, POSTING_MANUAL: "1" } }, "manual_mode");
 
   // ── assertAccountAllowed: a groups sync reads with every automation switch off,
   //    but a disabled account or a revoked profile still refuses it ──
