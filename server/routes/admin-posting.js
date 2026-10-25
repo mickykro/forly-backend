@@ -9,6 +9,7 @@
  *   POST /switch/visible   { enabled, reason, version }            visible_interactions_enabled
  *   POST /switch/staging   { enabled, reason, version }            settings/posting.sweeper_env (on = staging posts)
  *   POST /sweep            {}                                      a sweep now (what the minute timer runs)
+ *   GET  /status                                                   why each agent is or isn't posting
  *   POST /caps             { caps, reason, version }               settings/posting.caps (posting-safety CAP_FIELDS)
  *   POST /modes            { modes, reason, version }              settings/posting.modes (posting-modes MODES)
  *   POST /accounts/:account/reenable       { reason, agent_confirmed }  per halt class (R5)
@@ -305,6 +306,43 @@ module.exports = function createAdminPostingRouter({
     console.log(`posting admin: sweep now by …${opTail(req)} → ${st.last ? st.last.result : "?"}`);
     res.json({ ok: true, audited, running: ticked === undefined, ticked: ticked == null ? null : ticked, last: st.last,
       accounts: st.accounts.map((a) => ({ phone_tail: tail(a.phone), at: a.at, outcome: a.outcome })) });
+  }));
+  // ── why each agent with a live campaign is or isn't posting: the account's own gates,
+  //    each campaign's state and wait reason, its next posts and its last attempts (with
+  //    their error codes). Phone tails only. Read-only; one read set per agent. ──
+  const OPEN = new Set(["pending_approval", "scheduled", "posting"]);
+  router.get("/status", requireAdmin, wrap(async (req, res) => {
+    const live = (await store.listPostingCampaignsByStatus("running", 500)).concat(await store.listPostingCampaignsByStatus("paused", 500));
+    const byPhone = new Map();
+    for (const c of live) { if (!byPhone.has(c.phone)) byPhone.set(c.phone, []); byPhone.get(c.phone).push(c); }
+    const agents = [];
+    for (const [phone, cs] of byPhone) {
+      const conn = (await db.getConnection(phone)) || {};
+      agents.push({
+        phone_tail: tail(phone),
+        account: {
+          connected: !!conn.facebook_browser_connected_at, permission: !!(conn.posting_permission && conn.posting_permission.enabled === true),
+          warmup: conn.posting_warmup_mode || "auto", paused_by_admin: !!conn.posting_paused_by_admin,
+          disabled: conn.posting_disabled_until_admin === true, disabled_class: conn.posting_disabled_class || null,
+          penalty_until: conn.posting_penalty_until || null, profile: conn.facebook_profile_state || null,
+          needs_reconnect: conn.facebook_needs_reconnect === true,
+        },
+        campaigns: await Promise.all(cs.map(async (c) => {
+          const posts = c.posts || [];
+          const attempts = await Promise.all(posts.filter((p) => p.attempt_key).slice(-3).map(async (p) => {
+            const a = await store.getAttempt(p.attempt_key).catch(() => null);
+            return { post: p.status, state: a ? a.state : null, error_code: (a && a.error_code) || p.error_code || null, at: (a && a.updated_at) || null, lease_until: (a && a.lease_until) || null };
+          }));
+          return {
+            id_tail: c.id.slice(-6), page_id: c.page_id, status: c.status, pause_reason: c.pause_reason || null, wait_reason: c.wait_reason || null,
+            next: posts.filter((p) => OPEN.has(p.status)).sort((x, y) => String(x.scheduled_at).localeCompare(String(y.scheduled_at))).slice(0, 5)
+              .map((p) => ({ status: p.status, due: p.scheduled_at || null, group: p.group_name || p.group_id || null })),
+            attempts,
+          };
+        })),
+      });
+    }
+    res.json({ at: iso(clock()), sweep: sweeper.status().last, agents });
   }));
   // Which of production and staging posts (posting-guard): on = staging, and production holds off.
   switchRoute("/switch/staging", () => "staging", (cur, on) => ({ sweeper_env: on ? "staging" : "prod" }));
