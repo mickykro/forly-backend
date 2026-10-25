@@ -157,7 +157,7 @@
   const live = (c) => !!c && (c.status === "running" || c.status === "paused");
   const members = () => (settings && settings.member_groups) || [];
   const usableIds = () => members().filter(U.usable).map((g) => String(g.group_id));
-  const mode = () => (document.querySelector('input[name="apMode"]:checked') || {}).value || "per_post";
+  const mode = () => (document.querySelector('input[name="apMode"]:checked') || {}).value || "standing";
   const pages = () => U.cardPages(settings);
   const pageOn = () => pages().length > 0 && !!($("apPageOn") || {}).checked;
   const withPage = () => pageOn() && (pages().length === 1 || !!($("apPageSelect") || {}).value);
@@ -601,7 +601,6 @@
     const perm = settings.permission || {};
     $("apAutoEnroll").checked = perm.enabled === true && perm.auto_enroll === true;
     $("apVisible").checked = perm.allows_visible_interactions === true;
-    const m = document.querySelector(`input[name="apMode"][value="${perm.auto_mode === "standing" ? "standing" : "per_post"}"]`); if (m) m.checked = true;
     renderPages(perm.page_id);
     $("apFirstWeek").textContent = U.FIRST_WEEK;
     $("apReach").textContent = U.REACH_NOTE;

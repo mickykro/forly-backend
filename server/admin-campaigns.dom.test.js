@@ -220,19 +220,15 @@ function findChromium() {
     await page.waitForFunction(() => /הקמפיין נעצר/.test((document.getElementById("toast") || {}).textContent || ""));
     assert.equal(seen.stops, 1);
 
-    // restart of a stopped campaign records the chosen consent method and note
+    // restart of a stopped campaign with no consent note: the admin runs it on their own authority
+    // (the server records method "admin"); a note, when given, is sent as recorded (the create above)
     await page.waitForSelector("[data-camp='c1'] [data-act='start']");
     await page.click("[data-camp='c1'] [data-act='start']");
-    await page.selectOption("#campFormConsentMethod", "whatsapp");
     await page.fill("#campFormConsentNote", "   ");
-    await page.click("#campFormSave");
-    await page.waitForFunction(() => /חובה לכתוב/.test((document.getElementById("toast") || {}).textContent || ""));
-    assert.equal(seen.starts.length, 0, "an empty note is refused client-side");
-    await page.fill("#campFormConsentNote", "אישר בוואטסאפ");
     await page.click("#campFormSave");
     await page.waitForFunction(() => document.querySelector("#campForm").hidden);
     assert.equal(seen.starts.length, 1);
-    assert.deepEqual(seen.starts[0], { consent: { method: "whatsapp", note: "אישר בוואטסאפ" }, days: 7 }, "a restart runs as long as the run it repeats");
+    assert.deepEqual(seen.starts[0], { days: 7 }, "no consent sent; a restart runs as long as the run it repeats");
     console.log("admin-campaigns.dom.test.js ok");
   } finally { server.close(); await browser.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

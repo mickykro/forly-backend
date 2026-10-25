@@ -13,7 +13,7 @@
   var manual = false; // POSTING_MANUAL=1 on the server: an admin publishes by hand; the approval mode has no meaning there
   var STATUS = { running: "פעיל", paused: "מושהה", stopped: "נעצר", completed: "הסתיים" };
   var ERR = {
-    consent_note_required: "חובה לבחור איך הסוכן הסכים ולכתוב הערה.",
+    consent_note_required: "פרטי ההסכמה לא תקינים.",
     stale_version: "הקמפיין השתנה בינתיים — טוענים מחדש.",
     busy: "פוסט לקבוצה הזו כבר בדרך. נסו שוב בעוד כמה דקות.",
     not_live: "הקמפיין כבר לא פעיל.",
@@ -271,13 +271,12 @@
   }
   function setMain(show) { // the campaign fields vs. the restart form (consent and days)
     Array.prototype.forEach.call(document.querySelectorAll("#campForm .cf-main"), function (el) { el.hidden = !show; });
-    if (manual) $("#campFormMode").closest(".cf-field").hidden = true; // by hand there is no approval step
   }
   function closeForm() { seq++; editing = null; restarting = null; applying = null; $("#campFormDefaultsRow").hidden = true; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; clearError(); }
   function validNote() {
     var el = $("#campFormConsentNote"), n = el.value.trim();
-    if (!n || n.length > 300) return showError("חובה לכתוב הערת הסכמה של 1 עד 300 תווים: איך ומתי הסוכן אישר.", el);
-    return n;
+    if (n.length > 300) return showError("הערת ההסכמה ארוכה מ־300 תווים.", el);
+    return n; // "" = no consent recorded: the admin runs it on their own authority
   }
   function validNew() { // what the server would refuse anyway, said next to the field
     if (!$("#campFormAgent").value) return showError("בחרו סוכן.", $("#campFormAgent"));
@@ -309,13 +308,13 @@
     $("#campFormSetDefaultsRow").hidden = false; $("#campFormSetDefaults").checked = false;
     if (row) {
       var left = Math.min(30, Math.max(1, Math.ceil((Date.parse(row.expires_at) - Date.now()) / 86400000)) || 1);
-      initial = { days: String(left), repeat: row.repeat ? String(row.repeat_days) : "0", mode: row.mode, page: row.targets.indexOf("page") >= 0 };
+      initial = { days: String(left), repeat: row.repeat ? String(row.repeat_days) : "0", page: row.targets.indexOf("page") >= 0 };
       $("#campFormDays").value = initial.days;
       $("#campFormRepeatOn").checked = initial.repeat !== "0"; $("#campFormRepeat").value = initial.repeat !== "0" ? initial.repeat : "7";
-      $("#campFormMode").value = initial.mode; $("#campFormPage").checked = initial.page;
+      $("#campFormPage").checked = initial.page;
     } else {
       initial = null;
-      $("#campFormDays").value = "14"; $("#campFormRepeatOn").checked = false; $("#campFormRepeat").value = "7"; $("#campFormMode").value = "standing"; $("#campFormPage").checked = false;
+      $("#campFormDays").value = "14"; $("#campFormRepeatOn").checked = false; $("#campFormRepeat").value = "7"; $("#campFormPage").checked = false;
     }
     showForm();
     if (row) {
@@ -367,9 +366,9 @@
     clearError();
     if (applying) {
       if (!validDays()) return;
-      var an = validNote(); if (!an) return;
+      var an = validNote(); if (an == null) return;
       return settle(req("POST", "/campaigns/" + encodeURIComponent(applying.id) + "/apply-to-all", {
-        consent: { method: $("#campFormConsentMethod").value, note: an }, days: Number($("#campFormDays").value), set_defaults: $("#campFormDefaults").checked,
+        consent: an ? { method: $("#campFormConsentMethod").value, note: an } : undefined, days: Number($("#campFormDays").value), set_defaults: $("#campFormDefaults").checked,
       }).then(function (d) {
         closeForm(); load();
         var why = {};
@@ -380,21 +379,21 @@
     }
     if (restarting) {
       if (!validDays()) return;
-      var rn = validNote(); if (!rn) return;
+      var rn = validNote(); if (rn == null) return;
       var rid = restarting.id;
-      return settle(req("POST", "/campaigns/" + encodeURIComponent(rid) + "/start", { consent: { method: $("#campFormConsentMethod").value, note: rn }, days: Number($("#campFormDays").value) || 30 })
+      return settle(req("POST", "/campaigns/" + encodeURIComponent(rid) + "/start", { consent: rn ? { method: $("#campFormConsentMethod").value, note: rn } : undefined, days: Number($("#campFormDays").value) || 30 })
         .then(function () { closeForm(); FLY.toast("הקמפיין פעיל"); load(); }).catch(failClose));
     }
     var targets = $("#campFormPage").checked ? ["groups", "page"] : ["groups"];
     var repeat = Number(repeatVal());
     if (!editing) {
       if (!validNew()) return;
-      var note = validNote(); if (!note) return;
+      var note = validNote(); if (note == null) return;
       return settle(req("POST", "/campaigns", {
         agent: $("#campFormAgent").value, page_id: $("#campFormProperty").value, group_ids: chosenGroups(),
-        days: Number($("#campFormDays").value) || 14, repeat_days: repeat || undefined, mode: $("#campFormMode").value, targets: targets,
+        days: Number($("#campFormDays").value) || 14, repeat_days: repeat || undefined, mode: "standing", targets: targets,
         include_unknown: outsideCatalog(chosenGroups()) || undefined, set_defaults: $("#campFormSetDefaults").checked || undefined,
-        consent: { method: $("#campFormConsentMethod").value, note: note },
+        consent: note ? { method: $("#campFormConsentMethod").value, note: note } : undefined,
       }).then(function (d) { closeForm(); FLY.toast(d.existing ? "לנכס הזה כבר יש קמפיין — פתחו אותו לעריכה" : "הקמפיין נפתח" + (d.default_group_ids ? " · הקבוצות נשמרו כברירת מחדל" : "")); load(); }).catch(failSave));
     }
     var before = editing.groups.map(function (g) { return g.group_id; }), now = chosenGroups();
@@ -404,7 +403,6 @@
     var body = { version: editing.version };
     if ($("#campFormDays").value !== initial.days) body.days = Number($("#campFormDays").value) || 14;
     if (repeatVal() !== initial.repeat) body.repeat_days = repeat;
-    if ($("#campFormMode").value !== initial.mode) body.mode = $("#campFormMode").value;
     if ($("#campFormPage").checked !== initial.page) body.targets = targets;
     if (add.length) { body.add_group_ids = add; if (outsideCatalog(add)) body.include_unknown = true; }
     if (rem.length) body.remove_group_ids = rem;

@@ -240,7 +240,7 @@
     let settings = null, campaign = null, picked = new Set(), consentGiven = false, timer = null;
     const members = () => (settings && settings.member_groups) || [];
     const pages = () => U.cardPages(settings);
-    const mode = () => (document.querySelector('input[name="campMode"]:checked') || {}).value || "per_post";
+    const mode = () => (document.querySelector('input[name="campMode"]:checked') || {}).value || "standing";
     const live = (c) => !!c && (c.status === "running" || c.status === "paused");
     // The Page is opt-in (never a default): the Graph "פרסום בדף הפייסבוק" above is outside the campaign's duplicate checks.
     const pageOn = () => pages().length > 0 && !!($("campPageOn") || {}).checked;
@@ -382,7 +382,7 @@
       $("campPauseLink").hidden = campaign.status !== "running";
       const posted = current.filter((p) => p.status === "posted").length;
       const planned = current.filter((p) => ["scheduled", "pending_approval"].includes(p.status)).length;
-      $("campSummary").textContent = `${posted} פורסמו · ${planned} מתוכננים · ${campaign.mode === "per_post" ? "כל פוסט באישור שלכם" : "פורלי מפרסמת לבד עד שתעצרו"}`;
+      $("campSummary").textContent = `${posted} פורסמו · ${planned} מתוכננים · פורלי מפרסמת לבד עד שתעצרו`;
       const perm = (settings && settings.permission) || {};
       $("campAutoLine").hidden = !(perm.enabled && (perm.default_group_ids || []).length);
       fill($("campTimeline"), current, campaign);

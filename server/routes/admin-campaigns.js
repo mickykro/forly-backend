@@ -1,7 +1,8 @@
 // server/routes/admin-campaigns.js
 /*
  * routes/admin-campaigns.js — /api/admin/campaigns: the admin's "קמפיינים"
- * tab. Create, edit, stop and start an agent's campaign. Every change needs
+ * tab. Create, edit, stop and start an agent's campaign — with the agent's consent
+ * recorded, or on the admin's own authority (consentOf). Every change needs
  * the admin guard and a fresh step-up, and writes an audit row (no phone, no
  * text) BEFORE the change: no audit row, no change (503 audit_unavailable).
  * That row records the request (outcome "requested"); a change refused
@@ -29,10 +30,14 @@ const STATUSES = ["running", "paused", "stopped", "completed"];
 const ERR_STATUS = { not_found: 404, stale_version: 409, busy: 409, not_live: 409, no_destination: 400, audit_unavailable: 503 };
 const DAY = 86400000;
 
+// The agent's consent as the admin recorded it; none recorded = the admin runs the
+// campaign on their own authority (method "admin", in the consent record and the audit).
+// → null only for a malformed one.
 function consentOf(b) {
   const c = b && b.consent;
   const note = c && typeof c.note === "string" ? c.note.trim() : "";
-  if (!c || !METHODS.has(c.method) || !note || note.length > 300) return null;
+  if (!note) return { method: "admin", note: "" };
+  if (!METHODS.has(c.method) || note.length > 300) return null;
   return { method: c.method, note };
 }
 

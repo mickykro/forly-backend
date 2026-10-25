@@ -133,6 +133,10 @@ async function housekeep(phone, conn, deps, x, now, config) {
         out.push(c);
         continue;
       }
+      // No per-post approval (asksAgent): a post an older per_post campaign left waiting goes out as planned.
+      if (!C.asksAgent(c.mode, deps.env || process.env) && c.posts.some((p) => p.status === "pending_approval")) {
+        c = (await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.status === "pending_approval" ? { ...p, status: "scheduled" } : p)) }))) || c;
+      }
       catalog = catalog || (await A.catalogIndex(x.db));
       const ctx = { conn, catalog, listingType: (page.property || {}).listing_type || null, now };
       const refresh = (gs) => gs.map((g) => ({ ...g, ...A.eligibility(g, ctx) }));
@@ -178,10 +182,12 @@ async function runDue(c, post, st, deps, x, now) {
   // Local watched tests are approval-only even for a scheduled post left by an
   // older standing campaign; so is a per_post campaign's post planned while it
   // was standing (an admin edit). This gate runs before opening any browser.
-  const local = localMode.requireApproval(deps.env || process.env);
-  if ((local || c.mode === "per_post") && !post.approved_at) {
+  const env = deps.env || process.env;
+  const local = localMode.requireApproval(env);
+  const perPost = c.mode === "per_post" && C.asksAgent(c.mode, env); // a local watched test
+  if (C.asksAgent(c.mode, env) && !post.approved_at) {
     const next = await mutate(x, c.id, (cur) => ({
-      posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" && (local || cur.mode === "per_post") ? { ...p, status: "pending_approval" } : p)),
+      posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" && C.asksAgent(cur.mode, env) ? { ...p, status: "pending_approval" } : p)),
     }));
     const pending = next && next.posts.find((p) => p.id === post.id && p.status === "pending_approval");
     const where = pending && (pending.target === "page" ? "דף העסקי" : `קבוצה "${pending.group_name || pending.group_url}"`);
@@ -224,13 +230,13 @@ async function runDue(c, post, st, deps, x, now) {
   const fresh = C._test.buildCopy(page, c, target, post.link_kind || "property", deps.pageBaseUrl || "");
   const video = C.videoOf(page);
   const stale = post.copy_edited ? sha(fresh) !== post.base_hash : fresh !== post.copy;
-  if (c.mode === "per_post" && (stale || (post.video_url || null) !== video.video_url)) {
+  if (perPost && (stale || (post.video_url || null) !== video.video_url)) {
     const next = await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "pending_approval", copy: fresh, copy_hash: sha(fresh), copy_edited: false, base_hash: null, approved_at: null, ...video } : p)) }));
     const p2 = next && next.posts.find((p) => p.id === post.id);
     if (p2) await say(deps, phone, "approve", `📣 פרטי הנכס השתנו — פוסט מעודכן לאישור:\n──────────\n${fresh}\n──────────`, next, p2);
     return "reapproval";
   }
-  const copy = c.mode === "per_post" ? post.copy : fresh;
+  const copy = perPost ? post.copy : fresh;
 
   try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "reserve" }, A.guardDeps(deps, x)); }
   catch (e) {

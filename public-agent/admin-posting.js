@@ -27,7 +27,7 @@
   };
   var PLATFORM_LABELS = { facebook: "פייסבוק", yad2: "יד2", madlan: "מדלן" };
   var AUDIT_LABELS = {
-    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
+    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז", switch_staging: "פרסום מ־staging",
     reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל", resolve_attempt: "הכרעה בפוסט לא ידוע", resume_campaign: "המשך קמפיין",
   };
   var SECTION_LABELS = {
