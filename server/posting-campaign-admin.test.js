@@ -38,7 +38,7 @@ const A_ = require("./posting-account");
     assert.equal(out.posts.find((p) => p.id === "p2").status, "skipped");
     assert.equal(out.posts.find((p) => p.id === "p2").error_code, "removed");
     assert.equal(out.repeat, true); assert.equal(out.repeat_days, 5);
-    assert.equal(out.mode, "per_post");
+    assert.equal(out.mode, "standing", "per_post is no longer offered");
     assert.equal(new Date(out.expires_at).getTime(), K.NOW.getTime() + 10 * K.DAY);
     assert.equal(out.last_changed_by.by, "admin");
     // repeat off
@@ -125,11 +125,12 @@ const A_ = require("./posting-account");
     cur = await CA.update(c.id, { targets: ["groups"] }, deps, { version: cur.updated_at });
     assert.deepEqual([cur.posts[0].status, cur.posts[0].error_code], ["skipped", "target_removed"]);
     assert.equal(cur.posts[1].status, "scheduled");
-    // standing → per_post: an unapproved scheduled post goes to the agent for approval
+    // asking for per_post keeps it standing: nothing goes to the agent
     cur = await CA.update(c.id, { mode: "per_post" }, deps, { version: cur.updated_at });
-    assert.equal(cur.posts[1].status, "pending_approval");
-    assert.equal(notes.length, 1, "the agent is asked to approve it");
-    // per_post → standing: a post waiting for approval is scheduled
+    assert.deepEqual([cur.mode, cur.posts[1].status, notes.length], ["standing", "scheduled", 0]);
+    // an older per_post campaign set to standing: a post waiting for approval is scheduled
+    await K.store.mutatePostingCampaign(c.id, (x) => ({ mode: "per_post", posts: x.posts.map((p, i) => (i === 1 ? { ...p, status: "pending_approval" } : p)) }));
+    cur = await K.store.getPostingCampaign(c.id);
     cur = await CA.update(c.id, { mode: "standing" }, deps, { version: cur.updated_at });
     assert.equal(cur.posts[1].status, "scheduled");
     assert.ok(new Date(cur.posts[1].scheduled_at).getTime() >= K.NOW.getTime());
@@ -151,8 +152,7 @@ const A_ = require("./posting-account");
     assert.equal(c.posts[0].status, "scheduled");
     await K.store.mutatePostingCampaign(c.id, () => ({ mode: "per_post" }));
     c = await S.tick(await K.store.getPostingCampaign(c.id), deps, at(K.dueOf(c)));
-    assert.equal(c.posts[0].status, "pending_approval", "per_post: an unapproved post is never published");
-    assert.equal(deps.post.calls.length, 0);
+    assert.equal(deps.post.calls.length, 1, "an older per_post campaign posts without approval");
   }
   {
     const S = require("./posting-sweeper");

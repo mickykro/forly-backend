@@ -133,7 +133,7 @@ async function housekeep(phone, conn, deps, x, now, config) {
         out.push(c);
         continue;
       }
-      // Post approvals turned off: what already waits for the agent goes out as planned.
+      // No per-post approval (asksAgent): a post an older per_post campaign left waiting goes out as planned.
       if (!C.asksAgent(c.mode, deps.env || process.env) && c.posts.some((p) => p.status === "pending_approval")) {
         c = (await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.status === "pending_approval" ? { ...p, status: "scheduled" } : p)) }))) || c;
       }
@@ -184,7 +184,7 @@ async function runDue(c, post, st, deps, x, now) {
   // was standing (an admin edit). This gate runs before opening any browser.
   const env = deps.env || process.env;
   const local = localMode.requireApproval(env);
-  const perPost = c.mode === "per_post" && C.asksAgent(c.mode, env); // per_post, and approvals not turned off
+  const perPost = c.mode === "per_post" && C.asksAgent(c.mode, env); // a local watched test
   if (C.asksAgent(c.mode, env) && !post.approved_at) {
     const next = await mutate(x, c.id, (cur) => ({
       posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" && C.asksAgent(cur.mode, env) ? { ...p, status: "pending_approval" } : p)),

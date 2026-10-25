@@ -124,10 +124,10 @@ function findChromium() {
     state.calls = state.calls.filter((c) => c[0] !== "preview");
     await page.waitForFunction(() => /פעיל/.test(document.querySelector(".ap-prop").textContent));
     const [put, create, approve] = state.calls;
-    assert.deepEqual(approve, ["approve", "p1", {}], "confirming at the switch approved the first post: no second approval, text and time untouched");
+    assert.equal(approve, undefined, "no post approval: the campaign posts on its own");
     assert.equal(put[0], "put"); assert.equal(put[1].consent, true); assert.equal(put[1].consent_version, "v1");
     assert.equal(create[0], "create");
-    assert.deepEqual([create[1].page_id, create[1].group_ids, create[1].mode, create[1].consent], ["pgK", ["k1"], "per_post", true]);
+    assert.deepEqual([create[1].page_id, create[1].group_ids, create[1].mode, create[1].consent], ["pgK", ["k1"], "standing", true]);
     assert.ok((await page.textContent("#apCount")).includes("נכס אחד בפרסום אוטומטי"));
 
     // Eilat: switching on with no group opens its panel instead of starting.
@@ -169,7 +169,7 @@ function findChromium() {
     await page.click('button[data-confirm="pgR"]');
     await page.waitForFunction(() => /הורדנו קבוצה אחת שלא מתאימה/.test(document.getElementById("msg").textContent));
     const kinds = state.calls.map((c) => c[0]).filter((k) => k !== "preview");
-    assert.deepEqual(kinds, ["put", "refused", "create", "approve"]);
+    assert.deepEqual(kinds, ["put", "refused", "create"]);
     assert.deepEqual(state.calls.find((c) => c[0] === "create")[1].group_ids, ["k1"]);
     console.log("autopublish.dom.test.js ok");
   } finally { await browser.close(); srv.close(); }

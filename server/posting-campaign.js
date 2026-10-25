@@ -56,10 +56,9 @@ function normalizeGroups(groups, ctx) {
 // Default (Task 19's route, an explicit agent create): any stopped/completed
 // one. enrollNewPage passes a narrower rule (see there). Evaluated inside the
 // campaign transaction, so a STOP landing meanwhile is never overridden.
-// The agent approves each post: a per_post campaign — unless the admin turned post
-// approvals off (POSTING_NO_APPROVAL, posting-modes): it then posts as a standing one.
-// A local watched test always asks.
-const asksAgent = (mode, env = process.env) => localMode.requireApproval(env) || (mode === "per_post" && env.POSTING_NO_APPROVAL !== "1");
+// Whether a post waits for the agent's approval: only in a local watched test. Agents are
+// never asked per post (25 Oct 2026): an older per_post campaign posts as a standing one.
+const asksAgent = (mode, env = process.env) => localMode.requireApproval(env);
 
 async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets, copies, includeUnknown } = {}, deps = {}, opts = {}) {
   const x = ctxOf(deps);
@@ -72,7 +71,7 @@ async function create({ phone, page, groups, mode, days, repeat, repeatDays, con
   const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
   const c = {
     phone, page_id: String(page.page_id),
-    mode: approvalOnly || mode === "per_post" ? "per_post" : "standing",
+    mode: approvalOnly ? "per_post" : "standing", // per_post only for a local watched test (asksAgent)
     // repeat_days: "every N days" (1–30), the agent's choice — the property returns to its groups on that rhythm until expires_at.
     repeat: repeat === true || Number(repeatDays) > 0, repeat_days: Number(repeatDays) > 0 ? Math.min(30, Math.max(3, Math.round(Number(repeatDays)))) : null,
     expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 30, 1), 30) * MS_DAY),
@@ -376,7 +375,7 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
   const open = campaigns.reduce((n, c) => n + (c.posts || []).filter((p) => OPEN_POST.has(p.status)).length, 0);
   if (open >= A.maxSessionPosts(deps.env)) return null;
   // awaiting_texts: the agent has not approved the group texts yet (posting-listing-groups) —
-  // a wait only while approvals are on (asksAgent of a per_post campaign: approvals not turned off).
+  // a wait only in a local watched test (asksAgent); otherwise the campaign posts as it is.
   const textsWait = asksAgent("per_post", deps.env || process.env);
   const ready = campaigns.filter((c) => c.status === "running" && !(c.awaiting_texts && textsWait) && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
   if (!ready.length) return null;
