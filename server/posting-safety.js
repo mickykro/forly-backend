@@ -56,7 +56,7 @@ const DEFAULTS = {
   daily_cap: 20,                    // per account, all groups together
   weekly_cap: 100,
   day_start_jitter_min: 150,        // the first post of a day lands 0–150 min after active_hours.start
-  skip_day_probability: 0.2,        // one active day in five, nothing at all
+  skip_day_probability: 0,          // no day is skipped (25 Oct 2026); an admin may set a chance (skip_day_pct)
   // Explicit, inclusive day ranges counted from first_connected_at in Jerusalem
   // calendar days (day 1 = the connect day). After the last range: daily_cap.
   warmup: [

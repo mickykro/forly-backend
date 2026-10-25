@@ -43,9 +43,12 @@ assert.equal(S._test.isHolidayEve(IL("2026-09-20T10:00:00+03:00"), cfg), true);
   assert.ok(a.start_offset_min >= 0 && a.start_offset_min <= cfg.day_start_jitter_min);
   assert.ok(a.target >= 0 && a.target <= cfg.daily_cap);
   assert.deepEqual(S.dayPlan("2026-09-23", cfg, Math.random), a, "a day's plan is stable across ticks");
-  let skipped = 0;
-  for (let i = 1; i <= 200; i++) if (S.dayPlan(`2026-10-${String((i % 28) + 1).padStart(2, "0")}-${i}`, cfg, Math.random).target === 0) skipped++;
-  assert.ok(skipped > 20 && skipped < 80, `about one day in five is skipped, got ${skipped}/200`);
+  // No day is skipped by default; an admin's chance (skip_day_pct) still skips that share.
+  const days = Array.from({ length: 200 }, (_, i) => `2026-10-${String((i % 28) + 1).padStart(2, "0")}-${i + 1}`);
+  assert.equal(days.filter((d) => S.dayPlan(d, cfg, Math.random).target === 0).length, 0, "the default never skips a day");
+  const skipFifth = Object.assign({}, cfg, { skip_day_probability: 0.2 });
+  const skipped = days.filter((d) => S.dayPlan(d, skipFifth, Math.random).target === 0).length;
+  assert.ok(skipped > 20 && skipped < 80, `a 20% chance skips about one day in five, got ${skipped}/200`);
 }
 
 // ── per-account seeding: the shape of the schedule is per-phone, not shared ──
@@ -54,7 +57,7 @@ assert.equal(S._test.isHolidayEve(IL("2026-09-20T10:00:00+03:00"), cfg), true);
   let differ = 0;
   for (let i = 0; i < 30; i++) {
     const d = `2026-11-${String((i % 28) + 1).padStart(2, "0")}`;
-    const a = S.dayPlan(d, cfg, Math.random, "seedA"), b = S.dayPlan(d, cfg, Math.random, "seedB");
+    const a = S.dayPlan(d, { ...cfg, skip_day_probability: 0.2 }, Math.random, "seedA"), b = S.dayPlan(d, { ...cfg, skip_day_probability: 0.2 }, Math.random, "seedB");
     if (a.target !== b.target || a.start_offset_min !== b.start_offset_min) differ++;
   }
   assert.ok(differ > 5, `different seeds give a different skip/offset pattern across 30 days, got ${differ}/30`);
@@ -315,11 +318,12 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   const hour = Number(parts.find((x) => x.type === "hour").value) % 24, minute = Number(parts.find((x) => x.type === "minute").value);
   assert.equal(hour * 60 + minute, cfg.active_hours.start * 60 + expectedPlan.start_offset_min, "lands exactly at the landing day's own start jitter");
 
-  // A slot never lands on a skip day, whatever day the search starts from.
+  // A slot never lands on a skip day (with an admin's skip chance), whatever day the search starts from.
+  const skipsSome = { ...cfg, skip_day_probability: 0.2 };
   for (let i = 0; i < 30; i++) {
     const now = new Date(NOW.getTime() + i * day(1));
-    const res = S.nextSlot({ now, account: account(), candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand });
-    if (res.at) assert.notEqual(S.dayPlan(jerusalemDate(res.at), cfg).target, 0, `slot landed on a skip day (search started ${jerusalemDate(now)})`);
+    const res = S.nextSlot({ now, account: account(), candidates: [ok("g")], pageId: "p", config: skipsSome, rand: noRand });
+    if (res.at) assert.notEqual(S.dayPlan(jerusalemDate(res.at), skipsSome).target, 0, `slot landed on a skip day (search started ${jerusalemDate(now)})`);
   }
 }
 
