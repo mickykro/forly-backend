@@ -328,6 +328,37 @@
     if (b !== tab) b.addEventListener("click", function () { tab.classList.remove("on"); pane.classList.add("hidden"); });
   });
   $("#postingGlobal").addEventListener("change", function () { flip($("#postingGlobal"), "/switch"); });
+  // Why each agent is or isn't posting (GET /status): the account's gates, each campaign's
+  // state and wait reason, its next posts and its last attempts. Codes as the server names them.
+  function hm(t) { return t ? new Date(t).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }) : "—"; }
+  function loadStatus() {
+    $("#postingStatus").textContent = "טוען…";
+    return FLY.req(API + "/status", { noRedirect: true }).then(function (d) {
+      var gates = function (a) {
+        var bad = [];
+        if (!a.connected) bad.push("לא מחובר לפייסבוק");
+        if (!a.permission) bad.push("אין הרשאת פרסום");
+        if (a.paused_by_admin) bad.push("הושהה ע״י מנהל");
+        if (a.disabled) bad.push("מושבת" + (a.disabled_class ? " (" + a.disabled_class + ")" : ""));
+        if (a.needs_reconnect) bad.push("צריך להתחבר מחדש");
+        if (a.penalty_until && new Date(a.penalty_until) > new Date()) bad.push("עונש עד " + hm(a.penalty_until));
+        if (a.profile && a.profile !== "active") bad.push("פרופיל: " + a.profile);
+        bad.push("חימום: " + a.warmup);
+        return bad.join(" · ");
+      };
+      $("#postingStatus").innerHTML = (d.agents || []).length ? d.agents.map(function (g) {
+        return "<div style=\"margin:8px 0;padding:8px;border:1px solid rgba(23,20,15,.12);border-radius:8px\"><b>…" + esc(g.phone_tail) + "</b> — " + esc(gates(g.account)) +
+          g.campaigns.map(function (c) {
+            return "<div style=\"margin-top:4px\">קמפיין …" + esc(c.id_tail) + ": " + esc(c.status) + (c.pause_reason ? " (" + esc(c.pause_reason) + ")" : "") +
+              " · ממתין ל: " + esc(c.wait_reason || "—") +
+              "<br>הבאים: " + (c.next.length ? c.next.map(function (p) { return esc(p.status) + " " + hm(p.due) + " " + esc(p.group || ""); }).join(" · ") : "אין") +
+              "<br>ניסיונות אחרונים: " + (c.attempts.length ? c.attempts.map(function (a) { return esc(a.state || a.post) + (a.error_code ? " [" + esc(a.error_code) + "]" : "") + " " + hm(a.at); }).join(" · ") : "אין") +
+              "</div>";
+          }).join("") + "</div>";
+      }).join("") : "אין סוכנים עם קמפיין פעיל או מושהה.";
+    }).catch(function (e) { $("#postingStatus").textContent = ""; handleError(e, "שגיאה בטעינת המצב"); });
+  }
+  $("#postingStatusLoad").addEventListener("click", loadStatus);
   // A sweep now (what the server runs every minute): its result, and what each account's tick did.
   var SWEEP_RESULT = { ticked: "רץ", off: "כבוי", manual: "פרסום ידני", breaker: "מפסק הצי נפל", error: "שגיאה" };
   $("#postingSweepNow").addEventListener("click", function () {
@@ -339,6 +370,7 @@
         (l.accounts != null ? " · חשבונות: " + l.accounts : "") +
         ((d.accounts || []).length ? " · " + d.accounts.map(function (a) { return "…" + a.phone_tail + ": " + a.outcome; }).join(" · ") : "");
       saved(d, "✅ הסבב רץ");
+      return loadStatus();
     }).catch(function (e) { $("#postingSweepOut").textContent = ""; handleError(e, "שגיאה בהרצת הסבב"); })
       .then(function () { btn.disabled = false; });
   });

@@ -512,6 +512,23 @@ const noFullPhone = (raw, what) => {
       assert.deepEqual(r.body.accounts, [{ phone_tail: "0001", at: "t", outcome: "scheduled" }]);
       assert.ok(!r.raw.includes("972500000001"), "no full phone");
     }
+    // ── why each agent is or isn't posting: gates, campaigns, next posts, last attempts; tails only ──
+    {
+      const c = (await store.createPostingCampaignIfAbsent({ phone: P.legacy, page_id: "pgs", status: "running", wait_reason: "min_gap",
+        posts: [{ id: "s1", status: "scheduled", scheduled_at: "2026-10-25T12:00:00.000Z", group_id: "111", group_name: "דירות בחיפה" },
+          { id: "s0", status: "skipped", error_code: "nav_timeout", attempt_key: "missing-key", scheduled_at: "2026-10-25T10:00:00.000Z" }] })).campaign;
+      const r = await call(server, "GET", "/api/admin/posting/status", as(ADMIN));
+      assert.equal(r.status, 200, r.raw);
+      const g = r.body.agents.find((a) => a.phone_tail === P.legacy.slice(-4));
+      assert.ok(g, "the agent is listed");
+      assert.equal(typeof g.account.permission, "boolean");
+      const row = g.campaigns.find((x) => x.id_tail === c.id.slice(-6));
+      assert.deepEqual([row.status, row.wait_reason], ["running", "min_gap"]);
+      assert.deepEqual(row.next, [{ status: "scheduled", due: "2026-10-25T12:00:00.000Z", group: "דירות בחיפה" }]);
+      assert.deepEqual(row.attempts.map((a) => [a.post, a.state, a.error_code]), [["skipped", null, "nav_timeout"]], "a missing attempt still shows the post's error");
+      for (const ph of Object.values(P)) assert.ok(!r.raw.includes(ph), "no full phone");
+      assert.equal((await call(server, "GET", "/api/admin/posting/status")).status, 401, "admins only");
+    }
     console.log("routes/admin-posting.test.js ok");
   } finally {
     server.close();

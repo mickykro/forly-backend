@@ -92,5 +92,18 @@ const page = (id, phone, slug) => ({
   assert.equal(saved.version, 3);
   assert.equal(saved.enabled, false, "prior fields survive a partial-value write");
 
+  // ── prod/staging never fall back to the in-memory store: no credentials, no load ──
+  {
+    const { spawnSync } = require("child_process");
+    const load = (env) => spawnSync(process.execPath, ["-e", "require(" + JSON.stringify(require.resolve("./db")) + ")"],
+      { env: Object.assign({}, process.env, { GOOGLE_APPLICATION_CREDENTIALS: "" }, env), encoding: "utf8" });
+    for (const e of ["prod", "staging"]) {
+      const r = load({ FORLY_ENV: e });
+      assert.notEqual(r.status, 0, `${e}: refuses to load`);
+      assert.match(r.stderr, /needs GOOGLE_APPLICATION_CREDENTIALS/);
+    }
+    assert.equal(load({ FORLY_ENV: "local" }).status, 0, "local: the in-memory store is fine");
+  }
+
   console.log("db.test.js OK");
 })().catch((err) => { console.error(err); process.exit(1); });
