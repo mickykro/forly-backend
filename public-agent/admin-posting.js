@@ -389,13 +389,20 @@
   });
   $("#postingCapsSave").addEventListener("click", function () { saveCaps(this); });
   $("#postingModesSave").addEventListener("click", function () { saveModes(this); });
+  // The agents to pick from: the agents list (name · phone tail), as the campaigns tab shows it.
+  FLY.req("/api/admin/campaigns/agents", { noRedirect: true }).then(function (d) {
+    var agents = (d && d.agents) || [];
+    $("#postingWarmAgent").innerHTML = '<option value="">בחרו סוכן…</option>' + agents.map(function (a) {
+      return '<option value="' + esc(a.ref) + '">' + esc((a.name || "ללא שם") + " · …" + a.phone_tail) + "</option>";
+    }).join("");
+  }).catch(function () { $("#postingWarmAgent").innerHTML = '<option value="">רשימת הסוכנים לא נטענה</option>'; });
   $("#postingWarmSave").addEventListener("click", function () {
-    var btn = this, phone = ($("#postingWarmPhone").value || "").replace(/\D/g, "").replace(/^0/, "972");
-    if (!/^\d{9,15}$/.test(phone)) { FLY.toast("מספר טלפון לא תקין"); return; }
+    var btn = this, ref = $("#postingWarmAgent").value;
+    if (!ref) { FLY.toast("בחרו סוכן"); return; }
     var reason = askReason("סיבה?");
     if (!reason) return;
     btn.disabled = true;
-    send("/accounts/" + encodeURIComponent(phone) + "/warmup", { mode: $("#postingWarmMode").value, reason: reason })
+    send("/accounts/" + encodeURIComponent(ref) + "/warmup", { mode: $("#postingWarmMode").value, reason: reason })
       .then(function (d) { saved(d, "✅ החימום נשמר"); })
       .catch(function (e) { handleError(e, e && e.status === 404 ? "לא נמצא חשבון מחובר למספר הזה" : "השמירה נכשלה"); })
       .then(function () { btn.disabled = false; });
