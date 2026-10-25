@@ -179,7 +179,11 @@ module.exports = function createAdminPostingRouter({
     const p = String(param || "");
     if (/^\d{9,15}$/.test(p)) return p;
     if (!/^acct_[0-9a-f]{24}$/.test(p)) return null;
-    return (await knownPhones(now)).find((ph) => refOf(ph) === p) || null;
+    const halted = (await knownPhones(now)).find((ph) => refOf(ph) === p);
+    if (halted) return halted;
+    // An agent as the agents list names them (GET /api/admin/campaigns/agents, posting-manual.refOf).
+    const manualRef = require("../posting-manual").refOf;
+    return (await store.listConnectedPhones("facebook")).find((ph) => manualRef(ph) === p) || null;
   }
 
   // The overview degrades: a section whose query fails (a missing index above

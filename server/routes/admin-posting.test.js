@@ -248,6 +248,13 @@ const noFullPhone = (raw, what) => {
     assert.equal((await db.getConnection(P.fine)).posting_warmup_mode, "active");
     await post(`/accounts/${P.fine}/warmup`, { mode: "auto", reason: "back to default" });
     assert.equal((await db.getConnection(P.fine)).posting_warmup_mode, null);
+    // picked from the agents list (the dropdown): its ref names the agent, never the phone
+    const listRef = require("../posting-manual").refOf(P.fine);
+    r = await post(`/accounts/${listRef}/warmup`, { mode: "active", reason: "picked from the list" });
+    assert.equal(r.status, 200, r.raw);
+    assert.equal((await db.getConnection(P.fine)).posting_warmup_mode, "active");
+    assert.equal((await post(`/accounts/acct_${"0".repeat(24)}/warmup`, { mode: "active", reason: "x" })).status, 404, "an unknown ref");
+    await post(`/accounts/${P.fine}/warmup`, { mode: "auto", reason: "back to default" });
 
     // ── suspected compromise: the profile is revoked; the owner lifts it only after a reconnect ──
     r = await post(`/accounts/${P.compromised}/reenable`, { reason: "x" }, as(OWNER));
@@ -311,7 +318,7 @@ const noFullPhone = (raw, what) => {
     // ── every mutation wrote an audit event, tails only, kept a year ──
     const events = await store.listAuditEvents({ limit: 100 });
     const actions = events.map((e) => e.action).sort();
-    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible", "warmup_mode", "warmup_mode"]);
+    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible", "warmup_mode", "warmup_mode", "warmup_mode", "warmup_mode"]);
     for (const e of events) {
       assert.ok(/^\d{4}$/.test(e.operator_tail), JSON.stringify(e));
       assert.ok(e.target_phone_tail === null || /^\d{4}$/.test(e.target_phone_tail));
@@ -327,7 +334,7 @@ const noFullPhone = (raw, what) => {
     const scRow = ov.body.halts_by_class.suspected_compromise.find((a) => a.phone_tail === "0011");
     assert.equal(scRow.needs_agent_confirmation, true); assert.equal(scRow.reconnected_after_halt, false);
     assert.equal((await call(server, "GET", "/api/admin/posting/overview", as(OWNER, false))).body.is_owner, true);
-    assert.equal(ov.body.recent_audit.length, 16);
+    assert.equal(ov.body.recent_audit.length, 18);
 
     // ── the overview degrades: a failing section is named in warnings, the rest loads, 200 ──
     {
