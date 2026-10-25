@@ -40,8 +40,9 @@ function postingEnvAllowed(env = {}) {
 async function assertFleetAllowed({ platform } = {}, deps = {}) {
   const db = deps.db || dbLive;
   const env = deps.env || process.env;
-
-
+  // Manual posting: an admin publishes every post by hand, so no automatic step may run — including
+  // a queued tick or a chained post already under way when the admin switched modes.
+  if (require("./posting-manual").enabled(env)) deny("manual_mode");
   const settings = await db.getSetting("posting");
   if (!settings || settings.enabled !== true) deny("global_off");
   if (platform && settings.platforms && settings.platforms[platform] === false) deny("platform_off");

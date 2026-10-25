@@ -262,8 +262,10 @@ function applyRules(out, raw, env = process.env) {
     const v = raw && raw[f], [min, max] = capRange(f, env);
     if (Number.isInteger(v) && v >= min && v <= max) { RULES[f].set(out, v); applied.push(f); }
   }
+  return applied; // windows stay in out._windows, at their positions, until configFrom has applied every layer
+}
+function finishWindows(out) {
   if (out._windows) { out.post_windows = out._windows.filter((w) => w.start < w.end); delete out._windows; } // a window with start >= end is off
-  return applied;
 }
 // The rules' values in a config, as the admin page shows them (0 = no limit).
 const rulesOf = (config) => Object.fromEntries(CAP_FIELDS.map((f) => [f, RULES[f].get(config)]));
@@ -293,6 +295,7 @@ function configFrom(settings, env = {}, agentRules = null) {
   applyRules(out, settings && settings.caps, env);
   // One agent's own rules (connections.posting_rules) over the global ones.
   applyRules(out, agentRules, env);
+  finishWindows(out);
   return out;
 }
 

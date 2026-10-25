@@ -120,46 +120,75 @@
     }
   });
 
-  // ── soundtrack: narration + music beside the muted hero video. Browsers allow
-  //    sound only after a tap/click/key, so it starts at once where allowed, else
-  //    on the first one; a corner button (opposite the chat bubble) mutes it. The narration is timed to the
-  //    video from 0, so the video restarts with it. Volume is baked into the files
+  // ── soundtrack: narration + music beside the silent hero video. The video is
+  //    the clock: the tracks take its mute state and follow its play, pause,
+  //    seek and end, so every control a template already has (its own mute
+  //    button, pausing off-screen, a Play button, native controls) drives them
+  //    too. A muted track plays in step from the start; sound comes on with the
+  //    first tap/click/key outside a control (browsers allow it only after one),
+  //    where allowed at once, or from any mute control — a corner button
+  //    (opposite the chat bubble) included. Volume is baked into the files
   //    (iOS ignores audio.volume).
-  var narr = get("hero.narration_url"), music = get("hero.music_url"), hv = document.querySelector("[data-video]");
+  var narr = get("hero.narration_url"), music = get("hero.music_url");
+  var hv = document.querySelector("[data-video]") || document.querySelector("[data-video-manual]");
   if ((narr || music) && vsrc && hv) {
-    var tracks = [narr, music].filter(Boolean).map(function (u) {
-      var a = new Audio(u); a.preload = "auto"; a.loop = u === music; return a;
-    });
-    var started = false, on = false, sbtn = document.createElement("button");
+    var voice = narr ? new Audio(narr) : null, tune = music ? new Audio(music) : null;
+    var tracks = [voice, tune].filter(Boolean);
+    tracks.forEach(function (a) { a.preload = "auto"; });
+    if (tune) tune.loop = true;
+    var heard = !hv.muted, sbtn = document.createElement("button");
     sbtn.type = "button";
     sbtn.style.cssText = "position:fixed;z-index:60;bottom:16px;inset-inline-end:16px;width:44px;height:44px;" +
       "border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:20px;line-height:44px;cursor:pointer";
     var paint = function () {
+      var on = !hv.muted;
       sbtn.textContent = on ? "🔊" : "🔇";
       sbtn.setAttribute("aria-label", T(on ? "video_mute" : "video_sound"));
       sbtn.setAttribute("aria-pressed", on ? "true" : "false");
     };
-    var setOn = function (v) { on = v; tracks.forEach(function (a) { a.muted = !v; }); paint(); };
-    var start = function () {
-      try { hv.currentTime = 0; } catch (e) {}
-      return Promise.all(tracks.map(function (a) { a.currentTime = 0; a.muted = false; return a.play(); }))
-        .then(function () { started = true; stopWaiting(); setOn(true); },
-              function () { tracks.forEach(function (a) { a.pause(); }); });
+    // The narration is timed to the video from 0: over a looping clip it is heard
+    // once, and it stays silent past its own end.
+    var voiceDue = function () { return hv.loop ? !voice.ended : hv.currentTime < (voice.duration || Infinity); };
+    var align = function () {
+      if (voice.ended || Math.abs(voice.currentTime - hv.currentTime) > 0.5) { try { voice.currentTime = hv.currentTime; } catch (e) {} }
     };
-    // A touch only counts as a gesture when it ends.
+    var follow = function () {
+      tracks.forEach(function (a) { a.muted = hv.muted; });
+      var stopped = hv.paused || hv.ended || document.hidden;
+      tracks.forEach(function (a) {
+        if (stopped || (a === voice && !voiceDue())) return a.pause();
+        if (a === voice) align();
+        var p = a.play(); if (p && p.catch) p.catch(function () {});
+      });
+    };
+    hv.addEventListener("volumechange", function () {
+      // Sound on for the first time over a looping clip: from the top, so the narration is heard whole.
+      if (!hv.muted && !heard) { heard = true; if (hv.loop) { try { hv.currentTime = 0; } catch (e) {} } }
+      follow(); paint();
+    });
+    ["play", "playing", "pause", "ended", "seeked"].forEach(function (t) { hv.addEventListener(t, follow); });
+    hv.addEventListener("timeupdate", function () { if (voice && !hv.paused && voiceDue()) align(); });
+    document.addEventListener("visibilitychange", follow);
+    // A touch only counts as a gesture when it ends. A tap on a control is left to that control.
     var GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
-    var firstGesture = function (e) { if (e.target !== sbtn) start(); };
+    var firstGesture = function (e) {
+      if (heard) return stopWaiting();
+      var t = e.target && e.target.closest ? e.target : null;
+      if (!(t && t.closest("button,a,input,select,textarea,label,video[controls],[role=button]"))) hv.muted = false;
+      follow(); // inside the gesture: the browser lets the tracks play
+    };
     var stopWaiting = function () {
       GESTURES.forEach(function (t) { document.removeEventListener(t, firstGesture, true); });
     };
     GESTURES.forEach(function (t) { document.addEventListener(t, firstGesture, true); });
-    sbtn.addEventListener("click", function () { if (started) setOn(!on); else start(); });
-    document.addEventListener("visibilitychange", function () {
-      if (started && on) tracks.forEach(function (a) { if (document.hidden) a.pause(); else if (!a.ended) a.play().catch(function () {}); });
-    });
+    sbtn.addEventListener("click", function () { hv.muted = !hv.muted; follow(); });
     paint();
     document.body.appendChild(sbtn);
-    start();
+    if (hv.muted) {
+      // Sound at once where the browser allows it; otherwise the tracks play muted, in step.
+      Promise.all(tracks.map(function (a) { a.muted = false; return a.play(); }))
+        .then(function () { hv.muted = false; }, follow);
+    } else follow();
   }
 
   // ── editorial photo slots — the single, full-bleed images the magazine-style

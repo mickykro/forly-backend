@@ -164,7 +164,9 @@ const STUCK_SWEEP_MS = 60 * 60 * 1000;
 const inFlight = new Map(); // phone → its tick
 const queued = [];
 function startTicks(deps, at) {
-  const cap = Math.max(1, Number((deps.env || process.env).DRIVER_MAX_CONCURRENT || 2));
+  const env = deps.env || process.env;
+  if (require("./posting-manual").enabled(env)) { queued.length = 0; return; } // switched to manual: nothing queued starts
+  const cap = Math.max(1, Number(env.DRIVER_MAX_CONCURRENT || 2));
   while (queued.length && inFlight.size < cap) {
     const phone = queued.shift();
     const run = Promise.resolve().then(() => T.tickAccount(phone, deps, at()))

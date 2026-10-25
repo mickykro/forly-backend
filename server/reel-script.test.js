@@ -18,6 +18,9 @@ assert.equal(tagFor(rent), "להשכרה · באר שבע");
 const card = buildEndCard(sale, { name: "נופר הרוש", brand_name: "רימקס", phone: "972546582548" });
 assert.deepEqual(card, { name: "נופר הרוש", brand: "רימקס", phone: "054-658-2548", cta: "לפרטים ותיאום ביקור", facts: "1,350,000 ₪ · 120 מ״ר · קומה 8" });
 assert.equal(buildEndCard(rent, { name: "א", brand_name: "א" }).facts, "6,500 ₪ לחודש · 182 מ״ר · קומה 9", "rent says per month");
+for (const [currency, sym] of [["ILS", "₪"], ["USD", "$"], ["EUR", "€"], [undefined, "₪"]]) {
+  assert.equal(buildEndCard({ price: 500000, currency }, {}).facts, `500,000 ${sym}`, `end card price in ${currency}`);
+}
 assert.equal(buildEndCard(rent, { name: "א", brand_name: "א" }).brand, "", "brand equal to the name is not repeated");
 
 assert.equal(wrapSubtitle("קצר"), "קצר");
