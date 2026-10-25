@@ -27,7 +27,7 @@
   };
   var PLATFORM_LABELS = { facebook: "פייסבוק", yad2: "יד2", madlan: "מדלן" };
   var AUDIT_LABELS = {
-    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז", switch_staging: "פרסום מ־staging",
+    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז", switch_staging: "פרסום מ־staging", sweep_now: "סבב פרסום ידני",
     reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל", resolve_attempt: "הכרעה בפוסט לא ידוע", resume_campaign: "המשך קמפיין",
   };
   var SECTION_LABELS = {
@@ -328,6 +328,20 @@
     if (b !== tab) b.addEventListener("click", function () { tab.classList.remove("on"); pane.classList.add("hidden"); });
   });
   $("#postingGlobal").addEventListener("change", function () { flip($("#postingGlobal"), "/switch"); });
+  // A sweep now (what the server runs every minute): its result, and what each account's tick did.
+  var SWEEP_RESULT = { ticked: "רץ", off: "כבוי", manual: "פרסום ידני", breaker: "מפסק הצי נפל", error: "שגיאה" };
+  $("#postingSweepNow").addEventListener("click", function () {
+    var btn = this; btn.disabled = true; $("#postingSweepOut").textContent = "מריץ…";
+    send("/sweep", {}).then(function (d) {
+      var l = d.last || {};
+      $("#postingSweepOut").textContent = (d.running ? "הסבב עדיין רץ ברקע. " : "") +
+        "תוצאה: " + (SWEEP_RESULT[l.result] || l.result || "—") + (l.reason ? " (" + l.reason + ")" : "") + (l.code ? " (" + l.code + ")" : "") +
+        (l.accounts != null ? " · חשבונות: " + l.accounts : "") +
+        ((d.accounts || []).length ? " · " + d.accounts.map(function (a) { return "…" + a.phone_tail + ": " + a.outcome; }).join(" · ") : "");
+      saved(d, "✅ הסבב רץ");
+    }).catch(function (e) { $("#postingSweepOut").textContent = ""; handleError(e, "שגיאה בהרצת הסבב"); })
+      .then(function () { btn.disabled = false; });
+  });
   $("#postingCapsSave").addEventListener("click", function () { saveCaps(this); });
   $("#postingModesSave").addEventListener("click", function () { saveModes(this); });
   $("#postingWarmSave").addEventListener("click", function () {

@@ -8,6 +8,7 @@
  *   POST /switch/platform  { platform, enabled, reason, version }  settings/posting.platforms.<p>
  *   POST /switch/visible   { enabled, reason, version }            visible_interactions_enabled
  *   POST /switch/staging   { enabled, reason, version }            settings/posting.sweeper_env (on = staging posts)
+ *   POST /sweep            {}                                      a sweep now (what the minute timer runs)
  *   POST /caps             { caps, reason, version }               settings/posting.caps (posting-safety CAP_FIELDS)
  *   POST /modes            { modes, reason, version }              settings/posting.modes (posting-modes MODES)
  *   POST /accounts/:account/reenable       { reason, agent_confirmed }  per halt class (R5)
@@ -137,6 +138,7 @@ module.exports = function createAdminPostingRouter({
   halts = require("../posting-halts"), lifecycle = require("../profile-lifecycle"),
   deps = {}, env = process.env, clock = () => new Date(),
   reconcile = require("../posting-reconcile"), campaigns = require("../posting-campaign"),
+  sweeper = require("../posting-sweeper"),
 }) {
   if (typeof requireAdmin !== "function" || typeof requireStepUp !== "function") throw new Error("admin-posting: requireAdmin and requireStepUp required");
   const router = express.Router();
@@ -291,6 +293,19 @@ module.exports = function createAdminPostingRouter({
   switchRoute("/switch/platform", (b) => (PLATFORMS.includes(b.platform) ? `platform:${b.platform}` : null),
     (cur, on, m) => ({ platforms: Object.assign({}, cur.platforms || {}, { [m.platform]: on }) }));
   switchRoute("/switch/visible", () => "visible", (cur, on) => ({ visible_interactions_enabled: on }));
+  // ── a sweep now, as the minute timer runs it, so posting starts without waiting:
+  //    the sweep's result and each account's last tick (phone tails only). A sweep can
+  //    open a browser (a groups sync); past SWEEP_WAIT_MS it goes on and the answer says so.
+  const SWEEP_WAIT_MS = 20000;
+  router.post("/sweep", ...guard, wrap(async (req, res) => {
+    const audited = await audit(req, "sweep_now", {});
+    const run = sweeper.sweep(deps).catch(() => null);
+    const ticked = await Promise.race([run, new Promise((r) => setTimeout(() => r(undefined), SWEEP_WAIT_MS))]);
+    const st = sweeper.status();
+    console.log(`posting admin: sweep now by …${opTail(req)} → ${st.last ? st.last.result : "?"}`);
+    res.json({ ok: true, audited, running: ticked === undefined, ticked: ticked == null ? null : ticked, last: st.last,
+      accounts: st.accounts.map((a) => ({ phone_tail: tail(a.phone), at: a.at, outcome: a.outcome })) });
+  }));
   // Which of production and staging posts (posting-guard): on = staging, and production holds off.
   switchRoute("/switch/staging", () => "staging", (cur, on) => ({ sweeper_env: on ? "staging" : "prod" }));
 
