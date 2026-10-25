@@ -106,7 +106,7 @@ module.exports = function createLane({ deps, open, hubPage, videoFor, emit, prep
     if (cur) {
       const now = x.clock();
       const agent = await L.agentPosts(cur.phone, deps, x, now);
-      const lim = L.limitsFor(cur, agent.campaigns, now, await A.configOf(deps, x), agent)[String(item.group_id)];
+      const lim = L.limitsFor(cur, agent.campaigns, now, await A.configOf(deps, x, agent.conn), agent)[String(item.group_id)];
       if (lim && lim.block) {
         const dtail = (p) => String(p || "").replace(/\D/g, "").slice(-4);
         await x.store.addAuditEvent({ operator_tail: dtail(user && user.userId), action: "manual_limit_after_post", target_phone_tail: dtail(cur.phone),

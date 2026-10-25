@@ -110,11 +110,11 @@ function groupsOf(c, conn = null, now = null, config = null) {
     if (!prev || at(p) >= at(prev)) last.set(k, p);
   }
   const t = now ? now.getTime() : null;
-  const floor = ((config || safety.DEFAULTS).property_group_cooldown_days || 0) * MS_DAY;
-  const again = (g) => (!c.repeat ? Infinity : g.kind === "page" ? PAGE_DAYS * MS_DAY : Math.max((Number(c.repeat_days) || 0) * MS_DAY - MS_HOUR, floor, MS_HOUR));
+  const days = (config || safety.DEFAULTS).property_group_cooldown_days || 0; // a date gap (posting-safety.dateGapEnd)
+  const again = (g) => (!c.repeat ? Infinity : g.kind === "page" ? PAGE_DAYS * MS_DAY : Math.max((Number(c.repeat_days) || 0) * MS_DAY - MS_HOUR, MS_HOUR));
   return targetsOf(c, conn).map((g) => {
     const p = last.get(String(g.group_id));
-    const due = !!p && t !== null && t - at(p) >= again(g);
+    const due = !!p && t !== null && t - at(p) >= again(g) && (g.kind === "page" || !days || safety.datesApart(new Date(at(p)), now) >= days);
     const status = !p || due ? "owed" : p.status === "skipped" ? "skipped" : "posted";
     return { group_id: String(g.group_id), kind: g.kind, name: g.name || "", url: g.kind === "page" ? g.url : urlOf(g), status, copy: g.kind === "page" ? null : g.copy || null,
       posted_at: p && p.status !== "skipped" ? p.posted_at || null : null };
@@ -128,7 +128,9 @@ async function checklist(deps = {}) {
   const x = A.ctxOf(deps);
   const running = (await x.store.listPostingCampaignsByStatus("running", 500))
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-  const config = await A.configOf(deps, x);
+  // Each agent's own rules over the global ones (as markDone applies them); the settings doc read once.
+  const settings = deps.config ? null : await x.db.getSetting("posting");
+  const configFor = (conn) => deps.config || safety.configFrom(settings, deps.env || process.env, conn && conn.posting_rules);
   const now = x.clock();
   const byPhone = new Map(); // the agent's campaigns, connection and other posts, for the group limits
   const agentOf = async (phone) => {
@@ -142,6 +144,7 @@ async function checklist(deps = {}) {
     if (!page) continue;
     if (expired(c, now)) { await expire(c, deps, x); continue; }
     const agent = await agentOf(c.phone);
+    const config = configFor(agent.conn);
     const limits = L.limitsFor(c, agent.campaigns, now, config, agent);
     const byId = new Map(targetsOf(c, agent.conn).map((g) => [String(g.group_id), g]));
     out.push({
@@ -203,7 +206,7 @@ async function markDone(campaignId, groupId, status, deps = {}, opts = {}) {
   const head = await x.store.getPostingCampaign(String(campaignId));
   if (!head) return null;
   const conn = (await x.db.getConnection(head.phone)) || {};
-  const config = await A.configOf(deps, x);
+  const config = await A.configOf(deps, x, conn);
   const id = crypto.randomUUID();
   let finished = false, past = false;
   const next = await A.mutate(x, String(campaignId), (cur) => {

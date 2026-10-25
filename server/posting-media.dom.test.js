@@ -42,6 +42,19 @@ const FIXTURES = {
   none: dialog(""),
 };
 
+// No browser needed: a progress bar that lingers after Post is enabled stops blocking after the grace;
+// one with Post still disabled (a real upload) never does.
+(async () => {
+  const fake = (disabled) => ({ locator: (sel) => ({ count: async () => 1, first: () => ({ getAttribute: async () => (disabled && /Post|פרסום/i.test(sel) ? "true" : null) }) }) });
+  const x = { wait: () => new Promise((r) => setTimeout(r, 20)) };
+  assert.equal(await M.waitUploaded(fake(false), x, 2000, 100), null, "Post enabled, bar lingering: done after the grace");
+  assert.equal(await M.waitUploaded(fake(true), x, 300, 100), "media_upload_failed", "Post still disabled: still uploading");
+  // the file hand-off times out, but the preview shows the file arrived: attached
+  const late = Object.assign(fake(false), { setInputFiles: async () => { throw Object.assign(new Error("t"), { name: "TimeoutError" }); } });
+  late.locator = (sel) => ({ count: async () => 1, first: () => ({ getAttribute: async () => null, setInputFiles: late.setInputFiles, waitFor: async () => {} }) });
+  assert.equal(await M.attach(late, x, { name: "v.mp4", mimeType: "video/mp4", buffer: Buffer.from("v") }), null, "a timed-out hand-off with a preview is attached");
+})().catch((e) => { console.error(e); process.exit(1); });
+
 (async () => {
   // ── fetchVideo: a video, and every way it is not one ──
   const srv = http.createServer((q, r) => {

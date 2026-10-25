@@ -33,12 +33,10 @@ async function denies(opts, deps, reason) {
 }
 
 (async () => {
-  // ── env_off: the global kill switch, checked before anything else ──
-  await denies(
-    { phone: PHONE, platform: PLATFORM, action: "dwell" },
-    { db: fakeDb(), env: { POSTING_ENABLED: "0" } },
-    "env_off",
-  );
+  // ── no env switch: POSTING_ENABLED, whatever its value, never decides — the admin's main switch does ──
+  for (const env of [{}, { POSTING_ENABLED: "0" }, { POSTING_ENABLED: "1" }]) {
+    assert.deepStrictEqual(await assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env }), ENABLED, `the switch decides: ${JSON.stringify(env)}`);
+  }
 
   // ── global_off: settings/posting.enabled === false ──
   await denies(
@@ -195,11 +193,10 @@ async function denies(opts, deps, reason) {
     await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, { db: fakeDb({ settings }), env: ON }, "global_off");
     await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb({ settings }), env: ON }), (e) => e.reason === "global_off");
   }
-  // …and the env must say POSTING_ENABLED=1: unset, "0", "" or anything else is env_off, before the doc is read
-  for (const env of [{}, { POSTING_ENABLED: "0" }, { POSTING_ENABLED: "" }, { POSTING_ENABLED: "true" }, { POSTING_ENABLED: "yes" }]) {
-    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, { db: fakeDb(), env }, "env_off");
-  }
   assert.deepStrictEqual(await assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env: ON }), ENABLED);
+  // ── manual posting: every automatic step is refused, however the switches stand ──
+  await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb(), env: { ...ON, POSTING_MANUAL: "1" } }), (e) => e.reason === "manual_mode");
+  await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, { db: fakeDb({ conn: { posting_permission: GRANTED } }), env: { ...ON, POSTING_MANUAL: "1" } }, "manual_mode");
 
   // ── assertAccountAllowed: a groups sync reads with every automation switch off,
   //    but a disabled account or a revoked profile still refuses it ──
@@ -212,16 +209,20 @@ async function denies(opts, deps, reason) {
         (e) => e.code === "posting_disabled" && e.reason === reason, reason);
     }
     // posting still needs the switches
-    await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, off, "env_off");
+    await denies({ phone: PHONE, platform: PLATFORM, action: "post" }, off, "global_off");
   }
 
-  // ── postingEnvAllowed (C1): prod, or POSTING_SWEEPER=1 off staging; never staging ──
+  // ── postingEnvAllowed (C1): prod; POSTING_SWEEPER=1 off staging; staging only with POSTING_ON_STAGING=1 ──
   const table = [
     [{ FORLY_ENV: "prod" }, true],
     [{ FORLY_ENV: "prod", POSTING_SWEEPER: "1" }, true],
     [{ FORLY_ENV: "prod", POSTING_SWEEPER: "0" }, true],
     [{ FORLY_ENV: "staging" }, false],
     [{ FORLY_ENV: "staging", POSTING_SWEEPER: "1" }, false],
+    [{ FORLY_ENV: "staging", POSTING_ON_STAGING: "1" }, true],
+    [{ FORLY_ENV: "staging", POSTING_ON_STAGING: "true" }, false],
+    [{ FORLY_ENV: "prod", POSTING_ON_STAGING: "1" }, true],
+    [{ FORLY_ENV: "local", POSTING_ON_STAGING: "1" }, false],
     [{ FORLY_ENV: "local" }, false],
     [{ FORLY_ENV: "local", POSTING_SWEEPER: "1" }, true],
     [{ FORLY_ENV: "local", POSTING_SWEEPER: "true" }, false],
@@ -232,6 +233,20 @@ async function denies(opts, deps, reason) {
   for (const [env, want] of table) assert.strictEqual(postingEnvAllowed(env), want, JSON.stringify(env));
   assert.strictEqual(postingEnvAllowed(undefined), false);
   assert.strictEqual(postingEnvAllowed(null), false);
+
+  // ── one of production and staging posts: production, unless settings/posting.sweeper_env hands it to staging ──
+  for (const [sweeper_env, env, want] of [
+    [undefined, "prod", null], [undefined, "staging", "other_env"],
+    ["staging", "staging", null], ["staging", "prod", "other_env"],
+    ["prod", "staging", "other_env"], ["nonsense", "staging", "other_env"],
+    ["staging", "local", null], [undefined, undefined, null], // a local box, and an env without FORLY_ENV: unaffected
+  ]) {
+    const deps = { db: fakeDb({ settings: { enabled: true, sweeper_env } }), env: { FORLY_ENV: env, POSTING_ON_STAGING: "1" } };
+    if (want) await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, deps), (e) => e.reason === want, `${sweeper_env}/${env}`);
+    else assert.ok(await assertFleetAllowed({ platform: PLATFORM }, deps), `${sweeper_env}/${env}`);
+  }
+  await assert.rejects(() => assertFleetAllowed({ platform: PLATFORM }, { db: fakeDb({ settings: { enabled: false, sweeper_env: "staging" } }), env: { FORLY_ENV: "staging" } }),
+    (e) => e.reason === "global_off", "the main switch still comes first");
 
   // ── no caching: a switch flipped between two calls is seen by the second ──
   {
@@ -244,15 +259,8 @@ async function denies(opts, deps, reason) {
 
   // ── default deps: db defaults to the real module, env to process.env ──
   {
-    const saved = process.env.POSTING_ENABLED;
-    process.env.POSTING_ENABLED = "0";
-    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "env_off");
-    delete process.env.POSTING_ENABLED;
-    await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "env_off");
-    // env on, and the real db (memory path) holds no settings/posting doc: global_off
-    process.env.POSTING_ENABLED = "1";
+    // the real db (memory path) holds no settings/posting doc: global_off
     await denies({ phone: PHONE, platform: PLATFORM, action: "dwell" }, {}, "global_off");
-    if (saved === undefined) delete process.env.POSTING_ENABLED; else process.env.POSTING_ENABLED = saved;
   }
 
   console.log("posting-guard.test.js ok");

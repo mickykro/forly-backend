@@ -16,9 +16,7 @@ const createPagesRouter = require("./routes/pages");
 
 const PH = "972500000001";
 const DAY = 86400000;
-// Keep the valid click safely within its 30-day attribution window. A fixed
-// calendar date made this otherwise deterministic test fail once that window
-// elapsed; the next-day scenario below still remains in the past.
+// Relative to now: clicks live 30 days from T0, so a fixed date expires the fixtures. T0, T0+DAY and now are three distinct days.
 const T0 = new Date(Date.now() - 2 * DAY);
 const IP = "203.0.113.77";
 const HEX = /^[0-9a-f]{32}$/;

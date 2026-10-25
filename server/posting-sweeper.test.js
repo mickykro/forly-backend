@@ -33,7 +33,7 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     assert.ok(k.posting_last_halt_at);
     assert.equal(k.facebook_profile_state, "quarantined", "captcha/checkpoint quarantine the profile");
     assert.equal((await store.getPostingCampaign(other.id)).status, "paused", "the other campaign on the account pauses too");
-    assert.ok(notes.some((m) => /פייסבוק/.test(m)), "the agent hears about it on WhatsApp");
+    assert.ok(!notes.some((m) => /פייסבוק/.test(m)), "posting is quiet: the agent gets no halt message");
     assert.ok(ops.some((m) => /disabled/.test(m) && !m.includes(PH)), "the operator is told, with no full phone");
     assert.equal((await C.resume(c.id, deps)).status, "paused", "the agent cannot resume a disabled account");
     // a pre-submit verified_failed released its reservation (R1)
@@ -262,7 +262,7 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     assert.equal((first.posting_halts || []).filter((h) => h.code === "rate_limited").length, 1);
     const penaltyUntil = first.posting_penalty_until;
     const told = notes.length;
-    assert.ok(told >= 1);
+    assert.equal(told, 0, "posting is quiet: no penalty message");
     let ran = 0;
     const reconcile = async () => { ran++; return { state: "outcome_unknown", error_code: "rate_limited", signal: "rate_limited" }; };
     await S.sweep(with_(deps, { reconcile }), at(new Date(dueOf(c).getTime() + 2 * HOUR)));
@@ -302,7 +302,7 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     assert.equal(k.posting_disabled_until_admin, true, "the account is disabled again");
     assert.equal(k.posting_halts.filter((h) => h.code === "checkpoint").length, 2);
     assert.equal((await store.getPostingCampaign(c.id)).status, "paused", "the running campaign stops again");
-    assert.ok(notes.length > told, "the agent is told again");
+    assert.equal(notes.length, told, "posting is quiet: the agent is not messaged");
     assert.ok(ops.length > opsTold, "the operator is told again");
 
     // a flag cleared with no timestamp still counts as lifted: the effect is no longer in force
@@ -509,5 +509,21 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     assert.equal(S._test.optionalFn("./no-such-module", "x"), null);
   }
 
+  // ── a sweep stuck on a call that never returns blocks the next one for an hour, not forever ──
+  {
+    S._test.reset();
+    const realNow = Date.now;
+    let calls = 0;
+    const hang = { store: { reapExpired: () => { calls++; return calls === 1 ? new Promise(() => {}) : Promise.reject(Object.assign(new Error("x"), { code: "stop" })); } }, env: {} };
+    const quiet = console.error; console.error = () => {};
+    try {
+      S.sweep(hang); // never settles
+      await new Promise((r) => setImmediate(r));
+      assert.equal(await S.sweep(hang), 0); assert.equal(calls, 1, "within the hour: the stuck sweep still holds");
+      Date.now = () => realNow() + 61 * 60000;
+      await S.sweep(hang).catch(() => {});
+      assert.equal(calls, 2, "after an hour: a new sweep runs");
+    } finally { Date.now = realNow; console.error = quiet; S._test.reset(); }
+  }
   console.log("posting-sweeper.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

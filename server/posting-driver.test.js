@@ -1,6 +1,7 @@
 /* posting-driver.js — one attempt through its durable states, against a fake
    page (posting-driver-fakes.js). The fake matches on the EXPORTED selectors.
    No network, no Driver. reconcile() is in posting-driver-reconcile.test.js. */
+process.env.POSTING_SHOTS = "0"; // never into the dev page's screenshot folder
 const F = require("./posting-driver-fakes");
 const assert = require("assert");
 const PD = require("./posting-driver");
@@ -67,6 +68,19 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.ok(v.lastIndexOf("https://www.facebook.com/") > 1 && v[v.length - 1].includes("/posts/") || v.includes(GROUP_URL), "the dwell back on the feed between posts");
     assert.ok(h.transitions.some((t) => t.k === second.key && t.to === "verified_posted"), "the second attempt walked its own states");
   }
+  // burst (local): no dwell, but the chain goes on — a zero wait must never end it
+  {
+    const h = harness();
+    const second = attemptOf({ key: "abcdefabcdefabcdefabcdefabcdef12", post_id: "p2" });
+    let asked = 0;
+    const next = async () => (++asked > 1 ? null : async () => ({ kind: "group", args: argsOf({ attempt: second }), deps: Object.assign({}, h.deps, { next }) }));
+    h.deps.next = next; h.deps.env = { FORLY_ENV: "local", POSTING_SHOTS: "0", POSTING_BURST: "1" };
+    await PD.postToGroup(argsOf(), h.deps);
+    assert.equal(h.submits(), 2, "burst: both posts in one session");
+    assert.equal(h.opened.length, 1);
+  }
+  assert.equal(require("./posting-account").maxSessionPosts({ FORLY_ENV: "local", POSTING_BURST: "1" }), 1000, "burst read at each use");
+  assert.equal(require("./posting-account").maxSessionPosts({ FORLY_ENV: "local" }), 5);
   // POSTING_CHAIN=0: one post, the old short session
   {
     const h = harness();
@@ -79,7 +93,7 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
   {
     const h = harness();
     let dwelt = 0;
-    h.deps.env = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1", POSTING_LOCAL_PREFLIGHT_SECONDS: "12" };
+    h.deps.env = { FORLY_ENV: "local", POSTING_SHOTS: "0", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1", POSTING_LOCAL_PREFLIGHT_SECONDS: "12" };
     h.deps.socialDwell = async () => { dwelt++; return []; };
     const out = await PD.postToGroup(argsOf(), h.deps);
     assert.equal(out.state, "verified_posted");
@@ -184,6 +198,10 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.notEqual(P.norm("פורלי 😇"), P.norm("פורלי"));
     assert.equal(P.fingerprint("❤\ufe0f דירה"), P.fingerprint("❤ דירה"));
     assert.ok(P.isCutOf(`${COPY.slice(0, 30)}… ראו עוד`, COPY) && !P.isCutOf(`${COPY.slice(1, 30)}… ראו עוד`, COPY));
+    // a video card's first link is not the post's own: any link in the card may be the permalink
+    const card = { href: "https://www.facebook.com/watch/?v=1", hrefs: ["https://www.facebook.com/watch/?v=1", "https://www.facebook.com/groups/77/posts/123456789/"], text: COPY, author: "Me" };
+    assert.equal(P.findOwnPost([card], { kind: "group", ids: ["77"], author: "Me", copy: COPY }).permalink, "https://www.facebook.com/groups/77/posts/123456789/");
+    assert.equal(P.findOwnPost([{ ...card, hrefs: [card.href] }], { kind: "group", ids: ["77"], author: "Me", copy: COPY }), null, "no post link in the card: no match");
     for (const bad of ["Facebook", " facebook ", "", null, "Log in to Facebook", "פייסבוק", "x".repeat(121)]) assert.equal(P.isPersonName(bad), false, String(bad));
     assert.equal(P.isPersonName("Micky Kroitoro"), true);
     // the bootstrap name is preferred; anything that is not a string falls back to the banner
@@ -356,6 +374,33 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.deepEqual([out.state, out.error_code], ["outcome_unknown", "not_verified"]);
     assert.equal(h.submits(), 1, "exactly one click, never a second");
     assert.deepEqual(h.states().slice(-2), ["verification_pending", "outcome_unknown"]);
+  }
+  {
+    // a card with our name and copy but no post link: unknown normally, posted under POSTING_BURST on a local box
+    const feed = (s) => (s.submitted ? [{ href: null, author: NAME, text: COPY }] : []);
+    const h1 = harness({ page: { feed } });
+    assert.equal((await PD.postToGroup(argsOf(), h1.deps)).state, "outcome_unknown");
+    const h2 = harness({ page: { feed } });
+    h2.deps.env = { FORLY_ENV: "local", POSTING_SHOTS: "0", POSTING_BURST: "1", POSTING_CHAIN: "0" };
+    h2.page.keyboard.insertText = async (t) => { h2.page.st.typed.push(t); if (!h2.page.st.submitted) h2.page.st.editor += t; };
+    const out = await PD.postToGroup(argsOf(), h2.deps);
+    assert.equal(out.state, "verified_posted", "burst: own name + copy is enough");
+    assert.equal(h2.submits(), 1);
+    assert.equal(h2.page.st.editor, COPY, "burst: the whole copy is in the editor");
+    assert.ok(h2.page.st.typed.length <= 3, "burst: one insert per line (two lines and the break)");
+    // burst: one look after the click. A clean page ends as posted even with no card in the feed...
+    const h4 = harness({ page: { feed: [] } });
+    h4.deps.env = { FORLY_ENV: "local", POSTING_SHOTS: "0", POSTING_BURST: "1", POSTING_CHAIN: "0" };
+    assert.equal((await PD.postToGroup(argsOf(), h4.deps)).state, "verified_posted", "burst: no warning, move on");
+    // ...but a Facebook warning still stops it, with the code
+    const h5 = harness({ page: { texts: { [S.dialog]: (s) => (s.submitted ? "You can't use this feature right now" : "") } } });
+    h5.deps.env = { FORLY_ENV: "local", POSTING_SHOTS: "0", POSTING_BURST: "1", POSTING_CHAIN: "0" };
+    const w = await PD.postToGroup(argsOf(), h5.deps);
+    assert.equal(w.state, "outcome_unknown", "burst: a warning is never skipped");
+    assert.ok(w.error_code && w.error_code !== "not_verified", "burst: the warning's own code");
+    const h3 = harness({ page: { feed } });
+    h3.deps.env = { FORLY_ENV: "prod", POSTING_BURST: "1", POSTING_CHAIN: "0" };
+    assert.equal((await PD.postToGroup(argsOf(), h3.deps)).state, "outcome_unknown", "never outside a local box");
   }
   {
     const h = harness({ page: { texts: { [S.dialog]: (s) => (s.submitted ? "You can't use this feature right now" : "") } } });

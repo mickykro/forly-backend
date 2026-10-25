@@ -54,6 +54,11 @@ function parseInput(b) {
     // Printable text only; line breaks and other keys go as "key" events.
     case "text": return typeof b.text === "string" && b.text.length > 0 && b.text.length <= MAX_TEXT && !/[\u0000-\u001f\u007f]/.test(b.text) ? { t: "text", text: b.text } : null;
     case "back": case "reload": return { t: b.t };
+    // The viewer's screen size: the page is laid out at it, so text shows at its real size.
+    case "fit": {
+      const n = (v) => Number.isInteger(v) && v >= 320 && v <= 1280;
+      return n(b.w) && n(b.h) ? { t: "fit", w: b.w, h: b.h } : null;
+    }
     default: return null;
   }
 }
@@ -115,6 +120,12 @@ function adopt(key, sessionId, browser, context) {
   return hub;
 }
 
+// A CDP override, so it lasts only while this hub watches; Facebook sees a resized window.
+function applyFit(hub) {
+  if (!hub.cdp || !hub.fit) return Promise.resolve();
+  return hub.cdp.send("Emulation.setDeviceMetricsOverride", { width: hub.fit.w, height: hub.fit.h, deviceScaleFactor: 0, mobile: false });
+}
+
 // Point the screencast at `page` (the login tab, or a sign-in popup it opened).
 async function watch(hub, page) {
   if (hub.closed || hub.page === page) return;
@@ -133,6 +144,7 @@ async function watch(hub, page) {
     emit(hub, hub.last);
   });
   try { await page.bringToFront(); } catch (e) { /* a background tab only stops frames */ }
+  await applyFit(hub).catch(() => {});
   await cdp.send("Page.startScreencast", SCREENCAST);
 }
 
@@ -221,7 +233,9 @@ function subscribe(hub, fn) {
 
 // Replays one validated event into the page. Returns { editable } after a
 // click — whether a text field took the focus, so a phone opens its keyboard.
-async function input(key, raw) {
+// opts.fit: only the agent's login viewer resizes the page; a working browser
+// (a sync, a post) watched from the dev or admin page keeps its own layout.
+async function input(key, raw, opts = {}) {
   const hub = hubs.get(key);
   if (!hub || hub.closed || !hub.page) throw err("no_viewer");
   const ev = parseInput(raw);
@@ -230,6 +244,12 @@ async function input(key, raw) {
   hub.sent = hub.sent.filter((t) => now - t < 1000);
   if (hub.sent.length >= RATE_PER_S) throw err("slow_down");
   hub.sent.push(now);
+  if (ev.t === "fit") {
+    if (opts.fit !== true) return {};
+    hub.fit = { w: ev.w, h: ev.h };
+    await applyFit(hub).catch(() => {});
+    return {};
+  }
   const page = hub.page;
   const px = (f, total) => Math.round(f * total);
   try {

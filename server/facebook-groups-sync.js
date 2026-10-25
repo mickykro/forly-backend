@@ -36,11 +36,19 @@ const SELECTORS = { groupLink: 'a[href*="/groups/"][role="link"]' };
 const STALE_MS = 7 * 86400000; // isStale(): a sync older than this is due for a refresh
 const STALE_DROP_MS = 30 * 86400000; // mergeMembership(): a stale/left entry this old is forgotten
 
-const REAL_ESTATE_RE = /דיר|נדל|להשכר|למכיר|שכירות|מתווכ|תיווך|נכס|בתים|בית פרטי|בית למכירה|קוטג|וילה|וילות|פנטהאוז|דופלקס|קרקע|מגרשים|מגרש למכירה|משכנת|פינוי.?בינוי|התחדשות עירונית|תמ"?א ?38|apartment|rent|real estate|realtor|broker|propert|housing/i;
+const REAL_ESTATE_RE = /דיר|נדל|להשכר|למכיר|שכירות|מתווכ|תיווך|נכס|בתים|בית פרטי|בית למכירה|קוטג|וילה|וילות|פנטהאוז|דופלקס|קרקע|מגרשים|מגרש למכירה|משכנת|פינוי.?בינוי|התחדשות עירונית|תמ"?א ?38|apartment|rent|סאבלט|סבלט|real ?estate|realtor|broker|propert|housing/i;
 // What the words above also catch but is not real estate: clothes or items
 // "for rent / for sale", giveaways, cars.
 const NOT_REAL_ESTATE_RE = /שמלות|שמלה|בגדים|תחפוש|ציוד|מסירה|למסור|רכב|אופנוע|תכשיט|עגלות|תינוק|rental car|dress/i;
-const looksRealEstate = (name) => REAL_ESTATE_RE.test(String(name || "")) && !NOT_REAL_ESTATE_RE.test(String(name || ""));
+// A name with only a buying, selling or investing word ("קונים ומוכרים", "משקיעים")
+// is real estate too, unless it is about jobs, cars, stocks or the like ("דרושים אנשי מכירות").
+const DEAL_RE = /למכיר|מכירה|מכירות|למכור|מוכרים|קני?יה|לקנות|קונים|השקע|משקיע|invest/i;
+const NOT_PROPERTY_RE = /דרוש|עבודה|משרות|רכב|מכוני|אופנו|מניות|קריפטו|ביטקוין|פורקס|צלמ|וידאו|בגדים|ריהוט|יד שני|יד 2|יד2|לוח המכירות|jobs|cars|stocks|crypto/i;
+const looksRealEstate = (name) => {
+  const n = String(name || "");
+  if (NOT_REAL_ESTATE_RE.test(n)) return false;
+  return REAL_ESTATE_RE.test(n) || (DEAL_RE.test(n) && !NOT_PROPERTY_RE.test(n));
+};
 // What the agent is shown and can pick: real-estate groups only — one the
 // curated catalog carries, or one whose own name reads as real estate.
 // Everything else the account belongs to (a hobby, a job board) stays out.
@@ -83,7 +91,20 @@ async function syncMembership(page, opts = {}) {
   await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
   const signal = await require("./posting-driver-proof").readSignal(page, "");
   if (signal !== "ok") throw Object.assign(new Error("groups page not readable"), { code: "sync_signal", signal });
-  for (let i = 0; i < 8; i++) { await page.mouse.wheel(0, 1200); await page.waitForTimeout(800); } // load the whole list
+  // Load the whole list: Facebook adds groups in batches as the page scrolls, so
+  // scroll to the bottom until five rounds in a row add none (a slow batch can
+  // take a few seconds); capped at a few hundred groups.
+  const count = () => page.$$eval(SELECTORS.groupLink, (els) => els.length).catch(() => 0);
+  let rounds = 0, last = -1;
+  for (let still = 0; rounds < 80 && still < 5; rounds++) {
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)).catch(() => {});
+    await page.mouse.wheel(0, 2400);
+    await page.waitForTimeout(1200);
+    const n = await count();
+    still = n === last ? still + 1 : 0;
+    last = n;
+  }
+  console.log(`groups scan: ${last} group links after ${rounds} scrolls`);
   // readDom: the link's text WITH its emoji (<img alt>), as the R3 proof reads the group's header — the two names must match exactly.
   const raw = await page.$$eval(SELECTORS.groupLink, require("./posting-driver-proof").readDom);
   const out = new Map();

@@ -265,3 +265,5 @@ body.agent-page::before{content:"";position:fixed;inset:0;z-index:-1;pointer-eve
 .ap-recent span{color:var(--ink)}
 .camp details summary{cursor:pointer}
 .camp-page-pick{display:block;font-size:.84rem;margin:-4px 0 10px;padding-inline-start:26px}
+
+.ap-pick { display: flex; gap: 8px; margin-bottom: 8px; }

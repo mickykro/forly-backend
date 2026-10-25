@@ -62,6 +62,8 @@ const PAGE_BASE_URL = resolvePageBaseUrl({
   publicBaseUrl: PUBLIC_BASE_URL,
   allowInfra: process.env.ALLOW_INFRA_PAGE_BASE,
 });
+// Posts, and the links in the agents' posting messages: production's pages, also from staging.
+const POSTING_PAGE_BASE_URL = require("./utils").postingPageBaseUrl(process.env, PAGE_BASE_URL);
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
 const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
 const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
@@ -115,6 +117,8 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // ── db init ──
 const db = require("./db");
 db.init();
+// The admin panel's posting modes (settings/posting.modes) laid over the env: posting-modes.js.
+require("./posting-modes").refresh().catch(() => {});
 
 // ── auth ──
 const createAuthRouter = require("./auth");
@@ -325,7 +329,7 @@ if (driverBoot.enabled) {
   // ── automated group posting: the campaign sweeper (posting-sweeper.js) ──
   const postingSweeper = require("./posting-sweeper");
   const postingDeps = devPostingDeps = postingSweeper.liveDeps({
-    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN, pageBaseUrl: PAGE_BASE_URL, authSecret: AUTH_SECRET,
+    greenInstance: GREENAPI_INSTANCE, greenToken: GREENAPI_TOKEN, pageBaseUrl: POSTING_PAGE_BASE_URL, authSecret: AUTH_SECRET,
     operatorPhone: process.env.POSTING_OPERATOR_PHONE,
   });
   // Staging shares production's Firestore and GreenAPI: the sweeper runs only
@@ -340,12 +344,13 @@ if (driverBoot.enabled) {
   }
   // The campaign card's API (consent, campaigns, one-tap links), same deps as the sweeper.
   const createPostingRouter = require("./routes/posting");
-  app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET, pageBaseUrl: PAGE_BASE_URL, deps: postingDeps }));
+  app.use("/api/posting", createPostingRouter({ requireAuth, authSecret: AUTH_SECRET, pageBaseUrl: POSTING_PAGE_BASE_URL, deps: postingDeps }));
   // The operator's levers (kill switches, fleet overview, per-class re-enable,
   // profile revoke); every change needs a fresh OTP step-up and is audited.
   // Owner-only re-enables read POSTING_OWNER_PHONES (unset → refused).
   app.use("/api/admin/posting", require("./routes/admin-posting")({ requireAdmin, requireStepUp, deps: postingDeps }));
   app.use("/api/admin/campaigns", require("./routes/admin-campaigns")({ requireAdmin, requireStepUp, deps: postingDeps }));
+  app.use("/api/admin/agents", require("./routes/admin-agents")({ requireAdmin, requireStepUp, deps: postingDeps }));
   // Manual group posting (POSTING_MANUAL=1): the admin's queue and a live browser per agent.
   app.use("/api/admin/manual", require("./routes/admin-manual")({ requireAdmin, deps: postingDeps }));
 

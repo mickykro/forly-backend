@@ -15,10 +15,24 @@ const C = require("./posting-campaign");
   const sent = [];
   const notify = async (ph, m) => { sent.push(m); };
   for (const kind of ["approve", "posted", "halted", "reconnect", "stopped", "completed"]) await A.say({ env: { POSTING_MANUAL: "1" }, notify }, "972500000001", kind, `${kind} text`);
-  assert.deepEqual(sent, ["completed text"], "only completed goes out");
+  assert.deepEqual(sent, ["completed text"], "only completed goes out, with its own summary");
   sent.length = 0;
   await A.say({ env: {}, notify }, "972500000001", "approve", "approve text");
-  assert.deepEqual(sent, ["approve text"], "automatic mode unchanged");
+  assert.deepEqual(sent, ["approve text"], "automatic mode: approvals still go out");
+
+  // ── automatic mode is quiet: no per-post, pause or halt messages; one message when the last campaign ends ──
+  sent.length = 0;
+  const storeWith = (camps) => ({ listPostingCampaignsByPhone: async () => camps });
+  for (const kind of ["posted", "paused", "halted", "penalty", "reconnect", "removed", "stopped"]) await A.say({ env: {}, notify }, "972500000001", kind, `${kind} text`);
+  assert.deepEqual(sent, [], "nothing per post, pause, halt or stop");
+  await A.say({ env: {}, notify, store: storeWith([{ id: "a", status: "running" }, { id: "b", status: "completed" }]) }, "972500000001", "completed", "x", { id: "b" });
+  assert.deepEqual(sent, [], "another campaign still running: not yet");
+  await A.say({ env: {}, notify, store: storeWith([{ id: "a", status: "completed" }, { id: "b", status: "completed" }]) }, "972500000001", "completed", "x", { id: "b" });
+  assert.equal(sent.length, 1, "the last one: one message");
+  assert.ok(/סיימנו/.test(sent[0]));
+  sent.length = 0;
+  await A.say({ env: {}, notify, store: { listPostingCampaignsByPhone: async () => { throw new Error("down"); } } }, "972500000001", "completed", "x", { id: "b" });
+  assert.deepEqual(sent, [], "campaigns unreadable: stay quiet rather than guess");
 
   // ── the sweeper never posts in manual mode ──
   const S = require("./posting-sweeper");
@@ -84,8 +98,8 @@ const C = require("./posting-campaign");
     assert.equal((await K.store.getPostingCampaign(c.id)).status, "running", "a repeating campaign does not end with its first pass");
     assert.equal((await M.queue(deps)).length, 0, "nothing owed until the interval passes");
     assert.equal(notes.length, 0);
-    at(new Date(K.NOW.getTime() + 3 * K.DAY - 30 * 60000));
-    assert.equal((await M.queue(deps)).length, 0, "repeat 3: owed only once the pacer's 3-day floor has passed, not an hour before");
+    at(new Date(K.NOW.getTime() + 3 * K.DAY - 2 * 3600000));
+    assert.equal((await M.queue(deps)).length, 0, "repeat 3: not before its rhythm (3 days less an hour) has passed");
     at(new Date(K.NOW.getTime() + 3 * K.DAY));
     q = await M.queue(deps);
     assert.deepEqual(q.map((i) => i.group_id), ["111", "222"], "3 days on: the groups again (the skipped one too), the Page not for 30 days");

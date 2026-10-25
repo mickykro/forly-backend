@@ -11,7 +11,8 @@
  * (no_destination).
  * Targets and mode reconcile the posts already planned: a post to a target
  * no longer wanted is skipped (target_removed; one already posting refuses
- * the edit, busy); standing → per_post sends unapproved scheduled posts back
+ * the edit, busy); a mode edit stores standing (per_post only in a local watched
+ * test) — standing → per_post sends unapproved scheduled posts back
  * to the agent (pending_approval); per_post → standing schedules the posts
  * still waiting for approval.
  */
@@ -78,7 +79,7 @@ async function update(id, edit = {}, deps = {}, { version, by = "admin" } = {}) 
       patch.repeat_days = n > 0 ? Math.min(30, Math.max(3, Math.round(n))) : null;
     }
     if (Array.isArray(edit.targets)) patch.targets = A.targetsFor(conn, edit.targets);
-    if (edit.mode) patch.mode = localMode.requireApproval(env) || edit.mode === "per_post" ? "per_post" : "standing";
+    if (edit.mode) patch.mode = localMode.requireApproval(env) ? "per_post" : "standing"; // per_post is no longer offered (campaign.asksAgent)
     const targets = patch.targets || cur.targets || ["groups"];
     const pageOn = targets.includes("page") && !!A.pageTarget(conn);
     if (!groups.length && !pageOn) { refused = "no_destination"; return null; }

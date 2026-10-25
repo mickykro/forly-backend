@@ -23,6 +23,9 @@ const TIMEOUT_MS = 3 * 60 * 1000;
 const DIR = path.join(os.tmpdir(), "forly-post-video");
 const ARGS = (src, out) => ["-v", "error", "-y", "-i", src, "-c:v", "libx264", "-preset", "medium", "-crf", "23",
   "-maxrate", "4M", "-bufsize", "8M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out];
+// POSTING_BURST (local): the file crosses a slow link to the remote browser, so lighter is faster. Same resolution, 1.5 Mbit/s cap.
+const FAST_ARGS = (src, out) => ["-v", "error", "-y", "-i", src, "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+  "-maxrate", "1500k", "-bufsize", "3M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", out];
 
 function run(bin, args) {
   return new Promise((resolve) => {
@@ -36,16 +39,17 @@ function run(bin, args) {
 
 // file: { name, mimeType, buffer } → the same shape, lighter when that helps.
 async function shrink(file, deps = {}) {
-  if (!file || !Buffer.isBuffer(file.buffer) || file.buffer.length < MIN_BYTES) return file;
+  const fast = require("./posting-safety").burst(deps.env || process.env);
+  if (!file || !Buffer.isBuffer(file.buffer) || file.buffer.length < (fast ? 512 * 1024 : MIN_BYTES)) return file;
   if ((deps.env || process.env).POSTING_VIDEO_SHRINK === "0") return file;
-  const key = crypto.createHash("sha256").update(file.buffer).digest("hex").slice(0, 32);
+  const key = crypto.createHash("sha256").update(file.buffer).digest("hex").slice(0, 32) + (fast ? "g" : ""); // "g": the 1.5 Mbit/s encode; the older "f" files were 360p
   const out = path.join(DIR, `${key}.mp4`);
   try {
     if (!fs.existsSync(out)) {
       await fs.promises.mkdir(DIR, { recursive: true });
       const src = path.join(DIR, `${key}.src`), tmp = path.join(DIR, `${key}.part.mp4`);
       await fs.promises.writeFile(src, file.buffer);
-      const ok = await run(deps.ffmpeg || process.env.FFMPEG_PATH || "ffmpeg", ARGS(src, tmp));
+      const ok = await run(deps.ffmpeg || process.env.FFMPEG_PATH || "ffmpeg", (fast ? FAST_ARGS : ARGS)(src, tmp));
       await fs.promises.unlink(src).catch(() => {});
       if (!ok) { await fs.promises.unlink(tmp).catch(() => {}); return file; }
       await fs.promises.rename(tmp, out);

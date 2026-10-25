@@ -56,6 +56,10 @@ function normalizeGroups(groups, ctx) {
 // Default (Task 19's route, an explicit agent create): any stopped/completed
 // one. enrollNewPage passes a narrower rule (see there). Evaluated inside the
 // campaign transaction, so a STOP landing meanwhile is never overridden.
+// Whether a post waits for the agent's approval: only in a local watched test. Agents are
+// never asked per post (25 Oct 2026): an older per_post campaign posts as a standing one.
+const asksAgent = (mode, env = process.env) => localMode.requireApproval(env);
+
 async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets, copies, includeUnknown } = {}, deps = {}, opts = {}) {
   const x = ctxOf(deps);
   if (!consent || !consent.at) throw fail("consent_required", "consent required");
@@ -67,7 +71,7 @@ async function create({ phone, page, groups, mode, days, repeat, repeatDays, con
   const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
   const c = {
     phone, page_id: String(page.page_id),
-    mode: approvalOnly || mode === "per_post" ? "per_post" : "standing",
+    mode: approvalOnly ? "per_post" : "standing", // per_post only for a local watched test (asksAgent)
     // repeat_days: "every N days" (1–30), the agent's choice — the property returns to its groups on that rhythm until expires_at.
     repeat: repeat === true || Number(repeatDays) > 0, repeat_days: Number(repeatDays) > 0 ? Math.min(30, Math.max(3, Math.round(Number(repeatDays)))) : null,
     expires_at: iso(now.getTime() + Math.min(Math.max(Number(days) || 30, 1), 30) * MS_DAY),
@@ -185,7 +189,7 @@ async function pause(id, reason, deps = {}) {
 // The agent cannot lift an operator-level stop (R5): a disabled account, an
 // owner review, or a reconnect that has not happened yet.
 function accountBlocked(conn) {
-  if (conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true) return true;
+  if (conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true || conn.posting_paused_by_admin) return true;
   return conn.facebook_needs_reconnect === true && !(ms(conn.facebook_browser_connected_at) > ms(conn.facebook_needs_reconnect_at));
 }
 
@@ -267,8 +271,8 @@ async function approvePost(id, postId, deps = {}, opts = {}) {
   if (!c) return null;
   const post = c.posts.find((p) => p.id === postId && p.status === "pending_approval");
   if (!post) return c;
-  const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(c.phone)) || {};
+  const config = await configOf(deps, x, conn);
   const account = await A.accountView(c.phone, conn, deps, now, { exclude: post.id });
   const cand = { group_id: post.group_id, url: post.group_url };
   const slot = safety.nextSlot({ now, account, candidates: [{ ...cand, aliases: A.groupIdsOf(cand, conn).slice(1) }], pageId: c.page_id, config, rand: x.rand });
@@ -365,13 +369,15 @@ function candidatesFor(c, ctx) {
 async function planAccount(phone, deps = {}, now, pre = {}) {
   const x = ctxOf(deps);
   now = now || nowOf(deps, x);
-  const config = pre.config || (await configOf(deps, x));
+  const config = pre.config || (await configOf(deps, x, pre.conn || phone));
   const conn = pre.conn || (await x.db.getConnection(phone)) || {};
   const campaigns = pre.campaigns || (await x.store.listPostingCampaignsByPhone(phone));
   const open = campaigns.reduce((n, c) => n + (c.posts || []).filter((p) => OPEN_POST.has(p.status)).length, 0);
-  if (open >= A.MAX_SESSION_POSTS) return null;
-  // awaiting_texts: the agent has not approved the group texts yet (posting-listing-groups).
-  const ready = campaigns.filter((c) => c.status === "running" && !c.awaiting_texts && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
+  if (open >= A.maxSessionPosts(deps.env)) return null;
+  // awaiting_texts: the agent has not approved the group texts yet (posting-listing-groups) —
+  // a wait only in a local watched test (asksAgent); otherwise the campaign posts as it is.
+  const textsWait = asksAgent("per_post", deps.env || process.env);
+  const ready = campaigns.filter((c) => c.status === "running" && !(c.awaiting_texts && textsWait) && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
   if (!ready.length) return null;
   const account = await A.accountView(phone, conn, deps, now, { campaigns });
   const catalog = await A.catalogIndex(x.db);
@@ -390,7 +396,7 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
     const groupCands = cands.filter((g) => g.target === "group");
     const groupIds = groupCands.map((g) => g.group_id);
     const aliases = Object.fromEntries(groupCands.map((g) => [g.group_id, g.aliases || []]));
-    const groupActivity = groupIds.length ? await x.store.getGroupActivityFor(groupIds, now, undefined, aliases) : {};
+    const groupActivity = groupIds.length ? await x.store.getGroupActivityFor(groupIds, now, safety.activityDays(config), aliases) : {};
     const fp = safety.fingerprint(s.page.property || {});
     for (const set of [cands.filter((g) => g.target === "page"), cands.filter((g) => g.target === "group")]) {
       if (!set.length) continue;
@@ -465,7 +471,6 @@ async function schedulePost(decision, deps = {}, now) {
   const destination = destinations.choose({ page, campaign: c, target: { ...target, target: decision.target }, pagePostUrl, variantRound });
   const copy = buildCopy(page, c, target, destination.kind, deps.pageBaseUrl || "");
   const video = videoOf(page);
-  const approvalOnly = localMode.requireApproval(deps.env || process.env);
   const base = {
     id: crypto.randomUUID(), target: decision.target === "page" ? "page" : "group",
     group_id: target.group_id, group_url: target.url, group_name: target.name || "",
@@ -477,7 +482,7 @@ async function schedulePost(decision, deps = {}, now) {
   // Appended only while the campaign is still running (a STOP may have landed
   // since the read above); the mode is the committed one.
   const next = await mutate(x, c.id, (cur) => (cur.status !== "running" ? null : {
-    posts: cur.posts.concat([{ ...base, status: approvalOnly || cur.mode === "per_post" ? "pending_approval" : "scheduled" }]),
+    posts: cur.posts.concat([{ ...base, status: asksAgent(cur.mode, deps.env || process.env) ? "pending_approval" : "scheduled" }]),
     wait_reason: null, duplicate_review: decision.duplicate_review || null,
   }));
   const post = next && next.posts.find((p) => p.id === base.id);
@@ -493,15 +498,15 @@ async function schedulePost(decision, deps = {}, now) {
 async function explainGroups(c, deps = {}, now) {
   const x = ctxOf(deps);
   now = now || nowOf(deps, x);
-  const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(c.phone)) || {};
+  const config = await configOf(deps, x, conn);
   const page = (await x.db.getPage(c.page_id)) || {};
   const ctx = { conn, catalog: await A.catalogIndex(x.db), listingType: (page.property || {}).listing_type || null, now };
   const used = usedTargets(c, now);
   const account = await A.accountView(c.phone, conn, deps, now);
   const groups = (c.groups || []).filter((g) => g && g.group_id);
   const aliases = Object.fromEntries(groups.map((grp) => [grp.group_id, A.groupIdsOf(grp, conn).slice(1)]));
-  const activity = groups.length ? await x.store.getGroupActivityFor(groups.map((grp) => grp.group_id), now, undefined, aliases) : {};
+  const activity = groups.length ? await x.store.getGroupActivityFor(groups.map((grp) => grp.group_id), now, safety.activityDays(config), aliases) : {};
   const g = { now, posts: safety.withTimes(account), pageId: c.page_id, fp: safety.fingerprint(page.property || {}), groupActivity: activity, config };
   const pens = conn.posting_group_penalties || {};
   return groups.map((grp) => {
@@ -522,7 +527,7 @@ async function explainGroups(c, deps = {}, now) {
 }
 
 module.exports = {
-  explainGroups, addGroups, normalizeGroups,
+  explainGroups, addGroups, normalizeGroups, asksAgent,
   create, enrollNewPage, pause, resume, stop, approvePost, cleanCopy, MAX_COPY, videoView, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.

@@ -1,5 +1,8 @@
 /*
- * db.js — Firestore (or in-memory fallback) storage helpers.
+ * db.js — Firestore (or in-memory fallback) storage helpers. The in-memory
+ * store is for tests and local boxes only: under FORLY_ENV=prod|staging this
+ * module connects to Firestore as it loads (a script that requires it reads the
+ * real data, init() or not) and refuses to load without credentials.
  * ponytail: single source for all collection access
  */
 
@@ -23,6 +26,7 @@ function warnIfUserCredentials(path) {
 }
 
 function init() {
+  if (db) return; // connected already (on load, under prod/staging)
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     const admin = require("firebase-admin");
     admin.initializeApp();
@@ -749,6 +753,13 @@ async function saveDraft(draft) {
 async function deleteDraft(phone) {
   if (db) await db.collection("property_drafts").doc(phone).delete();
   else mem.drafts.delete(phone);
+}
+
+// prod and staging never fall back to the empty in-memory store: an uninitialised
+// db there read as "no settings, no campaigns" (25 Oct 2026, a diagnostic script).
+if (process.env.FORLY_ENV === "prod" || process.env.FORLY_ENV === "staging") {
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) throw new Error(`db: FORLY_ENV=${process.env.FORLY_ENV} needs GOOGLE_APPLICATION_CREDENTIALS — no in-memory store outside tests and local`);
+  init();
 }
 
 module.exports = {

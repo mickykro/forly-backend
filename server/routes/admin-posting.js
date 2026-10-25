@@ -7,6 +7,11 @@
  *   POST /switch           { enabled, reason, version }            global kill switch (R2)
  *   POST /switch/platform  { platform, enabled, reason, version }  settings/posting.platforms.<p>
  *   POST /switch/visible   { enabled, reason, version }            visible_interactions_enabled
+ *   POST /switch/staging   { enabled, reason, version }            settings/posting.sweeper_env (on = staging posts)
+ *   POST /sweep            {}                                      a sweep now (what the minute timer runs)
+ *   GET  /status                                                   why each agent is or isn't posting
+ *   POST /caps             { caps, reason, version }               settings/posting.caps (posting-safety CAP_FIELDS)
+ *   POST /modes            { modes, reason, version }              settings/posting.modes (posting-modes MODES)
  *   POST /accounts/:account/reenable       { reason, agent_confirmed }  per halt class (R5)
  *   POST /accounts/:account/revoke-profile { reason }                   suspected compromise
  *   POST /attempts/:key/resolve     { outcome: posted|not_posted, reason }  an outcome_unknown attempt (I7)
@@ -26,6 +31,9 @@ const { normalizeAuthPhone } = require("../utils");
 const { hmacHex } = require("../posting-tx");
 const { redact } = require("../driver-browser");
 const { postingEnvAllowed } = require("../posting-guard");
+const safety = require("../posting-safety");
+const A = require("../posting-account");
+const modes = require("../posting-modes");
 
 const MS_DAY = 86400000;
 const PLATFORMS = ["facebook", "yad2", "madlan"];
@@ -111,21 +119,28 @@ function switchView(s, env) {
   for (const p of PLATFORMS) platforms[p] = !(s.platforms && s.platforms[p] === false);
   const lc = s.last_change || null;
   return {
-    // Off unless switched on (I5): a missing doc or enabled !== true is off,
-    // and so is an env without POSTING_ENABLED=1 (as posting-guard reads them).
+    // Off unless switched on (I5): a missing doc or enabled !== true is off.
     enabled: s.enabled === true, disabled_reason: s.enabled === false ? s.disabled_reason || null : null,
-    version: s.version || 0, enabled_at: s.enabled_at || null, env_forced_off: env.POSTING_ENABLED !== "1",
+    version: s.version || 0, enabled_at: s.enabled_at || null,
     platforms, visible_interactions_enabled: s.visible_interactions_enabled !== false,
+    sweeper_env: s.sweeper_env === "staging" ? "staging" : "prod",
     changed_by_tail: s.changed_by || null, changed_at: s.changed_at || null, reason: s.reason || null,
     last_change: lc && { what: lc.what, enabled: lc.enabled, by_tail: lc.by_tail, reason: lc.reason, at: lc.at },
+    caps: capsView(s, env),
+    modes: modes.view(s.modes),
   };
 }
+
+// The caps: what the admin set, the code's default, and what applies now
+// (after the env: a local box without POSTING_CAPS has none of its own).
+const capsView = (s, env) => safety.rulesView(s && s.caps, safety.configFrom(s, env), env);
 
 module.exports = function createAdminPostingRouter({
   requireAdmin, requireStepUp, db = require("../db"), store = require("../posting-store"),
   halts = require("../posting-halts"), lifecycle = require("../profile-lifecycle"),
   deps = {}, env = process.env, clock = () => new Date(),
   reconcile = require("../posting-reconcile"), campaigns = require("../posting-campaign"),
+  sweeper = require("../posting-sweeper"),
 }) {
   if (typeof requireAdmin !== "function" || typeof requireStepUp !== "function") throw new Error("admin-posting: requireAdmin and requireStepUp required");
   const router = express.Router();
@@ -164,7 +179,11 @@ module.exports = function createAdminPostingRouter({
     const p = String(param || "");
     if (/^\d{9,15}$/.test(p)) return p;
     if (!/^acct_[0-9a-f]{24}$/.test(p)) return null;
-    return (await knownPhones(now)).find((ph) => refOf(ph) === p) || null;
+    const halted = (await knownPhones(now)).find((ph) => refOf(ph) === p);
+    if (halted) return halted;
+    // An agent as the agents list names them (GET /api/admin/campaigns/agents, posting-manual.refOf).
+    const manualRef = require("../posting-manual").refOf;
+    return (await store.listConnectedPhones("facebook")).find((ph) => manualRef(ph) === p) || null;
   }
 
   // The overview degrades: a section whose query fails (a missing index above
@@ -208,7 +227,7 @@ module.exports = function createAdminPostingRouter({
     // R5: campaigns paused `internal` (selector failures, tick errors) — the team resumes them.
     const internal = await section("internal_paused", async () => (await store.listPostingCampaignsByStatus("paused", 500)).filter((c) => c.pause_reason === "internal"), null);
     // Without the switch doc nothing about the switches is known: null, never a default "on".
-    const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, k === "env_forced_off" ? env.POSTING_ENABLED !== "1" : null]));
+    const sw = setting ? switchView(setting, env) : Object.fromEntries(Object.keys(switchView({}, env)).map((k) => [k, null]));
     res.json(Object.assign(sw, {
       campaigns, halts_24h, halts_by_class,
       // Counted over the disabled list; unknown (never a partial count) when
@@ -280,6 +299,130 @@ module.exports = function createAdminPostingRouter({
   switchRoute("/switch/platform", (b) => (PLATFORMS.includes(b.platform) ? `platform:${b.platform}` : null),
     (cur, on, m) => ({ platforms: Object.assign({}, cur.platforms || {}, { [m.platform]: on }) }));
   switchRoute("/switch/visible", () => "visible", (cur, on) => ({ visible_interactions_enabled: on }));
+  // ── a sweep now, as the minute timer runs it, so posting starts without waiting:
+  //    the sweep's result and each account's last tick (phone tails only). A sweep can
+  //    open a browser (a groups sync); past SWEEP_WAIT_MS it goes on and the answer says so.
+  const SWEEP_WAIT_MS = 20000;
+  router.post("/sweep", ...guard, wrap(async (req, res) => {
+    const audited = await audit(req, "sweep_now", {});
+    const run = sweeper.sweep(deps).catch(() => null);
+    const ticked = await Promise.race([run, new Promise((r) => setTimeout(() => r(undefined), SWEEP_WAIT_MS))]);
+    const st = sweeper.status();
+    console.log(`posting admin: sweep now by …${opTail(req)} → ${st.last ? st.last.result : "?"}`);
+    res.json({ ok: true, audited, running: ticked === undefined, ticked: ticked == null ? null : ticked, last: st.last,
+      accounts: st.accounts.map((a) => ({ phone_tail: tail(a.phone), at: a.at, outcome: a.outcome })) });
+  }));
+  // ── why each agent with a live campaign is or isn't posting: the account's own gates,
+  //    each campaign's state and wait reason, its next posts and its last attempts (with
+  //    their error codes). Phone tails only. Read-only; one read set per agent. ──
+  const OPEN = new Set(["pending_approval", "scheduled", "posting"]);
+  router.get("/status", requireAdmin, wrap(async (req, res) => {
+    const live = (await store.listPostingCampaignsByStatus("running", 500)).concat(await store.listPostingCampaignsByStatus("paused", 500));
+    const byPhone = new Map();
+    for (const c of live) { if (!byPhone.has(c.phone)) byPhone.set(c.phone, []); byPhone.get(c.phone).push(c); }
+    const agents = [];
+    const now = clock(), today = safety.jerusalemDate(now);
+    const x = A.ctxOf(Object.assign({}, deps, { db, store }));
+    for (const [phone, cs] of byPhone) {
+      const conn = (await db.getConnection(phone)) || {};
+      // Today against the limit, as the planner counts it: every counting attempt (failures
+      // too), manual share-kit posts and every planned post's slot, against the lowest of
+      // the day's target, the warm-up stage's cap and the daily cap.
+      const config = await A.configOf(deps, x, conn);
+      const acc = await A.accountView(phone, conn, Object.assign({}, deps, { db, store }), now);
+      const mine = acc.posts.filter((p) => safety.jerusalemDate(new Date(p.at)) === today);
+      const stage = safety._test.warmupStage(acc, now, config);
+      agents.push({
+        phone_tail: tail(phone),
+        today: {
+          counted: mine.length, posted: mine.filter((p) => p.ok === true).length, failed: mine.filter((p) => p.ok === false).length,
+          planned: mine.filter((p) => p.ok == null).length,
+          target: safety.dayPlan(today, config, null, acc.plan_seed).target, cap: safety.dailyCapFor(acc, now, config),
+          warmup_stage: stage ? { from_day: stage.start_day, to_day: stage.end_day, posts: stage.daily_post_cap } : null,
+        },
+        account: {
+          connected: !!conn.facebook_browser_connected_at, permission: !!(conn.posting_permission && conn.posting_permission.enabled === true),
+          warmup: conn.posting_warmup_mode || "auto", paused_by_admin: !!conn.posting_paused_by_admin,
+          disabled: conn.posting_disabled_until_admin === true, disabled_class: conn.posting_disabled_class || null,
+          penalty_until: conn.posting_penalty_until || null, profile: conn.facebook_profile_state || null,
+          needs_reconnect: conn.facebook_needs_reconnect === true,
+        },
+        campaigns: await Promise.all(cs.map(async (c) => {
+          const posts = c.posts || [];
+          const attempts = await Promise.all(posts.filter((p) => p.attempt_key).slice(-3).map(async (p) => {
+            const a = await store.getAttempt(p.attempt_key).catch(() => null);
+            return { post: p.status, state: a ? a.state : null, error_code: (a && a.error_code) || p.error_code || null, at: (a && a.updated_at) || null, lease_until: (a && a.lease_until) || null };
+          }));
+          return {
+            id_tail: c.id.slice(-6), page_id: c.page_id, status: c.status, pause_reason: c.pause_reason || null, wait_reason: c.wait_reason || null,
+            next: posts.filter((p) => OPEN.has(p.status)).sort((x, y) => String(x.scheduled_at).localeCompare(String(y.scheduled_at))).slice(0, 5)
+              .map((p) => ({ status: p.status, due: p.scheduled_at || null, group: p.group_name || p.group_id || null })),
+            attempts,
+          };
+        })),
+      });
+    }
+    res.json({ at: iso(clock()), sweep: sweeper.status().last, agents });
+  }));
+  // Which of production and staging posts (posting-guard): on = staging, and production holds off.
+  switchRoute("/switch/staging", () => "staging", (cur, on) => ({ sweeper_env: on ? "staging" : "prod" }));
+
+  // The caps: each a whole number 0..CAP_MAX (0 = no limit), or null for the default.
+  router.post("/caps", ...guard, wrap(async (req, res) => {
+    const b = req.body || {};
+    if (!Number.isInteger(b.version) || b.version < 0) return res.status(400).json({ error: "invalid_input", field: "version" });
+    const reason = cleanReason(b.reason);
+    if (!reason) return res.status(400).json({ error: "reason_required" });
+    if (!b.caps || typeof b.caps !== "object" || Array.isArray(b.caps)) return res.status(400).json({ error: "invalid_input", field: "caps" });
+    const caps = {};
+    for (const [f, v] of Object.entries(b.caps)) {
+      if (!safety.CAP_FIELDS.includes(f)) return res.status(400).json({ error: "invalid_input", field: f });
+      if (v === null) continue;
+      const [min, max] = safety.capRange(f, env);
+      if (!Number.isInteger(v) || v < min || v > max) return res.status(400).json({ error: "out_of_range", field: f, min, max });
+      caps[f] = v;
+    }
+    const cur = (await db.getSetting("posting")) || {};
+    if ((cur.version || 0) !== b.version) return res.status(409).json({ error: "version_conflict", version: cur.version || 0 });
+    const at = iso(clock()), by = opTail(req);
+    let next;
+    try { next = await db.setSetting("posting", { caps, last_change: { what: "caps", enabled: null, by_tail: by, reason, at } }, { expectVersion: b.version }); }
+    catch (e) {
+      if (!e || e.code !== "version_conflict") throw e;
+      const fresh = (await db.getSetting("posting")) || {};
+      return res.status(409).json({ error: "version_conflict", version: fresh.version || 0 });
+    }
+    const audited = await audit(req, "caps", { reason, detail: { changed: Object.keys(caps).join(" ") || "cleared", version: next.version } }); // the log takes flat values only
+    console.log(`posting admin: caps ${JSON.stringify(caps)} by …${by} (v${next.version})`);
+    res.json(Object.assign({ ok: true, audited }, switchView(next, env)));
+  }));
+
+  // The modes: each true, false, or null (the env's own value). Applied at once on this server.
+  router.post("/modes", ...guard, wrap(async (req, res) => {
+    const b = req.body || {};
+    if (!Number.isInteger(b.version) || b.version < 0) return res.status(400).json({ error: "invalid_input", field: "version" });
+    const reason = cleanReason(b.reason);
+    if (!reason) return res.status(400).json({ error: "reason_required" });
+    if (!b.modes || typeof b.modes !== "object" || Array.isArray(b.modes)) return res.status(400).json({ error: "invalid_input", field: "modes" });
+    for (const [m, v] of Object.entries(b.modes)) {
+      if (!(m in modes.MODES) || (v !== null && typeof v !== "boolean")) return res.status(400).json({ error: "invalid_input", field: m });
+    }
+    const set = modes.clean(b.modes);
+    const cur = (await db.getSetting("posting")) || {};
+    if ((cur.version || 0) !== b.version) return res.status(409).json({ error: "version_conflict", version: cur.version || 0 });
+    const at = iso(clock()), by = opTail(req);
+    let next;
+    try { next = await db.setSetting("posting", { modes: set, last_change: { what: "modes", enabled: null, by_tail: by, reason, at } }, { expectVersion: b.version }); }
+    catch (e) {
+      if (!e || e.code !== "version_conflict") throw e;
+      const fresh = (await db.getSetting("posting")) || {};
+      return res.status(409).json({ error: "version_conflict", version: fresh.version || 0 });
+    }
+    if (env === process.env) modes.apply(next.modes);
+    const audited = await audit(req, "modes", { reason, detail: { changed: Object.entries(set).map(([m, v]) => `${m}=${v ? "on" : "off"}`).join(" ") || "cleared", version: next.version } });
+    console.log(`posting admin: modes ${JSON.stringify(set)} by …${by} (v${next.version})`);
+    res.json(Object.assign({ ok: true, audited }, switchView(next, env)));
+  }));
 
   // POSTING_OWNER_PHONES, read per request; unset → nobody is an owner (fail closed).
   function ownerSet() {

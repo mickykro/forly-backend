@@ -34,7 +34,12 @@ const lifecycle = {
 const env = { FORLY_ENV: "prod", POSTING_ENABLED: "1" };
 const app = express();
 app.use(express.json());
-app.use("/api/admin/posting", createRouter({ requireAdmin, requireStepUp, db, store, lifecycle, env, deps: { driver: {} } }));
+const sweepCalls = [];
+const sweeper = {
+  sweep: async (d) => { sweepCalls.push(d); return 2; },
+  status: () => ({ last: { result: "ticked", accounts: 2 }, accounts: [{ phone: "972500000001", at: "t", outcome: "scheduled" }] }),
+};
+app.use("/api/admin/posting", createRouter({ requireAdmin, requireStepUp, db, store, lifecycle, env, deps: { driver: {} }, sweeper }));
 
 const headersFor = (phone, { stepup = false } = {}) => {
   const h = { authorization: `Bearer ${auth.signSession(SECRET, phone)}`, "content-type": "application/json" };
@@ -92,7 +97,7 @@ const noFullPhone = (raw, what) => {
     {
       assert.equal(await db.getSetting("posting"), null);
       const ov0 = await overview();
-      assert.equal(ov0.body.enabled, false, "no doc is off, never on"); assert.equal(ov0.body.version, 0); assert.equal(ov0.body.env_forced_off, false);
+      assert.equal(ov0.body.enabled, false, "no doc is off, never on"); assert.equal(ov0.body.version, 0);
       const first = await post("/switch", { enabled: true, reason: "launch", version: 0 });
       assert.equal(first.status, 200, first.raw); assert.equal(first.body.enabled, true); assert.equal(first.body.version, 1);
       const made = await db.getSetting("posting");
@@ -111,7 +116,7 @@ const noFullPhone = (raw, what) => {
       const sE = await new Promise((r) => { const sv = appE.listen(0, () => r(sv)); });
       try {
         const g = await call(sE, "GET", "/p/overview", as(ADMIN, false));
-        assert.equal(g.status, 200); assert.equal(g.body.env_forced_off, e.POSTING_ENABLED !== "1");
+        assert.equal(g.status, 200); assert.equal("env_forced_off" in g.body, false, "no env switch");
         // Allowed: reaches the route (a stale version → 409, nothing written). Refused: 503 before anything.
         const paths = allowed ? ["/switch"] : ["/switch", "/switch/platform", "/switch/visible", `/accounts/${P.captcha}/reenable`, `/accounts/${P.compromised}/revoke-profile`,
           `/attempts/${"a".repeat(32)}/resolve`, "/campaigns/abc/resume"];
@@ -243,6 +248,13 @@ const noFullPhone = (raw, what) => {
     assert.equal((await db.getConnection(P.fine)).posting_warmup_mode, "active");
     await post(`/accounts/${P.fine}/warmup`, { mode: "auto", reason: "back to default" });
     assert.equal((await db.getConnection(P.fine)).posting_warmup_mode, null);
+    // picked from the agents list (the dropdown): its ref names the agent, never the phone
+    const listRef = require("../posting-manual").refOf(P.fine);
+    r = await post(`/accounts/${listRef}/warmup`, { mode: "active", reason: "picked from the list" });
+    assert.equal(r.status, 200, r.raw);
+    assert.equal((await db.getConnection(P.fine)).posting_warmup_mode, "active");
+    assert.equal((await post(`/accounts/acct_${"0".repeat(24)}/warmup`, { mode: "active", reason: "x" })).status, 404, "an unknown ref");
+    await post(`/accounts/${P.fine}/warmup`, { mode: "auto", reason: "back to default" });
 
     // ── suspected compromise: the profile is revoked; the owner lifts it only after a reconnect ──
     r = await post(`/accounts/${P.compromised}/reenable`, { reason: "x" }, as(OWNER));
@@ -306,7 +318,7 @@ const noFullPhone = (raw, what) => {
     // ── every mutation wrote an audit event, tails only, kept a year ──
     const events = await store.listAuditEvents({ limit: 100 });
     const actions = events.map((e) => e.action).sort();
-    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible", "warmup_mode", "warmup_mode"]);
+    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible", "warmup_mode", "warmup_mode", "warmup_mode", "warmup_mode"]);
     for (const e of events) {
       assert.ok(/^\d{4}$/.test(e.operator_tail), JSON.stringify(e));
       assert.ok(e.target_phone_tail === null || /^\d{4}$/.test(e.target_phone_tail));
@@ -322,7 +334,7 @@ const noFullPhone = (raw, what) => {
     const scRow = ov.body.halts_by_class.suspected_compromise.find((a) => a.phone_tail === "0011");
     assert.equal(scRow.needs_agent_confirmation, true); assert.equal(scRow.reconnected_after_halt, false);
     assert.equal((await call(server, "GET", "/api/admin/posting/overview", as(OWNER, false))).body.is_owner, true);
-    assert.equal(ov.body.recent_audit.length, 16);
+    assert.equal(ov.body.recent_audit.length, 18);
 
     // ── the overview degrades: a failing section is named in warnings, the rest loads, 200 ──
     {
@@ -449,6 +461,84 @@ const noFullPhone = (raw, what) => {
       assert.equal(ev.filter((e) => e.action === "resume_campaign").length, 1);
     }
 
+    // ── caps: validated, compare-and-set, replaced whole, shown with default and what applies ──
+    {
+      const v0 = (await db.getSetting("posting")).version;
+      assert.equal((await post("/caps", { caps: { daily_cap: -1 }, reason: "x", version: v0 })).body.field, "daily_cap");
+      const zero = await post("/caps", { caps: { daily_cap: 0 }, reason: "x", version: v0 });
+      assert.deepEqual([zero.status, zero.body.error, zero.body.min, zero.body.max], [400, "out_of_range", 1, 60], "prod: no unlimited");
+      assert.equal((await post("/caps", { caps: { property_group_cooldown_days: 0 }, reason: "x", version: v0 })).body.error, "out_of_range", "prod: the duplicate guard never off");
+      assert.equal((await post("/caps", { caps: { nope: 1 }, reason: "x", version: v0 })).body.field, "nope");
+      assert.equal((await post("/caps", { caps: { daily_cap: 5 }, reason: " ", version: v0 })).body.error, "reason_required");
+      assert.equal((await post("/caps", { caps: { daily_cap: 5 }, reason: "x", version: v0 - 1 })).status, 409);
+      const c1 = await post("/caps", { caps: { daily_cap: 50, group_daily_cap: 5, weekly_cap: null }, reason: "more a day", version: v0 });
+      assert.equal(c1.status, 200, c1.raw);
+      assert.equal(c1.body.audited, true, "the change is in the action log");
+      assert.deepEqual((await db.getSetting("posting")).caps, { daily_cap: 50, group_daily_cap: 5 }, "null keeps the default");
+      assert.deepEqual(c1.body.caps.group_daily_cap, { set: 5, default: 3, applies: 5, min: 1, max: 10 });
+      assert.equal(c1.body.caps.weekly_cap.set, null);
+      const c2 = await post("/caps", { caps: { property_group_cooldown_days: 7 }, reason: "longer", version: v0 + 1 });
+      assert.deepEqual((await db.getSetting("posting")).caps, { property_group_cooldown_days: 7 }, "a save replaces the whole set");
+      assert.equal(c2.body.version, v0 + 2);
+      await post("/caps", { caps: {}, reason: "back to defaults", version: v0 + 2 });
+    }
+
+    // ── modes: validated, compare-and-set, replaced whole, shown with the env's own value ──
+    {
+      const v0 = (await db.getSetting("posting")).version;
+      assert.equal((await post("/modes", { modes: { nope: true }, reason: "x", version: v0 })).body.field, "nope");
+      assert.equal((await post("/modes", { modes: { manual: "on" }, reason: "x", version: v0 })).body.field, "manual");
+      assert.equal((await post("/modes", { modes: { manual: false }, reason: " ", version: v0 })).body.error, "reason_required");
+      const m1 = await post("/modes", { modes: { manual: false, shots: null }, reason: "automatic posting", version: v0 });
+      assert.equal(m1.status, 200, m1.raw);
+      assert.equal(m1.body.audited, true, "the change is in the action log");
+      assert.deepEqual((await db.getSetting("posting")).modes, { manual: false }, "null leaves the env in charge");
+      assert.deepEqual(m1.body.modes.manual.set, false);
+      assert.equal((await post("/modes", { modes: {}, reason: "x", version: v0 })).status, 409, "stale version");
+    }
+    // ── which environment posts: on = staging (production holds off), audited, shown ──
+    {
+      const v = ((await db.getSetting("posting")) || {}).version || 0;
+      const on = await post("/switch/staging", { enabled: true, reason: "posting from staging today", version: v });
+      assert.equal(on.status, 200, on.raw);
+      assert.equal((await db.getSetting("posting")).sweeper_env, "staging");
+      assert.deepEqual([on.body.sweeper_env, on.body.audited, on.body.last_change.what], ["staging", true, "staging"]);
+      assert.equal((await post("/switch/staging", { enabled: false, reason: "x", version: v })).status, 409, "stale version");
+      assert.equal((await post("/switch/staging", { enabled: false, reason: "", version: v + 1 })).status, 400, "a reason is required");
+      const off = await post("/switch/staging", { enabled: false, reason: "back to production", version: v + 1 });
+      assert.deepEqual([off.status, (await db.getSetting("posting")).sweeper_env, off.body.sweeper_env], [200, "prod", "prod"]);
+    }
+    // ── a sweep now: step-up, the sweeper's own deps, its result, tails only, audited ──
+    {
+      assert.equal((await post("/sweep", {}, as(ADMIN, false))).status, 401, "step-up required");
+      assert.equal(sweepCalls.length, 0);
+      const r = await post("/sweep", {});
+      assert.equal(r.status, 200, r.raw);
+      assert.equal(sweepCalls.length, 1); assert.equal(sweepCalls[0].driver !== undefined, true, "the posting deps");
+      assert.deepEqual([r.body.ticked, r.body.running, r.body.last.result, r.body.audited], [2, false, "ticked", true]);
+      assert.deepEqual(r.body.accounts, [{ phone_tail: "0001", at: "t", outcome: "scheduled" }]);
+      assert.ok(!r.raw.includes("972500000001"), "no full phone");
+    }
+    // ── why each agent is or isn't posting: gates, campaigns, next posts, last attempts; tails only ──
+    {
+      const c = (await store.createPostingCampaignIfAbsent({ phone: P.legacy, page_id: "pgs", status: "running", wait_reason: "min_gap",
+        posts: [{ id: "s1", status: "scheduled", scheduled_at: "2026-10-25T12:00:00.000Z", group_id: "111", group_name: "דירות בחיפה" },
+          { id: "s0", status: "skipped", error_code: "nav_timeout", attempt_key: "missing-key", scheduled_at: "2026-10-25T10:00:00.000Z" }] })).campaign;
+      const r = await call(server, "GET", "/api/admin/posting/status", as(ADMIN));
+      assert.equal(r.status, 200, r.raw);
+      const g = r.body.agents.find((a) => a.phone_tail === P.legacy.slice(-4));
+      assert.ok(g, "the agent is listed");
+      assert.equal(typeof g.account.permission, "boolean");
+      // today against the limit, as the planner counts it
+      assert.deepEqual(Object.keys(g.today).sort(), ["cap", "counted", "failed", "planned", "posted", "target", "warmup_stage"]);
+      assert.ok(Number.isInteger(g.today.cap) && Number.isInteger(g.today.target) && g.today.counted === g.today.posted + g.today.failed + g.today.planned);
+      const row = g.campaigns.find((x) => x.id_tail === c.id.slice(-6));
+      assert.deepEqual([row.status, row.wait_reason], ["running", "min_gap"]);
+      assert.deepEqual(row.next, [{ status: "scheduled", due: "2026-10-25T12:00:00.000Z", group: "דירות בחיפה" }]);
+      assert.deepEqual(row.attempts.map((a) => [a.post, a.state, a.error_code]), [["skipped", null, "nav_timeout"]], "a missing attempt still shows the post's error");
+      for (const ph of Object.values(P)) assert.ok(!r.raw.includes(ph), "no full phone");
+      assert.equal((await call(server, "GET", "/api/admin/posting/status")).status, 401, "admins only");
+    }
     console.log("routes/admin-posting.test.js ok");
   } finally {
     server.close();

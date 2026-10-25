@@ -38,7 +38,7 @@ const withDefaults = (ids) => ({ posting_permission: Object.assign({}, K.PERM, {
     const c = await LG.apply(K.page("pg1", PH), await K.db.getListing("L1"), deps);
     assert.deepEqual(c.groups.map((g) => g.group_id), ["111", "222"]);
     assert.equal(c.awaiting_texts, true);
-    assert.equal(await C.planAccount(PH, deps), null, "the planner leaves it alone until the texts are approved");
+    assert.ok(await C.planAccount(PH, deps), "planned at once: no wait for the texts' approval (the agent may still edit them)");
 
     const r = await LG.review(await K.db.getListing("L1"), deps);
     assert.equal(r.awaiting, true);

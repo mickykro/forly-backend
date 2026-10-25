@@ -8,6 +8,8 @@ const S = require("./posting-sweeper");
 
 const { store, NOW, MIN, HOUR, base, fakePost } = K;
 // The kit caps an account at 1 post a day; these tests are about several.
+// Approvals exist only in a local watched test (posting-campaign.asksAgent).
+const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPER: "1", POSTING_ENABLED: "1", DRIVER_DEV_VIEW: "1" };
 const setup = async (phone, o = {}) => {
   const r = await K.setup(phone, Object.assign({ config: Object.assign({}, K.cfg, { daily_cap: 10 }) }, o));
   if (o.post && o.post.useClock) o.post.useClock(r.clk);
@@ -51,10 +53,11 @@ function chainingPost() {
     assert.deepEqual(c.posts.map((p) => [p.group_id, p.status]), [["111", "posted"], ["222", "posted"]]);
   }
 
-  // ── per-post: a post still waiting for the agent is never taken; one set for later neither ──
+  // ── per-post (local watched test): a post still waiting for the agent is never taken; one set for later neither ──
   {
     const post = chainingPost();
     const { deps, at } = await setup(undefined, { post });
+    deps.env = LOCAL_TEST;
     let c = await C.create(base({ mode: "per_post" }), deps);
     const t = new Date("2026-09-23T12:00:00+03:00");
     c = await S.tick(c, deps, at(t));
@@ -67,6 +70,7 @@ function chainingPost() {
     const post = chainingPost();
     const { deps, at } = await setup(undefined, { post });
     await K.db.savePage(K.page("pg2"));
+    deps.env = LOCAL_TEST;
     const c1 = await C.create(base({ mode: "per_post" }), deps);
     const c2 = await C.create(base({ mode: "per_post", page: K.page("pg2") }), deps);
     const t = new Date("2026-09-23T12:00:00+03:00");
@@ -83,11 +87,12 @@ function chainingPost() {
     assert.ok(b.posts[0].not_before);
   }
 
-  // ── per-post: one tick prepares a session's worth (max 5) to approve together; one session posts them ──
+  // ── per-post (local watched test): one tick prepares a session's worth (max 5) to approve together; one session posts them ──
   {
     const post = chainingPost();
     const ids = ["111", "222", "333", "444", "555", "666", "777"];
     const { deps, at } = await setup(undefined, { post, conn: { facebook_groups_member: ids.map((id) => K.member(id)) } });
+    deps.env = LOCAL_TEST;
     let c = await C.create(base({ mode: "per_post", groups: ids.map((id) => ({ url: K.G(id), name: id, agent_policy: "explicitly_allowed" })) }), deps);
     const t = new Date("2026-09-23T12:00:00+03:00");
     c = await S.tick(c, deps, at(t));

@@ -152,7 +152,10 @@ async function retryProfileDeletes(deps, x, now) {
   return results;
 }
 
-let sweeping = false;
+let sweeping = false, sweepStarted = 0;
+// Longer than any browser session (Driver's 55 min): a sweep past it is stuck on a call
+// that never returns (21 Oct: a network drop froze posting for 1.5 h). The profile lock still guards each account.
+const STUCK_SWEEP_MS = 60 * 60 * 1000;
 // Accounts tick side by side, not one after another (2 Oct 2026: a single
 // account's post — ten minutes, longer with several in one session — held up
 // every other agent). At most DRIVER_MAX_CONCURRENT at once, the Driver
@@ -161,7 +164,9 @@ let sweeping = false;
 const inFlight = new Map(); // phone → its tick
 const queued = [];
 function startTicks(deps, at) {
-  const cap = Math.max(1, Number((deps.env || process.env).DRIVER_MAX_CONCURRENT || 2));
+  const env = deps.env || process.env;
+  if (require("./posting-manual").enabled(env)) { queued.length = 0; return; } // switched to manual: nothing queued starts
+  const cap = Math.max(1, Number(env.DRIVER_MAX_CONCURRENT || 2));
   while (queued.length && inFlight.size < cap) {
     const phone = queued.shift();
     const run = Promise.resolve().then(() => T.tickAccount(phone, deps, at()))
@@ -187,10 +192,13 @@ const state = { started: false, last: null, accounts: new Map() };
 const stamp = () => new Date().toISOString();
 // → the number of accounts ticked (0 when the switch is off or the breaker tripped).
 async function sweep(deps = {}, now) {
+  // The admin's posting modes first: a switch to or from manual posting takes effect here.
+  if (!deps.env) await require("./posting-modes").refresh(deps.db);
   // Manual posting: an admin publishes every post by hand (posting-manual).
   if (require("./posting-manual").enabled(deps.env || process.env)) { state.last = { at: stamp(), result: "manual" }; return 0; }
-  if (sweeping) return 0;
-  sweeping = true;
+  if (sweeping && Date.now() - sweepStarted < STUCK_SWEEP_MS) return 0;
+  if (sweeping) console.error(`posting sweep: the last sweep has run ${Math.round((Date.now() - sweepStarted) / 60000)} min, starting a new one`);
+  sweeping = true; sweepStarted = Date.now();
   const x = ctxOf(deps);
   const fixed = now instanceof Date ? now : null;
   const at = () => fixed || x.clock();

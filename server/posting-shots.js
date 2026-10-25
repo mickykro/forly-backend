@@ -46,11 +46,10 @@ async function capture(page, meta = {}, env = process.env) {
     const id = `${now}-${crypto.randomBytes(4).toString("hex")}`;
     let image = false;
     if (page && typeof page.screenshot === "function") {
-      let timer;
-      const shot = await Promise.race([
-        page.screenshot({ type: "jpeg", quality: 60, fullPage: false }),
-        new Promise((_, no) => { timer = setTimeout(() => no(new Error("timeout")), CAPTURE_TIMEOUT_MS); }),
-      ]).finally(() => clearTimeout(timer)).catch((e) => { console.error(`posting shot: ${(e && (e.code || e.name)) || "error"}`); return null; });
+      const timed = (p) => { let timer; return Promise.race([p, new Promise((_, no) => { timer = setTimeout(() => no(new Error("timeout")), CAPTURE_TIMEOUT_MS); })]).finally(() => clearTimeout(timer)); };
+      let shot = await timed(page.screenshot({ type: "jpeg", quality: 60, fullPage: false })).catch(() => null);
+      // A page stuck loading (a navigation timeout) fails Playwright's screenshot, which waits for it: ask the browser directly.
+      if (!shot) shot = await timed(rawShot(page)).catch((e) => { console.error(`posting shot: ${(e && (e.code || e.message || e.name)) || "error"}`); return null; });
       if (shot) { await fs.promises.writeFile(path.join(dir, `${id}.jpg`), shot, { mode: 0o600 }); image = true; }
     }
     const doc = {
@@ -65,6 +64,15 @@ async function capture(page, meta = {}, env = process.env) {
     console.error(`posting shot: ${(e && (e.code || e.name)) || "error"}`);
     return null;
   }
+}
+
+// The screen as the browser has it, without waiting for the page to settle (CDP Page.captureScreenshot).
+async function rawShot(page) {
+  const ctx = typeof page.context === "function" ? page.context() : null;
+  if (!ctx || typeof ctx.newCDPSession !== "function") throw new Error("no cdp");
+  const cdp = await ctx.newCDPSession(page);
+  try { return Buffer.from((await cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 60 })).data, "base64"); }
+  finally { cdp.detach().catch(() => {}); }
 }
 
 // The ids on disk, newest first.

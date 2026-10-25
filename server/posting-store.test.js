@@ -294,6 +294,12 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     assert.equal(out["222"].posts_today, 1);
     assert.deepEqual(out["333"], { posts_today: 0, fingerprints: [] });
     assert.equal((await S.getGroupActivityFor(["111"], NOW, 1))["111"].fingerprints.length, 2);
+    // a 7-day same-listing window (an admin's caps) reaches the one four dates back (PR #145 review)
+    const safety = require("./posting-safety");
+    const days = safety.activityDays(safety.configFrom({ caps: { fingerprint_window_days: 7 } }, {}));
+    assert.equal(days, 7);
+    assert.ok((await S.getGroupActivityFor(["111"], NOW, days))["111"].fingerprints.some((f) => f.exact === fp("old").exact), "the configured window is read");
+    assert.equal(safety.activityDays(safety.configFrom({ caps: { fingerprint_window_days: 0 } }, { FORLY_ENV: "local" })), 1, "no window (local): today's bucket still");
     for (const b of S._test.maps.group_activity.values()) {
       for (const f of b.fingerprints) {
         assert.deepEqual(Object.keys(f).sort(), ["at", "exact", "strong", "weak"]);
@@ -416,14 +422,14 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     const a = (await S.reserveAttempt(res({ limits: lim }))).attempt;
     await walk(a.key, ["session_started", "composer_ready", "submit_started", "verification_pending", "verified_posted"]);
     const dd = S._test.maps.posting_dedup.get(S._test.dedupKey("pg1", "group", "111"));
-    assert.equal(dd.expires_at, new Date(NOW.getTime() + 14 * DAY).toISOString());
+    assert.equal(dd.expires_at, require("./posting-safety").dateGapEnd(NOW, 14).toISOString(), "a date gap: Jerusalem midnight 14 dates on");
     const d10 = new Date(NOW.getTime() + 10 * DAY);
     assert.equal((await S.reserveAttempt(res({ limits: lim, now: d10 }))).reason, "duplicate", "10 days later: still within the cooldown");
     const d15 = new Date(NOW.getTime() + 15 * DAY);
     const again = await S.reserveAttempt(res({ limits: lim, now: d15 }));
     assert.equal(again.ok, true, "15 days later: the expired dedup is treated as absent");
     const dd2 = S._test.maps.posting_dedup.get(S._test.dedupKey("pg1", "group", "111"));
-    assert.deepEqual(dd2, { key: again.attempt.key, at: d15.toISOString(), expires_at: new Date(d15.getTime() + 14 * DAY).toISOString() }, "overwritten, not merged");
+    assert.deepEqual(dd2, { key: again.attempt.key, at: d15.toISOString(), expires_at: require("./posting-safety").dateGapEnd(d15, 14).toISOString() }, "overwritten, not merged");
     // release semantics unchanged: the old attempt no longer owns the doc, so nothing it does removes it
     assert.equal((await S.getAttempt(a.key)).state, "verified_posted");
     await S.transition(again.attempt.key, "cancelled", {}, d15);
@@ -434,6 +440,16 @@ const walk = async (key, states, at = NOW) => { for (const s of states) await S.
     await walk(p.key, ["session_started", "composer_ready", "submit_started", "verification_pending", "verified_posted"]);
     assert.equal((await S.reserveAttempt(res({ now: new Date(NOW.getTime() + 400 * DAY) }))).reason, "duplicate");
     await assert.rejects(S.reserveAttempt(res({ limits: { daily_cap: 3, group_global_daily_cap: 3, dedup_days: 0 } })), code("invalid_input"));
+  }
+  // ── a cooldown shortened since (an admin's caps) ends an older, longer dedup early ──
+  {
+    S._test.reset();
+    const lim = { daily_cap: 9, group_global_daily_cap: 9, dedup_days: 3 };
+    const a = (await S.reserveAttempt(res({ limits: lim }))).attempt;
+    await walk(a.key, ["session_started", "composer_ready", "submit_started", "verification_pending", "verified_posted"]);
+    const d2 = new Date(NOW.getTime() + 2 * DAY);
+    assert.equal((await S.reserveAttempt(res({ limits: lim, now: d2 }))).reason, "duplicate", "2 days into a 3-day cooldown");
+    assert.equal((await S.reserveAttempt(res({ limits: Object.assign({}, lim, { dedup_days: 1 }), now: d2 }))).ok, true, "the cooldown is now 1 day: free");
   }
 
   // ── no log lines at all in these modules ──

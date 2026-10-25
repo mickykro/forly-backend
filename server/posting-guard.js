@@ -21,31 +21,40 @@ function deny(reason) {
   throw e;
 }
 
-// Which environment may run automated posting at all (C1): staging shares
-// production's Firestore and GreenAPI, so it never may. Production does; a
-// local box only with POSTING_SWEEPER=1. index.js starts the sweeper on it,
-// and the /api/admin/posting switches answer 503 posting_unavailable_in_env
-// without it. Agents' changes (/api/posting) are saved in every env. Pure.
+// Which environment may run automated posting at all (C1). Production does; a
+// local box only with POSTING_SWEEPER=1; staging only with POSTING_ON_STAGING=1
+// in staging.env. Staging shares production's Firestore and GreenAPI, so it
+// posts for production's agents: which of the two posts is the admin's switch
+// (settings/posting.sweeper_env, assertFleetAllowed), and its links are
+// production's (utils.postingPageBaseUrl). index.js starts the sweeper where
+// this is true; the /api/admin/posting switches answer 503
+// posting_unavailable_in_env elsewhere. Agents' changes (/api/posting) are
+// saved in every env. Pure.
 function postingEnvAllowed(env = {}) {
-  if (!env || env.FORLY_ENV === "staging") return false;
+  if (!env) return false;
+  if (env.FORLY_ENV === "staging") return env.POSTING_ON_STAGING === "1";
   return env.FORLY_ENV === "prod" || env.POSTING_SWEEPER === "1";
 }
 
 // The fleet-level half: the env switch, the global switch and the platform
 // switch — no account involved. The sweeper asks this before anything else
 // (after reaping); assertAllowed() asks it first, in the same order.
-// Off unless switched on (I5): the env must say POSTING_ENABLED=1, and the
-// settings/posting doc must exist with enabled === true — a missing doc, or
-// any other value, is global_off. → the settings/posting doc.
+// Off unless switched on (I5): the admin's main switch decides — the
+// settings/posting doc must exist with enabled === true; a missing doc, or
+// any other value, is global_off. No env var is involved. → the settings/posting doc.
 async function assertFleetAllowed({ platform } = {}, deps = {}) {
   const db = deps.db || dbLive;
   const env = deps.env || process.env;
-
-  if (env.POSTING_ENABLED !== "1") deny("env_off");
-
+  // Manual posting: an admin publishes every post by hand, so no automatic step may run — including
+  // a queued tick or a chained post already under way when the admin switched modes.
+  if (require("./posting-manual").enabled(env)) deny("manual_mode");
   const settings = await db.getSetting("posting");
   if (!settings || settings.enabled !== true) deny("global_off");
   if (platform && settings.platforms && settings.platforms[platform] === false) deny("platform_off");
+  // One of production and staging posts (they share the database, and a profile lock
+  // holds within one server only): production, unless an admin handed it to staging.
+  const poster = settings.sweeper_env === "staging" ? "staging" : "prod";
+  if ((env.FORLY_ENV === "prod" || env.FORLY_ENV === "staging") && env.FORLY_ENV !== poster) deny("other_env");
   return settings;
 }
 
@@ -67,6 +76,8 @@ async function assertAccountAllowed({ phone, platform, action }, deps = {}) {
   // An owner-level review (R5: a second disabling halt in 30 days) is a
   // disabled account too, whatever the standard re-enable flag says.
   if (conn.posting_disabled_until_admin === true || conn.posting_owner_review_required === true) deny("account_disabled");
+  // An admin paused this agent's automatic posting (routes/admin-agents.js).
+  if (conn.posting_paused_by_admin) deny("paused_by_admin");
   // R5: a penalty halves the caps (posting-safety); it stops posting only on
   // day one — while the newest penalising halt is under 24 h old.
   if (action === "post" && conn.posting_penalty_until && new Date(conn.posting_penalty_until).getTime() > nowMs) {

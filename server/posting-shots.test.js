@@ -54,6 +54,13 @@ function call(app, p) {
     assert.equal(notes.find((n) => n.id === broken).image, false);
     assert.equal(await shots.read(noPage, LOCAL), null, "no image to serve");
     assert.equal(doc.image, true, "a real screenshot says so");
+    // a page stuck loading: Playwright's screenshot fails, the browser's own capture still works
+    const sent = [];
+    const stuck = { screenshot: async () => { throw new Error("navigating"); },
+      context: () => ({ newCDPSession: async () => ({ send: async (m) => { sent.push(m); return { data: JPG.toString("base64") }; }, detach: async () => {} }) }) };
+    const rescued = await shots.capture(stuck, meta, LOCAL);
+    assert.equal((await shots.list(LOCAL)).find((n) => n.id === rescued).image, true, "the fallback capture is kept");
+    assert.deepEqual(sent, ["Page.captureScreenshot"]);
 
     // ── kept small: the newest MAX_SHOTS; older than 3 days dropped ──
     const old = `${Date.now() - shots.MAX_AGE_MS - 60000}-00000000`;

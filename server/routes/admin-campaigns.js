@@ -1,7 +1,8 @@
 // server/routes/admin-campaigns.js
 /*
  * routes/admin-campaigns.js — /api/admin/campaigns: the admin's "קמפיינים"
- * tab. Create, edit, stop and start an agent's campaign. Every change needs
+ * tab. Create, edit, stop and start an agent's campaign — with the agent's consent
+ * recorded, or on the admin's own authority (consentOf). Every change needs
  * the admin guard and a fresh step-up, and writes an audit row (no phone, no
  * text) BEFORE the change: no audit row, no change (503 audit_unavailable).
  * That row records the request (outcome "requested"); a change refused
@@ -29,10 +30,14 @@ const STATUSES = ["running", "paused", "stopped", "completed"];
 const ERR_STATUS = { not_found: 404, stale_version: 409, busy: 409, not_live: 409, no_destination: 400, audit_unavailable: 503 };
 const DAY = 86400000;
 
+// The agent's consent as the admin recorded it; none recorded = the admin runs the
+// campaign on their own authority (method "admin", in the consent record and the audit).
+// → null only for a malformed one.
 function consentOf(b) {
   const c = b && b.consent;
   const note = c && typeof c.note === "string" ? c.note.trim() : "";
-  if (!c || !METHODS.has(c.method) || !note || note.length > 300) return null;
+  if (!note) return { method: "admin", note: "" };
+  if (!METHODS.has(c.method) || note.length > 300) return null;
   return { method: c.method, note };
 }
 
@@ -105,7 +110,8 @@ module.exports = function createAdminCampaignsRouter({
   }
   async function rowOf(c, cache = null) {
     const page = (await db.getPage(c.page_id).catch(() => null)) || {};
-    const pass = M.groupsOf(c, await connOf(c.phone, cache), x.clock(), await A.configOf(deps, x)); // this pass only: a restart keeps older posts as history
+    const conn = await connOf(c.phone, cache);
+    const pass = M.groupsOf(c, conn, x.clock(), await A.configOf(deps, x, conn)); // this pass only: a restart keeps older posts as history
     const n = (st) => pass.filter((g) => g.status === st).length;
     return {
       id: c.id, ref: M.refOf(c.phone), phone_tail: A.tail(c.phone), agent_name: await nameOf(c.phone),
@@ -257,7 +263,7 @@ module.exports = function createAdminCampaignsRouter({
     // What the agent's other live campaigns still take within these days: what
     // is owed now (the Page included), every later repeat pass of the groups,
     // and a repeating campaign's Page coming due again (30 days after its last).
-    const config = await A.configOf(deps, x);
+    const config = await A.configOf(deps, x, conn);
     const owed = live.reduce((n, c) => {
       const pass = M.groupsOf(c, conn, now, config);
       const left = Math.min(days, Math.max(0, (new Date(c.expires_at).getTime() - now.getTime()) / DAY));

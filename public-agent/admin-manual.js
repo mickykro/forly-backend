@@ -57,9 +57,8 @@
     var path = "/campaigns/" + encodeURIComponent(cid) + "/groups/" + encodeURIComponent(gid) + "/done";
     return call("POST", path, { status: "posted" }).catch(function (e) {
       if (!e || e.code !== "group_limit") throw e;
-      var r = window.prompt((LIMIT[e.why] || "הקבוצה הגיעה למגבלה") + ". לסמן בכל זאת? כתבו סיבה:");
-      if (!r || r.trim().length < 3) { FLY.toast("בוטל"); return null; }
-      return call("POST", path, { status: "posted", override_reason: r.trim() });
+      if (!window.confirm((LIMIT[e.why] || "הקבוצה הגיעה למגבלה") + ". לסמן בכל זאת?")) { FLY.toast("בוטל"); return null; }
+      return call("POST", path, { status: "posted", override_reason: "admin" });
     });
   }
   var B = function (ref) { return "/agents/" + encodeURIComponent(ref) + "/browser"; };
