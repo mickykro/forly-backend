@@ -9,6 +9,7 @@
  *   POST /switch/visible   { enabled, reason, version }            visible_interactions_enabled
  *   POST /switch/staging   { enabled, reason, version }            settings/posting.sweeper_env (on = staging posts)
  *   POST /sweep            {}                                      a sweep now (what the minute timer runs)
+ *   POST /accounts/:a/replan { reason }                            the agent's posts booked for later, now
  *   GET  /status                                                   why each agent is or isn't posting
  *   POST /caps             { caps, reason, version }               settings/posting.caps (posting-safety CAP_FIELDS)
  *   POST /modes            { modes, reason, version }              settings/posting.modes (posting-modes MODES)
@@ -473,6 +474,32 @@ module.exports = function createAdminPostingRouter({
   }));
 
   // ── the account's warm-up: the operator decides (active | slow | auto) ──
+  // ── an agent's booked posts, now: each post planned for later and not started moves to now.
+  //    Every rule is still checked when it comes due (hours, gap, caps, group rules) and a post
+  //    not allowed yet is re-timed then. For after the rules or the warm-up changed. ──
+  router.post("/accounts/:account/replan", ...guard, wrap(async (req, res) => {
+    const reason = cleanReason((req.body || {}).reason);
+    if (!reason) return res.status(400).json({ error: "reason_required" });
+    const at = clock(), phone = await resolveAccount(req.params.account, at);
+    if (!phone || !(await db.getConnection(phone))) return res.status(404).json({ error: "not_found" });
+    const now = iso(at), x = A.ctxOf(Object.assign({}, deps, { db, store }));
+    let moved = 0;
+    for (const c of await store.listPostingCampaignsByPhone(phone)) {
+      if (c.status !== "running") continue;
+      let n = 0; // reset on every run of the callback: a Firestore transaction may retry it
+      await A.mutate(x, c.id, (cur) => {
+        n = 0;
+        if (!cur || cur.status !== "running") return null;
+        const posts = (cur.posts || []).map((p) => (p.status === "scheduled" && p.scheduled_at > now ? (n++, { ...p, scheduled_at: now, not_before: null }) : p));
+        return n ? { posts } : null;
+      });
+      moved += n;
+    }
+    const audited = await audit(req, "replan", { phone, reason, detail: { moved } });
+    console.log(`posting admin: account …${tail(phone)} replanned ${moved} post(s) to now by …${opTail(req)}`);
+    res.json({ ok: true, audited, phone_tail: tail(phone), moved });
+  }));
+
   router.post("/accounts/:account/warmup", ...guard, wrap(async (req, res) => {
     const b = req.body || {};
     if (!["active", "slow", "auto"].includes(b.mode)) return res.status(400).json({ error: "invalid_input", field: "mode" });
