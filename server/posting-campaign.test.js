@@ -232,6 +232,35 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(c.posts[0].error_code, "agent");
   }
 
+  // ── post approvals turned off (POSTING_NO_APPROVAL): a per_post campaign posts as a standing one,
+  //    asks nothing, and posts already waiting for the agent go out ──
+  {
+    const { deps, at, notes } = await setup();
+    let c = await C.create(base({ mode: "per_post" }), deps);
+    c = await S.tick(c, deps, at(NOW));
+    assert.equal(c.posts[0].status, "pending_approval");
+    assert.equal(notes.length, 1, "approvals on: the agent is asked");
+    deps.env = Object.assign({}, deps.env, { POSTING_NO_APPROVAL: "1" });
+    c = await S.tick(c, deps, at(new Date(dueOf(c).getTime() + HOUR)));
+    assert.notEqual(c.posts[0].status, "pending_approval", "the waiting post is released");
+    assert.equal(deps.post.calls.length, 1, "and posted, unapproved");
+    assert.equal(notes.filter((n) => /לאישור/.test(typeof n === "string" ? n : JSON.stringify(n))).length, 1, "no new approval request");
+    assert.equal(C.asksAgent("standing", { ...LOCAL_TEST, POSTING_NO_APPROVAL: "1" }), true, "a local watched test still asks, whatever the mode");
+    assert.equal(C.asksAgent("standing", {}), false);
+  }
+  // …and a campaign held for the agent's text approval (awaiting_texts) is planned too
+  {
+    const { deps, at } = await setup();
+    let c = await C.create(base({ mode: "standing" }), deps);
+    const A = require("./posting-account");
+    await A.mutate(A.ctxOf(deps), c.id, () => ({ awaiting_texts: true }));
+    c = await S.tick(await store.getPostingCampaign(c.id), deps, at(NOW));
+    assert.equal(c.posts.length, 0, "approvals on: held");
+    deps.env = Object.assign({}, deps.env, { POSTING_NO_APPROVAL: "1" });
+    c = await S.tick(c, deps, at(new Date(NOW.getTime() + MIN)));
+    assert.equal(c.posts.length, 1, "approvals off: planned");
+  }
+
   // ── the property's video is part of the post: stored when planned, re-approved when it changes, handed to the driver ──
   {
     const { deps, at } = await setup();

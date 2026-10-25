@@ -56,6 +56,11 @@ function normalizeGroups(groups, ctx) {
 // Default (Task 19's route, an explicit agent create): any stopped/completed
 // one. enrollNewPage passes a narrower rule (see there). Evaluated inside the
 // campaign transaction, so a STOP landing meanwhile is never overridden.
+// The agent approves each post: a per_post campaign — unless the admin turned post
+// approvals off (POSTING_NO_APPROVAL, posting-modes): it then posts as a standing one.
+// A local watched test always asks.
+const asksAgent = (mode, env = process.env) => localMode.requireApproval(env) || (mode === "per_post" && env.POSTING_NO_APPROVAL !== "1");
+
 async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets, copies, includeUnknown } = {}, deps = {}, opts = {}) {
   const x = ctxOf(deps);
   if (!consent || !consent.at) throw fail("consent_required", "consent required");
@@ -370,8 +375,10 @@ async function planAccount(phone, deps = {}, now, pre = {}) {
   const campaigns = pre.campaigns || (await x.store.listPostingCampaignsByPhone(phone));
   const open = campaigns.reduce((n, c) => n + (c.posts || []).filter((p) => OPEN_POST.has(p.status)).length, 0);
   if (open >= A.maxSessionPosts(deps.env)) return null;
-  // awaiting_texts: the agent has not approved the group texts yet (posting-listing-groups).
-  const ready = campaigns.filter((c) => c.status === "running" && !c.awaiting_texts && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
+  // awaiting_texts: the agent has not approved the group texts yet (posting-listing-groups) —
+  // a wait only while approvals are on (asksAgent of a per_post campaign: approvals not turned off).
+  const textsWait = asksAgent("per_post", deps.env || process.env);
+  const ready = campaigns.filter((c) => c.status === "running" && !(c.awaiting_texts && textsWait) && !(c.posts || []).some((p) => OPEN_POST.has(p.status) && p.status !== "pending_approval"));
   if (!ready.length) return null;
   const account = await A.accountView(phone, conn, deps, now, { campaigns });
   const catalog = await A.catalogIndex(x.db);
@@ -465,7 +472,6 @@ async function schedulePost(decision, deps = {}, now) {
   const destination = destinations.choose({ page, campaign: c, target: { ...target, target: decision.target }, pagePostUrl, variantRound });
   const copy = buildCopy(page, c, target, destination.kind, deps.pageBaseUrl || "");
   const video = videoOf(page);
-  const approvalOnly = localMode.requireApproval(deps.env || process.env);
   const base = {
     id: crypto.randomUUID(), target: decision.target === "page" ? "page" : "group",
     group_id: target.group_id, group_url: target.url, group_name: target.name || "",
@@ -477,7 +483,7 @@ async function schedulePost(decision, deps = {}, now) {
   // Appended only while the campaign is still running (a STOP may have landed
   // since the read above); the mode is the committed one.
   const next = await mutate(x, c.id, (cur) => (cur.status !== "running" ? null : {
-    posts: cur.posts.concat([{ ...base, status: approvalOnly || cur.mode === "per_post" ? "pending_approval" : "scheduled" }]),
+    posts: cur.posts.concat([{ ...base, status: asksAgent(cur.mode, deps.env || process.env) ? "pending_approval" : "scheduled" }]),
     wait_reason: null, duplicate_review: decision.duplicate_review || null,
   }));
   const post = next && next.posts.find((p) => p.id === base.id);
@@ -522,7 +528,7 @@ async function explainGroups(c, deps = {}, now) {
 }
 
 module.exports = {
-  explainGroups, addGroups, normalizeGroups,
+  explainGroups, addGroups, normalizeGroups, asksAgent,
   create, enrollNewPage, pause, resume, stop, approvePost, cleanCopy, MAX_COPY, videoView, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.

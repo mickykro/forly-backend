@@ -22,12 +22,12 @@
     selector_failure: "תקלת ממשק", unknown: "לא ידוע",
   };
   var MODE_LABELS = {
-    manual: "פרסום ידני (מנהל מפרסם כל פוסט)", caps: "מגבלות פעילות (מקומי)", pacing: "קצב רגיל (מקומי)", warmup: "חימום חשבון חדש (מקומי)",
+    manual: "פרסום ידני (מנהל מפרסם כל פוסט)", no_approval: "פרסום בלי לבקש אישור מהסוכן", caps: "מגבלות פעילות (מקומי)", pacing: "קצב רגיל (מקומי)", warmup: "חימום חשבון חדש (מקומי)",
     burst: "מצב בדיקה — פרסום רצוף (מקומי)", browse: "גלישה בין סשנים (מקומי)", shots: "צילום מסך של כשלונות",
   };
   var PLATFORM_LABELS = { facebook: "פייסבוק", yad2: "יד2", madlan: "מדלן" };
   var AUDIT_LABELS = {
-    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
+    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז", switch_staging: "פרסום מ־staging",
     reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל", resolve_attempt: "הכרעה בפוסט לא ידוע", resume_campaign: "המשך קמפיין",
   };
   var SECTION_LABELS = {

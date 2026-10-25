@@ -14,6 +14,7 @@
  */
 const MODES = {
   manual: "POSTING_MANUAL", // an admin publishes every post by hand
+  no_approval: "POSTING_NO_APPROVAL", // automatic posting asks the agent nothing: a per_post campaign posts as a standing one
   caps: "POSTING_CAPS", // local: keep the caps (outside local they always hold)
   pacing: "POSTING_PACING", // local: the normal pacing, not the 5-minute test gap
   warmup: "POSTING_WARMUP", // local: the new-account warm-up
