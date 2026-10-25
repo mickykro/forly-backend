@@ -522,6 +522,9 @@ const noFullPhone = (raw, what) => {
       const g = r.body.agents.find((a) => a.phone_tail === P.legacy.slice(-4));
       assert.ok(g, "the agent is listed");
       assert.equal(typeof g.account.permission, "boolean");
+      // today against the limit, as the planner counts it
+      assert.deepEqual(Object.keys(g.today).sort(), ["cap", "counted", "failed", "planned", "posted", "target", "warmup_stage"]);
+      assert.ok(Number.isInteger(g.today.cap) && Number.isInteger(g.today.target) && g.today.counted === g.today.posted + g.today.failed + g.today.planned);
       const row = g.campaigns.find((x) => x.id_tail === c.id.slice(-6));
       assert.deepEqual([row.status, row.wait_reason], ["running", "min_gap"]);
       assert.deepEqual(row.next, [{ status: "scheduled", due: "2026-10-25T12:00:00.000Z", group: "דירות בחיפה" }]);

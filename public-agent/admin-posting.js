@@ -330,7 +330,20 @@
   $("#postingGlobal").addEventListener("change", function () { flip($("#postingGlobal"), "/switch"); });
   // Why each agent is or isn't posting (GET /status): the account's gates, each campaign's
   // state and wait reason, its next posts and its last attempts. Codes as the server names them.
-  function hm(t) { return t ? new Date(t).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }) : "—"; }
+  // A time, with its date when it is not today (a post moved to tomorrow reads as tomorrow).
+  function hm(t) {
+    if (!t) return "—";
+    var d = new Date(t), time = d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
+    return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" }) + " " + time;
+  }
+  function todayLine(t) {
+    if (!t) return "";
+    var limit = Math.min(t.cap, t.target);
+    return "<br>היום: " + t.counted + "/" + limit + " (פורסמו " + t.posted + ", נכשלו " + t.failed + ", מתוכננים " + t.planned + ")" +
+      " · יעד היום " + t.target + " · מגבלה " + t.cap +
+      (t.warmup_stage ? " · שלב חימום: ימים " + t.warmup_stage.from_day + "–" + t.warmup_stage.to_day + ", עד " + t.warmup_stage.posts + " ביום" : "") +
+      (t.counted >= limit ? " — <b>המכסה להיום מלאה</b>" : "");
+  }
   function loadStatus() {
     $("#postingStatus").textContent = "טוען…";
     return FLY.req(API + "/status", { noRedirect: true }).then(function (d) {
@@ -347,7 +360,7 @@
         return bad.join(" · ");
       };
       $("#postingStatus").innerHTML = (d.agents || []).length ? d.agents.map(function (g) {
-        return "<div style=\"margin:8px 0;padding:8px;border:1px solid rgba(23,20,15,.12);border-radius:8px\"><b>…" + esc(g.phone_tail) + "</b> — " + esc(gates(g.account)) +
+        return "<div style=\"margin:8px 0;padding:8px;border:1px solid rgba(23,20,15,.12);border-radius:8px\"><b>…" + esc(g.phone_tail) + "</b> — " + esc(gates(g.account)) + todayLine(g.today) +
           g.campaigns.map(function (c) {
             return "<div style=\"margin-top:4px\">קמפיין …" + esc(c.id_tail) + ": " + esc(c.status) + (c.pause_reason ? " (" + esc(c.pause_reason) + ")" : "") +
               " · ממתין ל: " + esc(c.wait_reason || "—") +

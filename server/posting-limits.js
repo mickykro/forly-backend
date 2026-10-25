@@ -67,7 +67,7 @@ async function agentPosts(phone, deps, x, now) {
 
 // The day's random target averages 3/4 of the cap; about 3 sessions of
 // MAX_SESSION_POSTS fit the two posting windows; Friday has one window;
-// one active day in five is skipped (skip_day_probability).
+// the admin's skip chance (skip_day_probability, 0 by default) takes its share off.
 function estimate({ posts, account, now, config, daysLeft }) {
   const daily = safety._test.dailyCapFor(account, now, config);
   const perDay = Math.min(Math.round(daily * 0.75), 3 * A.MAX_SESSION_POSTS);

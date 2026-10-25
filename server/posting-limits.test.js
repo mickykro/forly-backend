@@ -52,12 +52,14 @@ const L = require("./posting-limits");
   assert.equal(limB["111"].today, 2, "the share-kit post counts; the automatic one is not counted twice");
   assert.equal(L.limitsFor(c1, [c1], now, config, { accountPosts: [{ at: at(1), group_id: "111", ok: false }] })["111"].today, 0, "a failed attempt does not count");
 
-  // estimate: an established account, 200 posts → about 3 weeks, fits 30 days
+  // estimate: an established account, 200 posts → under 3 weeks (no day skipped by default), fits 30 days
   const { deps } = await K.setup();
   const conn = await K.db.getConnection("972500000001");
   const account = await A.accountView("972500000001", conn, deps, now);
   const e = L.estimate({ posts: 200, account, now, config, daysLeft: 30 });
-  assert.equal(e.per_week, 64); assert.equal(e.days, 22); assert.equal(e.fits, true); assert.equal(e.warmup, false);
+  assert.equal(e.per_week, 80); assert.equal(e.days, 18); assert.equal(e.fits, true); assert.equal(e.warmup, false);
+  const s = L.estimate({ posts: 200, account, now, config: Object.assign({}, config, { skip_day_probability: 0.2 }), daysLeft: 30 });
+  assert.deepEqual([s.per_week, s.days], [64, 22], "an admin's 20% skip chance: a fifth fewer per week");
   // a new account in warm-up: far beyond 30 days
   const fresh = Object.assign({}, account, { first_connected_at: new Date(now.getTime() - 4 * K.DAY).toISOString() });
   const f = L.estimate({ posts: 200, account: fresh, now, config, daysLeft: 30 });

@@ -32,6 +32,7 @@ const { hmacHex } = require("../posting-tx");
 const { redact } = require("../driver-browser");
 const { postingEnvAllowed } = require("../posting-guard");
 const safety = require("../posting-safety");
+const A = require("../posting-account");
 const modes = require("../posting-modes");
 
 const MS_DAY = 86400000;
@@ -316,10 +317,25 @@ module.exports = function createAdminPostingRouter({
     const byPhone = new Map();
     for (const c of live) { if (!byPhone.has(c.phone)) byPhone.set(c.phone, []); byPhone.get(c.phone).push(c); }
     const agents = [];
+    const now = clock(), today = safety.jerusalemDate(now);
+    const x = A.ctxOf(Object.assign({}, deps, { db, store }));
     for (const [phone, cs] of byPhone) {
       const conn = (await db.getConnection(phone)) || {};
+      // Today against the limit, as the planner counts it: every counting attempt (failures
+      // too), manual share-kit posts and every planned post's slot, against the lowest of
+      // the day's target, the warm-up stage's cap and the daily cap.
+      const config = await A.configOf(deps, x, conn);
+      const acc = await A.accountView(phone, conn, Object.assign({}, deps, { db, store }), now);
+      const mine = acc.posts.filter((p) => safety.jerusalemDate(new Date(p.at)) === today);
+      const stage = safety._test.warmupStage(acc, now, config);
       agents.push({
         phone_tail: tail(phone),
+        today: {
+          counted: mine.length, posted: mine.filter((p) => p.ok === true).length, failed: mine.filter((p) => p.ok === false).length,
+          planned: mine.filter((p) => p.ok == null).length,
+          target: safety.dayPlan(today, config, null, acc.plan_seed).target, cap: safety.dailyCapFor(acc, now, config),
+          warmup_stage: stage ? { from_day: stage.start_day, to_day: stage.end_day, posts: stage.daily_post_cap } : null,
+        },
         account: {
           connected: !!conn.facebook_browser_connected_at, permission: !!(conn.posting_permission && conn.posting_permission.enabled === true),
           warmup: conn.posting_warmup_mode || "auto", paused_by_admin: !!conn.posting_paused_by_admin,
