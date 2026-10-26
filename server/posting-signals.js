@@ -52,6 +52,8 @@ const TEXT_PHRASES = [
   ["restricted", ["your account is restricted", "you're restricted from posting in groups", "החשבון שלך מוגבל"]],
   ["pending_approval", ["your post is pending approval", "will be reviewed by a group admin", "ממתין לאישור", "ייבדק על ידי מנהל"]],
   ["group_blocked", ["you can't post in this group", "you're no longer able to post in this group", "לא ניתן לפרסם בקבוצה"]],
+  // A join request not yet approved: the group's page offers "cancel request" and no composer (26 Oct 2026).
+  ["membership_pending", ["your membership is pending", "החברות שלך בהמתנה"]],
   ["not_member", ["join (this )?group to post", "הצטרפו לקבוצה כדי לפרסם", "הצטרפות לקבוצה"]],
 ];
 const TEXT_SIGNALS = TEXT_PHRASES.map(([code, ps]) => [code, new RegExp(`(${ps.join("|")})`, "i")]);
@@ -59,7 +61,7 @@ const ALT_SIGNALS = TEXT_PHRASES.map(([code, ps]) => [code, ps.map((p) => new Re
 
 const SIGNAL_DISABLES = new Set(["checkpoint", "captcha", "restricted"]);
 const SIGNAL_PENALISES = new Set(["rate_limited", "feature_blocked"]);
-const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval"]);
+const SIGNAL_SKIPS = new Set(["group_blocked", "not_member", "pending_approval", "membership_pending"]);
 
 // hasCaptchaFrame is optional, structural evidence the driver (Task 18) can
 // supply when it actually saw a captcha iframe — a stronger signal than any
@@ -157,4 +159,7 @@ function classifySignal({ landedUrl, dialogText, alertText, hasCaptchaFrame, own
   return "ok";
 }
 
-module.exports = { classifySignal, echoed, capped, MIN_ECHO, ECHO_CONTEXT, REGION_CAP, OWN_CAP, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS };
+// The pending-join notice sits in the group page itself, not a dialog: the driver reads it there (posting-driver).
+const MEMBERSHIP_PENDING = TEXT_SIGNALS.find(([c]) => c === "membership_pending")[1];
+
+module.exports = { MEMBERSHIP_PENDING, classifySignal, echoed, capped, MIN_ECHO, ECHO_CONTEXT, REGION_CAP, OWN_CAP, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS };

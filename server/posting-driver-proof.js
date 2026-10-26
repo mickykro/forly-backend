@@ -30,6 +30,8 @@ const SELECTORS = {
   targetIdMeta: 'meta[property="al:android:url"]', // [Unverified] fb://group/<id>, fb://page/<id>, fb://profile/<id>
   targetUrlMeta: 'meta[property="og:url"]', // [Unverified]
   joinGroup: 'div[role="main"] div[aria-label="Join group"][role="button"], div[role="main"] div[aria-label="הצטרפות לקבוצה"][role="button"]', // [Unverified]
+  // A join request waiting for the group's admins (Hebrew is gendered: בטל / בטלי). [Unverified] labels, seen as text 26 Oct 2026.
+  cancelJoinRequest: 'div[role="main"] div[aria-label="Cancel request"][role="button"], div[role="main"] div[aria-label="ביטול הבקשה"][role="button"], div[role="main"] div[aria-label="בטל את הבקשה"][role="button"], div[role="main"] div[aria-label="בטלי את הבקשה"][role="button"]',
   // "כאן כותבים" is what a live Hebrew group page showed (a failed run's screenshot); the rest are guesses.
   composer: 'div[role="main"] [role="button"]:has-text("כאן כותבים"), div[role="main"] [role="button"]:has-text("כתבו משהו"), div[role="main"] [role="button"]:has-text("Write something"), div[role="main"] [role="button"]:has-text("What\'s on your mind")', // [Unverified]
   composerRoot: COMPOSER_ROOT,

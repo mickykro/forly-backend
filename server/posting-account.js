@@ -391,7 +391,9 @@ async function tellOperator(deps, text) {
 }
 
 // What the driver saw first-hand on a group's own page (Task 18): "Join
-// group" showing (membership "left"), or a vanity slug's real numeric id.
+// group" showing (membership "left"), a join request still waiting
+// (membership "pending": not planned until a groups sync sees it joined),
+// or a vanity slug's real numeric id.
 // The connection's membership list and the campaign's group follow it; the
 // old slug id stays an alias of the numeric one on both. Never throws.
 async function applyFindings(result, { c, post }, x, now) {
@@ -399,7 +401,7 @@ async function applyFindings(result, { c, post }, x, now) {
   if (!result || typeof result !== "object" || post.target === "page" || !gid) return;
   const rid = String(result.resolved_group_id || "");
   const numeric = /^slug:/.test(gid) && /^\d+$/.test(rid) ? rid : null;
-  const left = result.membership === "left";
+  const left = result.membership === "left" || result.membership === "pending" ? result.membership : null;
   if (!left && !numeric) return;
   const id = numeric || gid;
   const note = (what, e) => console.error(redact(`posting ${what} ${tail(c.phone)}: ${(e && (e.code || e.name)) || "error"}`));
@@ -408,7 +410,7 @@ async function applyFindings(result, { c, post }, x, now) {
     await x.store.mutateConnection(c.phone, (conn) => {
       let list = Array.isArray(conn.facebook_groups_member) ? conn.facebook_groups_member : [];
       if (numeric) list = resolveGroupId({ facebook_groups_member: list }, gid, numeric);
-      if (left) list = list.map((e) => (e && (e.group_id === id || aliasesOf(e).includes(id)) ? { ...e, membership_state: "left", observed_at: iso(now) } : e));
+      if (left) list = list.map((e) => (e && (e.group_id === id || aliasesOf(e).includes(id)) ? { ...e, membership_state: left, observed_at: iso(now) } : e));
       return { facebook_groups_member: list };
     });
   } catch (e) { note("membership update", e); }

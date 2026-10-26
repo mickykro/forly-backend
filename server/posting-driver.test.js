@@ -241,6 +241,17 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.deepEqual([out2.state, out2.error_code, out2.membership], ["verified_failed", "markers_missing", undefined]);
     assert.equal(h2.submits(), 0);
   }
+  // a join request still pending: no composer, a "cancel request" button or the notice in the page → skipped as membership_pending
+  for (const page of [{ counts: { [S.composer]: 0, [S.cancelJoinRequest]: 1 } }, { counts: { [S.composer]: 0 }, texts: { 'div[role="main"]': "דירות למכירה · החברות שלך בהמתנה · אם בקשת ההצטרפות שלך תאושר" } }]) {
+    const h = harness({ page });
+    const out = await PD.postToGroup(argsOf(), h.deps);
+    assert.deepEqual([out.state, out.error_code, out.membership], ["verified_failed", "membership_pending", "pending"], JSON.stringify(page.counts));
+    assert.equal(h.submits(), 0);
+  }
+  {
+    const h = harness({ page: { counts: { [S.composer]: 0 } } });
+    assert.equal((await PD.postToGroup(argsOf(), h.deps)).error_code, "composer_not_found", "no composer and no pending notice: still a calibration failure");
+  }
   // M5: exactly one composer root — none, or two (a stale draft), and nothing is typed or clicked
   for (const [n, code] of [[0, "composer_not_found"], [2, "destination_mismatch"]]) {
     const h = harness({ page: { counts: { [S.composerRoot]: n } } });

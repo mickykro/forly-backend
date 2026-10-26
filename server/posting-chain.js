@@ -62,7 +62,8 @@ function session(phone, deps, x, lock) {
   const budget = SESSION_MS(deps.env) - POST_BUDGET_MS;
   return {
     // The admin's live panel may hold the session after this post (posting-live).
-    more: (state) => OK.has(state) && posts < A.maxSessionPosts(deps.env) && Date.now() - started < budget && !live.held(phone),
+    // A group whose join request is still pending is skipped, not a failure of the session (res: the driver's result).
+    more: (state, res) => (OK.has(state) || (res && res.error_code === "membership_pending")) && posts < A.maxSessionPosts(deps.env) && Date.now() - started < budget && !live.held(phone),
     prepare: async () => {
       if (Date.now() - started >= budget) return null;
       if (lock && lock.renew && !lock.renew()) return null; // our hold lapsed: the profile is someone else's

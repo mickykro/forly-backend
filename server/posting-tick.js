@@ -377,7 +377,7 @@ async function runAttempt(attempt, st, deps, now) {
       await A.applyFindings(res, cur.st, x, x.clock());
       done = true;
       // Timed out: the tick already gave this browser up — it posts nothing more.
-      if (timedOut || !session.more(last)) return null;
+      if (timedOut || !session.more(last, res)) return null;
       // Renewed before the dwell too: post (≤ timeout) + dwell can outlast one hold.
       if (st.lock && st.lock.renew && !st.lock.renew()) return null;
       arm(); // the dwell gets its own window, not what is left of the post's

@@ -520,6 +520,17 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(c.posts[0].group_id, "12345");
   }
   {
+    // a join request still pending: the entry is `pending` (planned again once a sync sees it joined), and it is no failure
+    const { deps, at } = await setup(PH, { post: walk("verified_failed", { error_code: "membership_pending" }, { membership: "pending" }) });
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, at(NOW));
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal((await db.getConnection(PH)).facebook_groups_member.find((e) => e.group_id === "111").membership_state, "pending");
+    assert.equal(c.groups.find((g) => g.group_id === "111").is_member, false);
+    assert.equal(c.consecutive_failures || 0, 0, "a pending group is not a failure");
+    assert.equal(c.status, "running");
+  }
+  {
     // a failed connection write never escapes the tick, and its log line is redacted
     const lines = [];
     const orig = console.error;

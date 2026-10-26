@@ -43,7 +43,7 @@ const guardLive = require("./posting-guard");
 const social = require("./social-dwell");
 const localMode = require("./posting-local");
 const { profileNameFor } = require("./profile-name");
-const { SIGNAL_DISABLES, SIGNAL_PENALISES } = require("./posting-signals");
+const { SIGNAL_DISABLES, SIGNAL_PENALISES, MEMBERSHIP_PENDING } = require("./posting-signals");
 const P = require("./posting-driver-proof");
 const media = require("./posting-media");
 const shots = require("./posting-shots");
@@ -247,6 +247,7 @@ async function preSubmitSignal(page, x, known) {
   const sig = known || (await P.readSignal(page, x.copy));
   if (HALTING.has(sig)) return x.end("verified_failed", { error_code: sig, check: "page_signal" }, { signal: sig });
   if (sig === "not_member") return x.end("verified_failed", { error_code: sig, check: "join_text_on_page" }, { membership: "left" });
+  if (sig === "membership_pending") return x.end("verified_failed", { error_code: sig, check: "pending_text_on_page" }, { membership: "pending" });
   if (sig === "group_blocked") return x.end("verified_failed", { error_code: sig, check: "group_blocked_text" });
   if (sig === "unreadable") return x.end("verified_failed", { error_code: "markers_missing", check: "page_unreadable" }); // fail closed, pre-submit
   return null;
@@ -304,8 +305,9 @@ async function drive(page, x, want, args, opts = {}) {
   // checks below fail closed, as before.
   // Seen stuck on the splash for good: then one reload, what anyone does with
   // a page that will not load.
-  const there = () => page.locator(`${S.composer}, ${S.joinGroup}`).first().waitFor({ timeout: 45000 }).then(() => true, () => false);
-  if (!(await there()) && (await P.countOf(page, S.composer)) === 0 && (await P.countOf(page, S.joinGroup)) === 0) {
+  // A pending join request also says the page is there: no composer will come.
+  const there = () => page.locator(`${S.composer}, ${S.joinGroup}, ${S.cancelJoinRequest}`).first().waitFor({ timeout: 45000 }).then(() => true, () => false);
+  if (!(await there()) && (await P.countOf(page, S.composer)) === 0 && (await P.countOf(page, S.joinGroup)) === 0 && (await P.countOf(page, S.cancelJoinRequest)) === 0) {
     await x.guard("navigate");
     console.warn(`posting nav …${String(attempt.key).slice(-6)}: destination still loading, reloading once`);
     await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
@@ -319,6 +321,7 @@ async function drive(page, x, want, args, opts = {}) {
     const join = await P.countOf(page, S.joinGroup);
     if (join > 0) return x.end("verified_failed", { error_code: "not_member", check: "join_button_on_group_page" }, { membership: "left" });
     if (join < 0) return x.end("verified_failed", { error_code: "markers_missing", check: "join_button_unreadable" });
+    if ((await P.countOf(page, S.cancelJoinRequest)) > 0) return x.end("verified_failed", { error_code: "membership_pending", check: "cancel_request_button" }, { membership: "pending" });
   }
   const id = await P.readTargetId(page, kind);
   if (!want.id) {
@@ -333,7 +336,12 @@ async function drive(page, x, want, args, opts = {}) {
 
   // 3. compose
   const composer = page.locator(S.composer).first();
-  if ((await composer.count().catch(() => 0)) === 0) return x.end("verified_failed", { error_code: "composer_not_found", check: "composer_button" });
+  if ((await composer.count().catch(() => 0)) === 0) {
+    // No composer on a group whose join request waits: its notice is in the page itself ([Unverified] button labels above).
+    const main = kind === "group" ? await page.locator('div[role="main"]').first().innerText({ timeout: 5000 }).catch(() => "") : "";
+    if (MEMBERSHIP_PENDING.test(main)) return x.end("verified_failed", { error_code: "membership_pending", check: "pending_text_in_main" }, { membership: "pending" });
+    return x.end("verified_failed", { error_code: "composer_not_found", check: "composer_button" });
+  }
   await composer.click();
   const editor = page.locator(S.editor).first();
   const opened = () => editor.waitFor({ timeout: 45000 }).then(() => true, () => false);

@@ -72,6 +72,8 @@ function call(server, method, path, body) {
     const e = live.open(PHONE, "s4");
     const s = chain.session(PHONE, { env: {} }, {}, null);
     assert.equal(s.more("verified_posted"), true);
+    assert.equal(s.more("verified_failed", { error_code: "membership_pending" }), true, "a pending group does not end the session");
+    assert.equal(s.more("verified_failed", { error_code: "composer_not_found" }), false);
     live.hold(PHONE);
     assert.equal(s.more("verified_posted"), false, "finish, then hold");
     live.close(PHONE, e);
