@@ -165,6 +165,10 @@ module.exports = function createIntakeRouter(ctx) {
     const body = req.body || {};
     const agentPhone = normalizeAuthPhone(body.agent && body.agent.phone);
     if (!agentPhone) return res.status(400).json({ error: "valid agent.phone required" });
+    // A demo is the client's first account: never an empty one. Without a
+    // name the business doc below, the listing and every page it builds carry
+    // nothing, and the templates would show their placeholder agent instead.
+    if (!String((body.agent && body.agent.name) || "").trim()) return res.status(400).json({ error: "agent.name required" });
 
     const result = await createListing(agentPhone, body, { ...(body.agent || {}), phone: agentPhone });
     if (result.error) return res.status(result.code).json({ error: result.error });
