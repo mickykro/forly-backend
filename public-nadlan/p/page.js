@@ -142,7 +142,7 @@
   function render(d) {
     applyTheme(d.theme);
     CURLANG = d.language || "he";
-    if (window.I18N) window.I18N.apply(document, CURLANG); // translate chrome + set <html lang/dir>
+    if (window.I18N) { window.I18N.apply(document, CURLANG); window.I18N.picker(d); } // translate chrome + set <html lang/dir>
     var p = d.property, a = d.agent;
     var text = function (sel, val) { var el = $(sel); if (el && val != null) el.textContent = val; };
 
@@ -566,10 +566,11 @@
   // ── boot ─────────────────────────────────
 
   if (!pageId && !portfolioSlug) { setState("notfound"); return; }
-  var apiUrl = pageId
+  var visitorLang = new URLSearchParams(location.search).get("lang"); // the picker's choice (templates/i18n.js)
+  var apiUrl = (pageId
     ? "/api/property-page?id=" + encodeURIComponent(pageId) + (editToken ? "&edit_token=" + encodeURIComponent(editToken) : "")
     : "/api/property-by-slug?portfolio_slug=" + encodeURIComponent(portfolioSlug) + "&property_slug=" + encodeURIComponent(propertySlug) +
-      (editToken ? "&edit_token=" + encodeURIComponent(editToken) : "");
+      (editToken ? "&edit_token=" + encodeURIComponent(editToken) : "")) + (visitorLang ? "&lang=" + encodeURIComponent(visitorLang) : "");
   fetch(apiUrl)
     .then(function (r) {
       if (r.status === 404) { setState("notfound"); return null; }
