@@ -81,7 +81,7 @@ footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border
 
 <div class="verdict alert">
   <h2>Bottom line</h2>
-  <p>Not "nothing to improve." Of 5 real agent/customer conversations active in the last 4 days, at least 2 are hitting a Facebook-connection problem the bot cannot help with, one agent had a logo image run through a paid property-photo edit, and one agent's own valid menu reply was rejected twice by the bot. One likely internal-debug-text leak into a customer's chat was also found and flagged. Main Router v3's 10-20 fix is confirmed still live; Business Handler v6's fix remains built and verified but paused on the same unresolved credential risk as 10-21 — no change there today.</p>
+  <p>Not "nothing to improve." Of 5 real agent/customer conversations active in the last 4 days: the Facebook-connection problem first flagged for Nofar Harush on 10-23 is still open and now confirmed on a second agent (Itai Yaakov) too, with Nofar's own direct, unanswered request to fix it; a bot-offered numeric menu option was rejected twice before working; and a likely internal debug-text leak into a customer's chat was found and flagged (new this cycle). The logo-photo misclassification is the same single occurrence already reported on 10-23, repeated here only because it's still unfixed. Main Router v3's 10-20 fix is confirmed still live; Business Handler v6's fix remains built and verified but paused on the same unresolved credential risk as 10-21 — no change there today.</p>
 </div>
 
 <section>
@@ -97,11 +97,12 @@ footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border
 </section>
 
 <section>
-<h2 class="section-title">New findings from today's conversations</h2>
+<h2 class="section-title">Findings from today's conversations</h2>
 <div class="section-note">5 real agent conversations had activity in the sampled window (2026-10-22 → 2026-10-26); a 6th chat was the internal managers' log group (excluded — outbound-only) and the operator's own chat was excluded per instructions.</div>
 
 <div class="card critical">
-  <h3>1 · Facebook connection is broken for at least 2 of 5 agents — and the bot can't help <span class="badge critical">Cross-cutting</span> <span class="badge biz">Business</span></h3>
+  <h3>1 · Facebook connection is broken for at least 2 of 5 agents — and the bot can't help <span class="badge critical">Recurring, now 2 agents</span> <span class="badge biz">Business</span></h3>
+  <p><em>Correction for accuracy: Nofar's Facebook-connection problem itself was already flagged on 2026-10-23 (as a recommendation about nudge timing) and carried forward unresolved through 10-24/10-25 with no new occurrence (no new pages built those cycles). What's new today: a second, previously-unflagged agent (Itai Yaakov) hitting the identical failure, and Nofar's own direct, explicit, unanswered support request quoted below — which raises this from "a UX nudge-timing idea" to "a real open support gap affecting multiple agents."</em></p>
   <p><strong>Nofar Harush</strong> (RE/MAX Be'er Sheva) asked the bot directly, in plain words:</p>
   <div class="evidence"><div class="line">2026-10-25 10:33 — Agent: <em>"לא מצליחה להתחבר לפייסבוק"</em> (I can't manage to connect to Facebook)</div>
   <div class="line">2026-10-25 10:34 — Bot: <em>"לא בטוחה למה התכוונת 🙂 אפשר לכתוב במילים מה לעשות?"</em> (not sure what you meant — can you write in words what to do?)</div></div>
@@ -117,7 +118,8 @@ footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border
 </div>
 
 <div class="card critical">
-  <h3>2 · Agent's own logo photo was treated as a property photo — wasted generation, near-miss bad page <span class="badge critical">New</span></h3>
+  <h3>2 · Agent's own logo photo was treated as a property photo — wasted generation, near-miss bad page <span class="badge watch">Recurring — same occurrence as 2026-10-23, still unfixed</span></h3>
+  <p><em>Correction for accuracy: this is the exact same message from the exact same chat (972584191283, the logo sent 2026-10-22) already reported on 2026-10-23 — not a new occurrence. Repeated here only because it's still unfixed 4 days later and the exact caption text is worth having alongside today's other image-handling finding (3). No new instance of this pattern appeared in today's window.</em></p>
   <p>An agent sent their business logo, explicitly captioned <code class="code-inline">"זה הלוגו שלי"</code> ("this is my logo"). The bot ran it through the property-photo "improve" pipeline anyway:</p>
   <div class="evidence">
     <div class="line">10-22 10:42 — Agent sends logo image, caption: "זה הלוגו שלי"</div>
