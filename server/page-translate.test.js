@@ -94,7 +94,9 @@ const fake = (fn) => ({ beta: { messages: { create: fn } } });
     assert.deepEqual(got, { "שלום": "Bonjour", "סגירה": "Fermer" });
     assert.deepEqual(req.messages[0].content, JSON.stringify({ s0: "שלום", s1: "סגירה", s2: "ריק" }));
     assert.ok(/dashboard/.test(req.system) && /French/.test(req.system));
-    assert.equal(await T.translateStrings("fr", ["שלום"], { client: fake(async () => reply({}, "refusal")) }), null);
+    assert.deepEqual([req.model, req.thinking], [T.UI_MODEL, { type: "disabled" }], "the cheaper model, no thinking");
+    await assert.rejects(T.translateStrings("fr", ["שלום"], { client: fake(async () => reply({}, "refusal")) }), /unusable reply/);
+    await assert.rejects(T.translateStrings("fr", ["שלום"], { client: fake(async () => { throw new Error("429 rate limited"); }) }), /429/, "an API error is the caller's to report");
     assert.equal(await T.translateStrings("xx", ["שלום"], { client: fake(async () => reply({ s0: "x" })) }), null);
   }
 
