@@ -63,7 +63,7 @@
   function T(key, vars) { return window.I18N ? window.I18N.t(LANG, key, vars) : key; }
 
   // ── i18n: translate static chrome ([data-i18n]) + set <html lang/dir> ──
-  if (window.I18N) window.I18N.apply(document, LANG);
+  if (window.I18N) { window.I18N.apply(document, LANG); window.I18N.picker(DATA); }
 
   // ── theme: custom colors + fonts override the template's accent tokens ──
   (function applyTheme() {

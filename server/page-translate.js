@@ -187,4 +187,4 @@ async function translateStrings(lang, strings, deps = {}) {
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [fields[k], v]));
 }
 
-module.exports = { translatePage, translateStrings, collect, alreadyIn, buildRequest, readReply, NAMES, MODEL };
+module.exports = { translatePage, translateStrings, collect, setPath, alreadyIn, buildRequest, readReply, NAMES, MODEL };

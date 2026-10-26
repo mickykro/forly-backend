@@ -166,5 +166,22 @@
     each(root, "[data-i18n-aria]", function (el) { el.setAttribute("aria-label", t(lang, el.getAttribute("data-i18n-aria"))); });
   }
 
-  window.I18N = { t: t, apply: apply, isRTL: function (l) { return !!RTL[l]; }, langs: Object.keys(DICT) };
+  // A visitor's language picker, for a page served with multilingual (the
+  // server translates on ?lang=, once per language). Fixed by the sound
+  // button's corner, on the other side.
+  var NAMES = { he: "עברית", en: "English", ar: "العربية", ru: "Русский", es: "Español", fr: "Français" };
+  function picker(data) {
+    if (!data || !data.multilingual || document.querySelector(".fly-lang")) return;
+    var cur = data.language || "he", sel = document.createElement("select");
+    sel.className = "fly-lang"; sel.setAttribute("aria-label", "Language"); sel.setAttribute("translate", "no");
+    sel.style.cssText = "position:fixed;z-index:60;bottom:16px;inset-inline-start:16px;padding:8px 12px;border-radius:999px;border:1px solid rgba(0,0,0,.18);background:rgba(255,255,255,.94);color:#1a1712;font:600 14px/1.2 system-ui,sans-serif;box-shadow:0 6px 20px -8px rgba(0,0,0,.4);cursor:pointer";
+    Object.keys(DICT).forEach(function (l) { var o = document.createElement("option"); o.value = l; o.textContent = NAMES[l] || l; o.selected = l === cur; sel.appendChild(o); });
+    sel.addEventListener("change", function () {
+      var u = new URL(location.href); u.searchParams.set("lang", sel.value);
+      sel.disabled = true; // the first visit in a language waits for its translation
+      location.href = u.toString();
+    });
+    document.body.appendChild(sel);
+  }
+  window.I18N = { t: t, apply: apply, picker: picker, isRTL: function (l) { return !!RTL[l]; }, langs: Object.keys(DICT) };
 })();

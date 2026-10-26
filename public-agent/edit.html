@@ -259,7 +259,8 @@
         <div class="sec-title">הצגת אזורים</div>
         <div class="toggle-row"><label>גלריית תמונות</label><span class="switch"><input type="checkbox" id="tGallery"><i></i></span></div>
         <div class="toggle-row"><label>כרטיסי ״למה דווקא כאן״</label><span class="switch"><input type="checkbox" id="tCarousel"><i></i></span></div>
-        <div class="toggle-row" style="border-bottom:none"><label>מידע על השכונה</label><span class="switch"><input type="checkbox" id="tArea"><i></i></span></div>
+        <div class="toggle-row"><label>מידע על השכונה</label><span class="switch"><input type="checkbox" id="tArea"><i></i></span></div>
+        <div class="toggle-row" style="border-bottom:none"><label>תרגום לגולשים (בחירת שפה בדף)</label><span class="switch"><input type="checkbox" id="tMultilingual"><i></i></span></div>
       </div>
 
       <div class="save-bar">
@@ -394,6 +395,7 @@
         carousel: $("#tCarousel").checked,
         area: $("#tArea").checked,
       },
+      multilingual: $("#tMultilingual").checked,
     };
   }
 
@@ -517,6 +519,7 @@
       $("#tGallery").checked = !!sections.gallery;
       $("#tCarousel").checked = !!sections.carousel;
       $("#tArea").checked = !!sections.area;
+      $("#tMultilingual").checked = !!d.multilingual;
 
       galleryState = (gallery.images || []).slice();
       renderGallery();

@@ -19,7 +19,8 @@ const businessCache = require("../business-cache");
 const portalStream = require("../portal-stream");
 const og = require("../og");
 const distributionJobs = require("../distribution/jobs");
-const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, normalizePhone, guessImageExt, rehost, sendWhatsAppRich, storeBuffer, ownUploadedVideo, inPlace } = require("../utils");
+const { pad, daysFromNow, asMillis, sanitizeTheme, sanitizeLang, LANGUAGES, normalizePhone, guessImageExt, rehost, sendWhatsAppRich, storeBuffer, ownUploadedVideo, inPlace } = require("../utils");
+const pageTranslate = require("../page-translate");
 const { sanitizeTags, deriveTags } = require("../tags");
 const { CURRENCIES, normalizeCurrency } = require("../currency");
 const { roomLabel } = require("../rooms");
@@ -52,6 +53,31 @@ module.exports = function createPagesRouter(ctx) {
           uploadPublicBase, remoteUploadBase, signActionToken,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
   const { constantTimeEqual } = require("../security");
+  const translatePage = ctx.translatePage || pageTranslate.translatePage;
+
+  // ── a visitor's language (?lang=): a page marked multilingual (new pages,
+  // or the editor's toggle) is served in it — the chrome by templates/i18n.js,
+  // the words by the same translator that built the page, once per language
+  // and kept on the doc (i18n.<lang>). Not marked, unknown or the page's own
+  // language: the page as it is. A translation that fails serves the original.
+  const langOf = (q) => (typeof q.lang === "string" && LANGUAGES[q.lang] ? q.lang : null);
+  async function inLanguage(id, d, lang) {
+    if (!lang || !d || d.multilingual !== true || lang === (d.language || "he")) return d;
+    let cached = d.i18n && d.i18n[lang];
+    if (!cached) {
+      const clone = JSON.parse(JSON.stringify(d));
+      clone.language = lang; delete clone.place_i18n;
+      const tr = await translatePage(clone);
+      if (!tr.translated) return d;
+      cached = { fields: pageTranslate.collect(clone), place_i18n: clone.place_i18n || null };
+      try { await db.updatePage(id, { [`i18n.${lang}`]: cached }); } catch (e) { console.error(`[page-translate] ${id} ${lang} not cached: ${e && e.message}`); }
+    }
+    const out = JSON.parse(JSON.stringify(d));
+    for (const [p, v] of Object.entries(cached.fields)) pageTranslate.setPath(out, p, v);
+    out.place_i18n = cached.place_i18n;
+    out.language = lang;
+    return out;
+  }
   // Automated posting (Task 16): a page that becomes active joins a campaign
   // when its account opted in. Fire-and-forget — enrollment never fails or
   // delays the page; its own failure is stored as posting_enroll_error.
@@ -109,6 +135,7 @@ module.exports = function createPagesRouter(ctx) {
       hero: d.hero, gallery: d.gallery, carousel: d.carousel, area: d.area,
       cta: d.cta, sections: d.sections, theme: d.theme || null,
       language: d.language || "he",
+      multilingual: d.multilingual === true,
       texts: d.texts || null,
       chatbot: chatbot || { enabled: false, greeting: null },
     };
@@ -330,6 +357,7 @@ module.exports = function createPagesRouter(ctx) {
         },
         theme: theme || null,
         language: sanitizeLang(body.language || (listing && listing.language)),
+        multilingual: true, // visitors may read a new page in their language (inLanguage)
         hero: {
           phrase: body.hero_phrase || "", video_url: videoUrl, promo_video_url: promo ? promo.url : null, poster_url: posterUrl,
           ...(narrationUrl ? { narration_url: narrationUrl } : {}), ...(musicUrl ? { music_url: musicUrl } : {}),
@@ -419,7 +447,7 @@ module.exports = function createPagesRouter(ctx) {
     const editable = editableFor(req, id, d);
     res.set("Cache-Control", editable ? "no-store" : "public, max-age=60");
     const bot = await resolveChatbot(d);
-    res.json({ ...pagePayload(id, d, bot.public), ...(editable ? { editable: true } : {}) });
+    res.json({ ...pagePayload(id, await inLanguage(id, d, langOf(req.query)), bot.public), ...(editable ? { editable: true } : {}) });
   }
   router.get("/api/property-page", getPageHandler);
 
@@ -586,6 +614,7 @@ module.exports = function createPagesRouter(ctx) {
       if (body.theme && typeof body.theme === "object" && SERVER_TEMPLATES.has(body.theme.template)) {
         patch["theme.template"] = body.theme.template;
       }
+      if (body.multilingual != null) patch.multilingual = !!body.multilingual;
       if (body.sections && typeof body.sections === "object") {
         patch["sections.gallery"] = !!body.sections.gallery;
         patch["sections.carousel"] = !!body.sections.carousel;
@@ -869,7 +898,7 @@ module.exports = function createPagesRouter(ctx) {
       const bot = await resolveChatbot(page);
       const editable = editableFor(req, page.page_id, page);
       const payload = {
-        ...pagePayload(page.page_id, page, bot.public),
+        ...pagePayload(page.page_id, await inLanguage(page.page_id, page, langOf(req.query)), bot.public),
         property_url: `/${reservation.current_slug}/${propSlug}`,
         ...(editable ? { editable: true } : {}),
       };
@@ -972,8 +1001,9 @@ module.exports = function createPagesRouter(ctx) {
   const origShell = path.join(__dirname, "..", "..", "public-nadlan", "p", "index.html");
   // classic: the personal edit link (#edit=) edits texts in the Classic view, the
   // only one marked up for in-page editing; the texts are shared by every design.
-  async function renderPropertyPage(res, id, d, pageUrl, { classic = false } = {}) {
+  async function renderPropertyPage(res, id, d, pageUrl, { classic = false, lang = null } = {}) {
     const tpl = (d && d.theme && d.theme.template) || "original";
+    if (d && d.status === "active") d = await inLanguage(id, d, lang);
     if (!d || d.status !== "active" || classic || !SERVER_TEMPLATES.has(tpl)) {
       // Shell branch: still inject OG tags for active pages so shared links
       // preview — crawlers don't run the JS that renders this shell.
@@ -1042,7 +1072,7 @@ module.exports = function createPagesRouter(ctx) {
       } catch (e) { /* fall through to the legacy shell */ }
     }
     if (tracked) return res.redirect(302, attribution.withoutClick(`/p/${encodeURIComponent(id)}`, req.query));
-    renderPropertyPage(res, id, d, pageUrl, { classic: req.query.view === "classic" });
+    renderPropertyPage(res, id, d, pageUrl, { classic: req.query.view === "classic", lang: langOf(req.query) });
   });
 
   // ── nested property page: /:portfolioSlug/:propertySlug ──
@@ -1059,7 +1089,7 @@ module.exports = function createPagesRouter(ctx) {
       const d = await db.findPageBySlug(reservation.business_phone, propSlug);
       if (!d) return next();
       const pageUrl = `${pageBaseUrl}/${portfolioSlugParam}/${propSlug}`;
-      renderPropertyPage(res, d.page_id, d, pageUrl, { classic: req.query.view === "classic" });
+      renderPropertyPage(res, d.page_id, d, pageUrl, { classic: req.query.view === "classic", lang: langOf(req.query) });
     } catch (err) {
       console.error("GET /:portfolioSlug/:propertySlug failed:", err);
       next();
