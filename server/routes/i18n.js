@@ -20,6 +20,7 @@ const { LANGUAGES } = require("../utils");
 
 const DEFAULT_DIR = path.join(__dirname, "..", "..", "public-agent");
 const CHUNK = 80;
+const PARALLEL = 4; // calls in flight: the first fill of a language (~1,100 strings) takes a minute or two, not ten
 const MAX_KEYS = 5000;
 const HEBREW_TWICE = /[א-ת].*[א-ת]/s;
 // The operator console stays Hebrew; tests and the dev driver are not pages;
@@ -102,12 +103,17 @@ module.exports = function createI18nRouter({ db, dir = DEFAULT_DIR, translate = 
   const filling = {};
 
   async function fill(lang, missing) {
-    for (let i = 0; i < missing.length; i += CHUNK) {
-      const got = await translate(lang, missing.slice(i, i + CHUNK));
-      if (!got) return; // no key, a refusal or an error: what is cached stays, the rest waits for the next request
+    console.log(`[ui-i18n] ${lang}: translating ${missing.length} strings`);
+    for (let i = 0; i < missing.length; i += CHUNK * PARALLEL) {
+      const chunks = [];
+      for (let j = i; j < Math.min(missing.length, i + CHUNK * PARALLEL); j += CHUNK) chunks.push(missing.slice(j, j + CHUNK));
+      const got = Object.assign({}, ...(await Promise.all(chunks.map((c) => translate(lang, c)))).filter(Boolean));
+      // No key, a refusal or an error: what is cached stays, the rest waits for the next request.
+      if (!Object.keys(got).length) { console.log(`[ui-i18n] ${lang}: nothing came back, ${missing.length - i} strings left`); return; }
       const entries = Object.assign(parse(await db.getSetting(`ui_i18n_${lang}`)), got);
       await db.setSetting(`ui_i18n_${lang}`, { json: JSON.stringify(entries) });
     }
+    console.log(`[ui-i18n] ${lang}: done`);
   }
 
   router.get("/:lang", async (req, res) => {
@@ -122,7 +128,9 @@ module.exports = function createI18nRouter({ db, dir = DEFAULT_DIR, translate = 
         filling[lang] = fill(lang, missing).catch((e) => console.error(`[ui-i18n] ${lang}: ${e && e.message}`)).finally(() => { delete filling[lang]; });
       }
       res.set("Cache-Control", "no-store");
-      res.json({ entries, pending: filling[lang] ? missing.length : 0 });
+      // reason: why entries are missing — "filling" (ask again) or "no_api_key" (the server cannot translate).
+      const reason = !missing.length ? null : filling[lang] ? "filling" : process.env.ANTHROPIC_API_KEY ? null : "no_api_key";
+      res.json(Object.assign({ entries, pending: filling[lang] ? missing.length : 0 }, reason ? { reason } : {}));
     } catch (e) {
       console.error(`[ui-i18n] ${lang}: ${e && e.message}`);
       res.status(500).json({ error: "i18n_failed" });

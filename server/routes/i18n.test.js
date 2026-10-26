@@ -44,7 +44,7 @@ const { literals } = createRouter({ db })._test;
   assert.deepEqual((await get("/api/i18n/he")).body, { entries: {}, pending: 0 }, "Hebrew is the source");
 
   const first = await get("/api/i18n/en");
-  assert.deepEqual(first.body, { entries: {}, pending: 2 }, "nothing cached yet; both strings on their way");
+  assert.deepEqual(first.body, { entries: {}, pending: 2, reason: "filling" }, "nothing cached yet; both strings on their way");
   assert.equal(first.cache, "no-store");
   await router._test.whenFilled("en");
   assert.deepEqual(asked, [["en", ["הנכסים שלי", "הטקסט הועתק"]]], "the page's strings, not the console's or a test's");
@@ -71,7 +71,7 @@ const { literals } = createRouter({ db })._test;
 
   // No key on the server: Hebrew, and the client is not told to wait.
   delete process.env.ANTHROPIC_API_KEY;
-  assert.deepEqual((await get("/api/i18n/fr")).body, { entries: {}, pending: 0 });
+  assert.deepEqual((await get("/api/i18n/fr")).body, { entries: {}, pending: 0, reason: "no_api_key" }, "says why, for whoever opens the URL");
 
   server.close();
   console.log("routes/i18n.test.js ok");

@@ -73,7 +73,7 @@
       dict = d.entries || {};
       compile();
       pass();
-      if (d.pending && polls++ < 30) setTimeout(load, 4000); // the server is still filling this language
+      if (d.pending && polls++ < 90) setTimeout(load, 6000); // the server is still filling this language (a first fill takes minutes)
     }).catch(function () { /* stays Hebrew */ });
   }
 
