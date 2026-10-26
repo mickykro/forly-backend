@@ -13,7 +13,9 @@ const page = () => ({
   agent: { name: "שיראל כהן", brand_name: "כהן נדל״ן", tagline: "הבית הבא שלך" },
   texts: null,
 });
-const reply = (obj, stop = "end_turn") => ({ stop_reason: stop, content: [{ type: "text", text: JSON.stringify(obj) }] });
+// A reply: the translations as an array in the order the fields were sent (an object is sent as is, for junk cases).
+const reply = (vals, stop = "end_turn") => ({ stop_reason: stop, content: [{ type: "text", text: JSON.stringify(Array.isArray(vals) ? { values: vals } : vals) }] });
+const inOrder = (fields, map) => Object.keys(fields).map((k) => (k in map ? map[k] : ""));
 const fake = (fn) => ({ beta: { messages: { create: fn } } });
 
 (async () => {
@@ -38,7 +40,7 @@ const fake = (fn) => ({ beta: { messages: { create: fn } } });
     let req;
     const d = page();
     const out = Object.fromEntries(Object.keys(fields).map((k) => [k, `EN:${k}`]));
-    const r = await T.translatePage(d, { client: fake(async (body) => { req = body; return reply(out); }) });
+    const r = await T.translatePage(d, { client: fake(async (body) => { req = body; return reply(inOrder(fields, out)); }) });
     assert.deepEqual(r, { translated: Object.keys(fields).length });
     assert.equal(d.hero.phrase, "EN:hero.phrase");
     assert.equal(d.carousel.slides[0].title, "EN:carousel.slides.0.title");
@@ -53,29 +55,34 @@ const fake = (fn) => ({ beta: { messages: { create: fn } } });
     assert.deepEqual(d.place_i18n, { address: "EN:property.address", neighborhood: "EN:property.neighborhood", city: "EN:property.city" });
     assert.deepEqual(d.property.tags, ["מרפסת"], "tags are keys, never translated");
     assert.equal(d.agent.name, "שיראל כהן");
-    // the request: one call, schema with exactly the sent keys, fallback on
-    assert.deepEqual(req.output_config.format.schema.required.sort(), Object.keys(fields).sort());
-    assert.equal(req.output_config.format.schema.additionalProperties, false);
+    // the request: one call, the texts as one array (a per-text schema is too large a grammar), fallback on
+    assert.deepEqual(req.output_config.format.schema.required, ["values"]);
+    assert.equal(req.output_config.format.schema.properties.values.type, "array");
+    assert.equal(req.messages[0].content, JSON.stringify(Object.keys(fields).map((k) => fields[k])));
     assert.equal(req.fallbacks, "default");
     assert.ok(req.betas.includes("server-side-fallback-2026-07-01"));
     assert.match(req.system, /English/);
   }
 
-  // ── a partial reply applies what it has; unknown keys are ignored ──
+  // ── a blank entry keeps the original; a list of the wrong length is no reply ──
   {
     const d = page();
-    const r = await T.translatePage(d, { client: fake(async () => reply({ "hero.phrase": "Bright", "evil.key": "x", "cta.sub": "  " })) });
+    const r = await T.translatePage(d, { client: fake(async () => reply(inOrder(fields, { "hero.phrase": "Bright", "cta.sub": "  " }))) });
     assert.deepEqual(r, { translated: 1 });
     assert.equal(d.hero.phrase, "Bright");
     assert.equal(d.cta.sub, "השאירו פרטים", "a blank value keeps the original");
-    assert.ok(!("evil" in d));
+    const d2 = page();
+    const errLog = console.error; console.error = () => {};
+    assert.deepEqual(await T.translatePage(d2, { client: fake(async () => reply(["Bright"])) }), { skipped: "bad_reply" }, "a shorter list would shift every word");
+    console.error = errLog;
+    assert.equal(d2.hero.phrase, "בית מואר עם מרפסת");
   }
 
   // ── fail-open: errors, refusals, truncation and junk leave the page as built ──
   for (const [client, why] of [
     [fake(async () => { throw new Error("down"); }), "error"],
     [fake(async () => reply({}, "refusal")), "refusal"],
-    [fake(async () => reply({ "hero.phrase": "x" }, "max_tokens")), "bad_reply"],
+    [fake(async () => reply(["x"], "max_tokens")), "bad_reply"],
     [fake(async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: "not json" }] })), "bad_reply"],
   ]) {
     const d = page();
@@ -90,16 +97,17 @@ const fake = (fn) => ({ beta: { messages: { create: fn } } });
   // ── UI strings (routes/i18n.js): keyed by position on the wire, back by text; junk dropped ──
   {
     let req;
-    const got = await T.translateStrings("fr", ["שלום", "סגירה", "ריק"], { client: fake(async (r) => { req = r; return reply({ s0: "Bonjour", s1: "Fermer", s2: "  " }); }) });
+    const got = await T.translateStrings("fr", ["שלום", "סגירה", "ריק"], { client: fake(async (r) => { req = r; return reply(["Bonjour", "Fermer", "  "]); }) });
     assert.deepEqual(got, { "שלום": "Bonjour", "סגירה": "Fermer" });
-    assert.deepEqual(req.messages[0].content, JSON.stringify({ s0: "שלום", s1: "סגירה", s2: "ריק" }));
+    assert.deepEqual(req.messages[0].content, JSON.stringify(["שלום", "סגירה", "ריק"]));
+    await assert.rejects(T.translateStrings("fr", ["שלום", "סגירה"], { client: fake(async () => reply(["Bonjour"])) }), /unusable reply/, "a shorter list is refused");
     assert.ok(/dashboard/.test(req.system) && /French/.test(req.system));
     assert.deepEqual([req.model, req.thinking], [T.UI_MODEL, undefined], "the cheaper model; a 5.5 model takes no thinking parameter");
     assert.deepEqual(T.buildRequest("en", { a: "x" }, "claude-sonnet-5").thinking, { type: "disabled" }, "a 5.0 model thinks unless told not to");
     assert.equal(T.buildRequest("en", { a: "x" }, "claude-opus-5-5").thinking, undefined);
     await assert.rejects(T.translateStrings("fr", ["שלום"], { client: fake(async () => reply({}, "refusal")) }), /unusable reply/);
     await assert.rejects(T.translateStrings("fr", ["שלום"], { client: fake(async () => { throw new Error("429 rate limited"); }) }), /429/, "an API error is the caller's to report");
-    assert.equal(await T.translateStrings("xx", ["שלום"], { client: fake(async () => reply({ s0: "x" })) }), null);
+    assert.equal(await T.translateStrings("xx", ["שלום"], { client: fake(async () => reply(["x"])) }), null);
   }
 
   // ── no key, unknown language, nothing to translate ──
