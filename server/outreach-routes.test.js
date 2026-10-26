@@ -48,6 +48,7 @@ test("every admin mutation requires fresh step up before service access", async 
   );
   for (const path of [
     "/leads",
+    "/scans",
     "/leads/a/review",
     "/leads/a/corrections",
     "/leads/a/reject",
@@ -255,4 +256,82 @@ test("public preview shows only approved property fact keys with escaped values"
   assert.match(result.body, /&lt;b&gt;Haifa&lt;\/b&gt;/);
   assert.match(result.body, /<dd>0<\/dd>/);
   assert.ok(!result.body.includes("SECRET"));
+});
+test("group scans require step up and pass verified admin identity to discovery", async () => {
+  let input, actor;
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/admin/outreach",
+    createAdminOutreachRouter({
+      service: {},
+      requireAdmin: admin,
+      requireStepUp: (req, res, next) => next(),
+      discovery: {
+        start: async (body, user) => {
+          input = body;
+          actor = user;
+          return { id: "scan", status: "queued" };
+        },
+        status: async (id) => ({
+          id,
+          status: "done",
+          groups_visited: 2,
+          posts_seen: 8,
+          selected: 3,
+          duplicates: 1,
+          reasons: { not_property: 4 },
+        }),
+      },
+    }),
+  );
+  const result = await request(app, "/api/admin/outreach/scans", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      campaign_id: "outreach",
+      max_groups: 3,
+      max_candidates: 5,
+    }),
+  });
+  assert.equal(result.status, 200);
+  assert.equal(input.max_groups, 3);
+  assert.equal(actor.userId, "972500000001");
+  const status = await request(app, "/api/admin/outreach/scans/scan");
+  assert.equal(JSON.parse(status.body).posts_seen, 8);
+});
+test("latest scan list is admin protected and gracefully handles missing list capability", async () => {
+  let options;
+  const app = express();
+  app.use(
+    "/api/admin/outreach",
+    createAdminOutreachRouter({
+      service: {},
+      requireAdmin: admin,
+      requireStepUp: admin,
+      discovery: {
+        list: async (input) => {
+          options = input;
+          return { scans: [{ id: "running", status: "running" }] };
+        },
+      },
+    }),
+  );
+  const response = await request(app, "/api/admin/outreach/scans");
+  assert.deepEqual(options, { limit: 1 });
+  assert.equal(JSON.parse(response.body).scans[0].id, "running");
+  const fallback = express();
+  fallback.use(
+    "/api/admin/outreach",
+    createAdminOutreachRouter({
+      service: {},
+      requireAdmin: admin,
+      requireStepUp: admin,
+      discovery: {},
+    }),
+  );
+  assert.deepEqual(
+    JSON.parse((await request(fallback, "/api/admin/outreach/scans")).body),
+    { scans: [], next_cursor: null },
+  );
 });

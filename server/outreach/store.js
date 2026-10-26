@@ -9,6 +9,7 @@ const collections = [
   "jobs",
   "tokens",
   "challenges",
+  "scans",
 ];
 const name = (c) => {
   if (!collections.includes(c)) throw new Error("invalid outreach collection");
@@ -26,7 +27,7 @@ function createMemoryStore() {
     },
     async list(
       c,
-      { limit = 100, pending = false, demoId, dueBefore, cursor } = {},
+      { limit = 100, pending = false, demoId, dueBefore, cursor, kind } = {},
     ) {
       return [...maps[c].values()]
         .filter(
@@ -34,12 +35,21 @@ function createMemoryStore() {
             (!pending || x.status !== "done") &&
             (!demoId || x.demo_id === demoId) &&
             (!dueBefore || x.due_at <= dueBefore) &&
-            (!cursor || x.id > cursor),
+            (!cursor ||
+              (c === "scans" && kind === "scan"
+                ? x.created_at < maps[c].get(cursor)?.created_at ||
+                  (x.created_at === maps[c].get(cursor)?.created_at &&
+                    x.id > cursor)
+                : x.id > cursor)) &&
+            (!kind || x.kind === kind),
         )
         .sort((a, b) =>
           dueBefore
             ? String(a.due_at).localeCompare(String(b.due_at))
-            : String(a.id).localeCompare(String(b.id)),
+            : c === "scans" && kind === "scan"
+              ? String(b.created_at).localeCompare(String(a.created_at)) ||
+                String(a.id).localeCompare(String(b.id))
+              : String(a.id).localeCompare(String(b.id)),
         )
         .slice(0, Math.min(limit, 200))
         .map((x) => structuredClone(x));
@@ -83,12 +93,21 @@ function createFirestoreStore(db) {
     },
     async list(
       c,
-      { limit = 100, pending = false, demoId, dueBefore, cursor } = {},
+      { limit = 100, pending = false, demoId, dueBefore, cursor, kind } = {},
     ) {
       let q = db.collection(name(c));
+      if (kind) q = q.where("kind", "==", kind);
       if (pending) q = q.where("status", "in", ["queued", "running"]);
       if (demoId) q = q.where("demo_id", "==", demoId);
       if (dueBefore) q = q.where("due_at", "<=", dueBefore).orderBy("due_at");
+      if (c === "scans" && kind === "scan") {
+        q = q.orderBy("created_at", "desc").orderBy("__name__");
+        if (cursor) {
+          const previous = await db.collection(name(c)).doc(cursor).get();
+          if (!previous.exists) return [];
+          q = q.startAfter(previous);
+        }
+      }
       if (c === "leads") {
         q = q.orderBy("__name__");
         if (cursor) q = q.startAfter(cursor);

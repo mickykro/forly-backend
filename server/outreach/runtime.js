@@ -4,6 +4,7 @@ const { createService } = require("./service");
 const { createAssets } = require("./assets");
 const { createPrepareAssets } = require("./import-assets");
 const { createPipeline } = require("./pipeline");
+const { createDiscovery } = require("./discovery");
 const { createWorker } = require("./jobs");
 const { createClaimAuth } = require("./claim-auth");
 const { createPaidProvisioner } = require("./paid-page");
@@ -21,6 +22,8 @@ function createRuntime({
   sendCode,
   download,
   now = Date.now,
+  readGroups,
+  parseSource,
 }) {
   // Scheduling and private image reads do not consume paid rendering budgets.
   const { createCallbackGuard } = require("../callback-auth");
@@ -62,11 +65,21 @@ function createRuntime({
     reserve,
     now,
   });
+  const discovery = createDiscovery({
+    store,
+    service,
+    config,
+    database,
+    reserve,
+    now,
+    readGroups,
+    parseSource,
+  });
   const worker = createWorker({
     store,
     service,
     assets,
-    handlers: pipeline.handlers,
+    handlers: { ...pipeline.handlers, outreach_scan: discovery.handler },
     now,
     leaseMs: 10 * 60 * 1000,
   });
@@ -75,6 +88,7 @@ function createRuntime({
     requireAdmin,
     requireStepUp,
     startExtraction: pipeline.startExtraction,
+    discovery,
   });
   const claimAuth = createClaimAuth({
     store,
@@ -198,6 +212,7 @@ function createRuntime({
     },
   };
   return {
+    discovery,
     service,
     assets,
     worker,

@@ -15,6 +15,7 @@ function createAdminOutreachRouter({
   requireAdmin,
   requireStepUp,
   startExtraction,
+  discovery,
 }) {
   const router = express.Router();
   router.use(requireAdmin);
@@ -22,6 +23,37 @@ function createAdminOutreachRouter({
     res.set("Cache-Control", "no-store");
     next();
   });
+  router.post(
+    "/scans",
+    requireStepUp,
+    handler((req) => {
+      if (!discovery)
+        throw Object.assign(new Error("discovery_unavailable"), {
+          code: "discovery_unavailable",
+          status: 503,
+        });
+      return discovery.start(req.body, req.user);
+    }),
+  );
+  router.get(
+    "/scans",
+    handler((req) =>
+      discovery && typeof discovery.list === "function"
+        ? discovery.list({ limit: 1 })
+        : { scans: [], next_cursor: null },
+    ),
+  );
+  router.get(
+    "/scans/:id",
+    handler((req) => {
+      if (!discovery)
+        throw Object.assign(new Error("discovery_unavailable"), {
+          code: "discovery_unavailable",
+          status: 503,
+        });
+      return discovery.status(req.params.id);
+    }),
+  );
   router.get(
     "/leads",
     handler((req) =>

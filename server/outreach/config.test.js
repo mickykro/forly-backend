@@ -46,3 +46,8 @@ assert.throws(
     }),
   /outside/,
 );
+assert.equal(readConfig({}).groupScanEnabled, false);
+assert.equal(
+  readConfig({ OUTREACH_GROUP_SCAN_ENABLED: "true" }).groupScanEnabled,
+  true,
+);

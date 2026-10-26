@@ -20,6 +20,28 @@ test(
       secret: "emulator-only-outreach-purpose-key",
       config: { enabled: true, policyApproved: true },
     });
+    await store.transaction(async (tx) => {
+      tx.set("scans", "scan_old", {
+        id: "scan_old",
+        kind: "scan",
+        status: "done",
+        created_at: "2026-10-25T00:00:00Z",
+      });
+      tx.set("scans", "scan_recent", {
+        id: "scan_recent",
+        kind: "scan",
+        status: "running",
+        created_at: "2026-10-26T00:00:00Z",
+      });
+    });
+    const recent = await store.list("scans", { kind: "scan", limit: 1 });
+    assert.equal(recent[0].id, "scan_recent");
+    const older = await store.list("scans", {
+      kind: "scan",
+      limit: 1,
+      cursor: recent[0].id,
+    });
+    assert.equal(older[0].id, "scan_old");
     const actor = { id: "emulator-operator" };
     const input = {
       source_post_url: `https://facebook.com/groups/fixture/posts/${Date.now()}/`,

@@ -9,7 +9,10 @@
     cursor = null,
     detailTimer = null,
     reviewFacts = {},
-    deliveryCopy = {};
+    deliveryCopy = {},
+    scanTimer = null,
+    scanId = null,
+    scanWarnings = [];
   function error(e) {
     $("#outreachError").textContent =
       e && e.code === "stepup_required"
@@ -23,6 +26,107 @@
         ? { method: "POST", body: body, noRedirect: true }
         : { noRedirect: true },
     );
+  }
+  function scanTerminal(status) {
+    return (
+      [
+        "done",
+        "completed",
+        "failed",
+        "cancelled",
+        "blocked",
+        "outcome_unknown",
+      ].indexOf(status) >= 0
+    );
+  }
+  function renderScan(scan) {
+    (Array.isArray(scan.warnings) ? scan.warnings : []).forEach(
+      function (warning) {
+        var text = typeof warning === "string" ? warning : warning.code;
+        if (text && scanWarnings.indexOf(text) < 0) scanWarnings.push(text);
+      },
+    );
+    var metrics = [
+      ["קבוצות שנבדקו", "groups_visited"],
+      ["פוסטים שנצפו", "posts_seen"],
+      ["מועמדים שנבחרו", "selected"],
+      ["כפילויות", "duplicates"],
+    ];
+    var html = field("מצב הסריקה", scan.status);
+    if (scan.phase)
+      html += field(
+        "שלב",
+        {
+          reading_groups: "קריאת קבוצות ופוסטים",
+          qualifying: "בחירת מועמדים מתאימים",
+        }[scan.phase] || scan.phase,
+      );
+    if (scan.error_code)
+      html += field(
+        "נדרשת פעולה",
+        {
+          group_scan_login_required:
+            "פרופיל הסריקה אינו מחובר לפייסבוק. התחברו לפרופיל והפעילו סריקה חדשה.",
+          group_scan_checkpoint: "פייסבוק דורשת אימות בפרופיל הסריקה.",
+          group_scan_captcha: "יש להשלים את בדיקת פייסבוק בפרופיל הסריקה.",
+        }[scan.error_code] || scan.error_code,
+      );
+    metrics.forEach(function (pair) {
+      var value = scan[pair[1]];
+      html += field(
+        pair[0],
+        typeof value === "number" && Number.isFinite(value) ? value : "—",
+      );
+    });
+    var reasons = scan.reasons || {};
+    if (Array.isArray(reasons))
+      html += field("סיכום בחירה ודחייה", reasons.join(", "));
+    else
+      Object.keys(reasons).forEach(function (reason) {
+        html += field(reason, reasons[reason]);
+      });
+    if (scanWarnings.length)
+      html +=
+        "<h4>הערות הסריקה</h4><ul>" +
+        scanWarnings
+          .map(function (warning) {
+            return "<li>" + esc(warning) + "</li>";
+          })
+          .join("") +
+        "</ul>";
+    $("#outreachScanProgress").innerHTML = html;
+    $("#outreachScanStart").disabled = !scanTerminal(scan.status);
+  }
+  function pollScan() {
+    if (!scanId) return;
+    req("/scans/" + encodeURIComponent(scanId))
+      .then(function (scan) {
+        renderScan(scan);
+        if (scanTerminal(scan.status)) {
+          scanTimer = null;
+          load();
+        } else scanTimer = setTimeout(pollScan, 3000);
+      })
+      .catch(function (e) {
+        error(e);
+        $("#outreachScanStart").disabled = false;
+      });
+  }
+  function restoreScan() {
+    if (scanTimer) clearTimeout(scanTimer);
+    scanTimer = null;
+    return req("/scans")
+      .then(function (data) {
+        var scans = Array.isArray(data) ? data : data.scans || [];
+        if (!scans.length) return;
+        var scan = scans[0];
+        scanId = scan.id || scan.scan_id;
+        if (!scanId) return;
+        scanWarnings = [];
+        renderScan(scan);
+        if (!scanTerminal(scan.status)) pollScan();
+      })
+      .catch(error);
   }
   function load(next) {
     return req(
@@ -331,12 +435,39 @@
       p.classList.toggle("hidden", p !== pane);
     });
     load();
+    restoreScan();
   });
   document.querySelectorAll(".tabs button").forEach(function (b) {
     if (b !== tab)
       b.addEventListener("click", function () {
         tab.classList.remove("on");
         pane.classList.add("hidden");
+      });
+  });
+  $("#outreachScanForm").addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (scanTimer) clearTimeout(scanTimer);
+    var form = event.currentTarget;
+    var body = {
+      campaign_id: form.campaign_id.value || "outreach",
+      max_groups: Number(form.max_groups.value) || 3,
+      max_candidates: Number(form.max_candidates.value) || 5,
+      idempotency_key: crypto.randomUUID(),
+    };
+    $("#outreachScanStart").disabled = true;
+    scanWarnings = [];
+    $("#outreachScanProgress").textContent = "ממתינים לאישור תחילת הסריקה…";
+    req("/scans", body)
+      .then(function (scan) {
+        scanId = scan.id || scan.scan_id;
+        if (!scanId) throw { code: "invalid_scan_response" };
+        renderScan(scan);
+        if (scanTerminal(scan.status)) load();
+        else pollScan();
+      })
+      .catch(function (e) {
+        error(e);
+        $("#outreachScanStart").disabled = false;
       });
   });
   $("#outreachCapture").addEventListener("submit", function (event) {

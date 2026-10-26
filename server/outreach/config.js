@@ -12,6 +12,7 @@ function readConfig(env = process.env) {
   const enabled = env.OUTREACH_ENABLED === "true";
   const config = {
     enabled,
+    groupScanEnabled: env.OUTREACH_GROUP_SCAN_ENABLED === "true",
     policyApproved: env.OUTREACH_POLICY_APPROVED === "true",
     secret: env.OUTREACH_HMAC_SECRET || "",
     privateDir: canonicalPath(
