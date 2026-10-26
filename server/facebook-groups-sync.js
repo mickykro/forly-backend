@@ -360,4 +360,10 @@ function hiddenIds(conn) {
 
 const isStale = (conn, now) => !conn.facebook_groups_synced_at || now.getTime() - new Date(conn.facebook_groups_synced_at).getTime() > STALE_MS;
 
-module.exports = { groupName, isNavSlug, isRealEstateGroup, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };
+// Why a sync failed, safe to send back: codes only, never a message or an address.
+const failureOf = (e) => {
+  const safe = (v) => (v ? String(v).replace(/[^A-Za-z0-9_]/g, "").slice(0, 40) || null : null);
+  return { reason: safe(e && (e.code || e.name)) || "error", detail: safe(e && (e.signal || e.anomaly || e.status)) };
+};
+
+module.exports = { failureOf, groupName, isNavSlug, isRealEstateGroup, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };

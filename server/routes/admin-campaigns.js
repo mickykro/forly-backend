@@ -245,7 +245,7 @@ module.exports = function createAdminCampaignsRouter({
       if (e && e.code === "posting_disabled") return res.status(409).json({ error: "posting_disabled", reason: e.reason });
       if (e && e.code === "profile_busy") return res.status(409).json({ error: "profile_busy" });
       console.error(redact(`admin campaigns groups refresh: ${(e && (e.code || e.name)) || "error"} ${(e && (e.anomaly || e.signal)) || ""}`));
-      return res.status(503).json({ error: "sync_failed" });
+      return res.status(503).json(Object.assign({ error: "sync_failed" }, require("../facebook-groups-sync").failureOf(e)));
     }
     res.json(await groupsView((await db.getConnection(phone)) || {}, phone));
   }));

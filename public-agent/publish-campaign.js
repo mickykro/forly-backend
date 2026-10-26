@@ -75,6 +75,8 @@
       const min = Math.max(1, Math.ceil((Number(body.retry_after_s) || 600) / 60));
       return `רעננו לפני רגע. אפשר לרענן שוב בעוד ${min} דק׳.`;
     }
+    // Facebook logged the profile out: only reconnecting helps, a retry never will.
+    if (code === "sync_failed" && body.detail === "login_required") return "פייסבוק ניתק את החשבון — התחברו מחדש לפייסבוק ונסו שוב.";
     return ERRORS[code] || "משהו השתבש — נסו שוב.";
   }
 
