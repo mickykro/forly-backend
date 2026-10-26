@@ -101,19 +101,28 @@ module.exports = function createI18nRouter({ db, dir = DEFAULT_DIR, translate = 
   const router = express.Router();
   let keys = null; // the files do not change while the process runs
   const filling = {};
+  const lastError = {}; // per language: why the last fill stopped, shown in the answer
+  const lastErrorAt = {};
+  const RETRY_MS = 60 * 1000; // after a failure: no new attempt for a minute, so the answer can say what failed
 
   async function fill(lang, missing) {
     console.log(`[ui-i18n] ${lang}: translating ${missing.length} strings`);
-    for (let i = 0; i < missing.length; i += CHUNK * PARALLEL) {
-      const chunks = [];
-      for (let j = i; j < Math.min(missing.length, i + CHUNK * PARALLEL); j += CHUNK) chunks.push(missing.slice(j, j + CHUNK));
-      const got = Object.assign({}, ...(await Promise.all(chunks.map((c) => translate(lang, c)))).filter(Boolean));
-      // No key, a refusal or an error: what is cached stays, the rest waits for the next request.
-      if (!Object.keys(got).length) { console.log(`[ui-i18n] ${lang}: nothing came back, ${missing.length - i} strings left`); return; }
-      const entries = Object.assign(parse(await db.getSetting(`ui_i18n_${lang}`)), got);
-      await db.setSetting(`ui_i18n_${lang}`, { json: JSON.stringify(entries) });
+    try {
+      for (let i = 0; i < missing.length; i += CHUNK * PARALLEL) {
+        const chunks = [];
+        for (let j = i; j < Math.min(missing.length, i + CHUNK * PARALLEL); j += CHUNK) chunks.push(missing.slice(j, j + CHUNK));
+        const got = Object.assign({}, ...(await Promise.all(chunks.map((c) => translate(lang, c)))).filter(Boolean));
+        if (!Object.keys(got).length) throw new Error("no translation returned");
+        const entries = Object.assign(parse(await db.getSetting(`ui_i18n_${lang}`)), got);
+        await db.setSetting(`ui_i18n_${lang}`, { json: JSON.stringify(entries) });
+      }
+      delete lastError[lang];
+      console.log(`[ui-i18n] ${lang}: done`);
+    } catch (e) {
+      // What is cached stays; the rest is asked for again on the next request.
+      lastError[lang] = String((e && e.message) || e).slice(0, 300); lastErrorAt[lang] = Date.now();
+      console.error(`[ui-i18n] ${lang}: stopped — ${lastError[lang]}`);
     }
-    console.log(`[ui-i18n] ${lang}: done`);
   }
 
   router.get("/:lang", async (req, res) => {
@@ -124,13 +133,15 @@ module.exports = function createI18nRouter({ db, dir = DEFAULT_DIR, translate = 
       if (!keys) keys = sourceKeys(dir);
       const entries = parse(await db.getSetting(`ui_i18n_${lang}`));
       const missing = keys.filter((k) => entries[k] === undefined);
-      if (missing.length && !filling[lang] && process.env.ANTHROPIC_API_KEY) {
-        filling[lang] = fill(lang, missing).catch((e) => console.error(`[ui-i18n] ${lang}: ${e && e.message}`)).finally(() => { delete filling[lang]; });
+      const coolingDown = lastError[lang] && Date.now() - lastErrorAt[lang] < RETRY_MS;
+      if (missing.length && !filling[lang] && process.env.ANTHROPIC_API_KEY && !coolingDown) {
+        filling[lang] = fill(lang, missing).finally(() => { delete filling[lang]; });
       }
       res.set("Cache-Control", "no-store");
-      // reason: why entries are missing — "filling" (ask again) or "no_api_key" (the server cannot translate).
-      const reason = !missing.length ? null : filling[lang] ? "filling" : process.env.ANTHROPIC_API_KEY ? null : "no_api_key";
-      res.json(Object.assign({ entries, pending: filling[lang] ? missing.length : 0 }, reason ? { reason } : {}));
+      // reason: why entries are missing — "filling" (ask again), "no_api_key" (the server cannot translate)
+      // or "error" with the last failure's text (the fill is tried again on every request).
+      const reason = !missing.length ? null : filling[lang] ? "filling" : process.env.ANTHROPIC_API_KEY ? (lastError[lang] ? "error" : null) : "no_api_key";
+      res.json(Object.assign({ entries, pending: filling[lang] ? missing.length : 0 }, reason ? { reason } : {}, reason === "error" ? { error: lastError[lang] } : {}));
     } catch (e) {
       console.error(`[ui-i18n] ${lang}: ${e && e.message}`);
       res.status(500).json({ error: "i18n_failed" });

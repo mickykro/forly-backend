@@ -19,6 +19,8 @@
  */
 const NAMES = { he: "Hebrew", en: "English", ar: "Arabic", ru: "Russian", es: "Spanish", fr: "French" };
 const MODEL = process.env.PAGE_TRANSLATE_MODEL || "claude-opus-5-5";
+const UI_MODEL = process.env.UI_TRANSLATE_MODEL || "claude-sonnet-5-5"; // UI strings: many, short, no nuance to buy
+const { CLAUDE_NO_SAMPLING } = require("./chat-provider");
 const MAX_FIELDS = 80;
 
 // Letters that are not the target language's script. For the three scripts
@@ -82,11 +84,15 @@ function alreadyIn(lang, fields) {
   return !!re && Object.values(fields).every((v) => !re.test(v));
 }
 
-function buildRequest(lang, fields) {
+function buildRequest(lang, fields, model = MODEL) {
   const keys = Object.keys(fields);
   return {
-    model: MODEL,
+    model,
     max_tokens: 16000,
+    // Opus 5 / Sonnet 5 think by default, and max_tokens caps thinking and the
+    // reply together (chat-provider.js): off, or a page's worth of JSON can be
+    // cut short or run past the timeout.
+    ...(CLAUDE_NO_SAMPLING.test(model) ? { thinking: { type: "disabled" } } : {}),
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default", // a declined request is re-run on Anthropic's recommended fallback
     output_config: {
@@ -163,28 +169,26 @@ function clientOf(deps) {
 
 /*
  * The dashboard's own words (routes/i18n.js): Hebrew UI strings → { source:
- * translation } for the ones that came back, null when nothing could be asked.
- * Same call shape as a page; the strings are keyed by position for the schema.
+ * translation } for the ones that came back; null when nothing could be asked
+ * (no key, unknown language); throws when the call failed or the reply was
+ * unusable, so the caller can say why. Same call shape as a page; the strings
+ * are keyed by position for the schema.
  */
 async function translateStrings(lang, strings, deps = {}) {
   const client = clientOf(deps);
   if (!NAMES[lang] || !client || !strings.length) return null;
   const fields = Object.fromEntries(strings.map((s, i) => [`s${i}`, s]));
-  const req = buildRequest(lang, fields);
+  const req = buildRequest(lang, fields, deps.model || UI_MODEL);
   req.system =
     `You localize the user interface of a real-estate agents' web dashboard from Hebrew into ${NAMES[lang]}. ` +
     "Each JSON value is one UI string, or a fragment of one that the code joins to a number or a name. " +
     `Return the same keys, each value in natural, concise ${NAMES[lang]} as a software product would phrase it. ` +
     "Keep punctuation, emoji, arrows, ellipses and leading/trailing dashes as they are; keep digits, {placeholders} and " +
     "product names (Forly, WhatsApp, Facebook, Instagram) unchanged. A fragment stays a fragment (do not complete the sentence).";
-  let response;
-  try { response = await client.beta.messages.create(req); } catch (err) {
-    console.error(`[ui-translate] ${lang} failed: ${err && (err.status || "")} ${err && err.message}`);
-    return null;
-  }
+  const response = await client.beta.messages.create(req);
   const out = readReply(response, fields);
-  if (!out) return null;
+  if (!out) throw new Error(`unusable reply (stop_reason ${response && response.stop_reason})`);
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [fields[k], v]));
 }
 
-module.exports = { translatePage, translateStrings, collect, setPath, alreadyIn, buildRequest, readReply, NAMES, MODEL };
+module.exports = { translatePage, translateStrings, collect, setPath, alreadyIn, buildRequest, readReply, NAMES, MODEL, UI_MODEL };

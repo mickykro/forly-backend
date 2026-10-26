@@ -32,7 +32,7 @@ const { literals } = createRouter({ db })._test;
   fs.writeFileSync(path.join(dir, "admin.html"), "<p>מנהל</p>"); // the console stays Hebrew
   fs.writeFileSync(path.join(dir, "x.test.js"), 'assert("בדיקה")');
   const asked = [];
-  const translate = async (lang, strings) => { asked.push([lang, strings]); return lang === "ru" ? null : Object.fromEntries(strings.map((s) => [s, `${lang}:${s}`])); };
+  const translate = async (lang, strings) => { asked.push([lang, strings]); if (lang === "ru") throw new Error("429 rate limited"); return Object.fromEntries(strings.map((s) => [s, `${lang}:${s}`])); };
   const router = createRouter({ db, dir, translate });
   const app = express(); app.use("/api/i18n", router);
   const server = await new Promise((r) => { const s = http.createServer(app); s.listen(0, () => r(s)); });
@@ -63,11 +63,13 @@ const { literals } = createRouter({ db })._test;
   assert.equal(Object.keys(JSON.parse((await db.getSetting("ui_i18n_en")).json)).length, 3);
   server2.close();
 
-  // A translator that answers nothing (no key, a refusal): what is cached stays, nothing is stored.
+  // A translator that fails: nothing is stored, and the answer says what went wrong once the attempt is over.
   const ru = await get("/api/i18n/ru");
   assert.equal(ru.body.pending, 2, "this router read the files before new.js existed");
   await router._test.whenFilled("ru");
   assert.equal(await db.getSetting("ui_i18n_ru"), null);
+  const ruAgain = (await get("/api/i18n/ru")).body;
+  assert.deepEqual([ruAgain.reason, ruAgain.error, ruAgain.pending], ["error", "429 rate limited", 0], "the failure is shown, and not retried for a minute");
 
   // No key on the server: Hebrew, and the client is not told to wait.
   delete process.env.ANTHROPIC_API_KEY;
