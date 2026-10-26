@@ -167,8 +167,9 @@
   }
 
   // A visitor's language picker, for a page served with multilingual (the
-  // server translates on ?lang=, once per language). Fixed by the sound
-  // button's corner, on the other side. The choice is the browser's one
+  // server translates on ?lang=, once per language). It sits in the page's
+  // top bar (every template has a <header>; the chat bubble and the sound
+  // button own the bottom corners). The choice is the browser's one
   // language (localStorage forly_lang, the dashboard's too): a page opened
   // without ?lang= goes to it first.
   var NAMES = { he: "עברית", en: "English", ar: "العربية", ru: "Русский", es: "Español", fr: "Français" };
@@ -182,7 +183,9 @@
     }
     var sel = document.createElement("select");
     sel.className = "fly-lang"; sel.setAttribute("aria-label", "Language"); sel.setAttribute("translate", "no");
-    sel.style.cssText = "position:fixed;z-index:60;bottom:16px;inset-inline-start:16px;padding:8px 12px;border-radius:999px;border:1px solid rgba(0,0,0,.18);background:rgba(255,255,255,.94);color:#1a1712;font:600 14px/1.2 system-ui,sans-serif;box-shadow:0 6px 20px -8px rgba(0,0,0,.4);cursor:pointer";
+    var bar = document.querySelector("header");
+    sel.style.cssText = (bar ? "margin-inline-start:auto;flex-shrink:0;" : "position:fixed;z-index:60;top:16px;inset-inline-end:16px;") +
+      "padding:6px 10px;border-radius:999px;border:1px solid rgba(0,0,0,.18);background:rgba(255,255,255,.92);color:#1a1712;font:600 13px/1.2 system-ui,sans-serif;box-shadow:0 4px 14px -6px rgba(0,0,0,.35);cursor:pointer";
     Object.keys(DICT).forEach(function (l) { var o = document.createElement("option"); o.value = l; o.textContent = NAMES[l] || l; o.selected = l === cur; sel.appendChild(o); });
     sel.addEventListener("change", function () {
       try { localStorage.setItem(KEY, sel.value); } catch (e) { /* storage off */ }
@@ -190,7 +193,7 @@
       sel.disabled = true; // the first visit in a language waits for its translation
       location.href = u.toString();
     });
-    document.body.appendChild(sel);
+    (bar || document.body).appendChild(sel);
   }
   window.I18N = { t: t, apply: apply, picker: picker, isRTL: function (l) { return !!RTL[l]; }, langs: Object.keys(DICT) };
 })();
