@@ -28,7 +28,8 @@
  * session map runs in production only after the product owner approves it.
  */
 const express = require("express");
-const { normalizeAuthPhone } = require("../utils");
+const { normalizeAuthPhone, LANGUAGES } = require("../utils");
+const MAX_TEMPLATE = 2000; // a pasted post; cleanCopy caps the filled one at 3000
 const { hmacHex } = require("../posting-tx");
 const { redact } = require("../driver-browser");
 const { postingEnvAllowed } = require("../posting-guard");
@@ -129,6 +130,7 @@ function switchView(s, env) {
     last_change: lc && { what: lc.what, enabled: lc.enabled, by_tail: lc.by_tail, reason: lc.reason, at: lc.at },
     caps: capsView(s, env),
     modes: modes.view(s.modes),
+    copy_templates: s.copy_templates || {},
   };
 }
 
@@ -399,6 +401,33 @@ module.exports = function createAdminPostingRouter({
   }));
 
   // The modes: each true, false, or null (the env's own value). Applied at once on this server.
+  // ── the pasted post per page language (share-kit.fillTemplate); replaced whole, empty = the built-in copy ──
+  router.post("/templates", ...guard, wrap(async (req, res) => {
+    const b = req.body || {};
+    if (!Number.isInteger(b.version) || b.version < 0) return res.status(400).json({ error: "invalid_input", field: "version" });
+    const reason = cleanReason(b.reason);
+    if (!reason) return res.status(400).json({ error: "reason_required" });
+    if (!b.templates || typeof b.templates !== "object" || Array.isArray(b.templates)) return res.status(400).json({ error: "invalid_input", field: "templates" });
+    const templates = {};
+    for (const [lang, text] of Object.entries(b.templates)) {
+      if (!LANGUAGES[lang] || typeof text !== "string" || text.length > MAX_TEMPLATE) return res.status(400).json({ error: "invalid_input", field: lang });
+      if (text.trim()) templates[lang] = text.trim();
+    }
+    const cur = (await db.getSetting("posting")) || {};
+    if ((cur.version || 0) !== b.version) return res.status(409).json({ error: "version_conflict", version: cur.version || 0 });
+    const at = iso(clock()), by = opTail(req);
+    let next;
+    try { next = await db.setSetting("posting", { copy_templates: templates, last_change: { what: "templates", enabled: null, by_tail: by, reason, at } }, { expectVersion: b.version }); }
+    catch (e) {
+      if (!e || e.code !== "version_conflict") throw e;
+      const fresh = (await db.getSetting("posting")) || {};
+      return res.status(409).json({ error: "version_conflict", version: fresh.version || 0 });
+    }
+    const audited = await audit(req, "templates", { reason, detail: { languages: Object.keys(templates).join(" ") || "cleared", version: next.version } });
+    console.log(`posting admin: templates ${Object.keys(templates).join(" ") || "cleared"} by …${by} (v${next.version})`);
+    res.json(Object.assign({ ok: true, audited }, switchView(next, env)));
+  }));
+
   router.post("/modes", ...guard, wrap(async (req, res) => {
     const b = req.body || {};
     if (!Number.isInteger(b.version) || b.version < 0) return res.status(400).json({ error: "invalid_input", field: "version" });

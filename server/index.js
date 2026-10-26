@@ -384,6 +384,9 @@ if (require("./posting-shots").enabled(process.env)) {
 const createProfileRouter = require("./routes/profile");
 app.use("/api", createProfileRouter({ requireAuth, authSecret: AUTH_SECRET }));
 
+// ── the dashboard's words in the agent's language (public-agent/ui-i18n.js) ──
+app.use("/api/i18n", require("./routes/i18n")({ db }));
+
 // ── dashboard routes (properties list, profile) ──
 const createDashboardRouter = require("./routes/dashboard");
 app.use("/api", createDashboardRouter({

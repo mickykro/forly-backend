@@ -503,6 +503,26 @@ const noFullPhone = (raw, what) => {
       await post("/caps", { caps: {}, reason: "back to defaults", version: v0 + 2 });
     }
 
+    // ── the pasted post per language: validated, compare-and-set, replaced whole, empty clears ──
+    {
+      const v0 = (await db.getSetting("posting")).version;
+      assert.equal((await post("/templates", { templates: [], reason: "x", version: v0 })).body.field, "templates");
+      assert.equal((await post("/templates", { templates: { xx: "hi" }, reason: "x", version: v0 })).body.field, "xx");
+      assert.equal((await post("/templates", { templates: { en: "x".repeat(2001) }, reason: "x", version: v0 })).body.field, "en");
+      assert.equal((await post("/templates", { templates: { en: 5 }, reason: "x", version: v0 })).body.field, "en");
+      assert.equal((await post("/templates", { templates: { en: "hi" }, reason: " ", version: v0 })).body.error, "reason_required");
+      assert.equal((await post("/templates", { templates: { en: "hi" }, reason: "x", version: v0 - 1 })).status, 409);
+      const t1 = await post("/templates", { templates: { en: "  Hi {city} {link}\n", he: "   ", ru: "" }, reason: "english groups", version: v0 });
+      assert.equal(t1.status, 200, t1.raw);
+      assert.deepEqual(t1.body.copy_templates, { en: "Hi {city} {link}" }, "trimmed; blank languages are not kept");
+      assert.equal(t1.body.audited, true);
+      assert.deepEqual((await db.getSetting("posting")).copy_templates, { en: "Hi {city} {link}" });
+      assert.deepEqual((await overview()).body.copy_templates, { en: "Hi {city} {link}" }, "shown with the switches");
+      const t2 = await post("/templates", { templates: {}, reason: "back to built-in", version: v0 + 1 });
+      assert.deepEqual(t2.body.copy_templates, {}, "a save replaces the whole set");
+      assert.equal(t2.body.version, v0 + 2);
+    }
+
     // ── modes: validated, compare-and-set, replaced whole, shown with the env's own value ──
     {
       const v0 = (await db.getSetting("posting")).version;

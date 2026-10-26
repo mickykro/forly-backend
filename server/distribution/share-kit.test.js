@@ -3,7 +3,7 @@
  * Run: node server/distribution/share-kit.test.js
  */
 const assert = require("assert");
-const { MAX_GROUPS, buildPostCopy, sanitizeGroups, sharerLink, buildShareKitMessage,
+const { MAX_GROUPS, buildPostCopy, fillTemplate, sanitizeGroups, sharerLink, buildShareKitMessage,
   buildQueueMessage, trackedUrl, groupProgress } = require("./share-kit");
 
 const page = {
@@ -210,6 +210,18 @@ assert.ok(!qm0.includes("undefined"));
   assert.deepEqual(groupProgress(null, null), { posted: 0, total: 0 });
   assert.deepEqual(groupProgress({ groups: null }, ["https://www.facebook.com/groups/aaa"]),
     { posted: 0, total: 1 }, "a session with no group array falls back to the list");
+}
+
+// ── an admin-pasted template: facts in, a line with a missing fact out, the deal picked ──
+{
+  const tpl = "{deal:For sale|For rent} in {place}\n{rooms} rooms, {sqm} sqm, floor {floor}\n₪{price}\nBalcony {balcony}\n\nCall {name}: {phone}\n{link}";
+  const en = { ...page, language: "en", place_i18n: { city: "Tel Aviv", neighborhood: "Bavli" } };
+  assert.equal(fillTemplate(tpl, en, url),
+    "For sale in Bavli, Tel Aviv\n4 rooms, 105 sqm, floor 3\n₪4,200,000\n\nCall דנה לוי: 0501234567\n" + url,
+    "places in the page's language; an unknown placeholder drops its line; a blank line stays");
+  const rent = { property: { ...page.property, listing_type: "rent", floor: 0, neighborhood: "" }, agent: {} };
+  assert.equal(fillTemplate(tpl, rent, ""), "For rent in תל אביב\n₪4,200,000", "rent text; no floor, no agent, no link → those lines go");
+  assert.equal(fillTemplate("שלום {title}", page, url), "שלום 4 חד׳ בבבלי");
 }
 
 console.log("share-kit.test.js OK");

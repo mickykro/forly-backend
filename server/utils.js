@@ -428,7 +428,7 @@ module.exports = {
   textOfButtons, sendWhatsAppRich, publicUrl, PUBLIC_BASE_URL,
   ownUploadedVideo, inPlace,
   pad, daysFromNow, asMillis, escapeHtml,
-  sanitizeTheme, sanitizeLang, normalizePhone, normalizeAuthPhone,
+  sanitizeTheme, sanitizeLang, LANGUAGES, normalizePhone, normalizeAuthPhone,
   guessImageExt, rehost, readCapped, storeBuffer, sendWhatsApp, sendWhatsAppButtons, greenApiBase, getWhatsAppMessage, getWhatsAppHistory,
   assertPublicHttpUrl, isPrivateIp, sniffMatchesExt, INFRA_HOST, resolvePageBaseUrl, postingPageBaseUrl,
 };
