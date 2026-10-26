@@ -179,19 +179,19 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
     for (const leak of ["SECRET", "Other Person", "private text", "long text someone wrote"]) assert.ok(!flat.includes(leak), `never in the note: ${leak}`);
     page.setDefaultTimeout(30000);
 
-    // ── M8: typing goes through the editor even when something steals focus between words ──
+    // ── M8: the paste goes through the editor even when something steals focus between lines ──
     await page.setContent(`<div role="dialog"><div contenteditable="true" role="textbox" id="ed"></div></div><input id="other">
       <script>document.getElementById("ed").addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") document.getElementById("other").focus(); });</script>`);
     const text = "דירה בחיפה\nמרפסת גדולה וחניה";
     const x = { typingDelay: () => 0, rand: () => 0.5, wait: async () => {} };
-    await PD._test.humanType(page, page.locator(S.editor).first(), text, x);
+    await PD._test.pasteText(page, page.locator(S.editor).first(), text, x);
     assert.equal(await page.inputValue("#other"), "", "nothing reached the element that stole focus");
     assert.equal(await P.textOf(page, S.editor), P.norm(text), "the editor holds exactly the copy");
     // a newline is never pressed unless focus is inside the target: a focus
     // thief that wins every time makes typing stop, not type elsewhere
     await page.setContent(`<div role="dialog"><div contenteditable="true" role="textbox" id="ed"></div></div><input id="other">
       <script>document.getElementById("ed").addEventListener("focus", () => document.getElementById("other").focus());</script>`);
-    await assert.rejects(PD._test.humanType(page, page.locator(S.editor).first(), "a\nb", x), (e) => e.code === "composer_focus_lost");
+    await assert.rejects(PD._test.pasteText(page, page.locator(S.editor).first(), "a\nb", x), (e) => e.code === "composer_focus_lost");
     assert.ok(!(await page.inputValue("#other")).includes("\n"));
   } finally {
     await browser.close();

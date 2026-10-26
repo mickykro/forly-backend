@@ -156,6 +156,23 @@
     too_soon: "רענון רץ לפני רגע — נסו שוב בעוד דקה.",
     sync_failed: "הקריאה מפייסבוק נכשלה. נסו שוב מאוחר יותר.",
   };
+  // sync_failed's reason (facebook-groups-sync failureOf): what Facebook showed, or why the read was not trusted.
+  var SYNC_WHY = {
+    login_required: "הפרופיל לא מחובר לפייסבוק — צריך התחברות מחדש (פרסום ידני ← בדיקת התחברות, או הסוכן מתחבר).",
+    checkpoint: "פייסבוק ביקש אימות זהות (checkpoint) — החשבון נעצר.",
+    captcha: "פייסבוק הציג CAPTCHA — החשבון נעצר.",
+    restricted: "החשבון מוגבל בפייסבוק.",
+    rate_limited: "פייסבוק הגביל את הקצב — נסו מאוחר יותר.",
+    feature_blocked: "פייסבוק חסם את הפעולה זמנית.",
+    unreadable: "דף הקבוצות לא נטען — נסו שוב בעוד דקה.",
+    empty: "דף הקבוצות נטען אבל לא נקראה אף קבוצה — לא נשמר כלום. נסו שוב בעוד דקה.",
+    shrunk: "נקראו פחות ממחצית הקבוצות המוכרות — לא נשמר כלום, ליתר ביטחון. נסו שוב בעוד דקה.",
+  };
+  function syncWhy(e) {
+    var d = (e && e.data) || {};
+    var why = SYNC_WHY[d.detail] || SYNC_WHY[d.reason];
+    return "הקריאה מפייסבוק נכשלה: " + (why || "קוד " + [d.reason, d.detail].filter(Boolean).join(" / ") + ". נסו שוב מאוחר יותר.");
+  }
   function refreshGroups() {
     var ref = $("#campFormAgent").value, btn = $("#campFormRefresh"), my = seq;
     if (!ref || btn.disabled) return;
@@ -166,7 +183,7 @@
       showGroups(d, keep); groupsChanged(); checkFit(); FLY.toast("הקבוצות עודכנו");
     }).catch(function (e) {
       if (e && e.status === 401) return fail(e);
-      FLY.toast((e && REFRESH_ERR[e.code]) || "הרענון נכשל");
+      FLY.toast(e && e.code === "sync_failed" ? syncWhy(e) : (e && REFRESH_ERR[e.code]) || "הרענון נכשל");
     }).then(function () { btn.disabled = false; btn.textContent = "רענון הקבוצות מפייסבוק"; });
   }
   function groupsChanged() {

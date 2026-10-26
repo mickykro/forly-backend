@@ -27,7 +27,7 @@
   };
   var PLATFORM_LABELS = { facebook: "פייסבוק", yad2: "יד2", madlan: "מדלן" };
   var AUDIT_LABELS = {
-    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז", switch_staging: "פרסום מ־staging", sweep_now: "סבב פרסום ידני",
+    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז", switch_staging: "פרסום מ־staging", sweep_now: "סבב פרסום ידני", replan: "הקדמת פוסטים לעכשיו",
     reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל", resolve_attempt: "הכרעה בפוסט לא ידוע", resume_campaign: "המשך קמפיין",
   };
   var SECTION_LABELS = {
@@ -396,6 +396,18 @@
       return '<option value="' + esc(a.ref) + '">' + esc((a.name || "ללא שם") + " · …" + a.phone_tail) + "</option>";
     }).join("");
   }).catch(function () { $("#postingWarmAgent").innerHTML = '<option value="">רשימת הסוכנים לא נטענה</option>'; });
+  // The picked agent's posts booked for later, now (each still checked by the rules when due).
+  $("#postingReplan").addEventListener("click", function () {
+    var btn = this, ref = $("#postingWarmAgent").value;
+    if (!ref) { FLY.toast("בחרו סוכן"); return; }
+    var reason = askReason("סיבה?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/accounts/" + encodeURIComponent(ref) + "/replan", { reason: reason })
+      .then(function (d) { saved(d, d.moved ? "✅ " + d.moved + " פוסטים הוקדמו לעכשיו — הריצו סבב" : "אין פוסטים מתוכננים לאחר כך"); return loadStatus(); })
+      .catch(function (e) { handleError(e, "ההקדמה נכשלה"); })
+      .then(function () { btn.disabled = false; });
+  });
   $("#postingWarmSave").addEventListener("click", function () {
     var btn = this, ref = $("#postingWarmAgent").value;
     if (!ref) { FLY.toast("בחרו סוכן"); return; }

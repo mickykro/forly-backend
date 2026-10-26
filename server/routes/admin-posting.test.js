@@ -256,6 +256,26 @@ const noFullPhone = (raw, what) => {
     assert.equal((await post(`/accounts/acct_${"0".repeat(24)}/warmup`, { mode: "active", reason: "x" })).status, 404, "an unknown ref");
     await post(`/accounts/${P.fine}/warmup`, { mode: "auto", reason: "back to default" });
 
+    // ── an agent's booked posts, now: only scheduled-for-later ones move; step-up, a reason, audited ──
+    {
+      const later = new Date(Date.now() + 20 * 3600e3).toISOString(), earlier = new Date(Date.now() - 3600e3).toISOString();
+      const c = (await store.createPostingCampaignIfAbsent({ phone: P.fine, page_id: "pgr", status: "running", posts: [
+        { id: "r1", status: "scheduled", scheduled_at: later, not_before: later }, { id: "r2", status: "scheduled", scheduled_at: earlier },
+        { id: "r3", status: "posted", scheduled_at: later }] })).campaign;
+      assert.equal((await post(`/accounts/${P.fine}/replan`, { reason: "rules changed" }, as(ADMIN, false))).status, 401, "step-up required");
+      assert.equal((await post(`/accounts/${P.fine}/replan`, {})).body.error, "reason_required");
+      const r = await post(`/accounts/${require("../posting-manual").refOf(P.fine)}/replan`, { reason: "rules changed" });
+      assert.equal(r.status, 200, r.raw);
+      assert.deepEqual([r.body.moved, r.body.audited, r.body.phone_tail], [1, true, P.fine.slice(-4)]);
+      const posts = (await store.getPostingCampaign(c.id)).posts;
+      const by = (id) => posts.find((p) => p.id === id);
+      assert.ok(by("r1").scheduled_at <= new Date().toISOString() && by("r1").not_before === null, "the later one is now");
+      assert.equal(by("r2").scheduled_at, earlier, "an already-due post is left as it is");
+      assert.equal(by("r3").scheduled_at, later, "a posted one is never touched");
+      assert.equal((await post(`/accounts/${P.fine}/replan`, { reason: "again" })).body.moved, 0);
+      await store.mutatePostingCampaign(c.id, () => ({ status: "stopped" }));
+    }
+
     // ── suspected compromise: the profile is revoked; the owner lifts it only after a reconnect ──
     r = await post(`/accounts/${P.compromised}/reenable`, { reason: "x" }, as(OWNER));
     assert.equal(r.status, 409); assert.equal(r.body.error, "reconnect_required", "before the reconnect, not even the owner");
@@ -318,7 +338,7 @@ const noFullPhone = (raw, what) => {
     // ── every mutation wrote an audit event, tails only, kept a year ──
     const events = await store.listAuditEvents({ limit: 100 });
     const actions = events.map((e) => e.action).sort();
-    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible", "warmup_mode", "warmup_mode", "warmup_mode", "warmup_mode"]);
+    assert.deepEqual(actions, ["reenable", "reenable", "reenable", "reenable", "reenable", "replan", "replan", "revoke_profile", "revoke_profile", "switch_global", "switch_global", "switch_global", "switch_global", "switch_platform", "switch_platform", "switch_visible", "warmup_mode", "warmup_mode", "warmup_mode", "warmup_mode"]);
     for (const e of events) {
       assert.ok(/^\d{4}$/.test(e.operator_tail), JSON.stringify(e));
       assert.ok(e.target_phone_tail === null || /^\d{4}$/.test(e.target_phone_tail));
@@ -334,7 +354,7 @@ const noFullPhone = (raw, what) => {
     const scRow = ov.body.halts_by_class.suspected_compromise.find((a) => a.phone_tail === "0011");
     assert.equal(scRow.needs_agent_confirmation, true); assert.equal(scRow.reconnected_after_halt, false);
     assert.equal((await call(server, "GET", "/api/admin/posting/overview", as(OWNER, false))).body.is_owner, true);
-    assert.equal(ov.body.recent_audit.length, 18);
+    assert.equal(ov.body.recent_audit.length, 20);
 
     // ── the overview degrades: a failing section is named in warnings, the rest loads, 200 ──
     {

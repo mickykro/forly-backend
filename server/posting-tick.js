@@ -377,7 +377,7 @@ async function runAttempt(attempt, st, deps, now) {
       await A.applyFindings(res, cur.st, x, x.clock());
       done = true;
       // Timed out: the tick already gave this browser up — it posts nothing more.
-      if (timedOut || !session.more(last)) return null;
+      if (timedOut || !session.more(last, res)) return null;
       // Renewed before the dwell too: post (≤ timeout) + dwell can outlast one hold.
       if (st.lock && st.lock.renew && !st.lock.renew()) return null;
       arm(); // the dwell gets its own window, not what is left of the post's
@@ -393,6 +393,8 @@ async function runAttempt(attempt, st, deps, now) {
       };
     };
   }
+  // An admin's takeover (posting-live) keeps the browser — and so the profile — past the post.
+  if (st.lock && st.lock.renew) call.postDeps.renewLock = () => st.lock.renew();
   // Before the session closes: the account's due checks (yesterday's posts)
   // and, when it is stale, its groups sync — on the same page, no session of
   // their own. Never in the way of the posts: any failure is only logged.

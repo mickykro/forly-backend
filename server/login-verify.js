@@ -31,7 +31,9 @@ async function verifySaved(phone, platform, deps = {}) {
   const spec = CB.PLATFORMS[platform];
   if (!spec) return { error: "invalid_input" };
   const conn = (await db.getConnection(phone)) || {};
-  if (conn[`${platform}_browser_connected_at`]) return { state: "connected", identity_label: conn[`${platform}_identity_label`] || null };
+  // An agent Facebook logged out (needs_reconnect) is checked again: an admin may have logged the profile back in.
+  const stale = platform === "facebook" && require("./routes/posting-shared").needsReconnect(conn);
+  if (conn[`${platform}_browser_connected_at`] && !stale) return { state: "connected", identity_label: conn[`${platform}_identity_label`] || null };
   // A revoked or quarantined profile is not the agent's to reuse; withPage
   // would refuse it anyway (assertOwnership).
   if (["revoked", "quarantined"].includes(conn[`${platform}_profile_state`])) return { error: "profile_revoked" };
