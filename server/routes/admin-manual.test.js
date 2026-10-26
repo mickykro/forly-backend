@@ -168,25 +168,27 @@ function call(server, method, path, body) {
 
   // ── agents who logged in but never pressed done: listed, and verified on request ──
   {
-    const STUCK = "972500000003", DONE = "972500000004", NEVER = "972500000005";
+    const STUCK = "972500000003", DONE = "972500000004", NEVER = "972500000005", OUT = "972500000006";
     const conns = {
+      [OUT]: { browser_consent_at: "2026-10-05T10:00:00Z", facebook_browser_connected_at: "2026-10-05T10:05:00Z", facebook_needs_reconnect: true, facebook_needs_reconnect_at: "2026-10-06T10:00:00Z" },
       [STUCK]: { browser_consent_at: "2026-10-05T10:00:00Z" },
       [DONE]: { browser_consent_at: "2026-10-05T10:00:00Z", facebook_browser_connected_at: "2026-10-05T10:05:00Z" },
       [NEVER]: {},
     };
     const db = Object.assign(Object.create(deps.db || require("../db")), {
-      listAllBusinesses: async () => [STUCK, DONE, NEVER].map((phone) => ({ phone, full_name: `Agent ${phone.slice(-1)}` })),
+      listAllBusinesses: async () => [STUCK, DONE, NEVER, OUT].map((phone) => ({ phone, full_name: `Agent ${phone.slice(-1)}` })),
       getConnection: async (p) => conns[p] || null,
     });
     const verified = [];
-    const deps2 = Object.assign({}, deps, { db, verifySaved: async (phone, platform, o) => { verified.push([phone, platform, o.name]); return { state: "connected", identity_label: "Agent 3" }; } });
+    const deps2 = Object.assign({}, deps, { db, verifySaved: async (phone, platform, o) => { verified.push([phone, platform, o.name]); if (phone === OUT) conns[phone].facebook_browser_connected_at = new Date().toISOString(); return { state: "connected", identity_label: "Agent 3" }; } });
+    const paused = (await K.store.createPostingCampaignIfAbsent({ phone: OUT, page_id: "pgout", status: "paused", pause_reason: "account", posts: [], updated_at: new Date().toISOString() })).campaign.id;
     const app2 = express(); app2.use(express.json());
     app2.use("/api/admin/manual", createRouter({ requireAdmin, deps: deps2, driver: {}, viewer: {}, media: {} }));
     const server2 = app2.listen(0);
     try {
       const list = await call(server2, "GET", "/api/admin/manual/unconnected");
       assert.equal(list.status, 200);
-      assert.deepEqual(list.body.agents.map((a) => a.ref), [M.refOf(STUCK)], "only the agent who started a login and is not connected");
+      assert.deepEqual(list.body.agents.map((a) => [a.ref, a.reconnect]), [[M.refOf(STUCK), false], [M.refOf(OUT), true]], "an agent who started a login and is not connected, and one Facebook logged out");
       assert.ok(!JSON.stringify(list.body).includes(STUCK), "no phone, only a ref and a tail");
       const v = await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(STUCK)}/verify`);
       assert.equal(v.status, 200);
@@ -204,6 +206,12 @@ function call(server, method, path, body) {
       }
       assert.equal(verified.length, 2);
       assert.equal((await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(DONE)}/verify`)).status, 404, "a connected agent is not in the list");
+      // the logged-out agent: checked, marked connected, and the campaign the logout paused runs again
+      const rv = await call(server2, "POST", `/api/admin/manual/unconnected/${M.refOf(OUT)}/verify`);
+      assert.equal(rv.body.state, "connected");
+      assert.equal(rv.body.resumed, 1);
+      assert.equal((await K.store.getPostingCampaign(paused)).status, "running");
+      assert.equal((await call(server2, "GET", "/api/admin/manual/unconnected")).body.agents.some((a) => a.ref === M.refOf(OUT)), false, "off the list once reconnected");
     } finally { server2.close(); }
   }
   console.log("routes/admin-manual.test.js ok");

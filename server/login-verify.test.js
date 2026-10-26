@@ -59,6 +59,17 @@ function fakeDriver(page, seen) {
     assert.ok(r.state === "connected" || r.error === "profile_revoked");
   }
 
+  // ── Facebook logged the agent out (needs_reconnect): checked again, a browser opens ──
+  {
+    const seen = [];
+    const conn = { facebook_browser_connected_at: "2026-10-01T00:00:00Z", facebook_needs_reconnect: true, facebook_needs_reconnect_at: "2026-10-02T00:00:00Z" };
+    await verifySaved(PHONE, "facebook", { db: fakeDb(conn), driver: fakeDriver(fakePage(), seen) }).catch(() => null);
+    assert.equal(seen.length, 1, "a stale connection is checked");
+    const fresh = [];
+    await verifySaved(PHONE, "facebook", { db: fakeDb(Object.assign({}, conn, { facebook_browser_connected_at: "2026-10-03T00:00:00Z" })), driver: fakeDriver(fakePage(), fresh) });
+    assert.equal(fresh.length, 0, "reconnected since: no browser");
+  }
+
   // ── a profile in use (login window open, a post) → busy, nothing written ──
   {
     const db = fakeDb({});
