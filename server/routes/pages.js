@@ -61,7 +61,20 @@ module.exports = function createPagesRouter(ctx) {
   // and kept on the doc (i18n.<lang>). Not marked, unknown or the page's own
   // language: the page as it is. A translation that fails serves the original.
   const langOf = (q) => (typeof q.lang === "string" && LANGUAGES[q.lang] ? q.lang : null);
+  // A page built without an agent block (a WhatsApp intake, an n8n build that
+  // forwarded none) shows the agent's profile instead: the templates keep
+  // their placeholder name where the payload has none.
+  async function withAgent(d) {
+    if (!d || (d.agent && d.agent.name) || !d.business_phone) return d;
+    const biz = await businessCache.get(d.business_phone);
+    const profile = biz && (biz.full_name || biz.business_name) ? biz : (biz && biz.onboarding_partial) || null;
+    if (!profile || !(profile.full_name || profile.business_name)) return d;
+    const agent = d.agent || {};
+    return { ...d, agent: { ...agent, name: profile.full_name || profile.business_name, brand_name: agent.brand_name || profile.business_name || profile.full_name,
+      logo_url: agent.logo_url || profile.logo_url || null, phone: agent.phone || d.business_phone } };
+  }
   async function inLanguage(id, d, lang) {
+    d = await withAgent(d);
     if (!lang || !d || d.multilingual !== true || lang === (d.language || "he")) return d;
     let cached = d.i18n && d.i18n[lang];
     if (!cached) {
