@@ -21,6 +21,9 @@ const NAMES = { he: "Hebrew", en: "English", ar: "Arabic", ru: "Russian", es: "S
 const MODEL = process.env.PAGE_TRANSLATE_MODEL || "claude-opus-5-5";
 const UI_MODEL = process.env.UI_TRANSLATE_MODEL || "claude-sonnet-5-5"; // UI strings: many, short, no nuance to buy
 const { CLAUDE_NO_SAMPLING } = require("./chat-provider");
+// The 5.5 models do not think before responding and answer 400 to
+// thinking: disabled ("send between_tools instead"); nothing to switch off.
+const NO_THINKING_PARAM = /^claude-(opus|sonnet|haiku)-5-5/;
 const MAX_FIELDS = 80;
 
 // Letters that are not the target language's script. For the three scripts
@@ -92,7 +95,7 @@ function buildRequest(lang, fields, model = MODEL) {
     // Opus 5 / Sonnet 5 think by default, and max_tokens caps thinking and the
     // reply together (chat-provider.js): off, or a page's worth of JSON can be
     // cut short or run past the timeout.
-    ...(CLAUDE_NO_SAMPLING.test(model) ? { thinking: { type: "disabled" } } : {}),
+    ...(CLAUDE_NO_SAMPLING.test(model) && !NO_THINKING_PARAM.test(model) ? { thinking: { type: "disabled" } } : {}),
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default", // a declined request is re-run on Anthropic's recommended fallback
     output_config: {
