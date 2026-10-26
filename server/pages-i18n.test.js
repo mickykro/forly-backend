@@ -75,6 +75,7 @@ const createPagesRouter = require("./routes/pages");
   // The picker lives in the shared template i18n; both runtimes call it.
   const tpl = (f) => fs.readFileSync(path.join(__dirname, "..", "public-nadlan", f), "utf8");
   assert.ok(tpl("templates/i18n.js").includes("function picker(data)"));
+  assert.ok(tpl("templates/i18n.js").includes('localStorage.getItem(KEY)') && tpl("templates/i18n.js").includes('"forly_lang"'), "follows the dashboard's language");
   assert.ok(tpl("templates/runtime.js").includes("window.I18N.picker(DATA)"));
   assert.ok(tpl("p/page.js").includes("window.I18N.picker(d)") && tpl("p/page.js").includes('"&lang="'));
   console.log("pages-i18n.test.js ok");
