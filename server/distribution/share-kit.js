@@ -224,6 +224,39 @@ const TEMPLATES = [
   ],
 ];
 
+// An admin-pasted post (settings/posting.copy_templates, by the page's
+// language — routes/admin-posting.js): {placeholders} filled from the same
+// facts, {deal:sale text|rent text} picked by the deal. A line whose
+// placeholder has no value (or is not one of PLACEHOLDERS) is dropped, as the
+// built-in templates drop a missing fact; a blank template line stays a
+// paragraph break. {link}
+// is the page URL — without one the line goes, and the agent's first comment
+// still carries the link as usual. Places read in the page's language when
+// the page was translated (page-translate.js place_i18n).
+const PLACEHOLDERS = ["title", "rooms", "sqm", "floor", "price", "city", "neighborhood", "place", "name", "phone", "link", "deal"];
+function fillTemplate(template, page, pageUrl) {
+  const f = postFacts(page);
+  const p = (page && page.property) || {};
+  const places = (page && page.place_i18n) || {};
+  const num = (v) => (Number(v) > 0 ? String(Number(v)) : "");
+  const city = places.city || f.city, hood = places.neighborhood || f.hood;
+  const v = {
+    title: p.title || "", rooms: num(p.rooms), sqm: num(p.size_sqm) || num(p.size_built), floor: num(p.floor),
+    price: Number(p.price) > 0 ? Number(p.price).toLocaleString("en-US") : "",
+    city, neighborhood: hood, place: join(", ", hood, city),
+    name: f.name, phone: f.phone, link: pageUrl || "", deal: f.deal,
+  };
+  const lines = [];
+  for (const line of String(template).split("\n")) {
+    let missing = false;
+    const filled = line
+      .replace(/\{deal:([^|}]*)\|([^}]*)\}/g, (m, sale, rent) => (f.rent ? rent : sale))
+      .replace(/\{(\w+)\}/g, (m, k) => { if (!v[k]) missing = true; return v[k] || ""; });
+    if (!missing) lines.push(filled.trimEnd());
+  }
+  return lines.join("\n").trim();
+}
+
 function variantIndex(seed, mod) {
   const s = String(seed || "");
   let h = 0;
@@ -352,5 +385,5 @@ function groupProgress(session, fallbackGroups) {
   return { posted: 0, total: sanitizeGroups(fallbackGroups).length };
 }
 
-module.exports = { MAX_GROUPS, TEMPLATE_COUNT: TEMPLATES.length, buildPostCopy, sanitizeGroups, sharerLink,
+module.exports = { MAX_GROUPS, TEMPLATE_COUNT: TEMPLATES.length, PLACEHOLDERS, buildPostCopy, fillTemplate, sanitizeGroups, sharerLink,
   buildShareKitMessage, buildQueueMessage, trackedUrl, variantIndex, groupProgress };

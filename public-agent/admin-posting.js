@@ -157,6 +157,7 @@
     });
     renderCaps(known ? d.caps : null);
     renderModes(known ? d.modes : null);
+    renderTemplates(known ? d.copy_templates || {} : null);
     var vis = known && $("#postingVisible");
     if (vis) vis.addEventListener("change", function () { flip(vis, "/switch/visible"); });
     var stg = known && $("#postingStaging");
@@ -209,6 +210,26 @@
       return "<label>" + esc(MODE_LABELS[m]) + '<select data-mode="' + m + '">' + opt("", "ברירת מחדל") + opt("on", "פעיל") + opt("off", "כבוי") + "</select>" +
         '<span class="posting-note">בסביבה: ' + envText(c.env) + "</span></label>";
     }).join("");
+  }
+  // The pasted post per page language (share-kit.fillTemplate): empty = the built-in Hebrew copy.
+  var TEMPLATE_LANGS = { he: "עברית", en: "English", ar: "العربية", ru: "Русский", es: "Español", fr: "Français" };
+  function renderTemplates(t) {
+    $("#postingTemplatesSave").disabled = !t;
+    if (!t) { $("#postingTemplates").innerHTML = '<p class="posting-note">התבניות לא נטענו.</p>'; return; }
+    $("#postingTemplates").innerHTML = Object.keys(TEMPLATE_LANGS).map(function (l) {
+      return "<label>" + esc(TEMPLATE_LANGS[l]) + '<textarea data-lang="' + l + '" rows="6" maxlength="2000" dir="auto" style="width:100%;font:inherit;padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px">' + esc(t[l] || "") + "</textarea></label>";
+    }).join("");
+  }
+  function saveTemplates(btn) {
+    var templates = {};
+    Array.prototype.forEach.call(document.querySelectorAll("#postingTemplates textarea[data-lang]"), function (ta) { templates[ta.dataset.lang] = ta.value; });
+    var reason = askReason("למה משנים את התבניות?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/templates", { templates: templates, reason: reason, version: state.version })
+      .then(function (d) { saved(d, "✅ התבניות נשמרו"); return load(); })
+      .catch(function (e) { handleError(e, "שגיאה בשמירת התבניות"); })
+      .then(function () { btn.disabled = false; });
   }
   function saveModes(btn) {
     var modes = {};
@@ -389,6 +410,7 @@
   });
   $("#postingCapsSave").addEventListener("click", function () { saveCaps(this); });
   $("#postingModesSave").addEventListener("click", function () { saveModes(this); });
+  $("#postingTemplatesSave").addEventListener("click", function () { saveTemplates(this); });
   // The agents to pick from: the agents list (name · phone tail), as the campaigns tab shows it.
   FLY.req("/api/admin/campaigns/agents", { noRedirect: true }).then(function (d) {
     var agents = (d && d.agents) || [];

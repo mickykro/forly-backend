@@ -87,10 +87,22 @@ const fake = (fn) => ({ beta: { messages: { create: fn } } });
     assert.ok(!d.place_i18n);
   }
 
+  // ── UI strings (routes/i18n.js): keyed by position on the wire, back by text; junk dropped ──
+  {
+    let req;
+    const got = await T.translateStrings("fr", ["שלום", "סגירה", "ריק"], { client: fake(async (r) => { req = r; return reply({ s0: "Bonjour", s1: "Fermer", s2: "  " }); }) });
+    assert.deepEqual(got, { "שלום": "Bonjour", "סגירה": "Fermer" });
+    assert.deepEqual(req.messages[0].content, JSON.stringify({ s0: "שלום", s1: "סגירה", s2: "ריק" }));
+    assert.ok(/dashboard/.test(req.system) && /French/.test(req.system));
+    assert.equal(await T.translateStrings("fr", ["שלום"], { client: fake(async () => reply({}, "refusal")) }), null);
+    assert.equal(await T.translateStrings("xx", ["שלום"], { client: fake(async () => reply({ s0: "x" })) }), null);
+  }
+
   // ── no key, unknown language, nothing to translate ──
   {
     const saved = process.env.ANTHROPIC_API_KEY; delete process.env.ANTHROPIC_API_KEY;
     assert.deepEqual(await T.translatePage(page()), { skipped: "no_api_key" });
+    assert.equal(await T.translateStrings("en", ["שלום"]), null);
     if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
     assert.deepEqual(await T.translatePage({ ...page(), language: "xx" }), { skipped: "language" });
     assert.deepEqual(await T.translatePage({ language: "en", property: {} }), { skipped: "empty" });

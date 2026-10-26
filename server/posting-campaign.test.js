@@ -603,5 +603,15 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.ok(await C.enrollNewPage(page(), deps), "auto-enroll on: enrolled on the default groups");
   }
 
+  // ── the admin's pasted template serves pages in its language; others keep the built-in copy ──
+  {
+    const templates = { en: "Hi {city} {link}", he: "" };
+    const target = { group_id: "111", url: "https://www.facebook.com/groups/111" };
+    const en = { ...page(), language: "en", property: { ...page().property, city: "Haifa" } };
+    assert.equal(C.buildCopy(en, { page_id: "pg1", posts: [] }, target, "property", "http://127.0.0.1:8787", templates), "Hi Haifa https://nadlan.call4li.com/p/pg1");
+    const he = C.buildCopy(page(), { page_id: "pg1", posts: [] }, target, "property", "", templates);
+    assert.equal(he, C.buildCopy(page(), { page_id: "pg1", posts: [] }, target), "an empty template is no template");
+  }
+
   console.log("posting-campaign.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

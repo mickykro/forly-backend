@@ -138,12 +138,8 @@ async function translatePage(doc, deps = {}) {
   if (!keys.length) return { skipped: "empty" };
   if (keys.length > MAX_FIELDS) return { skipped: "too_many_fields" };
   if (alreadyIn(lang, fields)) return { skipped: "already_in_language" };
-  let client = deps.client;
-  if (!client) {
-    if (!process.env.ANTHROPIC_API_KEY) return { skipped: "no_api_key" };
-    const Anthropic = require("@anthropic-ai/sdk");
-    client = new Anthropic({ timeout: 60000, maxRetries: 2 });
-  }
+  const client = clientOf(deps);
+  if (!client) return { skipped: "no_api_key" };
   let response;
   try {
     response = await client.beta.messages.create(buildRequest(lang, fields));
@@ -157,4 +153,38 @@ async function translatePage(doc, deps = {}) {
   return { translated: Object.keys(out).length };
 }
 
-module.exports = { translatePage, collect, alreadyIn, buildRequest, readReply, NAMES, MODEL };
+// A Claude client, or null when the server has no key (deps.client stands in for tests).
+function clientOf(deps) {
+  if (deps.client) return deps.client;
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const Anthropic = require("@anthropic-ai/sdk");
+  return new Anthropic({ timeout: 60000, maxRetries: 2 });
+}
+
+/*
+ * The dashboard's own words (routes/i18n.js): Hebrew UI strings → { source:
+ * translation } for the ones that came back, null when nothing could be asked.
+ * Same call shape as a page; the strings are keyed by position for the schema.
+ */
+async function translateStrings(lang, strings, deps = {}) {
+  const client = clientOf(deps);
+  if (!NAMES[lang] || !client || !strings.length) return null;
+  const fields = Object.fromEntries(strings.map((s, i) => [`s${i}`, s]));
+  const req = buildRequest(lang, fields);
+  req.system =
+    `You localize the user interface of a real-estate agents' web dashboard from Hebrew into ${NAMES[lang]}. ` +
+    "Each JSON value is one UI string, or a fragment of one that the code joins to a number or a name. " +
+    `Return the same keys, each value in natural, concise ${NAMES[lang]} as a software product would phrase it. ` +
+    "Keep punctuation, emoji, arrows, ellipses and leading/trailing dashes as they are; keep digits, {placeholders} and " +
+    "product names (Forly, WhatsApp, Facebook, Instagram) unchanged. A fragment stays a fragment (do not complete the sentence).";
+  let response;
+  try { response = await client.beta.messages.create(req); } catch (err) {
+    console.error(`[ui-translate] ${lang} failed: ${err && (err.status || "")} ${err && err.message}`);
+    return null;
+  }
+  const out = readReply(response, fields);
+  if (!out) return null;
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [fields[k], v]));
+}
+
+module.exports = { translatePage, translateStrings, collect, alreadyIn, buildRequest, readReply, NAMES, MODEL };
