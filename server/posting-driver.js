@@ -67,6 +67,7 @@ const CHRONO_PARAM = ["sorting_setting", "CHRONOLOGICAL"];
 const HALTING = new Set([...SIGNAL_DISABLES, ...SIGNAL_PENALISES, "login_required"]);
 
 const liveKey = (phone) => `post|${phone}`;
+const OK_STATES = new Set(["verified_posted", "submitted_for_approval"]);
 function fail(code, msg) { const e = new Error(msg || code); e.code = code; return e; }
 
 // deps.guard is posting-tick's `(action) => …`, or a module-like
@@ -133,7 +134,6 @@ function context(kind, args, deps) {
     async allows(action) { try { await guardFn(action); return true; } catch { return false; } },
     // POSTING_BURST (local only): no human-paced waits or typing delays.
     wait: (page, a, b) => (burst ? Promise.resolve() : page.waitForTimeout(Math.round((a + rand() * (b - a)) * 1000))),
-    typingDelay: deps.typingDelay || (() => (burst ? 0 : Math.round(Math.exp(3.9 + rand() * 1.2)))), // ~50–165 ms
     dwellDeps: { phone, platform: "facebook", conn: deps.conn || {}, rand, guard: { assertAllowed: ({ action }) => guardFn(action) } },
   };
   return x;
@@ -211,34 +211,33 @@ function ensureFocus(el) {
   return inside();
 }
 
-// Word-sized chunks at a per-character delay, a longer pause at some word
-// boundaries. Never one insertText of the whole message. Typed THROUGH the
-// target locator (M8), and only while focus is inside it: before every
-// chunk — newlines included — focus is checked (and restored, caret at the
-// end); if it cannot be held, typing stops (composer_focus_lost) rather
-// than a key, or an Enter, landing anywhere else.
-async function humanType(page, target, text, x) {
-  if (x.burst && typeof page.keyboard.insertText === "function") {
-    // POSTING_BURST (local): one insert per line, not per word — every call is a round trip to the remote browser.
-    const lines = String(text).split(/\r?\n/);
-    // One focus check up front; the pre-submit proof compares the editor's text to the copy before any click.
-    if (!(await target.evaluate(ensureFocus).catch(() => false))) throw fail("composer_focus_lost", "focus left the editor");
-    for (let i = 0; i < lines.length; i++) {
-      if (i > 0) await target.pressSequentially("\n", { delay: 0 });
-      if (lines[i]) await page.keyboard.insertText(lines[i]);
-    }
-    return;
+// The copy goes in whole, as a paste does (owner's call, 26 Oct 2026: nobody
+// types a post any more, and typing a word at a time over the remote browser
+// was slow). One insert per line, a real Enter between lines (the editor's
+// own paragraphs). Through the target locator (M8), and only while focus is
+// inside it: before every insert and every Enter focus is checked (and restored, caret at the
+// end); if it cannot be held, it stops (composer_focus_lost) rather than an
+// Enter landing anywhere else. The pre-submit proof then compares the
+// editor's text to the copy before any click.
+async function pasteText(page, target, text, x) {
+  const held = async () => { if (!(await target.evaluate(ensureFocus).catch(() => false))) throw fail("composer_focus_lost", "focus left the editor"); };
+  const lines = String(text).split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    // Checked again after the Enter too: a key can move focus, an insert must never follow it elsewhere.
+    if (i > 0) { await held(); await target.pressSequentially("\n", { delay: 0 }); }
+    if (!lines[i]) continue;
+    await held();
+    if (typeof page.keyboard.insertText === "function") await page.keyboard.insertText(lines[i]);
+    else await target.pressSequentially(lines[i], { delay: 0 });
   }
-  for (const w of String(text).split(/(\s+)/)) {
-    if (!w) continue;
-    if (!(await target.evaluate(ensureFocus).catch(() => false))) throw fail("composer_focus_lost", "focus left the editor");
-    // A word at a time: over a remote browser every key is several round
-    // trips (a second a character, measured), and a post took five minutes
-    // to type. Line breaks stay real Enter presses.
-    if (/[\r\n]/.test(w) || typeof page.keyboard.insertText !== "function") await target.pressSequentially(w, { delay: x.typingDelay() });
-    else { await page.keyboard.insertText(w); await page.waitForTimeout(w.length * x.typingDelay()); }
-    if (/\s/.test(w) && x.rand() < 0.06) await x.wait(page, 0.4, 1.5);
-  }
+  if (!x.burst) await x.wait(page, 1, 3); // a glance at what was pasted
+}
+
+// Closes an open composer and drops its draft (a dry run; a failed post the session moves on from).
+async function closeComposer(page) {
+  await page.keyboard.press("Escape").catch(() => {});
+  const discard = page.locator(S.discard).first();
+  if ((await discard.count().catch(() => 0)) > 0) await discard.click().catch(() => {});
 }
 
 // Pre-submit: every halting signal ends the attempt as verified_failed with
@@ -372,7 +371,7 @@ async function drive(page, x, want, args, opts = {}) {
   }
   const tAttach = Date.now();
   await editor.click();
-  try { await humanType(page, editor, copy, x); }
+  try { await pasteText(page, editor, copy, x); }
   catch (e) { if (e && e.code === "composer_focus_lost") return x.end("verified_failed", { error_code: e.code, check: "typing_focus" }); throw e; }
   await x.wait(page, 5, 20); // re-read before posting, like anyone would
   const tTyped = Date.now();
@@ -391,9 +390,7 @@ async function drive(page, x, want, args, opts = {}) {
   if (!(await submitReady(page, x))) return x.end("verified_failed", { error_code: "submit_unavailable", check: "submit_button" });
 
   if (args.dryRun === true) {
-    await page.keyboard.press("Escape").catch(() => {});
-    const discard = page.locator(S.discard).first();
-    if ((await discard.count().catch(() => 0)) > 0) await discard.click().catch(() => {});
+    await closeComposer(page);
     return x.end("cancelled", { error_code: "dry_run" }, { dry_run: true });
   }
 
@@ -440,7 +437,7 @@ async function addComment(page, x, comment) {
     if ((await box.count()) === 0) return "comment_box_not_found";
     await x.wait(page, 8, 25);
     await box.click();
-    await humanType(page, box, comment, x);
+    await pasteText(page, box, comment, x);
     await x.wait(page, 1, 3);
     if (!(await x.allows("post"))) return "posting_disabled"; // R2: the last await before the click
     // No send button under the box (today's Facebook): Enter sends a comment.
@@ -571,6 +568,8 @@ async function more(page, out, x0, deps) {
     let prepare = null;
     try { prepare = await next(out); } catch { prepare = null; }
     if (!prepare) break;
+    // Moving on after a group's failure (posting-chain): its composer may still hold our text.
+    if (!(out && OK_STATES.has(out.state))) await closeComposer(page);
     if (!(await between(page, x0))) break;
     let call = null;
     try { call = await prepare(); } catch { call = null; }
@@ -720,5 +719,5 @@ async function reconcile(attempt, deps = {}) {
 module.exports = {
   postToGroup, postToPage, reconcile, liveKey, SELECTORS: S, POST_SESSION_S, RECHECK_SESSION_S,
   proveIdentityAndDestination: P.proveIdentityAndDestination,
-  _test: { preflight, humanType, guardOf, submitReady, nav, context, settleError },
+  _test: { preflight, pasteText, guardOf, submitReady, nav, context, settleError },
 };

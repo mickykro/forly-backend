@@ -168,5 +168,25 @@ function chainingPost() {
     assert.equal(await run(dwelling(40, 40)), 2, "post + dwell past one window: still within each own");
     assert.equal(await run(dwelling(10, 100)), 1, "timed out in the dwell: no post after it");
   }
+  // ── after a failure: one group's problem goes on to the next post, anything else ends the session ──
+  {
+    const chain = require("./posting-chain");
+    const fresh = () => chain.session("972500000001", { env: {} }, {}, null);
+    const f = (code) => ["verified_failed", { error_code: code }];
+    for (const code of ["not_member", "group_blocked", "destination_mismatch", "copy_mismatch", "composer_not_found"]) assert.equal(fresh().more(...f(code)), true, `${code}: on to the next`);
+    for (const code of ["identity_mismatch", "navigation_failed", "markers_missing", "captcha", "checkpoint", "rate_limited", "login_required", "submit_unavailable", "composer_focus_lost"]) assert.equal(fresh().more(...f(code)), false, `${code}: the session ends`);
+    assert.equal(fresh().more("outcome_unknown", { state: "outcome_unknown", error_code: "not_verified" }), false, "an unknown outcome ends it");
+    assert.equal(fresh().more("cancelled", { error_code: "not_member" }), false, "only a failed post moves on");
+    let s = fresh();
+    assert.equal(s.more(...f("composer_not_found")), true);
+    assert.equal(s.more(...f("composer_not_found")), false, "a second missing composer: likely Facebook, not the group");
+    s = fresh();
+    assert.equal(s.more(...f("not_member")), true);
+    assert.equal(s.more("verified_posted"), true);
+    assert.equal(s.more(...f("group_blocked")), false, "two failures end the session");
+    s = fresh();
+    for (let i = 0; i < 4; i++) assert.equal(s.more(...f("membership_pending")), true, "a pending join is a skip, never counted");
+    assert.equal(s.more(...f("not_member")), true);
+  }
   console.log("posting-chain.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

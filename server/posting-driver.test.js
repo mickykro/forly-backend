@@ -35,7 +35,7 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(fin.permalink, PERMA); assert.equal(fin.post_url, PERMA); assert.equal(fin.comment_error_code, undefined);
     assert.equal(h.page.st.editor, COPY, "the composer holds exactly the copy");
     assert.ok(h.page.st.typed.filter((t) => !h.page.st.editor.includes(t)).join("").includes("f.ly"), "the link went into a comment");
-    assert.ok(h.page.st.typed.length > 3, "typed in word-sized chunks");
+    assert.deepEqual(h.page.st.typed.slice(0, 3), COPY.split("\n").flatMap((l, i) => (i ? ["\n", l] : [l])), "pasted a line at a time, an Enter between lines");
     assert.ok(h.page.st.clicks.includes(S.commentSubmit));
     assert.equal(h.page.st.visited[0], "https://www.facebook.com/", "the feed comes first");
     assert.equal(h.page.st.visited[1], GROUP_URL);
@@ -67,6 +67,26 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.deepEqual(v.slice(0, 2), ["https://www.facebook.com/", GROUP_URL], "the first: feed, then group");
     assert.ok(v.lastIndexOf("https://www.facebook.com/") > 1 && v[v.length - 1].includes("/posts/") || v.includes(GROUP_URL), "the dwell back on the feed between posts");
     assert.ok(h.transitions.some((t) => t.k === second.key && t.to === "verified_posted"), "the second attempt walked its own states");
+  }
+  // after one group's failure the session goes on (posting-chain decides): the composer is closed first, then the next post
+  {
+    let failFirst = true;
+    const h = harness({ page: { counts: { [S.joinGroup]: (st) => (failFirst && st.editor ? 1 : 0) } } });
+    const second = attemptOf({ key: "1111222233334444aaaabbbbccccdddd", post_id: "p2" });
+    let asked = 0;
+    const next = async (out) => {
+      if (++asked > 1) return null;
+      assert.equal(out.error_code, "not_member");
+      failFirst = false;
+      return async () => ({ kind: "group", args: argsOf({ attempt: second }), deps: Object.assign({}, h.deps, { next }) });
+    };
+    h.deps.next = next; h.deps.chainDwellMs = 0;
+    const press = h.page.keyboard.press;
+    h.page.keyboard.press = async (k) => { if (k === "Escape") h.page.st.editor = ""; return press(k); }; // Facebook drops the draft
+    await PD.postToGroup(argsOf(), h.deps);
+    assert.ok(h.page.st.pressed.includes("Escape"), "the failed post's composer is closed");
+    assert.equal(h.submits(), 1, "the next post went up in the same session");
+    assert.equal(h.opened.length, 1);
   }
   // burst (local): no dwell, but the chain goes on — a zero wait must never end it
   {
