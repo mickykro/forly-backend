@@ -66,6 +66,19 @@ const createPagesRouter = require("./routes/pages");
   assert.ok(html.includes('"language":"en"') && html.includes("EN:4 חד׳ בבבלי"), "the server template is served in the visitor's language");
   assert.ok(html.includes('"multilingual":true'));
 
+  // ── a page with no agent block shows the agent's profile, not the design's placeholder ──
+  {
+    const bc = require("./business-cache");
+    const realGet = bc.get;
+    bc.get = async (phone) => (phone === "972500000009" ? { full_name: "דנה לוי", business_name: "לוי נדל״ן", logo_url: "https://f/logo.png" } : null);
+    await db.savePage(page("NA1", { agent: { name: "", phone: "" } }));
+    const na = await api("id=NA1");
+    assert.deepEqual([na.agent.name, na.agent.brand_name, na.agent.logo_url, na.agent.phone], ["דנה לוי", "לוי נדל״ן", "https://f/logo.png", "972500000009"]);
+    const kept = await api("id=ML1");
+    assert.equal(kept.agent.name, "דנה", "a page with its own agent keeps it");
+    bc.get = realGet;
+  }
+
   // ── the editor's toggle marks an older page ──
   await db.updatePage("HE1", { multilingual: true });
   assert.equal((await api("id=HE1&lang=en")).language, "en");
@@ -77,6 +90,7 @@ const createPagesRouter = require("./routes/pages");
   assert.ok(tpl("templates/i18n.js").includes("function picker(data)"));
   assert.ok(tpl("templates/i18n.js").includes('localStorage.getItem(KEY)') && tpl("templates/i18n.js").includes('"forly_lang"'), "follows the dashboard's language");
   assert.ok(tpl("templates/runtime.js").includes("window.I18N.picker(DATA)"));
+  assert.ok(tpl("templates/runtime.js").includes("never the design's placeholder agent"), "an empty agent field clears the template's placeholder");
   assert.ok(tpl("p/page.js").includes("window.I18N.picker(d)") && tpl("p/page.js").includes('"&lang="'));
   console.log("pages-i18n.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

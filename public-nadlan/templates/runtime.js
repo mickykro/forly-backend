@@ -90,6 +90,7 @@
     for (var i = 0; i < paths.length; i++) { v = get(paths[i].trim()); if (v != null && v !== "") break; }
     if (el.getAttribute("data-fmt") === "price") v = fmtPrice(v) + (isRent && v ? " " + T("per_month") : "");
     if (v != null && v !== "") el.textContent = v;
+    else if (/^agent2?\./.test(paths[0])) el.textContent = ""; // never the design's placeholder agent on a real page
   });
   each("[data-deal]", document, function (el) { el.textContent = isRent ? T("for_rent") : T("for_sale"); });
   each("[data-price-label]", document, function (el) { el.textContent = isRent ? T("monthly_rent") : T("asking_price"); });
@@ -389,7 +390,7 @@
     sampleLogoBackground(logoUrl);
   } else {
     var initials = String(get("agent.name") || "").split(/\s+/).map(function (w) { return w.charAt(0); }).join("").slice(0, 2);
-    each("[data-avatar]", document, function (el) { if (initials) el.textContent = initials; });
+    each("[data-avatar]", document, function (el) { if (initials) el.textContent = initials; else if (!el.querySelector("img")) el.textContent = ""; });
   }
 
   // ── price per m² (sale listings with both price and size) ──
