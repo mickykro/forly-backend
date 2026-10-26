@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://forly.example/contracts/outreach-render.v1.schema.json",
+  "title": "Forly outreach render v1",
+  "$defs": {
+    "pipelineRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "origin",
+        "brandMode",
+        "demo_id",
+        "correlation_id",
+        "image_requests",
+        "property_details",
+        "callback_url"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "origin": {
+          "const": "cold_outreach"
+        },
+        "brandMode": {
+          "const": "outreach_demo"
+        },
+        "demo_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,128}$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "image_requests": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url",
+              "body",
+              "headers"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https://[^/]+/api/outreach/render-asset$"
+              },
+              "body": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "demo_id",
+                  "asset_id"
+                ],
+                "properties": {
+                  "demo_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{8,128}$"
+                  },
+                  "asset_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{8,128}$"
+                  }
+                }
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "x-forly-timestamp",
+                  "x-forly-request-id",
+                  "x-forly-signature"
+                ],
+                "properties": {
+                  "x-forly-timestamp": {
+                    "type": "string",
+                    "pattern": "^[0-9]{13}$"
+                  },
+                  "x-forly-request-id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{16,128}$"
+                  },
+                  "x-forly-signature": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "property_details": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "location",
+            "property_type"
+          ],
+          "properties": {
+            "location": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "property_type": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "rooms": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "area": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "price": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "floor": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          }
+        },
+        "callback_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://[^/]+/api/video-overlay$"
+        }
+      }
+    },
+    "overlayRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "brandMode",
+        "demo_id",
+        "correlation_id",
+        "video_urls",
+        "lines"
+      ],
+      "properties": {
+        "brandMode": {
+          "const": "outreach_demo"
+        },
+        "demo_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,128}$"
+        },
+        "correlation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "video_urls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https?://"
+          }
+        },
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "maxLength": 60
+          }
+        }
+      }
+    },
+    "overlayResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "brand_mode",
+        "watermark_version",
+        "duration",
+        "renditions"
+      ],
+      "properties": {
+        "brand_mode": {
+          "const": "outreach_demo"
+        },
+        "watermark_version": {
+          "const": "forly-central-v1"
+        },
+        "duration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "renditions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "rendition"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{8,128}$"
+                  },
+                  "rendition": {
+                    "const": "watermarked_demo"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "rendition"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{8,128}$"
+                  },
+                  "rendition": {
+                    "const": "clean_paid"
+                  }
+                }
+              }
+            ]
+          },
+          "allOf": [
+            {
+              "contains": {
+                "properties": {
+                  "rendition": {
+                    "const": "watermarked_demo"
+                  }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "properties": {
+                  "rendition": {
+                    "const": "clean_paid"
+                  }
+                }
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -51,6 +51,14 @@ module.exports = function createPagesRouter(ctx) {
           requireAuth, verifyActionToken, authSecret, adminApiSecret,
           uploadPublicBase, remoteUploadBase, signActionToken,
           verifySession, readToken, normalizeAuthPhone, adminPhones } = ctx;
+  async function hiddenOutreachPage(page) {
+    if (page?.origin === "cold_outreach") return true;
+    if (page?.origin !== "outreach_paid") return false;
+    if (!/^outreach-[a-f0-9]{64}$/.test(page.listing_id || "")) return true;
+    const lead = await require("../outreach/store").get("leads", page.listing_id.slice(9));
+    return !lead || lead.status !== "upgraded" || lead.paid_page_id !== page.page_id;
+  }
+  const callbackGuard = ctx.callbackGuard || require("../callback-auth").createCallbackGuard();
   const { constantTimeEqual } = require("../security");
   // Automated posting (Task 16): a page that becomes active joins a campaign
   // when its account opted in. Fire-and-forget — enrollment never fails or
@@ -155,7 +163,7 @@ module.exports = function createPagesRouter(ctx) {
   });
 
   // ── page builder (called by n8n) ──
-  router.post("/createPropertyPage", async (req, res) => {
+  router.post("/createPropertyPage", callbackGuard("page"), async (req, res) => {
     const body = req.body || {};
     if (!body.listing_id || !body.business_phone || !body.video_url ||
         !Array.isArray(body.photos) || body.photos.length < 1) {
@@ -369,7 +377,7 @@ module.exports = function createPagesRouter(ctx) {
     } catch (err) {
       console.error("createPropertyPage failed:", err);
       res.status(500).json({ error: "internal error" });
-    }
+    } finally { req.callbackComplete?.(); }
   });
 
   // ── property-page API (also aliased as /api/page for edit.html) ──
@@ -377,7 +385,7 @@ module.exports = function createPagesRouter(ctx) {
     const id = typeof req.query.id === "string" ? req.query.id : "";
     if (!id) return res.status(400).json({ error: "missing id" });
     const d = await db.getPage(id);
-    if (!d) return res.status(404).json({ error: "not found" });
+    if (!d || await hiddenOutreachPage(d)) return res.status(404).json({ error: "not found" });
     if (d.status === "expired" || d.status === "archived") {
       res.set("Cache-Control", "public, max-age=60");
       return res.json({
@@ -661,8 +669,11 @@ module.exports = function createPagesRouter(ctx) {
 
   // ── video stitch + overlay ──
   const { overlayVideo, promoVideoUrl, ensurePlayableVideo, MAX_LINES, MAX_CLIPS } = require("../overlay");
-  router.post("/api/video-overlay", async (req, res) => {
+  router.post("/api/video-overlay", callbackGuard("overlay"), async (req, res) => {
     const body = req.body || {};
+    const brandMode = body.brandMode || body.brand_mode || "promo_titled";
+    if (!["promo_titled", "outreach_demo"].includes(brandMode)) return res.status(400).json({error:"invalid_brand_mode"});
+    if (brandMode === "outreach_demo" && (!ctx.outreachAssets || !/^[A-Za-z0-9_-]{8,128}$/.test(String(body.demo_id || "")))) return res.status(400).json({error:"outreach_manifest_required"});
     // video_urls (ordered clips, stitched with a crossfade) is the current
     // shape; video_url stays supported for single-clip callers.
     const videoUrls = (Array.isArray(body.video_urls) ? body.video_urls : [body.video_url])
@@ -691,12 +702,20 @@ module.exports = function createPagesRouter(ctx) {
       }
     }
     try {
-      const result = await overlayVideo({ videoUrls, lines, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl });
+      const result = await overlayVideo({ videoUrls, lines, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl, brandMode });
+      if (brandMode === "outreach_demo") {
+        try {
+          const assets = await ctx.outreachAssets.registerRenditions({demoId: body.demo_id, renditions: result.renditions});
+          return res.json({brand_mode:brandMode, watermark_version:result.watermark_version, duration:result.duration, renditions:assets});
+        } finally {
+          for (const rendition of result.renditions) require("fs").rmSync(rendition.path, {force:true});
+        }
+      }
       res.json(result);
     } catch (err) {
       console.error("video-overlay failed:", err.message);
       res.status(500).json({ error: "overlay_failed" });
-    }
+    } finally { req.callbackComplete?.(); }
   });
 
   // ── events beacon ──
@@ -818,7 +837,7 @@ module.exports = function createPagesRouter(ctx) {
         db.findPageBySlug(reservation.business_phone, propSlug),
       ]);
       const portfolio = business?.portfolio;
-      if (!page) return res.status(404).json({ error: "not_found" });
+      if (!page || await hiddenOutreachPage(page)) return res.status(404).json({ error: "not_found" });
       if (page.status !== "active" && page.status !== "expiring") {
         return res.status(404).json({ error: "not_found" });
       }
@@ -929,6 +948,7 @@ module.exports = function createPagesRouter(ctx) {
   // classic: the personal edit link (#edit=) edits texts in the Classic view, the
   // only one marked up for in-page editing; the texts are shared by every design.
   async function renderPropertyPage(res, id, d, pageUrl, { classic = false } = {}) {
+    if (await hiddenOutreachPage(d)) return res.status(404).end();
     const tpl = (d && d.theme && d.theme.template) || "original";
     if (!d || d.status !== "active" || classic || !SERVER_TEMPLATES.has(tpl)) {
       // Shell branch: still inject OG tags for active pages so shared links
@@ -967,6 +987,7 @@ module.exports = function createPagesRouter(ctx) {
     const id = req.params.id;
     let d = null;
     try { d = await db.getPage(id); } catch (e) { /* fall back */ }
+    if (await hiddenOutreachPage(d)) return res.status(404).end();
     const pageUrl = `${pageBaseUrl}/p/${id}`;
     // R4: a campaign link's ?c= is consumed here (visit + fly_ref); then a 302 without it.
     const tracked = await attribution.consumeClick(req, res, id);

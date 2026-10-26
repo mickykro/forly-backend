@@ -5,6 +5,9 @@ on:
     branches: [main, staging]
 jobs:
   test:
+    timeout-minutes: 20
+    env:
+      CALLBACK_ALLOW_UNSIGNED_LOCAL: "1"
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -16,5 +19,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: server/package-lock.json
+      - run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg fonts-noto-core fonts-dejavu-core
       - run: npm ci
+      - run: npm run test:outreach
       - run: npm test

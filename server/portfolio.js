@@ -67,7 +67,7 @@ function parsePublicPath(path) {
  * @returns {Array} - sorted by newest first
  */
 function visiblePortfolioPages(pages, searchQuery) {
-  let filtered = pages.filter((p) => (p.status === "active" || p.status === "expiring") && p.portfolio_visible !== false);
+  let filtered = pages.filter((p) => !require("./outreach-eligibility").isPrivateOutreach(p) && (p.status === "active" || p.status === "expiring") && p.portfolio_visible !== false);
 
   // Search in city, address, and property data
   if (searchQuery && typeof searchQuery === "string" && searchQuery.trim()) {

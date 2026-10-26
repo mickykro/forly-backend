@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><meta name="robots" content="noindex,nofollow,noarchive" /><meta
+    name="referrer"
+    content="no-referrer"
+  /><title>Claim your Forly preview</title
+  ><link rel="stylesheet" href="/style.css" />
+  <main class="container">
+    <h1>Claim your Forly preview</h1>
+    <p>
+      Verify your phone with a one-time WhatsApp code. Forly will review your
+      relationship to this property before enabling ownership or a paid upgrade.
+    </p>
+    <form id="claimCodeForm">
+      <label
+        >Your phone
+        <input
+          name="phone"
+          type="tel"
+          autocomplete="tel"
+          required
+          maxlength="20" /></label
+      ><button type="submit">Send verification code</button>
+    </form>
+    <form id="claimForm" hidden>
+      <label
+        >Verification code
+        <input
+          name="code"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          pattern="[0-9]{6}"
+          maxlength="6"
+          required /></label
+      ><label
+        ><input id="claimAcknowledged" type="checkbox" required /> I acknowledge
+        this listing and request an ownership review.</label
+      ><button type="submit">Verify and request review</button>
+    </form>
+    <p id="claimStatus" role="status"></p>
+  </main>
+  <script src="/api.js"></script>
+  <script src="/outreach-claim.js"></script>
+</html>
