@@ -173,6 +173,7 @@
   // language (localStorage forly_lang, the dashboard's too): a page opened
   // without ?lang= goes to it first.
   var NAMES = { he: "עברית", en: "English", ar: "العربية", ru: "Русский", es: "Español", fr: "Français" };
+  var FLAGS = { he: "🇮🇱", en: "🇬🇧", ar: "🇸🇦", ru: "🇷🇺", es: "🇪🇸", fr: "🇫🇷" }; // the dashboard switcher's
   var KEY = "forly_lang";
   function picker(data) {
     if (!data || !data.multilingual || document.querySelector(".fly-lang")) return;
@@ -186,7 +187,7 @@
     var bar = document.querySelector("header");
     sel.style.cssText = (bar ? "margin-inline-start:auto;flex-shrink:0;" : "position:fixed;z-index:60;top:16px;inset-inline-end:16px;") +
       "padding:6px 10px;border-radius:999px;border:1px solid rgba(0,0,0,.18);background:rgba(255,255,255,.92);color:#1a1712;font:600 13px/1.2 system-ui,sans-serif;box-shadow:0 4px 14px -6px rgba(0,0,0,.35);cursor:pointer";
-    Object.keys(DICT).forEach(function (l) { var o = document.createElement("option"); o.value = l; o.textContent = NAMES[l] || l; o.selected = l === cur; sel.appendChild(o); });
+    Object.keys(DICT).forEach(function (l) { var o = document.createElement("option"); o.value = l; o.textContent = (FLAGS[l] ? FLAGS[l] + " " : "") + (NAMES[l] || l); o.selected = l === cur; sel.appendChild(o); });
     sel.addEventListener("change", function () {
       try { localStorage.setItem(KEY, sel.value); } catch (e) { /* storage off */ }
       var u = new URL(location.href); u.searchParams.set("lang", sel.value);
