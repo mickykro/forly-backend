@@ -166,5 +166,35 @@
     each(root, "[data-i18n-aria]", function (el) { el.setAttribute("aria-label", t(lang, el.getAttribute("data-i18n-aria"))); });
   }
 
-  window.I18N = { t: t, apply: apply, isRTL: function (l) { return !!RTL[l]; }, langs: Object.keys(DICT) };
+  // A visitor's language picker, for a page served with multilingual (the
+  // server translates on ?lang=, once per language). It sits in the page's
+  // top bar (every template has a <header>; the chat bubble and the sound
+  // button own the bottom corners). The choice is the browser's one
+  // language (localStorage forly_lang, the dashboard's too): a page opened
+  // without ?lang= goes to it first.
+  var NAMES = { he: "עברית", en: "English", ar: "العربية", ru: "Русский", es: "Español", fr: "Français" };
+  var FLAGS = { he: "🇮🇱", en: "🇬🇧", ar: "🇸🇦", ru: "🇷🇺", es: "🇪🇸", fr: "🇫🇷" }; // the dashboard switcher's
+  var KEY = "forly_lang";
+  function picker(data) {
+    if (!data || !data.multilingual || document.querySelector(".fly-lang")) return;
+    var cur = data.language || "he", url = new URL(location.href), saved = null;
+    try { saved = localStorage.getItem(KEY); } catch (e) { /* storage off */ }
+    if (!url.searchParams.get("lang") && saved && DICT[saved] && saved !== cur) {
+      url.searchParams.set("lang", saved); location.replace(url.toString()); return;
+    }
+    var sel = document.createElement("select");
+    sel.className = "fly-lang"; sel.setAttribute("aria-label", "Language"); sel.setAttribute("translate", "no");
+    var bar = document.querySelector("header");
+    sel.style.cssText = (bar ? "margin-inline-start:auto;flex-shrink:0;" : "position:fixed;z-index:60;top:16px;inset-inline-end:16px;") +
+      "padding:6px 10px;border-radius:999px;border:1px solid rgba(0,0,0,.18);background:rgba(255,255,255,.92);color:#1a1712;font:600 13px/1.2 system-ui,sans-serif;box-shadow:0 4px 14px -6px rgba(0,0,0,.35);cursor:pointer";
+    Object.keys(DICT).forEach(function (l) { var o = document.createElement("option"); o.value = l; o.textContent = (FLAGS[l] ? FLAGS[l] + " " : "") + (NAMES[l] || l); o.selected = l === cur; sel.appendChild(o); });
+    sel.addEventListener("change", function () {
+      try { localStorage.setItem(KEY, sel.value); } catch (e) { /* storage off */ }
+      var u = new URL(location.href); u.searchParams.set("lang", sel.value);
+      sel.disabled = true; // the first visit in a language waits for its translation
+      location.href = u.toString();
+    });
+    (bar || document.body).appendChild(sel);
+  }
+  window.I18N = { t: t, apply: apply, picker: picker, isRTL: function (l) { return !!RTL[l]; }, langs: Object.keys(DICT) };
 })();

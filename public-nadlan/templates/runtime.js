@@ -63,7 +63,7 @@
   function T(key, vars) { return window.I18N ? window.I18N.t(LANG, key, vars) : key; }
 
   // ── i18n: translate static chrome ([data-i18n]) + set <html lang/dir> ──
-  if (window.I18N) window.I18N.apply(document, LANG);
+  if (window.I18N) { window.I18N.apply(document, LANG); window.I18N.picker(DATA); }
 
   // ── theme: custom colors + fonts override the template's accent tokens ──
   (function applyTheme() {
@@ -90,6 +90,7 @@
     for (var i = 0; i < paths.length; i++) { v = get(paths[i].trim()); if (v != null && v !== "") break; }
     if (el.getAttribute("data-fmt") === "price") v = fmtPrice(v) + (isRent && v ? " " + T("per_month") : "");
     if (v != null && v !== "") el.textContent = v;
+    else if (/^agent2?\./.test(paths[0])) el.textContent = ""; // never the design's placeholder agent on a real page
   });
   each("[data-deal]", document, function (el) { el.textContent = isRent ? T("for_rent") : T("for_sale"); });
   each("[data-price-label]", document, function (el) { el.textContent = isRent ? T("monthly_rent") : T("asking_price"); });
@@ -119,6 +120,94 @@
       if (v.hasAttribute("data-video")) { var p = v.play && v.play(); if (p && p.catch) p.catch(function () {}); }
     }
   });
+
+  // ── soundtrack: narration + music beside the silent hero video. The video is
+  //    the clock: the tracks take its mute state and follow its play, pause,
+  //    seek and end, so every control a template already has (its own mute
+  //    button, pausing off-screen, a Play button, native controls) drives them
+  //    too. A muted track plays in step from the start; sound comes on with the
+  //    first tap/click/key outside a control (browsers allow it only after one),
+  //    where allowed at once, or from any mute control — a corner button
+  //    (opposite the chat bubble) included. Volume is baked into the files
+  //    (iOS ignores audio.volume).
+  var narr = get("hero.narration_url"), music = get("hero.music_url");
+  var hv = document.querySelector("[data-video]") || document.querySelector("[data-video-manual]");
+  if ((narr || music) && vsrc && hv) {
+    var voice = narr ? new Audio(narr) : null, tune = music ? new Audio(music) : null;
+    var tracks = [voice, tune].filter(Boolean);
+    tracks.forEach(function (a) { a.preload = "auto"; });
+    if (tune) tune.loop = true;
+    var heard = !hv.muted, sbtn = document.createElement("button");
+    sbtn.type = "button";
+    sbtn.style.cssText = "position:fixed;z-index:60;bottom:16px;inset-inline-end:16px;width:44px;height:44px;" +
+      "border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:20px;line-height:44px;cursor:pointer";
+    var paint = function () {
+      var on = !hv.muted;
+      sbtn.textContent = on ? "🔊" : "🔇";
+      sbtn.setAttribute("aria-label", T(on ? "video_mute" : "video_sound"));
+      sbtn.setAttribute("aria-pressed", on ? "true" : "false");
+    };
+    // The narration is timed to the video from 0 and stays silent past its own end.
+    // Over a looping clip it is heard once: "heard" means it ended while audible —
+    // not voice.ended, which a muted pass sets too (and the next loop clears).
+    var voiceHeard = false;
+    if (voice) voice.addEventListener("ended", function () { if (!voice.muted) voiceHeard = true; });
+    var voiceDue = function () { return !(hv.loop && voiceHeard) && hv.currentTime < (voice.duration || Infinity); };
+    var align = function () {
+      if (voice.ended || Math.abs(voice.currentTime - hv.currentTime) > 0.5) { try { voice.currentTime = hv.currentTime; } catch (e) {} }
+    };
+    var follow = function () {
+      tracks.forEach(function (a) { a.muted = hv.muted; });
+      var stopped = hv.paused || hv.ended || document.hidden;
+      tracks.forEach(function (a) {
+        if (stopped || (a === voice && !voiceDue())) return a.pause();
+        if (a === voice) align();
+        var p = a.play(); if (p && p.catch) p.catch(function () {});
+      });
+    };
+    hv.addEventListener("volumechange", function () {
+      // Sound on for the first time over a looping clip: video and narration both from
+      // the top (before follow() asks whether the narration is due), so it is heard whole.
+      if (!hv.muted && !heard) {
+        heard = true;
+        if (hv.loop) { try { hv.currentTime = 0; if (voice) voice.currentTime = 0; } catch (e) {} }
+      }
+      follow(); paint();
+    });
+    ["play", "playing", "pause", "ended", "seeked"].forEach(function (t) { hv.addEventListener(t, follow); });
+    // Drift only, on a narration that is playing: restarting an ended one is follow()'s, on a seek, a loop or play.
+    hv.addEventListener("timeupdate", function () { if (voice && !voice.paused && !hv.paused && voiceDue()) align(); });
+    document.addEventListener("visibilitychange", follow);
+    // A touch only counts as a gesture when it ends. A tap on a control is left to that control.
+    var GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
+    var unlocked = false;
+    var firstGesture = function (e) {
+      // iOS lets a track play from script only once it has played inside a tap, and a
+      // template's Play starts the video after the tap — so each track plays here once
+      // (follow() pauses it again at once when the video is not playing). A pointerdown
+      // is no tap on iOS: the unlock waits for the touchend.
+      if (!unlocked && e.type !== "pointerdown") {
+        unlocked = true;
+        tracks.forEach(function (a) { if (a.paused && !a.ended) { var p = a.play(); if (p && p.catch) p.catch(function () {}); } });
+      }
+      var t = e.target && e.target.closest ? e.target : null;
+      if (!heard && !(t && t.closest("button,a,input,select,textarea,label,video[controls],[role=button]"))) hv.muted = false;
+      follow();
+      if (heard && unlocked) stopWaiting();
+    };
+    var stopWaiting = function () {
+      GESTURES.forEach(function (t) { document.removeEventListener(t, firstGesture, true); });
+    };
+    GESTURES.forEach(function (t) { document.addEventListener(t, firstGesture, true); });
+    sbtn.addEventListener("click", function () { hv.muted = !hv.muted; follow(); });
+    paint();
+    document.body.appendChild(sbtn);
+    if (hv.muted) {
+      // Sound at once where the browser allows it; otherwise the tracks play muted, in step.
+      Promise.all(tracks.map(function (a) { a.muted = false; return a.play(); }))
+        .then(function () { hv.muted = false; }, follow);
+    } else follow();
+  }
 
   // ── editorial photo slots — the single, full-bleed images the magazine-style
   //    templates hang their layout on, outside the gallery grid. data-photo="k"
@@ -301,7 +390,7 @@
     sampleLogoBackground(logoUrl);
   } else {
     var initials = String(get("agent.name") || "").split(/\s+/).map(function (w) { return w.charAt(0); }).join("").slice(0, 2);
-    each("[data-avatar]", document, function (el) { if (initials) el.textContent = initials; });
+    each("[data-avatar]", document, function (el) { if (initials) el.textContent = initials; else if (!el.querySelector("img")) el.textContent = ""; });
   }
 
   // ── price per m² (sale listings with both price and size) ──

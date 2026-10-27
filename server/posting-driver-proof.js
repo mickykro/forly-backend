@@ -30,6 +30,8 @@ const SELECTORS = {
   targetIdMeta: 'meta[property="al:android:url"]', // [Unverified] fb://group/<id>, fb://page/<id>, fb://profile/<id>
   targetUrlMeta: 'meta[property="og:url"]', // [Unverified]
   joinGroup: 'div[role="main"] div[aria-label="Join group"][role="button"], div[role="main"] div[aria-label="הצטרפות לקבוצה"][role="button"]', // [Unverified]
+  // A join request waiting for the group's admins (Hebrew is gendered: בטל / בטלי). [Unverified] labels, seen as text 26 Oct 2026.
+  cancelJoinRequest: 'div[role="main"] div[aria-label="Cancel request"][role="button"], div[role="main"] div[aria-label="ביטול הבקשה"][role="button"], div[role="main"] div[aria-label="בטל את הבקשה"][role="button"], div[role="main"] div[aria-label="בטלי את הבקשה"][role="button"]',
   // "כאן כותבים" is what a live Hebrew group page showed (a failed run's screenshot); the rest are guesses.
   composer: 'div[role="main"] [role="button"]:has-text("כאן כותבים"), div[role="main"] [role="button"]:has-text("כתבו משהו"), div[role="main"] [role="button"]:has-text("Write something"), div[role="main"] [role="button"]:has-text("What\'s on your mind")', // [Unverified]
   composerRoot: COMPOSER_ROOT,
@@ -115,7 +117,8 @@ function readDom(target, s) {
   if (!s) return target.map((a) => ({ href: a.href, text: text(a).trim() }));
   return target.slice(0, 15).map((el) => {
     const link = el.querySelector(s.link), msg = el.querySelector(s.text), au = el.querySelector(s.author);
-    return { href: link ? link.href : null, text: msg ? text(msg) : "", author: au ? text(au) : "" };
+    // hrefs: a video card's first link is often not the post's own.
+    return { href: link ? link.href : null, hrefs: Array.from(el.querySelectorAll(s.link)).slice(0, 8).map((a) => a.href), text: msg ? text(msg) : "", author: au ? text(au) : "" };
   });
 }
 
@@ -278,7 +281,7 @@ function isCutOf(text, copy) {
 function findOwnPost(posts, { kind, ids, author, copy }) {
   const fp = fingerprint(copy);
   for (const p of Array.isArray(posts) ? posts : []) {
-    const permalink = p && permalinkOf(p.href, kind, ids);
+    const permalink = p && [p.href, ...(Array.isArray(p.hrefs) ? p.hrefs : [])].map((h) => permalinkOf(h, kind, ids)).find(Boolean);
     if (!permalink || !author || norm(p.author) !== author) continue;
     const exact = fingerprint(p.text) === fp;
     if (exact || isCutOf(p.text, copy)) return { permalink, exact };

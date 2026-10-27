@@ -135,8 +135,13 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
     assert.equal(await P.textOf(page, S.editor), P.norm("🏠 דירה בחיפה\n3 חדרים\nשורה\nחדשה 👨‍👩‍👧"), "the editor: emoji kept, blocks and <br> break words, hidden text not read");
     assert.equal(await P.textOf(page, `${S.composerRoot} strong`), "Dana Cohen", "an avatar's alt is not text; inline spans do not split words");
     await page.setContent(`<div role="feed"><div><h3><strong>Dana Cohen</strong></h3><a href="https://www.facebook.com/groups/111/posts/9/">x</a><div data-ad-preview="message">${EM("🏠")} דירה בחיפה 4 חדרים<div>מרפסת</div></div></div></div>`);
-    assert.deepEqual(await P.readFeedPosts(page), [{ href: "https://www.facebook.com/groups/111/posts/9/", text: "\n🏠 דירה בחיפה 4 חדרים\nמרפסת\n\n", author: "Dana Cohen" }]);
+    assert.deepEqual(await P.readFeedPosts(page), [{ href: "https://www.facebook.com/groups/111/posts/9/", hrefs: ["https://www.facebook.com/groups/111/posts/9/"], text: "\n🏠 דירה בחיפה 4 חדרים\nמרפסת\n\n", author: "Dana Cohen" }]);
     assert.deepEqual(await page.$$eval("a", P.readDom), [{ href: "https://www.facebook.com/groups/111/posts/9/", text: "x" }], "a list of links (facebook-groups-sync)");
+    // a card whose first post link is not its own (a video or shared post inside it): every link is kept
+    await page.setContent(`<div role="feed"><div><h3><strong>Dana Cohen</strong></h3><a href="https://www.facebook.com/groups/999/posts/5/">v</a><a href="https://www.facebook.com/groups/111/posts/9/">x</a><div data-ad-preview="message">דירה</div></div></div>`);
+    const [vc] = await P.readFeedPosts(page);
+    assert.deepEqual(vc.hrefs, ["https://www.facebook.com/groups/999/posts/5/", "https://www.facebook.com/groups/111/posts/9/"]);
+    assert.equal(P.findOwnPost([vc], { kind: "group", ids: ["111"], author: "Dana Cohen", copy: "דירה" }).permalink, "https://www.facebook.com/groups/111/posts/9/", "the post's own link is found");
 
     // ── who is logged in: Facebook's own bootstrap data, never a post's text ──
     const boot = (name) => `<script type="application/json">${JSON.stringify({ require: [["ScheduledServerJS", "handle", null, [{ __bbox: { define: [["CurrentUserInitialData", [], { NAME: name, SHORT_NAME: "M" }, 270]] } }]]] })}</script>`;
@@ -174,19 +179,19 @@ const editor = (c) => `<div contenteditable="true" role="textbox">${c.split(". "
     for (const leak of ["SECRET", "Other Person", "private text", "long text someone wrote"]) assert.ok(!flat.includes(leak), `never in the note: ${leak}`);
     page.setDefaultTimeout(30000);
 
-    // ── M8: typing goes through the editor even when something steals focus between words ──
+    // ── M8: the paste goes through the editor even when something steals focus between lines ──
     await page.setContent(`<div role="dialog"><div contenteditable="true" role="textbox" id="ed"></div></div><input id="other">
       <script>document.getElementById("ed").addEventListener("keyup", (e) => { if (e.key === " " || e.key === "Enter") document.getElementById("other").focus(); });</script>`);
     const text = "דירה בחיפה\nמרפסת גדולה וחניה";
     const x = { typingDelay: () => 0, rand: () => 0.5, wait: async () => {} };
-    await PD._test.humanType(page, page.locator(S.editor).first(), text, x);
+    await PD._test.pasteText(page, page.locator(S.editor).first(), text, x);
     assert.equal(await page.inputValue("#other"), "", "nothing reached the element that stole focus");
     assert.equal(await P.textOf(page, S.editor), P.norm(text), "the editor holds exactly the copy");
     // a newline is never pressed unless focus is inside the target: a focus
     // thief that wins every time makes typing stop, not type elsewhere
     await page.setContent(`<div role="dialog"><div contenteditable="true" role="textbox" id="ed"></div></div><input id="other">
       <script>document.getElementById("ed").addEventListener("focus", () => document.getElementById("other").focus());</script>`);
-    await assert.rejects(PD._test.humanType(page, page.locator(S.editor).first(), "a\nb", x), (e) => e.code === "composer_focus_lost");
+    await assert.rejects(PD._test.pasteText(page, page.locator(S.editor).first(), "a\nb", x), (e) => e.code === "composer_focus_lost");
     assert.ok(!(await page.inputValue("#other")).includes("\n"));
   } finally {
     await browser.close();

@@ -224,4 +224,4 @@ async function ask(model, system, messages, keys, opts) {
   return readResponse(model, JSON.parse(text));
 }
 
-module.exports = { PROVIDERS, MAX_OUT, providerFor, envKeyFor, buildRequest, readResponse, ask };
+module.exports = { PROVIDERS, MAX_OUT, CLAUDE_NO_SAMPLING, providerFor, envKeyFor, buildRequest, readResponse, ask };

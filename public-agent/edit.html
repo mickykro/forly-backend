@@ -7,6 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="stylesheet" href="/app.css">
+<script src="/ui-i18n.js" defer></script>
 <style>
 .edit-layout{display:grid;grid-template-columns:420px 1fr;gap:24px;align-items:start}
 .edit-panel{max-height:calc(100vh - 140px);overflow-y:auto;padding-left:8px}
@@ -256,9 +257,10 @@
       <!-- Toggles -->
       <div class="card">
         <div class="sec-title">הצגת אזורים</div>
-        <div class="toggle-row"><label>גלריית תמונות</label><span class="switch"><input type="checkbox" id="tGallery"><i></i></span></div>
-        <div class="toggle-row"><label>כרטיסי ״למה דווקא כאן״</label><span class="switch"><input type="checkbox" id="tCarousel"><i></i></span></div>
-        <div class="toggle-row" style="border-bottom:none"><label>מידע על השכונה</label><span class="switch"><input type="checkbox" id="tArea"><i></i></span></div>
+        <div class="toggle-row"><label>גלריית תמונות</label><label class="switch"><input type="checkbox" id="tGallery"><i></i></label></div>
+        <div class="toggle-row"><label>כרטיסי ״למה דווקא כאן״</label><label class="switch"><input type="checkbox" id="tCarousel"><i></i></label></div>
+        <div class="toggle-row"><label>מידע על השכונה</label><label class="switch"><input type="checkbox" id="tArea"><i></i></label></div>
+        <div class="toggle-row" style="border-bottom:none"><label>תרגום לגולשים (בחירת שפה בדף)</label><label class="switch"><input type="checkbox" id="tMultilingual"><i></i></label></div>
       </div>
 
       <div class="save-bar">
@@ -393,6 +395,7 @@
         carousel: $("#tCarousel").checked,
         area: $("#tArea").checked,
       },
+      multilingual: $("#tMultilingual").checked,
     };
   }
 
@@ -516,6 +519,7 @@
       $("#tGallery").checked = !!sections.gallery;
       $("#tCarousel").checked = !!sections.carousel;
       $("#tArea").checked = !!sections.area;
+      $("#tMultilingual").checked = !!d.multilingual;
 
       galleryState = (gallery.images || []).slice();
       renderGallery();

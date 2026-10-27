@@ -281,8 +281,8 @@
     bMsg.textContent = SMS_NOTE;
     bModal.hidden = false; bOpen = true;
     window.ForlyViewer.mount($("browserView"), platform, {
-      // On a phone the steps fold away once the page shows, to give it the room.
-      onFrame: () => { const d = bBody.querySelector(".popup-steps-box"); if (d && window.matchMedia("(max-width: 640px)").matches) d.open = false; },
+      // The steps fold away once the page shows, to give it the room.
+      onFrame: () => { const d = bBody.querySelector(".popup-steps-box"); if (d) d.open = false; },
       onEnd: (code, gotFrame) => onViewerEnd(platform, code, gotFrame),
     });
   }

@@ -11,7 +11,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { INFRA_HOST, resolvePageBaseUrl, rehost, guessImageExt, ownUploadedVideo } = require("./utils");
+const { INFRA_HOST, resolvePageBaseUrl, postingPageBaseUrl, PUBLIC_BASE_URL, rehost, guessImageExt, ownUploadedVideo } = require("./utils");
 
 // ── INFRA_HOST ────────────────────────────────────────────────────────────
 // Moved out of index.js so scripts can require it; these pin the behaviour so
@@ -26,6 +26,12 @@ for (const bad of [
 for (const ok of ["https://nadlan.call4li.com", "https://call4li.com/p/1"]) {
   assert.ok(!INFRA_HOST.test(ok), `expected NOT infra host: ${ok}`);
 }
+
+// ── postingPageBaseUrl: staging posts production's links ──────────────────
+assert.strictEqual(postingPageBaseUrl({ FORLY_ENV: "staging" }, "https://staging.srv1173890.hstgr.cloud"), PUBLIC_BASE_URL);
+assert.strictEqual(PUBLIC_BASE_URL, "https://nadlan.call4li.com");
+assert.strictEqual(postingPageBaseUrl({ FORLY_ENV: "prod" }, "https://nadlan.call4li.com"), "https://nadlan.call4li.com");
+assert.strictEqual(postingPageBaseUrl({ FORLY_ENV: "local" }, "http://localhost:8787"), "http://localhost:8787");
 
 // ── resolvePageBaseUrl ────────────────────────────────────────────────────
 const PUB = "https://nadlan.call4li.com";

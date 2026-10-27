@@ -52,6 +52,9 @@ const driverOk = { getSession: async (id) => ({ sessionId: id, status: "active",
   assert.deepEqual(V.parseInput({ t: "down", x: 0.1, y: 0.2 }), { t: "down", x: 0.1, y: 0.2 });
   assert.equal(V.parseInput({ t: "up", x: 2, y: 0 }), null);
   assert.equal(V.parseInput(null), null);
+  assert.deepEqual(V.parseInput({ t: "fit", w: 640, h: 480 }), { t: "fit", w: 640, h: 480 });
+  assert.equal(V.parseInput({ t: "fit", w: 4000, h: 480 }), null, "fit size is bounded");
+  assert.equal(V.parseInput({ t: "fit", w: 640.5, h: 480 }), null);
   assert.equal(V.shortUrl("https://www.madlan.co.il/a/b?code=1#x"), "https://www.madlan.co.il/a/b");
   assert.equal(V.shortUrl("javascript:alert(1)"), "");
 
@@ -90,6 +93,10 @@ const driverOk = { getSession: async (id) => ({ sessionId: id, status: "active",
     assert.ok(f.calls.some((c) => c[0] === "text" && c[1] === "שלום"));
     assert.ok(f.calls.some((c) => c[0] === "press" && c[1] === "Enter"));
     assert.ok(f.calls.some((c) => c[0] === "wheel" && c[2] === 300));
+    await V.input("p1|madlan", { t: "fit", w: 600, h: 400 });
+    assert.ok(!f.calls.some((c) => c[0] === "Emulation.setDeviceMetricsOverride"), "a watched working browser is never resized");
+    await V.input("p1|madlan", { t: "fit", w: 640, h: 500 }, { fit: true });
+    assert.deepEqual(f.calls.filter((c) => c[0] === "Emulation.setDeviceMetricsOverride").pop()[1], { width: 640, height: 500, deviceScaleFactor: 0, mobile: false }, "the page is laid out at the viewer's size");
     // A held press: down at the point, moves, up.
     await V.input("p1|madlan", { t: "down", x: 0.5, y: 0.5 });
     await V.input("p1|madlan", { t: "move", x: 0.51, y: 0.5 });

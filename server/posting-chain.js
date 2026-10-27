@@ -8,21 +8,30 @@
  * against the switches (R2), the account's caps and the agent's approval:
  * only an approved post (or a standing campaign's next one) is taken, never
  * one the agent set for a later time, and the account's own min_gap gives way
- * to the dwell only inside the session. Any outcome but a clean post ends the
- * session: nothing is pushed after a failure or a halt.
+ * to the dwell only inside the session. A failure that belongs to one group
+ * (GROUP_FAILURES: not a member, blocked, the wrong page, a stale copy, a
+ * join still pending) moves on to the next post — the composer is closed
+ * first (posting-driver) — and so does one missing composer per session
+ * (a second one is likely Facebook's layout, not the group). Two such
+ * failures end the session. Anything else ends it: a halt, an unknown
+ * outcome, a page that will not load, the wrong identity.
  *
  * POSTING_CHAIN=0 turns it off (one post per session, as before).
  */
 const A = require("./posting-account");
 const C = require("./posting-campaign");
 const safety = require("./posting-safety");
+const live = require("./posting-live");
 
 const { ms, MS_MIN, configOf } = A;
-const MAX_POSTS = A.MAX_SESSION_POSTS;        // per session, the first included
+const MAX_POSTS = A.MAX_SESSION_POSTS;        // per session, the first included (burst: A.maxSessionPosts)
 const DWELL_S = [90, 348];                    // between posts: 1.5–5.8 minutes
 const POST_BUDGET_MS = 12 * MS_MIN;           // a dwell and a post must still fit in the session
 const SESSION_MS = (env) => Math.max(14, Number((env || process.env).POSTING_SESSION_MINUTES) || 55) * MS_MIN; // Driver's limit is 1 hour
 const OK = new Set(["verified_posted", "submitted_for_approval"]);
+// One group's problem, not the browser's or the account's (owner's call, 26 Oct 2026).
+const GROUP_FAILURES = new Set(["not_member", "group_blocked", "destination_mismatch", "copy_mismatch"]);
+const MAX_SESSION_FAILURES = 2;
 
 const enabled = (deps = {}) => (deps.env || process.env).POSTING_CHAIN !== "0";
 
@@ -33,7 +42,7 @@ const sessionConfig = (config) => Object.assign({}, config, { min_gap_minutes: 1
 // already planned — not one set for later by the agent — else one planned now.
 async function prepareNext(phone, deps, x, now) {
   const T = require("./posting-tick");
-  const config = sessionConfig(await configOf(deps, x));
+  const config = sessionConfig(await configOf(deps, x, phone));
   const d = Object.assign({}, deps, { config });
   const conn = (await x.db.getConnection(phone)) || {};
   const ready = (campaigns) => campaigns.filter((c) => c.status === "running")
@@ -57,10 +66,20 @@ async function prepareNext(phone, deps, x, now) {
 // One per browser session: how many it posted, since when.
 function session(phone, deps, x, lock) {
   const started = Date.now();
-  let posts = 1;
+  let posts = 1, failures = 0, composerMisses = 0;
   const budget = SESSION_MS(deps.env) - POST_BUDGET_MS;
+  // May the session go on after this result? A clean post, a pending join, or one group's failure within the cap.
+  const goesOn = (state, res) => {
+    if (OK.has(state)) return true;
+    const code = res && res.error_code;
+    if (state !== "verified_failed" || !code) return false;
+    if (code === "membership_pending") return true; // a skip, not a failure
+    if (!(GROUP_FAILURES.has(code) || (code === "composer_not_found" && ++composerMisses === 1))) return false;
+    return ++failures < MAX_SESSION_FAILURES;
+  };
   return {
-    more: (state) => OK.has(state) && posts < MAX_POSTS && Date.now() - started < budget,
+    // res: the driver's result. Held by the admin's live panel (posting-live): no next post.
+    more: (state, res) => goesOn(state, res) && posts < A.maxSessionPosts(deps.env) && Date.now() - started < budget && !live.held(phone),
     prepare: async () => {
       if (Date.now() - started >= budget) return null;
       if (lock && lock.renew && !lock.renew()) return null; // our hold lapsed: the profile is someone else's
@@ -71,6 +90,6 @@ function session(phone, deps, x, lock) {
   };
 }
 
-const dwellMs = (rand = Math.random) => Math.round((DWELL_S[0] + rand() * (DWELL_S[1] - DWELL_S[0])) * 1000);
+const dwellMs = (rand = Math.random, env = process.env) => safety.burst(env) ? 0 : Math.round((DWELL_S[0] + rand() * (DWELL_S[1] - DWELL_S[0])) * 1000);
 
-module.exports = { enabled, session, prepareNext, sessionConfig, dwellMs, SESSION_MS, MAX_POSTS, DWELL_S };
+module.exports = { enabled, session, prepareNext, sessionConfig, dwellMs, SESSION_MS, MAX_POSTS, DWELL_S, GROUP_FAILURES, MAX_SESSION_FAILURES };

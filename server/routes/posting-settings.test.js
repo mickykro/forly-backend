@@ -183,6 +183,12 @@ const enable = (b) => Object.assign({ enabled: true, consent: true, consent_vers
     const bad = await call(env.app, "POST", "/api/posting/groups/resync");
     console.error = orig;
     assert.equal(bad.status, 503); assert.equal(bad.body.error, "sync_failed");
+    assert.deepEqual([bad.body.reason, bad.body.detail], ["Error", null], "the failure's code goes back, never its message");
+    assert.ok(!JSON.stringify(bad.body).includes("facebook.com"));
+    const { failureOf } = require("../facebook-groups-sync");
+    assert.deepEqual(failureOf(Object.assign(new Error("x"), { code: "sync_signal", signal: "login_required" })), { reason: "sync_signal", detail: "login_required" });
+    assert.deepEqual(failureOf(Object.assign(new Error("x"), { code: "sync_anomaly", anomaly: "shrunk" })), { reason: "sync_anomaly", detail: "shrunk" });
+    assert.deepEqual(failureOf({ code: "a b/<x>" }), { reason: "abx", detail: null });
     assert.ok(errs.length && errs.every((m) => !m.includes("facebook.com")), "no URL in the log line");
     assert.equal((await call(env.app, "POST", "/api/posting/groups/resync")).status, 429, "a sync that ran keeps the stamp");
     // On a local box the limit is off: the owner re-reads groups while testing.

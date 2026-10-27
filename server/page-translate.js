@@ -19,6 +19,11 @@
  */
 const NAMES = { he: "Hebrew", en: "English", ar: "Arabic", ru: "Russian", es: "Spanish", fr: "French" };
 const MODEL = process.env.PAGE_TRANSLATE_MODEL || "claude-opus-5-5";
+const UI_MODEL = process.env.UI_TRANSLATE_MODEL || "claude-sonnet-5-5"; // UI strings: many, short, no nuance to buy
+const { CLAUDE_NO_SAMPLING } = require("./chat-provider");
+// The 5.5 models do not think before responding and answer 400 to
+// thinking: disabled ("send between_tools instead"); nothing to switch off.
+const NO_THINKING_PARAM = /^claude-(opus|sonnet|haiku)-5-5/;
 const MAX_FIELDS = 80;
 
 // Letters that are not the target language's script. For the three scripts
@@ -82,47 +87,55 @@ function alreadyIn(lang, fields) {
   return !!re && Object.values(fields).every((v) => !re.test(v));
 }
 
-function buildRequest(lang, fields) {
+function buildRequest(lang, fields, model = MODEL) {
   const keys = Object.keys(fields);
   return {
-    model: MODEL,
+    model,
     max_tokens: 16000,
+    // Opus 5 / Sonnet 5 think by default, and max_tokens caps thinking and the
+    // reply together (chat-provider.js): off, or a page's worth of JSON can be
+    // cut short or run past the timeout.
+    ...(CLAUDE_NO_SAMPLING.test(model) && !NO_THINKING_PARAM.test(model) ? { thinking: { type: "disabled" } } : {}),
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default", // a declined request is re-run on Anthropic's recommended fallback
+    // One array in, one array out. A schema with a property per text is a
+    // grammar the API refuses past a few dozen ("compiled grammar is too large").
     output_config: {
       effort: "low",
       format: {
         type: "json_schema",
         schema: {
           type: "object",
-          properties: Object.fromEntries(keys.map((k) => [k, { type: "string" }])),
-          required: keys,
+          properties: { values: { type: "array", items: { type: "string" } } },
+          required: ["values"],
           additionalProperties: false,
         },
       },
     },
     system:
       `You localize the text of a real-estate listing page into ${NAMES[lang]}. ` +
-      "Each JSON value is one visible text on the page. Return the same keys, each value written " +
-      `naturally in ${NAMES[lang]} for local home buyers. A value already in ${NAMES[lang]} is returned unchanged. ` +
+      "The user message is a JSON array of visible texts. Return {\"values\": [...]} with exactly one entry per input, " +
+      `in the same order and the same count, each written naturally in ${NAMES[lang]} for local home buyers. ` +
+      `A text already in ${NAMES[lang]} is returned unchanged. ` +
       `Place names (streets, neighborhoods, cities) are given as a ${NAMES[lang]} reader knows them; ` +
       "keep house numbers, prices, numbers and units. People's and companies' names are not translated. " +
-      "Keep each value about as long as the original; it sits in a fixed design.",
-    messages: [{ role: "user", content: JSON.stringify(fields) }],
+      "Keep each text about as long as the original; it sits in a fixed design.",
+    messages: [{ role: "user", content: JSON.stringify(keys.map((k) => fields[k])) }],
   };
 }
 
-// → the reply's { path: text }, keeping only known keys with non-empty strings.
+// → the reply's { path: text }, by position, keeping non-empty strings. A list
+// of another length would put words in the wrong places, so it counts as no reply.
 function readReply(response, fields) {
   if (!response || response.stop_reason === "refusal" || response.stop_reason === "max_tokens") return null;
   const text = (response.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
   let parsed;
   try { parsed = JSON.parse(text); } catch { return null; }
-  if (!parsed || typeof parsed !== "object") return null;
+  const keys = Object.keys(fields);
+  const vals = parsed && parsed.values;
+  if (!Array.isArray(vals) || vals.length !== keys.length) return null;
   const out = {};
-  for (const k of Object.keys(fields)) {
-    if (typeof parsed[k] === "string" && parsed[k].trim()) out[k] = parsed[k].trim();
-  }
+  keys.forEach((k, i) => { if (typeof vals[i] === "string" && vals[i].trim()) out[k] = vals[i].trim(); });
   return out;
 }
 
@@ -138,12 +151,8 @@ async function translatePage(doc, deps = {}) {
   if (!keys.length) return { skipped: "empty" };
   if (keys.length > MAX_FIELDS) return { skipped: "too_many_fields" };
   if (alreadyIn(lang, fields)) return { skipped: "already_in_language" };
-  let client = deps.client;
-  if (!client) {
-    if (!process.env.ANTHROPIC_API_KEY) return { skipped: "no_api_key" };
-    const Anthropic = require("@anthropic-ai/sdk");
-    client = new Anthropic({ timeout: 60000, maxRetries: 2 });
-  }
+  const client = clientOf(deps);
+  if (!client) return { skipped: "no_api_key" };
   let response;
   try {
     response = await client.beta.messages.create(buildRequest(lang, fields));
@@ -157,4 +166,37 @@ async function translatePage(doc, deps = {}) {
   return { translated: Object.keys(out).length };
 }
 
-module.exports = { translatePage, collect, alreadyIn, buildRequest, readReply, NAMES, MODEL };
+// A Claude client, or null when the server has no key (deps.client stands in for tests).
+function clientOf(deps) {
+  if (deps.client) return deps.client;
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const Anthropic = require("@anthropic-ai/sdk");
+  return new Anthropic({ timeout: 60000, maxRetries: 2 });
+}
+
+/*
+ * The dashboard's own words (routes/i18n.js): Hebrew UI strings → { source:
+ * translation } for the ones that came back; null when nothing could be asked
+ * (no key, unknown language); throws when the call failed or the reply was
+ * unusable, so the caller can say why. Same call shape as a page; the strings
+ * are keyed by position for the schema.
+ */
+async function translateStrings(lang, strings, deps = {}) {
+  const client = clientOf(deps);
+  if (!NAMES[lang] || !client || !strings.length) return null;
+  const fields = Object.fromEntries(strings.map((s, i) => [`s${i}`, s]));
+  const req = buildRequest(lang, fields, deps.model || UI_MODEL);
+  req.system =
+    `You localize the user interface of a real-estate agents' web dashboard from Hebrew into ${NAMES[lang]}. ` +
+    "Each JSON value is one UI string, or a fragment of one that the code joins to a number or a name. " +
+    `Return the same keys, each value in natural, concise ${NAMES[lang]} as a software product would phrase it. ` +
+    "Keep punctuation, emoji, arrows, ellipses and leading/trailing dashes as they are; keep digits, {placeholders} and " +
+    "product names (Forly, WhatsApp, Facebook, Instagram) unchanged. A fragment stays a fragment (do not complete the sentence). " +
+    "The user message is a JSON array; return {\"values\": [...]} with exactly one entry per input, same order, same count.";
+  const response = await client.beta.messages.create(req);
+  const out = readReply(response, fields);
+  if (!out) throw new Error(`unusable reply (stop_reason ${response && response.stop_reason})`);
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [fields[k], v]));
+}
+
+module.exports = { translatePage, translateStrings, collect, setPath, alreadyIn, buildRequest, readReply, NAMES, MODEL, UI_MODEL };

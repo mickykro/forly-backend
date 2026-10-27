@@ -21,7 +21,7 @@
   var here = null;                     // the group open in the browser { ref, group_id, group_name }: stays after its tick
 
   var ERR = {
-    profile_busy: "הפרופיל של הסוכן תפוס כרגע (פרסום אוטומטי או התחברות). נסו שוב בעוד דקה.",
+    profile_busy: "הפרופיל של הסוכן תפוס כרגע (פרסום אוטומטי, התחברות, או הדפדפן הידני פתוח — סגרו אותו). נסו שוב בעוד דקה.",
     facebook_not_connected: "הסוכן עוד לא חיבר את פייסבוק.",
     browser_unavailable: "הדפדפן לא נפתח. נסו שוב.",
     no_open_browser: "קודם פתחו את הפייסבוק של הסוכן.",
@@ -57,9 +57,8 @@
     var path = "/campaigns/" + encodeURIComponent(cid) + "/groups/" + encodeURIComponent(gid) + "/done";
     return call("POST", path, { status: "posted" }).catch(function (e) {
       if (!e || e.code !== "group_limit") throw e;
-      var r = window.prompt((LIMIT[e.why] || "הקבוצה הגיעה למגבלה") + ". לסמן בכל זאת? כתבו סיבה:");
-      if (!r || r.trim().length < 3) { FLY.toast("בוטל"); return null; }
-      return call("POST", path, { status: "posted", override_reason: r.trim() });
+      if (!window.confirm((LIMIT[e.why] || "הקבוצה הגיעה למגבלה") + ". לסמן בכל זאת?")) { FLY.toast("בוטל"); return null; }
+      return call("POST", path, { status: "posted", override_reason: "admin" });
     });
   }
   var B = function (ref) { return "/agents/" + encodeURIComponent(ref) + "/browser"; };
@@ -360,7 +359,7 @@
     return call("GET", "/unconnected").then(function (j) {
       var list = j.agents || [];
       box.innerHTML = !list.length ? '<p class="manual-muted">אין סוכנים כאלה.</p>' : list.map(function (a) {
-        return '<div class="manual-item"><b>' + esc(a.name || "סוכן") + '</b> <span class="manual-muted">' + esc(a.phone_tail || "") + " · התחיל התחברות " + esc(when(a.started_at)) + "</span> " +
+        return '<div class="manual-item"><b>' + esc(a.name || "סוכן") + '</b> <span class="manual-muted">' + esc(a.phone_tail || "") + (a.reconnect ? " · פייסבוק ניתק אותו — התחברו בדפדפן הידני, סגרו אותו ובדקו" : " · התחיל התחברות " + esc(when(a.started_at))) + "</span> " +
           // Optional: the exact profile name from Driver's dashboard, for a login made
           // in a profile this server would not find by itself (e.g. on staging).
           '<input type="text" class="manual-input" dir="ltr" data-profile="' + esc(a.ref) + '" placeholder="שם הפרופיל ב-Driver (לא חובה)" title="העתיקו את השם בדיוק מ-Driver. שם של סוכן אחר יחבר את החשבון שלו לסוכן הזה."> ' +
@@ -377,7 +376,7 @@
     var typed = input ? input.value.trim() : "";
     btn.disabled = true; btn.textContent = "בודקים…";
     call("POST", "/unconnected/" + encodeURIComponent(ref) + "/verify", typed ? { profile_name: typed } : null).then(function (r) {
-      if (r.state === "connected") { FLY.toast("הסוכן מחובר ✓" + (r.identity_label ? " (" + r.identity_label + ")" : "")); load(); loadUnconnected(); }
+      if (r.state === "connected") { FLY.toast("הסוכן מחובר ✓" + (r.identity_label ? " (" + r.identity_label + ")" : "") + (r.resumed ? " · " + r.resumed + " קמפיינים חודשו" : "")); load(); loadUnconnected(); }
       else { FLY.toast("הפרופיל השמור לא מחובר — הסוכן צריך להתחבר מחדש."); btn.disabled = false; btn.textContent = "בדיקת התחברות"; }
     }).catch(function (e) { fail(e); btn.disabled = false; btn.textContent = "בדיקת התחברות"; });
   });

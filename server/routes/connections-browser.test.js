@@ -79,7 +79,7 @@ function fakeLocks({ maxSessions = Infinity } = {}) {
 
 function fakeGuard(reason) {
   return {
-    assertAllowed: async () => {
+    assertAccountAllowed: async () => {
       if (!reason) return true;
       const e = new Error("posting not allowed"); e.code = "posting_disabled"; e.reason = reason;
       throw e;
@@ -127,7 +127,7 @@ function fakeGuard(reason) {
     assert.equal(made, true);
   }
   // ── ...but account-level refusals still apply while posting is off (the
-  //    guard's fleet checks come first, so they are re-run with the fleet on) ──
+  //    the account-level checks alone decide) ──
   {
     let made = false;
     const offDb = Object.assign(fakeDb({ posting_disabled_until_admin: true, posting_disabled_class: "restricted" }), { getSetting: async () => null });
@@ -136,6 +136,31 @@ function fakeGuard(reason) {
     assert.equal(r.status, 409);
     assert.deepEqual(r.body, { error: "posting_disabled", reason: "account_disabled" });
     assert.equal(made, false);
+  }
+
+  // ── manual posting (an admin publishes by hand) blocks every automatic step,
+  //    but never connecting or reconnecting: Facebook, Yad2 and Madlan all open,
+  //    a restricted account is still refused, and automatic posting still stops ──
+  {
+    const was = process.env.POSTING_MANUAL;
+    process.env.POSTING_MANUAL = "1";
+    try {
+      const onDb = (conn) => Object.assign(fakeDb(conn), { getSetting: async () => ({ enabled: true }) });
+      for (const platform of ["facebook", "yad2", "madlan"]) {
+        let made = false;
+        const app = makeApp({ driver: { createSession: async () => { made = true; return { sessionId: "sm", status: "active", cdpUrl: "wss://n/m" }; } }, db: onDb({}), locks: fakeLocks() });
+        const r = await call(app, "POST", "/api/connections/browser/start", { platform, consent: true });
+        assert.equal(r.status, 200, `${platform}: connect works in manual mode`);
+        assert.equal(made, true);
+      }
+      const restricted = makeApp({ driver: { createSession: async () => assert.fail("no session for a restricted account") },
+        db: onDb({ posting_disabled_until_admin: true, posting_disabled_class: "restricted" }), locks: fakeLocks() });
+      assert.deepEqual((await call(restricted, "POST", "/api/connections/browser/start", { platform: "facebook", consent: true })).body,
+        { error: "posting_disabled", reason: "account_disabled" }, "account restrictions still hold in manual mode");
+      const guard = require("../posting-guard");
+      await assert.rejects(guard.assertAllowed({ phone: PHONE, platform: "facebook", action: "post" }, { db: onDb({}) }),
+        (e) => e.reason === "manual_mode", "automatic posting still stops in manual mode");
+    } finally { if (was === undefined) delete process.env.POSTING_MANUAL; else process.env.POSTING_MANUAL = was; }
   }
 
   // ── yad2 and madlan: same flow, own profile names, own check URLs ──

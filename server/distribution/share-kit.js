@@ -35,12 +35,10 @@ function trackedUrl(pageUrl, { session, group }) {
 /*
  * Per-group phrasing. Identical text pasted into many groups is the classic
  * spam fingerprint, and it also reads like a bot to human members. The FACTS
- * never change (price, rooms, size, link); only the whole post's wording and
- * order do. Ten templates, written the way a local agent types a group post:
- * short fact lines, sparing "?" / "!", no emoji. The template is derived from
- * the property+group so a retry reproduces the same text rather than
- * inventing a new one each time. A template drops any line whose fact is
- * missing.
+ * never change; only the decision path, order and CTA vary. These ten
+ * templates are deliberately facts-first: detail modules appear only when
+ * their structured values exist. A retry reproduces the same copy, while a
+ * later completed round gets a fresh framing.
  */
 const COMMENT_CTAS = [
   "הקישור לפרטים המלאים בתגובה הראשונה 👇",
@@ -64,20 +62,34 @@ const PAGE_COMMENT_CTAS = [
 const join = (sep, ...xs) => xs.filter(Boolean).join(sep);
 const shekel = (n) => `${n.toLocaleString("en-US")} ש"ח`;
 const priceText = (n, cur) => (!cur || cur === "ILS" ? shekel(n) : `${symbol(cur)}${n.toLocaleString("en-US")}`);
-// 0542045280 → 054-2045280, the way agents usually write it.
-const dashedPhone = (s) => (/^05\d{8}$/.test(s) ? `${s.slice(0, 3)}-${s.slice(3)}` : s);
 
 function postFacts(page) {
   const p = (page && page.property) || {};
   const a = (page && page.agent) || {};
   const num = (v) => (Number(v) > 0 ? Number(v) : 0);
-  const rooms = num(p.rooms), sqm = num(p.size_sqm), floor = num(p.floor), price = num(p.price);
+  const rooms = num(p.rooms), sqm = num(p.size_sqm), built = num(p.size_built), floor = num(p.floor), price = num(p.price);
+  const balcony = num(p.size_balcony), garden = num(p.size_garden), plot = num(p.size_plot), parking = num(p.parking);
   const rent = p.listing_type === "rent";
   const hood = p.neighborhood || "", city = p.city || "";
   // After ב the article drops (הבורסה → בבורסה), but a name can start with
   // a root ה (הדר). "בשכונת הבורסה" is right either way. Only the
   // neighborhood: a city keeps its own (בהרצליה).
   const hoodAt = hood.startsWith("ה") ? `שכונת ${hood}` : hood;
+  const sqmText = sqm ? `${sqm} מ"ר` : "";
+  const builtText = built ? `${built} מ"ר` : "";
+  const outdoorLines = [
+    balcony ? `מרפסת: ${balcony} מ"ר` : "",
+    garden ? `גינה: ${garden} מ"ר` : "",
+    plot ? `מגרש: ${plot} מ"ר` : "",
+  ].filter(Boolean);
+  const elevatorLine = p.shabbat_elevator ? "מעלית שבת" : p.elevator ? "מעלית" : "";
+  const parkingLine = parking ? `חניה: ${parking} ${parking === 1 ? "מקום" : "מקומות"}` : "";
+  const storageLine = p.storage === true ? "מחסן: קיים" : "";
+  const accessLines = [elevatorLine, parkingLine, storageLine].filter(Boolean);
+  const builtLine = built && sqm && built !== sqm ? `שטח בנוי: ${builtText}` : "";
+  // Extra detail must qualify a buyer. Unknown values never create a label,
+  // and an ordinary listing receives no longer copy merely for variety.
+  const primaryModule = outdoorLines.length ? outdoorLines : accessLines.length ? accessLines : builtLine ? [builtLine] : [];
   return {
     rooms, rent,
     hood, city,
@@ -88,111 +100,162 @@ function postFacts(page) {
     priceLabel: rent ? "שכירות" : "מחיר",
     apt: rooms ? `דירת ${rooms} חדרים` : p.title || "נכס",
     roomsText: rooms ? `${rooms} חדרים` : "",
-    roomsShort: rooms ? `${rooms} חד'` : "",
-    sqm: sqm ? `${sqm} מ"ר` : "",
+    sqm: sqmText || builtText,
+    sqmLine: sqmText ? `שטח: ${sqmText}` : builtText ? `שטח בנוי: ${builtText}` : "",
+    builtLine,
+    outdoorLines,
+    accessLines,
+    primaryModule,
     floor: floor ? `קומה ${floor}` : "",
     price: price ? priceText(price, p.currency) : "",
-    // 2,900,000 → 2.9 מ' ש"ח, only when that is exact (2,925,000 stays full). ILS only.
-    priceShort: price && (!p.currency || p.currency === "ILS") && price >= 1e6 && price % 10000 === 0
-      ? `${price / 1e6} מ' ש"ח` : price ? priceText(price, p.currency) : "",
     name: a.name || "",
     phone: localPhone(a.phone),
   };
 }
 
 const at = (place) => (place ? ` ב${place}` : "");
-const sqmOnFloor = (f) => (f.sqm && f.floor ? `${f.sqm} ב${f.floor}` : f.sqm || f.floor);
+const priceLine = (f) => (f.price ? `${f.priceLabel}: ${f.price}` : "");
 
-// Each template: (facts, link, round) → lines. link(label) is the label plus
-// the page URL, or the first-comment CTA, or null. Falsy lines are dropped.
+// A public listing URL or an actual first-comment CTA is preferred. Contact
+// details appear only when there is no route to the listing at all.
+function finish(lines, f, link, label) {
+  const action = link(label);
+  if (action) return lines.concat(action);
+  const contact = join("-", f.name, f.phone);
+  return contact ? lines.concat(`לפרטים: ${contact}`) : lines;
+}
+
+// Each template: (facts, link) → lines. All ten retain the factual spine;
+// specialty lines are emitted only from structured property data. This keeps
+// each version useful even for older pages that lack newer detail fields.
 const TEMPLATES = [
   (f, link) => [
-    `${f.deal}${at(f.place)}!`,
-    join(", ", f.apt, f.sqm),
+    `${f.deal}${at(f.place)}`,
+    join(" | ", f.apt, f.sqm),
     f.floor,
-    f.price && `${f.priceLabel}: ${f.price}`,
-    link("כל הפרטים על הנכס"),
-    (f.name || f.phone) && "לפרטים ותיאום:",
-    join("-", f.name, f.phone),
+    priceLine(f),
+    ...f.primaryModule,
+    ...finish([], f, link, "לפרטים ולתיאום צפייה"),
   ],
   (f, link) => [
-    `מחפשים ${f.roomsText || "דירה"}${at(f.city)}?`,
-    join(", ", f.hood, f.floor, f.sqm),
-    f.price,
-    link("פרטים נוספים ותמונות"),
-    join("-", f.name, f.phone),
+    "השטח והחוץ, בנפרד וברור",
+    `${f.deal}${at(f.place)}`,
+    f.apt,
+    f.sqmLine,
+    f.builtLine,
+    ...f.outdoorLines,
+    f.floor,
+    priceLine(f),
+    ...finish([], f, link, "כל הפרטים והצפייה בנכס"),
   ],
   (f, link) => [
-    `${f.roomsShort || f.apt}${at(f.place)}`,
-    sqmOnFloor(f),
-    f.priceShort && (f.rent ? `שכירות: ${f.price}` : `מחיר שיווק: ${f.priceShort}`),
-    link("רוצים לדעת עוד לפני ביקור? כל הפרטים כאן"),
-    join(" ", f.name, dashedPhone(f.phone)),
+    "לפני ביקור, אלה הפרטים החשובים",
+    `${f.deal}${at(f.place)}`,
+    join(" | ", f.apt, f.sqm),
+    f.floor,
+    ...f.primaryModule,
+    priceLine(f),
+    ...finish([], f, link, "לבדיקת התאמה ולתיאום ביקור"),
   ],
   (f, link) => [
-    join(", ", f.apt, f.sqm) + at(f.hoodAt),
-    join(", ", f.city, f.floor),
-    f.price,
-    link("כל הפרטים על הדירה"),
-    "מוזמנים לתאם ביקור!",
-    join("-", f.name, f.phone),
+    "מגיעים, עולים, חונים",
+    `${f.deal}${at(f.place)}`,
+    join(" | ", f.apt, f.sqm),
+    f.floor,
+    ...f.accessLines,
+    priceLine(f),
+    ...finish([], f, link, "פרטי הנכס ותיאום צפייה"),
   ],
   (f, link) => [
+    "פרטי הנכס לפני שקובעים ביקור",
     `${f.deal}${at(f.city)}`,
-    join(", ", f.hood, f.roomsText),
-    join(", ", f.sqm, f.floor),
-    f.price && `${f.priceLabel}: ${f.price}`,
-    (f.name || f.phone) && "שאלות? דברו איתי",
-    f.name,
-    f.phone,
-    link("לפרטים נוספים"),
-  ],
-  // "חדש" is only claimed on a target's first round.
-  (f, link, round) => [
-    round === 0 ? "חדש אצלי בשיווק:" : "אצלי בשיווק:",
-    `${f.roomsText || f.apt}${at(f.place)}`,
-    join(", ", f.sqm, f.floor),
-    f.price,
-    link("כל הפרטים והתמונות"),
-    (f.name || f.phone) && `לתיאום: ${join("-", f.name, f.phone)}`,
-  ],
-  (f, link) => [
-    f.price ? `${f.price} ל${f.apt}${at(f.city)}` : `${f.apt}${at(f.city)}`,
-    f.hood && `שכונת ${f.hood}`,
-    sqmOnFloor(f),
-    link("לפרטים נוספים על הנכס"),
-    f.name,
-    dashedPhone(f.phone),
-  ],
-  (f, link) => {
-    const what = `${f.roomsText || f.apt}${f.sqm ? ` על ${f.sqm}` : ""}${f.floor ? `, ${f.floor}` : ""}`;
-    return [
-      f.rooms >= 3 ? "משפחה שצריכה עוד חדר?" : `מחפשים דירה${at(f.city)}?`,
-      f.placeIn ? `ב${f.placeIn} יש ${what}` : what,
-      f.price && `${f.priceLabel}: ${f.price}`,
-      link("כל המידע על הדירה כאן"),
-      join("-", f.name, f.phone),
-    ];
-  },
-  (f, link) => [
-    join(", ", f.city, f.hood),
-    join(", ", f.roomsShort, f.sqm, f.floor) || f.apt,
-    f.priceShort,
-    (f.name || f.phone) && "כתבו לי ואשלח פרטים!",
-    join("-", f.name, f.phone),
-    link("פרטים מלאים"),
-  ],
-  (f, link) => [
-    `${f.deal}:`,
-    f.apt + at(f.hoodAt),
-    f.city,
-    f.sqm,
+    join(" | ", f.apt, f.sqm),
+    f.hood && `שכונה: ${f.hood}`,
     f.floor,
-    f.price && `${f.priceLabel} ${f.price}`,
-    link("מה דעתכם? כל הפרטים כאן"),
-    (f.name || f.phone) && `לפרטים: ${join(" ", f.name, f.phone)}`,
+    priceLine(f),
+    ...f.primaryModule,
+    ...finish([], f, link, "לפרטים המלאים ולביקור"),
+  ],
+  (f, link) => [
+    "הבית במספרים",
+    f.apt + at(f.place),
+    f.sqmLine,
+    f.builtLine,
+    f.floor,
+    priceLine(f),
+    ...f.primaryModule,
+    ...finish([], f, link, "לפרטי הנכס"),
+  ],
+  (f, link) => [
+    "הנכס והבניין",
+    `${f.deal}${at(f.place)}`,
+    join(" | ", f.apt, f.sqm),
+    f.floor,
+    ...f.accessLines,
+    priceLine(f),
+    ...finish([], f, link, "פרטי היחידה ותיאום צפייה"),
+  ],
+  (f, link) => [
+    "המחיר לצד המפרט",
+    priceLine(f),
+    `${f.deal}${at(f.place)}`,
+    join(" | ", f.apt, f.sqm),
+    f.floor,
+    ...f.primaryModule,
+    ...finish([], f, link, "לתמונות, פרטים ותיאום"),
+  ],
+  (f, link) => [
+    "מבט מהיר על הנכס",
+    `${f.deal}${at(f.place)}`,
+    f.apt,
+    join(" | ", f.sqm, f.floor),
+    priceLine(f),
+    ...f.primaryModule,
+    ...finish([], f, link, "לפירוט הנכס ולצפייה"),
+  ],
+  (f, link) => [
+    "כשהפרטים ברורים",
+    `${f.deal}${at(f.place)}`,
+    join(" | ", f.apt, f.sqm),
+    f.floor,
+    ...f.primaryModule,
+    priceLine(f),
+    ...finish([], f, link, "מפה, פרטי הנכס ותיאום"),
   ],
 ];
+
+// An admin-pasted post (settings/posting.copy_templates, by the page's
+// language — routes/admin-posting.js): {placeholders} filled from the same
+// facts, {deal:sale text|rent text} picked by the deal. A line whose
+// placeholder has no value (or is not one of PLACEHOLDERS) is dropped, as the
+// built-in templates drop a missing fact; a blank template line stays a
+// paragraph break. {link}
+// is the page URL — without one the line goes, and the agent's first comment
+// still carries the link as usual. Places read in the page's language when
+// the page was translated (page-translate.js place_i18n).
+const PLACEHOLDERS = ["title", "rooms", "sqm", "floor", "price", "city", "neighborhood", "place", "name", "phone", "link", "deal"];
+function fillTemplate(template, page, pageUrl) {
+  const f = postFacts(page);
+  const p = (page && page.property) || {};
+  const places = (page && page.place_i18n) || {};
+  const num = (v) => (Number(v) > 0 ? String(Number(v)) : "");
+  const city = places.city || f.city, hood = places.neighborhood || f.hood;
+  const v = {
+    title: p.title || "", rooms: num(p.rooms), sqm: num(p.size_sqm) || num(p.size_built), floor: num(p.floor),
+    price: Number(p.price) > 0 ? Number(p.price).toLocaleString("en-US") : "",
+    city, neighborhood: hood, place: join(", ", hood, city),
+    name: f.name, phone: f.phone, link: pageUrl || "", deal: f.deal,
+  };
+  const lines = [];
+  for (const line of String(template).split("\n")) {
+    let missing = false;
+    const filled = line
+      .replace(/\{deal:([^|}]*)\|([^}]*)\}/g, (m, sale, rent) => (f.rent ? rent : sale))
+      .replace(/\{(\w+)\}/g, (m, k) => { if (!v[k]) missing = true; return v[k] || ""; });
+    if (!missing) lines.push(filled.trimEnd());
+  }
+  return lines.join("\n").trim();
+}
 
 function variantIndex(seed, mod) {
   const s = String(seed || "");
@@ -202,6 +265,9 @@ function variantIndex(seed, mod) {
 }
 
 function buildPostCopy(page, pageUrl, opts = {}) {
+  // opts.templates: the admin's pasted post per language; the page's language picks one.
+  const pasted = opts.templates && page && opts.templates[page.language || "he"];
+  if (typeof pasted === "string" && pasted.trim()) return fillTemplate(pasted, page, pageUrl);
   const seed = String(opts.variantSeed || "");
   const round = Number.isSafeInteger(opts.variantRound) && opts.variantRound >= 0 ? opts.variantRound : 0;
   const pick = (arr, key) => {
@@ -220,8 +286,9 @@ function buildPostCopy(page, pageUrl, opts = {}) {
     return destination === "none" ? null : pick(COMMENT_CTAS, "comment_cta");
   };
   const lines = pick(TEMPLATES, "template")(f, link, round).filter(Boolean);
-  // No name or phone: the reader still needs a way to respond.
-  if (!f.name && !f.phone) lines.push("לפרטים נוספים כתבו לי בפרטי.");
+  // No name, phone or CTA: the reader still needs a way to respond.
+  const hasCta = opts.linkInComment ? (opts.destinationKind || "property") !== "none" : !!pageUrl;
+  if (!f.name && !f.phone && !hasCta) lines.push("לפרטים נוספים כתבו לי בפרטי.");
   return lines.join("\n");
 }
 
@@ -321,5 +388,5 @@ function groupProgress(session, fallbackGroups) {
   return { posted: 0, total: sanitizeGroups(fallbackGroups).length };
 }
 
-module.exports = { MAX_GROUPS, TEMPLATE_COUNT: TEMPLATES.length, buildPostCopy, sanitizeGroups, sharerLink,
+module.exports = { MAX_GROUPS, TEMPLATE_COUNT: TEMPLATES.length, PLACEHOLDERS, buildPostCopy, fillTemplate, sanitizeGroups, sharerLink,
   buildShareKitMessage, buildQueueMessage, trackedUrl, variantIndex, groupProgress };

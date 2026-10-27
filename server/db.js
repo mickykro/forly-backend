@@ -1,5 +1,8 @@
 /*
- * db.js — Firestore (or in-memory fallback) storage helpers.
+ * db.js — Firestore (or in-memory fallback) storage helpers. The in-memory
+ * store is for tests and local boxes only: under FORLY_ENV=prod|staging this
+ * module connects to Firestore as it loads (a script that requires it reads the
+ * real data, init() or not) and refuses to load without credentials.
  * ponytail: single source for all collection access
  */
 
@@ -23,6 +26,7 @@ function warnIfUserCredentials(path) {
 }
 
 function init() {
+  if (db) return; // connected already (on load, under prod/staging)
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     const admin = require("firebase-admin");
     admin.initializeApp();
@@ -249,6 +253,14 @@ async function listPagesForExpiry(soonMs) {
 async function incrPageCounter(pageId, field, by) {
   if (db) await db.collection("property_pages").doc(pageId).update({ [field]: FieldValue.increment(by) });
   else { const p = mem.pages.get(pageId); if (p) p[field] = (p[field] || 0) + by; }
+}
+
+// A page's per-language translations (routes/pages.js inLanguage, i18n.<lang>)
+// are built from its text: an edit drops them, the next visit rebuilds.
+async function clearPageTranslations(pageId) {
+  if (db) { await db.collection("property_pages").doc(pageId).update({ i18n: FieldValue.delete() }); return; }
+  const p = mem.pages.get(pageId);
+  if (p) delete p.i18n;
 }
 
 // Partial page update from a { "dot.path": value } patch — avoids clobbering
@@ -751,6 +763,13 @@ async function deleteDraft(phone) {
   else mem.drafts.delete(phone);
 }
 
+// prod and staging never fall back to the empty in-memory store: an uninitialised
+// db there read as "no settings, no campaigns" (25 Oct 2026, a diagnostic script).
+if (process.env.FORLY_ENV === "prod" || process.env.FORLY_ENV === "staging") {
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) throw new Error(`db: FORLY_ENV=${process.env.FORLY_ENV} needs GOOGLE_APPLICATION_CREDENTIALS — no in-memory store outside tests and local`);
+  init();
+}
+
 module.exports = {
   init,
   get db() { return db; },
@@ -758,7 +777,7 @@ module.exports = {
   shortCode,
   saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listPendingListings, listAllListings,
   listPagelessListings, claimField,
-  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone, findPageBySlug,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, clearPageTranslations, uniquePageId, listAllPages, listPagesByPhone, findPageBySlug,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
   getPortfolioSlugReservation, reservePortfolioSlug,

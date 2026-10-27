@@ -94,11 +94,12 @@ async function review(listing, deps = {}) {
   const page = await x.db.getPage(listing.page_id);
   const c = page && (await campaignOf(x, String(listing.business_phone), page.page_id));
   if (!c) return null;
+  const templates = await A.templatesOf(x);
   return {
     awaiting: c.awaiting_texts === true,
     groups: (c.groups || []).map((g) => ({
       group_id: String(g.group_id), name: g.name || "",
-      copy: g.copy || C.buildCopy(page, c, { ...g, target: "group" }, "property", deps.pageBaseUrl || ""),
+      copy: g.copy || C.buildCopy(page, c, { ...g, target: "group" }, "property", deps.pageBaseUrl || "", templates),
     })),
   };
 }

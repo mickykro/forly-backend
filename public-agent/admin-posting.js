@@ -21,9 +21,13 @@
     login_required: "נדרשת התחברות", confirmed_removed: "פוסט הוסר ע״י מנהלי קבוצה",
     selector_failure: "תקלת ממשק", unknown: "לא ידוע",
   };
+  var MODE_LABELS = {
+    manual: "פרסום ידני (מנהל מפרסם כל פוסט)", caps: "מגבלות פעילות (מקומי)", pacing: "קצב רגיל (מקומי)", warmup: "חימום חשבון חדש (מקומי)",
+    burst: "מצב בדיקה — פרסום רצוף (מקומי)", browse: "גלישה בין סשנים (מקומי)", shots: "צילום מסך של כשלונות",
+  };
   var PLATFORM_LABELS = { facebook: "פייסבוק", yad2: "יד2", madlan: "מדלן" };
   var AUDIT_LABELS = {
-    switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז",
+    caps: "מגבלות פרסום", modes: "מצבי פרסום", switch_global: "מתג ראשי", switch_platform: "מתג פלטפורמה", switch_visible: "לייקים וסטוריז", switch_staging: "פרסום מ־staging", sweep_now: "סבב פרסום ידני", replan: "הקדמת פוסטים לעכשיו",
     reenable: "הפעלה מחדש", revoke_profile: "ביטול פרופיל", resolve_attempt: "הכרעה בפוסט לא ידוע", resume_campaign: "המשך קמפיין",
   };
   var SECTION_LABELS = {
@@ -39,7 +43,7 @@
     reconnect_required: "הסוכן צריך להתחבר מחדש עם פרופיל חדש לפני הפעלה מחדש",
     not_disabled: "החשבון כבר פעיל", reason_required: "חובה לכתוב סיבה", not_found: "החשבון לא נמצא",
     not_outcome_unknown: "הפוסט כבר לא בתוצאה לא ידועה — המצב נטען מחדש", not_internal_pause: "הקמפיין כבר לא עצור בגלל תקלה",
-    not_resumable: "החשבון עצמו עצור — קודם צריך להפעיל אותו מחדש", posting_unavailable_in_env: "בסביבה הזו אין פרסום אוטומטי",
+    out_of_range: "ערך מחוץ לטווח המותר", not_resumable: "החשבון עצמו עצור — קודם צריך להפעיל אותו מחדש", posting_unavailable_in_env: "בסביבה הזו אין פרסום אוטומטי",
   };
 
   function fmt(v) {
@@ -48,12 +52,8 @@
     return isNaN(d.getTime()) ? "—" : d.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" });
   }
   function onOff(on) { return on ? "פעיל" : "כבוי"; }
-  function askReason(q) {
-    var r = window.prompt(q || "סיבה?");
-    r = r == null ? "" : String(r).trim();
-    if (!r) FLY.toast("בוטל — חובה לכתוב סיבה");
-    return r || null;
-  }
+  // One admin: no reason is asked; the action log records each change as made by the admin.
+  function askReason() { return "admin"; }
 
   function handleError(e, fallback) {
     if (e && e.status === 401 && e.code === "stepup_required") {
@@ -140,7 +140,6 @@
     $("#postingGlobal").checked = !!d.enabled;
     $("#postingGlobal").disabled = !known;
     $("#postingGlobalLabel").textContent = !known ? "לא ידוע" : onOff(d.enabled) + (d.enabled ? "" : d.disabled_reason ? " — " + d.disabled_reason : "");
-    $("#postingEnvNote").classList.toggle("hidden", !d.env_forced_off);
     var lc = d.last_change;
     $("#postingLastChange").textContent =
       (d.changed_at ? "שינוי אחרון במתג הראשי: …" + (d.changed_by_tail || "?") + " · " + (d.reason || "") + " · " + fmt(d.changed_at) : "המתג הראשי לא שונה ידנית.") +
@@ -150,13 +149,19 @@
       return switchRow("postingPlatform_" + p, PLATFORM_LABELS[p], d.platforms && d.platforms[p]);
     });
     rows.push(switchRow("postingVisible", "לייקים וצפייה בסטוריז", d.visible_interactions_enabled));
+    rows.push(switchRow("postingStaging", "פרסום אוטומטי מ־staging (פרודקשן לא מפרסם)", d.sweeper_env === "staging"));
     $("#postingSwitches").innerHTML = known ? rows.join("") : '<p class="posting-note">מצב המתגים לא נטען.</p>';
     if (known) Object.keys(PLATFORM_LABELS).forEach(function (p) {
       var input = $("#postingPlatform_" + p);
       input.addEventListener("change", function () { flip(input, "/switch/platform", { platform: p }); });
     });
+    renderCaps(known ? d.caps : null);
+    renderModes(known ? d.modes : null);
+    renderTemplates(known ? d.copy_templates || {} : null);
     var vis = known && $("#postingVisible");
     if (vis) vis.addEventListener("change", function () { flip(vis, "/switch/visible"); });
+    var stg = known && $("#postingStaging");
+    if (stg) stg.addEventListener("change", function () { flip(stg, "/switch/staging"); });
 
     var c = d.campaigns || {};
     var stat = function (n, l) { return '<div class="stat"><div class="n num">' + esc(n == null ? "—" : n) + '</div><div class="l">' + esc(l) + "</div></div>"; };
@@ -187,6 +192,71 @@
   }
 
   // I7: outcome_unknown attempts — the verdict is the operator's, after checking the group by hand.
+  // Each cap: the admin's value (empty = default), with the default and what applies now.
+  // All the posting rules (admin-rules.js): empty = the default.
+  function renderCaps(caps) {
+    $("#postingCapsSave").disabled = !caps;
+    $("#postingCaps").innerHTML = caps ? FORLY_RULES.form(caps) : '<p class="posting-note">החוקים לא נטענו.</p>';
+  }
+
+  // Each mode: default (the env's own value) / on / off.
+  function renderModes(modes) {
+    $("#postingModesSave").disabled = !modes;
+    if (!modes) { $("#postingModes").innerHTML = '<p class="posting-note">המצבים לא נטענו.</p>'; return; }
+    var envText = function (v) { return v === null ? "לא מוגדר" : v === "1" ? "פעיל" : "כבוי"; };
+    $("#postingModes").innerHTML = Object.keys(MODE_LABELS).filter(function (m) { return modes[m]; }).map(function (m) {
+      var c = modes[m], sel = c.set === null ? "" : c.set ? "on" : "off";
+      var opt = function (v, l) { return '<option value="' + v + '"' + (sel === v ? " selected" : "") + ">" + l + "</option>"; };
+      return "<label>" + esc(MODE_LABELS[m]) + '<select data-mode="' + m + '">' + opt("", "ברירת מחדל") + opt("on", "פעיל") + opt("off", "כבוי") + "</select>" +
+        '<span class="posting-note">בסביבה: ' + envText(c.env) + "</span></label>";
+    }).join("");
+  }
+  // The pasted post per page language (share-kit.fillTemplate): empty = the built-in Hebrew copy.
+  var TEMPLATE_LANGS = { he: "עברית", en: "English", ar: "العربية", ru: "Русский", es: "Español", fr: "Français" };
+  function renderTemplates(t) {
+    $("#postingTemplatesSave").disabled = !t;
+    if (!t) { $("#postingTemplates").innerHTML = '<p class="posting-note">התבניות לא נטענו.</p>'; return; }
+    $("#postingTemplates").innerHTML = Object.keys(TEMPLATE_LANGS).map(function (l) {
+      return "<label>" + esc(TEMPLATE_LANGS[l]) + '<textarea data-lang="' + l + '" rows="6" maxlength="2000" dir="auto" style="width:100%;font:inherit;padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px">' + esc(t[l] || "") + "</textarea></label>";
+    }).join("");
+  }
+  function saveTemplates(btn) {
+    var templates = {};
+    Array.prototype.forEach.call(document.querySelectorAll("#postingTemplates textarea[data-lang]"), function (ta) { templates[ta.dataset.lang] = ta.value; });
+    var reason = askReason("למה משנים את התבניות?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/templates", { templates: templates, reason: reason, version: state.version })
+      .then(function (d) { saved(d, "✅ התבניות נשמרו"); return load(); })
+      .catch(function (e) { handleError(e, "שגיאה בשמירת התבניות"); })
+      .then(function () { btn.disabled = false; });
+  }
+  function saveModes(btn) {
+    var modes = {};
+    Array.prototype.forEach.call(document.querySelectorAll("#postingModes select[data-mode]"), function (s) {
+      modes[s.dataset.mode] = s.value === "" ? null : s.value === "on";
+    });
+    var reason = askReason("למה משנים את מצבי הפרסום?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/modes", { modes: modes, reason: reason, version: state.version })
+      .then(function (d) { saved(d, "✅ המצבים נשמרו"); return load(); })
+      .catch(function (e) { handleError(e, "שגיאה בשמירת המצבים"); })
+      .then(function () { btn.disabled = false; });
+  }
+  function saveCaps(btn) {
+    var got = FORLY_RULES.read($("#postingCaps"));
+    if (got.bad) { got.bad.focus(); FLY.toast("מספר שלם בטווח " + got.bad.min + "–" + got.bad.max); return; }
+    var caps = got.rules;
+    var reason = askReason("למה משנים את המגבלות?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/caps", { caps: caps, reason: reason, version: state.version })
+      .then(function (d) { saved(d, "✅ החוקים נשמרו"); return load(); })
+      .catch(function (e) { handleError(e, "שגיאה בשמירת המגבלות"); })
+      .then(function () { btn.disabled = false; });
+  }
+
   function renderUnknown(u) {
     $("#postingUnknownSummary").textContent = !u ? "לא נטען." : u.count ? (u.count_capped ? u.count + "+" : u.count) +
       " פוסטים ממתינים · הוותיק ביותר: " + (u.oldest_age_h == null ? "—" : u.oldest_age_h + " שעות") +
@@ -279,13 +349,94 @@
     if (b !== tab) b.addEventListener("click", function () { tab.classList.remove("on"); pane.classList.add("hidden"); });
   });
   $("#postingGlobal").addEventListener("change", function () { flip($("#postingGlobal"), "/switch"); });
-  $("#postingWarmSave").addEventListener("click", function () {
-    var btn = this, phone = ($("#postingWarmPhone").value || "").replace(/\D/g, "").replace(/^0/, "972");
-    if (!/^\d{9,15}$/.test(phone)) { FLY.toast("מספר טלפון לא תקין"); return; }
+  // Why each agent is or isn't posting (GET /status): the account's gates, each campaign's
+  // state and wait reason, its next posts and its last attempts. Codes as the server names them.
+  // A time, with its date when it is not today (a post moved to tomorrow reads as tomorrow).
+  function hm(t) {
+    if (!t) return "—";
+    var d = new Date(t), time = d.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
+    return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" }) + " " + time;
+  }
+  function todayLine(t) {
+    if (!t) return "";
+    var limit = Math.min(t.cap, t.target);
+    return "<br>היום: " + t.counted + "/" + limit + " (פורסמו " + t.posted + ", נכשלו " + t.failed + ", מתוכננים " + t.planned + ")" +
+      " · יעד היום " + t.target + " · מגבלה " + t.cap +
+      (t.warmup_stage ? " · שלב חימום: ימים " + t.warmup_stage.from_day + "–" + t.warmup_stage.to_day + ", עד " + t.warmup_stage.posts + " ביום" : "") +
+      (t.counted >= limit ? " — <b>המכסה להיום מלאה</b>" : "");
+  }
+  function loadStatus() {
+    $("#postingStatus").textContent = "טוען…";
+    return FLY.req(API + "/status", { noRedirect: true }).then(function (d) {
+      var gates = function (a) {
+        var bad = [];
+        if (!a.connected) bad.push("לא מחובר לפייסבוק");
+        if (!a.permission) bad.push("אין הרשאת פרסום");
+        if (a.paused_by_admin) bad.push("הושהה ע״י מנהל");
+        if (a.disabled) bad.push("מושבת" + (a.disabled_class ? " (" + a.disabled_class + ")" : ""));
+        if (a.needs_reconnect) bad.push("צריך להתחבר מחדש");
+        if (a.penalty_until && new Date(a.penalty_until) > new Date()) bad.push("עונש עד " + hm(a.penalty_until));
+        if (a.profile && a.profile !== "active") bad.push("פרופיל: " + a.profile);
+        bad.push("חימום: " + a.warmup);
+        return bad.join(" · ");
+      };
+      $("#postingStatus").innerHTML = (d.agents || []).length ? d.agents.map(function (g) {
+        return "<div style=\"margin:8px 0;padding:8px;border:1px solid rgba(23,20,15,.12);border-radius:8px\"><b>…" + esc(g.phone_tail) + "</b> — " + esc(gates(g.account)) + todayLine(g.today) +
+          g.campaigns.map(function (c) {
+            return "<div style=\"margin-top:4px\">קמפיין …" + esc(c.id_tail) + ": " + esc(c.status) + (c.pause_reason ? " (" + esc(c.pause_reason) + ")" : "") +
+              " · ממתין ל: " + esc(c.wait_reason || "—") +
+              "<br>הבאים: " + (c.next.length ? c.next.map(function (p) { return esc(p.status) + " " + hm(p.due) + " " + esc(p.group || ""); }).join(" · ") : "אין") +
+              "<br>ניסיונות אחרונים: " + (c.attempts.length ? c.attempts.map(function (a) { return esc(a.state || a.post) + (a.error_code ? " [" + esc(a.error_code) + "]" : "") + " " + hm(a.at); }).join(" · ") : "אין") +
+              "</div>";
+          }).join("") + "</div>";
+      }).join("") : "אין סוכנים עם קמפיין פעיל או מושהה.";
+    }).catch(function (e) { $("#postingStatus").textContent = ""; handleError(e, "שגיאה בטעינת המצב"); });
+  }
+  $("#postingStatusLoad").addEventListener("click", loadStatus);
+  // A sweep now (what the server runs every minute): its result, and what each account's tick did.
+  var SWEEP_RESULT = { ticked: "רץ", off: "כבוי", manual: "פרסום ידני", breaker: "מפסק הצי נפל", error: "שגיאה" };
+  $("#postingSweepNow").addEventListener("click", function () {
+    var btn = this; btn.disabled = true; $("#postingSweepOut").textContent = "מריץ…";
+    send("/sweep", {}).then(function (d) {
+      var l = d.last || {};
+      $("#postingSweepOut").textContent = (d.running ? "הסבב עדיין רץ ברקע. " : "") +
+        "תוצאה: " + (SWEEP_RESULT[l.result] || l.result || "—") + (l.reason ? " (" + l.reason + ")" : "") + (l.code ? " (" + l.code + ")" : "") +
+        (l.accounts != null ? " · חשבונות: " + l.accounts : "") +
+        ((d.accounts || []).length ? " · " + d.accounts.map(function (a) { return "…" + a.phone_tail + ": " + a.outcome; }).join(" · ") : "");
+      saved(d, "✅ הסבב רץ");
+      return loadStatus();
+    }).catch(function (e) { $("#postingSweepOut").textContent = ""; handleError(e, "שגיאה בהרצת הסבב"); })
+      .then(function () { btn.disabled = false; });
+  });
+  $("#postingCapsSave").addEventListener("click", function () { saveCaps(this); });
+  $("#postingModesSave").addEventListener("click", function () { saveModes(this); });
+  $("#postingTemplatesSave").addEventListener("click", function () { saveTemplates(this); });
+  // The agents to pick from: the agents list (name · phone tail), as the campaigns tab shows it.
+  FLY.req("/api/admin/campaigns/agents", { noRedirect: true }).then(function (d) {
+    var agents = (d && d.agents) || [];
+    $("#postingWarmAgent").innerHTML = '<option value="">בחרו סוכן…</option>' + agents.map(function (a) {
+      return '<option value="' + esc(a.ref) + '">' + esc((a.name || "ללא שם") + " · …" + a.phone_tail) + "</option>";
+    }).join("");
+  }).catch(function () { $("#postingWarmAgent").innerHTML = '<option value="">רשימת הסוכנים לא נטענה</option>'; });
+  // The picked agent's posts booked for later, now (each still checked by the rules when due).
+  $("#postingReplan").addEventListener("click", function () {
+    var btn = this, ref = $("#postingWarmAgent").value;
+    if (!ref) { FLY.toast("בחרו סוכן"); return; }
     var reason = askReason("סיבה?");
     if (!reason) return;
     btn.disabled = true;
-    send("/accounts/" + encodeURIComponent(phone) + "/warmup", { mode: $("#postingWarmMode").value, reason: reason })
+    send("/accounts/" + encodeURIComponent(ref) + "/replan", { reason: reason })
+      .then(function (d) { saved(d, d.moved ? "✅ " + d.moved + " פוסטים הוקדמו לעכשיו — הריצו סבב" : "אין פוסטים מתוכננים לאחר כך"); return loadStatus(); })
+      .catch(function (e) { handleError(e, "ההקדמה נכשלה"); })
+      .then(function () { btn.disabled = false; });
+  });
+  $("#postingWarmSave").addEventListener("click", function () {
+    var btn = this, ref = $("#postingWarmAgent").value;
+    if (!ref) { FLY.toast("בחרו סוכן"); return; }
+    var reason = askReason("סיבה?");
+    if (!reason) return;
+    btn.disabled = true;
+    send("/accounts/" + encodeURIComponent(ref) + "/warmup", { mode: $("#postingWarmMode").value, reason: reason })
       .then(function (d) { saved(d, "✅ החימום נשמר"); })
       .catch(function (e) { handleError(e, e && e.status === 404 ? "לא נמצא חשבון מחובר למספר הזה" : "השמירה נכשלה"); })
       .then(function () { btn.disabled = false; });

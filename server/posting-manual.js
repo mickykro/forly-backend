@@ -82,12 +82,15 @@ function propertyCard(page, base) {
 // Every version of the post text for a property, in template order (the
 // manual tab offers them all next to the browser). The link is the same one
 // the campaign's own text carries.
-function versions(page, base) {
+// templates: the admin's pasted post (A.templatesOf) comes first when the page's language has one.
+function versions(page, base, templates = null) {
   const shareKit = require("./distribution/share-kit");
   const url = base ? require("./posting-destination").previewUrl({ kind: "property" }, { pageBaseUrl: base, pageId: page.page_id }) : "";
   const out = [];
+  const pasted = shareKit.buildPostCopy(page, url, { templates, linkInComment: !url });
+  if (templates && pasted !== shareKit.buildPostCopy(page, url, { linkInComment: !url })) out.push(pasted);
   for (let r = 0; r < shareKit.TEMPLATE_COUNT; r++) {
-    out.push(shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, url, { variantRound: r, linkInComment: !url }));
+    out.push(shareKit.buildPostCopy(page, url, { variantRound: r, linkInComment: !url }));
   }
   return out;
 }
@@ -110,11 +113,11 @@ function groupsOf(c, conn = null, now = null, config = null) {
     if (!prev || at(p) >= at(prev)) last.set(k, p);
   }
   const t = now ? now.getTime() : null;
-  const floor = ((config || safety.DEFAULTS).property_group_cooldown_days || 0) * MS_DAY;
-  const again = (g) => (!c.repeat ? Infinity : g.kind === "page" ? PAGE_DAYS * MS_DAY : Math.max((Number(c.repeat_days) || 0) * MS_DAY - MS_HOUR, floor, MS_HOUR));
+  const days = (config || safety.DEFAULTS).property_group_cooldown_days || 0; // a date gap (posting-safety.dateGapEnd)
+  const again = (g) => (!c.repeat ? Infinity : g.kind === "page" ? PAGE_DAYS * MS_DAY : Math.max((Number(c.repeat_days) || 0) * MS_DAY - MS_HOUR, MS_HOUR));
   return targetsOf(c, conn).map((g) => {
     const p = last.get(String(g.group_id));
-    const due = !!p && t !== null && t - at(p) >= again(g);
+    const due = !!p && t !== null && t - at(p) >= again(g) && (g.kind === "page" || !days || safety.datesApart(new Date(at(p)), now) >= days);
     const status = !p || due ? "owed" : p.status === "skipped" ? "skipped" : "posted";
     return { group_id: String(g.group_id), kind: g.kind, name: g.name || "", url: g.kind === "page" ? g.url : urlOf(g), status, copy: g.kind === "page" ? null : g.copy || null,
       posted_at: p && p.status !== "skipped" ? p.posted_at || null : null };
@@ -128,8 +131,11 @@ async function checklist(deps = {}) {
   const x = A.ctxOf(deps);
   const running = (await x.store.listPostingCampaignsByStatus("running", 500))
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-  const config = await A.configOf(deps, x);
+  // Each agent's own rules over the global ones (as markDone applies them); the settings doc read once.
+  const settings = deps.config ? null : await x.db.getSetting("posting");
+  const configFor = (conn) => deps.config || safety.configFrom(settings, deps.env || process.env, conn && conn.posting_rules);
   const now = x.clock();
+  const templates = await A.templatesOf(x);
   const byPhone = new Map(); // the agent's campaigns, connection and other posts, for the group limits
   const agentOf = async (phone) => {
     if (!byPhone.has(phone)) byPhone.set(phone, L.agentPosts(phone, deps, x, now));
@@ -142,6 +148,7 @@ async function checklist(deps = {}) {
     if (!page) continue;
     if (expired(c, now)) { await expire(c, deps, x); continue; }
     const agent = await agentOf(c.phone);
+    const config = configFor(agent.conn);
     const limits = L.limitsFor(c, agent.campaigns, now, config, agent);
     const byId = new Map(targetsOf(c, agent.conn).map((g) => [String(g.group_id), g]));
     out.push({
@@ -153,7 +160,7 @@ async function checklist(deps = {}) {
         const withLimit = g.status === "owed" && g.kind === "group" ? { ...g, limit: limits[g.group_id] || null } : g;
         const tg = byId.get(g.group_id);
         return withLimit.status !== "owed" || withLimit.copy ? withLimit
-          : { ...withLimit, copy: C.buildCopy(page, c, { ...tg, target: tg.kind === "page" ? "page" : "group" }, "property", deps.pageBaseUrl || "") };
+          : { ...withLimit, copy: C.buildCopy(page, c, { ...tg, target: tg.kind === "page" ? "page" : "group" }, "property", deps.pageBaseUrl || "", templates) };
       }), now),
     });
   }
@@ -203,7 +210,7 @@ async function markDone(campaignId, groupId, status, deps = {}, opts = {}) {
   const head = await x.store.getPostingCampaign(String(campaignId));
   if (!head) return null;
   const conn = (await x.db.getConnection(head.phone)) || {};
-  const config = await A.configOf(deps, x);
+  const config = await A.configOf(deps, x, conn);
   const id = crypto.randomUUID();
   let finished = false, past = false;
   const next = await A.mutate(x, String(campaignId), (cur) => {

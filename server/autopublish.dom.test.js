@@ -112,8 +112,8 @@ function findChromium() {
     assert.deepEqual(state.calls.map((c) => c[0]), ["preview"]);
     state.calls.length = 0;
 
-    // Edit Kfar Saba's groups first: drop k2.
-    await rows.nth(0).locator("[data-groups]").click();
+    // Edit Kfar Saba's groups first: drop k2. Turning the switch on already opened the group list with the preview.
+    assert.ok(await page.locator('input[data-page="pgK"][data-group="k2"]').isVisible(), "the switch opens the groups together with the post");
     await page.locator('input[data-page="pgK"][data-group="k2"]').uncheck();
     assert.ok((await rows.nth(0).textContent()).includes("קבוצות (1)"));
 
@@ -124,16 +124,17 @@ function findChromium() {
     state.calls = state.calls.filter((c) => c[0] !== "preview");
     await page.waitForFunction(() => /פעיל/.test(document.querySelector(".ap-prop").textContent));
     const [put, create, approve] = state.calls;
-    assert.deepEqual(approve, ["approve", "p1", {}], "confirming at the switch approved the first post: no second approval, text and time untouched");
+    assert.equal(approve, undefined, "no post approval: the campaign posts on its own");
     assert.equal(put[0], "put"); assert.equal(put[1].consent, true); assert.equal(put[1].consent_version, "v1");
     assert.equal(create[0], "create");
-    assert.deepEqual([create[1].page_id, create[1].group_ids, create[1].mode, create[1].consent], ["pgK", ["k1"], "per_post", true]);
+    assert.deepEqual([create[1].page_id, create[1].group_ids, create[1].mode, create[1].consent], ["pgK", ["k1"], "standing", true]);
     assert.ok((await page.textContent("#apCount")).includes("נכס אחד בפרסום אוטומטי"));
 
     // Eilat: switching on with no group opens its panel instead of starting.
     await rows.nth(1).locator(".switch i").click();
-    await page.waitForFunction(() => /בחרו לפחות קבוצה אחת/.test(document.getElementById("msg").textContent));
+    await page.waitForFunction(() => /בחרו קבוצות לנכס הזה/.test(document.getElementById("msg").textContent));
     assert.equal(await page.locator('input[data-page="pgE"]').count(), 3, "its group list is open (usable groups only)");
+    assert.ok((await rows.nth(1).textContent()).includes("בחרו לפחות קבוצה אחת כדי לראות את הפוסט"), "the preview waits for a group");
     assert.equal(state.calls.filter((c) => c[0] === "create").length, 1);
 
     // A running property's groups: saved as a new pass — stop, then create with the new set.
@@ -168,7 +169,7 @@ function findChromium() {
     await page.click('button[data-confirm="pgR"]');
     await page.waitForFunction(() => /הורדנו קבוצה אחת שלא מתאימה/.test(document.getElementById("msg").textContent));
     const kinds = state.calls.map((c) => c[0]).filter((k) => k !== "preview");
-    assert.deepEqual(kinds, ["put", "refused", "create", "approve"]);
+    assert.deepEqual(kinds, ["put", "refused", "create"]);
     assert.deepEqual(state.calls.find((c) => c[0] === "create")[1].group_ids, ["k1"]);
     console.log("autopublish.dom.test.js ok");
   } finally { await browser.close(); srv.close(); }

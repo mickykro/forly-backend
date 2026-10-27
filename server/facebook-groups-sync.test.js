@@ -288,7 +288,13 @@ function nameHash(name) {
     assert.equal(merged[0].name_hash, nameHash("לא רלוונטי"));
   }
 
-  console.log("facebook-groups-sync.test.js ok");
+  {
+  const F = require("./facebook-groups-sync");
+  for (const name of ["קונים ומוכרים נדל\"ן", "קנייה ומכירה בצפון", "השקעות בחו\"ל", "משקיעים חכמים", "מגרשים בגליל", "רוצים לקנות או למכור?", "Property investors IL", "הקונים של המדינה", "נדל״ן והשקעות בתאילנד", "דירות להשכרה בבאר שבע - לכניסה מידית"])
+    assert.ok(F.isRealEstateGroup({ name }), name);
+  for (const name of ["קניות ברשת", "חובבי צילום", "Jobs Tel Aviv", "דרושים אנשי מכירות", "רכבים- לקנות/למכור", "פיננקה - מניות והשקעות מתחת לרדאר", "אלמנט - לוח המכירות הגדול !", "צלמים ועורכי וידאו📸 - קניה ומכירה"]) assert.ok(!F.isRealEstateGroup({ name }), name);
+}
+console.log("facebook-groups-sync.test.js ok");
 })();
 
 // ── a group's name is its link's first line, without the last-activity text ──

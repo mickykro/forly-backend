@@ -35,6 +35,9 @@ function browseEveryMs(env = process.env) {
   const min = Number(env.POSTING_BROWSE_EVERY_MIN || 20);
   return Number.isFinite(min) && min >= 1 ? min * MS_MIN : BROWSE_EVERY_MS;
 }
+// A local box has no idle browsing (it only holds the profile lock the posts
+// need, and the login may not be there): POSTING_BROWSE=1 keeps it.
+const browseOff = (env = process.env) => env.FORLY_ENV === "local" && env.POSTING_BROWSE !== "1";
 // Clearly below profile-lock's MAX_HOLD_MS (20 min): the profile lock must
 // still be ours when a hung driver call is settled (asserted in the tests).
 const POST_TIMEOUT_MS = 15 * MS_MIN;
@@ -130,6 +133,10 @@ async function housekeep(phone, conn, deps, x, now, config) {
         out.push(c);
         continue;
       }
+      // No per-post approval (asksAgent): a post an older per_post campaign left waiting goes out as planned.
+      if (!C.asksAgent(c.mode, deps.env || process.env) && c.posts.some((p) => p.status === "pending_approval")) {
+        c = (await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.status === "pending_approval" ? { ...p, status: "scheduled" } : p)) }))) || c;
+      }
       catalog = catalog || (await A.catalogIndex(x.db));
       const ctx = { conn, catalog, listingType: (page.property || {}).listing_type || null, now };
       const refresh = (gs) => gs.map((g) => ({ ...g, ...A.eligibility(g, ctx) }));
@@ -163,7 +170,7 @@ async function skip(x, id, postId, reason) {
 }
 
 function duplicateIn(ga, fp, now, config) {
-  const within = (f) => now.getTime() - ms(f.at) < config.fingerprint_window_days * MS_DAY;
+  const within = (f) => safety.datesApart(new Date(ms(f.at)), now) < config.fingerprint_window_days;
   return (ga.fingerprints || []).some((f) => within(f) && ((fp.exact && f.exact === fp.exact) || (fp.strong && f.strong === fp.strong)));
 }
 
@@ -175,10 +182,12 @@ async function runDue(c, post, st, deps, x, now) {
   // Local watched tests are approval-only even for a scheduled post left by an
   // older standing campaign; so is a per_post campaign's post planned while it
   // was standing (an admin edit). This gate runs before opening any browser.
-  const local = localMode.requireApproval(deps.env || process.env);
-  if ((local || c.mode === "per_post") && !post.approved_at) {
+  const env = deps.env || process.env;
+  const local = localMode.requireApproval(env);
+  const perPost = c.mode === "per_post" && C.asksAgent(c.mode, env); // a local watched test
+  if (C.asksAgent(c.mode, env) && !post.approved_at) {
     const next = await mutate(x, c.id, (cur) => ({
-      posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" && (local || cur.mode === "per_post") ? { ...p, status: "pending_approval" } : p)),
+      posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" && C.asksAgent(cur.mode, env) ? { ...p, status: "pending_approval" } : p)),
     }));
     const pending = next && next.posts.find((p) => p.id === post.id && p.status === "pending_approval");
     const where = pending && (pending.target === "page" ? "דף העסקי" : `קבוצה "${pending.group_name || pending.group_url}"`);
@@ -209,7 +218,7 @@ async function runDue(c, post, st, deps, x, now) {
     if (!g || !A.isEligible(A.eligibility(g, ctx))) return skip(x, c.id, post.id, "ineligible");
     // Another Forly account may have posted this listing here since it was planned.
     aliases = A.groupIdsOf(g, conn).slice(1); // a resolved slug's history is this group's (Task 18)
-    const ga = (await x.store.getGroupActivityFor([g.group_id], now, undefined, { [g.group_id]: aliases }))[g.group_id] || {};
+    const ga = (await x.store.getGroupActivityFor([g.group_id], now, safety.activityDays(config), { [g.group_id]: aliases }))[g.group_id] || {};
     if (duplicateIn(ga, fp, now, config)) return skip(x, c.id, post.id, "duplicate");
     target = { ...g, target: "group", target_id: g.group_id };
   }
@@ -221,13 +230,13 @@ async function runDue(c, post, st, deps, x, now) {
   const fresh = C._test.buildCopy(page, c, target, post.link_kind || "property", deps.pageBaseUrl || "");
   const video = C.videoOf(page);
   const stale = post.copy_edited ? sha(fresh) !== post.base_hash : fresh !== post.copy;
-  if (c.mode === "per_post" && (stale || (post.video_url || null) !== video.video_url)) {
+  if (perPost && (stale || (post.video_url || null) !== video.video_url)) {
     const next = await mutate(x, c.id, (cur) => ({ posts: cur.posts.map((p) => (p.id === post.id && p.status === "scheduled" ? { ...p, status: "pending_approval", copy: fresh, copy_hash: sha(fresh), copy_edited: false, base_hash: null, approved_at: null, ...video } : p)) }));
     const p2 = next && next.posts.find((p) => p.id === post.id);
     if (p2) await say(deps, phone, "approve", `📣 פרטי הנכס השתנו — פוסט מעודכן לאישור:\n──────────\n${fresh}\n──────────`, next, p2);
     return "reapproval";
   }
-  const copy = c.mode === "per_post" ? post.copy : fresh;
+  const copy = perPost ? post.copy : fresh;
 
   try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "reserve" }, A.guardDeps(deps, x)); }
   catch (e) {
@@ -368,7 +377,7 @@ async function runAttempt(attempt, st, deps, now) {
       await A.applyFindings(res, cur.st, x, x.clock());
       done = true;
       // Timed out: the tick already gave this browser up — it posts nothing more.
-      if (timedOut || !session.more(last)) return null;
+      if (timedOut || !session.more(last, res)) return null;
       // Renewed before the dwell too: post (≤ timeout) + dwell can outlast one hold.
       if (st.lock && st.lock.renew && !st.lock.renew()) return null;
       arm(); // the dwell gets its own window, not what is left of the post's
@@ -384,6 +393,8 @@ async function runAttempt(attempt, st, deps, now) {
       };
     };
   }
+  // An admin's takeover (posting-live) keeps the browser — and so the profile — past the post.
+  if (st.lock && st.lock.renew) call.postDeps.renewLock = () => st.lock.renew();
   // Before the session closes: the account's due checks (yesterday's posts)
   // and, when it is stale, its groups sync — on the same page, no session of
   // their own. Never in the way of the posts: any failure is only logged.
@@ -413,7 +424,7 @@ async function runAttempt(attempt, st, deps, now) {
 async function settle(key, result, err, st, deps, x, now) {
   const { c, post } = st;
   const phone = c.phone;
-  const config = await configOf(deps, x);
+  const config = await configOf(deps, x, phone);
   const hint = codeOf(result, err);
   let a = await x.store.getAttempt(key);
   if (a && (PRE_SUBMIT.has(a.state) || IN_FLIGHT.has(a.state))) {
@@ -461,7 +472,7 @@ async function settle(key, result, err, st, deps, x, now) {
 
 // ── nothing due: plan the next post, or browse on a warm-up day ──
 async function browse(phone, conn, deps, x, now) {
-  if (typeof deps.dwell !== "function") return;
+  if (typeof deps.dwell !== "function" || browseOff(deps.env || process.env)) return;
   if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < browseEveryMs(deps.env || process.env)) return;
   try { await x.guard.assertAllowed({ phone, platform: "facebook", action: "dwell" }, A.guardDeps(deps, x)); } catch (e) { if (e && e.code === "posting_disabled") return; throw e; }
   await x.db.setConnection(phone, { last_browse_attempt_at: iso(now) });
@@ -485,10 +496,11 @@ async function warmIdle(phone, deps = {}, now) {
   if (!conn.facebook_browser_connected_at) return "idle";
   if (C._test.accountBlocked(conn)) return "account_blocked";
   if (loginOpen(conn, "facebook", now.getTime())) return "login_open";
-  const config = await configOf(deps, x);
+  const config = await configOf(deps, x, conn);
   // A local box browses every interval whatever the warm-up says (it skips
   // the warm-up to test posting, and browsing should still be watchable).
   const local = (deps.env || process.env).FORLY_ENV === "local";
+  if (browseOff(deps.env || process.env)) return "idle";
   if (!local && !safety.wantsBrowseSession(await A.accountView(phone, conn, deps, now), now, config)) return "idle";
   if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < browseEveryMs(deps.env || process.env)) return "browse_only";
   const release = x.locks.tryAcquire(phone, "facebook");
@@ -509,7 +521,7 @@ async function planNext(phone, st, deps, x, now) {
   if (!decision) return "idle";
   if (decision.campaignId) {
     const at = decision.at;
-    for (let i = 0; i < A.MAX_SESSION_POSTS && decision && decision.campaignId; i++) {
+    for (let i = 0, max = A.maxSessionPosts(deps.env); i < max && decision && decision.campaignId; i++) {
       const c = await C.schedulePost(Object.assign({}, decision, { at }), deps, now);
       const post = c && (c.posts || []).find((p) => p.group_id === decision.group_id && OPEN_POST.has(p.status));
       if (!post || post.status !== "pending_approval") break;
@@ -528,8 +540,8 @@ async function planNext(phone, st, deps, x, now) {
 
 // ── one account ──
 async function tickLocked(phone, deps, x, now, lock, opts = {}) {
-  const config = await configOf(deps, x);
   const conn = (await x.db.getConnection(phone)) || {};
+  const config = await configOf(deps, x, conn);
   const campaigns = await housekeep(phone, conn, deps, x, now, config);
   const running = campaigns.filter((c) => c.status === "running");
   if (!running.length) return "idle";

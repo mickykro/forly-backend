@@ -110,7 +110,7 @@ const card = (title, body, extraHtml = "") => `<!doctype html><html lang="he" di
 // the denial reasons this call itself cures (granting the permission).
 // A system switch never refuses the agent's save: nothing posts here, and the
 // sweeper asks the guard again before every post.
-const SYSTEM_OFF = ["env_off", "global_off", "platform_off", "visible_off"];
+const SYSTEM_OFF = ["global_off", "platform_off", "visible_off"];
 async function allowed(S, phone, res, tolerate = []) {
   try {
     await S.guard.assertAllowed({ phone, platform: "facebook", action: "reserve" }, { db: S.db, env: S.deps.env || process.env });

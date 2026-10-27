@@ -71,6 +71,18 @@
   .posting-row{display:flex;align-items:center;gap:10px;margin:10px 0;flex-wrap:wrap}
   .posting-row .switch{display:inline-block;vertical-align:middle}
   .posting-note{font-size:.78rem;color:var(--ink-soft);font-weight:300;margin:4px 0 0}
+  .posting-table{width:100%;border-collapse:collapse;font-size:.82rem;margin-top:6px}
+  .posting-table th,.posting-table td{padding:4px 6px;border-bottom:1px solid rgba(0,0,0,.08);text-align:right}
+  .rules-group{font-size:.9rem;margin:14px 0 4px}
+  .rule-name{display:inline-flex;align-items:center;gap:6px}
+  .rule-i{width:18px;height:18px;border-radius:50%;border:1px solid currentColor;background:none;color:var(--ink-soft);font:italic 600 .7rem/16px Georgia,serif;padding:0;cursor:pointer;opacity:.7}
+  .rule-i:hover,.rule-i:focus-visible{opacity:1}
+  .rule-unit{color:var(--ink-soft);font-weight:300}
+  .rule-pop{position:fixed;z-index:1000;background:var(--card, #fff);color:var(--ink, #222);border:1px solid rgba(0,0,0,.12);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:10px 12px;font-size:.82rem;line-height:1.5;text-align:right;direction:rtl}
+  .rule-pop p{margin:6px 0 0}
+  .caps-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin:10px 0}
+  .caps-grid label{display:flex;flex-direction:column;gap:4px;font-size:.85rem}
+  .caps-grid input{width:100%;max-width:140px}
   .posting-warn{font-size:.82rem;color:#9a2f25;background:rgba(190,60,50,.08);border:1px solid rgba(190,60,50,.25);border-radius:12px;padding:10px 14px;margin-bottom:14px}
   .posting-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin-bottom:18px}
   .posting-audit{list-style:none;margin:0;padding:0;font-size:.8rem}
@@ -279,13 +291,22 @@
     <div class="posting-warn hidden" id="postingWarnings"></div>
     <div class="empty hidden" id="postingUnavailable">פרסום אוטומטי לא פעיל בשרת הזה.</div>
     <div id="postingBody" class="hidden">
+      <section class="message-card" id="postingLiveCard">
+        <h2>סשנים פעילים עכשיו</h2>
+        <p class="posting-note">כל דפדפן שמפרסם עכשיו. צפייה בזמן אמת; "לסיים ולעצור" — הפוסט הנוכחי מסתיים ואין פוסט נוסף בסשן; "לדלג" — הפוסט הנוכחי נעצר לפני הלחיצה על פרסום; "להשתלט" — האוטומציה נעצרת והעכבר והמקלדת אצלכם.</p>
+        <div id="postingLiveList" class="posting-note">אין סשן פעיל.</div>
+        <div id="postingLiveView"></div>
+      </section>
       <div class="posting-grid">
         <section class="message-card">
           <h2>מתג ראשי</h2>
           <p>כיבוי עוצר את כל הפרסום האוטומטי של כל הסוכנים לפני הפעולה הבאה.</p>
-          <div class="posting-warn hidden" id="postingEnvNote">POSTING_ENABLED אינו 1 בסביבה — הפרסום כבוי, והמתג הזה לא יכול להדליק אותו.</div>
           <div class="posting-row"><label class="switch"><input type="checkbox" id="postingGlobal"><i></i></label> <b id="postingGlobalLabel"></b></div>
           <p class="posting-note" id="postingLastChange"></p>
+          <div class="posting-row"><button type="button" class="btn btn-gold btn-sm" id="postingSweepNow">הרצת סבב פרסום עכשיו</button></div>
+          <p class="posting-note" id="postingSweepOut"></p>
+          <div class="posting-row"><button type="button" class="btn btn-ghost btn-sm" id="postingStatusLoad">למה סוכן לא מפרסם? (מצב לכל סוכן)</button></div>
+          <div id="postingStatus" class="posting-note"></div>
         </section>
         <section class="message-card">
           <h2>מתגים נוספים</h2>
@@ -295,14 +316,33 @@
       </div>
       <div class="stat-grid" id="postingCounts"></div>
       <section class="message-card" style="margin-bottom:18px">
+        <h2>חוקי פרסום</h2>
+        <p class="posting-note">חלים על כל הסוכנים. שדה ריק = ברירת המחדל. לכל סוכן אפשר לקבוע חוקים משלו בלשונית קמפיינים. כל שדה מראה את הטווח המותר (0 = ללא הגבלה, רק בסביבה מקומית). חלון שבו "מ" גדול או שווה ל"עד" — כבוי.</p>
+        <div id="postingCaps"></div>
+        <button type="button" class="btn btn-gold btn-sm" id="postingCapsSave">שמירת החוקים</button>
+      </section>
+      <section class="message-card" style="margin-bottom:18px">
+        <h2>תבניות פוסט</h2>
+        <p class="posting-note">הפוסט נבנה בעברית מפרטי הנכס. תבנית שמודבקת כאן מחליפה אותו לנכסים שדף הנכס שלהם באותה שפה (ובתבנית אחת אפשר להדביק כמה שפות, זו אחרי זו). שדות: {title} {rooms} {sqm} {floor} {price} {city} {neighborhood} {place} {name} {phone} {link} {deal} ו־{deal:למכירה|להשכרה} (הטקסט לפי סוג העסקה). שורה ששדה שלה ריק נשמטת; ריק = הפוסט המובנה.</p>
+        <div class="caps-grid" id="postingTemplates"></div>
+        <button type="button" class="btn btn-gold btn-sm" id="postingTemplatesSave">שמירת התבניות</button>
+      </section>
+      <section class="message-card" style="margin-bottom:18px">
+        <h2>מצבי פרסום</h2>
+        <p class="posting-note">במקום משתני סביבה. "ברירת מחדל" משאיר את ערך הסביבה. מצב בדיקה (פרץ), קצב מהיר, בלי חימום ובלי מגבלות פועלים רק בסביבה מקומית; צילומי מסך — אף פעם לא בייצור.</p>
+        <div class="caps-grid" id="postingModes"></div>
+        <button type="button" class="btn btn-gold btn-sm" id="postingModesSave">שמירת המצבים</button>
+      </section>
+      <section class="message-card" style="margin-bottom:18px">
         <h2>חימום חשבון</h2>
         <p class="posting-note">חשבון פעיל מספיק יכול לפרסם מיד. חשבון חדש או שקט — חימום איטי. "אוטומטי" — לפי מה שהסוכן ענה.</p>
         <div class="posting-row" style="gap:8px;flex-wrap:wrap">
-          <input id="postingWarmPhone" inputmode="tel" placeholder="טלפון הסוכן (9725…)" style="padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px;direction:ltr">
+          <select id="postingWarmAgent" style="padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px"><option value="">טוען סוכנים…</option></select>
           <select id="postingWarmMode" style="padding:8px 10px;border:1px solid rgba(23,20,15,.16);border-radius:9px">
             <option value="active">פעיל מיד — בלי חימום</option><option value="slow">חימום איטי</option><option value="auto">אוטומטי</option>
           </select>
           <button type="button" class="btn btn-gold btn-sm" id="postingWarmSave">שמירה</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="postingReplan">להקדים לעכשיו את הפוסטים המתוכננים</button>
         </div>
       </section>
       <section class="message-card" style="margin-bottom:18px">
@@ -355,6 +395,7 @@
       <select id="campAgent" aria-label="סוכן"><option value="">כל הסוכנים</option></select>
       <button type="button" class="btn btn-gold btn-sm" id="campNew">קמפיין חדש</button>
     </div>
+    <section class="message-card" id="campAgentPanel" hidden style="margin-bottom:14px"></section>
     <form id="campForm" class="cf" hidden novalidate>
       <div class="cf-top"><h3 id="campFormTitle">קמפיין חדש</h3><button type="button" class="cf-x" id="campFormClose" aria-label="סגירה">×</button></div>
       <section class="cf-step cf-main">
@@ -396,14 +437,13 @@
               <span id="campFormRepeatWrap" hidden>כל <input id="campFormRepeat" type="number" min="3" max="30" value="7" aria-label="ימים בין סבבים"> ימים</span>
             </div>
           </div>
-          <label class="cf-field cf-main"><span>אישור פוסטים</span><select id="campFormMode"><option value="standing">אישור אחד לכל הקמפיין</option><option value="per_post">אישור לכל פוסט</option></select></label>
         </div>
         <label class="cf-check" id="campFormDefaultsRow" hidden><input id="campFormDefaults" type="checkbox" checked> לשמור את הקבוצות האלה כקבוצות ברירת המחדל של הסוכן (גם לנכסים חדשים)</label>
         <p id="campFormEstimate" class="cf-est"></p>
       </section>
       <fieldset id="campFormConsent" class="cf-step">
-        <legend>הסכמת הסוכן</legend>
-        <p class="cf-hint">חובה לתעד איך ומתי הסוכן אישר את הקמפיין — זה נרשם ביומן.</p>
+        <legend>הסכמת הסוכן (לא חובה)</legend>
+        <p class="cf-hint">אם הסוכן אישר — תעדו איך ומתי. בלי הערה הקמפיין נפתח באחריות המנהל, וכך זה נרשם ביומן.</p>
         <div class="cf-row">
           <label class="cf-field"><span>איך אישר</span><select id="campFormConsentMethod"><option value="phone">בטלפון</option><option value="in_person">פנים אל פנים</option><option value="whatsapp">בוואטסאפ</option></select></label>
           <label class="cf-field cf-grow"><span>פרטי האישור</span><input id="campFormConsentNote" maxlength="300" placeholder="לדוגמה: אישר בשיחה ב-11/10 בצהריים, 14 יום בקבוצות של העיר"></label>
@@ -435,8 +475,8 @@
         <p class="manual-help"><b>חצי-אוטומטי:</b> פתחו את הפייסבוק של הסוכן ולחצו <b>▶ הפעלה</b>. המערכת פותחת את הקבוצה, מעלה את הסרטון ומקלידה את הטקסט, ומצלצלת כשמוכן. לוחצים "פרסום" בפייסבוק ואז <b>הבא</b>. "הבא" בלי לפרסם = דילוג עם סיבה. אפשר לפתוח כמה סוכנים בכמה לשוניות במקביל.</p>
         <p class="manual-help">ידני, לכל קבוצה: <b>פתיחה בקבוצה</b>, לחיצה בדפדפן על "כתבו משהו", <b>הקלדת הטקסט</b>, לחיצה בפייסבוק על "תמונה/סרטון" ואז <b>העלאת הסרטון</b>. בסוף לוחצים "פרסום" בפייסבוק ומסמנים את הקבוצה ✓. נכס יוצא מהרשימה כשכל הקבוצות שלו סומנו.</p>
         <details class="manual-agent" id="manualUnconnected">
-          <summary>סוכנים שהתחברו לפייסבוק אבל לא סומנו כמחוברים</summary>
-          <p class="manual-help">סוכן שהתחבר בחלון ההתחברות וסגר אותו בלי ללחוץ "סיימתי" נשאר שמור ב-Driver אבל לא מסומן כמחובר כאן. <b>בדיקת ההתחברות</b> פותחת את הפרופיל השמור שלו לרגע, ואם הוא מחובר — מסמנת אותו כמחובר.</p>
+          <summary>סוכנים שהתחברו לפייסבוק אבל לא סומנו כמחוברים / שפייסבוק ניתק</summary>
+          <p class="manual-help">סוכן שהתחבר בחלון ההתחברות וסגר אותו בלי ללחוץ "סיימתי" נשאר שמור ב-Driver אבל לא מסומן כמחובר כאן. <b>בדיקת ההתחברות</b> פותחת את הפרופיל השמור שלו לרגע, ואם הוא מחובר — מסמנת אותו כמחובר. גם סוכן שפייסבוק ניתק מופיע כאן: התחברו בשבילו בדפדפן של "פרסום ידני", סגרו את הדפדפן ולחצו בדיקה — הקמפיינים שנעצרו בגלל הניתוק יחזרו לרוץ.</p>
           <div id="manualUnconnectedList"><p class="manual-muted">טוען…</p></div>
         </details>
         <h3 class="manual-h">רשימת הפרסום <small class="manual-muted" id="manualSummary"></small></h3>
@@ -670,11 +710,14 @@
 
 <script src="/api.js"></script>
 <script src="/admin.js"></script>
+<script src="/admin-rules.js"></script>
 <script src="/admin-posting.js"></script>
 <script src="/connect-viewer.js"></script>
+<script src="/admin-posting-live.js"></script>
 <script src="/admin-manual-lane.js"></script>
 <script src="/admin-manual.js"></script>
 <script src="/admin-campaigns.js"></script>
+<script src="/admin-agent-panel.js"></script>
 <footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

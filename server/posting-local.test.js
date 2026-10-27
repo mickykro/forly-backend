@@ -22,7 +22,6 @@ for (const env of [
   { ...good, FORLY_ENV: "staging" },
   { ...good, NODE_ENV: "production" },
   { ...good, POSTING_SWEEPER: "0" },
-  { ...good, POSTING_ENABLED: "0" },
   { ...good, DRIVER_DEV_VIEW: "0" },
   { ...good, POSTING_LOCAL_PREFLIGHT_SECONDS: "-1" },
   { ...good, POSTING_LOCAL_PREFLIGHT_SECONDS: "91" },

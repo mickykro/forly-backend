@@ -10,6 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700&family=Frank+Ruhl+Libre:wght@400;500;600;700&family=Heebo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&family=Secular+One&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<script src="/ui-i18n.js" defer></script>
 <style>
   .chip-btn{border:1px solid rgba(23,20,15,.18);background:#fff;border-radius:100px;padding:4px 12px;font-size:.85rem;cursor:pointer;color:var(--ink,#17140f);line-height:1.4}
   .chip-btn:hover{border-color:var(--gold,#b98a2f);color:var(--gold,#b98a2f)}
@@ -1931,8 +1932,7 @@
           msg.textContent = "לא מצאנו קבוצה שלכם שמתאימה לעיר של הנכס. אפשר לבחור קבוצות בעמוד הפרסום האוטומטי.";
           actions.innerHTML = link("בחירת קבוצות"); return;
         }
-        var perPost = perm.auto_mode !== "standing";
-        msg.textContent = "לפרסם את הנכס אוטומטית בקבוצות האלה? " + (perPost ? "כל פוסט יחכה לאישור שלכם לפני שיעלה." : "פורלי תפרסם לבד, בקצב של החשבון, עד שתעצרו.");
+        msg.textContent = "לפרסם את הנכס אוטומטית בקבוצות האלה? פורלי תפרסם לבד, בקצב של החשבון, עד שתעצרו.";
         list.innerHTML = groups.map(function (g) {
           return '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" checked value="' + String(g.group_id).replace(/"/g, "") + '"> <span></span></label>';
         }).join("");
@@ -1944,13 +1944,13 @@
           if (!ids.length) { msg.textContent = "בחרו לפחות קבוצה אחת."; return; }
           btn.disabled = true;
           fetch("/api/posting/campaigns", { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({
-            page_id: pageId, group_ids: ids, mode: perPost ? "per_post" : "standing", days: 30, repeat: false, targets: ["groups"],
+            page_id: pageId, group_ids: ids, mode: "standing", days: 30, repeat: false, targets: ["groups"],
             consent: true, consent_version: s.consent_version,
             include_unknown: groups.some(function (g) { return ids.indexOf(String(g.group_id)) >= 0 && g.agent_policy === "unknown"; }),
           }) }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); }).then(function () {
             list.innerHTML = "";
-            msg.textContent = perPost ? "הופעל ✓ הפוסט הראשון מחכה לאישור שלכם: שם אפשר לערוך את הנוסח ולבחור מתי הוא יעלה." : "הופעל ✓ פורלי תפרסם את הנכס בקבוצות שבחרתם.";
-            actions.innerHTML = link(perPost ? "לאישור הפוסט" : "לעמוד הפרסום האוטומטי");
+            msg.textContent = "הופעל ✓ פורלי תפרסם את הנכס בקבוצות שבחרתם.";
+            actions.innerHTML = link("לעמוד הפרסום האוטומטי");
           }).catch(function () { btn.disabled = false; msg.textContent = "לא הצלחנו להפעיל מכאן — אפשר להפעיל בעמוד הפרסום האוטומטי."; actions.innerHTML = link("לעמוד הפרסום האוטומטי"); });
         });
       }).catch(function () { /* not signed in, or posting is not available here: the step is simply not shown */ });

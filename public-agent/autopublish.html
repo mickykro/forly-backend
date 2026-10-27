@@ -6,6 +6,7 @@
 <title>פרסום אוטומטי — Forly</title>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="stylesheet" href="/app.css">
+<script src="/ui-i18n.js" defer></script>
 <style>
   body{background:var(--bg)}
   .wrap{width:min(720px,100%);margin:0 auto;padding:18px 16px 100px}
@@ -114,9 +115,7 @@
 
       <fieldset class="camp-mode">
         <legend>מתי פורלי מפרסמת?</legend>
-        <label class="camp-opt"><input type="radio" name="apMode" value="per_post" checked>
-          <span><strong>רק אחרי אישור שלכם, פוסט-פוסט</strong><small>לפני כל פוסט תקבלו וואטסאפ עם הטקסט והקבוצה. אישור בלחיצה אחת — בלי אישור לא מפרסמים.</small></span></label>
-        <label class="camp-opt"><input type="radio" name="apMode" value="standing">
+        <label class="camp-opt"><input type="radio" name="apMode" value="standing" checked>
           <span><strong>לבד, עד שתעצרו</strong><small>מאשרים פעם אחת, פורלי מפרסמת בקצב שלה, ואפשר לעצור בכל רגע בלחיצה.</small></span></label>
         <p class="camp-muted camp-small">חל על נכסים שתפעילו מעכשיו. נכס שכבר פועל ממשיך במצב שבו הופעל.</p>
       </fieldset>

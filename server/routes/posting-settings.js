@@ -208,7 +208,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
       pagePostUrl: await D.pagePostUrl(db, pageId), variantRound: 0 });
     return res.json({
       ...(({ videoOf, videoView }) => videoView(videoOf(page)))(require("../posting-campaign")), // the post's video; the copy is its description
-      copy: campaigns.buildCopy(page, { page_id: pageId, posts: [] }, target, destination.kind, S.pageBaseUrl || deps.pageBaseUrl || ""),
+      copy: campaigns.buildCopy(page, { page_id: pageId, posts: [] }, target, destination.kind, S.pageBaseUrl || deps.pageBaseUrl || "",
+        await A.templatesOf({ db })),
       comment_link: D.previewUrl(destination, { pageBaseUrl: S.pageBaseUrl || deps.pageBaseUrl || "", pageId }),
       link_kind: destination.kind, link_notice: D.notice(destination.kind),
       author: conn.facebook_identity_label || null,
@@ -350,7 +351,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
       if (e && e.code === "posting_disabled") { await unstamp(); return res.status(409).json({ error: "posting_disabled", reason: e.reason }); }
       const { redact } = require("../driver-browser");
       console.error(redact(`posting groups resync failed: ${(e && (e.code || e.name)) || "error"} ${(e && (e.anomaly || e.signal)) || ""} ${String((e && e.message) || "").split("\n")[0].replace(/\S+:\/\/\S+/g, "<url>").slice(0, 200)}`));
-      return res.status(503).json({ error: "sync_failed" });
+      return res.status(503).json(Object.assign({ error: "sync_failed" }, require("../facebook-groups-sync").failureOf(e)));
     }
     const after = (await db.getConnection(phone)) || {};
     return res.json({ member_groups: await publicMembers(after, undefined, undefined, await db.getBusiness(phone).catch(() => null)), groups_synced_at: after.facebook_groups_synced_at || null });

@@ -140,7 +140,7 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     const r = await C.create(base({ mode: "per_post", days: 30, consent: { at: iso(NOW.getTime() + 3 * DAY), version: "2026-10-01" }, groups: [{ url: G(222) }] }), deps);
     assert.equal(r.id, c.id);
     assert.equal(r.status, "running");
-    assert.equal(r.mode, "per_post");
+    assert.equal(r.mode, "standing", "per_post is no longer offered: stored as standing");
     assert.equal(r.consent_version, "2026-10-01");
     assert.equal(r.pause_reason, null);
     assert.deepEqual(r.groups.map((g) => g.group_id), ["222"]);
@@ -154,9 +154,9 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     t = await S.tick(t, deps, at(new Date(NOW.getTime() + 16 * DAY)));
     assert.equal(t.posts.length, 3, "after the cooldown, a new post for the new pass");
     assert.equal(t.posts[2].group_id, "222");
-    assert.equal(t.posts[2].status, "pending_approval", "per the new mode");
+    assert.equal(t.posts[2].status, "scheduled", "no approval asked");
     // running (and paused) campaigns are returned unchanged: still idempotent
-    assert.equal((await C.create(base({ mode: "standing" }), deps)).mode, "per_post");
+    assert.equal((await C.create(base({ mode: "per_post" }), deps)).id, r.id);
     // a stopped campaign restarts too
     await C.stop(c.id, deps);
     assert.equal((await C.create(base(), deps)).status, "running");
@@ -201,12 +201,13 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(c.pause_reason, "page_gone");
     assert.equal(c.posts[0].status, "skipped");
     assert.equal(deps.post.calls.length, 0);
-    assert.ok(notes.some((m) => m.includes("נעצר")));
+    assert.ok(!notes.some((m) => m.includes("נעצר")), "posting is quiet: no stop message");
   }
 
-  // ── per_post: waits for approval; approval at night re-times the post to the morning ──
+  // ── approval (only a local watched test asks): waits; approval at night re-times the post to the morning ──
   {
     const { deps, at, notes } = await setup();
+    deps.env = LOCAL_TEST;
     let c = await C.create(base({ mode: "per_post" }), deps);
     c = await S.tick(c, deps, at(NOW));
     assert.equal(c.posts[0].status, "pending_approval");
@@ -232,9 +233,46 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(c.posts[0].error_code, "agent");
   }
 
-  // ── the property's video is part of the post: stored when planned, re-approved when it changes, handed to the driver ──
+  // ── agents are never asked per post: a per_post request posts as standing, and a post an
+  //    older per_post campaign left waiting goes out — no approval WhatsApp ──
+  {
+    const { deps, at, notes } = await setup();
+    const asked = () => notes.filter((n) => /לאישור/.test(typeof n === "string" ? n : JSON.stringify(n))).length;
+    let c = await C.create(base({ mode: "per_post" }), deps);
+    assert.equal(c.mode, "standing");
+    c = await S.tick(c, deps, at(NOW));
+    assert.equal(c.posts[0].status, "scheduled");
+    assert.equal(asked(), 0, "nothing asked");
+    assert.equal(C.asksAgent("per_post", {}), false);
+    assert.equal(C.asksAgent("standing", LOCAL_TEST), true, "a local watched test still asks");
+  }
+  {
+    const { deps, at, notes } = await setup();
+    deps.env = LOCAL_TEST; // a post left waiting, as an older per_post campaign did
+    let c = await C.create(base({ mode: "per_post" }), deps);
+    c = await S.tick(c, deps, at(NOW));
+    assert.equal(c.posts[0].status, "pending_approval");
+    const before = notes.length;
+    deps.env = { FORLY_ENV: "prod" };
+    c = await S.tick(c, deps, at(new Date(dueOf(c).getTime() + HOUR)));
+    assert.notEqual(c.posts[0].status, "pending_approval", "the waiting post is released");
+    assert.equal(deps.post.calls.length, 1, "and posted, unapproved");
+    assert.equal(notes.slice(before).filter((n) => /לאישור/.test(typeof n === "string" ? n : JSON.stringify(n))).length, 0, "no new approval request");
+  }
+  // …and a campaign held for the agent's text approval (awaiting_texts) is planned (held only in a local watched test)
   {
     const { deps, at } = await setup();
+    let c = await C.create(base({ mode: "standing" }), deps);
+    const A = require("./posting-account");
+    await A.mutate(A.ctxOf(deps), c.id, () => ({ awaiting_texts: true }));
+    c = await S.tick(await store.getPostingCampaign(c.id), deps, at(NOW));
+    assert.equal(c.posts.length, 1, "planned without the texts' approval");
+  }
+
+  // ── the property's video is part of the post: stored when planned, re-approved when it changes (local watched test), handed to the driver ──
+  {
+    const { deps, at } = await setup();
+    deps.env = LOCAL_TEST;
     let c = await C.create(base({ mode: "per_post" }), deps);
     c = await S.tick(c, deps, at(NOW));
     assert.equal(c.posts[0].video_url, null, "no video yet: a text post");
@@ -268,9 +306,10 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
 
   }
 
-  // ── text the agent edited on the approval page: typed as edited; asked again only when the property changes ──
+  // ── text the agent edited on the approval page (local watched test): typed as edited; asked again only when the property changes ──
   {
     const { deps, at } = await setup();
+    deps.env = LOCAL_TEST;
     let c = await C.create(base({ mode: "per_post" }), deps);
     c = await S.tick(c, deps, at(NOW));
     const MINE = "דירת 4 חדרים בחיפה — כתבו לי בפרטי";
@@ -281,6 +320,7 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(deps.post.calls[0].attempt.copy_hash, C.sha(MINE), "and checks it against the edited text");
 
     const two = await setup();
+    two.deps.env = LOCAL_TEST;
     let d = await C.create(base({ mode: "per_post" }), two.deps);
     d = await S.tick(d, two.deps, two.at(NOW));
     d = await C.approvePost(d.id, d.posts[0].id, two.deps, { copy: MINE });
@@ -480,6 +520,17 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(c.posts[0].group_id, "12345");
   }
   {
+    // a join request still pending: the entry is `pending` (planned again once a sync sees it joined), and it is no failure
+    const { deps, at } = await setup(PH, { post: walk("verified_failed", { error_code: "membership_pending" }, { membership: "pending" }) });
+    let c = await C.create(base(), deps);
+    c = await S.tick(c, deps, at(NOW));
+    c = await S.tick(c, deps, at(dueOf(c)));
+    assert.equal((await db.getConnection(PH)).facebook_groups_member.find((e) => e.group_id === "111").membership_state, "pending");
+    assert.equal(c.groups.find((g) => g.group_id === "111").is_member, false);
+    assert.equal(c.consecutive_failures || 0, 0, "a pending group is not a failure");
+    assert.equal(c.status, "running");
+  }
+  {
     // a failed connection write never escapes the tick, and its log line is redacted
     const lines = [];
     const orig = console.error;
@@ -514,7 +565,7 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     const cur = await store.getPostingCampaign(c.id);
     const why = await C.explainGroups(cur, deps);
     assert.deepEqual(why.map((w) => [w.group_id, w.why]), [[g1, "seen_not_member"], [g2, "property_cooldown"]]);
-    assert.equal(why[1].until, new Date(NOW.getTime() - 2 * DAY + 3 * DAY).toISOString(), "until when");
+    assert.equal(why[1].until, require("./posting-safety").dateGapEnd(new Date(NOW.getTime() - 2 * DAY), 3).toISOString(), "until when: midnight, 3 dates after the post");
     const plan = await C.planAccount(PH, deps);
     assert.equal(plan.reason, "no_eligible_group", "the card's reason and the explanation agree");
     // a later groups sync sees the account in g1 again → the block lifts
@@ -550,6 +601,16 @@ const LOCAL_TEST = { FORLY_ENV: "local", POSTING_LOCAL_TEST: "1", POSTING_SWEEPE
     assert.equal(await C.enrollNewPage(page(), deps), null, "defaults kept, auto-enroll off: nothing");
     await K.db.setConnection("972500000001", { posting_permission: Object.assign({}, K.PERM, { auto_enroll: true }) });
     assert.ok(await C.enrollNewPage(page(), deps), "auto-enroll on: enrolled on the default groups");
+  }
+
+  // ── the admin's pasted template serves pages in its language; others keep the built-in copy ──
+  {
+    const templates = { en: "Hi {city} {link}", he: "" };
+    const target = { group_id: "111", url: "https://www.facebook.com/groups/111" };
+    const en = { ...page(), language: "en", property: { ...page().property, city: "Haifa" } };
+    assert.equal(C.buildCopy(en, { page_id: "pg1", posts: [] }, target, "property", "http://127.0.0.1:8787", templates), "Hi Haifa https://nadlan.call4li.com/p/pg1");
+    const he = C.buildCopy(page(), { page_id: "pg1", posts: [] }, target, "property", "", templates);
+    assert.equal(he, C.buildCopy(page(), { page_id: "pg1", posts: [] }, target), "an empty template is no template");
   }
 
   console.log("posting-campaign.test.js ok");

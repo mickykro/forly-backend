@@ -18,6 +18,7 @@ const express = require("express");
 const M = require("../posting-manual");
 const A = require("../posting-account");
 const L = require("../posting-limits");
+const { needsReconnect } = require("./posting-shared");
 
 const SESSION_S = 3600;      // Driver's limit
 const CHOOSER_FRESH_MS = 60000;
@@ -120,9 +121,9 @@ module.exports = function createAdminManualRouter({
     return oneAtATime(String(head.phone), async () => {
       const cur = await x.store.getPostingCampaign(String(req.params.id));
       if (status === "posted" && cur) {
-        const config = await A.configOf(deps, x);
         const now = x.clock();
         const agent = await L.agentPosts(cur.phone, deps, x, now);
+        const config = await A.configOf(deps, x, agent.conn);
         if (M.owed(cur, agent.conn, now, config).some((g) => String(g.group_id) === String(req.params.gid))) {
           const lim = L.limitsFor(cur, agent.campaigns, now, config, agent)[String(req.params.gid)];
           if (lim && lim.block && !override) return res.status(409).json({ error: "group_limit", why: lim.block.why, until: lim.block.until });
@@ -161,23 +162,26 @@ module.exports = function createAdminManualRouter({
   }));
 
   // ── agents who started a Facebook login but are not marked connected ──
-  // (logged in, then closed the window instead of pressing done). One read
-  // per agent, only when the admin opens this list.
+  // (logged in, then closed the window instead of pressing done), and agents
+  // Facebook logged out (needs_reconnect: reconnect true) — an admin may log
+  // the profile back in from the manual browser. One read per agent, only
+  // when the admin opens this list.
   async function unconnected() {
     const out = [];
     for (const b of await x.db.listAllBusinesses().catch(() => [])) {
       if (!b || !b.phone) continue;
       const conn = (await x.db.getConnection(String(b.phone)).catch(() => null)) || {};
-      if (!conn.browser_consent_at || conn.facebook_browser_connected_at) continue;
+      const reconnect = !!conn.facebook_browser_connected_at && needsReconnect(conn);
+      if (!conn.browser_consent_at || (conn.facebook_browser_connected_at && !reconnect)) continue;
       if (["revoked", "quarantined"].includes(conn.facebook_profile_state)) continue;
-      out.push({ phone: String(b.phone), name: b.full_name || b.business_name || "", started_at: conn.browser_consent_at });
+      out.push({ phone: String(b.phone), name: b.full_name || b.business_name || "", started_at: conn.browser_consent_at, reconnect });
     }
     return out;
   }
   router.get("/unconnected", requireAdmin, wrap(async (req, res) => {
     res.set("Cache-Control", "no-store");
     const list = await unconnected();
-    res.json({ agents: list.map((a) => ({ ref: M.refOf(a.phone), phone_tail: A.tail(a.phone), name: a.name, started_at: a.started_at })) });
+    res.json({ agents: list.map((a) => ({ ref: M.refOf(a.phone), phone_tail: A.tail(a.phone), name: a.name, started_at: a.started_at, reconnect: a.reconnect })) });
   }));
   // Opens the agent's saved profile, checks the login, and marks the agent
   // connected only when it is logged in (login-verify.js). body.profile_name
@@ -191,7 +195,17 @@ module.exports = function createAdminManualRouter({
     if (!hit) return res.status(404).json({ error: "not_found" });
     const r = await (deps.verifySaved || require("../login-verify").verifySaved)(hit.phone, "facebook", Object.assign({ db: x.db, driver }, typed ? { name: typed } : {}));
     if (r.error) return res.status(r.error === "profile_busy" || r.error === "driver_busy" ? 409 : r.error === "invalid_profile_name" ? 400 : 502).json({ error: r.error });
-    res.json(r);
+    // Reconnected: the campaigns the logout paused (pause_reason "account") run again — resume re-checks the account.
+    let resumed = 0;
+    if (r.state === "connected" && hit.reconnect) {
+      for (const c of await x.store.listPostingCampaignsByPhone(hit.phone)) {
+        if (c.status !== "paused" || c.pause_reason !== "account") continue;
+        const out = await require("../posting-campaign").resume(c.id, deps).catch(() => null);
+        if (out && out.status === "running") resumed++;
+      }
+      console.log(`manual: agent ${A.tail(hit.phone)} reconnected by an admin; ${resumed} campaign(s) resumed`);
+    }
+    res.json(Object.assign({}, r, hit.reconnect ? { resumed } : {}));
   }));
 
   // Attaches a Driver profile to the agent by hand: the exact name, copied by
@@ -237,8 +251,8 @@ module.exports = function createAdminManualRouter({
     const conn = c ? (await x.db.getConnection(phone)) || {} : {};
     res.set("Cache-Control", "no-store");
     res.json({
-      property: M.propertyCard(page, deps.pageBaseUrl), versions: M.versions(page, deps.pageBaseUrl),
-      campaign: c ? { id: c.id, status: c.status } : null, groups: await M.tagLinks(c, M.groupsOf(c, conn, x.clock(), await A.configOf(deps, x)), x.clock()),
+      property: M.propertyCard(page, deps.pageBaseUrl), versions: M.versions(page, deps.pageBaseUrl, await A.templatesOf(x)),
+      campaign: c ? { id: c.id, status: c.status } : null, groups: await M.tagLinks(c, M.groupsOf(c, conn, x.clock(), await A.configOf(deps, x, conn)), x.clock()),
     });
   }));
 

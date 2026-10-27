@@ -220,8 +220,13 @@ async function reserveAttempt(input = {}) {
     if (((budget && budget.count) || 0) >= dailyCap) return { ok: false, reason: "daily_cap" };
     const aliasPosts = aliasBuckets.reduce((n, b) => n + ((b && b.posts) || 0), 0);
     if (aKey && ((bucket && bucket.posts) || 0) + aliasPosts >= groupCap) return { ok: false, reason: "group_cap" };
-    const live = (d) => d && !d.released && !(typeof d.expires_at === "string" && d.expires_at <= at);
-    if (!noCaps && (live(dedup) || aliasDedups.some(live))) return { ok: false, reason: "duplicate" };
+    // A timed dedup ends at its own expires_at, or sooner when the cooldown has since been shortened (an
+    // admin's caps). One with no expiry (the fail-closed default) never ends.
+    const shortEnd = (d) => dedupDays !== null && typeof d.expires_at === "string" && typeof d.at === "string" && dedupEnd(new Date(d.at), dedupDays).toISOString() <= at;
+    const live = (d) => d && !d.released && !(typeof d.expires_at === "string" && d.expires_at <= at) && !shortEnd(d);
+    // No caps (local) and no cooldown: the dedup lasts a minute and is not checked.
+    const dedupHolds = !noCaps || dedupDays === null || dedupDays >= 1;
+    if (dedupHolds && (live(dedup) || aliasDedups.some(live))) return { ok: false, reason: "duplicate" };
 
     const fpEntry = aKey && fp ? { ...fp, at } : null;
     const attempt = {
@@ -247,7 +252,7 @@ async function reserveAttempt(input = {}) {
       tx.set(ACT, aKey, { group_id: target_id, date, posts: ((bucket && bucket.posts) || 0) + 1, fingerprints: fps }, { merge: true });
     }
     // A full overwrite: an expired doc for this page→target is replaced, not merged.
-    tx.set(DED, dKey, { key: k, at, expires_at: dedupDays === null ? null : new Date(now.getTime() + dedupDays * 86400000).toISOString() });
+    tx.set(DED, dKey, { key: k, at, expires_at: dedupDays === null ? null : dedupEnd(now, dedupDays).toISOString() });
     return { ok: true, attempt };
   });
 }
@@ -422,6 +427,11 @@ function lastDates(today, n) {
     return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
   });
 }
+
+// When a dedup made at `from` ends: whole days are a date gap (Jerusalem
+// midnight, posting-safety.dateGapEnd); a fraction (a repeat rhythm, or the
+// local minute) is plain time.
+const dedupEnd = (from, days) => (Number.isInteger(days) ? safety.dateGapEnd(from, days) : new Date(from.getTime() + days * 86400000));
 
 // → { [group_id]: { posts_today, fingerprints } } — nextSlot's groupActivity input.
 // `aliases` ({ [group_id]: [other ids] }, Task 18) and the global
