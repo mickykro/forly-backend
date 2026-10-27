@@ -16,7 +16,7 @@
 const A = require("../posting-account");
 const safety = require("../posting-safety");
 const { sameArea } = require("../distribution/city-normalize");
-const { isRealEstateGroup } = require("../facebook-groups-sync");
+const { byRelevance } = require("../facebook-groups-sync");
 const { DriverError } = require("../driver-browser");
 const { SIGNAL_PENALISES } = require("../posting-signals");
 const S_ = require("./posting-shared");
@@ -46,8 +46,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const defaults = new Set(A.defaultGroupIds(conn, biz));
     const find = lookup || S_.catalogLookup(await S.catalog(null));
     const all = (m) => (find.all ? find.all(m) : [find(m)]);
-    // Real-estate groups only, and only with a real name — never "קבוצה פרטית".
-    return S_.memberList(conn).filter((m) => isRealEstateGroup(m, all(m)))
+    // Every group with a real name (never "קבוצה פרטית"), most relevant first.
+    return S_.memberList(conn).slice().sort(byRelevance(all))
       .map((m) => {
         const g = S_.publicMember(m, find(m), defaults);
         if (property) {
@@ -153,7 +153,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const phone = req.user.userId;
     const conn = (await db.getConnection(phone)) || {};
     const lookup = S_.catalogLookup(await S.catalog(null));
-    const members = S_.memberList(conn).filter((m) => m.membership_state === "member" && isRealEstateGroup(m, lookup.all(m)) && (m.name || (lookup(m) || {}).name));
+    const members = S_.memberList(conn).filter((m) => m.membership_state === "member" && (m.name || (lookup(m) || {}).name));
     const listings = typeof db.listListingsByPhone === "function" ? await db.listListingsByPhone(phone) : [];
     const camps = await store.listPostingCampaignsByPhone(phone);
     const biz = await db.getBusiness(phone).catch(() => null);

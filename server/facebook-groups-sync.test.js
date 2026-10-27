@@ -5,13 +5,8 @@
 process.env.FORLY_ENV = "local";
 process.env.PROFILE_KEY = "k";
 const assert = require("assert");
-const crypto = require("crypto");
 const G = require("./facebook-groups-sync");
 const { profileName } = require("./profile-name");
-
-function nameHash(name) {
-  return crypto.createHmac("sha256", "k").update(String(name)).digest("hex").slice(0, 16);
-}
 
 (async () => {
   // ── syncMembership: scrapes, canonicalises, dedups ──
@@ -166,34 +161,18 @@ function nameHash(name) {
     assert.equal(byId["999"].observed_at, NOW.toISOString());
     assert.equal(byId["999"].last_confirmed_at, NOW.toISOString());
     assert.equal(byId["slug:some-club"].id_verified, false);
-    // neither name matches the real-estate keywords nor a catalog entry -> hashed, no name
-    assert.equal(byId["999"].name, undefined);
-    assert.equal(byId["999"].name_hash, nameHash("משהו אחר לגמרי"));
-    assert.equal(byId["slug:some-club"].name_hash, nameHash("מועדון טיולים"));
+    // every group keeps its name, real estate or not, so the agent can pick it
+    assert.equal(byId["999"].name, "משהו אחר לגמרי");
+    assert.equal(byId["999"].name_hash, undefined);
+    assert.equal(byId["slug:some-club"].name, "מועדון טיולים");
   }
 
-  // ── privacy: a real-estate-looking name is kept in the clear ──
+  // ── an entry an older sync hashed gets its name back once observed again ──
   {
-    const scraped = [{ url: "https://www.facebook.com/groups/777", slug: "777", name: "דירות להשכרה בתל אביב" }];
-    const merged = G.mergeMembership([], scraped, { now: NOW, catalog: [], selected: [] });
-    assert.equal(merged[0].name, "דירות להשכרה בתל אביב");
+    const prev = [{ group_id: "777", canonical_url: "https://www.facebook.com/groups/777", slug: "777", name_hash: "h", membership_state: "member", observed_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(), id_verified: true }];
+    const merged = G.mergeMembership(prev, [{ url: "https://www.facebook.com/groups/777", slug: "777", name: "מועדון שחמט" }], { now: NOW });
+    assert.equal(merged[0].name, "מועדון שחמט");
     assert.equal(merged[0].name_hash, undefined);
-  }
-
-  // ── privacy: a catalog match (by canonical URL) is kept in the clear even
-  //    with a name that matches no keyword ──
-  {
-    const scraped = [{ url: "https://www.facebook.com/groups/555", slug: "555", name: "קבוצת השכנים שלי" }];
-    const catalog = [{ name: "x", url: "https://www.facebook.com/groups/555?ref=x" }];
-    const merged = G.mergeMembership([], scraped, { now: NOW, catalog, selected: [] });
-    assert.equal(merged[0].name, "קבוצת השכנים שלי");
-  }
-
-  // ── privacy: an explicitly selected group_id is kept in the clear ──
-  {
-    const scraped = [{ url: "https://www.facebook.com/groups/333", slug: "333", name: "לא רלוונטי" }];
-    const merged = G.mergeMembership([], scraped, { now: NOW, catalog: [], selected: ["333"] });
-    assert.equal(merged[0].name, "לא רלוונטי");
   }
 
   // ── missing from a scrape -> "stale", observed_at frozen ──
@@ -275,17 +254,14 @@ function nameHash(name) {
     assert.equal(out[0].membership_state, "member", "a re-join newer than the left determination wins");
   }
 
-  // ── mergeMembership: privacy is re-gated on every merge, not only when an
-  //    entry is first observed — a name kept because it was `selected` is
-  //    hashed away once it is no longer selected AND no longer observed ──
+  // ── a carried (stale) entry keeps its name ──
   {
     const prev = [{ group_id: "333", canonical_url: "https://www.facebook.com/groups/333", slug: "333", name: "לא רלוונטי", membership_state: "member", observed_at: NOW.toISOString(), last_confirmed_at: NOW.toISOString(), id_verified: true }];
     const later = new Date(NOW.getTime() + 86400000);
     const merged = G.mergeMembership(prev, [], { now: later, catalog: [], selected: [] });
     assert.equal(merged.length, 1);
     assert.equal(merged[0].membership_state, "stale");
-    assert.equal(merged[0].name, undefined, "no longer selected and not re-observed -> the plaintext name is re-gated away");
-    assert.equal(merged[0].name_hash, nameHash("לא רלוונטי"));
+    assert.equal(merged[0].name, "לא רלוונטי");
   }
 
   {

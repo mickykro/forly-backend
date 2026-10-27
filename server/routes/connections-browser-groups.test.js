@@ -79,13 +79,12 @@ function fullFacebookPage(groupLinks, o = {}) {
     assert.equal(fin.status, 200);
     assert.equal(conn.facebook_groups_member.length, 2);
     assert.ok(conn.facebook_groups_synced_at);
-    assert.deepEqual(catalogCalls, [500]);
+    assert.deepEqual(catalogCalls, [], "names no longer depend on the catalog");
 
     const byId = Object.fromEntries(conn.facebook_groups_member.map((e) => [e.group_id, e]));
     assert.equal(byId["111"].membership_state, "member");
     assert.equal(byId["111"].name, "דירות להשכרה בחיפה", "real-estate-looking name is kept");
-    assert.equal(byId["slug:two.words"].name, undefined, "a name that matches nothing is hashed, not kept");
-    assert.ok(byId["slug:two.words"].name_hash);
+    assert.equal(byId["slug:two.words"].name, "לא רלוונטי", "every group keeps its name");
 
     // Never a group name/URL in a log line: nothing in this happy path logs
     // at all, since the scrape did not throw.

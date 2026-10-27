@@ -35,7 +35,7 @@ const sha = (s) => crypto.createHash("sha256").update(String(s)).digest("hex").s
 function normalizeGroups(groups, ctx) {
   const out = [];
   const seen = new Set();
-  for (const g of (Array.isArray(groups) ? groups : []).slice(0, shareKit.MAX_GROUPS)) {
+  for (const g of (Array.isArray(groups) ? groups : []).slice(0, MAX_GROUPS)) {
     const url = shareKit.sanitizeGroups([g && g.url])[0];
     if (!url) continue;
     const m = A.memberOf(ctx.conn, { group_id: g.group_id, url });
@@ -177,7 +177,7 @@ async function addGroups(id, groups, deps = {}) {
     if (cur.status !== "running" && cur.status !== "paused") return null;
     const have = new Set((cur.groups || []).map((g) => g.group_id));
     const fresh = added.filter((g) => !have.has(g.group_id));
-    return fresh.length ? { groups: (cur.groups || []).concat(fresh).slice(0, shareKit.MAX_GROUPS), wait_reason: null } : null;
+    return fresh.length ? { groups: (cur.groups || []).concat(fresh).slice(0, MAX_GROUPS), wait_reason: null } : null;
   });
 }
 
@@ -255,6 +255,8 @@ async function stop(id, deps = {}, reason = "agent") {
 // control characters dropped, trimmed. → the text, or null when empty or
 // longer than MAX_COPY.
 const MAX_COPY = 3000;
+// How many groups one property (campaign) may post to. Posting frequency limits are unchanged.
+const MAX_GROUPS = 70;
 function cleanCopy(s) {
   if (typeof s !== "string") return null;
   const t = s.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, "").trim();
@@ -530,7 +532,7 @@ async function explainGroups(c, deps = {}, now) {
 
 module.exports = {
   explainGroups, addGroups, normalizeGroups, asksAgent,
-  create, enrollNewPage, pause, resume, stop, approvePost, cleanCopy, MAX_COPY, videoView, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
+  create, enrollNewPage, pause, resume, stop, approvePost, cleanCopy, MAX_COPY, MAX_GROUPS, videoView, skipPost, revokePermission, planAccount, schedulePost, buildCopy, videoOf,
   sha, // the copy_hash function — posting-driver.js (Task 18) checks the typed text against it
   // The sweeper half (posting-sweeper.js), re-exported lazily — no load cycle.
   tick: (...a) => require("./posting-sweeper").tick(...a),
