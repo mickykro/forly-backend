@@ -209,7 +209,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     return res.json({
       ...(({ videoOf, videoView }) => videoView(videoOf(page)))(require("../posting-campaign")), // the post's video; the copy is its description
       copy: campaigns.buildCopy(page, { page_id: pageId, posts: [] }, target, destination.kind, S.pageBaseUrl || deps.pageBaseUrl || "",
-        ((await db.getSetting("posting")) || {}).copy_templates),
+        await A.templatesOf({ db })),
       comment_link: D.previewUrl(destination, { pageBaseUrl: S.pageBaseUrl || deps.pageBaseUrl || "", pageId }),
       link_kind: destination.kind, link_notice: D.notice(destination.kind),
       author: conn.facebook_identity_label || null,

@@ -432,10 +432,8 @@ function buildCopy(page, c, target, destinationKind = "property", pageBaseUrl = 
   const targetKey = target.group_id || A.groupIdFromUrl(target.url) || target.url;
   const variantSeed = `${c.page_id}|${targetKey}`;
   const pageUrl = pageBaseUrl ? destinations.previewUrl({ kind: "property" }, { pageBaseUrl, pageId: c.page_id }) : "";
-  const pasted = templates && templates[page.language || "he"];
-  if (typeof pasted === "string" && pasted.trim()) return shareKit.fillTemplate(pasted, page, pageUrl);
-  return shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, pageUrl || "", {
-    variantSeed, variantRound: copyVariantRound(c, target), linkInComment: !pageUrl, destinationKind,
+  return shareKit.buildPostCopy(page, pageUrl || "", {
+    variantSeed, variantRound: copyVariantRound(c, target), linkInComment: !pageUrl, destinationKind, templates,
   });
 }
 
@@ -473,7 +471,7 @@ async function schedulePost(decision, deps = {}, now) {
   const variantRound = copyVariantRound(c, target);
   const pagePostUrl = decision.target === "page" ? null : await destinations.pagePostUrl(x.db, c.page_id);
   const destination = destinations.choose({ page, campaign: c, target: { ...target, target: decision.target }, pagePostUrl, variantRound });
-  const copy = buildCopy(page, c, target, destination.kind, deps.pageBaseUrl || "", ((await x.db.getSetting("posting")) || {}).copy_templates);
+  const copy = buildCopy(page, c, target, destination.kind, deps.pageBaseUrl || "", await A.templatesOf(x));
   const video = videoOf(page);
   const base = {
     id: crypto.randomUUID(), target: decision.target === "page" ? "page" : "group",

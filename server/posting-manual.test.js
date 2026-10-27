@@ -229,5 +229,15 @@ const C = require("./posting-campaign");
     assert.equal(done.status, "completed", "no group left: completed even though it repeats");
   }
 
+  // ── the manual tab's versions: the admin's pasted post first, then the built-ins ──
+  {
+    const page = { page_id: "pgV", language: "en", property: { title: "Flat", city: "Haifa", rooms: 3 }, agent: { name: "Dana" } };
+    const plain = M.versions(page, "http://127.0.0.1:8787");
+    const withT = M.versions(page, "http://127.0.0.1:8787", { en: "Hi {city}" });
+    assert.equal(withT[0], "Hi Haifa");
+    assert.deepEqual(withT.slice(1), plain, "the built-ins follow, unchanged");
+    assert.deepEqual(M.versions(page, "http://127.0.0.1:8787", { fr: "Salut" }), plain, "a template in another language changes nothing");
+  }
+
   console.log("posting-manual.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

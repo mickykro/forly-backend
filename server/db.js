@@ -255,6 +255,14 @@ async function incrPageCounter(pageId, field, by) {
   else { const p = mem.pages.get(pageId); if (p) p[field] = (p[field] || 0) + by; }
 }
 
+// A page's per-language translations (routes/pages.js inLanguage, i18n.<lang>)
+// are built from its text: an edit drops them, the next visit rebuilds.
+async function clearPageTranslations(pageId) {
+  if (db) { await db.collection("property_pages").doc(pageId).update({ i18n: FieldValue.delete() }); return; }
+  const p = mem.pages.get(pageId);
+  if (p) delete p.i18n;
+}
+
 // Partial page update from a { "dot.path": value } patch — avoids clobbering
 // concurrently-incremented counters the way a full set() would.
 async function updatePage(pageId, patch) {
@@ -769,7 +777,7 @@ module.exports = {
   shortCode,
   saveListing, getListing, setListingPageId, updateListing, listListingsByPhone, listPendingListings, listAllListings,
   listPagelessListings, claimField,
-  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, uniquePageId, listAllPages, listPagesByPhone, findPageBySlug,
+  savePage, getPage, findActivePageByListing, listPublicPages, listPagesForExpiry, incrPageCounter, updatePage, clearPageTranslations, uniquePageId, listAllPages, listPagesByPhone, findPageBySlug,
   getBusiness, setBusiness, listAllBusinesses,
   getLead, saveLead, addLeadSubmission, logPortalEvent,
   getPortfolioSlugReservation, reservePortfolioSlug,

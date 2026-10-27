@@ -497,6 +497,7 @@ module.exports = function createPagesRouter(ctx) {
       patch["edit_count"] = (d.edit_count || 0) + 1;
       patch["updated_at"] = new Date();
       await db.updatePage(pageId, patch);
+      if (d.i18n) await db.clearPageTranslations(pageId); // the words changed: other languages follow on their next visit
       const fresh = await db.getPage(pageId).catch(() => null);
       if (fresh) portalStream.broadcast("listing_updated", portalStream.toCard(fresh, pageBaseUrl));
       res.json({ ok: true, edit_count: patch["edit_count"] });
@@ -634,6 +635,8 @@ module.exports = function createPagesRouter(ctx) {
         patch["sections.area"] = !!body.sections.area;
       }
       await db.updatePage(pageId, patch);
+      // The words changed (not a toggle, theme or agent edit): other languages are rebuilt on their next visit.
+      if (d.i18n && (body.hero_phrase != null || body.property || body.gallery)) await db.clearPageTranslations(pageId);
       // The listing keeps it too: a rebuild of the page reads agent2 from there.
       if (agent2Patch !== undefined && d.listing_id) {
         await db.updateListing(d.listing_id, { agent2: agent2Patch }).catch((e) => console.warn("listing agent2 sync failed:", e.message));

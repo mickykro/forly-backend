@@ -222,6 +222,10 @@ assert.ok(!qm0.includes("undefined"));
   const rent = { property: { ...page.property, listing_type: "rent", floor: 0, neighborhood: "" }, agent: {} };
   assert.equal(fillTemplate(tpl, rent, ""), "For rent in תל אביב\n₪4,200,000", "rent text; no floor, no agent, no link → those lines go");
   assert.equal(fillTemplate("שלום {title}", page, url), "שלום 4 חד׳ בבבלי");
+  // Every builder of a post's text takes the templates: the page's language picks one, or none.
+  const templates = { en: "Hi {city} {link}" };
+  assert.equal(buildPostCopy({ ...page, language: "en" }, url, { templates }), `Hi תל אביב ${url}`);
+  assert.equal(buildPostCopy(page, url, { templates }), buildPostCopy(page, url), "a Hebrew page with no Hebrew template: the built-in copy");
 }
 
 console.log("share-kit.test.js OK");
