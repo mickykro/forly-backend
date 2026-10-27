@@ -36,6 +36,10 @@ Open **Outreach** in `/admin.html`. All mutations require an allowlisted admin a
 5. A prospect requests an OTP from the preview claim screen. Successful verification only requests ownership review. An admin must verify the relationship to the listing, then reconcile an external payment reference and note, then perform the idempotent upgrade.
 6. The stable preview link redirects to a normal paid page. Clean media is served only after the final audited `upgraded` state and while that paid page is active. Public/portfolio visibility and distribution remain opt-in; payment grants no Facebook authority.
 
+## Browser session cost control
+
+The login viewer has an explicit **Stop browser** control. It calls the authenticated close endpoint, stops the owner’s recorded Driver session, and keeps the saved Facebook profile/login. The UI reports success only after Driver confirms shutdown; an unconfirmed stop keeps the record, budget and retry control. Stopping does not disconnect the account or delete its saved profile.
+
 ## Durable lifecycle and retention
 
 Configure an external scheduler to POST `{}` to `/api/internal/outreach/tick`, signed using purpose `worker` (see render contract), at least once a minute. Alternatively, an always-on Node container can set `OUTREACH_WORKER=1` to poll durable, leased Firestore jobs every 30 seconds. State survives process restarts. A failed/unknown webhook is reconciled by a human; it must not be blindly retried.

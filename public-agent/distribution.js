@@ -291,6 +291,7 @@
   let restarted = false;
   async function onViewerEnd(platform, code, gotFrame) {
     if (!bOpen || currentPlatform !== platform || code === "connected" || code === "replaced") return;
+    if (code === "closed" || code === "stopped") { bMsg.textContent = "הדפדפן נעצר. החיבור השמור לחשבון נשמר."; return; }
     const expired = ["session_ended", "session_expired", "no_open_session"].includes(code);
     const network = ["proxy_unavailable", "browser_network_unavailable"].includes(code);
     if (((expired && !gotFrame) || network) && !restarted) {

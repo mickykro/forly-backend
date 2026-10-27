@@ -438,6 +438,32 @@ module.exports = function createConnectionsBrowserRouter(ctx) {
     }
   }));
 
+  // Stop the running login browser to release its paid session while retaining
+  // the persisted profile, account connection and all saved Pages/groups.
+  router.post("/:platform/close", requireAuth(authSecret), wrap("close", async (req, res) => {
+    const platform = String(req.params.platform);
+    if (!PLATFORMS[platform]) return res.status(400).json({ error: "invalid_input" });
+    const phone = req.user.userId;
+    const release = locks.tryAcquire(phone, platform);
+    if (!release) return res.status(409).json({ error: "profile_busy", retry: true });
+    try {
+      // Read only after acquiring ownership: /start or /finish may have
+      // replaced the recorded session while this request was arriving.
+      const conn = (await db.getConnection(phone)) || {};
+      const open = conn[`browser_session_${platform}`];
+      if (!open?.session_id) return res.json({ state: "stopped", stopped: true });
+      let stopped = false;
+      try { stopped = (await driver.stopSession(open.session_id)) === true; }
+      catch { /* Keep the recorded session and budget until shutdown is confirmed. */ }
+      if (!stopped) return res.status(503).json({ error: "driver_busy", retry: true });
+      await db.setConnection(phone, { [`browser_session_${platform}`]: null });
+      locks.endLogin(open.session_id);
+      try { await viewer.close(hubKey(phone, platform), "stopped"); }
+      catch { /* Confirmed remote shutdown remains successful if the viewer is unavailable. */ }
+      return res.json({ state: "stopped", stopped: true });
+    } finally { release(); }
+  }));
+
   // The way out. Stops what is running, forgets the login, deletes the profile
   // at Driver. Required by the privacy law the plan's intro names, and by
   // common decency: the agent must be able to take back what they handed over.

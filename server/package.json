@@ -101,7 +101,7 @@
     "g-login": "gcloud auth application-default login",
     "dev:tunnel": "bash ../scripts/dev-tunnel.sh",
     "report:stale-media": "node ../scripts/report-stale-media.local.js",
-    "test:outreach": "node --test outreach/*.test.js outreach-routes.test.js outreach-eligibility.test.js callback-auth.test.js overlay-outreach.test.js routes/pages-outreach.test.js"
+    "test:outreach": "node --test outreach/*.test.js outreach-routes.test.js outreach-eligibility.test.js callback-auth.test.js overlay-outreach.test.js routes/pages-outreach.test.js routes/connections-browser-close.test.js ../public-agent/connect-viewer-close.test.js"
   },
   "engines": {
     "node": ">=20"
