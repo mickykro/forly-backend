@@ -319,6 +319,19 @@ const CONSENT = { method: "phone", note: "הסוכן אישר בטלפון" };
       assert.equal(c8.include_unknown, true, "the copy keeps the acceptance");
       await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member });
     }
+    // ── remove a group from the agent's list: step-up, audited, hidden from later syncs ──
+    {
+      const conn0 = await K.db.getConnection(AGENT);
+      await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member.concat([K.member("888", { name: "מתכונים" })]) });
+      assert.equal((await call(server, "POST", `/agents/${REF}/groups/888/remove`, {}, false)).status, 401, "step-up required");
+      const rm = await call(server, "POST", `/agents/${REF}/groups/888/remove`, {});
+      assert.equal(rm.status, 200, JSON.stringify(rm.body));
+      assert.ok(!rm.body.groups.some((g) => g.group_id === "888"), "gone from the list");
+      assert.ok(((await K.db.getConnection(AGENT)).facebook_groups_hidden || []).some((h) => h.ids.includes("888")), "no sync brings it back");
+      assert.ok((await audits()).some((e) => e.action === "remove_group"));
+      assert.equal((await call(server, "POST", `/agents/${REF}/groups/888/remove`, {})).status, 404, "already removed");
+      await K.db.setConnection(AGENT, { facebook_groups_member: conn0.facebook_groups_member, facebook_groups_hidden: [] });
+    }
     console.log("routes/admin-campaigns.test.js ok");
   } finally { server.close(); }
 })().catch((e) => { console.error(e); process.exit(1); });

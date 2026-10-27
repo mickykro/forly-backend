@@ -166,9 +166,8 @@ function findChromium() {
     editAnswer = { status: 200, body: { campaign: ROW } };
     await page.click("[data-camp='c1'] [data-act='edit']");
     await page.waitForSelector("#campFormGroups input[value='222']", { state: "attached" });
-    assert.equal(await page.locator("#campFormGroups input[value='333']").count(), 0, "a group that doesn't read as real estate is not offered");
+    assert.equal(await page.locator("#campFormGroups input[value='333']").count(), 1, "every group is offered, real estate or not");
     assert.match(await page.textContent("#campFormGroups label:has(input[value='555'])"), /לא בקטלוג/, "a real-estate group outside the catalog is offered, tagged");
-    assert.match(await page.textContent("#campFormGroupsHidden"), /עוד 1 קבוצות/);
     // refresh from Facebook: a refusal says why; a success re-lists the groups and keeps what is ticked
     assert.match(await page.textContent("#campFormSynced"), /עוד לא נקראו/);
     await page.click("#campFormRefresh");
