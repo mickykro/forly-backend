@@ -36,7 +36,7 @@ function validCreate(b) {
   if (b.repeat_days !== undefined && b.repeat_days !== null && !(Number.isInteger(b.repeat_days) && b.repeat_days >= 3 && b.repeat_days <= 30)) return null; // never the same property to a group within 3 days
   for (const k of ["repeat", "include_unknown", "account_aged", "posted_manually"]) if (b[k] !== undefined && typeof b[k] !== "boolean") return null;
   // The text approved per group (manual posting): { group_id: text }.
-  if (b.copies !== undefined && b.copies !== null && (typeof b.copies !== "object" || Array.isArray(b.copies) || Object.keys(b.copies).length > 60
+  if (b.copies !== undefined && b.copies !== null && (typeof b.copies !== "object" || Array.isArray(b.copies) || Object.keys(b.copies).length > require("../posting-campaign").MAX_GROUPS + 1
     || Object.values(b.copies).some((t) => typeof t !== "string" || t.length > require("../posting-campaign").MAX_COPY))) return null;
   return { ids: g.ids, targets: t.targets };
 }

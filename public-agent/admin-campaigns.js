@@ -127,14 +127,12 @@
     var fromDefaults = !checked && defaults.length > 0;
     if (fromDefaults) checked = defaults;
     $("#campFormSynced").textContent = d.synced_at ? "הקבוצות נקראו מפייסבוק ב-" + new Date(d.synced_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "הקבוצות עוד לא נקראו מפייסבוק.";
-    // The agent's own rule: real-estate groups only (in the catalog, or a
-    // real-estate name) — plus any the campaign being edited already has.
-    var shown = groups.filter(function (g) { return g.in_catalog || g.real_estate || defaults.indexOf(g.group_id) >= 0 || (checked && checked.indexOf(g.group_id) >= 0); });
-    var hidden = groups.length - shown.length;
+    // All the agent's groups: defaults first, then the server's order (most relevant first).
+    var shown = groups.slice();
     groupInfo = {}; shown.forEach(function (g) { groupInfo[g.group_id] = g; });
-    $("#campFormGroupsHidden").textContent = hidden ? "עוד " + hidden + " קבוצות של הסוכן לא מוצגות — לפי השם הן לא קבוצות נדל״ן." : "";
+    $("#campFormGroupsHidden").textContent = "";
     var isDef = function (g) { return defaults.indexOf(g.group_id) >= 0 ? 1 : 0; };
-    shown.sort(function (a, b) { return isDef(b) - isDef(a) || (b.in_catalog ? 1 : 0) - (a.in_catalog ? 1 : 0) || (b.name ? 1 : 0) - (a.name ? 1 : 0) || String(a.name).localeCompare(String(b.name), "he"); });
+    shown.sort(function (a, b) { return isDef(b) - isDef(a); });
     if (!shown.length) { emptyGroups("הסוכן לא חבר באף קבוצה מהקטלוג — אפשר לפרסם רק בדף העסקי."); return; }
     $("#campFormGroups").innerHTML = shown.map(function (g) {
       var on = checked && checked.indexOf(g.group_id) >= 0;

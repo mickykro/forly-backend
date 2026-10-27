@@ -189,18 +189,18 @@ module.exports = function createAdminCampaignsRouter({
     const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
     res.json(await groupsView(conn, phone));
   }));
-  // The catalog fills the names the sync hashed (facebook-groups-sync keeps a
-  // name only for catalog / real-estate / selected groups). real_estate is the
-  // agent's own rule (isRealEstateGroup: in the catalog, or a real-estate name):
-  // the form offers those, sending include_unknown for one outside the catalog.
+  // The catalog fills a name an older sync hashed. All the agent's groups,
+  // most relevant first (groupRelevance); real_estate marks the relevant ones.
+  // The form sends include_unknown for one outside the catalog.
   async function groupsView(conn, phone) {
     const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
     const lookup = S_.catalogLookup(await catalogFn("sale"));
     const biz = await db.getBusiness(phone).catch(() => null);
-    return { synced_at: conn.facebook_groups_synced_at || null, default_group_ids: A.defaultGroupIds(conn, biz).map(String), groups: members.map((m) => {
+    const G = require("../facebook-groups-sync");
+    return { synced_at: conn.facebook_groups_synced_at || null, default_group_ids: A.defaultGroupIds(conn, biz).map(String), groups: members.sort(G.byRelevance(lookup.all)).map((m) => {
       const cat = lookup(m);
       return { group_id: String(m.group_id), name: m.name || (cat && cat.name) || "", url: S_.memberUrl(m), in_catalog: !!cat,
-        real_estate: require("../facebook-groups-sync").isRealEstateGroup(m, lookup.all(m)) };
+        real_estate: G.isRealEstateGroup(m, lookup.all(m)) };
     }) };
   }
   // Which of the agent's groups a property can't take, and why — the same

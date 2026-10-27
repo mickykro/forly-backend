@@ -151,7 +151,7 @@ async function readLogin(page, platform, spec, conn, db) {
       if (anomaly) console.error(`connections-browser: facebook group sync not trusted: ${anomaly}`);
       else {
         const merged = groupsSync.mergeMembership(conn.facebook_groups_member || [], scraped, {
-          now: new Date(), catalog: await db.listGroupCatalog(500), selected: [], hidden: groupsSync.hiddenIds(conn),
+          now: new Date(), hidden: groupsSync.hiddenIds(conn),
         });
         groups = { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() };
       }

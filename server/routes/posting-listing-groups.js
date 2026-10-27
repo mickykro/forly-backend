@@ -9,7 +9,7 @@
 const A = require("../posting-account");
 const LG = require("../posting-listing-groups");
 const S_ = require("./posting-shared");
-const { isRealEstateGroup } = require("../facebook-groups-sync");
+const { byRelevance } = require("../facebook-groups-sync");
 
 const SCOPES = ["session", "groups"];
 const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
@@ -54,7 +54,7 @@ module.exports = function mountListingGroups(router, S, ctx) {
     const find = S_.catalogLookup(await S.catalog(property.listing_type));
     const all = (m) => (find.all ? find.all(m) : [find(m)]);
     const defaults = new Set(LG.defaultIds(conn, await db.getBusiness(req.user.userId).catch(() => null)));
-    const groups = S_.memberList(conn).filter((m) => m.membership_state === "member" && isRealEstateGroup(m, all(m)))
+    const groups = S_.memberList(conn).filter((m) => m.membership_state === "member").sort(byRelevance(all))
       .map((m) => Object.assign(S_.publicMember(m, find(m), defaults), { fits: A.fitsProperty(m, all(m), property) }))
       .filter((g) => !g.private);
     res.json({
@@ -81,7 +81,7 @@ module.exports = function mountListingGroups(router, S, ctx) {
     const listing = await mine(req, res);
     if (!listing) return;
     const copies = req.body && req.body.copies;
-    if (!copies || typeof copies !== "object" || Array.isArray(copies) || Object.keys(copies).length > 60
+    if (!copies || typeof copies !== "object" || Array.isArray(copies) || Object.keys(copies).length > require("../posting-campaign").MAX_GROUPS + 1
       || Object.values(copies).some((t) => typeof t !== "string" || t.length > require("../posting-campaign").MAX_COPY)) return res.status(400).json({ error: "invalid_input" });
     const c = await LG.approveTexts(listing, copies, deps);
     if (!c) return res.status(409).json({ error: "page_not_ready" });

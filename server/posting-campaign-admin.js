@@ -18,7 +18,6 @@
  */
 const A = require("./posting-account");
 const C = require("./posting-campaign");
-const shareKit = require("./distribution/share-kit");
 const localMode = require("./posting-local");
 
 const { iso, fail, ctxOf, nowOf, MS_DAY } = A;
@@ -58,7 +57,7 @@ async function update(id, edit = {}, deps = {}, { version, by = "admin" } = {}) 
     if ((cur.posts || []).some((p) => p.status === "posting" && remove.has(String(p.group_id)))) { refused = "busy"; return null; }
     let groups = (cur.groups || []).filter((g) => !remove.has(String(g.group_id)));
     const have = new Set(groups.map((g) => g.group_id));
-    groups = groups.concat(added.filter((g) => !have.has(g.group_id))).slice(0, shareKit.MAX_GROUPS);
+    groups = groups.concat(added.filter((g) => !have.has(g.group_id))).slice(0, C.MAX_GROUPS);
     if (edit.copies) groups = groups.map((g) => (typeof edit.copies[g.group_id] === "string" ? withCopy(g, edit.copies[g.group_id]) : g));
     const patch = { groups, wait_reason: null, last_changed_by: { by, at: iso(now) } };
     if (edit.include_unknown === true) patch.include_unknown = true;

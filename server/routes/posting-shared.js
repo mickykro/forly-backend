@@ -21,7 +21,7 @@ const ACTIONS = new Set(["approve", "skip", "stop"]);
 const ACT_TTL_S = 72 * 3600; // a one-tap link works for 72 hours
 const TARGETS = ["page", "groups"];
 const DEFAULT_TARGETS = ["groups"]; // the Page is opt-in, by the agent's explicit choice
-const MAX_GROUP_IDS = 40; // share-kit MAX_GROUPS: posting frequency limits are unchanged
+const MAX_GROUP_IDS = require("../posting-campaign").MAX_GROUPS; // per property
 // A Task 14 group id: numeric, or "slug:<vanity>" until the driver resolves it.
 const GROUP_ID_RE = /^(?:\d{1,30}|slug:[^\s/|?#:]{1,120})$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
