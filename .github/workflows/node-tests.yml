@@ -1,0 +1,31 @@
+name: Outreach Firestore tests
+on:
+  pull_request:
+    paths:
+      [
+        "server/**",
+        "public-agent/**",
+        "public-nadlan/**",
+        "scripts/**",
+        ".github/workflows/node-tests.yml",
+      ]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  firestore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci --prefix server --ignore-scripts
+      - name: Firestore transaction integration in an isolated demo project
+        run: npx --yes firebase-tools@14.19.1 emulators:exec --only firestore --project demo-forly-outreach 'node --test server/outreach/firestore-emulator.test.js server/outreach/store.emulator.test.js'

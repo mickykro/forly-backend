@@ -26,7 +26,7 @@ window.ForlyViewer = (() => {
   // session_expired | driver_busy | viewer_unavailable | connected | closed | …
   function mount(box, platform, opts = {}) {
     unmount();
-    cur = create(box, `/api/connections/browser/${platform}/view`, opts);
+    cur = create(box, `/api/connections/browser/${platform}/view`, Object.assign({}, opts, { closeUrl: `/api/connections/browser/${platform}/close` }));
     return cur;
   }
 
@@ -39,16 +39,19 @@ window.ForlyViewer = (() => {
         <button type="button" class="btn btn-ghost cv-btn" data-a="back">חזרה</button>
         <button type="button" class="btn btn-ghost cv-btn" data-a="reload">רענון</button>
         <span class="cv-url" dir="ltr"></span>
+        ${opts.closeUrl ? '<button type="button" class="btn btn-ghost cv-btn" data-a="close">עצירת הדפדפן</button>' : ""}
         <button type="button" class="btn btn-ghost cv-btn" data-a="kbd">⌨ מקלדת</button>
       </div>
       <div class="cv-screen"><img class="cv-img" alt="" draggable="false" hidden><div class="cv-wait">פותחים את הדפדפן…</div></div>
+      <p class="cv-close-error" role="alert" hidden></p>
       <textarea class="cv-keys" aria-label="הקלדה לדפדפן" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
     </div>`;
     const me = { box, alive: true, ac: new AbortController(), size: null, gotFrame: false, queue: Promise.resolve(), ended: false };
     const img = box.querySelector(".cv-img"), wait = box.querySelector(".cv-wait"), url = box.querySelector(".cv-url"), ta = box.querySelector(".cv-keys");
 
-    const end = (code, detail) => {
+    const end = (code, detail, confirmedClose = false) => {
       if (me.ended || !me.alive) return;
+      if (me.stopRequested && !confirmedClose) return;
       me.ended = true;
       wait.hidden = false; wait.textContent = "הדפדפן נסגר";
       if (opts.onEnd) opts.onEnd(code, me.gotFrame, detail);
@@ -99,7 +102,7 @@ window.ForlyViewer = (() => {
             }
           } catch (e) { /* dropped: reconnect below */ }
         }
-        if (!me.alive || me.ended) return;
+        if (!me.alive || me.ended || me.stopRequested) return;
         // A dropped connection (proxy timeout, network blip) reconnects;
         // the server keeps the browser for a while with nobody watching.
         if (++tries > 5) { end("viewer_unavailable"); return; }
@@ -199,9 +202,29 @@ window.ForlyViewer = (() => {
     ta.addEventListener("compositionend", () => { composing = false; flush(); });
     ta.addEventListener("input", () => { if (!composing) flush(); });
 
+    me.close = async () => {
+      if (!opts.closeUrl || me.closing || !me.alive) return;
+      me.stopRequested = true;
+      me.closing = true;
+      const button = box.querySelector('[data-a="close"]'), problem = box.querySelector('.cv-close-error');
+      if (button) button.disabled = true;
+      problem.hidden = true;
+      try {
+        const response = await fetch(opts.closeUrl, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.stopped !== true) throw new Error('close_not_confirmed');
+        try { end('closed', undefined, true); } finally { stop(me); }
+      } catch (error) {
+        if (me.alive) { problem.hidden = false; problem.textContent = 'לא התקבל אישור לעצירת הדפדפן. נסו שוב — ייתכן שהסשן עדיין פעיל.'; }
+      } finally {
+        me.closing = false;
+        if (button) button.disabled = false;
+      }
+    };
     box.querySelector(".cv-bar").addEventListener("click", (e) => {
       const a = e.target && e.target.getAttribute && e.target.getAttribute("data-a");
-      if (a === "kbd") ta.focus();
+      if (a === "close") me.close();
+      else if (a === "kbd") ta.focus();
       else if (a === "back" || a === "reload") send({ t: a });
     });
     me.send = send;

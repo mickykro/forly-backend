@@ -868,7 +868,8 @@ async function ensurePlayableVideo(url, store) {
   }
 }
 
-async function overlayVideo({ videoUrl, videoUrls, lines, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl }) {
+async function overlayVideo({ videoUrl, videoUrls, lines, musicUrl, musicPrompt, logoUrl, uploadDir, baseUrl, brandMode = "promo_titled" }) {
+  if (!["promo_titled", "outreach_demo"].includes(brandMode)) throw new Error("invalid brandMode");
   const urls = (Array.isArray(videoUrls) && videoUrls.length ? videoUrls : [videoUrl])
     .filter((u) => typeof u === "string" && /^https?:\/\//.test(u));
   if (!urls.length) throw new Error("no video url given");
@@ -909,7 +910,7 @@ async function overlayVideo({ videoUrl, videoUrls, lines, musicUrl, musicPrompt,
     // The agent's logo is best-effort, like music: a bad URL ships the video without it.
     let logoFile = null;
     let logoDebug = "no_logo";
-    if (logoUrl) {
+    if (logoUrl && brandMode !== "outreach_demo") {
       try {
         const ext = (/\.(png|jpe?g|webp)(\?|$)/i.exec(logoUrl) || [, "png"])[1].toLowerCase();
         logoFile = path.join(tmp, `logo.${ext}`);
@@ -923,6 +924,19 @@ async function overlayVideo({ videoUrl, videoUrls, lines, musicUrl, musicPrompt,
     }
     const args = buildFfmpegArgs({ inFiles, assFile, outFile, info, durations, roomSegments, gradFile, musicFile, cleanFile, logoFile });
     await run(FFMPEG, args, 240000);
+    if (brandMode === "outreach_demo") {
+      // Never put either rendition in the public upload tree. The manifest owns publication.
+      const retained = fs.mkdtempSync(path.join(os.tmpdir(), "forly-private-render-"));
+      const cleanPath = path.join(retained, "clean_paid.mp4");
+      const demoPath = path.join(retained, "watermarked_demo.mp4");
+      try {
+        // Reuse the upstream split clean output: no end titles or agent logo.
+        fs.copyFileSync(cleanFile, cleanPath);
+        await run(FFMPEG, watermarkArgs(cleanPath, demoPath, info), 240000);
+        const rendition = (name, file) => ({rendition:name, path:file, sha256:crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"), watermark_version:name === "watermarked_demo" ? "forly-central-v1" : null});
+        return {brand_mode:brandMode, watermark_version:"forly-central-v1", duration:info.duration, renditions:[rendition("clean_paid",cleanPath),rendition("watermarked_demo",demoPath)]};
+      } catch (err) {fs.rmSync(retained,{recursive:true,force:true});throw err;}
+    }
     const id = crypto.randomUUID();
     const rel = `overlays/${id}.mp4`;
     const relClean = `overlays/${id}.clean.mp4`;
@@ -947,10 +961,16 @@ async function overlayVideo({ videoUrl, videoUrls, lines, musicUrl, musicPrompt,
   }
 }
 
+// Persistent, large central composited wordmark. ASS is already required by this module.
+function watermarkArgs(input, output, info) {
+  const size = Math.max(24, Math.round(info.width * 0.15));
+  return ["-y", "-i", input, "-vf", `drawtext=text='Forly':fontsize=${size}:fontcolor=white@0.72:borderw=2:bordercolor=black@0.4:x=(w-tw)/2:y=(h-th)/2`, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", output];
+}
+
 module.exports = {
   overlayVideo, promoVideoUrl, needsConversion, conversionArgs, ensurePlayableVideo, MAX_LINES, MAX_LINE_CHARS, MAX_ROOMS, MAX_CLIPS, XFADE_SECONDS,
   _test: {
-    buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
+    watermarkArgs, buildAss, buildFfmpegArgs, labelsToSegments, roomLabel, sanitizeAss, assTime,
     modeOf, gradientPng, bandHeight, stitchTimeline, parseFps, pickAudioUrl, afterJoin,
     endStyleFor, endFrameLuma, swooshPath, wrapText, textWidth,
   },

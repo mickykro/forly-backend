@@ -199,6 +199,7 @@ async function audit(deps, dist, target, action, extra = {}) {
 // Page-ready hook body: entitled + nothing posted/in-flight ⇒ offer via
 // WhatsApp confirm link. Fire-and-forget from routes/pages.js.
 async function maybeOffer(deps, page) {
+  if (require("../outreach-eligibility").isPrivateOutreach(page)) return { offered: false, reason: "private_preview" };
   const biz = await deps.getBusinessCached(page.business_phone);
   const ent = deps.config.resolve(biz, deps.env);
   if (!ent.enabled) return { offered: false, reason: ent.reason };
@@ -254,6 +255,7 @@ async function mediaUnreachable(deps, url) {
 // page is edited while the job waits (spec §5).
 async function snapshotFor(deps, pageId, phone) {
   const page = await deps.db.getPage(pageId);
+  if (require("../outreach-eligibility").isPrivateOutreach(page)) throw new Error("private preview cannot be distributed");
   if (!page) throw new Error(`snapshot: page ${pageId} not found`);
   const biz = await deps.db.getBusiness(phone);
   const pageUrl = `${deps.pageBaseUrl}/p/${pageId}`;
@@ -281,6 +283,7 @@ async function enqueueFromConfirm(deps, dist, trigger) {
 
 // Dashboard publish: already explicit, so it skips awaiting_confirm entirely.
 async function createQueued(deps, { page, business, trigger, force }) {
+  if (require("../outreach-eligibility").isPrivateOutreach(page)) throw new Error("private preview cannot be distributed");
   const id = crypto.randomUUID();
   const now = deps.now();
   const dist = {
@@ -371,6 +374,7 @@ async function resolveGroups(deps, page, business, explicit) {
 }
 
 async function createShareSession(deps, { page, business, copy, postUrl, groups: explicit }) {
+  if (require("../outreach-eligibility").isPrivateOutreach(page)) throw new Error("private preview cannot be shared");
   const id = crypto.randomUUID();
   const now = deps.now();
   const pageUrl = `${deps.pageBaseUrl}/p/${page.page_id}`;
@@ -411,6 +415,8 @@ async function executeJob(deps, dist) {
     throw new Error(`malformed distribution doc ${dist.id}`);
   }
   const { db } = deps;
+  const currentPage = await db.getPage(dist.page_id);
+  if (require("../outreach-eligibility").isPrivateOutreach(currentPage)) throw new Error("private preview cannot be distributed");
   const title = dist.snapshot.title || "";
 
   // Layer 1: page-wide duplicate check, any sibling, any status.

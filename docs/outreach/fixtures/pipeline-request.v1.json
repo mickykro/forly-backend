@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "origin": "cold_outreach",
+  "brandMode": "outreach_demo",
+  "demo_id": "demo_test_123",
+  "correlation_id": "video:demo_test_123",
+  "image_requests": [
+    {
+      "url": "https://forly.example/api/outreach/render-asset",
+      "body": {
+        "demo_id": "demo_test_123",
+        "asset_id": "asset_website_123"
+      },
+      "headers": {
+        "x-forly-timestamp": "1700000000000",
+        "x-forly-request-id": "fixture-source-request-123",
+        "x-forly-signature": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ],
+  "property_details": {
+    "location": "Test city",
+    "property_type": "apartment",
+    "rooms": 3
+  },
+  "callback_url": "https://forly.example/api/video-overlay"
+}

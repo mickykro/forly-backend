@@ -85,28 +85,6 @@
           "type": 301
         }
       ],
-      "rewrites": [
-        {
-          "source": "/api/property-page",
-          "function": { "functionId": "getPropertyPage", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/property-lead",
-          "function": { "functionId": "submitPropertyLead", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/property-event",
-          "function": { "functionId": "trackPropertyEvent", "region": "europe-west1" }
-        },
-        {
-          "source": "/api/extend",
-          "function": { "functionId": "extendPropertyPage", "region": "europe-west1" }
-        },
-        {
-          "source": "/p/**",
-          "destination": "/p/index.html"
-        }
-      ],
       "headers": [
         {
           "source": "**/*.html",

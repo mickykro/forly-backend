@@ -193,7 +193,7 @@ async function listPublicPages(limit = 200) {
       .filter((p) => p.status === "active" || p.status === "expiring")
       .slice(0, limit);
   }
-  return pages.sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at));
+  return pages.filter(p => !require("./outreach-eligibility").isPrivateOutreach(p)).sort((a, b) => asMillis(b.created_at) - asMillis(a.created_at));
 }
 
 // Append-only analytics/trigger log for portal interactions (phone reveals
@@ -744,3 +744,6 @@ module.exports = {
   saveExtractJob, getExtractJob, updateExtractJob, listExtractJobsByStatus,
   saveListingDraft, getListingDraft, updateListingDraft, listListingDraftsByPhone,
 };
+
+// Outreach callbacks receive an explicit isolated persistence adapter.
+module.exports.createOutreachCallbackLedger = (options = {}) => require('./outreach/callback-ledger').createCallbackLedger({ db, ...options });

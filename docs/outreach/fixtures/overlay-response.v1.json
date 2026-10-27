@@ -1,0 +1,15 @@
+{
+  "brand_mode": "outreach_demo",
+  "watermark_version": "forly-central-v1",
+  "duration": 10,
+  "renditions": [
+    {
+      "id": "asset_demo_123",
+      "rendition": "watermarked_demo"
+    },
+    {
+      "id": "asset_paid_123",
+      "rendition": "clean_paid"
+    }
+  ]
+}

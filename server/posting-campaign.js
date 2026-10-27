@@ -58,6 +58,7 @@ function normalizeGroups(groups, ctx) {
 // campaign transaction, so a STOP landing meanwhile is never overridden.
 async function create({ phone, page, groups, mode, days, repeat, repeatDays, consent, targets, copies } = {}, deps = {}, opts = {}) {
   const x = ctxOf(deps);
+  if (require("./outreach-eligibility").isPrivateOutreach(page)) throw fail("private_preview", "private preview cannot be published");
   if (!consent || !consent.at) throw fail("consent_required", "consent required");
   if (!page || !page.page_id || !phone) throw fail("invalid_input", "phone and page required");
   const now = nowOf(deps, x);
@@ -112,6 +113,7 @@ async function importedNotAgentCreated(page, db) {
 // Never throws: a failure is stored as posting_enroll_error on the page.
 async function enrollNewPage(page, deps = {}) {
   const x = ctxOf(deps);
+  if (require("./outreach-eligibility").isPrivateOutreach(page)) return null;
   if (!page || !page.page_id || !page.business_phone || !ACTIVE_PAGE.has(page.status || "active")) return null;
   try {
     const phone = String(page.business_phone);
@@ -450,7 +452,7 @@ async function schedulePost(decision, deps = {}, now) {
   const c = await x.store.getPostingCampaign(decision.campaignId);
   if (!c || c.status !== "running") return c;
   const page = await x.db.getPage(c.page_id);
-  if (!page) return c;
+  if (!page || require("./outreach-eligibility").isPrivateOutreach(page)) return c;
   const conn = (await x.db.getConnection(c.phone)) || {};
   const target = decision.target === "page" ? A.pageTarget(conn) : c.groups.find((g) => g.group_id === decision.group_id);
   if (!target) return c;

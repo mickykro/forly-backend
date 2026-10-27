@@ -158,9 +158,30 @@
     <button id="tabAgents">סוכנים ופיצ׳רים</button>
     <button id="tabPortfolios">פורטפוליו</button>
     <button id="tabMessages">הודעות לסוכנים</button>
+    <button id="tabOutreach">הדגמות Outreach</button>
     <button id="tabPosting">פרסום אוטומטי</button>
     <button id="tabManual">פרסום ידני</button>
   </div>
+
+  <section id="paneOutreach" class="hidden">
+    <h2>הדגמות Outreach</h2>
+    <p>תצוגות פרטיות לשבעה ימים. כל שליחה נעשית ידנית בערוץ מורשה ונרשמת בנפרד.</p>
+    <section class="card" aria-labelledby="outreachScanHeading">
+      <h3 id="outreachScanHeading">סריקת קבוצות ובחירת נכסים</h3>
+      <p>המערכת מאתרת קבוצות נדל״ן שהחשבון הייעודי חבר בהן, סורקת פוסטים ובוחרת מועמדים לבדיקה. יצירת הדגמה מחייבת אישור אנושי.</p>
+      <form id="outreachScanForm" class="toolbar">
+        <label>קמפיין <input name="campaign_id" value="outreach" required maxlength="80"></label>
+        <label>קבוצות לכל סריקה <input name="max_groups" type="number" value="3" min="1" max="3" required></label>
+        <label>מועמדים לבחירה <input name="max_candidates" type="number" value="5" min="1" max="5" required></label>
+        <button class="btn btn-primary" id="outreachScanStart">סריקת קבוצות ובחירת פוסטים</button>
+      </form>
+      <div id="outreachScanProgress" role="status" aria-live="polite"></div>
+    </section>
+    <details><summary>הוספת פוסט מסוים (רשות)</summary><form id="outreachCapture" class="toolbar"><input name="source_post_url" type="url" required placeholder="קישור מדויק לפוסט מאושר"><input name="campaign_id" value="outreach" required maxlength="80" placeholder="מזהה קמפיין"><button class="btn btn-ghost">יצירת מועמד</button></form></details>
+    <p id="outreachError" role="status"></p><button id="outreachRefresh" class="btn btn-ghost">רענון</button>
+    <div id="outreachList"></div><button id="outreachMore" class="btn btn-ghost hidden">הבאים</button>
+    <section id="outreachDetail" class="card hidden"></section>
+  </section>
 
   <!-- ── AGENT MESSAGES ── -->
   <div id="paneMessages" class="hidden">
@@ -499,6 +520,7 @@
 <script src="/admin-posting.js"></script>
 <script src="/connect-viewer.js"></script>
 <script src="/admin-manual.js"></script>
+<script src="/admin-outreach.js"></script>
 <footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
 </html>

@@ -112,9 +112,17 @@ const TEMPLATES_DIR = path.join(__dirname, "..", "public-nadlan", "templates");
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+// Expensive render callbacks use a dedicated signing key, never a session key.
+const { createCallbackGuard, validateCallbackConfig } = require("./callback-auth");
+validateCallbackConfig(process.env);
+const outreachConfig = require("./outreach/config").readConfig(process.env);
+
 // ── db init ──
 const db = require("./db");
 db.init();
+
+const callbackLedger = db.createOutreachCallbackLedger();
+const callbackGuard = createCallbackGuard({ reserve: callbackLedger.reserve });
 
 // ── auth ──
 const createAuthRouter = require("./auth");
@@ -443,9 +451,22 @@ app.use(createChatRouter({
 // Throttle the expensive ffmpeg video-overlay endpoint per IP (resource abuse).
 app.use("/api/video-overlay", rateLimit({ windowMs: 60_000, max: 20 }));
 
+// Node alone owns outreach. Its separate collections never create agent demos.
+const outreachRuntime = require("./outreach/runtime").createRuntime({
+  config: outreachConfig, database: db, callbackGuard, reserve: callbackLedger.reserve,
+  requireAdmin, requireStepUp, requireAuth: requireAuth(AUTH_SECRET),
+  sendCode: GREENAPI_INSTANCE && GREENAPI_TOKEN
+    ? (phone, code) => sendWhatsApp(phone, `Forly preview verification code: ${code}. Valid for 5 minutes.`, GREENAPI_INSTANCE, GREENAPI_TOKEN)
+    : null,
+});
+app.use("/api/admin/outreach", outreachRuntime.admin);
+app.use(outreachRuntime.publicRouter);
+app.use(outreachRuntime.internal);
+
 // ── pages routes (builder, serving, leads) ──
 const createPagesRouter = require("./routes/pages");
 app.use(createPagesRouter({
+  callbackGuard, outreachAssets: outreachRuntime.outreachAssets,
   uploadDir: UPLOAD_DIR,
   baseUrl: BASE_URL,
   // Page media is rehosted through the same relay the intake routes use, so a
@@ -472,6 +493,12 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   if (res.headersSent) return res.end();
   res.status(err && err.status && err.status < 600 ? err.status : 500).json({ error: "internal" });
 });
+// An external scheduler calls the signed tick endpoint. This optional polling
+// loop uses the same durable, leased jobs for always-on Node deployments.
+if (outreachConfig.enabled && process.env.OUTREACH_WORKER === "1") {
+  const timer = setInterval(() => outreachRuntime.worker.tick().catch(() => console.error("outreach worker failed")), 30000);
+  timer.unref();
+}
 
 // ── start ──
 app.listen(PORT, () => {

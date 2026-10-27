@@ -1,0 +1,7 @@
+{
+  "brandMode": "outreach_demo",
+  "demo_id": "demo_test_123",
+  "correlation_id": "video:demo_test_123",
+  "video_urls": ["https://media.example/clip.mp4"],
+  "lines": ["Property preview"]
+}
