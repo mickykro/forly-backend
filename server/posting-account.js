@@ -437,7 +437,15 @@ let cancelFailures = 0;
 const noteCancelFailure = (n = 1) => { cancelFailures += n; };
 const drainCancelFailures = () => { const n = cancelFailures; cancelFailures = 0; return n; };
 
+// The admin's pasted post per page language (settings/posting.copy_templates,
+// routes/admin-posting.js) — every builder of a post's text takes it, so the
+// text the agent approved is the text that goes out.
+async function templatesOf(x) {
+  try { return ((await x.db.getSetting("posting")) || {}).copy_templates || null; } catch { return null; }
+}
+
 module.exports = {
+  templatesOf,
   noteCancelFailure, drainCancelFailures, mutate, say, tellOperator,
   MS_MIN, MS_HOUR, MS_DAY, ACTIVE_PAGE, OPEN_POST, MAX_SESSION_POSTS, maxSessionPosts, POST_STATUS_OF, ELIGIBILITY,
   iso, tail, fail, ms, ctxOf, nowOf, guardDeps, configOf,

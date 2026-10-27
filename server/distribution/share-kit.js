@@ -265,6 +265,9 @@ function variantIndex(seed, mod) {
 }
 
 function buildPostCopy(page, pageUrl, opts = {}) {
+  // opts.templates: the admin's pasted post per language; the page's language picks one.
+  const pasted = opts.templates && page && opts.templates[page.language || "he"];
+  if (typeof pasted === "string" && pasted.trim()) return fillTemplate(pasted, page, pageUrl);
   const seed = String(opts.variantSeed || "");
   const round = Number.isSafeInteger(opts.variantRound) && opts.variantRound >= 0 ? opts.variantRound : 0;
   const pick = (arr, key) => {

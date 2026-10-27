@@ -82,12 +82,15 @@ function propertyCard(page, base) {
 // Every version of the post text for a property, in template order (the
 // manual tab offers them all next to the browser). The link is the same one
 // the campaign's own text carries.
-function versions(page, base) {
+// templates: the admin's pasted post (A.templatesOf) comes first when the page's language has one.
+function versions(page, base, templates = null) {
   const shareKit = require("./distribution/share-kit");
   const url = base ? require("./posting-destination").previewUrl({ kind: "property" }, { pageBaseUrl: base, pageId: page.page_id }) : "";
   const out = [];
+  const pasted = shareKit.buildPostCopy(page, url, { templates, linkInComment: !url });
+  if (templates && pasted !== shareKit.buildPostCopy(page, url, { linkInComment: !url })) out.push(pasted);
   for (let r = 0; r < shareKit.TEMPLATE_COUNT; r++) {
-    out.push(shareKit.buildPostCopy({ property: page.property || {}, agent: page.agent || {} }, url, { variantRound: r, linkInComment: !url }));
+    out.push(shareKit.buildPostCopy(page, url, { variantRound: r, linkInComment: !url }));
   }
   return out;
 }
@@ -132,6 +135,7 @@ async function checklist(deps = {}) {
   const settings = deps.config ? null : await x.db.getSetting("posting");
   const configFor = (conn) => deps.config || safety.configFrom(settings, deps.env || process.env, conn && conn.posting_rules);
   const now = x.clock();
+  const templates = await A.templatesOf(x);
   const byPhone = new Map(); // the agent's campaigns, connection and other posts, for the group limits
   const agentOf = async (phone) => {
     if (!byPhone.has(phone)) byPhone.set(phone, L.agentPosts(phone, deps, x, now));
@@ -156,7 +160,7 @@ async function checklist(deps = {}) {
         const withLimit = g.status === "owed" && g.kind === "group" ? { ...g, limit: limits[g.group_id] || null } : g;
         const tg = byId.get(g.group_id);
         return withLimit.status !== "owed" || withLimit.copy ? withLimit
-          : { ...withLimit, copy: C.buildCopy(page, c, { ...tg, target: tg.kind === "page" ? "page" : "group" }, "property", deps.pageBaseUrl || "") };
+          : { ...withLimit, copy: C.buildCopy(page, c, { ...tg, target: tg.kind === "page" ? "page" : "group" }, "property", deps.pageBaseUrl || "", templates) };
       }), now),
     });
   }

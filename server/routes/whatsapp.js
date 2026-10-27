@@ -139,6 +139,7 @@ module.exports = function createWhatsappRouter(ctx) {
       // Approved in chat ("כן" to confirmPageChanges): the live page and its listing.
       updatePageData: async ({ page_id, listing_id, pagePatch, listingPatch }) => {
         await db.updatePage(page_id, { ...pagePatch, updated_at: new Date() });
+        await db.clearPageTranslations(page_id).catch(() => null); // other languages follow on their next visit
         if (listing_id) await db.updateListing(listing_id, listingPatch);
       },
       importPhoto: importPhotoFor(phone),

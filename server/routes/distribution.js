@@ -403,7 +403,7 @@ module.exports = function createDistributionRouter(ctx) {
     }
     const biz = await db.getBusiness(req.user.userId);
     const pageUrl = `${pageBaseUrl}/p/${pageId}`;
-    const copy = shareKit.buildPostCopy(page, pageUrl);
+    const copy = shareKit.buildPostCopy(page, pageUrl, { templates: ((await db.getSetting("posting")) || {}).copy_templates });
     res.json({
       copy,
       page_url: pageUrl,

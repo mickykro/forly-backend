@@ -195,6 +195,11 @@ async function audit(deps, dist, target, action, extra = {}) {
   });
 }
 
+// The admin's pasted post per page language (settings/posting.copy_templates), when the deps carry a db that has settings.
+const templatesOf = async (deps) => {
+  try { return deps.db && deps.db.getSetting ? ((await deps.db.getSetting("posting")) || {}).copy_templates || null : null; } catch { return null; }
+};
+
 // ── creation paths ──
 // Page-ready hook body: entitled + nothing posted/in-flight ⇒ offer via
 // WhatsApp confirm link. Fire-and-forget from routes/pages.js.
@@ -215,7 +220,7 @@ async function maybeOffer(deps, page) {
   const link = `${deps.pageBaseUrl}/api/distribution/confirm?d=${id}&t=${deps.signActionToken([id, "confirm"])}`;
   const title = (page.property && page.property.title) || "";
   const pageUrl = `${deps.pageBaseUrl}/p/${page.page_id}`;
-  const copy = deps.shareKit.buildPostCopy(page, pageUrl);
+  const copy = deps.shareKit.buildPostCopy(page, pageUrl, { templates: await templatesOf(deps) });
   await notifyRich(deps, page.business_phone,
     BTN.confirmOffer({ title, pageUrl, confirmLink: link, copy }),
     M.confirmOffer(title, pageUrl, link, copy));
@@ -265,7 +270,7 @@ async function snapshotFor(deps, pageId, phone) {
     poster_url: publicMedia(deps, (page.hero && page.hero.poster_url) || null),
     photo_urls: ((page.gallery && page.gallery.images) || [])
       .map((i) => publicMedia(deps, i.url)).slice(0, 10),
-    copy: deps.shareKit.buildPostCopy(page, pageUrl),
+    copy: deps.shareKit.buildPostCopy(page, pageUrl, { templates: await templatesOf(deps) }),
     groups: deps.shareKit.sanitizeGroups(
       (biz && biz.distribution && biz.distribution.groups) || []),
   };
@@ -381,7 +386,7 @@ async function createShareSession(deps, { page, business, copy, postUrl, groups:
     snapshot: {
       title: (page.property && page.property.title) || "",
       page_url: pageUrl,
-      copy: copy || deps.shareKit.buildPostCopy(page, pageUrl),
+      copy: copy || deps.shareKit.buildPostCopy(page, pageUrl, { templates: await templatesOf(deps) }),
       listing_type: (page.property && page.property.listing_type) || "sale",
       // City drives the "same city ⇒ reuse those groups" offer in the queue.
       city: (page.property && page.property.city) || null,

@@ -79,6 +79,19 @@ const createPagesRouter = require("./routes/pages");
     bc.get = realGet;
   }
 
+  // ── an edit drops the cached translations: the next visit translates the new words ──
+  {
+    await db.updatePage("ML1", { edit_token: "tok-ml1" });
+    const before = calls.length;
+    const r = await fetch(`${base}/api/page/edit-text`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page_id: "ML1", edit_token: "tok-ml1", fields: { hero_phrase: "בית חדש לגמרי" } }) });
+    assert.equal(r.status, 200, await r.text());
+    assert.equal((await db.getPage("ML1")).i18n, undefined, "the English copy is gone with the old words");
+    const en2 = await api("id=ML1&lang=en");
+    assert.equal(en2.hero.phrase, "EN:בית חדש לגמרי", "translated again from the new words");
+    assert.equal(calls.length, before + 1);
+  }
+
   // ── the editor's toggle marks an older page ──
   await db.updatePage("HE1", { multilingual: true });
   assert.equal((await api("id=HE1&lang=en")).language, "en");

@@ -251,7 +251,7 @@ module.exports = function createAdminManualRouter({
     const conn = c ? (await x.db.getConnection(phone)) || {} : {};
     res.set("Cache-Control", "no-store");
     res.json({
-      property: M.propertyCard(page, deps.pageBaseUrl), versions: M.versions(page, deps.pageBaseUrl),
+      property: M.propertyCard(page, deps.pageBaseUrl), versions: M.versions(page, deps.pageBaseUrl, await A.templatesOf(x)),
       campaign: c ? { id: c.id, status: c.status } : null, groups: await M.tagLinks(c, M.groupsOf(c, conn, x.clock(), await A.configOf(deps, x, conn)), x.clock()),
     });
   }));
