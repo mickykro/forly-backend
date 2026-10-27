@@ -185,9 +185,20 @@ module.exports = function createAdminCampaignsRouter({
   router.get("/agents/:ref/groups", requireAdmin, wrap(async (req, res) => {
     const phone = await phoneOf(req.params.ref);
     if (!phone) return res.status(404).json({ error: "not_found" });
-    const conn = (await db.getConnection(phone)) || {};
-    const members = S_.memberList(conn).filter((m) => m.membership_state === "member");
-    res.json(await groupsView(conn, phone));
+    res.json(await groupsView((await db.getConnection(phone)) || {}, phone));
+  }));
+  // Removes a group from the agent's list, as the agent's own remove does
+  // (S_.hidePatch): no sync brings it back; the agent can restore it.
+  router.post("/agents/:ref/groups/:group_id/remove", ...guard, wrap(async (req, res) => {
+    const phone = await phoneOf(req.params.ref);
+    const id = String(req.params.group_id || "");
+    if (!phone) return res.status(404).json({ error: "not_found" });
+    if (!S_.GROUP_ID_RE.test(id)) return res.status(400).json({ error: "invalid_input" });
+    await audit(req, "remove_group", phone, { group_tail: id.slice(-6) });
+    let removed = false;
+    const saved = await store.mutateConnection(phone, (cur) => { const p = S_.hidePatch(cur, id, A.iso(x.clock())); removed = !!p; return p; });
+    if (!removed) return res.status(404).json({ error: "not_found" });
+    res.json(await groupsView(saved || {}, phone));
   }));
   // The catalog fills a name an older sync hashed. All the agent's groups,
   // most relevant first (groupRelevance); real_estate marks the relevant ones.
