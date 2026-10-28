@@ -18,7 +18,10 @@ const crypto = require("crypto");
 
 const MAX_ATTEMPTS = 3;
 const JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const SWEEP_MS = 5 * 1000;
+// Every query costs at least one Firestore read even when empty: at 5s this loop
+// alone used ~52k reads/day and exhausted the quota (28 Oct 2026). A new job
+// kicks a sweep itself (create), so the interval is only the retry backstop.
+const SWEEP_MS = 60 * 1000;
 // Each rung looks less like automation than the last, and costs more. Start cheap.
 const BROWSER_LADDER = ["hosted", "hosted_stealth", "hosted_privacy"];
 // Terminal on the first attempt — retrying cannot change the answer.
@@ -49,6 +52,7 @@ async function create({ phone, url, forceSource = null, profileName = null, draf
     expire_at: new Date(created.getTime() + JOB_RETENTION_MS),
   };
   await deps.db.saveExtractJob(job);
+  if (kick) kick();
   return job;
 }
 
@@ -68,13 +72,16 @@ function codeFor(err) {
 // Anything left "running" past its maximum lifetime died with the process.
 // Without this, DRIVER_MAX_CONCURRENT such ghosts wedge the queue for good.
 const STALE_MS = 5 * 60 * 1000;
+// → the jobs still running, so the sweep need not query them again.
 async function reapStale(deps, now = new Date()) {
   const running = await deps.db.listExtractJobsByStatus("running", 50);
+  const live = [];
   for (const j of running) {
-    if (now.getTime() - new Date(j.updated_at || 0).getTime() < STALE_MS) continue;
+    if (now.getTime() - new Date(j.updated_at || 0).getTime() < STALE_MS) { live.push(j); continue; }
     const dead = (j.attempts || 0) >= MAX_ATTEMPTS;
     await deps.db.updateExtractJob(j.id, { status: dead ? "failed" : "queued", error_code: dead ? "page_unreadable" : j.error_code || null, updated_at: nowIso() });
   }
+  return live;
 }
 
 async function runJob(job, deps) {
@@ -161,9 +168,8 @@ async function sweep(deps) {
   try { return await sweepOnce(deps); } finally { sweeping = false; }
 }
 async function sweepOnce(deps) {
-  await reapStale(deps);
+  const running = await reapStale(deps);
   const cap = deps.maxConcurrent || Number(process.env.DRIVER_MAX_CONCURRENT || 2);
-  const running = await deps.db.listExtractJobsByStatus("running", cap + 1);
   const budget = cap - running.length;
   if (budget <= 0) return 0;
   const queued = await deps.db.listExtractJobsByStatus("queued", budget);
@@ -176,11 +182,14 @@ async function sweepOnce(deps) {
   return queued.length;
 }
 
+let kick = null; // set by startSweeper: a new job starts now, not at the next interval
 function startSweeper(deps) {
   const every = deps.sweepMs || SWEEP_MS;
-  const t = setInterval(() => { sweep(deps).catch((e) => console.error(`extract sweep failed: ${e.message}`)); }, every);
+  const run = () => { sweep(deps).catch((e) => console.error(`extract sweep failed: ${e.message}`)); };
+  kick = run;
+  const t = setInterval(run, every);
   if (t.unref) t.unref();
-  return () => clearInterval(t);
+  return () => { clearInterval(t); kick = null; };
 }
 
 function liveDeps() {

@@ -114,6 +114,27 @@ function fakeStore() {
   assert.equal(swept, 2, "cap 3 minus 1 already running");
   assert.equal(started, 2);
 
+  // ── one sweep reads "running" once (each empty query is still a billed read) ──
+  {
+    const store11 = fakeStore();
+    const reads = [];
+    const list = store11.listExtractJobsByStatus;
+    store11.listExtractJobsByStatus = (s, l) => { reads.push(s); return list(s, l); };
+    await J.sweep({ db: store11, runJob: async () => {} });
+    assert.deepEqual(reads, ["running", "queued"]);
+  }
+
+  // ── a new job kicks the started sweeper instead of waiting out the interval ──
+  {
+    const store12 = fakeStore();
+    let ran = 0;
+    const stop = J.startSweeper({ db: store12, sweepMs: 3600_000, runJob: async () => { ran++; } });
+    await J.create({ phone: "p", url: "https://www.yad2.co.il/item/k" }, { db: store12 });
+    await new Promise((r) => setTimeout(r, 20));
+    stop();
+    assert.equal(ran, 1, "started by create, not the hour-long interval");
+  }
+
   // ── forceSource rides through to resolve, for the firecrawl fallback ──
   const store6 = fakeStore();
   const job6 = await J.create({ phone: "p", url: "https://example.com/x", forceSource: "driver" }, { db: store6 });
