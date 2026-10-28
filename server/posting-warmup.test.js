@@ -3,6 +3,8 @@
    once per 20 h, in the background under the profile lock, never past the
    warm-up, never while a switch is off. */
 const assert = require("assert");
+// Browse-only first days are off by default since 28 Oct 2026; this file tests (set before the testkit snapshots it) that stage's browsing.
+require("./posting-safety").DEFAULTS.warmup = [{ start_day: 1, end_day: 3, daily_post_cap: 0, daily_browse_cap: 1 }, { start_day: 4, end_day: 7, daily_post_cap: 1, daily_browse_cap: 1 }];
 const K = require("./posting-testkit");
 const T = require("./posting-tick");
 const Sw = require("./posting-sweeper");

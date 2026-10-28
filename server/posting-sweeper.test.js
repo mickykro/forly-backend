@@ -345,9 +345,10 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     release();
   }
 
-  // ── browse-only (warm-up) days run one dwell session a day, not a post ──
+  // ── browse-only (warm-up) days run one dwell session a day, not a post (a browse-only stage: off by default since 28 Oct) ──
   {
     const { deps, at } = await setup(PH, { conn: { facebook_browser_first_connected_at: iso(NOW.getTime() - DAY) } });
+    deps.config = Object.assign({}, deps.config, { warmup: [{ start_day: 1, end_day: 3, daily_post_cap: 0, daily_browse_cap: 1 }] });
     let dwelt = 0;
     const d2 = with_(deps, { dwell: async (o) => { dwelt++; assert.equal(o.note, "forly-dwell:", "no phone in a Driver note"); return { log: [], signal: null }; } });
     let c = await C.create(base(), d2);
@@ -356,6 +357,18 @@ const conn = async (ph = PH) => (await db.getConnection(ph)) || {};
     assert.equal(c.posts.length, 0);
     assert.equal(dwelt, 1, "one browse session today");
     assert.equal(c.wait_reason, "browse_only");
+  }
+
+  // ── a posting warm-up day (the default since 28 Oct) schedules a post AND browses once a day ──
+  {
+    const { deps, at } = await setup(PH, { conn: { facebook_browser_first_connected_at: iso(NOW.getTime() - DAY) } });
+    let dwelt = 0;
+    const d2 = with_(deps, { dwell: async () => { dwelt++; return { log: [], signal: null }; } });
+    let c = await C.create(base(), d2);
+    c = await S.tick(c, d2, at(NOW));
+    c = await S.tick(c, d2, at(new Date(NOW.getTime() + HOUR)));
+    assert.ok(c.posts.length >= 1, "a post is scheduled on day 2");
+    assert.equal(dwelt, 1, "and one browse session today");
   }
 
   // ── the kill switch: nothing but reaping happens while it is off ──

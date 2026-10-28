@@ -9,6 +9,9 @@ const NOW = new Date("2026-09-23T10:00:00+03:00"); // Wed
 const IL = (iso) => new Date(iso);
 const day = (n) => n * 24 * 3600 * 1000;
 const cfg = S.DEFAULTS;
+// The browse-only first days (off by default since 28 Oct 2026): still how a browse-only stage behaves.
+const BROWSE_RAMP = [{ start_day: 1, end_day: 3, daily_post_cap: 0, daily_browse_cap: 1 }, { start_day: 4, end_day: 7, daily_post_cap: 1, daily_browse_cap: 1 }];
+const browseCfg = Object.assign({}, cfg, { warmup: BROWSE_RAMP });
 const noRand = () => 0.5;
 const jerusalemDate = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: cfg.timezone }).format(d);
 const ok = (url, group_id = url) => ({ url, group_id, agent_policy: "explicitly_allowed" });
@@ -92,9 +95,9 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
 
 // ── a live penalty halves a warm-up cap too, and the weekly cap — never below 1 ──
 {
-  const stage3 = account({ first_connected_at: at(day(15)), penalty_until: at(-day(5)), halts: [{ at: at(day(3)), code: "rate_limited" }] });
-  assert.equal(S._test.warmupStage(stage3, NOW, cfg).daily_post_cap, 2, "sanity: warm-up stage 3's own cap is 2");
-  assert.equal(S._test.dailyCapFor(stage3, NOW, cfg), 1, "a live penalty halves the warm-up cap too — floor(2/2)");
+  const stage3 = account({ first_connected_at: at(day(3)), penalty_until: at(-day(5)), halts: [{ at: at(day(3)), code: "rate_limited" }] });
+  assert.equal(S._test.warmupStage(stage3, NOW, cfg).daily_post_cap, 20, "sanity: warm-up stage 2's own cap is 20");
+  assert.equal(S._test.dailyCapFor(stage3, NOW, cfg), 10, "a live penalty halves the warm-up cap too — floor(20/2)");
   assert.equal(S._test.weeklyCapFor(stage3, NOW, cfg), Math.max(1, Math.floor(cfg.weekly_cap / cfg.penalty_cap_divisor)), "a live penalty halves the weekly cap too");
   assert.equal(S._test.weeklyCapFor(account(), NOW, cfg), cfg.weekly_cap, "no penalty → the weekly cap is untouched");
 }
@@ -114,7 +117,7 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   const future = account({ first_connected_at: new Date(NOW.getTime() + day(1)).toISOString() });
   for (const [label, a] of [["missing", missing], ["invalid", invalid], ["future", future]]) {
     assert.doesNotThrow(() => S.nextSlot({ now: NOW, account: a, candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }), label);
-    assert.equal(S.wantsBrowseSession(a, NOW, cfg), true, `${label} first_connected_at → treated as day 1 (browse-only)`);
+    assert.equal(S._test.warmupStage(a, NOW, cfg).start_day, 1, `${label} first_connected_at → treated as day 1`);
     assert.equal(S._test.dayNumber(a, NOW, cfg), 1, label);
   }
 }
@@ -192,19 +195,19 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(require("./posting-chain").dwellMs(() => 0.5, { ...L, POSTING_BURST: "1" }), 0, "burst: no dwell");
   assert.ok(require("./posting-chain").dwellMs(() => 0.5, L) >= 90000, "no burst: normal dwell");
   assert.equal(cfg.active_hours.start, 9, "configFrom deep-copies — mutating the result never touches DEFAULTS");
-  assert.equal(cfg.warmup.length, 3, "nested arrays are copied too");
+  assert.equal(cfg.warmup.length, 2, "nested arrays are copied too");
 }
 
-// ── warm-up: a freshly connected account, or one that answered "no", posts once a day ──
+// ── warm-up: a freshly connected account, or one that answered "no", posts up to 5 a day ──
 {
   const cfgNoSkip = Object.assign({}, cfg, { skip_day_probability: 0 });
-  const one = [{ at: at(3600000), group_id: "a", group_url: "a", page_id: "p", ok: true }];
-  // day 6 by the Jerusalem calendar: warm-up stage 2 (days 4-7), one post/day
-  const fresh = account({ first_connected_at: at(day(5)), posts: one });
-  assert.equal(S.nextSlot({ now: NOW, account: fresh, candidates: [ok("g")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "daily_cap", "week 1: one a day");
-  // day 9 by the calendar — a mature account by now, but "unsure" doubles the
-  // warm-up window, so it is still in the one-a-day stage
-  const young = account({ account_aged: false, first_connected_at: at(day(8)), posts: one });
+  const one = Array.from({ length: 5 }, (_, i) => ({ at: at(3600000 + i * 60000), group_id: `a${i}`, group_url: `a${i}`, page_id: "p", ok: true }));
+  // day 2 by the Jerusalem calendar: warm-up stage 1 (days 1-3), 5 posts/day
+  const fresh = account({ first_connected_at: at(day(1)), posts: one });
+  assert.equal(S.nextSlot({ now: NOW, account: fresh, candidates: [ok("g")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "daily_cap", "week 1: 5 a day");
+  // day 5 by the calendar — stage 2 (20 a day) by now, but "unsure" doubles the
+  // warm-up window, so it is still in stage 1 (5 a day)
+  const young = account({ account_aged: false, first_connected_at: at(day(4)), posts: one });
   assert.equal(S.nextSlot({ now: NOW, account: young, candidates: [ok("g")], pageId: "p", config: cfgNoSkip, rand: noRand }).reason, "daily_cap", "a young Facebook account is treated like a fresh connection");
   const mature = account({ posts: one });
   const m = S.nextSlot({ now: NOW, account: mature, candidates: [ok("g")], pageId: "p", config: cfgNoSkip, rand: noRand });
@@ -255,8 +258,8 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
   assert.equal(S._test.warmupStage(Object.assign({}, fresh, { warmup_mode: "active" }), NOW, cfg), null, "active: no warm-up");
   assert.equal(S._test.dailyCapFor(Object.assign({}, fresh, { warmup_mode: "active" }), NOW, cfg), cfg.daily_cap);
   const mid = Object.assign({}, fresh, { first_connected_at: at(day(4)) }); // day 5
-  assert.equal(S._test.warmupStage(mid, NOW, cfg).daily_post_cap, 1);
-  assert.equal(S._test.warmupStage(Object.assign({}, mid, { warmup_mode: "slow" }), NOW, cfg).daily_post_cap, 0, "slow: still browse-only on day 5");
+  assert.equal(S._test.warmupStage(mid, NOW, cfg).daily_post_cap, 20);
+  assert.equal(S._test.warmupStage(Object.assign({}, mid, { warmup_mode: "slow" }), NOW, cfg).daily_post_cap, 5, "slow: still stage 1 on day 5");
 }
 
 // ── posting windows: 10–13 and 18–21; nothing in between, or outside ──
@@ -330,9 +333,13 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
 // ── warm-up day 2: a browse-only day — no slot, but a browse session is wanted ──
 {
   const fresh = account({ first_connected_at: at(day(1)) });
-  const r = S.nextSlot({ now: NOW, account: fresh, candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand });
+  const r = S.nextSlot({ now: NOW, account: fresh, candidates: [ok("g")], pageId: "p", config: browseCfg, rand: noRand });
   assert.equal(r.reason, "browse_only");
-  assert.equal(S.wantsBrowseSession(fresh, NOW, cfg), true);
+  assert.equal(S.wantsBrowseSession(fresh, NOW, browseCfg), true);
+  assert.notEqual(S.nextSlot({ now: NOW, account: fresh, candidates: [ok("g")], pageId: "p", config: cfg, rand: noRand }).reason, "browse_only", "by default, day 2 posts");
+  assert.equal(S.wantsWarmupBrowse(fresh, NOW, cfg), true, "…and browses too");
+  assert.equal(S.wantsBrowseSession(fresh, NOW, cfg), false, "but it is not a browse-only day");
+  assert.equal(S.wantsWarmupBrowse(account({ first_connected_at: at(day(30)) }), NOW, cfg), false, "past the warm-up: no browse session");
 }
 
 // ── fingerprint tiers: HMACs only, keyed by PROFILE_KEY, never a readable attribute ──
@@ -504,7 +511,7 @@ assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("l
   const sat = new Date("2026-09-26T10:00:00+03:00"); // a Saturday
   assert.equal(S.isActiveTime(sat), false, "no post on Shabbat");
   const acc = { first_connected_at: "2026-09-26T08:00:00+03:00", posts: [], halts: [], account_aged: true, posted_manually: true };
-  assert.deepEqual(S.nextSlot({ now: sat, account: acc, candidates: [{ group_id: "1", url: "https://www.facebook.com/groups/1" }], pageId: "p" }), { at: null, reason: "browse_only" }, "a warm-up browse on Shabbat");
+  assert.deepEqual(S.nextSlot({ now: sat, account: acc, candidates: [{ group_id: "1", url: "https://www.facebook.com/groups/1" }], pageId: "p", config: browseCfg }), { at: null, reason: "browse_only" }, "a warm-up browse on Shabbat");
 }
 
 // ── a local box skips the warm-up (POSTING_WARMUP=1 keeps it); prod never does ──
@@ -512,6 +519,7 @@ assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("l
   const day1 = new Date("2026-09-27T10:00:00+03:00"); // a Sunday
   const acc = { first_connected_at: "2026-09-27T08:00:00+03:00", posts: [], halts: [], account_aged: true, posted_manually: true };
   const cand = [{ group_id: "1", url: "https://www.facebook.com/groups/1" }];
+  const kept = S.DEFAULTS.warmup; S.DEFAULTS.warmup = BROWSE_RAMP; // a browse-only day 1 shows whether the warm-up applies
   const slot = (env) => S.nextSlot({ now: day1, account: acc, candidates: cand, pageId: "p", config: S.configFrom(null, env), rand: () => 0 });
   assert.equal(slot({ FORLY_ENV: "prod" }).reason, "browse_only", "prod: day 1 only browses");
   assert.equal(slot({ FORLY_ENV: "staging" }).reason, "browse_only");
@@ -522,6 +530,7 @@ assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("l
   const local = slot({ FORLY_ENV: "local" });
   assert.notEqual(local.reason, "browse_only", "local: day 1 may post");
   assert.ok(local.at, "a slot on day 1: " + JSON.stringify(local));
+  S.DEFAULTS.warmup = kept;
 }
 
 // ── a local box posts at once, even on Shabbat and a holiday (POSTING_PACING=1 keeps the pacing) ──

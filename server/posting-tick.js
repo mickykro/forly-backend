@@ -483,8 +483,8 @@ async function browse(phone, conn, deps, x, now) {
   if (cls) await H.haltAccount(phone, cls, deps); // stamped with the clock as it runs
 }
 
-// A connected account with no running campaign still warms up: the first
-// days are browse-only from the day it connected, whatever is switched on
+// A connected account with no running campaign still warms up: the warm-up
+// days browse from the day it connected, whatever is switched on
 // (the connect page says so). The browse runs in the background under the
 // profile lock, so the sweep goes on; the guard still decides every step.
 async function warmIdle(phone, deps = {}, now) {
@@ -501,7 +501,7 @@ async function warmIdle(phone, deps = {}, now) {
   // the warm-up to test posting, and browsing should still be watchable).
   const local = (deps.env || process.env).FORLY_ENV === "local";
   if (browseOff(deps.env || process.env)) return "idle";
-  if (!local && !safety.wantsBrowseSession(await A.accountView(phone, conn, deps, now), now, config)) return "idle";
+  if (!local && !safety.wantsWarmupBrowse(await A.accountView(phone, conn, deps, now), now, config)) return "idle";
   if (now.getTime() - Math.max(ms(conn.last_browse_at) || 0, ms(conn.last_browse_attempt_at) || 0) < browseEveryMs(deps.env || process.env)) return "browse_only";
   const release = x.locks.tryAcquire(phone, "facebook");
   if (!release) return "profile_busy";
@@ -510,6 +510,8 @@ async function warmIdle(phone, deps = {}, now) {
     .finally(release);
   return "browse_started";
 }
+
+const warmupBrowseDay = async (phone, st, deps, now) => safety.wantsWarmupBrowse(await A.accountView(phone, st.conn, deps, now, { campaigns: st.campaigns }), now, st.config);
 
 // A post that waits for the agent's approval does not hold the slot: the
 // planner keeps preparing the next groups' posts (up to MAX_SESSION_POSTS) so
@@ -527,9 +529,10 @@ async function planNext(phone, st, deps, x, now) {
       if (!post || post.status !== "pending_approval") break;
       decision = await C.planAccount(phone, deps, now, { conn: st.conn, config: st.config });
     }
+    if (!st.planOnly && (await warmupBrowseDay(phone, st, deps, now))) await browse(phone, st.conn, deps, x, now); // a warm-up day browses as well as posts
     return "scheduled";
   }
-  if (decision.reason === "browse_only" && !st.planOnly) await browse(phone, st.conn, deps, x, now);
+  if (!st.planOnly && (decision.reason === "browse_only" || (await warmupBrowseDay(phone, st, deps, now)))) await browse(phone, st.conn, deps, x, now);
   for (const c of st.campaigns) {
     if (c.status === "running" && !(c.posts || []).some((p) => OPEN_POST.has(p.status)) && c.wait_reason !== decision.reason) {
       await mutate(x, c.id, (cur) => (cur.status === "running" ? { wait_reason: decision.reason } : null));

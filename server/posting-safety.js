@@ -60,12 +60,13 @@ const DEFAULTS = {
   // Explicit, inclusive day ranges counted from first_connected_at in Jerusalem
   // calendar days (day 1 = the connect day). After the last range: daily_cap.
   warmup: [
-    { start_day: 1, end_day: 3, daily_post_cap: 0, daily_browse_cap: 1 },
-    { start_day: 4, end_day: 7, daily_post_cap: 1, daily_browse_cap: 1 },
-    { start_day: 8, end_day: 21, daily_post_cap: 2, skipped_day_browse_probability: 0.5 },
+    // 28 Oct 2026: posting from day 1 — the old ramp (browse-only, then 1–2 a day) was too slow; a
+    // brand-new account was flagged only after ~20 posts in ~4 h, with duplicates.
+    { start_day: 1, end_day: 3, daily_post_cap: 5, daily_browse_cap: 1 },
+    { start_day: 4, end_day: 5, daily_post_cap: 20, daily_browse_cap: 1 },
   ],
   warmup_multiplier_if_unsure: 2,   // account_aged === false or posted_manually === false
-  browse_sessions_per_day: 1,       // on browse-only days, and with p=0.5 on skipped days later
+  browse_sessions_per_day: 1,       // on warm-up days (posting or not), and with p=0.5 on skipped days later
   // Per group, per account (2 Oct 2026): up to group_daily_cap posts a day,
   // whichever properties; the SAME property again only after
   // property_group_cooldown_days. Other agents' posts never count against an
@@ -360,6 +361,8 @@ function warmupStage(account, now, config) {
   return config.warmup.find((w) => day >= w.start_day * mult - (mult - 1) && day <= w.end_day * mult) || null;
 }
 const wantsBrowseSession = (account, now, config) => { const w = warmupStage(account, now, config); return !!(w && w.daily_post_cap === 0 && w.daily_browse_cap > 0); };
+// A warm-up day that browses too — with or without posts (28 Oct 2026: browse AND post).
+const wantsWarmupBrowse = (account, now, config) => { const w = warmupStage(account, now, config); return !!(w && w.daily_browse_cap > 0); };
 
 function isPenalised(account, now) {
   return !!(account.penalty_until && now.getTime() < new Date(account.penalty_until).getTime());
@@ -504,6 +507,6 @@ module.exports = {
   capsOff, burst, CAP_FIELDS, CAP_MAX, capRange, applyRules, rulesOf, rulesView, RULES,
   datesApart, dateGapEnd, activityDays,
   DEFAULTS, CALENDAR_OK, nextSlot, groupBlock, withTimes, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
-  wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
+  wantsBrowseSession, wantsWarmupBrowse, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },
 };
