@@ -16,7 +16,7 @@
 const A = require("../posting-account");
 const safety = require("../posting-safety");
 const { sameArea } = require("../distribution/city-normalize");
-const { isRealEstateGroup } = require("../facebook-groups-sync");
+const { byRelevance } = require("../facebook-groups-sync");
 const { DriverError } = require("../driver-browser");
 const { SIGNAL_PENALISES } = require("../posting-signals");
 const S_ = require("./posting-shared");
@@ -34,8 +34,7 @@ const PENALTY_CLASSES = new Set(["rate_limited", "feature_blocked", "confirmed_r
 module.exports = function mountPostingSettings(router, S, auth) {
   const { db, store, campaigns, deps } = S;
 
-  const hiddenList = (conn) => (Array.isArray(conn.facebook_groups_hidden) ? conn.facebook_groups_hidden : [])
-    .filter((h) => h && Array.isArray(h.ids) && h.ids.length);
+  const hiddenList = S_.hiddenList;
 
   // With a property: whether each group suits it (fits — the automatic
   // pick) and whether a campaign for it would be refused (excluded — the
@@ -46,8 +45,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const defaults = new Set(A.defaultGroupIds(conn, biz));
     const find = lookup || S_.catalogLookup(await S.catalog(null));
     const all = (m) => (find.all ? find.all(m) : [find(m)]);
-    // Real-estate groups only, and only with a real name — never "קבוצה פרטית".
-    return S_.memberList(conn).filter((m) => isRealEstateGroup(m, all(m)))
+    // Every group with a real name (never "קבוצה פרטית"), most relevant first.
+    return S_.memberList(conn).slice().sort(byRelevance(all))
       .map((m) => {
         const g = S_.publicMember(m, find(m), defaults);
         if (property) {
@@ -153,7 +152,7 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const phone = req.user.userId;
     const conn = (await db.getConnection(phone)) || {};
     const lookup = S_.catalogLookup(await S.catalog(null));
-    const members = S_.memberList(conn).filter((m) => m.membership_state === "member" && isRealEstateGroup(m, lookup.all(m)) && (m.name || (lookup(m) || {}).name));
+    const members = S_.memberList(conn).filter((m) => m.membership_state === "member" && (m.name || (lookup(m) || {}).name));
     const listings = typeof db.listListingsByPhone === "function" ? await db.listListingsByPhone(phone) : [];
     const camps = await store.listPostingCampaignsByPhone(phone);
     const biz = await db.getBusiness(phone).catch(() => null);
@@ -357,11 +356,9 @@ module.exports = function mountPostingSettings(router, S, auth) {
     return res.json({ member_groups: await publicMembers(after, undefined, undefined, await db.getBusiness(phone).catch(() => null)), groups_synced_at: after.facebook_groups_synced_at || null });
   }));
 
-  // Forgets one membership entry (every id it is known by), drops it from the
-  // default groups, and records its ids in facebook_groups_hidden (ids only,
-  // never a name) so no sync — this route's or the weekly sweep's — brings it
-  // back. A campaign's copy of the group stops being planned: its is_member is
-  // re-derived from the member list at every plan.
+  // Removes one group from the agent's list (S_.hidePatch). A campaign's copy
+  // of the group stops being planned: its is_member is re-derived from the
+  // member list at every plan.
   router.delete("/groups/:group_id", auth, wrap("groups.delete", async (req, res) => {
     const phone = req.user.userId;
     const id = String(req.params.group_id || "");
@@ -369,22 +366,8 @@ module.exports = function mountPostingSettings(router, S, auth) {
     const at = A.iso(S.clock());
     let removed = false;
     const saved = await store.mutateConnection(phone, (cur) => {
-      const m = S_.findMember(cur, id);
-      removed = !!m;
-      if (!m) return null;
-      const ids = new Set([id, ...S_.idsOf(m)]);
-      const same = (e) => S_.idsOf(e).some((x) => ids.has(x));
-      const list = Array.isArray(cur.facebook_groups_member) ? cur.facebook_groups_member.filter((e) => e && e.group_id) : [];
-      for (const e of list) if (same(e)) for (const x of S_.idsOf(e)) ids.add(x);
-      const hidden = hiddenList(cur).filter((h) => !h.ids.some((x) => ids.has(String(x))));
-      const patch = {
-        facebook_groups_member: list.filter((e) => !same(e)),
-        facebook_groups_hidden: hidden.concat([{ ids: [m.group_id, ...[...ids].filter((x) => x !== m.group_id)], hidden_at: at }]),
-      };
-      const perm = cur.posting_permission;
-      if (perm && Array.isArray(perm.default_group_ids)) {
-        patch.posting_permission = { default_group_ids: perm.default_group_ids.map(String).filter((x) => !ids.has(x)) };
-      }
+      const patch = S_.hidePatch(cur, id, at);
+      removed = !!patch;
       return patch;
     });
     if (!removed) return res.status(404).json({ error: "not_found" });

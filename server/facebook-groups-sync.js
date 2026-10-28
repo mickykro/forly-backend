@@ -14,15 +14,13 @@
  * MAX_GROUPS cap here — share-kit's cap is for the WhatsApp share kit, not
  * for how many groups this account belongs to.
  *
- * Privacy (R3 §8): the full "Your groups" list is read into memory, but a
- * name is only ever PERSISTED when the entry matches the curated catalog,
- * reads as real-estate, or was explicitly selected by the agent — every
- * other membership is stored as `{ group_id, name_hash }` only. Group names
+ * Every membership keeps its name, so the agent can pick from all their
+ * groups (most relevant first — groupRelevance). An entry from before that
+ * may still carry only `name_hash` until the next sync sees it. Group names
  * and URLs never appear in a log line.
  *
  * [Unverified] GROUPS_URL and SELECTORS come from the Task 1 findings file.
  */
-const crypto = require("crypto");
 const driver = require("./driver-browser");
 const { profileNameFor } = require("./profile-name");
 const postingGuard = require("./posting-guard");
@@ -44,15 +42,20 @@ const NOT_REAL_ESTATE_RE = /שמלות|שמלה|בגדים|תחפוש|ציוד|�
 // is real estate too, unless it is about jobs, cars, stocks or the like ("דרושים אנשי מכירות").
 const DEAL_RE = /למכיר|מכירה|מכירות|למכור|מוכרים|קני?יה|לקנות|קונים|השקע|משקיע|invest/i;
 const NOT_PROPERTY_RE = /דרוש|עבודה|משרות|רכב|מכוני|אופנו|מניות|קריפטו|ביטקוין|פורקס|צלמ|וידאו|בגדים|ריהוט|יד שני|יד 2|יד2|לוח המכירות|jobs|cars|stocks|crypto/i;
-const looksRealEstate = (name) => {
-  const n = String(name || "");
-  if (NOT_REAL_ESTATE_RE.test(n)) return false;
-  return REAL_ESTATE_RE.test(n) || (DEAL_RE.test(n) && !NOT_PROPERTY_RE.test(n));
+// How relevant a group is to an agent: 3 in the curated catalog, 2 a
+// real-estate name, 1 only a buying/selling/investing word, 0 anything else.
+// Every group is shown; the lists put the most relevant first.
+const groupRelevance = (m, cats) => {
+  if (Array.isArray(cats) && cats.some(Boolean)) return 3;
+  const n = String((m && m.name) || "");
+  if (!n || NOT_REAL_ESTATE_RE.test(n)) return 0;
+  if (REAL_ESTATE_RE.test(n)) return 2;
+  return DEAL_RE.test(n) && !NOT_PROPERTY_RE.test(n) ? 1 : 0;
 };
-// What the agent is shown and can pick: real-estate groups only — one the
-// curated catalog carries, or one whose own name reads as real estate.
-// Everything else the account belongs to (a hobby, a job board) stays out.
-const isRealEstateGroup = (m, cats) => (Array.isArray(cats) && cats.some(Boolean)) || looksRealEstate(m && m.name);
+const isRealEstateGroup = (m, cats) => groupRelevance(m, cats) > 0;
+// Sort comparator for member lists, most relevant first; `all(m)` is the
+// catalog entries for m. Array#sort is stable, so ties keep their order.
+const byRelevance = (all) => (a, b) => groupRelevance(b, all(b)) - groupRelevance(a, all(a));
 
 // The link on "Your groups" also carries the group's last-activity line;
 // only the first line is the name. The suffix is also cut when the two come
@@ -119,33 +122,6 @@ async function syncMembership(page, opts = {}) {
   return [...out.values()];
 }
 
-function nameHash(name) {
-  return crypto.createHmac("sha256", String(process.env.PROFILE_KEY || "dev")).update(String(name || "")).digest("hex").slice(0, 16);
-}
-
-// Which canonical URLs / numeric ids the curated catalog carries, so a
-// membership that matches one keeps its name instead of being hashed.
-function catalogMatchers(catalog) {
-  const urls = new Set();
-  const ids = new Set();
-  for (const c of Array.isArray(catalog) ? catalog : []) {
-    const canon = shareKit.sanitizeGroups([c && c.url])[0];
-    if (!canon) continue;
-    urls.add(canon);
-    const slug = slugOf(canon);
-    if (isNumeric(slug)) ids.add(slug);
-  }
-  return { urls, ids };
-}
-
-function shouldKeepName(entry, { catalogUrls, catalogIds, selected }) {
-  if (catalogUrls.has(entry.canonical_url)) return true;
-  if (entry.id_verified && catalogIds.has(entry.group_id)) return true;
-  if (looksRealEstate(entry.name)) return true;
-  if (Array.isArray(selected) && selected.includes(entry.group_id)) return true;
-  return false;
-}
-
 function ageMs(now, iso) {
   const t = iso ? new Date(iso).getTime() : NaN;
   return Number.isFinite(t) ? now.getTime() - t : Infinity;
@@ -157,8 +133,6 @@ function ageMs(now, iso) {
  * `prev` but not observed now -> "stale", `observed_at` left exactly as it
  * was (the last time it WAS seen); a stale (or "left", set elsewhere —
  * Task 18) entry whose `observed_at` is more than 30 days old is dropped.
- * The privacy decision is recomputed for every OBSERVED entry from the
- * current catalog/keyword list every time, never inherited from storage.
  * `opts.hidden` (hiddenIds(conn)): groups the agent removed from the list
  * (DELETE /api/posting/groups/:id) — never re-added, observed or carried.
  */
@@ -166,8 +140,6 @@ function mergeMembership(prev, scraped, opts = {}) {
   const now = opts.now instanceof Date ? opts.now : new Date();
   const hidden = opts.hidden instanceof Set ? opts.hidden : new Set((Array.isArray(opts.hidden) ? opts.hidden : []).map(String));
   const nowIso = now.toISOString();
-  const selected = Array.isArray(opts.selected) ? opts.selected : [];
-  const { urls: catalogUrls, ids: catalogIds } = catalogMatchers(opts.catalog);
   const prevList = Array.isArray(prev) ? prev : [];
   const prevMap = new Map(prevList.filter((e) => e && e.group_id).map((e) => [e.group_id, e]));
   // A vanity slug already resolved to its numeric id (Task 18) stays that
@@ -185,11 +157,11 @@ function mergeMembership(prev, scraped, opts = {}) {
     if (seen.has(group_id)) continue; // dedup within one scrape, by group_id
     seen.add(group_id);
     const idVerified = isNumeric(group_id);
-    const built = { group_id, canonical_url: item.url, slug, name: item.name, id_verified: idVerified };
     const entry = {
       group_id,
-      canonical_url: built.canonical_url,
+      canonical_url: item.url,
       slug,
+      name: item.name,
       membership_state: "member",
       observed_at: nowIso,
       last_confirmed_at: nowIso,
@@ -197,8 +169,6 @@ function mergeMembership(prev, scraped, opts = {}) {
     };
     const prevAliases = (prevMap.get(group_id) || {}).aliases;
     if (Array.isArray(prevAliases) && prevAliases.length) entry.aliases = prevAliases.slice();
-    if (shouldKeepName(built, { catalogUrls, catalogIds, selected })) entry.name = built.name;
-    else entry.name_hash = nameHash(built.name);
     out.push(entry);
   }
 
@@ -210,16 +180,6 @@ function mergeMembership(prev, scraped, opts = {}) {
     const carried = prevEntry.membership_state === "left"
       ? Object.assign({}, prevEntry)
       : Object.assign({}, prevEntry, { membership_state: "stale" });
-    // Privacy is re-gated on EVERY merge, not only when an entry is first
-    // observed: an entry kept in the clear earlier (a catalog match, or an
-    // agent selection) can stop qualifying — removed from the catalog, or
-    // deselected — while the row itself is simply carried forward here.
-    // A hash-only entry has nothing left to leak and no way back to a name
-    // from its hash, so there is nothing to re-gate for it.
-    if (carried.name && !shouldKeepName(carried, { catalogUrls, catalogIds, selected })) {
-      carried.name_hash = nameHash(carried.name);
-      delete carried.name;
-    }
     out.push(carried);
   }
   return out;
@@ -335,7 +295,6 @@ async function runSync({ phone }, deps = {}) {
     if (HALTING.has(e.signal)) await (deps.haltAccount || require("./posting-halts").haltAccount)(phone, e.signal, deps);
     throw e;
   }
-  const catalog = await db.listGroupCatalog(500);
   // Re-read after the scrape (minutes): a group removed meanwhile stays removed.
   const fresh = (await db.getConnection(phone)) || {};
   const anomaly = scrapeAnomaly(fresh.facebook_groups_member, scraped);
@@ -343,7 +302,7 @@ async function runSync({ phone }, deps = {}) {
     await noteAnomaly(db, anomaly);
     throw Object.assign(new Error("groups scrape not trusted"), { code: "sync_anomaly", anomaly });
   }
-  const merged = mergeMembership(fresh.facebook_groups_member || [], scraped, { now: new Date(), catalog, selected: [], hidden: hiddenIds(fresh) });
+  const merged = mergeMembership(fresh.facebook_groups_member || [], scraped, { now: new Date(), hidden: hiddenIds(fresh) });
   await db.setConnection(phone, { facebook_groups_member: merged, facebook_groups_synced_at: new Date().toISOString() });
   return merged.length;
 }
@@ -366,4 +325,4 @@ const failureOf = (e) => {
   return { reason: safe(e && (e.code || e.name)) || "error", detail: safe(e && (e.signal || e.anomaly || e.status)) };
 };
 
-module.exports = { failureOf, groupName, isNavSlug, isRealEstateGroup, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };
+module.exports = { failureOf, groupName, isNavSlug, isRealEstateGroup, groupRelevance, byRelevance, syncMembership, mergeMembership, resolveGroupId, runSync, isStale, hiddenIds, scrapeAnomaly, SELECTORS, GROUPS_URL };

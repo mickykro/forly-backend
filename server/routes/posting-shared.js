@@ -21,7 +21,7 @@ const ACTIONS = new Set(["approve", "skip", "stop"]);
 const ACT_TTL_S = 72 * 3600; // a one-tap link works for 72 hours
 const TARGETS = ["page", "groups"];
 const DEFAULT_TARGETS = ["groups"]; // the Page is opt-in, by the agent's explicit choice
-const MAX_GROUP_IDS = 40; // share-kit MAX_GROUPS: posting frequency limits are unchanged
+const MAX_GROUP_IDS = require("../posting-campaign").MAX_GROUPS; // per property
 // A Task 14 group id: numeric, or "slug:<vanity>" until the driver resolves it.
 const GROUP_ID_RE = /^(?:\d{1,30}|slug:[^\s/|?#:]{1,120})$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -245,12 +245,36 @@ const wrap = (name, fn) => (req, res, next) => Promise.resolve(fn(req, res, next
 });
 
 // How many properties may post automatically at once (one account's pace).
+const hiddenList = (conn) => (Array.isArray(conn.facebook_groups_hidden) ? conn.facebook_groups_hidden : [])
+  .filter((h) => h && Array.isArray(h.ids) && h.ids.length);
+// Removes one group from the agent's list (agent DELETE /groups/:id, admin
+// remove): forgets the membership entry (every id it is known by), drops it
+// from the default groups, and records its ids in facebook_groups_hidden (ids
+// only, never a name) so no sync brings it back. null: not a member entry.
+function hidePatch(cur, id, at) {
+  const m = findMember(cur, id);
+  if (!m) return null;
+  const ids = new Set([String(id), ...idsOf(m)]);
+  const same = (e) => idsOf(e).some((x) => ids.has(x));
+  const list = Array.isArray(cur.facebook_groups_member) ? cur.facebook_groups_member.filter((e) => e && e.group_id) : [];
+  for (const e of list) if (same(e)) for (const x of idsOf(e)) ids.add(x);
+  const hidden = hiddenList(cur).filter((h) => !h.ids.some((x) => ids.has(String(x))));
+  const patch = {
+    facebook_groups_member: list.filter((e) => !same(e)),
+    facebook_groups_hidden: hidden.concat([{ ids: [m.group_id, ...[...ids].filter((x) => x !== m.group_id)], hidden_at: at }]),
+  };
+  const perm = cur.posting_permission;
+  if (perm && Array.isArray(perm.default_group_ids)) {
+    patch.posting_permission = { default_group_ids: perm.default_group_ids.map(String).filter((x) => !ids.has(x)) };
+  }
+  return patch;
+}
 const MAX_ACTIVE_CAMPAIGNS = 3;
 
 module.exports = {
   MAX_ACTIVE_CAMPAIGNS, CONSENT_VERSION, PRIVATE_NAME, ACTIONS, ACT_TTL_S, TARGETS, DEFAULT_TARGETS, MAX_GROUP_IDS, GROUP_ID_RE, ID_RE,
   publicView, scrub, actionLink, readActionLink, card, allowed, SYSTEM_OFF,
-  hiddenIds, memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, memberEntries, catalogLookup, publicMember,
+  hiddenIds, hiddenList, hidePatch, memberList, findMember, isMember, memberUrl, idsOf, parseGroupIds, memberGate, memberEntries, catalogLookup, publicMember,
   pagesOf, pageKey, storedPageId, pageByStored, pageByKey, pageConfirmed, parseTargets,
   needsReconnect, haltState, publicPermission, wrap,
 };

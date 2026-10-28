@@ -102,8 +102,8 @@
     var my = ++seq;
     $("#campFormEstimate").textContent = "";
     $("#campFormSync").hidden = !ref; $("#campFormSynced").textContent = "";
-    if (!ref) { $("#campFormGroupsHidden").textContent = ""; $("#campFormProperty").innerHTML = '<option value="">קודם בחרו סוכן</option>'; emptyGroups("בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן."); return Promise.resolve(false); }
-    $("#campFormProperty").innerHTML = '<option value="">טוען…</option>'; emptyGroups("טוען קבוצות…"); $("#campFormGroupsHidden").textContent = "";
+    if (!ref) { $("#campFormProperty").innerHTML = '<option value="">קודם בחרו סוכן</option>'; emptyGroups("בחרו סוכן כדי לראות את הקבוצות שהוא חבר בהן."); return Promise.resolve(false); }
+    $("#campFormProperty").innerHTML = '<option value="">טוען…</option>'; emptyGroups("טוען קבוצות…");
     return Promise.all([req("GET", "/agents/" + encodeURIComponent(ref) + "/properties"), req("GET", "/agents/" + encodeURIComponent(ref) + "/groups")]).then(function (r) {
       if (my !== seq) return false;
       var props = r[0].properties || [];
@@ -127,18 +127,16 @@
     var fromDefaults = !checked && defaults.length > 0;
     if (fromDefaults) checked = defaults;
     $("#campFormSynced").textContent = d.synced_at ? "הקבוצות נקראו מפייסבוק ב-" + new Date(d.synced_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : "הקבוצות עוד לא נקראו מפייסבוק.";
-    // The agent's own rule: real-estate groups only (in the catalog, or a
-    // real-estate name) — plus any the campaign being edited already has.
-    var shown = groups.filter(function (g) { return g.in_catalog || g.real_estate || defaults.indexOf(g.group_id) >= 0 || (checked && checked.indexOf(g.group_id) >= 0); });
-    var hidden = groups.length - shown.length;
+    // All the agent's groups: defaults first, then the server's order (most relevant first).
+    var shown = groups.slice();
     groupInfo = {}; shown.forEach(function (g) { groupInfo[g.group_id] = g; });
-    $("#campFormGroupsHidden").textContent = hidden ? "עוד " + hidden + " קבוצות של הסוכן לא מוצגות — לפי השם הן לא קבוצות נדל״ן." : "";
     var isDef = function (g) { return defaults.indexOf(g.group_id) >= 0 ? 1 : 0; };
-    shown.sort(function (a, b) { return isDef(b) - isDef(a) || (b.in_catalog ? 1 : 0) - (a.in_catalog ? 1 : 0) || (b.name ? 1 : 0) - (a.name ? 1 : 0) || String(a.name).localeCompare(String(b.name), "he"); });
+    shown.sort(function (a, b) { return isDef(b) - isDef(a); });
     if (!shown.length) { emptyGroups("הסוכן לא חבר באף קבוצה מהקטלוג — אפשר לפרסם רק בדף העסקי."); return; }
     $("#campFormGroups").innerHTML = shown.map(function (g) {
       var on = checked && checked.indexOf(g.group_id) >= 0;
-      return '<label class="camp-g' + (on ? " on" : "") + '"><input type="checkbox" value="' + esc(g.group_id) + '"' + (on ? " checked" : "") + '> <span class="camp-gn">' + esc(g.name || "קבוצה ללא שם · " + g.group_id) + "</span>" + (isDef(g) ? '<span class="cf-tag cf-def">ברירת מחדל</span>' : "") + (g.in_catalog ? "" : '<span class="cf-tag">לא בקטלוג</span>') + "</label>";
+      return '<label class="camp-g' + (on ? " on" : "") + '"><input type="checkbox" value="' + esc(g.group_id) + '"' + (on ? " checked" : "") + '> <span class="camp-gn">' + esc(g.name || "קבוצה ללא שם · " + g.group_id) + "</span>" + (isDef(g) ? '<span class="cf-tag cf-def">ברירת מחדל</span>' : "") + (g.in_catalog ? "" : '<span class="cf-tag">לא בקטלוג</span>') +
+        '<button type="button" class="cf-rm" data-rm="' + esc(g.group_id) + '" title="הסרה מהרשימה של הסוכן" aria-label="הסרה מהרשימה">×</button></label>';
     }).join("");
     $("#campFormGroupBar").hidden = false;
     $("#campFormUseDefaults").hidden = !defaults.length;
@@ -193,6 +191,16 @@
     clearError();
     showEstimate();
   }
+  // × on a group: removes it from the agent's list (the agent can restore it); what is ticked stays ticked.
+  function removeGroup(e) {
+    var b = e.target.closest(".cf-rm"), ref = $("#campFormAgent").value, my = seq, id = b && b.getAttribute("data-rm"), g = groupInfo[id] || {};
+    if (!b || !ref) return; e.preventDefault(); // the × sits inside the group's label: never a tick
+    if (!confirm("להסיר את \"" + (g.name || id) + "\" מרשימת הקבוצות של הסוכן? הקבוצה לא תחזור בסנכרון.")) return;
+    req("POST", "/agents/" + encodeURIComponent(ref) + "/groups/" + encodeURIComponent(id) + "/remove", {}).then(function (d) {
+      if (my === seq) { showGroups(d, chosenGroups().filter(function (x) { return x !== id; })); groupsChanged(); checkFit(); FLY.toast("הקבוצה הוסרה"); }
+    }).catch(fail);
+  }
+  function fullGroups(on) { $("#campFormWhere").classList.toggle("cf-full", on); $("#campFormFull").textContent = on ? "סגירת מסך מלא" : "מסך מלא"; }
   function filterGroups() {
     var q = $("#campFormGroupSearch").value.trim().toLowerCase();
     Array.prototype.forEach.call(document.querySelectorAll("#campFormGroups .camp-g"), function (l) { l.hidden = !!q && l.textContent.toLowerCase().indexOf(q) < 0; });
@@ -289,7 +297,7 @@
   function setMain(show) { // the campaign fields vs. the restart form (consent and days)
     Array.prototype.forEach.call(document.querySelectorAll("#campForm .cf-main"), function (el) { el.hidden = !show; });
   }
-  function closeForm() { seq++; editing = null; restarting = null; applying = null; $("#campFormDefaultsRow").hidden = true; initial = null; $("#campForm").hidden = true; $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; clearError(); }
+  function closeForm() { seq++; editing = null; restarting = null; applying = null; $("#campFormDefaultsRow").hidden = true; initial = null; $("#campForm").hidden = true; fullGroups(false); $("#campFormSave").disabled = false; $("#campFormEstimate").textContent = ""; clearError(); }
   function validNote() {
     var el = $("#campFormConsentNote"), n = el.value.trim();
     if (n.length > 300) return showError("הערת ההסכמה ארוכה מ־300 תווים.", el);
@@ -447,12 +455,13 @@
       return req("POST", "/campaigns/" + encodeURIComponent(id) + "/start", {}).then(function () { FLY.toast("הקמפיין פעיל"); load(); }).catch(fail);
     }
   }
-
   $("#campStatus").addEventListener("change", load);
   $("#campAgent").addEventListener("change", load);
   $("#campNew").addEventListener("click", function () { openForm(null); });
   $("#campFormAgent").addEventListener("change", function () { loadAgentChoices($("#campFormAgent").value, null); });
   $("#campFormGroups").addEventListener("change", groupsChanged);
+  $("#campFormGroups").addEventListener("click", removeGroup);
+  $("#campFormFull").addEventListener("click", function () { fullGroups(!$("#campFormWhere").classList.contains("cf-full")); }); document.addEventListener("keydown", function (e) { if (e.key === "Escape") fullGroups(false); });
   $("#campFormGroupSearch").addEventListener("input", filterGroups);
   $("#campFormRefresh").addEventListener("click", refreshGroups);
   $("#campFormAll").addEventListener("click", function () { setAllGroups(true); });

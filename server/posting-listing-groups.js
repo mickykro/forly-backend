@@ -16,7 +16,7 @@ const A = require("./posting-account");
 const C = require("./posting-campaign");
 
 const DEFAULT = "default";
-const MAX_GROUPS = 40;
+const MAX_GROUPS = C.MAX_GROUPS;
 const LIVE = new Set(["running", "paused"]);
 
 const connected = (conn) => !!(conn && conn.facebook_browser_connected_at);
