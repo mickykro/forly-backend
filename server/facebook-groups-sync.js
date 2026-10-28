@@ -96,11 +96,18 @@ async function syncMembership(page, opts = {}) {
   if (signal !== "ok") throw Object.assign(new Error("groups page not readable"), { code: "sync_signal", signal });
   // Load the whole list: Facebook adds groups in batches as the page scrolls, so
   // scroll to the bottom until five rounds in a row add none (a slow batch can
-  // take a few seconds); capped at a few hundred groups.
+  // take a few seconds); capped at about two thousand groups.
+  // The list's own last link is scrolled into view: scrolling the window, or the
+  // wheel at the cursor's default spot over the sidebar, left it at its first 109.
   const count = () => page.$$eval(SELECTORS.groupLink, (els) => els.length).catch(() => 0);
   let rounds = 0, last = -1;
-  for (let still = 0; rounds < 80 && still < 5; rounds++) {
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)).catch(() => {});
+  for (let still = 0; rounds < 150 && still < 5; rounds++) {
+    await page.evaluate((sel) => {
+      const links = document.querySelectorAll(sel);
+      if (links.length) links[links.length - 1].scrollIntoView({ block: "end" });
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    }, SELECTORS.groupLink).catch(() => {});
+    if (page.mouse.move) await page.mouse.move(800, 500).catch(() => {});
     await page.mouse.wheel(0, 2400);
     await page.waitForTimeout(1200);
     const n = await count();
@@ -285,7 +292,7 @@ async function runSync({ phone }, deps = {}) {
   let scraped;
   try {
     scraped = await withPage(
-      { duration: 300, note: "forly-sync:groups", profile: { name: profileNameFor("facebook", phone, conn), persist: true } },
+      { duration: 420, note: "forly-sync:groups", profile: { name: profileNameFor("facebook", phone, conn), persist: true } },
       (page) => syncMembership(page, { guard: navGuard }),
       pageDeps,
     );
