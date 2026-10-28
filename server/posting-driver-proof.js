@@ -29,6 +29,9 @@ const SELECTORS = {
   targetName: 'div[role="main"] h1', // [Unverified] the group's / Page's own header
   targetIdMeta: 'meta[property="al:android:url"]', // [Unverified] fb://group/<id>, fb://page/<id>, fb://profile/<id>
   targetUrlMeta: 'meta[property="og:url"]', // [Unverified]
+  // Seen 28 Oct 2026: a vanity-address group has no id <meta>; its own nav still links /groups/<id>/members/.
+  groupMembersLink: 'div[role="main"] a[href*="/members"]',
+  pendingList: 'div[role="main"]', // [Unverified] the group's "your pending posts" tab
   joinGroup: 'div[role="main"] div[aria-label="Join group"][role="button"], div[role="main"] div[aria-label="הצטרפות לקבוצה"][role="button"]', // [Unverified]
   // A join request waiting for the group's admins (Hebrew is gendered: בטל / בטלי). [Unverified] labels, seen as text 26 Oct 2026.
   cancelJoinRequest: 'div[role="main"] div[aria-label="Cancel request"][role="button"], div[role="main"] div[aria-label="ביטול הבקשה"][role="button"], div[role="main"] div[aria-label="בטל את הבקשה"][role="button"], div[role="main"] div[aria-label="בטלי את הבקשה"][role="button"]',
@@ -235,6 +238,12 @@ async function readTargetId(page, kind) {
   let landed = null;
   try { landed = kind === "group" ? urlGroupId(page.url()) : null; } catch { landed = null; }
   if (landed) ids.push(landed);
+  // A vanity address and no id <meta>: the group's own members link — only when exactly one id is named.
+  if (!ids.length && kind === "group") {
+    const hrefs = await Promise.resolve().then(() => page.$$eval(SELECTORS.groupMembersLink, (as) => as.map((a) => a.getAttribute("href")))).catch(() => []);
+    const own = [...new Set((Array.isArray(hrefs) ? hrefs : []).map((h) => (String(h).match(/\/groups\/(\d+)\/members\/?(?:[?#]|$)/) || [])[1]).filter(Boolean))];
+    if (own.length === 1) ids.push(own[0]);
+  }
   return ids.length && ids.every((i) => i === ids[0]) ? ids[0] : null;
 }
 

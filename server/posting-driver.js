@@ -642,6 +642,18 @@ async function chronoLoaded(page, kind) {
 }
 const feedHealthy = (posts) => posts.length >= MIN_FEED_FOR_ABSENT && posts.every((p) => P.norm(p.text) && P.norm(p.author));
 
+// → true when the copy is on the group's own-pending tab, false when not (or unreadable), null when navigation is not allowed.
+async function inPendingTab(page, x, id, copy) {
+  if (!(await x.allows("navigate"))) return null;
+  const ok = await page.goto(`https://www.facebook.com/groups/${id}/my_pending_content/`, { waitUntil: "domcontentloaded", timeout: 45000 }).then(() => true, () => false);
+  await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+  if (!ok || !/\/my_pending_content/.test(page.url())) return false; // redirected away: no such tab here
+  const sig = await P.readSignal(page, copy);
+  if (sig !== "ok" && sig !== "pending_approval") return false;
+  // The tab lists only this account's own waiting posts: the copy's opening words there are ours.
+  return (await P.textOf(page, S.pendingList)).includes(P.norm(copy).slice(0, 60));
+}
+
 /*
  * reconcile(attempt, deps) — an outcome_unknown attempt: look at the
  * destination for a post by this account whose text fingerprint is the
@@ -649,7 +661,8 @@ const feedHealthy = (posts) => posts.length >= MIN_FEED_FOR_ABSENT && posts.ever
  * Found → outcome_unknown → verified_posted (with its permalink). The
  * newest-first view loaded, at least MIN_FEED_FOR_ABSENT posts were read
  * with text AND author each (the selectors are healthy), and it is not
- * there → verified_failed `reconciled_absent`. Anything less certain → no
+ * there (nor, for a group, on its "your pending posts" tab → submitted_for_approval)
+ * → verified_failed `reconciled_absent`. Anything less certain → no
  * transition (operator review); a feed that could not be trusted is noted
  * `reconcile_note: "feed_unread"`. Only an attempt whose state IS
  * outcome_unknown is looked at. deps: posting-sweeper's { attempts
@@ -707,6 +720,12 @@ async function reconcile(attempt, deps = {}) {
       if (!(await chronoLoaded(page, kind)) || !feedHealthy([...seen.values()])) {
         await x.annotate({ reconcile_note: "feed_unread" });
         return stay("feed_unread", { reconcile_note: "feed_unread" });
+      }
+      // A group that approves posts keeps ours off the feed, on "your pending posts" (staging screenshots, 28 Oct).
+      if (kind === "group") {
+        const pending = await inPendingTab(page, x, id, copy);
+        if (pending === null) return stay("posting_disabled");
+        if (pending) return x.end("submitted_for_approval", { reconciled: true });
       }
       return x.end("verified_failed", { error_code: "reconciled_absent" });
     }, pageDepsOf(x));

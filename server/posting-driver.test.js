@@ -211,6 +211,11 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/111", "", "https://www.facebook.com/groups/222/"), "group"), null);
     assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/haifa.rent", "", ""), "group"), null, "a vanity address names no id");
     assert.equal(await P.readTargetId(at("https://evil.example/groups/111", "", ""), "group"), null);
+    const vanity = (links) => Object.assign(at("https://www.facebook.com/groups/ramotb7", "", ""), { $$eval: async (sel) => (sel === S.groupMembersLink ? links : []) });
+    assert.equal(await P.readTargetId(vanity(["https://www.facebook.com/groups/795524965564948/members/", "/groups/ramotb7/members/"]), "group"), "795524965564948", "a vanity group: its own members link names the id");
+    assert.equal(await P.readTargetId(vanity(["/groups/111/members/", "/groups/222/members/"]), "group"), null, "two ids named: no id");
+    assert.equal(await P.readTargetId(vanity(["/groups/111/members/"]), "page"), null, "never a Page's id");
+    assert.equal(await P.readTargetId(Object.assign(vanity(["/groups/222/members/"]), { url: () => "https://www.facebook.com/groups/111" }), "group"), "111", "the address wins; links read only when nothing else names an id");
     assert.equal(await P.readTargetId(at("https://www.facebook.com/groups/111", "", ""), "page"), null, "never a Page's id");
     // norm: invisible marks never make two equal names differ; visible text still must match exactly
     assert.equal(P.norm("\u200fפורלי\u00a0- הבית\u200e \u2068של\u2069 המתווכים😇\ufe0f"), "פורלי - הבית של המתווכים😇");

@@ -95,7 +95,7 @@ const EDGES = {
   composer_ready: ["submit_started", "cancelled", "verified_failed"],
   submit_started: ["verification_pending", "outcome_unknown", "verified_failed"],
   verification_pending: ["verified_posted", "submitted_for_approval", "verified_failed", "outcome_unknown"],
-  outcome_unknown: ["verified_posted", "verified_failed"], // reconciliation only
+  outcome_unknown: ["verified_posted", "submitted_for_approval", "verified_failed"], // reconciliation only
 };
 const TERMINAL = new Set(["verified_posted", "submitted_for_approval", "verified_failed", "cancelled"]);
 // Of one property→target key, after released attempts only. A local box calibrating selectors needs more.

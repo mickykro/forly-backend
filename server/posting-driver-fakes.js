@@ -67,7 +67,7 @@ function fakePage(o = {}) {
     mouse: { wheel: async () => {}, move: async () => {} },
     waitForLoadState: async () => {},
     waitForTimeout: async (ms) => { st.waits.push(ms); },
-    $$eval: async (sel) => (sel === S.feedPost ? v(feed) : []),
+    $$eval: async (sel) => (sel === S.feedPost ? v(feed) : sel === S.groupMembersLink ? v(o.memberLinks) || [] : []),
     // The driver's one in-page read (readInPage): the dialog/alert regions'
     // texts and the captcha-frame count. A region is { text (its chrome),
     // editable (the text inside its [contenteditable], never read) }; the

@@ -36,6 +36,28 @@ const PAGE_NAME = F.PAGE_NAME;
     assert.equal(h.page.st.clicks.length, 0);
     assert.ok(/[?&]sorting_setting=CHRONOLOGICAL/.test(h.page.st.visited[0]), "the chronological view was asked for");
   }
+  {
+    // an approval group: not in the feed, but waiting on "your pending posts" → submitted_for_approval
+    const h = recon({ page: { feed: feedWithout, texts: { [S.pendingList]: (st) => (/my_pending_content/.test(st.url) ? `Pending · ${COPY}` : "") } } });
+    const out = await PD.reconcile(unknown, h.deps);
+    assert.deepEqual(h.states(), ["submitted_for_approval"]);
+    assert.equal(out.state, "submitted_for_approval");
+    assert.ok(/\/groups\/111\/my_pending_content\/$/.test(h.page.st.visited[1]), "the pending tab was looked at");
+    assert.equal(h.page.st.clicks.length, 0);
+  }
+  {
+    // the pending tab redirects away (no such tab): absent, as before
+    const h = recon({ page: { feed: feedWithout, redirect: (u) => (/my_pending_content/.test(u) ? "https://www.facebook.com/groups/111/" : u), texts: { [S.pendingList]: COPY } } });
+    assert.equal((await PD.reconcile(unknown, h.deps)).state, "verified_failed");
+  }
+  {
+    // navigation refused before the pending tab: no verdict
+    let n = 0;
+    const h = recon({ page: { feed: feedWithout }, deny: (a) => a === "navigate" && ++n > 1 });
+    const out = await PD.reconcile(unknown, h.deps);
+    assert.deepEqual([out.state, out.error_code], ["outcome_unknown", "posting_disabled"]);
+    assert.equal(h.transitions.length, 0);
+  }
   // ── the selector health check: anything short of it stays outcome_unknown, noted feed_unread ──
   for (const [label, o] of [
     ["the text selector drifted (our post is there, unreadable)", { page: { feed: foreign(15).map((p, i) => (i === 0 ? { ...p, author: NAME, text: "" } : { ...p, text: "" })) } }],
