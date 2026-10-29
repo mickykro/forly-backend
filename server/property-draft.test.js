@@ -159,4 +159,8 @@ const afterPrice = D.touch({ ...d, skipped: [], fields: { ...d.fields, price: 29
 assert.notDeepEqual(D.nextStep(afterPrice), { kind: "ask", field: "deal" },
   "deal is not asked once it is inferred");
 
+// Stop words with polite filler around them still stop the edits (972547221770, 2026-10-29).
+for (const t of ["זהו מספיק תודה", "מספיק", "די תודה", "עצור!", "אל תמשיכי"]) assert.ok(D.isStop(t), t);
+for (const t of ["מספיק תמונות לדף", "די יפה", "עוד 3 תמונות"]) assert.ok(!D.isStop(t), t);
+
 console.log("property-draft.test.js ok");

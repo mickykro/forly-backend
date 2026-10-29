@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="he" dir="ltr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Forly WhatsApp Review — 2026-10-29 (PM)</title>
+<style>
+:root { --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f27; --muted: #5b6472; --border: #e3e6ea; --accent: #2563eb; --good: #15803d; --good-bg: #ecfdf3; --warn: #b45309; --warn-bg: #fffbeb; --bad: #b91c1c; --bad-bg: #fef2f2; --info-bg: #eff6ff; --code-bg: #0f172a; --code-ink: #e2e8f0; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.55; padding: 0 16px 64px; }
+.wrap { max-width: 880px; margin: 0 auto; }
+header { padding: 40px 0 20px; }
+h1 { font-size: 1.7rem; margin: 0 0 6px; }
+.subtitle { color: var(--muted); font-size: 0.95rem; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+.pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 0.82rem; color: var(--muted); }
+.verdict { margin: 22px 0 30px; padding: 20px 22px; border-radius: 14px; background: var(--info-bg); border: 1px solid #bfdbfe; }
+.verdict.alert { background: var(--bad-bg); border-color: #fecaca; }
+.verdict.ok { background: var(--good-bg); border-color: #bbf7d0; }
+.verdict h2 { margin: 0 0 8px; font-size: 1.05rem; }
+.verdict p { margin: 0 0 8px; color: #1e3a5f; }
+.verdict.alert p { color: #7f1d1d; }
+.verdict.ok p { color: #14532d; }
+.verdict p:last-child { margin-bottom: 0; }
+section { margin: 36px 0; }
+h2.section-title { font-size: 1.2rem; border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 18px; }
+.section-note { color: var(--muted); margin-top: -10px; margin-bottom: 18px; font-size: 0.92rem; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+.card.critical { border-color: #fecaca; }
+.card.positive { border-color: #bbf7d0; }
+.card.pending { border-color: #fde68a; }
+.card h3 { margin: 0 0 4px; font-size: 1.02rem; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.badge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.badge.fixed { background: var(--good-bg); color: var(--good); }
+.badge.n8n { background: var(--warn-bg); color: var(--warn); }
+.badge.watch { background: #f3f4f6; color: var(--muted); }
+.badge.good { background: var(--good-bg); color: var(--good); }
+.badge.critical { background: var(--bad-bg); color: var(--bad); }
+.badge.biz { background: #f3e8ff; color: #7e22ce; }
+.badge.blocked { background: #fef3c7; color: #92400e; }
+.badge.new { background: #dbeafe; color: #1d4ed8; }
+.card .meta { color: var(--muted); font-size: 0.82rem; margin: 4px 0 12px; }
+.card p { margin: 8px 0; }
+.evidence { background: #fafbfc; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 14px; margin: 10px 0; font-size: 0.86rem; }
+.evidence .line { margin: 3px 0; }
+code, .code-inline { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+ul.plain { margin: 8px 0; padding-inline-start: 20px; }
+ul.plain li { margin: 4px 0; }
+.outbound-msg { background: var(--bad-bg); border: 1px solid #fecaca; border-radius: 10px; padding: 14px 16px; margin-top: 10px; }
+.outbound-msg .to { font-size: 0.78rem; color: var(--bad); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 6px; }
+.outbound-msg pre { white-space: pre-wrap; font-family: inherit; margin: 0; direction: rtl; text-align: right; }
+.outbound-msg.sent-prior { background: var(--info-bg); border-color: #bfdbfe; }
+.outbound-msg.sent-prior .to { color: #1e3a5f; }
+footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1115; --card: #171a21; --ink: #e5e7eb; --muted: #9199a8; --border: #262b34; --info-bg: #142238; --good-bg: #0f2a1c; --warn-bg: #2a2110; --bad-bg: #2a1414; --code-bg: #05070c; }
+  .badge.biz { background: #2a1a3a; color: #d8b4fe; }
+  .badge.blocked { background: #3a2a0c; color: #fcd34d; }
+  .badge.new { background: #1e2d4a; color: #93c5fd; }
+  .verdict { border-color: #1e3a5f; } .verdict.alert { border-color: #4c1d1d; } .verdict.ok { border-color: #14532d; }
+  .verdict p { color: #bcd4ee; } .verdict.alert p { color: #fca5a5; } .verdict.ok p { color: #86efac; }
+  .evidence { background: #12151c; } code, .code-inline { background: #20242e; color: #dbe1ea; }
+  .outbound-msg { border-color: #4c1d1d; } .outbound-msg.sent-prior { border-color: #1e3a5f; }
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Forly WhatsApp Review</h1>
+  <div class="subtitle">Second check today. Conversations pulled straight from Whapi.Cloud, then each problem traced to its n8n execution so the fix went to the real cause.</div>
+  <div class="meta-row">
+    <span class="pill">Generated 2026-10-29, ~17:30 IDT</span>
+    <span class="pill">Window: 2026-10-28 08:30 → 2026-10-29 17:15 IDT</span>
+    <span class="pill">Source: gate.whapi.cloud <code>/messages/list</code> (direct, 500 msgs) + n8n execution data</span>
+    <span class="pill">972542045280 excluded (test target only)</span>
+  </div>
+</header>
+
+<div class="verdict alert">
+  <h2>Bottom line</h2>
+  <p>Not "nothing to improve." This morning's Main Router v3 publish brought in a regression. A 10-28 15:26 draft also set <code>alwaysOutputData</code> on <b>Code - Winner Check + Bundle</b>, so the debounce's "losers" kept going instead of stopping. Today an agent sent 11 photos and got <b>21 edits back</b>, 10 "עובדת על התמונה" acks and 11 "ערכתי תמונה אחת — לבנות דף?" prompts. About 10 paid generations were wasted.</p>
+  <p>The cause of agent …1283's 10-28 silence was also wrong in this morning's report. It wasn't Business Handler v6. Firestore returned <i>Quota exceeded</i> to <b>FS - Lookup Pending</b>, so every run in her burst (9 photos + "לצייר") saw an empty bucket and stopped without replying.</p>
+  <p>Fixed and published in n8n: Main Router v3 (both bugs, plus stop words now get through the generation lock) and Image Gen v4 (one progress ack per batch, not one per photo). A backend fix for "זהו מספיק תודה" not counting as a stop is in the PR. Live tests against 972542045280 are below.</p>
+</div>
+
+<section>
+  <h2 class="section-title">Changes made</h2>
+
+  <div class="card positive">
+    <h3>1 · Main Router v3: debounce losers stop again <span class="badge fixed">Fixed, published</span> <span class="badge n8n">n8n</span></h3>
+    <div class="meta">fhyTsd1DSN6wtMGz · version 9bc08b3e → 391ec6e7 · node <code>Code - Winner Check + Bundle</code></div>
+    <p><b>Evidence:</b> execution 148025 (one of 11 router runs for the 15:05:49 burst). Its lookup saw all 11 pending docs and the code returned <code>[]</code> (not the winner). But the node emitted <code>[{"json":{}}]</code> because <code>alwaysOutputData: true</code>, so the run carried on with only its own photo. All 11 router runs called Business Handler v6 (148035–148051): 10 single-photo edits plus the real 11-photo batch.</p>
+    <p><b>Change:</b> <code>alwaysOutputData</code> → <code>false</code>. Losing runs end at this node again, as the code comment always intended.</p>
+  </div>
+
+  <div class="card positive">
+    <h3>2 · Main Router v3: a failed lookup no longer drops the message <span class="badge fixed">Fixed, published</span> <span class="badge n8n">n8n</span></h3>
+    <div class="meta">same node · the 10-28 agent …1283 incident</div>
+    <p><b>Evidence:</b> executions 147985–147994 (10-28 10:08–10:09 UTC). <b>FS - Lookup Pending</b> returned <code>{"error":{"message":"The service is receiving too many requests from you","description":"Quota exceeded."}}</code> (it has <code>continueRegularOutput</code>). With no rows, every run took the "empty bucket" exit, so Business Handler never ran and nobody replied.</p>
+    <p><b>Change:</b> if the lookup <i>errored</i> (not just came back empty), the run handles its own message alone instead of bailing. A burst may then be answered in pieces while Firestore is down, but nothing goes unanswered. The Firestore quota cause itself was addressed separately by <code>37ed7f1</code> (extract sweep), already merged.</p>
+  </div>
+
+  <div class="card positive">
+    <h3>3 · Main Router v3: "עצור / מספיק" gets through the generation lock <span class="badge fixed">Fixed, published</span> <span class="badge n8n">n8n</span></h3>
+    <div class="meta">node <code>Code - Resolve Route</code></div>
+    <p>While a batch is running, the lock holds every message as a "followup" until the batch ends. So a stop word could never reach the intake that sets the cancel flag <b>Check Stop</b> reads, and "stop" only took effect after the last photo. Today the agent wrote "זהו מספיק תודה" at 15:08:57 and 11 more photos still arrived until 15:15:57. Now a message matching the stop pattern skips the lock and goes to the intake.</p>
+  </div>
+
+  <div class="card positive">
+    <h3>4 · Image Gen v4: one progress message per batch <span class="badge fixed">Fixed, published</span> <span class="badge n8n">n8n</span></h3>
+    <div class="meta">D6VSszXZdas4Hqve · version 4156c87c → 8bef6a0e · new node <code>IF — Send Ack?</code></div>
+    <p>Business Handler v6 already marks photos 2…N with <code>skip_ack: true</code>, but <b>Send Ack</b> ignored it. In the 7-photo batch (15:21) "עובדת על 7 התמונות ✨ כל אחת תגיע כשהיא מוכנה" went out 7 times, once before each photo. A new IF in front of Send Ack skips it when <code>skip_ack</code> is set. Callers that never set it behave exactly as before.</p>
+  </div>
+
+  <div class="card positive">
+    <h3>5 · Backend: polite stops count as stops <span class="badge fixed">In PR</span> <span class="badge new">code</span></h3>
+    <div class="meta"><code>server/property-draft.js</code> STOP_RE + test in <code>server/property-draft.test.js</code></div>
+    <p><code>STOP_RE</code> matched only a bare "מספיק"/"עצור". It now allows filler around the stop word ("זהו מספיק תודה", "די תודה", "עצור!"). Real requests still don't match ("מספיק תמונות לדף", "די יפה"). Takes effect when the intake is deployed from main.</p>
+  </div>
+
+  <div class="card">
+    <h3>How it was applied <span class="badge watch">Method</span></h3>
+    <ul class="plain">
+      <li>Exported both workflows with the n8n CLI in <code>root-n8n-1</code> (the MCP hides credentials and has dropped them on update before). Edited the JSON with a script that fails if any anchor text is missing, and self-tested the new code (winner / loser / empty bucket / lookup error, stop regex, new wiring).</li>
+      <li>Just before import, confirmed both live <code>versionId</code>s still matched what I had read, so no hand edits were overwritten. Imported with <code>n8n import:workflow</code>, published with MCP <code>publish_workflow</code>, then re-exported: credentialed nodes 10/10 (Router) and 4/4 (Image Gen v4), node counts 49→49 and 25→26, both active.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Live tests (to 972542045280)</h2>
+  <p class="section-note">Real webhooks posted to the router's own endpoint as the test number. Test images are public stock photos (picsum), not customer photos.</p>
+  <div class="card positive">
+    <h3>Test 1 · 3-message text burst <span class="badge good">Pass</span></h3>
+    <p>"היי", "בודק משהו", "מה אפשר לעשות עם תמונות?" 0.1 s apart → router 148094–148096 → <b>one</b> Business Handler run (148097) → <b>one</b> reply answering the last question. Before the fix this would have been 3 runs and 3 replies (the 10-27 double-reply pattern).</p>
+  </div>
+  <div class="card positive">
+    <h3>Test 2 · Edit request + 3-photo burst (the agent …1770 scenario) <span class="badge good">Pass</span></h3>
+    <div class="evidence">
+      <div class="line">17:12:50 Bot: "בשמחה ✨ שלחו את התמונות לעריכה 📸"</div>
+      <div class="line">17:13:26 Bot: "עובדת על 3 התמונות ✨ כל אחת תגיע כשהיא מוכנה" (once)</div>
+      <div class="line">17:14:08 / 17:14:51 / 17:15:36 Bot: 3 edited photos</div>
+      <div class="line">17:15:41 Bot: "ערכתי 3 תמונות ✨ לבנות מהן דף נכס?" (once)</div>
+    </div>
+    <p>Router 148100–148102 → one Business Handler run (148103) → three Image Gen v4 runs one after another. 3 edits for 3 photos, one ack, one offer.</p>
+  </div>
+  <div class="card positive">
+    <h3>Test 3 · "מספיק" while a batch is running <span class="badge good">Pass</span> <span class="badge watch">1 nit</span></h3>
+    <div class="evidence">
+      <div class="line">17:16:58 Bot: "עובדת על 3 התמונות…" → 17:17:13 test sends "מספיק"</div>
+      <div class="line">17:17:19 Bot: "עצרתי ✋ לא אערוך תמונות נוספות." (intake, through the lock)</div>
+      <div class="line">17:17:34 Bot: the one photo already in progress · 17:17:39 Bot: "עצרתי ✋ לא אערוך את שאר התמונות."</div>
+    </div>
+    <p>1 of 3 edits ran instead of 3, and the lock was cleared. Nit: two stop confirmations go out (intake + Business Handler's <b>Send Stopped</b>). Business Handler v6 wasn't touched in this pass, but dropping one of the two texts would tidy this up. Bare "מספיק" was used because the "זהו מספיק תודה" form needs the backend fix (5) deployed first.</p>
+  </div>
+
+</section>
+
+<section>
+  <h2 class="section-title">Conversation findings</h2>
+  <p class="section-note">4 agent chats active in the window, plus the internal managers' group (outbound only) and the test number, both excluded. One chat had only an OTP code, one only a link preview.</p>
+
+  <div class="card critical">
+    <h3>A · 11 photos → 21 edits and 30+ bot messages <span class="badge fixed">Fixed (1, 4)</span></h3>
+    <div class="meta">agent …1770 · 2026-10-29 15:05–15:16</div>
+    <div class="evidence">
+      <div class="line">15:05:03 Agent: "אני רוצה להעלות 11 תמונות וננקה אותם מעצמים קטנים, נמחק מלל… נבהיר אותם ונחדד אותם…"</div>
+      <div class="line">15:05:17 Bot: "בשמחה ✨ שלחו את התמונות לעריכה 📸"</div>
+      <div class="line">15:05:49–50 Agent: 11 photos</div>
+      <div class="line">15:05:59–15:06:02 Bot: "עובדת על התמונה ✨…" ×10, then "עובדת על 11 התמונות ✨…"</div>
+      <div class="line">15:06:47–15:07:15 Bot: "ערכתי תמונה אחת ✨ לבנות ממנה דף נכס?" ×10</div>
+      <div class="line">15:06:41–15:15:57 Bot: 21 edited photos, each with "עובדת על 11 התמונות" repeated after it</div>
+    </div>
+    <p>This is the agent who reads the bot most carefully: the request was explicit and the count was stated. They got a wall of messages and ~10 photos they paid for twice. The second batch (7 photos, 15:19) after the race window came out right: 7 edits, one "ערכתי 7 תמונות".</p>
+  </div>
+
+  <div class="card critical">
+    <h3>B · "זהו מספיק תודה" didn't stop the batch <span class="badge fixed">Fixed (3, 5)</span></h3>
+    <div class="meta">agent …1770 · 15:08:57</div>
+    <p>The bot answered "בכיף! 😊 התמונות נשמרו אצלכם…" and kept sending 7 more edits over 7 minutes. Two separate gaps: the stop pattern was whole-message only, and the lock held stop words back anyway.</p>
+  </div>
+
+  <div class="card critical">
+    <h3>C · agent …1283: 9 photos + "לצייר", no reply for 25 h <span class="badge fixed">Fixed (2)</span></h3>
+    <div class="meta">agent …1283 · 2026-10-28 13:08 → next reply 2026-10-29 11:49</div>
+    <p>Root cause above (Firestore quota on the debounce lookup). She came back the next day and typed "לצייר" again.</p>
+  </div>
+
+  <div class="card pending">
+    <h3>D · Unmet request: one banner from several property photos <span class="badge biz">Feature</span></h3>
+    <div class="meta">agent …1283 · 10-29 11:50</div>
+    <div class="evidence">
+      <div class="line">Agent: "באנר עם כל הנכסים ששלחתי מקודם"</div>
+      <div class="line">Bot: "אני לא יכולה ליצור באנר שמשלב תמונות מרובות… אני עובדת רק על תמונה אחת בכל פעם 📸" (said twice)</div>
+    </div>
+    <p>A reasonable ask for an agent with several listings: a collage or "my properties" banner with contact details. Today it's a hard no. Worth a dedicated multi-image banner route (the Kling multi-ref workflow already accepts <code>image_references[]</code>; image models like nano-banana edit take several inputs too).</p>
+  </div>
+
+  <div class="card pending">
+    <h3>E · Three clarifying questions, then "out of quota" <span class="badge n8n">Recommend</span></h3>
+    <div class="meta">agent …1283 · 10-29 11:49–11:53</div>
+    <p>The bot asked what to draw, then which banner, then which style. Only after the agent answered all three did it say "נגמרו לך ההקצאות ליצירת תמונות". That's three model turns and three agent replies wasted. Check the generation quota <i>before</i> starting a clarifying flow for a generation (Business Handler v6's AI agent could get <code>remaining</code> in its context, or a quota pre-check could run when the intent is generate_image).</p>
+    <p>Note: the banner that did arrive at 14:07 came from <b>manual</b> re-runs of Business Handler v6 (executions 148012–148021, mode <code>manual</code>), so someone on the team stepped in. Its caption was the photo-enhancement one ("שיפור איכות וניקיון התמונה… #נתניה_ריביירה"): wrong for a generated banner, with a made-up location hashtag.</p>
+  </div>
+
+  <div class="card pending">
+    <h3>F · Batch-edit captions: a generation per photo, some wrong Hebrew <span class="badge n8n">Recommend</span></h3>
+    <p>Every edited photo gets its own AI caption, and they're near-identical. Some read badly: "תמונה מתוקנת <b>וממוזנחת</b>" (= <i>neglected</i>), "נוקיה", "השרתחנו", "ממובילה", plus invented hashtags like #מור_נכסים and #משרד_יפה. For batch edits a fixed short caption (or none) would save N caption generations per batch and remove the risk of telling an agent their listing looks neglected.</p>
+  </div>
+
+  <div class="card pending">
+    <h3>G · Instruction + count given, still shown the 4-option menu <span class="badge watch">Minor</span></h3>
+    <div class="meta">agent …1770 · 15:19–15:21</div>
+    <p>"אני רוצה להעלות 7 תמונות וננקה אותם…" → "שלחו את 7 התמונות" → photos → "קיבלתי 7 תמונות 📸 מה לעשות? 1·דף נכס חדש 2·… 3·לשפר את כל 7…". The agent had already said what to do, so they had to answer "3". Most likely the open "offered" draft from the previous batch took precedence over the new edit request. Low cost (one extra tap), but it's the same agent who already hit A and B.</p>
+  </div>
+
+  <div class="card">
+    <h3>Carried forward <span class="badge watch">No new occurrences</span></h3>
+    <ul class="plain">
+      <li>one agent's Facebook connection (open since 10-25): no new activity in this window. Still needs a call.</li>
+      <li>Business Handler v6 <code>onError</code> fix: still unpublished, and not touched here (it was changed today at 11:06 UTC by someone else; nothing in this window traced to it).</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2 class="section-title">Recommendations, prioritized</h2>
+  <ul class="plain">
+    <li><b>Deploy the intake from main</b> so "זהו מספיק תודה" works (Fix 5). The n8n side is already live.</li>
+    <li><b>Quota pre-check before clarifying questions</b> on image/video generation (E).</li>
+    <li><b>Fixed or no captions on batch edits</b> (F): saves a generation per photo and avoids bad Hebrew.</li>
+    <li><b>Multi-image banner/collage</b> route (D): a request that was turned away twice.</li>
+    <li>Let a fresh edit request take precedence over a stale "offered" draft (G).</li>
+    <li>Before publishing a draft someone else saved, diff the node <i>settings</i> too (<code>alwaysOutputData</code>, <code>onError</code>), not just code and connections. That's what this morning's review missed.</li>
+  </ul>
+</section>
+
+<footer>Generated by Claude Code. Whapi data read directly; n8n read via CLI export + execution DB (read-only); changes via CLI import + MCP publish. Test traffic used only the test number and public stock photos.</footer>
+</div>
+
+</body>
+</html>
