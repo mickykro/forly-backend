@@ -16,7 +16,7 @@ const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
-const MAX_SHOTS = 50;
+const MAX_SHOTS = 500;
 const MAX_AGE_MS = 3 * 24 * 3600 * 1000;
 const CAPTURE_TIMEOUT_MS = 10000;
 const ID_RE = /^[0-9]{13}-[0-9a-f]{8}$/;
