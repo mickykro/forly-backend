@@ -20,7 +20,7 @@ const ACTIVE_PAGE = new Set(["active", "expiring"]);
 const OPEN_POST = new Set(["pending_approval", "scheduled", "posting"]);
 // Posts one browser session publishes, and so the most posts the planner
 // prepares ahead for the agent to approve together.
-const MAX_SESSION_POSTS = 5;
+const MAX_SESSION_POSTS = 10;
 // Read at each use: the admin's posting modes can turn burst on or off while the server runs. POSTING_BURST (local): no per-session limit.
 const maxSessionPosts = (env = process.env) => (safety.burst(env) ? 1000 : MAX_SESSION_POSTS);
 // Attempt state → campaign post status (the post mirrors its attempt).

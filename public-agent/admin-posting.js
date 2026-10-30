@@ -361,7 +361,7 @@
     if (!t) return "";
     var limit = Math.min(t.cap, t.target);
     return "<br>היום: " + t.counted + "/" + limit + " (פורסמו " + t.posted + ", נכשלו " + t.failed + ", מתוכננים " + t.planned + ")" +
-      " · יעד היום " + t.target + " · מגבלה " + t.cap +
+      " · יעד היום " + t.target + " · מגבלה " + t.cap + (t.min ? " · מינימום " + t.min : "") +
       (t.warmup_stage ? " · שלב חימום: ימים " + t.warmup_stage.from_day + "–" + t.warmup_stage.to_day + ", עד " + t.warmup_stage.posts + " ביום" : "") +
       (t.counted >= limit ? " — <b>המכסה להיום מלאה</b>" : "");
   }

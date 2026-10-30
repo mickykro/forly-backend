@@ -100,7 +100,7 @@ for (const k of Object.keys(real)) console[k] = (...a) => logged.push(a.join(" "
     assert.equal(h.opened.length, 1);
   }
   assert.equal(require("./posting-account").maxSessionPosts({ FORLY_ENV: "local", POSTING_BURST: "1" }), 1000, "burst read at each use");
-  assert.equal(require("./posting-account").maxSessionPosts({ FORLY_ENV: "local" }), 5);
+  assert.equal(require("./posting-account").maxSessionPosts({ FORLY_ENV: "local" }), 10);
   // POSTING_CHAIN=0: one post, the old short session
   {
     const h = harness();
