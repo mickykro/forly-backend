@@ -57,12 +57,12 @@ const L = require("./posting-limits");
   const conn = await K.db.getConnection("972500000001");
   const account = await A.accountView("972500000001", conn, deps, now);
   const e = L.estimate({ posts: 200, account, now, config, daysLeft: 30 });
-  assert.equal(e.per_week, 80); assert.equal(e.days, 18); assert.equal(e.fits, true); assert.equal(e.warmup, false);
+  assert.equal(e.per_week, 85); assert.equal(e.days, 17); assert.equal(e.fits, true); assert.equal(e.warmup, false);
   const s = L.estimate({ posts: 200, account, now, config: Object.assign({}, config, { skip_day_probability: 0.2 }), daysLeft: 30 });
-  assert.deepEqual([s.per_week, s.days], [64, 22], "an admin's 20% skip chance: a fifth fewer per week");
-  // a new account in warm-up: far beyond 30 days
-  const fresh = Object.assign({}, account, { first_connected_at: new Date(now.getTime() - 4 * K.DAY).toISOString() });
+  assert.deepEqual([s.per_week, s.days], [68, 21], "an admin's 20% skip chance: a fifth fewer per week");
+  // a new account in warm-up (day 2, up to 10 a day): estimated at today's warm-up pace
+  const fresh = Object.assign({}, account, { first_connected_at: new Date(now.getTime() - 1 * K.DAY).toISOString() });
   const f = L.estimate({ posts: 200, account: fresh, now, config, daysLeft: 30 });
-  assert.equal(f.warmup, true); assert.equal(f.fits, false);
+  assert.equal(f.warmup, true); assert.equal(f.per_week, 48);
   console.log("posting-limits.test.js ok");
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -54,15 +54,19 @@ const DEFAULTS = {
   gap_jitter: 0.5,                  // adds up to +50% of the gap, never subtracts
   long_break_probability: 0.05,     // now and then the gap is 3–5 hours, like a person with a job
   daily_cap: 20,                    // per account, all groups together
+  // Under this many posts today, the account keeps posting after the day's last
+  // window has closed, until midnight (29 Oct 2026). The calendar still rules.
+  daily_min: 5,
   weekly_cap: 100,
   day_start_jitter_min: 150,        // the first post of a day lands 0–150 min after active_hours.start
   skip_day_probability: 0,          // no day is skipped (25 Oct 2026); an admin may set a chance (skip_day_pct)
   // Explicit, inclusive day ranges counted from first_connected_at in Jerusalem
   // calendar days (day 1 = the connect day). After the last range: daily_cap.
+  // A new account posts 5–10 a day on days 1–3 (1–6 when unsure), then the
+  // admin's daily_cap (owner's call, 30 Oct 2026): the day's target scales to
+  // the stage's cap (dayTarget).
   warmup: [
-    { start_day: 1, end_day: 3, daily_post_cap: 0, daily_browse_cap: 1 },
-    { start_day: 4, end_day: 7, daily_post_cap: 1, daily_browse_cap: 1 },
-    { start_day: 8, end_day: 21, daily_post_cap: 2, skipped_day_browse_probability: 0.5 },
+    { start_day: 1, end_day: 3, daily_post_cap: 10 },
   ],
   warmup_multiplier_if_unsure: 2,   // account_aged === false or posted_manually === false
   browse_sessions_per_day: 1,       // on browse-only days, and with p=0.5 on skipped days later
@@ -140,18 +144,22 @@ function inWindow(date, config) {
   const lp = localParts(date, config.timezone), h = lp.hour + lp.minute / 60;
   return ws.some((w) => h >= w.start && h < w.end);
 }
-function isActiveTime(date, config = DEFAULTS) {
+// The hour the day's last window (else the active hours) closes.
+const lastEnd = (config) => { const ws = Array.isArray(config.post_windows) ? config.post_windows : []; return ws.length ? Math.max(...ws.map((w) => w.end)) : config.active_hours.end; };
+// behind: the account is under daily_min today — past the last window it may post until midnight.
+function isActiveTime(date, config = DEFAULTS, behind = false) {
   if (config.observe_calendar === false) { const h = localParts(date, config.timezone).hour; return h >= config.active_hours.start && h < config.active_hours.end; }
   if (!CALENDAR_OK) return false; // see CALENDAR_OK: an unverifiable calendar means no posting at all
   const lp = localParts(date, config.timezone);
   if (lp.dow === 6) return false; // Saturday: Shabbat, fully inactive all day (no fixed end-hour to get wrong)
   if (isYomTov(date, config.timezone)) return false;
   if ((lp.dow === 5 || isHolidayEve(date, config)) && lp.hour >= EVE_INACTIVE_HOUR) return false; // Erev Shabbat / Erev Yom Tov
+  if (behind && lp.hour + lp.minute / 60 >= lastEnd(config)) return lp.hour >= config.active_hours.start;
   return lp.hour >= config.active_hours.start && lp.hour < config.active_hours.end && inWindow(date, config);
 }
-function nextActiveTime(from, config) {
+function nextActiveTime(from, config, behind = false) {
   let t = new Date(from.getTime());
-  for (let i = 0; i < 10 * 96; i++) { if (isActiveTime(t, config)) return t; t = new Date(t.getTime() + 15 * MS_MIN); }
+  for (let i = 0; i < 10 * 96; i++) { if (isActiveTime(t, config, behind)) return t; t = new Date(t.getTime() + 15 * MS_MIN); }
   return t;
 }
 
@@ -232,6 +240,7 @@ const win = (i, k) => ({
 });
 const RULES = {
   daily_cap: { prod: [1, 60], ...limit("daily_cap") },
+  daily_min: { prod: [0, 60], ...plain("daily_min") },
   weekly_cap: { prod: [1, 300], ...limit("weekly_cap") },
   group_daily_cap: { prod: [1, 10], ...limit("group_daily_cap") },
   group_global_daily_cap: { prod: [1, 50], ...limit("group_global_daily_cap") },
@@ -371,6 +380,14 @@ function dailyCapFor(account, now, config) {
   const base = w ? w.daily_post_cap : config.daily_cap;
   return isPenalised(account, now) ? Math.max(1, Math.floor(base / config.penalty_cap_divisor)) : base;
 }
+// The day's target at this account's cap: the plan's half-to-full of daily_cap,
+// scaled down to a lower (warm-up, penalty) cap — 10 → 5..10.
+function dayTarget(plan, account, at, config) {
+  const cap = dailyCapFor(account, at, config);
+  if (!plan.target || !cap) return 0;
+  return Math.min(cap, Math.max(1, Math.round(plan.target * Math.min(1, cap / config.daily_cap))));
+}
+const dailyMinFor = (account, at, config) => Math.min(config.daily_min || 0, dailyCapFor(account, at, config));
 function weeklyCapFor(account, now, config) {
   return isPenalised(account, now) ? Math.max(1, Math.floor(config.weekly_cap / config.penalty_cap_divisor)) : config.weekly_cap;
 }
@@ -444,7 +461,7 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
   const today = localDate(now, config.timezone);
   const todayPlan = dayPlan(today, config, rand, account.plan_seed);
   if (todayPlan.target === 0) return { at: null, reason: "day_skipped" };
-  if (countOnDate(today) >= Math.min(todayPlan.target, dailyCapFor(account, now, config))) return { at: null, reason: "daily_cap" };
+  if (countOnDate(today) >= dayTarget(todayPlan, account, now, config)) return { at: null, reason: "daily_cap" };
   if (posts.filter((p) => now.getTime() - p.t < 7 * MS_DAY).length >= weeklyCapFor(account, now, config)) return { at: null, reason: "weekly_cap" };
 
   const g = { now, posts, pageId, fp, groupActivity, config };
@@ -485,9 +502,10 @@ function nextSlot({ now, account, candidates, pageId, fingerprint: fp = null, gr
     const plan = dayPlan(dateStr, config, rand, account.plan_seed);
     const dayStart = new Date(midnight.getTime() + (config.active_hours.start * 60 + plan.start_offset_min) * MS_MIN);
     if (plan.target > 0) {
-      const candidate = nextActiveTime(new Date(Math.max(cursor.getTime(), dayStart.getTime())), config);
+      const behind = countOnDate(dateStr) < dailyMinFor(account, cursor, config);
+      const candidate = nextActiveTime(new Date(Math.max(cursor.getTime(), dayStart.getTime())), config, behind);
       if (localDate(candidate, config.timezone) === dateStr) {
-        const capForDay = Math.min(plan.target, dailyCapFor(account, candidate, config));
+        const capForDay = dayTarget(plan, account, candidate, config);
         if (countOnDate(dateStr) < capForDay) {
           const result = { at: candidate, group_id: winner.group_id, group_url: winner.url };
           if (duplicateReview.length) result.duplicate_review = duplicateReview.slice();
@@ -504,6 +522,6 @@ module.exports = {
   capsOff, burst, CAP_FIELDS, CAP_MAX, capRange, applyRules, rulesOf, rulesView, RULES,
   datesApart, dateGapEnd, activityDays,
   DEFAULTS, CALENDAR_OK, nextSlot, groupBlock, withTimes, sameGroup, isActiveTime, nextActiveTime, dayPlan, planSeed, activityKey, jerusalemDate, configFrom, fingerprint,
-  wantsBrowseSession, dailyCapFor, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
+  wantsBrowseSession, dailyCapFor, dailyMinFor, dayTarget, weeklyCapFor, classifySignal, SIGNAL_DISABLES, SIGNAL_PENALISES, SIGNAL_SKIPS,
   _test: { localParts, dailyCapFor, weeklyCapFor, warmupStage, dayNumber, isYomTov, isHolidayEve },
 };

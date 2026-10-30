@@ -559,9 +559,8 @@ async function run(kind, args = {}, deps = {}) {
 }
 
 // The same session, the account's next ready post (posting-chain): the tick
-// settles the post just made (deps.next); the browser dwells on the feed for
-// 1.5–5.8 minutes; then the next one, prepared and reserved now, is posted
-// here — straight to its group, the feed already behind it.
+// settles the post just made (deps.next); the next one, prepared and reserved
+// now, is posted here at once — straight to its group, the feed already behind it.
 async function more(page, out, x0, deps) {
   let next = typeof deps.next === "function" ? deps.next : null;
   while (next) {
@@ -570,7 +569,7 @@ async function more(page, out, x0, deps) {
     if (!prepare) break;
     // Moving on after a group's failure (posting-chain): its composer may still hold our text.
     if (!(out && OK_STATES.has(out.state))) await closeComposer(page);
-    if (!(await between(page, x0))) break;
+    if (live.held(x0.phone) || !(await x0.allows("dwell"))) break; // the admin holds it, or a switch is off
     let call = null;
     try { call = await prepare(); } catch { call = null; }
     if (!call) break;
@@ -594,6 +593,8 @@ async function more(page, out, x0, deps) {
     }
     next = call.deps.next;
   }
+  // The feed once more after the session's last post, as before its first (owner's call, 29 Oct 2026).
+  if (typeof deps.next === "function" && out && OK_STATES.has(out.state) && !(live.get(x0.phone) || {}).takeover) await between(page, x0).catch(() => false);
   // The session's housekeeping on the same page (posting-tick): yesterday's
   // checks, a stale groups sync. Not after a halting page.
   if (typeof deps.afterPosts === "function" && !(out && HALTING.has(out.signal)) && !(live.get(x0.phone) || {}).takeover) {
@@ -603,10 +604,10 @@ async function more(page, out, x0, deps) {
   return Object.assign({}, out, { chained: true });
 }
 
-// Between two posts: on the feed, reading, for 1.5–5.8 minutes. → false when
+// After the session's last post: on the feed, reading, briefly (chain.DWELL_S). → false when
 // the page says stop (a halting signal) or the switches do.
 async function between(page, x) {
-  // POSTING_BURST (local): straight to the next post, no feed visit — but the switches still decide (0 would end the chain).
+  // POSTING_BURST (local): no feed visit — but the switches still decide.
   if (safety.burst(x.deps.env || process.env)) return x.allows("dwell");
   if (!(await x.allows("dwell")) || !(await nav(page, x, FEED_URL).catch(() => false))) return false;
   const until = Date.now() + (typeof x.deps.chainDwellMs === "number" ? x.deps.chainDwellMs : chain.dwellMs(x.rand, x.deps.env)); // tests: chainDwellMs
