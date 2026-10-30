@@ -2,13 +2,13 @@
  * posting-chain.js — more than one post in one browser session (2 Oct 2026).
  *
  * When an account has several posts ready, the browser that just posted one
- * stays open: the driver dwells on the feed for a random 1.5–5.8 minutes,
- * then posts the next, in the same session, without a new login or a new
- * warm-up of the feed. Every post is still its own reservation (R1), re-checked
+ * stays open and posts the next straight away, in the same session, without
+ * a new login or a new read of the feed: the feed is read before the first
+ * post and, briefly (DWELL_S), after the last (owner's call, 30 Oct 2026). Every post is still its own reservation (R1), re-checked
  * against the switches (R2), the account's caps and the agent's approval:
  * only an approved post (or a standing campaign's next one) is taken, never
- * one the agent set for a later time, and the account's own min_gap gives way
- * to the dwell only inside the session. A failure that belongs to one group
+ * one the agent set for a later time, and the account's own min_gap does not apply
+ * inside the session. A failure that belongs to one group
  * (GROUP_FAILURES: not a member, blocked, the wrong page, a stale copy, a
  * join still pending) moves on to the next post — the composer is closed
  * first (posting-driver) — and so does one missing composer per session
@@ -25,8 +25,8 @@ const live = require("./posting-live");
 
 const { ms, MS_MIN, configOf } = A;
 const MAX_POSTS = A.MAX_SESSION_POSTS;        // per session, the first included (burst: A.maxSessionPosts)
-const DWELL_S = [90, 348];                    // between posts: 1.5–5.8 minutes
-const POST_BUDGET_MS = 12 * MS_MIN;           // a dwell and a post must still fit in the session
+const DWELL_S = [30, 90];                     // after the session's last post: 0.5–1.5 minutes
+const POST_BUDGET_MS = 12 * MS_MIN;           // a post and the closing dwell must still fit in the session
 const SESSION_MS = (env) => Math.max(14, Number((env || process.env).POSTING_SESSION_MINUTES) || 55) * MS_MIN; // Driver's limit is 1 hour
 const OK = new Set(["verified_posted", "submitted_for_approval"]);
 // One group's problem, not the browser's or the account's (owner's call, 26 Oct 2026).
@@ -35,7 +35,7 @@ const MAX_SESSION_FAILURES = 2;
 
 const enabled = (deps = {}) => (deps.env || process.env).POSTING_CHAIN !== "0";
 
-// Inside the session the account's gap is the dwell itself.
+// Inside the session there is no gap: the posts follow one another.
 const sessionConfig = (config) => Object.assign({}, config, { min_gap_minutes: 1, gap_jitter: 0, long_break_probability: 0, day_start_jitter_min: 0 });
 
 // The account's next post that may go now: an approved (or standing) one

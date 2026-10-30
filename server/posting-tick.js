@@ -198,11 +198,13 @@ async function runDue(c, post, st, deps, x, now) {
   }
   const page = await x.db.getPage(c.page_id);
   // Safety is re-checked at the moment of posting, not only at scheduling.
-  if (!safety.isActiveTime(now, config)) return reschedule(x, c.id, post.id, safety.nextActiveTime(now, config), "inactive_time", false);
   const account = await A.accountView(phone, conn, deps, now, { campaigns: st.campaigns, exclude: post.id });
+  const today = safety.jerusalemDate(now);
+  const behind = account.posts.filter((p) => p.ok !== false && safety.jerusalemDate(new Date(p.at)) === today).length < safety.dailyMinFor(account, now, config);
+  if (!safety.isActiveTime(now, config, behind)) return reschedule(x, c.id, post.id, safety.nextActiveTime(now, config, behind), "inactive_time", false);
   const past = account.posts.map((p) => ms(p.at)).filter((t) => Number.isFinite(t) && t <= now.getTime());
   const lastAny = Math.max(0, ...past);
-  if (now.getTime() - lastAny < config.min_gap_minutes * MS_MIN) return reschedule(x, c.id, post.id, safety.nextActiveTime(new Date(lastAny + config.min_gap_minutes * MS_MIN), config), "min_gap", false);
+  if (now.getTime() - lastAny < config.min_gap_minutes * MS_MIN) return reschedule(x, c.id, post.id, safety.nextActiveTime(new Date(lastAny + config.min_gap_minutes * MS_MIN), config, behind), "min_gap", false);
   const freshPenalty = ms(account.penalty_until) > now.getTime() && account.halts.some((h) => safety.SIGNAL_PENALISES.has(h.code) && now.getTime() - ms(h.at) < MS_DAY);
   const weekly = past.filter((t) => now.getTime() - t < 7 * MS_DAY).length >= safety.weeklyCapFor(account, now, config);
   if (freshPenalty || weekly) return reschedule(x, c.id, post.id, A.nextDayStart(now, config, x.rand), freshPenalty ? "penalty" : "weekly_cap", false);

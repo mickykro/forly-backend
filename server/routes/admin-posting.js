@@ -340,7 +340,7 @@ module.exports = function createAdminPostingRouter({
         today: {
           counted: mine.length, posted: mine.filter((p) => p.ok === true).length, failed: mine.filter((p) => p.ok === false).length,
           planned: mine.filter((p) => p.ok == null).length,
-          target: safety.dayPlan(today, config, null, acc.plan_seed).target, cap: safety.dailyCapFor(acc, now, config),
+          target: safety.dayTarget(safety.dayPlan(today, config, null, acc.plan_seed), acc, now, config), min: safety.dailyMinFor(acc, now, config), cap: safety.dailyCapFor(acc, now, config),
           warmup_stage: stage ? { from_day: stage.start_day, to_day: stage.end_day, posts: stage.daily_post_cap } : null,
         },
         account: {

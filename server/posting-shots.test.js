@@ -62,7 +62,7 @@ function call(app, p) {
     assert.equal((await shots.list(LOCAL)).find((n) => n.id === rescued).image, true, "the fallback capture is kept");
     assert.deepEqual(sent, ["Page.captureScreenshot"]);
 
-    // ── kept small: the newest MAX_SHOTS; older than 3 days dropped ──
+    // ── kept small: the newest MAX_SHOTS; older than 7 days dropped ──
     const old = `${Date.now() - shots.MAX_AGE_MS - 60000}-00000000`;
     fs.writeFileSync(path.join(dir, `${old}.jpg`), JPG); fs.writeFileSync(path.join(dir, `${old}.json`), "{}");
     await shots.prune(LOCAL);

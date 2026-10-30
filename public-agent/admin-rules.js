@@ -5,13 +5,13 @@
  */
 window.FORLY_RULES = (function () {
   var GROUPS = [
-    { title: "מגבלות", fields: ["daily_cap", "weekly_cap", "group_daily_cap", "group_global_daily_cap", "max_consecutive_failures"] },
+    { title: "מגבלות", fields: ["daily_cap", "daily_min", "weekly_cap", "group_daily_cap", "group_global_daily_cap", "max_consecutive_failures"] },
     { title: "כפילויות", fields: ["property_group_cooldown_days", "fingerprint_window_days"] },
     { title: "שעות וקצב", fields: ["active_start", "active_end", "window1_start", "window1_end", "window2_start", "window2_end", "min_gap_minutes", "gap_jitter_pct", "long_break_pct", "day_start_jitter_min", "skip_day_pct"] },
     { title: "אחרי אזהרה מפייסבוק", fields: ["penalty_days", "penalty_cap_divisor", "halts_to_disable", "halts_window_days"] },
   ];
   var LABELS = {
-    daily_cap: "פוסטים ביום לחשבון", weekly_cap: "פוסטים בשבוע לחשבון", group_daily_cap: "פוסטים ביום לקבוצה (לחשבון)",
+    daily_cap: "פוסטים ביום לחשבון", daily_min: "מינימום פוסטים ביום לחשבון", weekly_cap: "פוסטים בשבוע לחשבון", group_daily_cap: "פוסטים ביום לקבוצה (לחשבון)",
     group_global_daily_cap: "פוסטים ביום לקבוצה (כל הסוכנים)", max_consecutive_failures: "כשלונות ברצף עד עצירה",
     property_group_cooldown_days: "ימים עד אותו נכס באותה קבוצה", fingerprint_window_days: "ימים עד אותה מודעה (מכל מקור) באותה קבוצה",
     active_start: "שעת התחלה", active_end: "שעת סיום",
@@ -23,7 +23,7 @@ window.FORLY_RULES = (function () {
   };
   // Each rule's unit, shown next to its field and in its explanation.
   var UNIT = {
-    daily_cap: "פוסטים", weekly_cap: "פוסטים", group_daily_cap: "פוסטים", group_global_daily_cap: "פוסטים",
+    daily_cap: "פוסטים", daily_min: "פוסטים", weekly_cap: "פוסטים", group_daily_cap: "פוסטים", group_global_daily_cap: "פוסטים",
     max_consecutive_failures: "כשלונות", property_group_cooldown_days: "תאריכים", fingerprint_window_days: "תאריכים",
     active_start: "שעה (0–23)", active_end: "שעה (1–24)", window1_start: "שעה", window1_end: "שעה", window2_start: "שעה", window2_end: "שעה",
     min_gap_minutes: "דקות", gap_jitter_pct: "% מהפער", long_break_pct: "%", day_start_jitter_min: "דקות", skip_day_pct: "%",
@@ -32,6 +32,7 @@ window.FORLY_RULES = (function () {
   // What each rule does, with its unit and an example — shown next to its ⓘ button.
   var HELP = {
     daily_cap: "מספר הפוסטים המרבי שהחשבון של הסוכן מפרסם ביום אחד (לפי תאריך בישראל), בכל הקבוצות יחד. כשמגיעים אליו — הפרסום ממשיך מחר. דוגמה: 20 = עד 20 פוסטים ביום.",
+    daily_min: "אם עד סוף החלון האחרון של היום החשבון פרסם פחות מזה — הפרסום ממשיך אחרי החלון, עד חצות, עד שמגיעים למינימום (לא בשבת ובחג, ולא מעל המגבלה היומית). דוגמה: 5 = לפחות 5 פוסטים ביום. 0 = כבוי.",
     weekly_cap: "מספר הפוסטים המרבי ב־7 הימים האחרונים, בכל הקבוצות יחד. בולם שבוע עמוס גם אם כל יום לחוד בתוך המגבלה. דוגמה: 100 = עד 100 פוסטים בשבוע.",
     group_daily_cap: "מספר הפוסטים המרבי שהחשבון של הסוכן מעלה לאותה קבוצה ביום אחד — כל אחד נכס אחר. דוגמה: 3 = עד 3 נכסים שונים לאותה קבוצה ביום.",
     group_global_daily_cap: "מספר הפוסטים המרבי שנכנסים לאותה קבוצה ביום מכל הסוכנים של פורלי יחד, כדי שהקבוצה לא תוצף מאיתנו. דוגמה: 5 = לא יותר מ־5 פוסטים של פורלי בקבוצה ביום.",
@@ -44,7 +45,7 @@ window.FORLY_RULES = (function () {
     window1_end: "שעת הסיום של חלון הפרסום הראשון. דוגמה: 13 = עד 13:00.",
     window2_start: "שעת ההתחלה של חלון הפרסום השני (למשל ערב). אם שני החלונות כבויים — מפרסמים בכל שעות הפעילות. דוגמה: 18.",
     window2_end: "שעת הסיום של חלון הפרסום השני. דוגמה: 21 = עד 21:00.",
-    min_gap_minutes: "כמה דקות לפחות בין סיום סשן פרסום אחד לתחילת הבא. בתוך סשן הפוסטים עולים ברצף, במרווח של כמה דקות. דוגמה: 120 = לפחות שעתיים בין סשנים.",
+    min_gap_minutes: "כמה דקות לפחות בין סיום סשן פרסום אחד לתחילת הבא. בתוך סשן (עד 10 פוסטים) הפוסטים עולים ברצף, בלי המתנה ביניהם — קריאת פיד לפני הראשון ומעט אחרי האחרון. דוגמה: 120 = לפחות שעתיים בין סשנים.",
     gap_jitter_pct: "תוספת אקראית לפער בין סשנים, באחוזים מהפער, כדי שהקצב לא יהיה קבוע כמו של רובוט. דוגמה: 50 עם פער של 120 דקות = בין 120 ל־180 דקות.",
     long_break_pct: "באחוז מהפעמים הפער בין סשנים הופך להפסקה ארוכה של 3–5 שעות, כמו אדם שעסוק בעבודה. דוגמה: 5 = בערך פעם אחת מתוך 20.",
     day_start_jitter_min: "עיכוב אקראי בדקות לפוסט הראשון של היום, אחרי שעת ההתחלה, כדי שהיום לא יתחיל תמיד באותה דקה. דוגמה: 150 עם התחלה ב־9 = הפוסט הראשון בין 09:00 ל־11:30.",

@@ -4,6 +4,15 @@
 process.env.PROFILE_KEY = "test-profile-key-15";
 const assert = require("assert");
 const S = require("./posting-safety");
+// The shipped policy (29 Oct 2026), checked at the end; everything above it
+// runs on the browse-first warm-up and no daily minimum, which the browse
+// machinery and the window rules are still built for.
+const SHIPPED = structuredClone(S.DEFAULTS);
+Object.assign(S.DEFAULTS, { daily_min: 0, warmup: [ // as posting-testkit's BROWSE_WARMUP
+  { start_day: 1, end_day: 3, daily_post_cap: 0, daily_browse_cap: 1 },
+  { start_day: 4, end_day: 7, daily_post_cap: 1, daily_browse_cap: 1 },
+  { start_day: 8, end_day: 21, daily_post_cap: 2, skipped_day_browse_probability: 0.5 },
+] });
 
 const NOW = new Date("2026-09-23T10:00:00+03:00"); // Wed
 const IL = (iso) => new Date(iso);
@@ -190,7 +199,7 @@ assert.equal(S.nextSlot({ now: NOW, account: account({ penalty_until: at(-day(5)
     assert.equal(S.burst(env), false, "burst only on a local box with caps off");
   }
   assert.equal(require("./posting-chain").dwellMs(() => 0.5, { ...L, POSTING_BURST: "1" }), 0, "burst: no dwell");
-  assert.ok(require("./posting-chain").dwellMs(() => 0.5, L) >= 90000, "no burst: normal dwell");
+  assert.ok(require("./posting-chain").dwellMs(() => 0.5, L) >= 30000, "no burst: a short closing dwell");
   assert.equal(cfg.active_hours.start, 9, "configFrom deep-copies — mutating the result never touches DEFAULTS");
   assert.equal(cfg.warmup.length, 3, "nested arrays are copied too");
 }
@@ -552,6 +561,42 @@ assert.ok(!S.SIGNAL_DISABLES.has("login_required") && !S.SIGNAL_PENALISES.has("l
   const one = { ...acc, posts: [{ at: new Date(night.getTime() - 60000).toISOString(), group_id: "9", page_id: "q" }] };
   const next = S.nextSlot({ now: night, account: one, candidates: cand, pageId: "p", config: local, rand: () => 0.99 });
   assert.ok(after.at && next.at.getTime() === night.getTime() + 4 * 60000, "gap: " + next.at.toISOString());
+}
+
+// ── the shipped policy: 5–10 a day on days 1–3 (unsure: 1–6), then daily_cap; under the daily minimum, past the last window until midnight ──
+{
+  const c = Object.assign(structuredClone(SHIPPED), { skip_day_probability: 0, day_start_jitter_min: 0, long_break_probability: 0 });
+  c.post_windows = c.window_slots;
+  const fresh = account({ first_connected_at: at(0), account_aged: true, posted_manually: true });
+  assert.equal(S.wantsBrowseSession(fresh, NOW, c), false, "day 1 posts, no browse-only day");
+  assert.equal(S.dailyCapFor(fresh, NOW, c), 10);
+  const targets = new Set();
+  for (let i = 0; i < 40; i++) targets.add(S.dayTarget(S.dayPlan(`2026-09-${10 + (i % 18)}`, c, null, "s" + i), fresh, NOW, c));
+  assert.ok([...targets].every((t) => t >= 5 && t <= 10) && targets.size > 1, "warm-up target 5..10: " + [...targets]);
+  assert.equal(S.dayTarget({ target: 20 }, account(), NOW, c), 20, "a warmed-up account keeps the full plan");
+  assert.equal(S.dailyMinFor(fresh, NOW, c), 5);
+  const onDay = (n, o = {}) => account(Object.assign({ first_connected_at: at(day(n - 1)) }, o));
+  assert.equal(S.dailyCapFor(onDay(3), NOW, c), 10, "day 3: still warming up");
+  assert.equal(S.dailyCapFor(onDay(4), NOW, c), c.daily_cap, "day 4: the admin's daily cap");
+  assert.equal(S.dailyCapFor(onDay(6, { account_aged: false }), NOW, c), 10, "unsure account: warm-up to day 6");
+  assert.equal(S.dailyCapFor(onDay(7, { account_aged: false }), NOW, c), c.daily_cap, "unsure account: day 7, the admin's cap");
+  assert.equal(require("./posting-account").MAX_SESSION_POSTS, 10, "one browser session posts up to 10");
+
+  const wed2130 = new Date("2026-09-23T21:30:00+03:00"), wed1500 = new Date("2026-09-23T15:00:00+03:00");
+  assert.equal(S.isActiveTime(wed2130, c), false, "after the last window: closed");
+  assert.equal(S.isActiveTime(wed2130, c, true), true, "under the minimum: open past the last window");
+  assert.equal(S.isActiveTime(wed1500, c, true), false, "between the windows: still closed");
+  assert.equal(S.isActiveTime(new Date("2026-09-24T08:00:00+03:00"), c, true), false, "never before the day starts");
+  assert.equal(S.isActiveTime(new Date("2026-09-25T21:30:00+03:00"), c, true), false, "Friday evening: Shabbat wins");
+
+  const g = { url: "g1", group_id: "g1", agent_policy: "explicitly_allowed" };
+  const two = account({ posts: [0, 1].map((i) => ({ at: new Date(wed2130.getTime() - (4 - i) * 3600000).toISOString(), group_id: "x" + i, group_url: "x" + i, page_id: "q", ok: true })) });
+  const r = S.nextSlot({ now: wed2130, account: two, candidates: [g], pageId: "p", config: c, rand: () => 0 });
+  assert.equal(jerusalemDate(r.at), "2026-09-23", "2 of 5 by 21:30: posts tonight, " + (r.at && r.at.toISOString()));
+  const five = account({ posts: [0, 1, 2, 3, 4].map((i) => ({ at: new Date(wed2130.getTime() - (5 - i) * 3600000).toISOString(), group_id: "x" + i, group_url: "x" + i, page_id: "q", ok: true })) });
+  const r5 = S.nextSlot({ now: wed2130, account: five, candidates: [g], pageId: "p", config: c, rand: () => 0 });
+  assert.equal(jerusalemDate(r5.at), "2026-09-24", "minimum met: tomorrow's window");
+  assert.equal(S.applyRules(structuredClone(SHIPPED), { daily_min: 8 }).includes("daily_min"), true, "the admin sets the minimum");
 }
 
 console.log("posting-safety.test.js ok");

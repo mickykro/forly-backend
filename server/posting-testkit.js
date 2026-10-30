@@ -14,7 +14,13 @@ const NOW = new Date("2026-09-23T10:00:00+03:00"); // a Wednesday, no holiday
 const MIN = 60000, HOUR = 3600000, DAY = 86400000;
 const iso = (d) => new Date(d).toISOString();
 // One post a day (daily_cap 1 → every day's target is 1), no jitter: deterministic.
-const cfg = Object.assign(safety.configFrom(null), { daily_cap: 1, skip_day_probability: 0, day_start_jitter_min: 0, long_break_probability: 0, gap_jitter: 0 });
+// The browse-first warm-up the defaults had before 29 Oct 2026: the browse machinery is still tested on it.
+const BROWSE_WARMUP = [
+  { start_day: 1, end_day: 3, daily_post_cap: 0, daily_browse_cap: 1 },
+  { start_day: 4, end_day: 7, daily_post_cap: 1, daily_browse_cap: 1 },
+  { start_day: 8, end_day: 21, daily_post_cap: 2, skipped_day_browse_probability: 0.5 },
+];
+const cfg = Object.assign(safety.configFrom(null), { daily_cap: 1, daily_min: 0, warmup: BROWSE_WARMUP, skip_day_probability: 0, day_start_jitter_min: 0, long_break_probability: 0, gap_jitter: 0 });
 const G = (id) => `https://www.facebook.com/groups/${id}`;
 const PERM = { enabled: true, consent_version: "2026-09-24", granted_at: iso(NOW.getTime() - DAY), platforms: ["facebook"], targets: ["groups"], default_group_ids: ["111", "222"], page_id: null, allows_dwell: true, allows_visible_interactions: false };
 const member = (id, o = {}) => Object.assign({ group_id: id, canonical_url: G(id), slug: id, name: `דירות בחיפה G${id}`, membership_state: "member", observed_at: iso(NOW), last_confirmed_at: iso(NOW), id_verified: true }, o);
@@ -83,4 +89,4 @@ async function setup(phone = "972500000001", o = {}) {
 const base = (o = {}) => Object.assign({ phone: "972500000001", page: page(), groups, mode: "standing", days: 14, repeat: false, consent: { at: iso(NOW), version: "2026-09-24" } }, o);
 const dueOf = (c, i = 0) => new Date(new Date(c.posts[i].scheduled_at).getTime() + 1000);
 
-module.exports = { db, store, locks, safety, NOW, MIN, HOUR, DAY, iso, cfg, G, PERM, member, page, groups, fakeDriver, fakePost, reset, setup, base, dueOf };
+module.exports = { db, store, locks, safety, NOW, MIN, HOUR, DAY, iso, cfg, BROWSE_WARMUP, G, PERM, member, page, groups, fakeDriver, fakePost, reset, setup, base, dueOf };
