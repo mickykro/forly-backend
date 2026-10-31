@@ -14,7 +14,7 @@ const db = require("../db");
 const businessCache = require("../business-cache");
 const pageEdit = require("../edit");
 const { sniffMatchesExt } = require("../utils");
-const { REVIEW_SCOPES } = require("../auth");
+const { REVIEW_SCOPES, UPLOAD_SCOPES } = require("../auth");
 const { validateListing, createListing: createListingShared, buildFailed, retryBlocked, retryListing,
   MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
 const { makeAdminGuard } = require("../admin-auth");
@@ -50,7 +50,7 @@ module.exports = function createIntakeRouter(ctx) {
   // Any authenticated user (agent or admin) may request upload slots; the
   // header bypass is gone.
   // The WhatsApp review link (scope "review") lands on create.html, which uploads photos and creates.
-  const uploadAuth = requireAuth(authSecret, REVIEW_SCOPES);
+  const uploadAuth = requireAuth(authSecret, UPLOAD_SCOPES);
 
   // PUT /upload/:fname additionally accepts a server-signed upload token, for
   // relays started by a route that has no session to forward (rehost() called
@@ -74,6 +74,7 @@ module.exports = function createIntakeRouter(ctx) {
       const nameExt = String((f && f.name) || "").split(".").pop().toLowerCase();
       const ext = IMAGE_TYPES[ct] || VIDEO_TYPES[ct] || FONT_TYPES[ct] || FONT_EXTS[nameExt];
       if (!ext) return res.status(400).json({ error: `unsupported type: ${ct}` });
+      if (req.user.scope === "promo" && !IMAGE_TYPES[ct]) return res.status(400).json({ error: `unsupported type: ${ct}` }); // /reel: photos only
       const isVideo = ext === "mp4";
       const isFont = ext in FONT_EXTS;
       const fname = `${crypto.randomUUID()}.${ext}`;
@@ -103,6 +104,10 @@ module.exports = function createIntakeRouter(ctx) {
       return res.status(400).json({ error: "empty body" });
     }
     const ext = m[1];
+    if (req.user && req.user.scope === "promo") { // /reel: new photos only, never overwrite an existing file
+      if (!/^(jpg|png|webp)$/.test(ext)) return res.status(400).json({ error: "images only" });
+      if (!remoteUploadBase && fs.existsSync(path.join(uploadDir, fname))) return res.status(409).json({ error: "exists" });
+    }
     const isVideo = ext === "mp4";
     const isFont = /^(woff2|woff|ttf|otf)$/.test(ext);
     const maxMb = isVideo ? MAX_VIDEO_MB : isFont ? MAX_FONT_MB : MAX_IMAGE_MB;
@@ -134,7 +139,7 @@ module.exports = function createIntakeRouter(ctx) {
   });
 
   // Remove an uploaded file (the form deletes photos the user takes back out).
-  router.delete("/upload/:fname", uploadAuth, async (req, res) => {
+  router.delete("/upload/:fname", requireAuth(authSecret, REVIEW_SCOPES), async (req, res) => {
     const fname = req.params.fname;
     if (!/^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.test(fname)) {
       return res.status(400).json({ error: "bad filename" });

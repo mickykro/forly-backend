@@ -145,9 +145,11 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, sendWhatsApp
   router.post("/otp", async (req, res) => {
     const phone = normalizeAny(req.body && req.body.phone);
     if (!phone) return res.status(400).json({ ok: false, error: "invalid_phone" });
+    const promo = req.body && req.body.purpose === "reel";
 
     try {
-      if (!(await isRegistered(phone))) {
+      // /reel visitors aren't clients yet: they get a code (and only a promo token at verify).
+      if (!promo && !(await isRegistered(phone))) {
         await notifyNotAClientLead(phone);
         return res.status(404).json({ ok: false, error: "not_a_client" });
       }
@@ -171,6 +173,7 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, sendWhatsApp
         created_at: now,
         attempts: 0,
         used: false,
+        purpose: promo ? "reel" : null,
         sends_today: sendsToday + 1,
         sends_day: day,
       });
@@ -228,6 +231,14 @@ module.exports = function createAuthRouter({ db, mem, sendWhatsApp, sendWhatsApp
       }
 
       await patchOtp(phone, { used: true, used_at: new Date() });
+
+      // A /reel visitor with no business doc gets a promo-only token: /api/promo and
+      // photo upload accept it; every dashboard route (default scope "session") refuses it.
+      if (rec.purpose === "reel" && !(await isRegistered(phone))) {
+        const token = signSession(secret, phone, { scope: "promo" });
+        res.cookie("forly_session", token, { httpOnly: true, secure: cookieSecure(req), sameSite: "lax", maxAge: SESSION_TTL_S * 1000 });
+        return res.json({ ok: true, token, userId: phone, scope: "promo", expires_in: SESSION_TTL_S });
+      }
 
       const token = signSession(secret, phone);
       res.cookie("forly_session", token, {
@@ -355,6 +366,8 @@ module.exports.verifyActionToken = (parts, token, secret) => {
 };
 
 module.exports.REVIEW_SCOPES = ["session", "review"];
+module.exports.PROMO_SCOPES = ["session", "promo"];            // /api/promo
+module.exports.UPLOAD_SCOPES = ["session", "review", "promo"]; // photo upload only
 module.exports.requireAuth = (secret, scopes) => (req, res, next) => {
   const session = verifySession(secret, readToken(req), scopes);
   if (!session) return res.status(401).json({ error: "unauthenticated" });
