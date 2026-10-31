@@ -119,6 +119,7 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
   - (a) ~~Can a production listing be read by the staging walkthrough API?~~ **Answered: yes.** Staging and production share Firestore (`server/build-fallback.js:11-12`), so the staging URLs can stay.
   - (b) `property-page-builder` WhatsApps the page link to `business_phone`. If it doesn't, the visitor gets only the video.
 - [ ] **Step 2b (staging uploads).** Read `REMOTE_UPLOAD_BASE` in `staging.env` on the VPS. If it is set (`.github/workflows/deploy-staging.yml:10` suggests it may be), staging forwards uploads to production, and production will refuse promo tokens until it runs Task 2b. In that case deploy Task 2b (auth + intake) to production before Task 8.
+- [ ] **Step 2c (proxy).** On the VPS, confirm there is exactly one reverse proxy (Traefik/nginx) in front of Forly and that it *appends* to `X-Forwarded-For`. Task 5's reel-code limiter keys on the last entry. If there are two proxies, use the second-to-last entry instead.
 - [ ] **Step 3 (public host).** Read `BASE_URL` in production `deploy.env`. It appears in the public /reel link, in Cardcom's return URL and webhook, and on the site Cardcom reviews. It must be the customer domain (the one the dashboard runs on), never an `hstgr.cloud` host (`server/utils.js` `INFRA_HOST`). If it is an `hstgr.cloud` host, stop and ask the owner which domain to use before Task 5.
 
 ---
@@ -458,7 +459,8 @@ function createPromoStore({ db }) {
   }
 
   async function listLeads(limit = 300) {
-    if (!db) return [...mem.leads.values()].sort((a, b) => (a.last_seen_at < b.last_seen_at ? 1 : -1)).slice(0, limit);
+    if (!db) return [...mem.leads.values()].map((l) => ({ ...l })).sort( // copies, like Firestore's d.data()
+      (a, b) => (a.last_seen_at < b.last_seen_at ? 1 : -1)).slice(0, limit);
     const q = await db.collection("promo_leads").orderBy("last_seen_at", "desc").limit(limit).get();
     return q.docs.map((d) => d.data());
   }
@@ -523,8 +525,9 @@ function fakeDb(businesses) {
   } };
 }
 
+const log = console.log;
 (async () => {
-  const log = console.log; console.log = console.error = () => {};
+  console.log = console.error = () => {};
   let lastMsg = "";
   const leads = [];
   const app = express();
@@ -560,7 +563,7 @@ function fakeDb(businesses) {
     assert.ok(verifySession("s", c.data.token), "client gets a real session");
   } finally { server.close(); }
   log("auth-promo.test.js OK");
-})().catch((e) => { console.log(e); process.exit(1); });
+})().catch((e) => { log(e); process.exit(1); });
 ```
 
   Before writing the test, check how auth.js uses `db` (`grep -n "db\." server/auth.js`). If it calls anything besides `collection().doc().get/set`, such as `runTransaction` or `FieldValue`, add that to `fakeDb`.
@@ -605,7 +608,18 @@ module.exports.UPLOAD_SCOPES = ["session", "review", "promo"]; // photo upload o
       if (req.user.scope === "promo" && !IMAGE_TYPES[ct]) return res.status(400).json({ error: `unsupported type: ${ct}` }); // /reel: photos only
 ```
 
-  `/properties/create` and `/properties/retry` keep `REVIEW_SCOPES`, so a promo token can't create listings. Task 8 Step 4 checks the upload limits against a real promo token.
+  - In `PUT /upload/:fname` (line 96), right after `const ext = m[1];`, add the following. `POST /upload-urls` only hands out names; the PUT accepts any name the caller picks and `writeFileSync` overwrites.
+
+```js
+    if (req.user && req.user.scope === "promo") { // /reel: new photos only, never overwrite an existing file
+      if (!/^(jpg|png|webp)$/.test(ext)) return res.status(400).json({ error: "images only" });
+      if (!remoteUploadBase && fs.existsSync(path.join(uploadDir, fname))) return res.status(409).json({ error: "exists" });
+    }
+```
+
+  (With `REMOTE_UPLOAD_BASE`, the receiving server runs this same code with the forwarded session.)
+
+  `/properties/create` and `/properties/retry` keep `REVIEW_SCOPES`, so a promo token can't create listings. Task 8 Step 3b checks the upload limits against a real promo token.
 
 - [ ] **Step 4: Run and expect PASS.** `node auth-promo.test.js && node auth-otp.test.js` → both OK, then `npm test` → all pass.
 - [ ] **Step 5:** Append ` && node auth-promo.test.js` to the `test` script.
@@ -627,14 +641,14 @@ git commit -m "feat(promo): OTP for /reel visitors who aren't clients — promo-
 
 **Interfaces:**
 - Consumes: the Cardcom API (Task 1), `priceFor`, `endOfDayIsrael` and the store (Task 2), and `validateListing` from `server/listing-create.js`.
-- Produces: `createPromoRouter({ requireAuth, authSecret, requireAdmin, requireStepUp, store, cardcom, createListing, business, isPaidClient, settings, normalizePhone, baseUrl, now? }) → express.Router`, mounted at `/api/promo`. Routes:
+- Produces: `createPromoRouter({ requireAuth, authSecret, requireAdmin, requireStepUp, store, cardcom, createListing, business, isPaidClient, settings, normalizePhone, getListing, photoBase, baseUrl, now? }) → express.Router`, mounted at `/api/promo`. Routes:
 
   | Route | Auth | Body | Response |
   |---|---|---|---|
   | `POST /lead/start` | public | `{ phone, terms_accepted: true }` | `{ ok }` / 400 `invalid_phone` / 400 `terms_required` |
   | `POST /lead` | session or promo | `{ stage: "verified" \| "payment_failed" }` | `{ ok }` |
   | `POST /quote` | session or promo | — | `{ tier, price }` |
-  | `POST /order` | session or promo | create-form fields + `agent_name` + `terms_accepted: true` | `{ order_id, status: "building" \| "failed" }` or `{ order_id, status: "pending", pay_url \| null }`; errors 400 / 409 / 413 / 502 `payment_unavailable` |
+  | `POST /order` | session or promo | create-form fields + `agent_name` + `terms_accepted: true` | `{ order_id, status: "building" \| "failed" }` or `{ order_id, status: "pending", pay_url \| null }`; errors 400 / 409 `{ error, order_id }` / 413 / 502 `payment_unavailable` |
   | `POST /cardcom/webhook` | public | JSON or form, `LowProfileId` | 200 `{ ok }` |
   | `GET /order/:id` | session or promo, owner only | — | `{ status, price, listing_id }` |
   | `GET /admin/settings` | admin | — | `{ until_date, until }` |
@@ -718,13 +732,13 @@ async function withApp(opts, fn) {
     assert.strictEqual((await req("POST", "/lead/start", { phone: "12", terms_accepted: true })).data.error, "invalid_phone");
     assert.strictEqual((await req("POST", "/lead/start", { phone: "050-111-1111", terms_accepted: true })).status, 200);
     const [lead] = await store.listLeads();
-    assert.deepStrictEqual([lead.phone, lead.stage, !!lead.terms_accepted_at, "marketing_consent_at" in lead], ["972501111111", "otp_sent", true, false]);
+    assert.deepStrictEqual([lead.phone, lead.stage, !!lead.terms_accepted_at, lead.marketing_consent_at], ["972501111111", "otp_sent", true, null]);
     await req("POST", "/lead/start", { phone: "0507777777", terms_accepted: true, marketing_consent: true });
     assert.ok((await store.listLeads()).find((l) => l.phone === "972507777777").marketing_consent_at, "opt-in recorded");
     const h = { "x-phone": "972501111111" };
     assert.strictEqual((await req("POST", "/lead", { stage: "paid" }, h)).status, 400, "client can't claim paid");
     await req("POST", "/lead", { stage: "verified" }, h);
-    assert.strictEqual((await store.listLeads())[0].stage, "verified");
+    assert.strictEqual((await store.listLeads()).find((l) => l.phone === "972501111111").stage, "verified");
     // admin sees it; non-admin doesn't
     assert.strictEqual((await req("GET", "/admin/leads")).status, 403);
     assert.strictEqual((await req("GET", "/admin/leads", null, admin)).data.leads.length, 2);
@@ -787,7 +801,7 @@ async function withApp(opts, fn) {
     const second = await req("POST", "/order", listing, h);
     assert.deepStrictEqual([second.status, second.data.error], [409, "already_used"]);
     assert.strictEqual(built.length, 1);
-    const id = (await req("GET", "/admin/leads", null, admin)).data.leads[0].order_id;
+    const id = second.data.order_id;
     assert.strictEqual((await req("GET", `/order/${id}`, null, h)).data.status, "failed");
     assert.strictEqual((await req("POST", `/admin/orders/${id}/mark-paid`, {}, admin)).status, 409);
     assert.strictEqual(built.length, 1);
@@ -913,7 +927,7 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     if (!phone) return res.status(400).json({ error: "invalid_phone" });
     if (body.terms_accepted !== true) return res.status(400).json({ error: "terms_required" });
     await store.touchLead(phone, "otp_sent", { terms_accepted_at: now().toISOString(),
-      marketing_consent_at: body.marketing_consent === true ? now().toISOString() : undefined });
+      marketing_consent_at: body.marketing_consent === true ? now().toISOString() : null }); // unticked = withdrawn
     res.json({ ok: true });
   }));
 
@@ -950,7 +964,7 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
       const s = await store.start(id, null);
       if (!s.ok) { // close it, so "mark paid" can't hand out a second free reel later
         await store.setOrder(id, { status: "failed", error: s.reason });
-        return res.status(409).json({ error: s.reason });
+        return res.status(409).json({ error: s.reason, order_id: id });
       }
       return res.json({ order_id: id, status: await build(s.order) });
     }
@@ -1178,7 +1192,9 @@ app.get(/^\/reel\/?$/, (req, res) => {
 ```js
 // /reel codes go to numbers that aren't clients: cap them per IP and site-wide so a
 // script can't make the shared WhatsApp number spam strangers (and get it banned).
-const reelOtpIp = rateLimit({ windowMs: 10 * 60_000, max: 5 });
+// Key on the hop our own proxy appends: the first X-Forwarded-For entry (clientIp's default) is client-controlled.
+const lastHop = (req) => String(req.headers["x-forwarded-for"] || "").split(",").map((s) => s.trim()).filter(Boolean).pop() || req.ip;
+const reelOtpIp = rateLimit({ windowMs: 10 * 60_000, max: 5, keyBy: lastHop });
 const reelOtpAll = rateLimit({ windowMs: 60 * 60_000, max: 200, keyBy: () => "all" });
 app.post("/api/auth/otp", (req, res, next) =>
   (req.body && req.body.purpose === "reel" ? reelOtpIp(req, res, () => reelOtpAll(req, res, next)) : next()));
@@ -1192,7 +1208,7 @@ app.post("/api/auth/otp", (req, res, next) =>
 // admin "mark paid". The promo end date is settings/reel_promo (admin "ריל" tab).
 const { createCardcom } = require("./payments/cardcom");
 const { createPromoStore } = require("./promo");
-app.use("/api/promo/lead/start", rateLimit({ windowMs: 60_000, max: 10 }));
+app.use("/api/promo/lead/start", rateLimit({ windowMs: 60_000, max: 10, keyBy: lastHop })); // lastHop: Step 3b
 app.post("/api/promo/order", rateLimit({ windowMs: 60_000, max: 10 })); // POST only: the status poll GETs /order/:id
 app.use("/api/promo/cardcom/webhook", rateLimit({ windowMs: 60_000, max: 60 }));
 app.use("/api/promo", require("./routes/promo")({
@@ -1338,7 +1354,8 @@ const ERR = {
   terms_required: "צריך לאשר את תנאי השימוש", already_used: "כבר קיבלת סרטון חינם במספר הזה",
   payment_unavailable: "מערכת התשלום לא זמינה כרגע, נסו שוב בעוד כמה דקות",
   too_soon: "כבר נשלח קוד — אפשר לבקש שוב בעוד רגע", whatsapp_send_failed: "לא הצלחנו לשלוח וואטסאפ, נסו שוב",
-  too_many_attempts: "יותר מדי ניסיונות, בקשו קוד חדש",
+  too_many_attempts: "יותר מדי ניסיונות, בקשו קוד חדש", rate_limited: "יותר מדי בקשות, נסו שוב בעוד כמה דקות",
+  code_already_used: "הקוד כבר נוצל, בקשו קוד חדש", no_code_requested: "בקשו קוד קודם",
 };
 const msg = (e) => ERR[e.message] || "משהו השתבש, נסו שוב";
 const lead = (stage) => api("/api/promo/lead", { stage }).catch(() => {}); // best effort: never blocks the visitor
@@ -1620,13 +1637,15 @@ Prerequisites: Operator guide §B and §C done on **staging** (`staging.env` has
 - [ ] **Step 2:** Run the `/reel` flow with a phone that is not a paying client, and pay with the Cardcom test card from their docs. Expected:
   - a redirect back to `/reel?order=…` and "הסרטון בהכנה";
   - the lead shows `paid` in the admin;
-  - the n8n "WW1 Walkthrough V4 dev" execution starts;
+  - the n8n "WW1 Reel (promo)" execution starts;
   - within about 20 minutes the reel arrives on WhatsApp, then the page link;
   - the cost line goes to the **admin** phone, not the buyer.
 - [ ] **Step 3:** Re-POST the same webhook (`curl -X POST $BASE/api/promo/cardcom/webhook -d LowProfileId=<id>`). Expected: `{"ok":true}` and no second n8n execution.
 - [ ] **Step 3b (upload limits).** Using the promo cookie from Step 2 (browser devtools → `forly_session`), check two things:
   - `curl -X POST $BASE/api/upload-urls -H 'Content-Type: application/json' --cookie "forly_session=<token>" -d '{"files":[{"name":"a.mp4","contentType":"video/mp4"}]}'` returns `400`.
   - `curl -X DELETE $BASE/api/upload/x.jpg --cookie "forly_session=<token>"` returns `401`.
+  - `curl -X PUT $BASE/api/upload/$(uuidgen | tr A-Z a-z).mp4 --cookie "forly_session=<token>" --data-binary @any.mp4` returns `400`.
+  - PUT to the name of an existing photo (copy one from a page's photo URL) returns `409`.
 - [ ] **Step 4:** Run the flow again with a phone whose quota plan is not "trial". Expected: "הסרטון הראשון עלינו 🎁", no Cardcom page, and the reel arrives.
 - [ ] **Step 5:** Abandon one checkout on purpose (close the Cardcom tab). Expected: it appears under "לא סיימו" with a WhatsApp button and "סמן כשולם".
 - [ ] **Step 6:** Read **every** WhatsApp message the buyer received. There must be no "dev", no costs, and no `hstgr.cloud` link: check the video link and the page link.
