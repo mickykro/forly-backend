@@ -114,7 +114,7 @@ const lead = (stage, extra) => api("/api/promo/lead", { stage, ...extra }).catch
 async function loadQuote() {
   const q = await api("/api/promo/quote", {});
   $("quote").textContent = q.price === 0 ? "הסרטון הראשון עלינו 🎁" : `₪${q.price}`;
-  $("submit").textContent = q.price === 0 ? "צרו לי סרטון" : `לתשלום ₪${q.price}`;
+  $("submit").textContent = q.price === 0 ? "צרו לי סרטון" : "המשך";
 }
 
 async function pollOrder(id, failed) {
