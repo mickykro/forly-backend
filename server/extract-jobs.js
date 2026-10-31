@@ -32,7 +32,9 @@ const nowIso = () => new Date().toISOString();
 // draftId: set only by listing-sweep.js (Phase 4). A drafted job's result is
 // written to the draft on `done` instead of being polled by a wizard — see
 // runJobLocked below.
-async function create({ phone, url, forceSource = null, profileName = null, draftId = null }, deps) {
+// profileOwner: whose profile a /reel promo job opens (the scrape admin); the
+// job itself stays the visitor's. Null → the job's own phone.
+async function create({ phone, url, forceSource = null, profileName = null, profileOwner = null, draftId = null }, deps) {
   const created = new Date();
   const job = {
     id: crypto.randomUUID(),
@@ -42,6 +44,7 @@ async function create({ phone, url, forceSource = null, profileName = null, draf
     attempts: 0,
     force_source: forceSource,
     profile_name: profileName,
+    profile_owner: profileOwner,
     draft_id: draftId,
     created_at: created.toISOString(),
     updated_at: created.toISOString(),
@@ -89,7 +92,7 @@ async function runJob(job, deps) {
   // posting — the same lock every one of them takes (profile-lock.js). An
   // extract job only ever carries a profile for a Facebook group read.
   const locks = deps.locks || require("./profile-lock");
-  const release = job.profile_name ? locks.tryAcquire(job.phone, "facebook") : () => {};
+  const release = job.profile_name ? locks.tryAcquire(job.profile_owner || job.phone, "facebook") : () => {};
   if (job.profile_name && !release) return job; // someone else has the profile open; next sweep
   try {
     return await runJobLocked(job, deps);
@@ -105,18 +108,19 @@ async function runJobLocked(job, deps) {
     // A job with a profile opens the agent's CURRENT profile (I2): the name
     // is the stored name, or derived again from the connection's generation; the connection
     // goes to withPage, which refuses a revoked or quarantined profile.
+    const owner = job.profile_owner || job.phone;
     let profileName = job.profile_name || null, conn = null;
     if (profileName) {
-      conn = (await deps.db.getConnection(job.phone)) || {};
+      conn = (await deps.db.getConnection(owner)) || {};
       const platform = String(profileName).split("-")[0];
-      profileName = require("./profile-name").profileNameFor(platform, job.phone, conn);
+      profileName = require("./profile-name").profileNameFor(platform, owner, conn);
     }
     const source = await deps.resolve(
       { url: job.url, userId: job.phone },
       {
         forceSource: job.force_source || "driver", browserType, profileName, jobId: job.id,
         // runJob already holds (phone, "facebook") when there is a profile.
-        phone: job.phone, platform: "facebook", lockHeld: !!job.profile_name, conn,
+        phone: owner, platform: "facebook", lockHeld: !!job.profile_name, conn,
       },
     );
     const parsed = await deps.parseListing(source.text);

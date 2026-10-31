@@ -7,13 +7,17 @@
  * admin (ADMIN_PHONES) keeps that admin as req.user, so Yad2/Facebook links
  * get the browser scrape on the admin's own profile and daily cap. Anonymous
  * demo callers still get login_required_for_browser.
+ *
+ * /reel promo logins (scope "promo") may extract too, under their own caps.
+ * Their browser jobs never open their own profile: a Facebook group post opens
+ * the scrape admin's (REEL_SCRAPE_PHONE) profile, everything else runs bare.
  */
 const express = require("express");
 const crypto = require("crypto");
 const { parseListing, MAX_INPUT } = require("../listing-extract");
 const { isPublicUrl, TIMEOUT_MS } = require("../listing-sources");
 const { storeBuffer } = require("../upload-store");
-const { REVIEW_SCOPES } = require("../auth");
+const { UPLOAD_SCOPES } = require("../auth");
 const { makeAdminGuard } = require("../admin-auth");
 
 const IMAGE_TYPES = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -25,6 +29,19 @@ const DAILY_CAP = 30;
 // A browser scrape is a whole Chrome instance plus metered bandwidth, where a
 // firecrawl scrape is one HTTP call. Same abuse surface, very different cost.
 const DRIVER_DAILY_CAP = 10;
+// /reel promo visitors: strangers, so tighter per phone, plus one site-wide browser pool.
+const PROMO_DAILY_CAP = 10;
+const PROMO_DRIVER_DAILY_CAP = 3;
+// A found-photos import is up to 12 calls per extract, so its own, wider cap.
+const PROMO_IMPORT_DAILY_CAP = 40;
+const MAX_REDIRECTS = 3;
+// Only a group post may open the scrape admin's logged-in profile.
+const isGroupPost = (url) => {
+  try {
+    const u = new URL(url);
+    return /^(www\.|m\.)?facebook\.com$/i.test(u.hostname) && /^\/groups\/[^/]+\/(posts|permalink)\/[^/]+/i.test(u.pathname);
+  } catch (e) { return false; }
+};
 
 const STATUS = {
   invalid_input: 400, facebook_not_connected: 409, social_login_required: 409, login_required_for_browser: 409,
@@ -69,10 +86,16 @@ function sniffImage(b) {
 async function importImage(url, { fetchFn = fetch, lookup, video = false } = {}) {
   const TYPES = video ? VIDEO_TYPES : IMAGE_TYPES;
   const fail = (code, msg) => { const e = new Error(msg || code); e.code = code; return e; };
-  if (!(await isPublicUrl(url, lookup))) throw fail("invalid_input", "url not allowed");
-  let r;
-  try { r = await fetchFn(url, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "follow" }); }
-  catch (err) { throw fail("page_unreadable", err.message); }
+  // Redirects by hand: each hop must pass the SSRF guard, not only the first URL.
+  let r, cur = url;
+  for (let hop = 0; ; hop++) {
+    if (!(await isPublicUrl(cur, lookup))) throw fail("invalid_input", "url not allowed");
+    try { r = await fetchFn(cur, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "manual" }); }
+    catch (err) { throw fail("page_unreadable", err.message); }
+    if (!(r.status >= 300 && r.status < 400)) break;
+    if (hop >= MAX_REDIRECTS) throw fail("page_unreadable", "too many redirects");
+    try { cur = new URL(r.headers.get("location"), cur).href; } catch (e) { throw fail("page_unreadable", "bad redirect"); }
+  }
   if (!r.ok) throw fail("page_unreadable", `fetch ${r.status}`);
   let ct = String(r.headers.get("content-type") || "").split(";")[0].trim();
   // WhatsApp media (Green API's store) comes back as octet-stream: trust the bytes then.
@@ -102,6 +125,11 @@ module.exports = function createExtractRouter(ctx) {
   const router = express.Router();
   const limit = new DailyLimit(DAILY_CAP);
   const driverLimit = new DailyLimit(DRIVER_DAILY_CAP);
+  const promoLimit = new DailyLimit(PROMO_DAILY_CAP);
+  const promoDriverLimit = new DailyLimit(PROMO_DRIVER_DAILY_CAP);
+  const promoImportLimit = new DailyLimit(PROMO_IMPORT_DAILY_CAP);
+  const promoPool = new DailyLimit(Number(process.env.REEL_SCRAPE_DAILY_CAP) || 20);
+  const reelScrapePhone = ctx.reelScrapePhone || null;
 
   function auth(req, res, next) {
     if ("x-demo-key" in req.headers) {
@@ -109,7 +137,10 @@ module.exports = function createExtractRouter(ctx) {
       if (isAdmin(session)) req.user = session;
       return next();
     }
-    return requireAuth(authSecret, REVIEW_SCOPES)(req, res, next);
+    return requireAuth(authSecret, UPLOAD_SCOPES)(req, res, () => {
+      req.promo = req.user.scope === "promo";
+      next();
+    });
   }
   const keyFor = (req) => (req.user && req.user.userId) || `demo:${req.ip}`;
   const sendError = (res, err) => {
@@ -121,7 +152,7 @@ module.exports = function createExtractRouter(ctx) {
   router.post("/properties/extract", auth, async (req, res) => {
     const input = validateBody(req.body);
     if (!input) return res.status(400).json({ error: "invalid_input" });
-    if (!limit.take(keyFor(req))) return res.status(429).json({ error: "extract_limit" });
+    if (!(req.promo ? promoLimit : limit).take(keyFor(req))) return res.status(429).json({ error: "extract_limit" });
     const phone = keyFor(req);
     try {
       // Driver-routed hosts never try firecrawl: we already know it cannot read them.
@@ -132,6 +163,7 @@ module.exports = function createExtractRouter(ctx) {
         // A browser session is a paid resource and, for social hosts, opens the
         // customer's own logged-in profile. Demo callers get neither.
         if (!req.user) throw fail("login_required_for_browser");
+        if (req.promo) return queuePromoJob(forceSource, withProfile && isGroupPost(input.url));
         if (!driverLimit.take(phone)) throw fail("extract_limit");
         // The profile's stored name, or its current generation's (I2): after a reconnect the gen-0 name is refused.
         let profileName = withProfile ? profileFor(input.url, phone) : null; // null: not a social host
@@ -144,7 +176,23 @@ module.exports = function createExtractRouter(ctx) {
         return { job_id: job.id, status: job.status };
       }
 
+      // The job stays the visitor's (poll ownership); profile_owner runs it as the admin.
+      async function queuePromoJob(forceSource, adminProfile) {
+        if (adminProfile && !reelScrapePhone) throw fail("login_required_for_browser");
+        if (!promoDriverLimit.take(phone) || !promoPool.take("pool")) throw fail("extract_limit");
+        let profileName = null, profileOwner = null;
+        if (adminProfile) {
+          const conn = (await database.getConnection(reelScrapePhone)) || {};
+          profileName = require("../profile-name").profileNameFor("facebook", reelScrapePhone, conn);
+          profileOwner = reelScrapePhone;
+        }
+        const job = await extractJobs.create({ phone, url: input.url, forceSource, profileName, profileOwner }, jobDeps);
+        return { job_id: job.id, status: job.status };
+      }
+
       if (kind === "driver") return res.status(202).json(await queueDriverJob(null, true));
+      // A page post reads through the caller's own Graph connection, which a stranger lacks.
+      if (kind === "facebook" && req.promo) return res.status(202).json(await queueDriverJob("driver", false));
 
       let src;
       try {
@@ -170,7 +218,7 @@ module.exports = function createExtractRouter(ctx) {
   // Poll target for a queued browser scrape. A job that belongs to someone else
   // answers exactly like one that does not exist — an agent must not be able to
   // probe for other agents' job ids.
-  router.get("/properties/extract/:job_id", requireAuth(authSecret), async (req, res) => {
+  router.get("/properties/extract/:job_id", requireAuth(authSecret, UPLOAD_SCOPES), async (req, res) => {
     const job = await database.getExtractJob(String(req.params.job_id)).catch(() => null);
     if (!job || job.phone !== req.user.userId) return res.status(404).json({ error: "not_found" });
     const out = { status: job.status };
@@ -188,6 +236,7 @@ module.exports = function createExtractRouter(ctx) {
   router.post("/photos/import-url", auth, async (req, res) => {
     const url = req.body && typeof req.body.url === "string" ? req.body.url.trim() : "";
     if (!url) return res.status(400).json({ error: "invalid_input" });
+    if (req.promo && !promoImportLimit.take(keyFor(req))) return res.status(429).json({ error: "extract_limit" });
     try {
       const img = await importImage(url);
       await storeBuffer(img, { uploadDir, remoteUploadBase, req });
@@ -203,4 +252,4 @@ module.exports = function createExtractRouter(ctx) {
 
 module.exports.importImage = importImage;
 module.exports.DailyLimit = DailyLimit;
-module.exports._test = { validateBody, statusFor, DailyLimit, importImage, IMAGE_TYPES, profileFor };
+module.exports._test = { validateBody, statusFor, DailyLimit, importImage, IMAGE_TYPES, profileFor, isGroupPost };

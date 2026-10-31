@@ -323,6 +323,8 @@ app.use("/api/whatsapp", createWhatsappRouter({
 const createExtractRouter = require("./routes/extract");
 app.use("/api", createExtractRouter({
   requireAuth, authSecret: AUTH_SECRET, verifySession, readToken, adminPhones: ADMIN_PHONES,
+  // /reel visitors' Facebook group-post scrapes open this admin's profile.
+  reelScrapePhone: normalizeAuthPhone(process.env.REEL_SCRAPE_PHONE || ADMIN_PHONES[0] || "") || null,
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
 }));
 
