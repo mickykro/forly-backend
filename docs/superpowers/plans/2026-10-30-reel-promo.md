@@ -4,7 +4,7 @@
 
 **Goal:** A public `/reel` page. Anyone enters a phone number, accepts the terms, verifies by WhatsApp OTP, uploads a property, pays with Cardcom (or gets it free), and receives a narrated reel and a property page on WhatsApp. Every number that started and didn't finish is kept for follow-up.
 
-**Architecture:** `/reel` is a paid front door to the existing `createListing()`. For promo listings, `createListing()` sends to the **"WW1 Walkthrough V4 dev"** n8n workflow (id `az3WzE3YLVzKRoJF`, webhook path `ww1-v4-dev`) instead of the regular WW1. That workflow renders the reel, WhatsApps it, and builds the page. New code:
+**Architecture:** `/reel` is a paid front door to the existing `createListing()`. For promo listings, `createListing()` sends to **"WW1 Reel (promo)"**, a frozen copy of the n8n workflow "WW1 Walkthrough V4 dev" (id `az3WzE3YLVzKRoJF`) with webhook path `reel-promo`, instead of the regular WW1. That workflow renders the reel, WhatsApps it, and builds the page. New code:
 - a promo login path in `server/auth.js`: a visitor who isn't a client gets a token that works for /reel and photo upload only
 - a Cardcom adapter (`server/payments/cardcom.js`)
 - pricing, orders and leads (`server/promo.js`)
@@ -21,7 +21,7 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
 ## How it works (plain language)
 
 **What the visitor sees on /reel:**
-1. **Phone + terms.** They type their WhatsApp number and tick "I agree to the terms of use and privacy policy" (both links open the existing `/legal/terms.html` and `/legal/privacy.html`). The "send me a code" button stays disabled until the box is ticked. *From this moment the number is saved as a lead (stage `otp_sent`).*
+1. **Phone + terms.** They type their WhatsApp number and tick "I agree to the terms of use and privacy policy" (both links open the existing `/legal/terms.html` and `/legal/privacy.html`). The "send me a code" button stays disabled until the box is ticked. A second, optional box says "send me updates and offers on WhatsApp". *From this moment the number is saved as a lead (stage `otp_sent`).*
 2. **Code.** A 6-digit code arrives on WhatsApp and they type it. *Lead stage → `verified`.*
 3. **Property form.** Name, city, address, price, rooms, sqm and at least 3 photos. The price is shown before they press the button:
    - an existing paying client's first reel shows "on us 🎁";
@@ -32,7 +32,7 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
 
 **What you see in the admin panel**, in a new **"ריל"** tab:
 - a **date picker** for the last day of the ₪59 promo. Saving it takes effect immediately; clearing it ends the promo.
-- a **leads table** listing every number that started: phone, name, stage, price, last activity, and a WhatsApp button to open a chat. Filtering by "didn't finish" gives you the abandoned carts.
+- a **leads table** listing every number that started: phone, name, stage, price and last activity. Only people who ticked "updates and offers" get a WhatsApp button that opens a chat. Filtering by "didn't finish" gives you the abandoned carts.
 - a **"mark paid"** button on orders that are waiting (`checkout`), for when someone paid you another way or Cardcom isn't live yet. It starts the reel.
 
 **Why it can't be abused:**
@@ -55,7 +55,8 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
   - Stages: `otp_sent` → `verified` → `checkout` / `payment_failed` / `paid`.
   - An early stage (`otp_sent`, `verified`) never overwrites a late one (`checkout`, `payment_failed`, `paid`).
   - Late stages overwrite each other, because the latest order wins, except that `payment_failed` never replaces `paid`.
-  - `order_status` (`building` / `failed` / `amount_mismatch`) is copied onto the lead so the admin sees problems.
+  - `order_status` (`building` / `failed` / `amount_mismatch`) and `listing_id` are copied onto the lead.
+  - `/admin/leads` marks a `building` lead from the last 3 days as `failed` when its listing is stuck (`buildFailed`), or `done` once the page exists. A reel n8n never delivered therefore shows up as a problem.
 - **Terms:**
   - `/api/promo/lead/start` and `/api/promo/order` both refuse requests without `terms_accepted: true`.
   - The acceptance time is stored on the lead and on the order.
@@ -68,7 +69,15 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
 - The page URL is `/reel`; the file is `public-agent/reel.html`.
 - Promo reels do NOT consume the `walkthroughs` quota. The V4 dev workflow never calls `/api/quota/consume`; that was checked in n8n on 2026-10-31.
 - Promo listings carry `source: "reel_promo"`. `kickPipeline` sends them to `N8N_REEL_WEBHOOK_URL`, so a retry of a promo listing also goes to the reel workflow.
-- A promo listing counts as "stuck" after 45 minutes, not 20. The reel itself takes about 20 minutes, so the photo-only fallback page and the "failed" badge must not fire while it is still rendering.
+- A promo listing counts as "stuck" (failed badge, retry allowed) after 45 minutes, not 20, because the reel itself takes about 20 minutes.
+- The photo-only fallback page is **never** built for promo listings. A built page sets `page_id`, and that blocks every retry (`already_built`), so the reel the buyer paid for could never be re-run.
+- **Consent:**
+  - The terms box is required.
+  - A second box, "agree to receive WhatsApp updates and offers", is optional and unticked. Only leads with `marketing_consent_at` get a WhatsApp button in the admin (Israeli Communications Law §30A).
+  - Before the pay button the page shows who provides the service and links to the cancellation/refund terms (Consumer Protection Law §14C).
+- `/order` forwards only whitelisted listing fields. Photo URLs must start with `${UPLOAD_PUBLIC_BASE}/files/` (our own upload), so a buyer can't send `own_video_url`, `listing_draft_id`, `theme`, `agent2` or foreign URLs down the pipeline.
+- **Abuse limits on reel codes**, since anyone can now ask for one: 5 per IP per 10 minutes and 200 per hour site-wide. Cold codes to random numbers could get the shared GreenAPI number banned.
+- Promo tokens upload **images only**, and can never DELETE uploads.
 - Admin writes (save promo date, mark paid) use `[requireAdmin, requireStepUp]`, like `routes/admin-campaigns.js`.
 - Secrets come only from env: `CARDCOM_TERMINAL`, `CARDCOM_API_NAME`, `N8N_REEL_WEBHOOK_URL`.
 - Express 4 doesn't catch async errors, so every async handler is wrapped in `h()` (shown in Task 3).
@@ -77,7 +86,10 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
 ## Decisions
 
 - **Failed or abandoned payment:** the order stays `pending` and the lead `checkout` or `payment_failed`. Nothing is charged and nothing is built. The visitor can submit again, and you can follow up from the leads table.
-- **Failed generation:** retry via the existing admin retry, which goes to the reel workflow again because the listing has `source: "reel_promo"`. Refunds are manual, from the Cardcom dashboard.
+- **Failed generation:** after 45 minutes the admin "ריל" tab shows "היצירה נכשלה". Retry from the admin נכסים tab; it goes to the reel workflow again, and there's no photo-only page in the way. Refunds are manual, from the Cardcom dashboard.
+- **Amount mismatch:** it can't be built from the admin. Check the payment in Cardcom, refund it, and ask the buyer to order again.
+- **Local runs can't exercise the promo token**, because with no Firestore `isRegistered()` is always true. The promo path is covered by `auth-promo.test.js` and by the staging run (Task 8).
+- **Staging shares production's Firestore.** Everything written on staging (promo date, counters, leads) is production data; see Task 8.
 - **Paid amount ≠ order price:** the order moves to `amount_mismatch` and nothing is built. It's logged for an operator.
 - **Unverified numbers** (`otp_sent`) are shown separately in the admin tab. Anyone can type someone else's number, so don't send marketing to unverified numbers. Use them only as a count.
 - **No editor in the promo.** Buyers get the reel and the page as generated. The editor being built separately is for existing clients only and isn't part of this plan.
@@ -103,9 +115,10 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
   - Its timeout message says "WW1 V4 dev".
   - It reads `body.phone`, `body.listing_id` and `body.image_urls` (`createListing`'s WW1 payload already has them) and posts the page to the `property-page-builder` webhook.
 
-  Before Task 7, the operator must do Operator guide §C (rename the messages, point Report Cost at the admin, publish), then confirm two things and write the answers here:
+  Before Task 8, the operator must do Operator guide §C: duplicate this workflow as **"WW1 Reel (promo)"** with its own webhook path, fix that copy's messages, and publish it. Then confirm the following on the copy and write the answers here:
   - (a) ~~Can a production listing be read by the staging walkthrough API?~~ **Answered: yes.** Staging and production share Firestore (`server/build-fallback.js:11-12`), so the staging URLs can stay.
   - (b) `property-page-builder` WhatsApps the page link to `business_phone`. If it doesn't, the visitor gets only the video.
+- [ ] **Step 2b (staging uploads).** Read `REMOTE_UPLOAD_BASE` in `staging.env` on the VPS. If it is set (`.github/workflows/deploy-staging.yml:10` suggests it may be), staging forwards uploads to production, and production will refuse promo tokens until it runs Task 2b. In that case deploy Task 2b (auth + intake) to production before Task 8.
 - [ ] **Step 3 (public host).** Read `BASE_URL` in production `deploy.env`. It appears in the public /reel link, in Cardcom's return URL and webhook, and on the site Cardcom reviews. It must be the customer domain (the one the dashboard runs on), never an `hstgr.cloud` host (`server/utils.js` `INFRA_HOST`). If it is an `hstgr.cloud` host, stop and ask the owner which domain to use before Task 5.
 
 ---
@@ -585,8 +598,14 @@ module.exports.UPLOAD_SCOPES = ["session", "review", "promo"]; // photo upload o
   In `server/routes/intake.js`:
   - Change the import on line 17 to `const { REVIEW_SCOPES, UPLOAD_SCOPES } = require("../auth");`.
   - Change line 53 to `const uploadAuth = requireAuth(authSecret, UPLOAD_SCOPES);`.
+  - **DELETE `/upload/:fname` (line 137) must not accept promo tokens**, because it has no ownership check. Change its guard from `uploadAuth` to `requireAuth(authSecret, REVIEW_SCOPES)`.
+  - In `POST /upload-urls`, right after `const ext = …` (line 75), add:
 
-  `/properties/create` and `/properties/retry` keep `REVIEW_SCOPES`, so a promo token can't create listings.
+```js
+      if (req.user.scope === "promo" && !IMAGE_TYPES[ct]) return res.status(400).json({ error: `unsupported type: ${ct}` }); // /reel: photos only
+```
+
+  `/properties/create` and `/properties/retry` keep `REVIEW_SCOPES`, so a promo token can't create listings. Task 8 Step 4 checks the upload limits against a real promo token.
 
 - [ ] **Step 4: Run and expect PASS.** `node auth-promo.test.js && node auth-otp.test.js` → both OK, then `npm test` → all pass.
 - [ ] **Step 5:** Append ` && node auth-promo.test.js` to the `test` script.
@@ -624,6 +643,7 @@ git commit -m "feat(promo): OTP for /reel visitors who aren't clients — promo-
   | `POST /admin/orders/:id/mark-paid` | admin + step-up | — | `{ ok, status }` |
 
   Dependencies:
+  - `getListing(id) → listing|null` (db.getListing) and `photoBase` (`${UPLOAD_PUBLIC_BASE}/files/`)
   - `business = { get(phone) }`, read only: `/order` never creates a business doc, because that would make the phone a "client" with unlimited dashboard builds
   - `isPaidClient(phone) → Promise<boolean>`
   - `settings = { get() → doc|null, set(patch) → doc }`
@@ -642,7 +662,8 @@ const { createPromoStore } = require("../promo");
 const { normalizeAuthPhone } = require("../utils");
 
 const photos = ["https://f/1.jpg", "https://f/2.jpg", "https://f/3.jpg"];
-const listing = { city: "תל אביב", price: 2500000, rooms: 4, photos_urls: photos, agent_name: "דנה", terms_accepted: true };
+const listing = { city: "תל אביב", price: 2500000, rooms: 4, photos_urls: photos, agent_name: "דנה", terms_accepted: true,
+  own_video_url: "https://evil/v.mp4", listing_draft_id: "someone-elses" }; // must be dropped by the whitelist
 
 async function withApp(opts, fn) {
   const businesses = new Map(Object.entries(opts.businesses || {}));
@@ -674,6 +695,7 @@ async function withApp(opts, fn) {
     isPaidClient: async (p) => (opts.paidClients || []).includes(p),
     settings: { get: async () => promo, set: async (patch) => (promo = { ...(promo || {}), ...patch }) },
     normalizePhone: normalizeAuthPhone,
+    getListing: async (id) => (opts.listings || {})[id] || null, photoBase: "https://f/",
     baseUrl: "https://forly.test", now: () => new Date("2026-11-01T10:00:00Z"),
   }));
   app.use((err, req, res, next) => res.status(500).json({ error: "internal" })); // eslint-disable-line no-unused-vars
@@ -695,20 +717,24 @@ async function withApp(opts, fn) {
     assert.strictEqual((await req("POST", "/lead/start", { phone: "050-111-1111" })).data.error, "terms_required");
     assert.strictEqual((await req("POST", "/lead/start", { phone: "12", terms_accepted: true })).data.error, "invalid_phone");
     assert.strictEqual((await req("POST", "/lead/start", { phone: "050-111-1111", terms_accepted: true })).status, 200);
-    let [lead] = await store.listLeads();
-    assert.deepStrictEqual([lead.phone, lead.stage, !!lead.terms_accepted_at], ["972501111111", "otp_sent", true]);
+    const [lead] = await store.listLeads();
+    assert.deepStrictEqual([lead.phone, lead.stage, !!lead.terms_accepted_at, "marketing_consent_at" in lead], ["972501111111", "otp_sent", true, false]);
+    await req("POST", "/lead/start", { phone: "0507777777", terms_accepted: true, marketing_consent: true });
+    assert.ok((await store.listLeads()).find((l) => l.phone === "972507777777").marketing_consent_at, "opt-in recorded");
     const h = { "x-phone": "972501111111" };
     assert.strictEqual((await req("POST", "/lead", { stage: "paid" }, h)).status, 400, "client can't claim paid");
     await req("POST", "/lead", { stage: "verified" }, h);
     assert.strictEqual((await store.listLeads())[0].stage, "verified");
     // admin sees it; non-admin doesn't
     assert.strictEqual((await req("GET", "/admin/leads")).status, 403);
-    assert.strictEqual((await req("GET", "/admin/leads", null, admin)).data.leads.length, 1);
+    assert.strictEqual((await req("GET", "/admin/leads", null, admin)).data.leads.length, 2);
   });
 
   // New phone: ₪59, pays via Cardcom, webhook builds once, retry doesn't rebuild
-  await withApp({}, async ({ req, built, lp, businesses, store }) => {
+  const listings = {};
+  await withApp({ listings }, async ({ req, built, lp, businesses, store }) => {
     const h = { "x-phone": "972501111111" };
+    assert.strictEqual((await req("POST", "/order", { ...listing, photos_urls: ["https://evil/1.jpg", ...photos] }, h)).status, 400, "foreign photo URLs refused");
     assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "promo", price: 59 });
     assert.strictEqual((await req("POST", "/order", { ...listing, terms_accepted: false }, h)).data.error, "terms_required");
     const o = await req("POST", "/order", listing, h);
@@ -729,7 +755,12 @@ async function withApp(opts, fn) {
     assert.strictEqual(built.length, 1);
     assert.deepStrictEqual(built[0].agent, { name: "דנה", phone: "972501111111" });
     assert.deepStrictEqual(built[0].extra, { source: "reel_promo" });
-    assert.ok(!("terms_accepted" in built[0].body) && !("agent_name" in built[0].body));
+    for (const k of ["terms_accepted", "agent_name", "own_video_url", "listing_draft_id"]) assert.ok(!(k in built[0].body), `${k} not forwarded`);
+    // a reel n8n never delivered shows up as a problem in the admin; a delivered one as done
+    listings.L1 = { listing_id: "L1", status: "active", page_id: null, source: "reel_promo", created_at: new Date(Date.now() - 60 * 60e3) };
+    assert.strictEqual((await req("GET", "/admin/leads", null, admin)).data.leads[0].order_status, "failed");
+    listings.L1.page_id = "pg1";
+    assert.strictEqual((await req("GET", "/admin/leads", null, admin)).data.leads[0].order_status, "done");
     assert.deepStrictEqual([(await store.listLeads())[0].stage, (await store.listLeads())[0].order_status], ["paid", "building"]);
     const st = await req("GET", `/order/${o.data.order_id}`, null, h);
     assert.deepStrictEqual(st.data, { status: "building", price: 59, listing_id: "L1" });
@@ -836,10 +867,13 @@ async function withApp(opts, fn) {
  */
 
 const express = require("express");
-const { validateListing } = require("../listing-create");
+const { validateListing, buildFailed } = require("../listing-create");
 const { priceFor, endOfDayIsrael } = require("../promo");
 
 const MAX_LISTING_BYTES = 32 * 1024;
+// What a /reel buyer may send down the pipeline; nothing else (own_video_url, listing_draft_id, theme, agent2…).
+const LISTING_FIELDS = ["city", "address", "neighborhood", "price", "rooms", "size_sqm", "floor", "listing_type",
+  "description", "photos_urls", "language"];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // A real calendar day: "2026-02-30" would otherwise roll over to March 2.
 const realDate = (d) => typeof d === "string" && DATE_RE.test(d) && !isNaN(new Date(`${d}T12:00:00Z`))
@@ -848,7 +882,7 @@ const realDate = (d) => typeof d === "string" && DATE_RE.test(d) && !isNaN(new D
 const h = (fn) => (req, res, next) => fn(req, res).catch(next);
 
 module.exports = function createPromoRouter({ requireAuth, authSecret, requireAdmin, requireStepUp, store, cardcom,
-  createListing, business, isPaidClient, settings, normalizePhone, baseUrl, now = () => new Date() }) {
+  createListing, business, isPaidClient, settings, normalizePhone, getListing, photoBase, baseUrl, now = () => new Date() }) {
   const router = express.Router();
   const auth = requireAuth(authSecret, ["session", "promo"]); // auth.js PROMO_SCOPES
   const adminWrite = [requireAdmin, requireStepUp];
@@ -868,7 +902,8 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
       console.error(`promo build failed for order ${order.id}:`, r.error);
       await store.setOrder(order.id, { status, error: String(r.error).slice(0, 200) });
     } else await store.setOrder(order.id, { status, listing_id: r.listing_id });
-    await store.touchLead(order.phone, "paid", { order_id: order.id, price: order.price, order_status: status });
+    await store.touchLead(order.phone, "paid", { order_id: order.id, price: order.price, order_status: status,
+      listing_id: r.listing_id || null });
     return status;
   }
 
@@ -877,7 +912,8 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     const phone = normalizePhone(String(body.phone || ""));
     if (!phone) return res.status(400).json({ error: "invalid_phone" });
     if (body.terms_accepted !== true) return res.status(400).json({ error: "terms_required" });
-    await store.touchLead(phone, "otp_sent", { terms_accepted_at: now().toISOString() });
+    await store.touchLead(phone, "otp_sent", { terms_accepted_at: now().toISOString(),
+      marketing_consent_at: body.marketing_consent === true ? now().toISOString() : undefined });
     res.json({ ok: true });
   }));
 
@@ -892,19 +928,23 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
 
   router.post("/order", auth, h(async (req, res) => {
     const phone = req.user.userId;
-    const { agent_name, terms_accepted, ...listing } = req.body || {};
+    const body = req.body || {};
+    const { agent_name, terms_accepted } = body;
+    const listing = Object.fromEntries(LISTING_FIELDS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
     const agentName = String(agent_name || "").trim().slice(0, 60);
     if (terms_accepted !== true) return res.status(400).json({ error: "terms_required" });
     if (!agentName) return res.status(400).json({ error: "agent_name is required" });
     const invalid = validateListing(listing);
     if (invalid) return res.status(invalid.code).json({ error: invalid.error });
+    if (!listing.photos_urls.every((u) => typeof u === "string" && u.startsWith(photoBase))) return res.status(400).json({ error: "photos must be uploaded here" });
     if (Buffer.byteLength(JSON.stringify(listing)) > MAX_LISTING_BYTES) return res.status(413).json({ error: "too_large" });
 
     const [biz, { tier, price }] = await Promise.all([business.get(phone), quote(phone)]);
     const termsAt = now().toISOString();
     const id = await store.createOrder({ phone, price, tier, listing, agent_name: agentName, terms_accepted_at: termsAt,
       use_agent_override: !(biz && (biz.full_name || biz.business_name)) }); // business docs have no `name`
-    await store.touchLead(phone, "checkout", { agent_name: agentName, order_id: id, price, terms_accepted_at: termsAt });
+    // Free orders get their lead from build(); a closed free order must not look like an abandoned cart.
+    if (price > 0) await store.touchLead(phone, "checkout", { agent_name: agentName, order_id: id, price, terms_accepted_at: termsAt, order_status: null });
 
     if (price === 0) {
       const s = await store.start(id, null);
@@ -969,7 +1009,18 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     res.json({ until_date: s.until_date || null, until: s.until || null });
   }));
 
-  router.get("/admin/leads", requireAdmin, h(async (req, res) => { res.json({ leads: await store.listLeads() }); }));
+  // A reel n8n never delivered is a stuck listing, not an order error: look at the listing
+  // for recent "building" leads (last 3 days only, to keep the reads small).
+  router.get("/admin/leads", requireAdmin, h(async (req, res) => {
+    const leads = await store.listLeads();
+    await Promise.all(leads.map(async (l) => {
+      if (l.order_status !== "building" || !l.listing_id || Date.now() - Date.parse(l.last_seen_at) > 3 * 864e5) return;
+      const listing = await getListing(l.listing_id).catch(() => null);
+      if (listing && listing.page_id) l.order_status = "done";
+      else if (listing && buildFailed(listing)) l.order_status = "failed";
+    }));
+    res.json({ leads });
+  }));
 
   router.post("/admin/orders/:id/mark-paid", adminWrite, h(async (req, res) => {
     const s = await store.start(req.params.id, { manual: true, by: req.user ? req.user.userId : "admin" });
@@ -1000,6 +1051,7 @@ git commit -m "feat(promo): /api/promo — leads, terms, quote, order, Cardcom w
   - the `kickPipeline(...)` call (line 100)
   - `kickPipeline` (around lines 106–109)
 - Modify: `server/build-fallback.js` (`due()`, line ~21)
+- Test: `server/build-fallback.test.js` (one assert, Step 1)
 - Modify: `server/routes/intake.js`:
   - the context destructure at line ~32–34;
   - `pipelineDeps` at line ~157, which builds its own deps, so the index.js value would never arrive.
@@ -1027,6 +1079,13 @@ git commit -m "feat(promo): /api/promo — leads, terms, quote, order, Cardcom w
   assert.equal(buildFailed(promoAt(50), now), true);
 ```
 
+  In `server/build-fallback.test.js`, add one assert next to its existing `due` checks. First check that `due` is exported; if it isn't, add it to `module.exports`.
+
+```js
+  assert.equal(due({ listing_id: "x", source: "reel_promo", photos_urls: ["a"], page_id: null, created_at: new Date(Date.now() - 2 * 3600e3) }, Date.now()), false,
+    "no photo-only page for a paid reel");
+```
+
 - [ ] **Step 2: Run it and expect FAIL.** `node listing-create.test.js` → AssertionError (`https://n8n/ww1` !== `https://n8n/reel`).
 
 - [ ] **Step 3: Implement.** In `server/listing-create.js`:
@@ -1049,11 +1108,13 @@ const REEL_STUCK_MS = 45 * 60 * 1000; // the reel workflow alone takes ~20 min
 const stuckMs = (l) => (l.source === "reel_promo" ? REEL_STUCK_MS : BUILD_STUCK_MS);
 ```
 
-  In `server/build-fallback.js`:
-  - import `stuckMs` instead of `BUILD_STUCK_MS`;
-  - in `due()`, use `return age > stuckMs(l) && age < MAX_AGE_MS;`.
+  In `server/build-fallback.js`, make this the first line of `due()`:
 
-  Without this, the photo-only page would go out while the reel is still rendering.
+```js
+  if (l && l.source === "reel_promo") return false; // a photo-only page sets page_id, which blocks re-running the paid reel
+```
+
+  Then the buyer never gets a page without the video, and a failed reel stays re-runnable from the admin retry. `build-fallback.test.js` keeps importing `BUILD_STUCK_MS`, so keep exporting it.
 
   In `server/routes/intake.js`:
   - add `n8nReelWebhook` to the context destructure (next to `n8nWw1Webhook`);
@@ -1093,7 +1154,7 @@ git commit -m "feat(promo): reel_promo listings go to the reel n8n workflow"
 - [ ] **Step 1: Add the env const** next to `N8N_WW1_WEBHOOK_URL` (line 67):
 
 ```js
-const N8N_REEL_WEBHOOK_URL = process.env.N8N_REEL_WEBHOOK_URL || ""; // "WW1 Walkthrough V4 dev" — /reel promo listings
+const N8N_REEL_WEBHOOK_URL = process.env.N8N_REEL_WEBHOOK_URL || ""; // n8n "WW1 Reel (promo)" — /reel promo listings
 ```
 
 - [ ] **Step 2: Add `n8nReelWebhook: N8N_REEL_WEBHOOK_URL,`** to each of the three deps objects that already contain `n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL` (`grep -n "n8nWw1Webhook:" server/index.js`). Then a retry from the admin panel or the dashboard re-sends a promo listing to the reel workflow. Also add one startup log line next to the existing `WW1 webhook:` log:
@@ -1110,6 +1171,17 @@ app.get(/^\/reel\/?$/, (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(__dirname, "..", "public-agent", "reel.html"));
 });
+```
+
+- [ ] **Step 3b: Limit reel codes.** Since Task 2b, anyone can ask for a code for any number. Insert this **before** the existing `app.post("/api/auth/otp", rateLimit(...))` at line 201. `express.json` is already mounted at line ~178, so `req.body` is parsed.
+
+```js
+// /reel codes go to numbers that aren't clients: cap them per IP and site-wide so a
+// script can't make the shared WhatsApp number spam strangers (and get it banned).
+const reelOtpIp = rateLimit({ windowMs: 10 * 60_000, max: 5 });
+const reelOtpAll = rateLimit({ windowMs: 60 * 60_000, max: 200, keyBy: () => "all" });
+app.post("/api/auth/otp", (req, res, next) =>
+  (req.body && req.body.purpose === "reel" ? reelOtpIp(req, res, () => reelOtpAll(req, res, next)) : next()));
 ```
 
 - [ ] **Step 4: Mount the API** after the `/api/quota` mount:
@@ -1141,6 +1213,8 @@ app.use("/api/promo", require("./routes/promo")({
   },
   settings: { get: () => db.getSetting("reel_promo"), set: (patch) => db.setSetting("reel_promo", patch) },
   normalizePhone: normalizeAuthPhone,
+  getListing: (id) => db.getListing(id),
+  photoBase: `${UPLOAD_PUBLIC_BASE}/files/`,
   baseUrl: BASE_URL,
 }));
 ```
@@ -1218,6 +1292,10 @@ git commit -m "feat(promo): mount /api/promo, serve /reel, pass the reel webhook
       <span>קראתי ואני מסכים/ה ל<a href="/legal/terms.html" target="_blank" rel="noopener">תנאי השימוש</a>
         ול<a href="/legal/privacy.html" target="_blank" rel="noopener">מדיניות הפרטיות</a></span>
     </label>
+    <label class="terms" for="marketing">
+      <input id="marketing" type="checkbox">
+      <span>אשמח לקבל עדכונים והצעות בוואטסאפ (לא חובה)</span>
+    </label>
     <button id="send" disabled>שלחו לי קוד</button>
     <div id="code-wrap" hidden>
       <label for="code">הקוד שקיבלת בוואטסאפ</label>
@@ -1286,6 +1364,7 @@ async function pollOrder(id, failed) {
     if (o && o.status === "pending") $("done-text").textContent = "ממתינים לאישור התשלום…";
     await new Promise((r) => setTimeout(r, 3000));
   }
+  $("done-text").textContent = "אם התשלום עבר — הסרטון בדרך ונעדכן אותך בוואטסאפ. לא חויבת? אפשר לנסות שוב מאוחר יותר.";
 }
 
 $("terms").onchange = () => { $("send").disabled = !$("terms").checked; };
@@ -1293,7 +1372,7 @@ $("send").onclick = async () => {
   $("e-phone").textContent = "";
   if (!$("terms").checked) { $("e-phone").textContent = ERR.terms_required; return; }
   try {
-    await api("/api/promo/lead/start", { phone: $("phone").value, terms_accepted: true });
+    await api("/api/promo/lead/start", { phone: $("phone").value, terms_accepted: true, marketing_consent: $("marketing").checked });
     await api("/api/auth/otp", { phone: $("phone").value, purpose: "reel" });
     $("code-wrap").hidden = false; $("code").focus();
   } catch (e) { $("e-phone").textContent = msg(e); }
@@ -1348,7 +1427,12 @@ $("submit").onclick = async () => {
 </html>
 ```
 
-  A visitor who is already logged in skips the terms box, but `POST /order` still sends `terms_accepted: true`. The order button itself means "I agree", so add the line `<p class="lead" style="font-size:13px">בלחיצה על המשך אני מאשר/ת את <a href="/legal/terms.html" target="_blank" rel="noopener">תנאי השימוש</a></p>` right above `<button id="submit">`.
+  A visitor who is already logged in skips the terms box, but `POST /order` still sends `terms_accepted: true`. The order button itself means "I agree". So, right above `<button id="submit">`, add this line. It also covers the pre-payment disclosure (who provides the service, and where the cancellation terms are):
+
+```html
+    <p class="lead" style="font-size:13px">השירות ניתן ע״י FORLY. בלחיצה על המשך אני מאשר/ת את
+      <a href="/legal/terms.html#reel" target="_blank" rel="noopener">תנאי השימוש ומדיניות הביטול וההחזרים</a>.</p>
+```
 
 - [ ] **Step 2: Verify in the browser.** Run `npm run local` and open http://127.0.0.1:8787/reel. With no `GREENAPI_TOKEN`, the OTP is printed in the server log (`[dev] OTP for …`). Check:
   - The send button stays disabled until the box is ticked, and both links open.
@@ -1442,6 +1526,7 @@ After `<script src="/admin-campaigns.js"></script>`:
   var STAGE = { otp_sent: "לא אימת קוד", verified: "אומת, לא הזמין", checkout: "בתשלום — לא הושלם", payment_failed: "תשלום נכשל", paid: "שילם / קיבל" };
   var OPEN = { verified: 1, checkout: 1, payment_failed: 1 };
   var ORDER = { failed: " · היצירה נכשלה", amount_mismatch: " · סכום התשלום שגוי" }; // needs you: retry / refund
+  var DONE = { done: " · נמסר ✓" };
   var fmt = function (v) { var d = new Date(v); return isNaN(d) ? "—" : d.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }); };
 
   function req(method, path, body) {
@@ -1462,10 +1547,10 @@ After `<script src="/admin-campaigns.js"></script>`:
     var list = rows.filter(function (r) { return f === "open" ? OPEN[r.stage] : f === "problem" ? ORDER[r.order_status] : !f || r.stage === f; });
     $("#promoCount").textContent = list.length + " מספרים";
     $("#promoLeads").innerHTML = list.map(function (r) {
-      // Unverified numbers may belong to someone else: no WhatsApp button for them.
-      var wa = r.stage === "otp_sent" ? "" : '<a class="btn" target="_blank" rel="noopener" href="https://wa.me/' + esc(r.phone) + '">וואטסאפ</a> ';
-      var pay = (r.stage === "checkout" || r.stage === "payment_failed") && r.order_id ? '<button class="btn" data-paid="' + esc(r.order_id) + '">סמן כשולם</button>' : "";
-      return "<tr><td class=\"num\">" + esc(r.phone) + "</td><td>" + esc(r.agent_name || "—") + "</td><td>" + esc((STAGE[r.stage] || r.stage) + (ORDER[r.order_status] || "")) +
+      // WhatsApp only to numbers that opted in (Communications Law §30A) and verified the code.
+      var wa = r.stage === "otp_sent" || !r.marketing_consent_at ? "" : '<a class="btn" target="_blank" rel="noopener" href="https://wa.me/' + esc(r.phone) + '">וואטסאפ</a> ';
+      var pay = (r.stage === "checkout" || r.stage === "payment_failed") && r.order_id && r.order_status !== "amount_mismatch" ? '<button class="btn" data-paid="' + esc(r.order_id) + '">סמן כשולם</button>' : "";
+      return "<tr><td class=\"num\">" + esc(r.phone) + "</td><td>" + esc(r.agent_name || "—") + "</td><td>" + esc((STAGE[r.stage] || r.stage) + (ORDER[r.order_status] || DONE[r.order_status] || "")) +
         "</td><td class=\"num\">" + (r.price == null ? "—" : "₪" + esc(String(r.price))) + "</td><td>" + fmt(r.last_seen_at) + "</td><td>" + wa + pay + "</td></tr>";
     }).join("") || '<tr><td colspan="6">אין עדיין</td></tr>';
   }
@@ -1527,7 +1612,9 @@ git commit -m "feat(promo): admin ריל tab — promo end date, leads, mark pai
 
 ### Task 8: End-to-end on staging with the Cardcom test terminal
 
-Prerequisites: Operator guide §B and §C done on **staging** (`staging.env` has `CARDCOM_TERMINAL=1000`, the test `CARDCOM_API_NAME` and `N8N_REEL_WEBHOOK_URL`), and Task 0 Step 2 answered.
+Prerequisites: Operator guide §B and §C done on **staging** (`staging.env` has `CARDCOM_TERMINAL=1000`, the test `CARDCOM_API_NAME` and `N8N_REEL_WEBHOOK_URL`), and Task 0 Steps 2 and 2b answered.
+
+**Staging writes production data** (shared Firestore): the promo date, `promo_counters`, `promo_leads` and `promo_orders`. Use **throwaway phone numbers**, not your own or a client's, because a test reel makes that number pay ₪219 next time in production. Do Step 7 when you finish.
 
 - [ ] **Step 1:** Deploy the branch to staging. In the admin "ריל" tab, set the promo end to a week from today.
 - [ ] **Step 2:** Run the `/reel` flow with a phone that is not a paying client, and pay with the Cardcom test card from their docs. Expected:
@@ -1537,9 +1624,17 @@ Prerequisites: Operator guide §B and §C done on **staging** (`staging.env` has
   - within about 20 minutes the reel arrives on WhatsApp, then the page link;
   - the cost line goes to the **admin** phone, not the buyer.
 - [ ] **Step 3:** Re-POST the same webhook (`curl -X POST $BASE/api/promo/cardcom/webhook -d LowProfileId=<id>`). Expected: `{"ok":true}` and no second n8n execution.
+- [ ] **Step 3b (upload limits).** Using the promo cookie from Step 2 (browser devtools → `forly_session`), check two things:
+  - `curl -X POST $BASE/api/upload-urls -H 'Content-Type: application/json' --cookie "forly_session=<token>" -d '{"files":[{"name":"a.mp4","contentType":"video/mp4"}]}'` returns `400`.
+  - `curl -X DELETE $BASE/api/upload/x.jpg --cookie "forly_session=<token>"` returns `401`.
 - [ ] **Step 4:** Run the flow again with a phone whose quota plan is not "trial". Expected: "הסרטון הראשון עלינו 🎁", no Cardcom page, and the reel arrives.
 - [ ] **Step 5:** Abandon one checkout on purpose (close the Cardcom tab). Expected: it appears under "לא סיימו" with a WhatsApp button and "סמן כשולם".
-- [ ] **Step 6:** Push the branch and open a PR to `staging`.
+- [ ] **Step 6:** Read **every** WhatsApp message the buyer received. There must be no "dev", no costs, and no `hstgr.cloud` link: check the video link and the page link.
+- [ ] **Step 7 (clean up production data).**
+  - In the Firebase console, delete the test phones' docs in `promo_counters`, `promo_leads` and `promo_orders`.
+  - In the admin "ריל" tab, set the real promo date, or clear it.
+  - Remove `CARDCOM_TERMINAL` / `CARDCOM_API_NAME` from `staging.env` and restart staging. Otherwise anyone who finds `staging…/reel` gets a real reel (real fal cost) for a test-card "payment". Without them, staging orders just wait for "mark paid".
+- [ ] **Step 8:** Push the branch and open a PR to `staging`.
 
 ---
 
@@ -1566,19 +1661,21 @@ Do **A** first because it takes days. B to D take about 30 minutes on launch day
    ```
    CARDCOM_TERMINAL=<terminal number from A4, or 1000 for testing>
    CARDCOM_API_NAME=<ApiName from A4, or the test ApiName from the Cardcom docs>
-   N8N_REEL_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/ww1-v4-dev
+   N8N_REEL_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/reel-promo
    ```
 3. Check that `BASE_URL` in the same file is your **customer domain** (the one your dashboard opens on), not an `hstgr.cloud` address. Buyers and Cardcom see it in the /reel link and the payment return address. If it's an `hstgr.cloud` address, tell the developer before launch.
-4. Restart the Forly container the way you normally deploy. In the container log, check that the startup lines show `reel webhook: https://n8n…/ww1-v4-dev` and not `(not set …)`.
+4. Restart the Forly container the way you normally deploy. In the container log, check that the startup lines show `reel webhook: https://n8n…/reel-promo` and not `(not set …)`.
 
-### C. n8n: make "WW1 Walkthrough V4 dev" customer-safe (by hand, in the n8n editor)
-Open https://n8n.srv1173890.hstgr.cloud/workflow/az3WzE3YLVzKRoJF.
+### C. n8n: a customer-safe copy of "WW1 Walkthrough V4 dev" (by hand, in the n8n editor)
+Open https://n8n.srv1173890.hstgr.cloud/workflow/az3WzE3YLVzKRoJF and choose **⋯ → Duplicate**. Name the copy **"WW1 Reel (promo)"**. In the copy's "Start (webhook)" node, set the path to `reel-promo`.
+
+Work only on the copy from here on. You can keep experimenting on the dev workflow without buyers seeing it.
 1. **"Report Cost" node:** it currently WhatsApps the cost breakdown (`fal: H3 $…`) **to the buyer**. In its `to` field, replace `{{ $("Start (webhook)").first().json.body.phone }}@c.us` with your own number, e.g. `9725XXXXXXXX@c.us`.
 2. **"Send Timeout Message" node:** change the text to something a customer can read, e.g. `הסרטון שלך לוקח קצת יותר זמן מהרגיל — נשלח אותו בהקדם 🙏`. It's also worth sending yourself a copy: duplicate the node with your number.
 3. **Errors:** if a clip fails, the "Check Status" node stops the run and the buyer gets nothing. Open the workflow's **Settings → Error workflow** and pick a workflow that WhatsApps you. If you don't have one, check **Executions** for failed runs twice a day during the promo.
 4. **Staging URLs:** four nodes call `https://staging.srv1173890.hstgr.cloud/api/walkthrough/...`. That's fine: staging and production share the same database. Just keep the staging server running during the promo, because if it's down no reel gets made.
-5. Optionally rename the workflow to "WW1 Reel (promo)".
-6. Click **Publish / Activate**. The production URL is `https://n8n.srv1173890.hstgr.cloud/webhook/ww1-v4-dev`, which is what §B puts in `N8N_REEL_WEBHOOK_URL`.
+5. Click **Publish / Activate** on the copy. Its production URL is `https://n8n.srv1173890.hstgr.cloud/webhook/reel-promo`; put that in `N8N_REEL_WEBHOOK_URL` (§B).
+6. Don't edit the copy during the promo. Try changes on the dev workflow first, then repeat them on the copy.
 
 ### D. Mark your paying clients
 The first reel is free only for clients whose quota **plan** is set.
@@ -1596,19 +1693,23 @@ The first reel is free only for clients whose quota **plan** is set.
 2. You should get the reel on WhatsApp, then the page link. The cost line should reach only your admin number.
 3. In the "ריל" tab, the number shows "שילם / קיבל".
 
-### G. Terms page (before launch, because Cardcom checks it)
-Add a short section to `/legal/terms.html` about the paid reel:
+### G. Terms and privacy pages (before launch, because Cardcom checks them)
+The live pages are the files `public-agent/legal/terms.html` and `public-agent/legal/privacy.html`; the `public-nadlan/legal` copies are not served. They are in the code, so a change is committed and deployed like any code change. Send the developer your text and they add it. In **terms**, add a section with the id `reel` (the /reel page links to `terms.html#reel`) covering:
 - what's delivered (a narrated reel and a property page on WhatsApp);
 - the price;
 - delivery time (usually under an hour);
 - the refund rule, e.g. a full refund if the reel isn't delivered within 24 hours;
 - the business name, address and phone.
 
-Have a lawyer or accountant check the refund wording against Israeli consumer-protection rules. Changing this page needs no code; it's a static file.
+In **privacy**, add: phone numbers typed on /reel are stored to follow up on unfinished orders; marketing messages go only to people who ticked the optional box; unverified numbers are deleted after 30 days. Do that deletion by hand monthly in the Firebase console (`promo_leads` with stage `otp_sent`) until it's automated.
+
+Have a lawyer or accountant check the refund and privacy wording against Israeli consumer-protection and privacy rules.
 
 ### H. Every day during the promo
-0. Filter **"בעיה"** first. "היצירה נכשלה" means retry it from the admin נכסים tab, or refund it in Cardcom. "סכום התשלום שגוי" means check the payment in Cardcom.
+0. Filter **"בעיה"** first.
+   - "היצירה נכשלה" means the reel wasn't delivered within 45 minutes. Retry it from the admin נכסים tab, or refund it in Cardcom.
+   - "סכום התשלום שגוי" means check the payment in Cardcom, refund it, and ask the buyer to order again. It can't be built from the admin.
 1. Open the "ריל" tab with the filter on **"לא סיימו"**: people who verified their number but didn't pay.
-2. Press **וואטסאפ** to message them, for example to offer help or remind them the ₪59 price ends on that date.
-3. "לא אימת קוד" numbers have no button on purpose: anyone can type someone else's number.
+2. Press **וואטסאפ** to message them, for example to offer help or remind them the ₪59 price ends on that date. The button appears only for people who ticked "updates and offers"; messaging the others would be illegal spam.
+3. "לא אימת קוד" numbers never have a button, because anyone can type someone else's number.
 4. If someone paid you outside Cardcom, press **"סמן כשולם"** on their row and the reel starts.
