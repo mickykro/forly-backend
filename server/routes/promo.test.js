@@ -6,8 +6,8 @@ const createPromoRouter = require("./promo");
 const { createPromoStore } = require("../promo");
 const { normalizeAuthPhone } = require("../utils");
 
-const photos = ["https://f/1.jpg", "https://f/2.jpg", "https://f/3.jpg"];
-const listing = { city: "תל אביב", price: 2500000, rooms: 4, photos_urls: photos, agent_name: "דנה", terms_accepted: true,
+const photos = ["https://f/1.jpg", "https://f/2.jpg", "https://f/3.jpg", "https://f/4.jpg"];
+const listing = { city: "תל אביב", price: 2500000, rooms: 4, photos_urls: photos, agent: { name: "דנה" }, terms_accepted: true,
   own_video_url: "https://evil/v.mp4", listing_draft_id: "someone-elses" }; // must be dropped by the whitelist
 
 async function withApp(opts, fn) {
@@ -38,6 +38,7 @@ async function withApp(opts, fn) {
     reelReady: opts.reelReady,
     createListing: async (phone, body, agent, extra) => { if (opts.failFirstBuild && !built.length) { built.push(null); throw new Error("boom"); } built.push({ phone, body, agent, extra }); return { listing_id: `L${built.length}` }; },
     business: { get: async (p) => businesses.get(p) || null, set: async (p, d) => businesses.set(p, { ...(businesses.get(p) || {}), ...d }) },
+    isAdmin: (u) => u && u.userId === "972500000000",
     isPaidClient: async (p) => (opts.paidClients || []).includes(p),
     settings: { get: async () => promo, set: async (patch) => (promo = { ...(promo || {}), ...patch }) },
     normalizePhone: normalizeAuthPhone,
@@ -107,7 +108,7 @@ async function withApp(opts, fn) {
     await req("POST", "/cardcom/webhook", { LowProfileId: lpId });
     await req("POST", "/cardcom/webhook", { LowProfileId: lpId });
     assert.strictEqual(built.length, 1);
-    assert.deepStrictEqual(built[0].agent, { name: "דנה", phone: "972501111111" });
+    assert.deepStrictEqual(built[0].agent, { name: "דנה", brand_name: "", license: "", logo_url: "", phone: "972501111111" });
     assert.deepStrictEqual(built[0].extra, { source: "reel_promo" });
     for (const k of ["terms_accepted", "agent_name", "own_video_url", "listing_draft_id"]) assert.ok(!(k in built[0].body), `${k} not forwarded`);
     // a reel n8n never delivered shows up as a problem in the admin; a delivered one as done
@@ -147,13 +148,13 @@ async function withApp(opts, fn) {
     assert.strictEqual(built.length, 1);
   });
 
-  // Existing paying client: first reel free and built at once (own profile, no override); next is ₪49
+  // Existing paying client: first reel free and built at once (typed agent block); next is ₪49
   await withApp({ businesses: { "972503333333": { full_name: "Agent" } }, paidClients: ["972503333333"] }, async ({ req, built }) => {
     const h = { "x-phone": "972503333333" };
     const o = await req("POST", "/order", listing, h);
     assert.strictEqual(o.data.status, "building");
     assert.strictEqual(built.length, 1);
-    assert.strictEqual(built[0].agent, null);
+    assert.strictEqual(built[0].agent.name, "דנה");
     assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "client", price: 49 });
   });
 
@@ -176,7 +177,7 @@ async function withApp(opts, fn) {
   await withApp({ cardcomDown: true }, async ({ req }) => {
     const h = { "x-phone": "972504" };
     assert.strictEqual((await req("POST", "/order", { ...listing, photos_urls: [] }, h)).status, 400);
-    assert.strictEqual((await req("POST", "/order", { ...listing, agent_name: "" }, h)).status, 400);
+    assert.strictEqual((await req("POST", "/order", { ...listing, agent: { name: " " } }, h)).status, 400);
     assert.strictEqual((await req("POST", "/order", listing)).status, 401);
     assert.strictEqual((await req("POST", "/cardcom/webhook", {})).status, 400);
     const o = await req("POST", "/order", listing, h);
@@ -222,6 +223,58 @@ async function withApp(opts, fn) {
     const r = await req("POST", "/order", listing, { "x-phone": "972501212121" });
     assert.deepStrictEqual([r.status, r.data.error], [503, "reel_unavailable"]);
     assert.strictEqual((await store.listLeads()).length, 0);
+  });
+
+  // create.html body: design/agent fields pass, forbidden ones are dropped, limits hold
+  await withApp({}, async ({ req, built }) => {
+    const h = { "x-phone": "972503333333" };
+    const full = { ...listing, size_built: 90, parking: 1, elevator: true, shabbat_elevator: true, storage: false,
+      theme: { template: "classic", primary: "#112233", font_url: "https://evil/f.woff", junk: 1 },
+      agent: { name: "דנה", brand_name: "B", license: "123", logo_url: "https://f/logo.png", phone: "972509999999", phone2: "1", extra: 1 },
+      agent2: { name: "x" }, phone2: "1", agent_phones: ["1"], replaces_listing_id: "r", whatsapp_draft: true };
+    assert.strictEqual((await req("POST", "/order", { ...full, agent: { ...full.agent, logo_url: "https://evil/l.png" } }, h)).status, 400, "foreign logo");
+    assert.strictEqual((await req("POST", "/order", { ...full, photos_urls: photos.slice(0, 3) }, h)).status, 400, "3 photos");
+    const o = await req("POST", "/order", full, h);
+    assert.strictEqual(o.status, 200);
+    await req("POST", "/cardcom/webhook", { LowProfileId: `lp-${o.data.order_id}` }); // unpaid: nothing built
+    assert.strictEqual(built.length, 0);
+  });
+  await withApp({}, async ({ req, built, lp, store }) => {
+    const h = { "x-phone": "972503333333" };
+    const full = { ...listing, size_built: 90, parking: 1, elevator: true,
+      theme: { template: "classic", primary: "#112233", font_url: "https://evil/f.woff", junk: 1 },
+      agent: { name: "דנה", brand_name: "B", license: "123", logo_url: "https://f/logo.png", phone: "972509999999", phone2: "1" },
+      agent2: { name: "x" }, phone2: "1", agent_phones: ["1"], replaces_listing_id: "r", whatsapp_draft: true };
+    const o = await req("POST", "/order", full, h);
+    lp.paid.set(`lp-${o.data.order_id}`, { orderId: o.data.order_id, amount: 59, approved: true, transactionId: 1 });
+    await req("POST", "/cardcom/webhook", { LowProfileId: `lp-${o.data.order_id}` });
+    const b = built[0];
+    assert.deepStrictEqual(b.agent, { name: "דנה", brand_name: "B", license: "123", logo_url: "https://f/logo.png", phone: "972503333333" });
+    assert.deepStrictEqual(b.body.theme, { template: "classic", primary: "#112233" });
+    assert.deepStrictEqual([b.body.size_built, b.body.parking, b.body.elevator], [90, 1, true]);
+    for (const k of ["agent", "agent2", "phone2", "agent_phones", "replaces_listing_id", "whatsapp_draft", "own_video_url"]) assert.ok(!(k in b.body), `${k} dropped`);
+  });
+
+  // Admin: free, counter untouched, every order builds; a body claiming admin does nothing
+  await withApp({}, async ({ req, built, store }) => {
+    const a = { "x-phone": "972500000000" };
+    assert.deepStrictEqual((await req("POST", "/quote", {}, a)).data, { price: 0, reason: "admin" });
+    const o1 = await req("POST", "/order", listing, a), o2 = await req("POST", "/order", listing, a);
+    assert.deepStrictEqual([o1.data.status, o2.data.status, built.length], ["building", "building", 2]);
+    assert.strictEqual(await store.startedCount("972500000000"), 0);
+    const ord = await store.getOrder(o1.data.order_id);
+    assert.deepStrictEqual([ord.price, ord.reason, ord.payment], [0, "admin", { admin: true, by: "972500000000" }]);
+    assert.strictEqual((await store.listLeads())[0].stage, "paid");
+    const s = { "x-phone": "972504444444" };
+    const fake = await req("POST", "/order", { ...listing, admin: true, isAdmin: true, price_override: 0 }, s);
+    assert.strictEqual(fake.data.status, "pending");
+    assert.deepStrictEqual((await req("POST", "/quote", { admin: true }, s)).data, { tier: "promo", price: 59 });
+  });
+  // Existing client: 1st ₪0, 2nd ₪49
+  await withApp({ paidClients: ["972505550000"] }, async ({ req }) => {
+    const c = { "x-phone": "972505550000" };
+    assert.strictEqual((await req("POST", "/order", listing, c)).data.status, "building");
+    assert.deepStrictEqual((await req("POST", "/quote", {}, c)).data, { tier: "client", price: 49 });
   });
 
   log("routes/promo.test.js OK");

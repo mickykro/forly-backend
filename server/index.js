@@ -244,7 +244,7 @@ app.use("/api/promo/lead/start", rateLimit({ windowMs: 60_000, max: 10, keyBy: l
 app.post("/api/promo/order", rateLimit({ windowMs: 60_000, max: 10 })); // POST only: the status poll GETs /order/:id
 app.use("/api/promo/cardcom/webhook", rateLimit({ windowMs: 60_000, max: 60 }));
 app.use("/api/promo", require("./routes/promo")({
-  requireAuth, authSecret: AUTH_SECRET, requireAdmin, requireStepUp,
+  requireAuth, authSecret: AUTH_SECRET, requireAdmin, requireStepUp, isAdmin,
   store: createPromoStore({ db: db.db }),
   cardcom: createCardcom({ terminal: process.env.CARDCOM_TERMINAL, apiName: process.env.CARDCOM_API_NAME }),
   reelReady: !!N8N_REEL_WEBHOOK_URL,
@@ -253,7 +253,6 @@ app.use("/api/promo", require("./routes/promo")({
     n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
     isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL, ...extra,
   }),
-  business: { get: (p) => db.getBusiness(p) },
   // A paying client = a quota plan the admin set that isn't the trial seed.
   isPaidClient: async (p) => {
     const q = await quota.getQuota(p).catch(() => null);

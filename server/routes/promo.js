@@ -18,10 +18,9 @@ const express = require("express");
 const { validateListing, buildFailed } = require("../listing-create");
 const { priceFor, endOfDayIsrael } = require("../promo");
 
+const { parseOrderBody } = require("../promo-body");
+
 const MAX_LISTING_BYTES = 32 * 1024;
-// What a /reel buyer may send down the pipeline; nothing else (own_video_url, listing_draft_id, theme, agent2…).
-const LISTING_FIELDS = ["city", "address", "neighborhood", "price", "rooms", "size_sqm", "floor", "listing_type",
-  "description", "photos_urls", "language"];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // A real calendar day: "2026-02-30" would otherwise roll over to March 2.
 const realDate = (d) => typeof d === "string" && DATE_RE.test(d) && !isNaN(new Date(`${d}T12:00:00Z`))
@@ -30,12 +29,13 @@ const realDate = (d) => typeof d === "string" && DATE_RE.test(d) && !isNaN(new D
 const h = (fn) => (req, res, next) => fn(req, res).catch(next);
 
 module.exports = function createPromoRouter({ requireAuth, authSecret, requireAdmin, requireStepUp, store, cardcom,
-  createListing, business, reelReady = true, isPaidClient, settings, normalizePhone, getListing, photoBase, baseUrl, now = () => new Date() }) {
+  createListing, isAdmin = () => false, reelReady = true, isPaidClient, settings, normalizePhone, getListing, photoBase, baseUrl, now = () => new Date() }) {
   const router = express.Router();
   const auth = requireAuth(authSecret, ["session", "promo"]); // auth.js PROMO_SCOPES
   const adminWrite = [requireAdmin, requireStepUp];
 
-  async function quote(phone) {
+  async function quote(phone, user) {
+    if (isAdmin(user)) return { price: 0, reason: "admin" }; // decided by the session only, never the body
     const [paidClient, reelsBefore, s] = await Promise.all([isPaidClient(phone), store.startedCount(phone), settings.get()]);
     return priceFor({ paidClient, reelsBefore, now: now(), promoUntil: s && s.until ? new Date(s.until) : null });
   }
@@ -43,7 +43,7 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
   // Started order → listing with source "reel_promo" → the reel workflow (kickPipeline).
   // Agents without a profile name get their typed name on the page.
   async function build(order) {
-    const agent = order.use_agent_override ? { name: order.agent_name, phone: order.phone } : null;
+    const agent = { ...order.agent, phone: order.phone }; // typed agent block; no business doc for strangers
     let r; // a throw after start() committed must not strand a paid order
     try { r = await createListing(order.phone, order.listing, agent, { source: "reel_promo" }); } catch (e) { r = { error: e.message }; }
     const status = r.error ? "failed" : "building";
@@ -74,31 +74,30 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     res.json({ ok: true });
   }));
 
-  router.post("/quote", auth, h(async (req, res) => { res.json(await quote(req.user.userId)); }));
+  router.post("/quote", auth, h(async (req, res) => { res.json(await quote(req.user.userId, req.user)); }));
 
   router.post("/order", auth, h(async (req, res) => {
     if (!reelReady) return res.status(503).json({ error: "reel_unavailable" }); // no reel workflow → don't take money
     const phone = req.user.userId;
     const body = req.body || {};
-    const { agent_name, terms_accepted } = body;
-    const listing = Object.fromEntries(LISTING_FIELDS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
-    const agentName = String(agent_name || "").trim().slice(0, 60);
-    if (terms_accepted !== true) return res.status(400).json({ error: "terms_required" });
-    if (!agentName) return res.status(400).json({ error: "agent_name is required" });
+    if (body.terms_accepted !== true) return res.status(400).json({ error: "terms_required" });
+    const parsed = parseOrderBody(body, photoBase);
+    if (parsed.error) return res.status(parsed.code).json({ error: parsed.error });
+    const { listing, agent } = parsed;
+    const agentName = agent.name;
     const invalid = validateListing(listing);
     if (invalid) return res.status(invalid.code).json({ error: invalid.error });
-    if (!listing.photos_urls.every((u) => typeof u === "string" && u.startsWith(photoBase) && !/\.\.|[?#]/.test(u))) return res.status(400).json({ error: "photos must be uploaded here" });
     if (Buffer.byteLength(JSON.stringify(listing)) > MAX_LISTING_BYTES) return res.status(413).json({ error: "too_large" });
 
-    const [biz, { tier, price }] = await Promise.all([business.get(phone), quote(phone)]);
+    const admin = isAdmin(req.user);
+    const { tier, price, reason } = await quote(phone, req.user);
     const termsAt = now().toISOString();
-    const id = await store.createOrder({ phone, price, tier, listing, agent_name: agentName, terms_accepted_at: termsAt,
-      use_agent_override: !(biz && (biz.full_name || biz.business_name)) }); // business docs have no `name`
+    const id = await store.createOrder({ phone, price, tier: tier || "admin", reason, listing, agent, agent_name: agentName, terms_accepted_at: termsAt });
     // Free orders get their lead from build(); a closed free order must not look like an abandoned cart.
     if (price > 0) await store.touchLead(phone, "checkout", { agent_name: agentName, order_id: id, price, terms_accepted_at: termsAt, order_status: null });
 
     if (price === 0) {
-      const s = await store.start(id, null);
+      const s = await store.start(id, admin ? { admin: true, by: phone } : null);
       if (!s.ok) { // close it, so "mark paid" can't hand out a second free reel later
         await store.setOrder(id, { status: "failed", error: s.reason });
         return res.status(409).json({ error: s.reason, order_id: id });

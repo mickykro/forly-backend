@@ -37,6 +37,11 @@ assert.strictEqual(endOfDayIsrael("2026-10-24").toISOString(), "2026-10-24T20:59
   assert.strictEqual((await s.start(c, { transactionId: 9 })).ok, true);
   assert.strictEqual(await s.startedCount("972501"), 2);
   assert.deepStrictEqual((await s.getOrder(c)).payment, { transactionId: 9 });
+  // admin start: no free-reel decision, no counter move, repeatable
+  const d1 = await s.createOrder({ phone: "972509", price: 0 }), d2 = await s.createOrder({ phone: "972509", price: 0 });
+  assert.strictEqual((await s.start(d1, { admin: true, by: "972509" })).ok, true);
+  assert.strictEqual((await s.start(d2, { admin: true, by: "972509" })).ok, true);
+  assert.strictEqual(await s.startedCount("972509"), 0);
   assert.deepStrictEqual(await s.start("nope", null), { ok: false, reason: "not_found" });
 
   // leads: early stages never overwrite late ones; late ones overwrite each other

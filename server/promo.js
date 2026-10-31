@@ -91,7 +91,7 @@ function createPromoStore({ db }) {
       const r = decideStart(order, order ? mem.counters.get(order.phone) || 0 : 0, payment);
       if (!r.ok) return r;
       Object.assign(order, patch);
-      mem.counters.set(order.phone, (mem.counters.get(order.phone) || 0) + 1);
+      if (!(payment && payment.admin)) mem.counters.set(order.phone, (mem.counters.get(order.phone) || 0) + 1); // admins never use up a free reel
       return { ok: true, order };
     }
     return db.runTransaction(async (tx) => {
@@ -102,7 +102,7 @@ function createPromoStore({ db }) {
       const r = decideStart(order, started, payment);
       if (!r.ok) return r;
       tx.set(orderRef(id), patch, { merge: true });
-      tx.set(counterRef(order.phone), { started: started + 1, updated_at: new Date() }, { merge: true });
+      if (!(payment && payment.admin)) tx.set(counterRef(order.phone), { started: started + 1, updated_at: new Date() }, { merge: true });
       return { ok: true, order: { ...order, ...patch } };
     });
   }
