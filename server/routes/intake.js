@@ -30,7 +30,7 @@ const MAX_FONT_MB = 5;
 
 module.exports = function createIntakeRouter(ctx) {
   const { requireAuth, normalizeAuthPhone, signSession, uploadDir, uploadPublicBase, remoteUploadBase,
-    n8nWw1Webhook, n8nPipelineWebhook, authSecret, sessionTtl, pageBaseUrl, isDevRun, isDevPipelineRun,
+    n8nWw1Webhook, n8nReelWebhook, n8nPipelineWebhook, authSecret, sessionTtl, pageBaseUrl, isDevRun, isDevPipelineRun,
     baseUrl, verifySession, readToken, verifyActionToken, adminPhones, quota } = ctx;
 
   const router = express.Router();
@@ -159,7 +159,7 @@ module.exports = function createIntakeRouter(ctx) {
   });
 
   // ── shared listing creation (listing-create.js) ──
-  const pipelineDeps = { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl };
+  const pipelineDeps = { n8nWw1Webhook, n8nReelWebhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl };
   const createListing = (phone, body, agentOverride, extraDeps) =>
     createListingShared(phone, body, agentOverride, { ...pipelineDeps, ...extraDeps });
 

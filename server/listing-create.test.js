@@ -32,6 +32,21 @@ const { buildFailed, retryBlocked, retryListing, BUILD_STUCK_MS, MAX_RETRIES } =
   assert.equal(hooks[0][0], "https://n8n/ww1");
   assert.deepEqual([hooks[0][1].listing_id, hooks[0][1].image_urls, hooks[0][1].property_details.city], ["R1", ["a", "b", "c"], "חיפה"]);
 
+  // ── a promo listing goes to the reel workflow (create and retry), never to WW1 ──
+  const reelHooks = [];
+  const reelDeps = { ...deps, n8nReelWebhook: "https://n8n/reel",
+    fetchFn: async (url, opts) => { reelHooks.push([url, JSON.parse(opts.body)]); return { status: 200 }; } };
+  await db.saveListing({ listing_id: "R2", business_phone: "P1", source: "reel_promo", status: "failed", page_id: null,
+    created_at: old, city: "חיפה", price: 1, rooms: 3, photos_urls: ["a", "b", "c"], own_video_url: null, language: "he" });
+  await retryListing(await db.getListing("R2"), reelDeps);
+  assert.deepEqual([reelHooks[0][0], reelHooks[0][1].listing_id, reelHooks[0][1].phone], ["https://n8n/reel", "R2", "P1"]);
+  await retryListing({ ...(await db.getListing("R2")), status: "failed" }, { ...reelDeps, n8nReelWebhook: "" });
+  assert.equal(reelHooks.length, 1, "no reel webhook configured → nothing sent (not WW1)");
+  // the reel alone takes ~20 min: a promo listing is "stuck" only after 45
+  const promoAt = (min) => ({ status: "active", page_id: null, source: "reel_promo", created_at: new Date(now - min * 60e3) });
+  assert.equal(buildFailed(promoAt(30), now), false);
+  assert.equal(buildFailed(promoAt(50), now), true);
+
   // ── routes: list splits archived, restore puts it back, retry is owner-only ──
   const createDashboardRouter = require("./routes/dashboard");
   const createIntakeRouter = require("./routes/intake");

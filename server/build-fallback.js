@@ -19,6 +19,7 @@ const SWEEP_MS = 5 * 60 * 1000;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function due(l, now) {
+  if (l && l.source === "reel_promo") return false; // a photo-only page sets page_id, which blocks re-running the paid reel
   if (!l || l.page_id || l.photo_fallback_at) return false;
   if (!Array.isArray(l.photos_urls) || !l.photos_urls.length) return false;
   const age = now - lastAttemptMs(l);

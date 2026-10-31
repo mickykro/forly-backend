@@ -33,7 +33,7 @@ function validateListing(body) {
 
 /*
  * createListing(phone, body, agentOverride, deps) → { listing_id } | { error, code }
- * deps: { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl,
+ * deps: { n8nWw1Webhook, n8nReelWebhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl,
  *         source = "dashboard", fetchFn = fetch }
  * `source` is stamped on the listing doc only ("dashboard" | "whatsapp").
  * The n8n payload keeps trigger_source "dashboard": WW1 treats both the same
@@ -41,7 +41,7 @@ function validateListing(body) {
  * the page link either way.
  */
 async function createListing(phone, body, agentOverride, deps) {
-  const { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl,
+  const { n8nWw1Webhook, n8nReelWebhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl,
     source = "dashboard", fetchFn = fetch, agentPhones = null } = deps;
   const invalid = validateListing(body);
   if (invalid) return invalid;
@@ -97,16 +97,18 @@ async function createListing(phone, body, agentOverride, deps) {
     created_at: new Date(),
   };
   await db.saveListing(listing);
-  kickPipeline(listing, { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl, fetchFn });
+  kickPipeline(listing, { n8nWw1Webhook, n8nReelWebhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl, fetchFn });
   return { listing_id: listingId };
 }
 
 // Fire the n8n page pipeline for a saved listing. Everything it needs lives on
 // the listing doc, so a retry replays exactly what the first attempt sent.
 function kickPipeline(listing, deps) {
-  const { n8nWw1Webhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl, fetchFn = fetch } = deps;
+  const { n8nWw1Webhook, n8nReelWebhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl, fetchFn = fetch } = deps;
   const listingId = listing.listing_id, phone = listing.business_phone;
-  const webhook = listing.own_video_url ? n8nPipelineWebhook : n8nWw1Webhook;
+  // /reel buyers paid for the reel workflow; never fall back to the regular WW1.
+  const webhook = listing.own_video_url ? n8nPipelineWebhook
+    : listing.source === "reel_promo" ? n8nReelWebhook : n8nWw1Webhook;
   const payload = listing.own_video_url ? {
     listing_id: listingId, business_phone: phone, video_url: listing.own_video_url,
     language: listing.language, dev: !!isDevPipelineRun, base_url: baseUrl,
@@ -132,6 +134,7 @@ function kickPipeline(listing, deps) {
     }).then((r) => console.log(`pipeline webhook → ${r.status}`))
       .catch((err) => console.error("pipeline webhook failed:", err.message));
   }
+  else console.error(`pipeline webhook not configured for listing ${listingId} (source ${listing.source || "?"})`);
 }
 
 /*
@@ -140,6 +143,8 @@ function kickPipeline(listing, deps) {
  * no new upload, no new quota unit. Capped, since each run costs real money.
  */
 const BUILD_STUCK_MS = 20 * 60 * 1000; // no page this long after an attempt = failed
+const REEL_STUCK_MS = 45 * 60 * 1000; // the reel workflow alone takes ~20 min
+const stuckMs = (l) => (l.source === "reel_promo" ? REEL_STUCK_MS : BUILD_STUCK_MS);
 const MAX_RETRIES = 3;
 const asMs = (v) => (v && v.toMillis ? v.toMillis() : v ? new Date(v).getTime() : 0);
 const lastAttemptMs = (l) => asMs(l.retried_at || l.created_at);
@@ -147,7 +152,7 @@ const lastAttemptMs = (l) => asMs(l.retried_at || l.created_at);
 function buildFailed(l, now = Date.now()) {
   if (!l || l.page_id) return false;
   if (l.status === "failed") return true;
-  return l.status === "active" && now - lastAttemptMs(l) > BUILD_STUCK_MS;
+  return l.status === "active" && now - lastAttemptMs(l) > stuckMs(l);
 }
 
 function retryBlocked(l, now = Date.now()) {
@@ -167,4 +172,4 @@ async function retryListing(listing, deps, now = new Date()) {
 }
 
 module.exports = { validateListing, createListing, kickPipeline, buildFailed, retryBlocked, retryListing,
-  lastAttemptMs, MAX_PHOTOS, MIN_PHOTOS, MAX_RETRIES, BUILD_STUCK_MS };
+  lastAttemptMs, MAX_PHOTOS, MIN_PHOTOS, MAX_RETRIES, BUILD_STUCK_MS, stuckMs };

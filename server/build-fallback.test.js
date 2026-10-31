@@ -18,6 +18,8 @@ const { BUILD_STUCK_MS } = require("./listing-create");
 
   assert.equal(due({ page_id: null, photos_urls: photos, created_at: stuck }, now), true);
   assert.equal(due({ page_id: null, photos_urls: photos, created_at: stuck, retried_at: new Date(now) }, now), false, "a fresh retry is still building");
+  assert.equal(due({ listing_id: "x", source: "reel_promo", photos_urls: ["a"], page_id: null, created_at: new Date(Date.now() - 2 * 3600e3) }, Date.now()), false,
+    "no photo-only page for a paid reel");
 
   const calls = [];
   const fetchFn = async (url, opts) => { calls.push([url, JSON.parse(opts.body)]); return { status: 200 }; };
