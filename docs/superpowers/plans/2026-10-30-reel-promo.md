@@ -1645,7 +1645,7 @@ Prerequisites: Operator guide §B and §C done on **staging** (`staging.env` has
   - `curl -X POST $BASE/api/upload-urls -H 'Content-Type: application/json' --cookie "forly_session=<token>" -d '{"files":[{"name":"a.mp4","contentType":"video/mp4"}]}'` returns `400`.
   - `curl -X DELETE $BASE/api/upload/x.jpg --cookie "forly_session=<token>"` returns `401`.
   - `curl -X PUT $BASE/api/upload/$(uuidgen | tr A-Z a-z).mp4 --cookie "forly_session=<token>" --data-binary @any.mp4` returns `400`.
-  - PUT to the name of an existing photo (copy one from a page's photo URL) returns `409`.
+  - PUT to the name of an existing photo (copy one from a page's photo URL) returns `409`, or `502` with `remote upload failed: 409` if staging forwards uploads to production (Step 2b).
 - [ ] **Step 4:** Run the flow again with a phone whose quota plan is not "trial". Expected: "הסרטון הראשון עלינו 🎁", no Cardcom page, and the reel arrives.
 - [ ] **Step 5:** Abandon one checkout on purpose (close the Cardcom tab). Expected: it appears under "לא סיימו" with a WhatsApp button and "סמן כשולם".
 - [ ] **Step 6:** Read **every** WhatsApp message the buyer received. There must be no "dev", no costs, and no `hstgr.cloud` link: check the video link and the page link.
