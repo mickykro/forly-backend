@@ -83,7 +83,10 @@
   viewForm.parentNode.insertBefore(login, viewForm);
   viewForm.classList.add("hidden"); // until the session is known
 
-  var err = function (t) { $("#rlErr").textContent = t || ""; $("#rlErr").classList.toggle("show", !!t); };
+  var err = function (t, ok) {
+    $("#rlErr").textContent = t || ""; $("#rlErr").classList.toggle("show", !!t);
+    $("#rlErr").style.color = ok ? "var(--ink-soft)" : ""; // a success note, not an error
+  };
   var codeSent = false;
   function setCodeSent(on) {
     codeSent = on;
@@ -108,7 +111,7 @@
     err("");
     $("#rlResend").disabled = true;
     api("/api/auth/otp", { phone: $("#rlPhone").value, purpose: "reel" })
-      .then(function () { cooldown(); err("שלחנו קוד חדש"); })
+      .then(function () { cooldown(); err("שלחנו קוד חדש", true); })
       .catch(function (e) { err(msg(e)); cooldown(); });
   });
   $("#rlChange").addEventListener("click", function () { err(""); setCodeSent(false); $("#rlPhone").focus(); });
