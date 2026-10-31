@@ -1674,7 +1674,9 @@
   updatePreview();
 
   // ── submit ──
-  $("#submitBtn").addEventListener("click", function () {
+  // collectBody(btn): validate, wait for the uploads and resolve the create body.
+  // Returns nothing when a field is invalid (its error is already shown).
+  function collectBody(btn) {
     var err = $("#formErr");
     err.classList.remove("show");
     // Show the stage before validating it, so the field the error scrolls to is
@@ -1724,7 +1726,6 @@
     // Cancel → generate one from the photos (their video isn't uploaded at all).
     if (videoFile && photos.length >= 4 && !window.confirm(FT("confirm_video_and_photos"))) videoFile = null;
 
-    var btn = this;
     btn.disabled = true;
     btn.textContent = FT("status_uploading");
     FLY.loaderShow(FT("status_uploading"));
@@ -1735,7 +1736,7 @@
 
     // Photos are already uploading since selection — wait for them, and upload
     // the video/logo/font alongside. Theme resolves first (logo color is async).
-    buildTheme(logoFile).then(function (theme) {
+    return buildTheme(logoFile).then(function (theme) {
       var extraFiles = [];
       if (videoFile) extraFiles.push(videoFile);
       if (logoFile) extraFiles.push(logoFile);
@@ -1795,58 +1796,49 @@
         // the page exists (routes/pages.js).
         if (fromListingDraftId) body.listing_draft_id = fromListingDraftId;
         if (fromListingId) body.replaces_listing_id = fromListingId;
-        btn.textContent = FT("status_creating");
-        $("#vLoaderMsg").textContent = FT("status_creating");
-        var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
-        return fetch(path, {
-          method: "POST",
-          credentials: "same-origin",
-          headers: Object.assign({ "Content-Type": "application/json" }, uploadHeaders),
-          body: JSON.stringify(body),
-        }).then(function (r) {
-          // Session expired / not logged in on the real path → go log in,
-          // matching FLY.req. Demo is admin-gated, so a non-admin goes there too.
-          if (!reelMode && (r.status === 401 || (r.status === 403 && isDemo))) { // reel mode: reel-mode.js shows its login
-            location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
-            throw new Error("unauthenticated");
-          }
-          return r.json().then(function (d) {
-            if (r.status === 402 && d.error === "quota_exceeded") {
-              // Paid bundle used up: the server's message already carries the
-              // friendly text + payment link; keep both for the catch below.
-              var qe = new Error(d.message || "quota_exceeded");
-              qe.quota = d;
-              throw qe;
-            }
-            if (!r.ok) throw new Error(d.error || "create failed");
-            return d;
-          });
-        });
+        return body;
       });
-    }).then(function (d) {
-      // Remember demo listings locally so the dashboard can show a "logged in"
-      // view with just this property (used when there's no account yet).
-      if (isDemo && !clientPhone) {
-        try {
-          var rec = {
-            listing_id: d.listing_id,
-            title: $("#pAddress").value.trim(),
-            city: $("#pCity").value.trim(),
-            thumb: (photos[0] && photos[0].publicUrl) || null,
-            created_at: Date.now(),
-          };
-          var arr = JSON.parse(localStorage.getItem("forly_demo_listings") || "[]")
-            .filter(function (r) { return r.listing_id !== rec.listing_id; });
-          arr.unshift(rec);
-          localStorage.setItem("forly_demo_listings", JSON.stringify(arr.slice(0, 10)));
-        } catch (e) { /* private mode — dashboard just won't show it */ }
+    });
+  }
+
+  // send(body, btn): post the collected body to the create endpoint; resolves the reply.
+  function send(body, btn) {
+    btn.textContent = FT("status_creating");
+    $("#vLoaderMsg").textContent = FT("status_creating");
+    var path = isDemo ? "/api/properties/demo-create" : "/api/properties/create";
+    return fetch(path, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: Object.assign({ "Content-Type": "application/json" }, uploadHeaders),
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      // Session expired / not logged in on the real path → go log in,
+      // matching FLY.req. Demo is admin-gated, so a non-admin goes there too.
+      if (r.status === 401 || (r.status === 403 && isDemo)) {
+        location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
+        throw new Error("unauthenticated");
       }
-      // ponytail: demo users are now logged in — redirect to dashboard
-      if (isDemo && d.logged_in) {
-        startBuildingScreen(d.listing_id, true);
-      } else {
-        startBuildingScreen(d.listing_id, false);
-      }
+      return r.json().then(function (d) {
+        if (r.status === 402 && d.error === "quota_exceeded") {
+          // Paid bundle used up: the server's message already carries the
+          // friendly text + payment link; keep both for the catch below.
+          var qe = new Error(d.message || "quota_exceeded");
+          qe.quota = d;
+          throw qe;
+        }
+        if (!r.ok) throw new Error(d.error || "create failed");
+        return d;
+      });
+    });
+  }
+
+  $("#submitBtn").addEventListener("click", function () {
+    var btn = this, err = $("#formErr");
+    var collected = collectBody(btn);
+    if (!collected) return;
+    collected.then(function (body) {
+      // reel mode never creates here: the summary screen (reel-mode.js) shows the price and orders it
+      return reelMode ? REEL.summary(body, btn) : send(body, btn).then(created);
     }).catch(function (e) {
       FLY.loaderHide(function () { $("#viewForm").classList.remove("hidden"); }); // form back, error readable
       if (e.quota) {
@@ -1871,9 +1863,38 @@
       err.textContent = FT("err_prefix") + e.message;
       err.classList.add("show");
       btn.disabled = false;
-      btn.textContent = FT("btn_submit");
+      btn.textContent = reelMode ? "המשך" : FT("btn_submit");
     });
   });
+
+  // created(d): the listing exists → the building screen.
+  function created(d) {
+      // Remember demo listings locally so the dashboard can show a "logged in"
+      // view with just this property (used when there's no account yet).
+      if (adminDemo && !clientPhone) {
+        try {
+          var rec = {
+            listing_id: d.listing_id,
+            title: $("#pAddress").value.trim(),
+            city: $("#pCity").value.trim(),
+            thumb: (photos[0] && photos[0].publicUrl) || null,
+            created_at: Date.now(),
+          };
+          var arr = JSON.parse(localStorage.getItem("forly_demo_listings") || "[]")
+            .filter(function (r) { return r.listing_id !== rec.listing_id; });
+          arr.unshift(rec);
+          localStorage.setItem("forly_demo_listings", JSON.stringify(arr.slice(0, 10)));
+        } catch (e) { /* private mode — dashboard just won't show it */ }
+      }
+      // ponytail: demo users are now logged in — redirect to dashboard
+      if (adminDemo && d.logged_in) {
+        startBuildingScreen(d.listing_id, true);
+      } else {
+        startBuildingScreen(d.listing_id, false);
+      }
+  }
+
+  if (reelMode) REEL.build = startBuildingScreen; // reel-mode.js: after the order / Cardcom return
 
   // ── building screen: poll listing status ──
   // ponytail: demoLoggedIn param controls redirect behavior
@@ -1882,13 +1903,13 @@
     FLY.loaderHide(function () { $("#viewBuilding").classList.remove("hidden"); });
     // A fresh load of this same page is the clean way back to an empty form —
     // location.search keeps the ?key= demo link intact.
-    $("#createAnother").href = location.pathname + location.search;
+    $("#createAnother").href = reelMode ? "/reel" : location.pathname + location.search; // reel: drop ?order=
     $("#st1").classList.add("done");
     $("#st2").classList.add("now");
     // The groups for this property, chosen while it builds (groups.html says
     // whether the agent's Facebook is connected; otherwise it stays hidden).
     var groupsChosen = false, gf = $("#groupsFrame");
-    if (gf && listingId) {
+    if (gf && listingId && !reelMode) { // a reel buyer has no Facebook groups here
       window.addEventListener("message", function (e) {
         if (e.origin !== location.origin || !e.data || !e.data.forlyGroups) return;
         var m = e.data.forlyGroups;
@@ -1903,7 +1924,7 @@
 
     // Stop polling after ~7 min so the screen can never spin forever; WhatsApp
     // delivery is the backstop, so on timeout we tell the user we'll message them.
-    var MAX_WAIT_MS = 7 * 60 * 1000;
+    var MAX_WAIT_MS = (reelMode ? 45 : 7) * 60 * 1000; // a reel takes far longer than a page
 
     // End the build screen in a terminal state: "done" (page ready), "wait"
     // (timed out — WhatsApp fallback) or "fail" (pipeline reported failure).
@@ -1986,7 +2007,7 @@
         }
         $("#doneBox").classList.remove("hidden");
         // Groups already chosen above: the texts are approved there, not here.
-        if (!groupsChosen) offerAutoPublish(pageId);
+        if (!groupsChosen && !reelMode) offerAutoPublish(pageId);
         // auto-redirect demo users to dashboard after 3s
         if (demoLoggedIn) {
           setTimeout(function() { location.href = "/"; }, 3000);
@@ -1996,6 +2017,7 @@
         // build from it rather than sending the agent back to an empty form.
         // That fresh form stays the fallback (e.g. an admin demo, not the owner).
         var retry = $("#retryLink");
+        retry.classList.toggle("hidden", reelMode); // /retry is not open to a reel buyer
         retry.href = location.pathname + location.search;
         retry.onclick = function (e) {
           e.preventDefault();

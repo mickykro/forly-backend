@@ -14,14 +14,18 @@
     too_soon: "כבר נשלח קוד — אפשר לבקש שוב בעוד רגע", whatsapp_send_failed: "לא הצלחנו לשלוח וואטסאפ, נסו שוב",
     too_many_attempts: "יותר מדי ניסיונות, בקשו קוד חדש", rate_limited: "יותר מדי בקשות, נסו שוב בעוד כמה דקות",
     code_already_used: "הקוד כבר נוצל, בקשו קוד חדש", no_code_requested: "בקשו קוד קודם",
+    already_used: "כבר קיבלת סרטון חינם במספר הזה",
+    reel_unavailable: "השירות לא זמין כרגע, נסו שוב מאוחר יותר",
+    payment_unavailable: "מערכת התשלום לא זמינה כרגע, נסו שוב בעוד כמה דקות",
   };
   var msg = function (e) { return ERR[e.message] || "משהו השתבש, נסו שוב"; };
 
   // A 401 anywhere shows the login card again; it never redirects to /?next=.
   var rawFetch = window.fetch.bind(window);
-  function api(path, body) {
-    return rawFetch(path, { method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
+  function api(path, body, method) {
+    var get = method === "GET";
+    return rawFetch(path, { method: method || "POST", credentials: "same-origin",
+      headers: get ? {} : { "Content-Type": "application/json" }, body: get ? undefined : JSON.stringify(body || {}) })
       .then(function (r) {
         return r.json().catch(function () { return {}; }).then(function (d) {
           if (!r.ok) throw Object.assign(new Error(d.error || "error " + r.status), { status: r.status });
@@ -107,6 +111,8 @@
     if (!login.classList.contains("hidden")) return;
     viewForm.classList.add("hidden");
     $("#viewBuilding").classList.add("hidden");
+    sum.classList.add("hidden");
+    FLY.loaderHide();
     login.classList.remove("hidden");
     window.scrollTo(0, 0);
   }
@@ -126,10 +132,103 @@
     var rest = digits ? full.slice(digits.length) : full;
     $("#agPhone").value = digits === "972" ? "0" + rest : rest;
     $("#agPhone").readOnly = true;
-    cc.readOnly = true;
     login.classList.add("hidden");
     viewForm.classList.remove("hidden");
+    resetSubmit();
+    // back from Cardcom: /reel?order=<id>[&failed=1] (once; a re-login resumes it)
+    if (returnOrder) { var id = returnOrder; returnOrder = null; pollOrder(id, returnFailed); }
   }
+
+  // ── stage 3 → the summary screen (the only place the price shows) → /api/promo/order ──
+  var submit = $("#submitBtn");
+  submit.removeAttribute("data-i18n"); // keeps "המשך": no reel button says pay
+  function resetSubmit() { submit.disabled = false; submit.textContent = "המשך"; }
+  resetSubmit();
+
+  // in place of #viewForm, like #viewBuilding; the login card's markup and classes
+  var sum = document.createElement("div");
+  sum.id = "reelSummary";
+  sum.className = "creation-grid hidden";
+  viewForm.parentNode.insertBefore(sum, viewForm);
+  function screen(title, text, inner) {
+    sum.innerHTML = '<div class="form-column"><div class="card creation-card form-card">' +
+      '<div class="section-intro"><span class="section-number">04</span><div><h2></h2><p></p></div></div>' +
+      (inner || "") + "</div></div>";
+    sum.querySelector("h2").textContent = title;
+    sum.querySelector(".section-intro p").textContent = text;
+    login.classList.add("hidden");
+    viewForm.classList.add("hidden");
+    FLY.loaderHide(function () { sum.classList.remove("hidden"); window.scrollTo(0, 0); });
+  }
+  var again = '<div class="wizard-actions form-actions"><a class="btn btn-gold primary-action" href="/reel">לנסות שוב</a></div>';
+  var price = function (q) { return q.price === 0 ? "עלינו 🎁" : "₪" + q.price; };
+
+  function summary(body, btn) {
+    return api("/api/promo/quote").then(function (q) {
+      screen("סיכום", "בודקים רגע, וממשיכים.",
+        '<div class="creation-promise"><div><span class="promise-mark">✦</span><span>מה מקבלים</span></div>' +
+        "<p>סרטון רילס לנכס ודף נכס אישי, נשלחים אליך בוואטסאפ.</p></div>" +
+        '<div class="field"><label>המחיר</label><strong id="rsPrice"></strong></div>' +
+        '<p class="hint">ביטול והחזרים לפי <a href="/legal/terms.html#reel" target="_blank" rel="noopener">תנאי השימוש</a>.</p>' +
+        '<p class="form-err" id="rsErr" role="alert"></p>' +
+        '<div class="wizard-actions form-actions split"><button type="button" class="btn btn-ghost secondary-action" id="rsBack">← חזרה</button>' +
+        '<button type="button" class="btn btn-gold primary-action" id="rsGo">המשך</button></div>');
+      $("#rsPrice").textContent = price(q);
+      $("#rsBack").addEventListener("click", function () { // stage 3 again, button live
+        sum.classList.add("hidden");
+        viewForm.classList.remove("hidden");
+        resetSubmit();
+        btn.scrollIntoView({ block: "center" });
+      });
+      $("#rsGo").addEventListener("click", function () { order(body, this); });
+    }).catch(function (e) {
+      if (e.status === 401) return showLogin();
+      throw e; // create.html's catch: the form back, with the error
+    });
+  }
+
+  function order(body, go) {
+    var err2 = function (t) { $("#rsErr").textContent = t; $("#rsErr").classList.toggle("show", !!t); };
+    err2("");
+    go.disabled = true;
+    api("/api/promo/order", Object.assign({}, body, { terms_accepted: true })).then(function (o) {
+      if (o.pay_url) { location.href = o.pay_url; return; }
+      if (o.status === "pending") return screen("ההזמנה התקבלה", "נחזור אליך בוואטסאפ.");
+      sum.classList.add("hidden");
+      if (o.listing_id) REEL.build(o.listing_id, false);
+      else pollOrder(o.order_id, false); // a free order: the listing id comes with the order
+    }).catch(function (e) {
+      if (e.status === 401) return showLogin();
+      err2(msg(e));
+      go.disabled = false;
+      // the free reel was used meanwhile: show the price the next order will have
+      if (e.message === "already_used") api("/api/promo/quote").then(function (q) { $("#rsPrice").textContent = price(q); }, function () {});
+    });
+  }
+
+  // Cardcom return (and a free order): wait for the order's listing, then the building screen.
+  function pollOrder(id, failed) {
+    if (failed) {
+      api("/api/promo/lead", { stage: "payment_failed" }).catch(function () {}); // best effort
+      return screen("התשלום לא הושלם", "לא חויבת.", again);
+    }
+    viewForm.classList.add("hidden");
+    FLY.loaderShow("ממתינים לאישור…");
+    var tries = 0;
+    (function tick() {
+      api("/api/promo/order/" + encodeURIComponent(id), null, "GET").catch(function () { return null; }).then(function (o) {
+        if (o && o.listing_id) return REEL.build(o.listing_id, false);
+        if (o && (o.status === "failed" || o.status === "amount_mismatch")) return screen("משהו השתבש ביצירה", "ניצור איתך קשר בוואטסאפ.");
+        if (++tries >= 20) return screen("ההזמנה התקבלה", "אם התשלום עבר — הסרטון בדרך ונעדכן אותך בוואטסאפ. לא חויבת? אפשר לנסות שוב מאוחר יותר.");
+        setTimeout(tick, 3000);
+      });
+    })();
+  }
+
+  var returnOrder = (location.search.match(/[?&]order=([^&]+)/) || [])[1] || null;
+  var returnFailed = /[?&]failed=1(&|$)/.test(location.search);
+  // create.html calls REEL.summary on stage 3 and sets REEL.build (its startBuildingScreen)
+  window.REEL = { summary: summary };
 
   // Already logged in (terms were accepted then) → straight to the wizard.
   api("/api/promo/quote").then(enter, showLogin);

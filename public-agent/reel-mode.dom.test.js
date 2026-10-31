@@ -3,7 +3,9 @@
  * Chromium against a stub API (no network): the OTP login card, then the same
  * wizard as create.html?key=demo with only the allowed differences, no admin call,
  * no x-demo-key, no added <style> or class name, and a later 401 shows the login
- * card instead of redirecting. Skipped, saying so, when no Chromium binary is found.
+ * card instead of redirecting; stage 3 → the summary (the only place with a price) →
+ * /api/promo/order → the building screen, and the Cardcom return. Demo-mode submit
+ * still posts the same body to /api/properties/demo-create. Skipped, saying so, when no Chromium binary is found.
  */
 const assert = require("assert");
 const fs = require("fs");
@@ -30,6 +32,8 @@ function findChromium() {
 }
 
 const PUB = __dirname;
+// What the pre-refactor create.html (cf85d47) posted for the listing filled by fill().
+const DEMO_BODY = {"listing_type":"sale","address":"","city":"חיפה","neighborhood":"","price":1500000,"rooms":4,"size_sqm":90,"size_built":0,"size_balcony":0,"size_garden":0,"floor":0,"parking":0,"storage":false,"elevator":false,"shabbat_elevator":false,"description":"","photos_urls":["https://cdn.test/p-0.jpg","https://cdn.test/p-0.jpg","https://cdn.test/p-0.jpg","https://cdn.test/p-0.jpg"],"own_video_url":null,"theme":{"template":"original","font_title":null,"font_body":null,"font_url":null,"primary":null,"accent":null},"language":"he","agent":{"name":"דנה","brand_name":"","phone":"972501234567","phone2":null,"license":"","logo_url":null}};
 const createHtml = fs.readFileSync(path.join(PUB, "create.html"), "utf8");
 
 (async () => {
@@ -40,11 +44,20 @@ const createHtml = fs.readFileSync(path.join(PUB, "create.html"), "utf8");
   try { browser = await chromium.launch({ executablePath: exe, headless: true, args: ["--no-sandbox"] }); }
   catch { console.log("reel-mode.dom.test.js skipped (launch failed)"); return; }
 
-  const state = { loggedIn: false, calls: [] };
+  const state = { loggedIn: false, calls: [], price: 59, orders: 0 };
   const app = express(); app.use(express.json());
   app.use("/api", (q, r, next) => { state.calls.push({ method: q.method, path: q.path, body: q.body, demoKey: q.get("x-demo-key") || null }); next(); });
   app.get(/^\/reel\/?$/, (q, r) => r.sendFile(path.join(PUB, "create.html")));
-  app.post("/api/promo/quote", (q, r) => (state.loggedIn ? r.json({ tier: "promo", price: 59, phone: "972501234567" }) : r.status(401).json({ error: "unauthenticated" })));
+  app.post("/api/promo/quote", (q, r) => (state.loggedIn ? r.json({ tier: "promo", price: state.price, phone: "972501234567" }) : r.status(401).json({ error: "unauthenticated" })));
+  // 1st order: the free reel was used meanwhile (409); then a free build without a listing id
+  app.post("/api/promo/order", (q, r) => (++state.orders === 1
+    ? (state.price = 59, r.status(409).json({ error: "already_used", order_id: "o0" }))
+    : r.json({ order_id: "o1", status: "building" })));
+  app.get("/api/promo/order/:id", (q, r) => r.json({ status: "building", price: 0, listing_id: "L-" + q.params.id }));
+  app.get("/api/listing-status", (q, r) => r.json({ status: "building" }));
+  app.post("/api/upload-urls", (q, r) => r.json({ files: q.body.files.map((f, i) => ({ method: "PUT", upload_url: "/up/" + i, content_type: f.contentType, public_url: "https://cdn.test/p" + state.calls.length + "-" + i + ".jpg" })) }));
+  app.post("/api/demo-save-agent", (q, r) => r.json({ ok: true }));
+  app.post("/api/properties/demo-create", (q, r) => r.json({ listing_id: "D1" }));
   app.post("/api/promo/lead/start", (q, r) => r.json({ ok: true }));
   app.post("/api/auth/otp", (q, r) => r.json({ ok: true }));
   app.post("/api/auth/otp/verify", (q, r) => {
@@ -54,6 +67,7 @@ const createHtml = fs.readFileSync(path.join(PUB, "create.html"), "utf8");
   app.post("/api/promo/lead", (q, r) => r.json({ ok: true }));
   app.get("/api/admin/me", (q, r) => r.json({ ok: true })); // the demo page's admin check
   app.use("/api", (q, r) => r.status(401).json({ error: "unauthenticated" }));
+  app.put("/up/:i", (q, r) => r.sendStatus(200));
   app.use(express.static(PUB));
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
@@ -67,12 +81,35 @@ const createHtml = fs.readFileSync(path.join(PUB, "create.html"), "utf8");
     return page;
   };
   const visible = (page, sel) => page.evaluate((s) => { const e = document.querySelector(s); return !!e && !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length); }, sel);
+  const jpg = (n) => Array.from({ length: n }, (_, i) => ({ name: `p${i}.jpg`, mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }));
+  // the same listing on any page; set directly (some fields sit in closed panels)
+  const fill = async (page, agent) => {
+    await page.setInputFiles("#fileInput", jpg(4));
+    await page.evaluate((agent) => {
+      const set = (s, v) => { const e = document.querySelector(s); e.value = v; e.dispatchEvent(new Event("input", { bubbles: true })); };
+      set("#pCity", "חיפה"); set("#pPrice", "1500000"); set("#pRooms", "4"); set("#pSqm", "90");
+      set("#agName", "דנה"); if (agent) set("#agPhone", "0501234567");
+    }, agent);
+  };
+  const submit = (page) => page.evaluate(() => document.querySelector("#submitBtn").click());
   const classes = (page) => page.evaluate(() => [...new Set([...document.querySelectorAll("[class]")].flatMap((e) => [...e.classList]))]);
 
   try {
     // ── the demo page, for comparison ──
     const demo = await open("/create.html?key=demo");
     const demoClasses = new Set(await classes(demo));
+
+    // ── demo-mode submit is unchanged: same endpoint, same body (recorded from the pre-refactor create.html) ──
+    await fill(demo, true);
+    state.calls = [];
+    await submit(demo);
+    await demo.waitForSelector("#viewBuilding:not(.hidden)");
+    (await classes(demo)).forEach((c) => demoClasses.add(c)); // photo tiles, steps done (set by script)
+    const created = state.calls.find((c) => c.path === "/properties/demo-create");
+    assert.ok(created && created.demoKey === "demo", "demo posts to demo-create with x-demo-key");
+    created.body.photos_urls = created.body.photos_urls.map((u) => u.replace(/p\d+-/, "p-"));
+    assert.deepStrictEqual(created.body, DEMO_BODY);
+    assert.ok(!state.calls.some((c) => c.path.startsWith("/promo")), "demo never orders");
     await demo.close();
     state.calls = [];
 
@@ -130,6 +167,59 @@ const createHtml = fs.readFileSync(path.join(PUB, "create.html"), "utf8");
     await page.waitForSelector("#reelLogin:not(.hidden)");
     assert.ok(!(await visible(page, "#viewForm")), "wizard hidden again");
     assert.strictEqual(new URL(page.url()).pathname, "/reel", "no redirect");
+
+    // ── stage 3 → summary (price only there) → order → building screen ──
+    state.price = 0;
+    const reel = await open("/reel");
+    await reel.waitForSelector("#viewForm:not(.hidden)");
+    await fill(reel, false);
+    assert.strictEqual(await reel.$eval("#submitBtn", (b) => b.textContent), "המשך", "stage 3 says continue");
+    assert.ok(!/₪\s*(0|59)\b|עלינו/.test(await reel.$eval("#viewForm", (e) => e.innerText)), "no reel price on stage 3");
+    await submit(reel);
+    await reel.waitForSelector("#reelSummary:not(.hidden)");
+    assert.ok(!(await visible(reel, "#viewForm")), "summary in place of the form");
+    assert.strictEqual(await reel.$eval("#rsPrice", (e) => e.textContent), "עלינו 🎁");
+    assert.strictEqual(await reel.$eval("#rsGo", (b) => b.textContent), "המשך");
+    assert.ok(await reel.$('#reelSummary a[href="/legal/terms.html#reel"]'), "cancellation/refund terms linked");
+    assert.ok(!state.calls.some((c) => c.path === "/properties/demo-create" || c.path === "/properties/create"), "reel never creates directly");
+    assert.deepStrictEqual((await classes(reel)).filter((c) => !demoClasses.has(c) && !declared.has(c)), [], "summary: no new class");
+    assert.ok(!/לתשלום|pay/i.test(await reel.$$eval("button", (bs) => bs.map((b) => b.textContent).join("|"))), "no button says pay");
+
+    await reel.click("#rsBack");
+    await reel.waitForSelector("#viewForm:not(.hidden)");
+    assert.ok(!(await visible(reel, "#reelSummary")));
+    assert.deepStrictEqual(await reel.$eval("#submitBtn", (b) => [b.disabled, b.textContent]), [false, "המשך"], "back: stage 3, button live");
+
+    await submit(reel);
+    await reel.waitForSelector("#reelSummary:not(.hidden)");
+    await reel.click("#rsGo");
+    await reel.waitForFunction(() => document.querySelector("#rsErr").textContent === "כבר קיבלת סרטון חינם במספר הזה");
+    await reel.waitForFunction(() => document.querySelector("#rsPrice").textContent === "₪59");
+    assert.ok(!(await reel.$eval("#rsGo", (b) => b.disabled)), "can continue at the new price");
+    const ob = state.calls.find((c) => c.path === "/promo/order").body;
+    assert.strictEqual(ob.terms_accepted, true);
+    assert.strictEqual(ob.photos_urls.length, 4);
+    assert.deepStrictEqual([ob.city, ob.price, ob.agent.name, ob.agent.phone], ["חיפה", 1500000, "דנה", "972501234567"]);
+
+    await reel.click("#rsGo");
+    await reel.waitForSelector("#viewBuilding:not(.hidden)");
+    assert.ok(state.calls.some((c) => c.path === "/promo/order/o1"), "free order: listing id from the order");
+    assert.ok(!(await visible(reel, "#reelSummary")) && !(await visible(reel, "#viewForm")));
+    assert.strictEqual(await reel.$eval("#groupsFrame", (f) => f.getAttribute("src")), null, "no groups iframe");
+    assert.strictEqual(new URL(await reel.$eval("#createAnother", (a) => a.href)).pathname + new URL(await reel.$eval("#createAnother", (a) => a.href)).search, "/reel");
+    await reel.close();
+
+    // ── Cardcom return: failed → "לא חויבת" + lead; paid → the building screen ──
+    state.calls = [];
+    const failed = await open("/reel?order=o2&failed=1");
+    await failed.waitForSelector("#reelSummary:not(.hidden)");
+    assert.ok((await failed.$eval("#reelSummary", (e) => e.innerText)).includes("לא חויבת"));
+    assert.deepStrictEqual(state.calls.find((c) => c.path === "/promo/lead").body, { stage: "payment_failed" });
+    await failed.close();
+    const paid = await open("/reel?order=o2");
+    await paid.waitForSelector("#viewBuilding:not(.hidden)");
+    assert.strictEqual(new URL(await paid.$eval("#createAnother", (a) => a.href)).search, "", "create another drops ?order=");
+    await paid.close();
 
     // ── already logged in: straight to the wizard ──
     const again = await open("/reel/");
