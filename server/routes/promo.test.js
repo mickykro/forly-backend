@@ -237,6 +237,8 @@ async function withApp(opts, fn) {
       agent2: { name: "x" }, phone2: "1", agent_phones: ["1"], replaces_listing_id: "r", whatsapp_draft: true };
     assert.strictEqual((await req("POST", "/order", { ...full, agent: { ...full.agent, logo_url: "https://evil/l.png" } }, h)).status, 400, "foreign logo");
     assert.strictEqual((await req("POST", "/order", { ...full, photos_urls: photos.slice(0, 3) }, h)).status, 400, "3 photos");
+    const many = Array.from({ length: 13 }, (_, i) => `https://f/${i}.jpg`);
+    assert.strictEqual((await req("POST", "/order", { ...full, photos_urls: many }, h)).status, 400, "13 photos");
     const o = await req("POST", "/order", full, h);
     assert.strictEqual(o.status, 200);
     await req("POST", "/cardcom/webhook", { LowProfileId: `lp-${o.data.order_id}` }); // unpaid: nothing built
@@ -245,7 +247,7 @@ async function withApp(opts, fn) {
   await withApp({}, async ({ req, built, lp, store }) => {
     const h = { "x-phone": "972503333333" };
     const full = { ...listing, size_built: 90, parking: 1, elevator: true,
-      theme: { template: "classic", primary: "#112233", font_url: "https://evil/f.woff", junk: 1 },
+      theme: { template: "classic", primary: "#112233", font_title: "custom", font_body: "Heebo", font_url: "https://evil/f.woff", junk: 1 },
       agent: { name: "דנה", brand_name: "B", license: "123", logo_url: "https://f/logo.png", phone: "972509999999", phone2: "1" },
       agent2: { name: "x" }, phone2: "1", agent_phones: ["1"], replaces_listing_id: "r", whatsapp_draft: true };
     const o = await req("POST", "/order", full, h);
@@ -253,7 +255,7 @@ async function withApp(opts, fn) {
     await req("POST", "/cardcom/webhook", { LowProfileId: `lp-${o.data.order_id}` });
     const b = built[0];
     assert.deepStrictEqual(b.agent, { name: "דנה", brand_name: "B", license: "123", logo_url: "https://f/logo.png", phone: "972503333333" });
-    assert.deepStrictEqual(b.body.theme, { template: "classic", primary: "#112233" });
+    assert.deepStrictEqual(b.body.theme, { template: "classic", font_title: null, font_body: "Heebo", primary: "#112233" });
     assert.deepStrictEqual([b.body.size_built, b.body.parking, b.body.elevator], [90, 1, true]);
     for (const k of ["agent", "agent2", "phone2", "agent_phones", "replaces_listing_id", "whatsapp_draft", "own_video_url"]) assert.ok(!(k in b.body), `${k} dropped`);
   });

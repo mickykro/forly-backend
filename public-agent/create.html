@@ -574,7 +574,7 @@
   // /reel: a stranger (promo-scope OTP login, reel-mode.js) gets the demo look;
   // everything admin-only stays behind adminDemo.
   var reelMode = /^\/reel\/?$/.test(location.pathname);
-  var adminDemo = !!demoKey;
+  var adminDemo = !!demoKey && !reelMode;
   var isDemo = adminDemo || reelMode;
   // ?agent=<phone> (admin panel → "create for client"): a real client's
   // property, created by an operator. Their saved profile fills the agent block,
@@ -988,7 +988,7 @@
         // drops it from this listing: the file stays (the old listing points at it).
         (d.photos || []).forEach(function (url) {
           if (photos.length >= 12) return;
-          var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
+          var t = FLY.el("div", "t", '<img src="' + FLY.esc(url) + '"><button class="x" type="button">✕</button>');
           var entry = { file: null, el: t, publicUrl: url, previewUrl: url, removed: false, failed: false, uploadPromise: Promise.resolve(url) };
           t.querySelector(".x").addEventListener("click", function () {
             entry.removed = true;
@@ -1304,7 +1304,7 @@
   }
   function addImportedPhoto(url) {
     if (importedPhotos.length >= 12) return;
-    var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
+    var t = FLY.el("div", "t", '<img src="' + FLY.esc(url) + '"><button class="x" type="button">✕</button>');
     var entry = { url: url, el: t, skip: false };
     t.querySelector(".x").addEventListener("click", function () {
       entry.skip = !entry.skip; t.classList.toggle("skip", entry.skip); syncPhotoChoice();
@@ -1338,7 +1338,7 @@
         body: JSON.stringify({ url: p.url }),
       }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
         if (!j || !j.url || photos.length >= 12) { FLY.toast(FT("err_photo_upload")); return; }
-        var t = FLY.el("div", "t", '<img src="' + j.url + '"><button class="x" type="button">✕</button>');
+        var t = FLY.el("div", "t", '<img src="' + FLY.esc(j.url) + '"><button class="x" type="button">✕</button>');
         var entry = { file: null, el: t, publicUrl: j.url, previewUrl: j.url, removed: false, failed: false, uploadPromise: Promise.resolve(j.url) };
         t.querySelector(".x").addEventListener("click", function () {
           entry.removed = true;
@@ -1895,6 +1895,12 @@
   }
 
   if (reelMode) REEL.build = startBuildingScreen; // reel-mode.js: after the order / Cardcom return
+  if (reelMode) { // a reel buyer has no property list; failures are handled by us on WhatsApp (no retry)
+    Array.prototype.forEach.call(document.querySelectorAll('#doneBox a[href="/"], #waitBox a[href="/"], #failBox a[href="/"]'), function (a) { a.href = "/reel"; });
+    var failSub = document.querySelector("#failBox [data-i18n=fail_sub]");
+    failSub.removeAttribute("data-i18n");
+    failSub.textContent = "יצירת הרילס לא הושלמה. ניצור איתך קשר בוואטסאפ.";
+  }
 
   // ── building screen: poll listing status ──
   // ponytail: demoLoggedIn param controls redirect behavior
@@ -1962,7 +1968,7 @@
         }
         msg.textContent = "לפרסם את הנכס אוטומטית בקבוצות האלה? פורלי תפרסם לבד, בקצב של החשבון, עד שתעצרו.";
         list.innerHTML = groups.map(function (g) {
-          return '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" checked value="' + String(g.group_id).replace(/"/g, "") + '"> <span></span></label>';
+          return '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" checked value="' + FLY.esc(g.group_id) + '"> <span></span></label>';
         }).join("");
         Array.prototype.forEach.call(list.querySelectorAll("span"), function (el, i) { el.textContent = groups[i].name; });
         actions.innerHTML = '<button type="button" class="btn btn-gold" id="autoPubStart">הפעלת פרסום אוטומטי</button><button type="button" class="btn btn-ghost" id="autoPubSkip">לא עכשיו</button>';
@@ -2089,7 +2095,7 @@
         }
         (data.photos || []).forEach(function (url) {
           if (photos.length >= 12) return;
-          var t = FLY.el("div", "t", '<img src="' + url + '"><button class="x" type="button">✕</button>');
+          var t = FLY.el("div", "t", '<img src="' + FLY.esc(url) + '"><button class="x" type="button">✕</button>');
           var entry = { file: null, el: t, publicUrl: url, previewUrl: url, removed: false, failed: false, uploadPromise: Promise.resolve(url) };
           t.querySelector(".x").addEventListener("click", function () {
             entry.removed = true;

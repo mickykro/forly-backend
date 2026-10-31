@@ -12,6 +12,7 @@ const THEME_FIELDS = ["template", "font_title", "font_body", "primary", "accent"
 // Never: agent.phone, phone2, agent2, agent_phones.
 const AGENT_FIELDS = ["name", "brand_name", "license", "logo_url"];
 const MIN_PHOTOS = 4;
+const MAX_PHOTOS = 12;
 
 const pick = (src, keys) => Object.fromEntries(keys.filter((k) => src[k] !== undefined).map((k) => [k, src[k]]));
 const ownUrl = (photoBase, u) => typeof u === "string" && u.startsWith(photoBase) && !/\.\.|[?#]/.test(u);
@@ -19,12 +20,17 @@ const ownUrl = (photoBase, u) => typeof u === "string" && u.startsWith(photoBase
 // → { error, code } | { listing, agent }
 function parseOrderBody(body, photoBase) {
   const listing = pick(body, LISTING_FIELDS);
-  if (body.theme && typeof body.theme === "object") listing.theme = pick(body.theme, THEME_FIELDS);
+  if (body.theme && typeof body.theme === "object") {
+    listing.theme = pick(body.theme, THEME_FIELDS);
+    // "custom" means an uploaded font_url, which is dropped above
+    for (const k of ["font_title", "font_body"]) if (listing.theme[k] === "custom") listing.theme[k] = null;
+  }
   const a = body.agent && typeof body.agent === "object" ? body.agent : {};
   const agent = Object.fromEntries(AGENT_FIELDS.map((k) => [k, typeof a[k] === "string" ? a[k].trim().slice(0, 120) : ""]));
   agent.name = agent.name.slice(0, 60);
   if (!agent.name) return { error: "agent.name is required", code: 400 };
   if (!Array.isArray(listing.photos_urls) || listing.photos_urls.length < MIN_PHOTOS) return { error: `at least ${MIN_PHOTOS} photos required`, code: 400 };
+  if (listing.photos_urls.length > MAX_PHOTOS) return { error: `at most ${MAX_PHOTOS} photos`, code: 400 };
   if (!listing.photos_urls.every((u) => ownUrl(photoBase, u)) || (agent.logo_url && !ownUrl(photoBase, agent.logo_url))) return { error: "photos must be uploaded here", code: 400 };
   return { listing, agent };
 }

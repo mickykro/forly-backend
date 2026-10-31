@@ -114,8 +114,12 @@ const createHtml = fs.readFileSync(path.join(PUB, "create.html"), "utf8");
     state.calls = [];
 
     // ── /reel, logged out: the login card, not the wizard ──
-    const page = await open("/reel");
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await page.route("**/*", (route) => (route.request().url().startsWith(base) ? route.continue() : route.abort()));
+    await page.goto(base + "/reel");
+    await page.waitForLoadState("load");
     await page.waitForSelector("#reelLogin:not(.hidden)");
+    await page.evaluate(() => { document.querySelector("#reelLogin").dataset.resendSecs = "2"; }); // a short countdown
     assert.ok(!(await visible(page, "#viewForm")), "wizard hidden until logged in");
     assert.ok(await page.$eval("#rlGo", (b) => b.disabled), "terms box gates the code");
     await page.fill("#rlPhone", "050-1234567");
@@ -123,6 +127,15 @@ const createHtml = fs.readFileSync(path.join(PUB, "create.html"), "utf8");
     await page.check("#rlMarketing");
     await page.click("#rlGo");
     await page.waitForSelector("#rlCodeWrap:not(.hidden)");
+    // resend: locked during the 30s countdown, then re-POSTs /auth/otp
+    assert.ok(await page.$eval("#rlResend", (b) => b.disabled && /שליחה חוזרת בעוד \d+ שנ׳/.test(b.textContent)), "resend locked with countdown");
+    await page.waitForFunction(() => !document.querySelector("#rlResend").disabled, null, { timeout: 5000 });
+    
+    const otpBefore = state.calls.filter((c) => c.path === "/auth/otp").length;
+    await page.click("#rlResend");
+    await page.waitForFunction(() => document.querySelector("#rlErr").textContent === "שלחנו קוד חדש");
+    assert.strictEqual(state.calls.filter((c) => c.path === "/auth/otp").length, otpBefore + 1, "resend calls /auth/otp again");
+    assert.ok(await page.$eval("#rlResend", (b) => b.disabled), "locked again after a send");
     await page.fill("#rlCode", "000000");
     await page.click("#rlGo");
     await page.waitForFunction(() => document.querySelector("#rlErr").textContent === "הקוד שגוי");
@@ -226,6 +239,15 @@ const createHtml = fs.readFileSync(path.join(PUB, "create.html"), "utf8");
     await again.waitForSelector("#viewForm:not(.hidden)");
     assert.ok(!(await visible(again, "#reelLogin")));
     assert.strictEqual(await again.$eval("#agPhone", (e) => e.value), "0501234567");
+    // ── loose ends: /reel?key=… never turns on the admin demo; box links go to /reel; fail box has no retry promise ──
+    state.calls = [];
+    const keyed = await open("/reel?key=demo");
+    await keyed.waitForSelector("#viewForm:not(.hidden)");
+    assert.ok(!state.calls.some((c) => c.demoKey), "no x-demo-key on /reel?key=");
+    assert.deepStrictEqual(await keyed.$$eval('#doneBox a.btn-ghost, #waitBox a.btn-ghost, #failBox a.btn-ghost', (a) => a.map((x) => x.getAttribute("href"))), ["/reel", "/reel", "/reel"]);
+    const failTxt = await keyed.$eval("#failBox p", (e) => e.textContent);
+    assert.ok(/וואטסאפ/.test(failTxt) && !/נסו שוב/.test(failTxt), "fail text: WhatsApp, no retry");
+    await keyed.close();
     console.log("reel-mode.dom.test.js OK");
   } finally {
     await browser.close();

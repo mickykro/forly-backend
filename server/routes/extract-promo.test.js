@@ -52,6 +52,9 @@ const recorder = () => {
 assert.equal(isGroupPost("https://www.facebook.com/groups/1/posts/2"), true);
 assert.equal(isGroupPost("https://m.facebook.com/groups/abc/permalink/9/"), true);
 assert.equal(isGroupPost("https://facebook.com/groups/1/posts/2"), true);
+assert.equal(isGroupPost("https://web.facebook.com/groups/1/posts/2"), true);
+assert.equal(isGroupPost("https://mbasic.facebook.com/groups/1/permalink/2"), true);
+assert.equal(isGroupPost("https://www.facebook.com/share/p/abc"), false, "share links stay profile-less");
 assert.equal(isGroupPost("https://www.facebook.com/groups/1"), false, "a group home page is not a post");
 assert.equal(isGroupPost("https://www.facebook.com/someone"), false);
 assert.equal(isGroupPost("https://evilfacebook.com/groups/1/posts/2"), false);
@@ -143,6 +146,28 @@ assert.equal(isGroupPost("https://www.instagram.com/p/x"), false);
   assert.equal(last.status, 429);
 }
 
+// ── admin-profile jobs: own pool (REEL_SCRAPE_FB_DAILY_CAP, default 8); a full pool keeps the visitor's attempt ──
+{
+  const jobs = recorder();
+  let user = { userId: "0507000000", scope: "promo" };
+  const requireAuth = () => (req, res, next) => { req.user = user; next(); };
+  const app = express(); app.use(express.json());
+  app.use("/api", createExtractRouter({ requireAuth, authSecret: "s", db: { getConnection: async () => ({}) }, extractJobs: jobs, driverEnabled: true, reelScrapePhone: ADMIN }));
+  const fbUrl = "https://www.facebook.com/groups/1/posts/2";
+  let n = 0, last;
+  for (let i = 0; i < 9; i++) {
+    user = { userId: `05071000${String(n++).padStart(2, "0")}`, scope: "promo" };
+    last = await post(app, "/api/properties/extract", { url: fbUrl });
+  }
+  assert.equal(jobs.created.length, 8);
+  assert.equal(last.status, 429);
+  // the visitor whose attempt hit the full pool still has theirs (3/day): a bare job is the pool's, not theirs
+  const v = { userId: "0507222222", scope: "promo" };
+  user = v;
+  assert.equal((await post(app, "/api/properties/extract", { url: fbUrl })).status, 429);
+  for (let i = 0; i < 3; i++) assert.equal((await post(app, "/api/properties/extract", { url: "https://www.yad2.co.il/item/9" })).status, 202, "own attempts intact");
+}
+
 // ── polling: the visitor sees their own job, another phone gets 404 ──
 {
   const job = { id: "jp", phone: VISITOR, profile_owner: ADMIN, status: "queued" };
@@ -217,6 +242,14 @@ assert.equal(isGroupPost("https://www.instagram.com/p/x"), false);
   const twoHops = async (u) => (hops++ < 2 ? redirectTo(`/next${hops}`) : okImg);
   const img = await importImage("https://c/a.png", { fetchFn: twoHops, lookup });
   assert.equal(img.contentType, "image/png");
+
+  let cancelled = 0;
+  const withBody = async (u) => (hops++ < 3 ? { ...redirectTo("/n"), body: { cancel: async () => { cancelled++; } } } : okImg);
+  hops = 0;
+  await importImage("https://c/a.png", { fetchFn: withBody, lookup });
+  assert.equal(cancelled, 3, "redirect bodies cancelled");
+  const noLoc = async () => ({ status: 302, ok: false, headers: new Map() });
+  await assert.rejects(importImage("https://c/a.png", { fetchFn: noLoc, lookup }), (e) => e.code === "page_unreadable");
 
   const loop = async () => redirectTo("/again");
   await assert.rejects(importImage("https://c/a.png", { fetchFn: loop, lookup }), (e) => e.code === "page_unreadable");

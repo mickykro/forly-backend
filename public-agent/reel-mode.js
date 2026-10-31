@@ -73,7 +73,9 @@
     '<label><input id="rlMarketing" type="checkbox"> <span>אשמח לקבל עדכונים והצעות בוואטסאפ (לא חובה)</span></label>' +
     '</div>' +
     '<div class="field hidden" id="rlCodeWrap"><label for="rlCode">הקוד שקיבלת בוואטסאפ</label>' +
-    '<input id="rlCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></div>' +
+    '<input id="rlCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6">' +
+    '<div class="wizard-actions form-actions split"><button type="button" class="btn btn-ghost" id="rlResend" disabled></button>' +
+    '<button type="button" class="btn btn-ghost" id="rlChange">← מספר אחר</button></div></div>' +
     '<p class="form-err" id="rlErr" role="alert"></p>' +
     '<div class="wizard-actions form-actions"><button type="button" class="btn btn-gold primary-action" id="rlGo" disabled>שלחו לי קוד בוואטסאפ</button></div>' +
     '</div></div>';
@@ -87,7 +89,29 @@
     codeSent = on;
     $("#rlCodeWrap").classList.toggle("hidden", !on);
     $("#rlGo").textContent = on ? "אימות" : "שלחו לי קוד בוואטסאפ";
+    if (on) cooldown(); else clearInterval(timer);
   }
+  // resend is locked for 30s after each send, with a countdown in its text
+  var timer = null;
+  function cooldown() {
+    var left = +login.dataset.resendSecs || 30, b = $("#rlResend");
+    clearInterval(timer);
+    b.disabled = true;
+    function tick() {
+      b.textContent = left > 0 ? "שליחה חוזרת בעוד " + left + " שנ׳" : "שלחו שוב את הקוד";
+      if (left-- <= 0) { clearInterval(timer); b.disabled = false; }
+    }
+    tick();
+    timer = setInterval(tick, 1000);
+  }
+  $("#rlResend").addEventListener("click", function () {
+    err("");
+    $("#rlResend").disabled = true;
+    api("/api/auth/otp", { phone: $("#rlPhone").value, purpose: "reel" })
+      .then(function () { cooldown(); err("שלחנו קוד חדש"); })
+      .catch(function (e) { err(msg(e)); cooldown(); });
+  });
+  $("#rlChange").addEventListener("click", function () { err(""); setCodeSent(false); $("#rlPhone").focus(); });
   $("#rlTerms").addEventListener("change", function () { $("#rlGo").disabled = !$("#rlTerms").checked; });
   $("#rlPhone").addEventListener("input", function () { if (codeSent) setCodeSent(false); });
   $("#rlGo").addEventListener("click", function () {

@@ -39,7 +39,7 @@ const MAX_REDIRECTS = 3;
 const isGroupPost = (url) => {
   try {
     const u = new URL(url);
-    return /^(www\.|m\.)?facebook\.com$/i.test(u.hostname) && /^\/groups\/[^/]+\/(posts|permalink)\/[^/]+/i.test(u.pathname);
+    return /^(www\.|m\.|web\.|mbasic\.)?facebook\.com$/i.test(u.hostname) && /^\/groups\/[^/]+\/(posts|permalink)\/[^/]+/i.test(u.pathname);
   } catch (e) { return false; }
 };
 
@@ -94,7 +94,10 @@ async function importImage(url, { fetchFn = fetch, lookup, video = false } = {})
     catch (err) { throw fail("page_unreadable", err.message); }
     if (!(r.status >= 300 && r.status < 400)) break;
     if (hop >= MAX_REDIRECTS) throw fail("page_unreadable", "too many redirects");
-    try { cur = new URL(r.headers.get("location"), cur).href; } catch (e) { throw fail("page_unreadable", "bad redirect"); }
+    const loc = r.headers.get("location");
+    if (!loc) throw fail("page_unreadable", "redirect without location");
+    if (r.body && r.body.cancel) r.body.cancel().catch(() => {});
+    try { cur = new URL(loc, cur).href; } catch (e) { throw fail("page_unreadable", "bad redirect"); }
   }
   if (!r.ok) throw fail("page_unreadable", `fetch ${r.status}`);
   let ct = String(r.headers.get("content-type") || "").split(";")[0].trim();
@@ -128,6 +131,8 @@ module.exports = function createExtractRouter(ctx) {
   const promoLimit = new DailyLimit(PROMO_DAILY_CAP);
   const promoDriverLimit = new DailyLimit(PROMO_DRIVER_DAILY_CAP);
   const promoImportLimit = new DailyLimit(PROMO_IMPORT_DAILY_CAP);
+  // Jobs on the scrape admin's Facebook profile: a smaller pool on top of promoPool.
+  const promoFbPool = new DailyLimit(Number(process.env.REEL_SCRAPE_FB_DAILY_CAP) || 8);
   const promoPool = new DailyLimit(Number(process.env.REEL_SCRAPE_DAILY_CAP) || 20);
   const reelScrapePhone = ctx.reelScrapePhone || null;
 
@@ -179,7 +184,8 @@ module.exports = function createExtractRouter(ctx) {
       // The job stays the visitor's (poll ownership); profile_owner runs it as the admin.
       async function queuePromoJob(forceSource, adminProfile) {
         if (adminProfile && !reelScrapePhone) throw fail("login_required_for_browser");
-        if (!promoDriverLimit.take(phone) || !promoPool.take("pool")) throw fail("extract_limit");
+        // Site pools first: a full pool must not burn the visitor's own attempt.
+        if (!promoPool.take("pool") || (adminProfile && !promoFbPool.take("pool")) || !promoDriverLimit.take(phone)) throw fail("extract_limit");
         let profileName = null, profileOwner = null;
         if (adminProfile) {
           const conn = (await database.getConnection(reelScrapePhone)) || {};
