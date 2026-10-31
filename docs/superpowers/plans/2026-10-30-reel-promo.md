@@ -5,6 +5,7 @@
 **Goal:** A public `/reel` page. Anyone enters a phone number, accepts the terms, verifies by WhatsApp OTP, uploads a property, pays with Cardcom (or gets it free), and receives a narrated reel and a property page on WhatsApp. Every number that started and didn't finish is kept for follow-up.
 
 **Architecture:** `/reel` is a paid front door to the existing `createListing()`. For promo listings, `createListing()` sends to the **"WW1 Walkthrough V4 dev"** n8n workflow (id `az3WzE3YLVzKRoJF`, webhook path `ww1-v4-dev`) instead of the regular WW1. That workflow renders the reel, WhatsApps it, and builds the page. New code:
+- a promo login path in `server/auth.js`: a visitor who isn't a client gets a token that works for /reel and photo upload only
 - a Cardcom adapter (`server/payments/cardcom.js`)
 - pricing, orders and leads (`server/promo.js`)
 - routes (`server/routes/promo.js`)
@@ -37,6 +38,7 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
 **Why it can't be abused:**
 - One free reel per phone. A database transaction guarantees it even with two tabs open.
 - Prices are computed on the server, never taken from the page.
+- A visitor who isn't a client logs in with a **promo-only** token. It works for /reel and photo upload, never the dashboard, so a /reel visitor can't create free listings there.
 - A payment counts only after the server asks Cardcom itself whether the order was really paid, and for the right amount.
 
 ---
@@ -52,14 +54,21 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
 - **Leads** go in `promo_leads/{phone}` with `{ phone, stage, first_seen_at, last_seen_at, terms_accepted_at, agent_name, order_id, price }` (ISO strings).
   - Stages: `otp_sent` → `verified` → `checkout` / `payment_failed` / `paid`.
   - An early stage (`otp_sent`, `verified`) never overwrites a late one (`checkout`, `payment_failed`, `paid`).
-  - Late stages overwrite each other, because the latest order wins.
+  - Late stages overwrite each other, because the latest order wins, except that `payment_failed` never replaces `paid`.
+  - `order_status` (`building` / `failed` / `amount_mismatch`) is copied onto the lead so the admin sees problems.
 - **Terms:**
   - `/api/promo/lead/start` and `/api/promo/order` both refuse requests without `terms_accepted: true`.
   - The acceptance time is stored on the lead and on the order.
+- **Promo login:**
+  - `POST /api/auth/otp` with `purpose: "reel"` skips the "not a client" check and the sales-lead notice.
+  - Verify then signs `scope: "promo"` for a phone with no `businesses` doc, or a normal session for a client.
+  - `/api/promo/*` accepts `["session","promo"]`, and upload accepts `["session","review","promo"]`. Every other route keeps refusing promo tokens.
+  - `/order` never creates a `businesses` doc.
 - Flow order: phone + terms → OTP → details and photos → pay → generate.
 - The page URL is `/reel`; the file is `public-agent/reel.html`.
 - Promo reels do NOT consume the `walkthroughs` quota. The V4 dev workflow never calls `/api/quota/consume`; that was checked in n8n on 2026-10-31.
 - Promo listings carry `source: "reel_promo"`. `kickPipeline` sends them to `N8N_REEL_WEBHOOK_URL`, so a retry of a promo listing also goes to the reel workflow.
+- A promo listing counts as "stuck" after 45 minutes, not 20. The reel itself takes about 20 minutes, so the photo-only fallback page and the "failed" badge must not fire while it is still rendering.
 - Admin writes (save promo date, mark paid) use `[requireAdmin, requireStepUp]`, like `routes/admin-campaigns.js`.
 - Secrets come only from env: `CARDCOM_TERMINAL`, `CARDCOM_API_NAME`, `N8N_REEL_WEBHOOK_URL`.
 - Express 4 doesn't catch async errors, so every async handler is wrapped in `h()` (shown in Task 3).
@@ -95,8 +104,9 @@ The Cardcom webhook body is never trusted: every payment is re-checked with `Get
   - It reads `body.phone`, `body.listing_id` and `body.image_urls` (`createListing`'s WW1 payload already has them) and posts the page to the `property-page-builder` webhook.
 
   Before Task 7, the operator must do Operator guide §C (rename the messages, point Report Cost at the admin, publish), then confirm two things and write the answers here:
-  - (a) A listing created on **production** can be planned by the **staging** walkthrough API and built by `property-page-builder`. This holds if both use the same Firestore project; check that `GOOGLE_CLOUD_PROJECT` / the service account in `deploy.env` and `staging.env` match. If they don't match, change the four staging URLs in the workflow to the production host.
+  - (a) ~~Can a production listing be read by the staging walkthrough API?~~ **Answered: yes.** Staging and production share Firestore (`server/build-fallback.js:11-12`), so the staging URLs can stay.
   - (b) `property-page-builder` WhatsApps the page link to `business_phone`. If it doesn't, the visitor gets only the video.
+- [ ] **Step 3 (public host).** Read `BASE_URL` in production `deploy.env`. It appears in the public /reel link, in Cardcom's return URL and webhook, and on the site Cardcom reviews. It must be the customer domain (the one the dashboard runs on), never an `hstgr.cloud` host (`server/utils.js` `INFRA_HOST`). If it is an `hstgr.cloud` host, stop and ask the owner which domain to use before Task 5.
 
 ---
 ### Task 1: Cardcom adapter
@@ -211,7 +221,7 @@ function createCardcom({ terminal, apiName, fetchFn = fetch }) {
       orderId: d.ReturnValue,
       amount: t ? Number(t.Amount) : 0,
       approved: !!t && Number(t.ResponseCode) === 0,
-      transactionId: t ? t.TranzactionId : null,
+      transactionId: t ? (t.TranzactionId ?? null) : null, // never undefined: Firestore rejects it
     };
   }
 
@@ -308,6 +318,8 @@ assert.ok(isNaN(endOfDayIsrael("2026-13-45")));
   await s.touchLead("972502", "payment_failed");
   await s.touchLead("972502", "paid");
   assert.strictEqual((await s.listLeads())[0].stage, "paid");
+  await s.touchLead("972502", "payment_failed");
+  assert.strictEqual((await s.listLeads())[0].stage, "paid", "a stale failed-payment link can't undo paid");
   await assert.rejects(s.touchLead("972502", "bogus"), /bad lead stage/);
 
   console.log("promo.test.js OK");
@@ -360,10 +372,11 @@ function decideStart(order, started, payment) {
   return { ok: true };
 }
 
-// Pure: the lead after this touch. An early stage never hides a late one.
+// Pure: the lead after this touch. An early stage never hides a late one, and an
+// old "&failed=1" link never turns a paid lead back into payment_failed.
 function nextLead(prev, phone, stage, extra, at) {
   const clean = Object.fromEntries(Object.entries(extra || {}).filter(([, v]) => v !== undefined));
-  const keep = prev && !LATE.has(stage) && LATE.has(prev.stage);
+  const keep = prev && ((!LATE.has(stage) && LATE.has(prev.stage)) || (stage === "payment_failed" && prev.stage === "paid"));
   return { ...(prev || { phone, first_seen_at: at }), ...clean, stage: keep ? prev.stage : stage, last_seen_at: at };
 }
 
@@ -454,6 +467,138 @@ git commit -m "feat(promo): reel prices, promo end date, orders and leads"
 
 ---
 
+### Task 2b: Promo login (OTP for people who aren't clients yet)
+
+Today `POST /api/auth/otp` answers 404 `not_a_client` for any phone without a `businesses` doc (`server/auth.js:150-152`). It also WhatsApps a sales-lead notice. A /reel visitor needs a code, but must not get a dashboard session.
+
+**Files:**
+- Modify: `server/auth.js`:
+  - `/otp`, around lines 147–175
+  - `verifyHandler`, around line 230
+  - exports at the end
+- Modify: `server/routes/intake.js` (line 17 import, line 53 `uploadAuth`)
+- Create: `server/auth-promo.test.js`
+- Modify: `server/package.json` (`test` script: append ` && node auth-promo.test.js`)
+
+**Interfaces:**
+- Produces:
+  - `POST /api/auth/otp { phone, purpose: "reel" }` sends a code to any valid phone.
+  - `POST /api/auth/otp/verify` returns, for that code:
+    - a phone with no business doc: `{ ok, token, userId, scope: "promo", expires_in }`, with the `forly_session` cookie holding a `scope: "promo"` token and no step-up cookie;
+    - a registered client: the normal full session, exactly as today.
+  - `require("./auth").PROMO_SCOPES = ["session", "promo"]` and `UPLOAD_SCOPES = ["session", "review", "promo"]`.
+
+- [ ] **Step 1: Write the failing test.** `server/auth-promo.test.js`:
+
+```js
+/* auth.js promo login: purpose "reel" lets a non-client get a code, and verify gives
+   them a promo-only token (no dashboard, no step-up); a client still gets a session. */
+const assert = require("assert");
+const express = require("express");
+const createAuthRouter = require("./auth");
+const { verifySession, PROMO_SCOPES, UPLOAD_SCOPES } = require("./auth");
+
+// Minimal Firestore stand-in: collection(c).doc(id).get()/set(v, {merge}).
+function fakeDb(businesses) {
+  const cols = { businesses: new Map(Object.entries(businesses)) };
+  return { collection: (c) => {
+    const m = cols[c] || (cols[c] = new Map());
+    return { doc: (id) => ({
+      get: async () => ({ exists: m.has(id), data: () => m.get(id) }),
+      set: async (v, o) => { m.set(id, o && o.merge ? { ...(m.get(id) || {}), ...v } : v); },
+    }) };
+  } };
+}
+
+(async () => {
+  const log = console.log; console.log = console.error = () => {};
+  let lastMsg = "";
+  const leads = [];
+  const app = express();
+  app.use(express.json());
+  app.use("/api/auth", createAuthRouter({ db: fakeDb({ "972501111111": { full_name: "Client" } }), mem: {},
+    sendWhatsApp: async (to, msg) => { if (to === "972599999999") leads.push(msg); else lastMsg = msg; return true; },
+    secret: "s", salesLeadPhone: "972599999999" }));
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${server.address().port}/api/auth`;
+  const post = async (path, body) => {
+    const r = await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return { status: r.status, data: await r.json(), cookies: r.headers.getSetCookie() };
+  };
+  try {
+    // not a client, normal login → refused (unchanged)
+    assert.equal((await post("/otp", { phone: "0502222222" })).data.error, "not_a_client");
+    const leadsBefore = leads.length;
+
+    // not a client, /reel → code; verify → promo token only
+    assert.equal((await post("/otp", { phone: "0503333333", purpose: "reel" })).status, 200);
+    assert.equal(leads.length, leadsBefore, "no sales-lead notice for a /reel visitor");
+    const v = await post("/otp/verify", { phone: "0503333333", code: lastMsg.match(/\d{6}/)[0] });
+    assert.equal(v.status, 200, JSON.stringify(v.data));
+    assert.equal(v.data.scope, "promo");
+    assert.equal(verifySession("s", v.data.token), null, "a promo token is not a dashboard session");
+    assert.equal(verifySession("s", v.data.token, PROMO_SCOPES).userId, "972503333333");
+    assert.ok(verifySession("s", v.data.token, UPLOAD_SCOPES), "a promo token may upload photos");
+    assert.ok(!v.cookies.some((c) => c.startsWith("forly_stepup=")), "no step-up for promo");
+
+    // a client using /reel → normal full session
+    await post("/otp", { phone: "0501111111", purpose: "reel" });
+    const c = await post("/otp/verify", { phone: "0501111111", code: lastMsg.match(/\d{6}/)[0] });
+    assert.ok(verifySession("s", c.data.token), "client gets a real session");
+  } finally { server.close(); }
+  log("auth-promo.test.js OK");
+})().catch((e) => { console.log(e); process.exit(1); });
+```
+
+  Before writing the test, check how auth.js uses `db` (`grep -n "db\." server/auth.js`). If it calls anything besides `collection().doc().get/set`, such as `runTransaction` or `FieldValue`, add that to `fakeDb`.
+
+- [ ] **Step 2: Run it and expect FAIL.** `node auth-promo.test.js` → `not_a_client` on the `purpose: "reel"` call.
+
+- [ ] **Step 3: Implement.** In `server/auth.js`:
+  - In `router.post("/otp", …)`, right after the `invalid_phone` check, add `const promo = req.body && req.body.purpose === "reel";` and change the registration check to:
+
+```js
+      // /reel visitors aren't clients yet: they get a code (and only a promo token at verify).
+      if (!promo && !(await isRegistered(phone))) {
+```
+
+  - In the `saveOtp(phone, { … })` call, add `purpose: promo ? "reel" : null,`.
+  - In `verifyHandler`, right after `await patchOtp(phone, { used: true, used_at: new Date() });`, insert:
+
+```js
+      // A /reel visitor with no business doc gets a promo-only token: /api/promo and
+      // photo upload accept it; every dashboard route (default scope "session") refuses it.
+      if (rec.purpose === "reel" && !(await isRegistered(phone))) {
+        const token = signSession(secret, phone, { scope: "promo" });
+        res.cookie("forly_session", token, { httpOnly: true, secure: cookieSecure(req), sameSite: "lax", maxAge: SESSION_TTL_S * 1000 });
+        return res.json({ ok: true, token, userId: phone, scope: "promo", expires_in: SESSION_TTL_S });
+      }
+```
+
+  - Next to `module.exports.REVIEW_SCOPES`, add:
+
+```js
+module.exports.PROMO_SCOPES = ["session", "promo"];            // /api/promo
+module.exports.UPLOAD_SCOPES = ["session", "review", "promo"]; // photo upload only
+```
+
+  In `server/routes/intake.js`:
+  - Change the import on line 17 to `const { REVIEW_SCOPES, UPLOAD_SCOPES } = require("../auth");`.
+  - Change line 53 to `const uploadAuth = requireAuth(authSecret, UPLOAD_SCOPES);`.
+
+  `/properties/create` and `/properties/retry` keep `REVIEW_SCOPES`, so a promo token can't create listings.
+
+- [ ] **Step 4: Run and expect PASS.** `node auth-promo.test.js && node auth-otp.test.js` → both OK, then `npm test` → all pass.
+- [ ] **Step 5:** Append ` && node auth-promo.test.js` to the `test` script.
+- [ ] **Step 6: Commit.**
+
+```bash
+git add server/auth.js server/auth-promo.test.js server/routes/intake.js server/package.json
+git commit -m "feat(promo): OTP for /reel visitors who aren't clients — promo-only token"
+```
+
+---
+
 ### Task 3: Promo routes
 
 **Files:**
@@ -468,18 +613,18 @@ git commit -m "feat(promo): reel prices, promo end date, orders and leads"
   | Route | Auth | Body | Response |
   |---|---|---|---|
   | `POST /lead/start` | public | `{ phone, terms_accepted: true }` | `{ ok }` / 400 `invalid_phone` / 400 `terms_required` |
-  | `POST /lead` | session | `{ stage: "verified" \| "payment_failed" }` | `{ ok }` |
-  | `POST /quote` | session | — | `{ tier, price }` |
-  | `POST /order` | session | create-form fields + `agent_name` + `terms_accepted: true` | `{ order_id, status: "building" \| "failed" }` or `{ order_id, status: "pending", pay_url \| null }`; errors 400 / 409 / 413 / 502 `payment_unavailable` |
+  | `POST /lead` | session or promo | `{ stage: "verified" \| "payment_failed" }` | `{ ok }` |
+  | `POST /quote` | session or promo | — | `{ tier, price }` |
+  | `POST /order` | session or promo | create-form fields + `agent_name` + `terms_accepted: true` | `{ order_id, status: "building" \| "failed" }` or `{ order_id, status: "pending", pay_url \| null }`; errors 400 / 409 / 413 / 502 `payment_unavailable` |
   | `POST /cardcom/webhook` | public | JSON or form, `LowProfileId` | 200 `{ ok }` |
-  | `GET /order/:id` | session, owner only | — | `{ status, price, listing_id }` |
+  | `GET /order/:id` | session or promo, owner only | — | `{ status, price, listing_id }` |
   | `GET /admin/settings` | admin | — | `{ until_date, until }` |
   | `PUT /admin/settings` | admin + step-up | `{ until_date: "YYYY-MM-DD" \| null }` | `{ until_date, until }` |
   | `GET /admin/leads` | admin | — | `{ leads }` |
   | `POST /admin/orders/:id/mark-paid` | admin + step-up | — | `{ ok, status }` |
 
   Dependencies:
-  - `business = { get(phone), set(phone, data) }`
+  - `business = { get(phone) }`, read only: `/order` never creates a business doc, because that would make the phone a "client" with unlimited dashboard builds
   - `isPaidClient(phone) → Promise<boolean>`
   - `settings = { get() → doc|null, set(patch) → doc }`
   - `normalizePhone(raw) → "972…" | null`
@@ -505,6 +650,7 @@ async function withApp(opts, fn) {
   const lp = { paid: new Map() }; // lowProfileId -> {orderId, amount, approved}
   let promo = opts.promo === undefined ? { until_date: "2026-11-06", until: "2026-11-06T21:59:59.999Z" } : opts.promo;
   const store = createPromoStore({ db: null });
+  if (opts.staleCount) store.startedCount = async () => 0; // the quote's read happened before the other tab started
   const cardcom = {
     configured: opts.cardcomConfigured !== false,
     async createPaymentPage({ orderId, amount }) {
@@ -569,9 +715,9 @@ async function withApp(opts, fn) {
     assert.strictEqual(o.status, 200);
     assert.strictEqual(o.data.status, "pending");
     assert.ok(o.data.pay_url.startsWith("https://pay/"));
-    assert.strictEqual(businesses.get("972501111111").source, "reel_promo");
+    assert.strictEqual(businesses.size, 0, "a promo buyer never gets a business doc");
     assert.strictEqual(built.length, 0);
-    let [lead] = await store.listLeads();
+    const [lead] = await store.listLeads();
     assert.deepStrictEqual([lead.stage, lead.order_id, lead.price, lead.agent_name], ["checkout", o.data.order_id, 59, "דנה"]);
 
     const lpId = `lp-${o.data.order_id}`;
@@ -584,7 +730,7 @@ async function withApp(opts, fn) {
     assert.deepStrictEqual(built[0].agent, { name: "דנה", phone: "972501111111" });
     assert.deepStrictEqual(built[0].extra, { source: "reel_promo" });
     assert.ok(!("terms_accepted" in built[0].body) && !("agent_name" in built[0].body));
-    assert.strictEqual((await store.listLeads())[0].stage, "paid");
+    assert.deepStrictEqual([(await store.listLeads())[0].stage, (await store.listLeads())[0].order_status], ["paid", "building"]);
     const st = await req("GET", `/order/${o.data.order_id}`, null, h);
     assert.deepStrictEqual(st.data, { status: "building", price: 59, listing_id: "L1" });
     assert.strictEqual((await req("GET", `/order/${o.data.order_id}`, null, { "x-phone": "972509999999" })).status, 404);
@@ -602,8 +748,22 @@ async function withApp(opts, fn) {
     assert.strictEqual((await req("GET", `/order/${o.data.order_id}`, null, h)).data.status, "amount_mismatch");
   });
 
+  // Free reel already used (two tabs: the 2nd was quoted ₪0 from a stale count): its order is
+  // closed, so "mark paid" can't hand out a second free reel later
+  await withApp({ businesses: { "972506666666": { full_name: "Agent" } }, paidClients: ["972506666666"], staleCount: true }, async ({ req, built }) => {
+    const h = { "x-phone": "972506666666" };
+    assert.strictEqual((await req("POST", "/order", listing, h)).data.status, "building");
+    const second = await req("POST", "/order", listing, h);
+    assert.deepStrictEqual([second.status, second.data.error], [409, "already_used"]);
+    assert.strictEqual(built.length, 1);
+    const id = (await req("GET", "/admin/leads", null, admin)).data.leads[0].order_id;
+    assert.strictEqual((await req("GET", `/order/${id}`, null, h)).data.status, "failed");
+    assert.strictEqual((await req("POST", `/admin/orders/${id}/mark-paid`, {}, admin)).status, 409);
+    assert.strictEqual(built.length, 1);
+  });
+
   // Existing paying client: first reel free and built at once (own profile, no override); next is ₪49
-  await withApp({ businesses: { "972503333333": { name: "Agent" } }, paidClients: ["972503333333"] }, async ({ req, built }) => {
+  await withApp({ businesses: { "972503333333": { full_name: "Agent" } }, paidClients: ["972503333333"] }, async ({ req, built }) => {
     const h = { "x-phone": "972503333333" };
     const o = await req("POST", "/order", listing, h);
     assert.strictEqual(o.data.status, "building");
@@ -618,6 +778,7 @@ async function withApp(opts, fn) {
     assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "regular", price: 219 });
     assert.strictEqual((await req("PUT", "/admin/settings", { until_date: "2026-11-07" }, { "x-admin": "1" })).status, 401);
     assert.strictEqual((await req("PUT", "/admin/settings", { until_date: "2026-13-45" }, admin)).status, 400);
+    assert.strictEqual((await req("PUT", "/admin/settings", { until_date: "2026-02-30" }, admin)).status, 400);
     const s = await req("PUT", "/admin/settings", { until_date: "2026-11-07" }, admin);
     assert.deepStrictEqual(s.data, { until_date: "2026-11-07", until: "2026-11-07T21:59:59.999Z" });
     assert.deepStrictEqual((await req("GET", "/admin/settings", null, { "x-admin": "1" })).data, s.data);
@@ -680,13 +841,16 @@ const { priceFor, endOfDayIsrael } = require("../promo");
 
 const MAX_LISTING_BYTES = 32 * 1024;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// A real calendar day: "2026-02-30" would otherwise roll over to March 2.
+const realDate = (d) => typeof d === "string" && DATE_RE.test(d) && !isNaN(new Date(`${d}T12:00:00Z`))
+  && new Date(`${d}T12:00:00Z`).toISOString().slice(0, 10) === d;
 // Express 4 doesn't catch rejected promises: hand them to the error handler.
 const h = (fn) => (req, res, next) => fn(req, res).catch(next);
 
 module.exports = function createPromoRouter({ requireAuth, authSecret, requireAdmin, requireStepUp, store, cardcom,
   createListing, business, isPaidClient, settings, normalizePhone, baseUrl, now = () => new Date() }) {
   const router = express.Router();
-  const auth = requireAuth(authSecret);
+  const auth = requireAuth(authSecret, ["session", "promo"]); // auth.js PROMO_SCOPES
   const adminWrite = [requireAdmin, requireStepUp];
 
   async function quote(phone) {
@@ -697,16 +861,15 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
   // Started order → listing with source "reel_promo" → the reel workflow (kickPipeline).
   // Agents without a profile name get their typed name on the page.
   async function build(order) {
-    await store.touchLead(order.phone, "paid", { order_id: order.id, price: order.price });
     const agent = order.use_agent_override ? { name: order.agent_name, phone: order.phone } : null;
     const r = await createListing(order.phone, order.listing, agent, { source: "reel_promo" });
+    const status = r.error ? "failed" : "building";
     if (r.error) {
       console.error(`promo build failed for order ${order.id}:`, r.error);
-      await store.setOrder(order.id, { status: "failed", error: String(r.error).slice(0, 200) });
-      return "failed";
-    }
-    await store.setOrder(order.id, { status: "building", listing_id: r.listing_id });
-    return "building";
+      await store.setOrder(order.id, { status, error: String(r.error).slice(0, 200) });
+    } else await store.setOrder(order.id, { status, listing_id: r.listing_id });
+    await store.touchLead(order.phone, "paid", { order_id: order.id, price: order.price, order_status: status });
+    return status;
   }
 
   router.post("/lead/start", h(async (req, res) => {
@@ -738,15 +901,17 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     if (Buffer.byteLength(JSON.stringify(listing)) > MAX_LISTING_BYTES) return res.status(413).json({ error: "too_large" });
 
     const [biz, { tier, price }] = await Promise.all([business.get(phone), quote(phone)]);
-    if (!biz) await business.set(phone, { source: "reel_promo", name: agentName, created_at: now() });
     const termsAt = now().toISOString();
     const id = await store.createOrder({ phone, price, tier, listing, agent_name: agentName, terms_accepted_at: termsAt,
-      use_agent_override: !(biz && biz.name) });
+      use_agent_override: !(biz && (biz.full_name || biz.business_name)) }); // business docs have no `name`
     await store.touchLead(phone, "checkout", { agent_name: agentName, order_id: id, price, terms_accepted_at: termsAt });
 
     if (price === 0) {
       const s = await store.start(id, null);
-      if (!s.ok) return res.status(409).json({ error: s.reason });
+      if (!s.ok) { // close it, so "mark paid" can't hand out a second free reel later
+        await store.setOrder(id, { status: "failed", error: s.reason });
+        return res.status(409).json({ error: s.reason });
+      }
       return res.json({ order_id: id, status: await build(s.order) });
     }
     if (!cardcom.configured) return res.json({ order_id: id, status: "pending", pay_url: null });
@@ -775,7 +940,10 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     if (!order || order.cardcom_lp_id !== lpId || !r.approved) return res.json({ ok: true, ignored: true });
     if (r.amount !== order.price) {
       console.error(`promo order ${order.id}: paid ${r.amount}, expected ${order.price}`);
-      if (order.status === "pending") await store.setOrder(order.id, { status: "amount_mismatch", payment: { transactionId: r.transactionId, amount: r.amount } });
+      if (order.status === "pending") {
+        await store.setOrder(order.id, { status: "amount_mismatch", payment: { transactionId: r.transactionId, amount: r.amount } });
+        await store.touchLead(order.phone, "payment_failed", { order_status: "amount_mismatch" });
+      }
       return res.json({ ok: true, ignored: true });
     }
     const s = await store.start(order.id, { transactionId: r.transactionId, amount: r.amount });
@@ -796,8 +964,7 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
 
   router.put("/admin/settings", adminWrite, h(async (req, res) => {
     const d = (req.body || {}).until_date;
-    const ok = d === null || (typeof d === "string" && DATE_RE.test(d) && !isNaN(endOfDayIsrael(d)));
-    if (!ok) return res.status(400).json({ error: "invalid_date" });
+    if (d !== null && !realDate(d)) return res.status(400).json({ error: "invalid_date" });
     const s = await settings.set({ until_date: d, until: d ? endOfDayIsrael(d).toISOString() : null });
     res.json({ until_date: s.until_date || null, until: s.until || null });
   }));
@@ -832,6 +999,10 @@ git commit -m "feat(promo): /api/promo — leads, terms, quote, order, Cardcom w
   - the `createListing` deps destructure (around line 44)
   - the `kickPipeline(...)` call (line 100)
   - `kickPipeline` (around lines 106–109)
+- Modify: `server/build-fallback.js` (`due()`, line ~21)
+- Modify: `server/routes/intake.js`:
+  - the context destructure at line ~32–34;
+  - `pipelineDeps` at line ~157, which builds its own deps, so the index.js value would never arrive.
 - Test: `server/listing-create.test.js` (after the "retry replays the stored listing" block, around line 34)
 
 **Interfaces:**
@@ -850,6 +1021,10 @@ git commit -m "feat(promo): /api/promo — leads, terms, quote, order, Cardcom w
   assert.deepEqual([reelHooks[0][0], reelHooks[0][1].listing_id, reelHooks[0][1].phone], ["https://n8n/reel", "R2", "P1"]);
   await retryListing({ ...(await db.getListing("R2")), status: "failed" }, { ...reelDeps, n8nReelWebhook: "" });
   assert.equal(reelHooks.length, 1, "no reel webhook configured → nothing sent (not WW1)");
+  // the reel alone takes ~20 min: a promo listing is "stuck" only after 45
+  const promoAt = (min) => ({ status: "active", page_id: null, source: "reel_promo", created_at: new Date(now - min * 60e3) });
+  assert.equal(buildFailed(promoAt(30), now), false);
+  assert.equal(buildFailed(promoAt(50), now), true);
 ```
 
 - [ ] **Step 2: Run it and expect FAIL.** `node listing-create.test.js` → AssertionError (`https://n8n/ww1` !== `https://n8n/reel`).
@@ -867,7 +1042,26 @@ git commit -m "feat(promo): /api/promo — leads, terms, quote, order, Cardcom w
     : listing.source === "reel_promo" ? n8nReelWebhook : n8nWw1Webhook;
 ```
 
-  Then, after the existing `if (webhook) { … }` block, add:
+  Next to `BUILD_STUCK_MS` (line ~142), add the following, then use `stuckMs(l)` instead of `BUILD_STUCK_MS` inside `buildFailed`, and add `stuckMs` to `module.exports`:
+
+```js
+const REEL_STUCK_MS = 45 * 60 * 1000; // the reel workflow alone takes ~20 min
+const stuckMs = (l) => (l.source === "reel_promo" ? REEL_STUCK_MS : BUILD_STUCK_MS);
+```
+
+  In `server/build-fallback.js`:
+  - import `stuckMs` instead of `BUILD_STUCK_MS`;
+  - in `due()`, use `return age > stuckMs(l) && age < MAX_AGE_MS;`.
+
+  Without this, the photo-only page would go out while the reel is still rendering.
+
+  In `server/routes/intake.js`:
+  - add `n8nReelWebhook` to the context destructure (next to `n8nWw1Webhook`);
+  - change `pipelineDeps` to `{ n8nWw1Webhook, n8nReelWebhook, n8nPipelineWebhook, isDevRun, isDevPipelineRun, baseUrl }`.
+
+  Then the owner's dashboard retry also reaches the reel workflow. The admin retry already passes `pipelineDeps` through (`routes/admin.js:509`).
+
+  Then, after the existing `if (webhook) { … }` block in `kickPipeline`, add:
 
 ```js
   else console.error(`pipeline webhook not configured for listing ${listingId} (source ${listing.source || "?"})`);
@@ -877,7 +1071,7 @@ git commit -m "feat(promo): /api/promo — leads, terms, quote, order, Cardcom w
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add server/listing-create.js server/listing-create.test.js
+git add server/listing-create.js server/listing-create.test.js server/build-fallback.js server/routes/intake.js
 git commit -m "feat(promo): reel_promo listings go to the reel n8n workflow"
 ```
 
@@ -927,7 +1121,7 @@ app.get(/^\/reel\/?$/, (req, res) => {
 const { createCardcom } = require("./payments/cardcom");
 const { createPromoStore } = require("./promo");
 app.use("/api/promo/lead/start", rateLimit({ windowMs: 60_000, max: 10 }));
-app.use("/api/promo/order", rateLimit({ windowMs: 60_000, max: 10 }));
+app.post("/api/promo/order", rateLimit({ windowMs: 60_000, max: 10 })); // POST only: the status poll GETs /order/:id
 app.use("/api/promo/cardcom/webhook", rateLimit({ windowMs: 60_000, max: 60 }));
 app.use("/api/promo", require("./routes/promo")({
   requireAuth, authSecret: AUTH_SECRET, requireAdmin, requireStepUp,
@@ -938,7 +1132,7 @@ app.use("/api/promo", require("./routes/promo")({
     n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
     isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL, ...extra,
   }),
-  business: { get: (p) => db.getBusiness(p), set: (p, d) => db.setBusiness(p, d) },
+  business: { get: (p) => db.getBusiness(p) },
   // A paying client = a quota plan the admin set that isn't the trial seed.
   isPaidClient: async (p) => {
     const q = await quota.getQuota(p).catch(() => null);
@@ -977,9 +1171,9 @@ git commit -m "feat(promo): mount /api/promo, serve /reel, pass the reel webhook
 
 **Interfaces:**
 - Consumes:
-  - `POST /api/auth/otp {phone}`
-  - `POST /api/auth/otp/verify {phone, code}` (sets the `forly_session` cookie)
-  - `GET /api/auth/me` → `{ userId }`
+  - `POST /api/auth/otp {phone, purpose: "reel"}` (Task 2b)
+  - `POST /api/auth/otp/verify {phone, code}` (sets the `forly_session` cookie: a promo token for non-clients, a full session for clients)
+  - It does NOT use `/api/auth/me`, which refuses promo tokens; resuming uses `POST /api/promo/quote` instead.
   - `POST /api/upload-urls {files:[{name, contentType}]}` → `{files:[{upload_url, method, content_type, public_url}]}`, then a PUT to each `upload_url`
   - the Task 3 promo routes
 
@@ -1065,6 +1259,8 @@ const ERR = {
   invalid_code: "הקוד שגוי", code_expired: "הקוד פג, שלחו שוב", invalid_phone: "מספר הטלפון לא תקין",
   terms_required: "צריך לאשר את תנאי השימוש", already_used: "כבר קיבלת סרטון חינם במספר הזה",
   payment_unavailable: "מערכת התשלום לא זמינה כרגע, נסו שוב בעוד כמה דקות",
+  too_soon: "כבר נשלח קוד — אפשר לבקש שוב בעוד רגע", whatsapp_send_failed: "לא הצלחנו לשלוח וואטסאפ, נסו שוב",
+  too_many_attempts: "יותר מדי ניסיונות, בקשו קוד חדש",
 };
 const msg = (e) => ERR[e.message] || "משהו השתבש, נסו שוב";
 const lead = (stage) => api("/api/promo/lead", { stage }).catch(() => {}); // best effort: never blocks the visitor
@@ -1086,7 +1282,7 @@ async function pollOrder(id, failed) {
   for (let i = 0; i < 20; i++) {
     const o = await api(`/api/promo/order/${encodeURIComponent(id)}`, null, "GET").catch(() => null);
     if (o && o.status === "building") return;
-    if (o && o.status === "failed") { $("done-title").textContent = "משהו השתבש ביצירה"; $("done-text").textContent = "ניצור איתך קשר בוואטסאפ."; return; }
+    if (o && (o.status === "failed" || o.status === "amount_mismatch")) { $("done-title").textContent = "משהו השתבש ביצירה"; $("done-text").textContent = "ניצור איתך קשר בוואטסאפ."; return; }
     if (o && o.status === "pending") $("done-text").textContent = "ממתינים לאישור התשלום…";
     await new Promise((r) => setTimeout(r, 3000));
   }
@@ -1098,7 +1294,7 @@ $("send").onclick = async () => {
   if (!$("terms").checked) { $("e-phone").textContent = ERR.terms_required; return; }
   try {
     await api("/api/promo/lead/start", { phone: $("phone").value, terms_accepted: true });
-    await api("/api/auth/otp", { phone: $("phone").value });
+    await api("/api/auth/otp", { phone: $("phone").value, purpose: "reel" });
     $("code-wrap").hidden = false; $("code").focus();
   } catch (e) { $("e-phone").textContent = msg(e); }
 };
@@ -1121,6 +1317,10 @@ async function uploadPhotos(files) {
 $("submit").onclick = async () => {
   const btn = $("submit"); $("e-form").textContent = "";
   const files = [...$("photos").files];
+  // check before uploading, so a missing field doesn't cost an upload
+  if (!$("agent_name").value.trim() || !$("city").value.trim() || !(Number($("price").value) > 0) || !(Number($("rooms").value) > 0)) {
+    $("e-form").textContent = "צריך למלא שם, עיר, מחיר וחדרים"; return;
+  }
   if (files.length < 3) { $("e-form").textContent = "צריך לפחות 3 תמונות"; return; }
   btn.disabled = true;
   try {
@@ -1137,11 +1337,11 @@ $("submit").onclick = async () => {
 };
 
 // Back from Cardcom (?order=…), or already logged in (terms were accepted then).
+// /quote, not /api/auth/me: /me refuses the promo token non-clients have.
 (async () => {
   const qs = new URLSearchParams(location.search);
   if (qs.get("order")) return pollOrder(qs.get("order"), qs.get("failed") === "1");
-  const me = await api("/api/auth/me", null, "GET").catch(() => null);
-  if (me && me.userId) { show("s-form"); loadQuote().catch(() => {}); }
+  try { await loadQuote(); show("s-form"); } catch { /* not logged in: stay on the phone step */ }
 })();
 </script>
 </body>
@@ -1206,6 +1406,7 @@ After the closing `</div>` of `#paneCampaigns`:
         <option value="checkout">בתשלום — לא הושלם</option>
         <option value="payment_failed">תשלום נכשל</option>
         <option value="paid">שילמו / קיבלו</option>
+        <option value="problem">בעיה (יצירה נכשלה / סכום שגוי)</option>
       </select>
       <span class="who num" id="promoCount"></span>
     </div>
@@ -1240,6 +1441,7 @@ After `<script src="/admin-campaigns.js"></script>`:
   var rows = [];
   var STAGE = { otp_sent: "לא אימת קוד", verified: "אומת, לא הזמין", checkout: "בתשלום — לא הושלם", payment_failed: "תשלום נכשל", paid: "שילם / קיבל" };
   var OPEN = { verified: 1, checkout: 1, payment_failed: 1 };
+  var ORDER = { failed: " · היצירה נכשלה", amount_mismatch: " · סכום התשלום שגוי" }; // needs you: retry / refund
   var fmt = function (v) { var d = new Date(v); return isNaN(d) ? "—" : d.toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }); };
 
   function req(method, path, body) {
@@ -1257,13 +1459,13 @@ After `<script src="/admin-campaigns.js"></script>`:
 
   function render() {
     var f = $("#promoStage").value;
-    var list = rows.filter(function (r) { return f === "open" ? OPEN[r.stage] : !f || r.stage === f; });
+    var list = rows.filter(function (r) { return f === "open" ? OPEN[r.stage] : f === "problem" ? ORDER[r.order_status] : !f || r.stage === f; });
     $("#promoCount").textContent = list.length + " מספרים";
     $("#promoLeads").innerHTML = list.map(function (r) {
       // Unverified numbers may belong to someone else: no WhatsApp button for them.
       var wa = r.stage === "otp_sent" ? "" : '<a class="btn" target="_blank" rel="noopener" href="https://wa.me/' + esc(r.phone) + '">וואטסאפ</a> ';
       var pay = (r.stage === "checkout" || r.stage === "payment_failed") && r.order_id ? '<button class="btn" data-paid="' + esc(r.order_id) + '">סמן כשולם</button>' : "";
-      return "<tr><td class=\"num\">" + esc(r.phone) + "</td><td>" + esc(r.agent_name || "—") + "</td><td>" + esc(STAGE[r.stage] || r.stage) +
+      return "<tr><td class=\"num\">" + esc(r.phone) + "</td><td>" + esc(r.agent_name || "—") + "</td><td>" + esc((STAGE[r.stage] || r.stage) + (ORDER[r.order_status] || "")) +
         "</td><td class=\"num\">" + (r.price == null ? "—" : "₪" + esc(String(r.price))) + "</td><td>" + fmt(r.last_seen_at) + "</td><td>" + wa + pay + "</td></tr>";
     }).join("") || '<tr><td colspan="6">אין עדיין</td></tr>';
   }
@@ -1366,14 +1568,15 @@ Do **A** first because it takes days. B to D take about 30 minutes on launch day
    CARDCOM_API_NAME=<ApiName from A4, or the test ApiName from the Cardcom docs>
    N8N_REEL_WEBHOOK_URL=https://n8n.srv1173890.hstgr.cloud/webhook/ww1-v4-dev
    ```
-3. Restart the Forly container the way you normally deploy. In the container log, check that the startup lines show `reel webhook: https://n8n…/ww1-v4-dev` and not `(not set …)`.
+3. Check that `BASE_URL` in the same file is your **customer domain** (the one your dashboard opens on), not an `hstgr.cloud` address. Buyers and Cardcom see it in the /reel link and the payment return address. If it's an `hstgr.cloud` address, tell the developer before launch.
+4. Restart the Forly container the way you normally deploy. In the container log, check that the startup lines show `reel webhook: https://n8n…/ww1-v4-dev` and not `(not set …)`.
 
 ### C. n8n: make "WW1 Walkthrough V4 dev" customer-safe (by hand, in the n8n editor)
 Open https://n8n.srv1173890.hstgr.cloud/workflow/az3WzE3YLVzKRoJF.
 1. **"Report Cost" node:** it currently WhatsApps the cost breakdown (`fal: H3 $…`) **to the buyer**. In its `to` field, replace `{{ $("Start (webhook)").first().json.body.phone }}@c.us` with your own number, e.g. `9725XXXXXXXX@c.us`.
 2. **"Send Timeout Message" node:** change the text to something a customer can read, e.g. `הסרטון שלך לוקח קצת יותר זמן מהרגיל — נשלח אותו בהקדם 🙏`. It's also worth sending yourself a copy: duplicate the node with your number.
 3. **Errors:** if a clip fails, the "Check Status" node stops the run and the buyer gets nothing. Open the workflow's **Settings → Error workflow** and pick a workflow that WhatsApps you. If you don't have one, check **Executions** for failed runs twice a day during the promo.
-4. **Staging vs production:** four nodes call `https://staging.srv1173890.hstgr.cloud/api/walkthrough/...`. If Task 0 Step 2(a) found that staging and production use different Firestore projects, change those four URLs to the production host.
+4. **Staging URLs:** four nodes call `https://staging.srv1173890.hstgr.cloud/api/walkthrough/...`. That's fine: staging and production share the same database. Just keep the staging server running during the promo, because if it's down no reel gets made.
 5. Optionally rename the workflow to "WW1 Reel (promo)".
 6. Click **Publish / Activate**. The production URL is `https://n8n.srv1173890.hstgr.cloud/webhook/ww1-v4-dev`, which is what §B puts in `N8N_REEL_WEBHOOK_URL`.
 
@@ -1404,6 +1607,7 @@ Add a short section to `/legal/terms.html` about the paid reel:
 Have a lawyer or accountant check the refund wording against Israeli consumer-protection rules. Changing this page needs no code; it's a static file.
 
 ### H. Every day during the promo
+0. Filter **"בעיה"** first. "היצירה נכשלה" means retry it from the admin נכסים tab, or refund it in Cardcom. "סכום התשלום שגוי" means check the payment in Cardcom.
 1. Open the "ריל" tab with the filter on **"לא סיימו"**: people who verified their number but didn't pay.
 2. Press **וואטסאפ** to message them, for example to offer help or remind them the ₪59 price ends on that date.
 3. "לא אימת קוד" numbers have no button on purpose: anyone can type someone else's number.
