@@ -82,13 +82,14 @@ async function api(path, body, method = "POST") {
 const ERR = {
   invalid_code: "הקוד שגוי", code_expired: "הקוד פג, שלחו שוב", invalid_phone: "מספר הטלפון לא תקין",
   terms_required: "צריך לאשר את תנאי השימוש", already_used: "כבר קיבלת סרטון חינם במספר הזה",
+  reel_unavailable: "השירות לא זמין כרגע, נסו שוב מאוחר יותר",
   payment_unavailable: "מערכת התשלום לא זמינה כרגע, נסו שוב בעוד כמה דקות",
   too_soon: "כבר נשלח קוד — אפשר לבקש שוב בעוד רגע", whatsapp_send_failed: "לא הצלחנו לשלוח וואטסאפ, נסו שוב",
   too_many_attempts: "יותר מדי ניסיונות, בקשו קוד חדש", rate_limited: "יותר מדי בקשות, נסו שוב בעוד כמה דקות",
   code_already_used: "הקוד כבר נוצל, בקשו קוד חדש", no_code_requested: "בקשו קוד קודם",
 };
 const msg = (e) => ERR[e.message] || "משהו השתבש, נסו שוב";
-const lead = (stage) => api("/api/promo/lead", { stage }).catch(() => {}); // best effort: never blocks the visitor
+const lead = (stage, extra) => api("/api/promo/lead", { stage, ...extra }).catch(() => {}); // best effort: never blocks the visitor
 
 async function loadQuote() {
   const q = await api("/api/promo/quote", {});
@@ -119,7 +120,7 @@ $("send").onclick = async () => {
   $("e-phone").textContent = "";
   if (!$("terms").checked) { $("e-phone").textContent = ERR.terms_required; return; }
   try {
-    await api("/api/promo/lead/start", { phone: $("phone").value, terms_accepted: true, marketing_consent: $("marketing").checked });
+    await api("/api/promo/lead/start", { phone: $("phone").value, terms_accepted: true });
     await api("/api/auth/otp", { phone: $("phone").value, purpose: "reel" });
     $("code-wrap").hidden = false; $("code").focus();
   } catch (e) { $("e-phone").textContent = msg(e); }
@@ -128,7 +129,7 @@ $("verify").onclick = async () => {
   $("e-phone").textContent = "";
   try {
     await api("/api/auth/otp/verify", { phone: $("phone").value, code: $("code").value });
-    lead("verified");
+    lead("verified", { marketing_consent: $("marketing").checked });
     show("s-form"); await loadQuote();
   } catch (e) { $("e-phone").textContent = msg(e); }
 };

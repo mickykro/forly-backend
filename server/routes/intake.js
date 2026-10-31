@@ -17,6 +17,7 @@ const { sniffMatchesExt } = require("../utils");
 const { REVIEW_SCOPES, UPLOAD_SCOPES } = require("../auth");
 const { validateListing, createListing: createListingShared, buildFailed, retryBlocked, retryListing,
   MAX_PHOTOS: MAX_UPLOAD_FILES } = require("../listing-create");
+const { rateLimit } = require("../security");
 const { makeAdminGuard } = require("../admin-auth");
 const { uprightJpeg } = require("../photo-orient");
 
@@ -63,7 +64,11 @@ module.exports = function createIntakeRouter(ctx) {
   const uploadAuthOrToken = (req, res, next) =>
     (uploadTokenOk(req) ? next() : uploadAuth(req, res, next));
 
-  router.post("/upload-urls", uploadAuth, (req, res) => {
+  // /reel promo tokens only: a cap per phone per hour (existing clients unaffected).
+  const promoCap = rateLimit({ windowMs: 3600_000, max: 120, keyBy: (r) => r.user.userId });
+  const capPromo = (req, res, next) => (req.user && req.user.scope === "promo" ? promoCap(req, res, next) : next());
+
+  router.post("/upload-urls", uploadAuth, capPromo, (req, res) => {
     const files = req.body && req.body.files;
     if (!Array.isArray(files) || files.length < 1 || files.length > MAX_UPLOAD_FILES) {
       return res.status(400).json({ error: `1-${MAX_UPLOAD_FILES} files` });
@@ -94,7 +99,7 @@ module.exports = function createIntakeRouter(ctx) {
   // Authenticated (agent or admin); the remote-store relay forwards the same
   // session so the remote instance re-authorizes rather than trusting the hop.
   const rawBody = express.raw({ type: () => true, limit: `${MAX_VIDEO_MB}mb` });
-  router.put("/upload/:fname", uploadAuthOrToken, rawBody, async (req, res) => {
+  router.put("/upload/:fname", uploadAuthOrToken, capPromo, rawBody, async (req, res) => {
     const fname = req.params.fname;
     const m = /^[0-9a-f-]{36}\.(jpg|png|webp|mp4|woff2|woff|ttf|otf)$/.exec(fname);
     if (!m) {

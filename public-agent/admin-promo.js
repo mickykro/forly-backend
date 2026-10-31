@@ -35,7 +35,8 @@
     $("#promoLeads").innerHTML = list.map(function (r) {
       // WhatsApp only to numbers that opted in (Communications Law §30A) and verified the code.
       var wa = r.stage === "otp_sent" || !r.marketing_consent_at ? "" : '<a class="btn" target="_blank" rel="noopener" href="https://wa.me/' + esc(r.phone) + '">וואטסאפ</a> ';
-      var pay = (r.stage === "checkout" || r.stage === "payment_failed") && r.order_id && r.order_status !== "amount_mismatch" ? '<button class="btn" data-paid="' + esc(r.order_id) + '">סמן כשולם</button>' : "";
+      var rebuild = r.stage === "paid" && r.order_status === "failed";
+      var pay = ((r.stage === "checkout" || r.stage === "payment_failed") && r.order_status !== "amount_mismatch" || rebuild) && r.order_id ? '<button class="btn" data-paid="' + esc(r.order_id) + '">' + (rebuild ? "בנה מחדש" : "סמן כשולם") + "</button>" : "";
       return "<tr><td class=\"num\">" + esc(r.phone) + "</td><td>" + esc(r.agent_name || "—") + "</td><td>" + esc((STAGE[r.stage] || r.stage) + (ORDER[r.order_status] || DONE[r.order_status] || "")) +
         "</td><td class=\"num\">" + (r.price == null ? "—" : "₪" + esc(String(r.price))) + "</td><td>" + fmt(r.last_seen_at) + "</td><td>" + wa + pay + "</td></tr>";
     }).join("") || '<tr><td colspan="6">אין עדיין</td></tr>';

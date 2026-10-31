@@ -23,7 +23,7 @@ async function withApp(opts, fn) {
       if (opts.cardcomDown) throw new Error("down");
       const id = `lp-${orderId}`; lp[id] = { orderId, amount }; return { lowProfileId: id, url: `https://pay/${id}` };
     },
-    async getResult(id) { return lp.paid.get(id) || { orderId: lp[id] && lp[id].orderId, amount: 0, approved: false }; },
+    async getResult(id) { if (opts.resultThrows) throw new Error("bad lp"); return lp.paid.get(id) || { orderId: lp[id] && lp[id].orderId, amount: 0, approved: false }; },
   };
   const app = express();
   app.use(express.json());
@@ -35,7 +35,8 @@ async function withApp(opts, fn) {
   const requireStepUp = (req, res, next) => (req.get("x-stepup") ? next() : res.status(401).json({ error: "stepup_required" }));
   app.use("/api/promo", createPromoRouter({
     requireAuth, authSecret: "s", requireAdmin, requireStepUp, store, cardcom,
-    createListing: async (phone, body, agent, extra) => { built.push({ phone, body, agent, extra }); return { listing_id: `L${built.length}` }; },
+    reelReady: opts.reelReady,
+    createListing: async (phone, body, agent, extra) => { if (opts.failFirstBuild && !built.length) { built.push(null); throw new Error("boom"); } built.push({ phone, body, agent, extra }); return { listing_id: `L${built.length}` }; },
     business: { get: async (p) => businesses.get(p) || null, set: async (p, d) => businesses.set(p, { ...(businesses.get(p) || {}), ...d }) },
     isPaidClient: async (p) => (opts.paidClients || []).includes(p),
     settings: { get: async () => promo, set: async (patch) => (promo = { ...(promo || {}), ...patch }) },
@@ -63,9 +64,16 @@ async function withApp(opts, fn) {
     assert.strictEqual((await req("POST", "/lead/start", { phone: "12", terms_accepted: true })).data.error, "invalid_phone");
     assert.strictEqual((await req("POST", "/lead/start", { phone: "050-111-1111", terms_accepted: true })).status, 200);
     const [lead] = await store.listLeads();
-    assert.deepStrictEqual([lead.phone, lead.stage, !!lead.terms_accepted_at, lead.marketing_consent_at], ["972501111111", "otp_sent", true, null]);
+    assert.deepStrictEqual([lead.phone, lead.stage, !!lead.terms_accepted_at, !!lead.marketing_consent_at], ["972501111111", "otp_sent", true, false]);
     await req("POST", "/lead/start", { phone: "0507777777", terms_accepted: true, marketing_consent: true });
-    assert.ok((await store.listLeads()).find((l) => l.phone === "972507777777").marketing_consent_at, "opt-in recorded");
+    assert.ok(!(await store.listLeads()).find((l) => l.phone === "972507777777").marketing_consent_at, "a typed number can't opt in");
+    const h7 = { "x-phone": "972507777777" };
+    await req("POST", "/lead", { stage: "verified", marketing_consent: true }, h7);
+    assert.ok((await store.listLeads()).find((l) => l.phone === "972507777777").marketing_consent_at, "opt-in recorded once verified");
+    await req("POST", "/lead/start", { phone: "0507777777", terms_accepted: true, marketing_consent: false });
+    assert.ok((await store.listLeads()).find((l) => l.phone === "972507777777").marketing_consent_at, "lead/start never erases it");
+    await req("POST", "/lead", { stage: "verified" }, h7);
+    assert.strictEqual((await store.listLeads()).find((l) => l.phone === "972507777777").marketing_consent_at, null, "unticked at verify = withdrawn");
     const h = { "x-phone": "972501111111" };
     assert.strictEqual((await req("POST", "/lead", { stage: "paid" }, h)).status, 400, "client can't claim paid");
     await req("POST", "/lead", { stage: "verified" }, h);
@@ -80,6 +88,7 @@ async function withApp(opts, fn) {
   await withApp({ listings }, async ({ req, built, lp, businesses, store }) => {
     const h = { "x-phone": "972501111111" };
     assert.strictEqual((await req("POST", "/order", { ...listing, photos_urls: ["https://evil/1.jpg", ...photos] }, h)).status, 400, "foreign photo URLs refused");
+    assert.strictEqual((await req("POST", "/order", { ...listing, photos_urls: ["https://f/../x.jpg", ...photos] }, h)).status, 400, "traversal/query photo URLs refused");
     assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "promo", price: 59 });
     assert.strictEqual((await req("POST", "/order", { ...listing, terms_accepted: false }, h)).data.error, "terms_required");
     const o = await req("POST", "/order", listing, h);
@@ -184,6 +193,35 @@ async function withApp(opts, fn) {
     assert.deepStrictEqual(m.data, { ok: true, status: "building" });
     assert.strictEqual(built.length, 1);
     assert.strictEqual((await req("POST", `/admin/orders/${o.data.order_id}/mark-paid`, {}, admin)).status, 409);
+  });
+
+  // createListing throws after payment → order "failed", not stranded; admin re-builds it once
+  await withApp({ failFirstBuild: true }, async ({ req, built, lp, store }) => {
+    const h = { "x-phone": "972508888888" };
+    const o = await req("POST", "/order", listing, h);
+    const lpId = `lp-${o.data.order_id}`;
+    lp.paid.set(lpId, { orderId: o.data.order_id, amount: 59, approved: true, transactionId: 7 });
+    assert.strictEqual((await req("POST", "/cardcom/webhook", { LowProfileId: lpId })).status, 200);
+    assert.strictEqual((await req("GET", `/order/${o.data.order_id}`, null, h)).data.status, "failed");
+    assert.strictEqual((await store.listLeads())[0].order_status, "failed");
+    const m = await req("POST", `/admin/orders/${o.data.order_id}/mark-paid`, {}, admin);
+    assert.deepStrictEqual(m.data, { ok: true, status: "building" });
+    assert.strictEqual(built.length, 2);
+    assert.strictEqual((await req("POST", `/admin/orders/${o.data.order_id}/mark-paid`, {}, admin)).status, 409, "built now: no third build");
+  });
+
+  // getResult throws (junk LowProfileId) → 200 so Cardcom stops retrying; nothing built
+  await withApp({ resultThrows: true }, async ({ req, built }) => {
+    const r = await req("POST", "/cardcom/webhook", { LowProfileId: "junk" });
+    assert.deepStrictEqual([r.status, r.data], [200, { ok: true, ignored: true }]);
+    assert.strictEqual(built.length, 0);
+  });
+
+  // No reel webhook configured → no order is created
+  await withApp({ reelReady: false }, async ({ req, store }) => {
+    const r = await req("POST", "/order", listing, { "x-phone": "972501212121" });
+    assert.deepStrictEqual([r.status, r.data.error], [503, "reel_unavailable"]);
+    assert.strictEqual((await store.listLeads()).length, 0);
   });
 
   log("routes/promo.test.js OK");

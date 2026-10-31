@@ -247,6 +247,7 @@ app.use("/api/promo", require("./routes/promo")({
   requireAuth, authSecret: AUTH_SECRET, requireAdmin, requireStepUp,
   store: createPromoStore({ db: db.db }),
   cardcom: createCardcom({ terminal: process.env.CARDCOM_TERMINAL, apiName: process.env.CARDCOM_API_NAME }),
+  reelReady: !!N8N_REEL_WEBHOOK_URL,
   createListing: (phone, body, agent, extra) => require("./listing-create").createListing(phone, body, agent, {
     n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL, n8nReelWebhook: N8N_REEL_WEBHOOK_URL,
     n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,

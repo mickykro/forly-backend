@@ -30,7 +30,7 @@ const realDate = (d) => typeof d === "string" && DATE_RE.test(d) && !isNaN(new D
 const h = (fn) => (req, res, next) => fn(req, res).catch(next);
 
 module.exports = function createPromoRouter({ requireAuth, authSecret, requireAdmin, requireStepUp, store, cardcom,
-  createListing, business, isPaidClient, settings, normalizePhone, getListing, photoBase, baseUrl, now = () => new Date() }) {
+  createListing, business, reelReady = true, isPaidClient, settings, normalizePhone, getListing, photoBase, baseUrl, now = () => new Date() }) {
   const router = express.Router();
   const auth = requireAuth(authSecret, ["session", "promo"]); // auth.js PROMO_SCOPES
   const adminWrite = [requireAdmin, requireStepUp];
@@ -44,7 +44,8 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
   // Agents without a profile name get their typed name on the page.
   async function build(order) {
     const agent = order.use_agent_override ? { name: order.agent_name, phone: order.phone } : null;
-    const r = await createListing(order.phone, order.listing, agent, { source: "reel_promo" });
+    let r; // a throw after start() committed must not strand a paid order
+    try { r = await createListing(order.phone, order.listing, agent, { source: "reel_promo" }); } catch (e) { r = { error: e.message }; }
     const status = r.error ? "failed" : "building";
     if (r.error) {
       console.error(`promo build failed for order ${order.id}:`, r.error);
@@ -60,21 +61,23 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     const phone = normalizePhone(String(body.phone || ""));
     if (!phone) return res.status(400).json({ error: "invalid_phone" });
     if (body.terms_accepted !== true) return res.status(400).json({ error: "terms_required" });
-    await store.touchLead(phone, "otp_sent", { terms_accepted_at: now().toISOString(),
-      marketing_consent_at: body.marketing_consent === true ? now().toISOString() : null }); // unticked = withdrawn
+    await store.touchLead(phone, "otp_sent", { terms_accepted_at: now().toISOString() }); // consent is recorded only after the OTP (a typed number proves nothing)
     res.json({ ok: true });
   }));
 
   router.post("/lead", auth, h(async (req, res) => {
     const stage = String((req.body && req.body.stage) || "");
     if (stage !== "verified" && stage !== "payment_failed") return res.status(400).json({ error: "invalid_stage" });
-    await store.touchLead(req.user.userId, stage);
+    // Verified-only: the owner of the number ticked it. Unticked = withdrawn.
+    await store.touchLead(req.user.userId, stage, stage === "verified"
+      ? { marketing_consent_at: req.body.marketing_consent === true ? now().toISOString() : null } : undefined);
     res.json({ ok: true });
   }));
 
   router.post("/quote", auth, h(async (req, res) => { res.json(await quote(req.user.userId)); }));
 
   router.post("/order", auth, h(async (req, res) => {
+    if (!reelReady) return res.status(503).json({ error: "reel_unavailable" }); // no reel workflow → don't take money
     const phone = req.user.userId;
     const body = req.body || {};
     const { agent_name, terms_accepted } = body;
@@ -84,7 +87,7 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     if (!agentName) return res.status(400).json({ error: "agent_name is required" });
     const invalid = validateListing(listing);
     if (invalid) return res.status(invalid.code).json({ error: invalid.error });
-    if (!listing.photos_urls.every((u) => typeof u === "string" && u.startsWith(photoBase))) return res.status(400).json({ error: "photos must be uploaded here" });
+    if (!listing.photos_urls.every((u) => typeof u === "string" && u.startsWith(photoBase) && !/\.\.|[?#]/.test(u))) return res.status(400).json({ error: "photos must be uploaded here" });
     if (Buffer.byteLength(JSON.stringify(listing)) > MAX_LISTING_BYTES) return res.status(413).json({ error: "too_large" });
 
     const [biz, { tier, price }] = await Promise.all([business.get(phone), quote(phone)]);
@@ -123,7 +126,11 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
   router.post("/cardcom/webhook", express.urlencoded({ extended: false }), h(async (req, res) => {
     const lpId = String((req.body && req.body.LowProfileId) || req.query.LowProfileId || req.query.lowprofilecode || "");
     if (!lpId) return res.status(400).json({ error: "missing LowProfileId" });
-    const r = await cardcom.getResult(lpId);
+    let r;
+    try { r = await cardcom.getResult(lpId); } catch (e) { // junk/declined id: a retry won't change it
+      console.error("promo webhook: getResult failed:", e.message);
+      return res.json({ ok: true, ignored: true });
+    }
     const order = r.orderId ? await store.getOrder(String(r.orderId)) : null;
     if (!order || order.cardcom_lp_id !== lpId || !r.approved) return res.json({ ok: true, ignored: true });
     if (r.amount !== order.price) {
@@ -172,8 +179,12 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
 
   router.post("/admin/orders/:id/mark-paid", adminWrite, h(async (req, res) => {
     const s = await store.start(req.params.id, { manual: true, by: req.user ? req.user.userId : "admin" });
-    if (!s.ok) return res.status(409).json({ error: s.reason });
-    res.json({ ok: true, status: await build(s.order) });
+    if (s.ok) return res.json({ ok: true, status: await build(s.order) });
+    if (s.reason === "already_started") { // re-build a paid order whose listing never got created
+      const o = await store.getOrder(req.params.id);
+      if (o && !o.listing_id && o.payment && (o.status === "paid" || o.status === "failed")) return res.json({ ok: true, status: await build(o) });
+    }
+    res.status(409).json({ error: s.reason });
   }));
 
   return router;
