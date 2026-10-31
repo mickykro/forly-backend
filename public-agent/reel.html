@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forly — סרטון רילס לנכס</title>
+<link rel="icon" href="/favicon.png">
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --fg:#f2f2f2; --muted:#9aa0aa; --accent:#ff5a36; --err:#ff6b6b; --line:#2a2f3a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+  main { max-width:480px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:28px; margin:8px 0; } p.lead { color:var(--muted); margin:0 0 20px; }
+  section { background:var(--card); border-radius:14px; padding:18px; margin-bottom:16px; }
+  label { display:block; font-size:14px; color:var(--muted); margin:12px 0 4px; }
+  input { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--fg); font-size:16px; }
+  label.terms { display:flex; gap:10px; align-items:flex-start; color:var(--fg); line-height:1.4; }
+  label.terms input { width:22px; height:22px; flex:none; margin:0; }
+  a { color:var(--accent); }
+  button { width:100%; margin-top:16px; padding:14px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:17px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .err { color:var(--err); font-size:14px; min-height:1em; margin-top:8px; }
+  .price { font-size:32px; font-weight:700; } [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>סרטון רילס לנכס שלך</h1>
+  <p class="lead">מעלים תמונות, ותוך דקות מקבלים בוואטסאפ סרטון רילס מוכן עם קריינות ומוזיקה + דף נכס.</p>
+
+  <section id="s-phone">
+    <label for="phone">מספר הוואטסאפ שלך</label>
+    <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="050-0000000">
+    <label class="terms" for="terms">
+      <input id="terms" type="checkbox">
+      <span>קראתי ואני מסכים/ה ל<a href="/legal/terms.html" target="_blank" rel="noopener">תנאי השימוש</a>
+        ול<a href="/legal/privacy.html" target="_blank" rel="noopener">מדיניות הפרטיות</a></span>
+    </label>
+    <label class="terms" for="marketing">
+      <input id="marketing" type="checkbox">
+      <span>אשמח לקבל עדכונים והצעות בוואטסאפ (לא חובה)</span>
+    </label>
+    <button id="send" disabled>שלחו לי קוד</button>
+    <div id="code-wrap" hidden>
+      <label for="code">הקוד שקיבלת בוואטסאפ</label>
+      <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+      <button id="verify">אימות</button>
+    </div>
+    <div class="err" id="e-phone" role="alert"></div>
+  </section>
+
+  <section id="s-form" hidden>
+    <label for="agent_name">שם (יופיע בדף הנכס)</label><input id="agent_name" autocomplete="name">
+    <label for="city">עיר</label><input id="city">
+    <label for="address">כתובת (לא חובה)</label><input id="address">
+    <label for="price">מחיר (₪)</label><input id="price" type="number" inputmode="numeric">
+    <label for="rooms">חדרים</label><input id="rooms" type="number" inputmode="decimal" step="0.5">
+    <label for="size_sqm">מ״ר</label><input id="size_sqm" type="number" inputmode="numeric">
+    <label for="photos">תמונות (לפחות 3)</label><input id="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+    <div class="price" id="quote" aria-live="polite"></div>
+    <p class="lead" style="font-size:13px">השירות ניתן ע״י FORLY. בלחיצה על המשך אני מאשר/ת את
+      <a href="/legal/terms.html#reel" target="_blank" rel="noopener">תנאי השימוש ומדיניות הביטול וההחזרים</a>.</p>
+    <button id="submit">המשך</button>
+    <div class="err" id="e-form" role="alert"></div>
+  </section>
+
+  <section id="s-done" hidden>
+    <h2 id="done-title">הסרטון בהכנה</h2>
+    <p id="done-text">נשלח לך את הסרטון ואת דף הנכס בוואטסאפ, בדרך כלל תוך 15–20 דקות.</p>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const show = (id) => ["s-phone", "s-form", "s-done"].forEach((s) => { $(s).hidden = s !== id; });
+async function api(path, body, method = "POST") {
+  const r = await fetch(path, { method, credentials: "same-origin",
+    headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(data.error || `error ${r.status}`), { status: r.status });
+  return data;
+}
+const ERR = {
+  invalid_code: "הקוד שגוי", code_expired: "הקוד פג, שלחו שוב", invalid_phone: "מספר הטלפון לא תקין",
+  terms_required: "צריך לאשר את תנאי השימוש", already_used: "כבר קיבלת סרטון חינם במספר הזה",
+  payment_unavailable: "מערכת התשלום לא זמינה כרגע, נסו שוב בעוד כמה דקות",
+  too_soon: "כבר נשלח קוד — אפשר לבקש שוב בעוד רגע", whatsapp_send_failed: "לא הצלחנו לשלוח וואטסאפ, נסו שוב",
+  too_many_attempts: "יותר מדי ניסיונות, בקשו קוד חדש", rate_limited: "יותר מדי בקשות, נסו שוב בעוד כמה דקות",
+  code_already_used: "הקוד כבר נוצל, בקשו קוד חדש", no_code_requested: "בקשו קוד קודם",
+};
+const msg = (e) => ERR[e.message] || "משהו השתבש, נסו שוב";
+const lead = (stage) => api("/api/promo/lead", { stage }).catch(() => {}); // best effort: never blocks the visitor
+
+async function loadQuote() {
+  const q = await api("/api/promo/quote", {});
+  $("quote").textContent = q.price === 0 ? "הסרטון הראשון עלינו 🎁" : `₪${q.price}`;
+  $("submit").textContent = q.price === 0 ? "צרו לי סרטון" : `לתשלום ₪${q.price}`;
+}
+
+async function pollOrder(id, failed) {
+  show("s-done");
+  if (failed) {
+    lead("payment_failed");
+    $("done-title").textContent = "התשלום לא הושלם";
+    $("done-text").innerHTML = 'לא חויבת. <a href="/reel">לנסות שוב</a>';
+    return;
+  }
+  for (let i = 0; i < 20; i++) {
+    const o = await api(`/api/promo/order/${encodeURIComponent(id)}`, null, "GET").catch(() => null);
+    if (o && o.status === "building") return;
+    if (o && (o.status === "failed" || o.status === "amount_mismatch")) { $("done-title").textContent = "משהו השתבש ביצירה"; $("done-text").textContent = "ניצור איתך קשר בוואטסאפ."; return; }
+    if (o && o.status === "pending") $("done-text").textContent = "ממתינים לאישור התשלום…";
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  $("done-text").textContent = "אם התשלום עבר — הסרטון בדרך ונעדכן אותך בוואטסאפ. לא חויבת? אפשר לנסות שוב מאוחר יותר.";
+}
+
+$("terms").onchange = () => { $("send").disabled = !$("terms").checked; };
+$("send").onclick = async () => {
+  $("e-phone").textContent = "";
+  if (!$("terms").checked) { $("e-phone").textContent = ERR.terms_required; return; }
+  try {
+    await api("/api/promo/lead/start", { phone: $("phone").value, terms_accepted: true, marketing_consent: $("marketing").checked });
+    await api("/api/auth/otp", { phone: $("phone").value, purpose: "reel" });
+    $("code-wrap").hidden = false; $("code").focus();
+  } catch (e) { $("e-phone").textContent = msg(e); }
+};
+$("verify").onclick = async () => {
+  $("e-phone").textContent = "";
+  try {
+    await api("/api/auth/otp/verify", { phone: $("phone").value, code: $("code").value });
+    lead("verified");
+    show("s-form"); await loadQuote();
+  } catch (e) { $("e-phone").textContent = msg(e); }
+};
+
+async function uploadPhotos(files) {
+  const { files: slots } = await api("/api/upload-urls", { files: files.map((f) => ({ name: f.name, contentType: f.type })) });
+  await Promise.all(slots.map((s, i) => fetch(s.upload_url, { method: s.method, credentials: "same-origin",
+    headers: { "Content-Type": s.content_type }, body: files[i] }).then((r) => { if (!r.ok) throw new Error("upload"); })));
+  return slots.map((s) => s.public_url);
+}
+
+$("submit").onclick = async () => {
+  const btn = $("submit"); $("e-form").textContent = "";
+  const files = [...$("photos").files];
+  // check before uploading, so a missing field doesn't cost an upload
+  if (!$("agent_name").value.trim() || !$("city").value.trim() || !(Number($("price").value) > 0) || !(Number($("rooms").value) > 0)) {
+    $("e-form").textContent = "צריך למלא שם, עיר, מחיר וחדרים"; return;
+  }
+  if (files.length < 3) { $("e-form").textContent = "צריך לפחות 3 תמונות"; return; }
+  btn.disabled = true;
+  try {
+    const photos_urls = await uploadPhotos(files);
+    const o = await api("/api/promo/order", {
+      agent_name: $("agent_name").value, city: $("city").value, address: $("address").value,
+      price: Number($("price").value), rooms: Number($("rooms").value), size_sqm: Number($("size_sqm").value),
+      photos_urls, terms_accepted: true,
+    });
+    if (o.pay_url) { location.href = o.pay_url; return; }
+    if (o.status === "pending") { show("s-done"); $("done-title").textContent = "ההזמנה התקבלה"; $("done-text").textContent = "נחזור אליך בוואטסאפ לתשלום."; return; }
+    pollOrder(o.order_id);
+  } catch (e) { $("e-form").textContent = msg(e); btn.disabled = false; }
+};
+
+// Back from Cardcom (?order=…), or already logged in (terms were accepted then).
+// /quote, not /api/auth/me: /me refuses the promo token non-clients have.
+(async () => {
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("order")) return pollOrder(qs.get("order"), qs.get("failed") === "1");
+  try { await loadQuote(); show("s-form"); } catch { /* not logged in: stay on the phone step */ }
+})();
+</script>
+</body>
+</html>
