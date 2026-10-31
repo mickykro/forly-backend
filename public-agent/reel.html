@@ -2,76 +2,96 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Forly — סרטון רילס לנכס</title>
-<link rel="icon" href="/favicon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forly · סרטון רילס לנכס</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/fonts/discovery.css">
 <style>
-  :root { --bg:#0f1115; --card:#181b22; --fg:#f2f2f2; --muted:#9aa0aa; --accent:#ff5a36; --err:#ff6b6b; --line:#2a2f3a; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
-  main { max-width:480px; margin:0 auto; padding:24px 16px 48px; }
-  h1 { font-size:28px; margin:8px 0; } p.lead { color:var(--muted); margin:0 0 20px; }
-  section { background:var(--card); border-radius:14px; padding:18px; margin-bottom:16px; }
-  label { display:block; font-size:14px; color:var(--muted); margin:12px 0 4px; }
-  input { width:100%; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--fg); font-size:16px; }
-  label.terms { display:flex; gap:10px; align-items:flex-start; color:var(--fg); line-height:1.4; }
-  label.terms input { width:22px; height:22px; flex:none; margin:0; }
-  a { color:var(--accent); }
-  button { width:100%; margin-top:16px; padding:14px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:17px; font-weight:600; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:default; }
-  .err { color:var(--err); font-size:14px; min-height:1em; margin-top:8px; }
-  .price { font-size:32px; font-weight:700; } [hidden] { display:none !important; }
+  .reel-page .auth-wrap::before { content:"FORLY · REEL"; }
+  .reel-page .auth-card { text-align:right; }
+  .reel-page .auth-card > .agent-kicker, .reel-page .auth-card > h1, .reel-page .auth-card > .sub { text-align:center; }
+  .reel-page .auth-card > .agent-kicker { display:flex; justify-content:center; }
+  .reel-page .agent-progress { justify-content:center; }
+  .check { display:flex; gap:10px; align-items:flex-start; font-size:.88rem; color:var(--ink); line-height:1.45; margin:0 0 12px; cursor:pointer; }
+  .check input { width:20px; height:20px; flex:none; margin:1px 0 0; accent-color:var(--gold); }
+  .auth-card a:not(.btn) { color:var(--gold); font-weight:600; }
+  .quote { text-align:center; font-family:var(--serif); font-size:2rem; margin:8px 0 4px; }
+  .fine { font-size:.75rem; color:var(--ink-soft); font-weight:300; text-align:center; margin:0 0 14px; }
+  #s-done { text-align:center; }
+  [hidden] { display:none !important; }
 </style>
 </head>
-<body>
-<main>
-  <h1>סרטון רילס לנכס שלך</h1>
-  <p class="lead">מעלים תמונות, ותוך דקות מקבלים בוואטסאפ סרטון רילס מוכן עם קריינות ומוזיקה + דף נכס.</p>
+<body class="agent-page signup-page reel-page">
 
-  <section id="s-phone">
-    <label for="phone">מספר הוואטסאפ שלך</label>
-    <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="050-0000000">
-    <label class="terms" for="terms">
-      <input id="terms" type="checkbox">
-      <span>קראתי ואני מסכים/ה ל<a href="/legal/terms.html" target="_blank" rel="noopener">תנאי השימוש</a>
-        ול<a href="/legal/privacy.html" target="_blank" rel="noopener">מדיניות הפרטיות</a></span>
-    </label>
-    <label class="terms" for="marketing">
-      <input id="marketing" type="checkbox">
-      <span>אשמח לקבל עדכונים והצעות בוואטסאפ (לא חובה)</span>
-    </label>
-    <button id="send" disabled>שלחו לי קוד</button>
-    <div id="code-wrap" hidden>
-      <label for="code">הקוד שקיבלת בוואטסאפ</label>
-      <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
-      <button id="verify">אימות</button>
+<header class="topbar agent-topbar">
+  <a class="brand" href="/"><b>FORLY</b><span>Nadlan Agents</span></a>
+</header>
+
+<div class="auth-wrap">
+  <div class="card auth-card" style="width:min(480px,100%)">
+    <div class="auth-mark">F</div>
+    <span class="agent-kicker">Forly Reel</span>
+    <h1 style="font-family:var(--serif);font-size:1.4rem;margin-bottom:2px">סרטון רילס לנכס שלך</h1>
+    <p class="sub">מעלים תמונות, ותוך דקות מקבלים בוואטסאפ סרטון רילס מוכן עם קריינות ומוזיקה + דף נכס.</p>
+
+    <div class="agent-progress" aria-label="שלבים"><span class="active"><i>01</i>אימות</span><span><i>02</i>פרטי הנכס</span><span><i>03</i>הסרטון בדרך</span></div>
+
+    <div id="s-phone">
+      <div class="field"><label for="phone">מספר הוואטסאפ שלך</label>
+        <input id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="050-0000000"></div>
+      <label class="check" for="terms">
+        <input id="terms" type="checkbox">
+        <span>קראתי ואני מסכים/ה ל<a href="/legal/terms.html" target="_blank" rel="noopener">תנאי השימוש</a>
+          ול<a href="/legal/privacy.html" target="_blank" rel="noopener">מדיניות הפרטיות</a></span>
+      </label>
+      <label class="check" for="marketing">
+        <input id="marketing" type="checkbox">
+        <span>אשמח לקבל עדכונים והצעות בוואטסאפ (לא חובה)</span>
+      </label>
+      <button class="btn btn-gold" id="send" disabled>שלחו לי קוד בוואטסאפ</button>
+      <div id="code-wrap" hidden style="margin-top:18px">
+        <div class="field"><label for="code">הקוד שקיבלת בוואטסאפ</label>
+          <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="text-align:center;letter-spacing:.4em"></div>
+        <button class="btn btn-gold" id="verify">אימות</button>
+      </div>
+      <p class="form-err show" id="e-phone" role="alert"></p>
     </div>
-    <div class="err" id="e-phone" role="alert"></div>
-  </section>
 
-  <section id="s-form" hidden>
-    <label for="agent_name">שם (יופיע בדף הנכס)</label><input id="agent_name" autocomplete="name">
-    <label for="city">עיר</label><input id="city">
-    <label for="address">כתובת (לא חובה)</label><input id="address">
-    <label for="price">מחיר (₪)</label><input id="price" type="number" inputmode="numeric">
-    <label for="rooms">חדרים</label><input id="rooms" type="number" inputmode="decimal" step="0.5">
-    <label for="size_sqm">מ״ר</label><input id="size_sqm" type="number" inputmode="numeric">
-    <label for="photos">תמונות (לפחות 3)</label><input id="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple>
-    <div class="price" id="quote" aria-live="polite"></div>
-    <p class="lead" style="font-size:13px">השירות ניתן ע״י FORLY. בלחיצה על המשך אני מאשר/ת את
-      <a href="/legal/terms.html#reel" target="_blank" rel="noopener">תנאי השימוש ומדיניות הביטול וההחזרים</a>.</p>
-    <button id="submit">המשך</button>
-    <div class="err" id="e-form" role="alert"></div>
-  </section>
+    <div id="s-form" hidden>
+      <div class="field"><label for="agent_name">שם (יופיע בדף הנכס)</label><input id="agent_name" autocomplete="name"></div>
+      <div class="grid-2">
+        <div class="field"><label for="city">עיר</label><input id="city"></div>
+        <div class="field"><label for="address">כתובת (לא חובה)</label><input id="address"></div>
+      </div>
+      <div class="field"><label for="price">מחיר (₪)</label><input id="price" type="number" inputmode="numeric"></div>
+      <div class="grid-2">
+        <div class="field"><label for="rooms">חדרים</label><input id="rooms" type="number" inputmode="decimal" step="0.5"></div>
+        <div class="field"><label for="size_sqm">מ״ר</label><input id="size_sqm" type="number" inputmode="numeric"></div>
+      </div>
+      <div class="field"><label for="photos">תמונות (לפחות 3)</label>
+        <input id="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple></div>
+      <div class="quote" id="quote" aria-live="polite"></div>
+      <p class="fine">השירות ניתן ע״י FORLY. בלחיצה על המשך אני מאשר/ת את
+        <a href="/legal/terms.html#reel" target="_blank" rel="noopener">תנאי השימוש ומדיניות הביטול וההחזרים</a>.</p>
+      <button class="btn btn-gold" id="submit">המשך</button>
+      <p class="form-err show" id="e-form" role="alert"></p>
+    </div>
 
-  <section id="s-done" hidden>
-    <h2 id="done-title">הסרטון בהכנה</h2>
-    <p id="done-text">נשלח לך את הסרטון ואת דף הנכס בוואטסאפ, בדרך כלל תוך 15–20 דקות.</p>
-  </section>
-</main>
+    <div id="s-done" hidden>
+      <div style="font-size:2.6rem">🎬</div>
+      <h2 id="done-title" style="font-family:var(--serif);margin:10px 0 6px">הסרטון בהכנה</h2>
+      <p id="done-text" style="color:var(--ink-soft);font-weight:300">נשלח לך את הסרטון ואת דף הנכס בוואטסאפ, בדרך כלל תוך 15–20 דקות.</p>
+    </div>
+  </div>
+</div>
 <script>
 const $ = (id) => document.getElementById(id);
-const show = (id) => ["s-phone", "s-form", "s-done"].forEach((s) => { $(s).hidden = s !== id; });
+const STEPS = ["s-phone", "s-form", "s-done"];
+const show = (id) => {
+  STEPS.forEach((s) => { $(s).hidden = s !== id; });
+  document.querySelectorAll(".agent-progress span").forEach((el, i) => el.classList.toggle("active", STEPS[i] === id));
+};
 async function api(path, body, method = "POST") {
   const r = await fetch(path, { method, credentials: "same-origin",
     headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
