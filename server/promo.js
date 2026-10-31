@@ -23,12 +23,18 @@ function priceFor({ paidClient, reelsBefore, now, promoUntil }) {
   return { tier, price: PRICES[tier] };
 }
 
+// Drops undefined values: Firestore rejects them, the memory store would hide it.
+function clean(obj) {
+  return Object.fromEntries(Object.entries(obj || {}).filter(([, v]) => v !== undefined));
+}
+
 // "2026-11-06" → the last millisecond of that day in Israel (DST-aware).
+// Offset is taken at noon UTC, so a day that contains the DST switch uses the offset that holds for most of it.
 function endOfDayIsrael(date) {
-  const guess = new Date(`${date}T23:59:59.999Z`);
-  const local = new Date(guess.toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
-  const utc = new Date(guess.toLocaleString("en-US", { timeZone: "UTC" }));
-  return new Date(guess.getTime() - (local - utc));
+  const noon = new Date(`${date}T12:00:00Z`);
+  const local = new Date(noon.toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
+  const utc = new Date(noon.toLocaleString("en-US", { timeZone: "UTC" }));
+  return new Date(new Date(`${date}T23:59:59.999Z`).getTime() - (local - utc));
 }
 
 // Pure: what start() decides, given the current docs.
@@ -42,9 +48,8 @@ function decideStart(order, started, payment) {
 // Pure: the lead after this touch. An early stage never hides a late one, and an
 // old "&failed=1" link never turns a paid lead back into payment_failed.
 function nextLead(prev, phone, stage, extra, at) {
-  const clean = Object.fromEntries(Object.entries(extra || {}).filter(([, v]) => v !== undefined));
   const keep = prev && ((!LATE.has(stage) && LATE.has(prev.stage)) || (stage === "payment_failed" && prev.stage === "paid"));
-  return { ...(prev || { phone, first_seen_at: at }), ...clean, stage: keep ? prev.stage : stage, last_seen_at: at };
+  return { ...(prev || { phone, first_seen_at: at }), ...clean(extra), stage: keep ? prev.stage : stage, last_seen_at: at };
 }
 
 function createPromoStore({ db }) {
@@ -55,7 +60,7 @@ function createPromoStore({ db }) {
 
   async function createOrder(order) {
     const id = crypto.randomUUID();
-    const doc = { ...order, id, status: "pending", created_at: new Date() };
+    const doc = { ...clean(order), id, status: "pending", created_at: new Date() };
     if (db) await orderRef(id).set(doc);
     else mem.orders.set(id, doc);
     return id;
@@ -68,8 +73,9 @@ function createPromoStore({ db }) {
   }
 
   async function setOrder(id, patch) {
-    if (db) await orderRef(id).set(patch, { merge: true });
-    else Object.assign(mem.orders.get(id) || {}, patch);
+    const p = clean(patch);
+    if (db) await orderRef(id).set(p, { merge: true });
+    else Object.assign(mem.orders.get(id) || {}, p);
   }
 
   async function startedCount(phone) {

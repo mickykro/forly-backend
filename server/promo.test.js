@@ -16,6 +16,8 @@ assert.deepStrictEqual(priceFor({ paidClient: false, reelsBefore: 0, now, promoU
 assert.strictEqual(endOfDayIsrael("2026-11-06").toISOString(), "2026-11-06T21:59:59.999Z");
 assert.strictEqual(endOfDayIsrael("2026-07-01").toISOString(), "2026-07-01T20:59:59.999Z");
 assert.ok(isNaN(endOfDayIsrael("2026-13-45")));
+// the day before the autumn switch (Israel stays +03:00 until Oct 25 02:00)
+assert.strictEqual(endOfDayIsrael("2026-10-24").toISOString(), "2026-10-24T20:59:59.999Z");
 
 (async () => {
   const s = createPromoStore({ db: null });
@@ -53,6 +55,14 @@ assert.ok(isNaN(endOfDayIsrael("2026-13-45")));
   await s.touchLead("972502", "payment_failed");
   assert.strictEqual((await s.listLeads())[0].stage, "paid", "a stale failed-payment link can't undo paid");
   await assert.rejects(s.touchLead("972502", "bogus"), /bad lead stage/);
+
+  // undefined values never reach the store (Firestore rejects them)
+  const u = await s.createOrder({ phone: "972503", price: 59, tier: "promo", agent_name: undefined });
+  assert.ok(!("agent_name" in await s.getOrder(u)), "createOrder drops undefined");
+  await s.setOrder(u, { cardcom_lp_id: undefined, x: 1 });
+  const uo = await s.getOrder(u);
+  assert.ok(!("cardcom_lp_id" in uo), "setOrder drops undefined");
+  assert.strictEqual(uo.x, 1);
 
   console.log("promo.test.js OK");
 })().catch((e) => { console.error(e); process.exit(1); });
