@@ -6,6 +6,8 @@ const createPromoRouter = require("./promo");
 const { createPromoStore } = require("../promo");
 const { normalizeAuthPhone } = require("../utils");
 
+// /quote also returns the session phone (checked once below); the price checks ignore it
+const noPhone = ({ phone, ...q }) => q;
 const photos = ["https://f/1.jpg", "https://f/2.jpg", "https://f/3.jpg", "https://f/4.jpg"];
 const listing = { city: "תל אביב", price: 2500000, rooms: 4, photos_urls: photos, agent: { name: "דנה" }, terms_accepted: true,
   own_video_url: "https://evil/v.mp4", listing_draft_id: "someone-elses" }; // must be dropped by the whitelist
@@ -90,7 +92,8 @@ async function withApp(opts, fn) {
     const h = { "x-phone": "972501111111" };
     assert.strictEqual((await req("POST", "/order", { ...listing, photos_urls: ["https://evil/1.jpg", ...photos] }, h)).status, 400, "foreign photo URLs refused");
     assert.strictEqual((await req("POST", "/order", { ...listing, photos_urls: ["https://f/../x.jpg", ...photos] }, h)).status, 400, "traversal/query photo URLs refused");
-    assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "promo", price: 59 });
+    assert.strictEqual((await req("POST", "/quote", {}, h)).data.phone, "972501111111", "the session phone, for /reel's read-only agent phone");
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", {}, h)).data), { tier: "promo", price: 59 });
     assert.strictEqual((await req("POST", "/order", { ...listing, terms_accepted: false }, h)).data.error, "terms_required");
     const o = await req("POST", "/order", listing, h);
     assert.strictEqual(o.status, 200);
@@ -120,7 +123,7 @@ async function withApp(opts, fn) {
     const st = await req("GET", `/order/${o.data.order_id}`, null, h);
     assert.deepStrictEqual(st.data, { status: "building", price: 59, listing_id: "L1" });
     assert.strictEqual((await req("GET", `/order/${o.data.order_id}`, null, { "x-phone": "972509999999" })).status, 404);
-    assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "regular", price: 219 });
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", {}, h)).data), { tier: "regular", price: 219 });
   });
 
   // Paid amount differs from order price → not built
@@ -155,22 +158,22 @@ async function withApp(opts, fn) {
     assert.strictEqual(o.data.status, "building");
     assert.strictEqual(built.length, 1);
     assert.strictEqual(built[0].agent.name, "דנה");
-    assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "client", price: 49 });
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", {}, h)).data), { tier: "client", price: 49 });
   });
 
   // Promo off (no date) → ₪219; admin sets a date → ₪59; bad date refused; step-up required
   await withApp({ promo: null }, async ({ req }) => {
     const h = { "x-phone": "972504444444" };
-    assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "regular", price: 219 });
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", {}, h)).data), { tier: "regular", price: 219 });
     assert.strictEqual((await req("PUT", "/admin/settings", { until_date: "2026-11-07" }, { "x-admin": "1" })).status, 401);
     assert.strictEqual((await req("PUT", "/admin/settings", { until_date: "2026-13-45" }, admin)).status, 400);
     assert.strictEqual((await req("PUT", "/admin/settings", { until_date: "2026-02-30" }, admin)).status, 400);
     const s = await req("PUT", "/admin/settings", { until_date: "2026-11-07" }, admin);
     assert.deepStrictEqual(s.data, { until_date: "2026-11-07", until: "2026-11-07T21:59:59.999Z" });
     assert.deepStrictEqual((await req("GET", "/admin/settings", null, { "x-admin": "1" })).data, s.data);
-    assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "promo", price: 59 });
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", {}, h)).data), { tier: "promo", price: 59 });
     await req("PUT", "/admin/settings", { until_date: null }, admin);
-    assert.deepStrictEqual((await req("POST", "/quote", {}, h)).data, { tier: "regular", price: 219 });
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", {}, h)).data), { tier: "regular", price: 219 });
   });
 
   // Validation + auth + Cardcom down
@@ -258,7 +261,7 @@ async function withApp(opts, fn) {
   // Admin: free, counter untouched, every order builds; a body claiming admin does nothing
   await withApp({}, async ({ req, built, store }) => {
     const a = { "x-phone": "972500000000" };
-    assert.deepStrictEqual((await req("POST", "/quote", {}, a)).data, { price: 0, reason: "admin" });
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", {}, a)).data), { price: 0, reason: "admin" });
     const o1 = await req("POST", "/order", listing, a), o2 = await req("POST", "/order", listing, a);
     assert.deepStrictEqual([o1.data.status, o2.data.status, built.length], ["building", "building", 2]);
     assert.strictEqual(await store.startedCount("972500000000"), 0);
@@ -268,13 +271,13 @@ async function withApp(opts, fn) {
     const s = { "x-phone": "972504444444" };
     const fake = await req("POST", "/order", { ...listing, admin: true, isAdmin: true, price_override: 0 }, s);
     assert.strictEqual(fake.data.status, "pending");
-    assert.deepStrictEqual((await req("POST", "/quote", { admin: true }, s)).data, { tier: "promo", price: 59 });
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", { admin: true }, s)).data), { tier: "promo", price: 59 });
   });
   // Existing client: 1st ₪0, 2nd ₪49
   await withApp({ paidClients: ["972505550000"] }, async ({ req }) => {
     const c = { "x-phone": "972505550000" };
     assert.strictEqual((await req("POST", "/order", listing, c)).data.status, "building");
-    assert.deepStrictEqual((await req("POST", "/quote", {}, c)).data, { tier: "client", price: 49 });
+    assert.deepStrictEqual(noPhone((await req("POST", "/quote", {}, c)).data), { tier: "client", price: 49 });
   });
 
   log("routes/promo.test.js OK");

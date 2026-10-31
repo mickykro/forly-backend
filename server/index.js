@@ -192,10 +192,10 @@ app.get(/^\/instructions(?:\/[a-z-]+)?\/?$/, (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(__dirname, "..", "public-agent", "instructions", "index.html"));
 });
-// Reel promo landing page (public; the page itself does OTP login).
+// Reel promo: create.html in reel mode (public; reel-mode.js does the OTP login).
 app.get(/^\/reel\/?$/, (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
-  res.sendFile(path.join(__dirname, "..", "public-agent", "reel.html"));
+  res.sendFile(path.join(__dirname, "..", "public-agent", "create.html"));
 });
 
 // ── auth routes ──

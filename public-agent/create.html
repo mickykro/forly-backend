@@ -546,6 +546,7 @@
 <script src="/api.js"></script>
 <script src="/form-i18n.js"></script>
 <script src="/extract.js"></script>
+<script src="/reel-mode.js"></script>
 <script>
 (function () {
   "use strict";
@@ -570,16 +571,20 @@
   // a literal "+" intact and still handles %2B-encoded links.
   var keyMatch = location.search.match(/[?&]key=([^&]*)/);
   var demoKey = keyMatch ? decodeURIComponent(keyMatch[1]) : null;
-  var isDemo = !!demoKey;
+  // /reel: a stranger (promo-scope OTP login, reel-mode.js) gets the demo look;
+  // everything admin-only stays behind adminDemo.
+  var reelMode = /^\/reel\/?$/.test(location.pathname);
+  var adminDemo = !!demoKey;
+  var isDemo = adminDemo || reelMode;
   // ?agent=<phone> (admin panel → "create for client"): a real client's
   // property, created by an operator. Their saved profile fills the agent block,
   // their logo is reused, and nothing is autosaved back into their account.
   var agentMatch = location.search.match(/[?&]agent=(\d{9,15})(&|$)/);
-  var clientPhone = isDemo && agentMatch ? agentMatch[1] : null;
+  var clientPhone = adminDemo && agentMatch ? agentMatch[1] : null;
   // ?from_listing=<id> (admin → a failed property): reopen it with its details
   // and photos; creating it again retires the old listing.
   var fromListingMatch = location.search.match(/[?&]from_listing=([0-9a-f-]{36})(&|$)/);
-  var fromListingId = isDemo && fromListingMatch ? fromListingMatch[1] : null;
+  var fromListingId = adminDemo && fromListingMatch ? fromListingMatch[1] : null;
   var clientLogoUrl = null;
 
   // ── functional three-stage creation wizard ──
@@ -839,6 +844,13 @@
     box.addEventListener("scroll", function () { if (box.scrollTop || box.scrollLeft) { box.scrollTop = 0; box.scrollLeft = 0; } });
   });
   if (isDemo) {
+    $("#agentBlock").classList.remove("hidden");
+    $("#demoWorkspaceNote").classList.remove("hidden");
+    // standalone demo — not for signed-in users: hide the "my properties" nav
+    var myProps = $("#navMyProps");
+    if (myProps) myProps.style.display = "none";
+  }
+  if (adminDemo) {
     // Demo creation is admin-only (ADMIN_PHONES). Not logged in → login page,
     // which returns here via ?next=. Logged in but not an admin → say so on the
     // page (with the phone the server sees) instead of bouncing back to login,
@@ -878,11 +890,6 @@
         }
       }
     });
-    $("#agentBlock").classList.remove("hidden");
-    $("#demoWorkspaceNote").classList.remove("hidden");
-    // standalone demo — not for signed-in users: hide the "my properties" nav
-    var myProps = $("#navMyProps");
-    if (myProps) myProps.style.display = "none";
     if (fromListingId) {
       reopenListing(fromListingId);
     } else if (clientPhone) {
@@ -891,7 +898,7 @@
       // ponytail: autosave agent fields on blur during demo
       initDemoAutosave();
     }
-  } else {
+  } else if (!reelMode) { // reel mode: reel-mode.js does the login
     // Real (non-demo) create is session-gated, but nothing checked that on
     // load — a logged-out user could fill the whole form before the 401
     // surfaced on submit. FLY.req redirects to login on 401 by default.
@@ -1069,7 +1076,7 @@
     setLang(start);
   })();
 
-  var uploadHeaders = isDemo ? { "x-demo-key": demoKey } : {};
+  var uploadHeaders = adminDemo ? { "x-demo-key": demoKey } : {};
 
   // ── price entry: thousands separators, quick-pick chips, "in words" line ──
   var SALE_PRESETS = [1000000, 1500000, 2000000, 2500000, 3000000, 4000000, 5000000];
@@ -1799,7 +1806,7 @@
         }).then(function (r) {
           // Session expired / not logged in on the real path → go log in,
           // matching FLY.req. Demo is admin-gated, so a non-admin goes there too.
-          if (r.status === 401 || (r.status === 403 && isDemo)) {
+          if (!reelMode && (r.status === 401 || (r.status === 403 && isDemo))) { // reel mode: reel-mode.js shows its login
             location.href = "/?next=" + encodeURIComponent(location.pathname + location.search);
             throw new Error("unauthenticated");
           }

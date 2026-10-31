@@ -3,7 +3,7 @@
  *
  *   POST /lead/start                   public   → number typed + terms ticked (lead: otp_sent)
  *   POST /lead                         session  → verified | payment_failed
- *   POST /quote                        session  → { tier, price }
+ *   POST /quote                        session  → { tier, price, phone }
  *   POST /order                        session  → free: build now; paid: Cardcom page URL
  *   POST /cardcom/webhook              public   → re-checked with GetLpResult, then build
  *   GET  /order/:id                    session  → status for the thank-you screen (owner only)
@@ -74,7 +74,8 @@ module.exports = function createPromoRouter({ requireAuth, authSecret, requireAd
     res.json({ ok: true });
   }));
 
-  router.post("/quote", auth, h(async (req, res) => { res.json(await quote(req.user.userId, req.user)); }));
+  // phone: /reel prefills its read-only agent phone from the session
+  router.post("/quote", auth, h(async (req, res) => { res.json({ ...(await quote(req.user.userId, req.user)), phone: req.user.userId }); }));
 
   router.post("/order", auth, h(async (req, res) => {
     if (!reelReady) return res.status(503).json({ error: "reel_unavailable" }); // no reel workflow → don't take money
