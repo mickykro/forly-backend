@@ -250,6 +250,7 @@
     <button id="tabPosting">פרסום אוטומטי</button>
     <button id="tabManual">פרסום ידני</button>
     <button id="tabCampaigns">קמפיינים</button>
+    <button id="tabPromo">ריל</button>
   </div>
 
   <!-- ── AGENT MESSAGES ── -->
@@ -459,6 +460,40 @@
       </div>
     </form>
     <div id="campList"><p class="manual-muted">טוען…</p></div>
+  </div>
+
+  <!-- ── REEL PROMO (admin-promo.js) ── -->
+  <div id="panePromo" class="hidden">
+    <div class="posting-warn hidden" id="promoStepUp">נדרש אימות מחדש — התחברו שוב</div>
+    <section class="message-card" style="margin-bottom:16px">
+      <h2>מבצע ₪59</h2>
+      <p>היום האחרון של המבצע (עד 23:59 שעון ישראל). ריק = אין מבצע, המחיר ₪219.</p>
+      <div class="toolbar">
+        <input type="date" id="promoUntil" aria-label="סוף המבצע">
+        <button class="btn btn-primary" id="promoSave">שמירה</button>
+        <button class="btn" id="promoClear">סיום מבצע</button>
+        <span class="who" id="promoState"></span>
+      </div>
+    </section>
+    <div class="toolbar" style="margin-bottom:12px">
+      <select id="promoStage" aria-label="שלב">
+        <option value="open">לא סיימו (אומתו ולא שילמו)</option>
+        <option value="">הכול</option>
+        <option value="otp_sent">לא אימתו קוד</option>
+        <option value="verified">אומתו, לא הזמינו</option>
+        <option value="checkout">בתשלום — לא הושלם</option>
+        <option value="payment_failed">תשלום נכשל</option>
+        <option value="paid">שילמו / קיבלו</option>
+        <option value="problem">בעיה (יצירה נכשלה / סכום שגוי)</option>
+      </select>
+      <span class="who num" id="promoCount"></span>
+    </div>
+    <div class="table-wrap">
+      <table class="admin" style="min-width:640px">
+        <thead><tr><th>טלפון</th><th>שם</th><th>שלב</th><th>מחיר</th><th>פעילות אחרונה</th><th></th></tr></thead>
+        <tbody id="promoLeads"></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- ── MANUAL POSTING (admin-manual.js) ── -->
@@ -720,6 +755,7 @@
 <script src="/admin-manual-lane.js"></script>
 <script src="/admin-manual.js"></script>
 <script src="/admin-campaigns.js"></script>
+<script src="/admin-promo.js"></script>
 <script src="/admin-agent-panel.js"></script>
 <footer class="app-footer"><span>© FORLY</span><a href="/legal/privacy.html">מדיניות פרטיות</a><a href="/legal/terms.html">תנאי שימוש</a><a href="/legal/accessibility.html">הצהרת נגישות</a></footer>
 </body>
