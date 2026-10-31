@@ -65,6 +65,7 @@ const PAGE_BASE_URL = resolvePageBaseUrl({
 // Posts, and the links in the agents' posting messages: production's pages, also from staging.
 const POSTING_PAGE_BASE_URL = require("./utils").postingPageBaseUrl(process.env, PAGE_BASE_URL);
 const N8N_WW1_WEBHOOK_URL = process.env.N8N_WW1_WEBHOOK_URL || "";
+const N8N_REEL_WEBHOOK_URL = process.env.N8N_REEL_WEBHOOK_URL || ""; // n8n "WW1 Reel (promo)" — /reel promo listings
 const N8N_DEV_WEBHOOK_URL = process.env.N8N_DEV_WEBHOOK_URL || "";
 const N8N_DEV_PIPELINE_WEBHOOK_URL = process.env.N8N_DEV_PIPELINE_WEBHOOK_URL || "";
 const N8N_PIPELINE_WEBHOOK_URL = process.env.N8N_PIPELINE_WEBHOOK_URL || "";
@@ -191,6 +192,11 @@ app.get(/^\/instructions(?:\/[a-z-]+)?\/?$/, (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(__dirname, "..", "public-agent", "instructions", "index.html"));
 });
+// Reel promo landing page (public; the page itself does OTP login).
+app.get(/^\/reel\/?$/, (req, res) => {
+  res.setHeader("Cache-Control", "no-cache");
+  res.sendFile(path.join(__dirname, "..", "public-agent", "reel.html"));
+});
 
 // ── auth routes ──
 // Throttle the OTP send/verify endpoints per IP (abuse / enumeration / SMS-cost
@@ -198,6 +204,14 @@ app.get(/^\/instructions(?:\/[a-z-]+)?\/?$/, (req, res) => {
 // Scoped to /otp and /verify so it never throttles /me polling or /logout.
 // Sending is loose (the per-phone spacing already bounds it — a real user never
 // gets near 60/min); code verification stays tight against guessing.
+// /reel codes go to numbers that aren't clients: cap them per IP and site-wide so a
+// script can't make the shared WhatsApp number spam strangers (and get it banned).
+// Key on the hop our own proxy appends: the first X-Forwarded-For entry (clientIp's default) is client-controlled.
+const lastHop = (req) => String(req.headers["x-forwarded-for"] || "").split(",").map((s) => s.trim()).filter(Boolean).pop() || req.ip;
+const reelOtpIp = rateLimit({ windowMs: 10 * 60_000, max: 5, keyBy: lastHop });
+const reelOtpAll = rateLimit({ windowMs: 60 * 60_000, max: 200, keyBy: () => "all" });
+app.post("/api/auth/otp", (req, res, next) =>
+  (req.body && req.body.purpose === "reel" ? reelOtpIp(req, res, () => reelOtpAll(req, res, next)) : next()));
 app.post("/api/auth/otp", rateLimit({ windowMs: 60_000, max: 60 }));
 app.use("/api/auth/otp/verify", rateLimit({ windowMs: 60_000, max: 10 }));
 app.use("/api/auth/verify", rateLimit({ windowMs: 60_000, max: 10 }));
@@ -221,6 +235,36 @@ const createQuotaRouter = require("./routes/quota");
 app.use("/api/quota", createQuotaRouter({
   quota, requireAuth, authSecret: AUTH_SECRET, n8nSecret: N8N_WEBHOOK_SECRET, normalizeAuthPhone,
 }));
+// ── reel promo (/reel): terms → OTP → listing → Cardcom → reel workflow. See routes/promo.js ──
+// CARDCOM_TERMINAL / CARDCOM_API_NAME: Cardcom API user; unset ⇒ orders wait for an
+// admin "mark paid". The promo end date is settings/reel_promo (admin "ריל" tab).
+const { createCardcom } = require("./payments/cardcom");
+const { createPromoStore } = require("./promo");
+app.use("/api/promo/lead/start", rateLimit({ windowMs: 60_000, max: 10, keyBy: lastHop })); // lastHop: defined above
+app.post("/api/promo/order", rateLimit({ windowMs: 60_000, max: 10 })); // POST only: the status poll GETs /order/:id
+app.use("/api/promo/cardcom/webhook", rateLimit({ windowMs: 60_000, max: 60 }));
+app.use("/api/promo", require("./routes/promo")({
+  requireAuth, authSecret: AUTH_SECRET, requireAdmin, requireStepUp,
+  store: createPromoStore({ db: db.db }),
+  cardcom: createCardcom({ terminal: process.env.CARDCOM_TERMINAL, apiName: process.env.CARDCOM_API_NAME }),
+  createListing: (phone, body, agent, extra) => require("./listing-create").createListing(phone, body, agent, {
+    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL, n8nReelWebhook: N8N_REEL_WEBHOOK_URL,
+    n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
+    isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL, ...extra,
+  }),
+  business: { get: (p) => db.getBusiness(p) },
+  // A paying client = a quota plan the admin set that isn't the trial seed.
+  isPaidClient: async (p) => {
+    const q = await quota.getQuota(p).catch(() => null);
+    const plan = String((q && q.plan) || "").trim().toLowerCase();
+    return !!plan && plan !== "trial";
+  },
+  settings: { get: () => db.getSetting("reel_promo"), set: (patch) => db.setSetting("reel_promo", patch) },
+  normalizePhone: normalizeAuthPhone,
+  getListing: (id) => db.getListing(id),
+  photoBase: `${UPLOAD_PUBLIC_BASE}/files/`,
+  baseUrl: BASE_URL,
+}));
 // ── walkthrough plan (n8n: space map → Seedance clips) ──
 const createWalkthroughRouter = require("./routes/walkthrough");
 app.use("/api/walkthrough", createWalkthroughRouter({
@@ -237,7 +281,7 @@ app.use("/api", createIntakeRouter({
   uploadDir: UPLOAD_DIR,
   uploadPublicBase: UPLOAD_PUBLIC_BASE,
   remoteUploadBase: REMOTE_UPLOAD_BASE,
-  n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+  n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL, n8nReelWebhook: N8N_REEL_WEBHOOK_URL,
   n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
   isDevRun: !!N8N_DEV_WEBHOOK_URL,
   isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL,
@@ -268,7 +312,7 @@ app.use("/api/whatsapp", createWhatsappRouter({
   uploadDir: UPLOAD_DIR, uploadPublicBase: UPLOAD_PUBLIC_BASE, remoteUploadBase: REMOTE_UPLOAD_BASE,
   baseUrl: BASE_URL,
   pipelineDeps: {
-    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL, n8nReelWebhook: N8N_REEL_WEBHOOK_URL,
     n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
     isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL,
   },
@@ -410,7 +454,7 @@ app.use("/api/admin", createAdminRouter({
   sendWhatsApp: (phone, message) => sendWhatsApp(phone, message, GREENAPI_INSTANCE, GREENAPI_TOKEN),
   quota,
   pipelineDeps: {
-    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL,
+    n8nWw1Webhook: N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL, n8nReelWebhook: N8N_REEL_WEBHOOK_URL,
     n8nPipelineWebhook: N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL,
     isDevRun: !!N8N_DEV_WEBHOOK_URL, isDevPipelineRun: !!N8N_DEV_PIPELINE_WEBHOOK_URL, baseUrl: BASE_URL,
   },
@@ -512,6 +556,7 @@ app.listen(PORT, () => {
   console.log(`  demo form:   ${BASE_URL}/create.html?key=demo`);
   console.log(`  pages served: ${PAGE_BASE_URL}/p/{id}`);
   console.log(`  uploads dir: ${UPLOAD_DIR}`);
+  console.log(`  reel webhook: ${N8N_REEL_WEBHOOK_URL || "(not set — /reel orders will not build)"}`);
   console.log(`  WW1 webhook: ${N8N_DEV_WEBHOOK_URL || N8N_WW1_WEBHOOK_URL || "(not set)"}${N8N_DEV_WEBHOOK_URL ? " [DEV]" : ""}`);
   console.log(`  pipeline webhook: ${N8N_DEV_PIPELINE_WEBHOOK_URL || N8N_PIPELINE_WEBHOOK_URL || "(not set)"}${N8N_DEV_PIPELINE_WEBHOOK_URL ? " [DEV]" : ""}`);
   console.log("  agent auth:  enabled");
